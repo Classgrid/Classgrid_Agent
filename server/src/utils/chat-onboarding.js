@@ -29,3 +29,11 @@ export function isSharedTestWhatsapp(phone) {
     // Match with or without the country code (a 10-digit entry matches "+91…" too)
     return [...SHARED_TEST_WHATSAPP, ...extra].some((n) => digits === n || digits.endsWith(n) || (n.endsWith(digits) && digits.length >= 10));
 }
+
+// Job roles are stored and shown as readable names ("Software Engineer"), never as keys like "software_engineer"
+export function readableJobRole(role) {
+    const value = String(role || "").trim();
+    if (!value || !/[_-]/.test(value) && value !== value.toLowerCase()) return value;
+    if (value.toLowerCase() === "hr") return "Human Resources";
+    return value.split(/[_\-\s]+/).filter(Boolean).map((w) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()).join(" ");
+}

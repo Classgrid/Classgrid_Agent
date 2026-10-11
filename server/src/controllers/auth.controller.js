@@ -86,7 +86,7 @@ import { trackOnboardingEvent } from "../services/onboarding-event.service.js";
 import { syncDerivedOnboardingProgress } from "../services/onboarding-progress.service.js";
 import { sendSMS } from "../services/sms.service.js";
 import { RecaptchaVerificationError, verifyRecaptchaToken } from "../services/recaptcha.service.js";
-import { isPublicChatAccount, needsChatOnboarding, isSharedTestWhatsapp } from "../utils/chat-onboarding.js";
+import { isPublicChatAccount, needsChatOnboarding, isSharedTestWhatsapp, readableJobRole } from "../utils/chat-onboarding.js";
 
 const JWT_SECRET = process.env.JWT_SECRET || "dev_secret";
 const getFrontendUrl = () => {
@@ -3035,7 +3035,8 @@ export const chatOnboard = async (req, res) => {
     try {
         const connectDB = (await import('../../config/db.js')).default;
         await connectDB();
-        const { email, name, password, age, role, whatsappPhone } = req.body;
+        const { email, name, password, age, role: rawRole, whatsappPhone } = req.body;
+        const role = readableJobRole(rawRole); // "software_engineer" -> "Software Engineer"
         const User = (await import('../models/User.js')).default;
         const bcrypt = (await import('bcryptjs')).default;
         const jwt = (await import('jsonwebtoken')).default;
@@ -3392,7 +3393,8 @@ export const chatFinalizeOnboarding = async (req, res) => {
     try {
         const connectDB = (await import('../../config/db.js')).default;
         await connectDB();
-        const { email, name, password, age, role, whatsappPhone, whatsappOtp, emailVerifiedTicket } = req.body;
+        const { email, name, password, age, role: rawRole, whatsappPhone, whatsappOtp, emailVerifiedTicket } = req.body;
+        const role = readableJobRole(rawRole); // "software_engineer" -> "Software Engineer"
         if (!email || !whatsappPhone || !whatsappOtp) {
             return res.status(400).json({ message: 'Email, WhatsApp number and OTP are required' });
         }
