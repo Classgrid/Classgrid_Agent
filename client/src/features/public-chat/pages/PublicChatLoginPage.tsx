@@ -16,6 +16,32 @@ import { toast } from "sonner"; // the app's mounted Toaster (components/marketi
 import { getGoogleAuthUrl, loginWithPassword, requestPasswordReset, verifyDeviceOtp, resendDeviceOtp } from "../../auth/api";
 import { API_BASE_URL, apiClient } from "@/lib/apiClient";
 import { LoginGridBackground } from "../components/LoginGridBackground";
+
+// How this browser last logged in (shown as a "Last used" tag) and whether it has logged in before (greeting)
+type LoginMethod = "google" | "github" | "email";
+const LAST_METHOD_KEY = "classgrid:last-login-method";
+function readLastLoginMethod(): LoginMethod | null {
+  try {
+    const v = localStorage.getItem(LAST_METHOD_KEY);
+    return v === "google" || v === "github" || v === "email" ? v : null;
+  } catch { return null; }
+}
+function rememberLoginMethod(method: LoginMethod) {
+  try { localStorage.setItem(LAST_METHOD_KEY, method); } catch { /* private mode: no tag next time */ }
+}
+const RETURNING_GREETINGS = [
+  { title: "Welcome back to Classgrid 👋", subtitle: "Sign in to continue your learning, check your classes and stay up to date." },
+  { title: "Good to see you again!", subtitle: "Log in to access your courses, schedule and updates in one place." },
+];
+const FIRST_GREETING = { title: "Welcome to Classgrid", subtitle: "Sign in with your email to pick up where you left off." };
+
+function LastUsedTag({ className = "" }: { className?: string }) {
+  return (
+    <span className={`pointer-events-none rounded-full bg-emerald-600 px-2 py-0.5 text-[11px] font-semibold leading-none text-white dark:bg-emerald-500 ${className}`}>
+      Last used
+    </span>
+  );
+}
 const Confetti = lazy(() => import("react-confetti"));
 
 const ROLES = [
@@ -276,9 +302,14 @@ function LoginContent() {
     fetch("/api/auth/csrf", { credentials: "include" }).catch(() => { });
   }, []);
 
+  // Read once per visit: the "Last used" tag and a first-time vs welcome-back greeting
+  const [lastMethod] = useState<LoginMethod | null>(() => readLastLoginMethod());
+  const [greeting] = useState(() => (readLastLoginMethod() ? RETURNING_GREETINGS[Math.floor(Math.random() * RETURNING_GREETINGS.length)]! : FIRST_GREETING));
+
   const handleGoogle = () => {
     const loginTab = encodeURIComponent("user");
     const host = encodeURIComponent(window.location.hostname);
+    rememberLoginMethod("google");
     const path = `/api/auth/google?loginTab=${loginTab}&host=${host}`;
     const url = (API_BASE_URL && !API_BASE_URL.startsWith('/')) ? new URL(path, API_BASE_URL).toString() : path;
     window.location.assign(url);
@@ -287,6 +318,7 @@ function LoginContent() {
   const handleGithub = () => {
     const loginTab = encodeURIComponent("user");
     const host = encodeURIComponent(window.location.hostname);
+    rememberLoginMethod("github");
     const path = `/api/auth/chat/github?loginTab=${loginTab}&host=${host}`;
     const url = (API_BASE_URL && !API_BASE_URL.startsWith('/')) ? new URL(path, API_BASE_URL).toString() : path;
     window.location.assign(url);
@@ -618,6 +650,7 @@ function LoginContent() {
 
       // The chat checks the sign-up: an account without a verified WhatsApp number comes back here
       // and continues at the WhatsApp step.
+      rememberLoginMethod("email");
       window.location.href = "/";
     } catch (err: any) {
       if (err && typeof err === "object" && "needsDeviceOtp" in err) {
@@ -660,6 +693,7 @@ function LoginContent() {
       try {
         await verifyDeviceOtp({ email: email.trim(), otp: otp.trim() });
         // Unfinished sign-ups are sent back from the chat to the WhatsApp step.
+        rememberLoginMethod("email");
         window.location.href = "/";
       } catch (err: any) {
         setError(err?.message || "Device verification failed.");
@@ -689,6 +723,7 @@ function LoginContent() {
         } else {
           localStorage.setItem("token", res.data.token);
           // Refresh the page or redirect so the app picks up the token and loads the chat session
+          rememberLoginMethod("email");
           window.location.href = "/";
         }
       } else {
@@ -1354,10 +1389,10 @@ function LoginContent() {
             <div className="animate-in fade-in duration-300">
               <img src="/logo.png" alt="Classgrid" className="mb-6 h-10 w-10 object-contain" />
               <h1 className="text-[30px] leading-tight font-medium tracking-tight text-slate-900 dark:text-[#f1f1f1]">
-                {mode === "signup" ? "Create your account" : "Welcome to Classgrid"}
+                {mode === "signup" ? "Create your account" : greeting.title}
               </h1>
               <p className="mt-2 mb-8 text-[15px] text-slate-600 dark:text-[#9a9a9a]">
-                {mode === "signup" ? "Sign up below to get started" : "Login or signup below"}
+                {mode === "signup" ? "Sign up below to get started" : greeting.subtitle}
               </p>
               <form onSubmit={handleSendOTP} className="space-y-4">
 
@@ -1390,7 +1425,10 @@ function LoginContent() {
 
               <div className="space-y-2">
                 <div className="flex items-center justify-between">
-                  <label htmlFor="email" className="text-[15px] font-medium text-slate-900 dark:text-[#f1f1f1]">Email</label>
+                  <label htmlFor="email" className="flex items-center gap-2 text-[15px] font-medium text-slate-900 dark:text-[#f1f1f1]">
+                    Email
+                    {mode === "signin" && lastMethod === "email" && <LastUsedTag />}
+                  </label>
                   {mode === "signin" && (
                     <button type="button" onClick={handleForgotPassword} className="text-[15px] text-slate-500 transition-colors hover:text-slate-900 dark:text-[#888] dark:hover:text-[#f1f1f1]">Forgot password?</button>
                   )}
@@ -1426,7 +1464,7 @@ function LoginContent() {
                   onClick={handleGoogle}
                   aria-label="Continue with Google"
                   title="Continue with Google"
-                  className="flex h-12 items-center justify-center rounded-lg bg-[#f1f1ef] transition-colors duration-200 hover:bg-[#e7e7e4] active:scale-[0.98] dark:bg-[#1f1f1f] dark:hover:bg-[#2a2a2a]"
+                  className="relative flex h-12 items-center justify-center rounded-lg bg-[#f1f1ef] transition-colors duration-200 hover:bg-[#e7e7e4] active:scale-[0.98] dark:bg-[#1f1f1f] dark:hover:bg-[#2a2a2a]"
                 >
                   <svg width="22" height="22" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
                     <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" fill="#4285F4" />
@@ -1440,7 +1478,7 @@ function LoginContent() {
                   onClick={handleGithub}
                   aria-label="Continue with GitHub"
                   title="Continue with GitHub"
-                  className="flex h-12 items-center justify-center rounded-lg bg-[#f1f1ef] text-slate-900 transition-colors duration-200 hover:bg-[#e7e7e4] active:scale-[0.98] dark:bg-[#1f1f1f] dark:text-[#f1f1f1] dark:hover:bg-[#2a2a2a]"
+                  className="relative flex h-12 items-center justify-center rounded-lg bg-[#f1f1ef] text-slate-900 transition-colors duration-200 hover:bg-[#e7e7e4] active:scale-[0.98] dark:bg-[#1f1f1f] dark:text-[#f1f1f1] dark:hover:bg-[#2a2a2a]"
                 >
                   <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor">
                     <path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z" />

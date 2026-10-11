@@ -2,7 +2,8 @@ import { useEffect, useState } from "react";
 import { motion, useReducedMotion } from "framer-motion";
 
 // Soft blocks behind the login card, starting 3 on each side: squares and rectangles that never disappear —
-// each keeps gliding to a new free area of the screen (top, bottom, left, right, crossing behind the card) while growing or shrinking (small, medium, big).
+// each keeps gliding to a new free area left or right of the card, from top to bottom and out to the screen edges
+// (crossing behind the card on the way) while growing or shrinking (small, medium, big).
 // Colours follow the logo (green, orange) plus a light neutral. Still when the user prefers reduced motion.
 const SNAP = 40; // targets snap to a hidden 40px grid so edges line up
 // Three clear size levels; every glide switches to a different level so the blocks visibly grow and shrink
@@ -31,9 +32,12 @@ const pick = <T,>(list: T[]) => list[Math.floor(Math.random() * list.length)]!;
 
 type Target = { x: number; y: number; w: number; h: number; level: Level; duration: number };
 
-// The screen is split 3x3; the middle area (behind the card) is skipped. Every glide sends a block to a random
-// spot inside an area no other block is heading to, so the blocks stay spread over the whole screen and never bunch up.
-const AREAS = [0, 1, 2, 3, 5, 6, 7, 8]; // 3x3 index (row * 3 + col), without 4 = centre
+// The open space left and right of the card is split into 4 rows per side (8 areas for 6 blocks). Every glide sends
+// a block to an area no other block is heading to, so the blocks stay spread over the whole screen and keep travelling.
+// (The middle column sits behind the card, where blocks would be hidden.)
+const ROWS = 4;
+const CARD_HALF = 240; // half the login card width, plus a little room
+const AREAS = Array.from({ length: ROWS * 2 }, (_, i) => i); // 0-3 = left side rows, 4-7 = right side rows
 const taken = new Map<number, number>(); // block id -> area it is heading to
 
 function randomTarget(blockId: number, startSide: Side | undefined, solid: boolean, prevLevel?: Level): Target {
@@ -45,14 +49,21 @@ function randomTarget(blockId: number, startSide: Side | undefined, solid: boole
   const h = pick([...LEVELS[level]]) * SNAP; // width and height picked separately: squares and rectangles
   const busy = new Set([...taken].filter(([id]) => id !== blockId).map(([, area]) => area));
   let free = AREAS.filter((a) => !busy.has(a) && a !== taken.get(blockId)); // a new area each time, so it travels
-  if (startSide) free = free.filter((a) => (startSide === "left" ? a % 3 === 0 : a % 3 === 2)); // start beside the card
+  if (startSide) free = free.filter((a) => (startSide === "left" ? a < ROWS : a >= ROWS)); // start on its own side
   const area = pick(free.length ? free : AREAS);
   taken.set(blockId, area);
-  const col = area % 3, row = Math.floor(area / 3);
-  // Random spot inside that area (its centre point is somewhere in the area; blocks may run past the screen edge)
-  const cx = ((col + Math.random()) * vw) / 3, cy = ((row + Math.random()) * vh) / 3;
-  const x = Math.round((cx - w / 2) / SNAP) * SNAP;
-  const y = Math.round((cy - h / 2) / SNAP) * SNAP;
+  const left = area < ROWS, row = area % ROWS;
+  // Side band: from the screen edge to the card. Often hug (or run past) the outer screen edge so edges get blocks too
+  const bandStart = left ? 0 : vw / 2 + CARD_HALF;
+  const bandEnd = left ? vw / 2 - CARD_HALF : vw;
+  const edgeHug = Math.random() < 0.4;
+  const rawX = edgeHug
+    ? (left ? -Math.random() * (w / 3) : vw - w + Math.random() * (w / 3))
+    : bandStart + Math.random() * Math.max(bandEnd - bandStart - w, 0);
+  // Row band: top and bottom rows may run a little past the screen edge as well
+  const rawY = ((row + Math.random()) * vh) / ROWS - h / 2;
+  const x = Math.round(rawX / SNAP) * SNAP;
+  const y = Math.round(rawY / SNAP) * SNAP;
   return { x, y, w, h, level, duration: 4 + Math.random() * 3 }; // 4-7 s per glide
 }
 
