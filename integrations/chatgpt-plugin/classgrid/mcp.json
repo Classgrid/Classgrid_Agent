@@ -9,22 +9,10 @@
           "auth": {
             "type": "oauth",
             "client": {
-              "mode": "dcr",
-              "tokenEndpointAuthMethod": "none"
+              "mode": "dcr"
             },
-            "authorizationUrl": "https://api.classgrid.in/oauth/authorize",
-            "tokenUrl": "https://api.classgrid.in/oauth/token",
-            "registrationUrl": "https://api.classgrid.in/oauth/register",
-            "baseScopes": [
-              "profile:read",
-              "offline_access"
-            ],
-            "defaultScopes": [
-              "profile:read",
-              "schedules:read",
-              "grid:read",
-              "offline_access"
-            ]
+            "baseScopes": ["profile:read", "offline_access"],
+            "defaultScopes": ["profile:read", "schedules:read", "grid:read", "offline_access"]
           }
         }
       }
