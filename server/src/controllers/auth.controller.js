@@ -3084,6 +3084,9 @@ export const chatOnboard = async (req, res) => {
 
         const JWT_SECRET = process.env.JWT_SECRET || 'dev_secret';
         const token = jwt.sign({ id: user._id.toString(), role: user.role, organization_id: user.organization_id }, JWT_SECRET, { expiresIn: '30d' });
+        // The chat calls the API with the login cookie, not this JSON token: without the cookie every request
+        // after sign-up was 401 until the user logged out and in again
+        setTokenCookie(res, token, req);
 
         res.json({ token, user });
     } catch (error) {
@@ -3485,6 +3488,9 @@ export const chatFinalizeOnboarding = async (req, res) => {
         await user.save();
 
         const token = jwt.sign({ id: user._id.toString(), role: user.role, organization_id: user.organization_id }, JWT_SECRET, { expiresIn: '30d' });
+        // The chat calls the API with the login cookie, not this JSON token: without the cookie every request
+        // after sign-up was 401 until the user logged out and in again
+        setTokenCookie(res, token, req);
 
         res.json({
             token,
