@@ -248,7 +248,8 @@ export function SuperAdminProfileView({ profileData, isReadOnly }: { profileData
                 {ROLES.map((r) => {
                   const Icon = r.icon;
                   return (
-                    <SelectItem key={r.value} value={r.value}>
+                    // Readable name ("Software Engineer") is what the box shows and what the account stores
+                    <SelectItem key={r.value} value={r.label}>
                       <div className="flex items-center gap-2">
                         <Icon className="w-4 h-4 text-muted-foreground" />
                         <span>{r.label}</span>

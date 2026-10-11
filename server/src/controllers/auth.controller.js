@@ -369,11 +369,16 @@ const setTokenCookie = (res, token, req = null, rememberMe = false) => {
         maxAge,
     };
 
-    // Only set domain for *.classgrid.in subdomains, NOT for custom domains
+    // Only set domain for *.classgrid.in subdomains, NOT for custom domains.
+    // The Google/GitHub callback comes from google.com/github.com (no classgrid Origin), so this API's own
+    // host also counts; otherwise that login left a token cookie for api.classgrid.in only.
     if (isProd && req) {
         const origin = req.headers.origin || req.headers.referer || "";
-        if (origin.includes("classgrid.in")) {
+        if (origin.includes("classgrid.in") || String(req.hostname || "").endsWith("classgrid.in")) {
             cookieOptions.domain = ".classgrid.in";
+            // Remove an older api.classgrid.in-only token cookie first: the browser sends it before the
+            // shared one, so a stale one (e.g. of a deleted account) made every call 401 until logout
+            res.clearCookie("token", { httpOnly: true, secure: isProd, sameSite: isProd ? "None" : "Lax", path: "/" });
         }
     }
 
@@ -2857,7 +2862,10 @@ export const deleteAccount = async (req, res) => {
         // Delete user
         await User.findByIdAndDelete(user._id);
 
-        res.clearCookie("token");
+        // Clear both token cookies, like logout (a leftover one for the deleted account made the next sign-up 401)
+        const isProdEnv = process.env.NODE_ENV === "production";
+        res.clearCookie("token", { httpOnly: true, secure: isProdEnv, sameSite: isProdEnv ? "None" : "Lax", path: "/" });
+        if (isProdEnv) res.clearCookie("token", { httpOnly: true, secure: true, sameSite: "None", path: "/", domain: ".classgrid.in" });
         res.json({ message: "Account deleted successfully." });
     } catch (err) {
         console.error("Delete Account Error:", err);
