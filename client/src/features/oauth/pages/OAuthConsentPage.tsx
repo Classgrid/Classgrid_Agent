@@ -3,7 +3,8 @@ import React, { useEffect, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
 import { useTheme } from "next-themes";
-import { Loader2, AlertTriangle, Lock, ExternalLink, Check } from "lucide-react";
+import { AlertTriangle, Lock, ExternalLink, Check } from "lucide-react";
+import { Spinner } from "@/components/ui/spinner";
 import { useCurrentUser } from "@/features/auth/queries/useCurrentUser";
 import { clearOAuthConsentReturn } from "@/features/oauth/lib/oauthReturn";
 import { LoginGridBackground } from "@/features/public-chat/components/LoginGridBackground";
@@ -269,7 +270,7 @@ export function OAuthConsentPage({ preview = false }: { preview?: boolean } = {}
   if (!preview && (isUserLoading || isLoading)) {
     return (
       <div className="flex h-screen w-full items-center justify-center bg-background">
-        <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
+        <Spinner className="w-6 h-6 text-muted-foreground" />
       </div>
     );
   }
@@ -392,7 +393,7 @@ export function OAuthConsentPage({ preview = false }: { preview?: boolean } = {}
           Cancel
         </button>
         <button type="button" className={PRIMARY_BUTTON} onClick={() => handleConsent(true)} disabled={isSubmitting || !canAllow}>
-          {isSubmitting ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : null}
+          {isSubmitting ? <Spinner className="w-4 h-4 mr-2 text-inherit" /> : null}
           Allow
         </button>
       </div>

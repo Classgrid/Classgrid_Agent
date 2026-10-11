@@ -3,7 +3,7 @@ import React, { useEffect, useState } from "react";
 import { AlertTriangle, KeyRound, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/marketing_ui/button";
-import { Spinner } from "@/components/marketing_ui/spinner";
+import { Spinner } from "@/components/ui/spinner";
 import { DangerConfirmDialog } from "@/components/marketing_ui/danger-confirm-dialog";
 
 // Outside apps (Claude, Cursor, ChatGPT…) the user allowed through the Classgrid consent page.
