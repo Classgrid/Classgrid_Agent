@@ -173,6 +173,7 @@ import { TerminalToolView } from "./stepper/TerminalToolView";
 import { DatabaseQueryView } from "./stepper/DatabaseQueryView";
 import { FileActionView } from "./stepper/FileActionView";
 import { WebSearchView } from "./stepper/WebSearchView";
+import { OpenPageView } from "./stepper/OpenPageView";
 import { EmailActionView } from "./stepper/EmailActionView";
 import { DocumentGenerationView } from "./stepper/DocumentGenerationView";
 import { KnowledgeBaseSearchView } from "./stepper/KnowledgeBaseSearchView";
@@ -4400,6 +4401,19 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
                                             } else {
                                               elements.push(draftingStep);
                                             }
+                                            return;
+                                          }
+
+                                          if (step.tool === 'open_url') {
+                                            elements.push(
+                                              <AgentStepAccordion
+                                                key={step.id}
+                                                title={step.status === 'loading' ? "Opening page" : step.status === 'error' ? "Couldn't open page" : "Opened page"}
+                                                status={step.status}
+                                              >
+                                                <OpenPageView url={step.args?.url} result={step.result} status={step.status} />
+                                              </AgentStepAccordion>
+                                            );
                                             return;
                                           }
 
