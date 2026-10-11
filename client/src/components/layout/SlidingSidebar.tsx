@@ -86,14 +86,14 @@ export function SlidingSidebar({
         {/* ==========================================
             PANE 1: MAIN MENU
             ========================================== */}
-        <div className="w-1/2 h-full shrink-0 overflow-y-auto pb-10 no-scrollbar">
+        <div className="w-1/2 h-full shrink-0 overflow-y-auto pb-10 chat-scrollbar">
           {mainMenu}
         </div>
 
         {/* ==========================================
             PANE 2: NESTED MENU
             ========================================== */}
-        <div className="w-1/2 h-full shrink-0 overflow-y-auto pb-10 pt-0 no-scrollbar">
+        <div className="w-1/2 h-full shrink-0 overflow-y-auto pb-10 pt-0 chat-scrollbar">
           <div className="group-data-[collapsible=icon]:hidden px-1 pb-1 -mt-1 mx-1">
             <SidebarMenuButton
               asChild
