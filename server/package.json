@@ -3,7 +3,8 @@
   "type": "module",
   "scripts": {
     "dev": "node server.js",
-    "start": "node server.js"
+    "start": "node server.js",
+    "test:mcp": "node --test tests/mcp/*.test.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.132.1",

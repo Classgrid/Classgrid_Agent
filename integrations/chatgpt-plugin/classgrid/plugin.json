@@ -1,0 +1,47 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "classgrid",
+  "version": "0.2.0",
+  "description": "Use your Classgrid account in ChatGPT: schedules and reminders, Grid team chats, your profile and your connected apps.",
+  "author": {
+    "name": "Classgrid",
+    "email": "support@classgrid.in",
+    "url": "https://classgrid.in"
+  },
+  "homepage": "https://classgrid.in/agent",
+  "license": "Proprietary",
+  "keywords": [
+    "education",
+    "productivity",
+    "schedules",
+    "reminders",
+    "team chat"
+  ],
+  "extensions": {
+    "com.openai": {
+      "onboardingSkill": "./skills/classgrid-setup/SKILL.md",
+      "interface": {
+        "displayName": "Classgrid",
+        "shortDescription": "Your Classgrid schedules, reminders and Grid chats in ChatGPT.",
+        "longDescription": "Connect your Classgrid account to see and manage your schedules and WhatsApp/email reminders, read and send messages in the Grid chats and groups you belong to, look up your profile, and (if you allow it) use the apps you have connected to Classgrid, such as Gmail, Drive or Notion. You choose exactly what ChatGPT may access on the Classgrid permission screen; anything that can make changes is off unless you tick it. You can remove access any time from Classgrid under AI Plugins > Connected apps.",
+        "developerName": "Classgrid",
+        "category": "Productivity",
+        "capabilities": [
+          "Read",
+          "Write"
+        ],
+        "websiteURL": "https://classgrid.in",
+        "privacyPolicyURL": "https://classgrid.in/privacy",
+        "termsOfServiceURL": "https://classgrid.in/terms",
+        "defaultPrompt": [
+          "Show my Classgrid schedules for this week",
+          "Remind me on Classgrid tomorrow at 8 AM to revise physics",
+          "What are the latest messages in my Classgrid Grid chats?"
+        ],
+        "brandColor": "#10B981",
+        "composerIcon": "./assets/icon.png",
+        "logo": "./assets/logo.png"
+      }
+    }
+  }
+}

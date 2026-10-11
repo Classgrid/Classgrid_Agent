@@ -49,6 +49,7 @@ import { getLoginPathForPath, getRedirectPath, isInstitutionAdminRole } from "..
 import { useCurrentUser } from "../queries/useCurrentUser";
 import { PresenceProvider } from "@/features/chat/context/PresenceContext";
 import { apiClient } from "@/lib/apiClient";
+import { OAUTH_CONSENT_PATH, peekOAuthConsentReturn, rememberOAuthConsentReturn } from "@/features/oauth/lib/oauthReturn";
 
 export function RequireAuth() {
   const location = useLocation();
@@ -97,6 +98,8 @@ export function RequireAuth() {
   if (!user) {
     const isRescueAuth = location.pathname === "/superadmin/audit-logs" && localStorage.getItem("rescue_token");
     if (!isRescueAuth) {
+      // The login page always finishes on "/", so remember an MCP/OAuth consent URL to come back to
+      if (path === OAUTH_CONSENT_PATH) rememberOAuthConsentReturn(`${location.pathname}${location.search}`);
       return (
         <Navigate
           to={getLoginPathForPath(location.pathname)}
@@ -134,6 +137,12 @@ export function RequireAuth() {
   }
   if (isOrganizationSetupRoute && !needsOrganizationCode) {
     return <Navigate to={needsPasswordReset ? "/required-password-reset" : getRedirectPath(user?.role)} replace />;
+  }
+
+  // Signed in after being sent away from the consent page: go back to it (it clears the saved URL)
+  if (user && path !== OAUTH_CONSENT_PATH) {
+    const consentReturn = peekOAuthConsentReturn();
+    if (consentReturn) return <Navigate to={consentReturn} replace />;
   }
 
   // 🚨 STRICT ROLE GUARDS 🚨

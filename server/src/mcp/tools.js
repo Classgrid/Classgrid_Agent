@@ -2179,8 +2179,9 @@ export const handleToolCall = async (name, args, context = {}) => {
           return { content: [{ type: 'text', text: `Error: Schedule with ID ${args.schedule_id} not found or you don't have permission to delete it.` }] };
         }
 
-        await AiSchedule.deleteOne({ _id: args.schedule_id });
-        await emitScheduleUpdate(schedule.user_id, args.schedule_id);
+        // Delete the exact document the ownership check found, never by the raw argument
+        await AiSchedule.deleteOne({ _id: schedule._id, user_email: finalUserEmail });
+        await emitScheduleUpdate(schedule.user_id, schedule._id);
         return { content: [{ type: 'text', text: `Successfully deleted schedule ${args.schedule_id}.` }] };
       } catch (e) {
         return { content: [{ type: 'text', text: `Error deleting schedule: ${e.message}` }] };

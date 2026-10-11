@@ -64,11 +64,13 @@ import marksRoutes from "../src/routes/marks.routes.js";
 import assignmentRoutes from "../src/routes/assignment.routes.js";
 import leaveRoutes from "../src/routes/leave.routes.js";
 import meetRoutes from "../src/routes/meet.routes.js";
-import { createMcpRouter } from "../src/mcp/index.js";
+import { createMcpRouter, loadRemoteMcpRouter } from "../src/mcp/index.js";
 import googleWorkspaceRoutes from "../src/routes/auth.google_workspace.routes.js";
 import microsoftRoutes from "../src/routes/auth.microsoft.routes.js";
 import notionRoutes from "../src/routes/auth.notion.routes.js";
-import oauthProviderRoutes from "../src/routes/oauth.provider.routes.js";
+import oauthProviderRoutes, {
+  isConsentPageOrigin, buildAuthorizationServerMetadata, buildProtectedResourceMetadata
+} from "../src/routes/oauth.provider.routes.js";
 import zoomRoutes from "../src/routes/zoom.routes.js";
 import supabaseRoutes from "../src/routes/auth.supabase.routes.js";
 import sanityRoutes from "../src/routes/auth.sanity.routes.js";
@@ -185,8 +187,15 @@ app.use(helmet({
   crossOriginOpenerPolicy: { policy: "same-origin-allow-popups" }, // ALLOWS OAuth popups to communicate back to the main window
 }));
 
-app.use(
-  cors({
+// The OAuth provider (/oauth/*) gets its own, stricter CORS below; every other route keeps these rules
+// unchanged (white-labeled custom ERP domains depend on them). Lower-cased because Express routing is
+// case-insensitive, so "/OAUTH/..." still reaches the OAuth router.
+const isOAuthProviderPath = (path) => {
+  const p = String(path || "").toLowerCase();
+  return p === "/oauth" || p.startsWith("/oauth/");
+};
+
+const apiCors = cors({
     origin: function (origin, callback) {
       // Allow requests with no origin (mobile apps, curl, server-to-server)
       if (!origin) return callback(null, true);
@@ -219,18 +228,40 @@ app.use(
       callback(new Error(`CORS blocked: ${origin}`));
     },
     credentials: true
+  });
+
+app.use((req, res, next) => (isOAuthProviderPath(req.path) ? next() : apiCors(req, res, next)));
+
+// /oauth/*: credentialed CORS only for the Classgrid consent page. The login cookie is SameSite=None on
+// .classgrid.in, so reflecting any https origin here let other websites read the user's details and get
+// auth codes issued. The cookie-free endpoints (token, register) stay callable from browser-based MCP
+// clients, but without credentials. Anything else gets no CORS headers (the browser blocks it).
+const OAUTH_PUBLIC_CORS_PATHS = new Set(["/oauth/token", "/oauth/register"]);
+app.use(
+  cors((req, callback) => {
+    if (!isOAuthProviderPath(req.path)) return callback(null, { origin: false });
+    if (isConsentPageOrigin(req.headers.origin)) return callback(null, { origin: true, credentials: true });
+    if (OAUTH_PUBLIC_CORS_PATHS.has(req.path.toLowerCase())) return callback(null, { origin: "*", credentials: false });
+    return callback(null, { origin: false });
   })
 );
 
 // Razorpay admission webhook needs the raw request body for signature verification.
 app.use("/api/admission/payments/webhook", express.raw({ type: "application/json", limit: "2mb" }));
 
+// Remote MCP endpoint parses its own body (1 MB cap) inside its router. Lower-cased: Express routing is case-insensitive.
+const isRemoteMcpPath = (path) => {
+  const p = String(path || "").toLowerCase();
+  return p === "/mcp" || p.startsWith("/mcp/");
+};
+
 // Skip JSON body parsing for webhook routes that rely on raw bodies.
 app.use((req, res, next) => {
   if (
     req.originalUrl.startsWith('/api/admission/payments/webhook') ||
     req.originalUrl.startsWith('/api/payments/webhook') ||
-    req.originalUrl.startsWith('/api/webhooks/razorpay')
+    req.originalUrl.startsWith('/api/webhooks/razorpay') ||
+    isRemoteMcpPath(req.path)
   ) {
     return next();
   }
@@ -389,10 +420,18 @@ app.use("/api/events", eventsRoutes);
 app.use("/api/academic-plans", academicPlanRoutes);
 app.use("/api/crm", crmRoutes);
 
-// 🚀 Mount the MCP Router
+// 🚀 Mount the MCP Router: the retired shared-key SSE routes (/api/mcp/sse, /api/mcp/messages) answer 410 Gone
 const mcpRouter = express.Router();
 createMcpRouter(mcpRouter);
-app.use("/api", mcpRouter); // Mounts at /api/mcp/sse and /api/mcp/messages
+app.use("/api", mcpRouter);
+
+// Remote MCP server for Claude / Cursor / ChatGPT: POST /mcp with a Classgrid OAuth token (src/mcp/mcp-server.js).
+// Returns 404 unless MCP_ENABLED=true. Left unmounted if the tool allowlist fails its safety check.
+try {
+  app.use("/mcp", await loadRemoteMcpRouter());
+} catch (err) {
+  console.error("❌ [MCP] /mcp route NOT mounted:", err?.message || err);
+}
 app.use("/api/certificates", certificateRoutes);
 app.use("/api/fees", feesRoutes);
 app.use("/api/push", pushRoutes);
@@ -436,17 +475,18 @@ app.use("/api/public/tenant", publicTenantRouter);   // GET /api/public/tenant/r
 app.use("/api/org-website", orgWebsiteRouter);       // Org admin CMS endpoints
 app.use("/api/super-admin", superAdminWebsiteRouter);// Super admin: list all websites
 
-// 🔑 DCR Discovery for Claude MCP
+// 🔑 OAuth discovery for remote MCP clients (Claude, Cursor, ChatGPT). Built in oauth.provider.routes.js
+// from OAUTH_ISSUER / MCP_RESOURCE_URL and the scope list in src/mcp/mcp-scopes.js.
+// RFC 8414 Authorization Server Metadata (issuer must equal the origin serving it)
 app.get("/.well-known/oauth-authorization-server", (req, res) => {
-  res.json({
-    issuer: "https://api.classgrid.in",
-    authorization_endpoint: "https://api.classgrid.in/oauth/authorize",
-    token_endpoint: "https://api.classgrid.in/oauth/token",
-    registration_endpoint: "https://api.classgrid.in/oauth/register",
-    scopes_supported: ["offline_access", "read", "write"],
-    response_types_supported: ["code"],
-    grant_types_supported: ["authorization_code", "refresh_token"]
-  });
+  res.set("Cache-Control", "public, max-age=300");
+  res.json(buildAuthorizationServerMetadata());
+});
+
+// RFC 9728 Protected Resource Metadata: root and the path-specific variant for /mcp (clients try that first)
+app.get(["/.well-known/oauth-protected-resource", "/.well-known/oauth-protected-resource/mcp"], (req, res) => {
+  res.set("Cache-Control", "public, max-age=300");
+  res.json(buildProtectedResourceMetadata());
 });
 
 // 🌐 MODULE 22: Public Tenant Info (Subdomain Resolution)

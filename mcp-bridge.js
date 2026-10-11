@@ -1,47 +1,32 @@
 #!/usr/bin/env node
-import { SSEClientTransport } from "@modelcontextprotocol/sdk/client/sse.js";
-import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
+/*
+ * DEPRECATED: this stdio-to-SSE bridge no longer works and is kept only to explain what replaced it.
+ *
+ * The old shared-key SSE endpoint (/api/mcp/sse, /api/mcp/messages) has been retired and answers 410 Gone.
+ * There is no shared MCP key any more: every user signs in with their own Classgrid account (OAuth).
+ *
+ * Connect your MCP client straight to the remote MCP server instead:
+ *
+ *   URL: https://api.classgrid.in/mcp   (Streamable HTTP, OAuth sign-in)
+ *
+ *   - Claude (desktop or web): Settings > Connectors > Add custom connector, paste the URL, then sign in.
+ *   - Cursor: add to ~/.cursor/mcp.json (or .cursor/mcp.json in a project), then click "Connect":
+ *       { "mcpServers": { "classgrid": { "url": "https://api.classgrid.in/mcp" } } }
+ *   - ChatGPT: add Classgrid as a connector with the same URL.
+ *   - Clients that only speak stdio can use the community "mcp-remote" package:
+ *       npx -y mcp-remote https://api.classgrid.in/mcp
+ *
+ * Your browser opens a Classgrid consent page where you choose what the app may do.
+ */
 
-async function run() {
-  const REMOTE_URL = process.env.MCP_REMOTE_URL || "https://api.classgrid.in";
-  const TOKEN = process.env.MCP_API_KEY || "dev-key-123";
+const MCP_URL = "https://api.classgrid.in/mcp";
 
-  console.error(`Connecting to Classgrid MCP Server at ${REMOTE_URL}...`);
-
-  // 1. Setup Remote SSE Transport
-  const sseUrl = new URL(`${REMOTE_URL}/api/mcp/sse?token=${TOKEN}`);
-  const sseTransport = new SSEClientTransport(sseUrl);
-
-  // 2. Setup Local Stdio Transport (Claude/Cursor communicates here)
-  const stdioTransport = new StdioServerTransport();
-
-  // 3. Start Transports
-  await sseTransport.start();
-  await stdioTransport.start();
-
-  console.error(`Bridge connected!`);
-
-  // 4. Pipe messages directly between them
-  sseTransport.onmessage = (msg) => {
-    stdioTransport.send(msg);
-  };
-
-  stdioTransport.onmessage = (msg) => {
-    sseTransport.send(msg);
-  };
-
-  sseTransport.onclose = () => {
-    console.error("Remote SSE closed.");
-    process.exit(0);
-  };
-
-  stdioTransport.onclose = () => {
-    console.error("Local Stdio closed.");
-    process.exit(0);
-  };
-}
-
-run().catch((err) => {
-  console.error("Bridge Error:", err);
-  process.exit(1);
-});
+console.error(
+  [
+    "mcp-bridge.js is deprecated: the Classgrid SSE MCP endpoint and its shared key have been retired.",
+    `Connect your MCP client (Claude, Cursor, ChatGPT) directly to ${MCP_URL}`,
+    "and sign in with your Classgrid account when asked (OAuth). No API key is needed.",
+    `Clients that only support stdio: npx -y mcp-remote ${MCP_URL}`,
+  ].join("\n")
+);
+process.exit(1);

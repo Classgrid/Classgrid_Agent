@@ -13,7 +13,8 @@ import {
   CreditCard,
   MessageSquare,
   Wand2,
-  Image as ImageIcon
+  Image as ImageIcon,
+  KeyRound
 } from "lucide-react";
 import { Spinner } from "@/components/marketing_ui/spinner";
 import { cn } from "@/lib/utils";
@@ -28,6 +29,7 @@ import { AiUsageBar } from "./AiUsageBar";
 import { AiCreditsPanel } from "./credits/AiCreditsPanel";
 import { AiUpgradePanel } from "./credits/AiUpgradePanel";
 import { AiSkillsPanel } from "./skills/AiSkillsPanel";
+import { AiConnectedAppsPanel } from "./connected-apps/AiConnectedAppsPanel";
 
 interface AiHubModalProps {
   isOpen: boolean;
@@ -40,6 +42,8 @@ const TABS = [
   { id: "plugins", label: "Plugins", icon: Plug },
   { id: "images", label: "Images", icon: ImageIcon },
   { id: "skills", label: "Skills", icon: Zap },
+  // Outside apps (Claude, Cursor, ChatGPT) allowed through the Classgrid OAuth consent page
+  { id: "connected-apps", label: "Connected apps", icon: KeyRound },
   { id: "usage", label: "Usage", icon: Activity },
   { id: "credits", label: "AI Credits", icon: CreditCard },
   { id: "upgrade", label: "Upgrade", icon: ArrowUpCircle },
@@ -648,6 +652,8 @@ export function AiHubModal({ isOpen, onClose, onSendPrompt, initialTab = "plugin
                   <div className="h-full flex-1">
                     <AiSkillsPanel backendUrl={backendUrl} />
                   </div>
+                ) : activeTab === "connected-apps" ? (
+                  <AiConnectedAppsPanel backendUrl={backendUrl} />
                 ) : (
                   <>
                     <h3 className="text-2xl font-bold text-foreground mb-2">{TABS.find(t => t.id === activeTab)?.label}</h3>

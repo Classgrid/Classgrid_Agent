@@ -1,0 +1,33 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/mcp.schema.json",
+  "mcpServers": {
+    "classgrid": {
+      "type": "streamable-http",
+      "url": "https://api.classgrid.in/mcp",
+      "extensions": {
+        "com.openai": {
+          "auth": {
+            "type": "oauth",
+            "client": {
+              "mode": "dcr",
+              "tokenEndpointAuthMethod": "none"
+            },
+            "authorizationUrl": "https://api.classgrid.in/oauth/authorize",
+            "tokenUrl": "https://api.classgrid.in/oauth/token",
+            "registrationUrl": "https://api.classgrid.in/oauth/register",
+            "baseScopes": [
+              "profile:read",
+              "offline_access"
+            ],
+            "defaultScopes": [
+              "profile:read",
+              "schedules:read",
+              "grid:read",
+              "offline_access"
+            ]
+          }
+        }
+      }
+    }
+  }
+}

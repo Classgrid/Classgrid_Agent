@@ -7,83 +7,55 @@
  * =========================================================================================
  */
 
-import { Server } from '@modelcontextprotocol/sdk/server/index.js';
-import { SSEServerTransport } from '@modelcontextprotocol/sdk/server/sse.js';
-import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js';
-import { getMcpTools, handleToolCall } from './tools.js';
+/*
+ * MCP entry points.
+ *
+ *   - createMcpRouter(router): the old single-connection SSE server (/api/mcp/sse, /api/mcp/messages) with
+ *     its shared key is gone. Both routes answer 410 Gone and point to the remote MCP server. No shared-key
+ *     access remains (MCP_API_KEY is no longer read).
+ *   - loadRemoteMcpRouter(): the multi-user remote MCP server (POST /mcp, OAuth bearer tokens), built in
+ *     ./mcp-server.js. Loaded dynamically so a failed allowlist safety check (thrown at load time) only
+ *     keeps /mcp unmounted instead of taking the whole API down.
+ */
 
-// Initialize the MCP Server
-export const mcpServer = new Server(
-  {
-    name: 'classgrid-mcp-server',
-    version: '1.0.0',
-  },
-  {
-    capabilities: {
-      tools: {},
-    },
-  }
-);
+import { getMcpResourceUrl } from "../routes/oauth.provider.routes.js";
 
-// Register the ListTools handler
-mcpServer.setRequestHandler(ListToolsRequestSchema, async () => {
-  return {
-    tools: getMcpTools(),
-  };
-});
-
-// Register the CallTool handler
-mcpServer.setRequestHandler(CallToolRequestSchema, async (request) => {
-  const { name, arguments: args } = request.params;
-  try {
-    return await handleToolCall(name, args);
-  } catch (error) {
-    return {
-      isError: true,
-      content: [{ type: 'text', text: error.message }],
-    };
-  }
-});
-
-// Create Express Middleware/Routes for MCP SSE
 export const createMcpRouter = (expressRouter) => {
-  let transport = null;
-
-  const checkMcpAuth = (req, res, next) => {
-    const token = req.query.token || req.headers['x-mcp-api-key'];
-    if (!process.env.MCP_API_KEY) {
-      console.warn("⚠️ MCP_API_KEY is not set in environment. Defaulting to insecure 'dev-key-123'");
-    }
-    const expectedKey = process.env.MCP_API_KEY || 'dev-key-123';
-    
-    if (token !== expectedKey) {
-      return res.status(401).json({ error: "Unauthorized. Invalid MCP token." });
-    }
-    next();
+  const gone = (req, res) => {
+    res.status(410).json({
+      error: "gone",
+      message: "The Classgrid SSE MCP endpoint has been retired. Connect your MCP client (Claude, Cursor, ChatGPT) to the remote MCP URL instead; it signs you in with your Classgrid account (OAuth).",
+      mcp_url: getMcpResourceUrl(),
+      transport: "streamable-http"
+    });
   };
 
-  // The primary endpoint where the AI establishes the SSE connection
-  expressRouter.get('/mcp/sse', checkMcpAuth, async (req, res) => {
-    try {
-      if (transport) {
-        await transport.close();
-      }
-      await mcpServer.close();
-    } catch (e) {
-      // Ignore close errors
-    }
-
-    transport = new SSEServerTransport('/api/mcp/messages?token=' + req.query.token, res);
-    await mcpServer.connect(transport);
-  });
-
-  // The endpoint where the AI posts messages/tool calls back to the server
-  expressRouter.post('/mcp/messages', checkMcpAuth, async (req, res) => {
-    if (!transport) {
-      return res.status(503).send('SSE transport not initialized. Connect to /mcp/sse first.');
-    }
-    await transport.handlePostMessage(req, res);
-  });
+  expressRouter.all("/mcp/sse", gone);
+  expressRouter.all("/mcp/messages", gone);
 
   return expressRouter;
 };
+
+// Builds the POST /mcp router with the real tools, OAuth token check, Redis and Supabase.
+// Throws if the allowlist is unsafe; the caller then leaves /mcp unmounted.
+export async function loadRemoteMcpRouter(overrides = {}) {
+  const [{ createRemoteMcpRouter }, tools, oauth, redisModule, supabase] = await Promise.all([
+    import("./mcp-server.js"),
+    import("./tools.js"),
+    import("../routes/oauth.provider.routes.js"),
+    import("../config/redis.js"),
+    import("../config/supabaseClient.js"),
+  ]);
+
+  return createRemoteMcpRouter({
+    getMcpTools: tools.getMcpTools,
+    handleToolCall: tools.handleToolCall,
+    verifyToken: oauth.verifyOAuthAccessToken,
+    extractBearerToken: oauth.extractBearerToken,
+    getResourceUrl: oauth.getMcpResourceUrl,
+    getRedis: () => redisModule.default,
+    getSb: supabase.getChatSb,
+    getUserModel: async () => (await import("../models/User.js")).default,
+    ...overrides,
+  });
+}

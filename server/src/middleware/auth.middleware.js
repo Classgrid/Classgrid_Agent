@@ -52,6 +52,70 @@ import { needsChatOnboarding } from "../utils/chat-onboarding.js";
 const JWT_SECRET = process.env.JWT_SECRET || "dev_secret";
 
 /**
+ * Shared account checks for an already-loaded user (used by isAuthenticated and by the OAuth
+ * access-token check). Returns null when the user may continue, otherwise { status, body } to send.
+ *
+ * options.issuedAtMs        — when the credential was issued; rejected if older than passwordChangedAt
+ * options.settings          — SystemSettings doc (undefined → loaded here)
+ * options.allowStatusBypass — keep the two support accounts usable while inactive (false for OAuth apps)
+ */
+export async function getUserAccessBlock(user, { issuedAtMs, settings, allowStatusBypass = true } = {}) {
+    // JWT Invalidation check after password change
+    if (user.passwordChangedAt && typeof issuedAtMs === "number") {
+        if (issuedAtMs < user.passwordChangedAt.getTime()) {
+            return {
+                status: 401,
+                body: { message: "Token expired due to password change. Please log in again." },
+            };
+        }
+    }
+
+    if (settings === undefined) {
+        settings = await SystemSettings.findOne();
+    }
+
+    // Check enforced system settings
+    if (settings && user.role !== "super_admin") {
+        if (settings.globalLock) {
+            return { status: 403, body: { success: false, message: "Platform is under a global security lock. All access is temporarily suspended.", code: "GLOBAL_LOCK" } };
+        }
+        if (settings.maintenanceMode) {
+            return { status: 503, body: { success: false, message: "Platform is currently under maintenance. Please try again later.", code: "MAINTENANCE_MODE" } };
+        }
+    }
+
+    // Status check — block suspended/blocked users
+    const bypassesStatus = allowStatusBypass && ["nikhil.shinde@classgrid.in", "support@classgrid.in"].includes(user.email);
+    if (user.status !== "active" && !bypassesStatus) {
+        return {
+            status: 403,
+            body: {
+                success: false,
+                message: "Your account is not active. Please contact support.",
+                code: "USER_INACTIVE",
+            },
+        };
+    }
+
+    // Organization status check
+    if (user.organization_id && user.role !== "super_admin") {
+        const org = await Organization.findById(user.organization_id).select("status").lean();
+        if (org && ["suspended", "blocked"].includes(org.status)) {
+            return {
+                status: 403,
+                body: {
+                    success: false,
+                    message: "Your organization has been suspended or blocked. Contact support.",
+                    code: "ORG_INACTIVE",
+                },
+            };
+        }
+    }
+
+    return null;
+}
+
+/**
  * Core authentication middleware.
  * Handles both normal and impersonation tokens.
  *
@@ -128,45 +192,11 @@ export const isAuthenticated = async (req, res, next) => {
                 return res.status(401).json({ message: "User no longer exists" });
             }
 
-            // JWT Invalidation check after password change
-            if (user.passwordChangedAt) {
-                if (decoded.iat * 1000 < user.passwordChangedAt.getTime()) {
-                    return res.status(401).json({
-                        message: "Token expired due to password change. Please log in again."
-                    });
-                }
+            // Password change, global lock / maintenance, user status and organization status checks
+            const block = await getUserAccessBlock(user, { issuedAtMs: decoded.iat * 1000, settings });
+            if (block) {
+                return res.status(block.status).json(block.body);
             }
-
-            // Check enforced system settings
-            if (settings && user.role !== "super_admin") {
-                if (settings.globalLock) {
-                    return res.status(403).json({ success: false, message: "Platform is under a global security lock. All access is temporarily suspended.", code: "GLOBAL_LOCK" });
-                }
-                if (settings.maintenanceMode) {
-                    return res.status(503).json({ success: false, message: "Platform is currently under maintenance. Please try again later.", code: "MAINTENANCE_MODE" });
-                }
-            }
-
-            // Status check — block suspended/blocked users
-            if (user.status !== "active" && !["nikhil.shinde@classgrid.in", "support@classgrid.in"].includes(user.email)) {
-                return res.status(403).json({
-                    success: false,
-                    message: "Your account is not active. Please contact support.",
-                    code: "USER_INACTIVE",
-                });
-            }
-
-        // Organization status check
-        if (user.organization_id && user.role !== "super_admin") {
-            const org = await Organization.findById(user.organization_id).select("status").lean();
-            if (org && ["suspended", "blocked"].includes(org.status)) {
-                return res.status(403).json({
-                    success: false,
-                    message: "Your organization has been suspended or blocked. Contact support.",
-                    code: "ORG_INACTIVE",
-                });
-            }
-        }
 
             const isAuthOrOnboardingRoute = req.originalUrl.startsWith('/api/auth');
             if (user.role === 'user' && (!user.metadata || !user.metadata.whatsappPhone) && !isAuthOrOnboardingRoute) {

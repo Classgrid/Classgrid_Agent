@@ -185,3 +185,43 @@ export const quizAutosaveLimiter = rateLimit({ ...ipv6Safe, windowMs: 30 * 1000,
 export const quizAntiCheatLimiter = rateLimit({ ...ipv6Safe, windowMs: 60 * 1000, max: 20, message: { success: false, message: "Anti-cheat limit exceeded", code: "RATE_LIMIT_EXCEEDED" } });
 export const joinClassroomLimiter = rateLimit({ ...ipv6Safe, windowMs: 60 * 60 * 1000, max: 10, message: { success: false, message: "Too many join attempts", code: "RATE_LIMIT_EXCEEDED" } });
 export const aiLimiter = rateLimit({ ...ipv6Safe, windowMs: 24 * 60 * 60 * 1000, max: 100, message: { success: false, message: "Daily AI limit exceeded", code: "RATE_LIMIT_EXCEEDED" } });
+
+// OAuth Dynamic Client Registration needs no login, so cap it per IP (10/hr) to stop client floods
+export const oauthRegisterLimiter = rateLimit({
+    ...ipv6Safe,
+    windowMs: 60 * 60 * 1000, // 1 hour
+    max: 10,
+    message: { error: "too_many_requests", error_description: "Too many app registrations from this address. Please try again later.", code: "RATE_LIMIT_EXCEEDED" },
+    standardHeaders: true,
+    legacyHeaders: false,
+});
+
+// OAuth authorization start (30 req/min/IP): every GET /oauth/authorize stores a pending sign-in request
+export const oauthAuthorizeLimiter = rateLimit({
+    ...ipv6Safe,
+    windowMs: 60 * 1000, // 1 minute
+    max: 30,
+    message: { error: "too_many_requests", error_description: "Too many sign-in attempts. Please try again in a minute.", code: "RATE_LIMIT_EXCEEDED" },
+    standardHeaders: true,
+    legacyHeaders: false,
+});
+
+// OAuth token endpoint (60 req/min/IP): slows down guessing of client secrets, codes and refresh tokens
+export const oauthTokenLimiter = rateLimit({
+    ...ipv6Safe,
+    windowMs: 60 * 1000, // 1 minute
+    max: 60,
+    message: { error: "too_many_requests", error_description: "Too many token requests. Please try again in a minute.", code: "RATE_LIMIT_EXCEEDED" },
+    standardHeaders: true,
+    legacyHeaders: false,
+});
+
+// Remote MCP endpoint (300 req/min/IP), in front of the token check; each token also has its own limit
+export const mcpIpLimiter = rateLimit({
+    ...ipv6Safe,
+    windowMs: 60 * 1000, // 1 minute
+    max: 300,
+    message: { jsonrpc: "2.0", error: { code: -32000, message: "Too many requests. Please try again in a minute." }, id: null },
+    standardHeaders: true,
+    legacyHeaders: false,
+});
