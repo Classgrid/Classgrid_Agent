@@ -175,7 +175,8 @@ TOOLS & ERRORS
 - On a tool error, never claim success, fabricate links or invent other reasons, and don't retry the same broken call. If another tool can still get the result (for example reading the file in the Sandbox with run_code), do that and finish the task without showing the error; only for Classgrid staff (role super_admin or co_super_admin) add one short last line: "Note: [tool] failed ([exact error]); I used [other way] instead." If no other way works: for Classgrid staff (email ending in @classgrid.in) say exactly: "I encountered a technical error: [insert exact error message]. Please report this to Nikhil (nikhil.shinde@classgrid.in) so he can fix the backend." For everyone else say only: "Something went wrong on our side. Please try again in a moment, or contact Help & Support if it keeps happening." and never show the error text, tool names, server details or any staff email."
 - Exception: never show Mistral 429 rate-limit errors or server logs; treat them as expected token exhaustion and continue silently.
 - If search shows the user's premise is false, say so; never stitch unrelated facts together.
-- At most 3 searches per question (web, knowledge base, our site). Then stop, say it isn't available, give your best assessment, never fabricate.
+- OFFICIAL SOURCES FIRST: for any question about a specific company, product, website, tool or API, get the answer from its official source. If you know the official domain (e.g. developers.cloudflare.com, docs.mistral.ai, the company's own site), open the exact page with open_url or search with search_web include_domains set to that domain. If you don't know the domain, first search for the official site, then search or open it. Use third-party blogs only when the official source doesn't cover it, and say when a fact comes from a third party. Classgrid's own news, new features and releases: open https://classgrid.in/changelog first (official), then search with include_domains ["classgrid.in"]; never answer them from unrelated third-party pages.
+- At most 5 searches/page reads per question (web, knowledge base, our site). Then stop, say it isn't available, give your best assessment, never fabricate.
 - Integrations (Zoom, Google Workspace, Notion, Slack, GitHub, etc.): connected means its tool is in your list, it is in the connected-integrations list, or its group is offered by load_tools. If connected, use it now (load it first if needed); never ask to connect or call open_integration_panel. Only if not connected: call open_integration_panel and say "I've opened the AI Hub for you. Please connect your account so I can automate this."
 
 ROUTING (right after brief thinking; load the tool's group first if needed): uploaded image you cannot already see: analyze_image with the URL; uploaded document/PDF you cannot already read: parse_document with the URL; send email: send_email; internal platform data (users, fees, attendance): unified_db_query, never for Google Classroom or Drive; PDF: generate_pdf; run code: run_code.
@@ -807,6 +808,65 @@ async function buildDeepContext(userEmail) {
 
 // Pre-request quota estimate: ~4 characters per token over everything sent (rules, history, message, tools),
 // plus room for the reply. MIN_PROMPT_TOKENS is the smallest real request (rules + core tools, "hi" ~3.8k).
+// search_web include/exclude_domains: plain hostnames only ("https://www.x.com/a" -> "x.com"), at most 10
+const cleanDomains = (list) => (Array.isArray(list) ? list : [])
+    .map((d) => String(d || "").trim().toLowerCase().replace(/^https?:\/\//, "").replace(/^www\./, "").split("/")[0])
+    .filter((d) => /^[a-z0-9.-]+\.[a-z]{2,}$/.test(d))
+    .slice(0, 10);
+
+// Official domains of well-known products/organisations. When a search names one of them (and the model gave no
+// include_domains), its official pages are boosted to the top, and fetched with an extra search if none came back.
+const OFFICIAL_DOMAINS = [
+    [/\bcloudflare|workers ai|\bwrangler\b|\bcloudflare r2\b/i, ["cloudflare.com"]],
+    [/\bmistral\b/i, ["mistral.ai"]],
+    [/\banthropic\b|\bclaude\b/i, ["anthropic.com", "claude.com"]],
+    [/\bopenai\b|\bchatgpt\b|\bgpt-?\d/i, ["openai.com"]],
+    [/\bgemini\b|\bgoogle ai studio\b/i, ["ai.google.dev", "gemini.google.com", "deepmind.google"]],
+    [/\bdeepseek\b/i, ["deepseek.com"]],
+    [/\bhugging ?face\b/i, ["huggingface.co"]],
+    [/\btavily\b/i, ["tavily.com"]],
+    [/\baws\b|\bamazon web services\b|\bamazon s3\b|\bec2\b|\baws lambda\b/i, ["aws.amazon.com", "docs.aws.amazon.com"]],
+    [/\bazure\b/i, ["learn.microsoft.com", "azure.microsoft.com"]],
+    [/\bgoogle cloud\b|\bgcp\b|\bfirebase\b/i, ["cloud.google.com", "firebase.google.com"]],
+    [/\bvercel\b/i, ["vercel.com"]],
+    [/\bnetlify\b/i, ["netlify.com"]],
+    [/\bsupabase\b/i, ["supabase.com"]],
+    [/\bmongodb\b|\bmongoose\b/i, ["mongodb.com", "mongoosejs.com"]],
+    [/\bpostgres(ql)?\b/i, ["postgresql.org"]],
+    [/\bredis\b/i, ["redis.io"]],
+    [/\bdocker\b/i, ["docker.com"]],
+    [/\bkubernetes\b|\bk8s\b/i, ["kubernetes.io"]],
+    [/\breact\.?js\b|\breact (hooks?|components?|router|docs)\b/i, ["react.dev"]],
+    [/\breact native\b/i, ["reactnative.dev"]],
+    [/\bnext\.?js\b/i, ["nextjs.org"]],
+    [/\bvite\b/i, ["vite.dev"]],
+    [/\btailwind/i, ["tailwindcss.com"]],
+    [/\btypescript\b/i, ["typescriptlang.org"]],
+    [/\bnode\.?js\b/i, ["nodejs.org"]],
+    [/\bpython (docs|documentation|library|module|syntax|version|install)/i, ["python.org"]],
+    [/\bdjango\b/i, ["djangoproject.com"]],
+    [/\bflutter\b/i, ["flutter.dev"]],
+    [/\bmdn\b|\bjavascript (api|method|function|docs)\b|\bcss (property|selector|grid|flexbox)\b|\bhtml (tag|element|attribute)\b/i, ["developer.mozilla.org"]],
+    [/\bgithub\b/i, ["github.com", "docs.github.com"]],
+    [/\bstripe\b/i, ["stripe.com"]],
+    [/\brazorpay\b/i, ["razorpay.com"]],
+    [/\bnotion (api|integration|database|page|workspace|app)\b/i, ["notion.com", "developers.notion.com"]],
+    [/\bslack (api|app|bot|workspace|channel|integration)\b/i, ["slack.com"]],
+    [/\bzoom (api|meeting|sdk|app|webinar|account)\b/i, ["zoom.us", "zoom.com"]],
+    [/\bwhatsapp\b/i, ["whatsapp.com", "developers.facebook.com"]],
+    [/\bsocket\.?io\b/i, ["socket.io"]],
+    [/\bclassgrid\b/i, ["classgrid.in"]],
+    [/\bcbse\b/i, ["cbse.gov.in"]],
+    [/\bugc\b/i, ["ugc.gov.in"]],
+    [/\baicte\b/i, ["aicte-india.org"]],
+    [/\bjee\b|\bneet\b|\bcuet\b|\bnta\b/i, ["nta.ac.in"]],
+    [/\bupsc\b/i, ["upsc.gov.in"]],
+];
+const officialDomainsFor = (query) => {
+    const q = String(query || "");
+    return [...new Set(OFFICIAL_DOMAINS.filter(([re]) => re.test(q)).flatMap(([, domains]) => domains))].slice(0, 10);
+};
+
 const MIN_PROMPT_TOKENS = 3000;
 const REPLY_TOKEN_ALLOWANCE = 2000;
 const estimatePromptTokens = (parts) => Math.ceil(parts.reduce((n, p) => n + (typeof p === "string" ? p.length : (JSON.stringify(p ?? "") || "").length), 0) / 4);
@@ -2097,13 +2157,30 @@ Do NOT talk about internal architecture unless asked by a @classgrid.in employee
                     type: "function",
                     function: {
                         name: "search_web",
-                        description: "Search the live web for competitor analysis, news, or external facts. Each result has an id: cite it as [id] after the sentence that uses it.",
+                        description: "Search the live web for news or external facts. For a question about a specific company, product, tool or API, pass its official domain(s) in include_domains so you get the original source (e.g. docs) instead of third-party blogs. Each result has an id: cite it as [id] after the sentence that uses it.",
                         parameters: {
                             type: "object",
                             properties: {
-                                query: { type: "string", description: "The search query (e.g. 'Teachmint features and pricing')" }
+                                query: { type: "string", description: "The search query (e.g. 'Workers AI pricing')" },
+                                include_domains: { type: "array", items: { type: "string" }, description: "Only return results from these domains, e.g. [\"developers.cloudflare.com\"] or [\"docs.mistral.ai\", \"mistral.ai\"]. Use for official sources." },
+                                exclude_domains: { type: "array", items: { type: "string" }, description: "Never return results from these domains." },
+                                topic: { type: "string", enum: ["general", "news"], description: "\"news\" for recent events; default general." }
                             },
                             required: ["query"]
+                        }
+                    }
+                },
+                {
+                    type: "function",
+                    function: {
+                        name: "open_url",
+                        description: "Open and read one specific web page (e.g. an official website, docs page or pricing page) and get its text. Use it to read the original source directly instead of relying on third-party summaries. The page is a citable source.",
+                        parameters: {
+                            type: "object",
+                            properties: {
+                                url: { type: "string", description: "Full URL, e.g. https://developers.cloudflare.com/workers-ai/platform/pricing/" }
+                            },
+                            required: ["url"]
                         }
                     }
                 },
@@ -2744,31 +2821,108 @@ Do NOT talk about internal architecture unless asked by a @classgrid.in employee
                             return `Error getting time for ${args.timeZone}. Please ensure it is a valid IANA timezone string like 'Europe/London'.`;
                         }
                     },
+                    open_url: async (args) => {
+                        // Read one specific page (the official site or docs) via Tavily Extract
+                        const tavilyKey = process.env.TAVILY_API_KEY?.trim();
+                        if (!tavilyKey) return "Reading the page failed because TAVILY_API_KEY is missing.";
+                        let target;
+                        try {
+                            target = new URL(String(args.url || "").trim());
+                            if (!/^https?:$/.test(target.protocol)) throw new Error("bad protocol");
+                        } catch {
+                            return "open_url needs a full http(s) URL, e.g. https://docs.mistral.ai/getting-started/models/";
+                        }
+                        try {
+                            const exRes = await fetch("https://api.tavily.com/extract", {
+                                method: "POST",
+                                headers: { "Content-Type": "application/json", "Authorization": `Bearer ${tavilyKey}` },
+                                body: JSON.stringify({ api_key: tavilyKey, urls: [target.href], extract_depth: "advanced", format: "markdown" })
+                            });
+                            if (!exRes.ok) return `Reading the page failed: ${exRes.status} ${exRes.statusText}`;
+                            const exData = await exRes.json();
+                            const page = Array.isArray(exData.results) ? exData.results[0] : null;
+                            const text = String(page?.raw_content || "").trim();
+                            if (!text) return `Could not read ${target.href} (the page may need a login or block readers). Try search_web with include_domains: ["${target.hostname.replace(/^www\./, "")}"].`;
+                            const domain = target.hostname.replace(/^www\./, "");
+                            let src = accSources.find((s) => s.url === target.href);
+                            if (!src) {
+                                src = { id: accSources.length + 1, url: target.href, title: domain + target.pathname, domain, snippet: text.replace(/\s+/g, " ").slice(0, 240) };
+                                accSources.push(src);
+                                try { if (!res.writableEnded) res.write(`data: ${JSON.stringify({ type: "sources", sources: accSources })}\n\n`); } catch (e) { }
+                            }
+                            const MAX = 15000;
+                            return JSON.stringify({
+                                how_to_cite: `This is the page itself (source id ${src.id}). Cite facts from it as [${src.id}].`,
+                                id: src.id,
+                                url: target.href,
+                                content: text.length > MAX ? text.slice(0, MAX) + "\n\n[...page truncated]" : text
+                            });
+                        } catch (e) {
+                            return "Reading the page failed: " + e;
+                        }
+                    },
+
                     search_web: async (args) => {
                         const tavilyKey = process.env.TAVILY_API_KEY?.trim();
                         if (!tavilyKey) return "Search failed because TAVILY_API_KEY is missing.";
                         try {
-                            const tavilyRes = await fetch("https://api.tavily.com/search", {
+                            const callTavily = (extra) => fetch("https://api.tavily.com/search", {
                                 method: "POST",
                                 headers: { "Content-Type": "application/json" },
                                 body: JSON.stringify({
                                     api_key: tavilyKey,
                                     query: args.query,
                                     search_depth: "advanced",
+                                    ...(cleanDomains(args.exclude_domains).length ? { exclude_domains: cleanDomains(args.exclude_domains) } : {}),
+                                    topic: args.topic === "news" ? "news" : "general",
                                     include_answer: false,
-                                    include_raw_content: true,
+                                    // Only the most relevant passages per page (not whole pages), so long blog posts
+                                    // no longer drown out short official pages
+                                    include_raw_content: false,
+                                    chunks_per_source: 3,
                                     include_images: true,
                                     include_image_descriptions: true,
-                                    max_results: 10
+                                    max_results: 8,
+                                    ...extra
                                 })
                             });
+                            // Official sources: the model's include_domains, or (when it gave none) the official domains
+                            // of the products/companies named in the query (OFFICIAL_DOMAINS map)
+                            const modelDomains = cleanDomains(args.include_domains);
+                            const queryOfficial = modelDomains.length ? [] : officialDomainsFor(args.query);
+                            const officialSet = [...modelDomains, ...queryOfficial];
+                            const isOfficial = (url) => {
+                                try {
+                                    const host = new URL(url).hostname.replace(/^www\./, "");
+                                    return officialSet.some((d) => host === d || host.endsWith(`.${d}`));
+                                } catch { return false; }
+                            };
+
+                            const tavilyRes = await callTavily(modelDomains.length ? { include_domains: modelDomains } : {});
                             if (!tavilyRes.ok) {
                                 const errorText = await tavilyRes.text();
                                 return `Web Search failed: ${tavilyRes.status} ${tavilyRes.statusText} - ${errorText}`;
                             }
 
                             const searchData = await tavilyRes.json();
-                            const results = Array.isArray(searchData.results) ? searchData.results : [];
+                            let results = Array.isArray(searchData.results) ? searchData.results : [];
+                            // Known product but no official page among the results: one extra search limited to its
+                            // official domains, merged on top (costs one more search only in that case)
+                            if (queryOfficial.length && !results.some((r) => isOfficial(r.url))) {
+                                try {
+                                    const offRes = await callTavily({ include_domains: queryOfficial, max_results: 5, include_images: false, include_image_descriptions: false });
+                                    if (offRes.ok) {
+                                        const offData = await offRes.json();
+                                        const extraResults = (Array.isArray(offData.results) ? offData.results : []).filter((r) => !results.some((x) => x.url === r.url));
+                                        results = [...extraResults, ...results];
+                                    }
+                                } catch { /* keep the general results */ }
+                            }
+                            // Re-rank: official pages first (order otherwise kept), and marked so the model prefers them
+                            if (officialSet.length) {
+                                results = [...results.filter((r) => isOfficial(r.url)), ...results.filter((r) => !isOfficial(r.url))]
+                                    .map((r) => (isOfficial(r.url) ? { ...r, official: true } : r));
+                            }
                             const numbered = results.map((r) => {
                                 const known = accSources.find((src) => src.url === r.url);
                                 if (known) return { ...r, id: known.id };
@@ -3733,7 +3887,7 @@ If a tool fails, never show the error message; say only: "Something went wrong o
                 const onStatus = (status) => {
                     console.log(`[AI-DEBUG] onStatus: "${status}" at +${((Date.now() - generateStartTime) / 1000).toFixed(1)}s`);
                     if (requestAborted || res.writableEnded) return;
-                    const mappedLabel = status === "search web" ? "searching" : status;
+                    const mappedLabel = status === "search web" ? "searching" : status === "open url" ? "reading page" : status;
                     try { res.write(`data: ${JSON.stringify({ type: "status", label: mappedLabel })}\n\n`); } catch (e) { }
                 };
                 const onThought = (thought) => {

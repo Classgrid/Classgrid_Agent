@@ -19,6 +19,7 @@ export const CORE_TOOL_NAMES = [
     "open_integration_panel",
     "get_timezone_time",
     "search_web",
+    "open_url",
     "search_knowledge_base",
 ];
 

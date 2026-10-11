@@ -243,7 +243,7 @@ function toClaudeMessages(messages, attachmentBlocks) {
 // Tool search: only these frequently used tools are loaded into Claude's context up front. Every other
 // tool is sent with defer_loading, so its definition costs no input tokens until Claude finds it with
 // the server-side tool search. Deferred tools sit outside the cached prefix, so caching is unaffected.
-const ALWAYS_LOADED_TOOLS = new Set(["search_web", "get_timezone_time", "run_code", "search_knowledge_base", "generate_pdf"]);
+const ALWAYS_LOADED_TOOLS = new Set(["search_web", "open_url", "get_timezone_time", "run_code", "search_knowledge_base", "generate_pdf"]);
 const TOOL_SEARCH_TOOL = { type: "tool_search_tool_bm25_20251119", name: "tool_search_tool_bm25" };
 const LOAD_TOOLS_TOOL = "load_tools";
 
