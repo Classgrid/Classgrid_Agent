@@ -1108,6 +1108,8 @@
   border-radius: 9999px;
   border: 4px solid transparent;
   background-clip: padding-box;
+  /* Long lists (e.g. hundreds of chats) shrank the handle to a tiny dash; keep it easy to grab */
+  min-height: 64px;
 }
 
 .dark .chat-scrollbar::-webkit-scrollbar-thumb {
