@@ -138,9 +138,9 @@ export const TOOL_GROUPS = [
     },
     {
         id: "internal_platform",
-        description: "STAFF: all organizations on the platform and blog subscribers.",
-        tools: ["list_organizations", "read_organization_details", "count_organization_users", "list_blog_subscribers", "count_blog_subscribers"],
-        pattern: /\b(organi[sz]ations?|orgs?|institutes?|tenants?|subdomains?|subscribers?|newsletter)\b/i,
+        description: "STAFF: all organizations and all users on the platform (latest sign-ups), and blog subscribers.",
+        tools: ["list_organizations", "get_organization_info", "list_global_users", "read_organization_details", "count_organization_users", "list_blog_subscribers", "count_blog_subscribers"],
+        pattern: /\b(organi[sz]ations?|orgs?|institutes?|tenants?|subdomains?|subscribers?|newsletter|users?|sign-?ups?|signed up|joined|new accounts?)\b/i,
         staffOnly: true,
     },
 ];

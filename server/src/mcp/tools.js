@@ -1026,13 +1026,24 @@ export const getMcpTools = () => [
   // ================= ORGANIZATION TOOLS =================
   {
     name: 'list_organizations',
-    description: 'List all organizations in the platform (or filter by status/type).',
+    description: 'List all organizations with their _id (org ID), plus the total count and count per status. Then call get_organization_info with an _id to get all fields of that organization.',
     inputSchema: { type: 'object', properties: { limit: { type: 'number', description: 'Max organizations to return. Default 50.' }, status: { type: 'string', description: 'Filter by status (e.g. active, suspended).' } } }
   },
   {
     name: 'read_organization_details',
     description: 'Read the full details of a specific organization (MongoDB).',
     inputSchema: { type: 'object', properties: { orgId: { type: 'string', description: 'The MongoDB ObjectId of the organization.' } }, required: ['orgId'] }
+  },
+  {
+    name: 'list_global_users',
+    description: 'STAFF: users across the whole platform (all organizations), newest first. Gives the total count and the latest sign-ups with name, email, role, organization and join date. Filter by role, orgId, search (name/email) or days (joined in the last N days).',
+    inputSchema: { type: 'object', properties: {
+      limit: { type: 'number', description: 'How many latest users to return. Default 20, max 100.' },
+      role: { type: 'string', description: 'Only this role (e.g. user, student, faculty, org_admin).' },
+      orgId: { type: 'string', description: 'Only users of this organization _id.' },
+      search: { type: 'string', description: 'Match part of the name or email.' },
+      days: { type: 'number', description: 'Only users who joined in the last N days.' }
+    } }
   },
   {
     name: 'count_organization_users',
@@ -1100,8 +1111,8 @@ export const getMcpTools = () => [
   },
   {
     name: 'get_organization_info',
-    description: 'Fetch the configuration, branding, and billing plan details of the user\'s current organization.',
-    inputSchema: { type: 'object', properties: {} }
+    description: 'Get ALL fields of one organization (configuration, branding, modules, plan). Classgrid staff: pass orgId from list_organizations. Other users always get their own organization.',
+    inputSchema: { type: 'object', properties: { orgId: { type: 'string', description: 'The organization _id from list_organizations (Classgrid staff only).' } } }
   },
   {
     name: 'get_student_count',
@@ -1367,6 +1378,16 @@ export const handleToolCall = async (name, args, context = {}) => {
     
     if (orgTools.includes(name)) {
       try {
+        // Classgrid staff: all fields of the org whose ID they pass (IDs come from list_organizations)
+        if (name === 'get_organization_info' && String(userEmail || '').toLowerCase().trim().endsWith('@classgrid.in')) {
+          const Organization = (await import('../models/Organization.js')).default;
+          if (!args.orgId) {
+            return { content: [{ type: 'text', text: 'Error: Pass orgId. Call list_organizations first to get every organization with its _id.' }] };
+          }
+          const org = await Organization.findById(args.orgId).select(ORG_HIDDEN_FIELDS).lean();
+          if (!org) return { content: [{ type: 'text', text: 'Error: Organization not found.' }] };
+          return { content: [{ type: 'text', text: JSON.stringify(org, null, 2) }] };
+        }
         const User = (await import('../models/User.js')).default;
         const finalUserEmail = userEmail && userEmail.trim() !== '' ? userEmail : 'unknown@unknown.invalid';
         const currentUser = await User.findOne({ email: finalUserEmail }).select('_id organization_id');
@@ -1377,8 +1398,8 @@ export const handleToolCall = async (name, args, context = {}) => {
 
         if (name === 'get_organization_info') {
           const Organization = (await import('../models/Organization.js')).default;
-          // Summary only: the full document is huge, and the old exclusion missed the nested canteen secret
-          const org = await Organization.findById(orgId).select(`${ORG_SUMMARY_FIELDS} purchased_modules academic_config`).lean();
+          // Org admins: all fields of their own org (any orgId they pass is ignored); secrets always hidden
+          const org = await Organization.findById(orgId).select(ORG_HIDDEN_FIELDS).lean();
           if (!org) return { content: [{ type: 'text', text: 'Error: Organization not found.' }] };
           return { content: [{ type: 'text', text: JSON.stringify(org, null, 2) }] };
         }
@@ -3030,6 +3051,45 @@ export const handleToolCall = async (name, args, context = {}) => {
     }
 
     // ================= ORGANIZATION HANDLERS =================
+    // ================= GLOBAL USERS (staff) =================
+    if (name === 'list_global_users') {
+      try {
+        if (!String(userEmail || '').toLowerCase().trim().endsWith('@classgrid.in')) {
+          return { content: [{ type: 'text', text: 'Error: Only Classgrid staff can list users across the platform.' }], isError: true };
+        }
+        const User = (await import('../models/User.js')).default;
+        await import('../models/Organization.js'); // registers the model used by populate below
+        const mongoose = (await import('mongoose')).default;
+        const query = {};
+        if (args.role) query.role = String(args.role);
+        if (args.orgId && mongoose.Types.ObjectId.isValid(args.orgId)) query.organization_id = new mongoose.Types.ObjectId(args.orgId);
+        if (args.search) {
+          const safe = String(args.search).slice(0, 80).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+          query.$or = [{ name: { $regex: safe, $options: 'i' } }, { email: { $regex: safe, $options: 'i' } }];
+        }
+        if (Number(args.days) > 0) query.createdAt = { $gte: new Date(Date.now() - Number(args.days) * 86400000) };
+        const limit = Math.min(Math.max(Number(args.limit) || 20, 1), 100);
+        const [users, total, platformTotal] = await Promise.all([
+          User.find(query).select('name email role organization_id createdAt').populate('organization_id', 'name subdomain').sort({ createdAt: -1 }).limit(limit).lean(),
+          User.countDocuments(query),
+          User.estimatedDocumentCount(),
+        ]);
+        const result = {
+          platformTotalUsers: platformTotal,
+          matching: total,
+          returned: users.length,
+          users: users.map((u) => ({
+            _id: u._id, name: u.name, email: u.email, role: u.role,
+            organization: u.organization_id ? { _id: u.organization_id._id, name: u.organization_id.name, subdomain: u.organization_id.subdomain } : null,
+            joinedAt: u.createdAt,
+          })),
+        };
+        return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
+      } catch (e) {
+        return { content: [{ type: 'text', text: `Error in list_global_users: ${e.message}` }], isError: true };
+      }
+    }
+
     if (['list_organizations', 'read_organization_details', 'count_organization_users'].includes(name)) {
       try {
         const Organization = (await import('../models/Organization.js')).default;

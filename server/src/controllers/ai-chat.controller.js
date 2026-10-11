@@ -3567,6 +3567,10 @@ If they ask whether their college/school uses Classgrid, say you can't see that 
                         return result.isError ? result.content[0].text : result.content[0].text;
                     },
                     // ================= ORGANIZATION TOOLS =================
+                    list_global_users: async (args) => {
+                        const result = await handleToolCall('list_global_users', args, { userEmail: req.user?.email || '' });
+                        return result.content[0].text;
+                    },
                     list_organizations: async (args) => {
                         const result = await handleToolCall('list_organizations', args, {});
                         return result.isError ? result.content[0].text : result.content[0].text;
