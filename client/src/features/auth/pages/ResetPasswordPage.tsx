@@ -43,7 +43,7 @@
  */
 
 import { type FormEvent, useEffect, useMemo, useState } from "react";
-import { useSearchParams } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import { Check, Eye, EyeOff, XCircle, AlertCircle } from "lucide-react";
 
 import { resetPasswordWithToken, verifyResetToken } from "../api";
