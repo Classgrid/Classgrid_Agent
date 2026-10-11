@@ -1192,7 +1192,11 @@ export const streamAskAi = async (req, res) => {
                 sessionId = session.id;
                 // Generate a real title in the background (delayed 5s to avoid competing with main LLM call for API rate limits)
                 if (!skipAutoTitle) {
-                    setTimeout(() => generateSessionTitle(sessionId, body.question).catch(console.error), 5000);
+                    // A file sent without text arrives as "Please analyze the attached file(s)." — give the titler the
+                    // file names too, or it titles the chat "No Files Provided"
+                    const fileNames = (body.fileUrls || []).map((u) => String(u).split(/[?#]/)[0].split('/').pop().replace(/^\d{10,}-/, '')).filter(Boolean);
+                    const titleInput = fileNames.length ? `${body.question}\nAttached files: ${fileNames.join(', ')}` : body.question;
+                    setTimeout(() => generateSessionTitle(sessionId, titleInput).catch(console.error), 5000);
                 }
 
                 // Send back the sessionId immediately so the frontend sidebar can update instantly

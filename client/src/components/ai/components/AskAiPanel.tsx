@@ -654,6 +654,15 @@ function getSectionIcon(title: string) {
   return match?.icon ?? ChevronRight;
 }
 
+// Saved attachments keep only their URL, so the type comes from the file ending (query strings ignored).
+// The old check had a doubled backslash, never matched, and every reopened image showed as a plain file.
+function mimeFromUrl(url: string): string {
+  const path = (String(url || "").split(/[?#]/)[0] || "").toLowerCase();
+  if (/\.(jpe?g|png|gif|webp|svg|bmp|avif|heic|heif|ico)$/.test(path)) return "image/jpeg";
+  if (/\.pdf$/.test(path)) return "application/pdf";
+  return "application/octet-stream";
+}
+
 function TypingDots({ reducedMotion }: { reducedMotion: boolean }) {
   const dotClass = "h-1.5 w-1.5 rounded-full bg-muted-foreground";
 
@@ -2571,7 +2580,7 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
             id: Math.random().toString(36).substring(7),
             name: attachName || attachUrl.split('/').pop() || "attached_file",
             size: 0,
-            type: attachUrl.match(/\.(jpeg|jpg|gif|png|webp)$/i) ? "image/jpeg" : attachUrl.match(/\.pdf$/i) ? "application/pdf" : "application/octet-stream",
+            type: mimeFromUrl(attachUrl),
             status: "done",
             url: attachUrl
           };
@@ -2653,7 +2662,7 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
               attachments: m.file_urls && m.file_urls.length > 0 ? m.file_urls.map((url: string) => ({
                 url: url,
                 name: url.split('/').pop() || "attachment",
-                mimeType: url.match(/\\.(jpeg|jpg|gif|png|webp)$/i) ? "image/jpeg" : url.match(/\\.pdf$/i) ? "application/pdf" : "application/octet-stream",
+                mimeType: mimeFromUrl(url),
                 size: 0
               })) : undefined,
               createdAt: m.created_at ? new Date(m.created_at).getTime() : Date.now()
@@ -2775,7 +2784,7 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
               attachments: m.file_urls && m.file_urls.length > 0 ? m.file_urls.map((url: string) => ({
                 url: url,
                 name: url.split('/').pop() || "attachment",
-                mimeType: url.match(/\\.(jpeg|jpg|gif|png|webp)$/i) ? "image/jpeg" : url.match(/\\.pdf$/i) ? "application/pdf" : "application/octet-stream",
+                mimeType: mimeFromUrl(url),
                 size: 0
               })) : undefined,
               createdAt: m.created_at ? new Date(m.created_at).getTime() : Date.now()
