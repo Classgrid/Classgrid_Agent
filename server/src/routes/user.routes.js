@@ -56,6 +56,7 @@ import redis from "../config/redis.js";
 import { normalizeWhatsappNumber } from "../services/ai-feature-limits.js";
 
 import { getProfileSchema } from "../utils/profile-schemas.js";
+import { isSharedTestWhatsapp } from "../utils/chat-onboarding.js";
 
 const router = express.Router();
 
@@ -228,6 +229,7 @@ function whatsappVariants(digits) {
 
 // Another account already uses this number (in either field, any stored format)?
 async function whatsappNumberTaken(digits, myId) {
+  if (isSharedTestWhatsapp(digits)) return false; // the owner's test number may sit on several accounts
   const variants = whatsappVariants(digits);
   const other = await User.findOne({
     _id: { $ne: myId },

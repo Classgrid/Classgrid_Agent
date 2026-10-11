@@ -16,3 +16,16 @@ export function needsChatOnboarding(user) {
     const meta = user.metadata || {};
     return !meta.whatsappPhone || !meta.age;
 }
+
+// The owner's own WhatsApp number may be linked to several test accounts: it skips the
+// "one number per account" rule (it still has to be verified with a real code). Extra numbers can be
+// added with WHATSAPP_SHARED_TEST_NUMBERS (comma-separated, any format).
+const SHARED_TEST_WHATSAPP = ["918623947038"];
+
+export function isSharedTestWhatsapp(phone) {
+    const digits = String(phone || "").replace(/\D/g, "");
+    if (!digits) return false;
+    const extra = String(process.env.WHATSAPP_SHARED_TEST_NUMBERS || "").split(",").map((n) => n.replace(/\D/g, "")).filter(Boolean);
+    // Match with or without the country code (a 10-digit entry matches "+91…" too)
+    return [...SHARED_TEST_WHATSAPP, ...extra].some((n) => digits === n || digits.endsWith(n) || (n.endsWith(digits) && digits.length >= 10));
+}

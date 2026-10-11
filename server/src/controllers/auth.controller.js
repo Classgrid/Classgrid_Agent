@@ -86,7 +86,7 @@ import { trackOnboardingEvent } from "../services/onboarding-event.service.js";
 import { syncDerivedOnboardingProgress } from "../services/onboarding-progress.service.js";
 import { sendSMS } from "../services/sms.service.js";
 import { RecaptchaVerificationError, verifyRecaptchaToken } from "../services/recaptcha.service.js";
-import { isPublicChatAccount, needsChatOnboarding } from "../utils/chat-onboarding.js";
+import { isPublicChatAccount, needsChatOnboarding, isSharedTestWhatsapp } from "../utils/chat-onboarding.js";
 
 const JWT_SECRET = process.env.JWT_SECRET || "dev_secret";
 const getFrontendUrl = () => {
@@ -3021,7 +3021,7 @@ export const chatOnboard = async (req, res) => {
         const jwt = (await import('jsonwebtoken')).default;
         
         // One email = one whatsapp number validation
-        const existingPhoneUser = await User.findOne({ "metadata.whatsappPhone": whatsappPhone });
+        const existingPhoneUser = isSharedTestWhatsapp(whatsappPhone) ? null : await User.findOne({ "metadata.whatsappPhone": whatsappPhone });
         if (existingPhoneUser && existingPhoneUser.email !== email.toLowerCase()) {
             return res.status(400).json({ message: "This WhatsApp number is already linked to another email." });
         }
@@ -3255,7 +3255,7 @@ export const chatSendWhatsappOtp = async (req, res) => {
         if (!phoneNumber) return res.status(400).json({ message: 'Phone number required' });
 
         const User = (await import('../models/User.js')).default;
-        const existingPhoneUser = await User.findOne({ "metadata.whatsappPhone": phoneNumber });
+        const existingPhoneUser = isSharedTestWhatsapp(phoneNumber) ? null : await User.findOne({ "metadata.whatsappPhone": phoneNumber });
         if (existingPhoneUser) {
             if (!email || (email && existingPhoneUser.email !== email.toLowerCase())) {
                  return res.status(400).json({ message: "This WhatsApp number is already linked to another email." });
@@ -3415,7 +3415,7 @@ export const chatFinalizeOnboarding = async (req, res) => {
         }
 
         // One WhatsApp number per email (the send-OTP check is only an early warning; its email isn't proven)
-        const existingPhoneUser = await User.findOne({ 'metadata.whatsappPhone': whatsappPhone }).select('email');
+        const existingPhoneUser = isSharedTestWhatsapp(whatsappPhone) ? null : await User.findOne({ 'metadata.whatsappPhone': whatsappPhone }).select('email');
         if (existingPhoneUser && existingPhoneUser.email !== email.toLowerCase()) {
             return res.status(400).json({ message: 'This WhatsApp number is already linked to another account.' });
         }
