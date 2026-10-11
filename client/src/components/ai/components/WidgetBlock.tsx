@@ -12,6 +12,15 @@ import { useEffect, useMemo, useRef, useState } from "react";
 const MIN_HEIGHT = 40;
 const MAX_HEIGHT = 2400;
 
+// Watchable drawing: fast models (e.g. Claude) send a whole card at once, so its code is fed into the frame at a
+// steady pace (a card takes ~2-3 s to draw). Slower models are never held back: when the AI writes slower than
+// this pace the card simply follows it. Cards in one reply draw one after another (in the order they appeared).
+// Cards that are already complete when they mount (reloaded chats) show at once.
+const DRAW_TICK_MS = 40;
+const MIN_CHARS_PER_SEC = 1500;
+const MAX_DRAW_SECONDS = 3;
+const drawQueue: string[] = [];
+
 function themeVars(dark: boolean) {
   // Neutral accent like ChatGPT (white buttons in dark mode, black in light); green/red only for right/wrong
   return dark
@@ -97,9 +106,46 @@ img{max-width:100%}
 <script>(${frameMain.toString()})(${JSON.stringify(id)});</script></body></html>`;
 }
 
-export function WidgetBlock({ code, done, onAsk }: { code: string; done: boolean; onAsk?: (text: string) => void }) {
+export function WidgetBlock({ code: fullCode, done: fullDone, onAsk }: { code: string; done: boolean; onAsk?: (text: string) => void }) {
   const frameRef = useRef<HTMLIFrameElement>(null);
   const [height, setHeight] = useState(MIN_HEIGHT);
+  const id = useMemo(() => Math.random().toString(36).slice(2), []);
+
+  // ── Paced drawing (see DRAW_* above) ──
+  const pacedRef = useRef(!fullDone); // complete on mount (reloaded chat) → no animation
+  const [shownLen, setShownLen] = useState(() => (fullDone ? fullCode.length : 0));
+  const fullRef = useRef({ fullCode, fullDone });
+  fullRef.current = { fullCode, fullDone };
+  useEffect(() => {
+    if (!pacedRef.current) return;
+    drawQueue.push(id);
+    let shown = 0;
+    let last = performance.now();
+    const timer = setInterval(() => {
+      const now = performance.now();
+      const elapsed = now - last;
+      last = now;
+      const { fullCode: target, fullDone: targetDone } = fullRef.current;
+      if (drawQueue[0] !== id) return; // waits for the card above to finish drawing
+      if (shown < target.length) {
+        const perSec = Math.max(MIN_CHARS_PER_SEC, target.length / MAX_DRAW_SECONDS);
+        shown = Math.min(target.length, shown + Math.max(1, Math.round((perSec * elapsed) / 1000)));
+        setShownLen(shown);
+      } else if (targetDone) {
+        const at = drawQueue.indexOf(id);
+        if (at >= 0) drawQueue.splice(at, 1);
+        clearInterval(timer);
+      }
+    }, DRAW_TICK_MS);
+    return () => {
+      clearInterval(timer);
+      const at = drawQueue.indexOf(id);
+      if (at >= 0) drawQueue.splice(at, 1);
+    };
+  }, [id]);
+  const code = pacedRef.current ? fullCode.slice(0, shownLen) : fullCode;
+  const done = fullDone && code.length >= fullCode.length;
+
   // Seconds shown next to "Working" while the card is being written (same look as "Thinking 2s")
   const [workSecs, setWorkSecs] = useState(0);
   useEffect(() => {
@@ -107,7 +153,6 @@ export function WidgetBlock({ code, done, onAsk }: { code: string; done: boolean
     const t = setInterval(() => setWorkSecs((s) => s + 1), 1000);
     return () => clearInterval(t);
   }, [done]);
-  const id = useMemo(() => Math.random().toString(36).slice(2), []);
   const dark = typeof document !== "undefined" && document.documentElement.classList.contains("dark");
   // The shell has no card code in it, so it never reloads while the AI is writing
   const shell = useMemo(() => buildShell(id, dark), [id, dark]);

@@ -1743,6 +1743,9 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
   const askQuestionRef = useRef<any>(null);
 
   const typingRunRef = useRef(0);
+  // Changes on New Chat / opening another chat. A reply still streaming for the previous chat then stops touching
+  // the screen (it keeps being received in the background, so the server finishes and saves it to that chat).
+  const chatGenRef = useRef(0);
   const inputRef = useRef<HTMLInputElement | null>(null);
   const chatScrollRef = useRef<HTMLDivElement | null>(null);
 
@@ -2527,7 +2530,17 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
 
   // Listen for external commands (like clicking "New Chat" or an old chat in the sidebar)
   useEffect(() => {
+    const detachRunningReply = () => {
+      chatGenRef.current++;
+      typingRunRef.current++; // stop any typing animation of the old reply
+      setThinking(false);
+      setSubmitting(false);
+      setMessageQueue([]);
+      setPriorityMessage(null);
+    };
+
     const handleNewChat = () => {
+      detachRunningReply();
       setMessages([]);
       setSessionId(null);
       setInput("");
@@ -2580,6 +2593,7 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
       const id = e.detail?.sessionId;
       if (!id || id === "schedule" || id === "library") return;
 
+      detachRunningReply();
       setMessages([]);
       setSessionId(id);
       setIsLoadingChat(true);
@@ -2692,6 +2706,16 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
     };
 
     const loadRouteSession = async () => {
+      // Opening another chat: a reply still streaming for the previous chat must not land in this one
+      // (re-opening the same chat keeps its running reply)
+      if (routeSessionId !== sessionId) {
+        chatGenRef.current++;
+        typingRunRef.current++;
+        setThinking(false);
+        setSubmitting(false);
+        setMessageQueue([]);
+        setPriorityMessage(null);
+      }
       setMessages([]);
       setSessionId(routeSessionId);
       setIsLoadingChat(true);
@@ -3231,6 +3255,8 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
 
   async function askQuestion(question: string, options?: { hidden?: boolean; isEdit?: boolean; explicitSessionId?: string | null }) {
     const workStartedAt = Date.now(); // for the "Worked for X sec" summary of this reply
+    const myGen = chatGenRef.current;
+    const isStale = () => chatGenRef.current !== myGen; // the user moved to another chat
     if (!options?.hidden) {
       retryCountRef.current = 0;
     }
@@ -3578,6 +3604,7 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
           buffer += decoder.decode(value, { stream: true });
           const parts = buffer.split("\n\n");
           buffer = parts.pop() || "";
+          if (isStale()) continue; // old chat's reply: received to the end (server saves it), never shown here
 
           for (const part of parts) {
             const dataMatch = part.match(/^data:\s*(.+)$/m);
@@ -3714,6 +3741,8 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
           }
         }
 
+        if (isStale()) return;
+
         if (streamError) {
           throw new Error(streamError);
         }
@@ -3778,6 +3807,7 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
         await typeAssistantResponse(answer);
       }
     } catch (error: any) {
+      if (isStale()) return;
       if (error.name === "AbortError" || error.message?.includes("abort")) {
         // User manually stopped the generation, silently exit
         setSubmitting(false);
@@ -3814,7 +3844,7 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
         await typeAssistantResponse(fallback);
       }
     } finally {
-      setSubmitting(false);
+      if (!isStale()) setSubmitting(false);
     }
   }
 
