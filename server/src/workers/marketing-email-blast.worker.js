@@ -604,9 +604,19 @@ export const initMarketingEmailWorker = () => {
       if (!queueItems || queueItems.length === 0) return;
 
       for (const item of queueItems) {
+        // The website reuses one queue row per document, so a re-sent page used to keep the old sent_count
+        // (e.g. 90): the worker then "resumed" past the end of the list, sent nobody and logged "90 sent".
+        // A request newer than the last processing is a fresh blast, so it starts from zero.
+        const isNewRequest = item.processed_at && item.created_at && new Date(item.created_at) > new Date(item.processed_at);
+        if (isNewRequest && (item.sent_count || item.failed_count)) {
+          console.log(`[EmailBlast] 🔁 New send for "${item.title}": resetting old counts (${item.sent_count || 0} sent, ${item.failed_count || 0} failed).`);
+          item.sent_count = 0;
+          item.failed_count = 0;
+        }
+
         await supabaseAdmin
           .from("email_notification_queue")
-          .update({ status: "processing", processed_at: new Date().toISOString() })
+          .update({ status: "processing", processed_at: new Date().toISOString(), ...(isNewRequest ? { sent_count: 0, failed_count: 0 } : {}) })
           .eq("id", item.id);
 
         try {
