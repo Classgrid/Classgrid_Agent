@@ -85,7 +85,8 @@ export function MasterWorkflowWrapper({
             <ChevronRight
               className={cn("h-3.5 w-3.5 text-muted-foreground transition-transform duration-200", isExpanded ? "rotate-90" : "")}
             />
-            <span className="font-medium text-[14px] text-slate-800 dark:text-[#eeeeee] bg-[linear-gradient(110deg,#404040,35%,#fff,50%,#404040,75%,#404040)] bg-[length:200%_100%] bg-clip-text text-transparent">
+            {/* Solid colour: the old shimmer gradient faded to white, so "sec" vanished on the light theme */}
+            <span className="font-medium text-[14px] text-slate-600 dark:text-[#cfcfcf]">
               {label}
             </span>
           </div>
