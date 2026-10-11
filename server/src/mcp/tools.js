@@ -1069,13 +1069,13 @@ export const getMcpTools = () => [
   // ================= SUPABASE SUBSCRIBERS TOOLS =================
   {
     name: 'list_blog_subscribers',
-    description: 'List blog/changelog/legal subscribers from Supabase. Returns email, name, subscription date, and preferences.',
-    inputSchema: { type: 'object', properties: { limit: { type: 'number', description: 'Max subscribers to return. Default 50.' }, preference: { type: 'string', description: 'Filter by preference: "blog", "changelog", "legal", or "all". Default "all".' } } }
+    description: 'List blog/changelog/legal subscribers, newest first: the EXACT total matching the filters plus a compact list (name, email, joined date, active, what they receive). Use month/days/since/until for "how many this month" questions; the total is exact even when the list is shorter.',
+    inputSchema: { type: 'object', properties: { limit: { type: 'number', description: 'Max subscribers to list. Default 30, max 60.' }, preference: { type: 'string', description: 'Filter by preference: "blog", "changelog", "legal", or "all". Default "all".' }, month: { type: 'string', description: 'Only subscribers who joined in this month, "YYYY-MM" (e.g. "2026-10").' }, days: { type: 'number', description: 'Only subscribers who joined in the last N days.' }, since: { type: 'string', description: 'Joined on/after this date (YYYY-MM-DD).' }, until: { type: 'string', description: 'Joined on/before this date (YYYY-MM-DD).' }, active_only: { type: 'boolean', description: 'Only currently subscribed (not unsubscribed). Default false.' } } }
   },
   {
     name: 'count_blog_subscribers',
-    description: 'Get the total number of blog/changelog/legal subscribers in Supabase.',
-    inputSchema: { type: 'object', properties: { preference: { type: 'string', description: 'Filter by preference: "blog", "changelog", "legal", or "all". Default "all".' } } }
+    description: 'Get the exact number of blog/changelog/legal subscribers, optionally only those who joined in a month, the last N days or a date range.',
+    inputSchema: { type: 'object', properties: { preference: { type: 'string', description: 'Filter by preference: "blog", "changelog", "legal", or "all". Default "all".' }, month: { type: 'string', description: 'Only subscribers who joined in this month, "YYYY-MM" (e.g. "2026-10").' }, days: { type: 'number', description: 'Only subscribers who joined in the last N days.' }, since: { type: 'string', description: 'Joined on/after this date (YYYY-MM-DD).' }, until: { type: 'string', description: 'Joined on/before this date (YYYY-MM-DD).' }, active_only: { type: 'boolean', description: 'Only currently subscribed (not unsubscribed). Default false.' } } }
   },
 
   // ================= LEAD CRM TOOLS =================
@@ -3172,30 +3172,50 @@ export const handleToolCall = async (name, args, context = {}) => {
         const { getBlogSubscribersSb } = await import('../config/blogSubscribersSupabaseClient.js');
         const sb = getBlogSubscribersSb();
 
-        if (name === 'list_blog_subscribers') {
-          let query = sb.from('blog_subscribers').select('*').order('created_at', { ascending: false }).limit(args.limit || 50);
-
+        // Same filters for the list and the count (preference, joined month / last N days / date range, active)
+        const applySubscriberFilters = (query) => {
           if (args.preference === 'blog') query = query.eq('receives_blog', true);
           else if (args.preference === 'changelog') query = query.eq('receives_changelog', true);
           else if (args.preference === 'legal') query = query.eq('receives_legal', true);
+          if (args.active_only) query = query.eq('is_active', true);
+          let from = null, to = null;
+          if (/^\d{4}-\d{2}$/.test(String(args.month || ''))) {
+            const [y, m] = args.month.split('-').map(Number);
+            from = new Date(Date.UTC(y, m - 1, 1)); to = new Date(Date.UTC(y, m, 1));
+          }
+          if (Number(args.days) > 0) from = new Date(Date.now() - Number(args.days) * 86400000);
+          if (args.since && !isNaN(Date.parse(args.since))) from = new Date(args.since);
+          if (args.until && !isNaN(Date.parse(args.until))) { to = new Date(args.until); to.setUTCDate(to.getUTCDate() + 1); }
+          if (from) query = query.gte('created_at', from.toISOString());
+          if (to) query = query.lt('created_at', to.toISOString());
+          return query;
+        };
 
-          const { data, error } = await query;
+        if (name === 'list_blog_subscribers') {
+          // Only what the answer needs: full rows (unsubscribe_token, short_code...) overflowed the reply and must not reach the AI
+          const limit = Math.min(Math.max(Number(args.limit) || 30, 1), 60);
+          const [{ data, error }, { count, error: countError }] = await Promise.all([
+            applySubscriberFilters(sb.from('blog_subscribers').select('name, email, created_at, is_active, receives_blog, receives_changelog, receives_legal')).order('created_at', { ascending: false }).limit(limit),
+            applySubscriberFilters(sb.from('blog_subscribers').select('id', { count: 'exact', head: true })),
+          ]);
           if (error) throw error;
-
-          return { content: [{ type: 'text', text: JSON.stringify(data, null, 2) }] };
+          if (countError) throw countError;
+          const subscribers = (data || []).map((r) => ({
+            name: r.name || '',
+            email: r.email,
+            joined: String(r.created_at || '').slice(0, 10),
+            active: r.is_active !== false,
+            receives: ['blog', 'changelog', 'legal'].filter((k) => r[`receives_${k}`]).join(','),
+          }));
+          const result = { totalMatching: count ?? subscribers.length, listed: subscribers.length, subscribers };
+          return { content: [{ type: 'text', text: JSON.stringify(result) }] };
         }
 
         if (name === 'count_blog_subscribers') {
-          let query = sb.from('blog_subscribers').select('id', { count: 'exact', head: true });
-
-          if (args.preference === 'blog') query = query.eq('receives_blog', true);
-          else if (args.preference === 'changelog') query = query.eq('receives_changelog', true);
-          else if (args.preference === 'legal') query = query.eq('receives_legal', true);
-
-          const { count, error } = await query;
+          const { count, error } = await applySubscriberFilters(sb.from('blog_subscribers').select('id', { count: 'exact', head: true }));
           if (error) throw error;
-
-          return { content: [{ type: 'text', text: `Total subscribers (${args.preference || 'all'}): ${count}` }] };
+          const scope = [args.preference && args.preference !== 'all' ? args.preference : 'all preferences', args.month ? `joined ${args.month}` : '', args.days ? `last ${args.days} days` : '', args.since ? `since ${args.since}` : '', args.until ? `until ${args.until}` : '', args.active_only ? 'active only' : ''].filter(Boolean).join(', ');
+          return { content: [{ type: 'text', text: `Subscribers (${scope}): ${count}` }] };
         }
       } catch (e) {
         return { content: [{ type: 'text', text: `Error in subscriber tool: ${e.message}` }], isError: true };
