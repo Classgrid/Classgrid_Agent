@@ -2225,26 +2225,6 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
   const sessionId = routeSessionId || localSessionId;
   const setSessionId = setLocalSessionId; // Keep existing setSessionId calls pointing to local state for backward compatibility
 
-  // First visit after sign-up ("Start Chatting" leaves a one-time note): greet the user in the empty chat.
-  // Only shown on screen; no AI call and nothing saved.
-  const welcomeShownRef = useRef(false);
-  useEffect(() => {
-    if (welcomeShownRef.current || sessionId || messages.length > 0 || readOnly) return;
-    let pending = false;
-    try { pending = localStorage.getItem("classgrid:show-welcome") === "1"; } catch { /* storage blocked */ }
-    if (!pending) return;
-    if (!user) return; // wait for the name; the note stays until it is shown
-    welcomeShownRef.current = true;
-    try { localStorage.removeItem("classgrid:show-welcome"); } catch { /* ignore */ }
-    const firstName = String(user.name || "").trim().split(/\s+/)[0];
-    setMessages([{
-      id: `welcome-${Date.now()}`,
-      role: "assistant",
-      content: `Hi${firstName ? ` ${firstName}` : ""}! 👋 I'm your **Classgrid Agent**.\n\nAsk me anything, upload a file to analyse, or tell me what you're studying and I'll help you plan it. I can also send you reminders on WhatsApp.\n\nWhat would you like to start with?`,
-      createdAt: Date.now(),
-    }]);
-  }, [sessionId, messages.length, readOnly, user]);
-
   const [isIncognito, setIsIncognito] = useState(false);
   const [copiedAll, setCopiedAll] = useState(false);
   const [lastSentDocsPath, setLastSentDocsPath] = useState<string | null>(null);
@@ -2571,6 +2551,27 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
       localStorage.setItem("classgrid_ai_user_email", currentEmail);
     }
   }, []);
+
+  // First visit after sign-up ("Start Chatting" leaves a one-time note): greet the user in the empty chat.
+  // Must stay BELOW the restore effect above: effects run in order, and that one clears the chat on load.
+  // Only shown on screen; no AI call and nothing saved.
+  const welcomeShownRef = useRef(false);
+  useEffect(() => {
+    if (welcomeShownRef.current || sessionId || messages.length > 0 || readOnly) return;
+    let pending = false;
+    try { pending = localStorage.getItem("classgrid:show-welcome") === "1"; } catch { /* storage blocked */ }
+    if (!pending) return;
+    if (!user) return; // wait for the name; the note stays until it is shown
+    welcomeShownRef.current = true;
+    try { localStorage.removeItem("classgrid:show-welcome"); } catch { /* ignore */ }
+    const firstName = String(user.name || "").trim().split(/\s+/)[0];
+    setMessages([{
+      id: `welcome-${Date.now()}`,
+      role: "assistant",
+      content: `Hi${firstName ? ` ${firstName}` : ""}! 👋 I'm your **Classgrid Agent**.\n\nAsk me anything, upload a file to analyse, or tell me what you're studying and I'll help you plan it. I can also send you reminders on WhatsApp.\n\nWhat would you like to start with?`,
+      createdAt: Date.now(),
+    }]);
+  }, [sessionId, messages.length, readOnly, user]);
 
   // Listen for external commands (like clicking "New Chat" or an old chat in the sidebar)
   useEffect(() => {
