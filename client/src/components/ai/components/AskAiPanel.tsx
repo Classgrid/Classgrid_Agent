@@ -173,6 +173,7 @@ import { TerminalToolView } from "./stepper/TerminalToolView";
 import { DatabaseQueryView } from "./stepper/DatabaseQueryView";
 import { FileActionView } from "./stepper/FileActionView";
 import { WebSearchView } from "./stepper/WebSearchView";
+import { MasterWorkflowWrapper } from "./stepper/MasterWorkflowWrapper";
 import { OpenPageView } from "./stepper/OpenPageView";
 import { EmailActionView } from "./stepper/EmailActionView";
 import { DocumentGenerationView } from "./stepper/DocumentGenerationView";
@@ -332,6 +333,8 @@ export type ChatMessage = {
   content: string;
   thought?: string;
   steps?: AgentStep[];
+  /** How long the agent worked on this reply (ms), for the "Worked for X sec" summary */
+  workedMs?: number;
   /** Web pages the answer cites as [n] (search_web) */
   sources?: ChatSource[];
   typing?: boolean;
@@ -2603,6 +2606,7 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
             let thought = undefined;
             let steps = undefined;
             let sources = undefined;
+            let workedMs: number | undefined = undefined;
 
             if (m.role === 'assistant') {
               let parsed = m.content;
@@ -2618,6 +2622,7 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
                 thought = parsed.thought;
                 steps = parsed.steps;
                 sources = parsed.sources;
+                workedMs = typeof parsed.worked_ms === 'number' ? parsed.worked_ms : undefined;
               }
             }
 
@@ -2627,6 +2632,7 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
               thought: thought,
               steps: steps,
               sources: sources,
+              workedMs: workedMs,
               fileUrls: m.file_urls || undefined,
               attachments: m.file_urls && m.file_urls.length > 0 ? m.file_urls.map((url: string) => ({
                 url: url,
@@ -2711,6 +2717,7 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
             let thought = undefined;
             let steps = undefined;
             let sources = undefined;
+            let workedMs: number | undefined = undefined;
 
             if (m.role === 'assistant') {
               let parsed = m.content;
@@ -2726,6 +2733,7 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
                 thought = parsed.thought;
                 steps = parsed.steps;
                 sources = parsed.sources;
+                workedMs = typeof parsed.worked_ms === 'number' ? parsed.worked_ms : undefined;
               }
             }
 
@@ -2736,6 +2744,7 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
               thought: thought,
               steps: steps,
               sources: sources,
+              workedMs: workedMs,
               fileUrls: m.file_urls || undefined,
               attachments: m.file_urls && m.file_urls.length > 0 ? m.file_urls.map((url: string) => ({
                 url: url,
@@ -3219,6 +3228,7 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
   }, [askQuestion]);
 
   async function askQuestion(question: string, options?: { hidden?: boolean; isEdit?: boolean; explicitSessionId?: string | null }) {
+    const workStartedAt = Date.now(); // for the "Worked for X sec" summary of this reply
     if (!options?.hidden) {
       retryCountRef.current = 0;
     }
@@ -3734,7 +3744,7 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
               if (!lastMsg || lastMsg.role !== "assistant") return prev;
               return [
                 ...prev.slice(0, -1),
-                { ...lastMsg, content: answer, typing: false }
+                { ...lastMsg, content: answer, typing: false, workedMs: Date.now() - workStartedAt }
               ];
             });
           } else {
@@ -4263,6 +4273,12 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
                                   This is required for the CSS .combined-reasoning-block ~ * trick to work! */}
                               {((message.thought && message.thought.trim().length > 0) || (index === messages.length - 1 && thinking) || (message.steps && message.steps.length > 0)) && (
                                 <div className="mb-4">
+                                  {(() => {
+                                    // Steps stay open while the agent works, then fold into "Worked for X sec" (old messages load folded)
+                                    const isLiveReply = index === messages.length - 1 && (thinking || submitting || !!message.typing);
+                                    const toolSteps = (message.steps || []).filter((s) => s.type === 'tool');
+                                    const workDone = !isLiveReply && !(message.steps || []).some((s) => s.status === 'loading');
+                                    const stepper = (
                                   <AgentStepper>
                                     {/* CombinedReasoningBlock MUST be first child - direct sibling of steps */}
                                     {((message.thought && message.thought.trim().length > 0) || (index === messages.length - 1 && thinking)) && (
@@ -4546,6 +4562,13 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
                                       return elements;
                                     })()}
                                   </AgentStepper>
+                                    );
+                                    return toolSteps.length > 0 ? (
+                                      <MasterWorkflowWrapper isFinished={workDone} durationMs={message.workedMs} stepCount={toolSteps.length}>
+                                        {stepper}
+                                      </MasterWorkflowWrapper>
+                                    ) : stepper;
+                                  })()}
                                 </div>
                               )}
 

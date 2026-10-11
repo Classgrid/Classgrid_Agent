@@ -11,20 +11,41 @@ import React, { useState, useEffect } from 'react';
 import { ChevronRight, ChevronDown, CheckCircle2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
+// Two modes:
+// - Sandbox (no `isFinished` prop): a timer finishes the demo after totalTimeMs, then it loops.
+// - Production (`isFinished` passed): the chat decides when the work is done (streaming ended, no step loading).
+//   No timers and no loop; the summary shows the real time (durationMs), or the step count for older messages.
+function formatWorked(ms: number) {
+  const totalSec = Math.max(1, Math.round(ms / 1000));
+  if (totalSec < 60) return `${totalSec} sec`;
+  const min = Math.floor(totalSec / 60);
+  const sec = totalSec % 60;
+  return sec ? `${min} min ${sec} sec` : `${min} min`;
+}
+
 export function MasterWorkflowWrapper({
   children,
   title,
-  totalTimeMs = 15000 // default to 15s for the sandbox workflows
+  totalTimeMs = 15000, // default to 15s for the sandbox workflows
+  isFinished: finishedProp,
+  durationMs,
+  stepCount,
 }: {
   children: React.ReactNode,
   title?: string,
-  totalTimeMs?: number
+  totalTimeMs?: number,
+  isFinished?: boolean,
+  durationMs?: number,
+  stepCount?: number,
 }) {
-  const [isFinished, setIsFinished] = useState(false);
+  const controlled = finishedProp !== undefined;
+  const [timerFinished, setIsFinished] = useState(false);
   const [isExpanded, setIsExpanded] = useState(false);
   const [loopKey, setLoopKey] = useState(0);
+  const isFinished = controlled ? !!finishedProp : timerFinished;
 
   useEffect(() => {
+    if (controlled) return; // production: no demo timer / loop
     // 1. Finish the workflow
     const finishTimeout = setTimeout(() => {
       setIsFinished(true);
@@ -40,7 +61,15 @@ export function MasterWorkflowWrapper({
     }, totalTimeMs);
     
     return () => clearTimeout(finishTimeout);
-  }, [totalTimeMs, loopKey]);
+  }, [totalTimeMs, loopKey, controlled]);
+
+  const label = controlled
+    ? (durationMs && durationMs > 0
+        ? `Worked for ${formatWorked(durationMs)}`
+        : stepCount
+          ? `Worked through ${stepCount} ${stepCount === 1 ? "step" : "steps"}`
+          : "Worked")
+    : `Worked for ${Math.round(totalTimeMs / 1000)} sec`;
 
   return (
     <div className="relative" key={loopKey}>
@@ -57,7 +86,7 @@ export function MasterWorkflowWrapper({
               className={cn("h-3.5 w-3.5 text-muted-foreground transition-transform duration-200", isExpanded ? "rotate-90" : "")}
             />
             <span className="font-medium text-[14px] text-slate-800 dark:text-[#eeeeee] bg-[linear-gradient(110deg,#404040,35%,#fff,50%,#404040,75%,#404040)] bg-[length:200%_100%] bg-clip-text text-transparent">
-              Worked for {Math.round(totalTimeMs / 1000)} sec
+              {label}
             </span>
           </div>
         </button>

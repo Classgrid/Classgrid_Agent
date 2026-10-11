@@ -4254,7 +4254,9 @@ If a tool fails, never show the error message; say only: "Something went wrong o
                         content: answer,
                         thought: accThought,
                         steps: accSteps,
-                        ...(accSources.length > 0 ? { sources: accSources } : {})
+                        ...(accSources.length > 0 ? { sources: accSources } : {}),
+                        // How long this reply took, for the chat's "Worked for X sec" summary
+                        worked_ms: Date.now() - requestStartedAt
                     });
                 }
                 saveMessage(sessionId, "assistant", savedContent, []).catch(err => console.error("Failed to save assistant message:", err));
