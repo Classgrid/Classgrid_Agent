@@ -48,6 +48,13 @@ import Organization from "../models/Organization.js";
 export const OAUTH_STATE_COOKIE = "classgrid_oauth_state";
 const STATE_TTL_MS = 10 * 60 * 1000;
 const LOGIN_TABS = new Set(["student", "teacher", "faculty", "admin", "org_admin", "super_admin"]);
+// MCP/OAuth consent page on chat.classgrid.in, the only "come back here after login" target we carry
+const CONSENT_RETURN_RE = /^\/oauth\/authorize\?request_id=[a-f0-9]{32,128}$/;
+
+function safeConsentReturn(value) {
+    const next = String(value || "");
+    return CONSENT_RETURN_RE.test(next) ? next : "";
+}
 
 function stateSecret() {
     return process.env.OAUTH_STATE_SECRET || process.env.JWT_SECRET || "dev_secret";
@@ -113,7 +120,7 @@ export function oauthStateCookieOptions({ clear = false } = {}) {
     return options;
 }
 
-export async function createOAuthState({ loginTab, host, intent }) {
+export async function createOAuthState({ loginTab, host, intent, next }) {
     const safeLoginTab = LOGIN_TABS.has(loginTab) ? loginTab : "student";
     const safeHost = await resolveAllowedHost(host);
     if (host && !safeHost) throw new Error("This login portal host is not registered or active.");
@@ -124,6 +131,8 @@ export async function createOAuthState({ loginTab, host, intent }) {
         h: safeHost,
         // chat.classgrid.in: only the Sign up screen may create an account (signed, so it cannot be changed)
         i: intent === "signup" ? "signup" : "signin",
+        // Started from the consent page: return there after login (signed, consent path only)
+        r: safeConsentReturn(next),
         n: nonce,
         exp: Date.now() + STATE_TTL_MS,
     };
@@ -152,5 +161,10 @@ export async function verifyOAuthState(rawState, expectedNonce) {
     const safeHost = await resolveAllowedHost(payload.h);
     if (payload.h && !safeHost) throw new Error("The OAuth return portal is no longer active.");
 
-    return { loginTab: payload.t, host: safeHost, intent: payload.i === "signup" ? "signup" : "signin" };
+    return {
+        loginTab: payload.t,
+        host: safeHost,
+        intent: payload.i === "signup" ? "signup" : "signin",
+        consentReturn: safeConsentReturn(payload.r),
+    };
 }

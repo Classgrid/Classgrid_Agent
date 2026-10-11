@@ -1902,16 +1902,20 @@ export const oauthCallback = async (req, res) => {
 
     const oauthUserRoleLabel = getRoleLabel(req.user.role);
 
-    if (req.user.role === 'super_admin' && loginTab !== 'super_admin') {
+    // Login started from the MCP/OAuth consent page on chat.classgrid.in: the consent page works for every
+    // role, so skip the portal checks below and return there (MCP never grants staff powers).
+    const consentReturn = host.startsWith('chat.') ? (req.oauthState?.consentReturn || '') : '';
+
+    if (!consentReturn && req.user.role === 'super_admin' && loginTab !== 'super_admin') {
         return res.redirect(`${TARGET_URL}/superadmin/login?error=wrong_portal&message=${encodeURIComponent(`This account is registered as Super Admin. Please log in here.`)}`);
     }
-    if (isInstitutionAdminRole(req.user.role) && loginTab !== 'admin' && loginTab !== 'org_admin') {
+    if (!consentReturn && isInstitutionAdminRole(req.user.role) && loginTab !== 'admin' && loginTab !== 'org_admin') {
         return res.redirect(`${TARGET_URL}/admin/login?error=wrong_portal&message=${encodeURIComponent(`This account is registered as ${oauthUserRoleLabel}. Please use the Admin portal to log in.`)}`);
     }
-    if (req.user.role === 'student' && loginTab !== 'student') {
+    if (!consentReturn && req.user.role === 'student' && loginTab !== 'student') {
         return res.redirect(`${TARGET_URL}/login?error=wrong_tab&tab=student&message=${encodeURIComponent(`This account is registered as Student. Please use the Student tab to sign in.`)}`);
     }
-    if (['faculty', 'teacher'].includes(req.user.role) && loginTab !== 'teacher' && loginTab !== 'faculty') {
+    if (!consentReturn && ['faculty', 'teacher'].includes(req.user.role) && loginTab !== 'teacher' && loginTab !== 'faculty') {
         return res.redirect(`${TARGET_URL}/login?error=wrong_tab&tab=teacher&message=${encodeURIComponent(`This account is registered as Faculty. Please use the Faculty tab to sign in.`)}`);
     }
 
@@ -2036,6 +2040,10 @@ export const oauthCallback = async (req, res) => {
         if (!req.user.metadata?.whatsappPhone || !req.user.metadata?.age) {
             target = '/login';
             qs = `?token=${token}&onboard=true&email=${encodeURIComponent(req.user.email)}`;
+        } else if (consentReturn) {
+            // consentReturn already carries "?request_id=..."
+            target = consentReturn;
+            qs = `&token=${token}`;
         } else {
             target = '/';
         }

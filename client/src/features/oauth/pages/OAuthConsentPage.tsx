@@ -2,11 +2,38 @@
 import React, { useEffect, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
-import { Loader2, X, AlertTriangle, Lock, ExternalLink } from "lucide-react";
-import { Button } from "@/components/marketing_ui/button";
-import { Checkbox } from "@/components/marketing_ui/checkbox";
+import { useTheme } from "next-themes";
+import { Loader2, AlertTriangle, Lock, ExternalLink, Check } from "lucide-react";
 import { useCurrentUser } from "@/features/auth/queries/useCurrentUser";
 import { clearOAuthConsentReturn } from "@/features/oauth/lib/oauthReturn";
+import { LoginGridBackground } from "@/features/public-chat/components/LoginGridBackground";
+
+// Same look as the chat.classgrid.in login page: flat card on the grid, black/white buttons, no accent colour
+const PRIMARY_BUTTON = "flex h-12 w-full items-center justify-center rounded-lg bg-[#111] px-5 text-[15px] font-semibold text-white transition-all duration-200 hover:bg-black active:scale-[0.98] disabled:opacity-50 disabled:active:scale-100 dark:bg-[#f1f1f1] dark:text-[#111] dark:hover:bg-white";
+const SECONDARY_BUTTON = "flex h-12 w-full items-center justify-center rounded-lg bg-[#f1f1ef] px-5 text-[15px] font-semibold text-slate-900 transition-colors duration-200 hover:bg-[#e7e7e4] active:scale-[0.98] disabled:opacity-50 dark:bg-[#1f1f1f] dark:text-[#f1f1f1] dark:hover:bg-[#2a2a2a]";
+
+// Desktop apps such as Cursor receive the sign-in on a local address of this computer (e.g. localhost:8787)
+function isLoopbackHost(host: string | null | undefined): boolean {
+  if (!host) return false;
+  const name = (host.startsWith("[") ? host.slice(0, host.indexOf("]") + 1) : host.split(":")[0]) ?? "";
+  return LOOPBACK_HOSTS.has((name ?? "").toLowerCase());
+}
+
+const CARD_PAD = "px-6 sm:px-10";
+const SCROLL_AREA = "min-h-0 overflow-y-auto overscroll-contain [scrollbar-width:thin]";
+
+function ConsentShell({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="h-[100dvh] overflow-hidden text-foreground flex flex-col relative font-sans">
+      <LoginGridBackground />
+      <div className="relative z-10 flex-1 min-h-0 flex flex-col items-center justify-center p-4">
+        <div className="flex w-full max-w-[440px] max-h-full flex-col bg-white text-slate-900 dark:bg-[#141414] dark:text-[#f1f1f1]">
+          {children}
+        </div>
+      </div>
+    </div>
+  );
+}
 
 const backendUrl = import.meta.env.VITE_API_URL || "https://api.classgrid.in";
 
@@ -66,18 +93,36 @@ function authHeaders(): Record<string, string> {
   return headers;
 }
 
-export function OAuthConsentPage() {
+// Local dev only (/oauth/preview): sample data so the screen can be looked at without a login or server
+const PREVIEW_CLIENT: OAuthClientDetails = { name: "Cursor", clientId: "preview", clientKind: "dynamic", redirectHost: "localhost:8787" };
+const PREVIEW_SCOPES: OAuthScopeOption[] = [
+  { scope: "profile:read", label: "Read your profile", sensitive: false, defaultChecked: true, locked: true },
+  { scope: "schedules:read", label: "Read your schedules", sensitive: false, defaultChecked: true },
+  { scope: "schedules:write", label: "Create, edit and delete your schedules", sensitive: true, defaultChecked: false },
+  { scope: "grid:read", label: "Read your Grid chats and groups", sensitive: false, defaultChecked: true },
+  { scope: "grid:write", label: "Send messages in Grid and chats", sensitive: true, defaultChecked: false },
+  { scope: "apps:use", label: "Use your connected apps (Gmail, Drive, Notion…)", sensitive: true, defaultChecked: false },
+  { scope: "offline_access", label: "Stay connected (refresh access)", sensitive: false, defaultChecked: true },
+];
+
+export function OAuthConsentPage({ preview = false }: { preview?: boolean } = {}) {
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
   const { data: user, isLoading: isUserLoading } = useCurrentUser();
 
-  const [clientData, setClientData] = useState<OAuthClientDetails | null>(null);
-  const [scopeOptions, setScopeOptions] = useState<OAuthScopeOption[]>([]);
-  const [checkedScopes, setCheckedScopes] = useState<Set<string>>(new Set());
-  const [isLoading, setIsLoading] = useState(true);
+  const [clientData, setClientData] = useState<OAuthClientDetails | null>(preview ? PREVIEW_CLIENT : null);
+  const [scopeOptions, setScopeOptions] = useState<OAuthScopeOption[]>(preview ? PREVIEW_SCOPES : []);
+  const [checkedScopes, setCheckedScopes] = useState<Set<string>>(() => new Set(preview ? PREVIEW_SCOPES.filter((o) => o.locked || o.defaultChecked).map((o) => o.scope) : []));
+  const [isLoading, setIsLoading] = useState(!preview);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [framed] = useState(isFramed);
+  const { setTheme } = useTheme();
+
+  // Same as the chat login page: follow the computer's light/dark setting
+  useEffect(() => {
+    setTheme("system");
+  }, [setTheme]);
 
   // New sign-ins carry only request_id (the app's request is stored on the server); older links carry client_id
   const requestId = searchParams.get("request_id");
@@ -91,7 +136,7 @@ export function OAuthConsentPage() {
   }, []);
 
   useEffect(() => {
-    if (framed) return;
+    if (framed || preview) return;
     if (isUserLoading) return;
 
     if (!user) {
@@ -172,6 +217,10 @@ export function OAuthConsentPage() {
 
   const handleConsent = async (allow: boolean) => {
     if (framed) return;
+    if (preview) {
+      toast.message(allow ? "Preview: Allow clicked" : "Preview: Cancel clicked");
+      return;
+    }
     setIsSubmitting(true);
     try {
       const body = requestId
@@ -205,160 +254,153 @@ export function OAuthConsentPage() {
 
   if (framed) {
     return (
-      <div className="flex min-h-screen w-full items-center justify-center bg-background p-4">
-        <div className="w-full max-w-md space-y-4 rounded-2xl border border-border bg-card p-6 text-center shadow-sm">
-          <img src="/logo.png" alt="Classgrid" className="mx-auto h-10 w-10 object-contain" />
-          <X className="w-10 h-10 text-destructive mx-auto" />
-          <h1 className="text-xl font-bold text-foreground">Open this page directly</h1>
-          <p className="text-muted-foreground text-sm">
-            For your safety, app connections can't be approved inside another website. Open chat.classgrid.in in its own tab and start the connection again.
-          </p>
+      <ConsentShell>
+        <div className={`${SCROLL_AREA} ${CARD_PAD} py-8 sm:py-10`}>
+        <img src="/logo.png" alt="Classgrid" className="mb-6 h-10 w-10 object-contain" />
+        <h1 className="text-[30px] leading-tight font-medium tracking-tight">Open this page directly</h1>
+        <p className="mt-2 text-[15px] text-slate-600 dark:text-[#9a9a9a]">
+          For your safety, app connections can't be approved inside another website. Open chat.classgrid.in in its own tab and start the connection again.
+        </p>
         </div>
-      </div>
+      </ConsentShell>
     );
   }
 
-  if (isUserLoading || isLoading) {
+  if (!preview && (isUserLoading || isLoading)) {
     return (
       <div className="flex h-screen w-full items-center justify-center bg-background">
-        <Loader2 className="w-8 h-8 animate-spin text-primary" />
+        <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
       </div>
     );
   }
 
   if (!clientData) {
     return (
-      <div className="flex min-h-screen w-full items-center justify-center bg-background p-4">
-        <div className="w-full max-w-md space-y-4 rounded-2xl border border-border bg-card p-6 text-center shadow-sm">
-          <img src="/logo.png" alt="Classgrid" className="mx-auto h-10 w-10 object-contain" />
-          <X className="w-10 h-10 text-destructive mx-auto" />
-          <h1 className="text-xl font-bold text-foreground">Can't connect this app</h1>
-          <p className="text-muted-foreground text-sm">
-            {loadError || "We couldn't verify the application requesting access. Please ensure the link is correct."}
-          </p>
-          <Button onClick={() => navigate("/")} variant="outline" className="w-full mt-2">
-            Back to Classgrid
-          </Button>
+      <ConsentShell>
+        <div className={`${SCROLL_AREA} ${CARD_PAD} py-8 sm:py-10`}>
+        <img src="/logo.png" alt="Classgrid" className="mb-6 h-10 w-10 object-contain" />
+        <h1 className="text-[30px] leading-tight font-medium tracking-tight">Can't connect this app</h1>
+        <p className="mt-2 mb-8 text-[15px] text-slate-600 dark:text-[#9a9a9a]">
+          {loadError || "We couldn't verify the application requesting access. Please ensure the link is correct."}
+        </p>
+        <button type="button" onClick={() => navigate("/")} className={SECONDARY_BUTTON}>
+          Back to Classgrid
+        </button>
         </div>
-      </div>
+      </ConsentShell>
     );
   }
 
   const isUnverified = clientData.clientKind === "dynamic";
+  // A local address means the app on this computer (Cursor, Claude Desktop…), not a website
+  const returnsToThisComputer = isLoopbackHost(clientData.redirectHost);
 
   return (
-    <div className="min-h-screen w-full flex items-center justify-center bg-muted/30 p-4">
-      <div className="w-full max-w-md bg-background border border-border rounded-2xl shadow-xl overflow-hidden">
-        <div className="p-6 sm:p-8">
-          <div className="flex items-center justify-center gap-2 mb-6">
-            <img src="/logo.png" alt="Classgrid" className="h-9 w-9 object-contain" />
-            <span className="text-lg font-semibold text-foreground">Classgrid</span>
-          </div>
+    <ConsentShell>
+      <div className={`${SCROLL_AREA} ${CARD_PAD} pt-8 sm:pt-10`}>
+      <img src="/logo.png" alt="Classgrid" className="mb-6 h-10 w-10 object-contain" />
+      <h1 className="text-[30px] leading-tight font-medium tracking-tight break-words">
+        {clientData.name} wants to access your Classgrid account
+      </h1>
+      {(preview ? "you@example.com" : user?.email) ? (
+        <p className="mt-2 text-[15px] text-slate-600 dark:text-[#9a9a9a] break-all">Signed in as {preview ? "you@example.com" : user?.email}</p>
+      ) : null}
 
-          <h1 className="text-xl font-semibold text-center text-foreground leading-snug break-words">
-            <span className="font-bold">{clientData.name}</span> wants to access your Classgrid account
-          </h1>
-          {user?.email ? (
-            <p className="mt-1 text-center text-sm text-muted-foreground break-all">({user.email})</p>
+      {/* The app's name is chosen by the app itself, so show where access is really sent */}
+      <div className="mt-5 mb-7 space-y-2 text-[13px] text-slate-500 dark:text-[#888]">
+        <div className="flex flex-wrap items-center gap-2">
+          {clientData.redirectHost ? (
+            <span className="inline-flex flex-wrap items-center gap-1" title={clientData.redirectHost}>
+              <ExternalLink className="w-3.5 h-3.5" />
+              {returnsToThisComputer ? (
+                <>Returns you to <span className="font-medium text-slate-900 dark:text-[#f1f1f1]">{clientData.name} on this computer</span></>
+              ) : (
+                <>Returns you to <span className="font-medium text-slate-900 dark:text-[#f1f1f1] break-all">{clientData.redirectHost}</span></>
+              )}
+            </span>
           ) : null}
-
-          {/* The app's name is chosen by the app itself, so show where access is really sent */}
-          <div className="mt-4 mb-6 space-y-2 text-xs">
-            <div className="flex flex-wrap items-center justify-center gap-2">
-              {clientData.redirectHost ? (
-                <span className="inline-flex flex-wrap items-center justify-center gap-1 text-muted-foreground">
-                  <ExternalLink className="w-3 h-3" />
-                  Returns you to <span className="font-mono font-semibold text-foreground break-all">{clientData.redirectHost}</span>
-                </span>
-              ) : null}
-              {isUnverified ? (
-                <span
-                  className="inline-flex items-center gap-1 rounded-full border border-amber-500/40 bg-amber-500/10 px-2 py-0.5 font-medium text-amber-700 dark:text-amber-400"
-                  title="This app registered itself. Classgrid has not checked who made it."
-                >
-                  <AlertTriangle className="w-3 h-3" />
-                  Unverified app
-                </span>
-              ) : null}
-            </div>
-            {isUnverified ? (
-              <p className="text-center text-muted-foreground">
-                Only allow access if you started this connection yourself and trust {clientData.redirectHost || "this app"}.
-              </p>
-            ) : null}
-          </div>
-
-          {scopeOptions.length > 0 ? (
-            <div className="mb-6">
-              <h2 className="mb-2 text-sm font-medium text-foreground break-words">Choose what {clientData.name} can do</h2>
-              <div className="divide-y divide-border rounded-xl border border-border">
-                {scopeOptions.map((option) => {
-                  const checked = Boolean(option.locked) || checkedScopes.has(option.scope);
-                  const inputId = `oauth-scope-${option.scope.replace(":", "-")}`;
-                  return (
-                    <label
-                      key={option.scope}
-                      htmlFor={inputId}
-                      className={`flex items-center gap-3 px-3 py-2.5 text-sm ${option.locked ? "cursor-default" : "cursor-pointer hover:bg-muted/40"}`}
-                    >
-                      <Checkbox
-                        id={inputId}
-                        checked={checked}
-                        disabled={isSubmitting || option.locked}
-                        onCheckedChange={(value) => toggleScope(option, value === true)}
-                      />
-                      <span className="flex-1 text-foreground">{option.label}</span>
-                      {option.locked ? (
-                        <span className="inline-flex items-center gap-1 text-xs text-muted-foreground" title="Needed so the app knows whose account it is">
-                          <Lock className="w-3 h-3" />
-                          Required
-                        </span>
-                      ) : option.sensitive ? (
-                        <span
-                          className="inline-flex items-center gap-1 text-xs font-medium text-amber-700 dark:text-amber-400"
-                          title="This lets the app change things or act for you"
-                        >
-                          <span className="h-2 w-2 rounded-full bg-amber-500" />
-                          Can make changes
-                        </span>
-                      ) : null}
-                    </label>
-                  );
-                })}
-              </div>
-              {!hasPermissionChecked ? (
-                <p className="mt-2 text-xs text-muted-foreground">Tick at least one permission to allow access.</p>
-              ) : null}
-            </div>
-          ) : (
-            <div className="mb-6 rounded-xl border border-border p-3 text-sm text-muted-foreground">
-              This app will be able to read your profile and use Classgrid on your behalf.
-            </div>
-          )}
-
-          <div className="flex flex-col-reverse sm:flex-row gap-3">
-            <Button
-              variant="outline"
-              className="w-full sm:flex-1"
-              onClick={() => handleConsent(false)}
-              disabled={isSubmitting}
+          {isUnverified ? (
+            <span
+              className="inline-flex items-center gap-1 rounded-full border border-slate-300 px-2 py-0.5 font-medium text-slate-700 dark:border-[#333] dark:text-[#cfcfcf]"
+              title="This app registered itself. Classgrid has not checked who made it."
             >
-              Cancel
-            </Button>
-            <Button
-              className="w-full sm:flex-1 bg-primary text-primary-foreground hover:bg-primary/90"
-              onClick={() => handleConsent(true)}
-              disabled={isSubmitting || !canAllow}
-            >
-              {isSubmitting ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : null}
-              Allow
-            </Button>
-          </div>
+              <AlertTriangle className="w-3 h-3" />
+              Unverified app
+            </span>
+          ) : null}
         </div>
-        <div className="bg-muted/50 px-6 py-3 text-center text-xs text-muted-foreground border-t border-border">
-          You can remove this access any time from Connected apps in Classgrid's AI Plugins.
-        </div>
+        {isUnverified ? (
+          <p>
+            Only allow access if you started this connection yourself{returnsToThisComputer ? "." : ` and trust ${clientData.redirectHost || "this app"}.`}
+          </p>
+        ) : null}
       </div>
-    </div>
+
+      {scopeOptions.length > 0 ? (
+        <div className="mb-3">
+          <h2 className="mb-3 text-[15px] font-medium break-words">Choose what {clientData.name} can do</h2>
+          <div className="space-y-1">
+            {scopeOptions.map((option) => {
+              const checked = Boolean(option.locked) || checkedScopes.has(option.scope);
+              const disabled = isSubmitting || Boolean(option.locked);
+              return (
+                <button
+                  key={option.scope}
+                  type="button"
+                  role="checkbox"
+                  aria-checked={checked}
+                  disabled={disabled}
+                  onClick={() => toggleScope(option, !checked)}
+                  className={`flex w-full items-center gap-3 rounded-lg px-3 py-3 text-left text-[15px] transition-colors ${option.locked ? "cursor-default" : "hover:bg-[#f1f1ef] dark:hover:bg-[#1f1f1f]"} disabled:opacity-100`}
+                >
+                  <span
+                    className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-[5px] border transition-colors ${checked
+                      ? "border-[#111] bg-[#111] text-white dark:border-[#f1f1f1] dark:bg-[#f1f1f1] dark:text-[#111]"
+                      : "border-slate-300 bg-white dark:border-[#444] dark:bg-[#161616]"} ${option.locked ? "opacity-60" : ""}`}
+                  >
+                    {checked ? <Check className="h-3.5 w-3.5" strokeWidth={3} /> : null}
+                  </span>
+                  <span className="flex-1">{option.label}</span>
+                  {option.locked ? (
+                    <span className="inline-flex items-center gap-1 text-[13px] text-slate-500 dark:text-[#888]" title="Needed so the app knows whose account it is">
+                      <Lock className="w-3 h-3" />
+                      Required
+                    </span>
+                  ) : option.sensitive ? (
+                    <span className="text-[13px] text-slate-500 dark:text-[#888]" title="This lets the app change things or act for you">
+                      Can make changes
+                    </span>
+                  ) : null}
+                </button>
+              );
+            })}
+          </div>
+          {!hasPermissionChecked ? (
+            <p className="mt-2 text-[13px] text-slate-500 dark:text-[#888]">Tick at least one permission to allow access.</p>
+          ) : null}
+        </div>
+      ) : (
+        <p className="mb-7 text-[15px] text-slate-600 dark:text-[#9a9a9a]">
+          This app will be able to read your profile and use Classgrid on your behalf.
+        </p>
+      )}
+      </div>
+
+      <div className={`shrink-0 ${CARD_PAD} pb-8 pt-4 sm:pb-10`}>
+      <div className="grid grid-cols-2 gap-3">
+        <button type="button" className={SECONDARY_BUTTON} onClick={() => handleConsent(false)} disabled={isSubmitting}>
+          Cancel
+        </button>
+        <button type="button" className={PRIMARY_BUTTON} onClick={() => handleConsent(true)} disabled={isSubmitting || !canAllow}>
+          {isSubmitting ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : null}
+          Allow
+        </button>
+      </div>
+
+      <p className="mt-4 text-[13px] text-slate-500 dark:text-[#888]">
+        You can remove this access any time from Connected apps in Classgrid's AI Plugins.
+      </p>
+      </div>
+    </ConsentShell>
   );
 }

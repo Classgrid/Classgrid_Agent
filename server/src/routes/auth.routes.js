@@ -110,7 +110,7 @@ router.get(
         const loginTab = req.query.loginTab || req.query.role || 'student';
         const host = req.query.host || '';
         try {
-            const { state, nonce } = await createOAuthState({ loginTab, host, intent: req.query.intent });
+            const { state, nonce } = await createOAuthState({ loginTab, host, intent: req.query.intent, next: req.query.next });
             res.cookie(OAUTH_STATE_COOKIE, nonce, oauthStateCookieOptions());
             passport.authenticate("google-chat", {
                 scope: ["profile", "email"],
@@ -166,7 +166,7 @@ router.get(
         const loginTab = req.query.loginTab || req.query.role || 'student';
         const host = req.query.host || '';
         try {
-            const { state, nonce } = await createOAuthState({ loginTab, host, intent: req.query.intent });
+            const { state, nonce } = await createOAuthState({ loginTab, host, intent: req.query.intent, next: req.query.next });
             res.cookie(OAUTH_STATE_COOKIE, nonce, oauthStateCookieOptions());
             passport.authenticate("github-chat", {
                 scope: ["user:email"],
@@ -248,7 +248,7 @@ router.get(
         const loginTab = req.query.loginTab || req.query.role || 'student';
         const host = req.query.host || '';
         try {
-            const { state, nonce } = await createOAuthState({ loginTab, host, intent: req.query.intent });
+            const { state, nonce } = await createOAuthState({ loginTab, host, intent: req.query.intent, next: req.query.next });
             res.cookie(OAUTH_STATE_COOKIE, nonce, oauthStateCookieOptions());
             passport.authenticate("google", {
                 scope: ["profile", "email"],

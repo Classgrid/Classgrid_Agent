@@ -16,6 +16,7 @@ import { toast } from "sonner"; // the app's mounted Toaster (components/marketi
 import { getGoogleAuthUrl, loginWithPassword, requestPasswordReset, verifyDeviceOtp, resendDeviceOtp } from "../../auth/api";
 import { API_BASE_URL, apiClient } from "@/lib/apiClient";
 import { LoginGridBackground } from "../components/LoginGridBackground";
+import { peekOAuthConsentReturn } from "@/features/oauth/lib/oauthReturn";
 
 // How this browser last logged in (shown as a "Last used" tag) and whether it has logged in before (greeting).
 // The server sets this cookie only after a login really succeeded, so a click that never finished doesn't count.
@@ -304,11 +305,17 @@ function LoginContent() {
   const [lastMethod] = useState<LoginMethod | null>(() => readLastLoginMethod());
   const [greeting] = useState(() => (readLastLoginMethod() ? RETURNING_GREETINGS[Math.floor(Math.random() * RETURNING_GREETINGS.length)]! : FIRST_GREETING));
 
+  // Opened from the MCP/OAuth consent page: the server sends every role straight back to it after login
+  const consentNextParam = () => {
+    const consentReturn = peekOAuthConsentReturn();
+    return consentReturn ? `&next=${encodeURIComponent(consentReturn)}` : "";
+  };
+
   const handleGoogle = () => {
     const loginTab = encodeURIComponent("user");
     const host = encodeURIComponent(window.location.hostname);
     // intent: only the Sign up screen may create an account; from Sign in an unknown email comes back as error=no_account
-    const path = `/api/auth/google?loginTab=${loginTab}&host=${host}&intent=${mode}`;
+    const path = `/api/auth/google?loginTab=${loginTab}&host=${host}&intent=${mode}${consentNextParam()}`;
     const url = (API_BASE_URL && !API_BASE_URL.startsWith('/')) ? new URL(path, API_BASE_URL).toString() : path;
     window.location.assign(url);
   };
@@ -316,7 +323,7 @@ function LoginContent() {
   const handleGithub = () => {
     const loginTab = encodeURIComponent("user");
     const host = encodeURIComponent(window.location.hostname);
-    const path = `/api/auth/chat/github?loginTab=${loginTab}&host=${host}&intent=${mode}`;
+    const path = `/api/auth/chat/github?loginTab=${loginTab}&host=${host}&intent=${mode}${consentNextParam()}`;
     const url = (API_BASE_URL && !API_BASE_URL.startsWith('/')) ? new URL(path, API_BASE_URL).toString() : path;
     window.location.assign(url);
   };

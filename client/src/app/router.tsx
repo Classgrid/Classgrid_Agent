@@ -251,6 +251,8 @@ export function AppRouter() {
       <Route path="/agent-sandbox-testing" element={<AgentUITestingPage />} />
       <Route path="/agent-simulation-demo" element={<SimulatedAgentDemoPage />} />
       <Route path="/public-chat-login" element={<PublicChatLoginPage />} />
+      {/* Local dev only: look at the OAuth consent screen with sample data */}
+      {import.meta.env.DEV && <Route path="/oauth/preview" element={<OAuthConsentPage preview />} />}
 
       <Route path="/logout" element={<LogoutPage />} />
       {/* ── DYNAMIC AUTH ROUTES (Based on Subdomain) ── */}
