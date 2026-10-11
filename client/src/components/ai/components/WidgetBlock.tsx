@@ -20,6 +20,9 @@ const DRAW_TICK_MS = 40;
 const MIN_CHARS_PER_SEC = 1500;
 const MAX_DRAW_SECONDS = 3;
 const drawQueue: string[] = [];
+// Last height and drawing progress per card (keyed by the start of its code), for cards the chat re-creates
+const CARD_KEY_LEN = 160;
+const cardMemo = new Map<string, { height: number; shownLen: number }>();
 
 function themeVars(dark: boolean) {
   // Neutral accent like ChatGPT (white buttons in dark mode, black in light); green/red only for right/wrong
@@ -108,18 +111,26 @@ img{max-width:100%}
 
 export function WidgetBlock({ code: fullCode, done: fullDone, onAsk }: { code: string; done: boolean; onAsk?: (text: string) => void }) {
   const frameRef = useRef<HTMLIFrameElement>(null);
-  const [height, setHeight] = useState(MIN_HEIGHT);
+  // The chat sometimes re-creates a card (e.g. when the final answer replaces the streamed text). The card's last
+  // height and drawing progress are remembered, so a re-created card keeps its size (no collapse/jump), fades in
+  // instead of flashing empty, and continues drawing where it was instead of starting over.
+  const memoKey = useMemo(() => (fullCode.length >= CARD_KEY_LEN ? fullCode.slice(0, CARD_KEY_LEN) : ""), [fullCode.length >= CARD_KEY_LEN]); // eslint-disable-line react-hooks/exhaustive-deps
+  const memo = memoKey ? cardMemo.get(memoKey) : undefined;
+  const [height, setHeight] = useState(memo?.height ?? MIN_HEIGHT);
+  const [visible, setVisible] = useState(!memo); // a re-created card stays hidden until it has redrawn
   const id = useMemo(() => Math.random().toString(36).slice(2), []);
 
   // ── Paced drawing (see DRAW_* above) ──
-  const pacedRef = useRef(!fullDone); // complete on mount (reloaded chat) → no animation
-  const [shownLen, setShownLen] = useState(() => (fullDone ? fullCode.length : 0));
+  // Complete on mount (reloaded chat) → no animation, unless this card was still mid-drawing before being re-created
+  const startLen = memo ? Math.min(memo.shownLen, fullCode.length) : 0;
+  const pacedRef = useRef(!fullDone || (!!memo && memo.shownLen < fullCode.length));
+  const [shownLen, setShownLen] = useState(() => (pacedRef.current ? startLen : fullCode.length));
   const fullRef = useRef({ fullCode, fullDone });
   fullRef.current = { fullCode, fullDone };
   useEffect(() => {
     if (!pacedRef.current) return;
     drawQueue.push(id);
-    let shown = 0;
+    let shown = startLen;
     let last = performance.now();
     const timer = setInterval(() => {
       const now = performance.now();
@@ -170,6 +181,19 @@ export function WidgetBlock({ code: fullCode, done: fullDone, onAsk }: { code: s
 
   useEffect(send, [code, done]);
 
+  // Remember size and drawing progress (see memoKey), and never leave a re-created card hidden for long
+  const visibleRef = useRef(visible);
+  visibleRef.current = visible;
+  useEffect(() => {
+    if (memoKey) cardMemo.set(memoKey, { height, shownLen: code.length });
+    if (cardMemo.size > 200) cardMemo.delete(cardMemo.keys().next().value as string);
+  }, [memoKey, height, code.length]);
+  useEffect(() => {
+    if (visible) return;
+    const t = setTimeout(() => setVisible(true), 500);
+    return () => clearTimeout(t);
+  }, [visible]);
+
   useEffect(() => {
     const onMessage = (e: MessageEvent) => {
       const frame = frameRef.current;
@@ -180,7 +204,10 @@ export function WidgetBlock({ code: fullCode, done: fullDone, onAsk }: { code: s
         ready.current = true;
         send();
       } else if (msg.type === "height" && Number.isFinite(msg.value)) {
-        setHeight(Math.max(MIN_HEIGHT, Math.min(MAX_HEIGHT, msg.value)));
+        const h = Math.max(MIN_HEIGHT, Math.min(MAX_HEIGHT, msg.value));
+        // While a re-created card is still hidden it never shrinks (it would jump while redrawing)
+        setHeight((prev) => (visibleRef.current ? h : Math.max(prev, h)));
+        if (!visibleRef.current) setTimeout(() => setVisible(true), 60);
       } else if (msg.type === "ask" && typeof msg.text === "string" && msg.text.trim()) {
         // Only a real click inside the card may send a message: the iframe must have focus, at most once every 1.5 s
         const now = Date.now();
@@ -202,7 +229,8 @@ export function WidgetBlock({ code: fullCode, done: fullDone, onAsk }: { code: s
         sandbox="allow-scripts"
         srcDoc={shell}
         className="block w-full border-0 bg-transparent"
-        style={{ height, colorScheme: dark ? "dark" : "light" }}
+        // Smooth size changes (e.g. when the card's scripts re-render it) and a fade-in for re-created cards
+        style={{ height, colorScheme: dark ? "dark" : "light", opacity: visible ? 1 : 0, transition: "height 150ms ease, opacity 150ms ease" }}
       />
       {!done && (
         <div className="mt-2 flex items-center gap-1.5">
