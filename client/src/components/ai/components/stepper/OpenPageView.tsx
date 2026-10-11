@@ -1,5 +1,5 @@
-// Stepper card for the agent's open_url tool: which page it opened (favicon, title, domain) and a short preview
-// of what it read, styled like WebSearchView.
+// Stepper card for the agent's open_url tool: which page it opened (favicon, address, page title), styled like
+// WebSearchView. No raw page text: extracted pages start with logo/image links and menus, which read as noise.
 import React from "react";
 
 interface OpenPageViewProps {
@@ -13,17 +13,15 @@ const GLOBE_FALLBACK = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/
 
 export function OpenPageView({ url, result, status }: OpenPageViewProps) {
   let pageUrl = String(url || "");
-  let preview = "";
+  let title = "";
   let error = "";
   if (result) {
     try {
       const parsed = JSON.parse(result);
       if (parsed?.url) pageUrl = parsed.url;
-      preview = String(parsed?.content || "")
-        .replace(/[#*_`>\[\]()!|-]+/g, " ")
-        .replace(/\s+/g, " ")
-        .trim()
-        .slice(0, 220);
+      // Page title = the first Markdown heading of what was read (e.g. "# Classgrid changelog")
+      const heading = String(parsed?.content || "").match(/^#{1,3}\s+(.+)$/m)?.[1] || "";
+      title = heading.replace(/!?\[([^\]]*)\]\([^)]*\)/g, "$1").replace(/[*_`#]/g, "").replace(/\s+/g, " ").trim().slice(0, 120);
     } catch {
       // Not JSON: the tool returned an error sentence
       if (status !== "loading") error = result;
@@ -58,13 +56,13 @@ export function OpenPageView({ url, result, status }: OpenPageViewProps) {
         {status === "loading" && <span className="shrink-0 text-[13px] text-slate-500 dark:text-[#8a8a8a]">Reading…</span>}
         {error && <span className="shrink-0 text-[13px] font-medium text-red-700 dark:text-[#ff7b72]">Failed</span>}
       </a>
-      {preview && (
-        <div className="px-4 pb-3 -mt-1 text-[13px] leading-relaxed text-slate-500 dark:text-[#9b9b9b] line-clamp-2">
-          {preview}
+      {title && (
+        <div className="px-4 pb-3 -mt-1 pl-[42px] text-[13px] text-slate-500 dark:text-[#9b9b9b] truncate">
+          {title}
         </div>
       )}
       {error && (
-        <div className="px-4 pb-3 -mt-1 text-[13px] leading-relaxed text-slate-500 dark:text-[#9b9b9b]">{error}</div>
+        <div className="px-4 pb-3 -mt-1 pl-[42px] text-[13px] text-slate-500 dark:text-[#9b9b9b] truncate" title={error}>{error}</div>
       )}
     </div>
   );
