@@ -2199,9 +2199,69 @@ This is a computer-generated receipt and does not require a physical signature.
 };
 
 // ------------- NO ACCOUNT SIGN-IN ATTEMPT -------------
+// chat.classgrid.in version: no institutions there, so explain the usual reasons and how to get in
+const getChatNoAccountSignInAttemptHtml = (email, device, city) => {
+  const content = `
+    <p>We received a sign-in attempt for <strong>${email}</strong> on <strong>Classgrid AI</strong>, but there's no account with this email yet.</p>
+
+    <div class="box">
+      <div class="meta">Attempt Details</div>
+      <p><strong>Device:</strong> ${device}</p>
+      <p><strong>Location:</strong> ${city}</p>
+      <p><strong>Time:</strong> ${formatDate(new Date())}</p>
+    </div>
+
+    <h3 style="color:#111111; margin-top:24px;">Why did this happen?</h3>
+    <ul style="color:#374151; padding-left:20px; line-height:1.6; margin-bottom:24px;">
+      <li>You haven't created a Classgrid AI account with this email yet.</li>
+      <li>You may have signed up with a different email address, or there's a typo in this one.</li>
+      <li>You may have signed up with <strong>Google</strong> or <strong>GitHub</strong>. Use the same button to sign in instead of typing your email.</li>
+    </ul>
+
+    <h3 style="color:#111111;">Next Steps</h3>
+    <p>New here? Create your free account in about 2 minutes: sign up with your email, verify your WhatsApp number with a one-time code, and you're in.</p>
+
+    <div style="text-align:center;margin:8px 0 24px;">
+      <a href="https://chat.classgrid.in/login" class="btn">Create your account</a>
+    </div>
+
+    <p style="font-size:13px;color:#6b7280;">Stuck at WhatsApp verification? Send "Hi" on WhatsApp to +91 81492 77038 first, then tap "Send OTP" again. For anything else, visit <a href="https://classgrid.in/support">Support</a> or email <a href="mailto:support@classgrid.in">support@classgrid.in</a>.</p>
+  `;
+
+  return baseTemplate({
+    content,
+    title: "Sign-in attempt",
+    ignoreText: "If this was not you, no action is required.",
+  });
+};
+
+const getChatNoAccountSignInAttemptPlainText = (email, device, city) => `Sign-in attempt on Classgrid AI
+
+We received a sign-in attempt for ${email} on Classgrid AI, but there's no account with this email yet.
+
+Device: ${device}
+Location: ${city}
+Time: ${formatDate(new Date())}
+
+Why did this happen?
+- You haven't created a Classgrid AI account with this email yet.
+- You may have signed up with a different email address, or there's a typo in this one.
+- You may have signed up with Google or GitHub. Use the same button to sign in instead of typing your email.
+
+Next Steps
+New here? Create your free account in about 2 minutes: sign up with your email, verify your WhatsApp number with a one-time code, and you're in.
+Create your account: https://chat.classgrid.in/login
+
+Stuck at WhatsApp verification? Send "Hi" on WhatsApp to +91 81492 77038 first, then tap "Send OTP" again.
+Support: https://classgrid.in/support or support@classgrid.in
+
+If this was not you, no action is required.
+© ${new Date().getFullYear()} Classgrid. All rights reserved.`;
+
 export const getNoAccountSignInAttemptHtml = (email, location = {}) => {
   const device = location.device || "Unknown device";
   const city = location.city || "Unknown location";
+  if (location.isChat) return getChatNoAccountSignInAttemptHtml(email, device, city);
     const orgUrl = location.orgSlug ? `${location.orgSlug}.classgrid.in` : "Classgrid";
     const orgNameText = location.orgSlug ? `<strong>${location.orgSlug.toUpperCase()}</strong> (${orgUrl})` : "your institution";
     const content = `
@@ -2234,6 +2294,7 @@ export const getNoAccountSignInAttemptHtml = (email, location = {}) => {
 export const getNoAccountSignInAttemptPlainText = (email, location = {}) => {
   const device = location.device || "Unknown device";
   const city = location.city || "Unknown location";
+  if (location.isChat) return getChatNoAccountSignInAttemptPlainText(email, device, city);
 
   const orgUrl = location.orgSlug ? `${location.orgSlug}.classgrid.in` : "Classgrid";
   const orgNameText = location.orgSlug ? `${location.orgSlug.toUpperCase()} (${orgUrl})` : "your institution";

@@ -300,11 +300,14 @@ export const sendNoAccountEmail = async (email, req, orgSlug = '') => {
         console.log(`[DEBUG Email] UA: ${req.headers['user-agent']} -> Device: ${deviceString}`);
         console.log(`[DEBUG Email] IP: ${req.headers['x-forwarded-for'] || req.socket?.remoteAddress} -> City: ${cityString}`);
         
-        const locationData = { city: cityString, device: deviceString, orgSlug };
-        
+        // chat.classgrid.in has no institutions: it gets the Classgrid AI version of this email
+        const isChat = orgSlug === 'chat' || [req.headers.origin, req.headers.referer].some((h) => String(h || '').includes('chat.classgrid.in'));
+        const locationData = { city: cityString, device: deviceString, orgSlug, isChat };
+
         sendEmail({
             to: email,
-            subject: 'Sign-in attempt on Classgrid',
+            subject: isChat ? 'Sign-in attempt on Classgrid AI' : 'Sign-in attempt on Classgrid',
+            ...(isChat ? { fromName: 'Classgrid AI' } : {}),
             html: getNoAccountSignInAttemptHtml(email, locationData),
             text: getNoAccountSignInAttemptPlainText(email, locationData),
         }).catch(err => console.error('No-account email error:', err));
