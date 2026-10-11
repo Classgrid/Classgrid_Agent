@@ -1516,10 +1516,12 @@ const AssistantMessageContent = memo(({ content, sources, createdAt, isTyping, o
               if (Array.isArray(parsedProps.questions)) {
                 parsedProps.questions = parsedProps.questions.map((q: any, qIdx: number) => {
                   const prompt = q.prompt || q.question || q.title || "Question";
-                  let options = q.options || [];
-                  if (options.length > 0 && typeof options[0] === 'object') {
-                    options = options.map((opt: any) => opt.label || opt.value || JSON.stringify(opt));
-                  }
+                  // Each option to plain text (strings or {label|value|text}); empty ones are dropped so the card
+                  // never shows a blank row
+                  const options = (Array.isArray(q.options) ? q.options : [])
+                    .map((opt: any) => (opt && typeof opt === 'object' ? (opt.label ?? opt.value ?? opt.text ?? "") : opt))
+                    .map((opt: any) => String(opt ?? "").trim())
+                    .filter((opt: string) => opt.length > 0);
                   return {
                     ...q,
                     id: q.id || `q-${qIdx}`,
