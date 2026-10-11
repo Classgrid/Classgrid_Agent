@@ -34,6 +34,10 @@ import { Readable } from 'stream';
 
 const execPromise = util.promisify(exec);
 
+// Organization tools: a short summary for lists, and never the join codes, payment keys or org API keys
+const ORG_SUMMARY_FIELDS = 'name org_type structure_type subdomain custom_domain city state status is_active org_mode demoExpiresAt ownerName ownerEmail createdAt';
+const ORG_HIDDEN_FIELDS = '-private_code -organizationCode -honorCode -razorpayCustomerId -razorpaySubscriptionId -razorpayOrderId -fees_razorpay_key_id -fees_razorpay_key_secret -fees_razorpay_webhook_secret -canteen_config.canteen_razorpay_key_id -canteen_config.canteen_razorpay_key_secret -canteen_config.canteen_razorpay_webhook_secret -ai_config.custom_api_keys';
+
 // ── Meta Long-Lived Token Cache ──
 let _cachedMetaLongLivedToken = null;
 let _metaTokenExchangedAt = null;
@@ -1373,7 +1377,9 @@ export const handleToolCall = async (name, args, context = {}) => {
 
         if (name === 'get_organization_info') {
           const Organization = (await import('../models/Organization.js')).default;
-          const org = await Organization.findById(orgId).select('-fees_razorpay_key_secret -canteen_razorpay_key_secret').lean();
+          // Summary only: the full document is huge, and the old exclusion missed the nested canteen secret
+          const org = await Organization.findById(orgId).select(`${ORG_SUMMARY_FIELDS} purchased_modules academic_config`).lean();
+          if (!org) return { content: [{ type: 'text', text: 'Error: Organization not found.' }] };
           return { content: [{ type: 'text', text: JSON.stringify(org, null, 2) }] };
         }
         if (name === 'get_student_count') {
@@ -3031,12 +3037,24 @@ export const handleToolCall = async (name, args, context = {}) => {
         if (name === 'list_organizations') {
           const query = {};
           if (args.status) query.status = args.status;
-          const orgs = await Organization.find(query).limit(args.limit || 50).lean();
-          return { content: [{ type: 'text', text: JSON.stringify(orgs, null, 2) }] };
+          const limit = Math.min(Math.max(Number(args.limit) || 50, 1), 200);
+          // A short summary per org: full documents (feature_flags, admission_config, ...) overflowed the reply after one record
+          const [orgs, total, byStatus] = await Promise.all([
+            Organization.find(query).select(ORG_SUMMARY_FIELDS).sort({ createdAt: -1 }).limit(limit).lean(),
+            Organization.countDocuments(query),
+            Organization.aggregate([{ $match: query }, { $group: { _id: '$status', count: { $sum: 1 } } }]),
+          ]);
+          const result = {
+            total,
+            byStatus: Object.fromEntries(byStatus.map((s) => [s._id || 'unknown', s.count])),
+            returned: orgs.length,
+            organizations: orgs,
+          };
+          return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
         }
 
         if (name === 'read_organization_details') {
-          const org = await Organization.findById(args.orgId).lean();
+          const org = await Organization.findById(args.orgId).select(ORG_HIDDEN_FIELDS).lean();
           if (!org) return { content: [{ type: 'text', text: 'Error: Organization not found.' }], isError: true };
           return { content: [{ type: 'text', text: JSON.stringify(org, null, 2) }] };
         }

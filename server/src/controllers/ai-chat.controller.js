@@ -55,6 +55,7 @@ import ClassroomMembership from "../models/ClassroomMembership.js";
 import AiSchedule from "../models/AiSchedule.js";
 import AiUsageLog from "../models/AiUsageLog.js";
 import { ROLE_DEFINITIONS } from "../utils/roles.js";
+import { isPublicChatAccount } from "../utils/chat-onboarding.js";
 
 const uniqueDashboards = [...new Set(Object.values(ROLE_DEFINITIONS).map(r => r.dashboard))];
 const dashboardList = uniqueDashboards.map(d => `- ${d}`).join('\n');
@@ -2054,7 +2055,9 @@ CRITICAL: When you want to highlight a single word, short phrase, or variable (l
         // PUBLIC CHAT (chat.classgrid.in) OVERRIDE RULES
         // =========================================================================
         const isClassgridEmployee = userEmail.endsWith('@classgrid.in');
-        if (!isClassgridEmployee && req.headers.host && req.headers.host.includes('chat.classgrid.in')) {
+        // Host is the API server's own address, so also detect chat users by the page origin and by their account
+        const fromChatSite = [req.headers.host, req.headers.origin, req.headers.referer].some((h) => String(h || '').includes('chat.classgrid.in'));
+        if (!isClassgridEmployee && (fromChatSite || isPublicChatAccount(req.user))) {
             volatilePrompt += `\n\n=========================================================================
 🚨 CRITICAL OVERRIDE: YOU ARE ON CHAT.CLASSGRID.IN (PUBLIC AI ASSISTANT) 🚨
 =========================================================================
@@ -2065,7 +2068,17 @@ Every user talking to you is your direct customer.
 NEVER mention "Super Admin Dashboard", "school/organization's workspace", or "ERP". 
 You are a friendly, magical, all-knowing AI assistant for everyone.
 Do NOT talk about internal architecture unless asked by a @classgrid.in employee.
+
+EMAIL DOMAIN DOES NOT MEAN ERP:
+A college, school or education email (e.g. @pccoepune.org, .edu, .ac.in, .edu.in or any institute domain) does NOT mean the user is using the Classgrid ERP or that their institute is a Classgrid customer. NEVER assume, say or hint that any user is on the ERP, belongs to an ERP institute, or can see school/college data here.
+Every user is using you as a personal AI assistant and agent (like ChatGPT) to make their life better — studies, work, writing, planning, reminders and everyday tasks. Treat them as an individual, not as a member of an organization.
 =========================================================================`;
+            // Only stated when the account check proves it (an ERP user may also open the chat site)
+            if (isPublicChatAccount(req.user)) {
+                volatilePrompt += `\n\nERP CLAIMS NEED PROOF — ALREADY CHECKED FOR YOU:
+The server has already checked this user's account in the Classgrid organization records: it is a personal chat.classgrid.in account and it is NOT linked to any ERP institute. So NEVER say you are "built for your school/organization", "on the Classgrid ERP platform", or offer ERP features (attendance, fees, timetables, exams, library, HR, admissions) for their institute. Do not guess from their email, college name or anything they type.
+If they ask whether their college/school uses Classgrid, say you can't see that from their personal account here, and that the institute's admin can tell them (or they can contact Classgrid at classgrid.in).`;
+            }
         }
 
         // The provider API is stateless and the system prompt is never stored in history,
