@@ -8,6 +8,20 @@ import { useCurrentUser } from "@/features/auth/queries/useCurrentUser";
 
 const backendUrl = import.meta.env.VITE_API_URL || "https://api.classgrid.in";
 
+// Same rule as the server: https, loopback http (desktop MCP clients) or Cursor's own callback
+const LOOPBACK_HOSTS = new Set(["localhost", "127.0.0.1", "[::1]"]);
+function isSafeRedirectUrl(value: string): boolean {
+  try {
+    const url = new URL(value);
+    if (url.protocol === "cursor:") return url.host === "anysphere.cursor-mcp" && url.pathname === "/oauth/callback";
+    if (url.username || url.password) return false;
+    if (url.protocol === "https:") return true;
+    return url.protocol === "http:" && LOOPBACK_HOSTS.has(url.hostname);
+  } catch {
+    return false;
+  }
+}
+
 export function OAuthConsentPage() {
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
@@ -89,6 +103,12 @@ export function OAuthConsentPage() {
 
       const data = await res.json();
       if (data.redirect_url) {
+        // Never navigate to anything but a normal web address (a "javascript:" URL would run as script here)
+        if (!isSafeRedirectUrl(data.redirect_url)) {
+          toast.error("This app has an unsafe return address, so access was not granted.");
+          setIsSubmitting(false);
+          return;
+        }
         window.location.href = data.redirect_url;
       } else if (data.error) {
         toast.error(data.error);

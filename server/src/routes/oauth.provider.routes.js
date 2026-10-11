@@ -11,6 +11,46 @@ const router = express.Router();
 // Helper to generate secure tokens
 const generateToken = (length = 40) => crypto.randomBytes(length).toString('hex');
 
+// A redirect URI is where the browser is sent with the auth code. Anything but a normal web address ran as
+// script on the consent page (e.g. "javascript:..." registered through /register stole the user's token),
+// so only https, loopback http (desktop MCP clients) and Cursor's own callback are accepted.
+const MAX_REDIRECT_URIS = 20;
+const ALLOWED_APP_CALLBACKS = new Set(["cursor://anysphere.cursor-mcp/oauth/callback"]);
+const LOOPBACK_HOSTS = new Set(["localhost", "127.0.0.1", "[::1]"]);
+
+export function isSafeRedirectUri(value) {
+    if (typeof value !== "string" || !value || value.length > 2048) return false;
+    if (ALLOWED_APP_CALLBACKS.has(value)) return true;
+    let url;
+    try { url = new URL(value); } catch { return false; }
+    if (url.username || url.password || url.hash) return false;
+    if (url.protocol === "https:") return true;
+    return url.protocol === "http:" && LOOPBACK_HOSTS.has(url.hostname);
+}
+
+const validRedirectUriList = (list) =>
+    Array.isArray(list) && list.length > 0 && list.length <= MAX_REDIRECT_URIS && list.every(isSafeRedirectUri);
+
+// The consent page is the only legitimate caller of /client-details and POST /authorize. Both accept the
+// login cookie (SameSite=None on .classgrid.in) and CORS reflects any https origin, so without this check any
+// website could read the user's name/email or get an auth code issued silently.
+export function isConsentPageOrigin(origin) {
+    if (!origin) return false;
+    if (/^https:\/\/([a-z0-9-]+\.)?classgrid\.in$/.test(origin)) return true;
+    const extra = [process.env.FRONTEND_URL, ...String(process.env.OAUTH_CONSENT_ORIGINS || "").split(",")]
+        .map((u) => { try { return new URL(String(u).trim()).origin; } catch { return null; } })
+        .filter(Boolean);
+    if (extra.includes(origin)) return true;
+    return process.env.NODE_ENV !== "production" && /^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin);
+}
+
+const requireConsentPageOrigin = (req, res, next) => {
+    if (!isConsentPageOrigin(req.headers.origin)) {
+        return res.status(403).json({ error: "access_denied", message: "This request must come from the Classgrid consent page." });
+    }
+    next();
+};
+
 // ─────────────────────────────────────────────
 // 1. DEVELOPER UI: Create an OAuth App (Client)
 // ─────────────────────────────────────────────
@@ -21,6 +61,9 @@ router.post("/clients/register", isAuthenticated, async (req, res) => {
         
         if (!name || !redirectUris || redirectUris.length === 0) {
             return res.status(400).json({ message: "Name and at least one Redirect URI are required." });
+        }
+        if (!validRedirectUriList(redirectUris)) {
+            return res.status(400).json({ message: `Redirect URIs must be https (or http://localhost), at most ${MAX_REDIRECT_URIS}.` });
         }
 
         const clientId = `cg_${generateToken(16)}`; // e.g. cg_abc123...
@@ -54,8 +97,8 @@ router.post("/register", async (req, res) => {
         await connectDB();
         const { client_name, redirect_uris } = req.body;
         
-        if (!redirect_uris || !Array.isArray(redirect_uris) || redirect_uris.length === 0) {
-            return res.status(400).json({ error: "invalid_redirect_uri" });
+        if (!validRedirectUriList(redirect_uris)) {
+            return res.status(400).json({ error: "invalid_redirect_uri", error_description: `Redirect URIs must be https, http loopback or the Cursor callback (at most ${MAX_REDIRECT_URIS}).` });
         }
 
         const clientId = `cg_${generateToken(16)}`;
@@ -110,17 +153,18 @@ router.get("/authorize", async (req, res) => {
 // ─────────────────────────────────────────────
 // 2.5. FETCH CLIENT DETAILS (Used by Frontend UI)
 // ─────────────────────────────────────────────
-router.get("/client-details", isAuthenticated, async (req, res) => {
+router.get("/client-details", requireConsentPageOrigin, isAuthenticated, async (req, res) => {
     try {
         await connectDB();
         const { client_id, redirect_uri } = req.query;
 
-        const client = await OAuthClient.findOne({ clientId: client_id });
+        const client = await OAuthClient.findOne({ clientId: String(client_id || "") });
         if (!client) {
             return res.status(400).json({ error: "invalid_client" });
         }
 
-        if (redirect_uri && !client.redirectUris.includes(redirect_uri)) {
+        // Also re-checked here: clients registered before the redirect check may hold unsafe URIs
+        if (redirect_uri && (!isSafeRedirectUri(redirect_uri) || !client.redirectUris.includes(redirect_uri))) {
             return res.status(400).json({ error: "invalid_grant", message: "Redirect URI mismatch" });
         }
 
@@ -137,13 +181,13 @@ router.get("/client-details", isAuthenticated, async (req, res) => {
 // ─────────────────────────────────────────────
 // 3. AUTHORIZATION ENDPOINT (User clicks "Allow")
 // ─────────────────────────────────────────────
-router.post("/authorize", isAuthenticated, async (req, res) => {
+router.post("/authorize", requireConsentPageOrigin, isAuthenticated, async (req, res) => {
     try {
         await connectDB();
         const { client_id, redirect_uri, state, allow } = req.body;
 
-        const client = await OAuthClient.findOne({ clientId: client_id });
-        if (!client || !client.redirectUris.includes(redirect_uri)) {
+        const client = await OAuthClient.findOne({ clientId: String(client_id || "") });
+        if (!client || !isSafeRedirectUri(redirect_uri) || !client.redirectUris.includes(redirect_uri)) {
             return res.status(400).json({ error: "invalid_request" });
         }
 
