@@ -228,6 +228,9 @@ export function WidgetBlock({ code: fullCode, done: fullDone, onAsk }: { code: s
         title="Interactive card"
         sandbox="allow-scripts"
         srcDoc={shell}
+        // The frame's "ready" message can arrive before the chat starts listening (fast reloads), which left the
+        // card empty. Its script has run by the time it has loaded, so the load event also marks it ready.
+        onLoad={() => { ready.current = true; send(); }}
         className="block w-full border-0 bg-transparent"
         // Smooth size changes (e.g. when the card's scripts re-render it) and a fade-in for re-created cards
         style={{ height, colorScheme: dark ? "dark" : "light", opacity: visible ? 1 : 0, transition: "height 150ms ease, opacity 150ms ease" }}
