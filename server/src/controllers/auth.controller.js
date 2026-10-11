@@ -3483,6 +3483,18 @@ export const chatFinalizeOnboarding = async (req, res) => {
         // number to get the OTP, so a normal text message is allowed (inside Meta's 24-hour window).
         if (firstSetup) {
             sendChatWelcomeWhatsapp(whatsappPhone, user.name).catch((err) => console.error('Welcome WhatsApp failed:', err.message));
+            // Welcome email, also after the reply (the general sendWelcomeEmail stays disabled; this one is chat-only)
+            (async () => {
+                const { getChatWelcomeEmailHtml, getChatWelcomeEmailPlainText } = await import('../services/email-templates.service.js');
+                await sendEmail({
+                    to: user.email,
+                    subject: 'Welcome to Classgrid AI',
+                    html: getChatWelcomeEmailHtml(user.name),
+                    text: getChatWelcomeEmailPlainText(user.name),
+                    fromName: 'Classgrid AI',
+                    userId: user._id,
+                });
+            })().catch((err) => console.error('Welcome email failed:', err.message));
         }
     } catch (error) {
         console.error('chatFinalizeOnboarding Error:', error);

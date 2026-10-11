@@ -3246,6 +3246,81 @@ export const getChatOtpEmailHtml = (otp) => {
   });
 };
 
+// ------------- CHAT WELCOME EMAIL -------------
+// Sent once when a chat.classgrid.in account finishes setup (see chatFinalizeOnboarding)
+const CHAT_APP_URL = "https://chat.classgrid.in";
+
+const chatWelcomeGreetingName = (name) => {
+  const first = String(name || "").trim().split(/\s+/)[0] || "";
+  // Sign-ups without a name are saved as "AI User"
+  if (!first || first === "AI") return "";
+  return first.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+};
+
+export const getChatWelcomeEmailHtml = (name) => {
+  const firstName = chatWelcomeGreetingName(name);
+  const content = `
+    <p>Hello${firstName ? ` ${firstName}` : ""},</p>
+    <p>Welcome to <strong>Classgrid AI</strong>, your new personal AI agent! Ask, research, analyse your files, run code and automate your everyday work. Classgrid AI is built to do your real work, from reading messy spreadsheets and PDFs to building finished reports and charts.</p>
+
+    <div style="text-align:center;margin:8px 0 28px;">
+      <a href="${CHAT_APP_URL}" class="btn">Open Classgrid AI</a>
+    </div>
+
+    <p><strong>Built to do your real work.</strong> Give the agent your toughest tasks. Upload spreadsheets or documents and it will run Python, plot charts and hand you ready-to-download PDF reports. Connect 20+ apps like Gmail, Google Drive, Notion, GitHub and Slack so the agent can take action across your tools.</p>
+
+    <p><strong>Works while you're away.</strong> Schedule daily briefs, weekly reports and reminders. The agent runs in the background and delivers the finished summaries straight to your WhatsApp.</p>
+
+    <p><strong>Flexible AI credits.</strong> No locked-in monthly plans. Top up AI credits with any amount from ₹1 to ₹10,000 whenever you need, from Upgrade in the app.</p>
+
+    <div style="text-align:center;margin:8px 0 28px;">
+      <a href="${CHAT_APP_URL}" class="btn">Give the agent its first task</a>
+    </div>
+
+    <p style="font-size:13px;color:#6b7280;">Please be aware that AI responses might contain inaccuracies.</p>
+
+    <p>Thanks,<br>The Classgrid Team</p>
+
+    <div class="box" style="margin-bottom:0;">
+      <p><strong>Need help?</strong></p>
+      <p>Visit our <a href="https://classgrid.in/support">Support page</a> or reach out to our team directly at <a href="mailto:support@classgrid.in">support@classgrid.in</a>.</p>
+    </div>
+  `;
+
+  return baseTemplate({
+    content,
+    title: "Welcome to Classgrid AI",
+    ignoreText: `You received this email because you created a Classgrid AI account. <a href="https://classgrid.in/privacy" style="color:#9ca3af;">Privacy Policy</a>`,
+  });
+};
+
+export const getChatWelcomeEmailPlainText = (name) => {
+  const firstName = chatWelcomeGreetingName(name);
+  return `Welcome to Classgrid AI!
+
+Hello${firstName ? ` ${firstName}` : ""},
+
+Welcome to Classgrid AI, your new personal AI agent! Ask, research, analyse your files, run code and automate your everyday work. Classgrid AI is built to do your real work, from reading messy spreadsheets and PDFs to building finished reports and charts.
+
+Open Classgrid AI: ${CHAT_APP_URL}
+
+Built to do your real work: Give the agent your toughest tasks. Upload spreadsheets or documents and it will run Python, plot charts and hand you ready-to-download PDF reports. Connect 20+ apps like Gmail, Google Drive, Notion, GitHub and Slack so the agent can take action across your tools.
+
+Works while you're away: Schedule daily briefs, weekly reports and reminders. The agent runs in the background and delivers the finished summaries straight to your WhatsApp.
+
+Flexible AI credits: No locked-in monthly plans. Top up AI credits with any amount from ₹1 to ₹10,000 whenever you need, from Upgrade in the app.
+
+Please be aware that AI responses might contain inaccuracies.
+
+Thanks,
+The Classgrid Team
+
+Need help? Visit https://classgrid.in/support or email support@classgrid.in.
+
+Privacy Policy: https://classgrid.in/privacy
+© ${new Date().getFullYear()} Classgrid. All rights reserved.`;
+};
+
 export const getChatOtpEmailPlainText = (otp) => {
   return `Classgrid AI Verification Code
 
