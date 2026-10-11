@@ -489,9 +489,11 @@ app.get(["/.well-known/oauth-protected-resource", "/.well-known/oauth-protected-
   res.json(buildProtectedResourceMetadata());
 });
 
-// OpenAI plugin portal domain check: it fetches this token (set OPENAI_APPS_CHALLENGE on EC2) before scanning /mcp
+// OpenAI plugin portal domain check: it fetches this token before scanning /mcp. The token is public by design
+// (anyone may read it here); OPENAI_APPS_CHALLENGE in .env overrides the one from the Classgrid plugin portal.
+const OPENAI_APPS_CHALLENGE_TOKEN = "51OJF0MvS_kbEWTbyM3f9o1X7Ugz2sqCctW70V4Pmtg";
 app.get("/.well-known/openai-apps-challenge", (req, res) => {
-  const token = String(process.env.OPENAI_APPS_CHALLENGE || "").trim();
+  const token = String(process.env.OPENAI_APPS_CHALLENGE || OPENAI_APPS_CHALLENGE_TOKEN).trim();
   if (!token) return res.status(404).type("text/plain").send("Not found");
   res.set("Cache-Control", "no-store");
   res.type("text/plain").send(token);
