@@ -3012,22 +3012,46 @@ export const handleToolCall = async (name, args, context = {}) => {
         if (name === 'create_group_poll') {
           const thread = await getThread(args.groupId);
           if (!thread) return { content: [{ type: 'text', text: 'Error: Group thread not found.' }], isError: true };
-          const options = (args.options || []).map((text, i) => ({ id: `opt_${i}`, text }));
+          // Same steps as the app's Poll button (POST /groups/:id/polls): the poll is linked to its
+          // "📊 Poll" message (message_id), which is how the group shows a voting card instead of plain text
+          const question = String(args.question || '').trim();
+          const rawOptions = Array.isArray(args.options) ? args.options : [];
+          if (!question) return { content: [{ type: 'text', text: 'Error: Poll question is required.' }], isError: true };
+          if (rawOptions.length < 2 || rawOptions.length > 10) return { content: [{ type: 'text', text: 'Error: Poll must have 2-10 options.' }], isError: true };
+          const options = rawOptions.map((text, i) => ({
+            id: String.fromCharCode(97 + i), // a, b, c, ... like the app
+            text: typeof text === 'string' ? text.trim() : String(text?.text || '').trim(),
+          }));
+          const creator = /^[0-9a-fA-F]{24}$/.test(String(args.creatorUserId || ''))
+            ? await User.findById(args.creatorUserId).select('name profilePicture').lean()
+            : null;
+          const now = new Date().toISOString();
+          const pollText = `📊 Poll: ${question}`;
+          const { data: insertedMsg, error: msgError } = await sb.from('chat_messages').insert({
+            thread_id: thread.id,
+            sender_id: args.creatorUserId,
+            sender_name: creator?.name || 'User',
+            user_avatar: creator?.profilePicture || null,
+            message: pollText,
+            created_at: now
+          }).select('id').single();
+          if (msgError) throw msgError;
+          sb.from('chat_threads').update({ last_message: pollText, last_message_at: now }).eq('id', thread.id).then(() => {}, () => {});
           const { data: poll, error } = await sb.from('chat_polls').insert([{
             thread_id: thread.id,
-            question: args.question,
-            options: options,
-            created_by: args.creatorUserId,
+            message_id: insertedMsg.id,
+            question,
+            options,
             allow_multiple: args.allowMultiple || false,
+            is_anonymous: args.isAnonymous || false,
+            created_by: args.creatorUserId,
             closes_at: args.closesAt || null
           }]).select().single();
           if (error) throw error;
-          // Also send a system message
-          await sb.from('chat_messages').insert([{
-            thread_id: thread.id,
-            sender_id: args.creatorUserId,
-            message: `📊 Poll: ${args.question}`
-          }]);
+          broadcastToChannel(`thread:${thread.id}`, 'new_poll', {
+            poll: { ...poll, voteCounts: {}, totalVoters: 0, myVotes: [] },
+            messageId: insertedMsg.id,
+          }).catch(() => {});
           return { content: [{ type: 'text', text: `Poll created successfully. ID: ${poll.id}` }] };
         }
 

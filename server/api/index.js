@@ -489,6 +489,14 @@ app.get(["/.well-known/oauth-protected-resource", "/.well-known/oauth-protected-
   res.json(buildProtectedResourceMetadata());
 });
 
+// OpenAI plugin portal domain check: it fetches this token (set OPENAI_APPS_CHALLENGE on EC2) before scanning /mcp
+app.get("/.well-known/openai-apps-challenge", (req, res) => {
+  const token = String(process.env.OPENAI_APPS_CHALLENGE || "").trim();
+  if (!token) return res.status(404).type("text/plain").send("Not found");
+  res.set("Cache-Control", "no-store");
+  res.type("text/plain").send(token);
+});
+
 // 🌐 MODULE 22: Public Tenant Info (Subdomain Resolution)
 app.get("/api/tenant/info", getPublicTenantInfo);
 
