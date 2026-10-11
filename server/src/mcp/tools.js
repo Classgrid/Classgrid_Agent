@@ -36,7 +36,22 @@ const execPromise = util.promisify(exec);
 
 // Organization tools: a short summary for lists, and never the join codes, payment keys or org API keys
 const ORG_SUMMARY_FIELDS = 'name org_type structure_type subdomain custom_domain city state status is_active org_mode demoExpiresAt ownerName ownerEmail createdAt';
-const ORG_HIDDEN_FIELDS = '-private_code -organizationCode -honorCode -razorpayCustomerId -razorpaySubscriptionId -razorpayOrderId -fees_razorpay_key_id -fees_razorpay_key_secret -fees_razorpay_webhook_secret -canteen_config.canteen_razorpay_key_id -canteen_config.canteen_razorpay_key_secret -canteen_config.canteen_razorpay_webhook_secret -ai_config.custom_api_keys';
+const ORG_HIDDEN_FIELDS = '-private_code -organizationCode -honorCode -razorpayCustomerId -razorpaySubscriptionId -razorpayOrderId -fees_razorpay_key_id -fees_razorpay_key_secret -fees_razorpay_webhook_secret -canteen_config.canteen_razorpay_key_id -canteen_config.canteen_razorpay_key_secret -canteen_config.canteen_razorpay_webhook_secret -ai_config.custom_api_keys -hr_config.biometric_api_key -hr_config.biometric_secret_hash -custom_domain.verification_token -erp_domain.verification_token -billing_settings.verification_token -billing_settings.verification_otp -pending_admin.activationToken -pending_admin.activationCodeHash';
+// Full org records are long and tool results are cut at 6000 chars: drop empty values and send compact JSON
+const compactOrg = (value) => {
+  if (Array.isArray(value)) return value.map(compactOrg).filter((v) => v !== undefined);
+  if (value && typeof value === 'object' && !(value instanceof Date) && !value._bsontype) {
+    const out = {};
+    for (const [k, v] of Object.entries(value)) {
+      if (k === '__v') continue;
+      const c = compactOrg(v);
+      if (c === undefined || c === null || c === '' || (Array.isArray(c) && !c.length) || (typeof c === 'object' && !Array.isArray(c) && !(c instanceof Date) && !c._bsontype && !Object.keys(c).length)) continue;
+      out[k] = c;
+    }
+    return out;
+  }
+  return value;
+};
 
 // ── Meta Long-Lived Token Cache ──
 let _cachedMetaLongLivedToken = null;
@@ -1386,7 +1401,7 @@ export const handleToolCall = async (name, args, context = {}) => {
           }
           const org = await Organization.findById(args.orgId).select(ORG_HIDDEN_FIELDS).lean();
           if (!org) return { content: [{ type: 'text', text: 'Error: Organization not found.' }] };
-          return { content: [{ type: 'text', text: JSON.stringify(org, null, 2) }] };
+          return { content: [{ type: 'text', text: JSON.stringify(compactOrg(org)) }] };
         }
         const User = (await import('../models/User.js')).default;
         const finalUserEmail = userEmail && userEmail.trim() !== '' ? userEmail : 'unknown@unknown.invalid';
@@ -1401,7 +1416,7 @@ export const handleToolCall = async (name, args, context = {}) => {
           // Org admins: all fields of their own org (any orgId they pass is ignored); secrets always hidden
           const org = await Organization.findById(orgId).select(ORG_HIDDEN_FIELDS).lean();
           if (!org) return { content: [{ type: 'text', text: 'Error: Organization not found.' }] };
-          return { content: [{ type: 'text', text: JSON.stringify(org, null, 2) }] };
+          return { content: [{ type: 'text', text: JSON.stringify(compactOrg(org)) }] };
         }
         if (name === 'get_student_count') {
           const count = await User.countDocuments({ organization_id: orgId, role: 'student' });
@@ -3116,7 +3131,7 @@ export const handleToolCall = async (name, args, context = {}) => {
         if (name === 'read_organization_details') {
           const org = await Organization.findById(args.orgId).select(ORG_HIDDEN_FIELDS).lean();
           if (!org) return { content: [{ type: 'text', text: 'Error: Organization not found.' }], isError: true };
-          return { content: [{ type: 'text', text: JSON.stringify(org, null, 2) }] };
+          return { content: [{ type: 'text', text: JSON.stringify(compactOrg(org)) }] };
         }
 
         if (name === 'count_organization_users') {
