@@ -380,6 +380,21 @@ const setTokenCookie = (res, token, req = null, rememberMe = false) => {
     res.cookie("token", token, cookieOptions);
 };
 
+// "Last used" on the chat login page: set only after a login really succeeded (not on button click).
+// Saved on the account and in a readable cookie for every *.classgrid.in page (it holds only the method name).
+const LAST_LOGIN_METHOD_COOKIE = "cg_last_login_method";
+const recordLoginMethod = (res, req, user, method) => {
+    if (!["google", "github", "email"].includes(method)) return;
+    if (user?._id) {
+        User.updateOne({ _id: user._id }, { $set: { lastLoginMethod: method } }).catch((err) => console.error("lastLoginMethod save failed:", err.message));
+    }
+    const isProd = process.env.NODE_ENV === "production";
+    const options = { httpOnly: false, secure: isProd, sameSite: "Lax", path: "/", maxAge: 365 * 24 * 60 * 60 * 1000 };
+    // OAuth callbacks come from Google/GitHub, so use this API's own host (not Origin) to pick the shared domain
+    if (isProd && String(req?.hostname || "").endsWith("classgrid.in")) options.domain = ".classgrid.in";
+    res.cookie(LAST_LOGIN_METHOD_COOKIE, method, options);
+};
+
 // ─────────────────────────────────────────────
 // Helper: Send Welcome Email (First Login)
 // ─────────────────────────────────────────────
@@ -1585,6 +1600,7 @@ export const login = async (req, res) => {
 
         const token = generateToken(user, req, rememberMe);
         setTokenCookie(res, token, req, rememberMe);
+        recordLoginMethod(res, req, user, "email");
 
         // Track soft devices (used for OAuth alerts, separate from strict fingerprinting)
         await checkAndRegisterDevice(user, req);
@@ -2000,6 +2016,7 @@ export const oauthCallback = async (req, res) => {
 
     const token = generateToken(req.user, req);
     setTokenCookie(res, token, req);
+    recordLoginMethod(res, req, req.user, req.oauthProvider); // set by the Google/GitHub callback routes
 
     // Send welcome email on first login only
     if (isFirstLogin) {
@@ -3184,6 +3201,7 @@ export const chatVerifyEmailOtp = async (req, res) => {
             token = generateToken(user, req);
             setTokenCookie(res, token, req);
         }
+        recordLoginMethod(res, req, user, "email"); // the email code was correct
 
         // Short-lived proof that this email was verified, required by chatFinalizeOnboarding.
         // No `id` claim, so it can never be used as a login token.

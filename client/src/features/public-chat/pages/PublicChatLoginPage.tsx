@@ -17,17 +17,15 @@ import { getGoogleAuthUrl, loginWithPassword, requestPasswordReset, verifyDevice
 import { API_BASE_URL, apiClient } from "@/lib/apiClient";
 import { LoginGridBackground } from "../components/LoginGridBackground";
 
-// How this browser last logged in (shown as a "Last used" tag) and whether it has logged in before (greeting)
+// How this browser last logged in (shown as a "Last used" tag) and whether it has logged in before (greeting).
+// The server sets this cookie only after a login really succeeded, so a click that never finished doesn't count.
 type LoginMethod = "google" | "github" | "email";
-const LAST_METHOD_KEY = "classgrid:last-login-method";
 function readLastLoginMethod(): LoginMethod | null {
   try {
-    const v = localStorage.getItem(LAST_METHOD_KEY);
+    const match = document.cookie.match(/(?:^|;\s*)cg_last_login_method=([a-z]+)/);
+    const v = match?.[1];
     return v === "google" || v === "github" || v === "email" ? v : null;
   } catch { return null; }
-}
-function rememberLoginMethod(method: LoginMethod) {
-  try { localStorage.setItem(LAST_METHOD_KEY, method); } catch { /* private mode: no tag next time */ }
 }
 const RETURNING_GREETINGS = [
   { title: "Welcome back to Classgrid 👋", subtitle: "Sign in to continue your learning, check your classes and stay up to date." },
@@ -37,7 +35,7 @@ const FIRST_GREETING = { title: "Welcome to Classgrid", subtitle: "Sign in with 
 
 function LastUsedTag({ className = "" }: { className?: string }) {
   return (
-    <span className={`pointer-events-none rounded-full bg-emerald-600 px-2 py-0.5 text-[11px] font-semibold leading-none text-white dark:bg-emerald-500 ${className}`}>
+    <span className={`pointer-events-none rounded-full bg-slate-900 px-2 py-0.5 text-[11px] font-semibold leading-none text-white shadow-sm dark:bg-[#f1f1f1] dark:text-[#111] ${className}`}>
       Last used
     </span>
   );
@@ -309,8 +307,8 @@ function LoginContent() {
   const handleGoogle = () => {
     const loginTab = encodeURIComponent("user");
     const host = encodeURIComponent(window.location.hostname);
-    rememberLoginMethod("google");
-    const path = `/api/auth/google?loginTab=${loginTab}&host=${host}`;
+    // intent: only the Sign up screen may create an account; from Sign in an unknown email comes back as error=no_account
+    const path = `/api/auth/google?loginTab=${loginTab}&host=${host}&intent=${mode}`;
     const url = (API_BASE_URL && !API_BASE_URL.startsWith('/')) ? new URL(path, API_BASE_URL).toString() : path;
     window.location.assign(url);
   };
@@ -318,8 +316,7 @@ function LoginContent() {
   const handleGithub = () => {
     const loginTab = encodeURIComponent("user");
     const host = encodeURIComponent(window.location.hostname);
-    rememberLoginMethod("github");
-    const path = `/api/auth/chat/github?loginTab=${loginTab}&host=${host}`;
+    const path = `/api/auth/chat/github?loginTab=${loginTab}&host=${host}&intent=${mode}`;
     const url = (API_BASE_URL && !API_BASE_URL.startsWith('/')) ? new URL(path, API_BASE_URL).toString() : path;
     window.location.assign(url);
   };
@@ -375,13 +372,27 @@ function LoginContent() {
 
   // Show OAuth error from URL (e.g. OAuthCallback)
   const urlError = searchParams.get("error");
-  const friendlyUrlError = urlError
+  // no_account is shown as the red line under the email field instead (see the effect below)
+  const friendlyUrlError = urlError && urlError !== "no_account"
     ? (Object.prototype.hasOwnProperty.call(OAUTH_ERROR_MAP, urlError) ? OAUTH_ERROR_MAP[urlError] : OAUTH_ERROR_MAP.default)
     : "";
 
   const [email, setEmail] = useState("");
   const [firstName, setFirstName] = useState("");
   const [lastName, setLastName] = useState("");
+
+  // Google/GitHub from the Sign in screen with no account: the server sends us back with error=no_account.
+  // Show the same red "Account does not exist" line as the email check, with the email filled in.
+  useEffect(() => {
+    if (searchParams.get("error") !== "no_account") return;
+    const noAccountEmail = searchParams.get("email") || "";
+    if (noAccountEmail) setEmail(noAccountEmail);
+    setError("Account does not exist. Please sign up.");
+    const clean = new URL(window.location.href);
+    clean.searchParams.delete("error");
+    clean.searchParams.delete("email");
+    window.history.replaceState({}, "", clean.toString());
+  }, [searchParams]);
   const [otp, setOtp] = useState("");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
@@ -650,7 +661,6 @@ function LoginContent() {
 
       // The chat checks the sign-up: an account without a verified WhatsApp number comes back here
       // and continues at the WhatsApp step.
-      rememberLoginMethod("email");
       window.location.href = "/";
     } catch (err: any) {
       if (err && typeof err === "object" && "needsDeviceOtp" in err) {
@@ -693,7 +703,6 @@ function LoginContent() {
       try {
         await verifyDeviceOtp({ email: email.trim(), otp: otp.trim() });
         // Unfinished sign-ups are sent back from the chat to the WhatsApp step.
-        rememberLoginMethod("email");
         window.location.href = "/";
       } catch (err: any) {
         setError(err?.message || "Device verification failed.");
@@ -723,7 +732,6 @@ function LoginContent() {
         } else {
           localStorage.setItem("token", res.data.token);
           // Refresh the page or redirect so the app picks up the token and loads the chat session
-          rememberLoginMethod("email");
           window.location.href = "/";
         }
       } else {

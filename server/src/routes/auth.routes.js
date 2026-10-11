@@ -110,7 +110,7 @@ router.get(
         const loginTab = req.query.loginTab || req.query.role || 'student';
         const host = req.query.host || '';
         try {
-            const { state, nonce } = await createOAuthState({ loginTab, host });
+            const { state, nonce } = await createOAuthState({ loginTab, host, intent: req.query.intent });
             res.cookie(OAUTH_STATE_COOKIE, nonce, oauthStateCookieOptions());
             passport.authenticate("google-chat", {
                 scope: ["profile", "email"],
@@ -141,8 +141,12 @@ router.get(
         const scheme = process.env.NODE_ENV === "production" ? "https://" : "http://";
         const TARGET_URL = host ? `${scheme}${host}` : defaultFrontendUrl;
 
+        req.oauthProvider = "google"; // for the "Last used" login method
         passport.authenticate("google-chat", { session: false }, (err, user) => {
             if (err) {
+                if (err.code === "NO_ACCOUNT") {
+                    return res.redirect(`${TARGET_URL}/login?error=no_account&email=${encodeURIComponent(err.email || "")}`);
+                }
                 console.error("Google Chat OAuth Error Trace:", err.stack || err);
                 return res.redirect(`${TARGET_URL}/login?error=google_blocked&message=${encodeURIComponent(err.message)}`);
             }
@@ -162,7 +166,7 @@ router.get(
         const loginTab = req.query.loginTab || req.query.role || 'student';
         const host = req.query.host || '';
         try {
-            const { state, nonce } = await createOAuthState({ loginTab, host });
+            const { state, nonce } = await createOAuthState({ loginTab, host, intent: req.query.intent });
             res.cookie(OAUTH_STATE_COOKIE, nonce, oauthStateCookieOptions());
             passport.authenticate("github-chat", {
                 scope: ["user:email"],
@@ -206,8 +210,12 @@ router.get(
         const scheme = process.env.NODE_ENV === "production" ? "https://" : "http://";
         const TARGET_URL = host ? `${scheme}${host}` : defaultFrontendUrl;
 
+        req.oauthProvider = "github"; // for the "Last used" login method
         passport.authenticate("github-chat", { session: false }, (err, user) => {
             if (err) {
+                if (err.code === "NO_ACCOUNT") {
+                    return res.redirect(`${TARGET_URL}/login?error=no_account&email=${encodeURIComponent(err.email || "")}`);
+                }
                 console.error("GitHub Chat OAuth Error Trace:", err.stack || err);
                 return res.redirect(`${TARGET_URL}/login?error=google_blocked&message=${encodeURIComponent(err.message)}`);
             }
@@ -240,7 +248,7 @@ router.get(
         const loginTab = req.query.loginTab || req.query.role || 'student';
         const host = req.query.host || '';
         try {
-            const { state, nonce } = await createOAuthState({ loginTab, host });
+            const { state, nonce } = await createOAuthState({ loginTab, host, intent: req.query.intent });
             res.cookie(OAUTH_STATE_COOKIE, nonce, oauthStateCookieOptions());
             passport.authenticate("google", {
                 scope: ["profile", "email"],
@@ -273,8 +281,13 @@ router.get(
         const errorPath = loginTab === 'super_admin' ? '/superadmin/login' : '/login';
 
         const strategy = (host && host.startsWith('chat.')) ? "google-chat" : "google";
+        req.oauthProvider = "google"; // for the "Last used" login method
         passport.authenticate(strategy, { session: false }, (err, user) => {
             if (err) {
+                // Sign-in screen + no account (chat): back to the login page with the same red error as the email check
+                if (err.code === "NO_ACCOUNT") {
+                    return res.redirect(`${TARGET_URL}${errorPath}?error=no_account&email=${encodeURIComponent(err.email || "")}`);
+                }
                 console.error(`Google OAuth Error Trace (${strategy}):`, err.stack || err);
                 return res.redirect(`${TARGET_URL}${errorPath}?error=google_blocked&message=${encodeURIComponent(err.message)}`);
             }

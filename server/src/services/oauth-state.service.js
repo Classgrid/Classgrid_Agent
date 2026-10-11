@@ -113,7 +113,7 @@ export function oauthStateCookieOptions({ clear = false } = {}) {
     return options;
 }
 
-export async function createOAuthState({ loginTab, host }) {
+export async function createOAuthState({ loginTab, host, intent }) {
     const safeLoginTab = LOGIN_TABS.has(loginTab) ? loginTab : "student";
     const safeHost = await resolveAllowedHost(host);
     if (host && !safeHost) throw new Error("This login portal host is not registered or active.");
@@ -122,6 +122,8 @@ export async function createOAuthState({ loginTab, host }) {
     const payload = {
         t: safeLoginTab,
         h: safeHost,
+        // chat.classgrid.in: only the Sign up screen may create an account (signed, so it cannot be changed)
+        i: intent === "signup" ? "signup" : "signin",
         n: nonce,
         exp: Date.now() + STATE_TTL_MS,
     };
@@ -150,5 +152,5 @@ export async function verifyOAuthState(rawState, expectedNonce) {
     const safeHost = await resolveAllowedHost(payload.h);
     if (payload.h && !safeHost) throw new Error("The OAuth return portal is no longer active.");
 
-    return { loginTab: payload.t, host: safeHost };
+    return { loginTab: payload.t, host: safeHost, intent: payload.i === "signup" ? "signup" : "signin" };
 }

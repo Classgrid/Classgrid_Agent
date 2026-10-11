@@ -50,6 +50,15 @@ import User from "../models/User.js";
 import connectDB from "../../config/db.js";
 import { sendNoAccountEmail } from "../controllers/auth.controller.js";
 
+// chat.classgrid.in sign-in with Google/GitHub and no account: the route redirects to ?error=no_account
+function noChatAccountError(email, req) {
+    sendNoAccountEmail(email, req, "chat"); // rate-limited, fire-and-forget
+    const err = new Error("Account does not exist. Please sign up.");
+    err.code = "NO_ACCOUNT";
+    err.email = email;
+    return err;
+}
+
 const getBackendUrl = () => {
     return process.env.BACKEND_URL?.trim() || (process.env.NODE_ENV === "production" ? "https://api.classgrid.in" : "https://api.classgrid.in");
 };
@@ -200,6 +209,10 @@ const passportConfig = () => {
                             return done(null, user);
                         }
 
+                        // Only the Sign up screen creates accounts; from Sign in, an unknown email gets the same
+                        // "Account does not exist" error (and no-account email) as typing the email
+                        if (req.oauthState?.intent !== "signup") return done(noChatAccountError(email, req), null);
+
                         // Auto-create for the Chat Organization
                         console.log(`✅ Google Chat: Creating new user: ${email}`);
                         
@@ -268,6 +281,9 @@ const passportConfig = () => {
                             }
                             return done(null, user);
                         }
+
+                        // Only the Sign up screen creates accounts (see google-chat)
+                        if (req.oauthState?.intent !== "signup") return done(noChatAccountError(email, req), null);
 
                         // Auto-create for the Chat Organization
                         console.log(`✅ GitHub Chat: Creating new user: ${email}`);

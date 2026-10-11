@@ -384,6 +384,13 @@ const userSchema = new mongoose.Schema(
       default: null,
     },
 
+    // How the last successful login was made (shown as "Last used" on the chat login page)
+    lastLoginMethod: {
+      type: String,
+      enum: ["google", "github", "email", null],
+      default: null,
+    },
+
     lastSeen: {
       type: Date,
       default: null,
