@@ -655,12 +655,26 @@ function getSectionIcon(title: string) {
 }
 
 // Saved attachments keep only their URL, so the type comes from the file ending (query strings ignored).
-// The old check had a doubled backslash, never matched, and every reopened image showed as a plain file.
+// Every type the upload button accepts is listed, so reopened chats show the right card and preview
+// (the old check only knew images and PDF, and its image test had a doubled backslash and never matched).
+const MIME_BY_EXTENSION: Record<string, string> = {
+  jpg: "image/jpeg", jpeg: "image/jpeg", png: "image/png", gif: "image/gif", webp: "image/webp", svg: "image/svg+xml",
+  bmp: "image/bmp", avif: "image/avif", heic: "image/heic", heif: "image/heif", ico: "image/x-icon",
+  pdf: "application/pdf",
+  doc: "application/msword",
+  docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  xls: "application/vnd.ms-excel",
+  xlsx: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  ppt: "application/vnd.ms-powerpoint",
+  pptx: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+  csv: "text/csv", txt: "text/plain", md: "text/markdown", json: "application/json",
+  mp4: "video/mp4", webm: "video/webm", mov: "video/quicktime", mkv: "video/x-matroska", avi: "video/x-msvideo",
+  mp3: "audio/mpeg", wav: "audio/wav", ogg: "audio/ogg", m4a: "audio/mp4", aac: "audio/aac", flac: "audio/flac",
+};
 function mimeFromUrl(url: string): string {
   const path = (String(url || "").split(/[?#]/)[0] || "").toLowerCase();
-  if (/\.(jpe?g|png|gif|webp|svg|bmp|avif|heic|heif|ico)$/.test(path)) return "image/jpeg";
-  if (/\.pdf$/.test(path)) return "application/pdf";
-  return "application/octet-stream";
+  const ext = path.includes(".") ? path.split(".").pop() || "" : "";
+  return MIME_BY_EXTENSION[ext] || "application/octet-stream";
 }
 
 function TypingDots({ reducedMotion }: { reducedMotion: boolean }) {
@@ -4810,7 +4824,8 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
                                 let Icon = FileText;
                                 let iconBgClass = "bg-slate-100/50 dark:bg-white/5";
                                 let iconColorClass = "text-slate-500 dark:text-slate-400";
-                                let fileTypeLabel = "FILE";
+                                // Real file type (PPTX, TXT, MD...) instead of a generic "FILE" when the name has one
+                                let fileTypeLabel = extension && /^[a-z0-9]{1,5}$/.test(extension) ? extension.toUpperCase() : "FILE";
 
                                 if (extension === 'pdf' || att.mimeType === 'application/pdf') {
                                   Icon = FileText;
