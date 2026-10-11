@@ -5,6 +5,8 @@
  * scrubbed of anything that could pick a different user, organization, file or collection.
  */
 
+import { requiredScopeForTool } from "./mcp-scopes.js";
+
 // Field names match what tools.js reads from its context (userEmail, userRole, userId, orgId, role,
 // sessionId, isStaff, subdomain), the same ones the AI chat passes.
 export function buildMcpContext({ user, tokenId, clientId, scopes }) {
@@ -151,5 +153,23 @@ export function toolForListing(tool) {
     }
     schema.properties = props;
     if (!schema.type) schema.type = "object";
-    return { name: tool.name, description: tool.description || "", inputSchema: schema };
+    return { name: tool.name, description: tool.description || "", inputSchema: schema, annotations: toolAnnotations(tool.name) };
+}
+
+// MCP tool annotations, always explicit booleans (the ChatGPT plugin review requires all three).
+// Read scopes only read; schedule edits/deletes change or remove data; app connectors reach outside
+// services (Gmail, Drive, Slack…) and can send or delete there.
+const DESTRUCTIVE_TOOL_PREFIXES = ["delete_", "edit_"];
+export function toolAnnotations(toolName) {
+    const name = String(toolName || "");
+    const scope = requiredScopeForTool(name) || "";
+    const title = name.split("_").filter(Boolean).map((w, i) => (i === 0 ? w.charAt(0).toUpperCase() + w.slice(1) : w)).join(" ");
+    if (scope.endsWith(":read")) {
+        return { title, readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false };
+    }
+    if (scope === "apps:use") {
+        return { title, readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true };
+    }
+    const destructive = DESTRUCTIVE_TOOL_PREFIXES.some((prefix) => name.startsWith(prefix));
+    return { title, readOnlyHint: false, destructiveHint: destructive, idempotentHint: false, openWorldHint: false };
 }
