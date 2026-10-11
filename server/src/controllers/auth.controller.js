@@ -3334,6 +3334,36 @@ export const chatVerifyWhatsappOtpStep = async (req, res) => {
     }
 };
 
+// One WhatsApp welcome after chat.classgrid.in setup is finished
+async function sendChatWelcomeWhatsapp(phone, name) {
+    if (!process.env.WHATSAPP_PHONE_ID || !process.env.WHATSAPP_ACCESS_TOKEN) return;
+    const to = String(phone || '').replace(/\D/g, '');
+    if (!to) return;
+    const firstName = String(name || '').trim().split(/\s+/)[0];
+    const greeting = firstName && firstName !== 'AI' ? `🎉 Welcome to Classgrid, ${firstName}!` : '🎉 Welcome to Classgrid!';
+    const body = [
+        greeting,
+        '',
+        "Your account is ready. Here's what you can do with your AI Agent:",
+        '',
+        '📚 Explain any topic or solve doubts',
+        '📄 Analyse PDFs, images and files',
+        '🗓️ Make study plans and exam schedules',
+        '⏰ Get reminders right here on WhatsApp',
+        '',
+        'Start now 👉 https://chat.classgrid.in',
+        '',
+        '— Team Classgrid',
+    ].join('\n');
+    const waRes = await fetch(`https://graph.facebook.com/v17.0/${process.env.WHATSAPP_PHONE_ID}/messages`, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${process.env.WHATSAPP_ACCESS_TOKEN}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ messaging_product: 'whatsapp', recipient_type: 'individual', to, type: 'text', text: { preview_url: false, body } }),
+    });
+    const data = await waRes.json().catch(() => ({}));
+    if (data.error) throw new Error(data.error.message || 'WhatsApp API error');
+}
+
 export const chatFinalizeOnboarding = async (req, res) => {
     try {
         const connectDB = (await import('../../config/db.js')).default;
@@ -3390,6 +3420,9 @@ export const chatFinalizeOnboarding = async (req, res) => {
             return res.status(400).json({ message: 'This WhatsApp number is already linked to another account.' });
         }
 
+        // Welcome WhatsApp goes out only the first time an account finishes setup
+        const firstSetup = !user || !user.metadata?.whatsappPhone;
+
         if (!user) {
             user = new User({
                 email: email.toLowerCase(),
@@ -3445,6 +3478,12 @@ export const chatFinalizeOnboarding = async (req, res) => {
                 metadata: user.metadata || {}
             }
         });
+
+        // After the reply: a failed WhatsApp send never affects the sign-up. The user just messaged our
+        // number to get the OTP, so a normal text message is allowed (inside Meta's 24-hour window).
+        if (firstSetup) {
+            sendChatWelcomeWhatsapp(whatsappPhone, user.name).catch((err) => console.error('Welcome WhatsApp failed:', err.message));
+        }
     } catch (error) {
         console.error('chatFinalizeOnboarding Error:', error);
         res.status(500).json({ message: error.message });
