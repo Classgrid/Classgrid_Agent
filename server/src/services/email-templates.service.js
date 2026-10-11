@@ -2225,7 +2225,7 @@ const getChatNoAccountSignInAttemptHtml = (email, device, city) => {
       <a href="https://chat.classgrid.in/login" class="btn">Create your account</a>
     </div>
 
-    <p style="font-size:13px;color:#6b7280;">Stuck at WhatsApp verification? Send "Hi" on WhatsApp to +91 81492 77038 first, then tap "Send OTP" again. For anything else, visit <a href="https://classgrid.in/support">Support</a> or email <a href="mailto:support@classgrid.in">support@classgrid.in</a>.</p>
+    <p style="font-size:13px;color:#6b7280;">Need help? Visit <a href="https://classgrid.in/support">Support</a> or email <a href="mailto:support@classgrid.in">support@classgrid.in</a>.</p>
   `;
 
   return baseTemplate({
@@ -2252,8 +2252,7 @@ Next Steps
 New here? Create your free account in about 2 minutes: sign up with your email, verify your WhatsApp number with a one-time code, and you're in.
 Create your account: https://chat.classgrid.in/login
 
-Stuck at WhatsApp verification? Send "Hi" on WhatsApp to +91 81492 77038 first, then tap "Send OTP" again.
-Support: https://classgrid.in/support or support@classgrid.in
+Need help? https://classgrid.in/support or support@classgrid.in
 
 If this was not you, no action is required.
 © ${new Date().getFullYear()} Classgrid. All rights reserved.`;
