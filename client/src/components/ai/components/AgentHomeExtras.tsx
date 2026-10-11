@@ -78,7 +78,7 @@ export function CapabilityStrip({ integrations = [] }: { integrations?: Integrat
     <div className="flex flex-wrap items-center justify-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
       {connected.length > 0 && (
         <span className="inline-flex items-center gap-2">
-          <span className="flex items-center -space-x-1">
+          <span className="flex items-center gap-1.5">
             {connected.slice(0, 5).map(({ id, name, info }) =>
               info?.imgUrl ? (
                 <img
@@ -86,7 +86,7 @@ export function CapabilityStrip({ integrations = [] }: { integrations?: Integrat
                   src={info.imgUrl}
                   alt={name}
                   title={name}
-                  className={`h-4 w-4 rounded-sm object-contain bg-background ring-2 ring-background ${info.invertInDarkMode ? "dark:invert" : ""} ${info.invertInLightMode ? "invert dark:invert-0" : ""}`}
+                  className={`h-4 w-4 object-contain ${info.invertInDarkMode ? "dark:invert" : ""} ${info.invertInLightMode ? "invert dark:invert-0" : ""}`}
                 />
               ) : (
                 <Plug key={id} className="h-3.5 w-3.5" aria-label={name} />
