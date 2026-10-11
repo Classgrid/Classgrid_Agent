@@ -1025,11 +1025,7 @@ function LoginContent() {
               className="flex flex-col items-center gap-5 mt-4"
             >
               <button
-                onClick={() => {
-                  // The chat greets the new user once (see the welcome effect in AskAiPanel)
-                  try { localStorage.setItem("classgrid:show-welcome", "1"); } catch { /* storage blocked: no greeting */ }
-                  window.location.href = "/";
-                }}
+                onClick={() => window.location.href = "/"}
                 className="h-14 px-10 flex items-center justify-center text-base font-semibold rounded-full bg-white/10 hover:bg-white/20 text-white border border-white/20 backdrop-blur-sm transition-all duration-300 shadow-lg shadow-blue-500/10 cursor-pointer"
               >
                 Start Chatting <ChevronRight className="ml-2 size-5" />
