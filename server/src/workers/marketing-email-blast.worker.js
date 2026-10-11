@@ -226,7 +226,14 @@ function buildNotificationEmailHtml(post, unsubscribeUrl, recentBlogs, recentCha
   } else if (isLegalPage) {
     bodyOutro = "";
     const effectiveDateStr = post._updatedAt ? formatDate(post._updatedAt) : "immediately";
-    const changeSummary = post.resolvedSummary || "Important updates to our legal terms and policies.";
+    // The summary is plain text from Sanity: keep its paragraphs (HTML ignores line breaks, so all lines ran
+    // together into one block) and escape it before it goes into the email HTML
+    const changeSummary = escapeHtml(post.resolvedSummary || "Important updates to our legal terms and policies.")
+      .trim()
+      .split(/\r?\n\s*\r?\n/)
+      .map((para) => para.trim().replace(/\r?\n/g, "<br>"))
+      .filter(Boolean)
+      .join("<br><br>");
 
     switch (post.slug) {
       case "privacy":
@@ -245,9 +252,9 @@ function buildNotificationEmailHtml(post, unsubscribeUrl, recentBlogs, recentCha
         ctaLabel = "Review the updated Security Policy";
         break;
       case "cookies":
-        eyebrow = "Changes to our Cookies Policy";
-        summary = `We have updated our Cookies Policy to explain how Classgrid Technologies and approved service providers use cookies and similar technologies on the Services.<br><br><b>Changes included in this update:</b><br>${changeSummary}<br><br>The revised Cookies Policy takes effect on ${effectiveDateStr}.`;
-        ctaLabel = "Review the updated Cookies Policy";
+        eyebrow = "Changes to our Cookie Policy";
+        summary = `We have updated our Cookie Policy to explain how Classgrid Technologies and approved service providers use cookies and similar technologies on the Services.<br><br><b>Changes included in this update:</b><br>${changeSummary}<br><br>The revised Cookie Policy takes effect on ${effectiveDateStr}.`;
+        ctaLabel = "Review the updated Cookie Policy";
         break;
       case "disclaimer":
         eyebrow = "Notice of changes to our Disclaimer";
@@ -484,7 +491,7 @@ async function processQueueItem(item) {
       case "privacy": subject = `Important update to our Privacy Policy — effective ${dateStr}`; break;
       case "terms": subject = `Notice of updates to our Terms of Service — effective ${dateStr}`; break;
       case "security": subject = "Update to our Information Security Policy"; break;
-      case "cookies": subject = `Update to our Cookies Policy — effective ${dateStr}`; break;
+      case "cookies": subject = `Update to our Cookie Policy — effective ${dateStr}`; break;
       case "disclaimer": subject = "Update to our Disclaimer"; break;
       default: subject = "Important Legal Update";
     }
