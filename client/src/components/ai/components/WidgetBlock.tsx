@@ -100,6 +100,13 @@ img{max-width:100%}
 export function WidgetBlock({ code, done, onAsk }: { code: string; done: boolean; onAsk?: (text: string) => void }) {
   const frameRef = useRef<HTMLIFrameElement>(null);
   const [height, setHeight] = useState(MIN_HEIGHT);
+  // Seconds shown next to "Working" while the card is being written (same look as "Thinking 2s")
+  const [workSecs, setWorkSecs] = useState(0);
+  useEffect(() => {
+    if (done) return;
+    const t = setInterval(() => setWorkSecs((s) => s + 1), 1000);
+    return () => clearInterval(t);
+  }, [done]);
   const id = useMemo(() => Math.random().toString(36).slice(2), []);
   const dark = typeof document !== "undefined" && document.documentElement.classList.contains("dark");
   // The shell has no card code in it, so it never reloads while the AI is writing
@@ -142,7 +149,6 @@ export function WidgetBlock({ code, done, onAsk }: { code: string; done: boolean
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
 
-  const lines = code ? code.split("\n").length : 0;
   return (
     <div className="my-4">
       <iframe
@@ -154,9 +160,16 @@ export function WidgetBlock({ code, done, onAsk }: { code: string; done: boolean
         style={{ height, colorScheme: dark ? "dark" : "light" }}
       />
       {!done && (
-        <p className="mt-2 animate-pulse text-[13px] text-[#6B6B69] dark:text-[#A6A6A3]">
-          Building interactive card… {lines} {lines === 1 ? "line" : "lines"}
-        </p>
+        <div className="mt-2 flex items-center gap-1.5">
+          <p
+            className="bg-[linear-gradient(110deg,#404040,35%,#fff,50%,#404040,75%,#404040)] bg-[length:200%_100%] bg-clip-text text-[14px] font-medium text-transparent"
+            style={{ animation: "cgWorkShimmer 2.5s linear infinite" }}
+          >
+            Working
+          </p>
+          <span className="text-sm text-muted-foreground">{workSecs}s</span>
+          <style>{`@keyframes cgWorkShimmer { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }`}</style>
+        </div>
       )}
     </div>
   );
