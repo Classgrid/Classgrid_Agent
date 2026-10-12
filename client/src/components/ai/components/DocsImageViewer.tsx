@@ -61,6 +61,8 @@ export function DocsImageViewer({ images, renderThumbnails, defaultOpenIndex, on
     setSelectedImage(img);
   }, []);
 
+  const lightboxRef = useRef<HTMLDivElement | null>(null);
+
   const closeImage = useCallback(() => {
     setSelectedImage(null);
     setZoom(1);
@@ -92,16 +94,30 @@ export function DocsImageViewer({ images, renderThumbnails, defaultOpenIndex, on
   }, [images, selectedImage]);
 
   // ── Keyboard: Escape to close, arrows to browse ──
+  // Captured on window and stopped there, so a dialog the viewer was opened from (e.g. the feedback box)
+  // doesn't also close on the same Escape.
   useEffect(() => {
     if (!selectedImage) return;
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape") closeImage();
+      if (e.key === "Escape") { e.stopPropagation(); closeImage(); }
       else if (e.key === "ArrowRight") showAt(1);
       else if (e.key === "ArrowLeft") showAt(-1);
     };
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
+    window.addEventListener("keydown", handleKeyDown, true);
+    return () => window.removeEventListener("keydown", handleKeyDown, true);
   }, [selectedImage, closeImage, showAt]);
+
+  // ── Presses inside the viewer never count as "outside" clicks for a dialog underneath ──
+  // (that dialog would close and lose what was typed). Clicks still reach the viewer, so it closes as usual.
+  useEffect(() => {
+    if (!selectedImage) return;
+    const keepInsideViewer = (e: Event) => {
+      if (lightboxRef.current && e.target instanceof Node && lightboxRef.current.contains(e.target)) e.stopPropagation();
+    };
+    const types = ["pointerdown", "mousedown", "touchstart"] as const;
+    types.forEach((t) => window.addEventListener(t, keepInsideViewer, true));
+    return () => types.forEach((t) => window.removeEventListener(t, keepInsideViewer, true));
+  }, [selectedImage]);
 
   // ── Zoom with mouse scroll ──
   useEffect(() => {
@@ -140,15 +156,16 @@ export function DocsImageViewer({ images, renderThumbnails, defaultOpenIndex, on
             return (
               <motion.div
                 key="docs-lightbox-backdrop"
+                ref={lightboxRef}
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 1 }}
                 exit={{ opacity: 0 }}
                 transition={{ duration: 0.28, ease: [0.4, 0, 0.2, 1] }}
-                className="fixed inset-0 z-[9999] flex items-center justify-center bg-white/95 dark:bg-black/95 backdrop-blur-sm cursor-zoom-out"
+                className="fixed inset-0 z-[10050] flex items-center justify-center bg-white/95 dark:bg-black/95 backdrop-blur-sm cursor-zoom-out"
                 onClick={closeImage}
               >
                 {/* ── Top Right Controls ── */}
-                <div className="absolute top-4 right-4 z-[10000] flex items-center gap-2">
+                <div className="absolute top-4 right-4 z-[10051] flex items-center gap-2">
                   <button
                     className="p-2.5 rounded-full bg-black/10 dark:bg-white/10 hover:bg-black/20 dark:hover:bg-white/20 text-black/60 dark:text-white/60 transition-all cursor-pointer"
                     onClick={async (e) => {
@@ -223,18 +240,18 @@ export function DocsImageViewer({ images, renderThumbnails, defaultOpenIndex, on
                 {/* ── Counter + previous / next (only with several images) ── */}
                 {hasMany && (
                   <>
-                    <div className="absolute top-5 left-1/2 -translate-x-1/2 z-[10000] rounded-full bg-black/10 px-3 py-1 text-[13px] font-medium tabular-nums text-black/70 dark:bg-white/10 dark:text-white/80 select-none">
+                    <div className="absolute top-5 left-1/2 -translate-x-1/2 z-[10051] rounded-full bg-black/10 px-3 py-1 text-[13px] font-medium tabular-nums text-black/70 dark:bg-white/10 dark:text-white/80 select-none">
                       {currentIndex + 1} / {images.length}
                     </div>
                     <button
-                      className="absolute left-3 top-1/2 -translate-y-1/2 z-[10000] p-2.5 rounded-full bg-black/10 dark:bg-white/10 hover:bg-black/20 dark:hover:bg-white/20 text-black/60 dark:text-white/70 transition-all cursor-pointer sm:left-6"
+                      className="absolute left-3 top-1/2 -translate-y-1/2 z-[10051] p-2.5 rounded-full bg-black/10 dark:bg-white/10 hover:bg-black/20 dark:hover:bg-white/20 text-black/60 dark:text-white/70 transition-all cursor-pointer sm:left-6"
                       onClick={(e) => { e.stopPropagation(); showAt(-1); }}
                       aria-label="Previous image"
                     >
                       <ChevronLeft className="w-5 h-5" />
                     </button>
                     <button
-                      className="absolute right-3 top-1/2 -translate-y-1/2 z-[10000] p-2.5 rounded-full bg-black/10 dark:bg-white/10 hover:bg-black/20 dark:hover:bg-white/20 text-black/60 dark:text-white/70 transition-all cursor-pointer sm:right-6"
+                      className="absolute right-3 top-1/2 -translate-y-1/2 z-[10051] p-2.5 rounded-full bg-black/10 dark:bg-white/10 hover:bg-black/20 dark:hover:bg-white/20 text-black/60 dark:text-white/70 transition-all cursor-pointer sm:right-6"
                       onClick={(e) => { e.stopPropagation(); showAt(1); }}
                       aria-label="Next image"
                     >
@@ -250,12 +267,12 @@ export function DocsImageViewer({ images, renderThumbnails, defaultOpenIndex, on
                     target="_blank"
                     rel="noreferrer"
                     onClick={(e) => e.stopPropagation()}
-                    className="absolute bottom-5 left-1/2 -translate-x-1/2 z-[10000] max-w-[80vw] truncate rounded-full bg-black/70 px-4 py-2 text-[14px] font-medium text-white underline underline-offset-4 hover:bg-black/80 dark:bg-white/15 dark:hover:bg-white/25"
+                    className="absolute bottom-5 left-1/2 -translate-x-1/2 z-[10051] max-w-[80vw] truncate rounded-full bg-black/70 px-4 py-2 text-[14px] font-medium text-white underline underline-offset-4 hover:bg-black/80 dark:bg-white/15 dark:hover:bg-white/25"
                   >
                     {selectedImage.sourceLabel || selectedImage.sourceUrl}
                   </a>
                 ) : (
-                  <div className="absolute bottom-4 left-1/2 -translate-x-1/2 z-[10000] text-black/25 dark:text-white/25 text-[10px] tracking-wide select-none pointer-events-none">
+                  <div className="absolute bottom-4 left-1/2 -translate-x-1/2 z-[10051] text-black/25 dark:text-white/25 text-[10px] tracking-wide select-none pointer-events-none">
                     Click or press Esc to close
                   </div>
                 )}
