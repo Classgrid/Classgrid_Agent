@@ -37,8 +37,7 @@ import {
     getSharedSnapshot,
     getUserGeneratedImages,
     memoryCoverage,
-    memoryText,
-    compactMemoryText
+    memoryText
 } from "../services/ai-chat.service.js";
 import { getHistory, getHistoryCount, appendToHistory, invalidateHistoryCache } from "../services/ai-chat-history.service.js";
 import { hasEnoughTokens, deductTokens, getImageGenerationCost } from "../services/ai-credits.service.js";
@@ -1155,10 +1154,7 @@ export const streamAskAi = async (req, res) => {
                 const total = await getHistoryCount(sessionId);
                 const sinceSummary = covered !== null ? total - covered : (total % 8) + 8;
                 historyDepth = Math.min(Math.max(sinceSummary + 2, 4), 30);
-                // Only the short part goes into every message (facts, task, last few topics); the full topic log is
-                // read with get_full_chat_memory when the user asks about older parts of the chat.
-                const compactMemory = compactMemoryText(sessionData.long_term_memory);
-                volatilePrompt += `\n\n<long_term_memory>\nA background model's summary of messages 1-${covered ?? "?"} of this chat (not their exact text; say so if you quote it). The messages after it follow in full.${compactMemory.olderTopics > 0 ? ` Only the latest topics are shown; when the user asks about earlier parts of the chat (their first message, what was discussed, an older question), call get_full_chat_memory first.` : ""}\n${compactMemory.text}\n</long_term_memory>`;
+                volatilePrompt += `\n\n<long_term_memory>\nA background model's summary of messages 1-${covered ?? "?"} of this chat (not their exact text; say so if you quote it). The messages after it follow in full.\n${memoryText(sessionData.long_term_memory)}\n</long_term_memory>`;
             }
 
             // Ownership verified, safe to load history
@@ -2128,18 +2124,6 @@ If they ask whether their college/school uses Classgrid, say you can't see that 
                 {
                     type: "function",
                     function: {
-                        name: "get_full_chat_memory",
-                        description: "Returns this chat's full long-term memory: the user's facts, the current task and the complete numbered log of every message so far (user message -> your answer), oldest first. Your context only shows the latest few topics; call this when the user asks about earlier parts of this chat, such as their first message, what you discussed, or an older question or answer.",
-                        parameters: {
-                            type: "object",
-                            properties: {},
-                            required: []
-                        }
-                    }
-                },
-                {
-                    type: "function",
-                    function: {
                         name: "open_integration_panel",
                         description: "Opens the AI Hub integration panel for the user in their UI. Use this ONLY when you are 10000% confirmed the user is disconnected (because the connector tool is missing from your available tools).",
                         parameters: {
@@ -2665,19 +2649,6 @@ If they ask whether their college/school uses Classgrid, say you can't see that 
                             return `FAILED to read ${path}: ${e.message}`;
                         } finally {
                             ssh.dispose();
-                        }
-                    },
-                    get_full_chat_memory: async () => {
-                        try {
-                            if (!sessionId || isIncognito) return "This chat has no saved memory (new or incognito chat).";
-                            const session = await getSessionById(sessionId);
-                            // Only the signed-in owner's own chat
-                            if (!session || session.user_email !== userEmail) return "No saved memory found for this chat.";
-                            if (!session.long_term_memory) return "No long-term memory yet: it is written every 8 messages, and the messages so far are already in your context in full.";
-                            const covered = memoryCoverage(session.long_term_memory);
-                            return `Full memory of messages 1-${covered ?? "?"} of this chat (a summary, not the exact text; later messages are in your context in full):\n\n${memoryText(session.long_term_memory)}`;
-                        } catch (e) {
-                            return `FAILED to load chat memory: ${e.message}`;
                         }
                     },
                     recall_session_context: async (args) => {

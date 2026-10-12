@@ -93,29 +93,6 @@ export function memoryText(summary) {
     return String(summary || "").replace(MEMORY_HEADER, "");
 }
 
-// The saved memory keeps every topic of the chat, so it grows. Each message only gets the short part:
-// User facts, Task state and the last few "Topics discussed" entries; the AI reads the whole log with
-// the get_full_chat_memory tool when the user asks about older parts of the chat.
-export const MEMORY_RECENT_TOPICS = 8;
-const TOPIC_ENTRY_RE = /^\s*\d+\.\s/;
-
-/** Memory text for the prompt: everything except older topic entries, plus how many were left out. */
-export function compactMemoryText(summary, keep = MEMORY_RECENT_TOPICS) {
-    const text = memoryText(summary);
-    const lines = text.split("\n");
-    const start = lines.findIndex((l) => /^##\s*Topics discussed/i.test(l.trim()));
-    if (start === -1) return { text, olderTopics: 0 };
-    let end = lines.findIndex((l, i) => i > start && /^##\s/.test(l.trim()));
-    if (end === -1) end = lines.length;
-    const section = lines.slice(start + 1, end);
-    const entryStarts = section.map((l, i) => (TOPIC_ENTRY_RE.test(l) ? i : -1)).filter((i) => i >= 0);
-    if (entryStarts.length <= keep) return { text, olderTopics: 0 };
-    const olderTopics = entryStarts.length - keep;
-    const kept = section.slice(entryStarts[olderTopics]);
-    const note = `(${olderTopics} older topic${olderTopics === 1 ? "" : "s"} not shown here; call get_full_chat_memory to read them all)`;
-    return { text: [...lines.slice(0, start + 1), note, ...kept, ...lines.slice(end)].join("\n"), olderTopics };
-}
-
 // Saved assistant messages can be JSON ({ classgrid_ai_message, content, steps }); only the text is summarized.
 function plainMessageText(content) {
     const text = String(content ?? "");
