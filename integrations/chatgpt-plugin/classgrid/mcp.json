@@ -11,8 +11,18 @@
             "client": {
               "mode": "dcr"
             },
-            "baseScopes": ["profile:read", "offline_access"],
-            "defaultScopes": ["profile:read", "schedules:read", "grid:read", "offline_access"]
+            "baseScopes": [
+              "profile:read",
+              "offline_access"
+            ],
+            "defaultScopes": [
+              "profile:read",
+              "schedules:read",
+              "schedules:write",
+              "grid:read",
+              "grid:write",
+              "offline_access"
+            ]
           }
         }
       }

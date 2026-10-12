@@ -1600,7 +1600,7 @@ router.put("/admin/tickets/:id/draft", isAuthenticated, requireRole("super_admin
                 aiContext: aiContext || "",
                 adminId: req.user._id
             },
-            { new: true, upsert: true }
+            { returnDocument: 'after', upsert: true }
         );
 
         res.json({ success: true, draft });

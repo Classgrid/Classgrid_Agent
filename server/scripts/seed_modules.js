@@ -106,7 +106,7 @@ async function seedModules() {
       await PlatformModule.findOneAndUpdate(
         { key: mod.key },
         { $set: mod },
-        { upsert: true, new: true }
+        { upsert: true, returnDocument: 'after' }
       );
     }
 

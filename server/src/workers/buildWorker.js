@@ -59,7 +59,7 @@ export const buildWorker = new Worker('build-steps', async (job) => {
     await Artifact.findOneAndUpdate(
       { sessionId, stepId },
       { content: cleanCode },
-      { upsert: true, new: true }
+      { upsert: true, returnDocument: 'after' }
     );
 
     // 3. Mark the step done in the Trajectory

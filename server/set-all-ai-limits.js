@@ -28,7 +28,7 @@ async function setAllLimits() {
                     image_generation_token_cost: 5000
                 }
             },
-            { new: true, upsert: true }
+            { returnDocument: 'after', upsert: true }
         );
 
         console.log("✅ Set global AI fallback limits:");

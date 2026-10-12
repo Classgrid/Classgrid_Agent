@@ -2713,7 +2713,7 @@ router.patch("/leads/:id/notes", async (req, res) => {
         let lead = await mongoose.model('DemoRequest').findByIdAndUpdate(
             id, 
             { $set: updateData }, 
-            { new: true }
+            { returnDocument: 'after' }
         ).populate("assignedTo", "name email profilePicture avatarUrl picture photoUrl").lean();
         
         if (assignedTo !== undefined && assignedTo && lead.assignedTo && (!oldLead || !oldLead.assignedTo || oldLead.assignedTo._id?.toString() !== assignedTo.toString())) {

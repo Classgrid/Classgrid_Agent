@@ -1488,7 +1488,7 @@ export const updateOrganizationStatus = async (req, res) => {
         const org = await Organization.findByIdAndUpdate(
             id,
             { status },
-            { new: true }
+            { returnDocument: 'after' }
         );
 
         if (!org) {

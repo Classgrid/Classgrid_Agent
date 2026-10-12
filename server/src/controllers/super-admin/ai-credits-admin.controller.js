@@ -62,7 +62,7 @@ export const blockAiUser = async (req, res) => {
         const user = await User.findByIdAndUpdate(
             userId,
             { $set: { "ai_tokens.is_ai_blocked": isBlocked } },
-            { new: true }
+            { returnDocument: 'after' }
         );
 
         if (!user) return res.status(404).json({ success: false, error: "User not found" });
@@ -92,7 +92,7 @@ export const blockAiOrg = async (req, res) => {
         const org = await Organization.findByIdAndUpdate(
             orgId,
             { $set: { "ai_config.is_ai_blocked": isBlocked } },
-            { new: true }
+            { returnDocument: 'after' }
         );
 
         if (!org) return res.status(404).json({ success: false, error: "Organization not found" });
@@ -195,7 +195,7 @@ export const grantCredits = async (req, res) => {
         updateObj.$set["ai_tokens.promotion_credits_start_date"] = new Date(startDate);
         updateObj.$set["ai_tokens.promotion_credits_end_date"] = new Date(endDate);
 
-        const user = await User.findByIdAndUpdate(userId, updateObj, { new: true });
+        const user = await User.findByIdAndUpdate(userId, updateObj, { returnDocument: 'after' });
 
         if (!user) return res.status(404).json({ success: false, error: "User not found" });
 
@@ -314,7 +314,7 @@ export const grantOrgCredits = async (req, res) => {
         updateObj.$set["ai_tokens.promotion_credits_start_date"] = new Date(startDate);
         updateObj.$set["ai_tokens.promotion_credits_end_date"] = new Date(endDate);
 
-        user = await User.findByIdAndUpdate(user._id, updateObj, { new: true });
+        user = await User.findByIdAndUpdate(user._id, updateObj, { returnDocument: 'after' });
 
         // Record the transaction
         await AiCreditTransaction.create({
@@ -455,7 +455,7 @@ export const updateOrgAiLimits = async (req, res) => {
         const org = await Organization.findByIdAndUpdate(
             orgId,
             { $set: updateSet },
-            { new: true }
+            { returnDocument: 'after' }
         );
 
         if (!org) return res.status(404).json({ success: false, error: "Organization not found" });
@@ -637,7 +637,7 @@ export const removeGrantedCredits = async (req, res) => {
                 "ai_tokens.promotion_credits_balance": -(txn.credits_added || 0),
                 "ai_tokens.total_promotion_credits_granted": -(txn.credits_added || 0)
             }
-        }, { new: true });
+        }, { returnDocument: 'after' });
 
         await AiCreditTransaction.create({
             userId: user._id,
@@ -797,7 +797,7 @@ export const extendGrantedCredits = async (req, res) => {
 
         const user = await User.findByIdAndUpdate(userId, {
             $set: { "ai_tokens.promotion_credits_end_date": new Date(endDate) }
-        }, { new: true });
+        }, { returnDocument: 'after' });
 
         const AiCreditTransaction = (await import("../../models/AiCreditTransaction.js")).default;
         const txn = await AiCreditTransaction.findOneAndUpdate(

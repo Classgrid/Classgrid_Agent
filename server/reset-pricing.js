@@ -18,7 +18,7 @@ async function resetPricing() {
                     image_generation_token_cost: 0
                 }
             },
-            { new: true, upsert: true }
+            { returnDocument: 'after', upsert: true }
         );
 
         console.log("✅ Reset global AI pricing to 0:");

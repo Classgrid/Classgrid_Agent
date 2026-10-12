@@ -625,7 +625,7 @@ async function authorizePendingRequest(req, res, body) {
     const pending = await OAuthAuthRequest.findOneAndUpdate(
         { requestIdHash: hashSecret(body.request_id), consumedAt: null, expiresAt: { $gt: new Date() } },
         { $set: { consumedAt: new Date() } },
-        { new: true }
+        { returnDocument: 'after' }
     );
     if (!pending) {
         return res.status(400).json({ error: "invalid_request", error_description: "This sign-in link has expired or was already used. Start again from the app." });

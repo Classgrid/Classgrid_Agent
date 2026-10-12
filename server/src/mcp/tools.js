@@ -1343,7 +1343,7 @@ export const handleToolCall = async (name, args, context = {}) => {
         const updated = await AiSkill.findOneAndUpdate(
           { _id: args.skill_id, userId: user._id, is_default: false },
           { $set: { name: args.name, instructions: args.instructions } },
-          { new: true }
+          { returnDocument: 'after' }
         );
         if (!updated) return { content: [{ type: 'text', text: 'Error: Skill not found or access denied.' }] };
 
@@ -2365,7 +2365,7 @@ export const handleToolCall = async (name, args, context = {}) => {
           const draft = await MessageDraft.findOneAndUpdate(
             { ticketId: targetId },
             { draftContent: args.draftContent, source: 'ai_generated' },
-            { upsert: true, new: true }
+            { upsert: true, returnDocument: 'after' }
           ).lean();
           return { content: [{ type: 'text', text: 'Draft saved successfully.' }] };
         }
@@ -3266,22 +3266,22 @@ export const handleToolCall = async (name, args, context = {}) => {
         }
 
         if (name === 'assign_lead') {
-          const lead = await DemoRequest.findByIdAndUpdate(args.leadId, { assignedTo: args.assignedTo, assignedAt: new Date() }, { new: true });
+          const lead = await DemoRequest.findByIdAndUpdate(args.leadId, { assignedTo: args.assignedTo, assignedAt: new Date() }, { returnDocument: 'after' });
           return { content: [{ type: 'text', text: `Lead assigned successfully.` }] };
         }
 
         if (name === 'update_lead_info') {
-          const lead = await DemoRequest.findByIdAndUpdate(args.leadId, { $set: args.updates }, { new: true });
+          const lead = await DemoRequest.findByIdAndUpdate(args.leadId, { $set: args.updates }, { returnDocument: 'after' });
           return { content: [{ type: 'text', text: `Lead info updated successfully.` }] };
         }
 
         if (name === 'update_lead_meeting_notes') {
-          const lead = await DemoRequest.findByIdAndUpdate(args.leadId, { meetingNotes: args.meetingNotes }, { new: true });
+          const lead = await DemoRequest.findByIdAndUpdate(args.leadId, { meetingNotes: args.meetingNotes }, { returnDocument: 'after' });
           return { content: [{ type: 'text', text: `Meeting notes updated.` }] };
         }
 
         if (name === 'request_lead_vetting_approval') {
-          const lead = await DemoRequest.findByIdAndUpdate(args.leadId, { isOrganizationVetted: args.isOrganizationVetted }, { new: true });
+          const lead = await DemoRequest.findByIdAndUpdate(args.leadId, { isOrganizationVetted: args.isOrganizationVetted }, { returnDocument: 'after' });
           return { content: [{ type: 'text', text: `Lead vetting status updated to ${args.isOrganizationVetted}.` }] };
         }
 

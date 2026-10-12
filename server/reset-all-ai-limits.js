@@ -22,7 +22,7 @@ async function resetAllLimits() {
                     global_whatsapp_scheduling_limit: 0
                 }
             },
-            { new: true, upsert: true }
+            { returnDocument: 'after', upsert: true }
         );
 
         console.log("✅ Reset global AI fallback limits to 0:");

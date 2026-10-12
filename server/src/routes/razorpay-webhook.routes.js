@@ -514,7 +514,7 @@ router.post("/razorpay", express.raw({ type: "application/json" }), async (req, 
                     await User.findByIdAndUpdate(userId, updateOps);
 
                     const PaymentOrder = (await import("../models/PaymentOrder.js")).default;
-                    const pOrder = await PaymentOrder.findOneAndUpdate({ providerOrderId: orderId }, { status: "PAID" }, { new: true });
+                    const pOrder = await PaymentOrder.findOneAndUpdate({ providerOrderId: orderId }, { status: "PAID" }, { returnDocument: 'after' });
 
                     // Format payment method string properly
                     let methodStr = paymentEntity.method || "";

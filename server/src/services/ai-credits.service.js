@@ -284,7 +284,7 @@ export const deductTokens = async (userId, orgId, tokenAmount, source) => {
                     "ai_tokens.ai_credits_balance": -actualDeduction,
                     "ai_tokens.total_ai_tokens_used": actualDeduction
                 }
-            }, { new: true });
+            }, { returnDocument: 'after' });
             result = { success: true, remaining: Math.max(0, updatedUser.ai_tokens.ai_credits_balance), limit: updatedUser.ai_tokens.ai_credits_balance + actualDeduction, type: "personal" };
             triggerEmailAlerts(userId, orgId, "personal", currentBalance, result.remaining, user?.ai_tokens?.total_ai_credits_purchased || currentBalance);
 
@@ -301,7 +301,7 @@ export const deductTokens = async (userId, orgId, tokenAmount, source) => {
                     "ai_tokens.promotion_credits_balance": -actualDeduction,
                     "ai_tokens.total_ai_tokens_used": actualDeduction
                 }
-            }, { new: true });
+            }, { returnDocument: 'after' });
             result = { success: true, remaining: Math.max(0, updatedUser.ai_tokens.promotion_credits_balance), limit: updatedUser.ai_tokens.promotion_credits_balance + actualDeduction, type: "promotion" };
             triggerEmailAlerts(userId, orgId, "promotion", currentBalance, result.remaining, user?.ai_tokens?.total_promotion_credits_granted || currentBalance);
 
@@ -322,7 +322,7 @@ export const deductTokens = async (userId, orgId, tokenAmount, source) => {
                         "ai_tokens.used_this_week": actualDeduction,
                         "ai_tokens.total_ai_tokens_used": actualDeduction
                     }
-                }, { new: true });
+                }, { returnDocument: 'after' });
                 result = { success: true, remaining: Math.max(0, weeklyLimit - updatedUser.ai_tokens.used_this_week), limit: weeklyLimit, type: "free" };
                 triggerEmailAlerts(userId, orgId, "free", headroom, result.remaining, weeklyLimit);
             } else {
@@ -359,7 +359,7 @@ export const deductTokens = async (userId, orgId, tokenAmount, source) => {
                     "ai_config.pro_used_this_period": actualDeduction,
                     "ai_config.total_ai_tokens_used": actualDeduction
                 }
-            }, { new: true });
+            }, { returnDocument: 'after' });
             await User.findByIdAndUpdate(userId, {
                 $inc: { "ai_tokens.total_ai_tokens_used": actualDeduction }
             });
@@ -387,7 +387,7 @@ export const addCredits = async (userId, amountToAdd) => {
     try {
         const user = await User.findByIdAndUpdate(userId, {
             $inc: { "ai_tokens.ai_credits_balance": amountToAdd }
-        }, { new: true });
+        }, { returnDocument: 'after' });
         
         import("../services/socket.service.js").then(({ getIO }) => {
             const io = getIO();

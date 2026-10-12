@@ -5587,7 +5587,7 @@ export const updateSkill = async (req, res) => {
         const skill = await AiSkill.findOneAndUpdate(
             { _id: req.params.id, userId: req.user.id, is_default: false },
             { $set: { name, instructions } },
-            { new: true }
+            { returnDocument: 'after' }
         );
         
         if (!skill) return res.status(404).json({ error: "Skill not found or access denied" });
@@ -5631,7 +5631,7 @@ export const updatePreferences = async (req, res) => {
                     "ai_preferences.activeDefaults": activeDefaults || []
                 } 
             },
-            { new: true }
+            { returnDocument: 'after' }
         ).select("ai_preferences").lean();
 
         res.json({ success: true, preferences: updatedUser.ai_preferences });
