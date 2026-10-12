@@ -78,6 +78,7 @@ export async function saveMessage(sessionId, role, content, fileUrls = []) {
 // The summary starts with this header, so the chat knows how many messages it covers and sends the model
 // every message after that point (no gap between the summary and the recent messages).
 const MEMORY_HEADER = /^\[Summary of messages 1-(\d+)\]\n/;
+// Every 8 messages DeepSeek V4 Flash rewrites one summary of the whole chat (User facts + Task state).
 const MEMORY_EVERY = 8;
 const MEMORY_MESSAGE_CHARS = 3000;
 const MEMORY_FLASH_MODEL = "@cf/deepseek-ai/deepseek-v4-flash-0731";
