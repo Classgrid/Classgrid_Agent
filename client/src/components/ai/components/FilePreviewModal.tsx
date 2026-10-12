@@ -8,7 +8,7 @@
  */
 
 
-import React, { useEffect, useCallback, useState } from "react";
+import React, { useEffect, useCallback, useRef, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   X,
@@ -125,18 +125,32 @@ export default function FilePreviewModal({ file, onClose, onDelete }: FilePrevie
   // Reset zoom/rotation when file changes
   useEffect(() => { setZoom(1); setRotation(0); }, [file]);
 
-  // Keyboard handlers
+  const previewRef = useRef<HTMLDivElement | null>(null);
+
+  // Keyboard handlers (captured on window: Escape closes only this preview, not a dialog it was opened from)
   const handleKey = useCallback((e: KeyboardEvent) => {
-    if (e.key === "Escape") onClose();
+    if (e.key === "Escape") { e.stopPropagation(); onClose(); }
     if (e.key === "+" || e.key === "=") setZoom(z => Math.min(z + 0.25, 3));
     if (e.key === "-") setZoom(z => Math.max(z - 0.25, 0.25));
   }, [onClose]);
 
   useEffect(() => {
     if (!file) return;
-    window.addEventListener("keydown", handleKey);
-    return () => window.removeEventListener("keydown", handleKey);
+    window.addEventListener("keydown", handleKey, true);
+    return () => window.removeEventListener("keydown", handleKey, true);
   }, [file, handleKey]);
+
+  // Presses inside the preview never count as "outside" clicks for a dialog underneath (e.g. Leave feedback),
+  // which would otherwise close and lose what was typed. Clicks still reach the preview as usual.
+  useEffect(() => {
+    if (!file) return;
+    const keepInsidePreview = (e: Event) => {
+      if (previewRef.current && e.target instanceof Node && previewRef.current.contains(e.target)) e.stopPropagation();
+    };
+    const types = ["pointerdown", "mousedown", "touchstart"] as const;
+    types.forEach((t) => window.addEventListener(t, keepInsidePreview, true));
+    return () => types.forEach((t) => window.removeEventListener(t, keepInsidePreview, true));
+  }, [file]);
 
   const handleDownload = () => {
     if (!srcUrl && !file) return;
@@ -152,11 +166,12 @@ export default function FilePreviewModal({ file, onClose, onDelete }: FilePrevie
     <AnimatePresence>
       <motion.div
         key="file-preview-backdrop"
+        ref={previewRef}
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
         exit={{ opacity: 0 }}
         transition={{ duration: 0.15 }}
-        className="fixed inset-0 z-[200] flex flex-col bg-white/95 dark:bg-black backdrop-blur-md"
+        className="fixed inset-0 z-[10050] flex flex-col bg-white/95 dark:bg-black backdrop-blur-md"
         onClick={onClose}
       >
         {/* ── Header bar ── */}
