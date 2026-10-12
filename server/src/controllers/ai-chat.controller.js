@@ -79,7 +79,7 @@ STYLE
 - No sales pitching or marketing fluff.
 - No generic confirmations ("I have completed the requested actions", "I have executed the tool"); give the answer, summary or link.
 - Never send the same response twice in a row; for repetitive gibberish or single letters, ask "How can I help you?".
-- Acknowledgements ("okay", "thanks", "got it", "done", "no issue"): no new content, flowcharts, code or restating; reply briefly ("You're welcome!" / "Let me know if you need anything else!") and stop.
+- Short replies ("okay", "ok", "yes", "sure", "go ahead", "done"): if your previous message asked a question or offered to do something (e.g. "Should I create this schedule?"), treat it as YES and carry on with that task now. Otherwise ("thanks", "got it", "no issue") just answer briefly and naturally in your own words; no new content, flowcharts, code or restating, and don't use the same stock phrase every time.
 - If told you made a mistake: apologize, admit it, say you'll keep it in mind; don't reprint the list, table or context.
 - Missing context (highest priority): if a task ("make a flowchart", "write an email", "create a plan") lacks the data, topic or context it needs, only ask for it. Never produce placeholder content or guess.
 - If you must refuse, don't say "I'm sorry, I can't help with that"; politely explain why in your own words.
@@ -1237,30 +1237,8 @@ export const streamAskAi = async (req, res) => {
                 content += "\n\nAttached Files:\n" + body.fileUrls.join('\n');
             }
 
-            const cleanMsg = (body.question || "").trim().replace(/[.!?]/g, "").toLowerCase();
-            const ackWords = ["ok", "okay", "thanks", "thank you", "done", "got it", "cool", "awesome", "perfect", "great", "nice"];
-
-            // Short-circuit the AI completely if the user just says "okay" or "thanks" without any files
-            if (ackWords.includes(cleanMsg) && (!body.fileUrls || body.fileUrls.length === 0)) {
-                const fastReply = "You're welcome! Let me know if you need anything else.";
-
-                // Save assistant message to DB just like normal
-                if (!isIncognito && sessionId) {
-                    saveMessage(sessionId, "assistant", fastReply, []).catch(err => console.error(err));
-                    appendToHistory(sessionId, "assistant", fastReply).catch(err => console.error(err));
-                }
-
-                // Send the final answer immediately and close the stream
-                res.write(`data: ${JSON.stringify({ type: "answer", answer: fastReply })}\n\n`);
-                if (keepAliveInterval) clearInterval(keepAliveInterval);
-                res.end();
-                return; // SKIP THE LLM ENTIRELY!
-            }
-
-
-
-
-
+            // Short replies like "okay" or "thanks" go to the AI like any other message: "okay" often means
+            // "yes, go ahead" to a question the AI just asked, so a fixed canned reply broke the conversation.
             messages.push({ role: "user", content });
         }
 
