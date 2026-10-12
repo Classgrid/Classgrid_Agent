@@ -30,6 +30,9 @@ export interface SetupUsageCreditsProps {
 
 export function SetupUsageCredits({ orgId, orgName, currentPoolLimit, currentUserWeeklyLimit, currentImageLimit, currentWhatsappLimit, customLimitsEnabled }: SetupUsageCreditsProps) {
   const isClassgrid = orgId === "classgrid";
+  // chat.classgrid.in's public chat organization: its users are never org admins, so the shared org pool
+  // (used only by org_admin accounts) never applies there and is hidden
+  const isPublicChatOrg = orgId === "6ac4b95e0f8a97f45e98b0ff";
   const [isCustomLimits, setIsCustomLimits] = useState(customLimitsEnabled ?? false);
   // State for Pools
   const [individualUsage, setIndividualUsage] = useState(currentUserWeeklyLimit ?? 0);
@@ -113,7 +116,7 @@ export function SetupUsageCredits({ orgId, orgName, currentPoolLimit, currentUse
         </div>
 
         <div className="p-0 flex flex-col h-full">
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-px bg-border border-b border-border flex-1">
+          <div className={`grid grid-cols-1 ${isPublicChatOrg ? "" : "md:grid-cols-2"} gap-px bg-border border-b border-border flex-1`}>
             {/* Individual Usage */}
             <Dialog open={openIndividual} onOpenChange={setOpenIndividual}>
               <DialogTrigger asChild>
@@ -147,7 +150,8 @@ export function SetupUsageCredits({ orgId, orgName, currentPoolLimit, currentUse
               </DialogContent>
             </Dialog>
 
-            {/* Organization Pool */}
+            {/* Organization Pool (not for the public chat organization) */}
+            {!isPublicChatOrg && (
             <Dialog open={openOrg} onOpenChange={setOpenOrg}>
               <DialogTrigger asChild>
                 <button disabled={!isCustomLimits} className={`bg-card p-5 flex flex-col gap-2 text-left transition-colors ${!isCustomLimits ? "opacity-50 cursor-not-allowed" : "hover:bg-muted/30"}`}>
@@ -179,6 +183,7 @@ export function SetupUsageCredits({ orgId, orgName, currentPoolLimit, currentUse
                 </DialogFooter>
               </DialogContent>
             </Dialog>
+            )}
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-px bg-border flex-1">

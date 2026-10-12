@@ -5130,6 +5130,13 @@ export const generateImage = async (req, res) => {
             const imageGlobalConfig = await GlobalAiConfig.findOne({ key: 'singleton' }).lean();
             const imageLimit = resolveFeatureLimit('image', imageOrg, imageGlobalConfig, imageOrgId);
 
+            // Weekly reset, same rule as the chat's token check (hasEnoughTokens): once week_reset_date has passed, the
+            // week's token and image counts start again. Done here too so @Create image alone also gets its reset.
+            await User.collection.updateOne(
+                { _id: authUserForImage._id, $or: [{ "ai_tokens.week_reset_date": { $exists: false } }, { "ai_tokens.week_reset_date": null }, { "ai_tokens.week_reset_date": { $lte: new Date() } }] },
+                { $set: { "ai_tokens.used_this_week": 0, "ai_tokens.week_reset_date": new Date(Date.now() + 7 * 24 * 60 * 60 * 1000), ai_image_free_weekly_used: 0 } }
+            );
+
             // Take one image slot BEFORE generating, in a single atomic step ("add 1 only while used < limit").
             // Checking first and counting after the 10-20s generation let parallel requests (several @Create image
             // at once, or the AI making many images in one reply) all pass the check, and the later read-then-save
