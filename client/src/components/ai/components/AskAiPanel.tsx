@@ -3495,10 +3495,21 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
 
         if (!res.ok) {
           let errorMsg = "Failed to generate image";
+          let limitReached = false;
           try {
             const errData = await res.json();
             if (errData.error) errorMsg = errData.error;
+            limitReached = errData.code === "IMAGE_LIMIT_REACHED";
           } catch (e) { }
+          if (limitReached) {
+            // Weekly image limit used up: say so plainly instead of showing a failed-image card
+            setMessages(prev => {
+              const lastMsg = prev[prev.length - 1];
+              if (!lastMsg || lastMsg.role !== "assistant") return prev;
+              return [...prev.slice(0, -1), { ...lastMsg, content: errorMsg }];
+            });
+            return;
+          }
           console.error("Backend returned 500 error:", errorMsg);
           throw new Error(errorMsg);
         }

@@ -4,6 +4,7 @@
 // limits on, or the Classgrid limit for users without an org. The super admin dashboard shows this same
 // value, so what the dashboard says is what the chat enforces.
 import redis from "../config/redis.js";
+import { CHAT_PUBLIC_ORG_ID } from "../utils/chat-onboarding.js";
 
 const FIELDS = {
     whatsapp: { global: "global_whatsapp_scheduling_limit", org: "whatsapp_scheduling_limit", classgrid: "classgrid_whatsapp_scheduling_limit", fallback: 10 },
@@ -16,10 +17,14 @@ const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
 export function resolveFeatureLimit(feature, org, globalConfig, orgId = org?._id) {
     const f = FIELDS[feature];
     let limit = isSet(globalConfig?.[f.global]) ? globalConfig[f.global] : f.fallback;
-    if (org) {
-        if (org.ai_config?.custom_limits_enabled && isSet(org.ai_config[f.org])) limit = org.ai_config[f.org];
-    } else if (!orgId && globalConfig?.classgrid_custom_limits_enabled && isSet(globalConfig[f.classgrid])) {
-        limit = globalConfig[f.classgrid];
+    const classgridLimit = globalConfig?.classgrid_custom_limits_enabled && isSet(globalConfig[f.classgrid]) ? globalConfig[f.classgrid] : null;
+    // chat.classgrid.in accounts live in the public chat organization: unless that org has its own custom
+    // limits, the Classgrid limit set by the super admin applies to them too (same as users without an org)
+    const isPublicChatOrg = String(orgId || org?._id || "") === CHAT_PUBLIC_ORG_ID;
+    if (org && org.ai_config?.custom_limits_enabled && isSet(org.ai_config[f.org])) {
+        limit = org.ai_config[f.org];
+    } else if ((!orgId || isPublicChatOrg) && classgridLimit !== null) {
+        limit = classgridLimit;
     }
     return limit;
 }

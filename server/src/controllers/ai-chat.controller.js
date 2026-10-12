@@ -2819,6 +2819,10 @@ If they ask whether their college/school uses Classgrid, say you can't see that 
                                     // so the reply can carry on after the image.
                                     return `[IMAGE_GENERATION_COMPLETE: ${args.prompt} | ${json.imageUrl}]\n\nThe image is ready. In your reply, put the exact [IMAGE_GENERATION_COMPLETE: ...] line above on its own line where the image should appear (copy it unchanged; do NOT use Markdown image syntax like ![alt](url)). Then continue your answer normally: briefly describe the image, offer changes, and finish any other part of the user's request.`;
                                 }
+                                if (json.code === 'IMAGE_LIMIT_REACHED') {
+                                    // The weekly image limit is final: no retries and no other way of making the picture
+                                    return `IMAGE LIMIT REACHED. ${json.error}\n\nDo NOT call generate_image again in this conversation, and do NOT create the image any other way (no code, SVG, canvas, HTML, uploaded files or external image links/websites). Tell the user plainly that their weekly image generation limit is used up (${json.limit} images) and that they can create images again after the weekly reset. You may still help with everything else.`;
+                                }
                                 return `FAILED to generate image: ${json.error || json.message || text}`;
                             } catch (e) {
                                 return `FAILED to generate image: Non-JSON error response from internal server.`;
@@ -5094,6 +5098,8 @@ export const bulkDeleteAgentReviews = async (req, res) => {
 };
 
 export const generateImage = async (req, res) => {
+    // Set once this request has taken one of the user's image slots; given back if the image then fails
+    let imageSlotUserId = null;
     try {
         const { prompt, sessionId, isIncognito } = req.body;
         // isInternalCall (the chat's generate_image tool) only skips saving to a chat session: the chat saves it itself.
@@ -5124,10 +5130,22 @@ export const generateImage = async (req, res) => {
             const imageGlobalConfig = await GlobalAiConfig.findOne({ key: 'singleton' }).lean();
             const imageLimit = resolveFeatureLimit('image', imageOrg, imageGlobalConfig, imageOrgId);
 
-            // Check if user has exceeded their image generation limit
-            if ((authUserForImage.ai_image_free_weekly_used || 0) >= imageLimit) {
-                return res.status(403).json({ error: "Image generation limit reached." });
+            // Take one image slot BEFORE generating, in a single atomic step ("add 1 only while used < limit").
+            // Checking first and counting after the 10-20s generation let parallel requests (several @Create image
+            // at once, or the AI making many images in one reply) all pass the check, and the later read-then-save
+            // +1s overwrote each other, so the limit was never reached.
+            const slot = await User.collection.updateOne(
+                { _id: authUserForImage._id, $expr: { $lt: [{ $ifNull: ["$ai_image_free_weekly_used", 0] }, imageLimit] } },
+                [{ $set: { ai_image_free_weekly_used: { $add: [{ $ifNull: ["$ai_image_free_weekly_used", 0] }, 1] } } }]
+            );
+            if (!slot.modifiedCount) {
+                return res.status(403).json({
+                    code: "IMAGE_LIMIT_REACHED",
+                    limit: imageLimit,
+                    error: `Image generation limit reached: you've used all ${imageLimit} image${imageLimit === 1 ? "" : "s"} for this week. You can create more images after your weekly limit resets.`,
+                });
             }
+            imageSlotUserId = authUserForImage._id;
         }
         // Call Cloudflare Workers AI (Flux-1-Schnell)
         let imageRes;
@@ -5249,17 +5267,18 @@ export const generateImage = async (req, res) => {
             }
         }
 
-        // Count the image on the signed-in user and log it for dashboard analytics (every call, chat tool included).
+        // The image was already counted when its slot was taken above; from here on it is kept even if logging fails
+        imageSlotUserId = null;
+
+        // Log it for dashboard analytics (every call, chat tool included).
         {
             try {
                 const User = (await import('../models/User.js')).default;
                 const AiUsageLog = (await import('../models/AiUsageLog.js')).default;
                 const { getIO } = await import('../services/socket.service.js');
-                
-                const user = await User.findById(req.user._id);
+
+                const user = await User.findById(req.user._id).select('organization_id').lean();
                 if (user) {
-                    user.ai_image_free_weekly_used = (user.ai_image_free_weekly_used || 0) + 1;
-                    await user.save();
                     await AiUsageLog.create({
                         organization_id: user.organization_id || null,
                         userId: user._id,
@@ -5285,6 +5304,15 @@ export const generateImage = async (req, res) => {
         res.json({ imageUrl: r2Url, sessionId: activeSessionId });
     } catch (e) {
         console.error("Error generating image:", e);
+        // No image was made: give the slot back (never below 0)
+        if (imageSlotUserId) {
+            try {
+                const User = (await import('../models/User.js')).default;
+                await User.updateOne({ _id: imageSlotUserId, ai_image_free_weekly_used: { $gt: 0 } }, { $inc: { ai_image_free_weekly_used: -1 } });
+            } catch (refundErr) {
+                console.error("Failed to give back image slot:", refundErr.message);
+            }
+        }
         res.status(500).json({ error: String(e.stack || e.message || e) });
     }
 };
