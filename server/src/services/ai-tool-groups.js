@@ -16,6 +16,7 @@ export const LOAD_TOOLS_NAME = "load_tools";
 export const CORE_TOOL_NAMES = [
     "get_my_profile",
     "recall_session_context",
+    "get_full_chat_memory",
     "open_integration_panel",
     "get_timezone_time",
     "search_web",
