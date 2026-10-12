@@ -1034,23 +1034,8 @@ const preprocessLaTeX = (content: string) => {
     return p1.trim();
   });
 
-  return escapeMoneyDollars(processed);
+  return processed;
 };
-
-// "$850B) and Anthropic ($380B" was read as inline maths between the two $ signs and drawn letter by letter.
-// A $ that is money ($ + number, optional K/M/B/T/million/billion/crore/lakh, then a space, punctuation or the
-// end) becomes \$ so it shows as a plain dollar sign. Maths such as $2^n$, $2x+1$ or $E=mc^2$ doesn't match
-// (the number is followed by ^, a letter or another $), and code blocks / inline code are left as they are.
-// Single, non-nested repeats only (see TAG_OR_CSS_RE below for why).
-const MONEY_DOLLAR_RE = /(^|[\s([{>:;,*_~])\$(?=\d[\d,]*(?:\.\d+)?(?:\s?(?:k|m|b|bn|t|K|M|B|Bn|T|million|billion|trillion|crore|lakh)\b)?(?:$|[\s).,;:!?\]}*_~/-]))/g;
-const CODE_SPANS_RE = /(```[\s\S]*?(?:```|$)|`[^`\n]*`)/g;
-function escapeMoneyDollars(text: string): string {
-  if (!text.includes("$")) return text;
-  return text
-    .split(CODE_SPANS_RE)
-    .map((part, i) => (i % 2 === 1 ? part : part.replace(MONEY_DOLLAR_RE, "$1\\$")))
-    .join("");
-}
 
 // Some models draft whole code blocks (e.g. widget cards) in their thinking. The thinking panel shows one
 // "Drafting code…" line for each such stretch instead of a wall of raw code.
