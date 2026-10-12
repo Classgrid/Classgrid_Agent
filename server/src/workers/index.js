@@ -58,6 +58,7 @@ import { initOrganizationUsageDailyWorker } from './organization-usage-daily.wor
 import { initMonthlyInvoiceWorker } from './monthly-invoice.worker.js';
 import { initBillingExportWorker } from './billing-export.worker.js';
 import { initMarketingEmailWorker } from './marketing-email-blast.worker.js';
+import { initCronLinkJobs } from './cron-links.worker.js';
 
 initCronJobs();
 initAdmissionCronJobs();
@@ -67,6 +68,7 @@ initOrganizationUsageDailyWorker();
 initMonthlyInvoiceWorker();
 initBillingExportWorker();
 initMarketingEmailWorker();
+initCronLinkJobs(); // agent review emails, ticket auto-close, expired messages (were cron-job.org links)
 // import './analytics.worker.js';
 
 console.log('👷 Background Workers Initialized');
