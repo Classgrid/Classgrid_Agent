@@ -108,7 +108,7 @@ function plainMessageText(content) {
 const MEMORY_INSTRUCTIONS = `You keep the long-term memory of one chat between a user and Classgrid AI.
 You get the PREVIOUS MEMORY (may be empty) and the NEW MESSAGES since it was written. Write the updated memory.
 
-Output exactly these two sections, in Markdown, max 350 words in total:
+Output exactly these three sections, in Markdown. "User facts" and "Task state" together: max 350 words. "Topics discussed" has no word limit, because it must keep every message:
 
 ## User facts
 Stable facts about the user: their name, things they asked the AI to remember (favorite things, numbers, names), stated preferences and standing instructions.
@@ -119,12 +119,21 @@ Stable facts about the user: their name, things they asked the AI to remember (f
 What the chat is working on now: the goal, decisions made, files and links created (exact paths/URLs), and what is still pending.
 - Drop finished or outdated items.
 
+## Topics discussed
+A numbered log of EVERY user message, oldest first, from the very first one, with nothing skipped: greetings ("hi", "hello"), thanks, "okay", repeated questions, quiz answers, everything, up to and including the last message. One entry per user message:
+"N. User: <what they asked or said, short> -> AI: <the AI's answer in 1-3 short lines>"
+Example: "3. User: asked which model it is -> AI: said it is Classgrid AI."
+Unlike Task state, finished topics stay here, so the AI can always tell the user everything the chat covered and in what order.
+- Copy every entry from the previous memory exactly as it is (same numbers and wording), then add one entry for each new user message at the end.
+- Never drop, merge or shorten old entries, even when the log gets long.
+- Keep names, numbers, links and file paths in the entries exact.
+
 Rules:
 - Write only what the messages actually say. Never invent facts, instructions or preferences.
 - Something the AI offered or suggested is not a user instruction unless the user agreed to it.
 - Do not record temporary status or guesses (for example "memory is not working yet" or "the agent may have failed").
 - If a section has nothing, write "None yet."
-- Output only the two sections, nothing before or after.`;
+- Output only the three sections, nothing before or after.`;
 
 async function summarizeWithFlash(input) {
     const { streamChat } = await import('./llm-stream.js');
@@ -141,7 +150,7 @@ async function summarizeWithFlash(input) {
             { role: "user", content: input }
         ],
         tools: [],
-        maxTokens: 3000, // Flash reasons first; leave room for the memory after the reasoning
+        maxTokens: 8000, // Flash reasons first; the topic log grows with the chat, so leave room for the full memory
         maxToolDepth: 0,
         timeoutMs: 90000
     });
