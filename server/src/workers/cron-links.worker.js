@@ -9,6 +9,13 @@ import nodeCron from "node-cron";
 import redis from "../config/redis.js";
 
 const JOBS = [
+    // Scheduled messages in Grids (group and direct chats). chat-scheduler.worker.js was never started, so these
+    // only went out when cron-job.org opened the link.
+    { name: "grid-scheduled-messages", schedule: "* * * * *", path: "/api/cron/process-scheduled-messages", lockSeconds: 55 },
+    // Unpin Grid messages whose pin time has run out
+    { name: "grid-unpin-expired", schedule: "*/5 * * * *", path: "/api/threads/cron/unpin-expired", lockSeconds: 240 },
+    // Groups with auto-add / admin roles: add new role holders, remove ones who lost the role, promote/demote admins
+    { name: "grid-sync-group-members", schedule: "0 3 * * *", path: "/api/cron/sync-group-members", lockSeconds: 3600 },
     // Agent review emails
     { name: "agent-reviews", schedule: "*/5 * * * *", path: "/api/ai/cron-process-reviews", lockSeconds: 240 },
     // Close support tickets that have gone quiet
