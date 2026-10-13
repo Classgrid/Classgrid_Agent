@@ -12,6 +12,7 @@ import Organization from "../models/Organization.js";
 
 import GlobalAiConfig from "../models/GlobalAiConfig.js";
 import { enqueueEmail } from "./email-queue.service.js";
+import { resetPeriodMs } from "./ai-feature-limits.js";
 import { getGrantedCreditsLowEmailHtml, getTopUpCreditsLowEmailHtml, getFreeLimitsExhaustedEmailHtml, getGrantedCreditsExhaustedEmailHtml, getTopUpCreditsExhaustedEmailHtml } from "./email-templates.service.js";
 
 
@@ -65,7 +66,7 @@ export const hasEnoughTokens = async (userId, orgId, requiredTokens = 1, { paidO
     }
 
     // FETCH GLOBAL CONFIG
-    const globalConfig = await GlobalAiConfig.findOne({ key: "singleton" }).select("global_user_weekly_limit global_ai_blocked classgrid_custom_limits_enabled classgrid_user_weekly_limit").lean() || {};
+    const globalConfig = await GlobalAiConfig.findOne({ key: "singleton" }).select("global_user_weekly_limit global_ai_blocked classgrid_custom_limits_enabled classgrid_user_weekly_limit global_token_reset_value global_token_reset_unit classgrid_token_reset_value classgrid_token_reset_unit global_image_reset_value global_image_reset_unit classgrid_image_reset_value classgrid_image_reset_unit").lean() || {};
     if (globalConfig.global_ai_blocked) {
         return { allowed: false, reason: "AI access is globally blocked by administrators." };
     }
@@ -107,20 +108,27 @@ export const hasEnoughTokens = async (userId, orgId, requiredTokens = 1, { paidO
     // 2. Check free weekly limit FIRST (Always use free before touching paid/promo)
     let usedThisWeek = user.ai_tokens?.used_this_week || 0;
     let weekResetDate = user.ai_tokens?.week_reset_date ? new Date(user.ai_tokens.week_reset_date).getTime() : 0;
-    
+
     // Auto-Reset logic if 7 days have passed
-    if (Date.now() >= weekResetDate) {
+    const tokenPeriodMs = resetPeriodMs("tokens", org, globalConfig, orgId);
+    const nowMs = Date.now();
+    if (nowMs >= weekResetDate) {
         usedThisWeek = 0;
-        const newResetDate = new Date();
-        newResetDate.setDate(newResetDate.getDate() + 7);
+        const newResetDate = new Date(nowMs + tokenPeriodMs);
         // Async update DB but don't block the chat flow
         User.findByIdAndUpdate(userId, { 
             $set: { 
                 "ai_tokens.used_this_week": 0,
-                "ai_tokens.week_reset_date": newResetDate,
-                "ai_image_free_weekly_used": 0
+                "ai_tokens.week_reset_date": newResetDate
             }
         }).catch(e => console.error("Auto-reset error:", e));
+        User.updateOne(
+            { _id: userId, ai_image_reset_date: null },
+            { $set: { ai_image_free_weekly_used: 0, ai_image_reset_date: new Date(nowMs + resetPeriodMs("image", org, globalConfig, orgId)) } }
+        ).catch(e => console.error("Image auto-reset error:", e));
+    } else if (weekResetDate - nowMs > tokenPeriodMs) {
+        User.updateOne({ _id: userId }, { $set: { "ai_tokens.week_reset_date": new Date(nowMs + tokenPeriodMs) } })
+            .catch(e => console.error("Reset date update error:", e));
     }
 
     if (usedThisWeek + requiredTokens <= weeklyLimit) {

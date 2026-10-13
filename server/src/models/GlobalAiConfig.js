@@ -39,6 +39,18 @@ const globalAiConfigSchema = new mongoose.Schema(
         classgrid_user_weekly_limit: { type: Number },
         classgrid_image_weekly_limit: { type: Number },
         classgrid_whatsapp_scheduling_limit: { type: Number },
+        global_token_reset_value: { type: Number },
+        global_token_reset_unit: { type: String },
+        global_image_reset_value: { type: Number },
+        global_image_reset_unit: { type: String },
+        global_whatsapp_reset_value: { type: Number },
+        global_whatsapp_reset_unit: { type: String },
+        classgrid_token_reset_value: { type: Number },
+        classgrid_token_reset_unit: { type: String },
+        classgrid_image_reset_value: { type: Number },
+        classgrid_image_reset_unit: { type: String },
+        classgrid_whatsapp_reset_value: { type: Number },
+        classgrid_whatsapp_reset_unit: { type: String },
         // --- Pricing & Cost Config ---
         credits_per_inr: { 
             type: Number,

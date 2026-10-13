@@ -2980,7 +2980,7 @@ If they ask whether their college/school uses Classgrid, say you can't see that 
                             const { checkWhatsappLimit, recordDirectWhatsappSend, normalizeWhatsappNumber } = await import('../services/ai-feature-limits.js');
                             const waLimit = await checkWhatsappLimit(req.user);
                             if (!waLimit.allowed) {
-                                return `FAILED: This user has used ${waLimit.used} of ${waLimit.limit} WhatsApp messages allowed in the last 7 days (the limit is set by Classgrid admins). No message was sent. Tell the user exactly this; do not guess other reasons.`;
+                                return `FAILED: This user has used ${waLimit.used} of ${waLimit.limit} WhatsApp messages allowed in the last ${waLimit.periodText || "7 days"} (the limit is set by Classgrid admins). No message was sent.${waLimit.resetText ? ` Reset time: ${waLimit.resetText}.` : ""} Tell the user exactly this; do not guess other reasons.`;
                             }
                             const recipient = normalizeWhatsappNumber(toPhoneNumber);
                             if (recipient.length < 11 || recipient.length > 15) {
@@ -5117,18 +5117,43 @@ export const generateImage = async (req, res) => {
             }
 
             // Same rule as the super admin dashboard shows (global -> org custom limit -> Classgrid limit for users without an org).
-            const { resolveFeatureLimit } = await import('../services/ai-feature-limits.js');
+            const { resolveFeatureLimit, resolveResetPeriod } = await import('../services/ai-feature-limits.js');
             const imageOrgId = authUserForImage.organization_id || null;
             const imageOrg = imageOrgId ? await Organization.findById(imageOrgId).select('ai_config').lean() : null;
             const imageGlobalConfig = await GlobalAiConfig.findOne({ key: 'singleton' }).lean();
             const imageLimit = resolveFeatureLimit('image', imageOrg, imageGlobalConfig, imageOrgId);
+            const imagePeriod = resolveResetPeriod('image', imageOrg, imageGlobalConfig, imageOrgId);
+            const tokenPeriodMs = resolveResetPeriod('tokens', imageOrg, imageGlobalConfig, imageOrgId).ms;
+            const resetNow = Date.now();
+            const nextImageReset = new Date(resetNow + imagePeriod.ms);
 
             // Weekly reset, same rule as the chat's token check (hasEnoughTokens): once week_reset_date has passed, the
             // week's token and image counts start again. Done here too so @Create image alone also gets its reset.
             await User.collection.updateOne(
-                { _id: authUserForImage._id, $or: [{ "ai_tokens.week_reset_date": { $exists: false } }, { "ai_tokens.week_reset_date": null }, { "ai_tokens.week_reset_date": { $lte: new Date() } }] },
-                { $set: { "ai_tokens.used_this_week": 0, "ai_tokens.week_reset_date": new Date(Date.now() + 7 * 24 * 60 * 60 * 1000), ai_image_free_weekly_used: 0 } }
+                { _id: authUserForImage._id, ai_image_reset_date: null, "ai_tokens.week_reset_date": { $gt: new Date(resetNow) } },
+                [{ $set: { ai_image_reset_date: "$ai_tokens.week_reset_date" } }]
             );
+            await User.collection.updateOne(
+                { _id: authUserForImage._id, $or: [{ ai_image_reset_date: null }, { ai_image_reset_date: { $lte: new Date(resetNow) } }] },
+                { $set: { ai_image_free_weekly_used: 0, ai_image_reset_date: nextImageReset } }
+            );
+            await User.collection.updateOne(
+                { _id: authUserForImage._id, ai_image_reset_date: { $gt: nextImageReset } },
+                { $set: { ai_image_reset_date: nextImageReset } }
+            );
+            await User.collection.updateOne(
+                { _id: authUserForImage._id, $or: [{ "ai_tokens.week_reset_date": { $exists: false } }, { "ai_tokens.week_reset_date": null }, { "ai_tokens.week_reset_date": { $lte: new Date(resetNow) } }] },
+                { $set: { "ai_tokens.used_this_week": 0, "ai_tokens.week_reset_date": new Date(resetNow + tokenPeriodMs) } }
+            );
+            await User.collection.updateOne(
+                { _id: authUserForImage._id, "ai_tokens.week_reset_date": { $gt: new Date(resetNow + tokenPeriodMs) } },
+                { $set: { "ai_tokens.week_reset_date": new Date(resetNow + tokenPeriodMs) } }
+            );
+
+            const tokenCheck = await hasEnoughTokens(authUserForImage._id, imageOrgId, 1);
+            if (!tokenCheck.allowed) {
+                return res.status(429).json({ error: tokenCheck.reason });
+            }
 
             // Take one image slot BEFORE generating, in a single atomic step ("add 1 only while used < limit").
             // Checking first and counting after the 10-20s generation let parallel requests (several @Create image
@@ -5139,10 +5164,14 @@ export const generateImage = async (req, res) => {
                 [{ $set: { ai_image_free_weekly_used: { $add: [{ $ifNull: ["$ai_image_free_weekly_used", 0] }, 1] } } }]
             );
             if (!slot.modifiedCount) {
+                const { formatResetTime } = await import('../services/ai-feature-limits.js');
+                const imageUser = await User.findById(authUserForImage._id).select('ai_image_reset_date').lean();
+                const resetText = formatResetTime(imageUser?.ai_image_reset_date || nextImageReset);
                 return res.status(403).json({
                     code: "IMAGE_LIMIT_REACHED",
                     limit: imageLimit,
-                    error: `Image generation limit reached: you've used all ${imageLimit} image${imageLimit === 1 ? "" : "s"} for this week. You can create more images after your weekly limit resets.`,
+                    resetPeriod: imagePeriod.label,
+                    error: `Image generation limit reached: you've used all ${imageLimit} image${imageLimit === 1 ? "" : "s"} for this period. You can create more images after the limit resets (it resets ${imagePeriod.label}). Reset time: ${resetText}.`,
                 });
             }
             imageSlotUserId = authUserForImage._id;
@@ -5410,6 +5439,15 @@ export const getMyUsage = async (req, res) => {
         if (!userTokens || !userTokens.ai_tokens) {
             return res.json({ type: 'free', used: 0, limit: freeLimit, remaining: freeLimit });
         }
+
+        const { resetPeriodMs } = await import("../services/ai-feature-limits.js");
+        const tokenPeriodMs = resetPeriodMs("tokens", org, globalConfig, userTokens.organization_id || null);
+        const nowMs = Date.now();
+        const savedResetMs = userTokens.ai_tokens.week_reset_date ? new Date(userTokens.ai_tokens.week_reset_date).getTime() : 0;
+        const periodOver = nowMs >= savedResetMs;
+        const shownResetDate = new Date(periodOver ? nowMs + tokenPeriodMs : Math.min(savedResetMs, nowMs + tokenPeriodMs));
+        userTokens.ai_tokens.used_this_week = periodOver ? 0 : (userTokens.ai_tokens.used_this_week || 0);
+        userTokens.ai_tokens.week_reset_date = shownResetDate;
 
         const freeData = {
             used: userTokens.ai_tokens.used_this_week,
