@@ -57,10 +57,10 @@ cron.schedule('* * * * *', async () => {
         let whatsappAllowed = true;
         if (isRepeat && schedule.whatsapp_phone_number && schedule.whatsapp_message && schedule.user_id) {
           try {
-            const { allowed, used, limit } = await checkWhatsappLimit({ _id: schedule.user_id, organization_id: schedule.organization_id });
+            const { allowed, used, limit, periodText = '7 days' } = await checkWhatsappLimit({ _id: schedule.user_id, organization_id: schedule.organization_id });
             if (!allowed) {
               whatsappAllowed = false;
-              await AiSchedule.updateOne({ _id: schedule._id }, { error_message: `WhatsApp skipped: weekly limit reached (${used}/${limit})` });
+              await AiSchedule.updateOne({ _id: schedule._id }, { error_message: `WhatsApp skipped: limit reached (${used}/${limit} in the last ${periodText})` });
             }
           } catch (limitErr) {
             console.warn(`[AiSchedule Worker] WhatsApp limit check failed: ${limitErr.message}`);

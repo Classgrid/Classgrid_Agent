@@ -1,5 +1,14 @@
 // CLASSGRID USES CLOUDFLARE USAGE TO CALCULATE TOKENS, NOT GPT-TOKENIZER (WHICH IS ONLY A FALLBACK)
 import GlobalAiConfig from "../../models/GlobalAiConfig.js";
+import { resolveResetPeriod, parseResetPeriodInput } from "../../services/ai-feature-limits.js";
+
+// The global reset periods in effect (7 days for any not set), shown by the Global AI Fallback Limits panel.
+// orgId "global" (not a real org, not empty) so only the global_* fields are read, never the Classgrid ones.
+const effectiveGlobalPeriods = (config) => ({
+    tokens: resolveResetPeriod("tokens", null, config, "global"),
+    image: resolveResetPeriod("image", null, config, "global"),
+    whatsapp: resolveResetPeriod("whatsapp", null, config, "global"),
+});
 
 // Fetch Global AI Configuration
 export const getGlobalAiConfig = async (req, res) => {
@@ -24,7 +33,8 @@ export const getGlobalAiConfig = async (req, res) => {
             await config.save();
         }
 
-        res.status(200).json({ success: true, config });
+        // config's own global_*_reset_* fields stay as stored; resetPeriods is what applies
+        res.status(200).json({ success: true, config, resetPeriods: effectiveGlobalPeriods(config) });
     } catch (error) {
         console.error("[getGlobalAiConfig] Error:", error);
         res.status(500).json({ success: false, message: "Server error fetching global config." });
@@ -47,6 +57,15 @@ export const updateGlobalAiConfig = async (req, res) => {
             cf_image_cost_per_unit
         } = req.body;
 
+        // Global reset periods (global_token_reset_value + global_token_reset_unit, global_image_reset_*,
+        // global_whatsapp_reset_*): a whole number 1..1000 and second/minute/hour/day/week/month, else 400
+        const resetPeriods = {};
+        for (const feature of ["token", "image", "whatsapp"]) {
+            const { set, error } = parseResetPeriodInput(req.body, `global_${feature}_reset`);
+            if (error) return res.status(400).json({ success: false, message: error, error });
+            if (set) resetPeriods[feature] = set;
+        }
+
         let config = await GlobalAiConfig.findOne({ key: "singleton" });
 
         if (!config) {
@@ -63,6 +82,10 @@ export const updateGlobalAiConfig = async (req, res) => {
         if (cf_input_cost_per_million !== undefined) config.cf_input_cost_per_million = cf_input_cost_per_million;
         if (cf_output_cost_per_million !== undefined) config.cf_output_cost_per_million = cf_output_cost_per_million;
         if (cf_image_cost_per_unit !== undefined) config.cf_image_cost_per_unit = cf_image_cost_per_unit;
+        for (const [feature, p] of Object.entries(resetPeriods)) {
+            config[`global_${feature}_reset_value`] = p.value;
+            config[`global_${feature}_reset_unit`] = p.unit;
+        }
 
         await config.save();
 
@@ -73,7 +96,7 @@ export const updateGlobalAiConfig = async (req, res) => {
             io.emit("ai_token_update");
         }
 
-        res.status(200).json({ success: true, message: "Global AI Limits updated successfully.", config });
+        res.status(200).json({ success: true, message: "Global AI Limits updated successfully.", config, resetPeriods: effectiveGlobalPeriods(config) });
     } catch (error) {
         console.error("[updateGlobalAiConfig] Error:", error);
         res.status(500).json({ success: false, message: "Server error updating global config." });

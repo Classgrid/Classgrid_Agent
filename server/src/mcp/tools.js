@@ -1947,13 +1947,14 @@ export const handleToolCall = async (name, args, context = {}) => {
             dropWhatsapp('the user is not signed in.');
           } else {
             const { checkWhatsappLimit, normalizeWhatsappNumber } = await import('../services/ai-feature-limits.js');
-            const { allowed, limit, used } = await checkWhatsappLimit(user, { includeUpcomingRepeats: rep.repeat !== 'once' });
-            const weekRuns = rep.repeat !== 'once' ? runsWithin(rep, rep.first, 7 * 24 * 60 * 60 * 1000) : 1;
+            const { allowed, limit, used, periodMs, periodText = '7 days' } = await checkWhatsappLimit(user, { includeUpcomingRepeats: rep.repeat !== 'once' });
+            // The WhatsApp limit's reset period (7 days unless the super admin set another)
+            const weekRuns = rep.repeat !== 'once' ? runsWithin(rep, rep.first, periodMs || 7 * 24 * 60 * 60 * 1000) : 1;
             if (!allowed) {
-              dropWhatsapp(`the user has used ${used} of ${limit} WhatsApp messages allowed in the last 7 days (limit set by Classgrid admins).`);
+              dropWhatsapp(`the user has used ${used} of ${limit} WhatsApp messages allowed in the last ${periodText} (limit set by Classgrid admins).`);
             } else if (rep.repeat !== 'once' && used + weekRuns > limit) {
-              // A repeat must fit its first week of WhatsApp messages into what is left of the weekly limit
-              dropWhatsapp(`this repeat would send ${weekRuns} WhatsApp messages in its first 7 days but only ${Math.max(0, limit - used)} of ${limit} weekly WhatsApp messages are left (limit set by Classgrid admins).`);
+              // A repeat must fit its first period of WhatsApp messages into what is left of the limit
+              dropWhatsapp(`this repeat would send ${weekRuns} WhatsApp messages in its first ${periodText} but only ${Math.max(0, limit - used)} of ${limit} WhatsApp messages per ${periodText} are left (limit set by Classgrid admins).`);
             } else {
               args.whatsapp_phone_number = normalizeWhatsappNumber(args.whatsapp_phone_number);
             }

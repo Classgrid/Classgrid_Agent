@@ -4,6 +4,7 @@ import AiCreditTransaction from "../models/AiCreditTransaction.js";
 import GlobalAiConfig from "../models/GlobalAiConfig.js";
 import Organization from "../models/Organization.js";
 import { resolveWeeklyLimit } from "../services/ai-credits.service.js";
+import { resetPeriodMs } from "../services/ai-feature-limits.js";
 
 /**
  * PHASE 13: End User AI Credits Controller
@@ -23,7 +24,7 @@ export const getMyCredits = async (req, res) => {
         // The free weekly limit from the super admin dashboard (same rule the chat uses to check and deduct).
         const orgId = req.user.organization_id || null;
         const org = orgId ? await Organization.findById(orgId).select("ai_config").lean() : null;
-        const limitConfig = await GlobalAiConfig.findOne({ key: "singleton" }).select("global_user_weekly_limit classgrid_custom_limits_enabled classgrid_user_weekly_limit").lean() || {};
+        const limitConfig = await GlobalAiConfig.findOne({ key: "singleton" }).select("global_user_weekly_limit classgrid_custom_limits_enabled classgrid_user_weekly_limit global_token_reset_value global_token_reset_unit classgrid_token_reset_value classgrid_token_reset_unit").lean() || {};
         const freeWeeklyLimit = resolveWeeklyLimit(user, org, limitConfig, orgId);
         // After the weekly reset date the week starts over, even before the next chat message resets the counter.
         const weekOver = tokens.week_reset_date && Date.now() >= new Date(tokens.week_reset_date).getTime();
@@ -35,8 +36,10 @@ export const getMyCredits = async (req, res) => {
 
         // Calculate strict start/end dates for Free
         const now = new Date();
-        const freeEndDate = tokens.week_reset_date ? new Date(tokens.week_reset_date) : new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
-        const freeStartDate = new Date(freeEndDate.getTime() - 7 * 24 * 60 * 60 * 1000);
+        // One token reset period (7 days unless the super admin set another) ends at the reset date
+        const tokenPeriodMs = resetPeriodMs("tokens", org, limitConfig, orgId);
+        const freeEndDate = tokens.week_reset_date ? new Date(tokens.week_reset_date) : new Date(now.getTime() + tokenPeriodMs);
+        const freeStartDate = new Date(freeEndDate.getTime() - tokenPeriodMs);
 
         const pools = [
             {

@@ -16,7 +16,61 @@ import { BlueSlider } from "@/components/marketing_ui/BlueSlider";
 import { toast } from "sonner";
 import { Spinner } from "@/components/marketing_ui/spinner";
 import { Switch } from "@/components/marketing_ui/switch";
-import { useUpdateOrgAiLimits } from "@/features/superadmin/queries/useAiUsage";
+import { useUpdateOrgAiLimits, type ResetPeriod, type ResetUnit } from "@/features/superadmin/queries/useAiUsage";
+
+// "Resets every" choices for the three limits (a month counts as 30 days on the server)
+export const RESET_UNITS: { value: ResetUnit; label: string }[] = [
+  { value: "second", label: "Second" },
+  { value: "minute", label: "Minute" },
+  { value: "hour", label: "Hour" },
+  { value: "day", label: "Day" },
+  { value: "week", label: "Week" },
+  { value: "month", label: "Month" },
+];
+// What applies when nothing is set (today's behaviour)
+export const DEFAULT_RESET_PERIOD: ResetPeriod = { value: 7, unit: "day" };
+
+export const toResetPeriod = (p?: ResetPeriod | null): ResetPeriod => (p?.value && p?.unit ? { value: p.value, unit: p.unit } : DEFAULT_RESET_PERIOD);
+
+/** "Resets every 2 hours" */
+export function formatResetPeriod(p?: ResetPeriod | null) {
+  const { value, unit } = toResetPeriod(p);
+  return `Resets every ${value} ${unit}${value === 1 ? "" : "s"}`;
+}
+
+/** Number (1-1000) + unit select for how often a limit resets */
+export function ResetPeriodInput({ id, value, onChange, disabled }: { id: string; value: ResetPeriod; onChange: (p: ResetPeriod) => void; disabled?: boolean }) {
+  return (
+    <div className="flex flex-col gap-2">
+      <Label htmlFor={`${id}-reset-value`} className="text-sm font-medium">Resets every</Label>
+      <div className="flex gap-2 items-center">
+        <div className="w-24 shrink-0">
+          <Input
+            id={`${id}-reset-value`}
+            type="number"
+            min={1}
+            max={1000}
+            step={1}
+            value={value.value}
+            onChange={(e) => onChange({ ...value, value: Math.max(1, Math.min(1000, Math.floor(Number(e.target.value) || 1))) })}
+            disabled={disabled}
+          />
+        </div>
+        <select
+          aria-label="Reset period unit"
+          value={value.unit}
+          onChange={(e) => onChange({ ...value, unit: e.target.value as ResetUnit })}
+          disabled={disabled}
+          className="h-10 flex-1 rounded-lg border border-input bg-background px-3 text-sm outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          {RESET_UNITS.map((u) => (
+            <option key={u.value} value={u.value}>{u.label}{value.value === 1 ? "" : "s"}</option>
+          ))}
+        </select>
+      </div>
+    </div>
+  );
+}
 
 export interface SetupUsageCreditsProps {
   orgId: string;
@@ -26,9 +80,11 @@ export interface SetupUsageCreditsProps {
   currentImageLimit?: number;
   currentWhatsappLimit?: number;
   customLimitsEnabled?: boolean;
+  // How often each limit resets, as the server applies it (getOrgAiDetail resetPeriods)
+  currentResetPeriods?: { tokens?: ResetPeriod; image?: ResetPeriod; whatsapp?: ResetPeriod };
 }
 
-export function SetupUsageCredits({ orgId, orgName, currentPoolLimit, currentUserWeeklyLimit, currentImageLimit, currentWhatsappLimit, customLimitsEnabled }: SetupUsageCreditsProps) {
+export function SetupUsageCredits({ orgId, orgName, currentPoolLimit, currentUserWeeklyLimit, currentImageLimit, currentWhatsappLimit, customLimitsEnabled, currentResetPeriods }: SetupUsageCreditsProps) {
   const isClassgrid = orgId === "classgrid";
   // chat.classgrid.in's public chat organization: its users are never org admins, so the shared org pool
   // (used only by org_admin accounts) never applies there and is hidden
@@ -42,6 +98,11 @@ export function SetupUsageCredits({ orgId, orgName, currentPoolLimit, currentUse
   const [images, setImages] = useState<number>(currentImageLimit ?? 0);
   const [whatsapp, setWhatsapp] = useState<number>(currentWhatsappLimit ?? 0);
 
+  // Reset periods (number + unit) for the three limits
+  const [tokenReset, setTokenReset] = useState<ResetPeriod>(toResetPeriod(currentResetPeriods?.tokens));
+  const [imageReset, setImageReset] = useState<ResetPeriod>(toResetPeriod(currentResetPeriods?.image));
+  const [whatsappReset, setWhatsappReset] = useState<ResetPeriod>(toResetPeriod(currentResetPeriods?.whatsapp));
+
   // Loading States
   const [openIndividual, setOpenIndividual] = useState(false);
   const [openOrg, setOpenOrg] = useState(false);
@@ -52,6 +113,12 @@ export function SetupUsageCredits({ orgId, orgName, currentPoolLimit, currentUse
   React.useEffect(() => { if (!openOrg) setOrgPool(currentPoolLimit ?? 0); }, [openOrg, currentPoolLimit]);
   React.useEffect(() => { if (!openImages) setImages(currentImageLimit ?? 0); }, [openImages, currentImageLimit]);
   React.useEffect(() => { if (!openWhatsapp) setWhatsapp(currentWhatsappLimit ?? 0); }, [openWhatsapp, currentWhatsappLimit]);
+  const tokenResetKey = `${currentResetPeriods?.tokens?.value}-${currentResetPeriods?.tokens?.unit}`;
+  const imageResetKey = `${currentResetPeriods?.image?.value}-${currentResetPeriods?.image?.unit}`;
+  const whatsappResetKey = `${currentResetPeriods?.whatsapp?.value}-${currentResetPeriods?.whatsapp?.unit}`;
+  React.useEffect(() => { if (!openIndividual) setTokenReset(toResetPeriod(currentResetPeriods?.tokens)); }, [openIndividual, tokenResetKey]);
+  React.useEffect(() => { if (!openImages) setImageReset(toResetPeriod(currentResetPeriods?.image)); }, [openImages, imageResetKey]);
+  React.useEffect(() => { if (!openWhatsapp) setWhatsappReset(toResetPeriod(currentResetPeriods?.whatsapp)); }, [openWhatsapp, whatsappResetKey]);
 
   const updateLimitsMutation = useUpdateOrgAiLimits();
 
@@ -84,7 +151,13 @@ export function SetupUsageCredits({ orgId, orgName, currentPoolLimit, currentUse
          pro_pool_limit: orgPool, 
          free_weekly_limit_per_user: individualUsage,
          image_generation_limit: images,
-         whatsapp_scheduling_limit: whatsapp
+         whatsapp_scheduling_limit: whatsapp,
+         token_reset_value: tokenReset.value,
+         token_reset_unit: tokenReset.unit,
+         image_reset_value: imageReset.value,
+         image_reset_unit: imageReset.unit,
+         whatsapp_reset_value: whatsappReset.value,
+         whatsapp_reset_unit: whatsappReset.unit
       }
     }, {
       onSuccess: () => {
@@ -121,24 +194,26 @@ export function SetupUsageCredits({ orgId, orgName, currentPoolLimit, currentUse
             <Dialog open={openIndividual} onOpenChange={setOpenIndividual}>
               <DialogTrigger asChild>
                 <button disabled={!isCustomLimits} className={`bg-card p-5 flex flex-col gap-2 text-left transition-colors ${!isCustomLimits ? "opacity-50 cursor-not-allowed" : "hover:bg-muted/30"}`}>
-                  <span className="text-sm font-medium text-muted-foreground">Individual Weekly Usage</span>
+                  <span className="text-sm font-medium text-muted-foreground">Individual Usage</span>
                   <span className="text-xl font-bold text-blue-600 dark:text-blue-400">
                     {individualUsage.toLocaleString()} <span className="text-sm font-normal text-muted-foreground ml-1">Tokens</span>
                   </span>
+                  <span className="text-xs text-muted-foreground">{formatResetPeriod(tokenReset)}</span>
                 </button>
               </DialogTrigger>
               <DialogContent className="sm:max-w-sm">
                 <DialogHeader>
                   <DialogTitle>Edit Individual Limit</DialogTitle>
-                  <DialogDescription>Adjust the 7-day token limit for individuals.</DialogDescription>
+                  <DialogDescription>Adjust the token limit for individuals and how often it resets.</DialogDescription>
                 </DialogHeader>
                 <div className="flex flex-col gap-3 py-4">
                   <div className="flex justify-between items-center">
-                    <Label className="text-sm font-semibold">Individual 7-Day Usage</Label>
+                    <Label className="text-sm font-semibold">Individual Usage per Period</Label>
                     <span className="text-sm font-bold text-blue-600">{individualUsage.toLocaleString()}</span>
                   </div>
                   <BlueSlider min={1000} max={100000000} step={1000} value={individualUsage} onValueChange={setIndividualUsage} disabled={updateLimitsMutation.isPending} />
                   <Input type="number" min={1000} max={100000000} value={individualUsage} onChange={(e) => setIndividualUsage(Math.max(1000, Math.min(100000000, Number(e.target.value) || 1000)))} disabled={updateLimitsMutation.isPending} className="mt-1 text-sm" placeholder="Type exact value e.g. 500000" />
+                  <ResetPeriodInput id="individual" value={tokenReset} onChange={setTokenReset} disabled={updateLimitsMutation.isPending} />
                 </div>
                 <DialogFooter>
                   <Button variant="outline" type="button" onClick={() => setOpenIndividual(false)} disabled={updateLimitsMutation.isPending}>Cancel</Button>
@@ -195,6 +270,7 @@ export function SetupUsageCredits({ orgId, orgName, currentPoolLimit, currentUse
                   <span className="text-xl font-bold text-foreground">
                     {images} <span className="text-sm font-normal text-muted-foreground ml-1">Images</span>
                   </span>
+                  <span className="text-xs text-muted-foreground">{formatResetPeriod(imageReset)}</span>
                 </button>
               </DialogTrigger>
               <DialogContent className="sm:max-w-sm">
@@ -213,6 +289,7 @@ export function SetupUsageCredits({ orgId, orgName, currentPoolLimit, currentUse
                     placeholder="e.g. 20" 
                     disabled={updateLimitsMutation.isPending}
                   />
+                  <ResetPeriodInput id="images" value={imageReset} onChange={setImageReset} disabled={updateLimitsMutation.isPending} />
                 </div>
                 <DialogFooter>
                   <Button variant="outline" type="button" onClick={() => setOpenImages(false)} disabled={updateLimitsMutation.isPending}>Cancel</Button>
@@ -232,6 +309,7 @@ export function SetupUsageCredits({ orgId, orgName, currentPoolLimit, currentUse
                   <span className="text-xl font-bold text-foreground">
                     {whatsapp} <span className="text-sm font-normal text-muted-foreground ml-1">Messages</span>
                   </span>
+                  <span className="text-xs text-muted-foreground">{formatResetPeriod(whatsappReset)}</span>
                 </button>
               </DialogTrigger>
               <DialogContent className="sm:max-w-sm">
@@ -250,6 +328,7 @@ export function SetupUsageCredits({ orgId, orgName, currentPoolLimit, currentUse
                     placeholder="e.g. 10" 
                     disabled={updateLimitsMutation.isPending}
                   />
+                  <ResetPeriodInput id="whatsapp" value={whatsappReset} onChange={setWhatsappReset} disabled={updateLimitsMutation.isPending} />
                 </div>
                 <DialogFooter>
                   <Button variant="outline" type="button" onClick={() => setOpenWhatsapp(false)} disabled={updateLimitsMutation.isPending}>Cancel</Button>
