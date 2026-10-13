@@ -2812,8 +2812,8 @@ If they ask whether their college/school uses Classgrid, say you can't see that 
                                     return `[IMAGE_GENERATION_COMPLETE: ${args.prompt} | ${json.imageUrl}]\n\nThe image is ready. In your reply, put the exact [IMAGE_GENERATION_COMPLETE: ...] line above on its own line where the image should appear (copy it unchanged; do NOT use Markdown image syntax like ![alt](url)). Then continue your answer normally: briefly describe the image, offer changes, and finish any other part of the user's request. If you need to look at this image again later (to describe, check or compare it), open its link with analyze_image; never say you can't see it.`;
                                 }
                                 if (json.code === 'IMAGE_LIMIT_REACHED') {
-                                    // The image limit is final until it resets: no retries and no other way of making the picture
-                                    return `IMAGE LIMIT REACHED. ${json.error}\n\nDo NOT call generate_image again in this conversation, and do NOT create the image any other way (no code, SVG, canvas, HTML, uploaded files or external image links/websites). Tell the user plainly that their image generation limit is used up (${json.limit} images) and exactly when it resets, using the reset time given above. You may still help with everything else.`;
+                                    // The weekly image limit is final: no retries and no other way of making the picture
+                                    return `IMAGE LIMIT REACHED. ${json.error}\n\nDo NOT call generate_image again in this conversation, and do NOT create the image any other way (no code, SVG, canvas, HTML, uploaded files or external image links/websites). Tell the user plainly that their weekly image generation limit is used up (${json.limit} images) and that they can create images again after the weekly reset. You may still help with everything else.`;
                                 }
                                 return `FAILED to generate image: ${json.error || json.message || text}`;
                             } catch (e) {
@@ -2980,7 +2980,7 @@ If they ask whether their college/school uses Classgrid, say you can't see that 
                             const { checkWhatsappLimit, recordDirectWhatsappSend, normalizeWhatsappNumber } = await import('../services/ai-feature-limits.js');
                             const waLimit = await checkWhatsappLimit(req.user);
                             if (!waLimit.allowed) {
-                                return `FAILED: This user has used ${waLimit.used} of ${waLimit.limit} WhatsApp messages allowed in the last ${waLimit.periodText || "7 days"} (the limit is set by Classgrid admins). No message was sent.${waLimit.resetText ? ` The next WhatsApp message can be sent ${waLimit.resetText}.` : ""} Tell the user exactly this; do not guess other reasons.`;
+                                return `FAILED: This user has used ${waLimit.used} of ${waLimit.limit} WhatsApp messages allowed in the last ${waLimit.periodText || "7 days"} (the limit is set by Classgrid admins). No message was sent.${waLimit.resetText ? ` Reset time: ${waLimit.resetText}.` : ""} Tell the user exactly this; do not guess other reasons.`;
                             }
                             const recipient = normalizeWhatsappNumber(toPhoneNumber);
                             if (recipient.length < 11 || recipient.length > 15) {
@@ -5150,7 +5150,6 @@ export const generateImage = async (req, res) => {
                 { _id: authUserForImage._id, $or: [{ "ai_tokens.week_reset_date": { $exists: false } }, { "ai_tokens.week_reset_date": null }, { "ai_tokens.week_reset_date": { $lte: new Date(resetNow) } }] },
                 { $set: { "ai_tokens.used_this_week": 0, "ai_tokens.week_reset_date": new Date(resetNow + tokenPeriodMs) } }
             );
-            // Token period shortened by the super admin: bring the token reset date in too (usage so far is kept)
             await User.collection.updateOne(
                 { _id: authUserForImage._id, "ai_tokens.week_reset_date": { $gt: new Date(resetNow + tokenPeriodMs) } },
                 { $set: { "ai_tokens.week_reset_date": new Date(resetNow + tokenPeriodMs) } }
@@ -5165,7 +5164,6 @@ export const generateImage = async (req, res) => {
                 [{ $set: { ai_image_free_weekly_used: { $add: [{ $ifNull: ["$ai_image_free_weekly_used", 0] }, 1] } } }]
             );
             if (!slot.modifiedCount) {
-                // The exact time the image count starts again, so the AI / chat can tell the user
                 const { formatResetTime } = await import('../services/ai-feature-limits.js');
                 const imageUser = await User.findById(authUserForImage._id).select('ai_image_reset_date').lean();
                 const resetText = formatResetTime(imageUser?.ai_image_reset_date || nextImageReset);
@@ -5173,7 +5171,7 @@ export const generateImage = async (req, res) => {
                     code: "IMAGE_LIMIT_REACHED",
                     limit: imageLimit,
                     resetPeriod: imagePeriod.label,
-                    error: `Image generation limit reached: you've used all ${imageLimit} image${imageLimit === 1 ? "" : "s"} for this period. You can create more images after the limit resets ${resetText} (it resets ${imagePeriod.label}).`,
+                    error: `Image generation limit reached: you've used all ${imageLimit} image${imageLimit === 1 ? "" : "s"} for this period. You can create more images after the limit resets (it resets ${imagePeriod.label}). Reset time: ${resetText}.`,
                 });
             }
             imageSlotUserId = authUserForImage._id;
@@ -5442,9 +5440,6 @@ export const getMyUsage = async (req, res) => {
             return res.json({ type: 'free', used: 0, limit: freeLimit, remaining: freeLimit });
         }
 
-        // The token reset period set by the super admin: a reset date saved under a longer period shows as at most
-        // one period away (the chat's token check moves the saved date the same way), and once it has passed the
-        // usage starts over.
         const { resetPeriodMs } = await import("../services/ai-feature-limits.js");
         const tokenPeriodMs = resetPeriodMs("tokens", org, globalConfig, userTokens.organization_id || null);
         const nowMs = Date.now();
