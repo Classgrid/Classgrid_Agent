@@ -109,6 +109,16 @@ export function formatPeriodLength(period) {
     return parts.join(" ") || `${p.value} ${p.unit}${p.value === 1 ? "" : "s"}`;
 }
 
+/** When a limit starts again, for the AI to tell the user: "in 2 hours 13 minutes (at 9:04 pm IST, 13 Oct)" */
+export function formatResetTime(date) {
+    const at = new Date(date);
+    const msLeft = Math.max(0, at.getTime() - Date.now());
+    const minutes = Math.ceil(msLeft / 60000);
+    const left = minutes < 1 ? "in less than a minute" : `in ${formatPeriodLength({ value: minutes, unit: "minute" })}`;
+    const clock = at.toLocaleString("en-IN", { timeZone: "Asia/Kolkata", hour: "numeric", minute: "2-digit", day: "numeric", month: "short" });
+    return `${left} (at ${clock} IST)`;
+}
+
 /** "every 2 hours", "every 1 day" */
 export function formatResetPeriod(period) {
     return `every ${formatPeriodLength(period)}`;
@@ -188,7 +198,30 @@ export async function checkWhatsappLimit(user, { includeUpcomingRepeats = false 
     } catch (e) { /* Redis down: count only the scheduled ones */ }
 
     const used = scheduled + direct + upcoming;
-    return { allowed: used < limit, limit, used, periodMs, periodText: formatPeriodLength(period) };
+    const allowed = used < limit;
+
+    // Limit reached: the count is over the last period, so a message frees up when the oldest counted one
+    // leaves that window. resetText ("in 2 hours 13 minutes (at 9:04 pm IST, 13 Oct)") is for the AI to tell the user.
+    let resetText = null;
+    if (!allowed) {
+        let oldestMs = Infinity;
+        const oldestScheduled = await AiSchedule.findOne({
+            user_id: user._id,
+            createdAt: { $gte: since },
+            status: { $in: ["pending", "sent"] },
+            repeat: { $nin: ["daily", "weekly", "custom"] },
+            whatsapp_failed: { $ne: true },
+            whatsapp_phone_number: { $exists: true, $ne: "" },
+            whatsapp_message: { $exists: true, $ne: "" },
+        }).sort({ createdAt: 1 }).select("createdAt").lean().catch(() => null);
+        if (oldestScheduled?.createdAt) oldestMs = new Date(oldestScheduled.createdAt).getTime();
+        try {
+            const first = await redis.zrange(directSendKey(user._id), 0, 0, "WITHSCORES");
+            if (first?.length === 2) oldestMs = Math.min(oldestMs, Number(first[1]));
+        } catch (e) { /* Redis down: scheduled ones only */ }
+        resetText = formatResetTime(Number.isFinite(oldestMs) ? oldestMs + periodMs : Date.now() + periodMs);
+    }
+    return { allowed, limit, used, periodMs, periodText: formatPeriodLength(period), resetText };
 }
 
 const messageOwnerKey = (messageId) => `ai:wa-msg:${messageId}`;
