@@ -953,6 +953,20 @@ const VIEW_IMAGE_TOOL = {
     }
 };
 
+// Claude sees images natively, but after the turn an image was generated in, the chat history only holds its
+// link. The last two images generated in this chat are attached to the new message so Claude can look at them
+// itself (describe, check, compare) without a tool. Single, non-nested repeats only.
+const GENERATED_IMAGE_LINK_RE = /\[IMAGE_GENERATION_COMPLETE:[^\]\n]*?[|:]\s*(https:\/\/[^\s\]]+?\.(?:png|jpe?g|webp))\]/gi;
+const MAX_GENERATED_IMAGES_FOR_CLAUDE = 2;
+function recentGeneratedImageAttachments(messages) {
+    const urls = [];
+    for (const m of messages || []) {
+        if (m?.role !== "assistant" || typeof m.content !== "string" || !m.content.includes("IMAGE_GENERATION_COMPLETE")) continue;
+        for (const match of m.content.matchAll(GENERATED_IMAGE_LINK_RE)) urls.push(match[1]);
+    }
+    return [...new Set(urls)].slice(-MAX_GENERATED_IMAGES_FOR_CLAUDE).map((url) => ({ url, name: "Image you generated earlier in this chat" }));
+}
+
 // The model's own name, added at the very end of the system prompt (after the cached part) just before each
 // model call, so "which model are you?" is answered from fact instead of guessed or dug out of server logs.
 // Only staff (database role super_admin / co_super_admin) are told the name; everyone else gets "Classgrid AI".
@@ -2184,7 +2198,7 @@ If they ask whether their college/school uses Classgrid, say you can't see that 
                     type: "function",
                     function: {
                         name: "analyze_image",
-                        description: "Analyzes an image URL (.jpg, .png) using the Cloudflare Vision AI model. NEVER use terminal OCR for images, ALWAYS use this tool. You must pass the image URL and the user's specific question about the image.",
+                        description: "Analyzes an image URL (.jpg, .png) using the Cloudflare Vision AI model. Works on ANY image link, including images YOU generated earlier in this chat (the link in an [IMAGE_GENERATION_COMPLETE: ... | link] line): never tell the user you can't see your own image, open it with this tool instead. NEVER use terminal OCR for images, ALWAYS use this tool. You must pass the image URL and the user's specific question about the image.",
                         parameters: {
                             type: "object",
                             properties: {
@@ -2795,7 +2809,7 @@ If they ask whether their college/school uses Classgrid, say you can't see that 
                                 if (json.imageUrl) {
                                     // The chat shows the image wherever this marker appears and still shows any text around it,
                                     // so the reply can carry on after the image.
-                                    return `[IMAGE_GENERATION_COMPLETE: ${args.prompt} | ${json.imageUrl}]\n\nThe image is ready. In your reply, put the exact [IMAGE_GENERATION_COMPLETE: ...] line above on its own line where the image should appear (copy it unchanged; do NOT use Markdown image syntax like ![alt](url)). Then continue your answer normally: briefly describe the image, offer changes, and finish any other part of the user's request.`;
+                                    return `[IMAGE_GENERATION_COMPLETE: ${args.prompt} | ${json.imageUrl}]\n\nThe image is ready. In your reply, put the exact [IMAGE_GENERATION_COMPLETE: ...] line above on its own line where the image should appear (copy it unchanged; do NOT use Markdown image syntax like ![alt](url)). Then continue your answer normally: briefly describe the image, offer changes, and finish any other part of the user's request. If you need to look at this image again later (to describe, check or compare it), open its link with analyze_image; never say you can't see it.`;
                                 }
                                 if (json.code === 'IMAGE_LIMIT_REACHED') {
                                     // The weekly image limit is final: no retries and no other way of making the picture
@@ -3972,8 +3986,9 @@ If a tool fails, never show the error message; say only: "Something went wrong o
                                 outputBudget: quotaRemaining,
                                 timeoutMs: llmConfig.providers[0].timeoutMs,
                                 systemCacheBoundary,
-                                // Images and PDFs attached to this message are sent to Claude directly (native vision)
-                                attachments: Array.isArray(body.attachments) ? body.attachments : [],
+                                // Images and PDFs attached to this message are sent to Claude directly (native vision),
+                                // plus the last images Claude generated in this chat, so it can look at its own images
+                                attachments: [...(Array.isArray(body.attachments) ? body.attachments : []), ...recentGeneratedImageAttachments(messages)],
                                 signal: streamAbort.signal,
                                 onStatus,
                                 onThought,
