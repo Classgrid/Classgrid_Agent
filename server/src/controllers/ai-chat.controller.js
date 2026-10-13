@@ -2813,7 +2813,7 @@ If they ask whether their college/school uses Classgrid, say you can't see that 
                                 }
                                 if (json.code === 'IMAGE_LIMIT_REACHED') {
                                     // The weekly image limit is final: no retries and no other way of making the picture
-                                    return `IMAGE LIMIT REACHED. ${json.error}\n\nDo NOT call generate_image again in this conversation, and do NOT create the image any other way (no code, SVG, canvas, HTML, uploaded files or external image links/websites). Tell the user plainly that their image generation limit is used up (${json.limit} images) and that they can create images again after the reset. You may still help with everything else.`;
+                                    return `IMAGE LIMIT REACHED. ${json.error}${req.user?.role === "super_admin" ? "" : " (share the reset time only if the user asks)"}\n\nDo NOT call generate_image again in this conversation, and do NOT create the image any other way (no code, SVG, canvas, HTML, uploaded files or external image links/websites). Tell the user plainly that their image generation limit is used up (${json.limit} images) and that they can create images again after the reset. You may still help with everything else.`;
                                 }
                                 return `FAILED to generate image: ${json.error || json.message || text}`;
                             } catch (e) {
@@ -2980,7 +2980,7 @@ If they ask whether their college/school uses Classgrid, say you can't see that 
                             const { checkWhatsappLimit, recordDirectWhatsappSend, normalizeWhatsappNumber, formatResetTime } = await import('../services/ai-feature-limits.js');
                             const waLimit = await checkWhatsappLimit(req.user);
                             if (!waLimit.allowed) {
-                                return `FAILED: This user has used ${waLimit.used} of ${waLimit.limit} WhatsApp messages allowed in the last ${waLimit.periodText || "7 days"} (the limit is set by Classgrid admins). No message was sent.${waLimit.resetText ? ` Reset time: ${waLimit.resetText}.` : ""} Tell the user exactly this; do not guess other reasons.`;
+                                return `FAILED: This user has used ${waLimit.used} of ${waLimit.limit} WhatsApp messages allowed in the last ${waLimit.periodText || "7 days"} (the limit is set by Classgrid admins). No message was sent.${waLimit.resetText ? ` Reset time: ${waLimit.resetText}${req.user?.role === "super_admin" ? "" : " (share only if the user asks)"}.` : ""} Tell the user exactly this; do not guess other reasons.`;
                             }
                             const recipient = normalizeWhatsappNumber(toPhoneNumber);
                             if (recipient.length < 11 || recipient.length > 15) {
@@ -3012,7 +3012,7 @@ If they ask whether their college/school uses Classgrid, say you can't see that 
 
                             const sent = await res.json().catch(() => ({}));
                             await recordDirectWhatsappSend(req.user._id, sent?.messages?.[0]?.id);
-                            return `SUCCESS: WhatsApp message sent to ${recipient} (${waLimit.used + 1} of ${waLimit.limit} used in the last ${waLimit.periodText || "7 days"}). Reset time: ${formatResetTime(waLimit.resetAt || Date.now() + waLimit.periodMs)}. Do not send it again.`;
+                            return `SUCCESS: WhatsApp message sent to ${recipient} (${waLimit.used + 1} of ${waLimit.limit} used in the last ${waLimit.periodText || "7 days"}). Reset time: ${formatResetTime(waLimit.resetAt || Date.now() + waLimit.periodMs)}${req.user?.role === "super_admin" ? "" : " (share only if the user asks)"}. Do not send it again.`;
                         } catch (e) {
                             return `FAILED to send WhatsApp message: ${e.message}`;
                         }

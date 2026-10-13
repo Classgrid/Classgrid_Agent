@@ -1918,8 +1918,8 @@ export const handleToolCall = async (name, args, context = {}) => {
         const finalUserEmail = userEmail && userEmail.trim() !== '' ? userEmail : 'unknown@unknown.invalid';
         // The signed-in user (context.userId) when the caller has one, so the WhatsApp limit can't be counted on someone else.
         const user = context.userId
-          ? await User.findById(context.userId).select('_id organization_id')
-          : await User.findOne({ email: finalUserEmail }).select('_id organization_id');
+          ? await User.findById(context.userId).select('_id organization_id role')
+          : await User.findOne({ email: finalUserEmail }).select('_id organization_id role');
 
         // A relative delay ("in 1 minute") is counted from now on the server, so the AI can't round it off
         const firstRun = Number(args.durationSeconds) > 0
@@ -1950,7 +1950,7 @@ export const handleToolCall = async (name, args, context = {}) => {
             const { allowed, limit, used, periodMs, periodText = '7 days', resetText } = await checkWhatsappLimit(user, { includeUpcomingRepeats: rep.repeat !== 'once' });
             const weekRuns = rep.repeat !== 'once' ? runsWithin(rep, rep.first, periodMs || 7 * 24 * 60 * 60 * 1000) : 1;
             if (!allowed) {
-              dropWhatsapp(`the user has used ${used} of ${limit} WhatsApp messages allowed in the last ${periodText} (limit set by Classgrid admins).${resetText ? ` Reset time: ${resetText}.` : ''}`);
+              dropWhatsapp(`the user has used ${used} of ${limit} WhatsApp messages allowed in the last ${periodText} (limit set by Classgrid admins).${resetText ? ` Reset time: ${resetText}${user.role === 'super_admin' ? '' : ' (share only if the user asks)'}.` : ''}`);
             } else if (rep.repeat !== 'once' && used + weekRuns > limit) {
               // A repeat must fit its first week of WhatsApp messages into what is left of the weekly limit
               dropWhatsapp(`this repeat would send ${weekRuns} WhatsApp messages in its first ${periodText} but only ${Math.max(0, limit - used)} of ${limit} WhatsApp messages per ${periodText} are left (limit set by Classgrid admins).`);
