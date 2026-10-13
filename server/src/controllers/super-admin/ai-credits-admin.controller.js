@@ -5,7 +5,6 @@ import AiCreditTransaction from "../../models/AiCreditTransaction.js";
 import mongoose from "mongoose";
 import AdminSecurityCode from "../../models/AdminSecurityCode.js";
 import { sendEmail } from "../../services/aws-ses.service.js";
-import { parseResetPeriodInput } from "../../services/ai-feature-limits.js";
 import { getAiCreditGrantedHtml, getAiCreditGrantedPlainText, getSuperAdminSecurityOtpHtml, getSuperAdminSecurityOtpPlainText } from "../../services/email-templates.service.js";
 
 /**
@@ -410,21 +409,8 @@ export const updateOrgAiLimits = async (req, res) => {
             custom_limits_enabled
         } = req.body;
 
-        // Reset periods for the three limits (token_reset_value + token_reset_unit, image_reset_*, whatsapp_reset_*),
-        // checked before anything is saved: a whole number 1..1000 and second/minute/hour/day/week/month.
-        const resetPeriods = {};
-        for (const feature of ["token", "image", "whatsapp"]) {
-            const { set, error } = parseResetPeriodInput(req.body, `${feature}_reset`);
-            if (error) return res.status(400).json({ success: false, error });
-            if (set) resetPeriods[feature] = set;
-        }
-
         if (orgId === "classgrid") {
             const globalUpdateSet = {};
-            for (const [feature, p] of Object.entries(resetPeriods)) {
-                globalUpdateSet[`classgrid_${feature}_reset_value`] = p.value;
-                globalUpdateSet[`classgrid_${feature}_reset_unit`] = p.unit;
-            }
             if (pro_pool_limit !== undefined) globalUpdateSet.classgrid_pro_pool_limit = pro_pool_limit;
             if (free_weekly_limit_per_user !== undefined) globalUpdateSet.classgrid_user_weekly_limit = free_weekly_limit_per_user;
             if (image_generation_limit !== undefined) globalUpdateSet.classgrid_image_weekly_limit = image_generation_limit;
@@ -465,10 +451,6 @@ export const updateOrgAiLimits = async (req, res) => {
         if (custom_limits_enabled !== undefined) updateSet["ai_config.custom_limits_enabled"] = custom_limits_enabled;
         if (image_generation_limit !== undefined) updateSet["ai_config.image_generation_limit"] = image_generation_limit;
         if (whatsapp_scheduling_limit !== undefined) updateSet["ai_config.whatsapp_scheduling_limit"] = whatsapp_scheduling_limit;
-        for (const [feature, p] of Object.entries(resetPeriods)) {
-            updateSet[`ai_config.${feature}_reset_value`] = p.value;
-            updateSet[`ai_config.${feature}_reset_unit`] = p.unit;
-        }
 
         const org = await Organization.findByIdAndUpdate(
             orgId,

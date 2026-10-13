@@ -5,7 +5,7 @@ import AiCreditTransaction from "../../models/AiCreditTransaction.js";
 import GlobalAiConfig from "../../models/GlobalAiConfig.js";
 import { primarySupabaseClient as supabase } from "../../config/supabaseClient.js";
 import mongoose from "mongoose";
-import { resolveFeatureLimit, resolveResetPeriod } from "../../services/ai-feature-limits.js";
+import { resolveFeatureLimit } from "../../services/ai-feature-limits.js";
 
 // PHASE 7: Super Admin AI Usage - Organizations Controller
 // Pulls real usage from Supabase and joins with MongoDB just like Agent Reviews!
@@ -126,8 +126,6 @@ export const getOrgAiDetail = async (req, res) => {
 
         let imageLimit;
         let whatsappLimit;
-        // How often each limit resets, as the chat applies it ({ value, unit, ms, label })
-        let resetPeriods;
         let poolUsed = 0;
         let userWeeklyUsed = 0;
 
@@ -142,11 +140,6 @@ export const getOrgAiDetail = async (req, res) => {
             // The limits the chat actually enforces (same rule as ai-feature-limits.js)
             imageLimit = resolveFeatureLimit("image", null, globalConfig, null);
             whatsappLimit = resolveFeatureLimit("whatsapp", null, globalConfig, null);
-            resetPeriods = {
-                tokens: resolveResetPeriod("tokens", null, globalConfig, null),
-                image: resolveResetPeriod("image", null, globalConfig, null),
-                whatsapp: resolveResetPeriod("whatsapp", null, globalConfig, null),
-            };
             userQuery = { 
                 $or: [{ role: 'super_admin' }, { organization_id: null }, { organization_id: { $exists: false } }] 
             };
@@ -167,11 +160,6 @@ export const getOrgAiDetail = async (req, res) => {
             }
             imageLimit = resolveFeatureLimit("image", org, globalConfig, orgId);
             whatsappLimit = resolveFeatureLimit("whatsapp", org, globalConfig, orgId);
-            resetPeriods = {
-                tokens: resolveResetPeriod("tokens", org, globalConfig, orgId),
-                image: resolveResetPeriod("image", org, globalConfig, orgId),
-                whatsapp: resolveResetPeriod("whatsapp", org, globalConfig, orgId),
-            };
             poolUsed = org.ai_config?.pro_used_this_period || 0;
             userQuery = { organization_id: orgId };
         }
@@ -220,7 +208,6 @@ export const getOrgAiDetail = async (req, res) => {
                 userWeeklyLimit,
                 imageLimit,
                 whatsappLimit,
-                resetPeriods,
                 totalUsage,
                 poolUsed,
                 userWeeklyUsed,

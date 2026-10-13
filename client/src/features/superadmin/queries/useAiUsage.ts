@@ -3,25 +3,6 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { apiClient as api } from "@/lib/apiClient";
 
-// How often a limit resets (set by the super admin per limit; 7 days when nothing is set). Month = 30 days.
-export type ResetUnit = "second" | "minute" | "hour" | "day" | "week" | "month";
-export type ResetPeriod = { value: number; unit: ResetUnit; ms?: number; label?: string };
-
-// Body of PUT /orgs/:orgId/limits (orgId "classgrid" = the Classgrid row). Only the fields sent are changed.
-export type OrgAiLimitsPayload = {
-  pro_pool_limit?: number;
-  free_weekly_limit_per_user?: number;
-  image_generation_limit?: number;
-  whatsapp_scheduling_limit?: number;
-  custom_limits_enabled?: boolean;
-  token_reset_value?: number;
-  token_reset_unit?: ResetUnit;
-  image_reset_value?: number;
-  image_reset_unit?: ResetUnit;
-  whatsapp_reset_value?: number;
-  whatsapp_reset_unit?: ResetUnit;
-};
-
 // API endpoints
 export const aiUsageApi = {
   getGlobalStats: (orgId?: string, month?: number, year?: number) => {
@@ -48,7 +29,7 @@ export const aiUsageApi = {
   grantOrgCredits: (orgId: string, amount: number, options?: { sendEmail?: boolean; startDate?: string; endDate?: string }) => api.post(`/api/super-admin/ai-usage/orgs/${orgId}/grant`, { amount, ...options }).then(res => res.data),
   extendCredits: (userId: string, endDate: string) => api.put(`/api/super-admin/ai-usage/users/${userId}/credits/extend`, { endDate }).then(res => res.data),
   deleteUserData: (userId: string) => api.delete(`/api/super-admin/ai-usage/users/${userId}/data`).then(res => res.data),
-  updateOrgLimits: (orgId: string, data: OrgAiLimitsPayload) => api.put(`/api/super-admin/ai-usage/orgs/${orgId}/limits`, data).then(res => res.data),
+  updateOrgLimits: (orgId: string, data: { pro_pool_limit: number, free_weekly_limit_per_user: number, image_generation_limit?: number, whatsapp_scheduling_limit?: number }) => api.put(`/api/super-admin/ai-usage/orgs/${orgId}/limits`, data).then(res => res.data),
   
   // Security OTP
   requestSecurityCode: (action: string, orgId?: string) => api.post(`/api/super-admin/ai-usage/security-code/request`, { action, orgId }).then(res => res.data),
@@ -186,7 +167,7 @@ export const useResetOrgUsage = () => {
 export const useUpdateOrgAiLimits = () => {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: ({ orgId, data }: { orgId: string, data: OrgAiLimitsPayload }) => aiUsageApi.updateOrgLimits(orgId, data),
+    mutationFn: ({ orgId, data }: { orgId: string, data: { pro_pool_limit: number, free_weekly_limit_per_user: number, image_generation_limit?: number, whatsapp_scheduling_limit?: number } }) => aiUsageApi.updateOrgLimits(orgId, data),
     onSuccess: (_, { orgId }) => {
       toast.success("Organization AI limits updated successfully.");
       queryClient.invalidateQueries({ queryKey: ["ai-usage-org", orgId] });

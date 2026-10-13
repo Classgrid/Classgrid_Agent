@@ -805,7 +805,6 @@ export function AiUsageDashboardPage() {
           currentUserWeeklyLimit={orgDetail?.userWeeklyLimit ?? 0}
           currentImageLimit={orgDetail?.imageLimit ?? 0}
           currentWhatsappLimit={orgDetail?.whatsappLimit ?? 0}
-          currentResetPeriods={orgDetail?.resetPeriods}
           customLimitsEnabled={orgDetail?.customLimitsEnabled ?? false}
         />
 

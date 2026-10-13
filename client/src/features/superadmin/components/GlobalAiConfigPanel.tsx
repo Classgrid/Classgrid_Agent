@@ -18,8 +18,6 @@ import { Spinner } from "@/components/marketing_ui/spinner";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiClient as api } from "@/lib/apiClient";
 import { Skeleton } from "@/components/marketing_ui/skeleton";
-import { ResetPeriodInput, formatResetPeriod, toResetPeriod } from "@/features/superadmin/components/SetupUsageCredits";
-import type { ResetPeriod } from "@/features/superadmin/queries/useAiUsage";
 
 export function GlobalAiConfigPanel({ grantCreditsNode }: { grantCreditsNode?: React.ReactNode }) {
   const queryClient = useQueryClient();
@@ -31,10 +29,6 @@ export function GlobalAiConfigPanel({ grantCreditsNode }: { grantCreditsNode?: R
   const [whatsapp, setWhatsapp] = useState(0); // Added for UI parity
   const [creditsPerInr, setCreditsPerInr] = useState(0);
   const [imageCost, setImageCost] = useState(0);
-  // Global reset periods (number + unit) for the three limits; 7 days when nothing is set
-  const [tokenReset, setTokenReset] = useState<ResetPeriod>(toResetPeriod());
-  const [imageReset, setImageReset] = useState<ResetPeriod>(toResetPeriod());
-  const [whatsappReset, setWhatsappReset] = useState<ResetPeriod>(toResetPeriod());
 
   // Loading States
   const [openIndividual, setOpenIndividual] = useState(false);
@@ -48,8 +42,7 @@ export function GlobalAiConfigPanel({ grantCreditsNode }: { grantCreditsNode?: R
     queryKey: ["globalAiConfig"],
     queryFn: async () => {
       const res = await api.get("/api/super-admin/ai-global-config");
-      // resetPeriods: the global reset periods in effect (sent next to config)
-      return res.data?.config ? { ...res.data.config, resetPeriods: res.data.resetPeriods } : res.data?.config;
+      return res.data?.config;
     }
   });
 
@@ -61,9 +54,6 @@ export function GlobalAiConfigPanel({ grantCreditsNode }: { grantCreditsNode?: R
       setWhatsapp(data.global_whatsapp_scheduling_limit ?? 0);
       if (data.credits_per_inr !== undefined) setCreditsPerInr(data.credits_per_inr);
       if (data.image_generation_token_cost !== undefined) setImageCost(data.image_generation_token_cost);
-      setTokenReset(toResetPeriod(data.resetPeriods?.tokens));
-      setImageReset(toResetPeriod(data.resetPeriods?.image));
-      setWhatsappReset(toResetPeriod(data.resetPeriods?.whatsapp));
     }
   }, [data]);
 
@@ -90,13 +80,7 @@ export function GlobalAiConfigPanel({ grantCreditsNode }: { grantCreditsNode?: R
       global_image_weekly_limit: images,
       global_whatsapp_scheduling_limit: whatsapp,
       credits_per_inr: creditsPerInr,
-      image_generation_token_cost: imageCost,
-      global_token_reset_value: tokenReset.value,
-      global_token_reset_unit: tokenReset.unit,
-      global_image_reset_value: imageReset.value,
-      global_image_reset_unit: imageReset.unit,
-      global_whatsapp_reset_value: whatsappReset.value,
-      global_whatsapp_reset_unit: whatsappReset.unit
+      image_generation_token_cost: imageCost
     }, {
       onSuccess: () => {
         toast.success(successMessage);
@@ -123,26 +107,24 @@ export function GlobalAiConfigPanel({ grantCreditsNode }: { grantCreditsNode?: R
             {/* Individual Usage */}
             <Dialog open={openIndividual} onOpenChange={(open) => {
               if (!open) setIndividualUsage(data?.global_user_weekly_limit ?? 0);
-              if (!open) setTokenReset(toResetPeriod(data?.resetPeriods?.tokens));
               setOpenIndividual(open);
             }}>
               <DialogTrigger asChild>
                 <button className="bg-card hover:bg-muted/30 p-5 flex flex-col gap-2 text-left transition-colors">
-                  <span className="text-sm font-medium text-muted-foreground">Individual Usage</span>
+                  <span className="text-sm font-medium text-muted-foreground">Individual Weekly Usage</span>
                   <span className="text-xl font-bold text-blue-600 dark:text-blue-400">
                     {(data?.global_user_weekly_limit ?? 0).toLocaleString()} <span className="text-sm font-normal text-muted-foreground ml-1">Tokens</span>
                   </span>
-                  <span className="text-xs text-muted-foreground">{formatResetPeriod(data?.resetPeriods?.tokens)}</span>
                 </button>
               </DialogTrigger>
               <DialogContent className="sm:max-w-sm">
                 <DialogHeader>
                   <DialogTitle>Edit Global Individual Limit</DialogTitle>
-                  <DialogDescription>Adjust the global token limit for individuals and how often it resets.</DialogDescription>
+                  <DialogDescription>Adjust the global 7-day token limit for individuals.</DialogDescription>
                 </DialogHeader>
                 <div className="flex flex-col gap-3 py-4">
                   <div className="flex justify-between items-center">
-                    <Label className="text-sm font-semibold">Individual Usage per Period</Label>
+                    <Label className="text-sm font-semibold">Individual 7-Day Usage</Label>
                     <span className="text-sm font-bold text-blue-600">{individualUsage.toLocaleString()}</span>
                   </div>
                   <BlueSlider min={1000} max={100000000} step={1000} value={individualUsage} onValueChange={setIndividualUsage} disabled={updateConfigMutation.isPending} />
@@ -156,7 +138,6 @@ export function GlobalAiConfigPanel({ grantCreditsNode }: { grantCreditsNode?: R
                     className="mt-1 text-sm"
                     placeholder="Type exact value e.g. 500000"
                   />
-                  <ResetPeriodInput id="global-individual" value={tokenReset} onChange={setTokenReset} disabled={updateConfigMutation.isPending} />
                 </div>
                 <DialogFooter>
                   <Button type="button" onClick={() => handleSave(setOpenIndividual, "Global individual limit saved successfully!")} disabled={updateConfigMutation.isPending}>
@@ -216,7 +197,6 @@ export function GlobalAiConfigPanel({ grantCreditsNode }: { grantCreditsNode?: R
             {/* Image Generations */}
             <Dialog open={openImages} onOpenChange={(open) => {
               if (!open) setImages(data?.global_image_weekly_limit ?? 0);
-              if (!open) setImageReset(toResetPeriod(data?.resetPeriods?.image));
               setOpenImages(open);
             }}>
               <DialogTrigger asChild>
@@ -225,7 +205,6 @@ export function GlobalAiConfigPanel({ grantCreditsNode }: { grantCreditsNode?: R
                   <span className="text-xl font-bold text-foreground">
                     {(data?.global_image_weekly_limit ?? 0).toLocaleString()} <span className="text-sm font-normal text-muted-foreground ml-1">Images</span>
                   </span>
-                  <span className="text-xs text-muted-foreground">{formatResetPeriod(data?.resetPeriods?.image)}</span>
                 </button>
               </DialogTrigger>
               <DialogContent className="sm:max-w-sm">
@@ -244,7 +223,6 @@ export function GlobalAiConfigPanel({ grantCreditsNode }: { grantCreditsNode?: R
                     placeholder="e.g. 20" 
                     disabled={updateConfigMutation.isPending}
                   />
-                  <ResetPeriodInput id="global-images" value={imageReset} onChange={setImageReset} disabled={updateConfigMutation.isPending} />
                 </div>
                 <DialogFooter>
                   <Button type="button" onClick={() => handleSave(setOpenImages, "Global image limit saved successfully!")} disabled={updateConfigMutation.isPending}>
@@ -258,7 +236,6 @@ export function GlobalAiConfigPanel({ grantCreditsNode }: { grantCreditsNode?: R
             {/* WhatsApp Scheduling */}
             <Dialog open={openWhatsapp} onOpenChange={(open) => {
               if (!open) setWhatsapp(data?.global_whatsapp_scheduling_limit ?? 0);
-              if (!open) setWhatsappReset(toResetPeriod(data?.resetPeriods?.whatsapp));
               setOpenWhatsapp(open);
             }}>
               <DialogTrigger asChild>
@@ -267,7 +244,6 @@ export function GlobalAiConfigPanel({ grantCreditsNode }: { grantCreditsNode?: R
                   <span className="text-xl font-bold text-foreground">
                     {(data?.global_whatsapp_scheduling_limit ?? 0).toLocaleString()} <span className="text-sm font-normal text-muted-foreground ml-1">Messages</span>
                   </span>
-                  <span className="text-xs text-muted-foreground">{formatResetPeriod(data?.resetPeriods?.whatsapp)}</span>
                 </button>
               </DialogTrigger>
               <DialogContent className="sm:max-w-sm">
@@ -286,7 +262,6 @@ export function GlobalAiConfigPanel({ grantCreditsNode }: { grantCreditsNode?: R
                     placeholder="e.g. 10" 
                     disabled={updateConfigMutation.isPending}
                   />
-                  <ResetPeriodInput id="global-whatsapp" value={whatsappReset} onChange={setWhatsappReset} disabled={updateConfigMutation.isPending} />
                 </div>
                 <DialogFooter>
                   <Button type="button" onClick={() => handleSave(setOpenWhatsapp, "Global WhatsApp limit saved successfully!")} disabled={updateConfigMutation.isPending}>

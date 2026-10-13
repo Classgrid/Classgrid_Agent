@@ -1,5 +1,5 @@
 // CLASSGRID USES CLOUDFLARE USAGE TO CALCULATE TOKENS, NOT GPT-TOKENIZER (WHICH IS ONLY A FALLBACK)
-// Limits for the AI's extra features (WhatsApp messages, image generations), resolved the same way
+// Weekly limits for the AI's extra features (WhatsApp messages, image generations), resolved the same way
 // as the free token limit (resolveWeeklyLimit): global limit -> the org's own limit when the org has custom
 // limits on, or the Classgrid limit for users without an org. The super admin dashboard shows this same
 // value, so what the dashboard says is what the chat enforces.
@@ -29,125 +29,14 @@ export function resolveFeatureLimit(feature, org, globalConfig, orgId = org?._id
     return limit;
 }
 
-// --- Reset periods ---------------------------------------------------------------------------------------
-// How often each limit starts again (chat tokens, images, WhatsApp), set by the super admin as a number + unit
-// next to the limit itself, at the same three levels: global -> the org's own (custom limits on) or Classgrid.
-// Nothing set = 7 days, which is how all three worked before. A month counts as 30 days.
-export const RESET_UNITS = { second: 1000, minute: 60 * 1000, hour: 60 * 60 * 1000, day: 24 * 60 * 60 * 1000, week: WEEK_MS, month: 30 * 24 * 60 * 60 * 1000 };
-export const DEFAULT_RESET_PERIOD = { value: 7, unit: "day" };
-
-// Stored as <prefix>_value + <prefix>_unit (e.g. ai_config.image_reset_value / ai_config.image_reset_unit).
-// classgridForPublicOrg: the public chat org falls back to the Classgrid period exactly when its LIMIT does
-// (resolveFeatureLimit does that for images/WhatsApp, resolveWeeklyLimit does not for tokens).
-const PERIOD_FIELDS = {
-    tokens: { global: "global_token_reset", org: "token_reset", classgrid: "classgrid_token_reset", classgridForPublicOrg: false },
-    image: { global: "global_image_reset", org: "image_reset", classgrid: "classgrid_image_reset", classgridForPublicOrg: true },
-    whatsapp: { global: "global_whatsapp_reset", org: "whatsapp_reset", classgrid: "classgrid_whatsapp_reset", classgridForPublicOrg: true },
-};
-export const RESET_PERIOD_FEATURES = Object.keys(PERIOD_FIELDS);
-
-// The admin sets a period as days + hours + minutes + seconds; it is stored in the largest unit that fits
-// exactly (e.g. 1 day 4 hours -> 28 hour), so any whole number is allowed, up to 366 days in total.
-export const MAX_RESET_PERIOD_MS = 366 * 24 * 60 * 60 * 1000;
-
-/** A whole number >= 1 of one of the RESET_UNITS, at most 366 days in total. */
-export function isValidResetPeriod(value, unit) {
-    return Number.isInteger(value) && value >= 1 && Object.prototype.hasOwnProperty.call(RESET_UNITS, unit)
-        && value * RESET_UNITS[unit] <= MAX_RESET_PERIOD_MS;
-}
-
-const readPeriod = (src, prefix) => {
-    const value = src?.[`${prefix}_value`];
-    const unit = src?.[`${prefix}_unit`];
-    return isValidResetPeriod(value, unit) ? { value, unit } : null;
-};
-
-/**
- * The reset period that applies to a feature ("tokens" | "image" | "whatsapp"), picked the same way as its
- * limit. Returns { value, unit, ms, label } with label like "every 2 hours".
- */
-export function resolveResetPeriod(feature, org, globalConfig, orgId = org?._id) {
-    const f = PERIOD_FIELDS[feature];
-    let period = readPeriod(globalConfig, f.global) || DEFAULT_RESET_PERIOD;
-    const classgridPeriod = globalConfig?.classgrid_custom_limits_enabled ? readPeriod(globalConfig, f.classgrid) : null;
-    const orgPeriod = org?.ai_config?.custom_limits_enabled ? readPeriod(org.ai_config, f.org) : null;
-    if (feature === "tokens") {
-        // same branches as resolveWeeklyLimit (ai-credits.service.js)
-        if (org) {
-            if (orgPeriod) period = orgPeriod;
-        } else if (!orgId && classgridPeriod) {
-            period = classgridPeriod;
-        }
-    } else {
-        // same branches as resolveFeatureLimit
-        const isPublicChatOrg = f.classgridForPublicOrg && String(orgId || org?._id || "") === CHAT_PUBLIC_ORG_ID;
-        if (org && orgPeriod) {
-            period = orgPeriod;
-        } else if ((!orgId || isPublicChatOrg) && classgridPeriod) {
-            period = classgridPeriod;
-        }
-    }
-    return { value: period.value, unit: period.unit, ms: period.value * RESET_UNITS[period.unit], label: formatResetPeriod(period) };
-}
-
-/** Length of one period in ms for a feature (7 days when nothing is set). */
-export function resetPeriodMs(feature, org, globalConfig, orgId = org?._id) {
-    return resolveResetPeriod(feature, org, globalConfig, orgId).ms;
-}
-
-/** "2 hours", "1 day", "1 day 4 hours 30 minutes" (weeks and months stay as set) */
-export function formatPeriodLength(period) {
-    const p = period || DEFAULT_RESET_PERIOD;
-    if (p.unit === "week" || p.unit === "month") return `${p.value} ${p.unit}${p.value === 1 ? "" : "s"}`;
-    let seconds = Math.round((p.value * RESET_UNITS[p.unit]) / 1000);
-    const parts = [];
-    for (const [name, size] of [["day", 86400], ["hour", 3600], ["minute", 60], ["second", 1]]) {
-        const n = Math.floor(seconds / size);
-        seconds -= n * size;
-        if (n > 0) parts.push(`${n} ${name}${n === 1 ? "" : "s"}`);
-    }
-    return parts.join(" ") || `${p.value} ${p.unit}${p.value === 1 ? "" : "s"}`;
-}
-
-export function formatResetTime(date) {
-    const at = new Date(date);
-    const msLeft = Math.max(0, at.getTime() - Date.now());
-    const minutes = Math.ceil(msLeft / 60000);
-    const left = minutes < 1 ? "in less than a minute" : `in ${formatPeriodLength({ value: minutes, unit: "minute" })}`;
-    const clock = at.toLocaleString("en-IN", { timeZone: "Asia/Kolkata", hour: "numeric", minute: "2-digit", day: "numeric", month: "short" });
-    return `${left} (at ${clock} IST)`;
-}
-
-/** "every 2 hours", "every 1 day" */
-export function formatResetPeriod(period) {
-    return `every ${formatPeriodLength(period)}`;
-}
-
-/**
- * Reads { <feature>_reset_value, <feature>_reset_unit } style fields from a request body for the admin
- * endpoints. bodyPrefix "token_reset" -> body.token_reset_value / body.token_reset_unit. Returns
- * { set: { value, unit } | null, error: string | null }; both missing = nothing to change.
- */
-export function parseResetPeriodInput(body, bodyPrefix) {
-    const rawValue = body?.[`${bodyPrefix}_value`];
-    const rawUnit = body?.[`${bodyPrefix}_unit`];
-    if (rawValue === undefined && rawUnit === undefined) return { set: null, error: null };
-    const value = typeof rawValue === "string" && rawValue.trim() !== "" ? Number(rawValue) : rawValue;
-    if (!isValidResetPeriod(value, rawUnit)) {
-        return { set: null, error: `${bodyPrefix}: value must be a whole number of at least 1, unit one of ${Object.keys(RESET_UNITS).join(", ")}, and the total at most 366 days.` };
-    }
-    return { set: { value, unit: rawUnit }, error: null };
-}
-
 const directSendKey = (userId) => `ai:wa-direct:${userId}`;
 
 /**
- * WhatsApp messages a user has used in the last reset period (7 days unless the super admin set another):
- * one-time scheduled ones (not cancelled) + ones sent right away + each run of a repeating schedule (those are
- * recorded like direct sends when they go out). With { includeUpcomingRepeats: true } (when a new repeat is
- * created) the runs other active repeats will send in the next period count too, so several repeats can't
- * together go over the limit.
- * Returns { allowed, limit, used, periodMs, periodText } (periodText like "7 days", for messages).
+ * WhatsApp messages a user has used in the last 7 days: one-time scheduled ones (not cancelled) + ones sent
+ * right away + each run of a repeating schedule (those are recorded like direct sends when they go out).
+ * With { includeUpcomingRepeats: true } (when a new repeat is created) the runs other active repeats will send
+ * in the next 7 days count too, so several repeats can't together go over the limit.
+ * Returns { allowed, limit, used }.
  */
 export async function checkWhatsappLimit(user, { includeUpcomingRepeats = false } = {}) {
     const [{ default: GlobalAiConfig }, { default: Organization }, { default: AiSchedule }] = await Promise.all([
@@ -159,11 +48,9 @@ export async function checkWhatsappLimit(user, { includeUpcomingRepeats = false 
     const orgId = user.organization_id || null;
     const org = orgId ? await Organization.findById(orgId).select("ai_config").lean() : null;
     const limit = resolveFeatureLimit("whatsapp", org, globalConfig, orgId);
-    const period = resolveResetPeriod("whatsapp", org, globalConfig, orgId);
-    const periodMs = period.ms;
 
     // Only messages still waiting to go out or actually sent count; failed or undelivered ones don't.
-    const since = new Date(Date.now() - periodMs);
+    const since = new Date(Date.now() - WEEK_MS);
     const scheduled = await AiSchedule.countDocuments({
         user_id: user._id,
         createdAt: { $gte: since },
@@ -184,48 +71,25 @@ export async function checkWhatsappLimit(user, { includeUpcomingRepeats = false 
             whatsapp_phone_number: { $exists: true, $ne: "" },
             whatsapp_message: { $exists: true, $ne: "" },
         }).select("scheduled_at repeat repeat_days repeat_until repeat_tz").lean();
-        for (const r of repeats) upcoming += runsWithin(r, new Date(r.scheduled_at), periodMs);
+        for (const r of repeats) upcoming += runsWithin(r, new Date(r.scheduled_at), WEEK_MS);
     }
 
     let direct = 0;
     try {
         const key = directSendKey(user._id);
-        await redis.zremrangebyscore(key, 0, Date.now() - periodMs);
+        await redis.zremrangebyscore(key, 0, Date.now() - WEEK_MS);
         direct = await redis.zcard(key);
-        // A period longer than the key's 8-day expiry would forget sends too early: keep it a day past the period
-        if (direct > 0 && periodMs > EIGHT_DAYS_S * 1000) await redis.expire(key, Math.ceil(periodMs / 1000) + 24 * 60 * 60);
     } catch (e) { /* Redis down: count only the scheduled ones */ }
 
     const used = scheduled + direct + upcoming;
-    const allowed = used < limit;
-
-    let resetText = null;
-    if (!allowed) {
-        let oldestMs = Infinity;
-        const oldestScheduled = await AiSchedule.findOne({
-            user_id: user._id,
-            createdAt: { $gte: since },
-            status: { $in: ["pending", "sent"] },
-            repeat: { $nin: ["daily", "weekly", "custom"] },
-            whatsapp_failed: { $ne: true },
-            whatsapp_phone_number: { $exists: true, $ne: "" },
-            whatsapp_message: { $exists: true, $ne: "" },
-        }).sort({ createdAt: 1 }).select("createdAt").lean().catch(() => null);
-        if (oldestScheduled?.createdAt) oldestMs = new Date(oldestScheduled.createdAt).getTime();
-        try {
-            const first = await redis.zrange(directSendKey(user._id), 0, 0, "WITHSCORES");
-            if (first?.length === 2) oldestMs = Math.min(oldestMs, Number(first[1]));
-        } catch (e) { /* Redis down: scheduled ones only */ }
-        resetText = formatResetTime(Number.isFinite(oldestMs) ? oldestMs + periodMs : Date.now() + periodMs);
-    }
-    return { allowed, limit, used, periodMs, periodText: formatPeriodLength(period), resetText };
+    return { allowed: used < limit, limit, used };
 }
 
 const messageOwnerKey = (messageId) => `ai:wa-msg:${messageId}`;
 const EIGHT_DAYS_S = 8 * 24 * 60 * 60;
 
 /**
- * Counts one WhatsApp message sent right away (not scheduled) toward the user's WhatsApp limit. With Meta's
+ * Counts one WhatsApp message sent right away (not scheduled) toward the user's weekly limit. With Meta's
  * message id, a later "failed" delivery report (handleWhatsappStatusUpdates) takes it off the count again.
  */
 export async function recordDirectWhatsappSend(userId, messageId) {
@@ -233,8 +97,7 @@ export async function recordDirectWhatsappSend(userId, messageId) {
         const key = directSendKey(userId);
         const now = Date.now();
         await redis.zadd(key, now, messageId ? `wamid:${messageId}` : `${now}-${Math.random().toString(36).slice(2, 8)}`);
-        // never shorten a longer expiry set by checkWhatsappLimit for a reset period over 8 days
-        if ((await redis.ttl(key)) < EIGHT_DAYS_S) await redis.expire(key, EIGHT_DAYS_S);
+        await redis.expire(key, EIGHT_DAYS_S);
         if (messageId) await redis.set(messageOwnerKey(messageId), String(userId), "EX", EIGHT_DAYS_S);
     } catch (e) { /* Redis down: the send is not counted */ }
 }

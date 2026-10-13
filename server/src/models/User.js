@@ -712,11 +712,6 @@ const userSchema = new mongoose.Schema(
       ai_image_free_weekly_used: { type: Number, default: 0 },
       total_ai_tokens_used: { type: Number, default: 0 }
     },
-    // Image generations used in the current image reset period (generateImage counts them atomically on the raw
-    // collection) and when that period ends. No defaults on purpose: accounts without them keep working
-    // (generateImage starts the clock), and loading/saving a user never overwrites the live counter.
-    ai_image_free_weekly_used: { type: Number },
-    ai_image_reset_date: { type: Date },
     // 🧠 AI Chat Customization & Defaults
     ai_preferences: {
       tone: { type: String, default: 'balanced' },
