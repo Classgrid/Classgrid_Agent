@@ -80,8 +80,7 @@ async function streamOneRound({ provider, messages, tools, temperature, maxToken
                 max_tokens: maxTokens,
                 tools: tools.length > 0 ? tools : undefined,
                 stream: true,
-                stream_options: { include_usage: true },
-                ...(provider.extraBody || {})
+                stream_options: { include_usage: true }
             })
         });
 

@@ -81,7 +81,6 @@ import {
   CornerDownRight,
   Layers,
   ListTodo,
-  Brain,
   type LucideIcon,
 } from "lucide-react";
 
@@ -1807,9 +1806,6 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
   const [completedPlanSteps, setCompletedPlanSteps] = useState<string[]>([]);
   const [planStepStatus, setPlanStepStatus] = useState<Record<string, "running" | "done" | "failed">>({});
   const [selectedModel, setSelectedModel] = useSelectedModel();
-  // TEMP (Think button test, localhost only)
-  const [thinkOn, setThinkOn] = useState<boolean>(() => { try { return localStorage.getItem("ai-think") !== "off"; } catch { return true; } });
-  const toggleThink = () => setThinkOn((v) => { const next = !v; try { localStorage.setItem("ai-think", next ? "on" : "off"); } catch { } return next; });
 
   // --- Voice Dictation State ---
   const [isRecording, setIsRecording] = useState(false);
@@ -3602,7 +3598,6 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
         body: JSON.stringify({
           question: apiQuestion,
           selectedModel,
-          think: thinkOn,
           userName: session?.user?.name ?? undefined,
           userEmail: session?.user?.email ?? undefined,
           userRole: session?.user?.role ?? undefined,
@@ -5512,7 +5507,6 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
 
                   {/* Bottom Right action bar: send OR stop */}
                   <div className="absolute bottom-3 right-3 flex items-center gap-0.5">
-                    <button type="button" onClick={toggleThink} disabled={isGenerating} title={thinkOn ? "Thinking on" : "Thinking off (faster replies)"} className={`h-8 shrink-0 rounded-full px-2.5 flex items-center gap-1.5 text-sm transition-all cursor-pointer ${thinkOn ? "text-foreground bg-muted hover:bg-muted/80" : "text-muted-foreground hover:text-foreground hover:bg-muted/80"}`}><Brain className="h-4 w-4" />Think</button>
                     <ModelPicker value={selectedModel} onChange={setSelectedModel} disabled={isGenerating} />
                     <button
                       type="button"
@@ -6120,7 +6114,6 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
 
                             {/* Bottom right: send */}
                             <div className="absolute bottom-3 right-3 flex items-center gap-0.5">
-                              <button type="button" onClick={toggleThink} title={thinkOn ? "Thinking on" : "Thinking off (faster replies)"} className={`h-8 shrink-0 rounded-full px-2.5 flex items-center gap-1.5 text-sm transition-all cursor-pointer ${thinkOn ? "text-foreground bg-muted hover:bg-muted/80" : "text-muted-foreground hover:text-foreground hover:bg-muted/80"}`}><Brain className="h-4 w-4" />Think</button>
                               <ModelPicker value={selectedModel} onChange={setSelectedModel} />
                               <button
                                 type="button"

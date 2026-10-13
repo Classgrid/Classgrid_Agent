@@ -994,23 +994,7 @@ function withModelIdentity(systemContent, model, isStaff, { selected, previousMo
 
 // Cloudflare's native /ai/run endpoint starts streaming noticeably faster than /ai/v1/chat/completions
 // and returns the same OpenAI-style chunks (delta.content / reasoning_content / tool_calls).
-// TEMP (Think button test, localhost only): request body that switches a Cloudflare model's thinking off
-const CF_THINK_OFF_BODY = {
-    "@cf/deepseek-ai/deepseek-v4-pro-0813": { chat_template_kwargs: { thinking: false } },
-    "@cf/deepseek-ai/deepseek-v4-flash-0731": { chat_template_kwargs: { thinking: false } },
-    "@cf/moonshotai/kimi-k2.6": { chat_template_kwargs: { thinking: false } },
-    "@cf/zai-org/glm-5.3": { reasoning_effort: "low" },
-    "@cf/zai-org/glm-5.3-flash": { reasoning_effort: "low" },
-    "@cf/zai-org/glm-5.2": { chat_template_kwargs: { enable_thinking: false } },
-    "@cf/zai-org/glm-4.7-flash": { chat_template_kwargs: { enable_thinking: false } },
-    "@cf/qwen/qwen3.8-27b": { chat_template_kwargs: { enable_thinking: false } },
-    "@cf/google/gemma-4-26b-a4b-it": { chat_template_kwargs: { enable_thinking: false } },
-    "@cf/nvidia/nemotron-3-120b-a12b": { chat_template_kwargs: { enable_thinking: false } },
-    "@cf/openai/gpt-oss-120b": { reasoning_effort: "low" },
-    "@cf/openai/gpt-oss-20b": { reasoning_effort: "low" },
-};
-const cloudflareStreamProvider = (model, thinkOff = false) => ({
-    extraBody: thinkOff ? CF_THINK_OFF_BODY[model] : undefined,
+const cloudflareStreamProvider = (model) => ({
     name: "cloudflare",
     url: CF_PICKER_MODELS.get(model) === "openai"
         ? `https://api.cloudflare.com/client/v4/accounts/${process.env.CLOUDFLARE_ACCOUNT_ID}/ai/v1/chat/completions`
@@ -4006,7 +3990,6 @@ If a tool fails, never show the error message; say only: "Something went wrong o
                                 // plus the last images Claude generated in this chat, so it can look at its own images
                                 attachments: [...(Array.isArray(body.attachments) ? body.attachments : []), ...recentGeneratedImageAttachments(messages)],
                                 signal: streamAbort.signal,
-                                thinkOff: body.think === false,
                                 onStatus,
                                 onThought,
                                 onToken
@@ -4054,7 +4037,7 @@ If a tool fails, never show the error message; say only: "Something went wrong o
                         if (messages[0]?.role === "system") messages[0] = { ...messages[0], content: withModelIdentity(messages[0].content, model, isStaffRole(req.user?.role), { selected: requestedModel, previousModel }) };
                         try {
                             streamed = await streamChat({
-                                provider: cloudflareStreamProvider(model, body.think === false),
+                                provider: cloudflareStreamProvider(model),
                                 messages,
                                 tools: llmConfig.tools,
                                 toolHandlers: llmConfig.toolHandlers,
