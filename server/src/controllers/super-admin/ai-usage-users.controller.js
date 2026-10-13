@@ -82,7 +82,7 @@ export const getUserAiDetail = async (req, res) => {
         }
 
         const user = await User.findById(userId)
-            .select("name email role ai_tokens organization_id profilePicture")
+            .select("name email role ai_tokens organization_id profilePicture ai_image_free_weekly_used ai_image_reset_date")
             .populate("organization_id", "name")
             .lean();
 
@@ -178,10 +178,35 @@ export const getUserAiDetail = async (req, res) => {
             user.ai_tokens.free_weekly_limit = effectiveFreeLimit;
         }
 
+        let limitTimers = null;
+        try {
+            const GlobalAiConfig = (await import("../../models/GlobalAiConfig.js")).default;
+            const Organization = (await import("../../models/Organization.js")).default;
+            const { resolveFeatureLimit, resolveResetPeriod, checkWhatsappLimit } = await import("../../services/ai-feature-limits.js");
+            const timerConfig = await GlobalAiConfig.findOne({ key: "singleton" }).lean();
+            const timerOrgId = user.organization_id?._id || null;
+            const timerOrg = timerOrgId ? await Organization.findById(timerOrgId).select("ai_config").lean() : null;
+            const nowMs = Date.now();
+            const timer = (used, limit, savedDate, periodMs) => {
+                const savedMs = savedDate ? new Date(savedDate).getTime() : 0;
+                if (!savedMs || nowMs >= savedMs) return { used: 0, limit, resetAt: null };
+                return { used, limit, resetAt: new Date(Math.min(savedMs, nowMs + periodMs)) };
+            };
+            const wa = await checkWhatsappLimit({ _id: user._id, organization_id: timerOrgId });
+            limitTimers = {
+                tokens: timer(user.ai_tokens?.used_this_week || 0, effectiveFreeLimit, user.ai_tokens?.week_reset_date, resolveResetPeriod("tokens", timerOrg, timerConfig, timerOrgId).ms),
+                image: timer(user.ai_image_free_weekly_used || 0, resolveFeatureLimit("image", timerOrg, timerConfig, timerOrgId), user.ai_image_reset_date, resolveResetPeriod("image", timerOrg, timerConfig, timerOrgId).ms),
+                whatsapp: { used: wa.used, limit: wa.limit, resetAt: wa.resetAt },
+            };
+        } catch (e) {
+            console.error("Error fetching limit timers:", e);
+        }
+
         res.status(200).json({
             success: true,
             data: {
                 id: user._id,
+                limitTimers,
                 name: user.name,
                 email: user.email,
                 role: user.role,

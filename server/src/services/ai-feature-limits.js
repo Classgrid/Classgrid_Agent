@@ -174,7 +174,8 @@ export async function checkWhatsappLimit(user, { includeUpcomingRepeats = false 
     const allowed = used < limit;
 
     let resetText = null;
-    if (!allowed) {
+    let resetAt = null;
+    if (used > 0) {
         let oldestMs = Infinity;
         const oldestScheduled = await AiSchedule.findOne({
             user_id: user._id,
@@ -190,9 +191,10 @@ export async function checkWhatsappLimit(user, { includeUpcomingRepeats = false 
             const first = await redis.zrange(directSendKey(user._id), 0, 0, "WITHSCORES");
             if (first?.length === 2) oldestMs = Math.min(oldestMs, Number(first[1]));
         } catch (e) { }
-        resetText = formatResetTime(Number.isFinite(oldestMs) ? oldestMs + periodMs : Date.now() + periodMs);
+        resetAt = new Date(Number.isFinite(oldestMs) ? oldestMs + periodMs : Date.now() + periodMs);
+        if (!allowed) resetText = formatResetTime(resetAt);
     }
-    return { allowed, limit, used, periodMs, periodText: formatPeriodLength(period), resetText };
+    return { allowed, limit, used, periodMs, periodText: formatPeriodLength(period), resetText, resetAt };
 }
 
 const messageOwnerKey = (messageId) => `ai:wa-msg:${messageId}`;

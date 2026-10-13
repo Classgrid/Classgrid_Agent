@@ -17,6 +17,45 @@ import { ViewGrantedCreditsDetails } from "./ViewGrantedCreditsDetails";
 import socketClient from "@/lib/socketClient";
 import { useQueryClient } from "@tanstack/react-query";
 
+function ResetCountdown({ resetAt }: { resetAt?: string | null }) {
+  const [now, setNow] = useState(Date.now());
+  useEffect(() => {
+    const id = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, []);
+  if (!resetAt) return <span className="text-xs text-muted-foreground">Full limit available</span>;
+  const left = Math.max(0, Math.floor((new Date(resetAt).getTime() - now) / 1000));
+  if (left === 0) return <span className="text-xs text-muted-foreground">Resetting now</span>;
+  const d = Math.floor(left / 86400);
+  const h = Math.floor((left % 86400) / 3600);
+  const m = Math.floor((left % 3600) / 60);
+  const s = left % 60;
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return <span className="text-xs text-muted-foreground tabular-nums">Resets in {d > 0 ? `${d}d ` : ""}{pad(h)}:{pad(m)}:{pad(s)}</span>;
+}
+
+function LimitTimerRow({ label, unit, timer }: { label: string; unit: string; timer?: { used: number; limit: number; resetAt?: string | null } | null }) {
+  if (!timer) return null;
+  const percent = timer.limit > 0 ? Math.min(100, Math.max(0, (timer.used / timer.limit) * 100)) : 0;
+  return (
+    <div className="w-full flex items-start justify-between">
+      <div className="flex flex-col gap-1 pr-6 min-w-[150px]">
+        <span className="text-sm font-medium text-foreground">{label}</span>
+        <ResetCountdown resetAt={timer.resetAt} />
+      </div>
+      <div className="flex-1 flex flex-col gap-1.5 mt-1">
+        <div className="w-full flex items-center justify-between text-xs mb-1">
+          <span className="font-medium text-foreground">{Math.round(percent)}% Used</span>
+          <span className="text-muted-foreground font-medium">{formatNumber(timer.used)} / {formatNumber(timer.limit)} {unit}</span>
+        </div>
+        <div className="w-full h-1.5 bg-muted-foreground/20 rounded-full overflow-hidden">
+          <div className="h-full bg-blue-500 rounded-full transition-all" style={{ width: `${percent}%` }} />
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export function AiUserDetailPanel({ userDetail }: { userDetail: any }) {
   const [isGrantCreditsOpen, setIsGrantCreditsOpen] = useState(false);
   const { data: currentUser } = useCurrentUser();
@@ -166,13 +205,13 @@ export function AiUserDetailPanel({ userDetail }: { userDetail: any }) {
               {/* 1. Personal Limits */}
               {(() => {
                 const limit = userDetail.ai_tokens?.free_weekly_limit ?? 0;
-                const used = userDetail.ai_tokens?.used_this_week || 0;
+                const used = userDetail.limitTimers?.tokens ? userDetail.limitTimers.tokens.used : (userDetail.ai_tokens?.used_this_week || 0);
                 const percent = limit > 0 ? Math.min(100, Math.max(0, (used / limit) * 100)) : 0;
                 return (
                   <div className="w-full flex items-start justify-between">
                     <div className="flex flex-col gap-1 pr-6 min-w-[150px]">
                       <span className="text-sm font-medium text-foreground">Personal Limits</span>
-                      <span className="text-xs text-muted-foreground">Resets in 7 days</span>
+                      {userDetail.limitTimers ? <ResetCountdown resetAt={userDetail.limitTimers.tokens?.resetAt} /> : <span className="text-xs text-muted-foreground">Resets in 7 days</span>}
                     </div>
                     <div className="flex-1 flex flex-col gap-1.5 mt-1">
                       <div className="w-full flex items-center justify-between text-xs mb-1">
@@ -186,6 +225,9 @@ export function AiUserDetailPanel({ userDetail }: { userDetail: any }) {
                   </div>
                 );
               })()}
+
+              <LimitTimerRow label="Images" unit="Images" timer={userDetail.limitTimers?.image} />
+              <LimitTimerRow label="WhatsApp" unit="Messages" timer={userDetail.limitTimers?.whatsapp} />
 
               {/* 2. Paid Credits */}
               {(() => {

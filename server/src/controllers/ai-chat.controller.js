@@ -2813,7 +2813,7 @@ If they ask whether their college/school uses Classgrid, say you can't see that 
                                 }
                                 if (json.code === 'IMAGE_LIMIT_REACHED') {
                                     // The weekly image limit is final: no retries and no other way of making the picture
-                                    return `IMAGE LIMIT REACHED. ${json.error}\n\nDo NOT call generate_image again in this conversation, and do NOT create the image any other way (no code, SVG, canvas, HTML, uploaded files or external image links/websites). Tell the user plainly that their weekly image generation limit is used up (${json.limit} images) and that they can create images again after the weekly reset. You may still help with everything else.`;
+                                    return `IMAGE LIMIT REACHED. ${json.error}\n\nDo NOT call generate_image again in this conversation, and do NOT create the image any other way (no code, SVG, canvas, HTML, uploaded files or external image links/websites). Tell the user plainly that their image generation limit is used up (${json.limit} images) and that they can create images again after the reset. You may still help with everything else.`;
                                 }
                                 return `FAILED to generate image: ${json.error || json.message || text}`;
                             } catch (e) {
@@ -2977,7 +2977,7 @@ If they ask whether their college/school uses Classgrid, say you can't see that 
                             if (!req.user?._id) {
                                 return "FAILED: Sign in to send WhatsApp messages.";
                             }
-                            const { checkWhatsappLimit, recordDirectWhatsappSend, normalizeWhatsappNumber } = await import('../services/ai-feature-limits.js');
+                            const { checkWhatsappLimit, recordDirectWhatsappSend, normalizeWhatsappNumber, formatResetTime } = await import('../services/ai-feature-limits.js');
                             const waLimit = await checkWhatsappLimit(req.user);
                             if (!waLimit.allowed) {
                                 return `FAILED: This user has used ${waLimit.used} of ${waLimit.limit} WhatsApp messages allowed in the last ${waLimit.periodText || "7 days"} (the limit is set by Classgrid admins). No message was sent.${waLimit.resetText ? ` Reset time: ${waLimit.resetText}.` : ""} Tell the user exactly this; do not guess other reasons.`;
@@ -3012,7 +3012,7 @@ If they ask whether their college/school uses Classgrid, say you can't see that 
 
                             const sent = await res.json().catch(() => ({}));
                             await recordDirectWhatsappSend(req.user._id, sent?.messages?.[0]?.id);
-                            return `SUCCESS: WhatsApp message sent to ${recipient} (${waLimit.used + 1} of ${waLimit.limit} used this week). Do not send it again.`;
+                            return `SUCCESS: WhatsApp message sent to ${recipient} (${waLimit.used + 1} of ${waLimit.limit} used in the last ${waLimit.periodText || "7 days"}). Reset time: ${formatResetTime(waLimit.resetAt || Date.now() + waLimit.periodMs)}. Do not send it again.`;
                         } catch (e) {
                             return `FAILED to send WhatsApp message: ${e.message}`;
                         }
@@ -5093,6 +5093,7 @@ export const bulkDeleteAgentReviews = async (req, res) => {
 export const generateImage = async (req, res) => {
     // Set once this request has taken one of the user's image slots; given back if the image then fails
     let imageSlotUserId = null;
+    let imageTokenCharge = null;
     try {
         const { prompt, sessionId, isIncognito } = req.body;
         // isInternalCall (the chat's generate_image tool) only skips saving to a chat session: the chat saves it itself.
@@ -5150,7 +5151,8 @@ export const generateImage = async (req, res) => {
                 { $set: { "ai_tokens.week_reset_date": new Date(resetNow + tokenPeriodMs) } }
             );
 
-            const tokenCheck = await hasEnoughTokens(authUserForImage._id, imageOrgId, 1);
+            const imageTokenCost = await getImageGenerationCost();
+            const tokenCheck = await hasEnoughTokens(authUserForImage._id, imageOrgId, Math.max(1, imageTokenCost));
             if (!tokenCheck.allowed) {
                 const tokenUser = await User.findById(authUserForImage._id).select("ai_tokens.week_reset_date").lean();
                 const tokenResetDate = tokenUser?.ai_tokens?.week_reset_date ? new Date(tokenUser.ai_tokens.week_reset_date) : new Date(resetNow + tokenPeriodMs);
@@ -5181,6 +5183,7 @@ export const generateImage = async (req, res) => {
                 });
             }
             imageSlotUserId = authUserForImage._id;
+            if (imageTokenCost > 0) imageTokenCharge = { userId: authUserForImage._id, orgId: imageOrgId, amount: imageTokenCost, source: tokenCheck.source };
         }
         // Call Cloudflare Workers AI (Flux-1-Schnell)
         let imageRes;
@@ -5304,6 +5307,10 @@ export const generateImage = async (req, res) => {
 
         // The image was already counted when its slot was taken above; from here on it is kept even if logging fails
         imageSlotUserId = null;
+
+        if (imageTokenCharge) {
+            await deductTokens(imageTokenCharge.userId, imageTokenCharge.orgId, imageTokenCharge.amount, imageTokenCharge.source).catch((e) => console.error("Image token deduction error:", e));
+        }
 
         // Log it for dashboard analytics (every call, chat tool included).
         {
