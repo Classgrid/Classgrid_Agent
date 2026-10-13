@@ -5150,6 +5150,24 @@ export const generateImage = async (req, res) => {
                 { _id: authUserForImage._id, $or: [{ "ai_tokens.week_reset_date": { $exists: false } }, { "ai_tokens.week_reset_date": null }, { "ai_tokens.week_reset_date": { $lte: new Date(resetNow) } }] },
                 { $set: { "ai_tokens.used_this_week": 0, "ai_tokens.week_reset_date": new Date(resetNow + tokenPeriodMs) } }
             );
+            // Token period shortened by the super admin: bring the token reset date in too (usage so far is kept)
+            await User.collection.updateOne(
+                { _id: authUserForImage._id, "ai_tokens.week_reset_date": { $gt: new Date(resetNow + tokenPeriodMs) } },
+                { $set: { "ai_tokens.week_reset_date": new Date(resetNow + tokenPeriodMs) } }
+            );
+
+            // Chat limit used up: no images either until it resets. Same 429 body as the chat's quota check, so the
+            // chat shows its usual out-of-credits card.
+            const tokenCheck = await hasEnoughTokens(authUserForImage._id, imageOrgId, 1);
+            if (!tokenCheck.allowed) {
+                const tokenUser = await User.findById(authUserForImage._id).select("ai_tokens.week_reset_date").lean();
+                const tokenResetDate = tokenUser?.ai_tokens?.week_reset_date ? new Date(tokenUser.ai_tokens.week_reset_date) : new Date(resetNow + tokenPeriodMs);
+                return res.status(429).json({
+                    error: tokenCheck.reason === "Insufficient tokens." ? "ai_quota_exceeded" : "ai_blocked",
+                    message: tokenCheck.reason,
+                    resetDate: tokenResetDate.toISOString(),
+                });
+            }
 
             // Take one image slot BEFORE generating, in a single atomic step ("add 1 only while used < limit").
             // Checking first and counting after the 10-20s generation let parallel requests (several @Create image
@@ -5432,6 +5450,18 @@ export const getMyUsage = async (req, res) => {
         if (!userTokens || !userTokens.ai_tokens) {
             return res.json({ type: 'free', used: 0, limit: freeLimit, remaining: freeLimit });
         }
+
+        // The token reset period set by the super admin: a reset date saved under a longer period shows as at most
+        // one period away (the chat's token check moves the saved date the same way), and once it has passed the
+        // usage starts over.
+        const { resetPeriodMs } = await import("../services/ai-feature-limits.js");
+        const tokenPeriodMs = resetPeriodMs("tokens", org, globalConfig, userTokens.organization_id || null);
+        const nowMs = Date.now();
+        const savedResetMs = userTokens.ai_tokens.week_reset_date ? new Date(userTokens.ai_tokens.week_reset_date).getTime() : 0;
+        const periodOver = nowMs >= savedResetMs;
+        const shownResetDate = new Date(periodOver ? nowMs + tokenPeriodMs : Math.min(savedResetMs, nowMs + tokenPeriodMs));
+        userTokens.ai_tokens.used_this_week = periodOver ? 0 : (userTokens.ai_tokens.used_this_week || 0);
+        userTokens.ai_tokens.week_reset_date = shownResetDate;
 
         const freeData = {
             used: userTokens.ai_tokens.used_this_week,

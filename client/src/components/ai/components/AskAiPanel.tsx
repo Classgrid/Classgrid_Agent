@@ -3515,6 +3515,11 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
             const errData = await res.json();
             if (errData.error) errorMsg = errData.error;
             limitReached = errData.code === "IMAGE_LIMIT_REACHED";
+            // Chat limit used up: the usual out-of-credits card, same as a chat message gets
+            if (errData.error === "ai_quota_exceeded" && errData.resetDate) {
+              errorMsg = `ai_quota_exceeded|${errData.resetDate}`;
+              limitReached = true;
+            }
           } catch (e) { }
           if (limitReached) {
             // Weekly image limit used up: say so plainly instead of showing a failed-image card
