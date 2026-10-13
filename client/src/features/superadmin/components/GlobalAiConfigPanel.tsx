@@ -148,7 +148,7 @@ export function GlobalAiConfigPanel({ grantCreditsNode }: { grantCreditsNode?: R
                     type="number"
                     min={1000}
                     max={100000000}
-                    value={individualUsage}
+                    value={individualUsage || ""}
                     onChange={(e) => setIndividualUsage(Number(e.target.value))}
                     disabled={updateConfigMutation.isPending}
                     className="mt-1 text-sm"
@@ -193,7 +193,7 @@ export function GlobalAiConfigPanel({ grantCreditsNode }: { grantCreditsNode?: R
                     type="number"
                     min={10000}
                     max={100000000}
-                    value={orgPool}
+                    value={orgPool || ""}
                     onChange={(e) => setOrgPool(Number(e.target.value))}
                     disabled={updateConfigMutation.isPending}
                     className="mt-1 text-sm"

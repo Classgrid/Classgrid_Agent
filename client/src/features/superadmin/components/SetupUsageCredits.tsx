@@ -247,7 +247,7 @@ export function SetupUsageCredits({ orgId, orgName, currentPoolLimit, currentUse
                     <span className="text-sm font-bold text-blue-600">{individualUsage.toLocaleString()}</span>
                   </div>
                   <BlueSlider min={1000} max={100000000} step={1000} value={individualUsage} onValueChange={setIndividualUsage} disabled={updateLimitsMutation.isPending} />
-                  <Input type="number" min={1000} max={100000000} value={individualUsage} onChange={(e) => setIndividualUsage(Math.max(1000, Math.min(100000000, Number(e.target.value) || 1000)))} disabled={updateLimitsMutation.isPending} className="mt-1 text-sm" placeholder="Type exact value e.g. 500000" />
+                  <Input type="number" min={1000} max={100000000} value={individualUsage || ""} onChange={(e) => setIndividualUsage(Math.min(100000000, Number(e.target.value) || 0))} disabled={updateLimitsMutation.isPending} className="mt-1 text-sm" placeholder="Type exact value e.g. 500000" />
                   <ResetPeriodInput id="individual" value={tokenReset} onChange={setTokenReset} disabled={updateLimitsMutation.isPending} />
                 </div>
                 <DialogFooter>
@@ -282,7 +282,7 @@ export function SetupUsageCredits({ orgId, orgName, currentPoolLimit, currentUse
                     <span className="text-sm font-bold text-blue-600">{orgPool.toLocaleString()}</span>
                   </div>
                   <BlueSlider min={10000} max={100000000} step={1000} value={orgPool} onValueChange={setOrgPool} disabled={updateLimitsMutation.isPending} />
-                  <Input type="number" min={10000} max={100000000} value={orgPool} onChange={(e) => setOrgPool(Math.max(10000, Math.min(100000000, Number(e.target.value) || 10000)))} disabled={updateLimitsMutation.isPending} className="mt-1 text-sm" placeholder="Type exact value e.g. 5000000" />
+                  <Input type="number" min={10000} max={100000000} value={orgPool || ""} onChange={(e) => setOrgPool(Math.min(100000000, Number(e.target.value) || 0))} disabled={updateLimitsMutation.isPending} className="mt-1 text-sm" placeholder="Type exact value e.g. 5000000" />
                 </div>
                 <DialogFooter>
                   <Button variant="outline" type="button" onClick={() => setOpenOrg(false)} disabled={updateLimitsMutation.isPending}>Cancel</Button>
