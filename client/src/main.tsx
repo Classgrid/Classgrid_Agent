@@ -149,3 +149,4 @@ if (hasIntegrationCallback) {
 }
 
 // Vercel trigger
+// redeploy trigger 2026-10-13
