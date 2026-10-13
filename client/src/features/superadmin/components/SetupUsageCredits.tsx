@@ -32,42 +32,90 @@ export const DEFAULT_RESET_PERIOD: ResetPeriod = { value: 7, unit: "day" };
 
 export const toResetPeriod = (p?: ResetPeriod | null): ResetPeriod => (p?.value && p?.unit ? { value: p.value, unit: p.unit } : DEFAULT_RESET_PERIOD);
 
-/** "Resets every 2 hours" */
+// The period is set as days + hours + minutes + seconds and saved in the largest unit that fits exactly
+// (1 day 4 hours -> 28 hours). Weeks and months saved earlier still show, as days.
+const UNIT_SECONDS: Record<ResetUnit, number> = { second: 1, minute: 60, hour: 3600, day: 86400, week: 604800, month: 2592000 };
+const MAX_RESET_SECONDS = 366 * 86400; // same cap as the server
+const PERIOD_PARTS = [
+  { key: "days", label: "Days", size: 86400 },
+  { key: "hours", label: "Hours", size: 3600 },
+  { key: "minutes", label: "Minutes", size: 60 },
+  { key: "seconds", label: "Seconds", size: 1 },
+] as const;
+type PeriodParts = Record<(typeof PERIOD_PARTS)[number]["key"], number>;
+
+const periodToSeconds = (p?: ResetPeriod | null) => {
+  const { value, unit } = toResetPeriod(p);
+  return value * UNIT_SECONDS[unit];
+};
+const secondsToPeriod = (total: number): ResetPeriod => {
+  for (const unit of ["day", "hour", "minute"] as const) {
+    if (total % UNIT_SECONDS[unit] === 0) return { value: total / UNIT_SECONDS[unit], unit };
+  }
+  return { value: total, unit: "second" };
+};
+const splitSeconds = (total: number): PeriodParts => {
+  let rest = total;
+  const parts = {} as PeriodParts;
+  for (const { key, size } of PERIOD_PARTS) {
+    parts[key] = Math.floor(rest / size);
+    rest -= parts[key] * size;
+  }
+  return parts;
+};
+
+/** "Resets every 2 hours", "Resets every 1 day 4 hours 30 minutes" */
 export function formatResetPeriod(p?: ResetPeriod | null) {
   const { value, unit } = toResetPeriod(p);
-  return `Resets every ${value} ${unit}${value === 1 ? "" : "s"}`;
+  if (unit === "week" || unit === "month") return `Resets every ${value} ${unit}${value === 1 ? "" : "s"}`;
+  const parts = splitSeconds(periodToSeconds(p));
+  const text = PERIOD_PARTS.filter(({ key }) => parts[key] > 0)
+    .map(({ key, label }) => `${parts[key]} ${parts[key] === 1 ? label.slice(0, -1).toLowerCase() : label.toLowerCase()}`)
+    .join(" ");
+  return `Resets every ${text}`;
 }
 
-/** Number (1-1000) + unit select for how often a limit resets */
+/** Days / Hours / Minutes / Seconds boxes for how often a limit resets */
 export function ResetPeriodInput({ id, value, onChange, disabled }: { id: string; value: ResetPeriod; onChange: (p: ResetPeriod) => void; disabled?: boolean }) {
+  const [parts, setParts] = useState<PeriodParts>(() => splitSeconds(periodToSeconds(value)));
+  // A new value from the server (dialog reopened) refills the boxes
+  React.useEffect(() => { setParts(splitSeconds(periodToSeconds(value))); }, [value.value, value.unit]);
+
+  const total = PERIOD_PARTS.reduce((sum, { key, size }) => sum + parts[key] * size, 0);
+  const invalid = total < 1 || total > MAX_RESET_SECONDS;
+
+  const setPart = (key: keyof PeriodParts, raw: string) => {
+    const next = { ...parts, [key]: Math.max(0, Math.floor(Number(raw) || 0)) };
+    setParts(next);
+    const nextTotal = PERIOD_PARTS.reduce((sum, p) => sum + next[p.key] * p.size, 0);
+    if (nextTotal >= 1 && nextTotal <= MAX_RESET_SECONDS) onChange(secondsToPeriod(nextTotal));
+  };
+
   return (
     <div className="flex flex-col gap-2">
-      <Label htmlFor={`${id}-reset-value`} className="text-sm font-medium">Resets every</Label>
-      <div className="flex gap-2 items-center">
-        <div className="w-24 shrink-0">
-          <Input
-            id={`${id}-reset-value`}
-            type="number"
-            min={1}
-            max={1000}
-            step={1}
-            value={value.value}
-            onChange={(e) => onChange({ ...value, value: Math.max(1, Math.min(1000, Math.floor(Number(e.target.value) || 1))) })}
-            disabled={disabled}
-          />
-        </div>
-        <select
-          aria-label="Reset period unit"
-          value={value.unit}
-          onChange={(e) => onChange({ ...value, unit: e.target.value as ResetUnit })}
-          disabled={disabled}
-          className="h-10 flex-1 rounded-lg border border-input bg-background px-3 text-sm outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 disabled:cursor-not-allowed disabled:opacity-50"
-        >
-          {RESET_UNITS.map((u) => (
-            <option key={u.value} value={u.value}>{u.label}{value.value === 1 ? "" : "s"}</option>
-          ))}
-        </select>
+      <Label className="text-sm font-medium">Resets every</Label>
+      <div className="grid grid-cols-4 gap-2">
+        {PERIOD_PARTS.map(({ key, label }) => (
+          <div key={key} className="flex flex-col gap-1">
+            <Input
+              id={`${id}-reset-${key}`}
+              type="number"
+              min={0}
+              step={1}
+              value={parts[key]}
+              onChange={(e) => setPart(key, e.target.value)}
+              disabled={disabled}
+              aria-label={label}
+            />
+            <Label htmlFor={`${id}-reset-${key}`} className="text-xs text-muted-foreground">{label}</Label>
+          </div>
+        ))}
       </div>
+      {invalid ? (
+        <p className="text-xs text-red-500">Set at least 1 second and at most 366 days.</p>
+      ) : (
+        <p className="text-xs text-muted-foreground">{formatResetPeriod(secondsToPeriod(total))}</p>
+      )}
     </div>
   );
 }

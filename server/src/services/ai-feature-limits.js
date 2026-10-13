@@ -46,9 +46,14 @@ const PERIOD_FIELDS = {
 };
 export const RESET_PERIOD_FEATURES = Object.keys(PERIOD_FIELDS);
 
-/** A whole number 1..1000 and one of the RESET_UNITS. */
+// The admin sets a period as days + hours + minutes + seconds; it is stored in the largest unit that fits
+// exactly (e.g. 1 day 4 hours -> 28 hour), so any whole number is allowed, up to 366 days in total.
+export const MAX_RESET_PERIOD_MS = 366 * 24 * 60 * 60 * 1000;
+
+/** A whole number >= 1 of one of the RESET_UNITS, at most 366 days in total. */
 export function isValidResetPeriod(value, unit) {
-    return Number.isInteger(value) && value >= 1 && value <= 1000 && Object.prototype.hasOwnProperty.call(RESET_UNITS, unit);
+    return Number.isInteger(value) && value >= 1 && Object.prototype.hasOwnProperty.call(RESET_UNITS, unit)
+        && value * RESET_UNITS[unit] <= MAX_RESET_PERIOD_MS;
 }
 
 const readPeriod = (src, prefix) => {
@@ -90,10 +95,18 @@ export function resetPeriodMs(feature, org, globalConfig, orgId = org?._id) {
     return resolveResetPeriod(feature, org, globalConfig, orgId).ms;
 }
 
-/** "2 hours", "1 day" */
+/** "2 hours", "1 day", "1 day 4 hours 30 minutes" (weeks and months stay as set) */
 export function formatPeriodLength(period) {
     const p = period || DEFAULT_RESET_PERIOD;
-    return `${p.value} ${p.unit}${p.value === 1 ? "" : "s"}`;
+    if (p.unit === "week" || p.unit === "month") return `${p.value} ${p.unit}${p.value === 1 ? "" : "s"}`;
+    let seconds = Math.round((p.value * RESET_UNITS[p.unit]) / 1000);
+    const parts = [];
+    for (const [name, size] of [["day", 86400], ["hour", 3600], ["minute", 60], ["second", 1]]) {
+        const n = Math.floor(seconds / size);
+        seconds -= n * size;
+        if (n > 0) parts.push(`${n} ${name}${n === 1 ? "" : "s"}`);
+    }
+    return parts.join(" ") || `${p.value} ${p.unit}${p.value === 1 ? "" : "s"}`;
 }
 
 /** "every 2 hours", "every 1 day" */
@@ -112,7 +125,7 @@ export function parseResetPeriodInput(body, bodyPrefix) {
     if (rawValue === undefined && rawUnit === undefined) return { set: null, error: null };
     const value = typeof rawValue === "string" && rawValue.trim() !== "" ? Number(rawValue) : rawValue;
     if (!isValidResetPeriod(value, rawUnit)) {
-        return { set: null, error: `${bodyPrefix}: value must be a whole number from 1 to 1000 and unit one of ${Object.keys(RESET_UNITS).join(", ")}.` };
+        return { set: null, error: `${bodyPrefix}: value must be a whole number of at least 1, unit one of ${Object.keys(RESET_UNITS).join(", ")}, and the total at most 366 days.` };
     }
     return { set: { value, unit: rawUnit }, error: null };
 }
