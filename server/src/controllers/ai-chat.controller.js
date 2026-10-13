@@ -5152,7 +5152,13 @@ export const generateImage = async (req, res) => {
 
             const tokenCheck = await hasEnoughTokens(authUserForImage._id, imageOrgId, 1);
             if (!tokenCheck.allowed) {
-                return res.status(429).json({ error: tokenCheck.reason });
+                const tokenUser = await User.findById(authUserForImage._id).select("ai_tokens.week_reset_date").lean();
+                const tokenResetDate = tokenUser?.ai_tokens?.week_reset_date ? new Date(tokenUser.ai_tokens.week_reset_date) : new Date(resetNow + tokenPeriodMs);
+                return res.status(429).json({
+                    error: tokenCheck.reason === "Insufficient tokens." ? "ai_quota_exceeded" : "ai_blocked",
+                    message: tokenCheck.reason,
+                    resetDate: tokenResetDate.toISOString(),
+                });
             }
 
             // Take one image slot BEFORE generating, in a single atomic step ("add 1 only while used < limit").
