@@ -314,6 +314,7 @@ export async function streamClaudeChat({
     groupNeedingLoad,
     attachments = [],
     effort,
+    thinkOff = false,
     // Auto-continue: when the answer hits max_tokens it is continued in the same reply, up to this many times,
     // while outputBudget (the user's remaining tokens; undefined = no limit) still has room
     maxContinuations = 0,
@@ -382,12 +383,15 @@ export async function streamClaudeChat({
         max_tokens: (maxTokens || 0) >= NORMAL_CALLER_CAP ? Math.max(maxTokens, MIN_MAX_TOKENS) : Math.max(maxTokens || 0, 1024),
         system,
         tools: claudeTools.length > 0 ? claudeTools : undefined,
-        thinking: {
-            type: "adaptive",
-            display: "summarized",
-            block_binding: { prefix_mismatch_behavior: "drop_block" },
-        },
-        output_config: { effort: effort || DEFAULT_EFFORT[model] || "medium" },
+        // TEMP (Think button test): Haiku 5.5 takes "disabled", Sonnet 5.5 "between_tools"; Opus 5.5 / Fable 5.1 can't switch it off, so effort low
+        thinking: thinkOff && model === "claude-haiku-5-5" ? { type: "disabled" }
+            : thinkOff && model === "claude-sonnet-5-5" ? { type: "between_tools" }
+            : {
+                type: "adaptive",
+                display: "summarized",
+                block_binding: { prefix_mismatch_behavior: "drop_block" },
+            },
+        output_config: { effort: thinkOff ? "low" : (effort || DEFAULT_EFFORT[model] || "medium") },
         // Automatic cache point on the newest message: chat history and earlier rounds of this answer (tool
         // calls and results, e.g. a long PDF the model wrote) are read from cache on the next round instead
         // of being paid in full again. Together with the tools and system breakpoints that's 3 of the 4 allowed.
