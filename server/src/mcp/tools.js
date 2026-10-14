@@ -4313,8 +4313,20 @@ export const handleToolCall = async (name, args, context = {}) => {
             : `No lines containing "${args.search.trim()}" in the last ${numLines} lines.`;
         }
         if (!resultText) resultText = "No logs found or empty output.";
+        let processStatus = '';
+        try {
+          const { stdout: jlist } = await execPromise('pm2 jlist', { maxBuffer: 1024 * 1024 * 10 });
+          const procs = JSON.parse(jlist || '[]');
+          processStatus = 'PM2 PROCESS STATUS (check this first: anything not "online" is down or crashing):\n' + procs.map((p) => {
+            const env = p.pm2_env || {};
+            const upMin = env.status === 'online' && env.pm_uptime ? Math.round((Date.now() - env.pm_uptime) / 60000) : 0;
+            return `- ${p.name}: ${env.status || 'unknown'}, restarts=${env.restart_time ?? 0}${env.status === 'online' ? `, up ${upMin} min` : ''}`;
+          }).join('\n') + '\n\n';
+        } catch (statusErr) {
+          processStatus = `PM2 PROCESS STATUS: could not read (${statusErr.message})\n\n`;
+        }
         // TRUNCATE TO LAST 8000 CHARS TO PREVENT CONTEXT WINDOW OVERFLOW CRASHES
-        return { content: [{ type: 'text', text: resultText.substring(resultText.length - 8000) }] };
+        return { content: [{ type: 'text', text: processStatus + resultText.substring(resultText.length - 8000) }] };
       } catch (err) {
         return { content: [{ type: 'text', text: `Failed to read server logs: ${err.message}\nStderr: ${err.stderr || ''}` }] };
       }
