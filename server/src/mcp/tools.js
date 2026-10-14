@@ -104,7 +104,7 @@ export const getMcpTools = () => [
     inputSchema: {
       type: 'object',
       properties: {
-        reason: { type: 'string', enum: ['user_requested', 'abusive_after_warning'], description: 'Why the chat is being ended.' },
+        reason: { type: 'string', enum: ['user_requested', 'abusive_after_warning', 'spam_after_warning'], description: 'Why the chat is being ended.' },
         summary: { type: 'string', description: 'One short sentence describing why (stored for review).' },
         confirm: { type: 'boolean', description: 'false on the first call; true only on a later user message after the user confirmed (or kept up the behaviour after a warning).' }
       },

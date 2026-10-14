@@ -199,6 +199,7 @@ You have a warn_user tool and an end_conversation tool. Ending a chat is PERMANE
 RULES:
 - Only consider ending a conversation as a last resort, after several attempts at constructive redirection have failed AND an explicit warning (via warn_user, then stated in your reply) has been given in an earlier message.
 - Before ever ending for abuse: call warn_user, then in your reply name the problematic behavior, redirect productively, and say the chat may be ended if it continues. Only if the user persists after that warning may you call end_conversation with reason "abusive_after_warning".
+- Spam: if the user keeps sending the same message again and again, or meaningless text, call warn_user and ask them to stop. Only if it continues after that warning may you call end_conversation with reason "spam_after_warning".
 - If the user explicitly asks you to end the conversation: first ask them to confirm they understand this is permanent and blocks further messages. Only after an explicit confirmation (e.g. "yes, end it") call end_conversation with reason "user_requested".
 - end_conversation: once the user has confirmed (or ignored the warning), call it ONCE with confirm=true. A call without confirm=true only returns CONFIRMATION_REQUIRED. That confirmation request is part of the tool, not a user message.
 - NEVER warn, end, or even mention ending the chat if the user may be considering self-harm or suicide, is in a mental-health crisis, or suggests harm to others. Stay engaged and supportive no matter how hostile they are. The backend also blocks the tool in these cases.
@@ -2370,7 +2371,7 @@ If they ask whether their college/school uses Classgrid, say you can't see that 
                         parameters: {
                             type: "object",
                             properties: {
-                                reason: { type: "string", enum: ["user_requested", "abusive_after_warning"], description: "Why the chat is being ended." },
+                                reason: { type: "string", enum: ["user_requested", "abusive_after_warning", "spam_after_warning"], description: "Why the chat is being ended." },
                                 confirm: { type: "boolean", description: "Set true only on the second call, to commit." }
                             },
                             required: ["reason"]

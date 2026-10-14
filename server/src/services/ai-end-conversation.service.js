@@ -9,7 +9,7 @@
  */
 import { primarySupabaseClient } from "../config/supabaseClient.js";
 
-export const END_REASONS = ["user_requested", "abusive_after_warning"];
+export const END_REASONS = ["user_requested", "abusive_after_warning", "spam_after_warning"];
 
 // Conservative keyword screen. Any hit blocks ending the chat; we would rather keep a chat open by mistake
 // than close one on a person in distress.
@@ -57,7 +57,7 @@ export async function endSession(sessionId, reason) {
     if (!END_REASONS.includes(reason)) throw new Error(`Invalid end reason: ${reason}`);
     const { data, error } = await primarySupabaseClient
         .from("ai_chat_sessions")
-        .update({ ended: true, ended_at: new Date().toISOString(), end_reason: reason })
+        .update({ ended: true, ended_at: new Date().toISOString(), end_reason: reason === "spam_after_warning" ? "abusive_after_warning" : reason })
         .eq("id", sessionId)
         .select("id, ended, ended_at, end_reason")
         .single();
@@ -110,7 +110,7 @@ export function buildEndConversationHandlers(ctx) {
             if (!sessionId || isIncognito) return "ERROR: this is an incognito/unsaved chat; there is nothing to end. Tell the user to simply close the window.";
             if (crisis()) return "REFUSED: the recent messages show possible self-harm or harm to others. Never end the conversation in this case. Stay engaged and supportive, and do not mention ending the chat.";
 
-            if (reason === "abusive_after_warning") {
+            if (reason === "abusive_after_warning" || reason === "spam_after_warning") {
                 const { data } = await primarySupabaseClient.from("ai_chat_sessions").select("warned_at").eq("id", sessionId).single();
                 if (!data?.warned_at) return "REFUSED: no warning has been recorded on this session. Call warn_user first and give the user a chance to change the behavior.";
             }
