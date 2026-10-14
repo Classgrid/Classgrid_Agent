@@ -181,13 +181,13 @@ export function SidebarUserMenu({ user, customTrigger }: { user: { name: string;
 
           <DropdownMenuSeparator className="mx-0" />
 
-          <div className="px-3 py-3 flex items-center justify-between text-xs hover:bg-accent hover:text-accent-foreground transition-colors cursor-pointer rounded-b-lg outline-none focus-visible:bg-accent">
+          <a href="https://status.classgrid.in" target="_blank" rel="noopener noreferrer" className="px-3 py-3 flex items-center justify-between text-xs hover:bg-accent hover:text-accent-foreground transition-colors cursor-pointer rounded-b-lg outline-none focus-visible:bg-accent">
             <div className="flex flex-col gap-0.5">
               <span className="text-muted-foreground font-medium">Platform Status</span>
               <span className={`${getFooterStatusTextClass(status.state)} font-medium`}>{status.label}</span>
             </div>
             <div className={`w-2 h-2 rounded-full ${getFooterStatusDotClass(status.state)}`} />
-          </div>
+          </a>
         </DropdownMenuContent>
       </DropdownMenu>
     </>
