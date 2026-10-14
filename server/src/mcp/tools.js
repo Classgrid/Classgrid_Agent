@@ -345,7 +345,9 @@ export const getMcpTools = () => [
         search: { type: 'string', description: 'Optional word or phrase (case-insensitive). Only lines containing it are returned.' },
         process: { type: 'string', description: 'Optional PM2 process name to read only its logs, e.g. classgrid, classgrid-rescue or classgrid-ai. Leave empty for all processes.' },
         status_code: { type: 'string', description: 'Optional HTTP status filter: one code ("404"), several ("404,412,500") or a class ("4xx", "5xx"). Only request lines with that status come back.' },
-        since_minutes: { type: 'number', description: 'Optional time window: only lines from the last N minutes (by the PM2 timestamp), e.g. 30 or 1440 for a day.' }
+        since_minutes: { type: 'number', description: 'Optional time window: only lines from the last N minutes (by the PM2 timestamp), e.g. 30 or 1440 for a day.' },
+        context_before: { type: 'number', description: 'Optional, with search: also return this many lines before each match (like grep -B), up to 100.' },
+        context_after: { type: 'number', description: 'Optional, with search: also return this many lines after each match (like grep -A), up to 100.' }
       },
       required: ['log_type']
     }
@@ -4355,6 +4357,11 @@ export const handleToolCall = async (name, args, context = {}) => {
         ? String(args.status_code).split(',').map((c) => c.trim().toLowerCase()).filter((c) => /^[1-5](\d\d|xx)$/.test(c))
         : [];
       const sinceMinutes = Number(args.since_minutes) > 0 ? Number(args.since_minutes) : 0;
+      // grep -B / -A style context around each search match
+      const ctxBefore = Math.max(0, Math.min(Math.floor(Number(args.context_before) || 0), 100));
+      const ctxAfter = Math.max(0, Math.min(Math.floor(Number(args.context_after) || 0), 100));
+      const withContext = !!search && (ctxBefore > 0 || ctxAfter > 0);
+      let hitCount = 0;
       const numLines = (search || statusFilter.length || sinceMinutes)
         ? Math.max(1, Math.min(Math.floor(Number(lines) || 10000), 10000))
         : Math.max(1, Math.min(Math.floor(Number(lines) || 5000), 10000));
@@ -4407,12 +4414,30 @@ export const handleToolCall = async (name, args, context = {}) => {
             if (!fs.existsSync(file)) continue;
             const rl = readline.createInterface({ input: fs.createReadStream(file, { encoding: 'utf8' }), crlfDelay: Infinity });
             const label = path.basename(file);
+            const prev = [];
+            let afterLeft = 0;
+            let lineNo = 0;
+            let lastEmitted = -1;
             for await (const line of rl) {
               scanned++;
+              lineNo++;
               if (line.toLowerCase().includes(search)) {
+                hitCount++;
+                if (withContext && matches.length && lineNo - prev.length > lastEmitted + 1) matches.push('--');
+                for (const p of prev) matches.push(`[${label}] ${p}`);
+                prev.length = 0;
                 matches.push(`[${label}] ${line}`);
-                if (matches.length > 20000) matches.shift();
+                lastEmitted = lineNo;
+                afterLeft = ctxAfter;
+              } else if (afterLeft > 0) {
+                matches.push(`[${label}] ${line}`);
+                lastEmitted = lineNo;
+                afterLeft--;
+              } else if (ctxBefore > 0) {
+                prev.push(line);
+                if (prev.length > ctxBefore) prev.shift();
               }
+              if (matches.length > 20000) matches.shift();
             }
           }
           resultText = matches.join('\n');
@@ -4444,7 +4469,11 @@ export const handleToolCall = async (name, args, context = {}) => {
             ? `${count} line(s) matching ${filtersUsed.join(' + ')} in ${searchedWhere}:\n${resultText}`
             : `No lines matching ${filtersUsed.join(' + ')} in ${searchedWhere}.`;
         }
-        if (search) {
+        if (withContext) {
+          resultText = hitCount > 0 && resultText
+            ? `${hitCount} match(es) for "${args.search.trim()}" with ${ctxBefore} line(s) before and ${ctxAfter} after${filtersUsed.length ? ` (${filtersUsed.join(' + ')})` : ''} in ${searchedWhere}:\n${resultText}`
+            : `No lines containing "${args.search.trim()}"${filtersUsed.length ? ` (${filtersUsed.join(' + ')})` : ''} in ${searchedWhere}.`;
+        } else if (search) {
           const matches = resultText ? resultText.split('\n').filter((l) => l.toLowerCase().includes(search)) : [];
           resultText = matches.length > 0
             ? `${matches.length} line(s) containing "${args.search.trim()}"${filtersUsed.length ? ` (${filtersUsed.join(' + ')})` : ''} in ${searchedWhere}:\n${matches.join('\n')}`
