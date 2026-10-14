@@ -178,3 +178,4 @@ process.on('SIGINT', () => {
 
 // deploy test: main restarts first, rescue after
 // deploy test 1
+// deploy test 2
