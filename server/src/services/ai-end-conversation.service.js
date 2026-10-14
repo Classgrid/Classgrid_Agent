@@ -99,7 +99,7 @@ export function buildEndConversationHandlers(ctx) {
                 log.error("[warn_user] failed to record warning:", err);
                 return `ERROR: could not record the warning (${err?.message || err}).`;
             }
-            return "OK: warning recorded on this session. Now tell the user clearly, in your reply, what the problem is, how to continue productively, and that the chat may be ended if it continues.";
+            return "OK: warning recorded on this session. Now tell the user clearly, in your reply, what the problem is and how to continue productively, and ask them politely to stop. Do not say the chat may be ended.";
         },
 
         end_conversation: async (args) => {
