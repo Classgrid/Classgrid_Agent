@@ -21,6 +21,8 @@ export const CORE_TOOL_NAMES = [
     "search_web",
     "open_url",
     "search_knowledge_base",
+    "warn_user",
+    "end_conversation",
 ];
 
 // Tool definitions with no handler behind them: every call fails today, so they are not offered.

@@ -40,6 +40,7 @@ import {
     memoryText
 } from "../services/ai-chat.service.js";
 import { getHistory, getHistoryCount, appendToHistory, invalidateHistoryCache } from "../services/ai-chat-history.service.js";
+import { buildEndConversationHandlers, reopenSession } from "../services/ai-end-conversation.service.js";
 import { hasEnoughTokens, deductTokens, getImageGenerationCost } from "../services/ai-credits.service.js";
 import redis from "../config/redis.js";
 import { sendEmail } from "../services/aws-ses.service.js";
@@ -191,7 +192,21 @@ CLASSGRID TALK, SUPPORT & PLUGINS
 INLINE CODE (BACKTICKS) RULE:
 CRITICAL: When you want to highlight a single word, short phrase, or variable (like \`cat\`, \`localStorage\`, \`id\`), ALWAYS wrap it in single backticks. This will render as a premium inline box with a grey background and red text. NEVER wrap entire sentences or paragraphs in single backticks. NEVER use bold or italics when backticks would be more appropriate for emphasizing technical or specific terms.`;
 
-const SYSTEM_PROMPT = CORE_PROMPT + `
+
+const END_CONVERSATION_RULES = `
+<end_conversation_tool_info>
+You have a warn_user tool and an end_conversation tool. Ending a chat is PERMANENT: the user can no longer send messages in it.
+RULES:
+- Only consider ending a conversation as a last resort, after several attempts at constructive redirection have failed AND an explicit warning (via warn_user, then stated in your reply) has been given in an earlier message.
+- Before ever ending for abuse: call warn_user, then in your reply name the problematic behavior, redirect productively, and say the chat may be ended if it continues. Only if the user persists after that warning may you call end_conversation with reason "abusive_after_warning".
+- If the user explicitly asks you to end the conversation: first ask them to confirm they understand this is permanent and blocks further messages. Only after an explicit confirmation (e.g. "yes, end it") call end_conversation with reason "user_requested".
+- end_conversation is two-step: the first call returns CONFIRMATION_REQUIRED; if you are certain, call it again with confirm=true. That confirmation request is part of the tool, not a user message.
+- NEVER warn, end, or even mention ending the chat if the user may be considering self-harm or suicide, is in a mental-health crisis, or suggests harm to others. Stay engaged and supportive no matter how hostile they are. The backend also blocks the tool in these cases.
+- A demo request ("show me how it works") is NOT a reason to end a chat; explain instead.
+- When in doubt, keep the conversation going.
+</end_conversation_tool_info>
+`;
+const SYSTEM_PROMPT = CORE_PROMPT + END_CONVERSATION_RULES + `
 <<G:off>>
 You are the Classgrid AI Assistant ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â a friendly, smart helper for educational institutions of all sizes (Schools, Junior Colleges, Engineering Colleges, Degree Colleges, Coaching Institutes) using the Classgrid ERP platform.
 
@@ -1156,6 +1171,13 @@ export const streamAskAi = async (req, res) => {
             if (!userEmail || sessionData.user_email !== userEmail) {
                 console.error(`[SECURITY] Unauthorized chat access attempt! User ${userEmail} tried to access session ${sessionId} owned by ${sessionData.user_email}`);
                 res.write(`data: ${JSON.stringify({ type: "error", error: "Unauthorized. You do not have permission to view this chat." })}\n\n`);
+                res.end();
+                return;
+            }
+
+            // Ended chats are read-only: no model call, no tokens burned.
+            if (sessionData.ended) {
+                res.write(`data: ${JSON.stringify({ type: "error", code: "CHAT_ENDED", error: "This conversation has ended. Start a new chat to continue." })}\n\n`);
                 res.end();
                 return;
             }
@@ -2329,6 +2351,35 @@ If they ask whether their college/school uses Classgrid, say you can't see that 
                 {
                     type: "function",
                     function: {
+                        name: "warn_user",
+                        description: "Record an explicit warning on this chat before any possible end_conversation for abuse. Call it once, then state the warning clearly in your reply.",
+                        parameters: {
+                            type: "object",
+                            properties: {
+                                behavior: { type: "string", description: "One line naming the problematic behavior." }
+                            },
+                            required: ["behavior"]
+                        }
+                    }
+                },
+                {
+                    type: "function",
+                    function: {
+                        name: "end_conversation",
+                        description: "Permanently end this chat (last resort, or when the user explicitly asks and confirms). Two-step: the first call returns CONFIRMATION_REQUIRED; call again with confirm=true to commit. Never usable when self-harm or harm to others is involved.",
+                        parameters: {
+                            type: "object",
+                            properties: {
+                                reason: { type: "string", enum: ["user_requested", "abusive_after_warning"], description: "Why the chat is being ended." },
+                                confirm: { type: "boolean", description: "Set true only on the second call, to commit." }
+                            },
+                            required: ["reason"]
+                        }
+                    }
+                },
+                {
+                    type: "function",
+                    function: {
                         name: "update_plan_step",
                         description: "Updates one step of the Project Execution Plan shown in the user's Workspace panel. Use the step ids from your own plan block. Call with 'running' when you start a step, 'done' when it is finished, 'failed' (with a short note) if it failed.",
                         parameters: {
@@ -2419,6 +2470,7 @@ If they ask whether their college/school uses Classgrid, say you can't see that 
                     },
                     // The model reports progress on its own plan steps (any ids). completedSteps is kept for older
                     // clients; stepStatus carries running/done/failed.
+                    ...buildEndConversationHandlers({ sessionId, isIncognito, messages, question: body.question, res }),
                     update_plan_step: async (args) => {
                         const stepId = typeof args?.step_id === "string" ? args.step_id.trim().slice(0, 100) : "";
                         const status = args?.status;
@@ -4370,6 +4422,24 @@ export const getChatSession = async (req, res) => {
     } catch (e) {
         console.error("Error getting session:", e);
         res.status(500).json({ error: "Failed to load session" });
+    }
+};
+
+// Staff only (route-guarded): reopen a chat that was ended by end_conversation.
+export const reopenChatSession = async (req, res) => {
+    try {
+        const role = req.user?.role;
+        const email = req.user?.email || "";
+        if (!(role === "super_admin" || role === "co_super_admin" || email.endsWith("@classgrid.in"))) {
+            return res.status(403).json({ error: "Forbidden" });
+        }
+        const session = await getSessionById(req.params.id);
+        if (!session) return res.status(404).json({ error: "Session not found" });
+        const data = await reopenSession(req.params.id);
+        res.json({ session: data });
+    } catch (e) {
+        console.error("Error reopening session:", e);
+        res.status(500).json({ error: "Failed to reopen session" });
     }
 };
 
