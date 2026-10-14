@@ -164,7 +164,14 @@ export function WidgetBlock({ code: fullCode, done: fullDone, onAsk }: { code: s
     const t = setInterval(() => setWorkSecs((s) => s + 1), 1000);
     return () => clearInterval(t);
   }, [done]);
-  const dark = typeof document !== "undefined" && document.documentElement.classList.contains("dark");
+  // Follow dark/light switches right away: watch the page's "dark" class instead of reading it only on render
+  const readDark = () => typeof document !== "undefined" && document.documentElement.classList.contains("dark");
+  const [dark, setDark] = useState(readDark);
+  useEffect(() => {
+    const observer = new MutationObserver(() => setDark(readDark()));
+    observer.observe(document.documentElement, { attributes: true, attributeFilter: ["class"] });
+    return () => observer.disconnect();
+  }, []);
   // The shell has no card code in it, so it never reloads while the AI is writing
   const shell = useMemo(() => buildShell(id, dark), [id, dark]);
   const onAskRef = useRef(onAsk);
