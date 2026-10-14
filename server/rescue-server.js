@@ -188,6 +188,12 @@ try {
   app.use("/api/rescue", (req, res, next) => {
     req.viaRescue = true;
     req.originalUrl = req.originalUrl.replace(/^\/api\/rescue/, "") || "/";
+    const withRescuePath = (options) =>
+      options?.path && /^\/(api|oauth)(\/|$)/.test(options.path) ? { ...options, path: `/api/rescue${options.path}` } : options;
+    const setCookie = res.cookie.bind(res);
+    const clearCookie = res.clearCookie.bind(res);
+    res.cookie = (name, value, options) => setCookie(name, value, withRescuePath(options));
+    res.clearCookie = (name, options) => clearCookie(name, withRescuePath(options));
     next();
   }, fullBackend);
   console.log("✅ Rescue Server loaded the full backend under /api/rescue");
