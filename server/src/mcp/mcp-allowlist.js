@@ -13,7 +13,7 @@ import { TOOL_GROUPS } from "../services/ai-tool-groups.js";
 // The owner's never-expose list, kept here word for word as a second copy on purpose: editing
 // mcp-scopes.js alone can't open one of these up.
 export const MCP_HARD_DENYLIST = Object.freeze(new Set([
-    "execute_terminal_command", "ubuntu", "unified_db_query", "read_server_logs", "read_local_file",
+    "execute_terminal_command", "ubuntu", "unified_db_query", "read_server_logs", "get_server_status", "read_local_file",
     "read_sandbox_file", "run_code", "manage_rag_document", "supabase_connector", "vercel_connector",
     "sanity_connector", "aws_ses_connector", "whatsapp_business_connector", "facebook_connector",
     "instagram_connector", "send_whatsapp_message", "generate_image", "edit_image", "transcribe_audio",

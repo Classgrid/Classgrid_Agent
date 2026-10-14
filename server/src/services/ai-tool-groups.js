@@ -117,7 +117,7 @@ export const TOOL_GROUPS = [
     {
         id: "internal_ops",
         description: "STAFF: run terminal commands on the sandbox and read server logs.",
-        tools: ["execute_terminal_command", "read_server_logs"],
+        tools: ["execute_terminal_command", "read_server_logs", "get_server_status"],
         pattern: /\b(logs?|terminal|ssh|env|ec2|aws|r2|bucket|infra|server|pm2|crash\w*|errors?)\b/i,
         staffOnly: true,
     },

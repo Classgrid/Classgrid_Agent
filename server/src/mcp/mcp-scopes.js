@@ -88,7 +88,7 @@ export const DEFAULT_REQUESTED_SCOPES = Object.freeze(
 // Never reachable over MCP, whatever the token's scopes (server, database, sandbox, platform accounts,
 // paid generation, AI settings/skills and every staff or platform tool).
 export const MCP_NEVER_EXPOSE = Object.freeze(new Set([
-    "execute_terminal_command", "ubuntu", "unified_db_query", "read_server_logs", "read_local_file",
+    "execute_terminal_command", "ubuntu", "unified_db_query", "read_server_logs", "get_server_status", "read_local_file",
     "read_sandbox_file", "run_code", "manage_rag_document", "search_knowledge_base", "search_syllabus_vectors",
     "supabase_connector", "vercel_connector", "sanity_connector", "aws_ses_connector",
     "whatsapp_business_connector", "facebook_connector", "instagram_connector", "send_whatsapp_message",

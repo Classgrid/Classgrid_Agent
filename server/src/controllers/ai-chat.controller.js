@@ -3345,6 +3345,10 @@ If they ask whether their college/school uses Classgrid, say you can't see that 
                         const result = await handleToolCall('read_server_logs', args, {});
                         return result.isError ? result.content[0].text : result.content[0].text;
                     },
+                    get_server_status: async (args) => {
+                        const result = await handleToolCall('get_server_status', args, {});
+                        return result.content[0].text;
+                    },
                     aws_ses_connector: async (args) => {
                         const result = await handleToolCall('aws_ses_connector', args, {});
                         return result.isError ? result.content[0].text : result.content[0].text;

@@ -314,16 +314,24 @@ export const getMcpTools = () => [
   },
   {
     name: 'read_server_logs',
-    description: 'Read the latest server logs from the host machine. You can read PM2 logs or Winston local file logs. To find something specific (e.g. "AI-STREAM", an error message, a session id), pass search: the server then scans up to the last 10,000 lines and returns only the matching lines.',
+    description: 'Read the latest server logs from the host machine (PM2 logs or Winston local file logs), 5000 lines by default and up to 10,000. Pick one PM2 process with process (classgrid = main server on port 3000, classgrid-rescue = rescue server on port 4000 that takes over when main is down, classgrid-ai = AI server). To find something specific (e.g. "AI-STREAM", an error message, a session id), pass search: only matching lines come back. The reply always starts with the PM2 status of every process.',
     inputSchema: {
       type: 'object',
       properties: {
         log_type: { type: 'string', enum: ['pm2_error', 'pm2_out', 'pm2_all', 'winston_error', 'winston_combined'], description: 'The type of logs to read. pm2_all = PM2 output and errors together.' },
-        lines: { type: 'number', description: 'Number of lines to read from the end. Max 500 without search, max 10000 with search (default 10000 when searching).' },
-        search: { type: 'string', description: 'Optional word or phrase (case-insensitive). Only lines containing it are returned.' }
+        lines: { type: 'number', description: 'Number of lines to read from the end, up to 10000 (default 5000, or 10000 when searching).' },
+        search: { type: 'string', description: 'Optional word or phrase (case-insensitive). Only lines containing it are returned.' },
+        process: { type: 'string', description: 'Optional PM2 process name to read only its logs, e.g. classgrid, classgrid-rescue or classgrid-ai. Leave empty for all processes.' },
+        status_code: { type: 'string', description: 'Optional HTTP status filter: one code ("404"), several ("404,412,500") or a class ("4xx", "5xx"). Only request lines with that status come back.' },
+        since_minutes: { type: 'number', description: 'Optional time window: only lines from the last N minutes (by the PM2 timestamp), e.g. 30 or 1440 for a day.' }
       },
       required: ['log_type']
     }
+  },
+  {
+    name: 'get_server_status',
+    description: 'Live status of the Classgrid servers: every PM2 process (online/errored/stopped, restarts, uptime, memory, CPU), a live health check of the main server (port 3000) and the rescue server (port 4000), which one is serving users right now, and the machine memory and load. Use this first when asked if the server is up, down or crashing.',
+    inputSchema: { type: 'object', properties: {} }
   },
   {
     name: 'aws_ses_connector',
@@ -4281,22 +4289,62 @@ export const handleToolCall = async (name, args, context = {}) => {
       }
     }
 
+    if (name === 'get_server_status') {
+      const check = async (url) => {
+        const started = Date.now();
+        try {
+          const r = await fetch(url, { signal: AbortSignal.timeout(5000) });
+          return { ok: r.ok, text: `HTTP ${r.status} in ${Date.now() - started} ms` };
+        } catch (e) {
+          return { ok: false, text: `NOT REACHABLE (${e.message})` };
+        }
+      };
+      const [main, rescue] = await Promise.all([check('http://localhost:3000/'), check('http://localhost:4000/api/rescue/status')]);
+      let procs = [];
+      try {
+        const { stdout } = await execPromise('pm2 jlist', { maxBuffer: 1024 * 1024 * 10 });
+        procs = JSON.parse(stdout || '[]');
+      } catch (e) { }
+      const os = await import('os');
+      const gb = (b) => (b / 1024 / 1024 / 1024).toFixed(2);
+      const out = [
+        `Main server (port 3000): ${main.ok ? 'UP' : 'DOWN'} - ${main.text}`,
+        `Rescue server (port 4000): ${rescue.ok ? 'UP' : 'DOWN'} - ${rescue.text}`,
+        `Serving users right now: ${main.ok ? 'main server' : rescue.ok ? 'RESCUE server (main is down)' : 'NOTHING - both are down'}`,
+        '',
+        'PM2 processes:',
+        ...(procs.length ? procs.map((p) => {
+          const env = p.pm2_env || {};
+          const upMin = env.status === 'online' && env.pm_uptime ? Math.round((Date.now() - env.pm_uptime) / 60000) : 0;
+          return `- ${p.name}: ${env.status || 'unknown'}, restarts=${env.restart_time ?? 0}${env.status === 'online' ? `, up ${upMin} min` : ''}, memory=${Math.round((p.monit?.memory || 0) / 1024 / 1024)} MB, cpu=${p.monit?.cpu ?? 0}%`;
+        }) : ['- could not read PM2 process list']),
+        '',
+        `Machine: memory free ${gb(os.freemem())} GB of ${gb(os.totalmem())} GB, load ${os.loadavg().map((n) => n.toFixed(2)).join(' / ')}, up ${Math.round(os.uptime() / 3600)} h`,
+      ];
+      return { content: [{ type: 'text', text: out.join('\n') }] };
+    }
+
     if (name === 'read_server_logs') {
       const { log_type, lines } = args;
       // With a search word the server scans far more lines (only matching lines come back, so the 8000-char
       // cap below holds useful lines instead of whatever background noise was logged last).
       const search = typeof args.search === 'string' ? args.search.trim().toLowerCase() : '';
-      const numLines = search
+      const statusFilter = typeof args.status_code === 'string' || typeof args.status_code === 'number'
+        ? String(args.status_code).split(',').map((c) => c.trim().toLowerCase()).filter((c) => /^[1-5](\d\d|xx)$/.test(c))
+        : [];
+      const sinceMinutes = Number(args.since_minutes) > 0 ? Number(args.since_minutes) : 0;
+      const numLines = (search || statusFilter.length || sinceMinutes)
         ? Math.max(1, Math.min(Math.floor(Number(lines) || 10000), 10000))
-        : Math.max(1, Math.min(Math.floor(Number(lines) || 5000), 5000));
+        : Math.max(1, Math.min(Math.floor(Number(lines) || 5000), 10000));
+      const pm2Process = typeof args.process === 'string' && /^[\w.-]+$/.test(args.process.trim()) ? ` ${args.process.trim()}` : '';
       try {
         let command = '';
         if (log_type === 'pm2_error') {
-          command = `pm2 logs --err --nostream --lines ${numLines}`;
+          command = `pm2 logs${pm2Process} --err --nostream --lines ${numLines}`;
         } else if (log_type === 'pm2_out') {
-          command = `pm2 logs --out --nostream --lines ${numLines}`;
+          command = `pm2 logs${pm2Process} --out --nostream --lines ${numLines}`;
         } else if (log_type === 'pm2_all') {
-          command = `pm2 logs --nostream --lines ${numLines}`;
+          command = `pm2 logs${pm2Process} --nostream --lines ${numLines}`;
         } else if (log_type === 'winston_error') {
           command = `tail -n ${numLines} logs/error.log || echo 'File not found'`;
         } else if (log_type === 'winston_combined') {
@@ -4306,6 +4354,29 @@ export const handleToolCall = async (name, args, context = {}) => {
         if (!command) throw new Error(`unknown log_type: ${log_type}`);
         const { stdout, stderr } = await execPromise(command, { maxBuffer: 1024 * 1024 * 50 });
         let resultText = stdout || stderr;
+        const filtersUsed = [];
+        if (sinceMinutes && resultText) {
+          const cutoff = Date.now() - sinceMinutes * 60000;
+          let keep = false;
+          resultText = resultText.split('\n').filter((l) => {
+            const m = l.match(/(\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2})/);
+            if (m) keep = new Date(m[1].replace(' ', 'T')).getTime() >= cutoff;
+            return keep;
+          }).join('\n');
+          filtersUsed.push(`last ${sinceMinutes} min`);
+        }
+        if (statusFilter.length && resultText) {
+          const patterns = statusFilter.map((c) => c.replace(/x/g, '\\d'));
+          const statusRe = new RegExp(`("status"\\s*:\\s*|status[=: ]\\s*|\\s)(${patterns.join('|')})\\b`, 'i');
+          resultText = resultText.split('\n').filter((l) => statusRe.test(l)).join('\n');
+          filtersUsed.push(`status ${statusFilter.join(',')}`);
+        }
+        if (filtersUsed.length && !search) {
+          const count = resultText ? resultText.split('\n').filter(Boolean).length : 0;
+          resultText = count
+            ? `${count} line(s) matching ${filtersUsed.join(' + ')} in the last ${numLines} lines:\n${resultText}`
+            : `No lines matching ${filtersUsed.join(' + ')} in the last ${numLines} lines.`;
+        }
         if (search && resultText) {
           const matches = resultText.split('\n').filter((l) => l.toLowerCase().includes(search));
           resultText = matches.length > 0
