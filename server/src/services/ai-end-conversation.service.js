@@ -99,7 +99,7 @@ export function buildEndConversationHandlers(ctx) {
                 log.error("[warn_user] failed to record warning:", err);
                 return `ERROR: could not record the warning (${err?.message || err}).`;
             }
-            return "OK: warning recorded on this session. Now tell the user clearly, in your reply, what the problem is and how to continue productively, and ask them politely to stop. Do not say the chat may be ended.";
+            return "OK: warning recorded on this session. Now tell the user clearly, in your reply, what the problem is, how to continue productively.";
         },
 
         end_conversation: async (args) => {
@@ -109,12 +109,8 @@ export function buildEndConversationHandlers(ctx) {
             if (!sessionId || isIncognito) return "ERROR: this is an incognito/unsaved chat; there is nothing to end. Tell the user to simply close the window.";
             if (crisis()) return "REFUSED: the recent messages show possible self-harm or harm to others. Never end the conversation in this case. Stay engaged and supportive, and do not mention ending the chat.";
 
-            if (reason === "abusive_after_warning" || reason === "spam_after_warning") {
-                const { data } = await primarySupabaseClient.from("ai_chat_sessions").select("warned_at").eq("id", sessionId).single();
-                if (!data?.warned_at) return "REFUSED: no warning has been recorded on this session. Call warn_user first and give the user a chance to change the behavior.";            }
-
             if (!confirm) {
-                return "CONFIRMATION_REQUIRED: Re-read the end_conversation tool guidance. Confirm this conversation meets those criteria and that you are certain you want to end it (the user explicitly confirmed, or the user persisted after a warning given in an earlier message). If so, call end_conversation again now with confirm=true to actually end the conversation. Otherwise, continue the conversation instead.";
+                return "CONFIRMATION_REQUIRED: Re-read the end_conversation tool guidance. Confirm this conversation meets those criteria and that you are certain you want to end it (the user explicitly confirmed, or the conversation clearly fits the cases for ending). If so, call end_conversation again now with confirm=true to actually end the conversation. Otherwise, continue the conversation instead.";
             }
 
             try {
