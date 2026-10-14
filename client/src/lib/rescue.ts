@@ -67,7 +67,7 @@ export async function resolveRescueNavigation(url: string): Promise<string> {
   if (isMainDown()) return rescueUrl;
   try {
     const origin = new URL(url, window.location.origin).origin;
-    const response = await fetch(`${origin}/`, { method: "GET", credentials: "omit", signal: AbortSignal.timeout(4000) });
+    const response = await fetch(`${origin}/?_=${Date.now()}`, { method: "GET", credentials: "omit", cache: "no-store", signal: AbortSignal.timeout(4000) });
     if (!MAIN_DOWN_STATUSES.has(response.status)) return url;
   } catch {
     markMainDown();

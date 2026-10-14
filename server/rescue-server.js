@@ -185,7 +185,11 @@ let backupJobsStarted = false;
 try {
   await import("./env.js");
   fullBackend = (await import("./api/index.js")).default;
-  app.use("/api/rescue", (req, res, next) => { req.viaRescue = true; next(); }, fullBackend);
+  app.use("/api/rescue", (req, res, next) => {
+    req.viaRescue = true;
+    req.originalUrl = req.originalUrl.replace(/^\/api\/rescue/, "") || "/";
+    next();
+  }, fullBackend);
   console.log("✅ Rescue Server loaded the full backend under /api/rescue");
 } catch (err) {
   console.error("❌ Rescue Server could not load the full backend, rescue routes still work:", err.message);
