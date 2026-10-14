@@ -84,11 +84,14 @@ export function useCurrentUser() {
         }
         return data;
       } catch (err) {
-        return null; // Not logged in
+        const code = (err as { code?: string })?.code;
+        if (code === "401" || code === "403" || !localStorage.getItem("token")) return null; // Not logged in
+        throw err;
       }
     },
     staleTime: 0,
     refetchOnMount: "always",
-    retry: false,
+    retry: (failureCount) => failureCount < 30,
+    retryDelay: 2000,
   });
 }

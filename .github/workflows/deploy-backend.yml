@@ -73,4 +73,16 @@ jobs:
             sudo systemctl start redis-server || sudo service redis start || true
             
             # Since PM2 was stopped, use restart instead of reload
-            pm2 restart all --update-env
+            pm2 restart classgrid --update-env
+            MAIN_UP=0
+            for i in $(seq 1 45); do
+              if curl -sf -o /dev/null --max-time 3 http://localhost:3000/; then MAIN_UP=1; break; fi
+              sleep 2
+            done
+            if [ "$MAIN_UP" = "1" ]; then
+              for name in $(pm2 jlist | node -e "let d='';process.stdin.on('data',c=>d+=c).on('end',()=>console.log(JSON.parse(d).map(p=>p.name).filter(n=>n!=='classgrid').join(' ')))"); do
+                pm2 restart "$name" --update-env
+              done
+            else
+              echo "Main server did not come up, keeping the rescue server on the previous code"
+            fi
