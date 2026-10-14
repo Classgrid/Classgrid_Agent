@@ -1806,6 +1806,8 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
   // Set when Classgrid AI (or the user) ended this chat: the composer is replaced by a "Chat ended" card.
   const [chatEnded, setChatEnded] = useState<{ reason: string | null; canReopen: boolean } | null>(null);
   const [endedFeedbackOpen, setEndedFeedbackOpen] = useState(false);
+  // The chat whose ended/not-ended state is known. Until it is, the composer stays hidden so an ended chat never flashes it.
+  const [endedCheckedFor, setEndedCheckedFor] = useState<string | null>(null);
   const [endedFeedbackSubmitting, setEndedFeedbackSubmitting] = useState(false);
   const [thinking, setThinking] = useState(false);
   const [sandboxFiles, setSandboxFiles] = useState<Record<string, string>>({});
@@ -2786,6 +2788,7 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
               setChatEnded(sData.session.ended
                 ? { reason: sData.session.end_reason ?? null, canReopen: sData.session.end_reason === "user_requested" }
                 : null);
+              setEndedCheckedFor(routeSessionId);
             }
             data = mData;
           } catch (err: any) {
@@ -3319,12 +3322,15 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
     fetchWithRescue(`${endpointPrefix}/api/ai/sessions/${sessionId}`, { credentials: "include" })
       .then((res) => (res.ok ? res.json() : null))
       .then((data) => {
-        if (cancelled || !data?.session) return;
-        setChatEnded(data.session.ended
-          ? { reason: data.session.end_reason ?? null, canReopen: data.session.end_reason === "user_requested" }
-          : null);
+        if (cancelled) return;
+        if (data?.session) {
+          setChatEnded(data.session.ended
+            ? { reason: data.session.end_reason ?? null, canReopen: data.session.end_reason === "user_requested" }
+            : null);
+        }
+        setEndedCheckedFor(sessionId);
       })
-      .catch(() => {});
+      .catch(() => { if (!cancelled) setEndedCheckedFor(sessionId); });
     return () => { cancelled = true; };
   }, [sessionId, readOnly]);
 
@@ -3634,6 +3640,7 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
 
         if (data.sessionId && !sessionId) {
           setSessionId(data.sessionId);
+          setEndedCheckedFor(data.sessionId);
           
           if (variant === "full-page") {
             const pathParts = window.location.pathname.split('/');
@@ -3777,6 +3784,7 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
                 window.dispatchEvent(new Event("agent:refresh-sessions"));
               } else if (event.type === "session_info" && event.sessionId) {
                 setSessionId(event.sessionId);
+                setEndedCheckedFor(event.sessionId);
                 window.dispatchEvent(new CustomEvent("agent:session-created", { detail: { id: event.sessionId, title: question } }));
                 window.dispatchEvent(new Event("agent:refresh-sessions"));
               } else if (event.type === "answer") {
@@ -3915,6 +3923,7 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
         if (finalPayload) {
           if (finalPayload.sessionId) {
             setSessionId(finalPayload.sessionId);
+            setEndedCheckedFor(finalPayload.sessionId);
 
           }
 
@@ -3957,6 +3966,7 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
 
         if (payload?.sessionId) {
           setSessionId(payload.sessionId);
+          setEndedCheckedFor(payload.sessionId);
 
         }
 
@@ -5201,7 +5211,7 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
                   )}
                 </>
               )}
-              <form onSubmit={handleSubmit} className={cn("space-y-2", chatEnded && "hidden")}>
+              <form onSubmit={handleSubmit} className={cn("space-y-2", (chatEnded || (sessionId && endedCheckedFor !== sessionId)) && "hidden")}>
                 <div className={cn(
                   "group relative w-full sm:w-[80%] mx-auto shadow-sm rounded-2xl border border-border !bg-white dark:!bg-[#0f0f0f] focus-within:border-black/80 dark:focus-within:border-white/50 focus-within:ring-1 focus-within:ring-black/80 dark:focus-within:ring-white/50 transition-all duration-300"
                 )}>
@@ -5882,7 +5892,7 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
                             )}
                           </>
                         )}
-                        <form onSubmit={handleSubmit} className={cn("space-y-2", chatEnded && "hidden")}>
+                        <form onSubmit={handleSubmit} className={cn("space-y-2", (chatEnded || (sessionId && endedCheckedFor !== sessionId)) && "hidden")}>
                           <div className={cn(
                             "group relative w-full shadow-sm rounded-2xl border border-border !bg-white dark:!bg-[#0f0f0f] focus-within:border-black/80 dark:focus-within:border-white/50 focus-within:ring-1 focus-within:ring-black/80 dark:focus-within:ring-white/50 transition-all duration-300"
                           )}>
