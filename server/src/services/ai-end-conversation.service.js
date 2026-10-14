@@ -85,6 +85,7 @@ export async function reopenSession(sessionId) {
 export function buildEndConversationHandlers(ctx) {
     const { sessionId, isIncognito, messages, question, res } = ctx;
     const log = ctx.log || console;
+    const requestStartedAt = Date.now(); // a warning only counts if it was given in an earlier message
 
     const crisis = () => detectCrisis(recentUserTexts(messages, question));
 
@@ -113,10 +114,11 @@ export function buildEndConversationHandlers(ctx) {
             if (reason === "abusive_after_warning" || reason === "spam_after_warning") {
                 const { data } = await primarySupabaseClient.from("ai_chat_sessions").select("warned_at").eq("id", sessionId).single();
                 if (!data?.warned_at) return "REFUSED: no warning has been recorded on this session. Call warn_user first and give the user a chance to change the behavior.";
+                if (new Date(data.warned_at).getTime() >= requestStartedAt) return "REFUSED: the warning was given in this same reply. Give the user a chance to change the behavior; you may end the chat only if they continue in a later message.";
             }
 
             if (!confirm) {
-                return "CONFIRMATION_REQUIRED: this will permanently end the chat. If you are certain (the user explicitly confirmed, or the warning was ignored), call end_conversation again with confirm=true.";
+                return "CONFIRMATION_REQUIRED: Re-read the end_conversation tool guidance. Confirm this conversation meets those criteria and that you are certain you want to end it (the user explicitly confirmed, or the user persisted after a warning given in an earlier message). If so, call end_conversation again now with confirm=true to actually end the conversation. Otherwise, continue the conversation instead.";
             }
 
             try {
