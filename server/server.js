@@ -25,7 +25,6 @@
  * 2. FRONTEND IS HOSTED ON VERCEL
  * ─────────────────────────────────────────────────────────
  */
-import "this-module-does-not-exist-forcing-a-crash";
 // ─────────────────────────────────────────────────────────
 // 🎤 STEP 0: Override console BEFORE any imports
 //    so that EVERY SINGLE log is captured into the database
@@ -35,7 +34,6 @@ process.env.AWS_SDK_JS_SUPPRESS_MAINTENANCE_MODE_MESSAGE = "1";
 
 import util from "util";
 import "./env.js"; // 🔥 Load env first so MONGODB_URI is available
-import "./crash-test-missing-file.js";
 import accessLogger from "./src/config/logger.js";
 
 
@@ -128,13 +126,6 @@ setTimeout(async () => {
   } catch (e) { console.error(e) }
 }, 2000);
 
-
-server.on("error", async (err) => {
-  if (err.code !== "EADDRINUSE") return console.error("❌ Server error:", err.message);
-  console.warn(`⚠️ Port ${PORT} is held by the Rescue Server, asking it to release...`);
-  try { await fetch("http://localhost:4000/api/rescue/release-port", { method: "POST" }); } catch (e) { }
-  setTimeout(() => server.listen(PORT), 3000);
-});
 
 server.listen(PORT, () => {
   console.log(`🔥 Server running at http://localhost:${PORT} (Socket.io Native)`);

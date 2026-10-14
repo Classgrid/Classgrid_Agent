@@ -98,9 +98,8 @@ const MAX_REDIS_STREAM_SIZE = 800; // 80% of 1000 threshold for emergency flush
 const STREAM_GROUP = "chat_workers";
 const STREAM_CONSUMER = `worker_${process.pid}`;
 
-export const initSocket = (server, { path } = {}) => {
+export const initSocket = (server) => {
     io = new Server(server, {
-        ...(path ? { path } : {}),
         pingTimeout: 86400000, // 24 HOURS — stays alive all day, only closes on logout/tab close
         pingInterval: 25000,   // Heartbeat every 25 seconds to keep connection alive
         cors: {
