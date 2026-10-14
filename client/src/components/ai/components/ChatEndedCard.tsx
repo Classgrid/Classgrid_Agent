@@ -4,7 +4,7 @@ import React from "react";
  * Shown in place of the composer once a chat has been ended by the end_conversation tool.
  * The session is read-only from here on; the backend answers /api/ai/ask with a chat_ended event.
  */
-export function ChatEndedCard({ onNewChat, onFeedback, onReopen, reason }: { onNewChat: () => void; onFeedback: () => void; onReopen?: () => void; reason?: string | null }) {
+export function ChatEndedCard({ onNewChat, onFeedback, reason }: { onNewChat: () => void; onFeedback: () => void; reason?: string | null }) {
   const byUser = reason === "user_requested";
   return (
     <div
@@ -21,15 +21,6 @@ export function ChatEndedCard({ onNewChat, onFeedback, onReopen, reason }: { onN
         </p>
       </div>
       <div className="flex shrink-0 flex-wrap gap-2">
-        {onReopen && (
-          <button
-            type="button"
-            onClick={onReopen}
-            className="rounded-lg px-4 py-2 text-[14px] font-medium text-foreground hover:bg-muted transition-colors"
-          >
-            Reopen chat
-          </button>
-        )}
         <button
           type="button"
           onClick={onNewChat}

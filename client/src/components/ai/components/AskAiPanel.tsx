@@ -5174,7 +5174,7 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
               </AnimatePresence>
               {chatEnded && (
                 <>
-                  <ChatEndedCard reason={chatEnded.reason} onNewChat={handleEndedNewChat} onFeedback={() => setEndedFeedbackOpen(true)} onReopen={chatEnded.canReopen ? handleReopenChat : undefined} />
+                  <ChatEndedCard reason={chatEnded.reason} onNewChat={handleEndedNewChat} onFeedback={() => setEndedFeedbackOpen(true)} />
                   {endedFeedbackOpen && (
                     <AiFeedbackModal isOpen={endedFeedbackOpen} onClose={() => setEndedFeedbackOpen(false)} onSubmit={submitEndedFeedback} isSubmitting={endedFeedbackSubmitting} />
                   )}
@@ -5855,7 +5855,7 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
                         </AnimatePresence>
                         {chatEnded && (
                           <>
-                            <ChatEndedCard reason={chatEnded.reason} onNewChat={handleEndedNewChat} onFeedback={() => setEndedFeedbackOpen(true)} onReopen={chatEnded.canReopen ? handleReopenChat : undefined} />
+                            <ChatEndedCard reason={chatEnded.reason} onNewChat={handleEndedNewChat} onFeedback={() => setEndedFeedbackOpen(true)} />
                             {endedFeedbackOpen && (
                               <AiFeedbackModal isOpen={endedFeedbackOpen} onClose={() => setEndedFeedbackOpen(false)} onSubmit={submitEndedFeedback} isSubmitting={endedFeedbackSubmitting} />
                             )}
