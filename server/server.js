@@ -175,3 +175,5 @@ process.on('SIGINT', () => {
 // Force deploy
 
 // redeploy trigger 3
+
+// deploy test: main restarts first, rescue after
