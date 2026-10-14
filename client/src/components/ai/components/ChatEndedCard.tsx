@@ -15,7 +15,7 @@ export function ChatEndedCard({ onNewChat, onFeedback, reason }: { onNewChat: ()
       <div className="min-w-0">
         <div className="text-[18px] font-semibold text-foreground">Chat ended</div>
         <p className="mt-1 text-[14px] text-muted-foreground">
-          Classgrid AI can't help with this. Start a new chat to continue.{" "}
+          Agent can't help with this. Start a new chat to continue.{" "}
           <a href="https://classgrid.in/terms" target="_blank" rel="noopener noreferrer" className="underline text-[#3b82f6] hover:opacity-80">Learn more</a>
           {" · "}
           <a href="https://classgrid.in/privacy" target="_blank" rel="noopener noreferrer" className="underline text-[#3b82f6] hover:opacity-80">Privacy</a>.
