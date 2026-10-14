@@ -439,11 +439,11 @@ export function LibraryPage() {
                   </div>
                   <DropdownMenu>
                     <DropdownMenuTrigger asChild>
-                      <button className="p-1 text-muted-foreground hover:text-foreground rounded-md hover:bg-accent transition-colors -mt-1 -mr-1">
+                      <button onClick={(e) => e.stopPropagation()} className="p-1 text-muted-foreground hover:text-foreground rounded-md hover:bg-accent transition-colors -mt-1 -mr-1">
                         <MoreVertical className="w-4 h-4" />
                       </button>
                     </DropdownMenuTrigger>
-                    <DropdownMenuContent align="end" className="w-48">
+                    <DropdownMenuContent align="end" className="w-48" onClick={(e) => e.stopPropagation()}>
                       <DropdownMenuItem onClick={(e) => { e.stopPropagation(); handleAskAI(file.cdn_url, file.original_name); }} className="cursor-pointer">
                         <MessageSquare className="w-4 h-4 mr-2" /> Ask Agent
                       </DropdownMenuItem>
