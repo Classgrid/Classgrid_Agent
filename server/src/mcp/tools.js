@@ -4288,7 +4288,7 @@ export const handleToolCall = async (name, args, context = {}) => {
       const search = typeof args.search === 'string' ? args.search.trim().toLowerCase() : '';
       const numLines = search
         ? Math.max(1, Math.min(Math.floor(Number(lines) || 10000), 10000))
-        : Math.max(1, Math.min(Math.floor(Number(lines) || 100), 500));
+        : Math.max(1, Math.min(Math.floor(Number(lines) || 5000), 5000));
       try {
         let command = '';
         if (log_type === 'pm2_error') {
@@ -4326,7 +4326,7 @@ export const handleToolCall = async (name, args, context = {}) => {
           processStatus = `PM2 PROCESS STATUS: could not read (${statusErr.message})\n\n`;
         }
         // TRUNCATE TO LAST 8000 CHARS TO PREVENT CONTEXT WINDOW OVERFLOW CRASHES
-        return { content: [{ type: 'text', text: processStatus + resultText.substring(resultText.length - 8000) }] };
+        return { content: [{ type: 'text', text: processStatus + resultText.substring(resultText.length - 60000) }] };
       } catch (err) {
         return { content: [{ type: 'text', text: `Failed to read server logs: ${err.message}\nStderr: ${err.stderr || ''}` }] };
       }
