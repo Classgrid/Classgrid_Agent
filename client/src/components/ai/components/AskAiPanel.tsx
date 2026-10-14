@@ -2765,12 +2765,12 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
         setSubmitting(false);
         setMessageQueue([]);
         setPriorityMessage(null);
+        setChatEnded(null);
       }
       setMessages([]);
       setSessionId(routeSessionId);
       setIsLoadingChat(true);
       setIsPinned(false);
-      setChatEnded(null);
       try {
         let data: any = null;
         for (let attempt = 0; attempt < 2 && !data; attempt++) {
@@ -2782,9 +2782,11 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
             ]);
             if (controller.signal.aborted) return;
             if (sData?.session) setIsPinned(!!sData.session.pinned);
-            setChatEnded(sData?.session?.ended
-              ? { reason: sData.session.end_reason ?? null, canReopen: sData.session.end_reason === "user_requested" }
-              : null);
+            if (sData?.session) {
+              setChatEnded(sData.session.ended
+                ? { reason: sData.session.end_reason ?? null, canReopen: sData.session.end_reason === "user_requested" }
+                : null);
+            }
             data = mData;
           } catch (err: any) {
             if (controller.signal.aborted) return;
@@ -3306,6 +3308,25 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
   useEffect(() => {
     askQuestionRef.current = askQuestion;
   }, [askQuestion]);
+
+  // Whatever way a chat was opened (refresh restore, sidebar, link), read whether it has ended.
+  useEffect(() => {
+    if (!sessionId || readOnly) return;
+    let cancelled = false;
+    const endpointPrefix = typeof import.meta !== "undefined" && import.meta.env
+      ? (import.meta.env.VITE_API_URL || "https://api.classgrid.in")
+      : "";
+    fetchWithRescue(`${endpointPrefix}/api/ai/sessions/${sessionId}`, { credentials: "include" })
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (cancelled || !data?.session) return;
+        setChatEnded(data.session.ended
+          ? { reason: data.session.end_reason ?? null, canReopen: data.session.end_reason === "user_requested" }
+          : null);
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [sessionId, readOnly]);
 
   // "Start a new chat" on the Chat ended card: same as the sidebar's New Chat.
   function handleEndedNewChat() {

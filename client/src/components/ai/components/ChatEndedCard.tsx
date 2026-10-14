@@ -24,14 +24,14 @@ export function ChatEndedCard({ onNewChat, onFeedback, reason }: { onNewChat: ()
         <button
           type="button"
           onClick={onNewChat}
-          className="rounded-lg bg-foreground px-4 py-2 text-[14px] font-medium text-background transition-opacity hover:opacity-90"
+          className="cursor-pointer rounded-lg bg-foreground px-4 py-2 text-[14px] font-medium text-background transition-colors hover:bg-foreground/80"
         >
           Start a new chat
         </button>
         <button
           type="button"
           onClick={onFeedback}
-          className="rounded-lg bg-muted px-4 py-2 text-[14px] font-medium text-foreground transition-colors hover:bg-muted/70"
+          className="cursor-pointer rounded-lg border border-border bg-muted px-4 py-2 text-[14px] font-medium text-foreground transition-colors hover:bg-foreground/10"
         >
           Send feedback
         </button>
