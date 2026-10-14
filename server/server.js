@@ -25,7 +25,6 @@
  * 2. FRONTEND IS HOSTED ON VERCEL
  * ─────────────────────────────────────────────────────────
  */
-import "this-module-does-not-exist-forcing-a-crash";
 // ─────────────────────────────────────────────────────────
 // 🎤 STEP 0: Override console BEFORE any imports
 //    so that EVERY SINGLE log is captured into the database
