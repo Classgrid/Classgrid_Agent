@@ -56,6 +56,7 @@
  * This Socket.io connection handles everything else.
  */
 import { io, Socket } from "socket.io-client";
+import { RESCUE_SOCKET_PATH, isMainDown, markMainDown } from "./rescue";
 
 const BACKEND_URL = import.meta.env.VITE_API_URL || (import.meta.env.DEV ? "" : "https://api.classgrid.in");
 
@@ -69,6 +70,7 @@ export function connectSocket(token: string): Socket {
   if (socket?.connected) return socket;
 
   socket = io(BACKEND_URL, {
+    ...(isMainDown() ? { path: RESCUE_SOCKET_PATH } : {}),
     auth: { token },
     transports: ["websocket", "polling"],
     reconnection: true,
@@ -82,8 +84,20 @@ export function connectSocket(token: string): Socket {
     console.log("🔌 Socket.io connected:", socket?.id);
   });
 
+  let failedConnects = 0;
+  socket.on("connect", () => {
+    failedConnects = 0;
+  });
   socket.on("connect_error", (err) => {
     console.warn("🔴 Socket.io connection error:", err.message);
+    failedConnects += 1;
+    if (failedConnects >= 2 && socket) {
+      failedConnects = 0;
+      const usingRescue = socket.io.opts.path === RESCUE_SOCKET_PATH;
+      if (!usingRescue) markMainDown();
+      socket.io.opts.path = usingRescue ? "/socket.io" : RESCUE_SOCKET_PATH;
+      console.warn(`🔁 Socket.io switching to ${usingRescue ? "main" : "rescue"} server`);
+    }
   });
 
   socket.on("disconnect", (reason) => {

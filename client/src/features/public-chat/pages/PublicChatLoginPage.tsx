@@ -15,6 +15,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import { toast } from "sonner"; // the app's mounted Toaster (components/marketing_ui/sonner)
 import { getGoogleAuthUrl, loginWithPassword, requestPasswordReset, verifyDeviceOtp, resendDeviceOtp } from "../../auth/api";
 import { API_BASE_URL, apiClient } from "@/lib/apiClient";
+import { fetchWithRescue, navigateWithRescue } from "@/lib/rescue";
 import { LoginGridBackground } from "../components/LoginGridBackground";
 import { peekOAuthConsentReturn } from "@/features/oauth/lib/oauthReturn";
 
@@ -298,7 +299,7 @@ function LoginContent() {
   // This ensures the next-auth CSRF cookie is properly set BEFORE the user clicks
   // any OAuth button, preventing the "Sign-in was interrupted" (OAuthCallback) error.
   useEffect(() => {
-    fetch("/api/auth/csrf", { credentials: "include" }).catch(() => { });
+    fetchWithRescue("/api/auth/csrf", { credentials: "include" }).catch(() => { });
   }, []);
 
   // Read once per visit: the "Last used" tag and a first-time vs welcome-back greeting
@@ -317,7 +318,7 @@ function LoginContent() {
     // intent: only the Sign up screen may create an account; from Sign in an unknown email comes back as error=no_account
     const path = `/api/auth/google?loginTab=${loginTab}&host=${host}&intent=${mode}${consentNextParam()}`;
     const url = (API_BASE_URL && !API_BASE_URL.startsWith('/')) ? new URL(path, API_BASE_URL).toString() : path;
-    window.location.assign(url);
+    navigateWithRescue(url);
   };
 
   const handleGithub = () => {
@@ -325,7 +326,7 @@ function LoginContent() {
     const host = encodeURIComponent(window.location.hostname);
     const path = `/api/auth/chat/github?loginTab=${loginTab}&host=${host}&intent=${mode}${consentNextParam()}`;
     const url = (API_BASE_URL && !API_BASE_URL.startsWith('/')) ? new URL(path, API_BASE_URL).toString() : path;
-    window.location.assign(url);
+    navigateWithRescue(url);
   };
 
   // ── Redirect already-logged-in users ──
@@ -348,12 +349,12 @@ function LoginContent() {
     }
     if (unsubscribeReturnTo) {
       isRedirecting.current = true;
-      window.location.href = unsubscribeReturnTo;
+      navigateWithRescue(unsubscribeReturnTo);
       return;
     }
     if (explicitNext) {
       isRedirecting.current = true;
-      window.location.href = explicitNext;
+      navigateWithRescue(explicitNext);
       return;
     }
 

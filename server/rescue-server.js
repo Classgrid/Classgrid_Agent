@@ -41,8 +41,9 @@ const app = express();
 const PORT = process.env.PORT || 4000;
 
 // Middleware
-app.use(cors({ origin: true, credentials: true }));
-app.use(express.json());
+const RESCUE_OWN_ROUTES = ["/api/rescue/login", "/api/rescue/error-logs", "/api/rescue/status"];
+app.use(RESCUE_OWN_ROUTES, cors({ origin: true, credentials: true }));
+app.use(RESCUE_OWN_ROUTES, express.json());
 
 // Simple manual .env parser so we don't depend on dotenv
 let env = {};
@@ -179,7 +180,31 @@ app.get("/api/rescue/status", (req, res) => {
   res.json({ success: true, status: "online" });
 });
 
-app.listen(PORT, async () => {
+let fullBackend = null;
+let backupJobsStarted = false;
+try {
+  await import("./env.js");
+  fullBackend = (await import("./api/index.js")).default;
+  app.use("/api/rescue", (req, res, next) => { req.viaRescue = true; next(); }, fullBackend);
+  console.log("✅ Rescue Server loaded the full backend under /api/rescue");
+} catch (err) {
+  console.error("❌ Rescue Server could not load the full backend, rescue routes still work:", err.message);
+}
+
+const startBackupJobs = async () => {
+  if (!fullBackend || backupJobsStarted) return;
+  backupJobsStarted = true;
+  try {
+    await import("./src/workers/index.js");
+    const { initLeadStream } = await import("./src/services/lead-stream.service.js");
+    initLeadStream();
+    console.log("✅ Main server is down: Rescue Server started the background jobs");
+  } catch (err) {
+    console.error("❌ Rescue Server could not start the background jobs:", err.message);
+  }
+};
+
+const rescueHttpServer = app.listen(PORT, async () => {
   console.log(`🚑 Rescue Server running on port ${PORT}`);
   
   // ─────────────────────────────────────────────────────────
@@ -255,6 +280,10 @@ app.listen(PORT, async () => {
           isDown = false;
           fs.writeFileSync(STATE_FILE, JSON.stringify({ isDown }));
         }
+        if (backupJobsStarted) {
+          console.log("🔁 Main server is back: Rescue Server restarts to stop its background jobs");
+          process.exit(0);
+        }
       } else {
         failureCount++;
       }
@@ -270,5 +299,22 @@ app.listen(PORT, async () => {
       console.log(`⚠️ Main server crashed! Sending ALARM (Red) signal...`);
       await sendCloudWatchSignal("ALARM");
     }
+    if (failureCount >= 3) await startBackupJobs();
   }, 10000); // Check every 10 seconds
+});
+
+if (fullBackend) {
+  try {
+    const { initSocket } = await import("./src/services/socket.service.js");
+    fullBackend.set("io", initSocket(rescueHttpServer, { path: "/api/rescue/socket.io" }));
+  } catch (err) {
+    console.error("❌ Rescue Server socket start failed:", err.message);
+  }
+}
+
+process.on("uncaughtException", (err) => {
+  console.error("💥 Rescue Server uncaught exception, kept alive:", err.message);
+});
+process.on("unhandledRejection", (reason) => {
+  console.error("💥 Rescue Server unhandled rejection, kept alive:", reason);
 });

@@ -47,6 +47,7 @@ import { Bot, Send, Loader2, Sparkles, BookOpen, FileText, Mic, StopCircle } fro
 import { useCurrentUser } from '@/features/auth/queries/useCurrentUser';
 import { Button } from '@/components/marketing_ui/button';
 import { apiClient } from '@/lib/apiClient';
+import { fetchWithRescue } from '@/lib/rescue';
 import ReactMarkdown from 'react-markdown';
 import remarkMath from "remark-math";
 import rehypeKatex from "rehype-katex";
@@ -154,7 +155,7 @@ export const ClassroomAITab: React.FC<ClassroomAITabProps> = ({
       formData.append('history', JSON.stringify(history));
 
       const baseUrl = apiClient.defaults.baseURL || '';
-      const response = await fetch(`${baseUrl}/api/ai-study/stream`, {
+      const response = await fetchWithRescue(`${baseUrl}/api/ai-study/stream`, {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${localStorage.getItem('token')}`,

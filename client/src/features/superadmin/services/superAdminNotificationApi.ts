@@ -44,8 +44,19 @@
 
 import axios from 'axios';
 import { getAuthHeader } from '@/features/auth/services/authApi';
+import { isMainDownStatus, markMainDown, toRescueUrl } from '@/lib/rescue';
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000/api';
+
+const withRescue = async <T>(url: string, call: (target: string) => Promise<T>): Promise<T> => {
+    try {
+        return await call(url);
+    } catch (err: any) {
+        if (!isMainDownStatus(err?.response?.status)) throw err;
+        markMainDown();
+        return call(toRescueUrl(url));
+    }
+};
 
 export interface NotificationTemplate {
     _id: string;
@@ -81,37 +92,37 @@ export const superAdminNotificationApi = {
     // TEMPLATES
     // -------------------------------------------------------------
     getTemplates: async (): Promise<NotificationTemplate[]> => {
-        const response = await axios.get(`${API_URL}/super-admin/notifications-sys/templates`, {
+        const response = await withRescue(`${API_URL}/super-admin/notifications-sys/templates`, (url) => axios.get(url, {
             headers: getAuthHeader(),
-        });
+        }));
         return response.data.data;
     },
 
     getTemplate: async (id: string): Promise<NotificationTemplate> => {
-        const response = await axios.get(`${API_URL}/super-admin/notifications-sys/templates/${id}`, {
+        const response = await withRescue(`${API_URL}/super-admin/notifications-sys/templates/${id}`, (url) => axios.get(url, {
             headers: getAuthHeader(),
-        });
+        }));
         return response.data.data;
     },
 
     createTemplate: async (data: Partial<NotificationTemplate>): Promise<NotificationTemplate> => {
-        const response = await axios.post(`${API_URL}/super-admin/notifications-sys/templates`, data, {
+        const response = await withRescue(`${API_URL}/super-admin/notifications-sys/templates`, (url) => axios.post(url, data, {
             headers: getAuthHeader(),
-        });
+        }));
         return response.data.data;
     },
 
     updateTemplate: async (id: string, data: Partial<NotificationTemplate>): Promise<NotificationTemplate> => {
-        const response = await axios.put(`${API_URL}/super-admin/notifications-sys/templates/${id}`, data, {
+        const response = await withRescue(`${API_URL}/super-admin/notifications-sys/templates/${id}`, (url) => axios.put(url, data, {
             headers: getAuthHeader(),
-        });
+        }));
         return response.data.data;
     },
 
     previewTemplate: async (data: { htmlBody?: string; textBody?: string; subject?: string; data: any }): Promise<{ subject: string; html: string; text: string }> => {
-        const response = await axios.post(`${API_URL}/super-admin/notifications-sys/templates/preview`, data, {
+        const response = await withRescue(`${API_URL}/super-admin/notifications-sys/templates/preview`, (url) => axios.post(url, data, {
             headers: getAuthHeader(),
-        });
+        }));
         return response.data.data;
     },
 
@@ -119,17 +130,17 @@ export const superAdminNotificationApi = {
     // LOGS
     // -------------------------------------------------------------
     getLogs: async (params: { orgId?: string; status?: string; type?: string; limit?: number; page?: number }): Promise<{ logs: NotificationLog[]; total: number; pages: number }> => {
-        const response = await axios.get(`${API_URL}/super-admin/notifications-sys/logs`, {
+        const response = await withRescue(`${API_URL}/super-admin/notifications-sys/logs`, (url) => axios.get(url, {
             headers: getAuthHeader(),
             params
-        });
+        }));
         return response.data.data;
     },
 
     getLogDetails: async (id: string): Promise<NotificationLog> => {
-        const response = await axios.get(`${API_URL}/super-admin/notifications-sys/logs/${id}`, {
+        const response = await withRescue(`${API_URL}/super-admin/notifications-sys/logs/${id}`, (url) => axios.get(url, {
             headers: getAuthHeader(),
-        });
+        }));
         return response.data.data;
     },
 };

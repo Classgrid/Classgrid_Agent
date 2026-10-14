@@ -51,6 +51,7 @@ import {  Search, FileText, CheckCircle, XCircle, AlertCircle, Eye, Shield, Cloc
 import { useApplications } from "../../admissions/queries/useApplications";
 import { getApplicationById, verifyDocument, updateApplicationStage } from "../../admissions/api";
 import { Spinner } from "@/components/marketing_ui/spinner";
+import { navigateWithRescue } from "@/lib/rescue";
 
 const fadeUp = { hidden: { opacity: 0, y: 16 }, show: { opacity: 1, y: 0 } };
 
@@ -333,7 +334,7 @@ function VerificationModal({ applicationId, onClose }: { applicationId: string; 
                         <div 
                           variant="outline" 
                           size="sm"
-                          onClick={() => window.open(`/api/admission/docs/view?path=admissions/temp/${applicationId}/${doc.name}.pdf`, '_blank')}
+                          onClick={() => navigateWithRescue(`/api/admission/docs/view?path=admissions/temp/${applicationId}/${doc.name}.pdf`, { newTab: true })}
                         >
                           <Eye className="w-4 h-4 mr-2" /> View
                         </div>

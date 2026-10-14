@@ -48,6 +48,7 @@ import { Mail, MapPin, HelpCircle, Lock, Eye, EyeOff, GraduationCap, Users, Glob
 import { useNavigate, useLocation } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
 import { getGoogleAuthUrl, loginWithPassword, verifyDeviceOtp, resendDeviceOtp, getAuthBranding, requestPasswordReset } from "../api";
+import { navigateWithRescue } from "@/lib/rescue";
 import { clearAuthCallbackError, getAuthCallbackFeedback, getDefaultRoleForAudience, getPostLoginPath, isUserRole, readStoredAuthRole, redirectToBrandingFallback, saveStoredAuthRole } from "../auth-helpers";
 import type { AuthUserRole, AuthBranding } from "../types";
 import { toast } from "sonner";
@@ -271,7 +272,7 @@ export function CustomDomainUserLoginPage({ preferredRole }: { preferredRole?: A
 
   const handleGoogleContinue = () => {
     saveStoredAuthRole(activeRole);
-    window.location.assign(getGoogleAuthUrl({ audience: "user", role: activeRole }));
+    navigateWithRescue(getGoogleAuthUrl({ audience: "user", role: activeRole }));
   };
 
   // Load Google reCAPTCHA v3 â€” shows official badge at bottom-right

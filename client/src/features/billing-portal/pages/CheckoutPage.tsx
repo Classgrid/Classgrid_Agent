@@ -47,6 +47,7 @@ import { useRef } from "react";
 import { useNavigate, useLocation, Link } from "react-router-dom";
 import { toast } from "sonner";
 import { apiClient } from "@/lib/apiClient";
+import { fetchWithRescue } from "@/lib/rescue";
 import { Spinner } from "@/components/marketing_ui/spinner";
 import { NotFoundPage } from "@/features/system/pages/NotFoundPage";
 
@@ -157,7 +158,7 @@ export function CheckoutPage() {
 
     setLoading(true);
     try {
-      const res = await fetch(`${API_BASE}/api/billing/demo/session`, {
+      const res = await fetchWithRescue(`${API_BASE}/api/billing/demo/session`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ email: payerEmail.trim(), payerName: payerName.trim() }),

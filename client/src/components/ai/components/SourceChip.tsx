@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Globe } from "lucide-react";
 import { HoverCard, HoverCardTrigger, HoverCardContent } from "@/components/marketing_ui/hover-card";
 import { cn } from "@/lib/utils";
+import { toRescueUrl } from "@/lib/rescue";
 
 // A web page the agent used, from search_web (numbered per answer; the reply cites it as [id]).
 export type ChatSource = { id: number; url: string; title: string; domain: string; snippet?: string };
@@ -11,13 +12,15 @@ const API_ORIGIN = (typeof import.meta !== "undefined" && import.meta.env && imp
 // Site icons come from our backend (cached), so the browser never asks a third party.
 function SiteIcon({ domain, className }: { domain: string; className?: string }) {
   const [failed, setFailed] = useState(false);
+  const [useRescue, setUseRescue] = useState(false);
   if (!domain || failed) return <Globe className={cn("shrink-0 opacity-70", className)} />;
+  const iconUrl = `${API_ORIGIN}/api/ai/favicon?domain=${encodeURIComponent(domain)}`;
   return (
     <img
-      src={`${API_ORIGIN}/api/ai/favicon?domain=${encodeURIComponent(domain)}`}
+      src={useRescue ? toRescueUrl(iconUrl) : iconUrl}
       alt=""
       loading="lazy"
-      onError={() => setFailed(true)}
+      onError={() => (useRescue ? setFailed(true) : setUseRescue(true))}
       className={cn("shrink-0 rounded-[3px] object-contain", className)}
     />
   );

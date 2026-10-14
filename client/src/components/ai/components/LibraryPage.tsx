@@ -12,9 +12,11 @@ import { NikhilTimeCalendar } from '@/components/marketing_ui/nikhil_time_calend
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, DropdownMenuSeparator } from '@/components/marketing_ui/dropdown-menu';
 import { DangerConfirmDialog } from '@/components/marketing_ui/danger-confirm-dialog';
 import { getSocket } from '@/lib/socketClient';
+import { fetchWithRescue } from "@/lib/rescue";
 import FilePreviewModal from './FilePreviewModal';
 import { DocsImageViewer } from './DocsImageViewer';
 import { useNavigate, useLocation } from 'react-router-dom';
+import { toast } from 'sonner';
 
 interface LibraryFile {
   _id: string;
@@ -67,7 +69,7 @@ export function LibraryPage() {
       if (activeTab !== 'all') {
         url += `&type=${activeTab}`;
       }
-      const res = await fetch(url, { credentials: 'include' });
+      const res = await fetchWithRescue(url, { credentials: 'include' });
       if (res.ok) {
         const data = await res.json();
         setFiles(data.files || []);
@@ -117,7 +119,7 @@ export function LibraryPage() {
     formData.append('file', file);
 
     try {
-      const res = await fetch(`${endpointPrefix}/api/ai/library/upload`, {
+      const res = await fetchWithRescue(`${endpointPrefix}/api/ai/library/upload`, {
         method: 'POST',
         body: formData,
         credentials: 'include'
@@ -149,7 +151,7 @@ export function LibraryPage() {
   const handleDelete = async (id: string) => {
     setIsDeleting(true);
     try {
-      const res = await fetch(`${endpointPrefix}/api/ai/library/${id}`, {
+      const res = await fetchWithRescue(`${endpointPrefix}/api/ai/library/${id}`, {
         method: 'DELETE',
         credentials: 'include'
       });
@@ -160,11 +162,13 @@ export function LibraryPage() {
           setQuota({ ...data.quota, percentage });
         }
         setFiles(files.filter(f => f._id !== id));
+        toast.success("File deleted");
       } else {
-        alert("Failed to delete file.");
+        toast.error("Failed to delete file.");
       }
     } catch (err) {
       console.error("Delete error", err);
+      toast.error("Failed to delete file.");
     } finally {
       setIsDeleting(false);
       setDeleteId(null);

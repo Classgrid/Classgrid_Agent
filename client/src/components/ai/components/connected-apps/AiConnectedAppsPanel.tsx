@@ -5,6 +5,7 @@ import { toast } from "sonner";
 import { Button } from "@/components/marketing_ui/button";
 import { Spinner } from "@/components/ui/spinner";
 import { DangerConfirmDialog } from "@/components/marketing_ui/danger-confirm-dialog";
+import { fetchWithRescue } from "@/lib/rescue";
 
 // Outside apps (Claude, Cursor, ChatGPT…) the user allowed through the Classgrid consent page.
 // From GET /oauth/grants; Remove calls DELETE /oauth/grants/:clientId, which ends every token that app holds.
@@ -47,7 +48,7 @@ export function AiConnectedAppsPanel({ backendUrl }: { backendUrl: string }) {
     setLoading(true);
     setLoadError(null);
     try {
-      const res = await fetch(`${backendUrl}/oauth/grants`, {
+      const res = await fetchWithRescue(`${backendUrl}/oauth/grants`, {
         method: "GET",
         headers: authHeaders(),
         credentials: "include"
@@ -72,7 +73,7 @@ export function AiConnectedAppsPanel({ backendUrl }: { backendUrl: string }) {
   const handleRemove = async (grant: ConnectedAppGrant) => {
     setIsRemoving(true);
     try {
-      const res = await fetch(`${backendUrl}/oauth/grants/${encodeURIComponent(grant.clientId)}`, {
+      const res = await fetchWithRescue(`${backendUrl}/oauth/grants/${encodeURIComponent(grant.clientId)}`, {
         method: "DELETE",
         headers: authHeaders(),
         credentials: "include"

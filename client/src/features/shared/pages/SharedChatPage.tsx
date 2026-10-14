@@ -33,6 +33,7 @@ import { CodeBlockClient } from "@/components/ai/components/CodeBlockClient";
 import { Info, Lightbulb, MessageSquareWarning, AlertTriangle, OctagonAlert } from "lucide-react";
 import hljs from "highlight.js";
 import 'highlight.js/styles/atom-one-dark.css';
+import { fetchWithRescue } from "@/lib/rescue";
 
 interface SharedMessage {
   role: "user" | "assistant";
@@ -252,7 +253,7 @@ export function SharedChatPage() {
   useEffect(() => {
     if (!shareId) return;
 
-    fetch(`${apiUrl}/api/ai/shared/${shareId}`)
+    fetchWithRescue(`${apiUrl}/api/ai/shared/${shareId}`)
       .then((res) => {
         if (!res.ok) throw new Error("Chat not found");
         return res.json();

@@ -5,6 +5,7 @@ import { useState } from "react";
 import { InputOTP, InputOTPGroup, InputOTPSlot } from "@/components/marketing_ui/input-otp";
 import { clsx, type ClassValue } from "clsx";
 import { twMerge } from "tailwind-merge";
+import { fetchWithRescue } from "@/lib/rescue";
 function cn(...inputs: ClassValue[]) { return twMerge(clsx(inputs)); }
 
 type LoginPageClientProps = {
@@ -125,7 +126,7 @@ export default function LoginPageClient({
         return;
       }
 
-      const response = await fetch("/api/forum/send-otp", {
+      const response = await fetchWithRescue("/api/forum/send-otp", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",

@@ -3,6 +3,7 @@ import React, { useEffect, useState } from "react";
 import { format, parseISO } from "date-fns";
 import { Download, ImageIcon, Loader2, Trash2 } from "lucide-react";
 import { toast } from "sonner";
+import { fetchWithRescue } from "@/lib/rescue";
 import { AiHubImageViewer } from "./AiHubImageViewer";
 import { DocsViewerImage } from "./DocsImageViewer";
 
@@ -26,7 +27,7 @@ export function AiImagesGallery({ backendUrl }: AiImagesGalleryProps) {
   useEffect(() => {
     const fetchImages = async () => {
       try {
-        const res = await fetch(`${backendUrl}/api/ai/my-images`, {
+        const res = await fetchWithRescue(`${backendUrl}/api/ai/my-images`, {
           credentials: "include",
         });
         if (!res.ok) {
@@ -47,7 +48,7 @@ export function AiImagesGallery({ backendUrl }: AiImagesGalleryProps) {
   const handleDeleteImage = async (id: string, isAutoDelete = false) => {
     try {
       setImages(prev => prev.filter(img => img.id !== id));
-      await fetch(`${backendUrl}/api/ai/my-images/${id}`, {
+      await fetchWithRescue(`${backendUrl}/api/ai/my-images/${id}`, {
         method: "DELETE",
         credentials: "include",
       });

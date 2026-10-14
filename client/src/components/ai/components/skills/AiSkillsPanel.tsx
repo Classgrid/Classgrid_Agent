@@ -6,6 +6,7 @@ import { Input } from "@/components/marketing_ui/input";
 import { Textarea } from "@/components/marketing_ui/textarea";
 import { Switch } from "@/components/marketing_ui/switch";
 import { toast } from "sonner";
+import { fetchWithRescue } from "@/lib/rescue";
 import { DangerConfirmDialog } from "@/components/marketing_ui/danger-confirm-dialog";
 import { Spinner } from "@/components/marketing_ui/spinner";
 const CustomSelect = ({ value, onChange, options }: { value: string, onChange: (val: string) => void, options: { value: string, label: string }[] }) => {
@@ -100,7 +101,7 @@ export function AiSkillsPanel({ backendUrl }: { backendUrl: string }) {
 
     const savePrefsToBackend = async () => {
       try {
-        await fetch(`${backendUrl}/api/ai/preferences`, {
+        await fetchWithRescue(`${backendUrl}/api/ai/preferences`, {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
           credentials: 'include',
@@ -127,7 +128,7 @@ export function AiSkillsPanel({ backendUrl }: { backendUrl: string }) {
 
   const fetchSkills = async () => {
     try {
-      const res = await fetch(`${backendUrl}/api/ai/skills`, { credentials: 'include' });
+      const res = await fetchWithRescue(`${backendUrl}/api/ai/skills`, { credentials: 'include' });
       if (res.ok) {
         const data = await res.json();
         setSkills(data.skills || []);
@@ -142,7 +143,7 @@ export function AiSkillsPanel({ backendUrl }: { backendUrl: string }) {
   useEffect(() => {
     const fetchPrefs = async () => {
       try {
-        const res = await fetch(`${backendUrl}/api/ai/preferences`, { credentials: 'include' });
+        const res = await fetchWithRescue(`${backendUrl}/api/ai/preferences`, { credentials: 'include' });
         if (res.ok) {
           const data = await res.json();
           if (data.preferences && Object.keys(data.preferences).length > 0) {
@@ -160,7 +161,7 @@ export function AiSkillsPanel({ backendUrl }: { backendUrl: string }) {
   const createSkill = async () => {
     if (!newSkillName.trim() || !newSkillInstructions.trim()) return;
     try {
-      const res = await fetch(`${backendUrl}/api/ai/skills`, {
+      const res = await fetchWithRescue(`${backendUrl}/api/ai/skills`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
@@ -181,7 +182,7 @@ export function AiSkillsPanel({ backendUrl }: { backendUrl: string }) {
   const handleDeleteSkill = async (id: string) => {
     setIsDeletingSkill(true);
     try {
-      const res = await fetch(`${backendUrl}/api/ai/skills/${id}`, {
+      const res = await fetchWithRescue(`${backendUrl}/api/ai/skills/${id}`, {
         method: 'DELETE',
         credentials: 'include'
       });
@@ -203,7 +204,7 @@ export function AiSkillsPanel({ backendUrl }: { backendUrl: string }) {
     if (!editSkillId || !editSkillName.trim() || !editSkillInstructions.trim()) return;
     setIsEditingSkill(true);
     try {
-      const res = await fetch(`${backendUrl}/api/ai/skills/${editSkillId}`, {
+      const res = await fetchWithRescue(`${backendUrl}/api/ai/skills/${editSkillId}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',

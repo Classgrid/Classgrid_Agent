@@ -61,6 +61,7 @@ import {
   Headphones,
 } from "lucide-react";
 import { CustomVideoPlayer } from "@/features/shared/components/CustomVideoPlayer";
+import { fetchWithRescue } from "@/lib/rescue";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -156,7 +157,7 @@ export default function FilePreviewModal({ file, onClose, onDelete }: FilePrevie
     if (typeof file.src !== "string") {
       (file.src as Blob).text().then(setTextContent);
     } else {
-      fetch(file.src).then(r => r.text()).then(setTextContent).catch(() => setTextContent(null));
+      fetchWithRescue(file.src).then(r => r.text()).then(setTextContent).catch(() => setTextContent(null));
     }
   }, [file, mime]);
 

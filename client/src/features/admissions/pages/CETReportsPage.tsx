@@ -46,6 +46,7 @@ import React, { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { motion } from "framer-motion";
 import { PageShell, PageHeader, ExportMenu } from "../components/SharedAdmissions";
+import { fetchWithRescue } from "@/lib/rescue";
 
 
 
@@ -56,7 +57,7 @@ export function CETReportsPage() {
     const { data: cetData, isLoading, isError } = useQuery({
         queryKey: ["cet-dashboard"],
         queryFn: async () => {
-            const res = await fetch(`/api/admission/cet/dashboard`, {
+            const res = await fetchWithRescue(`/api/admission/cet/dashboard`, {
                 headers: { Authorization: `Bearer ${token}` }
             });
             if (!res.ok) throw new Error("Failed to fetch CET dashboard");

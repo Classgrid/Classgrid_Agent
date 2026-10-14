@@ -44,6 +44,7 @@
 
 import { useEffect, useState } from "react";
 import { Spinner } from "@/components/marketing_ui/spinner";
+import { fetchWithRescue } from "@/lib/rescue";
 import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter } from "@/components/marketing_ui/card";
 
 const steps = [
@@ -116,7 +117,7 @@ function DemoCard() {
 
   // On mount, check if active session exists
   useEffect(() => {
-    fetch(`${API_BASE}/api/billing/demo/status`)
+    fetchWithRescue(`${API_BASE}/api/billing/demo/status`)
       .then(r => r.json())
       .then(d => { if (d.enabled && d.has_active_session) setCheckoutUrl(null); })
       .catch(() => {});
@@ -126,7 +127,7 @@ function DemoCard() {
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch(`${API_BASE}/api/billing/demo/session`, { method: "POST" });
+      const res = await fetchWithRescue(`${API_BASE}/api/billing/demo/session`, { method: "POST" });
       const data = await res.json();
       if (!res.ok || !data.success) throw new Error(data.error || "Failed");
       setCheckoutUrl(data.data.checkout_url);

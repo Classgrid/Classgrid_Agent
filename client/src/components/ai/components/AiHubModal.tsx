@@ -19,6 +19,7 @@ import {
 import { Spinner } from "@/components/marketing_ui/spinner";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
+import { fetchWithRescue } from "@/lib/rescue";
 import { INTEGRATIONS_LIST } from "./AskAiPanel";
 import { Button } from "@/components/marketing_ui/button";
 import { WhatsappConfigModal } from "./WhatsappConfigModal";
@@ -89,7 +90,7 @@ export function AiHubModal({ isOpen, onClose, onSendPrompt, initialTab = "plugin
   // ── REAL backend status check on mount ──
   const fetchStatus = async () => {
     try {
-      const res = await fetch(backendUrl + "/api/ai-integrations/status", {
+      const res = await fetchWithRescue(backendUrl + "/api/ai-integrations/status", {
         method: "GET",
         headers: { "Content-Type": "application/json" },
         credentials: "include"
@@ -156,7 +157,7 @@ export function AiHubModal({ isOpen, onClose, onSendPrompt, initialTab = "plugin
         endpoint = `/api/ai-integrations/connect/${id}?returnTo=${encodeURIComponent(window.location.href)}&popup=true`;
       }
 
-      const res = await fetch(backendUrl + endpoint, {
+      const res = await fetchWithRescue(backendUrl + endpoint, {
         method: "GET",
         headers: { "Content-Type": "application/json" },
         credentials: "include"
@@ -184,7 +185,7 @@ export function AiHubModal({ isOpen, onClose, onSendPrompt, initialTab = "plugin
         // Poll backend every 2 seconds to check if token was saved
         const pollInterval = setInterval(async () => {
           try {
-            const statusRes = await fetch(backendUrl + "/api/ai-integrations/status", {
+            const statusRes = await fetchWithRescue(backendUrl + "/api/ai-integrations/status", {
               method: "GET",
               headers: { "Content-Type": "application/json" },
               credentials: "include"
@@ -214,7 +215,7 @@ export function AiHubModal({ isOpen, onClose, onSendPrompt, initialTab = "plugin
             // Give 3 more seconds for the backend to finalize the token
             setTimeout(async () => {
               try {
-                const finalRes = await fetch(backendUrl + "/api/ai-integrations/status", {
+                const finalRes = await fetchWithRescue(backendUrl + "/api/ai-integrations/status", {
                   method: "GET",
                   headers: { "Content-Type": "application/json" },
                   credentials: "include"
@@ -288,7 +289,7 @@ export function AiHubModal({ isOpen, onClose, onSendPrompt, initialTab = "plugin
 
       if (endpoint) {
         const method = (id === 'slack' || id === 'github') ? 'DELETE' : 'POST';
-        const res = await fetch(backendUrl + endpoint, { method, credentials: 'include' });
+        const res = await fetchWithRescue(backendUrl + endpoint, { method, credentials: 'include' });
         if (res.ok) {
           toast.success(`${name} disconnected successfully`);
           await fetchStatus();

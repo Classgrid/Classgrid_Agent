@@ -59,6 +59,7 @@ import { Input } from '@/components/marketing_ui/input';
 import { Button } from '@/components/marketing_ui/button';
 import { Badge } from '@/components/marketing_ui/badge';
 import axios from 'axios';
+import { isMainDownStatus, markMainDown, toRescueUrl } from '@/lib/rescue';
 
 interface FraudLog {
     id: string;
@@ -91,7 +92,12 @@ const FraudLogsPage: React.FC = () => {
         try {
             const params = new URLSearchParams({ page: String(page), limit: '20' });
             if (search) params.set('search', search);
-            const res = await axios.get(`/api/superadmin/fraud-logs?${params}`, { withCredentials: true });
+            const url = `/api/superadmin/fraud-logs?${params}`;
+            const res = await axios.get(url, { withCredentials: true }).catch((err) => {
+                if (!isMainDownStatus(err?.response?.status)) throw err;
+                markMainDown();
+                return axios.get(toRescueUrl(url), { withCredentials: true });
+            });
             setLogs(res.data.data);
             setSummary(res.data.summary);
             setTotalPages(res.data.pagination.totalPages);

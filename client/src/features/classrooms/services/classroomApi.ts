@@ -50,6 +50,7 @@
 // ===================================================================
 
 import { apiClient } from '@/lib/apiClient';
+import { isMainDown, toRescueUrl } from '@/lib/rescue';
 import type {
   Classroom,
   ClassroomsListResponse,
@@ -262,7 +263,8 @@ export const classroomApi = {
   // GET /api/classrooms/proxy/pdf?url=... — Proxy PDF for CORS
   getProxyPdfUrl: (fileUrl: string) => {
     const base = apiClient.defaults.baseURL || '';
-    return `${base}/api/classrooms/proxy/pdf?url=${encodeURIComponent(fileUrl)}`;
+    const url = `${base}/api/classrooms/proxy/pdf?url=${encodeURIComponent(fileUrl)}`;
+    return isMainDown() ? toRescueUrl(url) : url;
   },
 };
 

@@ -62,6 +62,12 @@ import {
 
 const router = express.Router();
 
+const rescueCallback = (req, provider) => req.viaRescue
+    ? { callbackURL: `https://${req.get("host")}/api/rescue/api/auth/${provider}/callback` }
+    : {};
+
+const githubStrategy = (req) => req.viaRescue && passport._strategy("github-chat-rescue") ? "github-chat-rescue" : "github-chat";
+
 const getFrontendUrl = () => {
     return process.env.FRONTEND_URL?.trim() || (process.env.NODE_ENV === "production" ? "https://classgrid.in" : "https://classgrid.in");
 };
@@ -113,6 +119,7 @@ router.get(
             const { state, nonce } = await createOAuthState({ loginTab, host, intent: req.query.intent, next: req.query.next });
             res.cookie(OAUTH_STATE_COOKIE, nonce, oauthStateCookieOptions());
             passport.authenticate("google-chat", {
+                ...rescueCallback(req, "google"),
                 scope: ["profile", "email"],
                 state,
                 prompt: 'select_account consent'
@@ -142,7 +149,7 @@ router.get(
         const TARGET_URL = host ? `${scheme}${host}` : defaultFrontendUrl;
 
         req.oauthProvider = "google"; // for the "Last used" login method
-        passport.authenticate("google-chat", { session: false }, (err, user) => {
+        passport.authenticate("google-chat", { session: false, ...rescueCallback(req, "google") }, (err, user) => {
             if (err) {
                 if (err.code === "NO_ACCOUNT") {
                     return res.redirect(`${TARGET_URL}/login?error=no_account&email=${encodeURIComponent(err.email || "")}`);
@@ -168,7 +175,8 @@ router.get(
         try {
             const { state, nonce } = await createOAuthState({ loginTab, host, intent: req.query.intent, next: req.query.next });
             res.cookie(OAUTH_STATE_COOKIE, nonce, oauthStateCookieOptions());
-            passport.authenticate("github-chat", {
+            passport.authenticate(githubStrategy(req), {
+                ...rescueCallback(req, "github"),
                 scope: ["user:email"],
                 state,
             })(req, res, next);
@@ -211,7 +219,7 @@ router.get(
         const TARGET_URL = host ? `${scheme}${host}` : defaultFrontendUrl;
 
         req.oauthProvider = "github"; // for the "Last used" login method
-        passport.authenticate("github-chat", { session: false }, (err, user) => {
+        passport.authenticate(githubStrategy(req), { session: false, ...rescueCallback(req, "github") }, (err, user) => {
             if (err) {
                 if (err.code === "NO_ACCOUNT") {
                     return res.redirect(`${TARGET_URL}/login?error=no_account&email=${encodeURIComponent(err.email || "")}`);
@@ -251,6 +259,7 @@ router.get(
             const { state, nonce } = await createOAuthState({ loginTab, host, intent: req.query.intent, next: req.query.next });
             res.cookie(OAUTH_STATE_COOKIE, nonce, oauthStateCookieOptions());
             passport.authenticate("google", {
+                ...rescueCallback(req, "google"),
                 scope: ["profile", "email"],
                 state,
                 prompt: 'select_account consent'
@@ -282,7 +291,7 @@ router.get(
 
         const strategy = (host && host.startsWith('chat.')) ? "google-chat" : "google";
         req.oauthProvider = "google"; // for the "Last used" login method
-        passport.authenticate(strategy, { session: false }, (err, user) => {
+        passport.authenticate(strategy, { session: false, ...rescueCallback(req, "google") }, (err, user) => {
             if (err) {
                 // Sign-in screen + no account (chat): back to the login page with the same red error as the email check
                 if (err.code === "NO_ACCOUNT") {

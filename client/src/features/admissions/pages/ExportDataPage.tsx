@@ -49,6 +49,7 @@ import { PageShell, PageHeader } from "../components/SharedAdmissions";
 import { FiDownloadCloud, FiFileText, FiDatabase, FiLayers } from "react-icons/fi";
 
 import { Button } from "@/components/marketing_ui/button";
+import { fetchWithRescue } from "@/lib/rescue";
 
 const EXPORT_MODULES = [
     {
@@ -97,7 +98,7 @@ export function ExportDataPage() {
         
         try {
             const token = localStorage.getItem("token");
-            const res = await fetch(module.route, {
+            const res = await fetchWithRescue(module.route, {
                 headers: {
                     "Authorization": `Bearer ${token}`
                 }

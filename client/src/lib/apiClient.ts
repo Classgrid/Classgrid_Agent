@@ -46,6 +46,7 @@ import axios from "axios";
 
 import type { ApiErrorResponse } from "@shared-types";
 import { mockApiAdapter } from "./mockApiAdapter";
+import { isMainDown, isMainDownStatus, isRescueUrl, markMainDown, toRescueUrl } from "./rescue";
 
 const isMockApiEnabled = import.meta.env.VITE_MOCK_API === "true";
 export const API_BASE_URL =
@@ -69,12 +70,33 @@ apiClient.interceptors.request.use((config) => {
   if (token && config.headers) {
     config.headers.Authorization = `Bearer ${token}`;
   }
+  if (!isMockApiEnabled && isMainDown() && config.url && !isRescueUrl(config.url)) {
+    config.url = toRescueUrl(config.url);
+    (config as any).__rescueTried = true;
+  }
   return config;
 });
 
 apiClient.interceptors.response.use(
   (response) => response,
   (error) => {
+    const config = error?.config;
+    if (
+      !isMockApiEnabled &&
+      config &&
+      !config.__rescueTried &&
+      config.url &&
+      error?.code !== "ERR_CANCELED" &&
+      isMainDownStatus(error?.response?.status)
+    ) {
+      const rescueUrl = toRescueUrl(config.url);
+      if (rescueUrl !== config.url) {
+        markMainDown();
+        config.__rescueTried = true;
+        config.url = rescueUrl;
+        return apiClient(config);
+      }
+    }
     const responseData =
       error?.response?.data && typeof error.response.data === "object" ? error.response.data : {};
     const normalized: ApiErrorResponse = {

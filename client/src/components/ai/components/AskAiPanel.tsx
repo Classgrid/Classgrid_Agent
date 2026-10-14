@@ -197,6 +197,7 @@ type PageContext = {
 
 
 import { usePostHog } from 'posthog-js/react';
+import { fetchWithRescue } from "@/lib/rescue";
 
 // Fetch real presigned URL for R2 uploads
 async function getPresignedUrlForAskAiFile(name: string, type: string, size: number): Promise<any> {
@@ -204,7 +205,7 @@ async function getPresignedUrlForAskAiFile(name: string, type: string, size: num
     const endpoint = typeof import.meta !== "undefined" && import.meta.env
       ? (import.meta.env.VITE_API_URL || "https://api.classgrid.in") + "/api/ai/upload"
       : "/api/ai/upload";
-    const res = await fetch(endpoint, {
+    const res = await fetchWithRescue(endpoint, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       credentials: "include",
@@ -867,7 +868,7 @@ function MessageActions({ content, messageId, onReply }: { content: string; mess
         : "";
 
       const token = localStorage.getItem("token");
-      fetch(`${endpointPrefix}/api/ai/feedback`, {
+      fetchWithRescue(`${endpointPrefix}/api/ai/feedback`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -927,7 +928,7 @@ function MessageActions({ content, messageId, onReply }: { content: string; mess
         : "";
 
       const token = localStorage.getItem("token");
-      await fetch(`${endpointPrefix}/api/ai/feedback`, {
+      await fetchWithRescue(`${endpointPrefix}/api/ai/feedback`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -2022,7 +2023,7 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
             : "/api/voice/transcribe";
 
           const token = localStorage.getItem("token");
-          const res = await fetch(endpoint, {
+          const res = await fetchWithRescue(endpoint, {
             method: "POST",
             body: formData,
             credentials: "include",
@@ -2090,7 +2091,7 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
       const endpointPrefix = typeof import.meta !== "undefined" && import.meta.env
         ? (import.meta.env.VITE_API_URL || "https://api.classgrid.in")
         : "";
-      const res = await fetch(`${endpointPrefix}/api/ai/sessions/${sessionId}/public-share`, {
+      const res = await fetchWithRescue(`${endpointPrefix}/api/ai/sessions/${sessionId}/public-share`, {
         method: "POST",
         credentials: "include"
       });
@@ -2116,7 +2117,7 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
       const endpointPrefix = typeof import.meta !== "undefined" && import.meta.env
         ? (import.meta.env.VITE_API_URL || "https://api.classgrid.in")
         : "";
-      const res = await fetch(`${endpointPrefix}/api/ai/sessions/${sessionId}`, {
+      const res = await fetchWithRescue(`${endpointPrefix}/api/ai/sessions/${sessionId}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ pinned: !isPinned }),
@@ -2144,7 +2145,7 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
       const endpointPrefix = typeof import.meta !== "undefined" && import.meta.env
         ? (import.meta.env.VITE_API_URL || "https://api.classgrid.in")
         : "";
-      const res = await fetch(`${endpointPrefix}/api/ai/sessions/${sessionId}`, {
+      const res = await fetchWithRescue(`${endpointPrefix}/api/ai/sessions/${sessionId}`, {
         method: "DELETE",
         credentials: "include"
       });
@@ -2647,13 +2648,13 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
         const endpointPrefix = typeof import.meta !== "undefined" && import.meta.env
           ? (import.meta.env.VITE_API_URL || "https://api.classgrid.in")
           : "";
-        const sessionRes = await fetch(`${endpointPrefix}/api/ai/sessions/${id}`, { credentials: "include" });
+        const sessionRes = await fetchWithRescue(`${endpointPrefix}/api/ai/sessions/${id}`, { credentials: "include" });
         if (sessionRes.ok) {
           const sData = await sessionRes.json();
           if (sData.session) setIsPinned(!!sData.session.pinned);
         }
 
-        const res = await fetch(`${endpointPrefix}/api/ai/sessions/${id}/messages`, { credentials: "include" });
+        const res = await fetchWithRescue(`${endpointPrefix}/api/ai/sessions/${id}/messages`, { credentials: "include" });
         if (res.ok) {
           const data = await res.json();
           const loadedMessages = data.messages.map((m: any) => {
@@ -2735,7 +2736,7 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
       const onCancel = () => timeout.abort();
       controller.signal.addEventListener("abort", onCancel);
       try {
-        const res = await fetch(url, { credentials: "include", signal: timeout.signal });
+        const res = await fetchWithRescue(url, { credentials: "include", signal: timeout.signal });
         if (!res.ok) throw Object.assign(new Error(`HTTP ${res.status}`), { status: res.status });
         return await res.json();
       } finally {
@@ -2895,7 +2896,7 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
         ? (import.meta.env.VITE_API_URL || "https://api.classgrid.in") + "/api/user/ai-context"
         : "/api/user/ai-context";
 
-      fetch(endpoint, { credentials: "include" })
+      fetchWithRescue(endpoint, { credentials: "include" })
         .then((res) => {
           if (!res.ok) throw new Error("Network response was not ok");
           return res.json();
@@ -3419,7 +3420,7 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
         const endpoint = typeof import.meta !== "undefined" && import.meta.env
           ? (import.meta.env.VITE_API_URL || "https://api.classgrid.in") + "/api/ai/ask"
           : "/api/ai/ask";
-        fetch(endpoint, {
+        fetchWithRescue(endpoint, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           credentials: "include",
@@ -3496,7 +3497,7 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
           ? (import.meta.env.VITE_API_URL || "https://api.classgrid.in") + "/api/ai/generate-image"
           : "/api/ai/generate-image";
 
-        const res = await fetch(endpoint, {
+        const res = await fetchWithRescue(endpoint, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           credentials: "include",
@@ -3590,7 +3591,7 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
       const endpoint = typeof import.meta !== "undefined" && import.meta.env
         ? (import.meta.env.VITE_API_URL || "https://api.classgrid.in") + "/api/ai/ask"
         : "/api/ai/ask";
-      const response = await fetch(endpoint, {
+      const response = await fetchWithRescue(endpoint, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         credentials: "include",

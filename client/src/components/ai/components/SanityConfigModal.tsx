@@ -5,6 +5,7 @@ import { Button } from "@/components/marketing_ui/button";
 import { Input } from "./ui/input";
 import { toast } from "sonner";
 import { Spinner } from "@/components/marketing_ui/spinner";
+import { fetchWithRescue } from "@/lib/rescue";
 import { motion } from "framer-motion";
 
 interface SanityConfigModalProps {
@@ -30,7 +31,7 @@ export function SanityConfigModal({ isOpen, onClose, onSuccess, backendUrl }: Sa
 
     setIsLoading(true);
     try {
-      const res = await fetch(backendUrl + "/api/sanity/connect", {
+      const res = await fetchWithRescue(backendUrl + "/api/sanity/connect", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ projectId, apiToken }),

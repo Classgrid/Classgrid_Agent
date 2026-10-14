@@ -309,6 +309,22 @@ const passportConfig = () => {
             )
         );
         console.log("✅ GitHubStrategy (Chat) successfully registered with Passport");
+        if (process.env.GITHUB_RESCUE_CLIENT_ID && process.env.GITHUB_RESCUE_CLIENT_SECRET) {
+            passport.use(
+                'github-chat-rescue',
+                new GitHubStrategy(
+                    {
+                        clientID: process.env.GITHUB_RESCUE_CLIENT_ID,
+                        clientSecret: process.env.GITHUB_RESCUE_CLIENT_SECRET,
+                        callbackURL: process.env.GITHUB_RESCUE_CALLBACK_URL || "https://api.classgrid.in/api/rescue/api/auth/github/callback",
+                        scope: ['user:email'],
+                        passReqToCallback: true,
+                    },
+                    passport._strategy('github-chat')._verify
+                )
+            );
+            console.log("✅ GitHubStrategy (Rescue) successfully registered with Passport");
+        }
     } else {
         console.error("❌ CRITICAL ERROR: process.env.GITHUB_CLIENT_ID is missing!");
         console.error("❌ Passport skipped registering the GitHub Strategy.");

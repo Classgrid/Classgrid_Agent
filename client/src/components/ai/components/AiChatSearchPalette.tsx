@@ -8,6 +8,7 @@ import { Spinner } from "@/components/marketing_ui/spinner";
 import { cn } from "@/lib/utils";
 import { useLocation } from "react-router-dom";
 import { resolveDashboardConfig } from "@/config/sidebar";
+import { fetchWithRescue } from "@/lib/rescue";
 
 type SearchResult = {
   id: string;
@@ -100,7 +101,7 @@ export function AiChatSearchPalette({
         const endpointPrefix = typeof import.meta !== "undefined" && import.meta.env
           ? (import.meta.env.VITE_API_URL || "https://api.classgrid.in")
           : "";
-        const res = await fetch(`${endpointPrefix}/api/ai/sessions`, { credentials: "include" });
+        const res = await fetchWithRescue(`${endpointPrefix}/api/ai/sessions`, { credentials: "include" });
         const data = await res.json();
         if (data.sessions) {
           let filtered = data.sessions;

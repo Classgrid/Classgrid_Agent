@@ -47,6 +47,7 @@ import React, { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { motion } from "framer-motion";
 import { PageShell, PageHeader, ExportMenu } from "../components/SharedAdmissions";
+import { fetchWithRescue } from "@/lib/rescue";
 
 
 
@@ -67,7 +68,7 @@ export default function AdmissionAnalyticsPage() {
                 ? `/api/admission/analytics?hierarchy_id=${selectedHierarchy}`
                 : `/api/admission/analytics`;
             
-            const res = await fetch(url, {
+            const res = await fetchWithRescue(url, {
                 headers: { Authorization: `Bearer ${token}` }
             });
             if (!res.ok) throw new Error("Failed to fetch analytics");

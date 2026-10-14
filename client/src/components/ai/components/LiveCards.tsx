@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { fetchWithRescue } from "@/lib/rescue";
 import {
   Sun, CloudSun, Cloud, CloudFog, CloudDrizzle, CloudRain, CloudSnow, CloudLightning, Moon, CloudMoon,
   Droplets, Wind, MapPin, Navigation, ExternalLink, TrendingUp, TrendingDown, type LucideIcon,
@@ -196,7 +197,7 @@ export function MarketCard({ data }: { data: MarketData }) {
     ? `kind=fx&from=${encodeURIComponent((data.from || "").toUpperCase())}&to=${encodeURIComponent((data.to || "").toUpperCase())}`
     : `kind=stock&symbol=${encodeURIComponent((data.symbol || "").toUpperCase())}`;
   const state = useFetched<Quote>(async () => {
-    const r = await fetch(`${API_ORIGIN}/api/ai/market?${query}`);
+    const r = await fetchWithRescue(`${API_ORIGIN}/api/ai/market?${query}`);
     return r.ok ? r.json() : null;
   }, [query], 2 * 60 * 1000);
 

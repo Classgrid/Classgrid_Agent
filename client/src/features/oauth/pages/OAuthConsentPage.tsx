@@ -8,6 +8,7 @@ import { Spinner } from "@/components/ui/spinner";
 import { useCurrentUser } from "@/features/auth/queries/useCurrentUser";
 import { clearOAuthConsentReturn } from "@/features/oauth/lib/oauthReturn";
 import { LoginGridBackground } from "@/features/public-chat/components/LoginGridBackground";
+import { fetchWithRescue } from "@/lib/rescue";
 
 // Same look as the chat.classgrid.in login page: flat card on the grid, black/white buttons, no accent colour
 const PRIMARY_BUTTON = "flex h-12 w-full items-center justify-center rounded-lg bg-[#111] px-5 text-[15px] font-semibold text-white transition-all duration-200 hover:bg-black active:scale-[0.98] disabled:opacity-50 disabled:active:scale-100 dark:bg-[#f1f1f1] dark:text-[#111] dark:hover:bg-white";
@@ -155,7 +156,7 @@ export function OAuthConsentPage({ preview = false }: { preview?: boolean } = {}
     const fetchClientDetails = async () => {
       try {
         if (requestId) {
-          const res = await fetch(`${backendUrl}/oauth/request-details?${new URLSearchParams({ request_id: requestId }).toString()}`, {
+          const res = await fetchWithRescue(`${backendUrl}/oauth/request-details?${new URLSearchParams({ request_id: requestId }).toString()}`, {
             method: "GET",
             headers: authHeaders(),
             credentials: "include"
@@ -180,7 +181,7 @@ export function OAuthConsentPage({ preview = false }: { preview?: boolean } = {}
         // Fetch using generic cookies since it's an authenticated route on the backend
         // Note: The backend uses `isAuthenticated` which reads from Bearer token or cookies.
         // `useCurrentUser` typically means we have standard session management via cookies.
-        const res = await fetch(`${backendUrl}/oauth/client-details?${queryParams.toString()}`, {
+        const res = await fetchWithRescue(`${backendUrl}/oauth/client-details?${queryParams.toString()}`, {
           method: "GET",
           headers: authHeaders(),
           credentials: "include" // Important for sending the auth cookie
@@ -227,7 +228,7 @@ export function OAuthConsentPage({ preview = false }: { preview?: boolean } = {}
       const body = requestId
         ? { request_id: requestId, allow, scopes: scopeOptions.filter((o) => o.locked || checkedScopes.has(o.scope)).map((o) => o.scope) }
         : { client_id: clientId, redirect_uri: redirectUri, state, allow };
-      const res = await fetch(`${backendUrl}/oauth/authorize`, {
+      const res = await fetchWithRescue(`${backendUrl}/oauth/authorize`, {
         method: "POST",
         headers: authHeaders(),
         credentials: "include",

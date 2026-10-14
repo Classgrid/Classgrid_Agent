@@ -44,6 +44,7 @@
 
 import { useEffect, useState } from "react";
 import { Spinner } from "@/components/marketing_ui/spinner";
+import { fetchWithRescue } from "@/lib/rescue";
 import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter } from "@/components/marketing_ui/card";
 
 const steps = [
@@ -105,7 +106,7 @@ function DemoCard() {
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch(`${API_BASE}/api/billing/demo/session`, { 
+      const res = await fetchWithRescue(`${API_BASE}/api/billing/demo/session`, { 
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ email: email.trim(), payerName: "Payer" })

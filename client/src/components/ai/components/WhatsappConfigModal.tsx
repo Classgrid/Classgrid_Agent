@@ -6,6 +6,7 @@ import { Input } from "./ui/input";
 import { toast } from "sonner";
 import { Spinner } from "@/components/marketing_ui/spinner";
 import { motion } from "framer-motion";
+import { fetchWithRescue } from "@/lib/rescue";
 
 interface WhatsappConfigModalProps {
   isOpen: boolean;
@@ -31,7 +32,7 @@ export function WhatsappConfigModal({ isOpen, onClose, onSuccess, backendUrl }: 
 
     setIsLoading(true);
     try {
-      const res = await fetch(backendUrl + "/api/whatsapp/connect", {
+      const res = await fetchWithRescue(backendUrl + "/api/whatsapp/connect", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ phoneId, accessToken, verifyToken }),

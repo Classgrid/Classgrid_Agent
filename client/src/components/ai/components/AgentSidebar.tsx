@@ -23,6 +23,7 @@ import { Accordion, AccordionItem, AccordionTrigger, AccordionContent } from "@/
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator } from "@/components/marketing_ui/dropdown-menu";
 import { DangerConfirmDialog } from "@/components/marketing_ui/danger-confirm-dialog";
 import { toast } from "sonner";
+import { fetchWithRescue } from "@/lib/rescue";
 
 interface ChatSession {
   id: string;
@@ -80,7 +81,7 @@ export function AgentNestedMenu({ searchQuery = "" }: { searchQuery?: string }) 
       ? (import.meta.env.VITE_API_URL || "https://api.classgrid.in") + "/api/ai/sessions"
       : "/api/ai/sessions";
 
-    fetch(endpoint, { credentials: "include" })
+    fetchWithRescue(endpoint, { credentials: "include" })
       .then(res => res.json())
       .then(data => {
         if (data.sessions) setSessions(data.sessions);
@@ -125,7 +126,7 @@ export function AgentNestedMenu({ searchQuery = "" }: { searchQuery?: string }) 
   React.useEffect(() => {
     if (shareModalOpen && shareSessionId) {
       setIsLoadingPreview(true);
-      fetch(`${endpointPrefix}/api/ai/sessions/${shareSessionId}/messages`, { credentials: "include" })
+      fetchWithRescue(`${endpointPrefix}/api/ai/sessions/${shareSessionId}/messages`, { credentials: "include" })
         .then(res => res.json())
         .then(data => {
           if (data.messages) {
@@ -141,7 +142,7 @@ export function AgentNestedMenu({ searchQuery = "" }: { searchQuery?: string }) 
 
   const handleUpdateSession = async (id: string, updates: any) => {
     try {
-      const res = await fetch(`${endpointPrefix}/api/ai/sessions/${id}`, {
+      const res = await fetchWithRescue(`${endpointPrefix}/api/ai/sessions/${id}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(updates),
@@ -169,7 +170,7 @@ export function AgentNestedMenu({ searchQuery = "" }: { searchQuery?: string }) 
   const handleDeleteSession = async (id: string) => {
     setIsDeletingSession(true);
     try {
-      const res = await fetch(`${endpointPrefix}/api/ai/sessions/${id}`, {
+      const res = await fetchWithRescue(`${endpointPrefix}/api/ai/sessions/${id}`, {
         method: "DELETE",
         credentials: "include"
       });
@@ -200,7 +201,7 @@ export function AgentNestedMenu({ searchQuery = "" }: { searchQuery?: string }) 
     setIsSharingEmail(true);
     setSharedEmailSuccess(false);
     try {
-      const res = await fetch(`${endpointPrefix}/api/ai/sessions/${id}/share`, {
+      const res = await fetchWithRescue(`${endpointPrefix}/api/ai/sessions/${id}/share`, {
         method: "POST",
         credentials: "include"
       });
@@ -218,7 +219,7 @@ export function AgentNestedMenu({ searchQuery = "" }: { searchQuery?: string }) 
   const handleCopyChat = async (id: string) => {
     try {
       setIsCopying(true);
-      const res = await fetch(`${endpointPrefix}/api/ai/sessions/${id}/messages`, { credentials: "include" });
+      const res = await fetchWithRescue(`${endpointPrefix}/api/ai/sessions/${id}/messages`, { credentials: "include" });
       const data = await res.json();
       if (data.messages) {
         let transcript = "";
@@ -245,7 +246,7 @@ export function AgentNestedMenu({ searchQuery = "" }: { searchQuery?: string }) 
   const handleCreatePublicLink = async (id: string) => {
     setIsCreatingLink(true);
     try {
-      const res = await fetch(`${endpointPrefix}/api/ai/sessions/${id}/public-share`, {
+      const res = await fetchWithRescue(`${endpointPrefix}/api/ai/sessions/${id}/public-share`, {
         method: "POST",
         credentials: "include"
       });
@@ -268,7 +269,7 @@ export function AgentNestedMenu({ searchQuery = "" }: { searchQuery?: string }) 
   // ── COPY AS PLAIN TEXT ──
   const handleCopyText = async (id: string) => {
     try {
-      const res = await fetch(`${endpointPrefix}/api/ai/sessions/${id}/messages`, { credentials: "include" });
+      const res = await fetchWithRescue(`${endpointPrefix}/api/ai/sessions/${id}/messages`, { credentials: "include" });
       const data = await res.json();
       if (data.messages) {
         let transcript = "";
@@ -291,7 +292,7 @@ export function AgentNestedMenu({ searchQuery = "" }: { searchQuery?: string }) 
   // ── COPY AS MARKDOWN ──
   const handleCopyMarkdown = async (id: string) => {
     try {
-      const res = await fetch(`${endpointPrefix}/api/ai/sessions/${id}/messages`, { credentials: "include" });
+      const res = await fetchWithRescue(`${endpointPrefix}/api/ai/sessions/${id}/messages`, { credentials: "include" });
       const data = await res.json();
       if (data.messages) {
         let md = "";
@@ -316,7 +317,7 @@ export function AgentNestedMenu({ searchQuery = "" }: { searchQuery?: string }) 
        newWindow = window.open('about:blank', '_blank');
        setIsCreatingLink(true);
        try {
-         const res = await fetch(`${endpointPrefix}/api/ai/sessions/${shareSessionId}/public-share`, {
+         const res = await fetchWithRescue(`${endpointPrefix}/api/ai/sessions/${shareSessionId}/public-share`, {
            method: "POST",
            credentials: "include"
          });

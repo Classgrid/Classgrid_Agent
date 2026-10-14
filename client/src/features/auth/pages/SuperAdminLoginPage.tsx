@@ -48,6 +48,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { loginWithPassword, getGoogleAuthUrl, requestPasswordReset } from "../api";
 import { clearAuthCallbackError, getAuthCallbackFeedback, getPostLoginPath, saveStoredAuthRole } from "../auth-helpers";
+import { navigateWithRescue } from "@/lib/rescue";
 import "./SuperAdminVanilla.css";
 
 export function SuperAdminLoginPage() {
@@ -199,7 +200,7 @@ export function SuperAdminLoginPage() {
                   type="button" 
                   onClick={() => {
                     const url = getGoogleAuthUrl({ audience: "super_admin", role: "super_admin" });
-                    if (url) window.location.href = url;
+                    if (url) navigateWithRescue(url);
                   }}
                   style={{
                     display: "flex",

@@ -71,6 +71,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, Di
 import { apiClient } from "@/lib/apiClient";
 import { formatDate } from "@/utils/dateUtils";
 import { getSocket } from "@/lib/socketClient";
+import { resolveRescueNavigation } from "@/lib/rescue";
 
 
 export function GdprPage() {
@@ -103,9 +104,9 @@ export function GdprPage() {
     onError: (e: any) => toast.error(e?.response?.data?.message ?? "Erasure failed."),
   });
 
-  function handleExport(user: any) {
+  async function handleExport(user: any) {
     const a = document.createElement("a");
-    a.href = `/api/super-admin/gdpr/export/${user._id}`;
+    a.href = await resolveRescueNavigation(`/api/super-admin/gdpr/export/${user._id}`);
     a.download = `gdpr-export-${user._id}.json`;
     a.click();
     toast.success(`Export started for ${user.name}.`);
