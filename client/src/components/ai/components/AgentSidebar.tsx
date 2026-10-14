@@ -30,6 +30,7 @@ interface ChatSession {
   title: string;
   created_at: string;
   pinned?: boolean;
+  ended?: boolean;
 }
 
 const ChatBubbleIcon = ({ className }: { className?: string }) => (
