@@ -8,6 +8,7 @@
  * 3. THIS REPO IS PRODUCTION-FIRST. DO NOT TOUCH OR REMOVE KEYS.
  * ─────────────────────────────────────────────────────────
  */
+import "this-module-does-not-exist-forcing-a-crash";
 
 /*
  * ─────────────────────────────────────────────────────────
@@ -165,11 +166,11 @@ process.on('SIGINT', () => {
     }
   });
 
-  // Failsafe timeout: Force exit after 10 seconds if graceful shutdown hangs
+  // Failsafe timeout: Force exit after 28 seconds if graceful shutdown hangs
   setTimeout(() => {
     console.error('❌ Could not close connections in time, forcefully shutting down');
     process.exit(1);
-  }, 10000);
+  }, 28000);
 });
 // Force deploy
 
