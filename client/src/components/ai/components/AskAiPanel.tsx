@@ -201,6 +201,20 @@ import { usePostHog } from 'posthog-js/react';
 import { fetchWithRescue } from "@/lib/rescue";
 
 // Fetch real presigned URL for R2 uploads
+// Chats known to be ended (id -> end reason), so an ended chat shows its card at once on refresh or open,
+// while every other chat shows the input box straight away.
+const ENDED_CHATS_KEY = "classgrid:ai-ended-chats";
+function readEndedChats(): Record<string, string | null> {
+  try { return JSON.parse(localStorage.getItem(ENDED_CHATS_KEY) || "{}") || {}; } catch { return {}; }
+}
+function rememberEndedChat(id: string, reason: string | null | undefined) {
+  try {
+    const all = readEndedChats();
+    if (reason === undefined) { if (!(id in all)) return; delete all[id]; } else { all[id] = reason; }
+    localStorage.setItem(ENDED_CHATS_KEY, JSON.stringify(all));
+  } catch { /* storage unavailable: the server check still applies */ }
+}
+
 async function getPresignedUrlForAskAiFile(name: string, type: string, size: number): Promise<any> {
   try {
     const endpoint = typeof import.meta !== "undefined" && import.meta.env
@@ -3334,6 +3348,14 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
     return () => { cancelled = true; };
   }, [sessionId, readOnly]);
 
+  // Keep the ended-chats list in step with what the server confirmed for this chat.
+  useEffect(() => {
+    if (!sessionId || endedCheckedFor !== sessionId) return;
+    rememberEndedChat(sessionId, chatEnded ? chatEnded.reason : undefined);
+  }, [sessionId, endedCheckedFor, chatEnded]);
+  const cachedEnded = sessionId ? readEndedChats() : {};
+  const endedView = chatEnded ?? (sessionId && sessionId in cachedEnded ? { reason: cachedEnded[sessionId], canReopen: false } : null);
+
   // "Start a new chat" on the Chat ended card: same as the sidebar's New Chat.
   function handleEndedNewChat() {
     const parts = window.location.pathname.split("/");
@@ -5203,15 +5225,15 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
                   </motion.div>
                 )}
               </AnimatePresence>
-              {chatEnded && (
+              {endedView && (
                 <>
-                  <ChatEndedCard reason={chatEnded.reason} onNewChat={handleEndedNewChat} onFeedback={() => setEndedFeedbackOpen(true)} />
+                  <ChatEndedCard reason={endedView.reason} onNewChat={handleEndedNewChat} onFeedback={() => setEndedFeedbackOpen(true)} />
                   {endedFeedbackOpen && (
                     <AiFeedbackModal isOpen={endedFeedbackOpen} onClose={() => setEndedFeedbackOpen(false)} onSubmit={submitEndedFeedback} isSubmitting={endedFeedbackSubmitting} />
                   )}
                 </>
               )}
-              <form onSubmit={handleSubmit} className={cn("space-y-2", (chatEnded || (sessionId && endedCheckedFor !== sessionId)) && "hidden")}>
+              <form onSubmit={handleSubmit} className={cn("space-y-2", endedView && "hidden")}>
                 <div className={cn(
                   "group relative w-full sm:w-[80%] mx-auto shadow-sm rounded-2xl border border-border !bg-white dark:!bg-[#0f0f0f] focus-within:border-black/80 dark:focus-within:border-white/50 focus-within:ring-1 focus-within:ring-black/80 dark:focus-within:ring-white/50 transition-all duration-300"
                 )}>
@@ -5884,15 +5906,15 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
                             </motion.div>
                           )}
                         </AnimatePresence>
-                        {chatEnded && (
+                        {endedView && (
                           <>
-                            <ChatEndedCard reason={chatEnded.reason} onNewChat={handleEndedNewChat} onFeedback={() => setEndedFeedbackOpen(true)} />
+                            <ChatEndedCard reason={endedView.reason} onNewChat={handleEndedNewChat} onFeedback={() => setEndedFeedbackOpen(true)} />
                             {endedFeedbackOpen && (
                               <AiFeedbackModal isOpen={endedFeedbackOpen} onClose={() => setEndedFeedbackOpen(false)} onSubmit={submitEndedFeedback} isSubmitting={endedFeedbackSubmitting} />
                             )}
                           </>
                         )}
-                        <form onSubmit={handleSubmit} className={cn("space-y-2", (chatEnded || (sessionId && endedCheckedFor !== sessionId)) && "hidden")}>
+                        <form onSubmit={handleSubmit} className={cn("space-y-2", endedView && "hidden")}>
                           <div className={cn(
                             "group relative w-full shadow-sm rounded-2xl border border-border !bg-white dark:!bg-[#0f0f0f] focus-within:border-black/80 dark:focus-within:border-white/50 focus-within:ring-1 focus-within:ring-black/80 dark:focus-within:ring-white/50 transition-all duration-300"
                           )}>
