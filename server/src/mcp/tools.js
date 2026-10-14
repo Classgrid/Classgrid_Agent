@@ -314,7 +314,7 @@ export const getMcpTools = () => [
   },
   {
     name: 'read_server_logs',
-    description: 'Read the latest server logs from the host machine (PM2 logs or Winston local file logs), 5000 lines by default and up to 10,000. Pick one PM2 process with process (classgrid = main server on port 3000, classgrid-rescue = rescue server on port 4000 that takes over when main is down, classgrid-ai = AI server). To find something specific (e.g. "AI-STREAM", an error message, a session id), pass search: only matching lines come back. The reply always starts with the PM2 status of every process.',
+    description: 'Read the latest server logs from the host machine (PM2 logs or Winston local file logs), 5000 lines by default and up to 10,000. Pick one PM2 process with process (classgrid = main server on port 3000, classgrid-rescue = rescue server on port 4000 that takes over when main is down, classgrid-ai = AI server). To find something specific (e.g. "AI-STREAM", an error message, a session id), pass search with any word or phrase: it searches the WHOLE log files (every line, including rotated files), not just the last lines. The reply always starts with the PM2 status of every process.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -4352,8 +4352,53 @@ export const handleToolCall = async (name, args, context = {}) => {
         }
 
         if (!command) throw new Error(`unknown log_type: ${log_type}`);
-        const { stdout, stderr } = await execPromise(command, { maxBuffer: 1024 * 1024 * 50 });
-        let resultText = stdout || stderr;
+        let resultText = '';
+        let searchedWhere = `the last ${numLines} lines`;
+        if (search) {
+          const files = new Set();
+          if (log_type.startsWith('pm2')) {
+            try {
+              const { stdout: jlist } = await execPromise('pm2 jlist', { maxBuffer: 1024 * 1024 * 10 });
+              for (const p of JSON.parse(jlist || '[]')) {
+                if (pm2Process && p.name !== pm2Process.trim()) continue;
+                const env = p.pm2_env || {};
+                if (log_type !== 'pm2_error' && env.pm_out_log_path) files.add(env.pm_out_log_path);
+                if (log_type !== 'pm2_out' && env.pm_err_log_path) files.add(env.pm_err_log_path);
+              }
+            } catch (e) { }
+          } else {
+            files.add(path.join(process.cwd(), 'logs', log_type === 'winston_error' ? 'error.log' : 'combined.log'));
+          }
+          for (const file of [...files]) {
+            try {
+              const dir = path.dirname(file);
+              const base = path.basename(file).replace(/\.log$/, '');
+              for (const name of fs.readdirSync(dir)) {
+                if (name.startsWith(base) && name !== path.basename(file) && !name.endsWith('.gz')) files.add(path.join(dir, name));
+              }
+            } catch (e) { }
+          }
+          const readline = await import('readline');
+          const matches = [];
+          let scanned = 0;
+          for (const file of files) {
+            if (!fs.existsSync(file)) continue;
+            const rl = readline.createInterface({ input: fs.createReadStream(file, { encoding: 'utf8' }), crlfDelay: Infinity });
+            const label = path.basename(file);
+            for await (const line of rl) {
+              scanned++;
+              if (line.toLowerCase().includes(search)) {
+                matches.push(`[${label}] ${line}`);
+                if (matches.length > 20000) matches.shift();
+              }
+            }
+          }
+          resultText = matches.join('\n');
+          searchedWhere = `all ${files.size} log file(s) (${scanned} lines scanned)`;
+        } else {
+          const { stdout, stderr } = await execPromise(command, { maxBuffer: 1024 * 1024 * 50 });
+          resultText = stdout || stderr;
+        }
         const filtersUsed = [];
         if (sinceMinutes && resultText) {
           const cutoff = Date.now() - sinceMinutes * 60000;
@@ -4374,14 +4419,14 @@ export const handleToolCall = async (name, args, context = {}) => {
         if (filtersUsed.length && !search) {
           const count = resultText ? resultText.split('\n').filter(Boolean).length : 0;
           resultText = count
-            ? `${count} line(s) matching ${filtersUsed.join(' + ')} in the last ${numLines} lines:\n${resultText}`
-            : `No lines matching ${filtersUsed.join(' + ')} in the last ${numLines} lines.`;
+            ? `${count} line(s) matching ${filtersUsed.join(' + ')} in ${searchedWhere}:\n${resultText}`
+            : `No lines matching ${filtersUsed.join(' + ')} in ${searchedWhere}.`;
         }
-        if (search && resultText) {
-          const matches = resultText.split('\n').filter((l) => l.toLowerCase().includes(search));
+        if (search) {
+          const matches = resultText ? resultText.split('\n').filter((l) => l.toLowerCase().includes(search)) : [];
           resultText = matches.length > 0
-            ? `${matches.length} line(s) containing "${args.search.trim()}" in the last ${numLines} lines:\n${matches.join('\n')}`
-            : `No lines containing "${args.search.trim()}" in the last ${numLines} lines.`;
+            ? `${matches.length} line(s) containing "${args.search.trim()}"${filtersUsed.length ? ` (${filtersUsed.join(' + ')})` : ''} in ${searchedWhere}:\n${matches.join('\n')}`
+            : `No lines containing "${args.search.trim()}"${filtersUsed.length ? ` (${filtersUsed.join(' + ')})` : ''} in ${searchedWhere}.`;
         }
         if (!resultText) resultText = "No logs found or empty output.";
         let processStatus = '';
