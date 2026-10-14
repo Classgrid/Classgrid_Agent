@@ -127,6 +127,13 @@ setTimeout(async () => {
 }, 2000);
 
 
+server.on("error", async (err) => {
+  if (err.code !== "EADDRINUSE") return console.error("❌ Server error:", err.message);
+  console.warn(`⚠️ Port ${PORT} is held by the Rescue Server, asking it to release...`);
+  try { await fetch("http://localhost:4000/api/rescue/release-port", { method: "POST" }); } catch (e) { }
+  setTimeout(() => server.listen(PORT), 3000);
+});
+
 server.listen(PORT, () => {
   console.log(`🔥 Server running at http://localhost:${PORT} (Socket.io Native)`);
 });

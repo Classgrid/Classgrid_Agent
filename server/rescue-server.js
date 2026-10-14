@@ -28,6 +28,7 @@ import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
 import express from "express";
+import http from "http";
 import cors from "cors";
 import { MongoClient } from "mongodb";
 import bcrypt from "bcryptjs";
@@ -41,8 +42,9 @@ const app = express();
 const PORT = process.env.PORT || 4000;
 
 // Middleware
-app.use("/api/rescue", cors({ origin: true, credentials: true }));
-app.use("/api/rescue", express.json());
+const RESCUE_OWN_ROUTES = ["/api/rescue/login", "/api/rescue/error-logs", "/api/rescue/status"];
+app.use(RESCUE_OWN_ROUTES, cors({ origin: true, credentials: true }));
+app.use(RESCUE_OWN_ROUTES, express.json());
 
 // Simple manual .env parser so we don't depend on dotenv
 let env = {};
@@ -181,9 +183,20 @@ app.get("/api/rescue/status", (req, res) => {
 
 let fullBackend = null;
 let backupWorkersStarted = false;
+let takeoverServer = null;
+
+app.post("/api/rescue/release-port", (req, res) => {
+  const ip = req.socket.remoteAddress || "";
+  const fromThisMachine = ["127.0.0.1", "::1", "::ffff:127.0.0.1"].includes(ip) && !req.headers["x-forwarded-for"];
+  if (!fromThisMachine) return res.status(403).json({ success: false });
+  res.json({ success: true });
+  console.log("🔁 Main server is starting again: Rescue Server releases port 3000 and restarts");
+  setTimeout(() => process.exit(0), 300);
+});
 try {
   await import("./env.js");
   fullBackend = (await import("./api/index.js")).default;
+  app.use("/api/rescue", fullBackend);
   app.use(fullBackend);
   console.log("✅ Rescue Server loaded the full backend (login, ERP, chat, Grid, settings, agent)");
 } catch (err) {
@@ -255,8 +268,9 @@ const rescueHttpServer = app.listen(PORT, async () => {
   };
 
   setInterval(async () => {
+    if (takeoverServer) return;
     try {
-      const response = await fetch(`http://localhost:${MAIN_PORT}/`);
+      const response = await fetch(`http://localhost:${MAIN_PORT}/`, { signal: AbortSignal.timeout(4000) });
       if (response.ok) {
         failureCount = 0; 
         if (isDown) {
@@ -286,7 +300,25 @@ const rescueHttpServer = app.listen(PORT, async () => {
       await sendCloudWatchSignal("ALARM");
     }
 
-    if (failureCount >= 3 && fullBackend && !backupWorkersStarted) {
+    if (failureCount >= 2 && fullBackend && !takeoverServer) {
+      const takeover = http.createServer(app);
+      takeoverServer = takeover;
+      takeover.on("error", (err) => {
+        console.error(`❌ Rescue Server could not take over port ${MAIN_PORT}:`, err.message);
+        if (takeoverServer === takeover) takeoverServer = null;
+      });
+      takeover.listen(MAIN_PORT, async () => {
+        console.log(`✅ Main server is down: Rescue Server now serves the whole backend on port ${MAIN_PORT}`);
+        try {
+          const { initSocket } = await import("./src/services/socket.service.js");
+          fullBackend.set("io", initSocket(takeover));
+        } catch (err) {
+          console.error("❌ Rescue Server socket takeover failed:", err.message);
+        }
+      });
+    }
+
+    if (failureCount >= 2 && fullBackend && !backupWorkersStarted) {
       backupWorkersStarted = true;
       try {
         await import("./src/workers/index.js");
@@ -295,13 +327,13 @@ const rescueHttpServer = app.listen(PORT, async () => {
         console.error("❌ Rescue Server could not start the background jobs:", err.message);
       }
     }
-  }, 10000); // Check every 10 seconds
+  }, 5000);
 });
 
 if (fullBackend) {
   try {
     const { initSocket } = await import("./src/services/socket.service.js");
-    fullBackend.set("io", initSocket(rescueHttpServer));
+    fullBackend.set("io", initSocket(rescueHttpServer, { path: "/api/rescue/socket.io" }));
   } catch (err) {
     console.error("❌ Rescue Server socket start failed:", err.message);
   }
