@@ -3348,6 +3348,13 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
     return () => { cancelled = true; };
   }, [sessionId, readOnly]);
 
+  // An ended chat takes no queued messages: drop them so they don't fire one by one.
+  useEffect(() => {
+    if (!chatEnded) return;
+    setMessageQueue([]);
+    setPriorityMessage(null);
+  }, [chatEnded]);
+
   // Keep the ended-chats list in step with what the server confirmed for this chat.
   useEffect(() => {
     if (!sessionId || endedCheckedFor !== sessionId) return;
@@ -3917,6 +3924,8 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
               } else if (event.type === "chat_ended") {
                 chatEndedSeen = true;
                 setChatEnded({ reason: event.reason ?? null, canReopen: !!event.canReopen });
+                setMessageQueue([]);
+                setPriorityMessage(null);
               } else if (event.type === "error") {
                 streamError = event.error || "Unable to answer right now. Please try again.";
               }
