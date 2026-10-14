@@ -224,7 +224,7 @@ export function AiFeedbackModal({ isOpen, onClose, onSubmit, isSubmitting }: AiF
   return (
     <>
       <Dialog open={isOpen} onOpenChange={onClose}>
-        <DialogContent className="sm:max-w-[500px]" overlayClassName="supports-backdrop-filter:backdrop-blur-none !backdrop-blur-none">
+        <DialogContent className="sm:max-w-[500px]" overlayClassName="supports-backdrop-filter:backdrop-blur-none !backdrop-blur-none !bg-black/40">
           <DialogHeader>
             <DialogTitle>Leave feedback</DialogTitle>
             <DialogDescription>
