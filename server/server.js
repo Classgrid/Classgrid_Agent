@@ -8,7 +8,6 @@
  * 3. THIS REPO IS PRODUCTION-FIRST. DO NOT TOUCH OR REMOVE KEYS.
  * ─────────────────────────────────────────────────────────
  */
-import "this-module-does-not-exist-forcing-a-crash";
 
 /*
  * ─────────────────────────────────────────────────────────
