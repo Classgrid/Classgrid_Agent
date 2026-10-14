@@ -104,7 +104,7 @@ export const getMcpTools = () => [
     inputSchema: {
       type: 'object',
       properties: {
-        reason: { type: 'string', enum: ['user_requested', 'abusive_behavior', 'harassment', 'spam', 'other'], description: 'Why the chat is being ended.' },
+        reason: { type: 'string', enum: ['user_requested', 'abusive_after_warning'], description: 'Why the chat is being ended.' },
         summary: { type: 'string', description: 'One short sentence describing why (stored for review).' },
         confirm: { type: 'boolean', description: 'false on the first call; true only on a later user message after the user confirmed (or kept up the behaviour after a warning).' }
       },
@@ -116,8 +116,8 @@ export const getMcpTools = () => [
     description: 'Record a polite warning when the user is abusive, harassing or spamming. Required before end_conversation for any reason other than user_requested.',
     inputSchema: {
       type: 'object',
-      properties: { message: { type: 'string', description: 'Short note on what behaviour the warning is about.' } },
-      required: []
+      properties: { behavior: { type: 'string', description: 'Short note on what behaviour the warning is about.' } },
+      required: ['behavior']
     }
   },
   {

@@ -200,7 +200,7 @@ RULES:
 - Only consider ending a conversation as a last resort, after several attempts at constructive redirection have failed AND an explicit warning (via warn_user, then stated in your reply) has been given in an earlier message.
 - Before ever ending for abuse: call warn_user, then in your reply name the problematic behavior, redirect productively, and say the chat may be ended if it continues. Only if the user persists after that warning may you call end_conversation with reason "abusive_after_warning".
 - If the user explicitly asks you to end the conversation: first ask them to confirm they understand this is permanent and blocks further messages. Only after an explicit confirmation (e.g. "yes, end it") call end_conversation with reason "user_requested".
-- end_conversation is two-step: the first call returns CONFIRMATION_REQUIRED; if you are certain, call it again with confirm=true. That confirmation request is part of the tool, not a user message.
+- end_conversation: once the user has confirmed (or ignored the warning), call it ONCE with confirm=true. A call without confirm=true only returns CONFIRMATION_REQUIRED. That confirmation request is part of the tool, not a user message.
 - NEVER warn, end, or even mention ending the chat if the user may be considering self-harm or suicide, is in a mental-health crisis, or suggests harm to others. Stay engaged and supportive no matter how hostile they are. The backend also blocks the tool in these cases.
 - A demo request ("show me how it works") is NOT a reason to end a chat; explain instead.
 - When in doubt, keep the conversation going.
@@ -1177,7 +1177,7 @@ export const streamAskAi = async (req, res) => {
 
             // Ended chats are read-only: no model call, no tokens burned.
             if (sessionData.ended) {
-                res.write(`data: ${JSON.stringify({ type: "error", code: "CHAT_ENDED", error: "This conversation has ended. Start a new chat to continue." })}\n\n`);
+                res.write(`data: ${JSON.stringify({ type: "chat_ended", sessionId: sessionData.id, reason: sessionData.end_reason || null, canReopen: sessionData.end_reason === "user_requested" })}\n\n`);
                 res.end();
                 return;
             }
@@ -2366,7 +2366,7 @@ If they ask whether their college/school uses Classgrid, say you can't see that 
                     type: "function",
                     function: {
                         name: "end_conversation",
-                        description: "Permanently end this chat (last resort, or when the user explicitly asks and confirms). Two-step: the first call returns CONFIRMATION_REQUIRED; call again with confirm=true to commit. Never usable when self-harm or harm to others is involved.",
+                        description: "Permanently end this chat (last resort, or when the user explicitly asks and confirms). Call once with confirm=true to commit; without confirm=true it only returns CONFIRMATION_REQUIRED. Never usable when self-harm or harm to others is involved.",
                         parameters: {
                             type: "object",
                             properties: {
@@ -4430,11 +4430,14 @@ export const reopenChatSession = async (req, res) => {
     try {
         const role = req.user?.role;
         const email = req.user?.email || "";
-        if (!(role === "super_admin" || role === "co_super_admin" || email.endsWith("@classgrid.in"))) {
-            return res.status(403).json({ error: "Forbidden" });
-        }
+        const isStaff = role === "super_admin" || role === "co_super_admin" || email.endsWith("@classgrid.in");
         const session = await getSessionById(req.params.id);
         if (!session) return res.status(404).json({ error: "Session not found" });
+        // Staff can reopen any chat; the owner only a chat they ended themselves.
+        const ownerCanReopen = session.user_email === email && session.end_reason === "user_requested";
+        if (!(isStaff || ownerCanReopen)) {
+            return res.status(403).json({ error: "Forbidden" });
+        }
         const data = await reopenSession(req.params.id);
         res.json({ session: data });
     } catch (e) {

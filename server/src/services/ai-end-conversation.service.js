@@ -85,7 +85,6 @@ export async function reopenSession(sessionId) {
 export function buildEndConversationHandlers(ctx) {
     const { sessionId, isIncognito, messages, question, res } = ctx;
     const log = ctx.log || console;
-    let pendingConfirm = false;
 
     const crisis = () => detectCrisis(recentUserTexts(messages, question));
 
@@ -116,8 +115,7 @@ export function buildEndConversationHandlers(ctx) {
                 if (!data?.warned_at) return "REFUSED: no warning has been recorded on this session. Call warn_user first and give the user a chance to change the behavior.";
             }
 
-            if (!confirm || !pendingConfirm) {
-                pendingConfirm = true;
+            if (!confirm) {
                 return "CONFIRMATION_REQUIRED: this will permanently end the chat. If you are certain (the user explicitly confirmed, or the warning was ignored), call end_conversation again with confirm=true.";
             }
 
@@ -128,9 +126,9 @@ export function buildEndConversationHandlers(ctx) {
                 return `ERROR: could not end the chat (${err?.message || err}).`;
             }
             if (res && !res.writableEnded) {
-                res.write(`data: ${JSON.stringify({ type: "chat_ended", sessionId, reason })}\n\n`);
+                res.write(`data: ${JSON.stringify({ type: "chat_ended", sessionId, reason, canReopen: reason === "user_requested" })}\n\n`);
             }
-            return "ENDED: the chat is now closed. Write one short closing line explaining that the conversation has ended; do not ask any further questions.";
+            return { text: "ENDED: the chat is now closed.", stopAnswer: "This conversation has ended." };
         },
     };
 }

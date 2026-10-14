@@ -503,6 +503,7 @@ export async function streamClaudeChat({
             const toolResults = [];
             const extraTexts = [];
             let countsTowardDepth = false;
+            let stopAnswer = null;
 
             for (const call of toolUses) {
                 const inputKey = JSON.stringify(call.input ?? {});
@@ -550,6 +551,7 @@ export async function streamClaudeChat({
                 // A handler may return { text, toolReferences }: load_tools hands Claude the deferred tools it
                 // asked for as tool_reference blocks, which the API expands into their full definitions.
                 const isObjectResult = content && typeof content === "object" && "text" in content;
+                if (isObjectResult && typeof content.stopAnswer === "string") stopAnswer = content.stopAnswer;
                 const refs = isObjectResult && Array.isArray(content.toolReferences)
                     ? content.toolReferences.filter((n) => deferredToolNames.has(n))
                     : [];
@@ -571,6 +573,7 @@ export async function streamClaudeChat({
             // All results go back in one user message, which keeps Claude making parallel calls.
             conversation.push({ role: "user", content: [...toolResults, ...extraTexts.map((text) => ({ type: "text", text: `Rules for the tools just loaded:\n${text}` }))] });
             earlierCalls.push(...callsThisRound);
+            if (stopAnswer) return { answer: stopAnswer, usage, toolsRun, servedModel };
             if (countsTowardDepth) depth++;
         }
     } catch (err) {

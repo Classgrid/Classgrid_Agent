@@ -183,6 +183,7 @@ import { EmailSentView } from "./stepper/EmailSentView";
 import { SimpleLogStepView } from "./stepper/SimpleLogStepView";
 import { CombinedReasoningBlock } from "./stepper/CombinedReasoningBlock";
 import { AiFeedbackModal } from "./AiFeedbackModal";
+import { ChatEndedCard } from "./ChatEndedCard";
 
 // â”€â”€â”€ SDK-local type definitions & stubs â”€â”€â”€
 import { useCurrentUser } from "@/features/auth/queries/useCurrentUser";
@@ -1804,6 +1805,8 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
   const [input, setInput] = useState("");
   // Set when Classgrid AI (or the user) ended this chat: the composer is replaced by a "Chat ended" card.
   const [chatEnded, setChatEnded] = useState<{ reason: string | null; canReopen: boolean } | null>(null);
+  const [endedFeedbackOpen, setEndedFeedbackOpen] = useState(false);
+  const [endedFeedbackSubmitting, setEndedFeedbackSubmitting] = useState(false);
   const [thinking, setThinking] = useState(false);
   const [sandboxFiles, setSandboxFiles] = useState<Record<string, string>>({});
   const [completedPlanSteps, setCompletedPlanSteps] = useState<string[]>([]);
@@ -2767,6 +2770,7 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
       setSessionId(routeSessionId);
       setIsLoadingChat(true);
       setIsPinned(false);
+      setChatEnded(null);
       try {
         let data: any = null;
         for (let attempt = 0; attempt < 2 && !data; attempt++) {
@@ -2778,6 +2782,9 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
             ]);
             if (controller.signal.aborted) return;
             if (sData?.session) setIsPinned(!!sData.session.pinned);
+            setChatEnded(sData?.session?.ended
+              ? { reason: sData.session.end_reason ?? null, canReopen: sData.session.end_reason === "user_requested" }
+              : null);
             data = mData;
           } catch (err: any) {
             if (controller.signal.aborted) return;
@@ -3300,6 +3307,53 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
     askQuestionRef.current = askQuestion;
   }, [askQuestion]);
 
+  // "Start a new chat" on the Chat ended card: same as the sidebar's New Chat.
+  function handleEndedNewChat() {
+    const parts = window.location.pathname.split("/");
+    const agentIndex = parts.indexOf("agent");
+    if (agentIndex !== -1 && parts.length > agentIndex + 1) {
+      window.history.pushState({}, "", parts.slice(0, agentIndex + 1).join("/"));
+      window.dispatchEvent(new PopStateEvent("popstate"));
+    }
+    window.dispatchEvent(new Event("agent:new-chat"));
+  }
+
+  // "Send feedback" on the Chat ended card: the same thumbs-down feedback as on a reply.
+  async function submitEndedFeedback(text: string, files: File[]) {
+    setEndedFeedbackSubmitting(true);
+    try {
+      const fileUrls: string[] = [];
+      for (const file of files) {
+        const result = await getPresignedUrlForAskAiFile(file.name, file.type, file.size);
+        if (result.error) {
+          toast.error(`Failed to get upload URL for ${file.name}`);
+          continue;
+        }
+        if (result.uploadUrl !== "mock") {
+          const uploadRes = await fetch(result.uploadUrl, { method: "PUT", body: file, headers: { "Content-Type": file.type } });
+          if (!uploadRes.ok) throw new Error("Upload to R2 failed");
+        }
+        fileUrls.push(result.publicUrl);
+      }
+      const lastAssistant = [...messages].reverse().find((m) => m.role === "assistant");
+      const endpointPrefix = typeof import.meta !== "undefined" && import.meta.env
+        ? import.meta.env.VITE_API_URL || "https://api.classgrid.in"
+        : "";
+      const token = localStorage.getItem("token");
+      await fetchWithRescue(`${endpointPrefix}/api/ai/feedback`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...(token ? { "Authorization": `Bearer ${token}` } : {}) },
+        body: JSON.stringify({ messageId: lastAssistant?.id || sessionId, type: "negative", text, fileUrl: fileUrls.length > 0 ? fileUrls.join(",") : null })
+      });
+      toast.success("Feedback submitted. Thank you!");
+      setEndedFeedbackOpen(false);
+    } catch (err: any) {
+      toast.error(err.message || "Failed to submit feedback");
+    } finally {
+      setEndedFeedbackSubmitting(false);
+    }
+  }
+
   async function handleReopenChat() {
     if (!sessionId) return;
     try {
@@ -3314,7 +3368,7 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
   }
 
   async function askQuestion(question: string, options?: { hidden?: boolean; isEdit?: boolean; explicitSessionId?: string | null }) {
-    if (chatEnded) return; // ended chats take no new messages
+    if (chatEnded) { setSubmitting(false); return; } // ended chats take no new messages
     const workStartedAt = Date.now(); // for the "Worked for X sec" summary of this reply
     const myGen = chatGenRef.current;
     const isStale = () => chatGenRef.current !== myGen; // the user moved to another chat
@@ -5118,7 +5172,15 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
                   </motion.div>
                 )}
               </AnimatePresence>
-              <form onSubmit={handleSubmit} className="space-y-2">
+              {chatEnded && (
+                <>
+                  <ChatEndedCard reason={chatEnded.reason} onNewChat={handleEndedNewChat} onFeedback={() => setEndedFeedbackOpen(true)} onReopen={chatEnded.canReopen ? handleReopenChat : undefined} />
+                  {endedFeedbackOpen && (
+                    <AiFeedbackModal isOpen={endedFeedbackOpen} onClose={() => setEndedFeedbackOpen(false)} onSubmit={submitEndedFeedback} isSubmitting={endedFeedbackSubmitting} />
+                  )}
+                </>
+              )}
+              <form onSubmit={handleSubmit} className={cn("space-y-2", chatEnded && "hidden")}>
                 <div className={cn(
                   "group relative w-full sm:w-[80%] mx-auto shadow-sm rounded-2xl border border-border !bg-white dark:!bg-[#0f0f0f] focus-within:border-black/80 dark:focus-within:border-white/50 focus-within:ring-1 focus-within:ring-black/80 dark:focus-within:ring-white/50 transition-all duration-300"
                 )}>
@@ -5399,29 +5461,6 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
                       >
                         <X className="h-4 w-4" />
                       </button>
-                    </div>
-                  )}
-
-                  {chatEnded && (
-                    <div className="mb-2 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-border bg-muted/40 px-4 py-3 text-sm">
-                      <div className="flex flex-col">
-                        <span className="font-semibold text-foreground">Chat ended</span>
-                        <span className="text-[13px] text-muted-foreground">
-                          {chatEnded.canReopen
-                            ? "You ended this chat. You can reopen it or start a new one."
-                            : "This chat has ended and can't continue. Start a new chat to keep going."}
-                        </span>
-                      </div>
-                      <div className="flex shrink-0 gap-2">
-                        {chatEnded.canReopen && (
-                          <button type="button" onClick={handleReopenChat} className="rounded-full border border-border px-3 py-1.5 text-[13px] font-medium hover:bg-muted transition-colors">
-                            Reopen chat
-                          </button>
-                        )}
-                        <button type="button" onClick={handleNewChat} className="rounded-full bg-foreground px-3 py-1.5 text-[13px] font-medium text-background hover:opacity-90 transition-opacity">
-                          New chat
-                        </button>
-                      </div>
                     </div>
                   )}
 
@@ -5814,7 +5853,15 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
                             </motion.div>
                           )}
                         </AnimatePresence>
-                        <form onSubmit={handleSubmit} className="space-y-2">
+                        {chatEnded && (
+                          <>
+                            <ChatEndedCard reason={chatEnded.reason} onNewChat={handleEndedNewChat} onFeedback={() => setEndedFeedbackOpen(true)} onReopen={chatEnded.canReopen ? handleReopenChat : undefined} />
+                            {endedFeedbackOpen && (
+                              <AiFeedbackModal isOpen={endedFeedbackOpen} onClose={() => setEndedFeedbackOpen(false)} onSubmit={submitEndedFeedback} isSubmitting={endedFeedbackSubmitting} />
+                            )}
+                          </>
+                        )}
+                        <form onSubmit={handleSubmit} className={cn("space-y-2", chatEnded && "hidden")}>
                           <div className={cn(
                             "group relative w-full shadow-sm rounded-2xl border border-border !bg-white dark:!bg-[#0f0f0f] focus-within:border-black/80 dark:focus-within:border-white/50 focus-within:ring-1 focus-within:ring-black/80 dark:focus-within:ring-white/50 transition-all duration-300"
                           )}>

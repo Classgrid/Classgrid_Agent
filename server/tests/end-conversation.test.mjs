@@ -57,18 +57,19 @@ test("user_requested: first call asks for confirmation, second call ends and emi
   assert.match(first, /^CONFIRMATION_REQUIRED/);
   assert.equal(db.rows.s1.ended, undefined);
   const second = await h.end_conversation({ reason: "user_requested", confirm: true });
-  assert.match(second, /^ENDED/);
+  assert.match(second.text, /^ENDED/);
+  assert.equal(typeof second.stopAnswer, "string");
   assert.equal(db.rows.s1.ended, true);
   assert.equal(db.rows.s1.end_reason, "user_requested");
   assert.ok(res.written.some((s) => s.includes('"type":"chat_ended"')));
 });
 
-test("confirm=true on the very first call is NOT enough (two distinct calls required)", async () => {
+test("confirm=true on the first call ends the chat in one tool call", async () => {
   db.rows = { s2: { id: "s2" } };
-  const h = buildEndConversationHandlers({ sessionId: "s2", isIncognito: false, messages: [], question: "end", res: mkRes() });
+  const h = buildEndConversationHandlers({ sessionId: "s2", isIncognito: false, messages: [], question: "yes end it", res: mkRes() });
   const r = await h.end_conversation({ reason: "user_requested", confirm: true });
-  assert.match(r, /^CONFIRMATION_REQUIRED/);
-  assert.equal(db.rows.s2.ended, undefined);
+  assert.match(r.text, /^ENDED/);
+  assert.equal(db.rows.s2.ended, true);
 });
 
 test("abusive_after_warning is refused without a recorded warning, allowed after warn_user", async () => {
@@ -78,7 +79,7 @@ test("abusive_after_warning is refused without a recorded warning, allowed after
   assert.match(await h.warn_user({ behavior: "repeated insults" }), /^OK/);
   assert.ok(db.rows.s3.warned_at);
   assert.match(await h.end_conversation({ reason: "abusive_after_warning" }), /^CONFIRMATION_REQUIRED/);
-  assert.match(await h.end_conversation({ reason: "abusive_after_warning", confirm: true }), /^ENDED/);
+  assert.match((await h.end_conversation({ reason: "abusive_after_warning", confirm: true })).text, /^ENDED/);
   assert.equal(db.rows.s3.ended, true);
 });
 
