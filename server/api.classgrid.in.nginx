@@ -1,3 +1,8 @@
+upstream classgrid_api {
+    server localhost:3000 max_fails=1 fail_timeout=10s;
+    server localhost:4000 backup;
+}
+
 server {
     server_name api.classgrid.in;
 
@@ -21,7 +26,9 @@ server {
     }
 
     location / {
-        proxy_pass http://localhost:3000;
+        proxy_pass http://classgrid_api;
+        proxy_next_upstream error timeout http_502 http_503;
+        proxy_next_upstream_timeout 15s;
         proxy_http_version 1.1;
         proxy_set_header Upgrade $http_upgrade;
         proxy_set_header Connection "upgrade";

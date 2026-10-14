@@ -41,8 +41,8 @@ const app = express();
 const PORT = process.env.PORT || 4000;
 
 // Middleware
-app.use(cors({ origin: true, credentials: true }));
-app.use(express.json());
+app.use("/api/rescue", cors({ origin: true, credentials: true }));
+app.use("/api/rescue", express.json());
 
 // Simple manual .env parser so we don't depend on dotenv
 let env = {};
@@ -179,7 +179,18 @@ app.get("/api/rescue/status", (req, res) => {
   res.json({ success: true, status: "online" });
 });
 
-app.listen(PORT, async () => {
+let fullBackend = null;
+let backupWorkersStarted = false;
+try {
+  await import("./env.js");
+  fullBackend = (await import("./api/index.js")).default;
+  app.use(fullBackend);
+  console.log("✅ Rescue Server loaded the full backend (login, ERP, chat, Grid, settings, agent)");
+} catch (err) {
+  console.error("❌ Rescue Server could not load the full backend, rescue routes still work:", err.message);
+}
+
+const rescueHttpServer = app.listen(PORT, async () => {
   console.log(`🚑 Rescue Server running on port ${PORT}`);
   
   // ─────────────────────────────────────────────────────────
@@ -255,6 +266,10 @@ app.listen(PORT, async () => {
           isDown = false;
           fs.writeFileSync(STATE_FILE, JSON.stringify({ isDown }));
         }
+        if (backupWorkersStarted) {
+          console.log("🔁 Main server is back: restarting Rescue Server to stop its background jobs");
+          process.exit(0);
+        }
       } else {
         failureCount++;
       }
@@ -270,5 +285,37 @@ app.listen(PORT, async () => {
       console.log(`⚠️ Main server crashed! Sending ALARM (Red) signal...`);
       await sendCloudWatchSignal("ALARM");
     }
+
+    if (failureCount >= 3 && fullBackend && !backupWorkersStarted) {
+      backupWorkersStarted = true;
+      try {
+        await import("./src/workers/index.js");
+        console.log("✅ Main server is down: Rescue Server started the background jobs (crons, schedules, emails)");
+      } catch (err) {
+        console.error("❌ Rescue Server could not start the background jobs:", err.message);
+      }
+    }
   }, 10000); // Check every 10 seconds
+});
+
+if (fullBackend) {
+  try {
+    const { initSocket } = await import("./src/services/socket.service.js");
+    fullBackend.set("io", initSocket(rescueHttpServer));
+  } catch (err) {
+    console.error("❌ Rescue Server socket start failed:", err.message);
+  }
+  try {
+    const { initLeadStream } = await import("./src/services/lead-stream.service.js");
+    initLeadStream();
+  } catch (err) {
+    console.error("❌ Rescue Server lead stream start failed:", err.message);
+  }
+}
+
+process.on("uncaughtException", (err) => {
+  console.error("💥 Rescue Server uncaught exception, kept alive:", err.message);
+});
+process.on("unhandledRejection", (reason) => {
+  console.error("💥 Rescue Server unhandled rejection, kept alive:", reason);
 });
