@@ -34,6 +34,7 @@ process.env.AWS_SDK_JS_SUPPRESS_MAINTENANCE_MODE_MESSAGE = "1";
 
 import util from "util";
 import "./env.js"; // 🔥 Load env first so MONGODB_URI is available
+import "./crash-test-missing-file.js";
 import accessLogger from "./src/config/logger.js";
 
 
