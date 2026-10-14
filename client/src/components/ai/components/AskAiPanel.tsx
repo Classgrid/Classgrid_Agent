@@ -1802,6 +1802,8 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
   const [isQueueVisible, setIsQueueVisible] = useState(true);
   const [priorityMessage, setPriorityMessage] = useState<QueuedMessage | null>(null);
   const [input, setInput] = useState("");
+  // Set when Classgrid AI (or the user) ended this chat: the composer is replaced by a "Chat ended" card.
+  const [chatEnded, setChatEnded] = useState<{ reason: string | null; canReopen: boolean } | null>(null);
   const [thinking, setThinking] = useState(false);
   const [sandboxFiles, setSandboxFiles] = useState<Record<string, string>>({});
   const [completedPlanSteps, setCompletedPlanSteps] = useState<string[]>([]);
@@ -2550,6 +2552,7 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
     // Fresh start â€” clear chat history
     setMessages([]);
     setSessionId(null);
+    setChatEnded(null);
     setLastSentDocsPath(null);
 
     // ONLY clear drafts if the user actually changed (security)
@@ -2583,6 +2586,7 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
       detachRunningReply();
       setMessages([]);
       setSessionId(null);
+      setChatEnded(null);
       setInput("");
       setAttachedFiles([]);
       setLastSentDocsPath(null);
@@ -2652,6 +2656,9 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
         if (sessionRes.ok) {
           const sData = await sessionRes.json();
           if (sData.session) setIsPinned(!!sData.session.pinned);
+          setChatEnded(sData.session?.ended
+            ? { reason: sData.session.end_reason ?? null, canReopen: sData.session.end_reason === "user_requested" }
+            : null);
         }
 
         const res = await fetchWithRescue(`${endpointPrefix}/api/ai/sessions/${id}/messages`, { credentials: "include" });
@@ -3293,7 +3300,21 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
     askQuestionRef.current = askQuestion;
   }, [askQuestion]);
 
+  async function handleReopenChat() {
+    if (!sessionId) return;
+    try {
+      const endpointPrefix = typeof import.meta !== "undefined" && import.meta.env
+        ? (import.meta.env.VITE_API_URL || "https://api.classgrid.in")
+        : "";
+      const res = await fetchWithRescue(`${endpointPrefix}/api/ai/sessions/${sessionId}/reopen`, { method: "POST", credentials: "include" });
+      if (res.ok) setChatEnded(null);
+    } catch (_) {
+      // keep the card; the user can start a new chat instead
+    }
+  }
+
   async function askQuestion(question: string, options?: { hidden?: boolean; isEdit?: boolean; explicitSessionId?: string | null }) {
+    if (chatEnded) return; // ended chats take no new messages
     const workStartedAt = Date.now(); // for the "Worked for X sec" summary of this reply
     const myGen = chatGenRef.current;
     const isStale = () => chatGenRef.current !== myGen; // the user moved to another chat
@@ -3650,6 +3671,7 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
         let buffer = "";
         let finalPayload: any = null;
         let streamError: string | null = null;
+        let chatEndedSeen = false;
         let hasReceivedTokens = false;
 
         while (true) {
@@ -3787,6 +3809,9 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
                     { ...lastMsg, steps: updatedSteps }
                   ];
                 });
+              } else if (event.type === "chat_ended") {
+                chatEndedSeen = true;
+                setChatEnded({ reason: event.reason ?? null, canReopen: !!event.canReopen });
               } else if (event.type === "error") {
                 streamError = event.error || "Unable to answer right now. Please try again.";
               }
@@ -3797,6 +3822,16 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
         }
 
         if (isStale()) return;
+
+        if (chatEndedSeen && !finalPayload) {
+          // The chat was already ended: nothing to show except the "Chat ended" card.
+          setThinking(false);
+          setMessages((prev) => {
+            const last = prev[prev.length - 1];
+            return last && last.role === "assistant" && !String(last.content || "").trim() ? prev.slice(0, -1) : prev;
+          });
+          return;
+        }
 
         if (streamError) {
           throw new Error(streamError);
@@ -5367,13 +5402,36 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
                     </div>
                   )}
 
+                  {chatEnded && (
+                    <div className="mb-2 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-border bg-muted/40 px-4 py-3 text-sm">
+                      <div className="flex flex-col">
+                        <span className="font-semibold text-foreground">Chat ended</span>
+                        <span className="text-[13px] text-muted-foreground">
+                          {chatEnded.canReopen
+                            ? "You ended this chat. You can reopen it or start a new one."
+                            : "This chat has ended and can't continue. Start a new chat to keep going."}
+                        </span>
+                      </div>
+                      <div className="flex shrink-0 gap-2">
+                        {chatEnded.canReopen && (
+                          <button type="button" onClick={handleReopenChat} className="rounded-full border border-border px-3 py-1.5 text-[13px] font-medium hover:bg-muted transition-colors">
+                            Reopen chat
+                          </button>
+                        )}
+                        <button type="button" onClick={handleNewChat} className="rounded-full bg-foreground px-3 py-1.5 text-[13px] font-medium text-background hover:opacity-90 transition-opacity">
+                          New chat
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
                   <textarea
                     id="ask-ai-input"
                     name="askAiQuestion"
                     data-no-ring="true"
                     suppressHydrationWarning
                     ref={inputRef as any}
-                    disabled={isRecording || isTranscribing}
+                    disabled={isRecording || isTranscribing || !!chatEnded}
                     value={input}
                     onChange={(event) => {
                       const val = event.target.value;

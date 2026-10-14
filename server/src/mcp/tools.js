@@ -99,6 +99,28 @@ export const getMcpTools = () => [
     }
   },
   {
+    name: 'end_conversation',
+    description: 'End the current chat. Use ONLY when the user clearly asks to end/close this chat (reason user_requested), or after at least one warn_user when the user keeps being abusive or harassing. Two steps: call with confirm=false first (you get what to tell the user), then call again with confirm=true on a LATER user message. NEVER use this when the user seems distressed or mentions self-harm.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        reason: { type: 'string', enum: ['user_requested', 'abusive_behavior', 'harassment', 'spam', 'other'], description: 'Why the chat is being ended.' },
+        summary: { type: 'string', description: 'One short sentence describing why (stored for review).' },
+        confirm: { type: 'boolean', description: 'false on the first call; true only on a later user message after the user confirmed (or kept up the behaviour after a warning).' }
+      },
+      required: ['reason', 'confirm']
+    }
+  },
+  {
+    name: 'warn_user',
+    description: 'Record a polite warning when the user is abusive, harassing or spamming. Required before end_conversation for any reason other than user_requested.',
+    inputSchema: {
+      type: 'object',
+      properties: { message: { type: 'string', description: 'Short note on what behaviour the warning is about.' } },
+      required: []
+    }
+  },
+  {
     name: 'list_skills',
     description: 'List all custom AI skills (instruction sets) available to the user.',
     inputSchema: { type: 'object', properties: {} }
