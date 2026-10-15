@@ -47,6 +47,9 @@ import { sendEmail } from "../services/aws-ses.service.js";
 import mongoose from "mongoose";
 import NotificationLog from "../models/NotificationLog.js";
 import { getMcpTools, handleToolCall, readSandboxFiles } from "../mcp/tools.js";
+import { parseHTML } from "linkedom";
+import { Readability } from "@mozilla/readability";
+import TurndownService from "turndown";
 import { RagPipeline, MongoVectorStore, VoyageEmbedder } from "@classgrid/ai/rag";
 import Note from "../models/Note.js";
 import User from "../models/User.js";
@@ -937,6 +940,21 @@ async function readPageDirect(startUrl) {
         const type = r.headers.get("content-type") || "";
         const body = (await r.text()).slice(0, 3000000);
         if (!/html/i.test(type)) return body.trim().slice(0, 50000);
+        // Best quality first: Readability finds the main content and Turndown turns it into Markdown (title, headings,
+        // lists, links). linkedom keeps it light on the server.
+        try {
+            const { document } = parseHTML(body);
+            const article = new Readability(document).parse();
+            if (article?.content && (article.textContent || "").trim().length > 200) {
+                const turndown = new TurndownService({ headingStyle: "atx", codeBlockStyle: "fenced", bulletListMarker: "-" });
+                turndown.remove(["script", "style", "noscript", "svg"]);
+                let markdown = turndown.turndown(article.content);
+                if (article.title) markdown = `# ${article.title}\n\n${markdown}`;
+                return markdown.slice(0, 50000);
+            }
+        } catch (readErr) {
+            console.warn(`[open_url] Readability could not read ${url}, using the plain text reader: ${readErr.message}`);
+        }
         const decode = (s) => s.replace(/&nbsp;/g, " ").replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&#(\d+);/g, (_, n) => String.fromCharCode(Number(n)));
         const visible = decode(body
             .replace(/<(script|style|noscript|svg|head)\b[^>]*>[\s\S]*?<\/\1>/gi, " ")
