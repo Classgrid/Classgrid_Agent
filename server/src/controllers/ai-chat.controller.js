@@ -940,7 +940,7 @@ const CF_PICKER_MODELS = new Map([
     ["@cf/qwen/qwen3.8-27b", "native"],
     ["@cf/google/gemma-4-26b-a4b-it", "native"],
     ["@cf/nvidia/nemotron-3-120b-a12b", "native"],
-    ["@cf/meta/llama-4-scout-17b-16e-instruct", "native"],
+    // ["@cf/meta/llama-4-scout-17b-16e-instruct", "native"], // Llama 4 Scout: turned off for now, uncomment to bring it back
     ["@cf/mistralai/mistral-small-3.1-24b-instruct", "openai"],
 ]);
 

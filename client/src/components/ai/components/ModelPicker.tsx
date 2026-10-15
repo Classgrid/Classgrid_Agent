@@ -75,7 +75,8 @@ export const MODEL_GROUPS: { label: string; models: ChatModelOption[] }[] = [
       { id: "@cf/qwen/qwen3.8-27b", name: "Qwen 3.8 27B", description: "Alibaba Qwen model", provider: "cloudflare", logo: LOGOS.qwen },
       { id: "@cf/google/gemma-4-26b-a4b-it", name: "Gemma 4 26B", description: "Google open model", provider: "cloudflare", logo: LOGOS.google },
       { id: "@cf/nvidia/nemotron-3-120b-a12b", name: "Nemotron 3 120B", description: "NVIDIA open model", provider: "cloudflare", logo: LOGOS.nvidia },
-      { id: "@cf/meta/llama-4-scout-17b-16e-instruct", name: "Llama 4 Scout", description: "Meta open model", provider: "cloudflare", logo: LOGOS.meta },
+      // Llama 4 Scout: turned off for now, uncomment to bring it back
+      // { id: "@cf/meta/llama-4-scout-17b-16e-instruct", name: "Llama 4 Scout", description: "Meta open model", provider: "cloudflare", logo: LOGOS.meta },
       { id: "@cf/mistralai/mistral-small-3.1-24b-instruct", name: "Mistral Small 3.1", description: "Mistral open model", provider: "cloudflare", logo: LOGOS.mistral },
     ],
   },
