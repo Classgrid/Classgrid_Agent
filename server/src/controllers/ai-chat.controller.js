@@ -3027,11 +3027,11 @@ If they ask whether their college/school uses Classgrid, say you can't see that 
                             return "open_url needs a full http(s) URL, e.g. https://docs.mistral.ai/getting-started/models/";
                         }
                         try {
-                            let text = "";
-                            // Tavily Extract is turned off for testing: open_url reads pages only with readPageDirect.
-                            // Set OPEN_URL_USE_TAVILY to true to turn it back on.
-                            const OPEN_URL_USE_TAVILY = false;
-                            if (OPEN_URL_USE_TAVILY) try {
+                            // Order: 1) Readability and 2) the plain-text (curl) reader, both inside readPageDirect,
+                            // 3) Tavily Extract only when this server could not read the page.
+                            let text = await readPageDirect(target.href);
+                            const OPEN_URL_USE_TAVILY = true;
+                            if (!text && OPEN_URL_USE_TAVILY) try {
                                 const exRes = await fetch("https://api.tavily.com/extract", {
                                     method: "POST",
                                     headers: { "Content-Type": "application/json", "Authorization": `Bearer ${tavilyKey}` },
@@ -3042,13 +3042,11 @@ If they ask whether their college/school uses Classgrid, say you can't see that 
                                     const page = Array.isArray(exData.results) ? exData.results[0] : null;
                                     text = String(page?.raw_content || "").trim();
                                 } else {
-                                    console.warn(`[open_url] Tavily ${exRes.status} for ${target.href}, reading the page directly`);
+                                    console.warn(`[open_url] Tavily ${exRes.status} for ${target.href}`);
                                 }
                             } catch (e) {
-                                console.warn(`[open_url] Tavily failed for ${target.href}, reading the page directly: ${e.message}`);
+                                console.warn(`[open_url] Tavily failed for ${target.href}: ${e.message}`);
                             }
-                            // Tavily empty, rate-limited or down: read the page straight from this server (like curl)
-                            if (!text) text = await readPageDirect(target.href);
                             if (!text) return `Could not read ${target.href} (the page may need a login or block readers). Try search_web with include_domains: ["${target.hostname.replace(/^www\./, "")}"].`;
                             const domain = target.hostname.replace(/^www\./, "");
                             let src = accSources.find((s) => s.url === target.href);
