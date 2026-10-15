@@ -112,7 +112,9 @@ export const hasEnoughTokens = async (userId, orgId, requiredTokens = 1, { paidO
     // Auto-Reset logic if 7 days have passed
     const tokenPeriodMs = resetPeriodMs("tokens", org, globalConfig, orgId);
     const nowMs = Date.now();
-    if (nowMs >= weekResetDate) {
+    // A saved reset date further away than one current period was set under an older, longer period
+    // before the reset timing was changed in the dashboard: that period is treated as over, so the user is not kept waiting.
+    if (nowMs >= weekResetDate || weekResetDate - nowMs > tokenPeriodMs) {
         usedThisWeek = 0;
         const newResetDate = new Date(nowMs + tokenPeriodMs);
         // Async update DB but don't block the chat flow

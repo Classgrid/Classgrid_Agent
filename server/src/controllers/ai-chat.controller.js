@@ -5242,7 +5242,7 @@ export const generateImage = async (req, res) => {
                 { $set: { ai_image_reset_date: nextImageReset } }
             );
             await User.collection.updateOne(
-                { _id: authUserForImage._id, $or: [{ "ai_tokens.week_reset_date": { $exists: false } }, { "ai_tokens.week_reset_date": null }, { "ai_tokens.week_reset_date": { $lte: new Date(resetNow) } }] },
+                { _id: authUserForImage._id, $or: [{ "ai_tokens.week_reset_date": { $exists: false } }, { "ai_tokens.week_reset_date": null }, { "ai_tokens.week_reset_date": { $lte: new Date(resetNow) } }, { "ai_tokens.week_reset_date": { $gt: new Date(resetNow + tokenPeriodMs) } }] },
                 { $set: { "ai_tokens.used_this_week": 0, "ai_tokens.week_reset_date": new Date(resetNow + tokenPeriodMs) } }
             );
             await User.collection.updateOne(
@@ -5556,7 +5556,7 @@ export const getMyUsage = async (req, res) => {
         const tokenPeriodMs = resetPeriodMs("tokens", org, globalConfig, userTokens.organization_id || null);
         const nowMs = Date.now();
         const savedResetMs = userTokens.ai_tokens.week_reset_date ? new Date(userTokens.ai_tokens.week_reset_date).getTime() : 0;
-        const periodOver = nowMs >= savedResetMs;
+        const periodOver = nowMs >= savedResetMs || savedResetMs - nowMs > tokenPeriodMs;
         const shownResetDate = new Date(periodOver ? nowMs + tokenPeriodMs : Math.min(savedResetMs, nowMs + tokenPeriodMs));
         userTokens.ai_tokens.used_this_week = periodOver ? 0 : (userTokens.ai_tokens.used_this_week || 0);
         userTokens.ai_tokens.week_reset_date = shownResetDate;

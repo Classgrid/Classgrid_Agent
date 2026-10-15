@@ -189,7 +189,7 @@ export const getUserAiDetail = async (req, res) => {
             const nowMs = Date.now();
             const timer = (used, limit, savedDate, periodMs) => {
                 const savedMs = savedDate ? new Date(savedDate).getTime() : 0;
-                if (!savedMs || nowMs >= savedMs) return { used: 0, limit, resetAt: null };
+                if (!savedMs || nowMs >= savedMs || savedMs - nowMs > periodMs) return { used: 0, limit, resetAt: null };
                 return { used, limit, resetAt: new Date(Math.min(savedMs, nowMs + periodMs)) };
             };
             const wa = await checkWhatsappLimit({ _id: user._id, organization_id: timerOrgId });
