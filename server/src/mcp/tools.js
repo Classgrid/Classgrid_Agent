@@ -99,6 +99,30 @@ export const getMcpTools = () => [
     }
   },
   {
+    name: 'recall_chat',
+    description: 'Read older messages of THIS chat word for word, by message number (1 = the first message of the chat). You only see the latest messages; use this when the user refers to something earlier that you can\'t see.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        from: { type: 'number', description: 'First message number to read (1 = the first message of the chat).' },
+        count: { type: 'number', description: 'How many messages to read, up to 20 (default 10).' }
+      },
+      required: ['from']
+    }
+  },
+  {
+    name: 'search_recall_chat',
+    description: 'Search all messages of THIS chat for words or a phrase. Returns the matching message numbers and their text; read more around a match with recall_chat.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        query: { type: 'string', description: 'Words or phrase to find (not case-sensitive).' },
+        max_results: { type: 'number', description: 'Most matches to return, up to 20 (default 10).' }
+      },
+      required: ['query']
+    }
+  },
+  {
     name: 'end_conversation',
     description: 'Permanently end the current chat. You decide on your own when to use it. Call once with confirm=true. Never tell the user you will use it.',
     inputSchema: {

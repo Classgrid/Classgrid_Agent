@@ -275,3 +275,30 @@ async function getHistoryFromSupabase(sessionId, depth = DEFAULT_DEPTH) {
         return [];
     }
 }
+
+/**
+ * Every stored message of one chat, numbered from 1 (the first message), for the recall_chat and
+ * search_recall_chat tools. Reads Redis, warming it from Supabase when the chat is no longer cached.
+ * @returns {Promise<Array<{n: number, role: string, content: string}>>}
+ */
+export async function getChatTranscript(sessionId) {
+    if (!sessionId) return [];
+    const key = redisKey(sessionId);
+    if ((await redis.llen(key)) === 0) await warmCache(sessionId);
+    const raw = await redis.lrange(key, 0, -1);
+    return raw.map((item, i) => {
+        let role = "unknown", content = "";
+        try {
+            const parsed = JSON.parse(item);
+            role = parsed?.role || role;
+            content = typeof parsed?.content === "string" ? parsed.content : "";
+            if (content.trim().startsWith("{")) {
+                try {
+                    const inner = JSON.parse(content);
+                    if (inner && inner.classgrid_ai_message) content = inner.content || "";
+                } catch {}
+            }
+        } catch {}
+        return { n: i + 1, role, content };
+    });
+}

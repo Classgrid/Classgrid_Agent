@@ -39,7 +39,7 @@ import {
     memoryCoverage,
     memoryText
 } from "../services/ai-chat.service.js";
-import { getHistory, getHistoryCount, appendToHistory, invalidateHistoryCache } from "../services/ai-chat-history.service.js";
+import { getHistory, getHistoryCount, appendToHistory, invalidateHistoryCache, getChatTranscript } from "../services/ai-chat-history.service.js";
 import { buildEndConversationHandlers, reopenSession } from "../services/ai-end-conversation.service.js";
 import { hasEnoughTokens, deductTokens, getImageGenerationCost, tokenWindowEnd } from "../services/ai-credits.service.js";
 import redis from "../config/redis.js";
@@ -2727,6 +2727,40 @@ If they ask whether their college/school uses Classgrid, say you can't see that 
                             return `FAILED to read ${path}: ${e.message}`;
                         } finally {
                             ssh.dispose();
+                        }
+                    },
+                    // Older messages of this chat only (sessionId is the chat already checked to belong to this user)
+                    recall_chat: async (args) => {
+                        if (!sessionId || isIncognito) return "This chat is not saved, so there are no older messages to read.";
+                        try {
+                            const all = await getChatTranscript(sessionId);
+                            if (all.length === 0) return "No messages found in this chat.";
+                            const count = Math.max(1, Math.min(Math.floor(Number(args?.count) || 10), 20));
+                            const from = Math.max(1, Math.min(Math.floor(Number(args?.from) || 1), all.length));
+                            const picked = all.slice(from - 1, from - 1 + count);
+                            return `This chat has ${all.length} messages. Messages ${from}-${from + picked.length - 1}:\n\n` +
+                                picked.map((m) => `#${m.n} ${m.role}:\n${m.content.slice(0, 4000)}`).join("\n\n---\n\n");
+                        } catch (e) {
+                            return `FAILED to read this chat's messages: ${e.message}`;
+                        }
+                    },
+                    search_recall_chat: async (args) => {
+                        if (!sessionId || isIncognito) return "This chat is not saved, so there are no older messages to search.";
+                        const query = String(args?.query || "").trim().toLowerCase();
+                        if (!query) return "ERROR: give the words to search for in 'query'.";
+                        try {
+                            const all = await getChatTranscript(sessionId);
+                            const max = Math.max(1, Math.min(Math.floor(Number(args?.max_results) || 10), 20));
+                            const hits = all.filter((m) => m.content.toLowerCase().includes(query)).slice(0, max);
+                            if (hits.length === 0) return `No message in this chat (${all.length} messages) contains "${args.query}".`;
+                            return `${hits.length} message(s) in this chat (${all.length} messages) contain "${args.query}":\n\n` +
+                                hits.map((m) => {
+                                    const at = m.content.toLowerCase().indexOf(query);
+                                    const start = Math.max(0, at - 600);
+                                    return `#${m.n} ${m.role}:\n${start > 0 ? "..." : ""}${m.content.slice(start, at + query.length + 1200)}`;
+                                }).join("\n\n---\n\n");
+                        } catch (e) {
+                            return `FAILED to search this chat's messages: ${e.message}`;
                         }
                     },
                     recall_session_context: async (args) => {
