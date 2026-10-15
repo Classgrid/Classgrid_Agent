@@ -198,7 +198,7 @@ export const MermaidViewer = ({ chart, onRetry, isTyping }: { chart: string, onR
       isMounted = false;
       clearTimeout(timer);
     };
-  }, [chart]);
+  }, [chart, isTyping]); // also redraw once typing ends, even if the text did not change
 
   // Escape key closes fullscreen
   useEffect(() => {
