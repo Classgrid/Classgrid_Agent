@@ -100,6 +100,15 @@ export const TOOL_GROUPS = [
         tools: ["send_email", "send_whatsapp_message"],
         pattern: /\b(e-?mails?|mail\s+(to|kar\w*|bhej\w*)|send\s+mail|whats\s*app|sms|notify|parents?\s+ko)\b|ईमेल|मेल|व्हाट्सएप/i,
     },
+    // Card packs: no tools, only the card's format (prompt blocks "cards_*"), sent when the message needs it or the
+    // model loads it with load_tools.
+    { id: "cards_chart", description: "Format of the chart card.", tools: [], promptOnly: true, pattern: /\b(charts?|graphs?|plot\w*|statistic\w*|stats|metrics?|trends?|growth|percent\w*|compar\w*|data|bar|pie)\b/i },
+    { id: "cards_questions", description: "Format of the clickable questions/quiz card and the carousel/flashcards.", tools: [], promptOnly: true, pattern: /\b(quiz\w*|mcqs?|tests?|questions?|flash\s*cards?|options?|choose|pick|tutorial|slides?|carousel|practi[cs]e)\b/i },
+    { id: "cards_live", description: "Format of the live cards: clock, weather, market (stock/currency), map, countdown/timer.", tools: [], promptOnly: true, pattern: /\b(weather|temperature|rain\w*|forecast|mausam|stocks?|shares?|nifty|sensex|crypto|bitcoin|btc|currency|exchange\s*rate|usd|inr|dollar|rupee|maps?|where\s+is|location|route|distance|directions?|how\s+far|countdown|days?\s+(left|until|till|to\s+go)|timer|time\s+in|what\s+time|clock|kitne\s+baje)\b|मौसम/i },
+    { id: "cards_review", description: "Format of the review, scores, cards, rating and points cards.", tools: [], promptOnly: true, pattern: /\b(review\w*|rate|rating|ratings|audit|evaluat\w*|scores?|feedback|pros|cons|analy[sz]\w*|recommend\w*|priorit\w*|strengths?|weakness\w*)\b/i },
+    { id: "cards_school", description: "Format of the reportcard, timetable, attendance and planner (study/exam plan) cards.", tools: [], promptOnly: true, pattern: /\b(marks?|results?|report\s*card|grades?|timetable|time\s*table|attendance|exams?|study\s*plan|revision|syllabus|semester|cbse|icse)\b/i },
+    { id: "cards_actions", description: "Format of the actions card (cards with a button or reveal).", tools: [], promptOnly: true, pattern: /\b(concepts?|takeaways?|courses?|resources?|next\s*steps?|challenges?|learn\w*|lessons?|explain\w*|teach\w*)\b/i },
+    { id: "cards_widget", description: "Format of the widget card (your own interactive HTML card).", tools: [], promptOnly: true, pattern: /\b(interactive|widgets?|cards?|polls?|sliders?|games?|puzzles?|matching|drag|simulat\w*|calculator|toggle|meter)\b/i },
     // Connector groups: only offered when that integration is connected (its tool is in the list).
     { id: "connector:google", description: "Google Workspace: Gmail, Drive, Docs, Sheets, Calendar, Meet, Classroom.", tools: ["google_workspace_connector"], pattern: new RegExp(String.raw`\b(g-?mail|google|g?drive|docs?|sheets?|classroom|${MAIL_MEETING})\b`, "i") },
     { id: "connector:microsoft", description: "Microsoft 365: Outlook, OneDrive, Teams, SharePoint.", tools: ["microsoft_workspace_connector"], pattern: new RegExp(String.raw`\b(outlook|microsoft|ms\s*365|office\s*365|onedrive|teams|sharepoint|hotmail|${MAIL_MEETING})\b`, "i") },
@@ -171,7 +180,7 @@ export function planToolsForMessage({ allTools, text = "", attachments = [], sti
 
     // Groups this user may load at all.
     const allowedGroups = TOOL_GROUPS.filter((g) =>
-        (!g.staffOnly || staff) && (!g.needsOrg || hasOrg) && g.tools.some((t) => present.has(t))
+        (!g.staffOnly || staff) && (!g.needsOrg || hasOrg) && (g.promptOnly || g.tools.some((t) => present.has(t)))
     );
     const allowedIds = new Set(allowedGroups.map((g) => g.id));
 
