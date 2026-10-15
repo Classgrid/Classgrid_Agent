@@ -3204,7 +3204,7 @@ If they ask whether their college/school uses Classgrid, say you can't see that 
                                 userId: req.user?._id || null
                             });
 
-                            return `SUCCESS: Email sent successfully to ${args.to} from ${args.fromEmail || 'default'}`;
+                            return `SUCCESS: Email sent successfully to ${args.to} from ${emailPayload.fromEmail}`;
                         } catch (e) {
                             return `FAILED to send email: ${e.message}`;
                         }
