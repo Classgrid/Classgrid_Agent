@@ -3,7 +3,7 @@ import User from "../models/User.js";
 import AiCreditTransaction from "../models/AiCreditTransaction.js";
 import GlobalAiConfig from "../models/GlobalAiConfig.js";
 import Organization from "../models/Organization.js";
-import { resolveWeeklyLimit } from "../services/ai-credits.service.js";
+import { resolveWeeklyLimit, tokenWindowEnd } from "../services/ai-credits.service.js";
 import { resetPeriodMs } from "../services/ai-feature-limits.js";
 
 /**
@@ -27,7 +27,8 @@ export const getMyCredits = async (req, res) => {
         const limitConfig = await GlobalAiConfig.findOne({ key: "singleton" }).select("global_user_weekly_limit classgrid_custom_limits_enabled classgrid_user_weekly_limit global_token_reset_value global_token_reset_unit classgrid_token_reset_value classgrid_token_reset_unit").lean() || {};
         const freeWeeklyLimit = resolveWeeklyLimit(user, org, limitConfig, orgId);
         // After the weekly reset date the week starts over, even before the next chat message resets the counter.
-        const weekOver = tokens.week_reset_date && Date.now() >= new Date(tokens.week_reset_date).getTime();
+        const liveEndMs = tokenWindowEnd(tokens, resetPeriodMs("tokens", org, limitConfig, orgId));
+        const weekOver = Date.now() >= liveEndMs;
         const usedThisWeek = weekOver ? 0 : (tokens.used_this_week || 0);
 
         const totalPurchased = tokens.total_ai_credits_purchased || 0;
@@ -37,7 +38,7 @@ export const getMyCredits = async (req, res) => {
         // Calculate strict start/end dates for Free
         const now = new Date();
         const tokenPeriodMs = resetPeriodMs("tokens", org, limitConfig, orgId);
-        const freeEndDate = tokens.week_reset_date ? new Date(tokens.week_reset_date) : new Date(now.getTime() + tokenPeriodMs);
+        const freeEndDate = weekOver ? new Date(now.getTime() + tokenPeriodMs) : new Date(liveEndMs);
         const freeStartDate = new Date(freeEndDate.getTime() - tokenPeriodMs);
 
         const pools = [

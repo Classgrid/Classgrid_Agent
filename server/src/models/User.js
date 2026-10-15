@@ -693,7 +693,9 @@ const userSchema = new mongoose.Schema(
       custom_limits_enabled: { type: Boolean, default: false }, // If false, fallback to GlobalAiConfig
       free_weekly_limit: { type: Number, default: 100000 },
       used_this_week: { type: Number, default: 0 },
-      week_reset_date: { type: Date, default: () => { const d = new Date(); d.setDate(d.getDate() + 7); return d; } },
+      week_reset_date: { type: Date, default: null },
+      // When the current token period started; its end is always worked out from the dashboard timing (tokenWindowEnd)
+      window_start: { type: Date, default: null },
       is_ai_blocked: { type: Boolean, default: false },
       
       // Paid Credits

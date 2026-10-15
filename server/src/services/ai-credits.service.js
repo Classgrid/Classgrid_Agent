@@ -37,6 +37,17 @@ export const calculateCreditsFromAmount = async (amountInr) => {
  * after it (they used to differ: the deduction read only user.ai_tokens.free_weekly_limit, default 100,000,
  * so usage stopped being counted at 100k while the check allowed the dashboard's limit).
  */
+// End of the user's current token period, always from the reset timing set in the super admin dashboard right now:
+// period start + current timing. Users saved before the start was recorded fall back to their saved end date, and a
+// saved end further away than the current timing counts as over.
+export function tokenWindowEnd(tokens, periodMs, nowMs = Date.now()) {
+    const start = tokens?.window_start ? new Date(tokens.window_start).getTime() : 0;
+    if (start) return start + periodMs;
+    const saved = tokens?.week_reset_date ? new Date(tokens.week_reset_date).getTime() : 0;
+    if (!saved || saved - nowMs > periodMs) return 0;
+    return saved;
+}
+
 export function resolveWeeklyLimit(user, org, globalConfig, orgId = org?._id) {
     let weeklyLimit = globalConfig?.global_user_weekly_limit || 0;
     if (org) {
@@ -107,20 +118,19 @@ export const hasEnoughTokens = async (userId, orgId, requiredTokens = 1, { paidO
 
     // 2. Check free weekly limit FIRST (Always use free before touching paid/promo)
     let usedThisWeek = user.ai_tokens?.used_this_week || 0;
-    let weekResetDate = user.ai_tokens?.week_reset_date ? new Date(user.ai_tokens.week_reset_date).getTime() : 0;
-
-    // Auto-Reset logic if 7 days have passed
+    // Reset follows the dashboard timing live (see tokenWindowEnd)
     const tokenPeriodMs = resetPeriodMs("tokens", org, globalConfig, orgId);
     const nowMs = Date.now();
-    // A saved reset date further away than one current period was set under an older, longer period
-    // before the reset timing was changed in the dashboard: that period is treated as over, so the user is not kept waiting.
-    if (nowMs >= weekResetDate || weekResetDate - nowMs > tokenPeriodMs) {
+    const windowEndMs = tokenWindowEnd(user.ai_tokens, tokenPeriodMs, nowMs);
+    const savedResetMs = user.ai_tokens?.week_reset_date ? new Date(user.ai_tokens.week_reset_date).getTime() : 0;
+    if (nowMs >= windowEndMs) {
         usedThisWeek = 0;
         const newResetDate = new Date(nowMs + tokenPeriodMs);
         // Async update DB but don't block the chat flow
         User.findByIdAndUpdate(userId, { 
             $set: { 
                 "ai_tokens.used_this_week": 0,
+                "ai_tokens.window_start": new Date(nowMs),
                 "ai_tokens.week_reset_date": newResetDate
             }
         }).catch(e => console.error("Auto-reset error:", e));
@@ -128,8 +138,9 @@ export const hasEnoughTokens = async (userId, orgId, requiredTokens = 1, { paidO
             { _id: userId, ai_image_reset_date: null },
             { $set: { ai_image_free_weekly_used: 0, ai_image_reset_date: new Date(nowMs + resetPeriodMs("image", org, globalConfig, orgId)) } }
         ).catch(e => console.error("Image auto-reset error:", e));
-    } else if (weekResetDate - nowMs > tokenPeriodMs) {
-        User.updateOne({ _id: userId }, { $set: { "ai_tokens.week_reset_date": new Date(nowMs + tokenPeriodMs) } })
+    } else if (savedResetMs !== windowEndMs) {
+        // The dashboard timing changed: keep the saved end date (shown to users) in step with it
+        User.updateOne({ _id: userId }, { $set: { "ai_tokens.week_reset_date": new Date(windowEndMs) } })
             .catch(e => console.error("Reset date update error:", e));
     }
 

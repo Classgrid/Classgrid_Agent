@@ -41,7 +41,7 @@ import {
 } from "../services/ai-chat.service.js";
 import { getHistory, getHistoryCount, appendToHistory, invalidateHistoryCache } from "../services/ai-chat-history.service.js";
 import { buildEndConversationHandlers, reopenSession } from "../services/ai-end-conversation.service.js";
-import { hasEnoughTokens, deductTokens, getImageGenerationCost } from "../services/ai-credits.service.js";
+import { hasEnoughTokens, deductTokens, getImageGenerationCost, tokenWindowEnd } from "../services/ai-credits.service.js";
 import redis from "../config/redis.js";
 import { sendEmail } from "../services/aws-ses.service.js";
 import mongoose from "mongoose";
@@ -5241,14 +5241,13 @@ export const generateImage = async (req, res) => {
                 { _id: authUserForImage._id, ai_image_reset_date: { $gt: nextImageReset } },
                 { $set: { ai_image_reset_date: nextImageReset } }
             );
-            await User.collection.updateOne(
-                { _id: authUserForImage._id, $or: [{ "ai_tokens.week_reset_date": { $exists: false } }, { "ai_tokens.week_reset_date": null }, { "ai_tokens.week_reset_date": { $lte: new Date(resetNow) } }, { "ai_tokens.week_reset_date": { $gt: new Date(resetNow + tokenPeriodMs) } }] },
-                { $set: { "ai_tokens.used_this_week": 0, "ai_tokens.week_reset_date": new Date(resetNow + tokenPeriodMs) } }
-            );
-            await User.collection.updateOne(
-                { _id: authUserForImage._id, "ai_tokens.week_reset_date": { $gt: new Date(resetNow + tokenPeriodMs) } },
-                { $set: { "ai_tokens.week_reset_date": new Date(resetNow + tokenPeriodMs) } }
-            );
+            const imageTokenUser = await User.collection.findOne({ _id: authUserForImage._id }, { projection: { ai_tokens: 1 } });
+            if (resetNow >= tokenWindowEnd(imageTokenUser?.ai_tokens, tokenPeriodMs, resetNow)) {
+                await User.collection.updateOne(
+                    { _id: authUserForImage._id },
+                    { $set: { "ai_tokens.used_this_week": 0, "ai_tokens.window_start": new Date(resetNow), "ai_tokens.week_reset_date": new Date(resetNow + tokenPeriodMs) } }
+                );
+            }
 
             const imageTokenCost = await getImageGenerationCost();
             const tokenCheck = await hasEnoughTokens(authUserForImage._id, imageOrgId, Math.max(1, imageTokenCost));
@@ -5555,9 +5554,9 @@ export const getMyUsage = async (req, res) => {
         const { resetPeriodMs } = await import("../services/ai-feature-limits.js");
         const tokenPeriodMs = resetPeriodMs("tokens", org, globalConfig, userTokens.organization_id || null);
         const nowMs = Date.now();
-        const savedResetMs = userTokens.ai_tokens.week_reset_date ? new Date(userTokens.ai_tokens.week_reset_date).getTime() : 0;
-        const periodOver = nowMs >= savedResetMs || savedResetMs - nowMs > tokenPeriodMs;
-        const shownResetDate = new Date(periodOver ? nowMs + tokenPeriodMs : Math.min(savedResetMs, nowMs + tokenPeriodMs));
+        const windowEndMs = tokenWindowEnd(userTokens.ai_tokens, tokenPeriodMs, nowMs);
+        const periodOver = nowMs >= windowEndMs;
+        const shownResetDate = new Date(periodOver ? nowMs + tokenPeriodMs : windowEndMs);
         userTokens.ai_tokens.used_this_week = periodOver ? 0 : (userTokens.ai_tokens.used_this_week || 0);
         userTokens.ai_tokens.week_reset_date = shownResetDate;
 

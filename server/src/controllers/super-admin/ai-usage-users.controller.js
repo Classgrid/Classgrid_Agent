@@ -183,6 +183,7 @@ export const getUserAiDetail = async (req, res) => {
             const GlobalAiConfig = (await import("../../models/GlobalAiConfig.js")).default;
             const Organization = (await import("../../models/Organization.js")).default;
             const { resolveFeatureLimit, resolveResetPeriod, checkWhatsappLimit } = await import("../../services/ai-feature-limits.js");
+            const { tokenWindowEnd } = await import("../../services/ai-credits.service.js");
             const timerConfig = await GlobalAiConfig.findOne({ key: "singleton" }).lean();
             const timerOrgId = user.organization_id?._id || null;
             const timerOrg = timerOrgId ? await Organization.findById(timerOrgId).select("ai_config").lean() : null;
@@ -194,7 +195,11 @@ export const getUserAiDetail = async (req, res) => {
             };
             const wa = await checkWhatsappLimit({ _id: user._id, organization_id: timerOrgId });
             limitTimers = {
-                tokens: timer(user.ai_tokens?.used_this_week || 0, effectiveFreeLimit, user.ai_tokens?.week_reset_date, resolveResetPeriod("tokens", timerOrg, timerConfig, timerOrgId).ms),
+                tokens: (() => {
+                    const periodMs = resolveResetPeriod("tokens", timerOrg, timerConfig, timerOrgId).ms;
+                    const endMs = tokenWindowEnd(user.ai_tokens, periodMs, nowMs);
+                    return nowMs >= endMs ? { used: 0, limit: effectiveFreeLimit, resetAt: null } : { used: user.ai_tokens?.used_this_week || 0, limit: effectiveFreeLimit, resetAt: new Date(endMs) };
+                })(),
                 image: timer(user.ai_image_free_weekly_used || 0, resolveFeatureLimit("image", timerOrg, timerConfig, timerOrgId), user.ai_image_reset_date, resolveResetPeriod("image", timerOrg, timerConfig, timerOrgId).ms),
                 whatsapp: { used: wa.used, limit: wa.limit, resetAt: wa.resetAt },
             };
