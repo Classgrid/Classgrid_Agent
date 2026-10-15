@@ -903,6 +903,70 @@ const officialDomainsFor = (query) => {
 
 const MIN_PROMPT_TOKENS = 3000;
 const REPLY_TOKEN_ALLOWANCE = 2000;
+
+// open_url backup reader: fetches the page straight from this server (like curl) when Tavily can't read it.
+// Only public addresses: never localhost, private networks or the cloud metadata address.
+const isPrivateIp = (ip) => /^(127\.|10\.|0\.|169\.254\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.|100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\.)/.test(ip) || ip === "::1" || /^f[cd]/i.test(ip) || /^fe80/i.test(ip) || /^::ffff:(127|10|169\.254|192\.168)\./i.test(ip);
+async function isPublicUrl(u) {
+    try {
+        const url = new URL(u);
+        if (!/^https?:$/.test(url.protocol)) return false;
+        const host = url.hostname.replace(/^\[|\]$/g, "");
+        if (/^(localhost|.*\.local|.*\.internal)$/i.test(host)) return false;
+        const { lookup } = await import("node:dns/promises");
+        const addrs = await lookup(host, { all: true });
+        return addrs.length > 0 && addrs.every((a) => !isPrivateIp(a.address));
+    } catch { return false; }
+}
+async function readPageDirect(startUrl) {
+    try {
+        let url = startUrl, r = null;
+        for (let hop = 0; hop < 4; hop++) {
+            if (!(await isPublicUrl(url))) return "";
+            const ctrl = new AbortController();
+            const timer = setTimeout(() => ctrl.abort(), 15000);
+            r = await fetch(url, {
+                headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0 Safari/537.36", "Accept": "text/html,application/xhtml+xml,text/plain;q=0.9,*/*;q=0.8" },
+                redirect: "manual", signal: ctrl.signal,
+            }).finally(() => clearTimeout(timer));
+            const next = r.status >= 300 && r.status < 400 ? r.headers.get("location") : null;
+            if (!next) break;
+            url = new URL(next, url).href;
+        }
+        if (!r || !r.ok) return "";
+        const type = r.headers.get("content-type") || "";
+        const body = (await r.text()).slice(0, 3000000);
+        if (!/html/i.test(type)) return body.trim().slice(0, 50000);
+        const decode = (s) => s.replace(/&nbsp;/g, " ").replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&#(\d+);/g, (_, n) => String.fromCharCode(Number(n)));
+        const visible = decode(body
+            .replace(/<(script|style|noscript|svg|head)\b[^>]*>[\s\S]*?<\/\1>/gi, " ")
+            .replace(/<br\s*\/?>/gi, "\n")
+            .replace(/<\/(p|div|li|h[1-6]|tr|section|article)>/gi, "\n")
+            .replace(/<[^>]+>/g, " "))
+            .replace(/[ \t]+/g, " ").replace(/\n\s*\n+/g, "\n\n").trim();
+        if (visible.length >= 8000) return visible;
+        // JavaScript-built pages keep their text inside script data: pull readable sentences out of it
+        const strings = [], seen = new Set();
+        const collect = (source, depth) => {
+            for (const m of source.matchAll(/"([^"\\]*(?:\\.[^"\\]*)*)"/g)) {
+                if (strings.length >= 400) return;
+                if (m[1].length < 40) continue;
+                let s;
+                try { s = JSON.parse(`"${m[1]}"`); } catch { continue; }
+                // A big string is page data with its own quoted text inside (e.g. Next.js): read one level deeper
+                if (s.length > 4000) { if (depth < 1) collect(s, depth + 1); continue; }
+                s = s.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
+                if (s.length < 40 || !/[a-z]{3,} [a-z]{2,}/i.test(s) || /^(https?:|\/|data:|[{[])/.test(s) || seen.has(s)) continue;
+                const words = s.split(" ");
+                if (words.length < 5 || words.filter((w) => /[-:_/[\]=#{}()<>]/.test(w)).length / words.length > 0.2) continue; // CSS classes and code, not text
+                seen.add(s);
+                strings.push(s);
+            }
+        };
+        collect(body, 0);
+        return [visible, strings.join("\n")].filter(Boolean).join("\n\n").trim();
+    } catch { return ""; }
+}
 const estimatePromptTokens = (parts) => Math.ceil(parts.reduce((n, p) => n + (typeof p === "string" ? p.length : (JSON.stringify(p ?? "") || "").length), 0) / 4);
 
 // Chat models (approved by the platform owner, 2026-10-07): V4 Pro answers anything non-trivial,
@@ -2937,7 +3001,6 @@ If they ask whether their college/school uses Classgrid, say you can't see that 
                     open_url: async (args) => {
                         // Read one specific page (the official site or docs) via Tavily Extract
                         const tavilyKey = process.env.TAVILY_API_KEY?.trim();
-                        if (!tavilyKey) return "Reading the page failed because TAVILY_API_KEY is missing.";
                         let target;
                         try {
                             target = new URL(String(args.url || "").trim());
@@ -2946,15 +3009,25 @@ If they ask whether their college/school uses Classgrid, say you can't see that 
                             return "open_url needs a full http(s) URL, e.g. https://docs.mistral.ai/getting-started/models/";
                         }
                         try {
-                            const exRes = await fetch("https://api.tavily.com/extract", {
-                                method: "POST",
-                                headers: { "Content-Type": "application/json", "Authorization": `Bearer ${tavilyKey}` },
-                                body: JSON.stringify({ api_key: tavilyKey, urls: [target.href], extract_depth: "advanced", format: "markdown" })
-                            });
-                            if (!exRes.ok) return `Reading the page failed: ${exRes.status} ${exRes.statusText}`;
-                            const exData = await exRes.json();
-                            const page = Array.isArray(exData.results) ? exData.results[0] : null;
-                            const text = String(page?.raw_content || "").trim();
+                            let text = "";
+                            try {
+                                const exRes = await fetch("https://api.tavily.com/extract", {
+                                    method: "POST",
+                                    headers: { "Content-Type": "application/json", "Authorization": `Bearer ${tavilyKey}` },
+                                    body: JSON.stringify({ api_key: tavilyKey, urls: [target.href], extract_depth: "advanced", format: "markdown" })
+                                });
+                                if (exRes.ok) {
+                                    const exData = await exRes.json();
+                                    const page = Array.isArray(exData.results) ? exData.results[0] : null;
+                                    text = String(page?.raw_content || "").trim();
+                                } else {
+                                    console.warn(`[open_url] Tavily ${exRes.status} for ${target.href}, reading the page directly`);
+                                }
+                            } catch (e) {
+                                console.warn(`[open_url] Tavily failed for ${target.href}, reading the page directly: ${e.message}`);
+                            }
+                            // Tavily empty, rate-limited or down: read the page straight from this server (like curl)
+                            if (!text) text = await readPageDirect(target.href);
                             if (!text) return `Could not read ${target.href} (the page may need a login or block readers). Try search_web with include_domains: ["${target.hostname.replace(/^www\./, "")}"].`;
                             const domain = target.hostname.replace(/^www\./, "");
                             let src = accSources.find((s) => s.url === target.href);
