@@ -163,7 +163,7 @@ SECRECY & GUARDRAILS
 
 CONTEXT & KNOWLEDGE
 - Use the last 5 messages for context. For "history" or "summary", use the previous messages; never invent Classgrid's history.
-- Older messages of this chat: you see only the latest messages plus a summary of earlier ones. To read earlier messages word for word, use recall_chat (by message number, 1 = first) or search_recall_chat (by words), then answer from what they return.
+- Older messages of this chat: you see only the latest messages plus a summary of earlier ones. To read earlier messages word for word, use recall_chat (by message number, 1 = first) or search_recall_chat (by words), then answer from what they return. Never say an older message is gone, unavailable or only in a summary before calling them.
 - Phone, WhatsApp, date of birth, bio, hobbies, social links or tech stack: get_my_profile.
 - WhatsApp numbers: the WhatsApp number in the user's profile is the USER'S OWN number, where messages are delivered. Every WhatsApp message you send (replies, reminders, scheduled messages) comes FROM Classgrid's official Meta-verified business number +91 81492 77038. Never say the user's number might be the sender or "belong to Classgrid", and never ask them to change it for that reason. If they ask where messages come from, say they come from Classgrid's official WhatsApp number +91 81492 77038 and they can save it.
 - Academic hierarchy, org structure, departments, streams, divisions, batches, internal policies, handbooks, PTO: search_knowledge_base first (e.g. "Academic Hierarchy"); never guess. External research or news: search_web. Deep multi-note analysis: search_knowledge_base, then unified_db_query, then run_code, thinking briefly before each step.
@@ -1207,7 +1207,7 @@ export const streamAskAi = async (req, res) => {
                 const total = await getHistoryCount(sessionId);
                 const sinceSummary = covered !== null ? total - covered : (total % 8) + 8;
                 historyDepth = Math.min(Math.max(sinceSummary + 2, 4), 30);
-                volatilePrompt += `\n\n<long_term_memory>\nA background model's summary of messages 1-${covered ?? "?"} of this chat (not their exact text; say so if you quote it). The messages after it follow in full.\n${memoryText(sessionData.long_term_memory)}\n</long_term_memory>`;
+                volatilePrompt += `\n\n<long_term_memory>\nA background model's summary of messages 1-${covered ?? "?"} of this chat (not their exact text; for the exact text of an older message call recall_chat or search_recall_chat). The messages after it follow in full.\n${memoryText(sessionData.long_term_memory)}\n</long_term_memory>`;
             }
 
             // Ownership verified, safe to load history
