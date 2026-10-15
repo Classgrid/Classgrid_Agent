@@ -65,13 +65,7 @@ const supportedRoles = Object.keys(ROLE_DEFINITIONS).map(r => `- ${ROLE_DEFINITI
 // The system prompt was originally in ./prompt, we will define it here or import it if needed.
 // Always-sent core rules: the short Level 2 version, owner-approved 2026-10-08 (docs/AI_TOKEN_ROOT_CAUSE.md).
 // The original long core rules are kept below inside <<G:off>> markers (never sent) so nothing is lost.
-const CORE_PROMPT = `You are the Classgrid AI Assistant, a friendly, smart helper for educational institutions of all sizes (Schools, Junior Colleges, Engineering Colleges, Degree Colleges, Coaching Institutes) on the Classgrid ERP platform. Never claim to be ChatGPT, OpenAI, GPT-4 or any other third-party AI.
-
-AUDIENCE & ROLES
-- Users are administrators, teachers, students and parents, not developers.
-- The backend has exactly ${uniqueDashboards.length} dashboards. Roles like Principal, HOD or Coordinator are not separate backends; they are frontend roles mapped to 'org_admin' (or another dashboard below) with their own RBAC rules. RBAC governs every role: users only see what is relevant to them. Roles and dashboards:
-${supportedRoles}
-- The 'super_admin' dashboard is never used unless the user's email ends exactly in "@classgrid.in".
+const CORE_PROMPT = `You are the Classgrid AI Assistant, a personal AI assistant and agent (like ChatGPT) for everyone: studies, work, writing, planning, reminders and everyday tasks. Classgrid is currently shipping only its AI agent; the Classgrid ERP is paused for now (not shut down). Never offer ERP features or talk about schools, roles or dashboards on Classgrid. If someone asks about the ERP, say Classgrid is focusing on its AI agent right now. Never claim to be ChatGPT, OpenAI, GPT-4 or any other third-party AI.
 
 EMAIL SENDER: send only from agent@classgrid.in, never support@classgrid.in or another official address, unless the user is Nikhil Shinde (nikhil.shinde@classgrid.in) and he explicitly asks to use his email.
 
@@ -1438,7 +1432,7 @@ CRITICAL DATABASE BAN: If ANY user who is NOT a Super Admin (email ending in @cl
 - Holidays: \`holidays\`
 - Email Queue: \`email_notification_queue\` (CRITICAL: This is ONLY for internal system transactional emails. If the user asks to read their personal inbox, unread emails, or Gmail, you MUST use the 'google_workspace_connector' tool instead!)
 
-CRITICAL INSTRUCTION FOR GOOGLE WORKSPACE & CLASSROOM DISAMBIGUATION: If the user asks about "emails", "inbox", "Google Drive files", "Drive folders", "assignments", or "student submissions", YOU MUST NEVER USE \`unified_db_query\`. YOU MUST ALWAYS USE \`google_workspace_connector\`. HOWEVER, if the user ambiguously asks about "classroom" or "announcements" (e.g., "read my classroom" or "show announcements"), YOU MUST EXPLICITLY ASK THEM: "Do you mean your Google Classroom or your Classgrid Classroom?" DO NOT assume one or the other. Only after they clarify should you use the respective tool (\`google_workspace_connector\` for Google, or \`unified_db_query\` for Classgrid). The internal Supabase and MongoDB tables are NEVER used for storing the user's personal Google Drive, Google Classroom, or Gmail data!
+CRITICAL INSTRUCTION FOR GOOGLE WORKSPACE & CLASSROOM DISAMBIGUATION: If the user asks about "emails", "inbox", "Google Drive files", "Drive folders", "assignments", or "student submissions", YOU MUST NEVER USE \`unified_db_query\`. YOU MUST ALWAYS USE \`google_workspace_connector\`. "Classroom" and "announcements" always mean Google Classroom. The internal Supabase and MongoDB tables are NEVER used for storing the user's personal Google Drive, Google Classroom, or Gmail data!
 
 3. Redis (source="redis", collectionOrTable="key_pattern"):
 - Use operation="find" to list keys (e.g. collectionOrTable="user:profile:*")
@@ -1554,7 +1548,7 @@ CRITICAL: If you call ANY integration tool (e.g. Google Classroom, Gmail, Google
         const UserModel = (await import("../models/User.js")).default;
         const AiSkillModel = (await import("../models/AiSkill.js")).default;
         const [deepContext, userPrefsDocResult, customSkillsResult, latestUserResult] = await Promise.all([
-            hasUserContext ? buildDeepContext(userEmail).catch((e) => { console.error("buildDeepContext failed:", e); return null; }) : null,
+            null, // The ERP is gone: its class/subject/teacher context (buildDeepContext) is no longer added
             userId ? UserModel.findById(userId).select("ai_preferences").lean().catch((e) => { console.error("Error loading AI Preferences:", e); return null; }) : null,
             userId ? AiSkillModel.find({ userId, is_active: true }).lean().catch((e) => { console.error("Error loading AI skills:", e); return []; }) : [],
             req.user ? mongoose.model('User').findById(req.user._id).lean().catch((e) => { console.error("Error loading user for integrations:", e); return null; }) : null
@@ -1574,12 +1568,6 @@ CRITICAL: If you call ANY integration tool (e.g. Google Classroom, Gmail, Google
                 volatilePrompt += `\nTheir User ID: ${req.user._id}`;
             }
             if (req.user.role) volatilePrompt += `\nTheir Role: ${req.user.role}`;
-            if (body.subdomain) {
-                volatilePrompt += `\nCurrent Dashboard Subdomain: ${body.subdomain}`;
-                if (body.subdomain !== "classgrid.in" && body.subdomain !== "superadmin.classgrid.in" && body.subdomain !== "localhost") {
-                    volatilePrompt += ` (This means they are using a school/organization's dashboard, not the super admin dashboard)`;
-                }
-            }
 
             // Inject Deep Context (Enrolled Classes, Subjects, Teachers)
             if (deepContext) {
@@ -2098,7 +2086,7 @@ CRITICAL: When you want to highlight a single word, short phrase, or variable (l
         const isClassgridEmployee = userEmail.endsWith('@classgrid.in');
         // Host is the API server's own address, so also detect chat users by the page origin and by their account
         const fromChatSite = [req.headers.host, req.headers.origin, req.headers.referer].some((h) => String(h || '').includes('chat.classgrid.in'));
-        if (!isClassgridEmployee && (fromChatSite || isPublicChatAccount(req.user))) {
+        if (!isClassgridEmployee) {
             volatilePrompt += `\n\n=========================================================================
 🚨 CRITICAL OVERRIDE: YOU ARE ON CHAT.CLASSGRID.IN (PUBLIC AI ASSISTANT) 🚨
 =========================================================================
