@@ -3028,7 +3028,10 @@ If they ask whether their college/school uses Classgrid, say you can't see that 
                         }
                         try {
                             let text = "";
-                            try {
+                            // Tavily Extract is turned off for testing: open_url reads pages only with readPageDirect.
+                            // Set OPEN_URL_USE_TAVILY to true to turn it back on.
+                            const OPEN_URL_USE_TAVILY = false;
+                            if (OPEN_URL_USE_TAVILY) try {
                                 const exRes = await fetch("https://api.tavily.com/extract", {
                                     method: "POST",
                                     headers: { "Content-Type": "application/json", "Authorization": `Bearer ${tavilyKey}` },
