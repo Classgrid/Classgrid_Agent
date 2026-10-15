@@ -3176,12 +3176,17 @@ If they ask whether their college/school uses Classgrid, say you can't see that 
                                 }
                             }
 
+                            // A plain-text body keeps its line breaks: HTML would join the lines into one paragraph
+                            const rawBody = String(args.body || args.htmlBody || ""); // htmlBody: the old parameter name
+                            const bodyIsHtml = /<\/?[a-z][\s\S]*>/i.test(rawBody);
+                            const escapedBody = rawBody.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
                             const emailPayload = {
                                 to: args.to,
                                 subject: args.subject,
-                                html: args.body || args.htmlBody, // htmlBody: the old parameter name
+                                html: bodyIsHtml ? rawBody : `<div style="white-space:pre-wrap;font-family:Arial,sans-serif;font-size:14px">${escapedBody}</div>`,
+                                text: bodyIsHtml ? rawBody.replace(/<br\s*\/?>/gi, "\n").replace(/<\/p>/gi, "\n\n").replace(/<[^>]+>/g, "").trim() : rawBody,
                                 fromName: args.fromName,
-                                fromEmail: args.fromEmail
+                                fromEmail: args.fromEmail || "agent@classgrid.in"
                             };
 
                             if (processedAttachments.length > 0) {
