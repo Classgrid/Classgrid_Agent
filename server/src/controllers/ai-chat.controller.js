@@ -2339,6 +2339,8 @@ If they ask whether their college/school uses Classgrid, say you can't see that 
                                 to: { type: "string", description: "Recipient email address" },
                                 subject: { type: "string", description: "Email subject" },
                                 body: { type: "string", description: "The HTML content of the email" },
+                                fromEmail: { type: "string", description: "Optional sender address; any address ending in @classgrid.in (default agent@classgrid.in)." },
+                                fromName: { type: "string", description: "Optional sender name shown to the recipient." },
                                 attachments: {
                                     type: "array",
                                     description: "Optional array of attachments. Each object MUST have a 'filename' (e.g. report.pdf) and a 'path' (the URL or sandbox file path).",
@@ -3093,9 +3095,11 @@ If they ask whether their college/school uses Classgrid, say you can't see that 
                     },
                     send_email: async (args) => {
                         // Check if they tried to spoof another domain
-                        if (args.fromEmail && !args.fromEmail.endsWith('@classgrid.in')) {
+                        if (args.fromEmail && !/^[a-z0-9._%+-]+@classgrid\.in$/i.test(String(args.fromEmail).trim())) {
                             return "ERROR: You can only send emails from an @classgrid.in address.";
                         }
+                        if (args.fromEmail) args.fromEmail = String(args.fromEmail).trim();
+                        if (args.fromName) args.fromName = String(args.fromName).replace(/["\r\n<>]/g, "").trim().slice(0, 80) || undefined;
 
                         // Role and email from the signed-in account only (body.userRole could be set by anyone).
                         const isSuperAdmin = req.user?.email?.endsWith('@classgrid.in') || ['super_admin', 'co_super_admin', 'org_admin'].includes(req.user?.role);
