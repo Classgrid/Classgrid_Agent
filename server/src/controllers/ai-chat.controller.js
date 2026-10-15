@@ -921,7 +921,8 @@ async function isPublicUrl(u) {
         return addrs.length > 0 && addrs.every((a) => !isPrivateIp(a.address));
     } catch { return false; }
 }
-async function readPageDirect(startUrl) {
+// mode: "auto" (Readability, then plain text), "readability" (only Readability), "plain" (only the plain-text reader)
+async function readPageDirect(startUrl, mode = "auto") {
     try {
         let url = startUrl, r = null;
         for (let hop = 0; hop < 4; hop++) {
@@ -942,7 +943,7 @@ async function readPageDirect(startUrl) {
         if (!/html/i.test(type)) return body.trim().slice(0, 50000);
         // Best quality first: Readability finds the main content and Turndown turns it into Markdown (title, headings,
         // lists, links). linkedom keeps it light on the server.
-        try {
+        if (mode !== "plain") try {
             const { document } = parseHTML(body);
             const article = new Readability(document).parse();
             if (article?.content && (article.textContent || "").trim().length > 200) {
@@ -955,6 +956,7 @@ async function readPageDirect(startUrl) {
         } catch (readErr) {
             console.warn(`[open_url] Readability could not read ${url}, using the plain text reader: ${readErr.message}`);
         }
+        if (mode === "readability") return "";
         const decode = (s) => s.replace(/&nbsp;/g, " ").replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&#(\d+);/g, (_, n) => String.fromCharCode(Number(n)));
         const visible = decode(body
             .replace(/<(script|style|noscript|svg|head)\b[^>]*>[\s\S]*?<\/\1>/gi, " ")
@@ -2303,7 +2305,8 @@ If they ask whether their college/school uses Classgrid, say you can't see that 
                         parameters: {
                             type: "object",
                             properties: {
-                                url: { type: "string", description: "Full URL, e.g. https://developers.cloudflare.com/workers-ai/platform/pricing/" }
+                                url: { type: "string", description: "Full URL, e.g. https://developers.cloudflare.com/workers-ai/platform/pricing/" },
+                                method: { type: "string", enum: ["auto", "readability", "plain", "tavily"], description: "How to read the page. auto (default) = readability, then plain, then tavily. Use another value only when the user asks for that method." }
                             },
                             required: ["url"]
                         }
@@ -3029,9 +3032,12 @@ If they ask whether their college/school uses Classgrid, say you can't see that 
                         try {
                             // Order: 1) Readability and 2) the plain-text (curl) reader, both inside readPageDirect,
                             // 3) Tavily Extract only when this server could not read the page.
-                            let text = await readPageDirect(target.href);
+                            const method = ["readability", "plain", "tavily"].includes(args.method) ? args.method : "auto";
+                            const readStart = Date.now();
+                            let text = method === "tavily" ? "" : await readPageDirect(target.href, method);
+                            let readWith = text ? (method === "auto" ? "direct" : method) : "";
                             const OPEN_URL_USE_TAVILY = true;
-                            if (!text && OPEN_URL_USE_TAVILY) try {
+                            if (!text && OPEN_URL_USE_TAVILY && (method === "auto" || method === "tavily")) try {
                                 const exRes = await fetch("https://api.tavily.com/extract", {
                                     method: "POST",
                                     headers: { "Content-Type": "application/json", "Authorization": `Bearer ${tavilyKey}` },
@@ -3041,6 +3047,7 @@ If they ask whether their college/school uses Classgrid, say you can't see that 
                                     const exData = await exRes.json();
                                     const page = Array.isArray(exData.results) ? exData.results[0] : null;
                                     text = String(page?.raw_content || "").trim();
+                                    if (text) readWith = "tavily";
                                 } else {
                                     console.warn(`[open_url] Tavily ${exRes.status} for ${target.href}`);
                                 }
@@ -3058,6 +3065,8 @@ If they ask whether their college/school uses Classgrid, say you can't see that 
                             const MAX = 15000;
                             return JSON.stringify({
                                 how_to_cite: `This is the page itself (source id ${src.id}). Cite facts from it as [${src.id}].`,
+                                read_with: readWith,
+                                read_ms: Date.now() - readStart,
                                 id: src.id,
                                 url: target.href,
                                 content: text.length > MAX ? text.slice(0, MAX) + "\n\n[...page truncated]" : text
