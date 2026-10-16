@@ -550,7 +550,7 @@ export function AgentNestedMenu({ searchQuery = "" }: { searchQuery?: string }) 
             <SidebarMenuItem>
               <SidebarMenuButton 
                 tooltip="Schedule"
-                onClick={() => navigate(`${baseAgentPath}/schedule`)}
+                onClick={() => navigate(`${baseAgentPath.replace("/project", "/agent")}/schedule`)}
                 render={
                   <div className="flex items-center gap-3 w-full cursor-pointer">
                     <Calendar size={20} />
@@ -563,7 +563,7 @@ export function AgentNestedMenu({ searchQuery = "" }: { searchQuery?: string }) 
             <SidebarMenuItem>
               <SidebarMenuButton 
                 tooltip="Library"
-                onClick={() => navigate(`${baseAgentPath}/library`)}
+                onClick={() => navigate(`${baseAgentPath.replace("/project", "/agent")}/library`)}
                 render={
                   <div className="flex items-center gap-3 w-full cursor-pointer">
                     <Library size={20} />
@@ -675,7 +675,7 @@ export function AgentNestedMenu({ searchQuery = "" }: { searchQuery?: string }) 
 
             <SidebarMenuItem>
               <SidebarMenuButton 
-                onClick={() => navigate(`${baseAgentPath}/schedule`)}
+                onClick={() => navigate(`${baseAgentPath.replace("/project", "/agent")}/schedule`)}
                 render={
                   <div className="flex items-center gap-3 w-full cursor-pointer">
                     <Calendar size={20} />
@@ -687,7 +687,7 @@ export function AgentNestedMenu({ searchQuery = "" }: { searchQuery?: string }) 
 
             <SidebarMenuItem>
               <SidebarMenuButton 
-                onClick={() => navigate(`${baseAgentPath}/library`)}
+                onClick={() => navigate(`${baseAgentPath.replace("/project", "/agent")}/library`)}
                 render={
                   <div className="flex items-center gap-3 w-full cursor-pointer">
                     <Library size={20} />

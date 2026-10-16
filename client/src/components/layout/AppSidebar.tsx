@@ -204,7 +204,7 @@ export function AppSidebar({ role, user }: AppSidebarProps) {
   // Auto-open menus based on route changes
   useEffect(() => {
     setShowStorageMenu(location.pathname.includes("/storage"));
-    setShowAgentMenu((location.pathname.includes("/agent") && !location.pathname.includes("/agent-reviews")) || location.pathname.endsWith("/project"));
+    setShowAgentMenu((location.pathname.includes("/agent") && !location.pathname.includes("/agent-reviews")) || location.pathname.split("/").includes("project"));
   }, [location.pathname, agentItem]);
 
   // Auto-open Agent menu when first question is sent

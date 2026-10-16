@@ -71,7 +71,7 @@ export function SidebarSwitcher({ user }: { user: { role?: string; name?: string
   const isSuperAdminArea = pathname.startsWith("/superadmin");
   const agentPath = isSuperAdminArea ? "/superadmin/agent" : "/c/agent";
   const projectPath = isSuperAdminArea ? "/superadmin/project" : "/c/project";
-  const currentMode = pathname.endsWith("/project") ? "project" : "agent";
+  const currentMode = pathname.split("/").includes("project") ? "project" : "agent";
   const queryClient = useQueryClient();
   const [isSwitching, setIsSwitching] = useState(false);
 

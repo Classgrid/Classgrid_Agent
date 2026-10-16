@@ -307,6 +307,7 @@ export function AppRouter() {
           <Route path="/superadmin/dashboard" element={<NavigateWithQuery to="/superadmin/agent" replace />} />
           <Route path="/superadmin/agent" element={<DashboardHomePage />} />
           <Route path="/superadmin/project" element={<ProjectModePage />} />
+          <Route path="/superadmin/project/:sessionId" element={<ProjectModePage />} />
           <Route path="/superadmin/agent/:sessionId" element={<DashboardHomePage />} />
           <Route path="/superadmin/agent/:sessionId/*" element={<DashboardHomePage />} />
           <Route path="/superadmin/agent-reviews" element={<AgentReviewsPage />} />
@@ -427,6 +428,7 @@ export function AppRouter() {
           <Route path="/agent/:sessionId/*" element={<DashboardHomePage />} />
           <Route path="/c/agent" element={<DashboardHomePage />} />
           <Route path="/c/project" element={<ProjectModePage />} />
+          <Route path="/c/project/:sessionId" element={<ProjectModePage />} />
           <Route path="/c/agent/:sessionId" element={<DashboardHomePage />} />
           <Route path="/c/agent/:sessionId/*" element={<DashboardHomePage />} />
           <Route path="/c" element={<DashboardHomePage />} />
