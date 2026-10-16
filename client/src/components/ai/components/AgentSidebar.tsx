@@ -82,7 +82,14 @@ export function AgentNestedMenu({ searchQuery = "" }: { searchQuery?: string }) 
       ? (import.meta.env.VITE_API_URL || "https://api.classgrid.in") + "/api/ai/sessions"
       : "/api/ai/sessions";
 
-    fetchWithRescue(endpoint, { credentials: "include" })
+    // Agent mode and Project mode keep separate chat lists (Project mode: only the open project's chats)
+    let listQuery = "?mode=agent";
+    if (window.location.pathname.split("/").includes("project")) {
+      let openProject: string | null = null;
+      try { openProject = localStorage.getItem("cg_project_open"); } catch { /* storage blocked */ }
+      listQuery = `?project=${openProject || "none"}`;
+    }
+    fetchWithRescue(endpoint + listQuery, { credentials: "include" })
       .then(res => res.json())
       .then(data => {
         if (data.sessions) setSessions(data.sessions);
@@ -393,6 +400,9 @@ export function AgentNestedMenu({ searchQuery = "" }: { searchQuery?: string }) 
 
   const navigate = useNavigate();
   const location = useLocation();
+  const isProjectMode = location.pathname.split("/").includes("project");
+  // Switching between Agent and Project mode shows that mode's own chats
+  React.useEffect(() => { fetchSessions(true); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [isProjectMode]);
 
   // Extract base path robustly by finding the 'agent' segment
   const pathParts = location.pathname.split('/');
@@ -547,18 +557,20 @@ export function AgentNestedMenu({ searchQuery = "" }: { searchQuery?: string }) 
               />
             </SidebarMenuItem>
 
-            <SidebarMenuItem>
-              <SidebarMenuButton 
-                tooltip="Schedule"
-                onClick={() => navigate(`${baseAgentPath.replace("/project", "/agent")}/schedule`)}
-                render={
-                  <div className="flex items-center gap-3 w-full cursor-pointer">
-                    <Calendar size={20} />
-                    <span className="truncate font-medium">Schedule</span>
-                  </div>
-                }
-              />
-            </SidebarMenuItem>
+            {!isProjectMode && (
+              <SidebarMenuItem>
+                <SidebarMenuButton 
+                  tooltip="Schedule"
+                  onClick={() => navigate(`${baseAgentPath.replace("/project", "/agent")}/schedule`)}
+                  render={
+                    <div className="flex items-center gap-3 w-full cursor-pointer">
+                      <Calendar size={20} />
+                      <span className="truncate font-medium">Schedule</span>
+                    </div>
+                  }
+                />
+              </SidebarMenuItem>
+            )}
 
             <SidebarMenuItem>
               <SidebarMenuButton 
@@ -673,17 +685,19 @@ export function AgentNestedMenu({ searchQuery = "" }: { searchQuery?: string }) 
               />
             </SidebarMenuItem>
 
-            <SidebarMenuItem>
-              <SidebarMenuButton 
-                onClick={() => navigate(`${baseAgentPath.replace("/project", "/agent")}/schedule`)}
-                render={
-                  <div className="flex items-center gap-3 w-full cursor-pointer">
-                    <Calendar size={20} />
-                    <span className="font-medium text-sm">Schedule</span>
-                  </div>
-                }
-              />
-            </SidebarMenuItem>
+            {!isProjectMode && (
+              <SidebarMenuItem>
+                <SidebarMenuButton 
+                  onClick={() => navigate(`${baseAgentPath.replace("/project", "/agent")}/schedule`)}
+                  render={
+                    <div className="flex items-center gap-3 w-full cursor-pointer">
+                      <Calendar size={20} />
+                      <span className="font-medium text-sm">Schedule</span>
+                    </div>
+                  }
+                />
+              </SidebarMenuItem>
+            )}
 
             <SidebarMenuItem>
               <SidebarMenuButton 

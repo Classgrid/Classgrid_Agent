@@ -4562,7 +4562,22 @@ export const getChatSessions = async (req, res) => {
         const email = req.user?.email; // Assumes isAuthenticated populates req.user
         if (!email) return res.status(401).json({ error: "Unauthorized" });
 
-        const sessions = await getSessions(email);
+        let sessions = await getSessions(email);
+        // Agent mode and Project mode keep separate chat lists: ?mode=agent leaves out chats that belong to a
+        // project, ?project=<id> shows only that project's chats (the user's own projects only). No query = all.
+        const { mode, project } = req.query || {};
+        if (mode === "agent" || project) {
+            const IdeProject = (await import("../models/IdeProject.js")).default;
+            if (project) {
+                const p = /^[0-9a-f]{24}$/i.test(String(project)) ? await IdeProject.findOne({ _id: project, owner: req.user._id }).select("chatSessionIds").lean() : null;
+                const ids = new Set(p?.chatSessionIds || []);
+                sessions = (sessions || []).filter((s) => ids.has(s.id));
+            } else {
+                const ps = await IdeProject.find({ owner: req.user._id }).select("chatSessionIds").lean();
+                const ids = new Set(ps.flatMap((x) => x.chatSessionIds || []));
+                sessions = (sessions || []).filter((s) => !ids.has(s.id));
+            }
+        }
         res.json({ sessions });
     } catch (e) {
         console.error("Error getting sessions:", e);

@@ -73,6 +73,7 @@ export function ProjectModePage() {
   const rememberOpen = (id: string | null) => {
     setOpenId(id);
     try { id ? localStorage.setItem(OPEN_PROJECT_KEY, id) : localStorage.removeItem(OPEN_PROJECT_KEY); } catch { /* storage blocked */ }
+    window.dispatchEvent(new Event("agent:refresh-sessions")); // the left list shows this project's chats
   };
 
   const loadProjects = useCallback(async () => {
