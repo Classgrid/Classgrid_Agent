@@ -4005,7 +4005,7 @@ export const handleToolCall = async (name, args, context = {}) => {
                 <head>
                     <title>${title || 'Document'}</title>
                     <style>
-                        body { font-family: Arial, sans-serif; margin: 20px; color: #333; }
+                        body { font-family: Arial, 'Noto Sans Devanagari', 'Noto Color Emoji', sans-serif; margin: 20px; color: #333; }
                         h1 { color: #3eaf28; text-align: center; }
                         table { width: 100%; border-collapse: collapse; margin-top: 20px; }
                         th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
