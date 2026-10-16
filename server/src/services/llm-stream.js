@@ -186,6 +186,7 @@ export async function streamChat({
     let hadReasoning = false;
     let continuedText = ""; // earlier parts of an answer that was cut off and continued
     let continuations = 0;
+    let lastIntro = ""; // start of the previous tool round's text, to catch a model stuck repeating itself
 
     try {
         for (;;) {
@@ -235,6 +236,16 @@ export async function streamChat({
             if (depth >= maxToolDepth) {
                 return { answer: "I searched but couldn't find a clear answer. Could you try rephrasing?", usage, toolsRun };
             }
+
+            // The same text again before another tool call means the model is going round in circles (seen with
+            // several models just before a questions card): stop here and keep what it wrote, instead of
+            // repeating the same paragraph up to maxToolDepth times.
+            const intro = (round.text || "").slice(0, 120);
+            if (intro.length >= 40 && intro === lastIntro) {
+                console.log(`[AI-STREAM] same text repeated before a tool call (${round.toolCalls.map((c) => c.function.name).join(", ")}), stopping the loop`);
+                return { answer: (continuedText + round.rawText).trim() || null, usage, toolsRun };
+            }
+            lastIntro = intro;
 
             // Duplicate checks look only at earlier rounds plus calls already handled in this round.
             // Including the current assistant message would make every parallel call after the first match itself.

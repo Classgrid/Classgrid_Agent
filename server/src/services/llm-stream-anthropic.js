@@ -406,6 +406,7 @@ export async function streamClaudeChat({
     let roundUsage = null;
     let continuedText = ""; // earlier parts of an answer that was cut off and continued
     let continuations = 0;
+    let lastIntro = ""; // start of the previous tool round's text, to catch a model stuck repeating itself
     // Never let one round write more than the user has left
     const roundMaxTokens = () => outputBudget === undefined
         ? params.max_tokens
@@ -494,6 +495,15 @@ export async function streamClaudeChat({
             if (depth >= maxToolDepth) {
                 return { answer: "I searched but couldn't find a clear answer. Could you try rephrasing?", usage, toolsRun, servedModel };
             }
+
+            // The same text again before another tool call means the model is going round in circles:
+            // stop here and keep what it wrote, instead of repeating the same paragraph many times
+            const intro = (text || "").slice(0, 120);
+            if (intro.length >= 40 && intro === lastIntro) {
+                console.log(`[AI-STREAM] Claude repeated the same text before a tool call (${toolUses.map((c) => c.name).join(", ")}), stopping the loop`);
+                return { answer: (continuedText + text).trim() || null, usage, toolsRun, servedModel };
+            }
+            lastIntro = intro;
 
             // Pass the assistant turn back unchanged (apart from a declined model's blocks) so its thinking stays valid.
             conversation.push({ role: "assistant", content });
