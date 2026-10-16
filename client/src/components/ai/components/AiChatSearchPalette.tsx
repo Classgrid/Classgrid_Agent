@@ -212,7 +212,7 @@ export function AiChatSearchPalette({
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
             transition={{ duration: 0.15 }}
-            className="fixed inset-0 z-[100] bg-black/60"
+            className="fixed inset-0 z-[130] bg-black/60"
             onClick={() => onOpenChange(false)}
           />
 
@@ -223,7 +223,7 @@ export function AiChatSearchPalette({
             animate={{ opacity: 1, scale: 1, y: 0 }}
             exit={{ opacity: 0, scale: 0.96, y: -10 }}
             transition={{ duration: 0.2, ease: [0.16, 1, 0.3, 1] }}
-            className="fixed inset-x-0 top-[12vh] z-[101] mx-auto w-[min(92vw,580px)]"
+            className="fixed inset-x-0 top-[12vh] z-[131] mx-auto w-[min(92vw,580px)]"
           >
             <div className="overflow-hidden rounded-xl border border-slate-200 dark:border-white/[0.12] bg-white/95 dark:bg-[#0a0a0a]/95 shadow-[0_25px_60px_rgba(0,0,0,0.15)] dark:shadow-[0_25px_60px_rgba(0,0,0,0.5)] backdrop-blur-xl">
               {/* Search Input */}
