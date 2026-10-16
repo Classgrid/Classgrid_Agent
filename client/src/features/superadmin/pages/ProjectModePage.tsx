@@ -33,23 +33,29 @@ async function api(path: string, init?: RequestInit) {
 // Project mode: shown inside the normal layout (left sidebar). The middle shows the user's projects; an open project
 // shows the code editor (OpenVSCode Server on the sandbox at ide.classgrid.in; each user is let into their own editor
 // box via their Classgrid login). The right side is the AI panel in its overlay layout.
-// Soft Classgrid green and orange smoke that drifts in slowly from the left and right behind the loading bar
+// Classgrid green and orange smoke that drifts in slowly from the left and right sides behind the loading bar
 function LoadingSmoke() {
   const reduce = useReducedMotion();
-  const puff = (color: string, side: "left" | "right", delay: number, duration: number) => (
-    <motion.div
-      aria-hidden
-      className="absolute -bottom-[35%] h-[90%] w-[75%] rounded-full pointer-events-none -z-10 blur-[90px] dark:blur-[110px]"
-      style={{ [side]: "-30%", background: `radial-gradient(closest-side, ${color}, transparent)` }}
-      initial={{ opacity: 0, x: side === "left" ? "-10%" : "10%" }}
-      animate={reduce ? { opacity: 0.75 } : { opacity: 0.75, x: side === "left" ? ["-10%", "18%", "30%"] : ["10%", "-16%", "-28%"], y: ["8%", "-6%", "3%"], scale: [0.95, 1.08, 1] }}
-      transition={{ opacity: { duration: 2.4, delay, ease: "easeOut" }, default: { duration, delay, ease: "easeInOut", repeat: Infinity, repeatType: "reverse" } }}
-    />
-  );
+  // side, color, size/position, how far it drifts in, timing
+  const puffs = [
+    { side: "left", color: "#34d399", bottom: "-30%", h: "80%", w: "70%", from: "-30%", to: "8%", delay: 0, duration: 10 },
+    { side: "left", color: "#34d399", bottom: "-15%", h: "50%", w: "45%", from: "-20%", to: "30%", delay: 0.8, duration: 13 },
+    { side: "right", color: "#f97316", bottom: "-30%", h: "80%", w: "70%", from: "30%", to: "-8%", delay: 0.3, duration: 11 },
+    { side: "right", color: "#f97316", bottom: "-15%", h: "50%", w: "45%", from: "20%", to: "-30%", delay: 1.1, duration: 14 },
+  ] as const;
   return (
     <>
-      {puff("#34d39988", "left", 0, 14)}
-      {puff("#f9731680", "right", 0.4, 16)}
+      {puffs.map((p, i) => (
+        <motion.div
+          key={i}
+          aria-hidden
+          className="absolute rounded-full pointer-events-none -z-10 blur-[60px]"
+          style={{ [p.side]: "-15%", bottom: p.bottom, height: p.h, width: p.w, background: `radial-gradient(closest-side, ${p.color}, ${p.color}00)` }}
+          initial={{ opacity: 0, x: p.from }}
+          animate={reduce ? { opacity: 0.8, x: p.to } : { opacity: [0, 0.85, 0.65, 0.85], x: [p.from, p.to], y: ["6%", "-10%", "0%"], scale: [0.9, 1.1, 1] }}
+          transition={{ duration: p.duration, delay: p.delay, ease: "easeInOut", repeat: reduce ? 0 : Infinity, repeatType: "reverse" }}
+        />
+      ))}
     </>
   );
 }
