@@ -28,7 +28,10 @@ must "$W" 'default:bu.AFTER_DELAY' "auto-save on"
 #    and no Extensions icon in the left bar
 node -e 'const fs=require("fs");const f=process.argv[1];const p=JSON.parse(fs.readFileSync(f,"utf8"));for(const k of ["extensionsGallery","extensionRecommendations","keymapExtensionTips","languageExtensionTips","configBasedExtensionTips"])delete p[k];fs.writeFileSync(f,JSON.stringify(p,null,"\t"))' "$ROOT/product.json"
 printf '\n/* classgrid-no-extensions: no extension store in Classgrid Code */\n.monaco-workbench .activitybar li.action-item:has(.codicon-extensions-view-icon){display:none!important}\n' >> "$ROOT/out/vs/code/browser/workbench/workbench.css"
-if grep -q extensionsGallery "$ROOT/product.json"; then echo "PATCH FAILED: extension store still on" >&2; exit 1; fi
+# The same store address is also built into the program files; rename it there so it is never used
+F=$(grep -l 'extensionsGallery:{serviceUrl:"https://open-vsx.org' -r "$ROOT/out")
+sed -i 's#extensionsGallery:{serviceUrl:"https://open-vsx.org#extensionsGalleryOff:{serviceUrl:"https://open-vsx.org#g' $F
+if grep -q extensionsGallery "$ROOT/product.json" || grep -rq 'extensionsGallery:{serviceUrl' "$ROOT/out"; then echo "PATCH FAILED: extension store still on" >&2; exit 1; fi
 
 # 4. Classgrid theme as the default light/dark theme, Classgrid logos
 cp /tmp/cg/default-dark-modern.json "$ROOT/extensions/theme-defaults/themes/dark_modern.json"
