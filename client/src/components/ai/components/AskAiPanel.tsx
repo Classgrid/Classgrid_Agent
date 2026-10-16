@@ -3419,7 +3419,9 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
   // "Start a new chat" on the Chat ended card: same as the sidebar's New Chat.
   function handleEndedNewChat() {
     const parts = window.location.pathname.split("/");
-    const agentIndex = parts.indexOf("agent");
+    // Agent mode (/agent/<chat>) or Project Mode (/project/<chat>): drop the ended chat from the address, so the
+    // new chat stays in the same mode (and in the open project)
+    const agentIndex = parts.indexOf("project") !== -1 ? parts.indexOf("project") : parts.indexOf("agent");
     if (agentIndex !== -1 && parts.length > agentIndex + 1) {
       window.history.pushState({}, "", parts.slice(0, agentIndex + 1).join("/"));
       window.dispatchEvent(new PopStateEvent("popstate"));

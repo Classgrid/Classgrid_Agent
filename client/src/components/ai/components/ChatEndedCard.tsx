@@ -7,10 +7,12 @@ import React from "react";
 export function ChatEndedCard({ onNewChat, onFeedback, reason }: { onNewChat: () => void; onFeedback: () => void; reason?: string | null }) {
   const byUser = reason === "user_requested";
   return (
+    // Side by side only when the card itself is wide (not the screen): in the narrow AI side panel it stacks
+    <div className="@container w-full">
     <div
       role="status"
       aria-live="polite"
-      className="mx-auto w-full flex flex-col sm:flex-row sm:items-center justify-between gap-4 rounded-2xl border border-border bg-white dark:bg-[#1f1f1f] px-5 py-5"
+      className="mx-auto w-full flex flex-col @md:flex-row @md:items-center justify-between gap-4 rounded-2xl border border-border bg-white dark:bg-[#1f1f1f] px-5 py-5"
     >
       <div className="min-w-0">
         <div className="text-[18px] font-semibold text-foreground">Chat ended</div>
@@ -37,6 +39,7 @@ export function ChatEndedCard({ onNewChat, onFeedback, reason }: { onNewChat: ()
           Send feedback
         </button>
       </div>
+    </div>
     </div>
   );
 }
