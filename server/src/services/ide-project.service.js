@@ -553,8 +553,21 @@ export async function undoToCheckpoint(project, ssh, sessionId, id) {
 // if that backup fails, the code is kept. Returns what happened per project.
 export async function backupAndRemoveProjectCode(ssh, project) {
   const dir = projectHostDir(project);
-  // Without a GitHub repo there is nowhere to save it, so the code stays on the sandbox
-  if (!project.repo) return { removed: false, noRepo: true, reason: "no GitHub repo yet" };
+  // No GitHub repo yet: an empty project is just removed; one with files first gets its own private repo
+  // on the user's GitHub (named after the project), so the work is saved there before it leaves the sandbox
+  if (!project.repo) {
+    const { stdout: files } = await ssh.execCommand(`ls -A ${q(dir)} 2>/dev/null | grep -v '^.git$' | head -1`);
+    if (!files.trim()) { await ssh.execCommand(`rm -rf ${q(dir)}`); return { removed: true }; }
+    const base = String(project.name || "project").toLowerCase().replace(/[^a-z0-9._-]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 60) || "project";
+    let made = "";
+    for (const name of [base, `${base}-${String(project._id).slice(-6)}`]) {
+      made = await createRepoForProject(project, ssh, { name, private: true, description: "Made by Classgrid Project Mode" });
+      if (project.repo) break;
+    }
+    if (!project.repo || /failed/i.test(made)) return { removed: false, reason: `could not save to a new GitHub repo: ${made}` };
+    await ssh.execCommand(`rm -rf ${q(dir)}`);
+    return { removed: true, backupBranch: null, createdRepo: project.repo };
+  }
   const { stdout: exists } = await ssh.execCommand(`[ -d ${q(dir)}/.git ] && echo yes`);
   if (!exists.trim()) {
     await ssh.execCommand(`rm -rf ${q(dir)}`); // a folder without a repo has nothing to save

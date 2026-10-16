@@ -78,7 +78,6 @@ setInterval(async () => {
       let keptAny = false;
       for (const p of projects) {
         const r = await backupAndRemoveProjectCode(ssh, p).catch((e) => ({ removed: false, reason: e.message }));
-        if (!r.removed && r.noRepo) continue; // nothing to back up to; stays until a repo is made
         if (!r.removed) { keptAny = true; console.error(`[IDE] Kept project ${p._id} on the sandbox: ${r.reason}`); }
       }
       await ssh.execCommand(`docker rm -f ide-u-${userId}`);
@@ -265,9 +264,10 @@ router.post("/projects/:id/open", isAuthenticated, async (req, res) => {
     ssh = await sandboxSsh();
     const { stdout: haveCode } = req.body?.resume ? await ssh.execCommand(`[ -d ${dir} ] && echo yes`) : { stdout: "" };
     const resuming = !!haveCode.trim();
+    // GitHub must be connected for every project: code is only kept on GitHub, never on our servers
+    const user = await githubTokenFor(req.user._id);
+    if (!user) return res.status(409).json({ error: "github_not_connected" });
     if (project.repo && !resuming) {
-      const user = await githubTokenFor(req.user._id);
-      if (!user) return res.status(409).json({ error: "github_not_connected" });
       if (!req.body?.replace) {
         const { stdout } = await ssh.execCommand(`[ -d ${dir}/.git ] && git -C ${dir} status --porcelain | head -1`);
         if (stdout.trim()) return res.status(409).json({ error: "unsaved_changes" });
