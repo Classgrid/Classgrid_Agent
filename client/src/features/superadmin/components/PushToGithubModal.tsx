@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from "react";
-import { Github, GitBranch, GitCommit, UploadCloud, X, Sparkles } from "lucide-react";
+import { GitBranch } from "lucide-react";
+import { Dialog, DialogContent, DialogTitle, DialogDescription } from "@/components/marketing_ui/dialog";
 import { Spinner } from "@/components/marketing_ui/spinner";
 import { cn } from "@/lib/utils";
 
@@ -19,6 +20,7 @@ const COMMIT_SUGGESTIONS = [
   "Add new feature implementation"
 ];
 
+// Same look as the Delete Account box (DangerConfirmDialog): header, body and footer sections, no blur behind it
 export function PushToGithubModal({
   isOpen,
   onClose,
@@ -37,78 +39,46 @@ export function PushToGithubModal({
     }
   }, [isOpen]);
 
-  if (!isOpen) return null;
+  const canPush = !!message.trim() && !isPushing;
 
-  const handleSubmit = async (e?: React.FormEvent) => {
-    if (e) e.preventDefault();
-    const trimmed = message.trim();
-    if (!trimmed || isPushing) return;
-    await onPush(trimmed);
+  const handleSubmit = async () => {
+    if (!canPush) return;
+    await onPush(message.trim());
   };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
       e.preventDefault();
       handleSubmit();
-    } else if (e.key === "Escape" && !isPushing) {
-      onClose();
     }
   };
 
   return (
-    <div
-      className="fixed inset-0 z-[130] bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in duration-200"
-      onClick={() => {
-        if (!isPushing) onClose();
-      }}
-    >
-      <div
-        className="w-full max-w-md rounded-2xl border border-border bg-background shadow-2xl p-6 flex flex-col gap-5 relative overflow-hidden"
-        onClick={(e) => e.stopPropagation()}
+    <Dialog open={isOpen} onOpenChange={(open) => { if (!open && !isPushing) onClose(); }}>
+      <DialogContent
+        className="max-w-[calc(100%-2rem)] sm:max-w-md p-0 gap-0 border border-border shadow-2xl rounded-xl overflow-hidden bg-background flex flex-col max-h-[90dvh]"
+        overlayClassName="supports-backdrop-filter:backdrop-blur-none !backdrop-blur-none"
+        showCloseButton={false}
       >
         {/* Header */}
-        <div className="flex items-start justify-between gap-3">
-          <div className="flex items-center gap-3">
-            <div className="size-10 rounded-xl bg-secondary flex items-center justify-center shrink-0 border border-border/50">
-              <Github className="size-5 text-foreground" />
-            </div>
-            <div className="flex flex-col">
-              <h2 className="text-base font-semibold text-foreground tracking-tight flex items-center gap-2">
-                Push to GitHub
-              </h2>
-              <div className="flex items-center gap-2 mt-0.5">
-                <span className="text-xs text-muted-foreground truncate max-w-[200px]" title={repoName || projectName}>
-                  {repoName || projectName}
-                </span>
-                <span className="inline-flex items-center gap-1 text-[11px] font-mono px-1.5 py-0.5 rounded bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20">
-                  <GitBranch className="size-2.5" /> main
-                </span>
-              </div>
-            </div>
-          </div>
-          <button
-            type="button"
-            onClick={onClose}
-            disabled={isPushing}
-            className="p-1 rounded-lg text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors disabled:opacity-50"
-            title="Close"
-          >
-            <X className="size-4" />
-          </button>
+        <div className="px-6 py-6 border-b border-border bg-muted dark:bg-black shrink-0">
+          <DialogTitle className="text-xl font-semibold text-foreground tracking-tight">
+            Push to GitHub
+          </DialogTitle>
+          <DialogDescription className="text-[15px] text-muted-foreground leading-relaxed mt-3 flex items-center gap-2 flex-wrap">
+            <span className="truncate max-w-[260px]" title={repoName || projectName}>{repoName || projectName}</span>
+            <span className="inline-flex items-center gap-1 text-xs font-mono px-1.5 py-0.5 rounded border border-border text-foreground">
+              <GitBranch className="size-3" /> main
+            </span>
+          </DialogDescription>
         </div>
 
-        {/* Form Body */}
-        <form onSubmit={handleSubmit} className="flex flex-col gap-4">
-          <div className="flex flex-col gap-2">
-            <div className="flex items-center justify-between">
-              <label htmlFor="commit-msg" className="text-xs font-medium text-foreground flex items-center gap-1.5">
-                <GitCommit className="size-3.5 text-muted-foreground" />
-                Commit message
-              </label>
-              <span className="text-[11px] text-muted-foreground font-mono">
-                {message.length} chars
-              </span>
-            </div>
+        {/* Body */}
+        <div className="flex-1 overflow-y-auto min-h-0">
+          <div className="flex flex-col gap-4 px-6 py-6 bg-background">
+            <label htmlFor="commit-msg" className="text-sm text-foreground/80">
+              What did you change?
+            </label>
             <textarea
               id="commit-msg"
               ref={textareaRef}
@@ -117,64 +87,52 @@ export function PushToGithubModal({
               onChange={(e) => setMessage(e.target.value)}
               onKeyDown={handleKeyDown}
               disabled={isPushing}
-              placeholder="What did you change? (e.g. Add hero section and responsive layout)"
-              className="w-full rounded-xl border border-border bg-card px-3.5 py-2.5 text-sm text-foreground placeholder:text-muted-foreground/60 focus:outline-none focus:ring-2 focus:ring-foreground/20 focus:border-foreground/40 transition-all resize-none font-sans"
+              placeholder="e.g. Add hero section and responsive layout"
+              className="w-full rounded-md border border-input bg-background dark:bg-black px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground/60 outline-none transition-all duration-200 focus:ring-1 focus:ring-emerald-500/50 focus:border-emerald-500/50 resize-none"
             />
-          </div>
-
-          {/* Quick Suggestion Chips */}
-          <div className="flex flex-wrap gap-1.5">
-            {COMMIT_SUGGESTIONS.map((suggestion) => (
-              <button
-                key={suggestion}
-                type="button"
-                disabled={isPushing}
-                onClick={() => setMessage(suggestion)}
-                className={cn(
-                  "text-[11px] px-2.5 py-1 rounded-full border border-border/70 text-muted-foreground hover:text-foreground hover:bg-secondary/70 transition-colors text-left",
-                  message === suggestion && "bg-secondary text-foreground border-foreground/30 font-medium"
-                )}
-              >
-                {suggestion}
-              </button>
-            ))}
-          </div>
-
-          {/* Footer Actions */}
-          <div className="flex items-center justify-between pt-2 border-t border-border mt-1">
-            <span className="text-[11px] text-muted-foreground hidden sm:inline">
-              Press <kbd className="px-1.5 py-0.5 text-[10px] font-mono rounded bg-secondary border border-border">Ctrl</kbd> + <kbd className="px-1.5 py-0.5 text-[10px] font-mono rounded bg-secondary border border-border">Enter</kbd>
-            </span>
-            <div className="flex items-center gap-2 ml-auto">
-              <button
-                type="button"
-                onClick={onClose}
-                disabled={isPushing}
-                className="px-4 py-2 rounded-full border border-border text-sm text-foreground hover:bg-secondary transition-colors disabled:opacity-50"
-              >
-                Cancel
-              </button>
-              <button
-                type="submit"
-                disabled={!message.trim() || isPushing}
-                className="flex items-center gap-2 px-5 py-2 rounded-full font-medium text-sm bg-foreground text-background hover:opacity-90 transition-opacity disabled:opacity-50 disabled:cursor-not-allowed shadow-sm"
-              >
-                {isPushing ? (
-                  <>
-                    <Spinner className="size-4" />
-                    Pushing…
-                  </>
-                ) : (
-                  <>
-                    <UploadCloud className="size-4" />
-                    Push changes
-                  </>
-                )}
-              </button>
+            <div className="flex flex-wrap gap-1.5">
+              {COMMIT_SUGGESTIONS.map((suggestion) => (
+                <button
+                  key={suggestion}
+                  type="button"
+                  disabled={isPushing}
+                  onClick={() => setMessage(suggestion)}
+                  className={cn(
+                    "text-xs px-2.5 py-1 rounded-md border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition-colors",
+                    message === suggestion && "bg-muted text-foreground"
+                  )}
+                >
+                  {suggestion}
+                </button>
+              ))}
             </div>
           </div>
-        </form>
-      </div>
-    </div>
+        </div>
+
+        {/* Footer */}
+        <div className="px-6 py-5 flex items-center justify-between bg-muted dark:bg-black border-t border-border shrink-0">
+          <button
+            type="button"
+            onClick={onClose}
+            disabled={isPushing}
+            className="h-10 px-4 rounded-md border border-border bg-transparent text-sm font-medium text-foreground hover:bg-muted transition-colors"
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            onClick={handleSubmit}
+            disabled={!canPush}
+            className={cn(
+              "inline-flex items-center justify-center rounded-md text-sm font-medium h-10 px-4 transition-all duration-200",
+              canPush || isPushing ? "bg-foreground text-background hover:opacity-90" : "bg-muted text-muted-foreground cursor-not-allowed"
+            )}
+          >
+            {isPushing && <Spinner className="mr-2" />}
+            {isPushing ? "Pushing…" : "Push changes"}
+          </button>
+        </div>
+      </DialogContent>
+    </Dialog>
   );
 }
