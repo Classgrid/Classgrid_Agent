@@ -185,7 +185,8 @@ export function ProjectModePage() {
     if (!res.ok) return toast.error(data.error || "Could not create the project");
     setNewName(null);
     setProjects((list) => [data.project, ...(list || [])]);
-    open(data.project); // starts empty; a GitHub repo can be linked later, or the AI can make one
+    setLinking(data.project); // pick a repo, or start empty and make a repo later
+    loadRepos();
   };
 
   const rename = async () => {
@@ -491,7 +492,7 @@ export function ProjectModePage() {
           <div className="w-full max-w-md rounded-xl border border-border bg-background p-5 flex flex-col gap-4" onClick={(e) => e.stopPropagation()}>
             <div>
               <h2 className="text-lg font-semibold">Link a GitHub repo</h2>
-              <p className="text-sm text-muted-foreground">For "{linking.name}". Its code is downloaded each time you open the project.</p>
+              <p className="text-sm text-muted-foreground">For "{linking.name}". Pick a repo, or start empty and make a repo after you write the code.</p>
             </div>
             {githubConnected === false ? (
               <button onClick={() => setHubOpen(true)} className="flex items-center justify-center gap-2 bg-foreground text-background px-4 py-2 rounded-full font-medium text-sm hover:opacity-90">
@@ -512,7 +513,18 @@ export function ProjectModePage() {
                 ))}
               </div>
             )}
-            <button onClick={() => setLinking(null)} className="self-end px-3 py-1.5 rounded-full text-sm hover:bg-secondary">Later</button>
+            <div className="flex items-center justify-between gap-2">
+              {githubConnected ? (
+                <button
+                  onClick={() => { const p = linking; setLinking(null); open(p); }}
+                  className="px-3 py-1.5 rounded-full border border-border text-sm hover:bg-secondary"
+                  title="Open an empty project. Make a GitHub repo for it later (the Agent can make one)."
+                >
+                  Start empty, make a repo later
+                </button>
+              ) : <span />}
+              <button onClick={() => setLinking(null)} className="px-3 py-1.5 rounded-full text-sm hover:bg-secondary">Later</button>
+            </div>
           </div>
         </div>
       )}
