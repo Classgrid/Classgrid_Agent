@@ -6391,7 +6391,7 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
           {!isMobile && open && (
             <motion.aside
               aria-hidden={!open}
-              className="fixed inset-y-0 right-0 z-[120] w-[400px] flex flex-col border-l border-border bg-background shadow-2xl hidden sm:flex"
+              className="fixed inset-y-0 right-0 z-[120] w-[400px] flex flex-col border-l border-border !bg-[#fafafa] dark:!bg-[#000000] hidden sm:flex"
               initial={{ x: "100%" }}
               animate={{ x: 0 }}
               exit={{ x: "100%" }}
