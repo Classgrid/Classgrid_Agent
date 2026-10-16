@@ -3,6 +3,7 @@ import { motion, useReducedMotion } from "framer-motion";
 import { useParams } from "react-router-dom";
 import { ArrowLeft, FolderGit2, Github, Pencil, Plus, Trash2 } from "lucide-react";
 import { Spinner } from "@/components/marketing_ui/spinner";
+import { Skeleton } from "@/components/marketing_ui/skeleton";
 import { toast } from "sonner";
 import { AlertTriangle } from "lucide-react";
 import { AskAiPanel } from "@/components/ai";
@@ -389,7 +390,16 @@ export function ProjectModePage() {
             </div>
 
             {projects === null ? (
-              <div className="flex justify-center py-16"><Spinner className="size-5 text-muted-foreground" /></div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                {[0, 1, 2].map((i) => (
+                  <div key={i} className="rounded-xl border border-border bg-background p-4 flex flex-col gap-2 min-h-[140px]">
+                    <div className="flex items-center gap-2"><Skeleton className="size-5 rounded" /><Skeleton className="h-4 w-32" /></div>
+                    <Skeleton className="h-3 w-40" />
+                    <Skeleton className="h-3 w-28" />
+                    <Skeleton className="mt-auto h-8 w-20 rounded-full" />
+                  </div>
+                ))}
+              </div>
             ) : (
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
                 {(newName !== null || projects.length === 0) && (

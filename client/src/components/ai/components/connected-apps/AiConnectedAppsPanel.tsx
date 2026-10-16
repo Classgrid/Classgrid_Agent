@@ -3,7 +3,7 @@ import React, { useEffect, useState } from "react";
 import { AlertTriangle, KeyRound, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/marketing_ui/button";
-import { Spinner } from "@/components/ui/spinner";
+import { Skeleton } from "@/components/marketing_ui/skeleton";
 import { DangerConfirmDialog } from "@/components/marketing_ui/danger-confirm-dialog";
 import { fetchWithRescue } from "@/lib/rescue";
 
@@ -102,8 +102,16 @@ export function AiConnectedAppsPanel({ backendUrl }: { backendUrl: string }) {
 
       <div className="flex-1 overflow-y-auto custom-scrollbar">
         {loading ? (
-          <div className="flex items-center justify-center h-40">
-            <Spinner className="w-6 h-6" />
+          <div className="space-y-3 max-w-2xl">
+            {[0, 1].map((i) => (
+              <div key={i} className="bg-card border border-border rounded-xl p-4 flex items-start gap-3">
+                <Skeleton className="w-9 h-9 shrink-0 rounded-lg" />
+                <div className="flex-1 space-y-2">
+                  <Skeleton className="h-4 w-40" />
+                  <Skeleton className="h-3 w-64" />
+                </div>
+              </div>
+            ))}
           </div>
         ) : loadError ? (
           <div className="flex flex-col items-center justify-center gap-3 h-40 border border-border rounded-xl text-center px-4">
