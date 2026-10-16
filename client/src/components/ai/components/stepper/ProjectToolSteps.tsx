@@ -86,7 +86,7 @@ export function ProjectEditStep({ step }: { step: Step }) {
   return (
     <div className="flex flex-col">
       <Row onClick={loading ? undefined : () => setOpen(!open)} open={open}>
-        <span className="shrink-0">{loading ? 'Editing' : failed ? 'Could not edit' : step.tool === 'write_project_file' && !step.args?.overwrite ? 'Created' : 'Edited'}</span>
+        <span className="shrink-0">{loading ? 'Editing' : failed ? 'Could not edit' : step.tool === 'write_project_file' ? 'Created' : 'Edited'}</span>
         <FileBadge path={path} />
         <FileLink path={path} find={edits[0]?.new_text?.split("\n").find((l) => l.trim()) || undefined} />
         {!failed && <span className="shrink-0 text-xs text-green-600 dark:text-green-500">+{added}</span>}

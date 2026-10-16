@@ -164,15 +164,14 @@ export const projectTools = {
     return stdout.trim() || "No matches.";
   }),
 
-  write_project_file: (sessionId, { path: file, content = "", overwrite = false }) => withProject(sessionId, async (project, ssh) => {
+  // New files only. A file that already exists is always changed with edit_project_file, never replaced whole.
+  write_project_file: (sessionId, { path: file, content = "" }) => withProject(sessionId, async (project, ssh) => {
     const { full, rel } = resolveInProject(project, file);
     const { stdout: exists } = await ssh.execCommand(`[ -e ${q(full)} ] && echo yes`);
-    if (exists.trim() && !overwrite) return `Error: ${rel} already exists. Set overwrite to true to replace it.`;
-    const before = exists.trim() ? await readText(ssh, full) : null;
+    if (exists.trim()) return `Error: ${rel} already exists, so it was not changed. Change existing files with edit_project_file.`;
     await writeText(ssh, full, String(content));
     const total = String(content).split("\n").length;
-    const { added, removed } = before !== null ? lineChange(before, String(content)) : { added: total, removed: 0 };
-    return `${before !== null ? "Replaced" : "Created"} ${rel} (${total} lines, +${added} -${removed}).${await problemsAfterWrite(ssh, project, full)}`;
+    return `Created ${rel} (${total} lines, +${total} -0).${await problemsAfterWrite(ssh, project, full)}`;
   }),
 
   // One or more edits in one file. Each edit replaces old_text (which must be found exactly, once unless

@@ -370,13 +370,12 @@ export const getMcpTools = () => [
   },
   {
     name: 'write_project_file',
-    description: 'Create a file in the open Project Mode project, or replace a whole file (overwrite). Folders are created as needed. The user sees it in the code editor right away.',
+    description: 'Create a new file in the open Project Mode project. Folders are created as needed. The user sees it in the code editor right away. Only for files that do not exist yet: an existing file is changed with edit_project_file and is never replaced.',
     inputSchema: {
       type: 'object',
       properties: {
         path: { type: 'string', description: 'File inside the project, relative (e.g. "src/utils/date.ts") or as /data/... .' },
-        content: { type: 'string', description: 'The full file content.' },
-        overwrite: { type: 'boolean', description: 'Replace the file if it already exists.' }
+        content: { type: 'string', description: 'The full file content.' }
       },
       required: ['path', 'content']
     }
