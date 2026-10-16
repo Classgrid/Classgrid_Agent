@@ -4408,7 +4408,7 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
                           className={cn(
                             "relative min-w-0 transition-all duration-700 msg-target-glow scroll-mt-12",
                             isUser
-                              ? "group rounded-[16px] px-[14px] py-[6px] bg-[#f1f1ef] dark:bg-[#2C2C2C]"
+                              ? "group rounded-[16px] px-[14px] py-[6px] bg-[#f1f1ef] dark:bg-[#2C2C2C] max-w-full"
                               : "w-full max-w-full bg-transparent text-foreground"
                           )}
                         >
@@ -4455,9 +4455,9 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
                                       const quotedText = replyMatch[1].replace(/\n>\s/g, '\n').trim();
                                       const userReply = replyMatch[2].trim();
                                       return (
-                                        <div className="flex flex-col gap-2 w-full text-left">
+                                        <div className="flex flex-col gap-2 w-full min-w-0 max-w-full text-left">
                                           <div 
-                                            className="flex flex-col overflow-hidden border-l-2 border-foreground/30 pl-2 bg-black/5 dark:bg-white/5 py-1 pr-3 rounded-r-lg cursor-pointer hover:bg-black/10 dark:hover:bg-white/10 transition-colors"
+                                            className="flex flex-col min-w-0 max-w-full overflow-hidden border-l-2 border-foreground/30 pl-2 bg-black/5 dark:bg-white/5 py-1 pr-3 rounded-r-lg cursor-pointer hover:bg-black/10 dark:hover:bg-white/10 transition-colors"
                                             onClick={(e) => {
                                               e.preventDefault();
                                               e.stopPropagation();
@@ -4477,7 +4477,7 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
                                             }}
                                           >
                                             <span className="font-semibold text-[11px] text-foreground mb-0.5 uppercase tracking-wider pointer-events-none">Replied to AI</span>
-                                            <span className="text-muted-foreground truncate whitespace-nowrap text-[13px] pointer-events-none">
+                                            <span className="block min-w-0 max-w-full text-muted-foreground truncate whitespace-nowrap text-[13px] pointer-events-none">
                                               {stripMarkdownForPreview(quotedText).substring(0, 100)}
                                               {stripMarkdownForPreview(quotedText).length > 100 ? "..." : ""}
                                             </span>
