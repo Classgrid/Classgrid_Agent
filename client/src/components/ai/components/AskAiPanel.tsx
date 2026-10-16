@@ -181,6 +181,7 @@ import { KnowledgeBaseSearchView } from "./stepper/KnowledgeBaseSearchView";
 import { CdnUploadView } from "./stepper/CdnUploadView";
 import { EmailSentView } from "./stepper/EmailSentView";
 import { SimpleLogStepView } from "./stepper/SimpleLogStepView";
+import { ProjectEditStep, ProjectExploreGroup, ProjectPushStep, PROJECT_EDIT_TOOLS, PROJECT_EXPLORE_TOOLS } from "./stepper/ProjectToolSteps";
 import { CombinedReasoningBlock } from "./stepper/CombinedReasoningBlock";
 import { AiFeedbackModal } from "./AiFeedbackModal";
 import { ChatEndedCard } from "./ChatEndedCard";
@@ -4544,7 +4545,17 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
                                       const elements: React.ReactNode[] = [];
                                       let thoughtGroup: any[] = [];
 
+                                      // Project file reads/searches in a row show as one "Exploring 2 files, 1 search" group
+                                      let exploreGroup: any[] = [];
+                                      const flushExplore = () => {
+                                        if (exploreGroup.length > 0) {
+                                          elements.push(<ProjectExploreGroup key={`explore-${exploreGroup[0].id}`} steps={exploreGroup} />);
+                                          exploreGroup = [];
+                                        }
+                                      };
+
                                       const flushThoughts = () => {
+                                        flushExplore();
                                         if (thoughtGroup.length > 0) {
                                           if (thoughtGroup.length === 1) {
                                             const step = thoughtGroup[0];
@@ -4578,7 +4589,21 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
                                         if (step.type === 'thought') {
                                           thoughtGroup.push(step);
                                         } else if (step.type === 'tool') {
+                                          if (PROJECT_EXPLORE_TOOLS.has(step.tool)) {
+                                            if (thoughtGroup.length > 0) flushThoughts();
+                                            exploreGroup.push(step);
+                                            return;
+                                          }
                                           flushThoughts();
+
+                                          if (PROJECT_EDIT_TOOLS.has(step.tool)) {
+                                            elements.push(<ProjectEditStep key={step.id} step={step} />);
+                                            return;
+                                          }
+                                          if (step.tool === 'push_project_to_github') {
+                                            elements.push(<ProjectPushStep key={step.id} step={step} />);
+                                            return;
+                                          }
 
                                           // Render specific tool views
                                           if (step.tool === 'run_code' || step.tool === 'execute_terminal_command') {
