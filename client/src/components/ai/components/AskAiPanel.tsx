@@ -2262,6 +2262,18 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
   const sessionId = routeSessionId || localSessionId;
   const setSessionId = setLocalSessionId; // Keep existing setSessionId calls pointing to local state for backward compatibility
 
+  // Project mode: a chat started here gets its id in the address, so the code editor next to it opens this chat's
+  // sandbox folder. The chat is already on screen, so the route change must not reload it.
+  const urlSyncedSessionRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (variant !== "overlay" || !localSessionId || routeSessionId) return;
+    const parts = window.location.pathname.split("/");
+    if (parts[parts.length - 1] !== "project") return;
+    urlSyncedSessionRef.current = localSessionId;
+    window.history.pushState(null, "", `${window.location.pathname}/${localSessionId}`);
+    window.dispatchEvent(new PopStateEvent("popstate"));
+  }, [localSessionId, routeSessionId, variant]);
+
   const [isIncognito, setIsIncognito] = useState(false);
   const [copiedAll, setCopiedAll] = useState(false);
   const [lastSentDocsPath, setLastSentDocsPath] = useState<string | null>(null);
@@ -2747,6 +2759,7 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
   const [routeLoadAttempt, setRouteLoadAttempt] = useState(0);
   useEffect(() => {
     if (!routeSessionId || routeSessionId === "schedule" || routeSessionId === "library") return;
+    if (urlSyncedSessionRef.current === routeSessionId) { urlSyncedSessionRef.current = null; return; }
 
     // Each load gets its own abort controller: opening another chat (or leaving) cancels this one,
     // so a late reply can never overwrite the chat that is open now.
