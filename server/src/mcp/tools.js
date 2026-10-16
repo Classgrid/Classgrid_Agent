@@ -280,7 +280,7 @@ export const getMcpTools = () => [
   */
   {
     name: 'run_code',
-    description: 'Execute Python or JavaScript code securely in the AWS EC2 Docker Sandbox. Use this for calculations, data analysis, or executing scripts. CRITICAL: DO NOT use this tool to generate PDFs (no ReportLab). ALWAYS use the native generate_pdf tool instead.',
+    description: 'Execute Python or JavaScript code securely in the AWS EC2 Docker Sandbox. Use this for calculations, data analysis, or executing scripts. CRITICAL: DO NOT use this tool to generate PDFs (no ReportLab). ALWAYS use the native generate_pdf tool instead. Files are in /data (this chat\x27s folder, also open in the user\x27s code editor in Project Mode); /data/scratch is for test and trial files and is cleaned automatically; /data/project holds the code of a GitHub project the user opened.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -305,7 +305,7 @@ export const getMcpTools = () => [
 
   {
     name: 'execute_terminal_command',
-    description: 'Executes a native bash/terminal command directly on the host computer. You can use this to run curl, tesseract, Python, or system utilities.',
+    description: 'Executes a native bash/terminal command directly on the host computer. You can use this to run curl, tesseract, Python, or system utilities. Files are in /data (this chat\x27s folder, also open in the user\x27s code editor in Project Mode); /data/scratch is for test and trial files and is cleaned automatically; /data/project holds the code of a GitHub project the user opened.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -3811,7 +3811,7 @@ export const handleToolCall = async (name, args, context = {}) => {
         // We use -v to mount a shared /data folder specific to this chat session!
         const scriptPath = `/home/ubuntu/sandbox_data/${sessionId}/${SANDBOX_RUNNER_PREFIX}_terminal.sh`;
 
-        const writeCommand = `mkdir -p /home/ubuntu/sandbox_data/${sessionId} && cat << 'EOF_SCRIPT' > ${scriptPath}\n${command}\nEOF_SCRIPT`;
+        const writeCommand = `mkdir -p /home/ubuntu/sandbox_data/${sessionId}/scratch /home/ubuntu/sandbox_data/${sessionId}/project && cat << 'EOF_SCRIPT' > ${scriptPath}\n${command}\nEOF_SCRIPT`;
         await ssh.execCommand(writeCommand);
 
         // Only the allowlisted keys go into the sandbox (SANDBOX_ENV_ALLOWLIST), never the whole server env
@@ -3906,7 +3906,7 @@ export const handleToolCall = async (name, args, context = {}) => {
         const scriptPath = `/home/ubuntu/sandbox_data/${sessionId}/${SANDBOX_RUNNER_PREFIX}.${ext}`;
 
         // We use EOF heredoc to safely write the script without quote escaping issues
-        const writeCommand = `mkdir -p /home/ubuntu/sandbox_data/${sessionId} && cat << 'EOF_SCRIPT' > ${scriptPath}\n${finalCode}\nEOF_SCRIPT`;
+        const writeCommand = `mkdir -p /home/ubuntu/sandbox_data/${sessionId}/scratch /home/ubuntu/sandbox_data/${sessionId}/project && cat << 'EOF_SCRIPT' > ${scriptPath}\n${finalCode}\nEOF_SCRIPT`;
         await ssh.execCommand(writeCommand);
 
         // Only the allowlisted keys go into the sandbox (SANDBOX_ENV_ALLOWLIST), never the whole server env
