@@ -97,6 +97,12 @@ export const TOOL_GROUPS = [
         pattern: /\b(run|execute|python|code|script|program|javascript|node(js)?|bash|shell|sandbox|compile|debug|pandas|numpy|matplotlib|plot|graph|chart|csv|excel|xlsx|spreadsheet|calculat\w*|compute|simulat\w*|website|landing\s*page|html|chala\w*|likh\w*)\b|```|कोड|चलाओ/i,
     },
     {
+        id: "code_project",
+        description: "List, read, search, create and edit files of the Project Mode project open in this chat, and push it to GitHub.",
+        tools: ["list_project_files", "view_project_file", "search_project", "write_project_file", "edit_project_file", "push_project_to_github"],
+        pattern: /\b(project|repo\w*|files?|folders?|edit\w*|lines?|functions?|components?|imports?|push\w*|commits?|git\s*hub|refactor\w*|bug|fix\w*|code)\b/i,
+    },
+    {
         id: "email_messaging",
         description: "Send emails and WhatsApp messages.",
         tools: ["send_email", "send_whatsapp_message"],

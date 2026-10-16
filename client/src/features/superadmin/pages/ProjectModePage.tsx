@@ -148,6 +148,23 @@ export function ProjectModePage() {
     open(data.project);
   };
 
+  const [pushing, setPushing] = useState(false);
+  const push = async () => {
+    if (!openProject) return;
+    const message = window.prompt("What did you change? (commit message)");
+    if (!message?.trim()) return;
+    setPushing(true);
+    try {
+      const { res, data } = await api(`/projects/${openProject.id}/push`, { method: "POST", body: JSON.stringify({ message }) });
+      if (!res.ok) throw new Error(data.error || "Could not push to GitHub");
+      toast.success(data.message || "Pushed to GitHub");
+    } catch (e: any) {
+      toast.error(e?.message || "Could not push to GitHub");
+    } finally {
+      setPushing(false);
+    }
+  };
+
   const showEditor = isSuperAdmin && openProject && (folder || progress);
   const editorLoaded = () => {
     setProgress((p) => p && { ...p, label: "Almost ready", target: 100 });
@@ -164,6 +181,11 @@ export function ProjectModePage() {
             </button>
             <span className="text-sm font-medium truncate">{openProject.name}</span>
             {openProject.repo && <span className="text-xs text-muted-foreground truncate">{openProject.repo}</span>}
+            {openProject.repo && folder && (
+              <button onClick={push} disabled={pushing} className="ml-auto shrink-0 flex items-center gap-2 h-8 px-3 rounded-full border border-border text-sm hover:bg-secondary disabled:opacity-50">
+                {pushing ? <Loader2 className="size-4 animate-spin" /> : <Github className="size-4" />} Push to GitHub
+              </button>
+            )}
           </>
         ) : (
           <span className="text-sm font-medium">Project Mode</span>

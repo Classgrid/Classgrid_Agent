@@ -29,6 +29,7 @@ import { PutObjectCommand } from '@aws-sdk/client-s3';
 import { SESClient, GetSendStatisticsCommand, ListIdentitiesCommand } from '@aws-sdk/client-ses';
 import puppeteer from 'puppeteer';
 import IdeProject from '../models/IdeProject.js';
+import { projectTools } from '../services/ide-project.service.js';
 
 // A chat inside a Project Mode project also gets that project's code, at /data/project and at the same path the
 // user sees in the code editor (/home/workspace/projects/<id>), so paths copied from the editor work as they are.
@@ -318,6 +319,94 @@ export const getMcpTools = () => [
         filePath: { type: 'string', description: 'The file path relative to /data/ (e.g., "index.html", "css/style.css", "deploy.js").' }
       },
       required: ['filePath']
+    }
+  },
+
+  {
+    name: 'list_project_files',
+    description: 'List the files and folders of the Project Mode project open in this chat (the same code the user sees in the code editor). node_modules and .git are left out.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        path: { type: 'string', description: 'Folder inside the project, relative (e.g. "src") or as /data/project/... . Empty = project root.' },
+        depth: { type: 'number', description: 'How many folder levels to show (1-6, default 2).' }
+      }
+    }
+  },
+  {
+    name: 'view_project_file',
+    description: 'Read a file of the open Project Mode project, with line numbers. Can read only a line range.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        path: { type: 'string', description: 'File inside the project, relative (e.g. "src/App.tsx") or as /data/project/... .' },
+        start_line: { type: 'number', description: 'First line to show (1-based). Optional.' },
+        end_line: { type: 'number', description: 'Last line to show. Optional.' }
+      },
+      required: ['path']
+    }
+  },
+  {
+    name: 'search_project',
+    description: 'Search the text of all files in the open Project Mode project (like grep). Returns file:line: text for each match.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        query: { type: 'string', description: 'Text to find (or a regular expression when regex is true).' },
+        path: { type: 'string', description: 'Folder or file inside the project to search in. Empty = whole project.' },
+        regex: { type: 'boolean', description: 'Treat query as a regular expression.' }
+      },
+      required: ['query']
+    }
+  },
+  {
+    name: 'write_project_file',
+    description: 'Create a file in the open Project Mode project, or replace a whole file (overwrite). Folders are created as needed. The user sees it in the code editor right away.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        path: { type: 'string', description: 'File inside the project, relative (e.g. "src/utils/date.ts") or as /data/project/... .' },
+        content: { type: 'string', description: 'The full file content.' },
+        overwrite: { type: 'boolean', description: 'Replace the file if it already exists.' }
+      },
+      required: ['path', 'content']
+    }
+  },
+  {
+    name: 'edit_project_file',
+    description: 'Change parts of a file in the open Project Mode project without rewriting it. Each edit replaces old_text (exact text from the file) with new_text; several edits in different places can be done in one call. start_line and end_line limit where old_text is looked for. Nothing is changed if any edit does not match.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        path: { type: 'string', description: 'File inside the project, relative or as /data/project/... .' },
+        edits: {
+          type: 'array',
+          description: 'The changes, applied in order.',
+          items: {
+            type: 'object',
+            properties: {
+              old_text: { type: 'string', description: 'Exact text in the file to replace (include enough lines to be unique).' },
+              new_text: { type: 'string', description: 'The text that replaces it.' },
+              start_line: { type: 'number', description: 'Optional: first line of the range where old_text is.' },
+              end_line: { type: 'number', description: 'Optional: last line of that range.' },
+              allow_multiple: { type: 'boolean', description: 'Replace every match instead of requiring exactly one.' }
+            },
+            required: ['old_text', 'new_text']
+          }
+        }
+      },
+      required: ['path', 'edits']
+    }
+  },
+  {
+    name: 'push_project_to_github',
+    description: 'Commit all changes in the open Project Mode project and push them to its GitHub repo (current branch), using the user\'s connected GitHub account.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        message: { type: 'string', description: 'Commit message describing the change.' }
+      },
+      required: ['message']
     }
   },
 
@@ -1292,6 +1381,11 @@ const sandboxEnvFlags = (isStaff = false) => [...SANDBOX_ENV_ALLOWLIST, ...(isSt
 const SANDBOX_RUNNER_PREFIX = '.cg_run';
 
 export const handleToolCall = async (name, args, context = {}) => {
+  // Project Mode file tools (the open project of this chat)
+  if (projectTools[name]) {
+    const text = await projectTools[name](context.sessionId || 'default', args || {});
+    return { content: [{ type: 'text', text }] };
+  }
   // Unknown caller falls back to a reserved .invalid address: it must never end in @classgrid.in (staff checks below).
   const { userEmail = 'unknown@unknown.invalid', userRole = '', subdomain = '', sessionId = 'default' } = context;
 

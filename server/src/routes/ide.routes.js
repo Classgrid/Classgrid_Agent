@@ -3,6 +3,7 @@ import { NodeSSH } from "node-ssh";
 import { isAuthenticated, requireRole } from "../middleware/auth.middleware.js";
 import User from "../models/User.js";
 import IdeProject from "../models/IdeProject.js";
+import { pushProject } from "../services/ide-project.service.js";
 import mongoose from "mongoose";
 import connectDB from "../../config/db.js";
 import redis from "../config/redis.js";
@@ -255,6 +256,24 @@ router.post("/projects/:id/open", isAuthenticated, async (req, res) => {
   } catch (e) {
     console.error("[IDE] Open project failed:", e.message);
     res.status(e.status || 500).json({ error: e.status ? e.message : "Could not open this project" });
+  } finally {
+    ssh?.dispose();
+  }
+});
+
+// Push button: commit everything and push to the project's repo with the owner's GitHub key (only for that command)
+router.post("/projects/:id/push", isAuthenticated, async (req, res) => {
+  const project = await ownProject(req, res);
+  if (!project) return;
+  let ssh;
+  try {
+    ssh = await sandboxSsh();
+    const result = await pushProject(project.toObject(), ssh, req.body?.message);
+    const ok = /pushed/i.test(result) && !/failed/i.test(result);
+    res.status(ok ? 200 : 400).json(ok ? { message: result } : { error: result });
+  } catch (e) {
+    console.error("[IDE] Push failed:", e.message);
+    res.status(500).json({ error: "Could not push to GitHub" });
   } finally {
     ssh?.dispose();
   }
