@@ -76,8 +76,10 @@ export function ProjectEditStep({ step }: { step: Step }) {
   const path = step.args?.path || '';
   const loading = step.status === 'loading';
   const edits: { old_text?: string; new_text?: string }[] = step.tool === 'edit_project_file' ? (step.args?.edits || []) : [];
-  const added = step.tool === 'write_project_file' ? lineCount(step.args?.content) : edits.reduce((n, e) => n + lineCount(e.new_text), 0);
-  const removed = edits.reduce((n, e) => n + lineCount(e.old_text), 0);
+  // The real change comes back from the tool ("+208 -0"); until then (or for old chats) it is estimated from the request
+  const real = String(step.result || '').match(/\+(\d+) -(\d+)\)\.?\s*$/);
+  const added = real ? Number(real[1]) : step.tool === 'write_project_file' ? lineCount(step.args?.content) : edits.reduce((n, e) => n + lineCount(e.new_text), 0);
+  const removed = real ? Number(real[2]) : edits.reduce((n, e) => n + lineCount(e.old_text), 0);
   const failed = isError(step);
 
   return (
@@ -86,8 +88,8 @@ export function ProjectEditStep({ step }: { step: Step }) {
         <span className="shrink-0">{loading ? 'Editing' : failed ? 'Could not edit' : step.tool === 'write_project_file' && !step.args?.overwrite ? 'Created' : 'Edited'}</span>
         <FileBadge path={path} />
         <FileLink path={path} find={edits[0]?.new_text?.split("\n").find((l) => l.trim()) || undefined} />
-        <span className="shrink-0 text-xs text-green-600 dark:text-green-500">+{added}</span>
-        <span className="shrink-0 text-xs text-red-600 dark:text-red-500">-{removed}</span>
+        {!failed && <span className="shrink-0 text-xs text-green-600 dark:text-green-500">+{added}</span>}
+        {!failed && <span className="shrink-0 text-xs text-red-600 dark:text-red-500">-{removed}</span>}
         {loading && <Loader2 className="size-3.5 shrink-0 animate-spin" />}
       </Row>
       <ErrorLine step={step} />

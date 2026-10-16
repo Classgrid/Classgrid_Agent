@@ -74,6 +74,21 @@ async function writeText(ssh, full, content) {
   if (res.code) throw new Error(res.stderr || "Could not write the file");
 }
 
+// Real change between two versions of a file: lines added and removed (each line counted as many times as it appears)
+function lineChange(before, after) {
+  const count = new Map();
+  for (const l of before.split("\n")) count.set(l, (count.get(l) || 0) + 1);
+  let added = 0;
+  for (const l of after.split("\n")) {
+    const n = count.get(l) || 0;
+    if (n > 0) count.set(l, n - 1);
+    else added++;
+  }
+  let removed = 0;
+  for (const n of count.values()) removed += n;
+  return { added, removed };
+}
+
 export const projectTools = {
   list_project_files: (sessionId, { path: dir = "", depth = 2 }) => withProject(sessionId, async (project, ssh) => {
     const { full, rel } = resolveInProject(project, dir);
@@ -108,8 +123,11 @@ export const projectTools = {
     const { full, rel } = resolveInProject(project, file);
     const { stdout: exists } = await ssh.execCommand(`[ -e ${q(full)} ] && echo yes`);
     if (exists.trim() && !overwrite) return `Error: ${rel} already exists. Set overwrite to true to replace it.`;
+    const before = exists.trim() ? await readText(ssh, full) : null;
     await writeText(ssh, full, String(content));
-    return `${exists.trim() ? "Replaced" : "Created"} ${rel} (${String(content).split("\n").length} lines).`;
+    const total = String(content).split("\n").length;
+    const { added, removed } = before !== null ? lineChange(before, String(content)) : { added: total, removed: 0 };
+    return `${before !== null ? "Replaced" : "Created"} ${rel} (${total} lines, +${added} -${removed}).`;
   }),
 
   // One or more edits in one file. Each edit replaces old_text (which must be found exactly, once unless
@@ -118,6 +136,7 @@ export const projectTools = {
     const { full, rel } = resolveInProject(project, file);
     if (!Array.isArray(edits) || !edits.length) return "Error: edits is empty";
     let text = await readText(ssh, full);
+    const original = text;
     const done = [];
     for (const [i, e] of edits.entries()) {
       const oldText = String(e?.old_text ?? "");
@@ -140,7 +159,8 @@ export const projectTools = {
       done.push(`edit ${i + 1}: ${count} place${count > 1 ? "s" : ""}`);
     }
     await writeText(ssh, full, text);
-    return `Edited ${rel} (${done.join(", ")}).`;
+    const { added, removed } = lineChange(original, text);
+    return `Edited ${rel} (${done.join(", ")}, +${added} -${removed}).`;
   }),
 
   push_project_to_github: (sessionId, { message }) => withProject(sessionId, (project, ssh) => pushProject(project, ssh, message)),
