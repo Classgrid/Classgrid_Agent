@@ -380,8 +380,23 @@ async function findPlanFile(project, ssh, planTitle) {
 
 export async function revealInEditor(project, ssh, { path: file, startLine, endLine, find, plan, planTitle }) {
   if (plan && !file) file = await findPlanFile(project, ssh, planTitle);
-  const { full, rel } = resolveInProject(project, file);
-  const { stdout: kind } = await ssh.execCommand(`if [ -d ${q(full)} ]; then echo folder; elif [ -f ${q(full)} ]; then echo file; fi`);
+  let { full, rel } = resolveInProject(project, file);
+  let { stdout: kind } = await ssh.execCommand(`if [ -d ${q(full)} ]; then echo folder; elif [ -f ${q(full)} ]; then echo file; fi`);
+  if (!kind.trim()) {
+    // Often only the file name is written (e.g. "ApprovalCard.tsx"): look for it by name in the whole project,
+    // and open the match with the shortest path
+    const name = String(file || "").replace(/\\/g, "/").split("/").filter(Boolean).pop() || "";
+    if (/^[\w.@-]+$/.test(name)) {
+      const root = projectHostDir(project);
+      const { stdout: hits } = await ssh.execCommand(
+        `find ${q(root)} \\( -name node_modules -o -name .git \\) -prune -o -name ${q(name)} -print 2>/dev/null | awk '{ print length, $0 }' | sort -n | head -1 | cut -d' ' -f2-`
+      );
+      if (hits.trim()) {
+        ({ full, rel } = resolveInProject(project, hits.trim().slice(root.length + 1)));
+        ({ stdout: kind } = await ssh.execCommand(`if [ -d ${q(full)} ]; then echo folder; elif [ -f ${q(full)} ]; then echo file; fi`));
+      }
+    }
+  }
   if (!kind.trim()) throw new Error(`${rel} is not in this project`);
   const folder = kind.trim() === "folder";
   const inBox = full.replace(`/home/ubuntu/ide_users/${project.owner}`, "/home/workspace");
