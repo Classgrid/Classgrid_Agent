@@ -3,6 +3,7 @@
 set -e
 U="$1"; [[ "$U" =~ ^[a-f0-9]{24}$ ]] || { echo "bad user" >&2; exit 2; }
 MAX_BOXES=5
+MIN_FREE_MB=900 # a new box needs this much free memory on the server
 N="ide-u-$U"; D="/home/ubuntu/ide_users/$U"
 exec 9>/tmp/ide-user.lock; flock 9
 mkdir -p "$D/projects" "$D/.openvscode-server/data/Machine"
@@ -11,6 +12,9 @@ if [ -z "$(docker ps -q -f name="^$N$")" ]; then
   docker rm -f "$N" >/dev/null 2>&1 || true
   RUNNING=$(docker ps -q -f name="^ide-u-" | wc -l)
   [ "$RUNNING" -lt "$MAX_BOXES" ] || { echo "busy" >&2; exit 3; }
+  # Enough free memory for one more box? Otherwise say busy instead of filling the server until things get killed
+  FREE_MB=$(awk '/^MemAvailable:/ { print int($2 / 1024) }' /proc/meminfo)
+  [ "$FREE_MB" -ge "$MIN_FREE_MB" ] || { echo "busy (only ${FREE_MB} MB free)" >&2; exit 3; }
   PORT=""
   for p in $(seq 41000 41999); do ss -ltn | grep -q ":$p " || { PORT=$p; break; }; done
   # Safe extensions for everyone (the extension store itself is off); each installed once into the user's extensions

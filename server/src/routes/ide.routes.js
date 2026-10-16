@@ -368,7 +368,11 @@ router.post("/projects/:id/open", isAuthenticated, async (req, res) => {
       `cd ${dir} && for f in package.json */package.json; do [ -f "$f" ] && d=$(dirname "$f") && [ ! -d "$d/node_modules" ] && echo "$d"; done`
     );
     const folders = needs.split("\n").map((x) => x.trim()).filter((x) => /^[A-Za-z0-9._-]+$/.test(x)).slice(0, 6);
-    if (folders.length) {
+    // The install box can use up to 1.5 GB: only start it when the server has that much free, so it never
+    // pushes the sandbox over (opening the project again later installs what is missing)
+    const { stdout: freeMb } = await ssh.execCommand(`awk '/^MemAvailable:/ { print int($2 / 1024) }' /proc/meminfo`);
+    if (folders.length && Number(freeMb) < 1700) console.error(`[IDE] Package install skipped for now: only ${freeMb.trim()} MB free`);
+    if (folders.length && Number(freeMb) >= 1700) {
       installing = true;
       const inBox = `/home/workspace/projects/${project._id}`;
       const steps = folders.map((f) => `cd ${inBox}/${f} && npm install --ignore-scripts --no-audit --no-fund >> /home/workspace/.classgrid/npm-install-${project._id}.log 2>&1`).join("; ");
