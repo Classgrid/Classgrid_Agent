@@ -396,7 +396,7 @@ export function AgentNestedMenu({ searchQuery = "" }: { searchQuery?: string }) 
 
   // Extract base path robustly by finding the 'agent' segment
   const pathParts = location.pathname.split('/');
-  const agentIndex = pathParts.indexOf('agent');
+  const agentIndex = pathParts.indexOf('agent') !== -1 ? pathParts.indexOf('agent') : pathParts.indexOf('project');
   const baseAgentPath = agentIndex !== -1
     ? pathParts.slice(0, agentIndex + 1).join('/')
     : location.pathname;
