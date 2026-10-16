@@ -33,6 +33,27 @@ async function api(path: string, init?: RequestInit) {
 // Project mode: shown inside the normal layout (left sidebar). The middle shows the user's projects; an open project
 // shows the code editor (OpenVSCode Server on the sandbox at ide.classgrid.in; each user is let into their own editor
 // box via their Classgrid login). The right side is the AI panel in its overlay layout.
+// Soft Classgrid green and orange smoke that drifts in slowly from the left and right behind the loading bar
+function LoadingSmoke() {
+  const reduce = useReducedMotion();
+  const puff = (color: string, side: "left" | "right", delay: number, duration: number) => (
+    <motion.div
+      aria-hidden
+      className="absolute -bottom-[35%] h-[90%] w-[75%] rounded-full pointer-events-none -z-10 blur-[90px] dark:blur-[110px]"
+      style={{ [side]: "-30%", background: `radial-gradient(closest-side, ${color}, transparent)` }}
+      initial={{ opacity: 0, x: side === "left" ? "-10%" : "10%" }}
+      animate={reduce ? { opacity: 0.75 } : { opacity: 0.75, x: side === "left" ? ["-10%", "18%", "30%"] : ["10%", "-16%", "-28%"], y: ["8%", "-6%", "3%"], scale: [0.95, 1.08, 1] }}
+      transition={{ opacity: { duration: 2.4, delay, ease: "easeOut" }, default: { duration, delay, ease: "easeInOut", repeat: Infinity, repeatType: "reverse" } }}
+    />
+  );
+  return (
+    <>
+      {puff("#34d39988", "left", 0, 14)}
+      {puff("#f9731680", "right", 0.4, 16)}
+    </>
+  );
+}
+
 export function ProjectModePage() {
   const { data: currentUser } = useCurrentUser();
   const isSuperAdmin = !!currentUser; // every logged-in user; each gets their own editor box with only their own projects
@@ -322,7 +343,8 @@ export function ProjectModePage() {
             <iframe key={folder} src={`https://ide.classgrid.in/?folder=${encodeURIComponent(folder)}`} onLoad={editorLoaded} title="Code editor" className="flex-1 w-full border-0 [color-scheme:light] dark:[color-scheme:dark]" allow="clipboard-read; clipboard-write" />
           )}
           {progress && (
-            <div className="cg-smoke !absolute inset-0 flex items-center justify-center !bg-[#fafafa] dark:!bg-[#000000]">
+            <div className="absolute inset-0 isolate overflow-hidden flex items-center justify-center !bg-[#fafafa] dark:!bg-[#000000]">
+              <LoadingSmoke />
               <Progress value={Math.round(progress.value)} className="w-[min(360px,80%)]">
                 <ProgressLabel>{progress.label}</ProgressLabel>
                 <ProgressValue />
