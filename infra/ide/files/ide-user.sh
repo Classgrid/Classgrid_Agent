@@ -13,11 +13,6 @@ if [ -z "$(docker ps -q -f name="^$N$")" ]; then
   [ "$RUNNING" -lt "$MAX_BOXES" ] || { echo "busy" >&2; exit 3; }
   PORT=""
   for p in $(seq 41000 41999); do ss -ltn | grep -q ":$p " || { PORT=$p; break; }; done
-  # Classgrid add-on (opens files from the chat at the right lines); installed into the user's own extensions once
-  BRIDGE=1.0.2
-  if [ ! -d "$D/.openvscode-server/extensions/classgrid.classgrid-bridge-$BRIDGE" ]; then
-    docker run --rm -v "$D:/home/workspace" -v /home/ubuntu/ide_branding/classgrid-bridge.vsix:/tmp/cg.vsix:ro --entrypoint /opt/ide/bin/openvscode-server classgrid-ide       --server-data-dir /home/workspace/.openvscode-server --extensions-dir /home/workspace/.openvscode-server/extensions --install-extension /tmp/cg.vsix --force >/dev/null 2>&1 || true
-  fi
   # Safe extensions for everyone (the extension store itself is off); each installed once into the user's extensions
   for VSIX in /home/ubuntu/ide_branding/extensions/*.vsix; do
     [ -f "$VSIX" ] || continue

@@ -6,6 +6,8 @@ ARG COMMIT
 COPY files/default-dark-modern.json files/default-light-modern.json patch-ide.sh /tmp/cg/
 COPY assets/ /tmp/cg/assets/
 RUN sh /tmp/cg/patch-ide.sh /home/.openvscode-server "$COMMIT"
+# The Classgrid add-on, built in (users can't disable or uninstall it)
+COPY bridge/ /home/.openvscode-server/extensions/classgrid-bridge/
 
 FROM classgrid-ai-sandbox:latest
 USER root

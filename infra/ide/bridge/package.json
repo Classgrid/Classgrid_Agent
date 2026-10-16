@@ -2,7 +2,7 @@
   "name": "classgrid-bridge",
   "displayName": "Classgrid",
   "publisher": "classgrid",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "engines": {
     "vscode": "^1.80.0"
   },
@@ -23,5 +23,7 @@
       "supported": true
     },
     "virtualWorkspaces": true
-  }
+  },
+  "icon": "logo.png",
+  "description": "Connects Classgrid Code to the Classgrid AI: opens files from the chat and shares what you are looking at."
 }

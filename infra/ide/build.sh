@@ -1,6 +1,6 @@
 #!/bin/bash
 # Rebuild Classgrid Code on the sandbox server. Run from a checkout of the repo: infra/ide/build.sh
-# Builds the editor image, the Classgrid add-on and the logos, and copies the setup files to /home/ubuntu/ide_branding.
+# Builds the editor image (with the built-in Classgrid add-on) and the logos, and copies the setup files to /home/ubuntu/ide_branding.
 # Needs: Docker, python3, the AI sandbox image (server/agent-sandbox-env) built as classgrid-ai-sandbox.
 set -e
 cd "$(dirname "$0")"
@@ -22,7 +22,7 @@ svg 1 > assets/code-icon.svg
 # Editor image
 docker build --build-arg COMMIT="$COMMIT" -t classgrid-ide .
 
-# Setup files and the Classgrid add-on (bridge)
+# Setup files
 mkdir -p "$B"
 cp files/Caddyfile files/ide-user.sh files/ide-firewall.sh files/ide-disk-check.sh files/user-machine-settings.json "$B/"
 chmod +x "$B/ide-user.sh" "$B/ide-firewall.sh" "$B/ide-disk-check.sh"
@@ -34,5 +34,4 @@ while read -r EXT; do
   URL=$(curl -s "https://open-vsx.org/api/$EXT/latest" | python3 -c "import sys,json;print(json.load(sys.stdin)['files']['download'])")
   curl -sL -o "$B/extensions/$(echo "$EXT" | tr / .).vsix" "$URL"
 done < files/extensions.txt
-python3 build-bridge-vsix.py bridge "$B/classgrid-bridge.vsix"
 echo "Built Classgrid Code (build $COMMIT). Next steps: README.md"
