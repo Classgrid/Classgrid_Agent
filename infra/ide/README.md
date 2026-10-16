@@ -10,7 +10,7 @@ The backend side lives in `server/src/routes/ide.routes.js`, `server/src/service
 |---|---|
 | `classgrid-ide` image | OpenVSCode Server (pinned version) renamed to "Classgrid Code": Classgrid theme and logo, no VS Code AI chat or account icon, auto-save on. Built on top of the AI sandbox image, so the editor's terminal has the same tools as the AI. |
 | `ide` container | Serves only the editor's program files (no user data) on `127.0.0.1:3000`. |
-| `ide-u-<userId>` containers | One editor box per user, started by `ide-user.sh` when they open a project. Sees only `/home/ubuntu/ide_users/<userId>`. 1.25 GB / 1 CPU, max 5 at once, stopped by the backend after 30 idle minutes. |
+| `ide-u-<userId>` containers | One editor box per user, started by `ide-user.sh` when they open a project. Sees only `/home/ubuntu/ide_users/<userId>`. 1.25 GB / 1 CPU, max 5 at once, stopped by the backend 5 minutes after the editor is closed (unpushed work is backed up to GitHub first, then the code is removed). |
 | `caddy` container | `https://ide.classgrid.in`. Checks the Classgrid login (`/api/ide/check`) and sends each user to their own box. |
 | `ide-net` network + `ide-firewall.sh` | Boxes can't reach each other, cloud metadata, private networks or the host. |
 | Classgrid add-on (`bridge/`) | Built into the image (users can't disable or uninstall it). Opens files from the chat at the right lines; keeps `.classgrid/context.json` (open file, cursor, selection, tabs, errors) for the AI. |
