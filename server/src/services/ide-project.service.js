@@ -89,6 +89,31 @@ function lineChange(before, after) {
   return { added, removed };
 }
 
+// The file's exact text for every place where old_text's lines appear with only spaces at line starts/ends different
+function findLooseLines(text, oldText) {
+  const lines = text.split("\n");
+  const want = oldText.split("\n").map((l) => l.trim());
+  while (want.length && !want[want.length - 1]) want.pop();
+  while (want.length && !want[0]) want.shift();
+  if (!want.length) return [];
+  const found = [];
+  for (let s = 0; s + want.length <= lines.length; s++) {
+    if (want.every((w, j) => lines[s + j].trim() === w)) found.push(lines.slice(s, s + want.length).join("\n"));
+  }
+  return found;
+}
+
+// When old_text isn't in the file: the file's lines that look most like its first line, to copy from
+function closestLines(text, oldText) {
+  const first = oldText.split("\n").map((l) => l.trim()).find(Boolean);
+  if (!first) return "";
+  const words = first.toLowerCase().split(/\W+/).filter((w) => w.length > 2);
+  if (!words.length) return "";
+  const scored = text.split("\n").map((l, i) => ({ n: i + 1, l, score: words.filter((w) => l.toLowerCase().includes(w)).length }))
+    .filter((x) => x.score > 0).sort((a, b) => b.score - a.score).slice(0, 3).sort((a, b) => a.n - b.n);
+  return scored.length ? ` Closest lines in the file: ${scored.map((x) => `${x.n}: ${x.l.trim().slice(0, 160)}`).join(" | ")}` : " The file has no similar line; read it with view_project_file first.";
+}
+
 export const projectTools = {
   list_project_files: (sessionId, { path: dir = "", depth = 2 }) => withProject(sessionId, async (project, ssh) => {
     const { full, rel } = resolveInProject(project, dir);
@@ -132,16 +157,26 @@ export const projectTools = {
 
   // One or more edits in one file. Each edit replaces old_text (which must be found exactly, once unless
   // allow_multiple) with new_text; start_line/end_line, when given, limit where old_text is looked for.
+  // Line endings never matter (the file keeps its own); when the exact text isn't there, the same lines with
+  // different spaces at their start/end are accepted if they appear exactly once.
   edit_project_file: (sessionId, { path: file, edits = [] }) => withProject(sessionId, async (project, ssh) => {
     const { full, rel } = resolveInProject(project, file);
     if (!Array.isArray(edits) || !edits.length) return "Error: edits is empty";
-    let text = await readText(ssh, full);
+    const raw = await readText(ssh, full);
+    const eol = raw.includes("\r\n") ? "\r\n" : "\n";
+    let text = raw.replace(/\r\n/g, "\n");
     const original = text;
     const done = [];
     for (const [i, e] of edits.entries()) {
-      const oldText = String(e?.old_text ?? "");
-      const newText = String(e?.new_text ?? "");
+      let oldText = String(e?.old_text ?? "").replace(/\r\n/g, "\n");
+      const newText = String(e?.new_text ?? "").replace(/\r\n/g, "\n");
       if (!oldText) return `Error in edit ${i + 1}: old_text is empty`;
+      if (!text.includes(oldText)) {
+        const loose = findLooseLines(text, oldText);
+        if (loose.length === 1) oldText = loose[0];
+        else if (loose.length > 1) return `Error in edit ${i + 1}: old_text matches ${loose.length} places (ignoring spaces). Add more surrounding text or a line range. Nothing was changed.`;
+        else return `Error in edit ${i + 1}: old_text was not found${e.start_line || e.end_line ? " in that line range" : ""}. Nothing was changed.${closestLines(text, oldText)}`;
+      }
       let from = 0;
       let to = text.length;
       if (e.start_line || e.end_line) {
@@ -158,7 +193,7 @@ export const projectTools = {
       text = text.slice(0, from) + part.split(oldText).join(newText) + text.slice(to);
       done.push(`edit ${i + 1}: ${count} place${count > 1 ? "s" : ""}`);
     }
-    await writeText(ssh, full, text);
+    await writeText(ssh, full, eol === "\n" ? text : text.replace(/\n/g, eol));
     const { added, removed } = lineChange(original, text);
     return `Edited ${rel} (${done.join(", ")}, +${added} -${removed}).`;
   }),
