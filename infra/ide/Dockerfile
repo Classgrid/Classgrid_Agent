@@ -3,7 +3,7 @@
 FROM gitpod/openvscode-server@sha256:5e7b8750749f282940a799ed59ccd02fac698ef6744f9113ac01c0ef8e76485e AS ide
 USER root
 ARG COMMIT
-COPY files/default-dark-modern.json files/default-light-modern.json patch-ide.sh /tmp/cg/
+COPY files/default-dark-modern.json files/default-light-modern.json patch-ide.sh rm-builtin.js /tmp/cg/
 COPY assets/ /tmp/cg/assets/
 RUN sh /tmp/cg/patch-ide.sh /home/.openvscode-server "$COMMIT"
 # The Classgrid add-on, built in (users can't disable or uninstall it)

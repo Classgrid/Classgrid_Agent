@@ -35,6 +35,18 @@ F=$(grep -l 'extensionsGallery:{serviceUrl:"https://open-vsx.org' -r "$ROOT/out"
 sed -i 's#extensionsGallery:{serviceUrl:"https://open-vsx.org#extensionsGalleryOff:{serviceUrl:"https://open-vsx.org#g' $F
 if grep -q extensionsGallery "$ROOT/product.json" || grep -rq 'extensionsGallery:{serviceUrl' "$ROOT/out"; then echo "PATCH FAILED: extension store still on" >&2; exit 1; fi
 
+# 3b. Nothing from Microsoft, GitHub or Copilot: no "Ask @vscode", no VS Code sign-in / tunnel / chat add-ons
+#     (Classgrid has its own GitHub plugin), no "Do you trust this folder?" popup (each user's box is already walled off)
+perl -0pi -e 's/(title:D\(\d+,"Ask \@vscode"\),category:Ie\.Help,f1:)!0,precondition:C\.equals\("chatSetupHidden",!1\)/$1!1,precondition:C.equals("classgridNever",!0)/' "$W"
+perl -0pi -e 's/(command:\{id:jei\.ID,title:D\(\d+,"Ask \@vscode"\)\},order:7,group:"1_welcome",when:)C\.equals\("chatSetupHidden",!1\)/$1C.equals("classgridNever",!0)/' "$W"
+perl -0pi -e 's/(\[jfe\]:\{type:"boolean",default:)!0/$1!1/' "$W"
+must "$W" 'classgridNever' "Ask @vscode hidden"
+must "$W" '\[jfe\]:{type:"boolean",default:!1' "folder trust popup off"
+rm -rf "$ROOT/extensions/github" "$ROOT/extensions/github-authentication" "$ROOT/extensions/microsoft-authentication" "$ROOT/extensions/tunnel-forwarding" "$ROOT/extensions/mermaid-chat-features"
+node /tmp/cg/rm-builtin.js "$W" github-authentication microsoft-authentication github tunnel-forwarding mermaid-chat-features
+grep -rl "VSCode" "$ROOT/extensions" --include=package.nls.json | xargs -r sed -i "s/VSCode/Classgrid Code/g"
+sed -i "s/Grunt support for VS Code/Grunt support/" "$ROOT/extensions/grunt/package.json"
+
 # 4. Classgrid theme as the default light/dark theme, Classgrid logos
 cp /tmp/cg/default-dark-modern.json "$ROOT/extensions/theme-defaults/themes/dark_modern.json"
 cp /tmp/cg/default-light-modern.json "$ROOT/extensions/theme-defaults/themes/light_modern.json"
