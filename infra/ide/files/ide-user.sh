@@ -18,6 +18,14 @@ if [ -z "$(docker ps -q -f name="^$N$")" ]; then
   if [ ! -d "$D/.openvscode-server/extensions/classgrid.classgrid-bridge-$BRIDGE" ]; then
     docker run --rm -v "$D:/home/workspace" -v /home/ubuntu/ide_branding/classgrid-bridge.vsix:/tmp/cg.vsix:ro --entrypoint /opt/ide/bin/openvscode-server classgrid-ide       --server-data-dir /home/workspace/.openvscode-server --extensions-dir /home/workspace/.openvscode-server/extensions --install-extension /tmp/cg.vsix --force >/dev/null 2>&1 || true
   fi
+  # Safe extensions for everyone (the extension store itself is off); each installed once into the user's extensions
+  for VSIX in /home/ubuntu/ide_branding/extensions/*.vsix; do
+    [ -f "$VSIX" ] || continue
+    MARK="$D/.openvscode-server/extensions/.installed-$(basename "$VSIX")"
+    if [ ! -f "$MARK" ]; then
+      docker run --rm -v "$D:/home/workspace" -v "$VSIX:/tmp/ext.vsix:ro" --entrypoint /opt/ide/bin/openvscode-server classgrid-ide         --server-data-dir /home/workspace/.openvscode-server --extensions-dir /home/workspace/.openvscode-server/extensions --install-extension /tmp/ext.vsix --force >/dev/null 2>&1 && touch "$MARK" || true
+    fi
+  done
   docker run -d --name "$N" --network ide-net --memory 768m --memory-swap 768m --cpus 1 --pids-limit 512 -e npm_config_cache=/home/workspace/.cache/npm -e PIP_CACHE_DIR=/home/workspace/.cache/pip \
     -p "127.0.0.1:$PORT:3000" -v "$D:/home/workspace" classgrid-ide >/dev/null
   for i in $(seq 1 30); do curl -s -o /dev/null "http://127.0.0.1:$PORT/" && break; sleep 0.5; done

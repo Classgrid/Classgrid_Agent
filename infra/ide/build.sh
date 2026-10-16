@@ -24,7 +24,15 @@ docker build --build-arg COMMIT="$COMMIT" -t classgrid-ide .
 
 # Setup files and the Classgrid add-on (bridge)
 mkdir -p "$B"
-cp files/Caddyfile files/ide-user.sh files/ide-firewall.sh files/user-machine-settings.json "$B/"
-chmod +x "$B/ide-user.sh" "$B/ide-firewall.sh"
+cp files/Caddyfile files/ide-user.sh files/ide-firewall.sh files/ide-disk-check.sh files/user-machine-settings.json "$B/"
+chmod +x "$B/ide-user.sh" "$B/ide-firewall.sh" "$B/ide-disk-check.sh"
+
+# Safe extensions every box gets (the extension store is off), latest versions from Open VSX
+mkdir -p "$B/extensions"
+while read -r EXT; do
+  [ -n "$EXT" ] || continue
+  URL=$(curl -s "https://open-vsx.org/api/$EXT/latest" | python3 -c "import sys,json;print(json.load(sys.stdin)['files']['download'])")
+  curl -sL -o "$B/extensions/$(echo "$EXT" | tr / .).vsix" "$URL"
+done < files/extensions.txt
 python3 build-bridge-vsix.py bridge "$B/classgrid-bridge.vsix"
 echo "Built Classgrid Code (build $COMMIT). Next steps: README.md"

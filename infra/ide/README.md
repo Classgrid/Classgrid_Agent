@@ -14,7 +14,8 @@ The backend side lives in `server/src/routes/ide.routes.js`, `server/src/service
 | `caddy` container | `https://ide.classgrid.in`. Checks the Classgrid login (`/api/ide/check`) and sends each user to their own box. |
 | `ide-net` network + `ide-firewall.sh` | Boxes can't reach each other, cloud metadata, private networks or the host. |
 | Classgrid add-on (`bridge/`) | Installed into each box. Opens files from the chat at the right lines; keeps `.classgrid/context.json` (open file, cursor, selection, tabs, errors) for the AI. |
-| Cron jobs | Clean chat `scratch/` folders (1 day) and package caches (30 days); re-apply the firewall after a restart. |
+| Extensions | No extension store and no Extensions icon. Every box gets the safe ones in `files/extensions.txt` (Prettier, ESLint), installed from `/home/ubuntu/ide_branding/extensions`. |
+| Cron jobs | Clean chat `scratch/` folders (1 day) and package caches (30 days); hourly disk check per user (`ide-disk-check.sh`, 3 GB limit, report in `ide_branding/disk-report.txt`); re-apply the firewall after a restart. |
 
 Folders on the sandbox: `/home/ubuntu/ide_branding` (setup files), `/home/ubuntu/ide_users/<userId>` (projects,
 editor settings, package cache), `/home/ubuntu/sandbox_data/<chatId>` (the AI's chat folders).

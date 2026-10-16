@@ -24,7 +24,13 @@ must "$W" 'registerViews(\[\],cse)' "chat panel removed"
 must "$W" 'ACCOUNTS_VISIBILITY_PREFERENCE_KEY,0,!1)' "account icon hidden"
 must "$W" 'default:bu.AFTER_DELAY' "auto-save on"
 
-# 3. Classgrid theme as the default light/dark theme, Classgrid logos
+# 3. No extension store (disk, RAM and safety; our own safe extensions are installed per box by ide-user.sh),
+#    and no Extensions icon in the left bar
+node -e 'const fs=require("fs");const f=process.argv[1];const p=JSON.parse(fs.readFileSync(f,"utf8"));for(const k of ["extensionsGallery","extensionRecommendations","keymapExtensionTips","languageExtensionTips","configBasedExtensionTips"])delete p[k];fs.writeFileSync(f,JSON.stringify(p,null,"\t"))' "$ROOT/product.json"
+printf '\n/* classgrid-no-extensions: no extension store in Classgrid Code */\n.monaco-workbench .activitybar li.action-item:has(.codicon-extensions-view-icon){display:none!important}\n' >> "$ROOT/out/vs/code/browser/workbench/workbench.css"
+if grep -q extensionsGallery "$ROOT/product.json"; then echo "PATCH FAILED: extension store still on" >&2; exit 1; fi
+
+# 4. Classgrid theme as the default light/dark theme, Classgrid logos
 cp /tmp/cg/default-dark-modern.json "$ROOT/extensions/theme-defaults/themes/dark_modern.json"
 cp /tmp/cg/default-light-modern.json "$ROOT/extensions/theme-defaults/themes/light_modern.json"
 cp "$A/favicon.ico" "$ROOT/resources/server/favicon.ico"
@@ -33,13 +39,13 @@ cp "$A/code-512.png" "$ROOT/resources/server/code-512.png"
 for v in dark light hcDark hcLight; do cp "$A/letterpress.svg" "$ROOT/out/media/letterpress-$v.svg"; done
 cp "$A/code-icon.svg" "$ROOT/out/media/code-icon.svg"
 
-# 4. Our name instead of Microsoft's (trademark). The MIT license notice files stay as they are.
+# 5. Our name instead of Microsoft's (trademark). The MIT license notice files stay as they are.
 F=$(grep -rl "VS Code\|Visual Studio Code" "$ROOT/out/nls.messages.js" "$ROOT/out/nls.messages.json" "$W" $(grep -rl "VS Code\|Visual Studio Code" "$ROOT/extensions" --include=package.nls.json))
 sed -i -e "s/Visual Studio Code/Classgrid Code/g" -e "s/VS Code/Classgrid Code/g" $F
 F=$(grep -rl "OpenVSCode Server\|OpenVSC&ode Server" "$ROOT/out" "$ROOT/product.json" "$ROOT/package.json")
 sed -i -e "s/OpenVSC&ode Server/Classgrid C\&ode/g" -e "s/OpenVSCode Server/Classgrid Code/g" $F
 
-# 5. New build id, so browsers load our changed files instead of old saved copies
+# 6. New build id, so browsers load our changed files instead of old saved copies
 grep -rl "$OLD_COMMIT" "$ROOT" --include=*.js --include=*.json --include=*.html | xargs sed -i "s/$OLD_COMMIT/$COMMIT/g"
 must "$ROOT/product.json" "\"commit\": \"$COMMIT\"" "build id"
 echo "Classgrid Code patched (build $COMMIT)"
