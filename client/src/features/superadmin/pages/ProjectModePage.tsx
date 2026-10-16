@@ -92,6 +92,7 @@ export function ProjectModePage() {
       if (!res.ok) throw new Error(data.error || "Could not open this project");
       setFolder(data.folder);
       setProgress({ label: "Starting the editor", value: 70, target: 95 });
+      if (data.installing) toast("Installing the project's packages in the background. Red marks in the editor go away when it finishes (about a minute the first time).");
     } catch (e: any) {
       setProgress(null);
       rememberOpen(wasOpen);

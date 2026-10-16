@@ -250,9 +250,19 @@ router.post("/projects/:id/open", isAuthenticated, async (req, res) => {
       await ssh.execCommand(`mkdir -p ${dir}`);
     }
     await ensureBox(ssh, String(req.user._id));
+    // A fresh download has no packages, so the editor's type checker marks every file red. Install them in the
+    // background inside the user's own editor box (with their package cache); the red marks go when it finishes.
+    let installing = false;
+    const { stdout: needsInstall } = await ssh.execCommand(`[ -f ${dir}/package.json ] && [ ! -d ${dir}/node_modules ] && echo yes`);
+    if (needsInstall.trim()) {
+      installing = true;
+      await ssh.execCommand(
+        `docker exec -d ide-u-${req.user._id} sh -c 'mkdir -p /home/workspace/.classgrid && cd /home/workspace/projects/${project._id} && npm install --ignore-scripts --no-audit --no-fund > /home/workspace/.classgrid/npm-install-${project._id}.log 2>&1'`
+      );
+    }
     project.lastOpenedAt = new Date();
     await project.save();
-    res.json({ project: projectJson(project), folder: `/home/workspace/projects/${project._id}` });
+    res.json({ project: projectJson(project), folder: `/home/workspace/projects/${project._id}`, installing });
   } catch (e) {
     console.error("[IDE] Open project failed:", e.message);
     res.status(e.status || 500).json({ error: e.status ? e.message : "Could not open this project" });
