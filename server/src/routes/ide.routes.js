@@ -333,13 +333,22 @@ router.post("/projects/:id/open", isAuthenticated, async (req, res) => {
     }
     await ensureBox(ssh, String(req.user._id));
     // A fresh download has no packages, so the editor's type checker marks every file red. Install them in the
-    // background inside the user's own editor box (with their package cache); the red marks go when it finishes.
+    // background for the project folder and each first-level folder with its own package.json (client/, server/...),
+    // with the user's package cache. It runs in a separate short-lived box with its own memory: inside the editor
+    // box a big install is killed for lack of memory. Same walls as the editor box (only this user's folder).
     let installing = false;
-    const { stdout: needsInstall } = await ssh.execCommand(`[ -f ${dir}/package.json ] && [ ! -d ${dir}/node_modules ] && echo yes`);
-    if (needsInstall.trim()) {
+    const { stdout: needs } = await ssh.execCommand(
+      `cd ${dir} && for f in package.json */package.json; do [ -f "$f" ] && d=$(dirname "$f") && [ ! -d "$d/node_modules" ] && echo "$d"; done`
+    );
+    const folders = needs.split("\n").map((x) => x.trim()).filter((x) => /^[A-Za-z0-9._-]+$/.test(x)).slice(0, 6);
+    if (folders.length) {
       installing = true;
+      const inBox = `/home/workspace/projects/${project._id}`;
+      const steps = folders.map((f) => `cd ${inBox}/${f} && npm install --ignore-scripts --no-audit --no-fund >> /home/workspace/.classgrid/npm-install-${project._id}.log 2>&1`).join("; ");
       await ssh.execCommand(
-        `docker exec -d ide-u-${req.user._id} sh -c 'mkdir -p /home/workspace/.classgrid && cd /home/workspace/projects/${project._id} && npm install --ignore-scripts --no-audit --no-fund > /home/workspace/.classgrid/npm-install-${project._id}.log 2>&1'`
+        `docker rm -f ide-npm-${req.user._id} >/dev/null 2>&1; docker run -d --rm --name ide-npm-${req.user._id} --network ide-net --memory 1500m --memory-swap 1500m --cpus 1 --pids-limit 512 ` +
+        `-u 1000:1000 -e HOME=/home/workspace -e npm_config_cache=/home/workspace/.cache/npm -v /home/ubuntu/ide_users/${req.user._id}:/home/workspace ` +
+        `--entrypoint sh classgrid-ide -c ${JSON.stringify(`mkdir -p /home/workspace/.classgrid; ${steps}`)}`
       );
     }
     const backup = project.lastBackup?.branch ? project.lastBackup.branch : null; // shown once
