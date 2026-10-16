@@ -43,7 +43,7 @@
  */
 
 import React, { useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useLocation } from "react-router-dom";
 import { apiClient as api } from "@/lib/apiClient";
 import { toast } from "sonner";
 import { useQueryClient } from "@tanstack/react-query";
@@ -66,6 +66,12 @@ import { SidebarMenu, SidebarMenuItem, SidebarMenuButton, useSidebar } from "@/c
 
 export function SidebarSwitcher({ user }: { user: { role?: string; name?: string; sidebar_name?: string; additional_roles?: string[]; organization?: { sidebar_name?: string; name?: string; logo_url?: string; sidebar_logo_url?: string }, metadata?: Record<string, any> } | null }) {
   const { isMobile } = useSidebar();
+  // Modes: Agent (the chat) and Project. Super admins stay under /superadmin, everyone else under /c.
+  const { pathname } = useLocation();
+  const isSuperAdminArea = pathname.startsWith("/superadmin");
+  const agentPath = isSuperAdminArea ? "/superadmin/agent" : "/c/agent";
+  const projectPath = isSuperAdminArea ? "/superadmin/project" : "/c/project";
+  const currentMode = pathname.endsWith("/project") ? "project" : "agent";
   const queryClient = useQueryClient();
   const [isSwitching, setIsSwitching] = useState(false);
 
@@ -156,24 +162,26 @@ export function SidebarSwitcher({ user }: { user: { role?: string; name?: string
 
             <DropdownMenuSeparator className="mx-1 my-1" />
             <DropdownMenuLabel className="text-xs text-muted-foreground font-semibold uppercase tracking-wider py-2">
-              Switch Roles
+              Switch Mode
             </DropdownMenuLabel>
-            {allRoles.map((role) => (
-              <DropdownMenuItem 
-                key={role} 
-                className="gap-3 p-2 cursor-pointer rounded-md"
-                onClick={() => handleSwitchRole(role)}
-                disabled={isSwitching}
+            {[
+              { key: "agent", label: "Agent", to: agentPath },
+              { key: "project", label: "Project", to: projectPath },
+            ].map((mode) => (
+              <DropdownMenuItem
+                key={mode.key}
+                render={<Link to={mode.to} className="flex items-center gap-3 p-2 w-full cursor-pointer rounded-md" />}
+                className="p-0"
               >
                 <div className="flex size-5 items-center justify-center shrink-0">
-                  {role === currentRole ? (
+                  {mode.key === currentMode ? (
                     <Check className="size-4 text-blue-500 font-bold" />
                   ) : (
                     <div className="size-4" />
                   )}
                 </div>
-                <span className={`text-sm ${role === currentRole ? "font-medium text-foreground" : "text-muted-foreground"}`}>
-                  {formatRole(role)}
+                <span className={`text-sm ${mode.key === currentMode ? "font-medium text-foreground" : "text-muted-foreground"}`}>
+                  {mode.label}
                 </span>
               </DropdownMenuItem>
             ))}
@@ -181,14 +189,6 @@ export function SidebarSwitcher({ user }: { user: { role?: string; name?: string
             {currentRole === "super_admin" && (
               <>
                 <DropdownMenuSeparator className="mx-1 my-1" />
-                <DropdownMenuItem render={
-                  <Link to="/superadmin/project" className="flex items-center gap-3 p-2 w-full cursor-pointer rounded-md text-sm text-foreground" />
-                } className="p-0">
-                    <div className="flex size-5 items-center justify-center shrink-0">
-                      <Code2 className="size-4" />
-                    </div>
-                    Project Mode
-                </DropdownMenuItem>
                 <DropdownMenuItem render={
                   <Link to="/superadmin/onboard" className="flex items-center gap-2 p-2 w-full cursor-pointer rounded-md text-sm text-blue-500 hover:text-blue-600 font-medium" />
                 } className="p-0">

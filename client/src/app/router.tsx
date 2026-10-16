@@ -302,6 +302,7 @@ export function AppRouter() {
         <Route path="/oauth/authorize" element={<OAuthConsentPage />} />
 
         <Route path="/superadmin/project" element={<ProjectModePage />} />
+        <Route path="/c/project" element={<ProjectModePage />} />
 
         {/* NEW SUPER ADMIN SHELL */}
         <Route element={<SuperAdminLayout />}>

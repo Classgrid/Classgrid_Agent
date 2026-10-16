@@ -1,16 +1,18 @@
-import { Link } from "react-router-dom";
+import { Link, useLocation } from "react-router-dom";
 import { ArrowLeft } from "lucide-react";
 import { AskAiPanel } from "@/components/ai";
 
 // Project mode: full screen. Left side is kept empty for now (the code editor will go here),
 // right side is the AI panel in its overlay layout.
 export function ProjectModePage() {
+  const { pathname } = useLocation();
+  const agentPath = pathname.startsWith("/superadmin") ? "/superadmin/agent" : "/c/agent";
   return (
     <div className="fixed inset-0 bg-background text-foreground">
       <div className="h-full sm:pr-[400px] flex flex-col">
         <div className="h-12 shrink-0 flex items-center px-4 border-b border-border">
           <Link
-            to="/superadmin/agent"
+            to={agentPath}
             className="inline-flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground transition-colors"
           >
             <ArrowLeft className="size-4" />
