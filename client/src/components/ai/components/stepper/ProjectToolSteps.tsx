@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { ChevronDown, ChevronRight, Folder, FileText, Github, Loader2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
@@ -268,8 +268,31 @@ export const REVIEW_CHECKPOINT_EVENT = "classgrid:review-checkpoint";
 const reviewCheckpoint = (detail: { sessionId: string; checkpoint: string; mode: 'review' | 'undo' }) =>
   window.dispatchEvent(new CustomEvent(REVIEW_CHECKPOINT_EVENT, { detail }));
 
+// What the user did with an answer's changes (kept, rejected, undone, or single files rejected). Remembered in this
+// browser so the box under the answer stays right after a refresh; the files themselves are changed on the server.
+type CheckpointState = { status?: 'kept' | 'rejected' | 'undone'; rejectedFiles?: string[] };
+const CHECKPOINT_STATE_EVENT = "classgrid:checkpoint-state";
+const cpKey = (id: string) => `cg_cp_${id}`;
+const readCheckpointState = (id?: string): CheckpointState => {
+  if (!id) return {};
+  try { return JSON.parse(localStorage.getItem(cpKey(id)) || "{}"); } catch { return {}; }
+};
+export function markCheckpoint(id: string, change: CheckpointState) {
+  const next = { ...readCheckpointState(id), ...change };
+  if (change.rejectedFiles) next.rejectedFiles = [...new Set([...(readCheckpointState(id).rejectedFiles || []), ...change.rejectedFiles])];
+  try { localStorage.setItem(cpKey(id), JSON.stringify(next)); } catch { /* storage blocked */ }
+  window.dispatchEvent(new CustomEvent(CHECKPOINT_STATE_EVENT, { detail: { id, state: next } }));
+}
+
 export function FilesChangedSummary({ steps, checkpoint, sessionId }: { steps: Step[]; checkpoint?: string; sessionId?: string }) {
   const [open, setOpen] = useState(false);
+  const [cpState, setCpState] = useState<CheckpointState>(() => readCheckpointState(checkpoint));
+  useEffect(() => {
+    setCpState(readCheckpointState(checkpoint));
+    const onState = (e: Event) => { const d = (e as CustomEvent).detail; if (d?.id === checkpoint) setCpState(d.state); };
+    window.addEventListener(CHECKPOINT_STATE_EVENT, onState);
+    return () => window.removeEventListener(CHECKPOINT_STATE_EVENT, onState);
+  }, [checkpoint]);
   const byFile = new Map<string, FileChange>();
   const add = (c: FileChange) => {
     const prev = byFile.get(c.path) || { path: c.path, added: 0, removed: 0 };
@@ -287,23 +310,38 @@ export function FilesChangedSummary({ steps, checkpoint, sessionId }: { steps: S
   }
   const files = [...byFile.values()];
   if (!files.length) return null;
-  const added = files.reduce((n, f) => n + f.added, 0);
-  const removed = files.reduce((n, f) => n + f.removed, 0);
+  const rejected = new Set(cpState.rejectedFiles || []);
+  const allRejected = files.every((f) => rejected.has(f.path));
+  const status = cpState.status || (allRejected ? 'rejected' : undefined);
+  const done = status === 'rejected' || status === 'undone';
+  const live = files.filter((f) => !done && !rejected.has(f.path));
+  const added = (done ? files : live).reduce((n, f) => n + f.added, 0);
+  const removed = (done ? files : live).reduce((n, f) => n + f.removed, 0);
+  const title = status === 'undone' ? 'Changes undone' : status === 'rejected' ? 'Changes rejected' : status === 'kept' ? `${files.length} file${files.length > 1 ? 's' : ''} changed · kept`
+    : `${live.length} file${live.length === 1 ? '' : 's'} changed${rejected.size ? ` · ${rejected.size} rejected` : ''}`;
   return (
     <div className="mt-3 rounded-xl border border-border bg-secondary/30">
       <button type="button" onClick={() => setOpen(!open)} className="w-full flex items-center gap-2 px-4 py-2.5 text-[14px] text-slate-500 dark:text-[#8a8a8a] hover:text-foreground">
-        <span>{files.length} file{files.length > 1 ? 's' : ''} changed</span>
-        <span className="text-green-600 dark:text-green-500">+{added}</span>
-        <span className="text-red-600 dark:text-red-500">-{removed}</span>
+        <span>{title}</span>
+        {!done && <span className="text-green-600 dark:text-green-500">+{added}</span>}
+        {!done && <span className="text-red-600 dark:text-red-500">-{removed}</span>}
         {open ? <ChevronDown className="size-3.5" /> : <ChevronRight className="size-3.5" />}
-        {checkpoint && sessionId && inProjectMode() && (
+        {checkpoint && sessionId && inProjectMode() && !status && (
           <span className="ml-auto flex items-center gap-1.5" onClick={(e) => e.stopPropagation()}>
             <span role="button" tabIndex={0} onClick={() => reviewCheckpoint({ sessionId, checkpoint, mode: 'review' })} className="rounded-md border border-border px-2.5 py-1 text-xs text-foreground hover:bg-secondary">Review</span>
             <span role="button" tabIndex={0} onClick={() => reviewCheckpoint({ sessionId, checkpoint, mode: 'undo' })} className="rounded-md border border-border px-2.5 py-1 text-xs text-foreground hover:bg-secondary">Undo</span>
           </span>
         )}
       </button>
-      {open && <div className="border-t border-border px-4 py-1">{files.map((f) => <ChangeRow key={f.path} change={f} />)}</div>}
+      {open && (
+        <div className="border-t border-border px-4 py-1">
+          {files.map((f) => (
+            <div key={f.path} className={cn((done || rejected.has(f.path)) && 'line-through opacity-50')}>
+              <ChangeRow change={f} />
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

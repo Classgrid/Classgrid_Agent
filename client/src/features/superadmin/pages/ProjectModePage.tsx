@@ -7,7 +7,7 @@ import { AiHubModal } from "@/components/ai/components/AiHubModal";
 import { useCurrentUser } from "@/features/auth/queries/useCurrentUser";
 import { fetchWithRescue } from "@/lib/rescue";
 import { Progress, ProgressLabel, ProgressValue } from "@/components/marketing_ui/progress";
-import { OPEN_PROJECT_FILE_EVENT, REVIEW_CHECKPOINT_EVENT } from "@/components/ai/components/stepper/ProjectToolSteps";
+import { OPEN_PROJECT_FILE_EVENT, REVIEW_CHECKPOINT_EVENT, markCheckpoint } from "@/components/ai/components/stepper/ProjectToolSteps";
 
 const backendUrl = import.meta.env.VITE_API_URL || "https://api.classgrid.in";
 const OPEN_PROJECT_KEY = "cg_project_open"; // which project this browser had open (per-viewer convenience)
@@ -195,7 +195,7 @@ export function ProjectModePage() {
       if (d.mode === "undo") {
         if (!window.confirm("Put the project back to how it was before this answer? Changes made after it, by you or the AI, are undone too.")) return;
         const { res, data } = await api(`${cpPath(d)}/undo`, { method: "POST", body: "{}" });
-        if (res.ok) toast.success(`Undone: ${data.reverted} file${data.reverted === 1 ? "" : "s"} put back`);
+        if (res.ok) { markCheckpoint(d.checkpoint, { status: "undone" }); toast.success(`Undone: ${data.reverted} file${data.reverted === 1 ? "" : "s"} put back`); }
         else toast.error(data.error || "Could not undo");
         return;
       }
@@ -211,7 +211,11 @@ export function ProjectModePage() {
     if (!window.confirm(file ? `Throw away the AI's changes to ${file}?` : "Throw away all of this answer's changes?")) return;
     setReview({ ...review, busy: true });
     const { res, data } = await api(`${cpPath(review)}/reject`, { method: "POST", body: JSON.stringify({ file }) });
-    if (res.ok) toast.success(file ? `${file} put back` : `Rejected: ${data.reverted} file${data.reverted === 1 ? "" : "s"} put back`);
+    if (res.ok) {
+      markCheckpoint(review.checkpoint, file ? { rejectedFiles: [file] } : { status: "rejected" });
+      toast.success(file ? `${file} put back` : `Rejected: ${data.reverted} file${data.reverted === 1 ? "" : "s"} put back`);
+      if (!file) { setReview(null); return; }
+    }
     else toast.error(data.error || "Could not reject the changes");
     loadReview(review);
   };
@@ -389,7 +393,7 @@ export function ProjectModePage() {
               )}
               <div className="ml-auto flex items-center gap-2">
                 <button disabled={review.busy || !review.files?.length} onClick={() => rejectChanges()} className="px-3 py-1.5 rounded-full border border-border text-sm hover:bg-secondary disabled:opacity-50">Reject all</button>
-                <button onClick={() => { setReview(null); toast.success("Changes kept"); }} className="px-3 py-1.5 rounded-full bg-foreground text-background text-sm hover:opacity-90">Accept all</button>
+                <button onClick={() => { markCheckpoint(review.checkpoint, { status: "kept" }); setReview(null); toast.success("Changes kept"); }} className="px-3 py-1.5 rounded-full bg-foreground text-background text-sm hover:opacity-90">Accept all</button>
               </div>
             </div>
             <div className="flex-1 overflow-y-auto">
