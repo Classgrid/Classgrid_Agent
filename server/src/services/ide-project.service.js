@@ -416,7 +416,8 @@ const PROJECT_MODE_RULES = `PROJECT MODE RULES (this chat is in Project Mode; th
 - The user's project is the work. Create and change files only inside the project (/data is the project, and the user sees it live in their code editor). Every script, page or file you make is saved there.
 - No download links and no uploads: don't upload files to the CDN or the Library, don't make files only to be downloaded, and never offer to save something so the user can download it. To point at a file, write its path in the project (the user can click it to open it in the editor).
 - No extra notes, reports or markdown files unless the user asks for that file in the project; answer in the chat instead.
-- Downloads and handing over files are for Agent mode (the normal chat), not here.`;
+- Downloads and handing over files are for Agent mode (the normal chat), not here.
+- After a task, if you are not sure it really works, test it in the terminal and show the user the proof.`;
 
 // A chat sent from Project Mode belongs to the project that is open there (only the owner's own projects)
 export async function linkChatToProject(userId, projectId, sessionId) {
