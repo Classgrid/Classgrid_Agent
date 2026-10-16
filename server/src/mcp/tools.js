@@ -28,6 +28,17 @@ import { s3Client, BUCKET_NAME, CDN_BASE_URL } from '../config/s3Client.js';
 import { PutObjectCommand } from '@aws-sdk/client-s3';
 import { SESClient, GetSendStatisticsCommand, ListIdentitiesCommand } from '@aws-sdk/client-ses';
 import puppeteer from 'puppeteer';
+import IdeProject from '../models/IdeProject.js';
+
+// A chat inside a Project Mode project also gets that project's code at /data/project
+async function projectMountFor(sessionId) {
+  try {
+    const project = await IdeProject.findOne({ chatSessionIds: sessionId }).select('_id').lean();
+    return project ? ` -v /home/ubuntu/sandbox_data/projects/${project._id}:/data/project` : '';
+  } catch {
+    return '';
+  }
+}
 import Handlebars from 'handlebars';
 
 import { Readable } from 'stream';
@@ -3818,7 +3829,7 @@ export const handleToolCall = async (name, args, context = {}) => {
         const envVars = sandboxEnvFlags(context.isStaff === true);
 
         console.log(`[Sandbox] Securely injecting credentials and running Docker container for terminal command...`);
-        const dockerCommand = `docker run --rm ${envVars} -v /home/ubuntu/sandbox_data/${sessionId}:/data classgrid-ai-sandbox bash /data/${SANDBOX_RUNNER_PREFIX}_terminal.sh`;
+        const dockerCommand = `docker run --rm ${envVars} -v /home/ubuntu/sandbox_data/${sessionId}:/data${await projectMountFor(sessionId)} classgrid-ai-sandbox bash /data/${SANDBOX_RUNNER_PREFIX}_terminal.sh`;
         const result = await ssh.execCommand(dockerCommand);
 
         console.log(`\n=================================================`);
@@ -3913,7 +3924,7 @@ export const handleToolCall = async (name, args, context = {}) => {
         const envVars = sandboxEnvFlags(context.isStaff === true);
 
         console.log(`[Sandbox] Securely injecting credentials and running Docker container for ${language} script...`);
-        const dockerCommand = `docker run --rm ${envVars} -v /home/ubuntu/sandbox_data/${sessionId}:/data classgrid-ai-sandbox ${execCmd} /data/${SANDBOX_RUNNER_PREFIX}.${ext}`;
+        const dockerCommand = `docker run --rm ${envVars} -v /home/ubuntu/sandbox_data/${sessionId}:/data${await projectMountFor(sessionId)} classgrid-ai-sandbox ${execCmd} /data/${SANDBOX_RUNNER_PREFIX}.${ext}`;
         const result = await ssh.execCommand(dockerCommand);
 
         console.log(`\n=================================================`);
