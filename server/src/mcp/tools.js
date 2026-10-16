@@ -42,7 +42,8 @@ async function projectMountFor(sessionId) {
     const dir = `${userDir}/projects/${project._id}`;
     // The owner's own package cache (shared with their code editor), so installs after the first one are fast
     const cache = ` -v ${userDir}/.cache:/home/workspace/.cache -e npm_config_cache=/home/workspace/.cache/npm -e PIP_CACHE_DIR=/home/workspace/.cache/pip`;
-    return { prep: `mkdir -p ${dir} ${userDir}/.cache && `, mount: ` -v ${dir}:/data/project -v ${dir}:/home/workspace/projects/${project._id}${cache}` };
+    // Commands start inside the project (like a terminal opened in it), so files made with relative paths land there
+    return { prep: `mkdir -p ${dir} ${userDir}/.cache && `, mount: ` -v ${dir}:/data/project -v ${dir}:/home/workspace/projects/${project._id}${cache} -w /data/project` };
   } catch {
     return { prep: '', mount: '' };
   }
@@ -299,7 +300,7 @@ export const getMcpTools = () => [
   */
   {
     name: 'run_code',
-    description: 'Execute Python or JavaScript code securely in the AWS EC2 Docker Sandbox. Use this for calculations, data analysis, or executing scripts. CRITICAL: DO NOT use this tool to generate PDFs (no ReportLab). ALWAYS use the native generate_pdf tool instead. Files are in /data (this chat\x27s folder); /data/scratch is for test and trial files and is cleaned automatically; /data/project holds the code of the GitHub project the user opened in Project Mode (the same files the user\x27s code editor shows at /home/workspace/projects/<id>, which also works as a path here).',
+    description: 'Execute Python or JavaScript code securely in the AWS EC2 Docker Sandbox. Use this for calculations, data analysis, or executing scripts. CRITICAL: DO NOT use this tool to generate PDFs (no ReportLab). ALWAYS use the native generate_pdf tool instead. Files are in /data (this chat\x27s folder); /data/scratch is for test and trial files and is cleaned automatically; /data/project holds the code of the GitHub project the user opened in Project Mode (the same files the user\x27s code editor shows at /home/workspace/projects/<id>, which also works as a path here). In a chat with an open project, commands start in /data/project.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -412,7 +413,7 @@ export const getMcpTools = () => [
 
   {
     name: 'execute_terminal_command',
-    description: 'Executes a native bash/terminal command directly on the host computer. You can use this to run curl, tesseract, Python, or system utilities. Files are in /data (this chat\x27s folder); /data/scratch is for test and trial files and is cleaned automatically; /data/project holds the code of the GitHub project the user opened in Project Mode (the same files the user\x27s code editor shows at /home/workspace/projects/<id>, which also works as a path here).',
+    description: 'Executes a native bash/terminal command directly on the host computer. You can use this to run curl, tesseract, Python, or system utilities. Files are in /data (this chat\x27s folder); /data/scratch is for test and trial files and is cleaned automatically; /data/project holds the code of the GitHub project the user opened in Project Mode (the same files the user\x27s code editor shows at /home/workspace/projects/<id>, which also works as a path here). In a chat with an open project, commands start in /data/project.',
     inputSchema: {
       type: 'object',
       properties: {
