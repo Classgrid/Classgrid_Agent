@@ -317,6 +317,7 @@ type AskAiPanelProps = {
   onOpenChange: (open: boolean) => void;
   pageContext?: PageContext;
   variant?: "in-flow" | "overlay" | "full-page";
+  hideClearChat?: boolean; // e.g. Project Mode: no one-click way to wipe the chat
   initialMessages?: ChatMessage[];
   autoFocus?: boolean;
   readOnly?: boolean;
@@ -1798,7 +1799,7 @@ export const INTEGRATIONS_LIST: any[] = [
 ];
 
 
-export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow", initialMessages, autoFocus = true, readOnly = false }: AskAiPanelProps) {
+export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow", initialMessages, autoFocus = true, readOnly = false, hideClearChat = false }: AskAiPanelProps) {
   const { data: user } = useCurrentUser();
   const session = user ? { user } : null;
   // No SidebarContext subscription here: this whole panel would re-render (every message) on each sidebar toggle.
@@ -4186,15 +4187,17 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
               {copiedAll ? <Check className="h-4 w-4 text-emerald-500" /> : <Copy className="h-4 w-4" />}
               <span className="sr-only">Copy chat</span>
             </button>
-            <button
-              type="button"
-              className="flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground cursor-pointer"
-              onClick={handleClearChat}
-              title="Clear chat"
-            >
-              <Trash2 className="h-4 w-4" />
-              <span className="sr-only">Clear chat</span>
-            </button>
+            {!hideClearChat && (
+              <button
+                type="button"
+                className="flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground cursor-pointer"
+                onClick={handleClearChat}
+                title="Clear chat"
+              >
+                <Trash2 className="h-4 w-4" />
+                <span className="sr-only">Clear chat</span>
+              </button>
+            )}
             <div className="mx-1 h-4 w-[1px] bg-border" />
           </>
         )}

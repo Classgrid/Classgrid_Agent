@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { useParams } from "react-router-dom";
-import { ArrowLeft, FolderGit2, Github, Loader2, Pencil, Plus, Trash2 } from "lucide-react";
+import { ArrowLeft, FolderGit2, Github, Loader2, Pencil, Plus, Sparkles, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { AskAiPanel } from "@/components/ai";
 import { AiHubModal } from "@/components/ai/components/AiHubModal";
@@ -11,6 +11,7 @@ import { OPEN_PROJECT_FILE_EVENT, REVIEW_CHECKPOINT_EVENT, markCheckpoint } from
 
 const backendUrl = import.meta.env.VITE_API_URL || "https://api.classgrid.in";
 const OPEN_PROJECT_KEY = "cg_project_open"; // which project this browser had open (per-viewer convenience)
+const AI_PANEL_KEY = "cg_project_ai_closed"; // whether the AI panel was closed (per-viewer convenience)
 
 type Project = { id: string; name: string; repo: string | null; lastOpenedAt: string | null; updatedAt: string };
 
@@ -43,6 +44,12 @@ export function ProjectModePage() {
   const [githubConnected, setGithubConnected] = useState<boolean | null>(null);
   const [githubExpired, setGithubExpired] = useState(false);
   const [hubOpen, setHubOpen] = useState(false);
+  // The AI panel on the right can be closed (the editor then uses the full width) and opened again from the top bar
+  const [aiOpen, setAiOpenState] = useState(() => { try { return localStorage.getItem(AI_PANEL_KEY) !== "1"; } catch { return true; } });
+  const setAiOpen = (v: boolean) => {
+    setAiOpenState(v);
+    try { v ? localStorage.removeItem(AI_PANEL_KEY) : localStorage.setItem(AI_PANEL_KEY, "1"); } catch { /* storage blocked */ }
+  };
   // Opening a project: download, then the editor loads. The bar moves toward each step's target while it waits.
   const [progress, setProgress] = useState<{ label: string; value: number; target: number } | null>(null);
   useEffect(() => {
@@ -227,7 +234,7 @@ export function ProjectModePage() {
   };
 
   return (
-    <div className="h-full flex flex-col !bg-[#fafafa] dark:!bg-[#000000] text-foreground sm:pr-[400px]">
+    <div className={`h-full flex flex-col !bg-[#fafafa] dark:!bg-[#000000] text-foreground ${aiOpen ? "sm:pr-[400px]" : ""}`}>
       <div className="shrink-0 flex items-center gap-3 h-8 box-content py-4 pl-16 pr-4 border-b border-border">{/* same height as the AI panel header, so both lines meet */}
         {showEditor ? (
           <>
@@ -244,6 +251,15 @@ export function ProjectModePage() {
           </>
         ) : (
           <span className="text-sm font-medium">Project Mode</span>
+        )}
+        {!aiOpen && (
+          <button
+            onClick={() => setAiOpen(true)}
+            className={`${showEditor && openProject?.repo && folder ? "" : "ml-auto"} shrink-0 flex items-center gap-2 h-8 px-3 rounded-full border border-border text-sm hover:bg-secondary`}
+            title="Open the AI agent"
+          >
+            <Sparkles className="size-4" /> Agent
+          </button>
         )}
       </div>
 
@@ -378,7 +394,7 @@ export function ProjectModePage() {
         </div>
       )}
 
-      <AskAiPanel open onOpenChange={() => {}} variant="overlay" />
+      <AskAiPanel open={aiOpen} onOpenChange={setAiOpen} variant="overlay" hideClearChat />
       {review && (
         <div className="fixed inset-0 z-[130] bg-black/60 flex items-center justify-center p-4" onClick={() => setReview(null)}>
           <div className="w-full max-w-3xl max-h-[85vh] flex flex-col rounded-xl border border-border bg-background" onClick={(e) => e.stopPropagation()}>
