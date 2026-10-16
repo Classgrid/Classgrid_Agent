@@ -207,10 +207,44 @@ async function ownProject(req, res) {
 
 const projectJson = (p) => ({ id: p._id, name: p.name, repo: p.repo, lastOpenedAt: p.lastOpenedAt, createdAt: p.createdAt, updatedAt: p.updatedAt });
 
+// "Last edited" follows real file edits: newest file change on disk (node_modules and .git skipped), never older than the saved record.
+// If the sandbox cannot be reached, the saved record time is used.
+async function newestFileEdits(projects) {
+  const times = {};
+  if (!projects.length) return times;
+  let ssh;
+  try {
+    ssh = await sandboxSsh();
+    const script = projects.map((p) => {
+      const dir = projectDir(p);
+      return `echo "${p._id} $([ -d ${dir} ] && find ${dir} \\( -name node_modules -o -name .git \\) -prune -o -type f -printf '%T@\\n' 2>/dev/null | sort -n | tail -1)"`;
+    }).join("; ");
+    const { stdout } = await ssh.execCommand(script);
+    for (const line of stdout.split("\n")) {
+      const [id, secs] = line.trim().split(/\s+/);
+      const ms = Math.round(parseFloat(secs) * 1000);
+      if (id && Number.isFinite(ms)) times[id] = new Date(ms);
+    }
+  } catch (e) {
+    console.error("[IDE] Could not read file edit times:", e.message);
+  } finally {
+    ssh?.dispose();
+  }
+  return times;
+}
+
 router.get("/projects", isAuthenticated, async (req, res) => {
   await connectDB();
   const projects = await IdeProject.find({ owner: req.user._id }).sort({ updatedAt: -1 }).limit(200);
-  res.json({ projects: projects.map(projectJson) });
+  const edits = await newestFileEdits(projects);
+  const list = projects.map((p) => {
+    const json = projectJson(p);
+    const edited = edits[String(p._id)];
+    if (edited && (!json.updatedAt || edited > new Date(json.updatedAt))) json.updatedAt = edited;
+    return json;
+  });
+  list.sort((a, b) => new Date(b.updatedAt) - new Date(a.updatedAt));
+  res.json({ projects: list });
 });
 
 router.post("/projects", isAuthenticated, async (req, res) => {
