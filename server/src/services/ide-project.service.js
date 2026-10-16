@@ -415,11 +415,16 @@ export async function revealInEditor(project, ssh, { path: file, startLine, endL
 
 // Which project files a code/terminal run changed: a snapshot of the whole folder (as a git tree, without touching
 // the user's git index) before and after the run, then the difference between the two.
+// Downloaded packages and build output are never the user's work, even when the project has no .gitignore
+// for them: thousands of their files would fill "files changed" and make every snapshot slow.
+const SNAPSHOT_SKIP = ["node_modules", "dist", "build", ".next", ".venv", "venv", "__pycache__", ".cache"]
+  .map((d) => `':(exclude,glob)**/${d}/**'`).join(" ");
+
 export async function projectSnapshot(ssh, project) {
   const dir = projectHostDir(project);
   const idx = `/tmp/cg-index-${project._id}-${Date.now()}`;
   const { stdout, code } = await ssh.execCommand(
-    `[ -d ${q(dir)}/.git ] && cd ${q(dir)} && GIT_INDEX_FILE=${idx} git add -A . 2>/dev/null && GIT_INDEX_FILE=${idx} git write-tree; rm -f ${idx}`
+    `[ -d ${q(dir)}/.git ] && cd ${q(dir)} && GIT_INDEX_FILE=${idx} git add -A -- . ${SNAPSHOT_SKIP} 2>/dev/null && GIT_INDEX_FILE=${idx} git write-tree; rm -f ${idx}`
   );
   return code === 0 && /^[0-9a-f]{40}$/.test(stdout.trim()) ? stdout.trim() : null;
 }
