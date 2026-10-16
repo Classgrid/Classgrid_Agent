@@ -67,6 +67,7 @@ import { CandidatePortalPage } from "@/features/admission-portal/pages/Candidate
 import { ParentTrackerPage } from "@/features/admission-portal/pages/ParentTrackerPage";
 
 import { DashboardHomePage } from "@/features/superadmin/pages/DashboardHomePage";
+import { ProjectModePage } from "@/features/superadmin/pages/ProjectModePage";
 import { OrgAdminDashboard } from "@/features/org-admin/components/OrgAdminDashboard";
 import { UsagePage } from "@/features/org-admin/pages/UsagePage";
 import { BillingPage as OrgAdminBillingPage } from "@/features/org-admin/pages/BillingPage";
@@ -299,6 +300,8 @@ export function AppRouter() {
         <Route path="/required-password-reset" element={<RequiredPasswordResetPage />} />
         <Route path="/enter-org-code" element={<EnterOrganizationCodePage />} />
         <Route path="/oauth/authorize" element={<OAuthConsentPage />} />
+
+        <Route path="/superadmin/project" element={<ProjectModePage />} />
 
         {/* NEW SUPER ADMIN SHELL */}
         <Route element={<SuperAdminLayout />}>

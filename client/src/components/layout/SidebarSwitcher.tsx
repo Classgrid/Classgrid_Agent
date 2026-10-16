@@ -51,7 +51,8 @@ import {
   ChevronsUpDown,
   Check,
   Building2,
-  Plus
+  Plus,
+  Code2
 } from "lucide-react";
 import {
   DropdownMenu,
@@ -180,6 +181,14 @@ export function SidebarSwitcher({ user }: { user: { role?: string; name?: string
             {currentRole === "super_admin" && (
               <>
                 <DropdownMenuSeparator className="mx-1 my-1" />
+                <DropdownMenuItem render={
+                  <Link to="/superadmin/project" className="flex items-center gap-3 p-2 w-full cursor-pointer rounded-md text-sm text-foreground" />
+                } className="p-0">
+                    <div className="flex size-5 items-center justify-center shrink-0">
+                      <Code2 className="size-4" />
+                    </div>
+                    Project Mode
+                </DropdownMenuItem>
                 <DropdownMenuItem render={
                   <Link to="/superadmin/onboard" className="flex items-center gap-2 p-2 w-full cursor-pointer rounded-md text-sm text-blue-500 hover:text-blue-600 font-medium" />
                 } className="p-0">
