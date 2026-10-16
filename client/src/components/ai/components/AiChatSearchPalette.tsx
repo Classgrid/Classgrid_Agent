@@ -101,7 +101,15 @@ export function AiChatSearchPalette({
         const endpointPrefix = typeof import.meta !== "undefined" && import.meta.env
           ? (import.meta.env.VITE_API_URL || "https://api.classgrid.in")
           : "";
-        const res = await fetchWithRescue(`${endpointPrefix}/api/ai/sessions`, { credentials: "include" });
+        // Same lists as the sidebar: Agent mode leaves out project chats; Project mode shows the open project's
+        // chats, or all project chats on the Projects page
+        let listQuery = "?mode=agent";
+        if (location.pathname.split("/").includes("project")) {
+          let openProject: string | null = null;
+          try { openProject = localStorage.getItem("cg_project_open"); } catch { /* storage blocked */ }
+          listQuery = `?project=${openProject || "all"}`;
+        }
+        const res = await fetchWithRescue(`${endpointPrefix}/api/ai/sessions${listQuery}`, { credentials: "include" });
         const data = await res.json();
         if (data.sessions) {
           let filtered = data.sessions;
@@ -170,9 +178,10 @@ export function AiChatSearchPalette({
       navigate(id);
     } else {
       const pathParts = location.pathname.split('/');
-      const agentIndex = pathParts.indexOf('agent');
-      const baseAgentPath = agentIndex !== -1
-        ? pathParts.slice(0, agentIndex + 1).join('/')
+      // A project chat opens in Project Mode, an Agent chat in Agent mode
+      const modeIndex = pathParts.indexOf('project') !== -1 ? pathParts.indexOf('project') : pathParts.indexOf('agent');
+      const baseAgentPath = modeIndex !== -1
+        ? pathParts.slice(0, modeIndex + 1).join('/')
         : '/superadmin/agent';
       navigate(`${baseAgentPath}/${id}`);
     }
