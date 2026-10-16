@@ -30,13 +30,17 @@ import { SESClient, GetSendStatisticsCommand, ListIdentitiesCommand } from '@aws
 import puppeteer from 'puppeteer';
 import IdeProject from '../models/IdeProject.js';
 
-// A chat inside a Project Mode project also gets that project's code at /data/project
+// A chat inside a Project Mode project also gets that project's code, at /data/project and at the same path the
+// user sees in the code editor (/home/workspace/projects/<id>), so paths copied from the editor work as they are.
+// The folder is made first (as the normal user), so Docker never creates it as root.
 async function projectMountFor(sessionId) {
   try {
     const project = await IdeProject.findOne({ chatSessionIds: sessionId }).select('_id owner').lean();
-    return project ? ` -v /home/ubuntu/ide_users/${project.owner}/projects/${project._id}:/data/project` : '';
+    if (!project) return { prep: '', mount: '' };
+    const dir = `/home/ubuntu/ide_users/${project.owner}/projects/${project._id}`;
+    return { prep: `mkdir -p ${dir} && `, mount: ` -v ${dir}:/data/project -v ${dir}:/home/workspace/projects/${project._id}` };
   } catch {
-    return '';
+    return { prep: '', mount: '' };
   }
 }
 import Handlebars from 'handlebars';
@@ -291,7 +295,7 @@ export const getMcpTools = () => [
   */
   {
     name: 'run_code',
-    description: 'Execute Python or JavaScript code securely in the AWS EC2 Docker Sandbox. Use this for calculations, data analysis, or executing scripts. CRITICAL: DO NOT use this tool to generate PDFs (no ReportLab). ALWAYS use the native generate_pdf tool instead. Files are in /data (this chat\x27s folder, also open in the user\x27s code editor in Project Mode); /data/scratch is for test and trial files and is cleaned automatically; /data/project holds the code of a GitHub project the user opened.',
+    description: 'Execute Python or JavaScript code securely in the AWS EC2 Docker Sandbox. Use this for calculations, data analysis, or executing scripts. CRITICAL: DO NOT use this tool to generate PDFs (no ReportLab). ALWAYS use the native generate_pdf tool instead. Files are in /data (this chat\x27s folder); /data/scratch is for test and trial files and is cleaned automatically; /data/project holds the code of the GitHub project the user opened in Project Mode (the same files the user\x27s code editor shows at /home/workspace/projects/<id>, which also works as a path here).',
     inputSchema: {
       type: 'object',
       properties: {
@@ -316,7 +320,7 @@ export const getMcpTools = () => [
 
   {
     name: 'execute_terminal_command',
-    description: 'Executes a native bash/terminal command directly on the host computer. You can use this to run curl, tesseract, Python, or system utilities. Files are in /data (this chat\x27s folder, also open in the user\x27s code editor in Project Mode); /data/scratch is for test and trial files and is cleaned automatically; /data/project holds the code of a GitHub project the user opened.',
+    description: 'Executes a native bash/terminal command directly on the host computer. You can use this to run curl, tesseract, Python, or system utilities. Files are in /data (this chat\x27s folder); /data/scratch is for test and trial files and is cleaned automatically; /data/project holds the code of the GitHub project the user opened in Project Mode (the same files the user\x27s code editor shows at /home/workspace/projects/<id>, which also works as a path here).',
     inputSchema: {
       type: 'object',
       properties: {
@@ -3829,7 +3833,8 @@ export const handleToolCall = async (name, args, context = {}) => {
         const envVars = sandboxEnvFlags(context.isStaff === true);
 
         console.log(`[Sandbox] Securely injecting credentials and running Docker container for terminal command...`);
-        const dockerCommand = `docker run --rm ${envVars} -v /home/ubuntu/sandbox_data/${sessionId}:/data${await projectMountFor(sessionId)} classgrid-ai-sandbox bash /data/${SANDBOX_RUNNER_PREFIX}_terminal.sh`;
+        const projectMount = await projectMountFor(sessionId);
+        const dockerCommand = `${projectMount.prep}docker run --rm ${envVars} -v /home/ubuntu/sandbox_data/${sessionId}:/data${projectMount.mount} classgrid-ai-sandbox bash /data/${SANDBOX_RUNNER_PREFIX}_terminal.sh`;
         const result = await ssh.execCommand(dockerCommand);
 
         console.log(`\n=================================================`);
@@ -3924,7 +3929,8 @@ export const handleToolCall = async (name, args, context = {}) => {
         const envVars = sandboxEnvFlags(context.isStaff === true);
 
         console.log(`[Sandbox] Securely injecting credentials and running Docker container for ${language} script...`);
-        const dockerCommand = `docker run --rm ${envVars} -v /home/ubuntu/sandbox_data/${sessionId}:/data${await projectMountFor(sessionId)} classgrid-ai-sandbox ${execCmd} /data/${SANDBOX_RUNNER_PREFIX}.${ext}`;
+        const projectMount = await projectMountFor(sessionId);
+        const dockerCommand = `${projectMount.prep}docker run --rm ${envVars} -v /home/ubuntu/sandbox_data/${sessionId}:/data${projectMount.mount} classgrid-ai-sandbox ${execCmd} /data/${SANDBOX_RUNNER_PREFIX}.${ext}`;
         const result = await ssh.execCommand(dockerCommand);
 
         console.log(`\n=================================================`);

@@ -39,6 +39,7 @@ export function ProjectModePage() {
   const [linking, setLinking] = useState<Project | null>(null);
   const [repos, setRepos] = useState<{ fullName: string; private: boolean }[] | null>(null);
   const [githubConnected, setGithubConnected] = useState<boolean | null>(null);
+  const [githubExpired, setGithubExpired] = useState(false);
   const [hubOpen, setHubOpen] = useState(false);
 
   const openProject = projects?.find((p) => p.id === openId) || null;
@@ -56,7 +57,7 @@ export function ProjectModePage() {
 
   const loadRepos = useCallback(async () => {
     const { res, data } = await api("/github/repos");
-    if (res.status === 409) { setGithubConnected(false); setRepos(null); return; }
+    if (res.status === 409) { setGithubConnected(false); setGithubExpired(data.error === "github_expired"); setRepos(null); return; }
     setGithubConnected(res.ok);
     setRepos(res.ok ? data.repos || [] : []);
   }, []);
@@ -247,7 +248,7 @@ export function ProjectModePage() {
             </div>
             {githubConnected === false ? (
               <button onClick={() => setHubOpen(true)} className="flex items-center justify-center gap-2 bg-foreground text-background px-4 py-2 rounded-full font-medium text-sm hover:opacity-90">
-                <Github className="size-4" /> Connect GitHub
+                <Github className="size-4" /> {githubExpired ? "Reconnect GitHub" : "Connect GitHub"}
               </button>
             ) : repos === null ? (
               <div className="flex justify-center py-6"><Loader2 className="size-5 animate-spin text-muted-foreground" /></div>

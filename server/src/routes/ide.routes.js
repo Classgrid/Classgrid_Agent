@@ -95,8 +95,14 @@ router.get("/github/repos", isAuthenticated, async (req, res) => {
     const ghRes = await fetch("https://api.github.com/user/repos?per_page=100&sort=updated&affiliation=owner,collaborator,organization_member", {
       headers: { Authorization: `Bearer ${user.github_access_token}`, Accept: "application/vnd.github+json", "User-Agent": "Classgrid" },
     });
-    if (ghRes.status === 401) return res.status(409).json({ error: "github_not_connected" });
-    if (!ghRes.ok) return res.status(502).json({ error: "Could not load your GitHub repos" });
+    if (ghRes.status === 401) {
+      console.error("[IDE] GitHub refused the saved key for user", String(req.user._id));
+      return res.status(409).json({ error: "github_expired" });
+    }
+    if (!ghRes.ok) {
+      console.error("[IDE] GitHub repos status", ghRes.status, (await ghRes.text()).slice(0, 200));
+      return res.status(502).json({ error: "Could not load your GitHub repos" });
+    }
     const repos = await ghRes.json();
     res.json({ repos: repos.map((r) => ({ fullName: r.full_name, private: r.private, defaultBranch: r.default_branch })) });
   } catch (e) {
