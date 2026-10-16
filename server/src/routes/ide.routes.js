@@ -281,9 +281,11 @@ router.post("/projects/:id/open", isAuthenticated, async (req, res) => {
         `docker exec -d ide-u-${req.user._id} sh -c 'mkdir -p /home/workspace/.classgrid && cd /home/workspace/projects/${project._id} && npm install --ignore-scripts --no-audit --no-fund > /home/workspace/.classgrid/npm-install-${project._id}.log 2>&1'`
       );
     }
+    const backup = project.lastBackup?.branch ? project.lastBackup.branch : null; // shown once
+    project.lastBackup = undefined;
     project.lastOpenedAt = new Date();
     await project.save();
-    res.json({ project: projectJson(project), folder: `/home/workspace/projects/${project._id}`, installing });
+    res.json({ project: projectJson(project), folder: `/home/workspace/projects/${project._id}`, installing, backup });
   } catch (e) {
     console.error("[IDE] Open project failed:", e.message);
     res.status(e.status || 500).json({ error: e.status ? e.message : "Could not open this project" });

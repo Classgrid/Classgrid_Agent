@@ -341,6 +341,8 @@ export async function editorContextFor(sessionId) {
       `Project: ${project.name}${project.repo ? ` (GitHub ${project.repo})` : ""}. Its files are at ${root}/ (the same files at /data/). Paths below are relative to it.`,
     ];
 
+    const { stdout: hasCode } = await ssh.execCommand(`[ -n "$(ls -A ${q(projectHostDir(project))} 2>/dev/null)" ] && echo yes`);
+    if (!hasCode.trim()) lines.push("The project's code is not downloaded right now (it leaves our servers a few minutes after the user closes the editor). The user can open the project in Project Mode to download it again.");
     const { stdout } = await ssh.execCommand(`cat ${q(`/home/ubuntu/ide_users/${project.owner}/.classgrid/context.json`)} 2>/dev/null`);
     let ctx = null;
     try { ctx = JSON.parse(stdout); } catch {}
