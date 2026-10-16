@@ -10,7 +10,7 @@ export function ProjectModePage() {
   return (
     <div className="fixed inset-0 bg-background text-foreground">
       <div className="h-full sm:pr-[400px] flex flex-col">
-        <div className="h-12 shrink-0 flex items-center px-4 border-b border-border">
+        <div className="shrink-0 flex items-center h-8 box-content py-4 px-4 border-b border-border">{/* same height as the AI panel header, so both lines meet */}
           <Link
             to={agentPath}
             className="inline-flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground transition-colors"
