@@ -458,7 +458,7 @@ export function ProjectModePage() {
                       ? <span className="text-xs text-muted-foreground truncate">{p.repo}</span>
                       : <span className="text-xs text-muted-foreground">No GitHub repo yet · <button onClick={() => { setLinking(p); loadRepos(); }} className="underline hover:text-foreground">Link one</button></span>}
                     {p.createdAt && <span className="text-xs text-muted-foreground">Created {new Date(p.createdAt).toLocaleDateString()}</span>}
-                    {p.updatedAt && <span className="text-xs text-muted-foreground">Last edited {new Date(p.updatedAt).toLocaleDateString()}</span>}
+                    {p.updatedAt && <span className="text-xs text-muted-foreground">Last edited {new Date(p.updatedAt).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' })}, {new Date(p.updatedAt).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })}</span>}
                     <span className="text-xs text-muted-foreground">{p.lastOpenedAt ? `Opened ${new Date(p.lastOpenedAt).toLocaleDateString()}` : "Never opened"}</span>
                     <button
                       onClick={() => { if (p.repo) open(p); else { setLinking(p); loadRepos(); } }}
