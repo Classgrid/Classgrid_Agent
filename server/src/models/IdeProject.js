@@ -9,6 +9,8 @@ const ideProjectSchema = new mongoose.Schema(
     repo: { type: String, default: null }, // "owner/name" on GitHub
     chatSessionIds: { type: [String], default: [], index: true },
     lastOpenedAt: { type: Date, default: null },
+    // Unpushed work pushed to GitHub when the project left the sandbox, shown once on the next open
+    lastBackup: { branch: { type: String }, at: { type: Date } },
   },
   { timestamps: true }
 );

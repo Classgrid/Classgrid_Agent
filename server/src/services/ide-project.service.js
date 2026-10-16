@@ -500,3 +500,39 @@ export async function undoToCheckpoint(project, ssh, sessionId, id) {
   }
   return entries.length;
 }
+
+// ── Closed projects leave the sandbox ────────────────────────────────────────────────────────────────────────────
+// When the user's editor has been closed for a while, each downloaded project is removed from the sandbox (it is
+// downloaded fresh on the next open). Unpushed work is first pushed to a new "classgrid-backup-..." branch on GitHub;
+// if that backup fails, the code is kept. Returns what happened per project.
+export async function backupAndRemoveProjectCode(ssh, project) {
+  const dir = projectHostDir(project);
+  const { stdout: exists } = await ssh.execCommand(`[ -d ${q(dir)}/.git ] && echo yes`);
+  if (!exists.trim()) {
+    await ssh.execCommand(`rm -rf ${q(dir)}`); // a folder without a repo has nothing to save
+    return { removed: true };
+  }
+  const { stdout: dirty } = await ssh.execCommand(`git -C ${q(dir)} status --porcelain | head -1`);
+  const { stdout: ahead } = await ssh.execCommand(`git -C ${q(dir)} rev-list --count @{u}..HEAD 2>/dev/null || echo 0`);
+  let backupBranch = null;
+  if (dirty.trim() || Number(ahead.trim()) > 0) {
+    await connectDB();
+    const owner = await User.findById(project.owner).select("github_access_token");
+    if (!owner?.github_access_token || !project.repo) return { removed: false, reason: "unpushed work and no GitHub access" };
+    const stamp = new Date().toISOString().slice(0, 16).replace(/[-:T]/g, "").replace(/^(\d{8})(\d{4})$/, "$1-$2");
+    backupBranch = `classgrid-backup-${stamp}`;
+    const auth = Buffer.from(`x-access-token:${owner.github_access_token}`).toString("base64");
+    await ssh.execCommand(`git -C ${q(dir)} checkout -q -b ${backupBranch} && git -C ${q(dir)} add -A && git -C ${q(dir)} -c user.name=Classgrid -c user.email=backup@classgrid.in commit -q -m "Classgrid: unsaved work, saved when the project was closed" || true`);
+    const push = await ssh.execCommand(
+      `GIT_TERMINAL_PROMPT=0 GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=http.https://github.com/.extraheader GIT_CONFIG_VALUE_0="AUTHORIZATION: basic ${auth}" ` +
+      `git -C ${q(dir)} push -q origin ${backupBranch} 2>&1 | tail -3`
+    );
+    if (/rejected|error|fatal/i.test(push.stdout || push.stderr || "")) {
+      console.error("[IDE] Backup push failed, keeping the code:", String(push.stdout || push.stderr).split(auth).join("***").slice(0, 300));
+      return { removed: false, reason: "backup push failed" };
+    }
+    await IdeProject.updateOne({ _id: project._id }, { $set: { lastBackup: { branch: backupBranch, at: new Date() } } });
+  }
+  await ssh.execCommand(`rm -rf ${q(dir)}`);
+  return { removed: true, backupBranch };
+}

@@ -3,7 +3,7 @@ import { NodeSSH } from "node-ssh";
 import { isAuthenticated, requireRole } from "../middleware/auth.middleware.js";
 import User from "../models/User.js";
 import IdeProject from "../models/IdeProject.js";
-import { pushProject, revealInEditor, checkpointChanges, rejectCheckpoint, undoToCheckpoint } from "../services/ide-project.service.js";
+import { pushProject, revealInEditor, checkpointChanges, rejectCheckpoint, undoToCheckpoint, backupAndRemoveProjectCode } from "../services/ide-project.service.js";
 import mongoose from "mongoose";
 import connectDB from "../../config/db.js";
 import redis from "../config/redis.js";
@@ -17,7 +17,7 @@ const router = express.Router();
 const BOX_PORT = (userId) => `ide:port:${userId}`;
 const BOX_SEEN = (userId) => `ide:seen:${userId}`;
 const BOXES = "ide:boxes";
-const BOX_IDLE_MS = 30 * 60 * 1000;
+const BOX_IDLE_MS = 5 * 60 * 1000; // editor closed this long -> code leaves the sandbox
 
 router.get("/check", isAuthenticated, async (req, res) => {
   res.set("Cache-Control", "no-store");
@@ -51,21 +51,39 @@ async function ensureBox(ssh, userId) {
   await redis.sadd(BOXES, userId);
 }
 
-// Boxes nobody used for 30 minutes are switched off (their files stay; the box starts again on the next open)
+// Every minute: a box with an open editor (a live connection to it) counts as in use. When a user's editor has
+// been closed for 5 minutes, their downloaded projects leave the sandbox (unpushed work is first pushed to a
+// "classgrid-backup-..." branch; if that fails the code stays) and the box is switched off. Opening a project
+// again downloads it fresh. A Redis lock makes sure only one server process does this at a time.
 let reaping = false;
 setInterval(async () => {
   if (reaping) return;
   reaping = true;
   let ssh;
   try {
+    if (!(await redis.set("ide:reaper-lock", "1", "EX", 55, "NX"))) return;
     const users = await redis.smembers(BOXES);
     for (const userId of users) {
+      if (!/^[a-f0-9]{24}$/.test(userId)) { await redis.srem(BOXES, userId); continue; }
+      ssh = ssh || await sandboxSsh();
+      const port = await redis.get(BOX_PORT(userId));
+      if (/^4\d{4}$/.test(port || "")) {
+        const { stdout } = await ssh.execCommand(`ss -Htn state established "( sport = :${port} )" | wc -l`);
+        if (Number(stdout.trim()) > 0) { await redis.set(BOX_SEEN(userId), String(Date.now()), "EX", 24 * 60 * 60); continue; }
+      }
       const seen = Number(await redis.get(BOX_SEEN(userId))) || 0;
       if (Date.now() - seen < BOX_IDLE_MS) continue;
-      ssh = ssh || await sandboxSsh();
-      if (/^[a-f0-9]{24}$/.test(userId)) await ssh.execCommand(`docker rm -f ide-u-${userId}`);
+      await connectDB();
+      const projects = await IdeProject.find({ owner: userId }).lean();
+      let keptAny = false;
+      for (const p of projects) {
+        const r = await backupAndRemoveProjectCode(ssh, p).catch((e) => ({ removed: false, reason: e.message }));
+        if (!r.removed) { keptAny = true; console.error(`[IDE] Kept project ${p._id} on the sandbox: ${r.reason}`); }
+      }
+      await ssh.execCommand(`docker rm -f ide-u-${userId}`);
       await redis.del(BOX_PORT(userId), BOX_SEEN(userId));
-      await redis.srem(BOXES, userId);
+      if (!keptAny) await redis.srem(BOXES, userId);
+      else await redis.set(BOX_SEEN(userId), String(Date.now()), "EX", 24 * 60 * 60); // try the kept ones again later
     }
   } catch (e) {
     console.error("[IDE] Box cleanup failed:", e.message);
@@ -73,7 +91,7 @@ setInterval(async () => {
     ssh?.dispose();
     reaping = false;
   }
-}, 5 * 60 * 1000).unref();
+}, 60 * 1000).unref();
 
 async function sandboxSsh() {
   const ssh = new NodeSSH();

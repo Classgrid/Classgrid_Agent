@@ -10,6 +10,7 @@ import { useCurrentUser } from "@/features/auth/queries/useCurrentUser";
 import { fetchWithRescue } from "@/lib/rescue";
 import { Progress, ProgressLabel, ProgressValue } from "@/components/marketing_ui/progress";
 import { OPEN_PROJECT_FILE_EVENT, REVIEW_CHECKPOINT_EVENT, markCheckpoint } from "@/components/ai/components/stepper/ProjectToolSteps";
+import { PushToGithubModal } from "../components/PushToGithubModal";
 
 const backendUrl = import.meta.env.VITE_API_URL || "https://api.classgrid.in";
 const OPEN_PROJECT_KEY = "cg_project_open"; // which project this browser had open (per-viewer convenience)
@@ -170,15 +171,21 @@ export function ProjectModePage() {
   };
 
   const [pushing, setPushing] = useState(false);
-  const push = async () => {
+  const [isPushModalOpen, setIsPushModalOpen] = useState(false);
+
+  const handleOpenPushModal = () => {
     if (!openProject) return;
-    const message = window.prompt("What did you change? (commit message)");
-    if (!message?.trim()) return;
+    setIsPushModalOpen(true);
+  };
+
+  const handleConfirmPush = async (message: string) => {
+    if (!openProject) return;
     setPushing(true);
     try {
       const { res, data } = await api(`/projects/${openProject.id}/push`, { method: "POST", body: JSON.stringify({ message }) });
       if (!res.ok) throw new Error(data.error || "Could not push to GitHub");
       toast.success(data.message || "Pushed to GitHub");
+      setIsPushModalOpen(false);
     } catch (e: any) {
       toast.error(e?.message || "Could not push to GitHub");
     } finally {
@@ -261,7 +268,7 @@ export function ProjectModePage() {
             <span className="text-sm font-medium truncate">{openProject.name}</span>
             {openProject.repo && <span className="text-xs text-muted-foreground truncate">{openProject.repo}</span>}
             {openProject.repo && folder && (
-              <button onClick={push} disabled={pushing} className="ml-auto shrink-0 flex items-center gap-2 h-8 px-3 rounded-full border border-border text-sm hover:bg-secondary disabled:opacity-50">
+              <button onClick={handleOpenPushModal} disabled={pushing} className="ml-auto shrink-0 flex items-center gap-2 h-8 px-3 rounded-full border border-border text-sm hover:bg-secondary disabled:opacity-50">
                 {pushing ? <Spinner className="size-4" /> : <Github className="size-4" />} Push to GitHub
               </button>
             )}
@@ -412,6 +419,14 @@ export function ProjectModePage() {
       )}
 
       <AskAiPanel open={aiOpen} onOpenChange={setAiOpen} variant="overlay" hideClearChat />
+      <PushToGithubModal
+        isOpen={isPushModalOpen}
+        onClose={() => setIsPushModalOpen(false)}
+        onPush={handleConfirmPush}
+        projectName={openProject?.name || "Project"}
+        repoName={openProject?.repo}
+        isPushing={pushing}
+      />
       {review && (
         <div className="fixed inset-0 z-[130] bg-black/60 flex items-center justify-center p-4" onClick={() => setReview(null)}>
           <div className="w-full max-w-3xl max-h-[85vh] flex flex-col rounded-xl border border-border bg-background" onClick={(e) => e.stopPropagation()}>
