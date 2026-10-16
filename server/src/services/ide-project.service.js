@@ -27,6 +27,17 @@ export async function sandboxSsh() {
 export const projectHostDir = (p) => `/home/ubuntu/ide_users/${p.owner}/projects/${p._id}`;
 const q = (s) => `'${String(s).replace(/'/g, `'\\''`)}'`;
 
+// Newest file change on disk (node_modules and .git skipped), as a Date, or null if there is nothing to read.
+// Used to persist the real "last edited" time before the project code leaves the sandbox.
+async function newestFileEdit(ssh, project) {
+  const dir = projectHostDir(project);
+  const { stdout } = await ssh.execCommand(
+    `[ -d ${q(dir)} ] && find ${q(dir)} \\( -name node_modules -o -name .git \\) -prune -o -type f -printf '%T@\\n' 2>/dev/null | sort -n | tail -1`
+  );
+  const secs = parseFloat(String(stdout).trim());
+  return Number.isFinite(secs) ? new Date(Math.round(secs * 1000)) : null;
+}
+
 export async function projectForChat(sessionId) {
   await connectDB();
   return IdeProject.findOne({ chatSessionIds: sessionId }).lean();
@@ -597,6 +608,12 @@ export async function undoToCheckpoint(project, ssh, sessionId, id) {
 // if that backup fails, the code is kept. Returns what happened per project.
 export async function backupAndRemoveProjectCode(ssh, project) {
   const dir = projectHostDir(project);
+  // Persist the real "last edited" time before the code leaves the sandbox, so the Projects page
+  // keeps showing the correct time even after the folder is gone.
+  const saveLastEdit = async () => {
+    const edited = await newestFileEdit(ssh, project);
+    if (edited) await IdeProject.updateOne({ _id: project._id }, { $set: { updatedAt: edited } });
+  };
   // No GitHub repo yet: an empty project is just removed; one with files first gets its own private repo
   // on the user's GitHub (named after the project), so the work is saved there before it leaves the sandbox
   if (!project.repo) {
@@ -609,11 +626,13 @@ export async function backupAndRemoveProjectCode(ssh, project) {
       if (project.repo) break;
     }
     if (!project.repo || /failed/i.test(made)) return { removed: false, reason: `could not save to a new GitHub repo: ${made}` };
+    await saveLastEdit();
     await ssh.execCommand(`rm -rf ${q(dir)}`);
     return { removed: true, backupBranch: null, createdRepo: project.repo };
   }
   const { stdout: exists } = await ssh.execCommand(`[ -d ${q(dir)}/.git ] && echo yes`);
   if (!exists.trim()) {
+    await saveLastEdit();
     await ssh.execCommand(`rm -rf ${q(dir)}`); // a folder without a repo has nothing to save
     return { removed: true };
   }
@@ -638,6 +657,7 @@ export async function backupAndRemoveProjectCode(ssh, project) {
     }
     await IdeProject.updateOne({ _id: project._id }, { $set: { lastBackup: { branch: backupBranch, at: new Date() } } });
   }
+  await saveLastEdit();
   await ssh.execCommand(`rm -rf ${q(dir)}`);
   return { removed: true, backupBranch };
 }
