@@ -37,8 +37,11 @@ async function projectMountFor(sessionId) {
   try {
     const project = await IdeProject.findOne({ chatSessionIds: sessionId }).select('_id owner').lean();
     if (!project) return { prep: '', mount: '' };
-    const dir = `/home/ubuntu/ide_users/${project.owner}/projects/${project._id}`;
-    return { prep: `mkdir -p ${dir} && `, mount: ` -v ${dir}:/data/project -v ${dir}:/home/workspace/projects/${project._id}` };
+    const userDir = `/home/ubuntu/ide_users/${project.owner}`;
+    const dir = `${userDir}/projects/${project._id}`;
+    // The owner's own package cache (shared with their code editor), so installs after the first one are fast
+    const cache = ` -v ${userDir}/.cache:/home/workspace/.cache -e npm_config_cache=/home/workspace/.cache/npm -e PIP_CACHE_DIR=/home/workspace/.cache/pip`;
+    return { prep: `mkdir -p ${dir} ${userDir}/.cache && `, mount: ` -v ${dir}:/data/project -v ${dir}:/home/workspace/projects/${project._id}${cache}` };
   } catch {
     return { prep: '', mount: '' };
   }
@@ -3855,7 +3858,7 @@ export const handleToolCall = async (name, args, context = {}) => {
         ssh.dispose();
 
         return {
-          content: [{ type: 'text', text: `Command executed in isolated Sandbox.\nSTDOUT:\n${result.stdout}\nSTDERR:\n${result.stderr}` }]
+          content: [{ type: 'text', text: `Command executed in isolated Sandbox.\nEXIT CODE: ${result.code}${!result.stdout && !result.stderr ? ' (no output)' : ''}\nSTDOUT:\n${result.stdout}\nSTDERR:\n${result.stderr}` }]
         };
       } catch (e) {
         return {
@@ -3952,7 +3955,7 @@ export const handleToolCall = async (name, args, context = {}) => {
         ssh.dispose();
 
         return {
-          content: [{ type: 'text', text: `[Sandbox Execution Results]\n\nSTDOUT:\n${result.stdout}\nSTDERR:\n${result.stderr}` }],
+          content: [{ type: 'text', text: `[Sandbox Execution Results]\n\nEXIT CODE: ${result.code}${!result.stdout && !result.stderr ? ' (no output)' : ''}\n\nSTDOUT:\n${result.stdout}\nSTDERR:\n${result.stderr}` }],
         };
       } catch (e) {
         return { content: [{ type: 'text', text: `Failed to connect to AWS Sandbox: ${e.message}` }] };
