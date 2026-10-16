@@ -144,24 +144,6 @@ export function SidebarSwitcher({ user }: { user: { role?: string; name?: string
             sideOffset={4}
           >
             <DropdownMenuLabel className="text-xs text-muted-foreground font-semibold uppercase tracking-wider py-2">
-              Active Context
-            </DropdownMenuLabel>
-            <DropdownMenuItem className="gap-3 p-2 rounded-md">
-              <div className={`flex aspect-square size-8 items-center justify-center rounded-md overflow-hidden shrink-0 ${orgLogo ? 'bg-transparent' : 'bg-emerald-500 text-white border border-border'}`}>
-                {orgLogo ? (
-                  <img src={orgLogo} alt={orgName} className="w-full h-full object-contain" />
-                ) : (
-                  <Building2 className="size-4 text-white" />
-                )}
-              </div>
-              <div className="flex flex-col gap-0.5">
-                <span className="font-medium text-sm text-foreground">{orgName}</span>
-                <span className="text-xs text-muted-foreground">{formatRole(user?.metadata?.job_role || currentRole)} (Active)</span>
-              </div>
-            </DropdownMenuItem>
-
-            <DropdownMenuSeparator className="mx-1 my-1" />
-            <DropdownMenuLabel className="text-xs text-muted-foreground font-semibold uppercase tracking-wider py-2">
               Switch Mode
             </DropdownMenuLabel>
             {[
@@ -185,20 +167,6 @@ export function SidebarSwitcher({ user }: { user: { role?: string; name?: string
                 </span>
               </DropdownMenuItem>
             ))}
-
-            {currentRole === "super_admin" && (
-              <>
-                <DropdownMenuSeparator className="mx-1 my-1" />
-                <DropdownMenuItem render={
-                  <Link to="/superadmin/onboard" className="flex items-center gap-2 p-2 w-full cursor-pointer rounded-md text-sm text-blue-500 hover:text-blue-600 font-medium" />
-                } className="p-0">
-                    <div className="flex size-5 items-center justify-center rounded-md border border-blue-200 bg-blue-50/50 dark:bg-blue-900/20 dark:border-blue-800">
-                      <Plus className="size-3" />
-                    </div>
-                    Onboard New Organization
-                </DropdownMenuItem>
-              </>
-            )}
           </DropdownMenuContent>
         </DropdownMenu>
       </SidebarMenuItem>
