@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { useParams } from "react-router-dom";
-import { ArrowLeft, FolderGit2, Github, Loader2, Pencil, Plus, Sparkles, Trash2 } from "lucide-react";
+import { ArrowLeft, FolderGit2, Github, Loader2, Pencil, Plus, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { AskAiPanel } from "@/components/ai";
 import { AiHubModal } from "@/components/ai/components/AiHubModal";
@@ -255,10 +255,10 @@ export function ProjectModePage() {
         {!aiOpen && (
           <button
             onClick={() => setAiOpen(true)}
-            className={`${showEditor && openProject?.repo && folder ? "" : "ml-auto"} shrink-0 flex items-center gap-2 h-8 px-3 rounded-full border border-border text-sm hover:bg-secondary`}
+            className={`${showEditor && openProject?.repo && folder ? "" : "ml-auto"} shrink-0 flex items-center h-8 px-3 rounded-full border border-border bg-background text-sm text-foreground hover:bg-secondary`}
             title="Open the AI agent"
           >
-            <Sparkles className="size-4" /> Agent
+            Agent
           </button>
         )}
       </div>
