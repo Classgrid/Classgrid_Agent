@@ -107,6 +107,23 @@ async function sandboxSsh() {
 }
 
 // The user's GitHub repos, newest first, for the Project Mode picker
+// The GitHub account connected in AI Hub (picture, name, email), shown on the Projects page
+router.get("/github/me", isAuthenticated, async (req, res) => {
+  try {
+    const user = await githubTokenFor(req.user._id);
+    if (!user) return res.status(409).json({ error: "github_not_connected" });
+    const ghRes = await fetch("https://api.github.com/user", {
+      headers: { Authorization: `Bearer ${user.github_access_token}`, Accept: "application/vnd.github+json", "User-Agent": "Classgrid" },
+    });
+    if (ghRes.status === 401) return res.status(409).json({ error: "github_expired" });
+    const gh = ghRes.ok ? await ghRes.json() : {};
+    res.json({ login: gh.login || null, name: gh.name || user.github_name || gh.login || null, email: gh.email || user.github_email || null, avatar: gh.avatar_url || null });
+  } catch (e) {
+    console.error("[IDE] GitHub account failed:", e.message);
+    res.status(500).json({ error: "Could not load your GitHub account" });
+  }
+});
+
 router.get("/github/repos", isAuthenticated, async (req, res) => {
   try {
     const user = await githubTokenFor(req.user._id);
@@ -188,7 +205,7 @@ async function ownProject(req, res) {
   return project;
 }
 
-const projectJson = (p) => ({ id: p._id, name: p.name, repo: p.repo, lastOpenedAt: p.lastOpenedAt, updatedAt: p.updatedAt });
+const projectJson = (p) => ({ id: p._id, name: p.name, repo: p.repo, lastOpenedAt: p.lastOpenedAt, createdAt: p.createdAt, updatedAt: p.updatedAt });
 
 router.get("/projects", isAuthenticated, async (req, res) => {
   await connectDB();

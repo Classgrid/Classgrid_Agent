@@ -16,7 +16,8 @@ const backendUrl = import.meta.env.VITE_API_URL || "https://api.classgrid.in";
 const OPEN_PROJECT_KEY = "cg_project_open"; // which project this browser had open (per-viewer convenience)
 const AI_PANEL_KEY = "cg_project_ai_closed"; // whether the AI panel was closed (per-viewer convenience)
 
-type Project = { id: string; name: string; repo: string | null; lastOpenedAt: string | null; updatedAt: string };
+type Project = { id: string; name: string; repo: string | null; lastOpenedAt: string | null; createdAt?: string; updatedAt: string };
+type GithubAccount = { login: string | null; name: string | null; email: string | null; avatar: string | null };
 
 async function api(path: string, init?: RequestInit) {
   const res = await fetchWithRescue(`${backendUrl}/api/ide${path}`, {
@@ -83,6 +84,12 @@ export function ProjectModePage() {
     else setProjects([]);
   }, []);
   useEffect(() => { if (isSuperAdmin) loadProjects(); }, [isSuperAdmin, loadProjects]);
+
+  const [githubAccount, setGithubAccount] = useState<GithubAccount | null>(null);
+  useEffect(() => {
+    if (!isSuperAdmin) return;
+    api("/github/me").then(({ res, data }) => setGithubAccount(res.ok ? data : null)).catch(() => setGithubAccount(null));
+  }, [isSuperAdmin]);
 
   const loadRepos = useCallback(async () => {
     const { res, data } = await api("/github/repos");
@@ -311,6 +318,19 @@ export function ProjectModePage() {
               <div>
                 <h1 className="text-3xl font-bold tracking-tight mb-2">Projects</h1>
                 <p className="text-muted-foreground text-sm">Your code stays on GitHub. Opening a project downloads it fresh.</p>
+                {githubAccount && (
+                  <div className="flex items-center gap-2.5 mt-4">
+                    {githubAccount.avatar
+                      ? <img src={githubAccount.avatar} alt="" className="size-8 rounded-full border border-border" />
+                      : <div className="size-8 rounded-full border border-border flex items-center justify-center"><Github className="size-4" /></div>}
+                    <div className="flex flex-col min-w-0">
+                      <span className="text-sm font-medium truncate">
+                        {githubAccount.name}{githubAccount.login && githubAccount.login !== githubAccount.name ? <span className="text-muted-foreground font-normal"> @{githubAccount.login}</span> : null}
+                      </span>
+                      {githubAccount.email && <span className="text-xs text-muted-foreground truncate">{githubAccount.email}</span>}
+                    </div>
+                  </div>
+                )}
               </div>
               {projects && projects.length > 0 && newName === null && (
                 <button onClick={() => setNewName("")} className="flex items-center gap-2 bg-foreground text-background px-4 py-2 rounded-full font-medium text-sm hover:opacity-90 transition-opacity whitespace-nowrap">
@@ -371,6 +391,7 @@ export function ProjectModePage() {
                       </div>
                     )}
                     <span className="text-xs text-muted-foreground truncate">{p.repo || "No GitHub repo yet"}</span>
+                    {p.createdAt && <span className="text-xs text-muted-foreground">Created {new Date(p.createdAt).toLocaleDateString()}</span>}
                     <span className="text-xs text-muted-foreground">{p.lastOpenedAt ? `Opened ${new Date(p.lastOpenedAt).toLocaleDateString()}` : "Never opened"}</span>
                     <button
                       onClick={() => open(p)}
