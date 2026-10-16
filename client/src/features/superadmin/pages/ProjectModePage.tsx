@@ -72,15 +72,15 @@ export function ProjectModePage() {
   }, []);
 
   // Open = download the project's code fresh from GitHub, then show it in the editor
-  const open = async (project: Project, replace = false) => {
+  const open = async (project: Project, replace = false, resume = false) => {
     if (!project.repo) { setLinking(project); loadRepos(); return; }
     setBusyId(project.id);
     const wasOpen = openId;
     rememberOpen(project.id);
     setFolder(null);
-    setProgress({ label: "Downloading the latest code from GitHub", value: 3, target: 70 });
+    setProgress({ label: resume ? "Reconnecting to your project" : "Downloading the latest code from GitHub", value: 3, target: 70 });
     try {
-      const { res, data } = await api(`/projects/${project.id}/open`, { method: "POST", body: JSON.stringify({ replace }) });
+      const { res, data } = await api(`/projects/${project.id}/open`, { method: "POST", body: JSON.stringify({ replace, resume }) });
       if (res.status === 409 && data.error === "unsaved_changes") {
         setBusyId(null);
         if (window.confirm("This project has changes that are not pushed to GitHub. Download a fresh copy and lose them?")) return open(project, true);
@@ -104,7 +104,7 @@ export function ProjectModePage() {
 
   // Coming back to the page with a project open: download it fresh again
   useEffect(() => {
-    if (openProject && !folder && busyId !== openProject.id) open(openProject);
+    if (openProject && !folder && busyId !== openProject.id) open(openProject, false, true); // refresh: keep the code that is there
     if (projects && openId && !openProject) rememberOpen(null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projects, openId]);

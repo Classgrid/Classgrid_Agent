@@ -219,6 +219,7 @@ router.delete("/projects/:id", isAuthenticated, async (req, res) => {
 });
 
 // Open = download the repo fresh. Unsaved (not pushed) changes from last time are kept unless the user chose to replace them.
+// Resume (page refresh) = keep the code that is already there and only make sure the editor box is running.
 router.post("/projects/:id/open", isAuthenticated, async (req, res) => {
   const project = await ownProject(req, res);
   if (!project) return;
@@ -226,7 +227,9 @@ router.post("/projects/:id/open", isAuthenticated, async (req, res) => {
   let ssh;
   try {
     ssh = await sandboxSsh();
-    if (project.repo) {
+    const { stdout: haveCode } = req.body?.resume ? await ssh.execCommand(`[ -d ${dir} ] && echo yes`) : { stdout: "" };
+    const resuming = !!haveCode.trim();
+    if (project.repo && !resuming) {
       const user = await githubTokenFor(req.user._id);
       if (!user) return res.status(409).json({ error: "github_not_connected" });
       if (!req.body?.replace) {
