@@ -6,6 +6,7 @@ import { AskAiPanel } from "@/components/ai";
 import { AiHubModal } from "@/components/ai/components/AiHubModal";
 import { useCurrentUser } from "@/features/auth/queries/useCurrentUser";
 import { fetchWithRescue } from "@/lib/rescue";
+import { Progress, ProgressLabel, ProgressValue } from "@/components/marketing_ui/progress";
 
 const backendUrl = import.meta.env.VITE_API_URL || "https://api.classgrid.in";
 const OPEN_PROJECT_KEY = "cg_project_open"; // which project this browser had open (per-viewer convenience)
@@ -41,6 +42,13 @@ export function ProjectModePage() {
   const [githubConnected, setGithubConnected] = useState<boolean | null>(null);
   const [githubExpired, setGithubExpired] = useState(false);
   const [hubOpen, setHubOpen] = useState(false);
+  // Opening a project: download, then the editor loads. The bar moves toward each step's target while it waits.
+  const [progress, setProgress] = useState<{ label: string; value: number; target: number } | null>(null);
+  useEffect(() => {
+    if (!progress || progress.value >= progress.target) return;
+    const t = window.setTimeout(() => setProgress((p) => p && { ...p, value: Math.min(p.target, p.value + Math.max(0.4, (p.target - p.value) * 0.06)) }), 250);
+    return () => window.clearTimeout(t);
+  }, [progress]);
 
   const openProject = projects?.find((p) => p.id === openId) || null;
   const rememberOpen = (id: string | null) => {
@@ -66,19 +74,26 @@ export function ProjectModePage() {
   const open = async (project: Project, replace = false) => {
     if (!project.repo) { setLinking(project); loadRepos(); return; }
     setBusyId(project.id);
+    const wasOpen = openId;
+    rememberOpen(project.id);
+    setFolder(null);
+    setProgress({ label: "Downloading the latest code from GitHub", value: 3, target: 70 });
     try {
       const { res, data } = await api(`/projects/${project.id}/open`, { method: "POST", body: JSON.stringify({ replace }) });
       if (res.status === 409 && data.error === "unsaved_changes") {
+        setBusyId(null);
         if (window.confirm("This project has changes that are not pushed to GitHub. Download a fresh copy and lose them?")) return open(project, true);
-        setFolder(`/home/workspace/chats/projects/${project.id}`);
-        rememberOpen(project.id);
+        setProgress(null);
+        rememberOpen(wasOpen);
         return;
       }
-      if (res.status === 409) { setGithubConnected(false); setLinking(project); return; }
+      if (res.status === 409) { setProgress(null); rememberOpen(wasOpen); setGithubConnected(false); setLinking(project); loadRepos(); return; }
       if (!res.ok) throw new Error(data.error || "Could not open this project");
       setFolder(data.folder);
-      rememberOpen(project.id);
+      setProgress({ label: "Starting the editor", value: 70, target: 95 });
     } catch (e: any) {
+      setProgress(null);
+      rememberOpen(wasOpen);
       toast.error(e?.message || "Could not open this project");
     } finally {
       setBusyId(null);
@@ -133,14 +148,18 @@ export function ProjectModePage() {
     open(data.project);
   };
 
-  const showEditor = isSuperAdmin && openProject && folder;
+  const showEditor = isSuperAdmin && openProject && (folder || progress);
+  const editorLoaded = () => {
+    setProgress((p) => p && { ...p, label: "Almost ready", target: 100 });
+    window.setTimeout(() => setProgress(null), 1200);
+  };
 
   return (
     <div className="h-full flex flex-col !bg-[#fafafa] dark:!bg-[#000000] text-foreground sm:pr-[400px]">
       <div className="shrink-0 flex items-center gap-3 h-8 box-content py-4 pl-16 pr-4 border-b border-border">{/* same height as the AI panel header, so both lines meet */}
         {showEditor ? (
           <>
-            <button onClick={() => { rememberOpen(null); setFolder(null); }} className="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground">
+            <button onClick={() => { rememberOpen(null); setFolder(null); setProgress(null); }} className="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground">
               <ArrowLeft className="size-4" /> Projects
             </button>
             <span className="text-sm font-medium truncate">{openProject.name}</span>
@@ -152,7 +171,19 @@ export function ProjectModePage() {
       </div>
 
       {showEditor ? (
-        <iframe key={folder} src={`https://ide.classgrid.in/?folder=${encodeURIComponent(folder)}`} title="Code editor" className="flex-1 w-full border-0 [color-scheme:light] dark:[color-scheme:dark]" allow="clipboard-read; clipboard-write" />
+        <div className="relative flex-1 flex flex-col">
+          {folder && (
+            <iframe key={folder} src={`https://ide.classgrid.in/?folder=${encodeURIComponent(folder)}`} onLoad={editorLoaded} title="Code editor" className="flex-1 w-full border-0 [color-scheme:light] dark:[color-scheme:dark]" allow="clipboard-read; clipboard-write" />
+          )}
+          {progress && (
+            <div className="absolute inset-0 flex items-center justify-center !bg-[#fafafa] dark:!bg-[#000000]">
+              <Progress value={Math.round(progress.value)} className="w-[min(360px,80%)]">
+                <ProgressLabel>{progress.label}</ProgressLabel>
+                <ProgressValue />
+              </Progress>
+            </div>
+          )}
+        </div>
       ) : !isSuperAdmin ? (
         <div className="flex-1" />
       ) : (
