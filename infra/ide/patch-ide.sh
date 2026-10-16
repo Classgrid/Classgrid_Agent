@@ -26,7 +26,7 @@ must "$W" 'default:bu.AFTER_DELAY' "auto-save on"
 
 # 3. No extension store (disk, RAM and safety; our own safe extensions are installed per box by ide-user.sh),
 #    and no Extensions icon in the left bar
-node -e 'const fs=require("fs");const f=process.argv[1];const p=JSON.parse(fs.readFileSync(f,"utf8"));for(const k of ["extensionsGallery","extensionRecommendations","keymapExtensionTips","languageExtensionTips","configBasedExtensionTips"])delete p[k];fs.writeFileSync(f,JSON.stringify(p,null,"\t"))' "$ROOT/product.json"
+"$ROOT/node" -e 'const fs=require("fs");const f=process.argv[1];const p=JSON.parse(fs.readFileSync(f,"utf8"));for(const k of ["extensionsGallery","extensionRecommendations","keymapExtensionTips","languageExtensionTips","configBasedExtensionTips"])delete p[k];fs.writeFileSync(f,JSON.stringify(p,null,"\t"))' "$ROOT/product.json"
 printf '\n/* classgrid-no-extensions: no extension store in Classgrid Code */\n.monaco-workbench .activitybar li.action-item:has(.codicon-extensions-view-icon){display:none!important}\n' >> "$ROOT/out/vs/code/browser/workbench/workbench.css"
 # No Copilot icon or "Set up Copilot" card in the status bar (not our brand)
 printf '\n/* classgrid-no-copilot: no Copilot icon or setup card in Classgrid Code */\n.monaco-workbench .statusbar-item[id="chat.statusBarEntry"]{display:none!important}\n' >> "$ROOT/out/vs/code/browser/workbench/workbench.css"
@@ -43,7 +43,7 @@ perl -0pi -e 's/(\[jfe\]:\{type:"boolean",default:)!0/$1!1/' "$W"
 must "$W" 'classgridNever' "Ask @vscode hidden"
 must "$W" '\[jfe\]:{type:"boolean",default:!1' "folder trust popup off"
 rm -rf "$ROOT/extensions/github" "$ROOT/extensions/github-authentication" "$ROOT/extensions/microsoft-authentication" "$ROOT/extensions/tunnel-forwarding" "$ROOT/extensions/mermaid-chat-features"
-node /tmp/cg/rm-builtin.js "$W" github-authentication microsoft-authentication github tunnel-forwarding mermaid-chat-features
+"$ROOT/node" /tmp/cg/rm-builtin.js "$W" github-authentication microsoft-authentication github tunnel-forwarding mermaid-chat-features
 grep -rl "VSCode" "$ROOT/extensions" --include=package.nls.json | xargs -r sed -i "s/VSCode/Classgrid Code/g"
 sed -i "s/Grunt support for VS Code/Grunt support/" "$ROOT/extensions/grunt/package.json"
 
