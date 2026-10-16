@@ -197,7 +197,15 @@ function ExploreItem({ step }: { step: Step }) {
 export function ProjectExploreGroup({ steps }: { steps: Step[] }) {
   const loading = steps.some((s) => s.status === 'loading');
   const [open, setOpen] = useState<boolean | null>(null);
-  const isOpen = open ?? loading;
+  // Open while the AI explores. Between two steps nothing is loading for a moment; closing right then made the
+  // list flash shut and open again, so it only closes after a short quiet time.
+  const [busy, setBusy] = useState(loading);
+  useEffect(() => {
+    if (loading) { setBusy(true); return; }
+    const t = setTimeout(() => setBusy(false), 1500);
+    return () => clearTimeout(t);
+  }, [loading]);
+  const isOpen = open ?? busy;
   const files = steps.filter((s) => s.tool === 'view_project_file').length;
   const searches = steps.filter((s) => s.tool === 'search_project').length;
   const folders = steps.filter((s) => s.tool === 'list_project_files').length;
@@ -210,9 +218,9 @@ export function ProjectExploreGroup({ steps }: { steps: Step[] }) {
   return (
     <div className="flex flex-col">
       <Row onClick={() => setOpen(!isOpen)} open={isOpen}>
-        <span className="shrink-0">{loading ? 'Exploring' : 'Explored'}</span>
+        <span className="shrink-0">{busy ? 'Exploring' : 'Explored'}</span>
         <Name>{parts}</Name>
-        {loading && <Spinner className="size-3.5 shrink-0" />}
+        {busy && <Spinner className="size-3.5 shrink-0" />}
       </Row>
       {isOpen && <div className="ml-10 flex flex-col">{steps.map((s) => <ExploreItem key={s.id} step={s} />)}</div>}
     </div>
