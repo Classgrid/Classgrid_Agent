@@ -375,3 +375,111 @@ export async function sandboxDataDir(sessionId) {
   const project = await projectForChat(sessionId).catch(() => null);
   return project ? projectHostDir(project) : `/home/ubuntu/sandbox_data/${sessionId}`;
 }
+
+// ── Checkpoints: the project before and after each AI answer, for Review / Accept / Reject / Undo ───────────────
+// Saved as local git commits under refs/classgrid/ in the project (never pushed, and gone when the project is
+// downloaded fresh). The user's own git index and branches are never touched.
+const CP_KEY = (sessionId, id) => `ide:cp:${sessionId}:${id}`;
+const CP_TTL = 30 * 24 * 60 * 60;
+
+async function snapshotCommit(ssh, project, label) {
+  const dir = projectHostDir(project);
+  const tree = await projectSnapshot(ssh, project);
+  if (!tree) return null;
+  const { stdout, code } = await ssh.execCommand(
+    `git -C ${q(dir)} -c user.name=Classgrid -c user.email=checkpoint@classgrid.in commit-tree ${tree} -m ${q(label)}`
+  );
+  const commit = stdout.trim();
+  if (code || !/^[0-9a-f]{40}$/.test(commit)) return null;
+  await ssh.execCommand(`git -C ${q(dir)} update-ref refs/classgrid/${label} ${commit}`);
+  return commit;
+}
+
+export async function startCheckpoint(sessionId) {
+  const project = await projectForChat(sessionId);
+  if (!project) return null;
+  let ssh;
+  try {
+    ssh = await sandboxSsh();
+    const id = `${Date.now()}`;
+    const before = await snapshotCommit(ssh, project, `cp-${id}-before`);
+    if (!before) return null;
+    await redis.set(CP_KEY(sessionId, id), JSON.stringify({ project: String(project._id), before, after: null }), "EX", CP_TTL);
+    return id;
+  } catch {
+    return null;
+  } finally {
+    ssh?.dispose();
+  }
+}
+
+export async function finishCheckpoint(sessionId, id) {
+  if (!id) return;
+  const project = await projectForChat(sessionId);
+  const cp = JSON.parse((await redis.get(CP_KEY(sessionId, id))) || "null");
+  if (!project || !cp) return;
+  let ssh;
+  try {
+    ssh = await sandboxSsh();
+    cp.after = await snapshotCommit(ssh, project, `cp-${id}-after`);
+    await redis.set(CP_KEY(sessionId, id), JSON.stringify(cp), "EX", CP_TTL);
+  } finally {
+    ssh?.dispose();
+  }
+}
+
+async function loadCheckpoint(project, sessionId, id, ssh) {
+  if (!/^\d+$/.test(String(id))) throw new Error("Unknown checkpoint");
+  const cp = JSON.parse((await redis.get(CP_KEY(sessionId, id))) || "null");
+  if (!cp || cp.project !== String(project._id)) throw new Error("This answer's changes can't be reviewed anymore");
+  const dir = projectHostDir(project);
+  const { code } = await ssh.execCommand(`git -C ${q(dir)} cat-file -e ${cp.before}`);
+  if (code) throw new Error("This answer's changes can't be reviewed anymore (the project was downloaded fresh)");
+  return { cp, dir };
+}
+
+// The AI's changes in one answer: each file with +/- and its diff
+export async function checkpointChanges(project, ssh, sessionId, id) {
+  const { cp, dir } = await loadCheckpoint(project, sessionId, id, ssh);
+  const after = cp.after || (await snapshotCommit(ssh, project, `cp-${id}-now`));
+  const { stdout: stat } = await ssh.execCommand(`git -C ${q(dir)} diff --numstat ${cp.before} ${after} | head -100`);
+  const { stdout: status } = await ssh.execCommand(`git -C ${q(dir)} diff --name-status ${cp.before} ${after} | head -100`);
+  const kinds = Object.fromEntries(status.trim().split("\n").filter(Boolean).map((l) => { const [k, ...f] = l.split("\t"); return [f.join("\t"), k[0]]; }));
+  const files = [];
+  for (const line of stat.trim().split("\n").filter(Boolean)) {
+    const [a, r, ...f] = line.split("\t");
+    const file = f.join("\t");
+    const { stdout: diff } = await ssh.execCommand(`git -C ${q(dir)} diff --unified=3 ${cp.before} ${after} -- ${q(file)} | head -c 60000`);
+    files.push({ file, added: Number(a) || 0, removed: Number(r) || 0, kind: { A: "added", D: "deleted" }[kinds[file]] || "changed", diff });
+  }
+  return { files, finished: !!cp.after };
+}
+
+// Reject: put back what the file(s) were before this answer (files the AI created are removed)
+export async function rejectCheckpoint(project, ssh, sessionId, id, onlyFile) {
+  const { cp, dir } = await loadCheckpoint(project, sessionId, id, ssh);
+  const after = cp.after || (await snapshotCommit(ssh, project, `cp-${id}-now`));
+  const { stdout } = await ssh.execCommand(`git -C ${q(dir)} diff --name-status ${cp.before} ${after}`);
+  let entries = stdout.trim().split("\n").filter(Boolean).map((l) => { const [k, ...f] = l.split("\t"); return { kind: k[0], file: f.join("\t") }; });
+  if (onlyFile) entries = entries.filter((e) => e.file === onlyFile);
+  for (const e of entries) {
+    const { full } = resolveInProject(project, e.file);
+    if (e.kind === "A") await ssh.execCommand(`rm -f ${q(full)}`);
+    else await ssh.execCommand(`mkdir -p ${q(path.posix.dirname(full))} && git -C ${q(dir)} show ${cp.before}:${q(e.file)} > ${q(full)}`);
+  }
+  return entries.length;
+}
+
+// Undo: the whole project back to how it was before this answer (later changes are undone too)
+export async function undoToCheckpoint(project, ssh, sessionId, id) {
+  const { cp, dir } = await loadCheckpoint(project, sessionId, id, ssh);
+  const now = await snapshotCommit(ssh, project, `cp-${id}-undo`);
+  const { stdout } = await ssh.execCommand(`git -C ${q(dir)} diff --name-status ${cp.before} ${now}`);
+  const entries = stdout.trim().split("\n").filter(Boolean).map((l) => { const [k, ...f] = l.split("\t"); return { kind: k[0], file: f.join("\t") }; });
+  for (const e of entries) {
+    const { full } = resolveInProject(project, e.file);
+    if (e.kind === "A") await ssh.execCommand(`rm -f ${q(full)}`);
+    else await ssh.execCommand(`mkdir -p ${q(path.posix.dirname(full))} && git -C ${q(dir)} show ${cp.before}:${q(e.file)} > ${q(full)}`);
+  }
+  return entries.length;
+}

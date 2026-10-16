@@ -352,6 +352,7 @@ export type ChatMessage = {
   steps?: AgentStep[];
   /** How long the agent worked on this reply (ms), for the "Worked for X sec" summary */
   workedMs?: number;
+  checkpoint?: string; // Project Mode: snapshot before this answer (Review / Reject / Undo)
   /** Web pages the answer cites as [n] (search_web) */
   sources?: ChatSource[];
   typing?: boolean;
@@ -2711,6 +2712,7 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
             let steps = undefined;
             let sources = undefined;
             let workedMs: number | undefined = undefined;
+            let checkpoint: string | undefined = undefined;
 
             if (m.role === 'assistant') {
               let parsed = m.content;
@@ -2727,6 +2729,7 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
                 steps = parsed.steps;
                 sources = parsed.sources;
                 workedMs = typeof parsed.worked_ms === 'number' ? parsed.worked_ms : undefined;
+                checkpoint = typeof parsed.checkpoint === 'string' ? parsed.checkpoint : undefined;
               }
             }
 
@@ -2737,6 +2740,7 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
               steps: steps,
               sources: sources,
               workedMs: workedMs,
+              checkpoint,
               fileUrls: m.file_urls || undefined,
               attachments: m.file_urls && m.file_urls.length > 0 ? m.file_urls.map((url: string) => ({
                 url: url,
@@ -2840,6 +2844,7 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
             let steps = undefined;
             let sources = undefined;
             let workedMs: number | undefined = undefined;
+            let checkpoint: string | undefined = undefined;
 
             if (m.role === 'assistant') {
               let parsed = m.content;
@@ -2856,6 +2861,7 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
                 steps = parsed.steps;
                 sources = parsed.sources;
                 workedMs = typeof parsed.worked_ms === 'number' ? parsed.worked_ms : undefined;
+                checkpoint = typeof parsed.checkpoint === 'string' ? parsed.checkpoint : undefined;
               }
             }
 
@@ -2867,6 +2873,7 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
               steps: steps,
               sources: sources,
               workedMs: workedMs,
+              checkpoint,
               fileUrls: m.file_urls || undefined,
               attachments: m.file_urls && m.file_urls.length > 0 ? m.file_urls.map((url: string) => ({
                 url: url,
@@ -3873,6 +3880,13 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
                     return prev;
                   });
                 }
+              } else if (event.type === "checkpoint") {
+                // Project Mode: this answer's snapshot, for Review / Reject / Undo under the answer
+                setMessages((prev) => {
+                  const lastMsg = prev[prev.length - 1];
+                  if (lastMsg && lastMsg.role === "assistant") return [...prev.slice(0, -1), { ...lastMsg, checkpoint: event.id }];
+                  return [...prev, { id: createMessageId("assistant"), role: "assistant", content: "", createdAt: Date.now(), checkpoint: event.id }];
+                });
               } else if (event.type === "file_update") {
                 setSandboxFiles(prev => ({ ...prev, ...(event.files || {}) }));
               } else if (event.type === "plan_step_update") {
@@ -5002,7 +5016,7 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
                           )}
                           {!isUser && !message.typing && message.content.length > 0 && !message.content.includes("```approval") && !/^\s*\[IMAGE_GENERATION_[^\]]*\]\s*$/.test(message.content) && !message.content.trim().startsWith("ai_quota_exceeded") && message.content.trim() !== "ai_blocked" && (
                             <div className="pl-1 mt-3">
-                              <FilesChangedSummary steps={(message.steps || []) as any} />
+                              <FilesChangedSummary steps={(message.steps || []) as any} checkpoint={message.checkpoint} sessionId={sessionId || undefined} />
                               <MessageActions content={message.content} messageId={message.id} onReply={() => setReplyToMessage(message)} />
                             </div>
                           )}

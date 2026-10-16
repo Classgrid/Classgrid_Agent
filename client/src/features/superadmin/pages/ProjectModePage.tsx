@@ -7,7 +7,7 @@ import { AiHubModal } from "@/components/ai/components/AiHubModal";
 import { useCurrentUser } from "@/features/auth/queries/useCurrentUser";
 import { fetchWithRescue } from "@/lib/rescue";
 import { Progress, ProgressLabel, ProgressValue } from "@/components/marketing_ui/progress";
-import { OPEN_PROJECT_FILE_EVENT } from "@/components/ai/components/stepper/ProjectToolSteps";
+import { OPEN_PROJECT_FILE_EVENT, REVIEW_CHECKPOINT_EVENT } from "@/components/ai/components/stepper/ProjectToolSteps";
 
 const backendUrl = import.meta.env.VITE_API_URL || "https://api.classgrid.in";
 const OPEN_PROJECT_KEY = "cg_project_open"; // which project this browser had open (per-viewer convenience)
@@ -179,6 +179,43 @@ export function ProjectModePage() {
     return () => window.removeEventListener(OPEN_PROJECT_FILE_EVENT, onOpenFile);
   }, [openProject, folder]);
 
+  // Review / Reject / Undo an AI answer's changes (from the buttons under each answer)
+  type ReviewFile = { file: string; added: number; removed: number; kind: string; diff: string };
+  const [review, setReview] = useState<{ sessionId: string; checkpoint: string; files: ReviewFile[] | null; open: string | null; busy: boolean } | null>(null);
+  const cpPath = (r: { sessionId: string; checkpoint: string }) => `/projects/${openProject?.id}/checkpoints/${r.sessionId}/${r.checkpoint}`;
+  const loadReview = async (r: { sessionId: string; checkpoint: string }) => {
+    const { res, data } = await api(cpPath(r));
+    if (!res.ok) { toast.error(data.error || "Could not load the changes"); setReview(null); return; }
+    setReview({ ...r, files: data.files || [], open: null, busy: false });
+  };
+  useEffect(() => {
+    const onReview = async (e: Event) => {
+      const d = (e as CustomEvent).detail;
+      if (!openProject || !d?.checkpoint) return;
+      if (d.mode === "undo") {
+        if (!window.confirm("Put the project back to how it was before this answer? Changes made after it, by you or the AI, are undone too.")) return;
+        const { res, data } = await api(`${cpPath(d)}/undo`, { method: "POST", body: "{}" });
+        if (res.ok) toast.success(`Undone: ${data.reverted} file${data.reverted === 1 ? "" : "s"} put back`);
+        else toast.error(data.error || "Could not undo");
+        return;
+      }
+      setReview({ sessionId: d.sessionId, checkpoint: d.checkpoint, files: null, open: null, busy: false });
+      loadReview(d);
+    };
+    window.addEventListener(REVIEW_CHECKPOINT_EVENT, onReview);
+    return () => window.removeEventListener(REVIEW_CHECKPOINT_EVENT, onReview);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [openProject]);
+  const rejectChanges = async (file?: string) => {
+    if (!review) return;
+    if (!window.confirm(file ? `Throw away the AI's changes to ${file}?` : "Throw away all of this answer's changes?")) return;
+    setReview({ ...review, busy: true });
+    const { res, data } = await api(`${cpPath(review)}/reject`, { method: "POST", body: JSON.stringify({ file }) });
+    if (res.ok) toast.success(file ? `${file} put back` : `Rejected: ${data.reverted} file${data.reverted === 1 ? "" : "s"} put back`);
+    else toast.error(data.error || "Could not reject the changes");
+    loadReview(review);
+  };
+
   const showEditor = isSuperAdmin && openProject && (folder || progress);
   const editorLoaded = () => {
     setProgress((p) => p && { ...p, label: "Almost ready", target: 100 });
@@ -338,6 +375,53 @@ export function ProjectModePage() {
       )}
 
       <AskAiPanel open onOpenChange={() => {}} variant="overlay" />
+      {review && (
+        <div className="fixed inset-0 z-[130] bg-black/60 flex items-center justify-center p-4" onClick={() => setReview(null)}>
+          <div className="w-full max-w-3xl max-h-[85vh] flex flex-col rounded-xl border border-border bg-background" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center gap-3 px-5 py-4 border-b border-border">
+              <h2 className="text-lg font-semibold">Review changes</h2>
+              {review.files && (
+                <span className="text-sm text-muted-foreground">
+                  {review.files.length} file{review.files.length === 1 ? "" : "s"}
+                  <span className="ml-2 text-green-600 dark:text-green-500">+{review.files.reduce((n, f) => n + f.added, 0)}</span>
+                  <span className="ml-1 text-red-600 dark:text-red-500">-{review.files.reduce((n, f) => n + f.removed, 0)}</span>
+                </span>
+              )}
+              <div className="ml-auto flex items-center gap-2">
+                <button disabled={review.busy || !review.files?.length} onClick={() => rejectChanges()} className="px-3 py-1.5 rounded-full border border-border text-sm hover:bg-secondary disabled:opacity-50">Reject all</button>
+                <button onClick={() => { setReview(null); toast.success("Changes kept"); }} className="px-3 py-1.5 rounded-full bg-foreground text-background text-sm hover:opacity-90">Accept all</button>
+              </div>
+            </div>
+            <div className="flex-1 overflow-y-auto">
+              {review.files === null ? (
+                <div className="flex justify-center py-10"><Loader2 className="size-5 animate-spin text-muted-foreground" /></div>
+              ) : review.files.length === 0 ? (
+                <p className="px-5 py-8 text-sm text-muted-foreground">No changes left from this answer.</p>
+              ) : review.files.map((f) => (
+                <div key={f.file} className="border-b border-border last:border-b-0">
+                  <div className="flex items-center gap-2 px-5 py-2.5">
+                    <button onClick={() => setReview({ ...review, open: review.open === f.file ? null : f.file })} className="flex min-w-0 flex-1 items-center gap-2 text-left text-sm hover:text-foreground">
+                      <span className="truncate font-medium">{f.file}</span>
+                      <span className="shrink-0 text-xs text-muted-foreground">{f.kind}</span>
+                      <span className="shrink-0 text-xs text-green-600 dark:text-green-500">+{f.added}</span>
+                      <span className="shrink-0 text-xs text-red-600 dark:text-red-500">-{f.removed}</span>
+                    </button>
+                    <button disabled={review.busy} onClick={() => rejectChanges(f.file)} className="shrink-0 px-2.5 py-1 rounded-md border border-border text-xs hover:bg-secondary disabled:opacity-50">Reject</button>
+                  </div>
+                  {review.open === f.file && (
+                    <pre className="mx-5 mb-3 max-h-[45vh] overflow-auto rounded-lg border border-border text-[12px] leading-5">
+                      {f.diff.split("\n").filter((l) => !/^(diff --git|index |--- |\+\+\+ )/.test(l)).map((l, i) => (
+                        <div key={i} className={l.startsWith("+") ? "px-3 bg-green-500/10 text-green-800 dark:text-green-300" : l.startsWith("-") ? "px-3 bg-red-500/10 text-red-800 dark:text-red-300" : l.startsWith("@@") ? "px-3 text-muted-foreground" : "px-3"}>{l || " "}</div>
+                      ))}
+                    </pre>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
       <AiHubModal isOpen={hubOpen} onClose={() => { setHubOpen(false); loadRepos(); }} />
     </div>
   );

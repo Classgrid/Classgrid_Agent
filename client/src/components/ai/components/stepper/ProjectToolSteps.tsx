@@ -263,7 +263,12 @@ export function ProjectRunChanges({ result }: { result?: string }) {
   return <div className="ml-10 -mt-1 mb-1 flex flex-col">{changes.map((c) => <ChangeRow key={c.path} change={c} verb="Changed" />)}</div>;
 }
 
-export function FilesChangedSummary({ steps }: { steps: Step[] }) {
+// Project Mode shows the review window for an answer's checkpoint (Review = see and accept/reject, Undo = go back)
+export const REVIEW_CHECKPOINT_EVENT = "classgrid:review-checkpoint";
+const reviewCheckpoint = (detail: { sessionId: string; checkpoint: string; mode: 'review' | 'undo' }) =>
+  window.dispatchEvent(new CustomEvent(REVIEW_CHECKPOINT_EVENT, { detail }));
+
+export function FilesChangedSummary({ steps, checkpoint, sessionId }: { steps: Step[]; checkpoint?: string; sessionId?: string }) {
   const [open, setOpen] = useState(false);
   const byFile = new Map<string, FileChange>();
   const add = (c: FileChange) => {
@@ -291,6 +296,12 @@ export function FilesChangedSummary({ steps }: { steps: Step[] }) {
         <span className="text-green-600 dark:text-green-500">+{added}</span>
         <span className="text-red-600 dark:text-red-500">-{removed}</span>
         {open ? <ChevronDown className="size-3.5" /> : <ChevronRight className="size-3.5" />}
+        {checkpoint && sessionId && inProjectMode() && (
+          <span className="ml-auto flex items-center gap-1.5" onClick={(e) => e.stopPropagation()}>
+            <span role="button" tabIndex={0} onClick={() => reviewCheckpoint({ sessionId, checkpoint, mode: 'review' })} className="rounded-md border border-border px-2.5 py-1 text-xs text-foreground hover:bg-secondary">Review</span>
+            <span role="button" tabIndex={0} onClick={() => reviewCheckpoint({ sessionId, checkpoint, mode: 'undo' })} className="rounded-md border border-border px-2.5 py-1 text-xs text-foreground hover:bg-secondary">Undo</span>
+          </span>
+        )}
       </button>
       {open && <div className="border-t border-border px-4 py-1">{files.map((f) => <ChangeRow key={f.path} change={f} />)}</div>}
     </div>

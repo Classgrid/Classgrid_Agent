@@ -3,7 +3,7 @@ import { NodeSSH } from "node-ssh";
 import { isAuthenticated, requireRole } from "../middleware/auth.middleware.js";
 import User from "../models/User.js";
 import IdeProject from "../models/IdeProject.js";
-import { pushProject, revealInEditor } from "../services/ide-project.service.js";
+import { pushProject, revealInEditor, checkpointChanges, rejectCheckpoint, undoToCheckpoint } from "../services/ide-project.service.js";
 import mongoose from "mongoose";
 import connectDB from "../../config/db.js";
 import redis from "../config/redis.js";
@@ -291,6 +291,29 @@ router.post("/projects/:id/push", isAuthenticated, async (req, res) => {
     ssh?.dispose();
   }
 });
+
+// Review / Reject / Undo one AI answer's changes (the answer's checkpoint, in a chat of this project)
+async function checkpointRoute(req, res, fn) {
+  const project = await ownProject(req, res);
+  if (!project) return;
+  const { sessionId, cp } = req.params;
+  if (!CHAT_ID.test(sessionId) || !project.chatSessionIds.includes(sessionId)) return res.status(404).json({ error: "This chat is not part of the project" });
+  let ssh;
+  try {
+    ssh = await sandboxSsh();
+    res.json(await fn(project.toObject(), ssh, sessionId, cp));
+  } catch (e) {
+    res.status(400).json({ error: e.message });
+  } finally {
+    ssh?.dispose();
+  }
+}
+router.get("/projects/:id/checkpoints/:sessionId/:cp", isAuthenticated, (req, res) =>
+  checkpointRoute(req, res, (p, ssh, s, cp) => checkpointChanges(p, ssh, s, cp)));
+router.post("/projects/:id/checkpoints/:sessionId/:cp/reject", isAuthenticated, (req, res) =>
+  checkpointRoute(req, res, async (p, ssh, s, cp) => ({ reverted: await rejectCheckpoint(p, ssh, s, cp, req.body?.file || null) })));
+router.post("/projects/:id/checkpoints/:sessionId/:cp/undo", isAuthenticated, (req, res) =>
+  checkpointRoute(req, res, async (p, ssh, s, cp) => ({ reverted: await undoToCheckpoint(p, ssh, s, cp) })));
 
 // Clicking a file in the chat opens it in the editor at those lines
 router.post("/projects/:id/reveal", isAuthenticated, async (req, res) => {
