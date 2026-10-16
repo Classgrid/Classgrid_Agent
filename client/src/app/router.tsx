@@ -301,13 +301,12 @@ export function AppRouter() {
         <Route path="/enter-org-code" element={<EnterOrganizationCodePage />} />
         <Route path="/oauth/authorize" element={<OAuthConsentPage />} />
 
-        <Route path="/superadmin/project" element={<ProjectModePage />} />
-        <Route path="/c/project" element={<ProjectModePage />} />
 
         {/* NEW SUPER ADMIN SHELL */}
         <Route element={<SuperAdminLayout />}>
           <Route path="/superadmin/dashboard" element={<NavigateWithQuery to="/superadmin/agent" replace />} />
           <Route path="/superadmin/agent" element={<DashboardHomePage />} />
+          <Route path="/superadmin/project" element={<ProjectModePage />} />
           <Route path="/superadmin/agent/:sessionId" element={<DashboardHomePage />} />
           <Route path="/superadmin/agent/:sessionId/*" element={<DashboardHomePage />} />
           <Route path="/superadmin/agent-reviews" element={<AgentReviewsPage />} />
@@ -427,6 +426,7 @@ export function AppRouter() {
           <Route path="/agent/:sessionId" element={<DashboardHomePage />} />
           <Route path="/agent/:sessionId/*" element={<DashboardHomePage />} />
           <Route path="/c/agent" element={<DashboardHomePage />} />
+          <Route path="/c/project" element={<ProjectModePage />} />
           <Route path="/c/agent/:sessionId" element={<DashboardHomePage />} />
           <Route path="/c/agent/:sessionId/*" element={<DashboardHomePage />} />
           <Route path="/c" element={<DashboardHomePage />} />
