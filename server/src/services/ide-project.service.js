@@ -253,7 +253,9 @@ export async function pushProject(project, ssh, message) {
 // Open a project file in the owner's code editor at given lines (or at the given text). The Classgrid add-on in
 // the editor box watches /home/workspace/.classgrid/open.json and opens what it names.
 export async function revealInEditor(project, ssh, { path: file, startLine, endLine, find }) {
-  const { full } = resolveInProject(project, file);
+  const { full, rel } = resolveInProject(project, file);
+  const { stdout: exists } = await ssh.execCommand(`[ -f ${q(full)} ] && echo yes`);
+  if (!exists.trim()) throw new Error(`${rel} is not in this project (the AI may have saved it in its own chat folder)`);
   const inBox = full.replace(`/home/ubuntu/ide_users/${project.owner}`, "/home/workspace");
   const req = JSON.stringify({
     path: inBox,
