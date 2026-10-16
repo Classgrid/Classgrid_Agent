@@ -1156,3 +1156,67 @@
 .dark .chat-scrollbar::-webkit-scrollbar-button:single-button:vertical:increment {
   background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='16' height='16' fill='%23aaa'><path d='M4 6l4 4 4-4'/></svg>");
 }
+/* Classgrid smoke: soft green (brand primary) and orange glow that drifts in slowly from the left and right
+   edges at the bottom. Put .cg-smoke on a positioned box; content inside stays on top. */
+.cg-smoke {
+  --smoke-green: var(--primary);
+  --smoke-orange: #f97316;
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
+}
+
+.cg-smoke::before,
+.cg-smoke::after {
+  content: "";
+  position: absolute;
+  z-index: -1;
+  bottom: -35%;
+  width: 75%;
+  height: 90%;
+  border-radius: 50%;
+  filter: blur(90px);
+  pointer-events: none;
+  opacity: 0;
+  will-change: transform, opacity;
+}
+
+.cg-smoke::before {
+  left: -30%;
+  background: radial-gradient(closest-side, color-mix(in srgb, var(--smoke-green) 55%, transparent), transparent);
+  animation: cg-smoke-left 14s ease-in-out infinite alternate, cg-smoke-in 2.4s ease-out forwards;
+}
+
+.cg-smoke::after {
+  right: -30%;
+  background: radial-gradient(closest-side, color-mix(in srgb, var(--smoke-orange) 50%, transparent), transparent);
+  animation: cg-smoke-right 16s ease-in-out infinite alternate, cg-smoke-in 2.4s ease-out 0.4s forwards;
+}
+
+.dark .cg-smoke::before,
+.dark .cg-smoke::after {
+  filter: blur(110px);
+}
+
+@keyframes cg-smoke-in {
+  to { opacity: 0.75; }
+}
+
+@keyframes cg-smoke-left {
+  0% { transform: translate3d(-10%, 10%, 0) scale(0.95); }
+  50% { transform: translate3d(18%, -6%, 0) scale(1.08); }
+  100% { transform: translate3d(30%, 4%, 0) scale(1); }
+}
+
+@keyframes cg-smoke-right {
+  0% { transform: translate3d(10%, 8%, 0) scale(1); }
+  50% { transform: translate3d(-16%, -8%, 0) scale(1.1); }
+  100% { transform: translate3d(-28%, 2%, 0) scale(0.96); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cg-smoke::before,
+  .cg-smoke::after {
+    animation: cg-smoke-in 0.01s forwards;
+  }
+}

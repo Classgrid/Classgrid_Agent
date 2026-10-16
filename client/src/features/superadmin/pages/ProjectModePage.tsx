@@ -322,7 +322,7 @@ export function ProjectModePage() {
             <iframe key={folder} src={`https://ide.classgrid.in/?folder=${encodeURIComponent(folder)}`} onLoad={editorLoaded} title="Code editor" className="flex-1 w-full border-0 [color-scheme:light] dark:[color-scheme:dark]" allow="clipboard-read; clipboard-write" />
           )}
           {progress && (
-            <div className="absolute inset-0 flex items-center justify-center !bg-[#fafafa] dark:!bg-[#000000]">
+            <div className="cg-smoke !absolute inset-0 flex items-center justify-center !bg-[#fafafa] dark:!bg-[#000000]">
               <Progress value={Math.round(progress.value)} className="w-[min(360px,80%)]">
                 <ProgressLabel>{progress.label}</ProgressLabel>
                 <ProgressValue />
