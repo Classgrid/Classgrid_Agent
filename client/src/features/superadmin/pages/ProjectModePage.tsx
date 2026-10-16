@@ -84,6 +84,13 @@ export function ProjectModePage() {
     else setProjects([]);
   }, []);
   useEffect(() => { if (isSuperAdmin) loadProjects(); }, [isSuperAdmin, loadProjects]);
+  // A project without a repo: check now and then, so a repo the AI made for it shows up here
+  const openWithoutRepo = !!openProject && !openProject.repo;
+  useEffect(() => {
+    if (!openWithoutRepo) return;
+    const t = setInterval(() => loadProjects(), 15000);
+    return () => clearInterval(t);
+  }, [openWithoutRepo, loadProjects]);
 
   const [githubAccount, setGithubAccount] = useState<GithubAccount | null>(null);
   useEffect(() => {
@@ -100,7 +107,6 @@ export function ProjectModePage() {
 
   // Open = download the project's code fresh from GitHub, then show it in the editor
   const open = async (project: Project, replace = false, resume = false) => {
-    if (!project.repo) { setLinking(project); loadRepos(); return; }
     setBusyId(project.id);
     const wasOpen = openId;
     rememberOpen(project.id);
@@ -149,8 +155,7 @@ export function ProjectModePage() {
     if (!res.ok) return toast.error(data.error || "Could not create the project");
     setNewName(null);
     setProjects((list) => [data.project, ...(list || [])]);
-    setLinking(data.project);
-    loadRepos();
+    open(data.project); // starts empty; a GitHub repo can be linked later, or the AI can make one
   };
 
   const rename = async () => {
@@ -390,7 +395,9 @@ export function ProjectModePage() {
                         <button onClick={() => remove(p)} title="Delete" className="opacity-0 group-hover:opacity-100 p-1 rounded hover:bg-secondary"><Trash2 className="size-3.5" /></button>
                       </div>
                     )}
-                    <span className="text-xs text-muted-foreground truncate">{p.repo || "No GitHub repo yet"}</span>
+                    {p.repo
+                      ? <span className="text-xs text-muted-foreground truncate">{p.repo}</span>
+                      : <span className="text-xs text-muted-foreground">No GitHub repo yet · <button onClick={() => { setLinking(p); loadRepos(); }} className="underline hover:text-foreground">Link one</button></span>}
                     {p.createdAt && <span className="text-xs text-muted-foreground">Created {new Date(p.createdAt).toLocaleDateString()}</span>}
                     <span className="text-xs text-muted-foreground">{p.lastOpenedAt ? `Opened ${new Date(p.lastOpenedAt).toLocaleDateString()}` : "Never opened"}</span>
                     <button
@@ -398,8 +405,8 @@ export function ProjectModePage() {
                       disabled={busyId === p.id}
                       className="mt-auto self-start flex items-center gap-2 px-3 py-1.5 rounded-full border border-border text-sm hover:bg-secondary disabled:opacity-50"
                     >
-                      {busyId === p.id ? <Spinner className="size-4" /> : p.repo ? <Github className="size-4" /> : <Plus className="size-4" />}
-                      {busyId === p.id ? "Downloading…" : p.repo ? "Open" : "Link GitHub repo"}
+                      {busyId === p.id ? <Spinner className="size-4" /> : p.repo ? <Github className="size-4" /> : <FolderGit2 className="size-4" />}
+                      {busyId === p.id ? (p.repo ? "Downloading…" : "Opening…") : "Open"}
                     </button>
                   </div>
                 ))}

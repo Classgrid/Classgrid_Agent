@@ -78,6 +78,7 @@ setInterval(async () => {
       let keptAny = false;
       for (const p of projects) {
         const r = await backupAndRemoveProjectCode(ssh, p).catch((e) => ({ removed: false, reason: e.message }));
+        if (!r.removed && r.noRepo) continue; // nothing to back up to; stays until a repo is made
         if (!r.removed) { keptAny = true; console.error(`[IDE] Kept project ${p._id} on the sandbox: ${r.reason}`); }
       }
       await ssh.execCommand(`docker rm -f ide-u-${userId}`);
@@ -284,6 +285,9 @@ router.post("/projects/:id/open", isAuthenticated, async (req, res) => {
       }
       if (user.github_name) await ssh.execCommand(`git -C ${dir} config user.name ${JSON.stringify(user.github_name)}`);
       if (user.github_email) await ssh.execCommand(`git -C ${dir} config user.email ${JSON.stringify(user.github_email)}`);
+    } else if (!project.repo) {
+      // An empty project (no repo yet): a git folder, so changes can be tracked and the AI can make a repo for it later
+      await ssh.execCommand(`mkdir -p ${dir} && cd ${dir} && ([ -d .git ] || git init -q -b main)`);
     } else {
       await ssh.execCommand(`mkdir -p ${dir}`);
     }

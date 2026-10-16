@@ -219,10 +219,54 @@ export const projectTools = {
   }),
 
   push_project_to_github: (sessionId, { message }) => withProject(sessionId, (project, ssh) => pushProject(project, ssh, message)),
+
+  create_github_repo_for_project: (sessionId, args) => withProject(sessionId, (project, ssh) => createRepoForProject(project, ssh, args || {})),
 };
 
+// A project made without a repo: make a new repo on the user's GitHub account, link it to the project and push the
+// project's files to it, so it can be downloaded again later.
+export async function createRepoForProject(project, ssh, { name, private: isPrivate = true, description }) {
+  if (project.repo) return `This project is already linked to ${project.repo}.`;
+  const repoName = String(name || "").trim();
+  if (!/^[A-Za-z0-9._-]{1,100}$/.test(repoName)) return "Error: the repo name can only use letters, numbers, dots, dashes and underscores.";
+  await connectDB();
+  const owner = await User.findById(project.owner).select("github_access_token github_name github_email");
+  if (!owner?.github_access_token) return "GitHub is not connected. The user connects it in AI Hub, then tries again.";
+
+  const ghRes = await fetch("https://api.github.com/user/repos", {
+    method: "POST",
+    headers: { Authorization: `Bearer ${owner.github_access_token}`, Accept: "application/vnd.github+json", "User-Agent": "Classgrid", "Content-Type": "application/json" },
+    body: JSON.stringify({ name: repoName, private: isPrivate !== false, description: description ? String(description).slice(0, 300) : undefined }),
+  });
+  const gh = await ghRes.json().catch(() => ({}));
+  if (ghRes.status === 401) return "GitHub refused the saved key. The user reconnects GitHub in AI Hub, then tries again.";
+  if (!ghRes.ok) return `Could not create the repo: ${gh.errors?.[0]?.message || gh.message || ghRes.status}`;
+
+  await IdeProject.updateOne({ _id: project._id }, { $set: { repo: gh.full_name } });
+  project.repo = gh.full_name;
+
+  const dir = projectHostDir(project);
+  const branch = gh.default_branch || "main";
+  await ssh.execCommand(`mkdir -p ${q(dir)} && cd ${q(dir)} && ([ -d .git ] || git init -q -b ${q(branch)})`);
+  await ssh.execCommand(`git -C ${q(dir)} remote remove origin 2>/dev/null; git -C ${q(dir)} remote add origin ${q(`https://github.com/${gh.full_name}.git`)}`);
+  await ssh.execCommand(`git -C ${q(dir)} config user.name ${q(owner.github_name || "Classgrid")} && git -C ${q(dir)} config user.email ${q(owner.github_email || "code@classgrid.in")}`);
+  await ssh.execCommand(`git -C ${q(dir)} add -A`);
+  const { stdout: staged } = await ssh.execCommand(`git -C ${q(dir)} diff --cached --stat | tail -1`);
+  if (staged.trim()) await ssh.execCommand(`git -C ${q(dir)} commit -q -m "First version"`);
+  const { stdout: hasCommit } = await ssh.execCommand(`git -C ${q(dir)} rev-parse -q --verify HEAD`);
+  if (!hasCommit.trim()) return `Created ${gh.private ? "private" : "public"} repo ${gh.full_name} (${gh.html_url}) and linked it to this project. The project has no files yet, so nothing was pushed.`;
+  const auth = Buffer.from(`x-access-token:${owner.github_access_token}`).toString("base64");
+  const push = await ssh.execCommand(
+    `GIT_TERMINAL_PROMPT=0 GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=http.https://github.com/.extraheader GIT_CONFIG_VALUE_0="AUTHORIZATION: basic ${auth}" ` +
+    `git -C ${q(dir)} push -u origin HEAD:${q(branch)} 2>&1 | tail -5`
+  );
+  const out = (push.stdout || push.stderr || "").split(auth).join("***");
+  if (/rejected|error|fatal/i.test(out)) return `Created and linked ${gh.full_name}, but the first push failed: ${out.slice(0, 800)}`;
+  return `Created ${gh.private ? "private" : "public"} repo ${gh.full_name} (${gh.html_url}), linked it to this project and pushed the project's files${staged.trim() ? ` (${staged.trim()})` : ""}.`;
+}
+
 export async function pushProject(project, ssh, message) {
-  if (!project.repo) return "This project has no GitHub repo linked.";
+  if (!project.repo) return "This project has no GitHub repo yet. Create one with create_github_repo_for_project.";
   const msg = String(message || "").trim().slice(0, 500);
   if (!msg) return "Error: a commit message is needed";
   await connectDB();
@@ -338,7 +382,7 @@ export async function editorContextFor(sessionId) {
     const rel = (p) => (p && p.startsWith(root + "/") ? p.slice(root.length + 1) : p);
     const lines = [
       PROJECT_MODE_RULES,
-      `Project: ${project.name}${project.repo ? ` (GitHub ${project.repo})` : ""}. Its files are at ${root}/ (the same files at /data/). Paths below are relative to it.`,
+      `Project: ${project.name}${project.repo ? ` (GitHub ${project.repo})` : " (no GitHub repo yet)"}. Its files are at ${root}/ (the same files at /data/). Paths below are relative to it.`,
     ];
 
     const { stdout: hasCode } = await ssh.execCommand(`[ -n "$(ls -A ${q(projectHostDir(project))} 2>/dev/null)" ] && echo yes`);
@@ -509,6 +553,8 @@ export async function undoToCheckpoint(project, ssh, sessionId, id) {
 // if that backup fails, the code is kept. Returns what happened per project.
 export async function backupAndRemoveProjectCode(ssh, project) {
   const dir = projectHostDir(project);
+  // Without a GitHub repo there is nowhere to save it, so the code stays on the sandbox
+  if (!project.repo) return { removed: false, noRepo: true, reason: "no GitHub repo yet" };
   const { stdout: exists } = await ssh.execCommand(`[ -d ${q(dir)}/.git ] && echo yes`);
   if (!exists.trim()) {
     await ssh.execCommand(`rm -rf ${q(dir)}`); // a folder without a repo has nothing to save

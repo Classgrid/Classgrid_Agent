@@ -420,6 +420,20 @@ export const getMcpTools = () => [
   },
 
   {
+    name: 'create_github_repo_for_project',
+    description: 'Create a new GitHub repo on the user\'s connected GitHub account for the open Project Mode project (only when it has no repo yet), link it to the project, and push the project\'s files to it.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        name: { type: 'string', description: 'Repo name (letters, numbers, dots, dashes, underscores).' },
+        private: { type: 'boolean', description: 'Private repo (default true).' },
+        description: { type: 'string', description: 'Short repo description.' }
+      },
+      required: ['name']
+    }
+  },
+
+  {
     name: 'execute_terminal_command',
     description: 'Executes a native bash/terminal command directly on the host computer. You can use this to run curl, tesseract, Python, or system utilities. Files are in /data (this chat\x27s folder; /data/scratch is for test and trial files and is cleaned automatically). In a Project Mode chat, /data is the user\x27s project itself (the same files their code editor shows at /home/workspace/projects/<id>, which also works as a path) and commands start there.',
     inputSchema: {
