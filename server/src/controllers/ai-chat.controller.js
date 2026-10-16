@@ -1460,7 +1460,9 @@ You are currently talking to Nikhil Shinde (nikhil.shinde@classgrid.in), the CRE
         if (sessionId && !isIncognito && /^[0-9a-f]{24}$/i.test(String(body.projectId || "")) && req.user?._id) {
             await linkChatToProject(req.user._id, body.projectId, sessionId).catch(() => {});
         }
-        if (sessionId && !isIncognito) volatilePrompt += await editorContextFor(sessionId).catch(() => "");
+        const projectContext = sessionId && !isIncognito ? await editorContextFor(sessionId).catch(() => "") : "";
+        const isProjectChat = !!projectContext; // Project Mode chat: Agent-mode website hosting rules are not sent
+        volatilePrompt += projectContext;
         // Project Mode: snapshot the project before this answer, so its changes can be reviewed, rejected or undone
         const checkpointId = sessionId && !isIncognito ? await startCheckpoint(sessionId).catch(() => null) : null;
         if (checkpointId && !res.writableEnded) res.write(`data: ${JSON.stringify({ type: "checkpoint", id: checkpointId })}\n\n`);
@@ -2068,7 +2070,8 @@ CRITICAL INSTRUCTION FOR GOOGLE WORKSPACE & CLASSROOM DISAMBIGUATION: If the use
 
         // --- DO NOT TOUCH THIS BLOCK ---
         // These instructions were painstakingly negotiated. Do not let any AI rewrite or modify them.
-        dynamicSystemPrompt += promptBlock("code_sandbox|connector:github|connector:vercel", `\n\nWEBSITE DEPLOYMENT INSTRUCTIONS:
+        // (Agent mode only: Project Mode works in the user's own repo, so it never gets these.)
+        if (!isProjectChat) dynamicSystemPrompt += promptBlock("code_sandbox|connector:github|connector:vercel", `\n\nWEBSITE DEPLOYMENT INSTRUCTIONS:
 **CRITICAL RULE: YOU MUST ONLY USE THIS PLAN FLOW WHEN BUILDING A WEBSITE. FOR ANY OTHER CHAT OR QUESTIONS, NEVER GENERATE A PLAN BLOCK!**
 **IMPORTANT RULE FOR FRAMEWORKS**: 
 - If the user chooses **Vercel + GitHub**, you are COMPLETELY FREE to use React, Next.js, Vite, or any other modern stack! 
