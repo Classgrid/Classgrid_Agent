@@ -5244,7 +5244,8 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
               )}
               <form onSubmit={handleSubmit} className={cn("space-y-2", endedView && "hidden")}>
                 <div className={cn(
-                  "group relative w-full sm:w-[80%] mx-auto shadow-sm rounded-2xl border border-border !bg-white dark:!bg-[#0f0f0f] focus-within:border-black/80 dark:focus-within:border-white/50 focus-within:ring-1 focus-within:ring-black/80 dark:focus-within:ring-white/50 transition-all duration-300"
+                  variant === "overlay" ? "w-full" : "sm:w-[80%]",
+                  "group relative w-full mx-auto shadow-sm rounded-2xl border border-border !bg-white dark:!bg-[#0f0f0f] focus-within:border-black/80 dark:focus-within:border-white/50 focus-within:ring-1 focus-within:ring-black/80 dark:focus-within:ring-white/50 transition-all duration-300"
                 )}>
                   {/* Hidden file input */}
                   <input
@@ -5624,8 +5625,9 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
                     placeholder={attachedFiles.length > 0 ? "Add a message or send files..." : "Ask a question..."}
                     autoComplete="off"
                     className={cn(
-                      "w-full resize-none bg-transparent pb-12 pl-4 pr-4 sm:pl-24 text-[16px] sm:text-sm focus:outline-none overflow-y-auto chat-scrollbar leading-relaxed transition-all duration-300",
-                      showFilesPanel ? "sm:pr-32" : "sm:pr-60",
+                      "w-full resize-none bg-transparent pb-12 pl-4 pr-4 text-[16px] sm:text-sm focus:outline-none overflow-y-auto chat-scrollbar leading-relaxed transition-all duration-300",
+                      // The narrow side panel has the buttons below the text, so it keeps normal side spacing
+                      variant === "overlay" ? "" : cn("sm:pl-24", showFilesPanel ? "sm:pr-32" : "sm:pr-60"),
                       (isRecording || isTranscribing) ? "text-transparent placeholder:text-transparent" : "text-foreground",
                       isExpandedBox ? "min-h-[60vh] max-h-[60vh]" : "min-h-[56px] max-h-[180px]",
                       (pageContext?.path?.startsWith("/docs") || attachedFiles.length > 0) ? "pt-3" : "pt-4 rounded-2xl"
