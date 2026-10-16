@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
-import { ChevronDown, ChevronRight, Folder, FileText, Github, Loader2 } from 'lucide-react';
+import { ChevronDown, ChevronRight, Folder, FileText, Github } from 'lucide-react';
+import { Spinner } from '@/components/marketing_ui/spinner';
 import { cn } from '@/lib/utils';
 
 // Steps of the Project Mode file tools, shown like a code editor's agent: "Edited calculator.ts +26 -0",
@@ -90,7 +91,7 @@ export function ProjectEditStep({ step }: { step: Step }) {
         <FileLink path={path} find={edits[0]?.new_text?.split("\n").find((l) => l.trim()) || undefined} />
         {!failed && <span className="shrink-0 text-xs text-green-600 dark:text-green-500">+{added}</span>}
         {!failed && <span className="shrink-0 text-xs text-red-600 dark:text-red-500">-{removed}</span>}
-        {loading && <Loader2 className="size-3.5 shrink-0 animate-spin" />}
+        {loading && <Spinner className="size-3.5 shrink-0" />}
       </Row>
       <ErrorLine step={step} />
       {!failed && /Editor problems in this file now/.test(String(step.result || '')) && (
@@ -211,7 +212,7 @@ export function ProjectExploreGroup({ steps }: { steps: Step[] }) {
       <Row onClick={() => setOpen(!isOpen)} open={isOpen}>
         <span className="shrink-0">{loading ? 'Exploring' : 'Explored'}</span>
         <Name>{parts}</Name>
-        {loading && <Loader2 className="size-3.5 shrink-0 animate-spin" />}
+        {loading && <Spinner className="size-3.5 shrink-0" />}
       </Row>
       {isOpen && <div className="ml-10 flex flex-col">{steps.map((s) => <ExploreItem key={s.id} step={s} />)}</div>}
     </div>
@@ -227,7 +228,7 @@ export function ProjectPushStep({ step }: { step: Step }) {
       <Github className="size-3.5 shrink-0" />
       <span className="shrink-0">{loading ? 'Pushing to GitHub' : failed ? 'Push failed' : 'Pushed to GitHub'}</span>
       {repo && <Name>{repo}</Name>}
-      {loading && <Loader2 className="size-3.5 shrink-0 animate-spin" />}
+      {loading && <Spinner className="size-3.5 shrink-0" />}
     </Row>
   );
 }

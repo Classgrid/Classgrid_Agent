@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { useParams } from "react-router-dom";
-import { ArrowLeft, FolderGit2, Github, Loader2, Pencil, Plus, Trash2 } from "lucide-react";
+import { ArrowLeft, FolderGit2, Github, Pencil, Plus, Trash2 } from "lucide-react";
+import { Spinner } from "@/components/marketing_ui/spinner";
 import { toast } from "sonner";
 import { AskAiPanel } from "@/components/ai";
 import { AiHubModal } from "@/components/ai/components/AiHubModal";
@@ -245,7 +246,7 @@ export function ProjectModePage() {
             {openProject.repo && <span className="text-xs text-muted-foreground truncate">{openProject.repo}</span>}
             {openProject.repo && folder && (
               <button onClick={push} disabled={pushing} className="ml-auto shrink-0 flex items-center gap-2 h-8 px-3 rounded-full border border-border text-sm hover:bg-secondary disabled:opacity-50">
-                {pushing ? <Loader2 className="size-4 animate-spin" /> : <Github className="size-4" />} Push to GitHub
+                {pushing ? <Spinner className="size-4" /> : <Github className="size-4" />} Push to GitHub
               </button>
             )}
           </>
@@ -295,7 +296,7 @@ export function ProjectModePage() {
             </div>
 
             {projects === null ? (
-              <div className="flex justify-center py-16"><Loader2 className="size-5 animate-spin text-muted-foreground" /></div>
+              <div className="flex justify-center py-16"><Spinner className="size-5 text-muted-foreground" /></div>
             ) : (
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
                 {(newName !== null || projects.length === 0) && (
@@ -352,7 +353,7 @@ export function ProjectModePage() {
                       disabled={busyId === p.id}
                       className="mt-auto self-start flex items-center gap-2 px-3 py-1.5 rounded-full border border-border text-sm hover:bg-secondary disabled:opacity-50"
                     >
-                      {busyId === p.id ? <Loader2 className="size-4 animate-spin" /> : p.repo ? <Github className="size-4" /> : <Plus className="size-4" />}
+                      {busyId === p.id ? <Spinner className="size-4" /> : p.repo ? <Github className="size-4" /> : <Plus className="size-4" />}
                       {busyId === p.id ? "Downloading…" : p.repo ? "Open" : "Link GitHub repo"}
                     </button>
                   </div>
@@ -375,7 +376,7 @@ export function ProjectModePage() {
                 <Github className="size-4" /> {githubExpired ? "Reconnect GitHub" : "Connect GitHub"}
               </button>
             ) : repos === null ? (
-              <div className="flex justify-center py-6"><Loader2 className="size-5 animate-spin text-muted-foreground" /></div>
+              <div className="flex justify-center py-6"><Spinner className="size-5 text-muted-foreground" /></div>
             ) : repos.length === 0 ? (
               <p className="text-sm text-muted-foreground">No repos found on your GitHub account.</p>
             ) : (
@@ -414,7 +415,7 @@ export function ProjectModePage() {
             </div>
             <div className="flex-1 overflow-y-auto">
               {review.files === null ? (
-                <div className="flex justify-center py-10"><Loader2 className="size-5 animate-spin text-muted-foreground" /></div>
+                <div className="flex justify-center py-10"><Spinner className="size-5 text-muted-foreground" /></div>
               ) : review.files.length === 0 ? (
                 <p className="px-5 py-8 text-sm text-muted-foreground">No changes left from this answer.</p>
               ) : review.files.map((f) => (
