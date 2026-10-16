@@ -214,6 +214,7 @@ const projectJson = (p) => ({ id: p._id, name: p.name, repo: p.repo, lastOpenedA
 // If Redis fails, every project goes through SSH exactly as before.
 const EDIT_CACHE_TTL = 45;
 const EDIT_CACHE_KEY = (id) => `ide:lastEdited:${id}`;
+const EDIT_CACHE_NO_FILES = "none"; // saved for projects with no files (or no folder yet)
 
 async function newestFileEdits(allProjects) {
   const times = {};
@@ -224,6 +225,7 @@ async function newestFileEdits(allProjects) {
     projects = [];
     allProjects.forEach((p, i) => {
       const ms = Number(cached[i]);
+      if (cached[i] === EDIT_CACHE_NO_FILES) return; // cached "no files": nothing to look up, skip SSH
       if (cached[i] && Number.isFinite(ms)) times[String(p._id)] = new Date(ms);
       else projects.push(p);
     });
@@ -243,9 +245,12 @@ async function newestFileEdits(allProjects) {
     for (const line of stdout.split("\n")) {
       const [id, secs] = line.trim().split(/\s+/);
       const ms = Math.round(parseFloat(secs) * 1000);
-      if (id && Number.isFinite(ms)) {
+      if (!id) continue;
+      if (Number.isFinite(ms)) {
         times[id] = new Date(ms);
         redis.set(EDIT_CACHE_KEY(id), String(ms), "EX", EDIT_CACHE_TTL).catch(() => {});
+      } else if (!secs) {
+        redis.set(EDIT_CACHE_KEY(id), EDIT_CACHE_NO_FILES, "EX", EDIT_CACHE_TTL).catch(() => {});
       }
     }
   } catch (e) {
