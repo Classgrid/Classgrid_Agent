@@ -38,10 +38,10 @@ function LoadingSmoke() {
   const reduce = useReducedMotion();
   // side, color, size/position, how far it drifts in, timing
   const puffs = [
-    { side: "left", color: "#34d399", bottom: "-30%", h: "80%", w: "70%", from: "-30%", to: "8%", delay: 0, duration: 10 },
-    { side: "left", color: "#34d399", bottom: "-15%", h: "50%", w: "45%", from: "-20%", to: "30%", delay: 0.8, duration: 13 },
-    { side: "right", color: "#f97316", bottom: "-30%", h: "80%", w: "70%", from: "30%", to: "-8%", delay: 0.3, duration: 11 },
-    { side: "right", color: "#f97316", bottom: "-15%", h: "50%", w: "45%", from: "20%", to: "-30%", delay: 1.1, duration: 14 },
+    { side: "left", color: "#34d399", top: "28%", h: "55%", w: "70%", from: "-25%", to: "12%", delay: 0, duration: 10 },
+    { side: "left", color: "#34d399", top: "40%", h: "40%", w: "50%", from: "-10%", to: "35%", delay: 0.8, duration: 13 },
+    { side: "right", color: "#f97316", top: "28%", h: "55%", w: "70%", from: "25%", to: "-12%", delay: 0.3, duration: 11 },
+    { side: "right", color: "#f97316", top: "40%", h: "40%", w: "50%", from: "10%", to: "-35%", delay: 1.1, duration: 14 },
   ] as const;
   return (
     <>
@@ -50,9 +50,9 @@ function LoadingSmoke() {
           key={i}
           aria-hidden
           className="absolute rounded-full pointer-events-none -z-10 blur-[60px]"
-          style={{ [p.side]: "-15%", bottom: p.bottom, height: p.h, width: p.w, background: `radial-gradient(closest-side, ${p.color}, ${p.color}00)` }}
+          style={{ [p.side]: "-10%", top: p.top, height: p.h, width: p.w, background: `radial-gradient(closest-side, ${p.color}, ${p.color}00)` }}
           initial={{ opacity: 0, x: p.from }}
-          animate={reduce ? { opacity: 0.8, x: p.to } : { opacity: [0, 0.85, 0.65, 0.85], x: [p.from, p.to], y: ["6%", "-10%", "0%"], scale: [0.9, 1.1, 1] }}
+          animate={reduce ? { opacity: 0.8, x: p.to } : { opacity: [0, 0.85, 0.65, 0.85], x: [p.from, p.to], y: ["4%", "-6%", "0%"], scale: [0.9, 1.1, 1] }}
           transition={{ duration: p.duration, delay: p.delay, ease: "easeInOut", repeat: reduce ? 0 : Infinity, repeatType: "reverse" }}
         />
       ))}
