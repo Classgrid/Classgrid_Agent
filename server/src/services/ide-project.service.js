@@ -221,7 +221,52 @@ export const projectTools = {
   push_project_to_github: (sessionId, { message }) => withProject(sessionId, (project, ssh) => pushProject(project, ssh, message)),
 
   create_github_repo_for_project: (sessionId, args) => withProject(sessionId, (project, ssh) => createRepoForProject(project, ssh, args || {})),
+
+  update_project_github_repo: (sessionId, args) => withProject(sessionId, (project, ssh) => updateProjectRepo(project, ssh, args || {})),
 };
+
+// Rename the project's GitHub repo or change its description, website or public/private setting.
+// A new name is also saved on the project and in the downloaded code, so pushing keeps working.
+export async function updateProjectRepo(project, ssh, { new_name, description, homepage, private: isPrivate }) {
+  if (!project.repo) return "This project has no GitHub repo yet. Create one with create_github_repo_for_project.";
+  const body = {};
+  if (new_name !== undefined) {
+    const n = String(new_name).trim();
+    if (!/^[A-Za-z0-9._-]{1,100}$/.test(n)) return "Error: the repo name can only use letters, numbers, dots, dashes and underscores.";
+    body.name = n;
+  }
+  if (description !== undefined) body.description = String(description).slice(0, 300);
+  if (homepage !== undefined) body.homepage = String(homepage).slice(0, 300);
+  if (isPrivate !== undefined) body.private = !!isPrivate;
+  if (!Object.keys(body).length) return "Error: nothing to change. Give new_name, description, homepage or private.";
+  await connectDB();
+  const owner = await User.findById(project.owner).select("github_access_token");
+  if (!owner?.github_access_token) return "GitHub is not connected. The user connects it in AI Hub, then tries again.";
+
+  const ghRes = await fetch(`https://api.github.com/repos/${project.repo}`, {
+    method: "PATCH",
+    headers: { Authorization: `Bearer ${owner.github_access_token}`, Accept: "application/vnd.github+json", "User-Agent": "Classgrid", "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  const gh = await ghRes.json().catch(() => ({}));
+  if (ghRes.status === 401) return "GitHub refused the saved key. The user reconnects GitHub in AI Hub, then tries again.";
+  if (!ghRes.ok) return `Could not change the repo: ${gh.errors?.[0]?.message || gh.message || ghRes.status}`;
+
+  const old = project.repo;
+  if (gh.full_name && gh.full_name !== old) {
+    await IdeProject.updateOne({ _id: project._id }, { $set: { repo: gh.full_name } });
+    project.repo = gh.full_name;
+    const dir = projectHostDir(project);
+    await ssh.execCommand(`[ -d ${q(dir)}/.git ] && git -C ${q(dir)} remote set-url origin ${q(`https://github.com/${gh.full_name}.git`)}`);
+  }
+  const changed = [
+    gh.full_name !== old && `renamed ${old} to ${gh.full_name}`,
+    body.description !== undefined && "description updated",
+    body.homepage !== undefined && "website updated",
+    body.private !== undefined && `now ${gh.private ? "private" : "public"}`,
+  ].filter(Boolean);
+  return `Repo ${gh.full_name} (${gh.html_url}): ${changed.join(", ")}.`;
+}
 
 // A project made without a repo: make a new repo on the user's GitHub account, link it to the project and push the
 // project's files to it, so it can be downloaded again later.

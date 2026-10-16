@@ -434,6 +434,20 @@ export const getMcpTools = () => [
   },
 
   {
+    name: 'update_project_github_repo',
+    description: 'Change the open Project Mode project\'s GitHub repo: rename it, or change its description, website or public/private setting. A rename is also saved on the project, so pushing keeps working.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        new_name: { type: 'string', description: 'New repo name (letters, numbers, dots, dashes, underscores).' },
+        description: { type: 'string', description: 'New repo description.' },
+        homepage: { type: 'string', description: 'Website link shown on the repo.' },
+        private: { type: 'boolean', description: 'true = private, false = public.' }
+      }
+    }
+  },
+
+  {
     name: 'execute_terminal_command',
     description: 'Executes a native bash/terminal command directly on the host computer. You can use this to run curl, tesseract, Python, or system utilities. Files are in /data (this chat\x27s folder; /data/scratch is for test and trial files and is cleaned automatically). In a Project Mode chat, /data is the user\x27s project itself (the same files their code editor shows at /home/workspace/projects/<id>, which also works as a path) and commands start there.',
     inputSchema: {

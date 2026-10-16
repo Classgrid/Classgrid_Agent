@@ -99,7 +99,7 @@ export const TOOL_GROUPS = [
     {
         id: "code_project",
         description: "List, read, search, create and edit files of the Project Mode project open in this chat, and push it to GitHub.",
-        tools: ["list_project_files", "view_project_file", "search_project", "write_project_file", "edit_project_file", "push_project_to_github", "create_github_repo_for_project"],
+        tools: ["list_project_files", "view_project_file", "search_project", "write_project_file", "edit_project_file", "push_project_to_github", "create_github_repo_for_project", "update_project_github_repo"],
         pattern: /\b(project|repo\w*|files?|folders?|edit\w*|lines?|functions?|components?|imports?|push\w*|commits?|git\s*hub|refactor\w*|bug|fix\w*|code)\b/i,
     },
     {
