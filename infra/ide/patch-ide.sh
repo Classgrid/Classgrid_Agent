@@ -28,6 +28,8 @@ must "$W" 'default:bu.AFTER_DELAY' "auto-save on"
 #    and no Extensions icon in the left bar
 node -e 'const fs=require("fs");const f=process.argv[1];const p=JSON.parse(fs.readFileSync(f,"utf8"));for(const k of ["extensionsGallery","extensionRecommendations","keymapExtensionTips","languageExtensionTips","configBasedExtensionTips"])delete p[k];fs.writeFileSync(f,JSON.stringify(p,null,"\t"))' "$ROOT/product.json"
 printf '\n/* classgrid-no-extensions: no extension store in Classgrid Code */\n.monaco-workbench .activitybar li.action-item:has(.codicon-extensions-view-icon){display:none!important}\n' >> "$ROOT/out/vs/code/browser/workbench/workbench.css"
+# No Copilot icon or "Set up Copilot" card in the status bar (not our brand)
+printf '\n/* classgrid-no-copilot: no Copilot icon or setup card in Classgrid Code */\n.monaco-workbench .statusbar-item[id="chat.statusBarEntry"]{display:none!important}\n' >> "$ROOT/out/vs/code/browser/workbench/workbench.css"
 # The same store address is also built into the program files; rename it there so it is never used
 F=$(grep -l 'extensionsGallery:{serviceUrl:"https://open-vsx.org' -r "$ROOT/out")
 sed -i 's#extensionsGallery:{serviceUrl:"https://open-vsx.org#extensionsGalleryOff:{serviceUrl:"https://open-vsx.org#g' $F
