@@ -77,7 +77,7 @@ export function ProjectEditStep({ step }: { step: Step }) {
   const loading = step.status === 'loading';
   const edits: { old_text?: string; new_text?: string }[] = step.tool === 'edit_project_file' ? (step.args?.edits || []) : [];
   // The real change comes back from the tool ("+208 -0"); until then (or for old chats) it is estimated from the request
-  const real = String(step.result || '').match(/\+(\d+) -(\d+)\)\.?\s*$/);
+  const real = String(step.result || '').match(/\+(\d+) -(\d+)\)\./);
   const added = real ? Number(real[1]) : step.tool === 'write_project_file' ? lineCount(step.args?.content) : edits.reduce((n, e) => n + lineCount(e.new_text), 0);
   const removed = real ? Number(real[2]) : edits.reduce((n, e) => n + lineCount(e.old_text), 0);
   const failed = isError(step);
@@ -93,6 +93,11 @@ export function ProjectEditStep({ step }: { step: Step }) {
         {loading && <Loader2 className="size-3.5 shrink-0 animate-spin" />}
       </Row>
       <ErrorLine step={step} />
+      {!failed && /Editor problems in this file now/.test(String(step.result || '')) && (
+        <div className="ml-10 -mt-1 mb-1 text-xs text-amber-600 dark:text-amber-500 whitespace-pre-line">
+          {String(step.result).split('Editor problems in this file now')[1]?.replace(/^\s*\((\d+)\):/, '$1 problem(s) in the editor:')}
+        </div>
+      )}
       {open && (
         <div className="ml-10 mr-2 mb-2 rounded-lg border border-border overflow-hidden text-[12px] font-mono">
           <div className="px-3 py-1.5 border-b border-border text-muted-foreground font-sans text-xs truncate">{path}</div>
@@ -268,7 +273,7 @@ export function FilesChangedSummary({ steps }: { steps: Step[] }) {
   for (const s of steps || []) {
     if (s.status === 'loading' || isError(s)) continue;
     if (PROJECT_EDIT_TOOLS.has(s.tool)) {
-      const real = String(s.result || '').match(/\+(\d+) -(\d+)\)\.?\s*$/);
+      const real = String(s.result || '').match(/\+(\d+) -(\d+)\)\./);
       const p = String(s.args?.path || '').replace(/^\/data\/project\//, '').replace(/^\/home\/workspace\/projects\/[^/]+\//, '');
       if (real && p) add({ path: p, added: Number(real[1]), removed: Number(real[2]) });
     } else if (s.tool === 'run_code' || s.tool === 'execute_terminal_command') {

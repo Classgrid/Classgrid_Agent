@@ -40,6 +40,7 @@ import {
     memoryText
 } from "../services/ai-chat.service.js";
 import { getHistory, getHistoryCount, appendToHistory, invalidateHistoryCache, getChatTranscript } from "../services/ai-chat-history.service.js";
+import { editorContextFor, rememberProjectSnapshot } from "../services/ide-project.service.js";
 import { buildEndConversationHandlers, reopenSession } from "../services/ai-end-conversation.service.js";
 import { hasEnoughTokens, deductTokens, getImageGenerationCost, tokenWindowEnd } from "../services/ai-credits.service.js";
 import redis from "../config/redis.js";
@@ -1453,6 +1454,9 @@ You are currently talking to Nikhil Shinde (nikhil.shinde@classgrid.in), the CRE
         }
 
         volatilePrompt += `\n\n--- CURRENT SYSTEM TIME ---\nThe current time in IST (India) is ${timeIST} on ${dateIST}. The current time in UTC is ${timeUTC} on ${dateUTC} (exact UTC now: ${now.toISOString()}).\n${calendarStr}\nIf the user asks for the time in ANY other timezone or city (like London or Tokyo), you MUST use the \`get_timezone_time\` tool to find the exact time. DO NOT attempt to calculate timezone math yourself, you will get it wrong. NEVER output placeholders like "[Your local time here]". DO NOT attempt to calculate calendar dates in your head; look at the reference list above.`;
+
+        // Project Mode: what the user sees in the code editor (open file, cursor, selection, errors) and what they changed
+        if (sessionId && !isIncognito) volatilePrompt += await editorContextFor(sessionId).catch(() => "");
         dynamicSystemPrompt += promptBlock("connector:zoom|connector:google|connector:microsoft|schedules", `\nCRITICAL TIMEZONE RULE FOR MEETINGS: When scheduling a Zoom meeting or Google Calendar event, the APIs EXPECT the 'startTime' parameter to be in UTC format (with a 'Z' at the end). To ensure accuracy, YOU MUST ALWAYS USE the \`get_timezone_time\` tool to check the current time and UTC offset for the user's location BEFORE scheduling any future meetings. Use the offset returned by the tool (e.g. GMT+05:30) to calculate the correct UTC time for the meeting.`);
 
         dynamicSystemPrompt += promptBlock("off", `\n\nCRITICAL INSTRUCTION (HIGHEST PRIORITY): If a user asks you to perform ANY task (e.g. "make a flowchart", "write an email", "create a plan") BUT they do not provide the necessary data, topic, or context, your ONLY ALLOWED RESPONSE is a question asking for that information. Under NO circumstances should you generate placeholder content, guess the topic, or attempt to fulfill the request without the context.\nCRITICAL: NEVER say generic confirmation phrases like "I have completed the requested actions" or "I have executed the tool." Just provide the direct answer, summary, or link.\nCONVERSATIONAL FLOW RULE: If the user provides a brief acknowledgement (like "okay", "thanks", "got it", "no issue"), DO NOT repeat previous information or restate the previous answer. Keep your response extremely brief, conversational, and natural, such as "You're welcome!" or "Let me know if you need anything else!"\nERROR HANDLING & APOLOGY RULE: If the user points out that you made a mistake (e.g. you said something wasn't there but it was), you MUST simply apologize, admit the mistake, and say you will keep it in mind. DO NOT reprint the entire list, table, or context again to prove you fixed it. Repeating large blocks of text when apologizing is strictly forbidden.\nSTRICT FORMATTING BAN: You are STRICTLY BANNED from wrapping tool call outputs, markdown code blocks, or repository names in parentheses \`( )\`. Never do things like \`( \`\`\`code\`\`\` )\`. Do not use parentheses to enclose multiline content or blocks as it breaks the UI rendering. NEVER write around like this!`);
@@ -4486,6 +4490,8 @@ If a tool fails, never show the error message; say only: "Something went wrong o
                 }
                 saveMessage(sessionId, "assistant", savedContent, []).catch(err => console.error("Failed to save assistant message:", err));
                 appendToHistory(sessionId, "assistant", savedContent).catch(err => console.error("Failed to append assistant reply to Redis:", err));
+                // Project Mode: remember the project's state now, so the next turn can show what the user changed themselves
+                rememberProjectSnapshot(sessionId).catch(() => {});
             }
 
             // Extract AI-created file links (PDFs, Excel, etc.) from the CDN and save to Library

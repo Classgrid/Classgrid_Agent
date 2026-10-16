@@ -3,6 +3,7 @@ import { NodeSSH } from "node-ssh";
 import IdeProject from "../models/IdeProject.js";
 import User from "../models/User.js";
 import connectDB from "../../config/db.js";
+import redis from "../config/redis.js";
 
 // File tools for a Project Mode project (the code the user and the AI share). Everything runs on the sandbox as
 // the normal user, inside the project folder only. Pushing adds the owner's GitHub key just for that one command,
@@ -114,6 +115,25 @@ function closestLines(text, oldText) {
   return scored.length ? ` Closest lines in the file: ${scored.map((x) => `${x.n}: ${x.l.trim().slice(0, 160)}`).join(" | ")}` : " The file has no similar line; read it with view_project_file first.";
 }
 
+// After the AI changes a file: the errors the user's editor now shows in it (TypeScript, ESLint...). The editor
+// re-checks a moment after the file changes; when it hasn't reported anything new, nothing is added.
+async function problemsAfterWrite(ssh, project, full) {
+  const since = Date.now();
+  const ctxFile = `/home/ubuntu/ide_users/${project.owner}/.classgrid/context.json`;
+  const inBox = full.replace(`/home/ubuntu/ide_users/${project.owner}`, "/home/workspace");
+  for (let i = 0; i < 4; i++) {
+    await new Promise((r) => setTimeout(r, 900));
+    const { stdout } = await ssh.execCommand(`cat ${q(ctxFile)} 2>/dev/null`);
+    let ctx = null;
+    try { ctx = JSON.parse(stdout); } catch {}
+    if (!ctx || (ctx.updatedAt || 0) < since) continue;
+    const mine = (ctx.problems || []).filter((p) => p.file === inBox);
+    if (!mine.length) return "";
+    return `\nEditor problems in this file now (${mine.length}):\n${mine.slice(0, 15).map((p) => `- line ${p.line} ${p.severity}: ${p.message}`).join("\n")}`;
+  }
+  return "";
+}
+
 export const projectTools = {
   list_project_files: (sessionId, { path: dir = "", depth = 2 }) => withProject(sessionId, async (project, ssh) => {
     const { full, rel } = resolveInProject(project, dir);
@@ -152,7 +172,7 @@ export const projectTools = {
     await writeText(ssh, full, String(content));
     const total = String(content).split("\n").length;
     const { added, removed } = before !== null ? lineChange(before, String(content)) : { added: total, removed: 0 };
-    return `${before !== null ? "Replaced" : "Created"} ${rel} (${total} lines, +${added} -${removed}).`;
+    return `${before !== null ? "Replaced" : "Created"} ${rel} (${total} lines, +${added} -${removed}).${await problemsAfterWrite(ssh, project, full)}`;
   }),
 
   // One or more edits in one file. Each edit replaces old_text (which must be found exactly, once unless
@@ -195,7 +215,7 @@ export const projectTools = {
     }
     await writeText(ssh, full, eol === "\n" ? text : text.replace(/\n/g, eol));
     const { added, removed } = lineChange(original, text);
-    return `Edited ${rel} (${done.join(", ")}, +${added} -${removed}).`;
+    return `Edited ${rel} (${done.join(", ")}, +${added} -${removed}).${await problemsAfterWrite(ssh, project, full)}`;
   }),
 
   push_project_to_github: (sessionId, { message }) => withProject(sessionId, (project, ssh) => pushProject(project, ssh, message)),
@@ -269,3 +289,61 @@ export async function projectChangesBetween(ssh, project, before, after) {
 
 export const formatProjectChanges = (changes) =>
   changes.length ? `\n\nFILES CHANGED IN PROJECT:\n${changes.map((c) => `+${c.added} -${c.removed} ${c.file}`).join("\n")}` : "";
+
+// ── What the user sees in the editor, for the AI ─────────────────────────────────────────────────────────
+// Read from the user's own editor box (the Classgrid add-on keeps .classgrid/context.json up to date), plus the
+// changes the user made themselves since the AI's last answer (project snapshot at the end of each answer).
+const LAST_SNAPSHOT = (sessionId) => `ide:lastsnap:${sessionId}`;
+
+export async function rememberProjectSnapshot(sessionId) {
+  const project = await projectForChat(sessionId);
+  if (!project) return;
+  let ssh;
+  try {
+    ssh = await sandboxSsh();
+    const snap = await projectSnapshot(ssh, project);
+    if (snap) await redis.set(LAST_SNAPSHOT(sessionId), snap, "EX", 7 * 24 * 60 * 60);
+  } finally {
+    ssh?.dispose();
+  }
+}
+
+export async function editorContextFor(sessionId) {
+  const project = await projectForChat(sessionId);
+  if (!project) return "";
+  let ssh;
+  try {
+    ssh = await sandboxSsh();
+    const root = `/home/workspace/projects/${project._id}`;
+    const rel = (p) => (p && p.startsWith(root + "/") ? p.slice(root.length + 1) : p);
+    const lines = [
+      `Project: ${project.name}${project.repo ? ` (GitHub ${project.repo})` : ""}. Its files are at ${root}/ (the same files at /data/project/). Paths below are relative to it.`,
+    ];
+
+    const { stdout } = await ssh.execCommand(`cat ${q(`/home/ubuntu/ide_users/${project.owner}/.classgrid/context.json`)} 2>/dev/null`);
+    let ctx = null;
+    try { ctx = JSON.parse(stdout); } catch {}
+    if (ctx && Date.now() - (ctx.updatedAt || 0) < 6 * 60 * 60 * 1000) {
+      if (ctx.activeFile) lines.push(`Open in the editor now: ${rel(ctx.activeFile)}${ctx.cursorLine ? `, cursor on line ${ctx.cursorLine}` : ""}.`);
+      if (ctx.selection?.text) lines.push(`Selected by the user (lines ${ctx.selection.startLine}-${ctx.selection.endLine}):\n\`\`\`\n${ctx.selection.text}\n\`\`\``);
+      const others = (ctx.openTabs || []).filter((t) => t !== ctx.activeFile).map(rel);
+      if (others.length) lines.push(`Other open tabs: ${others.join(", ")}.`);
+      if (ctx.problemCount) {
+        lines.push(`Problems the editor shows (${ctx.problemCount}${ctx.problemCount > ctx.problems.length ? `, first ${ctx.problems.length}` : ""}):\n` +
+          ctx.problems.map((p) => `- ${rel(p.file)}:${p.line} ${p.severity}: ${p.message}${p.source ? ` (${p.source})` : ""}`).join("\n"));
+      }
+    }
+
+    const prev = await redis.get(LAST_SNAPSHOT(sessionId)).catch(() => null);
+    const now = prev ? await projectSnapshot(ssh, project) : null;
+    if (prev && now && prev !== now) {
+      const { stdout: diff } = await ssh.execCommand(`git -C ${q(projectHostDir(project))} diff --unified=2 ${prev} ${now} | head -c 6000`);
+      if (diff.trim()) lines.push(`Changes the user made in the editor since your last answer:\n\`\`\`diff\n${diff.trim()}\n\`\`\``);
+    }
+    return `\n\n<project_editor>\n${lines.join("\n")}\n</project_editor>`;
+  } catch {
+    return "";
+  } finally {
+    ssh?.dispose();
+  }
+}
