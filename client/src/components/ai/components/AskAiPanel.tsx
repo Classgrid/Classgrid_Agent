@@ -2761,12 +2761,20 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
       }
     };
 
+    // Another part of the page sends a message for the user (e.g. Project Mode's "Ask Agent to create repo")
+    const handleAsk = (e: Event) => {
+      const text = (e as CustomEvent<{ text?: string }>).detail?.text;
+      if (text) askQuestionRef.current?.(text);
+    };
+
     window.addEventListener("agent:new-chat", handleNewChat);
     window.addEventListener("agent:load-chat", handleLoadChat);
+    window.addEventListener("agent:ask", handleAsk);
 
     return () => {
       window.removeEventListener("agent:new-chat", handleNewChat);
       window.removeEventListener("agent:load-chat", handleLoadChat);
+      window.removeEventListener("agent:ask", handleAsk);
     };
   }, []);
 
