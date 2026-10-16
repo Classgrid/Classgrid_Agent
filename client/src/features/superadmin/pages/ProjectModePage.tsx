@@ -214,7 +214,7 @@ export function ProjectModePage() {
     if (!res.ok) return toast.error(data.error || "Could not link the repo");
     setProjects((list) => (list || []).map((p) => (p.id === linking.id ? data.project : p)));
     setLinking(null);
-    open(data.project);
+    toast.success(`Linked ${repo}. Click Open on the project when you want to start.`); // never opens the editor by itself
   };
 
   const [pushing, setPushing] = useState(false);
