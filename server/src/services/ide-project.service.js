@@ -2,6 +2,7 @@ import path from "path";
 import { NodeSSH } from "node-ssh";
 import IdeProject from "../models/IdeProject.js";
 import User from "../models/User.js";
+import { githubUser } from "./github-token.service.js";
 import connectDB from "../../config/db.js";
 import redis from "../config/redis.js";
 
@@ -250,7 +251,7 @@ export async function updateProjectRepo(project, ssh, { new_name, description, h
   if (isPrivate !== undefined) body.private = !!isPrivate;
   if (!Object.keys(body).length) return "Error: nothing to change. Give new_name, description, homepage or private.";
   await connectDB();
-  const owner = await User.findById(project.owner).select("github_access_token");
+  const owner = await githubUser(project.owner);
   if (!owner?.github_access_token) return "GitHub is not connected. The user connects it in AI Hub, then tries again.";
 
   const ghRes = await fetch(`https://api.github.com/repos/${project.repo}`, {
@@ -285,7 +286,7 @@ export async function createRepoForProject(project, ssh, { name, private: isPriv
   const repoName = String(name || "").trim();
   if (!/^[A-Za-z0-9._-]{1,100}$/.test(repoName)) return "Error: the repo name can only use letters, numbers, dots, dashes and underscores.";
   await connectDB();
-  const owner = await User.findById(project.owner).select("github_access_token github_name github_email");
+  const owner = await githubUser(project.owner, "github_name github_email");
   if (!owner?.github_access_token) return "GitHub is not connected. The user connects it in AI Hub, then tries again.";
 
   const ghRes = await fetch("https://api.github.com/user/repos", {
@@ -325,7 +326,7 @@ export async function pushProject(project, ssh, message) {
   const msg = String(message || "").trim().slice(0, 500);
   if (!msg) return "Error: a commit message is needed";
   await connectDB();
-  const owner = await User.findById(project.owner).select("github_access_token");
+  const owner = await githubUser(project.owner);
   if (!owner?.github_access_token) return "GitHub is not connected. The user connects it in AI Hub, then tries again.";
 
   const dir = projectHostDir(project);
@@ -652,7 +653,7 @@ export async function backupAndRemoveProjectCode(ssh, project) {
   let backupBranch = null;
   if (dirty.trim() || Number(ahead.trim()) > 0) {
     await connectDB();
-    const owner = await User.findById(project.owner).select("github_access_token");
+    const owner = await githubUser(project.owner);
     if (!owner?.github_access_token || !project.repo) return { removed: false, reason: "unpushed work and no GitHub access" };
     const stamp = new Date().toISOString().slice(0, 16).replace(/[-:T]/g, "").replace(/^(\d{8})(\d{4})$/, "$1-$2");
     backupBranch = `classgrid-backup-${stamp}`;

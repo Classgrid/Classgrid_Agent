@@ -6,8 +6,8 @@ import connectDB from "../../config/db.js";
 
 const router = express.Router();
 
-const GITHUB_CLIENT_ID = "Ov23lije9NerEtV7Lseb";
-const GITHUB_CLIENT_SECRET = "07acf4d6a0f8f9be1da6b8b6c18900531ff10ee1";
+export const GITHUB_CLIENT_ID = "Ov23lije9NerEtV7Lseb";
+export const GITHUB_CLIENT_SECRET = "07acf4d6a0f8f9be1da6b8b6c18900531ff10ee1";
 
 const getGithubAuthUrl = (statePayload) => {
     const clientId = GITHUB_CLIENT_ID;

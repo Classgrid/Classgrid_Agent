@@ -3,6 +3,7 @@ import { NodeSSH } from "node-ssh";
 import { isAuthenticated, requireRole } from "../middleware/auth.middleware.js";
 import User from "../models/User.js";
 import IdeProject from "../models/IdeProject.js";
+import { githubUser } from "../services/github-token.service.js";
 import { pushProject, revealInEditor, checkpointChanges, rejectCheckpoint, undoToCheckpoint, backupAndRemoveProjectCode } from "../services/ide-project.service.js";
 import mongoose from "mongoose";
 import connectDB from "../../config/db.js";
@@ -34,7 +35,7 @@ const REPO_NAME = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/;
 
 async function githubTokenFor(userId) {
   await connectDB();
-  const user = await User.findById(userId).select("github_access_token github_name github_email");
+  const user = await githubUser(userId, "github_name github_email"); // key renewed if it ran out
   return user?.github_access_token ? user : null;
 }
 

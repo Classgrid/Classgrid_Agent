@@ -29,6 +29,7 @@ import { PutObjectCommand } from '@aws-sdk/client-s3';
 import { SESClient, GetSendStatisticsCommand, ListIdentitiesCommand } from '@aws-sdk/client-ses';
 import puppeteer from 'puppeteer';
 import IdeProject from '../models/IdeProject.js';
+import { ensureFreshGithubToken } from '../services/github-token.service.js';
 import { projectTools, projectForChat, projectSnapshot, projectChangesBetween, formatProjectChanges, sandboxDataDir } from '../services/ide-project.service.js';
 
 // What the sandbox container sees as /data, and where the hidden runner script is.
@@ -5746,6 +5747,7 @@ export const handleToolCall = async (name, args, context = {}) => {
         if (!user || !user.github_access_token) {
           return { content: [{ type: 'text', text: "Error: No GitHub account connected. Tell the user to click the Connect button in the AI Hub to link their GitHub account." }] };
         }
+        await ensureFreshGithubToken(user); // keys run out after about 8 hours; renew with the saved refresh key
         accessToken = user.github_access_token;
       }
 
