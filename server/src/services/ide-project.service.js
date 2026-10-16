@@ -328,18 +328,35 @@ export async function editorContextFor(sessionId) {
       if (ctx.selection?.text) lines.push(`Selected by the user (lines ${ctx.selection.startLine}-${ctx.selection.endLine}):\n\`\`\`\n${ctx.selection.text}\n\`\`\``);
       const others = (ctx.openTabs || []).filter((t) => t !== ctx.activeFile).map(rel);
       if (others.length) lines.push(`Other open tabs: ${others.join(", ")}.`);
-      if (ctx.problemCount) {
-        lines.push(`Problems the editor shows (${ctx.problemCount}${ctx.problemCount > ctx.problems.length ? `, first ${ctx.problems.length}` : ""}):\n` +
-          ctx.problems.map((p) => `- ${rel(p.file)}:${p.line} ${p.severity}: ${p.message}${p.source ? ` (${p.source})` : ""}`).join("\n"));
-      }
     }
 
+    // The user's own changes since the AI's last answer, and which lines they touched (to mark errors on them)
+    let userDiff = "";
+    const touched = new Map(); // file (relative) -> [[from, to], ...] lines in the new version
     const prev = await redis.get(LAST_SNAPSHOT(sessionId)).catch(() => null);
     const now = prev ? await projectSnapshot(ssh, project) : null;
     if (prev && now && prev !== now) {
       const { stdout: diff } = await ssh.execCommand(`git -C ${q(projectHostDir(project))} diff --unified=2 ${prev} ${now} | head -c 6000`);
-      if (diff.trim()) lines.push(`Changes the user made in the editor since your last answer:\n\`\`\`diff\n${diff.trim()}\n\`\`\``);
+      userDiff = diff.trim();
+      let file = null;
+      for (const l of userDiff.split("\n")) {
+        const f = l.match(/^\+\+\+ b\/(.+)$/);
+        if (f) { file = f[1]; continue; }
+        const h = l.match(/^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@/);
+        if (h && file) {
+          const from = Number(h[1]);
+          const to = from + Math.max(Number(h[2] ?? 1) - 1, 0);
+          touched.set(file, [...(touched.get(file) || []), [from, to]]);
+        }
+      }
     }
+    const onUserChange = (p) => (touched.get(rel(p.file)) || []).some(([a, b]) => p.line >= a && p.line <= b);
+
+    if (ctx?.problemCount && Date.now() - (ctx.updatedAt || 0) < 6 * 60 * 60 * 1000) {
+      lines.push(`Problems the editor shows (${ctx.problemCount}${ctx.problemCount > ctx.problems.length ? `, first ${ctx.problems.length}` : ""}):\n` +
+        ctx.problems.map((p) => `- ${rel(p.file)}:${p.line} ${p.severity}: ${p.message}${p.source ? ` (${p.source})` : ""}${onUserChange(p) ? " (on a line the user just changed)" : ""}`).join("\n"));
+    }
+    if (userDiff) lines.push(`Changes the user made in the editor since your last answer:\n\`\`\`diff\n${userDiff}\n\`\`\``);
     return `\n\n<project_editor>\n${lines.join("\n")}\n</project_editor>`;
   } catch {
     return "";
