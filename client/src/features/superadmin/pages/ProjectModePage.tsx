@@ -4,6 +4,7 @@ import { useParams } from "react-router-dom";
 import { ArrowLeft, FolderGit2, Github, Pencil, Plus, Trash2 } from "lucide-react";
 import { Spinner } from "@/components/marketing_ui/spinner";
 import { Skeleton } from "@/components/marketing_ui/skeleton";
+import { DangerConfirmDialog } from "@/components/marketing_ui/danger-confirm-dialog";
 import { toast } from "sonner";
 import { AlertTriangle } from "lucide-react";
 import { AskAiPanel } from "@/components/ai";
@@ -195,9 +196,12 @@ export function ProjectModePage() {
     setRenaming(null);
   };
 
+  const [deleting, setDeleting] = useState<Project | null>(null);
+  const [deleteBusy, setDeleteBusy] = useState(false);
   const remove = async (project: Project) => {
-    if (!window.confirm(`Delete "${project.name}"? Its code stays on GitHub.`)) return;
-    const { res } = await api(`/projects/${project.id}`, { method: "DELETE" });
+    setDeleteBusy(true);
+    const { res } = await api(`/projects/${project.id}`, { method: "DELETE" }).finally(() => setDeleteBusy(false));
+    setDeleting(null);
     if (!res.ok) return toast.error("Could not delete the project");
     setProjects((list) => (list || []).filter((p) => p.id !== project.id));
     if (openId === project.id) { rememberOpen(null); setFolder(null); }
@@ -446,7 +450,7 @@ export function ProjectModePage() {
                         <FolderGit2 className="size-5 shrink-0 text-muted-foreground mt-0.5" />
                         <span className="font-medium truncate flex-1">{p.name}</span>
                         <button onClick={() => setRenaming({ id: p.id, name: p.name })} title="Rename" className="opacity-0 group-hover:opacity-100 p-1 rounded hover:bg-secondary"><Pencil className="size-3.5" /></button>
-                        <button onClick={() => remove(p)} title="Delete" className="opacity-0 group-hover:opacity-100 p-1 rounded hover:bg-secondary"><Trash2 className="size-3.5" /></button>
+                        <button onClick={() => setDeleting(p)} title="Delete" className="opacity-0 group-hover:opacity-100 p-1 rounded hover:bg-secondary"><Trash2 className="size-3.5" /></button>
                       </div>
                     )}
                     {p.repo
@@ -469,6 +473,18 @@ export function ProjectModePage() {
           </div>
         </div>
       )}
+
+      <DangerConfirmDialog
+        open={!!deleting}
+        onOpenChange={(o) => { if (!o && !deleteBusy) setDeleting(null); }}
+        title="Delete project"
+        description={`Delete "${deleting?.name || ""}" from Project Mode.`}
+        confirmationSteps={deleting ? [{ label: "To confirm, type the project name", value: deleting.name }] : []}
+        warningMessage="Its code stays on GitHub. Only the project here is deleted."
+        actionLabel="Delete project"
+        isLoading={deleteBusy}
+        onConfirm={() => deleting && remove(deleting)}
+      />
 
       {linking && (
         <div className="fixed inset-0 z-[130] bg-black/60 flex items-center justify-center p-4" onClick={() => setLinking(null)}>
