@@ -2,7 +2,7 @@
   "name": "classgrid-bridge",
   "displayName": "Classgrid",
   "publisher": "classgrid",
-  "version": "1.0.3",
+  "version": "1.0.5",
   "engines": {
     "vscode": "^1.80.0"
   },

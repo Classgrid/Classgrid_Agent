@@ -51,7 +51,7 @@ const Name = ({ children }: { children: React.ReactNode }) => <span className="f
 
 // Ask Project Mode to open a file in the code editor (at lines, or at a piece of text)
 export const OPEN_PROJECT_FILE_EVENT = "classgrid:open-project-file";
-const openInEditor = (detail: { path: string; startLine?: number; endLine?: number; find?: string }) =>
+const openInEditor = (detail: { path: string; startLine?: number; endLine?: number; find?: string; folder?: boolean }) =>
   window.dispatchEvent(new CustomEvent(OPEN_PROJECT_FILE_EVENT, { detail }));
 
 function FileLink({ path, startLine, endLine, find }: { path: string; startLine?: number; endLine?: number; find?: string }) {
@@ -301,9 +301,18 @@ export function FilesChangedSummary({ steps }: { steps: Step[] }) {
 // opens it in the Project Mode editor at that line. Only in Project Mode; elsewhere it stays normal code.
 const FILE_MENTION = /^((?:[\w.@-]+\/)*[\w@-][\w.@-]*\.(?:tsx?|jsx?|mjs|cjs|json|md|mdx|html?|css|scss|sass|less|py|rb|go|rs|java|kt|php|c|h|cpp|hpp|cs|swift|vue|svelte|ya?ml|toml|ini|env|txt|sh|sql|graphql|xml|svg|prisma|dart|lock|tsbuildinfo|gitignore|config))(?::(\d+)(?:-(\d+))?|#L(\d+)(?:-L?(\d+))?|,?\s*\(?lines?\s*(\d+)(?:\s*[-–]\s*(\d+))?\)?)?$/i;
 
+const inProjectMode = () => typeof window !== 'undefined' && window.location.pathname.split('/').includes('project');
+// A folder named in the answer (`src/components/`): needs a "/" so normal words never match
+const FOLDER_MENTION = /^(?:\.\/)?((?:[\w@-][\w.@-]*\/)+(?:[\w@-][\w@-]*)?)\/?$/;
+
 export function parseFileMention(text: string) {
-  if (typeof window === 'undefined' || !window.location.pathname.split('/').includes('project')) return null;
-  const m = String(text).trim().match(FILE_MENTION);
+  if (!inProjectMode()) return null;
+  const t = String(text).trim();
+  const folder = t.match(FOLDER_MENTION);
+  if (folder && folder[1] && !/\.[A-Za-z][A-Za-z0-9]*$/.test(folder[1].replace(/\/$/, ''))) {
+    return { path: folder[1].replace(/\/$/, ''), folder: true, label: t };
+  }
+  const m = t.match(FILE_MENTION);
   if (!m || !m[1]) return null;
   // Code like res.json / process.env / package.lock looks like a file name; without a folder in front, skip those words
   if (!m[1].includes('/') && /^(res|req|process|window|document|module|exports|this|self|app|router|response|request|data|obj|config|os|fs|path|console|json|math|object|array|string|promise|error|event|e|err|ctx|props|state)\./i.test(m[1])) return null;
@@ -312,17 +321,40 @@ export function parseFileMention(text: string) {
   return { path: m[1], startLine: start, endLine: end, label: String(text).trim() };
 }
 
-export function FileMentionChip({ path, startLine, endLine, label }: { path: string; startLine?: number; endLine?: number; label: string }) {
+// A link the AI wrote to a project file or folder ([App.tsx](src/App.tsx), /data/src, the editor path, or this
+// site's own address with a file path): opens in the editor instead of going to a web page.
+export function parseProjectLink(href?: string) {
+  if (!href || !inProjectMode()) return null;
+  let p = String(href).trim();
+  if (/^(mailto:|tel:|#)/i.test(p)) return null;
+  if (/^https?:\/\//i.test(p)) {
+    try {
+      const u = new URL(p);
+      if (u.host !== window.location.host) return null; // a real website
+      p = decodeURIComponent(u.pathname) + u.hash;
+    } catch { return null; }
+  }
+  p = p.replace(/^file:\/\//i, '').replace(/^\/home\/workspace\/projects\/[^/]+\/?/, '').replace(/^\/data\/?/, '').replace(/^\.\//, '').replace(/^\//, '');
+  if (!p || /^(c|superadmin|agent|chat|org|dept|faculty|student|api)(\/|$)/.test(p)) return null; // our own app pages
+  const line = p.match(/(?:#L|:)(\d+)(?:-L?(\d+))?$/);
+  const path = p.replace(/(?:#L|:)\d+(?:-L?\d+)?$/, '').replace(/\/$/, '');
+  if (!path) return null;
+  const isFolder = !/\.[A-Za-z][A-Za-z0-9]*$/.test(path);
+  return { path, folder: isFolder, startLine: line ? Number(line[1]) : undefined, endLine: line ? Number(line[2] || line[1]) : undefined };
+}
+
+export function FileMentionChip({ path, startLine, endLine, label, folder }: { path: string; startLine?: number; endLine?: number; label: React.ReactNode; folder?: boolean }) {
+  const go = () => openInEditor({ path, startLine, endLine, folder });
   return (
     <span
       role="link"
       tabIndex={0}
-      title={startLine ? `Open ${path} at line ${startLine}` : `Open ${path}`}
-      onClick={() => openInEditor({ path, startLine, endLine })}
-      onKeyDown={(e) => { if (e.key === 'Enter') openInEditor({ path, startLine, endLine }); }}
+      title={folder ? `Show ${path} in the editor` : startLine ? `Open ${path} at line ${startLine}` : `Open ${path}`}
+      onClick={go}
+      onKeyDown={(e) => { if (e.key === 'Enter') go(); }}
       className="inline-flex items-center gap-1 rounded-md border border-blue-500/30 bg-blue-500/10 px-1.5 py-0.5 align-baseline font-mono text-[0.85em] text-blue-700 dark:text-blue-300 cursor-pointer hover:bg-blue-500/20 hover:underline"
     >
-      <FileBadge path={path} />
+      {folder ? <Folder className="size-3.5 shrink-0" /> : <FileBadge path={path} />}
       {label}
     </span>
   );

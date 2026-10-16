@@ -254,11 +254,13 @@ export async function pushProject(project, ssh, message) {
 // the editor box watches /home/workspace/.classgrid/open.json and opens what it names.
 export async function revealInEditor(project, ssh, { path: file, startLine, endLine, find }) {
   const { full, rel } = resolveInProject(project, file);
-  const { stdout: exists } = await ssh.execCommand(`[ -f ${q(full)} ] && echo yes`);
-  if (!exists.trim()) throw new Error(`${rel} is not in this project (the AI may have saved it in its own chat folder)`);
+  const { stdout: kind } = await ssh.execCommand(`if [ -d ${q(full)} ]; then echo folder; elif [ -f ${q(full)} ]; then echo file; fi`);
+  if (!kind.trim()) throw new Error(`${rel} is not in this project`);
+  const folder = kind.trim() === "folder";
   const inBox = full.replace(`/home/ubuntu/ide_users/${project.owner}`, "/home/workspace");
   const req = JSON.stringify({
     path: inBox,
+    folder: folder || undefined,
     startLine: Number(startLine) || undefined,
     endLine: Number(endLine) || undefined,
     find: find ? String(find).slice(0, 2000) : undefined,

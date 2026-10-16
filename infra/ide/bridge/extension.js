@@ -19,6 +19,17 @@ async function handleOpen() {
   lastStamp = req.stamp;
   if (!req.path.startsWith(PROJECTS)) return;
   try {
+    if (req.folder) {
+      // A folder: show it in the Explorer
+      await vscode.commands.executeCommand("workbench.view.explorer");
+      await vscode.commands.executeCommand("revealInExplorer", vscode.Uri.file(req.path));
+      return;
+    }
+    // Pictures, PDFs and other non-text files: open them in their own viewer
+    if (/\.(png|jpe?g|gif|webp|svg|ico|bmp|avif|pdf|mp4|webm|mp3|wav|woff2?|ttf|zip)$/i.test(req.path)) {
+      await vscode.commands.executeCommand("vscode.open", vscode.Uri.file(req.path), { preview: false });
+      return;
+    }
     const doc = await vscode.workspace.openTextDocument(vscode.Uri.file(req.path));
     let range;
     if (req.find) {
