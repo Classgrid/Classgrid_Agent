@@ -82,12 +82,12 @@ export function AgentNestedMenu({ searchQuery = "" }: { searchQuery?: string }) 
       ? (import.meta.env.VITE_API_URL || "https://api.classgrid.in") + "/api/ai/sessions"
       : "/api/ai/sessions";
 
-    // Agent mode and Project mode keep separate chat lists (Project mode: only the open project's chats)
+    // Agent mode and Project mode keep separate chat lists (Project mode: the open project's chats, or all project chats on the Projects page)
     let listQuery = "?mode=agent";
     if (window.location.pathname.split("/").includes("project")) {
       let openProject: string | null = null;
       try { openProject = localStorage.getItem("cg_project_open"); } catch { /* storage blocked */ }
-      listQuery = `?project=${openProject || "none"}`;
+      listQuery = `?project=${openProject || "all"}`; // no project open: chats of all projects
     }
     fetchWithRescue(endpoint + listQuery, { credentials: "include" })
       .then(res => res.json())

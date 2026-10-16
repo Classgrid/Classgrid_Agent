@@ -4571,7 +4571,12 @@ export const getChatSessions = async (req, res) => {
         const { mode, project } = req.query || {};
         if (mode === "agent" || project) {
             const IdeProject = (await import("../models/IdeProject.js")).default;
-            if (project) {
+            if (project === "all") {
+                // Projects page with no project open: the chats of all the user's projects
+                const ps = await IdeProject.find({ owner: req.user._id }).select("chatSessionIds").lean();
+                const ids = new Set(ps.flatMap((x) => x.chatSessionIds || []));
+                sessions = (sessions || []).filter((s) => ids.has(s.id));
+            } else if (project) {
                 const p = /^[0-9a-f]{24}$/i.test(String(project)) ? await IdeProject.findOne({ _id: project, owner: req.user._id }).select("chatSessionIds").lean() : null;
                 const ids = new Set(p?.chatSessionIds || []);
                 sessions = (sessions || []).filter((s) => ids.has(s.id));
