@@ -362,7 +362,24 @@ export async function pushProject(project, ssh, message) {
 
 // Open a project file in the owner's code editor at given lines (or at the given text). The Classgrid add-on in
 // the editor box watches /home/workspace/.classgrid/open.json and opens what it names.
-export async function revealInEditor(project, ssh, { path: file, startLine, endLine, find }) {
+// With plan: true (the plan card's "View Plan"), the plan file is picked from the plan/ folder: the .md file whose
+// name shares the most words with planTitle, else the newest one.
+async function findPlanFile(project, ssh, planTitle) {
+  const { full } = resolveInProject(project, "plan");
+  const { stdout } = await ssh.execCommand(`ls -t ${q(full)}/*.md 2>/dev/null | head -50`);
+  const names = stdout.trim().split("\n").filter(Boolean).map((p) => p.split("/").pop());
+  if (!names.length) throw new Error("There is no plan file in the plan/ folder yet");
+  const words = String(planTitle || "").toLowerCase().split(/[^a-z0-9]+/).filter((w) => w.length > 2);
+  let best = names[0], bestScore = 0; // names are newest first
+  for (const n of names) {
+    const score = words.filter((w) => n.toLowerCase().includes(w)).length;
+    if (score > bestScore) { best = n; bestScore = score; }
+  }
+  return `plan/${best}`;
+}
+
+export async function revealInEditor(project, ssh, { path: file, startLine, endLine, find, plan, planTitle }) {
+  if (plan && !file) file = await findPlanFile(project, ssh, planTitle);
   const { full, rel } = resolveInProject(project, file);
   const { stdout: kind } = await ssh.execCommand(`if [ -d ${q(full)} ]; then echo folder; elif [ -f ${q(full)} ]; then echo file; fi`);
   if (!kind.trim()) throw new Error(`${rel} is not in this project`);

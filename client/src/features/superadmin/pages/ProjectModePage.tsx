@@ -244,7 +244,7 @@ export function ProjectModePage() {
   useEffect(() => {
     const onOpenFile = async (e: Event) => {
       const detail = (e as CustomEvent).detail;
-      if (!openProject || !folder || !detail?.path) return;
+      if (!openProject || !folder || !(detail?.path || detail?.plan)) return;
       const { res, data } = await api(`/projects/${openProject.id}/reveal`, { method: "POST", body: JSON.stringify(detail) });
       if (!res.ok) toast.error(data.error || "Could not open the file");
     };

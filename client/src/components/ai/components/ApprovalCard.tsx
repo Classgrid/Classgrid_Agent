@@ -171,6 +171,8 @@ export interface ApprovalCardProps {
   currentStepIndex?: number;
   onApprove?: (payload?: { answers?: Record<string, string> }) => void;
   onReject?: () => void;
+  /** Plan card only: "View Plan" opens the plan and sends nothing (the card stays so the user can still approve). */
+  onViewPlan?: () => void;
   className?: string;
 }
 
@@ -190,6 +192,7 @@ export function ApprovalCard({
   currentStepIndex = -1,
   onApprove,
   onReject,
+  onViewPlan,
   className,
 }: ApprovalCardProps) {
   const [answers, setAnswers] = useState<Record<string, string>>({});
@@ -312,6 +315,10 @@ export function ApprovalCard({
   const handleReject = () => {
     if (isSubmitted) return;
     cancelAutoApprove();
+    if (variant === "plan" && rejectLabel === undefined && onViewPlan) {
+      onViewPlan(); // just open the plan: no message, card stays
+      return;
+    }
     if (variant === "questions") {
       if (safeStep < questions.length - 1) {
         goToStep(safeStep + 1);

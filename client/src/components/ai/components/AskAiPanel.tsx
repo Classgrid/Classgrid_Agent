@@ -1622,6 +1622,13 @@ const AssistantMessageContent = memo(({ content, sources, createdAt, isTyping, o
                 onReject={() => {
                   onApprovalActionRef.current?.(`I want to skip this or I do not approve.`);
                 }}
+                onViewPlan={() => {
+                  // Only opens the plan, never sends a message: Project Mode shows the plan/ file in the editor, otherwise the side panel
+                  let inProject = false;
+                  try { inProject = window.location.pathname.split("/").includes("project") && !!localStorage.getItem("cg_project_open"); } catch { /* storage blocked */ }
+                  if (inProject) window.dispatchEvent(new CustomEvent("classgrid:open-project-file", { detail: { plan: true, planTitle: parsedProps.planTitle } }));
+                  else window.dispatchEvent(new Event("classgrid:open-plan-panel"));
+                }}
               />
             );
 
@@ -2013,6 +2020,13 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
       setShowFilesPanel(true);
     }
   }, [hasPlan]);
+
+  // The plan card's "View Plan" button opens the side panel (outside Project Mode)
+  useEffect(() => {
+    const open = () => setShowFilesPanel(true);
+    window.addEventListener("classgrid:open-plan-panel", open);
+    return () => window.removeEventListener("classgrid:open-plan-panel", open);
+  }, []);
 
   // ─── Voice Dictation Methods ───
   const getSupportedAudioMimeType = () => {
