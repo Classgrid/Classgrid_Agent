@@ -7,6 +7,7 @@ import { AiHubModal } from "@/components/ai/components/AiHubModal";
 import { useCurrentUser } from "@/features/auth/queries/useCurrentUser";
 import { fetchWithRescue } from "@/lib/rescue";
 import { Progress, ProgressLabel, ProgressValue } from "@/components/marketing_ui/progress";
+import { OPEN_PROJECT_FILE_EVENT } from "@/components/ai/components/stepper/ProjectToolSteps";
 
 const backendUrl = import.meta.env.VITE_API_URL || "https://api.classgrid.in";
 const OPEN_PROJECT_KEY = "cg_project_open"; // which project this browser had open (per-viewer convenience)
@@ -164,6 +165,18 @@ export function ProjectModePage() {
       setPushing(false);
     }
   };
+
+  // A file clicked in the chat steps opens in the editor at those lines
+  useEffect(() => {
+    const onOpenFile = async (e: Event) => {
+      const detail = (e as CustomEvent).detail;
+      if (!openProject || !folder || !detail?.path) return;
+      const { res, data } = await api(`/projects/${openProject.id}/reveal`, { method: "POST", body: JSON.stringify(detail) });
+      if (!res.ok) toast.error(data.error || "Could not open the file");
+    };
+    window.addEventListener(OPEN_PROJECT_FILE_EVENT, onOpenFile);
+    return () => window.removeEventListener(OPEN_PROJECT_FILE_EVENT, onOpenFile);
+  }, [openProject, folder]);
 
   const showEditor = isSuperAdmin && openProject && (folder || progress);
   const editorLoaded = () => {

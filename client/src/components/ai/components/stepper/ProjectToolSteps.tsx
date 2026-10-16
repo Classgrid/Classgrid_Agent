@@ -49,6 +49,28 @@ function Row({ children, onClick, open }: { children: React.ReactNode; onClick?:
 
 const Name = ({ children }: { children: React.ReactNode }) => <span className="font-medium text-foreground/90 truncate">{children}</span>;
 
+// Ask Project Mode to open a file in the code editor (at lines, or at a piece of text)
+export const OPEN_PROJECT_FILE_EVENT = "classgrid:open-project-file";
+const openInEditor = (detail: { path: string; startLine?: number; endLine?: number; find?: string }) =>
+  window.dispatchEvent(new CustomEvent(OPEN_PROJECT_FILE_EVENT, { detail }));
+
+function FileLink({ path, startLine, endLine, find }: { path: string; startLine?: number; endLine?: number; find?: string }) {
+  return (
+    <span
+      role="link"
+      tabIndex={0}
+      title="Open in the editor"
+      onClick={(e) => { e.stopPropagation(); openInEditor({ path, startLine, endLine, find }); }}
+      onKeyDown={(e) => { if (e.key === "Enter") openInEditor({ path, startLine, endLine, find }); }}
+      className="font-medium text-foreground/90 truncate cursor-pointer hover:underline"
+    >
+      {baseName(path)}
+    </span>
+  );
+}
+
+const ErrorLine = ({ step }: { step: Step }) => (isError(step) ? <div className="ml-10 -mt-1 mb-1 text-xs text-red-600 dark:text-red-500">{String(step.result).replace(/^error:\s*/i, "")}</div> : null);
+
 export function ProjectEditStep({ step }: { step: Step }) {
   const [open, setOpen] = useState(false);
   const path = step.args?.path || '';
@@ -63,11 +85,12 @@ export function ProjectEditStep({ step }: { step: Step }) {
       <Row onClick={loading ? undefined : () => setOpen(!open)} open={open}>
         <span className="shrink-0">{loading ? 'Editing' : failed ? 'Could not edit' : step.tool === 'write_project_file' && !step.args?.overwrite ? 'Created' : 'Edited'}</span>
         <FileBadge path={path} />
-        <Name>{baseName(path)}</Name>
+        <FileLink path={path} find={edits[0]?.new_text?.split("\n").find((l) => l.trim()) || undefined} />
         <span className="shrink-0 text-xs text-green-600 dark:text-green-500">+{added}</span>
         <span className="shrink-0 text-xs text-red-600 dark:text-red-500">-{removed}</span>
         {loading && <Loader2 className="size-3.5 shrink-0 animate-spin" />}
       </Row>
+      <ErrorLine step={step} />
       {open && (
         <div className="ml-10 mr-2 mb-2 rounded-lg border border-border overflow-hidden text-[12px] font-mono">
           <div className="px-3 py-1.5 border-b border-border text-muted-foreground font-sans text-xs truncate">{path}</div>
@@ -108,7 +131,18 @@ function ExploreItem({ step }: { step: Step }) {
         </div>
         {open && (
           <div className="mb-1 ml-1 max-h-[220px] overflow-auto rounded-md border border-border font-mono text-[12px]">
-            {matches.slice(0, 100).map((m, i) => <div key={i} className="px-2 py-0.5 truncate">{m}</div>)}
+            {matches.slice(0, 100).map((m, i) => {
+              const hit = m.match(/^(.+?):(\d+):/);
+              return (
+                <div
+                  key={i}
+                  onClick={hit ? () => openInEditor({ path: hit[1] || "", startLine: Number(hit[2]), endLine: Number(hit[2]) }) : undefined}
+                  className={cn("px-2 py-0.5 truncate", hit && "cursor-pointer hover:bg-secondary")}
+                >
+                  {m}
+                </div>
+              );
+            })}
           </div>
         )}
       </div>
@@ -131,7 +165,7 @@ function ExploreItem({ step }: { step: Step }) {
             {entries.slice(0, 200).map((e, i) => (
               <div key={i} className="flex items-center gap-1.5 py-0.5 text-slate-500 dark:text-[#8a8a8a]">
                 {e.endsWith('/') ? <Folder className="size-3.5 shrink-0" /> : <FileBadge path={e} />}
-                <span className="truncate">{e}</span>
+                {e.endsWith("/") ? <span className="truncate">{e}</span> : <span onClick={() => openInEditor({ path: (step.args?.path ? String(step.args.path).replace(/\/+$/, "") + "/" : "") + e })} className="truncate cursor-pointer hover:underline">{e}</span>}
               </div>
             ))}
           </div>
@@ -146,7 +180,7 @@ function ExploreItem({ step }: { step: Step }) {
     <div className="flex items-center gap-1.5 py-1 text-[14px] text-slate-500 dark:text-[#8a8a8a]">
       <span className="shrink-0">{loading ? 'Analyzing' : isError(step) ? 'Could not open' : 'Analyzed'}</span>
       <FileBadge path={step.args?.path} />
-      <Name>{baseName(step.args?.path)}</Name>
+      <FileLink path={step.args?.path} startLine={range ? Number(range[1]) : undefined} endLine={range ? Number(range[2]) : undefined} />
       {range && <span className="shrink-0 text-xs opacity-70">#L{range[1]}-{range[2]}</span>}
     </div>
   );

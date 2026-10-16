@@ -3,7 +3,7 @@ import { NodeSSH } from "node-ssh";
 import { isAuthenticated, requireRole } from "../middleware/auth.middleware.js";
 import User from "../models/User.js";
 import IdeProject from "../models/IdeProject.js";
-import { pushProject } from "../services/ide-project.service.js";
+import { pushProject, revealInEditor } from "../services/ide-project.service.js";
 import mongoose from "mongoose";
 import connectDB from "../../config/db.js";
 import redis from "../config/redis.js";
@@ -274,6 +274,22 @@ router.post("/projects/:id/push", isAuthenticated, async (req, res) => {
   } catch (e) {
     console.error("[IDE] Push failed:", e.message);
     res.status(500).json({ error: "Could not push to GitHub" });
+  } finally {
+    ssh?.dispose();
+  }
+});
+
+// Clicking a file in the chat opens it in the editor at those lines
+router.post("/projects/:id/reveal", isAuthenticated, async (req, res) => {
+  const project = await ownProject(req, res);
+  if (!project) return;
+  let ssh;
+  try {
+    ssh = await sandboxSsh();
+    await revealInEditor(project.toObject(), ssh, req.body || {});
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(400).json({ error: e.message });
   } finally {
     ssh?.dispose();
   }
