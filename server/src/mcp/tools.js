@@ -33,8 +33,8 @@ import IdeProject from '../models/IdeProject.js';
 // A chat inside a Project Mode project also gets that project's code at /data/project
 async function projectMountFor(sessionId) {
   try {
-    const project = await IdeProject.findOne({ chatSessionIds: sessionId }).select('_id').lean();
-    return project ? ` -v /home/ubuntu/sandbox_data/projects/${project._id}:/data/project` : '';
+    const project = await IdeProject.findOne({ chatSessionIds: sessionId }).select('_id owner').lean();
+    return project ? ` -v /home/ubuntu/ide_users/${project.owner}/projects/${project._id}:/data/project` : '';
   } catch {
     return '';
   }

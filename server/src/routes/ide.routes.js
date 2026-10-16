@@ -5,13 +5,26 @@ import User from "../models/User.js";
 import IdeProject from "../models/IdeProject.js";
 import mongoose from "mongoose";
 import connectDB from "../../config/db.js";
+import redis from "../config/redis.js";
+import { primarySupabaseClient } from "../config/supabaseClient.js";
 
 const router = express.Router();
 
 // The IDE (OpenVSCode Server) on the sandbox (https://ide.classgrid.in) asks this before every request:
-// the browser's normal Classgrid login cookie (.classgrid.in) comes along, and only super admins get through.
-router.get("/check", isAuthenticated, requireRole("super_admin"), (req, res) => {
+// the browser's normal Classgrid login cookie (.classgrid.in) comes along, and the user is sent to their own
+// editor box (started when they open a project). No box = no way in, so nobody can reach another user's box.
+const BOX_PORT = (userId) => `ide:port:${userId}`;
+const BOX_SEEN = (userId) => `ide:seen:${userId}`;
+const BOXES = "ide:boxes";
+const BOX_IDLE_MS = 30 * 60 * 1000;
+
+router.get("/check", isAuthenticated, async (req, res) => {
   res.set("Cache-Control", "no-store");
+  const userId = String(req.user._id);
+  const port = await redis.get(BOX_PORT(userId)).catch(() => null);
+  if (!/^4\d{4}$/.test(port || "")) return res.sendStatus(403);
+  redis.set(BOX_SEEN(userId), String(Date.now()), "EX", 24 * 60 * 60).catch(() => {});
+  res.set("X-Ide-Upstream", `127.0.0.1:${port}`);
   res.sendStatus(204);
 });
 
@@ -23,6 +36,43 @@ async function githubTokenFor(userId) {
   const user = await User.findById(userId).select("github_access_token github_name github_email");
   return user?.github_access_token ? user : null;
 }
+
+// Start (or reuse) the user's own editor box on the sandbox. It sees only /home/ubuntu/ide_users/<user>.
+async function ensureBox(ssh, userId) {
+  const { stdout, stderr } = await ssh.execCommand(`/home/ubuntu/ide_branding/ide-user.sh ${userId}`);
+  const port = stdout.trim().split("\n").pop();
+  if (!/^4\d{4}$/.test(port || "")) {
+    if (/busy/.test(stderr)) { const e = new Error("Project Mode is busy right now. Try again in a few minutes."); e.status = 503; throw e; }
+    throw new Error(`Editor box did not start: ${stderr.slice(0, 200)}`);
+  }
+  await redis.set(BOX_PORT(userId), port, "EX", 24 * 60 * 60);
+  await redis.set(BOX_SEEN(userId), String(Date.now()), "EX", 24 * 60 * 60);
+  await redis.sadd(BOXES, userId);
+}
+
+// Boxes nobody used for 30 minutes are switched off (their files stay; the box starts again on the next open)
+let reaping = false;
+setInterval(async () => {
+  if (reaping) return;
+  reaping = true;
+  let ssh;
+  try {
+    const users = await redis.smembers(BOXES);
+    for (const userId of users) {
+      const seen = Number(await redis.get(BOX_SEEN(userId))) || 0;
+      if (Date.now() - seen < BOX_IDLE_MS) continue;
+      ssh = ssh || await sandboxSsh();
+      if (/^[a-f0-9]{24}$/.test(userId)) await ssh.execCommand(`docker rm -f ide-u-${userId}`);
+      await redis.del(BOX_PORT(userId), BOX_SEEN(userId));
+      await redis.srem(BOXES, userId);
+    }
+  } catch (e) {
+    console.error("[IDE] Box cleanup failed:", e.message);
+  } finally {
+    ssh?.dispose();
+    reaping = false;
+  }
+}, 5 * 60 * 1000).unref();
 
 async function sandboxSsh() {
   const ssh = new NodeSSH();
@@ -38,7 +88,7 @@ async function sandboxSsh() {
 }
 
 // The user's GitHub repos, newest first, for the Project Mode picker
-router.get("/github/repos", isAuthenticated, requireRole("super_admin"), async (req, res) => {
+router.get("/github/repos", isAuthenticated, async (req, res) => {
   try {
     const user = await githubTokenFor(req.user._id);
     if (!user) return res.status(409).json({ error: "github_not_connected" });
@@ -101,9 +151,9 @@ router.post("/github/open", isAuthenticated, requireRole("super_admin"), async (
 });
 
 // ── Projects ─────────────────────────────────────────────────────────────────────────────────────────────────
-// Each user sees only their own projects. A project's code lives in /home/ubuntu/sandbox_data/projects/<id>
-// (the editor sees it at /home/workspace/chats/projects/<id>, chats inside the project see it at /data/project).
-const projectDir = (id) => `/home/ubuntu/sandbox_data/projects/${id}`;
+// Each user sees only their own projects. A project's code lives in /home/ubuntu/ide_users/<owner>/projects/<id>
+// (the owner's editor box sees it at /home/workspace/projects/<id>, chats inside the project see it at /data/project).
+const projectDir = (p) => `/home/ubuntu/ide_users/${p.owner}/projects/${p._id}`;
 
 async function ownProject(req, res) {
   if (!mongoose.isValidObjectId(req.params.id)) { res.status(404).json({ error: "Project not found" }); return null; }
@@ -115,13 +165,13 @@ async function ownProject(req, res) {
 
 const projectJson = (p) => ({ id: p._id, name: p.name, repo: p.repo, lastOpenedAt: p.lastOpenedAt, updatedAt: p.updatedAt });
 
-router.get("/projects", isAuthenticated, requireRole("super_admin"), async (req, res) => {
+router.get("/projects", isAuthenticated, async (req, res) => {
   await connectDB();
   const projects = await IdeProject.find({ owner: req.user._id }).sort({ updatedAt: -1 }).limit(200);
   res.json({ projects: projects.map(projectJson) });
 });
 
-router.post("/projects", isAuthenticated, requireRole("super_admin"), async (req, res) => {
+router.post("/projects", isAuthenticated, async (req, res) => {
   const name = String(req.body?.name || "").trim().slice(0, 80);
   if (!name) return res.status(400).json({ error: "Give the project a name" });
   await connectDB();
@@ -129,7 +179,7 @@ router.post("/projects", isAuthenticated, requireRole("super_admin"), async (req
   res.json({ project: projectJson(project) });
 });
 
-router.patch("/projects/:id", isAuthenticated, requireRole("super_admin"), async (req, res) => {
+router.patch("/projects/:id", isAuthenticated, async (req, res) => {
   const project = await ownProject(req, res);
   if (!project) return;
   if (req.body?.name !== undefined) {
@@ -145,13 +195,13 @@ router.patch("/projects/:id", isAuthenticated, requireRole("super_admin"), async
   res.json({ project: projectJson(project) });
 });
 
-router.delete("/projects/:id", isAuthenticated, requireRole("super_admin"), async (req, res) => {
+router.delete("/projects/:id", isAuthenticated, async (req, res) => {
   const project = await ownProject(req, res);
   if (!project) return;
   let ssh;
   try {
     ssh = await sandboxSsh();
-    await ssh.execCommand(`rm -rf ${projectDir(project._id)}`);
+    await ssh.execCommand(`rm -rf ${projectDir(project)}`);
   } catch (e) {
     console.error("[IDE] Could not remove project folder:", e.message);
   } finally {
@@ -162,10 +212,10 @@ router.delete("/projects/:id", isAuthenticated, requireRole("super_admin"), asyn
 });
 
 // Open = download the repo fresh. Unsaved (not pushed) changes from last time are kept unless the user chose to replace them.
-router.post("/projects/:id/open", isAuthenticated, requireRole("super_admin"), async (req, res) => {
+router.post("/projects/:id/open", isAuthenticated, async (req, res) => {
   const project = await ownProject(req, res);
   if (!project) return;
-  const dir = projectDir(project._id);
+  const dir = projectDir(project);
   let ssh;
   try {
     ssh = await sandboxSsh();
@@ -178,7 +228,7 @@ router.post("/projects/:id/open", isAuthenticated, requireRole("super_admin"), a
       }
       const auth = Buffer.from(`x-access-token:${user.github_access_token}`).toString("base64");
       const clone = await ssh.execCommand(
-        `rm -rf ${dir} && mkdir -p /home/ubuntu/sandbox_data/projects && ` +
+        `rm -rf ${dir} && mkdir -p ${dir}/.. && ` +
         `GIT_TERMINAL_PROMPT=0 GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=http.https://github.com/.extraheader GIT_CONFIG_VALUE_0="AUTHORIZATION: basic ${auth}" ` +
         `git clone --depth 1 --quiet https://github.com/${project.repo}.git ${dir} 2>&1 | tail -3`
       );
@@ -192,23 +242,28 @@ router.post("/projects/:id/open", isAuthenticated, requireRole("super_admin"), a
     } else {
       await ssh.execCommand(`mkdir -p ${dir}`);
     }
+    await ensureBox(ssh, String(req.user._id));
     project.lastOpenedAt = new Date();
     await project.save();
-    res.json({ project: projectJson(project), folder: `/home/workspace/chats/projects/${project._id}` });
+    res.json({ project: projectJson(project), folder: `/home/workspace/projects/${project._id}` });
   } catch (e) {
     console.error("[IDE] Open project failed:", e.message);
-    res.status(500).json({ error: "Could not open this project" });
+    res.status(e.status || 500).json({ error: e.status ? e.message : "Could not open this project" });
   } finally {
     ssh?.dispose();
   }
 });
 
 // A chat started inside a project belongs to it, so the AI in that chat works on the project's code (/data/project)
-router.post("/projects/:id/chats", isAuthenticated, requireRole("super_admin"), async (req, res) => {
+router.post("/projects/:id/chats", isAuthenticated, async (req, res) => {
   const project = await ownProject(req, res);
   if (!project) return;
   const sessionId = req.body?.sessionId;
   if (!CHAT_ID.test(sessionId || "")) return res.status(400).json({ error: "Open a chat first" });
+  const { data: session } = await primarySupabaseClient.from("ai_chat_sessions").select("user_email").eq("id", sessionId).maybeSingle();
+  if (!session || String(session.user_email || "").toLowerCase() !== String(req.user.email || "").toLowerCase()) {
+    return res.status(403).json({ error: "This chat is not yours" });
+  }
   await IdeProject.updateMany({ owner: req.user._id, chatSessionIds: sessionId, _id: { $ne: project._id } }, { $pull: { chatSessionIds: sessionId } });
   await IdeProject.updateOne({ _id: project._id }, { $addToSet: { chatSessionIds: sessionId } });
   res.json({ ok: true });

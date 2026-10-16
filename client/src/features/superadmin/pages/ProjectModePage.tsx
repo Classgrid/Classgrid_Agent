@@ -23,11 +23,11 @@ async function api(path: string, init?: RequestInit) {
 }
 
 // Project mode: shown inside the normal layout (left sidebar). The middle shows the user's projects; an open project
-// shows the code editor (OpenVSCode Server on the sandbox at ide.classgrid.in, which lets in only super admins via
-// their Classgrid login). The right side is the AI panel in its overlay layout.
+// shows the code editor (OpenVSCode Server on the sandbox at ide.classgrid.in; each user is let into their own editor
+// box via their Classgrid login). The right side is the AI panel in its overlay layout.
 export function ProjectModePage() {
   const { data: currentUser } = useCurrentUser();
-  const isSuperAdmin = (currentUser as any)?.role === "super_admin";
+  const isSuperAdmin = !!currentUser; // every logged-in user; each gets their own editor box with only their own projects
   const { sessionId } = useParams<{ sessionId?: string }>();
 
   const [projects, setProjects] = useState<Project[] | null>(null);
