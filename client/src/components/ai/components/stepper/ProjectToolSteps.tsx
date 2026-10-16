@@ -274,7 +274,7 @@ export function FilesChangedSummary({ steps }: { steps: Step[] }) {
     if (s.status === 'loading' || isError(s)) continue;
     if (PROJECT_EDIT_TOOLS.has(s.tool)) {
       const real = String(s.result || '').match(/\+(\d+) -(\d+)\)\./);
-      const p = String(s.args?.path || '').replace(/^\/data\/project\//, '').replace(/^\/home\/workspace\/projects\/[^/]+\//, '');
+      const p = String(s.args?.path || '').replace(/^\/data\/project\//, '').replace(/^\/data\//, '').replace(/^\/home\/workspace\/projects\/[^/]+\//, '');
       if (real && p) add({ path: p, added: Number(real[1]), removed: Number(real[2]) });
     } else if (s.tool === 'run_code' || s.tool === 'execute_terminal_command') {
       changesFromRun(s.result).forEach(add);

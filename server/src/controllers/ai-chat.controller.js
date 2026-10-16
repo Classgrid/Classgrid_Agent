@@ -40,7 +40,7 @@ import {
     memoryText
 } from "../services/ai-chat.service.js";
 import { getHistory, getHistoryCount, appendToHistory, invalidateHistoryCache, getChatTranscript } from "../services/ai-chat-history.service.js";
-import { editorContextFor, rememberProjectSnapshot } from "../services/ide-project.service.js";
+import { editorContextFor, rememberProjectSnapshot, sandboxDataDir } from "../services/ide-project.service.js";
 import { buildEndConversationHandlers, reopenSession } from "../services/ai-end-conversation.service.js";
 import { hasEnoughTokens, deductTokens, getImageGenerationCost, tokenWindowEnd } from "../services/ai-credits.service.js";
 import redis from "../config/redis.js";
@@ -2693,7 +2693,7 @@ If they ask whether their college/school uses Classgrid, say you can't see that 
                             const fileName = sandboxFilePath.split('/').pop();
                             // Sandbox maps /data inside docker to /home/ubuntu/sandbox_data/${sessionId} on the host
                             const relativePath = sandboxFilePath.replace('/data/', '');
-                            const hostFilePath = `/home/ubuntu/sandbox_data/${sessionId}/${relativePath}`;
+                            const hostFilePath = `${await sandboxDataDir(sessionId)}/${relativePath}`;
 
                             console.log(`[upload_sandbox_file_to_cdn] Fetching file from host: ${hostFilePath}`);
 
@@ -2795,7 +2795,7 @@ If they ask whether their college/school uses Classgrid, say you can't see that 
                             return "FAILED: sandboxFilePath must be a .png, .jpg, .gif or .webp file under /data/ (e.g. /data/frames/f_03.jpg).";
                         }
                         if (!/^[\w-]+$/.test(String(sessionId))) return "FAILED: no sandbox for this chat yet. Create the image with run_code first.";
-                        const hostFilePath = `/home/ubuntu/sandbox_data/${sessionId}/${path.slice("/data/".length)}`;
+                        const hostFilePath = `${await sandboxDataDir(sessionId)}/${path.slice("/data/".length)}`;
                         const { NodeSSH } = await import('node-ssh');
                         const ssh = new NodeSSH();
                         try {

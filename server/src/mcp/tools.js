@@ -29,23 +29,31 @@ import { PutObjectCommand } from '@aws-sdk/client-s3';
 import { SESClient, GetSendStatisticsCommand, ListIdentitiesCommand } from '@aws-sdk/client-ses';
 import puppeteer from 'puppeteer';
 import IdeProject from '../models/IdeProject.js';
-import { projectTools, projectForChat, projectSnapshot, projectChangesBetween, formatProjectChanges } from '../services/ide-project.service.js';
+import { projectTools, projectForChat, projectSnapshot, projectChangesBetween, formatProjectChanges, sandboxDataDir } from '../services/ide-project.service.js';
 
-// A chat inside a Project Mode project also gets that project's code, at /data/project and at the same path the
-// user sees in the code editor (/home/workspace/projects/<id>), so paths copied from the editor work as they are.
-// The folder is made first (as the normal user), so Docker never creates it as root.
+// What the sandbox container sees as /data, and where the hidden runner script is.
+// Normal chat: /data is the chat's own folder. Project Mode chat: /data IS the user's project (the same files as
+// /home/workspace/projects/<id> in their editor), so the AI works only in the user's repo; the chat folder only
+// holds the runner script, mounted read-only at /cg. Folders are made first (as the normal user), so Docker never
+// creates them as root.
 async function projectMountFor(sessionId) {
+  const chatDir = `/home/ubuntu/sandbox_data/${sessionId}`;
+  const plain = { prep: '', mount: ` -v ${chatDir}:/data`, runnerDir: '/data', isProject: false };
   try {
     const project = await IdeProject.findOne({ chatSessionIds: sessionId }).select('_id owner').lean();
-    if (!project) return { prep: '', mount: '' };
+    if (!project) return plain;
     const userDir = `/home/ubuntu/ide_users/${project.owner}`;
     const dir = `${userDir}/projects/${project._id}`;
     // The owner's own package cache (shared with their code editor), so installs after the first one are fast
     const cache = ` -v ${userDir}/.cache:/home/workspace/.cache -e npm_config_cache=/home/workspace/.cache/npm -e PIP_CACHE_DIR=/home/workspace/.cache/pip`;
-    // Commands start inside the project (like a terminal opened in it), so files made with relative paths land there
-    return { prep: `mkdir -p ${dir} ${userDir}/.cache && `, mount: ` -v ${dir}:/data/project -v ${dir}:/home/workspace/projects/${project._id}${cache} -w /data/project` };
+    return {
+      prep: `mkdir -p ${dir} ${userDir}/.cache && `,
+      mount: ` -v ${dir}:/data -v ${dir}:/home/workspace/projects/${project._id} -v ${chatDir}:/cg:ro${cache} -w /data`,
+      runnerDir: '/cg',
+      isProject: true,
+    };
   } catch {
-    return { prep: '', mount: '' };
+    return plain;
   }
 }
 import Handlebars from 'handlebars';
@@ -300,7 +308,7 @@ export const getMcpTools = () => [
   */
   {
     name: 'run_code',
-    description: 'Execute Python or JavaScript code securely in the AWS EC2 Docker Sandbox. Use this for calculations, data analysis, or executing scripts. CRITICAL: DO NOT use this tool to generate PDFs (no ReportLab). ALWAYS use the native generate_pdf tool instead. Files are in /data (this chat\x27s folder); /data/scratch is for test and trial files and is cleaned automatically; /data/project holds the code of the GitHub project the user opened in Project Mode (the same files the user\x27s code editor shows at /home/workspace/projects/<id>, which also works as a path here). In a chat with an open project, commands start in /data/project.',
+    description: 'Execute Python or JavaScript code securely in the AWS EC2 Docker Sandbox. Use this for calculations, data analysis, or executing scripts. CRITICAL: DO NOT use this tool to generate PDFs (no ReportLab). ALWAYS use the native generate_pdf tool instead. Files are in /data (this chat\x27s folder; /data/scratch is for test and trial files and is cleaned automatically). In a Project Mode chat, /data is the user\x27s project itself (the same files their code editor shows at /home/workspace/projects/<id>, which also works as a path) and commands start there.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -329,7 +337,7 @@ export const getMcpTools = () => [
     inputSchema: {
       type: 'object',
       properties: {
-        path: { type: 'string', description: 'Folder inside the project, relative (e.g. "src") or as /data/project/... . Empty = project root.' },
+        path: { type: 'string', description: 'Folder inside the project, relative (e.g. "src") or as /data/... . Empty = project root.' },
         depth: { type: 'number', description: 'How many folder levels to show (1-6, default 2).' }
       }
     }
@@ -340,7 +348,7 @@ export const getMcpTools = () => [
     inputSchema: {
       type: 'object',
       properties: {
-        path: { type: 'string', description: 'File inside the project, relative (e.g. "src/App.tsx") or as /data/project/... .' },
+        path: { type: 'string', description: 'File inside the project, relative (e.g. "src/App.tsx") or as /data/... .' },
         start_line: { type: 'number', description: 'First line to show (1-based). Optional.' },
         end_line: { type: 'number', description: 'Last line to show. Optional.' }
       },
@@ -366,7 +374,7 @@ export const getMcpTools = () => [
     inputSchema: {
       type: 'object',
       properties: {
-        path: { type: 'string', description: 'File inside the project, relative (e.g. "src/utils/date.ts") or as /data/project/... .' },
+        path: { type: 'string', description: 'File inside the project, relative (e.g. "src/utils/date.ts") or as /data/... .' },
         content: { type: 'string', description: 'The full file content.' },
         overwrite: { type: 'boolean', description: 'Replace the file if it already exists.' }
       },
@@ -379,7 +387,7 @@ export const getMcpTools = () => [
     inputSchema: {
       type: 'object',
       properties: {
-        path: { type: 'string', description: 'File inside the project, relative or as /data/project/... .' },
+        path: { type: 'string', description: 'File inside the project, relative or as /data/... .' },
         edits: {
           type: 'array',
           description: 'The changes, applied in order.',
@@ -413,7 +421,7 @@ export const getMcpTools = () => [
 
   {
     name: 'execute_terminal_command',
-    description: 'Executes a native bash/terminal command directly on the host computer. You can use this to run curl, tesseract, Python, or system utilities. Files are in /data (this chat\x27s folder); /data/scratch is for test and trial files and is cleaned automatically; /data/project holds the code of the GitHub project the user opened in Project Mode (the same files the user\x27s code editor shows at /home/workspace/projects/<id>, which also works as a path here). In a chat with an open project, commands start in /data/project.',
+    description: 'Executes a native bash/terminal command directly on the host computer. You can use this to run curl, tesseract, Python, or system utilities. Files are in /data (this chat\x27s folder; /data/scratch is for test and trial files and is cleaned automatically). In a Project Mode chat, /data is the user\x27s project itself (the same files their code editor shows at /home/workspace/projects/<id>, which also works as a path) and commands start there.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -3933,9 +3941,9 @@ export const handleToolCall = async (name, args, context = {}) => {
         console.log(`[Sandbox] Securely injecting credentials and running Docker container for terminal command...`);
         const projectMount = await projectMountFor(sessionId);
         // In a Project Mode chat, note which project files this run changes (shown under the step)
-        const chatProject = projectMount.mount ? await projectForChat(sessionId) : null;
+        const chatProject = projectMount.isProject ? await projectForChat(sessionId) : null;
         const snapBefore = chatProject ? await projectSnapshot(ssh, chatProject) : null;
-        const dockerCommand = `${projectMount.prep}docker run --rm ${envVars} -v /home/ubuntu/sandbox_data/${sessionId}:/data${projectMount.mount} classgrid-ai-sandbox bash /data/${SANDBOX_RUNNER_PREFIX}_terminal.sh`;
+        const dockerCommand = `${projectMount.prep}docker run --rm ${envVars} ${projectMount.mount} classgrid-ai-sandbox bash ${projectMount.runnerDir}/${SANDBOX_RUNNER_PREFIX}_terminal.sh`;
         const result = await ssh.execCommand(dockerCommand);
         const projectChanges = chatProject ? await projectChangesBetween(ssh, chatProject, snapBefore, await projectSnapshot(ssh, chatProject)) : [];
 
@@ -4033,9 +4041,9 @@ export const handleToolCall = async (name, args, context = {}) => {
         console.log(`[Sandbox] Securely injecting credentials and running Docker container for ${language} script...`);
         const projectMount = await projectMountFor(sessionId);
         // In a Project Mode chat, note which project files this run changes (shown under the step)
-        const chatProject = projectMount.mount ? await projectForChat(sessionId) : null;
+        const chatProject = projectMount.isProject ? await projectForChat(sessionId) : null;
         const snapBefore = chatProject ? await projectSnapshot(ssh, chatProject) : null;
-        const dockerCommand = `${projectMount.prep}docker run --rm ${envVars} -v /home/ubuntu/sandbox_data/${sessionId}:/data${projectMount.mount} classgrid-ai-sandbox ${execCmd} /data/${SANDBOX_RUNNER_PREFIX}.${ext}`;
+        const dockerCommand = `${projectMount.prep}docker run --rm ${envVars} ${projectMount.mount} classgrid-ai-sandbox ${execCmd} ${projectMount.runnerDir}/${SANDBOX_RUNNER_PREFIX}.${ext}`;
         const result = await ssh.execCommand(dockerCommand);
         const projectChanges = chatProject ? await projectChangesBetween(ssh, chatProject, snapBefore, await projectSnapshot(ssh, chatProject)) : [];
 
@@ -4082,7 +4090,7 @@ export const handleToolCall = async (name, args, context = {}) => {
             : { privateKeyPath: 'C:\\Users\\nikhi\\Downloads\\Nikhil.pem' })
         });
 
-        const fullPath = `/home/ubuntu/sandbox_data/${sessionId}/${filePath}`;
+        const fullPath = `${await sandboxDataDir(sessionId)}/${String(filePath).replace(/^\/data\//, '')}`;
         const { stdout, stderr } = await ssh.execCommand(`cat ${fullPath}`);
         ssh.dispose();
 
@@ -6181,6 +6189,7 @@ export async function readSandboxFiles(sessionId) {
   });
 
   try {
+    if (await projectForChat(sessionId).catch(() => null)) return {}; // Project Mode: the code editor shows the files
     const dir = `/home/ubuntu/sandbox_data/${sessionId}`;
     // Recursively find ALL files (including subdirectories like css/, js/), excluding the hidden runner files
     // (.cg_run.*, .cg_run_terminal.sh). A site's own script.js is a normal file and is included.
@@ -6229,7 +6238,7 @@ async function readSandboxFilesForPush(sessionId, wantedPaths) {
   });
 
   try {
-    const dir = `/home/ubuntu/sandbox_data/${sessionId}`;
+    const dir = await sandboxDataDir(sessionId);
     const { stdout } = await ssh.execCommand(
       `cd ${dir} 2>/dev/null && find . \\( -name node_modules -o -name .git -o -name dist -o -name build -o -name .next -o -name .vite \\) -prune -o -type f -printf '%s %P\\n'`
     );

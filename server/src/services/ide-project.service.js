@@ -32,15 +32,15 @@ export async function projectForChat(sessionId) {
   return IdeProject.findOne({ chatSessionIds: sessionId }).lean();
 }
 
-// Paths may be given relative to the project, or as /data/project/... or /home/workspace/projects/<id>/...
+// Paths may be given relative to the project, or as /data/... or /home/workspace/projects/<id>/...
 function resolveInProject(project, givenPath = "") {
   const root = projectHostDir(project);
   let rel = String(givenPath || "").trim().replace(/\\/g, "/");
-  for (const prefix of ["/data/project", `/home/workspace/projects/${project._id}`]) {
+  for (const prefix of [`/home/workspace/projects/${project._id}`, "/data"]) {
     if (rel === prefix) rel = "";
     else if (rel.startsWith(prefix + "/")) rel = rel.slice(prefix.length + 1);
   }
-  if (rel.startsWith("/")) throw new Error(`Path must be inside the project (relative, /data/project/... or /home/workspace/projects/${project._id}/...)`);
+  if (rel.startsWith("/")) throw new Error(`Path must be inside the project (relative, /data/... or /home/workspace/projects/${project._id}/...)`);
   const full = path.posix.normalize(path.posix.join(root, rel || "."));
   if (full !== root && !full.startsWith(root + "/")) throw new Error("Path must stay inside the project");
   if (full.split("/").includes(".git")) throw new Error("The .git folder can't be changed directly");
@@ -142,7 +142,7 @@ export const projectTools = {
       `cd ${q(full)} && find . -mindepth 1 -maxdepth ${d} \\( -name node_modules -o -name .git \\) -prune -o -printf '%y %P\\n' | sort -k2 | head -500`
     );
     const lines = stdout.trim().split("\n").filter(Boolean).map((l) => (l.startsWith("d ") ? `${l.slice(2)}/` : l.slice(2)));
-    return `Project folder: ${rel === "." ? "/" : rel} (also /data/project${rel === "." ? "" : "/" + rel})\n${lines.join("\n") || "(empty)"}${lines.length >= 500 ? "\n… (first 500 entries)" : ""}`;
+    return `Project folder: ${rel === "." ? "/" : rel} (also /data${rel === "." ? "" : "/" + rel})\n${lines.join("\n") || "(empty)"}${lines.length >= 500 ? "\n… (first 500 entries)" : ""}`;
   }),
 
   view_project_file: (sessionId, { path: file, start_line, end_line }) => withProject(sessionId, async (project, ssh) => {
@@ -319,7 +319,7 @@ export async function editorContextFor(sessionId) {
     const root = `/home/workspace/projects/${project._id}`;
     const rel = (p) => (p && p.startsWith(root + "/") ? p.slice(root.length + 1) : p);
     const lines = [
-      `Project: ${project.name}${project.repo ? ` (GitHub ${project.repo})` : ""}. Its files are at ${root}/ (the same files at /data/project/). Paths below are relative to it.`,
+      `Project: ${project.name}${project.repo ? ` (GitHub ${project.repo})` : ""}. Its files are at ${root}/ (the same files at /data/). Paths below are relative to it.`,
     ];
 
     const { stdout } = await ssh.execCommand(`cat ${q(`/home/ubuntu/ide_users/${project.owner}/.classgrid/context.json`)} 2>/dev/null`);
@@ -365,4 +365,11 @@ export async function editorContextFor(sessionId) {
   } finally {
     ssh?.dispose();
   }
+}
+
+// Where /data is for a chat's sandbox on the sandbox server: in a Project Mode chat it IS the project (the AI
+// works only in the user's repo), otherwise the chat's own folder.
+export async function sandboxDataDir(sessionId) {
+  const project = await projectForChat(sessionId).catch(() => null);
+  return project ? projectHostDir(project) : `/home/ubuntu/sandbox_data/${sessionId}`;
 }
