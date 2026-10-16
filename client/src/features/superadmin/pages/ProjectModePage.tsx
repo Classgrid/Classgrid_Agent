@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import { motion, useReducedMotion } from "framer-motion";
 import { useParams } from "react-router-dom";
 import { ArrowLeft, FolderGit2, Github, Pencil, Plus, Trash2 } from "lucide-react";
 import { Spinner } from "@/components/marketing_ui/spinner";
@@ -47,6 +48,15 @@ export function ProjectModePage() {
   const [hubOpen, setHubOpen] = useState(false);
   // The AI panel on the right can be closed (the editor then uses the full width) and opened again from the top bar
   const [aiOpen, setAiOpenState] = useState(() => { try { return localStorage.getItem(AI_PANEL_KEY) !== "1"; } catch { return true; } });
+  // The editor's width slides together with the AI panel (same timing as the panel), on screens where the panel shows
+  const [wide, setWide] = useState(() => typeof window !== "undefined" && window.matchMedia("(min-width: 640px)").matches);
+  useEffect(() => {
+    const mq = window.matchMedia("(min-width: 640px)");
+    const onChange = () => setWide(mq.matches);
+    mq.addEventListener("change", onChange);
+    return () => mq.removeEventListener("change", onChange);
+  }, []);
+  const reduceMotion = useReducedMotion();
   const setAiOpen = (v: boolean) => {
     setAiOpenState(v);
     try { v ? localStorage.removeItem(AI_PANEL_KEY) : localStorage.setItem(AI_PANEL_KEY, "1"); } catch { /* storage blocked */ }
@@ -235,7 +245,12 @@ export function ProjectModePage() {
   };
 
   return (
-    <div className={`h-full flex flex-col !bg-[#fafafa] dark:!bg-[#000000] text-foreground ${aiOpen ? "sm:pr-[400px]" : ""}`}>
+    <motion.div
+      className="h-full flex flex-col !bg-[#fafafa] dark:!bg-[#000000] text-foreground"
+      initial={false}
+      animate={{ paddingRight: aiOpen && wide ? 400 : 0 }}
+      transition={reduceMotion ? { duration: 0 } : { duration: 0.36, ease: [0.22, 1, 0.36, 1] }}
+    >
       <div className="shrink-0 flex items-center gap-3 h-8 box-content py-4 pl-16 pr-4 border-b border-border">{/* same height as the AI panel header, so both lines meet */}
         {showEditor ? (
           <>
@@ -444,6 +459,6 @@ export function ProjectModePage() {
       )}
 
       <AiHubModal isOpen={hubOpen} onClose={() => { setHubOpen(false); loadRepos(); }} />
-    </div>
+    </motion.div>
   );
 }
