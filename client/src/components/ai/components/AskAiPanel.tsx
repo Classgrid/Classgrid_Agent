@@ -181,7 +181,7 @@ import { KnowledgeBaseSearchView } from "./stepper/KnowledgeBaseSearchView";
 import { CdnUploadView } from "./stepper/CdnUploadView";
 import { EmailSentView } from "./stepper/EmailSentView";
 import { SimpleLogStepView } from "./stepper/SimpleLogStepView";
-import { FilesChangedSummary, ProjectEditStep, ProjectExploreGroup, ProjectPushStep, ProjectRunChanges, PROJECT_EDIT_TOOLS, PROJECT_EXPLORE_TOOLS } from "./stepper/ProjectToolSteps";
+import { FileMentionChip, parseFileMention, FilesChangedSummary, ProjectEditStep, ProjectExploreGroup, ProjectPushStep, ProjectRunChanges, PROJECT_EDIT_TOOLS, PROJECT_EXPLORE_TOOLS } from "./stepper/ProjectToolSteps";
 import { CombinedReasoningBlock } from "./stepper/CombinedReasoningBlock";
 import { AiFeedbackModal } from "./AiFeedbackModal";
 import { ChatEndedCard } from "./ChatEndedCard";
@@ -1252,6 +1252,12 @@ const MarkdownComponents = {
           {codeString.trim()}
         </a>
       );
+    }
+
+    // A file named in the answer opens in the Project Mode editor (at its line, when one is given)
+    if (isActuallyInline) {
+      const mention = parseFileMention(codeString);
+      if (mention) return <FileMentionChip {...mention} />;
     }
 
     const match = /language-(\w+)/.exec(className || "");

@@ -291,3 +291,34 @@ export function FilesChangedSummary({ steps }: { steps: Step[] }) {
     </div>
   );
 }
+
+// A file the AI names in its answer (`src/App.tsx`, `calculator.ts:25`, `logger.ts#L10-20`), shown as a link that
+// opens it in the Project Mode editor at that line. Only in Project Mode; elsewhere it stays normal code.
+const FILE_MENTION = /^((?:[\w.@-]+\/)*[\w@-][\w.@-]*\.(?:tsx?|jsx?|mjs|cjs|json|md|mdx|html?|css|scss|sass|less|py|rb|go|rs|java|kt|php|c|h|cpp|hpp|cs|swift|vue|svelte|ya?ml|toml|ini|env|txt|sh|sql|graphql|xml|svg|prisma|dart|lock|tsbuildinfo|gitignore|config))(?::(\d+)(?:-(\d+))?|#L(\d+)(?:-L?(\d+))?|,?\s*\(?lines?\s*(\d+)(?:\s*[-–]\s*(\d+))?\)?)?$/i;
+
+export function parseFileMention(text: string) {
+  if (typeof window === 'undefined' || !window.location.pathname.split('/').includes('project')) return null;
+  const m = String(text).trim().match(FILE_MENTION);
+  if (!m || !m[1]) return null;
+  // Code like res.json / process.env / package.lock looks like a file name; without a folder in front, skip those words
+  if (!m[1].includes('/') && /^(res|req|process|window|document|module|exports|this|self|app|router|response|request|data|obj|config|os|fs|path|console|json|math|object|array|string|promise|error|event|e|err|ctx|props|state)\./i.test(m[1])) return null;
+  const start = Number(m[2] || m[4] || m[6]) || undefined;
+  const end = Number(m[3] || m[5] || m[7]) || start;
+  return { path: m[1], startLine: start, endLine: end, label: String(text).trim() };
+}
+
+export function FileMentionChip({ path, startLine, endLine, label }: { path: string; startLine?: number; endLine?: number; label: string }) {
+  return (
+    <span
+      role="link"
+      tabIndex={0}
+      title={startLine ? `Open ${path} at line ${startLine}` : `Open ${path}`}
+      onClick={() => openInEditor({ path, startLine, endLine })}
+      onKeyDown={(e) => { if (e.key === 'Enter') openInEditor({ path, startLine, endLine }); }}
+      className="inline-flex items-center gap-1 rounded-md border border-blue-500/30 bg-blue-500/10 px-1.5 py-0.5 align-baseline font-mono text-[0.85em] text-blue-700 dark:text-blue-300 cursor-pointer hover:bg-blue-500/20 hover:underline"
+    >
+      <FileBadge path={path} />
+      {label}
+    </span>
+  );
+}
