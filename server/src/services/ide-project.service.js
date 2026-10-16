@@ -626,6 +626,7 @@ export async function backupAndRemoveProjectCode(ssh, project) {
   const saveLastEdit = async () => {
     const edited = await newestFileEdit(ssh, project);
     if (edited) await IdeProject.updateOne({ _id: project._id }, { $set: { updatedAt: edited } }, { timestamps: false });
+    redis.del(`ide:lastEdited:${project._id}`).catch(() => {}); // next /projects call reads fresh
   };
   // No GitHub repo yet: an empty project is just removed; one with files first gets its own private repo
   // on the user's GitHub (named after the project), so the work is saved there before it leaves the sandbox

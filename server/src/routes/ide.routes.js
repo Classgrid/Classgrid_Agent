@@ -210,8 +210,27 @@ const projectJson = (p) => ({ id: p._id, name: p.name, repo: p.repo, lastOpenedA
 
 // "Last edited" follows real file edits: newest file change on disk (node_modules and .git skipped), never older than the saved record.
 // If the sandbox cannot be reached, the saved record time is used.
-async function newestFileEdits(projects) {
+// Edit times are cached in Redis for 45s per project, so the SSH `find` only runs for projects not cached yet.
+// If Redis fails, every project goes through SSH exactly as before.
+const EDIT_CACHE_TTL = 45;
+const EDIT_CACHE_KEY = (id) => `ide:lastEdited:${id}`;
+
+async function newestFileEdits(allProjects) {
   const times = {};
+  if (!allProjects.length) return times;
+  let projects = allProjects;
+  try {
+    const cached = await redis.mget(allProjects.map((p) => EDIT_CACHE_KEY(p._id)));
+    projects = [];
+    allProjects.forEach((p, i) => {
+      const ms = Number(cached[i]);
+      if (cached[i] && Number.isFinite(ms)) times[String(p._id)] = new Date(ms);
+      else projects.push(p);
+    });
+  } catch (e) {
+    console.error("[IDE] Edit-time cache read failed, using SSH:", e.message);
+    projects = allProjects;
+  }
   if (!projects.length) return times;
   let ssh;
   try {
@@ -224,7 +243,10 @@ async function newestFileEdits(projects) {
     for (const line of stdout.split("\n")) {
       const [id, secs] = line.trim().split(/\s+/);
       const ms = Math.round(parseFloat(secs) * 1000);
-      if (id && Number.isFinite(ms)) times[id] = new Date(ms);
+      if (id && Number.isFinite(ms)) {
+        times[id] = new Date(ms);
+        redis.set(EDIT_CACHE_KEY(id), String(ms), "EX", EDIT_CACHE_TTL).catch(() => {});
+      }
     }
   } catch (e) {
     console.error("[IDE] Could not read file edit times:", e.message);
