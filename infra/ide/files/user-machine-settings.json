@@ -1,4 +1,11 @@
 {
-  "files.exclude": { "**/.git": true, "**/__pycache__": true },
-  "files.autoSave": "afterDelay"
+  "files.exclude": {
+    "**/.git": true,
+    "**/__pycache__": true
+  },
+  "files.autoSave": "afterDelay",
+  "code-runner.runInTerminal": true,
+  "code-runner.saveFileBeforeRun": true,
+  "code-runner.clearPreviousOutput": true,
+  "code-runner.showRunCommandInEditorContextMenu": true
 }
