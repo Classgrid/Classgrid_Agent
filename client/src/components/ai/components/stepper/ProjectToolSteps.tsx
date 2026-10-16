@@ -226,3 +226,68 @@ export function ProjectPushStep({ step }: { step: Step }) {
     </Row>
   );
 }
+
+// Files a code/terminal run changed in the project ("FILES CHANGED IN PROJECT:" from the server), and the
+// files a whole answer changed, like a code editor's "3 files changed +21 -5".
+type FileChange = { path: string; added: number; removed: number };
+
+export function changesFromRun(result?: string): FileChange[] {
+  const part = String(result || '').split('FILES CHANGED IN PROJECT:')[1];
+  if (!part) return [];
+  return part.trim().split('\n').map((l) => l.match(/^\+(\d+) -(\d+) (.+)$/)).filter(Boolean)
+    .map((m) => ({ path: m![3] || '', added: Number(m![1]), removed: Number(m![2]) }));
+}
+
+function ChangeRow({ change, verb }: { change: FileChange; verb?: string }) {
+  const dir = change.path.includes('/') ? change.path.slice(0, change.path.lastIndexOf('/')) : '';
+  return (
+    <div className="flex min-w-0 items-center gap-1.5 py-1 text-[14px] text-slate-500 dark:text-[#8a8a8a]">
+      {verb && <span className="shrink-0">{verb}</span>}
+      <FileBadge path={change.path} />
+      <FileLink path={change.path} />
+      <span className="shrink-0 text-xs text-green-600 dark:text-green-500">+{change.added}</span>
+      <span className="shrink-0 text-xs text-red-600 dark:text-red-500">-{change.removed}</span>
+      {dir && !verb && <span className="truncate text-xs opacity-60">{dir}</span>}
+    </div>
+  );
+}
+
+export function ProjectRunChanges({ result }: { result?: string }) {
+  const changes = changesFromRun(result);
+  if (!changes.length) return null;
+  return <div className="ml-10 -mt-1 mb-1 flex flex-col">{changes.map((c) => <ChangeRow key={c.path} change={c} verb="Changed" />)}</div>;
+}
+
+export function FilesChangedSummary({ steps }: { steps: Step[] }) {
+  const [open, setOpen] = useState(false);
+  const byFile = new Map<string, FileChange>();
+  const add = (c: FileChange) => {
+    const prev = byFile.get(c.path) || { path: c.path, added: 0, removed: 0 };
+    byFile.set(c.path, { path: c.path, added: prev.added + c.added, removed: prev.removed + c.removed });
+  };
+  for (const s of steps || []) {
+    if (s.status === 'loading' || isError(s)) continue;
+    if (PROJECT_EDIT_TOOLS.has(s.tool)) {
+      const real = String(s.result || '').match(/\+(\d+) -(\d+)\)\.?\s*$/);
+      const p = String(s.args?.path || '').replace(/^\/data\/project\//, '').replace(/^\/home\/workspace\/projects\/[^/]+\//, '');
+      if (real && p) add({ path: p, added: Number(real[1]), removed: Number(real[2]) });
+    } else if (s.tool === 'run_code' || s.tool === 'execute_terminal_command') {
+      changesFromRun(s.result).forEach(add);
+    }
+  }
+  const files = [...byFile.values()];
+  if (!files.length) return null;
+  const added = files.reduce((n, f) => n + f.added, 0);
+  const removed = files.reduce((n, f) => n + f.removed, 0);
+  return (
+    <div className="mt-3 rounded-xl border border-border bg-secondary/30">
+      <button type="button" onClick={() => setOpen(!open)} className="w-full flex items-center gap-2 px-4 py-2.5 text-[14px] text-slate-500 dark:text-[#8a8a8a] hover:text-foreground">
+        <span>{files.length} file{files.length > 1 ? 's' : ''} changed</span>
+        <span className="text-green-600 dark:text-green-500">+{added}</span>
+        <span className="text-red-600 dark:text-red-500">-{removed}</span>
+        {open ? <ChevronDown className="size-3.5" /> : <ChevronRight className="size-3.5" />}
+      </button>
+      {open && <div className="border-t border-border px-4 py-1">{files.map((f) => <ChangeRow key={f.path} change={f} />)}</div>}
+    </div>
+  );
+}

@@ -29,7 +29,7 @@ import { PutObjectCommand } from '@aws-sdk/client-s3';
 import { SESClient, GetSendStatisticsCommand, ListIdentitiesCommand } from '@aws-sdk/client-ses';
 import puppeteer from 'puppeteer';
 import IdeProject from '../models/IdeProject.js';
-import { projectTools } from '../services/ide-project.service.js';
+import { projectTools, projectForChat, projectSnapshot, projectChangesBetween, formatProjectChanges } from '../services/ide-project.service.js';
 
 // A chat inside a Project Mode project also gets that project's code, at /data/project and at the same path the
 // user sees in the code editor (/home/workspace/projects/<id>), so paths copied from the editor work as they are.
@@ -3931,8 +3931,12 @@ export const handleToolCall = async (name, args, context = {}) => {
 
         console.log(`[Sandbox] Securely injecting credentials and running Docker container for terminal command...`);
         const projectMount = await projectMountFor(sessionId);
+        // In a Project Mode chat, note which project files this run changes (shown under the step)
+        const chatProject = projectMount.mount ? await projectForChat(sessionId) : null;
+        const snapBefore = chatProject ? await projectSnapshot(ssh, chatProject) : null;
         const dockerCommand = `${projectMount.prep}docker run --rm ${envVars} -v /home/ubuntu/sandbox_data/${sessionId}:/data${projectMount.mount} classgrid-ai-sandbox bash /data/${SANDBOX_RUNNER_PREFIX}_terminal.sh`;
         const result = await ssh.execCommand(dockerCommand);
+        const projectChanges = chatProject ? await projectChangesBetween(ssh, chatProject, snapBefore, await projectSnapshot(ssh, chatProject)) : [];
 
         console.log(`\n=================================================`);
         console.log(`ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã¢â‚¬Â¦ÃƒÂ¢Ã¢â€šÂ¬Ã…â€œÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â¦ [SANDBOX TERMINAL ACTION FINISHED]`);
@@ -3952,7 +3956,7 @@ export const handleToolCall = async (name, args, context = {}) => {
         ssh.dispose();
 
         return {
-          content: [{ type: 'text', text: `Command executed in isolated Sandbox.\nEXIT CODE: ${result.code}${!result.stdout && !result.stderr ? ' (no output)' : ''}\nSTDOUT:\n${result.stdout}\nSTDERR:\n${result.stderr}` }]
+          content: [{ type: 'text', text: `Command executed in isolated Sandbox.\nEXIT CODE: ${result.code}${!result.stdout && !result.stderr ? ' (no output)' : ''}\nSTDOUT:\n${result.stdout}\nSTDERR:\n${result.stderr}${formatProjectChanges(projectChanges)}` }]
         };
       } catch (e) {
         return {
@@ -4027,8 +4031,12 @@ export const handleToolCall = async (name, args, context = {}) => {
 
         console.log(`[Sandbox] Securely injecting credentials and running Docker container for ${language} script...`);
         const projectMount = await projectMountFor(sessionId);
+        // In a Project Mode chat, note which project files this run changes (shown under the step)
+        const chatProject = projectMount.mount ? await projectForChat(sessionId) : null;
+        const snapBefore = chatProject ? await projectSnapshot(ssh, chatProject) : null;
         const dockerCommand = `${projectMount.prep}docker run --rm ${envVars} -v /home/ubuntu/sandbox_data/${sessionId}:/data${projectMount.mount} classgrid-ai-sandbox ${execCmd} /data/${SANDBOX_RUNNER_PREFIX}.${ext}`;
         const result = await ssh.execCommand(dockerCommand);
+        const projectChanges = chatProject ? await projectChangesBetween(ssh, chatProject, snapBefore, await projectSnapshot(ssh, chatProject)) : [];
 
         console.log(`\n=================================================`);
         console.log(`ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã¢â‚¬Â¦ÃƒÂ¢Ã¢â€šÂ¬Ã…â€œÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â¦ [SANDBOX CODE EXECUTION FINISHED]`);
@@ -4049,7 +4057,7 @@ export const handleToolCall = async (name, args, context = {}) => {
         ssh.dispose();
 
         return {
-          content: [{ type: 'text', text: `[Sandbox Execution Results]\n\nEXIT CODE: ${result.code}${!result.stdout && !result.stderr ? ' (no output)' : ''}\n\nSTDOUT:\n${result.stdout}\nSTDERR:\n${result.stderr}` }],
+          content: [{ type: 'text', text: `[Sandbox Execution Results]\n\nEXIT CODE: ${result.code}${!result.stdout && !result.stderr ? ' (no output)' : ''}\n\nSTDOUT:\n${result.stdout}\nSTDERR:\n${result.stderr}${formatProjectChanges(projectChanges)}` }],
         };
       } catch (e) {
         return { content: [{ type: 'text', text: `Failed to connect to AWS Sandbox: ${e.message}` }] };

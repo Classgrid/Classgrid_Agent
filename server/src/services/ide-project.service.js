@@ -211,3 +211,26 @@ export async function revealInEditor(project, ssh, { path: file, startLine, endL
   const res = await ssh.execCommand(`mkdir -p ${q(dir)} && cat > ${q(dir)}/open.tmp && mv ${q(dir)}/open.tmp ${q(dir)}/open.json`, { stdin: req });
   if (res.code) throw new Error("Could not open the file in the editor");
 }
+
+// Which project files a code/terminal run changed: a snapshot of the whole folder (as a git tree, without touching
+// the user's git index) before and after the run, then the difference between the two.
+export async function projectSnapshot(ssh, project) {
+  const dir = projectHostDir(project);
+  const idx = `/tmp/cg-index-${project._id}-${Date.now()}`;
+  const { stdout, code } = await ssh.execCommand(
+    `[ -d ${q(dir)}/.git ] && cd ${q(dir)} && GIT_INDEX_FILE=${idx} git add -A . 2>/dev/null && GIT_INDEX_FILE=${idx} git write-tree; rm -f ${idx}`
+  );
+  return code === 0 && /^[0-9a-f]{40}$/.test(stdout.trim()) ? stdout.trim() : null;
+}
+
+export async function projectChangesBetween(ssh, project, before, after) {
+  if (!before || !after || before === after) return [];
+  const { stdout } = await ssh.execCommand(`git -C ${q(projectHostDir(project))} diff --numstat ${before} ${after} | head -50`);
+  return stdout.trim().split("\n").filter(Boolean).map((l) => {
+    const [a, r, ...file] = l.split("\t");
+    return { file: file.join("\t"), added: Number(a) || 0, removed: Number(r) || 0 };
+  });
+}
+
+export const formatProjectChanges = (changes) =>
+  changes.length ? `\n\nFILES CHANGED IN PROJECT:\n${changes.map((c) => `+${c.added} -${c.removed} ${c.file}`).join("\n")}` : "";

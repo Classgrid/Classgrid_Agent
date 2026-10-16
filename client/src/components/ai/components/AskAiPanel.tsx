@@ -181,7 +181,7 @@ import { KnowledgeBaseSearchView } from "./stepper/KnowledgeBaseSearchView";
 import { CdnUploadView } from "./stepper/CdnUploadView";
 import { EmailSentView } from "./stepper/EmailSentView";
 import { SimpleLogStepView } from "./stepper/SimpleLogStepView";
-import { ProjectEditStep, ProjectExploreGroup, ProjectPushStep, PROJECT_EDIT_TOOLS, PROJECT_EXPLORE_TOOLS } from "./stepper/ProjectToolSteps";
+import { FilesChangedSummary, ProjectEditStep, ProjectExploreGroup, ProjectPushStep, ProjectRunChanges, PROJECT_EDIT_TOOLS, PROJECT_EXPLORE_TOOLS } from "./stepper/ProjectToolSteps";
 import { CombinedReasoningBlock } from "./stepper/CombinedReasoningBlock";
 import { AiFeedbackModal } from "./AiFeedbackModal";
 import { ChatEndedCard } from "./ChatEndedCard";
@@ -4618,6 +4618,7 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
                                                 />
                                               </AgentStepAccordion>
                                             );
+                                            elements.push(<ProjectRunChanges key={`changes-${step.id}`} result={step.result} />);
                                             return;
                                           }
 
@@ -4992,6 +4993,7 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
                           )}
                           {!isUser && !message.typing && message.content.length > 0 && !message.content.includes("```approval") && !/^\s*\[IMAGE_GENERATION_[^\]]*\]\s*$/.test(message.content) && !message.content.trim().startsWith("ai_quota_exceeded") && message.content.trim() !== "ai_blocked" && (
                             <div className="pl-1 mt-3">
+                              <FilesChangedSummary steps={(message.steps || []) as any} />
                               <MessageActions content={message.content} messageId={message.id} onReply={() => setReplyToMessage(message)} />
                             </div>
                           )}
