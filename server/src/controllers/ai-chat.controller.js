@@ -40,7 +40,7 @@ import {
     memoryText
 } from "../services/ai-chat.service.js";
 import { getHistory, getHistoryCount, appendToHistory, invalidateHistoryCache, getChatTranscript } from "../services/ai-chat-history.service.js";
-import { editorContextFor, rememberProjectSnapshot, sandboxDataDir, startCheckpoint, finishCheckpoint } from "../services/ide-project.service.js";
+import { editorContextFor, rememberProjectSnapshot, sandboxDataDir, startCheckpoint, finishCheckpoint, linkChatToProject } from "../services/ide-project.service.js";
 import { buildEndConversationHandlers, reopenSession } from "../services/ai-end-conversation.service.js";
 import { hasEnoughTokens, deductTokens, getImageGenerationCost, tokenWindowEnd } from "../services/ai-credits.service.js";
 import redis from "../config/redis.js";
@@ -1456,6 +1456,10 @@ You are currently talking to Nikhil Shinde (nikhil.shinde@classgrid.in), the CRE
         volatilePrompt += `\n\n--- CURRENT SYSTEM TIME ---\nThe current time in IST (India) is ${timeIST} on ${dateIST}. The current time in UTC is ${timeUTC} on ${dateUTC} (exact UTC now: ${now.toISOString()}).\n${calendarStr}\nIf the user asks for the time in ANY other timezone or city (like London or Tokyo), you MUST use the \`get_timezone_time\` tool to find the exact time. DO NOT attempt to calculate timezone math yourself, you will get it wrong. NEVER output placeholders like "[Your local time here]". DO NOT attempt to calculate calendar dates in your head; look at the reference list above.`;
 
         // Project Mode: what the user sees in the code editor (open file, cursor, selection, errors) and what they changed
+        // A message sent from Project Mode links this chat to the open project first (from the very first message)
+        if (sessionId && !isIncognito && /^[0-9a-f]{24}$/i.test(String(body.projectId || "")) && req.user?._id) {
+            await linkChatToProject(req.user._id, body.projectId, sessionId).catch(() => {});
+        }
         if (sessionId && !isIncognito) volatilePrompt += await editorContextFor(sessionId).catch(() => "");
         // Project Mode: snapshot the project before this answer, so its changes can be reviewed, rejected or undone
         const checkpointId = sessionId && !isIncognito ? await startCheckpoint(sessionId).catch(() => null) : null;

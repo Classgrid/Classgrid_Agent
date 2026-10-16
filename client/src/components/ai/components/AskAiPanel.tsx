@@ -3770,6 +3770,8 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
           userContext: userContext,
           sessionId: (options && options.explicitSessionId !== undefined) ? (options.explicitSessionId ?? undefined) : (sessionId ?? undefined),
           isIncognito: isIncognito,
+          // Project Mode: the project open next to the chat (the backend links the chat to it)
+          projectId: (() => { try { return window.location.pathname.split("/").includes("project") ? localStorage.getItem("cg_project_open") || undefined : undefined; } catch { return undefined; } })(),
           fileUrls: uploadedAttachments.length > 0 ? uploadedAttachments.map(a => a.url) : [],
           attachments: uploadedAttachments.length > 0 ? uploadedAttachments.map(a => ({ url: a.url, name: a.name, mimeType: a.mimeType })) : undefined,
           history: messages
