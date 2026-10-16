@@ -1,0 +1,2 @@
+0 * * * * find /home/ubuntu/sandbox_data/*/scratch -mindepth 1 -mmin +1440 -delete 2>/dev/null
+30 3 * * * find /home/ubuntu/ide_users/*/.cache -type f -atime +30 -delete 2>/dev/null

@@ -1,0 +1,27 @@
+{
+  "name": "classgrid-bridge",
+  "displayName": "Classgrid",
+  "publisher": "classgrid",
+  "version": "1.0.2",
+  "engines": {
+    "vscode": "^1.80.0"
+  },
+  "extensionKind": [
+    "workspace"
+  ],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "main": "./extension.js",
+  "repository": {
+    "type": "git",
+    "url": "https://classgrid.in"
+  },
+  "license": "UNLICENSED",
+  "capabilities": {
+    "untrustedWorkspaces": {
+      "supported": true
+    },
+    "virtualWorkspaces": true
+  }
+}

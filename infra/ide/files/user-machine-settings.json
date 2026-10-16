@@ -1,0 +1,4 @@
+{
+  "files.exclude": { "**/.git": true, "**/__pycache__": true },
+  "files.autoSave": "afterDelay"
+}

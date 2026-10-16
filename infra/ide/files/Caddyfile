@@ -1,0 +1,31 @@
+ide.classgrid.in {
+	log
+	encode zstd gzip
+
+	# VS Code program files (the same for everyone, no user data) come from a shared box with no user files
+	@static path_regexp ^/stable-[a-f0-9]+/static/
+	handle @static {
+		header Cache-Control "no-cache" {
+			defer
+		}
+		reverse_proxy 127.0.0.1:3000
+	}
+
+	# Everything else (pages, files, terminal) goes to the logged-in user own box; Classgrid says which one
+	handle {
+		route {
+		request_header -X-Ide-Upstream
+		forward_auth https://api.classgrid.in {
+			uri /api/ide/check
+			header_up Host api.classgrid.in
+			header_up -Upgrade
+			header_up -Connection
+			copy_headers X-Ide-Upstream
+		}
+		header Cache-Control "no-store" {
+			defer
+		}
+		reverse_proxy {http.request.header.X-Ide-Upstream}
+		}
+	}
+}

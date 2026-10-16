@@ -1,0 +1,2 @@
+# Classgrid Code: re-apply the walls around user editor boxes after every restart
+@reboot root sleep 20 && /bin/sh /home/ubuntu/ide_branding/ide-firewall.sh
