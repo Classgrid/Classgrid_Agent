@@ -460,7 +460,7 @@ export function ProjectModePage() {
                     {p.createdAt && <span className="text-xs text-muted-foreground">Created {new Date(p.createdAt).toLocaleDateString()}</span>}
                     <span className="text-xs text-muted-foreground">{p.lastOpenedAt ? `Opened ${new Date(p.lastOpenedAt).toLocaleDateString()}` : "Never opened"}</span>
                     <button
-                      onClick={() => open(p)}
+                      onClick={() => { if (p.repo) open(p); else { setLinking(p); loadRepos(); } }}
                       disabled={busyId === p.id}
                       className="mt-auto self-start flex items-center gap-2 px-3 py-1.5 rounded-full border border-border text-sm hover:bg-secondary disabled:opacity-50"
                     >
@@ -492,7 +492,7 @@ export function ProjectModePage() {
           <div className="w-full max-w-md rounded-xl border border-border bg-background p-5 flex flex-col gap-4" onClick={(e) => e.stopPropagation()}>
             <div>
               <h2 className="text-lg font-semibold">Link a GitHub repo</h2>
-              <p className="text-sm text-muted-foreground">For "{linking.name}". Pick a repo, or start empty and make a repo after you write the code.</p>
+              <p className="text-sm text-muted-foreground">For "{linking.name}". Linking a repo is optional: pick one below, or enter the project without a repo and make one later.</p>
             </div>
             {githubConnected === false ? (
               <button onClick={() => setHubOpen(true)} className="flex items-center justify-center gap-2 bg-foreground text-background px-4 py-2 rounded-full font-medium text-sm hover:opacity-90">
@@ -518,9 +518,9 @@ export function ProjectModePage() {
                 <button
                   onClick={() => { const p = linking; setLinking(null); open(p); }}
                   className="px-3 py-1.5 rounded-full border border-border text-sm hover:bg-secondary"
-                  title="Open an empty project. Make a GitHub repo for it later (the Agent can make one)."
+                  title="Open the project without a repo. Make one later (the Agent can create it and push the code)."
                 >
-                  Start empty, make a repo later
+                  Enter project without a repo
                 </button>
               ) : <span />}
               <button onClick={() => setLinking(null)} className="px-3 py-1.5 rounded-full text-sm hover:bg-secondary">Later</button>

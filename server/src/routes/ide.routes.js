@@ -231,6 +231,11 @@ router.patch("/projects/:id", isAuthenticated, async (req, res) => {
   }
   if (req.body?.repo !== undefined) {
     if (req.body.repo !== null && !REPO_NAME.test(req.body.repo)) return res.status(400).json({ error: "Pick a repo" });
+    if (req.body.repo) {
+      // One project per repo, so the same code never shows up twice
+      const other = await IdeProject.findOne({ owner: req.user._id, _id: { $ne: project._id }, repo: new RegExp(`^${req.body.repo.replace(/\./g, "\\.")}$`, "i") }).select("name"); // repo names are only letters, digits, - _ . /
+      if (other) return res.status(409).json({ error: `This repo is already linked to your project "${other.name}". Open that project instead.` });
+    }
     project.repo = req.body.repo;
   }
   await project.save();

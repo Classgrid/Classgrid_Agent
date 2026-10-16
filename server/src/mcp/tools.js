@@ -5722,6 +5722,21 @@ export const handleToolCall = async (name, args, context = {}) => {
       const { operation, owner, repo, path: filePath, title, body, state = 'open', repoName, isPrivate, content, message, branch, sha, head, base, issueNumber, query, isClassgridManaged } = args;
       const { userEmail = '' } = context;
 
+      // A Project Mode chat already has its own repo: making another one or pushing the project to a different
+      // repo would only make a copy of the same code, so these go through the project's own repo tools.
+      if (operation === 'create_repo' || operation === 'push_sandbox_files') {
+        const project = context.sessionId ? await projectForChat(context.sessionId).catch(() => null) : null;
+        if (project?.repo && (operation === 'create_repo' || `${owner}/${repo}`.toLowerCase() !== project.repo.toLowerCase())) {
+          return { content: [{ type: 'text', text: `Not done: this Project Mode project is already linked to the GitHub repo ${project.repo}, so a new or different repo would be a duplicate. Its changes go to ${project.repo} with push_project_to_github.` }] };
+        }
+        if (project && !project.repo && operation === 'create_repo') {
+          return { content: [{ type: 'text', text: 'Not done: in a Project Mode chat the repo is made with create_github_repo_for_project, which also links it to the project and pushes its files.' }] };
+        }
+        if (project?.repo && operation === 'push_sandbox_files') {
+          return { content: [{ type: 'text', text: `Not done: Project Mode files are pushed to ${project.repo} with push_project_to_github.` }] };
+        }
+      }
+
       let accessToken = '';
       if (isClassgridManaged) {
         accessToken = process.env.GITHUB_MASTER_TOKEN || process.env.GITHUB_TOKEN;
