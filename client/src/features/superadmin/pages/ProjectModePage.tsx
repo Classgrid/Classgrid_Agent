@@ -4,8 +4,8 @@ import { AskAiPanel } from "@/components/ai";
 // will go here), the right side is the AI panel in its overlay layout.
 export function ProjectModePage() {
   return (
-    <div className="h-[100dvh] flex flex-col bg-background text-foreground sm:pr-[400px]">
-      <div className="shrink-0 flex items-center h-8 box-content py-4 px-4 border-b border-border">{/* same height as the AI panel header, so both lines meet */}
+    <div className="h-full flex flex-col bg-background text-foreground sm:pr-[400px]">
+      <div className="shrink-0 flex items-center h-8 box-content py-4 pl-16 pr-4 border-b border-border">{/* same height as the AI panel header, so both lines meet */}
         <span className="text-sm font-medium">Project Mode</span>
       </div>
       <div className="flex-1" />
