@@ -14,7 +14,7 @@ export function ProjectModePage() {
         <span className="text-sm font-medium">Project Mode</span>
       </div>
       {isSuperAdmin ? (
-        <iframe src="https://ide.classgrid.in/" title="Code editor" className="flex-1 w-full border-0" allow="clipboard-read; clipboard-write" />
+        <iframe src="https://ide.classgrid.in/" title="Code editor" className="flex-1 w-full border-0 [color-scheme:light] dark:[color-scheme:dark]" allow="clipboard-read; clipboard-write" />
       ) : (
         <div className="flex-1" />
       )}
