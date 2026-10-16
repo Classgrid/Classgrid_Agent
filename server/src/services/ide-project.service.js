@@ -340,10 +340,20 @@ export async function pushProject(project, ssh, message) {
   }
   const { stdout: branch } = await ssh.execCommand(`git -C ${q(dir)} rev-parse --abbrev-ref HEAD`);
   const auth = Buffer.from(`x-access-token:${owner.github_access_token}`).toString("base64");
-  const push = await ssh.execCommand(
-    `GIT_TERMINAL_PROMPT=0 GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=http.https://github.com/.extraheader GIT_CONFIG_VALUE_0="AUTHORIZATION: basic ${auth}" ` +
-    `git -C ${q(dir)} push origin HEAD 2>&1 | tail -5`
-  );
+  const gitAuth = `GIT_TERMINAL_PROMPT=0 GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=http.https://github.com/.extraheader GIT_CONFIG_VALUE_0="AUTHORIZATION: basic ${auth}"`;
+  // Someone else may have pushed to the same branch since the project was downloaded: take their commits
+  // first and put ours on top, so the push is not rejected. If the same lines were changed, stop and say so.
+  const b = q(branch.trim() || "main");
+  const fetch = await ssh.execCommand(`${gitAuth} git -C ${q(dir)} fetch -q origin ${b}`);
+  if (!fetch.code) { // the branch is on GitHub (a brand-new empty repo has nothing to take)
+    const rebase = await ssh.execCommand(`git -C ${q(dir)} -c user.name=Classgrid -c user.email=code@classgrid.in rebase -q FETCH_HEAD`);
+    if (rebase.code) {
+      await ssh.execCommand(`git -C ${q(dir)} rebase --abort 2>/dev/null`);
+      const { stdout: files } = await ssh.execCommand(`git -C ${q(dir)} diff --name-only HEAD FETCH_HEAD 2>/dev/null | head -20 | paste -sd, -`);
+      return `Push stopped: GitHub has new commits that change the same lines as this project's changes, so they could not be joined by themselves. Nothing was lost. Files that differ: ${files.trim() || "unknown"}.`;
+    }
+  }
+  const push = await ssh.execCommand(`${gitAuth} git -C ${q(dir)} push origin HEAD 2>&1 | tail -5`);
   const out = (push.stdout || push.stderr || "").split(auth).join("***");
   if (/rejected|error|fatal/i.test(out)) return `Push failed: ${out.slice(0, 800)}`;
   return `${staged.trim() ? `Committed (${staged.trim()}) and pushed` : "Nothing new to commit; pushed"} to ${project.repo} (${branch.trim() || "current branch"}).`;
