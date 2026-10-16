@@ -4818,6 +4818,37 @@ export const handleToolCall = async (name, args, context = {}) => {
 
         const data = await response.json();
 
+        // A new project linked to GitHub is not built until the next push, and its web address is only known from
+        // Vercel (<name>.vercel.app is already taken for many names). So start the first production build from the
+        // repo now and return the real address, so no link has to be guessed.
+        if (operation === 'create_project' && data?.id) {
+          const vercelApi = (path, opts = {}) => fetch(`https://api.vercel.com${path}`, { ...opts, headers: fetchOptions.headers });
+          let deployNote = '';
+          try {
+            const branch = data.link?.productionBranch || 'main';
+            const dep = await vercelApi(`/v13/deployments`, {
+              method: 'POST',
+              body: JSON.stringify({ name: data.name, project: data.id, target: 'production', gitSource: { type: 'github', repoId: data.link?.repoId, ref: branch } }),
+            });
+            const depData = await dep.json().catch(() => ({}));
+            deployNote = dep.ok
+              ? `First production build started (deployment ${depData.id}, status ${depData.readyState || depData.status || 'QUEUED'}). It is usually live in about a minute.`
+              : `Could not start the first build: ${depData.error?.message || dep.status}. It starts on the next push to the repo.`;
+          } catch (e) {
+            deployNote = `Could not start the first build: ${e.message}. It starts on the next push to the repo.`;
+          }
+          let domains = [];
+          try {
+            const d = await (await vercelApi(`/v9/projects/${data.id}/domains`)).json();
+            domains = (d.domains || []).map((x) => x.name);
+          } catch {}
+          const live = domains.find((n) => n.endsWith('.vercel.app')) || domains[0];
+          const others = domains.filter((n) => n !== live).map((n) => `https://${n}`);
+          return {
+            content: [{ type: 'text', text: `Created Vercel project ${data.name} (id ${data.id}) linked to ${githubRepo}.\n${deployNote}\nLive URL (the project's real address): ${live ? `https://${live}` : 'not assigned yet'}${others.length ? `\nOther domains: ${others.join(', ')}` : ''}` }]
+          };
+        }
+
         // ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â°ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¸ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¨ AI TOKEN OVERFLOW PROTECTION ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â°ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¸ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¨
         const aiSafetyReplacer = (key, value) => {
           const forbiddenKeys = ['source', 'env', 'builds', 'routes', 'meta'];
