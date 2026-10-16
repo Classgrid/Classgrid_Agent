@@ -410,10 +410,11 @@ export function FileMentionChip({ path, startLine, endLine, label, folder }: { p
       title={folder ? `Show ${path} in the editor` : startLine ? `Open ${path} at line ${startLine}` : `Open ${path}`}
       onClick={go}
       onKeyDown={(e) => { if (e.key === 'Enter') go(); }}
-      className="inline-flex items-center gap-1 rounded-md border border-blue-500/30 bg-blue-500/10 px-1.5 py-0.5 align-baseline font-mono text-[0.85em] text-blue-700 dark:text-blue-300 cursor-pointer hover:bg-blue-500/20 hover:underline"
+      className="inline-flex max-w-full items-center gap-1 rounded-md border border-blue-500/30 bg-blue-500/10 px-1.5 py-0.5 align-baseline font-mono text-[0.85em] text-blue-700 dark:text-blue-300 cursor-pointer hover:bg-blue-500/20 hover:underline"
     >
       {folder ? <Folder className="size-3.5 shrink-0" /> : <FileBadge path={path} />}
-      {label}
+      {/* Long paths break onto the next line instead of pushing the chat wider than a narrow panel */}
+      <span className="min-w-0 [overflow-wrap:anywhere]">{label}</span>
     </span>
   );
 }
