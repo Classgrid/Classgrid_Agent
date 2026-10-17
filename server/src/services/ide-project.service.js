@@ -615,7 +615,8 @@ const PROJECT_MODE_RULES = `PROJECT MODE RULES (this chat is in Project Mode; th
 - No extra notes, reports or markdown files unless the user asks for that file in the project; answer in the chat instead.
 - Downloads and handing over files are for Agent mode (the normal chat), not here.
 - After a task, if you are not sure it really works, test it in the terminal and show the user the proof.
-- When you plan a task, write the plan as a markdown file in a plan/ folder in the project (create it if needed). All plan files go only in that folder; add to them there instead of making notes anywhere else. Ask the user's choices with the questions card (multiple choice) and get their approval with the plan card before starting the work.`;
+- When you plan a task, write the plan as a markdown file in a plan/ folder in the project (create it if needed). All plan files go only in that folder; add to them there instead of making notes anywhere else. Ask the user's choices with the questions card (multiple choice) and get their approval with the plan card before starting the work.
+- Secret keys (API keys, passwords, database links) never go in front-end code, in VITE_/NEXT_PUBLIC_ variables, or in any file pushed to GitHub. Keep them only in the hosting's environment settings (for example Vercel Environment Variables) and use them only from server code (for example a Vercel serverless function in api/); the front end calls that server code.`;
 
 // A chat sent from Project Mode belongs to the project that is open there (only the owner's own projects)
 export async function linkChatToProject(userId, projectId, sessionId) {
