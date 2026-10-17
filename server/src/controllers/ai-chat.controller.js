@@ -957,8 +957,9 @@ async function readPageDirect(startUrl) {
                 // keep the link text only, drop images. open_url serves the page in parts, so the cap is high.
                 markdown = markdown
                     .replace(/\[\\\[[^\]\n]{0,40}\\\]\]\([^)\n]*\)/g, "") // citation marks like [\[37\]](#cite_note-…)
-                    .replace(/!\[[^\]\n]*\]\([^)\n]*\)/g, "")
-                    .replace(/\[([^\]\n]*)\]\([^)\n]*\)/g, "$1")
+                    // a link target is (url "title"): the url can hold one level of brackets, the title can hold any
+                    .replace(/!\[[^\]\n]*\]\((?:[^()\s]|\([^()\s]*\))*(?:\s+"[^"\n]*")?\)/g, "")
+                    .replace(/\[([^\]\n]*)\]\((?:[^()\s]|\([^()\s]*\))*(?:\s+"[^"\n]*")?\)/g, "$1")
                     .replace(/\n{3,}/g, "\n\n");
                 return markdown.length > PAGE_TEXT_MAX ? `${markdown.slice(0, PAGE_TEXT_MAX)}\n\n[The page is longer than the reader keeps; the rest was left out.]` : markdown;
             }
