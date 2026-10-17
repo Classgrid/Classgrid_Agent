@@ -473,7 +473,9 @@ export async function linkChatToProject(userId, projectId, sessionId) {
   await connectDB();
   const project = await IdeProject.findOne({ _id: projectId, owner: userId }).select("_id");
   if (!project) return;
-  await IdeProject.updateMany({ owner: userId, chatSessionIds: sessionId, _id: { $ne: project._id } }, { $pull: { chatSessionIds: sessionId } });
+  // A chat stays with the project it started in (chats are kept per project); it is never moved to another one
+  const other = await IdeProject.findOne({ owner: userId, chatSessionIds: sessionId, _id: { $ne: project._id } }).select("_id").lean();
+  if (other) return;
   await IdeProject.updateOne({ _id: project._id }, { $addToSet: { chatSessionIds: sessionId } });
 }
 

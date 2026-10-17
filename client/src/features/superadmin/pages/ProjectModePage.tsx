@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { motion, useReducedMotion } from "framer-motion";
 import { useParams } from "react-router-dom";
 import { ArrowLeft, FolderGit2, Github, Pencil, Plus, Trash2 } from "lucide-react";
@@ -156,6 +156,15 @@ export function ProjectModePage() {
   const open = async (project: Project, replace = false, resume = false) => {
     setBusyId(project.id);
     const wasOpen = openId;
+    // Opening a different project starts a fresh chat for it: the old chat stays with its own project (chats are
+    // kept per project), so the AI never mixes two projects
+    if (!resume && chatProjectRef.current && chatProjectRef.current !== project.id) {
+      chatProjectRef.current = null;
+      const parts = window.location.pathname.split("/");
+      const i = parts.indexOf("project");
+      if (i !== -1 && parts.length > i + 1) window.history.pushState({}, "", parts.slice(0, i + 1).join("/"));
+      window.dispatchEvent(new Event("agent:new-chat"));
+    }
     rememberOpen(project.id);
     setFolder(null);
     setProgress({ label: resume ? "Reconnecting to your project" : "Downloading the latest code from GitHub", value: 3, target: 70 });
@@ -191,8 +200,13 @@ export function ProjectModePage() {
   }, [projects, openId]);
 
   // A chat used while a project is open belongs to that project, so the AI there works on the project's code
+  // (a chat that already belongs to another project is never moved; the server keeps it there)
+  const chatProjectRef = useRef<string | null>(null);
   useEffect(() => {
-    if (openId && sessionId && folder) api(`/projects/${openId}/chats`, { method: "POST", body: JSON.stringify({ sessionId }) });
+    if (openId && sessionId && folder) {
+      chatProjectRef.current = openId;
+      api(`/projects/${openId}/chats`, { method: "POST", body: JSON.stringify({ sessionId }) });
+    }
   }, [openId, sessionId, folder]);
 
   const create = async () => {

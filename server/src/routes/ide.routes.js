@@ -462,7 +462,9 @@ router.post("/projects/:id/chats", isAuthenticated, async (req, res) => {
   if (!session || String(session.user_email || "").toLowerCase() !== String(req.user.email || "").toLowerCase()) {
     return res.status(403).json({ error: "This chat is not yours" });
   }
-  await IdeProject.updateMany({ owner: req.user._id, chatSessionIds: sessionId, _id: { $ne: project._id } }, { $pull: { chatSessionIds: sessionId } });
+  // A chat stays with the project it started in (chats are kept per project); it is never moved to another one
+  const other = await IdeProject.findOne({ owner: req.user._id, chatSessionIds: sessionId, _id: { $ne: project._id } }).select("_id").lean();
+  if (other) return res.status(409).json({ error: "chat_in_other_project" });
   await IdeProject.updateOne({ _id: project._id }, { $addToSet: { chatSessionIds: sessionId } });
   res.json({ ok: true });
 });
