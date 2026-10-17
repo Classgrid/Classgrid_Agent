@@ -2320,7 +2320,8 @@ If they ask whether their college/school uses Classgrid, say you can't see that 
                         parameters: {
                             type: "object",
                             properties: {
-                                url: { type: "string", description: "Full URL, e.g. https://developers.cloudflare.com/workers-ai/platform/pricing/" }
+                                url: { type: "string", description: "Full URL, e.g. https://developers.cloudflare.com/workers-ai/platform/pricing/" },
+                                part: { type: "number", description: "Long pages come in parts. Leave empty for part 1; ask for part 2, 3... to read the rest." }
                             },
                             required: ["url"]
                         }
@@ -3129,12 +3130,17 @@ If they ask whether their college/school uses Classgrid, say you can't see that 
                                 accSources.push(src);
                                 try { if (!res.writableEnded) res.write(`data: ${JSON.stringify({ type: "sources", sources: accSources })}\n\n`); } catch (e) { }
                             }
-                            const MAX = 15000;
+                            // Long pages are read in parts (each fits in one tool result), so nothing is silently cut off
+                            const PART = 11000;
+                            const parts = Math.max(1, Math.ceil(text.length / PART));
+                            const part = Math.min(Math.max(1, Math.floor(Number(args.part) || 1)), parts);
                             return JSON.stringify({
                                 how_to_cite: `This is the page itself (source id ${src.id}). Cite facts from it as [${src.id}].`,
                                 id: src.id,
                                 url: target.href,
-                                content: text.length > MAX ? text.slice(0, MAX) + "\n\n[...page truncated]" : text
+                                part: `${part} of ${parts}`,
+                                ...(part < parts ? { more: `The page continues. Call open_url again with this url and part ${part + 1} to read more.` } : {}),
+                                content: text.slice((part - 1) * PART, part * PART)
                             });
                         } catch (e) {
                             return "Reading the page failed: " + e;

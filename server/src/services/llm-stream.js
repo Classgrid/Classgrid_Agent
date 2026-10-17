@@ -330,7 +330,7 @@ export async function streamChat({
                 const resultText = toolResult && typeof toolResult === "object" && "text" in toolResult ? toolResult.text : toolResult;
                 if (toolResult && typeof toolResult === "object" && typeof toolResult.stopAnswer === "string") stopAnswer = toolResult.stopAnswer;
                 // load_tools carries the full rules of the loaded groups, so it isn't cut like normal tool output.
-                conversation.push({ role: "tool", tool_call_id: call.id, content: String(resultText ?? "").slice(0, toolName === "load_tools" ? 40000 : 6000) });
+                conversation.push({ role: "tool", tool_call_id: call.id, content: String(resultText ?? "").slice(0, toolName === "load_tools" ? 40000 : toolName === "open_url" ? 12500 : 6000) });
             }
 
             if (stopAnswer) return { answer: stopAnswer, usage, toolsRun };
