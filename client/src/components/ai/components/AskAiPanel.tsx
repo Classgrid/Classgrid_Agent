@@ -3884,6 +3884,16 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
                 window.dispatchEvent(new Event("agent:refresh-sessions"));
               } else if (event.type === "answer") {
                 finalPayload = event;
+              } else if (event.type === "generated_image" && event.url) {
+                // The image tool finished: show the picture now, at the top of the reply
+                const marker = `[IMAGE_GENERATION_COMPLETE: ${String(event.prompt || "").replace(/[\]\n|]/g, " ")} | ${event.url}]\n\n`;
+                setMessages((prev) => {
+                  const lastMsg = prev[prev.length - 1];
+                  if (!lastMsg || lastMsg.role !== "assistant") {
+                    return [...prev, { id: createMessageId("assistant"), role: "assistant", content: marker, createdAt: Date.now(), typing: true }];
+                  }
+                  return [...prev.slice(0, -1), { ...lastMsg, content: marker + (lastMsg.content || "") }];
+                });
               } else if (event.type === "token") {
                 hasReceivedTokens = true;
                 setThinking(false);

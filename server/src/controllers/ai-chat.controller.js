@@ -2216,6 +2216,7 @@ If they ask whether their college/school uses Classgrid, say you can't see that 
 
         // 3. Initialize the real LLM Client from the Classgrid SDK using the fallback hierarchy
         let accSteps = []; // hoisted here so tool wrappers can push to it
+        const generatedImages = []; // images made in this answer: shown by the app, never copied by the model
         // Web pages search_web used in this answer, numbered across searches so [n] in the reply points at
         // one page. Streamed as a "sources" event and saved with the message (the chat shows them as chips).
         let accSources = [];
@@ -3059,9 +3060,11 @@ If they ask whether their college/school uses Classgrid, say you can't see that 
                             try {
                                 const json = JSON.parse(text);
                                 if (json.imageUrl) {
-                                    // The chat shows the image wherever this marker appears and still shows any text around it,
-                                    // so the reply can carry on after the image.
-                                    return `[IMAGE_GENERATION_COMPLETE: ${args.prompt} | ${json.imageUrl}]\n\nThe image is ready. In your reply, put the exact [IMAGE_GENERATION_COMPLETE: ...] line above on its own line where the image should appear (copy it unchanged; do NOT use Markdown image syntax like ![alt](url)). Then continue your answer normally: briefly describe the image, offer changes, and finish any other part of the user's request. If you need to look at this image again later (to describe, check or compare it), open its link with analyze_image; never say you can't see it.`;
+                                    // The app shows the image itself (right away, and saved with the answer), so the model never has
+                                    // to copy a marker or a link: some models broke the marker or wrote the raw link instead.
+                                    generatedImages.push({ prompt: String(args.prompt || ""), url: json.imageUrl });
+                                    if (!res.writableEnded) res.write(`data: ${JSON.stringify({ type: "generated_image", prompt: String(args.prompt || ""), url: json.imageUrl })}\n\n`);
+                                    return `The image is ready and the app already shows it to the user at the top of your reply. Do not write its link, any [IMAGE_GENERATION...] marker or a Markdown image. Continue your answer normally: briefly describe the image, offer changes, and finish any other part of the user's request. If you need to look at this image again later (to describe, check or compare it), open it with analyze_image using this link (for the tool only, never in your reply): ${json.imageUrl}; never say you can't see it.`;
                                 }
                                 if (json.code === 'IMAGE_LIMIT_REACHED') {
                                     // The weekly image limit is final: no retries and no other way of making the picture
@@ -4531,6 +4534,15 @@ If a tool fails, never show the error message; say only: "Something went wrong o
             console.error("Failed to deduct tokens:", e);
         }
         // ---------------------------------
+
+        if (generatedImages.length && typeof answer === "string" && answer !== "[RATE_LIMITED]") {
+            let text = answer.replace(/\[IMAGE_GENERATION_(?:COMPLETE|QUEUED|ERROR):[^\]\n]*\]?/g, "");
+            for (const img of generatedImages) {
+                text = text.split(`](${img.url})`).join("](#)").replace(/!\[[^\]\n]*\]\(#\)/g, "").split(img.url).join("");
+            }
+            const markers = generatedImages.map((img) => `[IMAGE_GENERATION_COMPLETE: ${img.prompt.replace(/[\]\n|]/g, " ")} | ${img.url}]`).join("\n\n");
+            answer = `${markers}\n\n${text.replace(/\n{3,}/g, "\n\n").trim()}`.trim();
+        }
 
         if (answer == null && !res.writableEnded) {
             res.write(`data: ${JSON.stringify({ type: "answer", answer: "Failed to get an answer from the AI." })}\n\n`);
