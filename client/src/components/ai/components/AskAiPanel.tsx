@@ -4668,6 +4668,9 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
                                           flushThoughts();
 
                                           if (PROJECT_EDIT_TOOLS.has(step.tool)) {
+                                            // "File already exists, use the edit tool" is only for the AI: it then edits the file,
+                                            // and that edit is the step the user sees
+                                            if (step.tool === 'write_project_file' && /already exists, so it was not changed/i.test(String(step.result || ''))) return;
                                             elements.push(<ProjectEditStep key={step.id} step={step} />);
                                             return;
                                           }
