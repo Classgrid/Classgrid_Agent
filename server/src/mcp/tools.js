@@ -503,6 +503,18 @@ export const getMcpTools = () => [
   },
 
   {
+    name: 'deploy_to_classgrid_cloud',
+    description: 'Publish a website made in the sandbox to Classgrid Cloud in a few seconds: the server reads the listed files from /data and uploads them, so nothing has to be installed. The site goes live at https://<site>.sites.classgrid.in . A site name belongs to the user who first publishes it.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        site: { type: 'string', description: 'Site name: lowercase letters, numbers and dashes (3-40), e.g. "nikhil-portfolio".' },
+        paths: { type: 'array', items: { type: 'string' }, description: 'Every website file to publish, relative to /data/ (e.g. ["index.html", "style.css", "script.js", "images/logo.png"]). Names only, never file content.' }
+      },
+      required: ['site', 'paths']
+    }
+  },
+  {
     name: 'execute_terminal_command',
     description: 'Executes a native bash/terminal command directly on the host computer. You can use this to run curl, tesseract, Python, or system utilities. Files are in /data (this chat\x27s folder; /data/scratch is for test and trial files and is cleaned automatically). In a Project Mode chat, /data is the user\x27s project itself (the same files their code editor shows at /home/workspace/projects/<id>, which also works as a path) and commands start there.',
     inputSchema: {
@@ -3970,6 +3982,44 @@ export const handleToolCall = async (name, args, context = {}) => {
       return {
         content: [{ type: 'text', text: `Thought recorded successfully. Proceed with your next action.` }]
       };
+    }
+
+    if (name === 'deploy_to_classgrid_cloud') {
+      // Reads the files from the chat's sandbox on the server and uploads them to R2 (no npm install in a fresh
+      // sandbox box, which took minutes). Only file names pass through the model.
+      const { userEmail = '', sessionId = 'default' } = context;
+      const site = String(args.site || '').trim().toLowerCase();
+      if (!/^[a-z0-9](?:[a-z0-9-]{1,38}[a-z0-9])$/.test(site)) {
+        return { content: [{ type: 'text', text: 'Error: the site name must be 3-40 lowercase letters, numbers or dashes (not starting or ending with a dash).' }], isError: true };
+      }
+      const wanted = Array.isArray(args.paths) ? args.paths.map((p) => String(p).replace(/^\/?data\//, '').replace(/^\.?\//, '')).filter(Boolean) : [];
+      if (!wanted.length) return { content: [{ type: 'text', text: 'Error: list the website files in paths, relative to /data/ (e.g. ["index.html", "style.css"]).' }], isError: true };
+      if (!userEmail || userEmail.endsWith('.invalid')) return { content: [{ type: 'text', text: 'Error: sign in to publish a site.' }], isError: true };
+      try {
+        // A site name belongs to whoever published it first; nobody else can overwrite it
+        const ownerKey = `classgrid-site:owner:${site}`;
+        const claimed = await redis.set(ownerKey, userEmail.toLowerCase(), 'NX');
+        const owner = claimed ? userEmail.toLowerCase() : await redis.get(ownerKey);
+        if (owner && owner !== userEmail.toLowerCase()) {
+          return { content: [{ type: 'text', text: `Error: the site name "${site}" is already used by someone else. Pick another name.` }], isError: true };
+        }
+        const files = await readSandboxFilesForPush(sessionId, wanted);
+        const missing = wanted.filter((p) => !(p in files));
+        if (missing.length) {
+          return { content: [{ type: 'text', text: `Error: these files are not in the sandbox or can't be published (hidden files, keys and .env files never are): ${missing.join(', ')}` }], isError: true };
+        }
+        const TYPES = { html: 'text/html; charset=utf-8', htm: 'text/html; charset=utf-8', css: 'text/css; charset=utf-8', js: 'application/javascript; charset=utf-8', mjs: 'application/javascript; charset=utf-8', json: 'application/json; charset=utf-8', md: 'text/markdown; charset=utf-8', txt: 'text/plain; charset=utf-8', svg: 'image/svg+xml', png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp', ico: 'image/x-icon', woff: 'font/woff', woff2: 'font/woff2', ttf: 'font/ttf', xml: 'application/xml', pdf: 'application/pdf', mp4: 'video/mp4', webm: 'video/webm', mp3: 'audio/mpeg' };
+        const uploaded = [];
+        await Promise.all(Object.entries(files).map(async ([path, b64]) => {
+          const ext = (path.split('.').pop() || '').toLowerCase();
+          await uploadBufferToR2(Buffer.from(b64, 'base64'), path, TYPES[ext] || 'application/octet-stream', `websites/${site}/${path}`);
+          uploaded.push(path);
+        }));
+        const hasIndex = uploaded.includes('index.html');
+        return { content: [{ type: 'text', text: `Published ${uploaded.length} file${uploaded.length === 1 ? '' : 's'} to Classgrid Cloud: ${uploaded.sort().join(', ')}.\nLive at: https://${site}.sites.classgrid.in${hasIndex ? '' : '\nNote: there is no index.html, so the site has no home page.'}` }] };
+      } catch (e) {
+        return { content: [{ type: 'text', text: `Publishing failed: ${e.message}` }], isError: true };
+      }
     }
 
     if (name === 'execute_terminal_command') {

@@ -93,7 +93,7 @@ export const TOOL_GROUPS = [
     {
         id: "code_sandbox",
         description: "Run Python, JavaScript or bash in the sandbox, read sandbox files, upload sandbox files to the CDN, build websites and report plan progress.",
-        tools: ["run_code", "read_sandbox_file", "upload_sandbox_file_to_cdn", "update_plan_step"],
+        tools: ["run_code", "read_sandbox_file", "upload_sandbox_file_to_cdn", "update_plan_step", "deploy_to_classgrid_cloud"],
         pattern: /\b(run|execute|python|code|script|program|javascript|node(js)?|bash|shell|sandbox|compile|debug|pandas|numpy|matplotlib|plot|graph|chart|csv|excel|xlsx|spreadsheet|calculat\w*|compute|simulat\w*|website|landing\s*page|html|chala\w*|likh\w*)\b|```|कोड|चलाओ/i,
     },
     {

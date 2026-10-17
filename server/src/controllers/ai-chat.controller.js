@@ -2581,6 +2581,7 @@ If they ask whether their college/school uses Classgrid, say you can't see that 
                         const result = await handleToolCall('execute_terminal_command', args, { sessionId, isStaff: isStaffRole(req.user?.role) });
                         return result.isError ? result.content[0].text : result.content[0].text;
                     },
+                    deploy_to_classgrid_cloud: async (args) => (await handleToolCall('deploy_to_classgrid_cloud', args, { sessionId, userEmail })).content[0].text,
                     read_sandbox_file: async (args) => {
                         const result = await handleToolCall('read_sandbox_file', args, { sessionId });
                         return result.isError ? result.content[0].text : result.content[0].text;
