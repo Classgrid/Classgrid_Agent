@@ -501,7 +501,7 @@ export function ProjectModePage() {
               ) : (
                 <>
                   <h2 className="text-lg font-semibold">Step 2: Link a GitHub repo (optional)</h2>
-                  <p className="text-sm text-muted-foreground">For "{linking.name}". Pick a repo below, or enter the project without a repo and make one later.</p>
+                  <p className="text-sm text-muted-foreground">For "{linking.name}". Pick a repo below, or enter the project without a repo. You or the Agent can make a repo later.</p>
                 </>
               )}
             </div>
