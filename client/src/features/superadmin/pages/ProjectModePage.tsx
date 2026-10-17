@@ -492,8 +492,18 @@ export function ProjectModePage() {
         <div className="fixed inset-0 z-[130] bg-black/60 flex items-center justify-center p-4" onClick={() => setLinking(null)}>
           <div className="w-full max-w-md rounded-xl border border-border bg-background p-5 flex flex-col gap-4" onClick={(e) => e.stopPropagation()}>
             <div>
-              <h2 className="text-lg font-semibold">Link a GitHub repo</h2>
-              <p className="text-sm text-muted-foreground">For "{linking.name}". Linking a repo is optional: pick one below, or enter the project without a repo and make one later.</p>
+              {/* Step 1 (must): connect GitHub. Step 2 (optional): pick a repo, or enter without one */}
+              {githubConnected === false ? (
+                <>
+                  <h2 className="text-lg font-semibold">Step 1: Connect GitHub</h2>
+                  <p className="text-sm text-muted-foreground">Connecting GitHub is needed before you can open "{linking.name}". Your code is only kept on GitHub.</p>
+                </>
+              ) : (
+                <>
+                  <h2 className="text-lg font-semibold">Step 2: Link a GitHub repo (optional)</h2>
+                  <p className="text-sm text-muted-foreground">For "{linking.name}". Pick a repo below, or enter the project without a repo and make one later.</p>
+                </>
+              )}
             </div>
             {githubConnected === false ? (
               <button onClick={() => setHubOpen(true)} className="flex items-center justify-center gap-2 bg-foreground text-background px-4 py-2 rounded-full font-medium text-sm hover:opacity-90">
