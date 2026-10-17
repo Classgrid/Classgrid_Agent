@@ -520,7 +520,7 @@ export function ProjectModePage() {
               ) : (
                 <>
                   <h2 className="text-lg font-semibold">Step 2: Link a GitHub repo (optional)</h2>
-                  <p className="text-sm text-muted-foreground">For "{linking.name}". Pick a repo below, or enter the project without a repo. You or the Agent can make a repo later.</p>
+                  <p className="text-sm text-muted-foreground">For "{linking.name}". Pick a repo below, or enter the project without a repo. You or the Agent can make a repo any time.</p>
                 </>
               )}
             </div>
@@ -548,7 +548,7 @@ export function ProjectModePage() {
                 <button
                   onClick={() => { const p = linking; setLinking(null); open(p); }}
                   className="px-3 py-1.5 rounded-full border border-border text-sm hover:bg-secondary"
-                  title="Open the project without a repo. Make one later (the Agent can create it and push the code)."
+                  title="Open the project without a repo. You or the Agent can make one any time and push the code."
                 >
                   Enter project without a repo
                 </button>
