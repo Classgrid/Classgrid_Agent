@@ -534,7 +534,8 @@ export function ProjectModePage() {
                   Enter project without a repo
                 </button>
               ) : <span />}
-              <button onClick={() => setLinking(null)} className="px-3 py-1.5 rounded-full text-sm hover:bg-secondary">Later</button>
+              {/* No "Later" before GitHub is connected: connecting is needed, there is nothing to put off */}
+              {githubConnected && <button onClick={() => setLinking(null)} className="px-3 py-1.5 rounded-full text-sm hover:bg-secondary">Later</button>}
             </div>
           </div>
         </div>
