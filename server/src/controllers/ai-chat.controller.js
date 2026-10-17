@@ -2532,7 +2532,7 @@ If they ask whether their college/school uses Classgrid, say you can't see that 
                         const result = await handleToolCall('read_sandbox_file', args, { sessionId });
                         return result.isError ? result.content[0].text : result.content[0].text;
                     },
-                    ...Object.fromEntries(["list_project_files", "view_project_file", "search_project", "write_project_file", "edit_project_file", "push_project_to_github", "create_github_repo_for_project", "update_project_github_repo", "start_background_command", "check_background_command", "stop_background_command"].map((toolName) => [
+                    ...Object.fromEntries(["list_project_files", "view_project_file", "search_project", "write_project_file", "edit_project_file", "push_project_to_github", "create_github_repo_for_project", "update_project_github_repo", "start_background_command", "check_background_command", "stop_background_command", "search_project_by_meaning"].map((toolName) => [
                         toolName,
                         async (args) => (await handleToolCall(toolName, args, { sessionId })).content[0].text,
                     ])),

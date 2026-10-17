@@ -233,6 +233,8 @@ export const projectTools = {
 
   create_github_repo_for_project: (sessionId, args) => withProject(sessionId, (project, ssh) => createRepoForProject(project, ssh, args || {})),
 
+  search_project_by_meaning: (sessionId, { query, max_results }) => withProject(sessionId, (project, ssh) => searchByMeaning(project, ssh, query, max_results)),
+
   // Long commands (dev servers, builds, test suites) run in the background while the AI keeps working
   start_background_command: (sessionId, { command }) => withProject(sessionId, (project, ssh) => startBackgroundJob(project, ssh, sessionId, command)),
   check_background_command: (sessionId, { job_id, run_inside }) => withProject(sessionId, (project, ssh) => checkBackgroundJob(ssh, sessionId, job_id, run_inside)),
@@ -465,6 +467,75 @@ export async function rememberProjectSnapshot(sessionId) {
 }
 
 // Only sent in Project Mode chats (a chat linked to a project); normal Agent chats never get these
+// --- Search by meaning ---------------------------------------------------------------------------------------
+// Code is cut into chunks and turned into meaning vectors (Cloudflare embeddings). The vectors live in one index
+// file per project on the sandbox (infra/ide/files/semindex.py), never in a database; only changed files are
+// sent again, so later searches are fast. The first search on a big project takes a minute or two.
+const SEM_MODEL = "@cf/baai/bge-small-en-v1.5";
+const SEM_SCRIPT = "/home/ubuntu/ide_branding/semindex.py";
+
+async function embedTexts(texts) {
+  // Batches of 100, 4 at a time (the first index of a big project has thousands of chunks)
+  const batches = [];
+  for (let i = 0; i < texts.length; i += 100) batches.push(texts.slice(i, i + 100));
+  const results = new Array(batches.length);
+  let next = 0;
+  const worker = async () => {
+    while (next < batches.length) {
+      const n = next++;
+      for (let attempt = 1; ; attempt++) {
+        const res = await fetch(`https://api.cloudflare.com/client/v4/accounts/${process.env.CLOUDFLARE_ACCOUNT_ID}/ai/run/${SEM_MODEL}`, {
+          method: "POST",
+          headers: { Authorization: `Bearer ${process.env.CLOUDFLARE_WORKERS_AI_TOKEN}`, "Content-Type": "application/json" },
+          body: JSON.stringify({ text: batches[n] }),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (res.ok && Array.isArray(data?.result?.data)) { results[n] = data.result.data; break; }
+        if (res.status === 429 && attempt < 4) { await new Promise((r) => setTimeout(r, 3000 * attempt)); continue; }
+        throw new Error(`embedding failed (${res.status})`);
+      }
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(4, batches.length) }, worker));
+  return results.flat();
+}
+
+async function searchByMeaning(project, ssh, query, maxResults) {
+  const question = String(query || "").trim();
+  if (!question) return "Error: query is empty";
+  const k = Math.min(Math.max(Number(maxResults) || 8, 1), 15);
+  const dir = projectHostDir(project);
+  const { stdout: hasCode } = await ssh.execCommand(`[ -n "$(ls -A ${q(dir)} 2>/dev/null)" ] && echo yes`);
+  if (!hasCode.trim()) return "The project's code is not downloaded right now. The user opens the project in Project Mode first.";
+  const index = `/home/ubuntu/ide_users/${project.owner}/.classgrid/semindex/${project._id}.json`;
+
+  const planned = await ssh.execCommand(`python3 ${SEM_SCRIPT} plan ${q(dir)} ${q(index)}`);
+  let plan;
+  try { plan = JSON.parse(planned.stdout); } catch { return `Error: could not read the project (${(planned.stderr || "").slice(0, 200)})`; }
+  const todo = plan.todo || [];
+  if (todo.length) {
+    const vectors = await embedTexts(todo.map((c) => c.text));
+    for (let i = 0; i < todo.length; i += 1000) {
+      const part = todo.slice(i, i + 1000).map((c, j) => ({ file: c.file, start: c.start, end: c.end, sha: c.sha, vec: vectors[i + j] }));
+      const added = await ssh.execCommand(`python3 ${SEM_SCRIPT} add ${q(index)}`, { stdin: JSON.stringify(part) });
+      if (added.code) return `Error: could not save the search index (${(added.stderr || "").slice(0, 200)})`;
+    }
+  }
+  const [qvec] = await embedTexts([question]);
+  const found = await ssh.execCommand(`python3 ${SEM_SCRIPT} search ${q(index)} ${k}`, { stdin: JSON.stringify(qvec) });
+  let hits;
+  try { hits = JSON.parse(found.stdout); } catch { return "Error: the search failed"; }
+  if (!hits.length) return "Nothing found (the project has no searchable code files).";
+
+  // A short look at each match: its first lines
+  const lines = [`Best matches for "${question}" (by meaning, ${plan.total} code chunks searched${plan.capped ? ", big project: only part of it is indexed" : ""}):`];
+  for (const [n, h] of hits.entries()) {
+    const { stdout: preview } = await ssh.execCommand(`sed -n '${h.start},${Math.min(h.end, h.start + 7)}p' ${q(`${dir}/${h.file}`)} 2>/dev/null | head -c 600`);
+    lines.push(`${n + 1}. ${h.file}:${h.start}-${h.end} (match ${h.score})\n${preview.split("\n").map((l) => `   ${l}`).join("\n").trimEnd()}`);
+  }
+  return lines.join("\n");
+}
+
 // --- Background jobs ---------------------------------------------------------------------------------------
 // One container per job on the sandbox, with the same walls as a terminal run (the project at /data, the owner's
 // package cache, no server secrets), its own memory and CPU limits, and a 30-minute limit. Output is read with

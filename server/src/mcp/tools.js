@@ -434,6 +434,18 @@ export const getMcpTools = () => [
   },
 
   {
+    name: 'search_project_by_meaning',
+    description: 'Search the open Project Mode project by meaning, not exact words (e.g. "how does login work" also finds signIn or checkPassword). Returns the best matching code places with file paths, line numbers and a short preview. The first search on a big project can take a minute or two; later ones are fast.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        query: { type: 'string', description: 'What to look for, in plain words.' },
+        max_results: { type: 'number', description: 'How many places to return (1-15, default 8).' }
+      },
+      required: ['query']
+    }
+  },
+  {
     name: 'start_background_command',
     description: 'Start a long-running command in the open Project Mode project (a dev server, a build, a test suite) in the background, so you can keep working while it runs (up to 30 minutes, at most 3 at once). Returns a job_id.',
     inputSchema: {

@@ -6,7 +6,7 @@ import { cn } from '@/lib/utils';
 // Steps of the Project Mode file tools, shown like a code editor's agent: "Edited calculator.ts +26 -0",
 // and reading/searching grouped as "Exploring 2 files, 1 search".
 
-export const PROJECT_EXPLORE_TOOLS = new Set(['view_project_file', 'search_project', 'list_project_files']);
+export const PROJECT_EXPLORE_TOOLS = new Set(['view_project_file', 'search_project', 'list_project_files', 'search_project_by_meaning']);
 export const PROJECT_EDIT_TOOLS = new Set(['write_project_file', 'edit_project_file']);
 
 type Step = { id: string; tool: string; status?: string; args?: any; result?: string };
@@ -126,6 +126,30 @@ function ExploreItem({ step }: { step: Step }) {
   const loading = step.status === 'loading';
   const result = String(step.result || '');
 
+  if (step.tool === 'search_project_by_meaning') {
+    const places = [...result.matchAll(/^\d+\. (.+?):(\d+)-(\d+) \(match ([\d.]+)\)/gm)].map((m) => ({ file: m[1] || '', start: Number(m[2]), end: Number(m[3]) }));
+    return (
+      <div className="flex flex-col">
+        <div className="flex items-center gap-1.5 py-1 text-[14px] text-slate-500 dark:text-[#8a8a8a]">
+          <button type="button" disabled={!places.length} onClick={() => setOpen(!open)} className="flex min-w-0 items-center gap-1.5 hover:text-foreground disabled:hover:text-inherit">
+            <span className="shrink-0">{loading ? 'Searching by meaning' : 'Searched by meaning'}</span>
+            <Name>{step.args?.query}</Name>
+            {!loading && <span className="shrink-0 rounded-full bg-secondary px-2 text-xs">{places.length} place{places.length === 1 ? '' : 's'}</span>}
+          </button>
+        </div>
+        {open && (
+          <div className="mb-1 ml-1 max-h-[220px] overflow-auto rounded-md border border-border font-mono text-[12px]">
+            {places.map((p, i) => (
+              <div key={i} onClick={() => openInEditor({ path: p.file, startLine: p.start, endLine: p.end })} className="cursor-pointer truncate px-2 py-0.5 hover:bg-secondary">
+                {p.file}:{p.start}-{p.end}
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    );
+  }
+
   if (step.tool === 'search_project') {
     const matches = !result || /^no matches/i.test(result.trim()) || isError(step) ? [] : result.trim().split('\n');
     return (
@@ -207,7 +231,7 @@ export function ProjectExploreGroup({ steps }: { steps: Step[] }) {
   }, [loading]);
   const isOpen = open ?? busy;
   const files = steps.filter((s) => s.tool === 'view_project_file').length;
-  const searches = steps.filter((s) => s.tool === 'search_project').length;
+  const searches = steps.filter((s) => s.tool === 'search_project' || s.tool === 'search_project_by_meaning').length;
   const folders = steps.filter((s) => s.tool === 'list_project_files').length;
   const parts = [
     files && `${files} file${files > 1 ? 's' : ''}`,
