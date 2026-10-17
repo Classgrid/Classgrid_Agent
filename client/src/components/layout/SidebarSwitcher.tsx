@@ -155,18 +155,20 @@ export function SidebarSwitcher({ user }: { user: { role?: string; name?: string
                 render={<Link to={mode.to} className="flex items-center gap-3 p-2 w-full cursor-pointer rounded-md" />}
                 className="p-0"
               >
-                <div className="flex size-5 items-center justify-center shrink-0">
-                  {mode.key === currentMode ? (
-                    <Check className="size-4 text-blue-500 font-bold" />
-                  ) : (
-                    <div className="size-4" />
-                  )}
-                </div>
-                <span className={`text-sm ${mode.key === currentMode ? "font-medium text-foreground" : "text-muted-foreground"}`}>
+                <ModeIcon kind={mode.key as "agent" | "project"} />
+                <span className={`flex-1 text-sm ${mode.key === currentMode ? "font-medium text-foreground" : "text-muted-foreground"}`}>
                   {mode.label}
                 </span>
+                {mode.key === currentMode && <Check className="size-4 shrink-0 text-foreground" />}
               </DropdownMenuItem>
             ))}
+            <DropdownMenuItem
+              render={<a href="https://www.classgrid.in/docs" target="_blank" rel="noopener noreferrer" className="flex items-center gap-3 p-2 w-full cursor-pointer rounded-md" />}
+              className="p-0"
+            >
+              <ModeIcon kind="docs" />
+              <span className="flex-1 text-sm text-muted-foreground">Docs</span>
+            </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
       </SidebarMenuItem>
@@ -174,3 +176,31 @@ export function SidebarSwitcher({ user }: { user: { role?: string; name?: string
   );
 }
 
+// Icons for the mode switcher: Agent (Classgrid green, a chat bubble with a spark), Project (Classgrid orange,
+// code brackets) and Docs (neutral, a page)
+function ModeIcon({ kind }: { kind: "agent" | "project" | "docs" }) {
+  if (kind === "agent") {
+    return (
+      <svg viewBox="0 0 24 24" className="size-7 shrink-0" aria-hidden="true">
+        <rect width="24" height="24" rx="6" fill="#34d399" />
+        <path d="M6.5 8.2c0-1.2 1-2.2 2.2-2.2h6.6c1.2 0 2.2 1 2.2 2.2v4.6c0 1.2-1 2.2-2.2 2.2h-4.2l-3 2.4v-2.4h-.4c-.7 0-1.2-.5-1.2-1.2V8.2z" fill="#022c22" />
+        <path d="M12 7.9l.62 1.48 1.48.62-1.48.62L12 12.1l-.62-1.48L9.9 10l1.48-.62L12 7.9z" fill="#34d399" />
+      </svg>
+    );
+  }
+  if (kind === "project") {
+    return (
+      <svg viewBox="0 0 24 24" className="size-7 shrink-0" aria-hidden="true">
+        <rect width="24" height="24" rx="6" fill="#f97316" />
+        <path d="M9.4 8.3L5.9 12l3.5 3.7M14.6 8.3l3.5 3.7-3.5 3.7M13.1 7l-2.2 10" fill="none" stroke="#ffffff" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+      </svg>
+    );
+  }
+  return (
+    <svg viewBox="0 0 24 24" className="size-7 shrink-0" aria-hidden="true">
+      <rect width="24" height="24" rx="6" className="fill-muted" />
+      <path d="M8.5 6h5l3 3v8.2c0 .7-.5 1.3-1.2 1.3H8.5c-.7 0-1.2-.6-1.2-1.3V7.3C7.3 6.6 7.8 6 8.5 6z" fill="none" className="stroke-foreground" strokeWidth="1.5" strokeLinejoin="round" />
+      <path d="M13.3 6v3.2h3.2M9.8 12.3h4.4M9.8 15h3" fill="none" className="stroke-foreground" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
