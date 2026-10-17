@@ -4671,6 +4671,8 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
                                             // "File already exists, use the edit tool" is only for the AI: it then edits the file,
                                             // and that edit is the step the user sees
                                             if (step.tool === 'write_project_file' && /already exists, so it was not changed/i.test(String(step.result || ''))) return;
+                                            // A failed edit try that changed nothing ("old_text was not found…"): the AI reads the file and tries again
+                                            if (step.tool === 'edit_project_file' && /Nothing was changed\./.test(String(step.result || ''))) return;
                                             elements.push(<ProjectEditStep key={step.id} step={step} />);
                                             return;
                                           }
