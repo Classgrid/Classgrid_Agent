@@ -924,7 +924,7 @@ async function isPublicUrl(u) {
 }
 const PAGE_TEXT_MAX = 300000; // characters kept from one page (open_url serves it in parts of 11,000)
 
-async function readPageDirect(startUrl) {
+async function readPageDirect(startUrl, pageLinks = []) {
     try {
         let url = startUrl, r = null;
         for (let hop = 0; hop < 4; hop++) {
@@ -953,6 +953,16 @@ async function readPageDirect(startUrl) {
                 turndown.remove(["script", "style", "noscript", "svg"]);
                 let markdown = turndown.turndown(article.content);
                 if (article.title) markdown = `# ${article.title}\n\n${markdown}`;
+                // The page's links (up to 30, first ones, no in-page anchors), given apart from the text so it can be followed
+                const seenLinks = new Set();
+                for (const m of markdown.matchAll(/(?<!!)\[([^\]\n]{2,80})\]\(((?:https?:\/\/|\/)[^()\s]*(?:\([^()\s]*\)[^()\s]*)*)/g)) {
+                    if (pageLinks.length >= 30) break;
+                    let href;
+                    try { href = new URL(m[2], url).href; } catch { continue; }
+                    if (seenLinks.has(href) || /^(\\?\[|!)/.test(m[1]) || /\.(png|jpe?g|gif|svg|webp)(\?|$)/i.test(href)) continue;
+                    seenLinks.add(href);
+                    pageLinks.push({ text: m[1].trim(), url: href });
+                }
                 // Images and link targets take most of the space on big pages (Wikipedia: thumbnails, citations):
                 // keep the link text only, drop images. open_url serves the page in parts, so the cap is high.
                 markdown = markdown
@@ -960,6 +970,8 @@ async function readPageDirect(startUrl) {
                     // a link target is (url "title"): the url can hold one level of brackets, the title can hold any
                     .replace(/!\[[^\]\n]*\]\((?:[^()\s]|\([^()\s]*\))*(?:\s+"[^"\n]*")?\)/g, "")
                     .replace(/\[([^\]\n]*)\]\((?:[^()\s]|\([^()\s]*\))*(?:\s+"[^"\n]*")?\)/g, "$1")
+                    .replace(/([^\s]) {2,}(?=[^\s])/g, "$1 ")
+                    .replace(/ +([.,;:])/g, "$1")
                     .replace(/\n{3,}/g, "\n\n");
                 return markdown.length > PAGE_TEXT_MAX ? `${markdown.slice(0, PAGE_TEXT_MAX)}\n\n[The page is longer than the reader keeps; the rest was left out.]` : markdown;
             }
@@ -3114,7 +3126,8 @@ If they ask whether their college/school uses Classgrid, say you can't see that 
                         try {
                             // Order: 1) Readability and 2) the plain-text (curl) reader, both inside readPageDirect,
                             // 3) Tavily Extract only when this server could not read the page.
-                            let text = await readPageDirect(target.href);
+                            const pageLinks = [];
+                            let text = await readPageDirect(target.href, pageLinks);
                             const OPEN_URL_USE_TAVILY = true;
                             if (!text && OPEN_URL_USE_TAVILY) try {
                                 const exRes = await fetch("https://api.tavily.com/extract", {
@@ -3149,6 +3162,7 @@ If they ask whether their college/school uses Classgrid, say you can't see that 
                                 id: src.id,
                                 url: target.href,
                                 part: `${part} of ${parts}`,
+                                ...(part === 1 && pageLinks.length ? { links: pageLinks } : {}),
                                 ...(part < parts ? { more: `The page continues. Call open_url again with this url and part ${part + 1} to read more.` } : {}),
                                 // The part line is also at the top of the text, so it is seen even if the end gets cut
                                 content: (parts > 1 ? `[Part ${part} of ${parts}${part < parts ? `. For more, call open_url again with part ${part + 1}.` : ". This is the last part."}]
