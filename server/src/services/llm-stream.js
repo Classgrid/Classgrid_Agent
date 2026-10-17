@@ -171,6 +171,8 @@ export async function streamChat({
     // Auto-continue: when the answer hits maxTokens it is continued in the same reply, up to this many times,
     // while outputBudget (the user's remaining tokens; undefined = no limit) still has room
     maxContinuations = 0,
+    // At the tool-round limit, ask for an answer from what was found instead of the fixed "couldn't find" text
+    answerAtDepthLimit = false,
     outputBudget,
     signal,
     onToken,
@@ -234,6 +236,18 @@ export async function streamChat({
             }
 
             if (depth >= maxToolDepth) {
+                if (answerAtDepthLimit) {
+                    conversation.push({ role: "assistant", content: round.text || "", tool_calls: round.toolCalls });
+                    for (const call of round.toolCalls) conversation.push({ role: "tool", tool_call_id: call.id, content: "Not run: no more tool calls are possible." });
+                    conversation.push({ role: "user", content: "No more tool calls are possible. Answer now from what you found so far, and say what you could not check." });
+                    const last = await streamOneRound({ provider, messages: conversation, tools: [], temperature, maxTokens, timeoutMs, signal, onToken: undefined, onThought: undefined });
+                    if (last.usage) {
+                        usage.prompt_tokens += last.usage.prompt_tokens || 0;
+                        usage.completion_tokens += last.usage.completion_tokens || 0;
+                        usage.total_tokens += last.usage.total_tokens || 0;
+                    }
+                    return { answer: (continuedText + (last.rawText || "")).trim() || null, usage, toolsRun };
+                }
                 return { answer: "I searched but couldn't find a clear answer. Could you try rephrasing?", usage, toolsRun };
             }
 

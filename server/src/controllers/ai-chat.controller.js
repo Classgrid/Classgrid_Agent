@@ -2546,8 +2546,10 @@ If they ask whether their college/school uses Classgrid, say you can't see that 
                             { type: "function", function: { name: "search_project", description: "Search the project files for text or a regular expression.", parameters: { type: "object", properties: { query: { type: "string" }, path: { type: "string", description: "Folder to search in, relative. Empty = whole project." } }, required: ["query"] } } },
                         ];
                         const helperHandlers = Object.fromEntries(readOnly.map((n) => [n, async (a) => (await handleToolCall(n, a, { sessionId })).content[0].text]));
+                        const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
                         const results = await Promise.all(tasks.map(async (task, i) => {
-                            try {
+                            await sleep(i * 1500); // start a little apart, so the model service isn't hit all at once
+                            for (let attempt = 1; ; attempt++) try {
                                 const r = await streamChat({
                                     provider: cloudflareStreamProvider(CF_FLASH_MODEL),
                                     messages: [
@@ -2559,11 +2561,14 @@ If they ask whether their college/school uses Classgrid, say you can't see that 
                                     maxTokens: 6000,
                                     maxToolDepth: 20, // big repos need more looking around before an answer
                                     maxContinuations: 1,
+                                    answerAtDepthLimit: true,
                                     timeoutMs: 240000
                                 });
                                 if (userId && r.usage?.total_tokens) deductTokens(userId, orgId, chargeableTokens(r.usage, CF_FLASH_MODEL), tokenSource).catch(() => {});
                                 return `Helper ${i + 1} (${task.slice(0, 80)}):\n${String(r.answer || "(no answer)").slice(0, 1400)}`;
                             } catch (e) {
+                                // "Too many requests" from the model service: wait and try again (up to 3 tries)
+                                if (/429|rate limit/i.test(String(e?.message)) && attempt < 3) { await sleep(4000 * attempt); continue; }
                                 return `Helper ${i + 1} (${task.slice(0, 80)}) failed: ${e.message}`;
                             }
                         }));
