@@ -3140,7 +3140,10 @@ If they ask whether their college/school uses Classgrid, say you can't see that 
                                 url: target.href,
                                 part: `${part} of ${parts}`,
                                 ...(part < parts ? { more: `The page continues. Call open_url again with this url and part ${part + 1} to read more.` } : {}),
-                                content: text.slice((part - 1) * PART, part * PART)
+                                // The part line is also at the top of the text, so it is seen even if the end gets cut
+                                content: (parts > 1 ? `[Part ${part} of ${parts}${part < parts ? `. For more, call open_url again with part ${part + 1}.` : ". This is the last part."}]
+
+` : "") + text.slice((part - 1) * PART, part * PART)
                             });
                         } catch (e) {
                             return "Reading the page failed: " + e;
