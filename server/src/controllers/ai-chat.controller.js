@@ -1010,6 +1010,8 @@ function pickChatModel({ question, fileUrls, scheduleContext }) {
 // Cloudflare models the user can pick in the model dropdown (each tested live for streaming and tool
 // calls on 2026-10-08). The value is the endpoint the model streams on: Mistral Small is only served on
 // the OpenAI-compatible endpoint (the native one returns 404 for it).
+// Second model for Project Mode helpers (its own request limit, separate from DeepSeek)
+const HELPER_GLM_MODEL = "@cf/zai-org/glm-5.3";
 const CF_PICKER_MODELS = new Map([
     [CF_PRO_MODEL, "native"],
     [CF_FLASH_MODEL, "native"],
@@ -2549,28 +2551,39 @@ If they ask whether their college/school uses Classgrid, say you can't see that 
                         const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
                         const results = await Promise.all(tasks.map(async (task, i) => {
                             await sleep(i * 1500); // start a little apart, so the model service isn't hit all at once
-                            for (let attempt = 1; ; attempt++) try {
-                                const r = await streamChat({
-                                    provider: cloudflareStreamProvider(CF_FLASH_MODEL),
-                                    messages: [
-                                        { role: "system", content: "You are a helper exploring a code project for another AI. Use the tools to look at the project (you can only read it), then answer the task in under 150 words: the facts you found, with file paths and line numbers. Don't guess; say what you could not find." },
-                                        { role: "user", content: task }
-                                    ],
-                                    tools: helperTools,
-                                    toolHandlers: helperHandlers,
-                                    maxTokens: 6000,
-                                    maxToolDepth: 20, // big repos need more looking around before an answer
-                                    maxContinuations: 1,
-                                    answerAtDepthLimit: true,
-                                    timeoutMs: 240000
-                                });
-                                if (userId && r.usage?.total_tokens) deductTokens(userId, orgId, chargeableTokens(r.usage, CF_FLASH_MODEL), tokenSource).catch(() => {});
-                                return `Helper ${i + 1} (${task.slice(0, 80)}):\n${String(r.answer || "(no answer)").slice(0, 1400)}`;
-                            } catch (e) {
-                                // "Too many requests" from the model service: wait and try again (up to 3 tries)
-                                if (/429|rate limit/i.test(String(e?.message)) && attempt < 3) { await sleep(4000 * attempt); continue; }
-                                return `Helper ${i + 1} (${task.slice(0, 80)}) failed: ${e.message}`;
+                            // Different models have separate request limits, so helpers take turns: helpers 1, 3 use
+                            // DeepSeek V4 Flash and fall back to GLM 5.3 if it fails; helpers 2, 4 use GLM 5.3
+                            const models = i % 2 === 0 ? [CF_FLASH_MODEL, HELPER_GLM_MODEL] : [HELPER_GLM_MODEL];
+                            let lastError = "";
+                            for (const model of models) {
+                                for (let attempt = 1; attempt <= 2; attempt++) {
+                                    try {
+                                        const r = await streamChat({
+                                            provider: cloudflareStreamProvider(model),
+                                            messages: [
+                                                { role: "system", content: "You are a helper exploring a code project for another AI. Use the tools to look at the project (you can only read it), then answer the task in under 150 words: the facts you found, with file paths and line numbers. Don't guess; say what you could not find." },
+                                                { role: "user", content: task }
+                                            ],
+                                            tools: helperTools,
+                                            toolHandlers: helperHandlers,
+                                            maxTokens: 6000,
+                                            maxToolDepth: 20, // big repos need more looking around before an answer
+                                            maxContinuations: 1,
+                                            answerAtDepthLimit: true,
+                                            timeoutMs: 240000
+                                        });
+                                        if (userId && r.usage?.total_tokens) deductTokens(userId, orgId, chargeableTokens(r.usage, model), tokenSource).catch(() => {});
+                                        if (!String(r.answer || "").trim()) { lastError = "no answer"; break; } // try the next model
+                                        return `Helper ${i + 1} (${task.slice(0, 80)}):\n${String(r.answer).slice(0, 1400)}`;
+                                    } catch (e) {
+                                        lastError = String(e?.message || e);
+                                        // "Too many requests": wait once and retry this model, then move to the next one
+                                        if (/429|rate limit/i.test(lastError) && attempt < 2) { await sleep(4000); continue; }
+                                        break;
+                                    }
+                                }
                             }
+                            return `Helper ${i + 1} (${task.slice(0, 80)}) failed: ${lastError}`;
                         }));
                         return results.join("\n\n");
                     },
