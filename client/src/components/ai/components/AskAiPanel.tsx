@@ -181,7 +181,7 @@ import { KnowledgeBaseSearchView } from "./stepper/KnowledgeBaseSearchView";
 import { CdnUploadView } from "./stepper/CdnUploadView";
 import { EmailSentView } from "./stepper/EmailSentView";
 import { SimpleLogStepView } from "./stepper/SimpleLogStepView";
-import { FileMentionChip, parseFileMention, parseProjectLink, FilesChangedSummary, ProjectEditStep, ProjectExploreGroup, ProjectPushStep, ProjectRunChanges, PROJECT_EDIT_TOOLS, PROJECT_EXPLORE_TOOLS } from "./stepper/ProjectToolSteps";
+import { FileMentionChip, parseFileMention, parseProjectLink, FilesChangedSummary, ProjectEditStep, ProjectExploreGroup, ProjectPushStep, ProjectRunChanges, ProjectHelpersStep, TerminalStep, PROJECT_BACKGROUND_TOOLS, PROJECT_EDIT_TOOLS, PROJECT_EXPLORE_TOOLS } from "./stepper/ProjectToolSteps";
 import { CombinedReasoningBlock } from "./stepper/CombinedReasoningBlock";
 import { AiFeedbackModal } from "./AiFeedbackModal";
 import { ChatEndedCard } from "./ChatEndedCard";
@@ -4665,19 +4665,41 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
                                             elements.push(<ProjectPushStep key={step.id} step={step} />);
                                             return;
                                           }
+                                          if (step.tool === 'run_project_helpers') {
+                                            elements.push(<ProjectHelpersStep key={step.id} step={step} />);
+                                            return;
+                                          }
+                                          if (PROJECT_BACKGROUND_TOOLS.has(step.tool ?? '')) {
+                                            // Same look as a normal command: the command (or the check run inside it) and its output
+                                            const bgCommand = step.tool === 'start_background_command'
+                                              ? String(step.args?.command || '')
+                                              : step.tool === 'check_background_command'
+                                                ? (step.args?.run_inside ? String(step.args.run_inside) : `check job ${step.args?.job_id || ''}`)
+                                                : `stop job ${step.args?.job_id || ''}`;
+                                            elements.push(
+                                              <TerminalStep
+                                                key={step.id}
+                                                name={step.tool === 'start_background_command' ? 'Background' : step.tool === 'check_background_command' ? 'Check background' : 'Stop background'}
+                                                description={step.args?.description ? String(step.args.description) : undefined}
+                                                command={bgCommand}
+                                                output={step.result}
+                                                status={step.status}
+                                              />
+                                            );
+                                            return;
+                                          }
 
                                           // Render specific tool views
                                           if (step.tool === 'run_code' || step.tool === 'execute_terminal_command') {
                                             elements.push(
-                                              <AgentStepAccordion
+                                              <TerminalStep
                                                 key={step.id}
-                                                title={step.tool === 'run_code' ? 'Executing Code' : 'OCR the attached identity card'}
-                                                status={step.status}                                              >
-                                                <TerminalToolView
-                                                  command={step.args?.command || step.args?.code || 'Running...'}
-                                                  output={step.result || 'Waiting for output...'}
-                                                />
-                                              </AgentStepAccordion>
+                                                name={step.tool === 'run_code' ? `Run ${step.args?.language || 'code'}` : 'Terminal'}
+                                                description={step.args?.description ? String(step.args.description) : undefined}
+                                                command={String(step.args?.command || step.args?.code || '')}
+                                                output={step.result}
+                                                status={step.status}
+                                              />
                                             );
                                             elements.push(<ProjectRunChanges key={`changes-${step.id}`} result={step.result} />);
                                             return;

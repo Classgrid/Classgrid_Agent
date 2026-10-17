@@ -438,7 +438,10 @@ export const getMcpTools = () => [
     description: 'Start a long-running command in the open Project Mode project (a dev server, a build, a test suite) in the background, so you can keep working while it runs (up to 30 minutes, at most 3 at once). Returns a job_id.',
     inputSchema: {
       type: 'object',
-      properties: { command: { type: 'string', description: 'The shell command, run in the project folder (/data).' } },
+      properties: {
+        command: { type: 'string', description: 'The shell command, run in the project folder (/data).' },
+        description: { type: 'string', description: 'A few plain words saying what it does, shown to the user above it (e.g. "Start the dev server").' }
+      },
       required: ['command']
     }
   },
@@ -492,7 +495,8 @@ export const getMcpTools = () => [
     inputSchema: {
       type: 'object',
       properties: {
-        command: { type: 'string', description: 'The exact bash/terminal command to execute.' }
+        command: { type: 'string', description: 'The exact bash/terminal command to execute.' },
+        description: { type: 'string', description: 'A few plain words saying what the command does, shown to the user above it (e.g. "Install the packages").' }
       },
       required: ['command']
     }

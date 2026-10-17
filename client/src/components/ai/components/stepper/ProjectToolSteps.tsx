@@ -227,6 +227,145 @@ export function ProjectExploreGroup({ steps }: { steps: Step[] }) {
   );
 }
 
+// "Sending 3 helpers" with each helper's task; when done, each helper's answer opens under its task
+type HelperResult = { task: string; answer: string; failed: boolean };
+function parseHelpers(result?: string): HelperResult[] {
+  return String(result || '')
+    .split(/\n\n(?=Helper \d+ \()/)
+    .map((part) => {
+      const m = part.match(/^Helper \d+ \(([\s\S]*?)\)( failed: ([\s\S]*)|:\n([\s\S]*))$/);
+      if (!m) return null;
+      return { task: m[1], answer: (m[3] ?? m[4] ?? '').trim(), failed: !!m[2]?.startsWith(' failed') };
+    })
+    .filter(Boolean) as HelperResult[];
+}
+
+function HelperItem({ task, answer, failed, loading }: { task: string; answer?: string; failed?: boolean; loading?: boolean }) {
+  const [open, setOpen] = useState(false);
+  const canOpen = !loading && !!answer;
+  return (
+    <div className="flex flex-col">
+      <button
+        type="button"
+        onClick={() => canOpen && setOpen(!open)}
+        disabled={!canOpen}
+        className={cn('flex min-w-0 items-center gap-1.5 py-1 text-[13px] text-left text-slate-500 dark:text-[#8a8a8a]', canOpen && 'hover:text-foreground')}
+      >
+        {loading ? <Spinner className="size-3 shrink-0" /> : <span className={cn('size-1.5 shrink-0 rounded-full', failed ? 'bg-red-500' : 'bg-emerald-500')} />}
+        <span className="truncate">{task}</span>
+        {canOpen && (open ? <ChevronDown className="size-3.5 shrink-0" /> : <ChevronRight className="size-3.5 shrink-0" />)}
+      </button>
+      {open && answer && <div className="ml-3 mb-1 whitespace-pre-wrap border-l border-border pl-3 text-[13px] text-foreground/80">{answer}</div>}
+    </div>
+  );
+}
+
+export function ProjectHelpersStep({ step }: { step: Step }) {
+  const loading = step.status === 'loading';
+  const tasks: string[] = Array.isArray(step.args?.tasks) ? step.args.tasks.map((t: unknown) => String(t)) : [];
+  const results = loading ? [] : parseHelpers(step.result);
+  const n = loading ? tasks.length : results.length || tasks.length;
+  const [open, setOpen] = useState<boolean | null>(null);
+  const isOpen = open ?? true;
+  return (
+    <div className="flex flex-col">
+      <Row onClick={() => setOpen(!isOpen)} open={isOpen}>
+        <span className="shrink-0">{loading ? `Sending ${n} helper${n === 1 ? '' : 's'}` : `${n} helper${n === 1 ? '' : 's'} explored`}</span>
+        {loading && <Spinner className="size-3.5 shrink-0" />}
+      </Row>
+      {isOpen && (
+        <div className="ml-10 flex flex-col">
+          {loading || !results.length
+            ? tasks.map((t, i) => <HelperItem key={i} task={t} loading={loading} answer={loading ? undefined : String(step.result || '')} />)
+            : results.map((r, i) => <HelperItem key={i} task={r.task} answer={r.answer} failed={r.failed} />)}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Background commands: "Started in background npm run dev", "Checked background command: running", "Stopped"
+export const PROJECT_BACKGROUND_TOOLS = new Set(['start_background_command', 'check_background_command', 'stop_background_command']);
+
+export function ProjectBackgroundStep({ step }: { step: Step }) {
+  const loading = step.status === 'loading';
+  const result = String(step.result || '');
+  const failed = isError(step) || /^no background command/i.test(result);
+  const [open, setOpen] = useState(false);
+  let label: string;
+  let name: string | null = null;
+  if (step.tool === 'start_background_command') {
+    label = loading ? 'Starting in background' : failed ? 'Could not start in background' : 'Started in background';
+    name = (String(step.args?.command || '').split('\n')[0] ?? '').slice(0, 80);
+  } else if (step.tool === 'stop_background_command') {
+    label = loading ? 'Stopping background command' : failed ? 'Could not stop background command' : 'Stopped background command';
+  } else {
+    const state = /still running/.test(result) ? 'running' : /finished \(exit code (\d+)\)/.test(result) ? `finished (exit ${result.match(/exit code (\d+)/)?.[1]})` : null;
+    label = loading ? 'Checking background command' : failed ? 'Background command not found' : `Background command ${state || 'checked'}`;
+    if (step.args?.run_inside) name = String(step.args.run_inside).slice(0, 80);
+  }
+  const canOpen = !loading && !!result;
+  return (
+    <div className="flex flex-col">
+      <Row onClick={canOpen ? () => setOpen(!open) : undefined} open={open}>
+        <span className="shrink-0">{label}</span>
+        {name && <code className="truncate rounded bg-muted px-1.5 py-0.5 font-mono text-[12px] text-foreground/90">{name}</code>}
+        {loading && <Spinner className="size-3.5 shrink-0" />}
+      </Row>
+      {open && <pre className="ml-10 mb-1 max-h-60 overflow-auto whitespace-pre-wrap rounded-md bg-muted/60 p-2 font-mono text-[12px] text-foreground/80">{result}</pre>}
+    </div>
+  );
+}
+
+// A command step like a coding agent's: "● Terminal  Install the packages", then IN (the command) and OUT (the
+// result) in one box. Long text is cut with a Show more.
+function ClampedBlock({ text, lines = 6 }: { text: string; lines?: number }) {
+  const [all, setAll] = useState(false);
+  const rows = text.split('\n');
+  const long = rows.length > lines || text.length > 1200;
+  const shown = all || !long ? text : rows.slice(0, lines).join('\n').slice(0, 1200);
+  return (
+    <div className="min-w-0 flex-1">
+      <pre className="whitespace-pre-wrap break-words font-mono text-[12.5px] leading-relaxed text-foreground/85">{shown}</pre>
+      {long && (
+        <button type="button" onClick={() => setAll(!all)} className="mt-1 text-[12px] text-muted-foreground hover:text-foreground">
+          {all ? 'Show less' : `Show more (${rows.length} lines)`}
+        </button>
+      )}
+    </div>
+  );
+}
+
+export function TerminalStep({ name, description, command, output, status }: { name: string; description?: string; command: string; output?: string; status?: string }) {
+  const loading = status === 'loading';
+  const failed = !loading && (/^(error|tool error)/i.test(String(output || '').trim()) || /EXIT CODE: [1-9]/.test(String(output || '')));
+  return (
+    <div className="flex flex-col gap-1.5 py-1">
+      <div className="flex min-w-0 items-center gap-2.5 pl-2.5">
+        {loading
+          ? <Spinner className="size-3 shrink-0" />
+          : <span className={cn('size-2 shrink-0 rounded-full', failed ? 'bg-red-500' : 'bg-emerald-500')} />}
+        <span className="shrink-0 text-[14px] font-semibold text-foreground">{name}</span>
+        {description && <span className="truncate text-[14px] text-muted-foreground">{description}</span>}
+      </div>
+      <div className="ml-7 overflow-hidden rounded-lg border border-border bg-muted/40 text-[12.5px]">
+        <div className="flex gap-3 px-3 py-2">
+          <span className="w-8 shrink-0 pt-px font-mono text-[11px] text-muted-foreground">IN</span>
+          <ClampedBlock text={command || '…'} lines={4} />
+        </div>
+        {(loading || output) && (
+          <div className="flex gap-3 border-t border-border px-3 py-2">
+            <span className="w-8 shrink-0 pt-px font-mono text-[11px] text-muted-foreground">OUT</span>
+            {loading && !output
+              ? <span className="text-muted-foreground">Running…</span>
+              : <ClampedBlock text={String(output || '').trim() || '(no output)'} />}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export function ProjectPushStep({ step }: { step: Step }) {
   const loading = step.status === 'loading';
   const failed = isError(step) || /failed/i.test(String(step.result || ''));

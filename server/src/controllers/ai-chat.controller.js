@@ -2556,9 +2556,10 @@ If they ask whether their college/school uses Classgrid, say you can't see that 
                                     ],
                                     tools: helperTools,
                                     toolHandlers: helperHandlers,
-                                    maxTokens: 4000,
-                                    maxToolDepth: 12,
-                                    timeoutMs: 180000
+                                    maxTokens: 6000,
+                                    maxToolDepth: 20, // big repos need more looking around before an answer
+                                    maxContinuations: 1,
+                                    timeoutMs: 240000
                                 });
                                 if (userId && r.usage?.total_tokens) deductTokens(userId, orgId, chargeableTokens(r.usage, CF_FLASH_MODEL), tokenSource).catch(() => {});
                                 return `Helper ${i + 1} (${task.slice(0, 80)}):\n${String(r.answer || "(no answer)").slice(0, 1400)}`;
