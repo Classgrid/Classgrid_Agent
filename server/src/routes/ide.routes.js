@@ -63,6 +63,9 @@ setInterval(async () => {
   let ssh;
   try {
     if (!(await redis.set("ide:reaper-lock", "1", "EX", 55, "NX"))) return;
+    // Background commands that finished more than an hour ago are cleared (running ones stop by themselves at 30 min)
+    ssh = await sandboxSsh();
+    await ssh.execCommand(`docker container prune -f --filter label=classgrid-bg=1 --filter until=1h >/dev/null 2>&1`);
     const users = await redis.smembers(BOXES);
     for (const userId of users) {
       if (!/^[a-f0-9]{24}$/.test(userId)) { await redis.srem(BOXES, userId); continue; }

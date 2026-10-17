@@ -2530,10 +2530,44 @@ If they ask whether their college/school uses Classgrid, say you can't see that 
                         const result = await handleToolCall('read_sandbox_file', args, { sessionId });
                         return result.isError ? result.content[0].text : result.content[0].text;
                     },
-                    ...Object.fromEntries(["list_project_files", "view_project_file", "search_project", "write_project_file", "edit_project_file", "push_project_to_github", "create_github_repo_for_project", "update_project_github_repo"].map((toolName) => [
+                    ...Object.fromEntries(["list_project_files", "view_project_file", "search_project", "write_project_file", "edit_project_file", "push_project_to_github", "create_github_repo_for_project", "update_project_github_repo", "start_background_command", "check_background_command", "stop_background_command"].map((toolName) => [
                         toolName,
                         async (args) => (await handleToolCall(toolName, args, { sessionId })).content[0].text,
                     ])),
+                    // Up to 4 read-only helpers explore the project at the same time (cheap Flash model, list/read/search
+                    // only, never change anything) and each returns a short summary; their tokens are charged like the chat's
+                    run_project_helpers: async (args) => {
+                        const tasks = (Array.isArray(args?.tasks) ? args.tasks : []).map((t) => String(t || "").trim()).filter(Boolean).slice(0, 4);
+                        if (!tasks.length) return "Error: give 1 to 4 tasks.";
+                        const readOnly = ["list_project_files", "view_project_file", "search_project"];
+                        const helperTools = [
+                            { type: "function", function: { name: "list_project_files", description: "List files and folders of the project.", parameters: { type: "object", properties: { path: { type: "string", description: "Folder, relative. Empty = root." }, depth: { type: "number", description: "Levels to show (1-6)." } } } } },
+                            { type: "function", function: { name: "view_project_file", description: "Read a project file with line numbers, or a line range.", parameters: { type: "object", properties: { path: { type: "string" }, start_line: { type: "number" }, end_line: { type: "number" } }, required: ["path"] } } },
+                            { type: "function", function: { name: "search_project", description: "Search the project files for text or a regular expression.", parameters: { type: "object", properties: { query: { type: "string" }, path: { type: "string", description: "Folder to search in, relative. Empty = whole project." } }, required: ["query"] } } },
+                        ];
+                        const helperHandlers = Object.fromEntries(readOnly.map((n) => [n, async (a) => (await handleToolCall(n, a, { sessionId })).content[0].text]));
+                        const results = await Promise.all(tasks.map(async (task, i) => {
+                            try {
+                                const r = await streamChat({
+                                    provider: cloudflareStreamProvider(CF_FLASH_MODEL),
+                                    messages: [
+                                        { role: "system", content: "You are a helper exploring a code project for another AI. Use the tools to look at the project (you can only read it), then answer the task in under 150 words: the facts you found, with file paths and line numbers. Don't guess; say what you could not find." },
+                                        { role: "user", content: task }
+                                    ],
+                                    tools: helperTools,
+                                    toolHandlers: helperHandlers,
+                                    maxTokens: 4000,
+                                    maxToolDepth: 12,
+                                    timeoutMs: 180000
+                                });
+                                if (userId && r.usage?.total_tokens) deductTokens(userId, orgId, chargeableTokens(r.usage, CF_FLASH_MODEL), tokenSource).catch(() => {});
+                                return `Helper ${i + 1} (${task.slice(0, 80)}):\n${String(r.answer || "(no answer)").slice(0, 1400)}`;
+                            } catch (e) {
+                                return `Helper ${i + 1} (${task.slice(0, 80)}) failed: ${e.message}`;
+                            }
+                        }));
+                        return results.join("\n\n");
+                    },
                     run_code: async (args) => {
                         const result = await handleToolCall('run_code', args, { sessionId, isStaff: isStaffRole(req.user?.role) });
                         const text = result.isError ? result.content[0].text : result.content[0].text;

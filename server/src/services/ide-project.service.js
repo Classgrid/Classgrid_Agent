@@ -233,6 +233,11 @@ export const projectTools = {
 
   create_github_repo_for_project: (sessionId, args) => withProject(sessionId, (project, ssh) => createRepoForProject(project, ssh, args || {})),
 
+  // Long commands (dev servers, builds, test suites) run in the background while the AI keeps working
+  start_background_command: (sessionId, { command }) => withProject(sessionId, (project, ssh) => startBackgroundJob(project, ssh, sessionId, command)),
+  check_background_command: (sessionId, { job_id, run_inside }) => withProject(sessionId, (project, ssh) => checkBackgroundJob(ssh, sessionId, job_id, run_inside)),
+  stop_background_command: (sessionId, { job_id }) => withProject(sessionId, (project, ssh) => stopBackgroundJob(ssh, sessionId, job_id)),
+
   update_project_github_repo: (sessionId, args) => withProject(sessionId, (project, ssh) => updateProjectRepo(project, ssh, args || {})),
 };
 
@@ -460,6 +465,71 @@ export async function rememberProjectSnapshot(sessionId) {
 }
 
 // Only sent in Project Mode chats (a chat linked to a project); normal Agent chats never get these
+// --- Background jobs ---------------------------------------------------------------------------------------
+// One container per job on the sandbox, with the same walls as a terminal run (the project at /data, the owner's
+// package cache, no server secrets), its own memory and CPU limits, and a 30-minute limit. Output is read with
+// docker logs. Stopped jobs are cleared by the box reaper. At most 3 running jobs per chat.
+const BG_MAX_RUNNING = 3;
+const bgPrefix = (sessionId) => `ai-bg-${String(sessionId).replace(/[^a-zA-Z0-9]/g, "").slice(0, 12)}-`;
+const bgName = (sessionId, jobId) => `${bgPrefix(sessionId)}${jobId}`;
+
+async function startBackgroundJob(project, ssh, sessionId, command) {
+  const cmd = String(command || "").trim();
+  if (!cmd) return "Error: command is empty";
+  const { stdout: running } = await ssh.execCommand(`docker ps -q -f name=^${bgPrefix(sessionId)} | wc -l`);
+  if (Number(running.trim()) >= BG_MAX_RUNNING) return `Error: ${BG_MAX_RUNNING} background commands are already running in this chat. Stop one with stop_background_command first.`;
+  const { stdout: freeMb } = await ssh.execCommand(`awk '/^MemAvailable:/ { print int($2 / 1024) }' /proc/meminfo`);
+  if (Number(freeMb) < 1200) return "Error: the sandbox is busy right now (not enough free memory). Try again in a few minutes.";
+
+  const jobId = Math.random().toString(16).slice(2, 10);
+  const userDir = `/home/ubuntu/ide_users/${project.owner}`;
+  const dir = `${userDir}/projects/${project._id}`;
+  const chatDir = `/home/ubuntu/sandbox_data/${sessionId}`;
+  const script = `${chatDir}/bg-${jobId}.sh`;
+  const write = await ssh.execCommand(`mkdir -p ${q(chatDir)} ${q(userDir)}/.cache && cat > ${q(script)}`, { stdin: cmd + "\n" });
+  if (write.code) return "Error: could not prepare the command";
+  const run = await ssh.execCommand(
+    `docker run -d --name ${bgName(sessionId, jobId)} --label classgrid-bg=1 --memory 1g --memory-swap 1g --cpus 1 --pids-limit 512 ` +
+    `-v ${q(dir)}:/data -v ${q(dir)}:/home/workspace/projects/${project._id} -v ${q(chatDir)}:/cg:ro ` +
+    `-v ${q(userDir)}/.cache:/home/workspace/.cache -e npm_config_cache=/home/workspace/.cache/npm -e PIP_CACHE_DIR=/home/workspace/.cache/pip ` +
+    `-w /data classgrid-ai-sandbox timeout 1800 bash /cg/bg-${jobId}.sh`
+  );
+  if (run.code) return `Error: could not start it: ${(run.stderr || run.stdout).slice(0, 300)}`;
+  return `Started background command ${jobId}. It keeps running while you work (up to 30 minutes). Check it with check_background_command (job_id "${jobId}"); to test a server it started, pass run_inside, e.g. "curl -s localhost:3000". Stop it with stop_background_command.`;
+}
+
+async function checkBackgroundJob(ssh, sessionId, jobId, runInside) {
+  if (!/^[a-f0-9]{8}$/.test(String(jobId || ""))) return "Error: unknown job_id";
+  const name = bgName(sessionId, jobId);
+  const { stdout: state, code } = await ssh.execCommand(`docker inspect -f '{{.State.Status}} {{.State.ExitCode}}' ${name}`);
+  if (code) return `No background command ${jobId} in this chat (it may have finished long ago and been cleared).`;
+  const [status, exitCode] = state.trim().split(" ");
+  const { stdout: logs, stderr: errLogs } = await ssh.execCommand(`docker logs --tail 60 ${name} 2>&1`);
+  let out = `Background command ${jobId}: ${status === "running" ? "still running" : `finished (exit code ${exitCode})`}.\nLast output:\n${(logs || errLogs || "(no output yet)").slice(-4000)}`;
+  if (runInside && status === "running") {
+    const r = await ssh.execCommand(`timeout 25 docker exec ${name} bash -c ${q(String(runInside))} 2>&1 | head -c 3000`);
+    out += `\n\nOutput of "${String(runInside).slice(0, 200)}" inside it:\n${r.stdout || r.stderr || "(nothing)"}`;
+  }
+  return out;
+}
+
+async function stopBackgroundJob(ssh, sessionId, jobId) {
+  if (!/^[a-f0-9]{8}$/.test(String(jobId || ""))) return "Error: unknown job_id";
+  const { code } = await ssh.execCommand(`docker rm -f ${bgName(sessionId, jobId)}`);
+  return code ? `No background command ${jobId} in this chat.` : `Stopped background command ${jobId}.`;
+}
+
+// The project's own instructions for AI agents, if the repo has them (first one found), read every turn
+const RULES_FILES = ["AGENTS.md", "CLAUDE.md", ".classgrid/rules.md", ".cursorrules", ".github/copilot-instructions.md"];
+async function projectRulesFile(ssh, project) {
+  const dir = projectHostDir(project);
+  for (const f of RULES_FILES) {
+    const { stdout, code } = await ssh.execCommand(`head -c 6000 ${q(`${dir}/${f}`)} 2>/dev/null`);
+    if (!code && stdout.trim()) return { file: f, text: stdout.trim() };
+  }
+  return null;
+}
+
 const PROJECT_MODE_RULES = `PROJECT MODE RULES (this chat is in Project Mode; they don't apply to normal Agent chats):
 - The user's project is the work. Create and change files only inside the project (/data is the project, and the user sees it live in their code editor). Every script, page or file you make is saved there.
 - No download links and no uploads: don't upload files to the CDN or the Library, don't make files only to be downloaded, and never offer to save something so the user can download it. To point at a file, write its path in the project (the user can click it to open it in the editor).
@@ -491,6 +561,9 @@ export async function editorContextFor(sessionId) {
       PROJECT_MODE_RULES,
       `Project: ${project.name}${project.repo ? ` (GitHub ${project.repo})` : " (no GitHub repo yet)"}. Its files are at ${root}/ (the same files at /data/). Paths below are relative to it.`,
     ];
+    const rulesFile = await projectRulesFile(ssh, project).catch(() => null);
+    if (rulesFile) lines.push(`The project's own instructions for AI agents (from ${rulesFile.file} in the repo):
+${rulesFile.text}`);
 
     const { stdout: hasCode } = await ssh.execCommand(`[ -n "$(ls -A ${q(projectHostDir(project))} 2>/dev/null)" ] && echo yes`);
     if (!hasCode.trim()) lines.push("The project's code is not downloaded right now (it leaves our servers a few minutes after the user closes the editor). The user can open the project in Project Mode to download it again.");

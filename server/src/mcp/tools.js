@@ -434,6 +434,45 @@ export const getMcpTools = () => [
   },
 
   {
+    name: 'start_background_command',
+    description: 'Start a long-running command in the open Project Mode project (a dev server, a build, a test suite) in the background, so you can keep working while it runs (up to 30 minutes, at most 3 at once). Returns a job_id.',
+    inputSchema: {
+      type: 'object',
+      properties: { command: { type: 'string', description: 'The shell command, run in the project folder (/data).' } },
+      required: ['command']
+    }
+  },
+  {
+    name: 'check_background_command',
+    description: 'See whether a background command is still running, its exit code and its latest output. run_inside runs a short command inside the same container while it runs (e.g. "curl -s localhost:3000" to test a server it started).',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        job_id: { type: 'string', description: 'The job_id from start_background_command.' },
+        run_inside: { type: 'string', description: 'Optional short command to run inside the running job.' }
+      },
+      required: ['job_id']
+    }
+  },
+  {
+    name: 'stop_background_command',
+    description: 'Stop a background command.',
+    inputSchema: {
+      type: 'object',
+      properties: { job_id: { type: 'string' } },
+      required: ['job_id']
+    }
+  },
+  {
+    name: 'run_project_helpers',
+    description: 'Send 1 to 4 helper agents to explore the open Project Mode project at the same time. Each helper can only read the project (list, read, search) and returns a short summary with file paths and line numbers. Give each helper one clear task.',
+    inputSchema: {
+      type: 'object',
+      properties: { tasks: { type: 'array', items: { type: 'string' }, description: 'One task per helper (1-4).' } },
+      required: ['tasks']
+    }
+  },
+  {
     name: 'update_project_github_repo',
     description: 'Change the open Project Mode project\'s GitHub repo: rename it, or change its description, website or public/private setting. A rename is also saved on the project, so pushing keeps working.',
     inputSchema: {
