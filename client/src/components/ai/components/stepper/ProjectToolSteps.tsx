@@ -249,10 +249,10 @@ function HelperItem({ task, answer, failed, loading }: { task: string; answer?: 
         type="button"
         onClick={() => canOpen && setOpen(!open)}
         disabled={!canOpen}
-        className={cn('flex min-w-0 items-center gap-1.5 py-1 text-[13px] text-left text-slate-500 dark:text-[#8a8a8a]', canOpen && 'hover:text-foreground')}
+        className={cn('flex min-w-0 items-start gap-1.5 py-1 text-[13px] text-left text-slate-500 dark:text-[#8a8a8a]', canOpen && 'hover:text-foreground')}
       >
         {loading ? <Spinner className="size-3 shrink-0" /> : <span className={cn('size-1.5 shrink-0 rounded-full', failed ? 'bg-red-500' : 'bg-emerald-500')} />}
-        <span className="truncate">{task}</span>
+        <span className="min-w-0 break-words">{task}</span>
         {canOpen && (open ? <ChevronDown className="size-3.5 shrink-0" /> : <ChevronRight className="size-3.5 shrink-0" />)}
       </button>
       {open && answer && <div className="ml-3 mb-1 whitespace-pre-wrap border-l border-border pl-3 text-[13px] text-foreground/80">{answer}</div>}

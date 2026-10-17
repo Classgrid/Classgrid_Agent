@@ -4679,7 +4679,7 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
                                             elements.push(
                                               <TerminalStep
                                                 key={step.id}
-                                                name={step.tool === 'start_background_command' ? 'Background' : step.tool === 'check_background_command' ? 'Check background' : 'Stop background'}
+                                                name="Bash"
                                                 description={step.args?.description ? String(step.args.description) : undefined}
                                                 command={bgCommand}
                                                 output={step.result}
@@ -4692,14 +4692,15 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
                                           // Render specific tool views
                                           if (step.tool === 'run_code' || step.tool === 'execute_terminal_command') {
                                             elements.push(
-                                              <TerminalStep
+                                              <AgentStepAccordion
                                                 key={step.id}
-                                                name={step.tool === 'run_code' ? `Run ${step.args?.language || 'code'}` : 'Terminal'}
-                                                description={step.args?.description ? String(step.args.description) : undefined}
-                                                command={String(step.args?.command || step.args?.code || '')}
-                                                output={step.result}
-                                                status={step.status}
-                                              />
+                                                title={step.tool === 'run_code' ? 'Executing Code' : 'Running a command'}
+                                                status={step.status}                                              >
+                                                <TerminalToolView
+                                                  command={step.args?.command || step.args?.code || 'Running...'}
+                                                  output={step.result || 'Waiting for output...'}
+                                                />
+                                              </AgentStepAccordion>
                                             );
                                             elements.push(<ProjectRunChanges key={`changes-${step.id}`} result={step.result} />);
                                             return;
