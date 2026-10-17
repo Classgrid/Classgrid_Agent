@@ -2712,6 +2712,15 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
         const sessionRes = await fetchWithRescue(`${endpointPrefix}/api/ai/sessions/${id}`, { credentials: "include" });
         if (sessionRes.ok) {
           const sData = await sessionRes.json();
+          // A project's chat opened from Agent mode (Library, an old link...): open it in Project Mode, in its project
+          const parts = window.location.pathname.split("/");
+          const agentAt = parts.indexOf("agent");
+          if (sData.projectId && agentAt !== -1) {
+            try { localStorage.setItem("cg_project_open", sData.projectId); } catch { /* storage blocked */ }
+            parts[agentAt] = "project";
+            window.location.assign(parts.slice(0, agentAt + 1).join("/") + `/${id}`);
+            return;
+          }
           if (sData.session) setIsPinned(!!sData.session.pinned);
           setChatEnded(sData.session?.ended
             ? { reason: sData.session.end_reason ?? null, canReopen: sData.session.end_reason === "user_requested" }

@@ -4606,7 +4606,15 @@ export const getChatSession = async (req, res) => {
             return res.status(403).json({ error: "Forbidden" });
         }
 
-        res.json({ session });
+        // A Project Mode chat says which project it belongs to, so it always opens in Project Mode
+        let projectId = null;
+        if (req.user?._id) {
+            const IdeProject = (await import("../models/IdeProject.js")).default;
+            const p = await IdeProject.findOne({ owner: req.user._id, chatSessionIds: id }).select("_id").lean();
+            projectId = p ? String(p._id) : null;
+        }
+
+        res.json({ session, projectId });
     } catch (e) {
         console.error("Error getting session:", e);
         res.status(500).json({ error: "Failed to load session" });
