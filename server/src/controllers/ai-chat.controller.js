@@ -947,10 +947,27 @@ async function readPageDirect(startUrl, pageLinks = []) {
         // lists, links). linkedom keeps it light on the server.
         try {
             const { document } = parseHTML(body);
+            // Links in menus, headers, footers, sidebars and Wikipedia's side/top boxes are not the page's own links:
+            // note them before Readability (it changes the document) so the links list skips them. Their text stays.
+            const chromeLinks = new Set();
+            for (const a of document.querySelectorAll("nav a, header a, footer a, aside a, [role=navigation] a, .infobox a, .hatnote a, .navbox a, .mw-editsection a, .sidebar a")) {
+                try { chromeLinks.add(new URL(a.getAttribute("href") || "", url).href); } catch { }
+            }
             const article = new Readability(document).parse();
             if (article?.content && (article.textContent || "").trim().length > 200) {
                 const turndown = new TurndownService({ headingStyle: "atx", codeBlockStyle: "fenced", bulletListMarker: "-" });
                 turndown.remove(["script", "style", "noscript", "svg"]);
+                // A link that wraps a whole card (headline, summary) is read as plain text, not as a broken [..](url);
+                // its address still goes into the links list, named by the card's headline
+                const cardLinks = [];
+                turndown.addRule("cardLink", {
+                    filter: (node) => node.nodeName === "A" && !!node.querySelector("h1,h2,h3,h4,h5,h6,p,div,section,article,ul,ol,li"),
+                    replacement: (content, node) => {
+                        const title = (node.querySelector("h1,h2,h3,h4,h5,h6")?.textContent || "").replace(/\s+/g, " ").trim().slice(0, 80);
+                        try { if (title) cardLinks.push({ text: title, url: new URL(node.getAttribute("href") || "", url).href }); } catch { }
+                        return `\n\n${content}\n\n`;
+                    },
+                });
                 let markdown = turndown.turndown(article.content);
                 if (article.title) markdown = `# ${article.title}\n\n${markdown}`;
                 // The page's links (up to 30, first ones, no in-page anchors), given apart from the text so it can be followed
@@ -961,12 +978,18 @@ async function readPageDirect(startUrl, pageLinks = []) {
                     if (pageLinks.length >= 1500) break;
                     let href;
                     try { href = new URL(unescapeMd(m[2]), url).href; } catch { continue; }
-                    if (seenLinks.has(href) || /^(\\?\[|!)/.test(m[1]) || /\.(png|jpe?g|gif|svg|webp)(\?|$)/i.test(href) || /geohack|toolforge\.org/i.test(href)) continue;
+                    if (seenLinks.has(href) || /^(\\?\[|!)/.test(m[1]) || /\.(png|jpe?g|gif|svg|webp)(\?|$)/i.test(href) || /geohack|toolforge\.org/i.test(href) || chromeLinks.has(href)) continue;
                     const linkText = unescapeMd(m[1]).replace(/\s+/g, " ").trim();
                     if (linkText.length < 3 || seenLinks.has(`text:${linkText.toLowerCase()}`)) continue; // one link per name
                     seenLinks.add(href);
                     seenLinks.add(`text:${linkText.toLowerCase()}`);
                     pageLinks.push({ text: linkText, url: href });
+                }
+                for (const c of cardLinks) {
+                    if (pageLinks.length >= 1500 || seenLinks.has(c.url) || chromeLinks.has(c.url) || seenLinks.has(`text:${c.text.toLowerCase()}`)) continue;
+                    seenLinks.add(c.url);
+                    seenLinks.add(`text:${c.text.toLowerCase()}`);
+                    pageLinks.push(c);
                 }
                 // Images and link targets take most of the space on big pages (Wikipedia: thumbnails, citations):
                 // keep the link text only, drop images. open_url serves the page in parts, so the cap is high.
@@ -3186,6 +3209,8 @@ If they ask whether their college/school uses Classgrid, say you can't see that 
                                 url: target.href,
                                 part: `${part} of ${parts}`,
                                 ...(partLinks.length ? { links: partLinks } : {}),
+                                // Very little text usually means the page is built by JavaScript and the reader only got its shell
+                                ...(text.length < 1500 ? { note: "Very little text was found: this page is probably built by JavaScript, so its main content may be missing. Don't present this as the full page; try search_web for it instead." } : {}),
                                 ...(part < parts ? { more: `The page continues. Call open_url again with this url and part ${part + 1} to read more.` } : {}),
                                 // The part line is also at the top of the text, so it is seen even if the end gets cut
                                 content: (parts > 1 ? `[Part ${part} of ${parts}${part < parts ? `. For more, call open_url again with part ${part + 1}.` : ". This is the last part."}]
