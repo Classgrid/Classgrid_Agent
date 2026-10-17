@@ -49,6 +49,7 @@ import axios from "axios";
 import User from "../models/User.js";
 import connectDB from "../../config/db.js";
 import { sendNoAccountEmail } from "../controllers/auth.controller.js";
+import { GITHUB_CLIENT_ID as GITHUB_PLUGIN_CLIENT_ID, GITHUB_CLIENT_SECRET as GITHUB_PLUGIN_CLIENT_SECRET } from "../routes/auth.github.routes.js";
 
 // chat.classgrid.in sign-in with Google/GitHub and no account: the route redirects to ?error=no_account
 function noChatAccountError(email, req) {
@@ -251,9 +252,11 @@ const passportConfig = () => {
             'github-chat',
             new GitHubStrategy(
                 {
-                    clientID: process.env.GITHUB_CLIENT_ID,
-                    clientSecret: process.env.GITHUB_CLIENT_SECRET,
-                    callbackURL: process.env.GITHUB_CALLBACK_URL || "https://api.classgrid.in/api/auth/github/callback",
+                    // Same GitHub app as the AI Hub GitHub plugin (the old login app can no longer be managed).
+                    // Login and plugin connect share the callback; /github/callback tells them apart by the state.
+                    clientID: GITHUB_PLUGIN_CLIENT_ID,
+                    clientSecret: GITHUB_PLUGIN_CLIENT_SECRET,
+                    callbackURL: "https://api.classgrid.in/api/auth/github/callback",
                     scope: ['user:email'],
                     passReqToCallback: true,
                 },
