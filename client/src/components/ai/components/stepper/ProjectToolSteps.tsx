@@ -339,16 +339,20 @@ function ClampedBlock({ text, lines = 6 }: { text: string; lines?: number }) {
 export function TerminalStep({ name, description, command, output, status }: { name: string; description?: string; command: string; output?: string; status?: string }) {
   const loading = status === 'loading';
   const failed = !loading && (/^(error|tool error)/i.test(String(output || '').trim()) || /EXIT CODE: [1-9]/.test(String(output || '')));
+  // Click the title to open or close the IN / OUT box (open while it runs, closed after, until the user chooses)
+  const [open, setOpen] = useState<boolean | null>(null);
+  const isOpen = open ?? loading;
   return (
     <div className="flex flex-col gap-1.5 py-1">
-      <div className="flex min-w-0 items-center gap-2.5 pl-2.5">
+      <button type="button" onClick={() => setOpen(!isOpen)} className="group flex min-w-0 items-center gap-2.5 pl-2.5 text-left">
         {loading
           ? <Spinner className="size-3 shrink-0" />
           : <span className={cn('size-2 shrink-0 rounded-full', failed ? 'bg-red-500' : 'bg-emerald-500')} />}
         <span className="shrink-0 text-[14px] font-semibold text-foreground">{name}</span>
-        {description && <span className="truncate text-[14px] text-muted-foreground">{description}</span>}
-      </div>
-      <div className="ml-7 overflow-hidden rounded-lg border border-border bg-muted/40 text-[12.5px]">
+        {description && <span className="truncate text-[14px] text-muted-foreground group-hover:text-foreground">{description}</span>}
+        {isOpen ? <ChevronDown className="size-3.5 shrink-0 text-muted-foreground" /> : <ChevronRight className="size-3.5 shrink-0 text-muted-foreground" />}
+      </button>
+      {isOpen && <div className="ml-7 overflow-hidden rounded-lg border border-border bg-muted/40 text-[12.5px]">
         <div className="flex gap-3 px-3 py-2">
           <span className="w-8 shrink-0 pt-px font-mono text-[11px] text-muted-foreground">IN</span>
           <ClampedBlock text={command || '…'} lines={4} />
@@ -361,7 +365,7 @@ export function TerminalStep({ name, description, command, output, status }: { n
               : <ClampedBlock text={String(output || '').trim() || '(no output)'} />}
           </div>
         )}
-      </div>
+      </div>}
     </div>
   );
 }
