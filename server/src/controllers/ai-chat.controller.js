@@ -958,12 +958,15 @@ async function readPageDirect(startUrl, pageLinks = []) {
                 // Turndown puts backslashes before Markdown signs (dd\-mm, 2321\_7, \( \)): take them out for reading
                 const unescapeMd = (t) => t.replace(/\\([\\`*_{}[\]()#+\-.!~=>|])/g, "$1");
                 for (const m of markdown.matchAll(/(?<!!)\[([^\]\n]{2,80})\]\(((?:https?:\/\/|\/)[^()\s]*(?:\([^()\s]*\)[^()\s]*)*)/g)) {
-                    if (pageLinks.length >= 30) break;
+                    if (pageLinks.length >= 1500) break;
                     let href;
                     try { href = new URL(unescapeMd(m[2]), url).href; } catch { continue; }
-                    if (seenLinks.has(href) || /^(\\?\[|!)/.test(m[1]) || /\.(png|jpe?g|gif|svg|webp)(\?|$)/i.test(href)) continue;
+                    if (seenLinks.has(href) || /^(\\?\[|!)/.test(m[1]) || /\.(png|jpe?g|gif|svg|webp)(\?|$)/i.test(href) || /geohack|toolforge\.org/i.test(href)) continue;
+                    const linkText = unescapeMd(m[1]).replace(/\s+/g, " ").trim();
+                    if (linkText.length < 3 || seenLinks.has(`text:${linkText.toLowerCase()}`)) continue; // one link per name
                     seenLinks.add(href);
-                    pageLinks.push({ text: unescapeMd(m[1]).trim(), url: href });
+                    seenLinks.add(`text:${linkText.toLowerCase()}`);
+                    pageLinks.push({ text: linkText, url: href });
                 }
                 // Images and link targets take most of the space on big pages (Wikipedia: thumbnails, citations):
                 // keep the link text only, drop images. open_url serves the page in parts, so the cap is high.
@@ -975,7 +978,7 @@ async function readPageDirect(startUrl, pageLinks = []) {
                     .replace(/([^\s]) {2,}(?=[^\s])/g, "$1 ")
                     .replace(/ +([.,;:])/g, "$1")
                     .replace(/\n{3,}/g, "\n\n");
-                markdown = unescapeMd(markdown);
+                markdown = unescapeMd(markdown).replace(/[﻿​]/g, "");
                 return markdown.length > PAGE_TEXT_MAX ? `${markdown.slice(0, PAGE_TEXT_MAX)}\n\n[The page is longer than the reader keeps; the rest was left out.]` : markdown;
             }
         } catch (readErr) {
@@ -3157,20 +3160,37 @@ If they ask whether their college/school uses Classgrid, say you can't see that 
                                 try { if (!res.writableEnded) res.write(`data: ${JSON.stringify({ type: "sources", sources: accSources })}\n\n`); } catch (e) { }
                             }
                             // Long pages are read in parts (each fits in one tool result), so nothing is silently cut off
+                            // Parts end at a line break or space (never mid-word); the same page always splits the same way
                             const PART = 11000;
-                            const parts = Math.max(1, Math.ceil(text.length / PART));
+                            const cuts = [0];
+                            while (text.length - cuts[cuts.length - 1] > PART) {
+                                const start = cuts[cuts.length - 1];
+                                const window = text.slice(start + PART - 1500, start + PART);
+                                const nl = window.lastIndexOf("\n"), sp = window.lastIndexOf(" ");
+                                cuts.push(start + PART - 1500 + (nl > 500 ? nl + 1 : sp > 0 ? sp + 1 : 1500));
+                            }
+                            cuts.push(text.length);
+                            const parts = cuts.length - 1;
                             const part = Math.min(Math.max(1, Math.floor(Number(args.part) || 1)), parts);
+                            const partText = text.slice(cuts[part - 1], cuts[part]);
+                            // This part's own links: page links whose name first shows up in this part, in reading order (up to 25)
+                            const partLinks = pageLinks
+                                .map((l) => ({ l, at: text.indexOf(l.text) }))
+                                .filter((x) => x.at >= cuts[part - 1] && x.at < cuts[part])
+                                .sort((a, b) => a.at - b.at)
+                                .slice(0, 25)
+                                .map((x) => x.l);
                             return JSON.stringify({
                                 how_to_cite: `This is the page itself (source id ${src.id}). Cite facts from it as [${src.id}].`,
                                 id: src.id,
                                 url: target.href,
                                 part: `${part} of ${parts}`,
-                                ...(part === 1 && pageLinks.length ? { links: pageLinks } : {}),
+                                ...(partLinks.length ? { links: partLinks } : {}),
                                 ...(part < parts ? { more: `The page continues. Call open_url again with this url and part ${part + 1} to read more.` } : {}),
                                 // The part line is also at the top of the text, so it is seen even if the end gets cut
                                 content: (parts > 1 ? `[Part ${part} of ${parts}${part < parts ? `. For more, call open_url again with part ${part + 1}.` : ". This is the last part."}]
 
-` : "") + text.slice((part - 1) * PART, part * PART)
+` : "") + partText
                             });
                         } catch (e) {
                             return "Reading the page failed: " + e;
