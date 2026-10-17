@@ -166,14 +166,22 @@ export const projectTools = {
     return `${rel} (lines ${start}-${end} of ${lines.length})\n${body}`;
   }),
 
-  search_project: (sessionId, { query, path: dir = "", regex = false }) => withProject(sessionId, async (project, ssh) => {
+  search_project: (sessionId, { query, path: dir = "", regex = false, ignore_case = false }) => withProject(sessionId, async (project, ssh) => {
     if (!query) return "Error: query is empty";
     const { full } = resolveInProject(project, dir);
+    const where = q(path.posix.relative(projectHostDir(project), full) || ".");
+    const grep = `grep -rnI ${regex ? "-E" : "-F"}${ignore_case ? " -i" : ""} --exclude-dir=node_modules --exclude-dir=.git -f -`;
+    // The full list goes to a temp file: the real totals are counted from it, the first 200 lines are shown
     const { stdout } = await ssh.execCommand(
-      `cd ${q(projectHostDir(project))} && grep -rnI ${regex ? "-E" : "-F"} --exclude-dir=node_modules --exclude-dir=.git -f - -- ${q(path.posix.relative(projectHostDir(project), full) || ".")} | head -200 | cut -c1-300`,
+      `cd ${q(projectHostDir(project))} && t=$(mktemp) && ${grep} -- ${where} > $t; ` +
+      `echo "TOTAL $(wc -l < $t) $(cut -d: -f1 $t | sort -u | wc -l)"; head -200 $t | cut -c1-300; rm -f $t`,
       { stdin: String(query) }
     );
-    return stdout.trim() || "No matches.";
+    const [first, ...rest] = stdout.split("\n");
+    const [, lines = "0", files = "0"] = (first || "").split(" ");
+    if (Number(lines) === 0) return "No matches.";
+    const shown = rest.join("\n").trim();
+    return `Found in ${files} file${files === "1" ? "" : "s"} (${lines} matching line${lines === "1" ? "" : "s"})${Number(lines) > 200 ? "; showing the first 200 lines" : ""}.\n${shown}`;
   }),
 
   // New files only. A file that already exists is always changed with edit_project_file, never replaced whole.

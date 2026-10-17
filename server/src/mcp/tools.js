@@ -362,6 +362,7 @@ export const getMcpTools = () => [
     inputSchema: {
       type: 'object',
       properties: {
+        ignore_case: { type: 'boolean', description: 'Match upper and lower case the same (default false).' },
         query: { type: 'string', description: 'Text to find (or a regular expression when regex is true).' },
         path: { type: 'string', description: 'Folder or file inside the project to search in. Empty = whole project.' },
         regex: { type: 'boolean', description: 'Treat query as a regular expression.' }

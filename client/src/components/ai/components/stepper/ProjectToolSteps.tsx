@@ -151,14 +151,16 @@ function ExploreItem({ step }: { step: Step }) {
   }
 
   if (step.tool === 'search_project') {
-    const matches = !result || /^no matches/i.test(result.trim()) || isError(step) ? [] : result.trim().split('\n');
+    // The first line is the real total ("Found in 487 files (912 matching lines)…"); the rest are the shown lines
+    const total = result.match(/^Found in (\d+) files? \((\d+) matching/);
+    const matches = !result || /^no matches/i.test(result.trim()) || isError(step) ? [] : result.trim().split('\n').filter((l) => !/^Found in \d+ file/.test(l));
     return (
       <div className="flex flex-col">
         <div className="flex items-center gap-1.5 py-1 text-[14px] text-slate-500 dark:text-[#8a8a8a]">
           <button type="button" disabled={!matches.length} onClick={() => setOpen(!open)} className="flex min-w-0 items-center gap-1.5 hover:text-foreground disabled:hover:text-inherit">
             <span className="shrink-0">{loading ? 'Searching' : 'Searched'}</span>
             <Name>{step.args?.query}</Name>
-            {!loading && <span className="shrink-0 rounded-full bg-secondary px-2 text-xs">{matches.length} result{matches.length === 1 ? '' : 's'}</span>}
+            {!loading && <span className="shrink-0 rounded-full bg-secondary px-2 text-xs">{total ? `${total[1]} file${total[1] === '1' ? '' : 's'}` : `${matches.length} result${matches.length === 1 ? '' : 's'}`}</span>}
           </button>
         </div>
         {open && (
