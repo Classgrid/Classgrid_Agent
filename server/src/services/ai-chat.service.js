@@ -239,19 +239,29 @@ export async function triggerMemoryAgent(sessionId) {
  */
 export async function getSessions(userEmail) {
     // Only what the chat list needs (sidebar + search palette); the big columns (memory summary etc.) stay in the DB.
-    const { data, error } = await primarySupabaseClient
-        .from('ai_chat_sessions')
-        .select('id, title, created_at, pinned')
-        .eq('user_email', userEmail)
-        .eq('is_incognito', false)
-        .order('created_at', { ascending: false });
+    // The database sends at most 1000 rows per request, so read in pages: with more chats than that, the oldest
+    // ones silently dropped off the list and looked deleted. Small columns only, and a page cap as a brake.
+    const PAGE = 1000, MAX_PAGES = 10;
+    const all = [];
+    for (let page = 0; page < MAX_PAGES; page++) {
+        const { data, error } = await primarySupabaseClient
+            .from('ai_chat_sessions')
+            .select('id, title, created_at, pinned')
+            .eq('user_email', userEmail)
+            .eq('is_incognito', false)
+            .order('created_at', { ascending: false })
+            .order('id', { ascending: false })
+            .range(page * PAGE, page * PAGE + PAGE - 1);
 
-    if (error) {
-        console.error("Error fetching AI chat sessions:", error);
-        throw error;
+        if (error) {
+            console.error("Error fetching AI chat sessions:", error);
+            throw error;
+        }
+        all.push(...(data || []));
+        if (!data || data.length < PAGE) break;
     }
 
-    return data;
+    return all;
 }
 
 /**
