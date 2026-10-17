@@ -312,12 +312,50 @@ const LiveWaveform = ({ stream }: { stream: MediaStream | null }) => {
   );
 };
 
+// Project Mode: drag the AI panel's left edge to make it wider (never smaller than the normal 400 px). While
+// dragging, a clear layer covers the page so the code editor iframe can't take the mouse.
+function OverlayDragHandle({ onChange, onResizingChange }: { onChange: (w: number) => void; onResizingChange?: (r: boolean) => void }) {
+  const [dragging, setDragging] = useState(false);
+  useEffect(() => {
+    if (!dragging) return;
+    const move = (e: PointerEvent) => onChange(Math.round(Math.min(Math.max(window.innerWidth - e.clientX, 400), Math.max(400, window.innerWidth * 0.6))));
+    const up = () => setDragging(false);
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+    window.addEventListener("pointercancel", up);
+    window.addEventListener("blur", up);
+    onResizingChange?.(true);
+    return () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+      window.removeEventListener("pointercancel", up);
+      window.removeEventListener("blur", up);
+      onResizingChange?.(false);
+    };
+  }, [dragging, onChange, onResizingChange]);
+  return (
+    <>
+      <div
+        onPointerDown={(e) => { if (e.button === 0) { e.preventDefault(); setDragging(true); } }}
+        className="group absolute inset-y-0 -left-1 z-10 w-2 cursor-col-resize touch-none"
+        title="Drag to make the panel wider"
+      >
+        <div className={cn("mx-auto h-full w-px transition-colors", dragging ? "bg-foreground/40" : "bg-transparent group-hover:bg-foreground/25")} />
+      </div>
+      {dragging && ReactDOM.createPortal(<div className="fixed inset-0 z-[200] cursor-col-resize select-none" />, document.body)}
+    </>
+  );
+}
+
 type AskAiPanelProps = {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   pageContext?: PageContext;
   variant?: "in-flow" | "overlay" | "full-page";
   hideClearChat?: boolean; // e.g. Project Mode: no one-click way to wipe the chat
+  overlayWidth?: number; // overlay only: the panel's width (Project Mode drag)
+  onOverlayWidthChange?: (width: number) => void;
+  onOverlayResizingChange?: (resizing: boolean) => void;
   initialMessages?: ChatMessage[];
   autoFocus?: boolean;
   readOnly?: boolean;
@@ -1806,7 +1844,7 @@ export const INTEGRATIONS_LIST: any[] = [
 ];
 
 
-export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow", initialMessages, autoFocus = true, readOnly = false, hideClearChat = false }: AskAiPanelProps) {
+export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow", initialMessages, autoFocus = true, readOnly = false, hideClearChat = false, overlayWidth, onOverlayWidthChange, onOverlayResizingChange }: AskAiPanelProps) {
   const { data: user } = useCurrentUser();
   const session = user ? { user } : null;
   // No SidebarContext subscription here: this whole panel would re-render (every message) on each sidebar toggle.
@@ -6532,11 +6570,13 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
             <motion.aside
               aria-hidden={!open}
               className="fixed inset-y-0 right-0 z-[120] w-[400px] flex flex-col border-l border-border !bg-[#fafafa] dark:!bg-[#000000] hidden sm:flex"
+              style={overlayWidth ? { width: overlayWidth } : undefined}
               initial={{ x: "100%" }}
               animate={{ x: 0 }}
               exit={{ x: "100%" }}
               transition={prefersReducedMotion ? { duration: 0 } : panelTransition}
             >
+              {onOverlayWidthChange && <OverlayDragHandle onChange={onOverlayWidthChange} onResizingChange={onOverlayResizingChange} />}
               {panelHeader}
               {panelChat}
               {panelInput}

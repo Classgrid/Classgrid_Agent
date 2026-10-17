@@ -82,6 +82,9 @@ export function ProjectModePage() {
   const [aiOpen, setAiOpenState] = useState(() => { try { return localStorage.getItem(AI_PANEL_KEY) !== "1"; } catch { return true; } });
   // The editor's width slides together with the AI panel (same timing as the panel), on screens where the panel shows
   const [wide, setWide] = useState(() => typeof window !== "undefined" && window.matchMedia("(min-width: 640px)").matches);
+  // The AI panel starts at its normal 400 px and can be dragged wider; the editor's space follows it at once
+  const [aiWidth, setAiWidth] = useState(400);
+  const [aiResizing, setAiResizing] = useState(false);
   useEffect(() => {
     const mq = window.matchMedia("(min-width: 640px)");
     const onChange = () => setWide(mq.matches);
@@ -334,10 +337,10 @@ export function ProjectModePage() {
     <motion.div
       className="h-full flex flex-col !bg-[#fafafa] dark:!bg-[#000000] text-foreground"
       initial={false}
-      animate={{ paddingRight: aiOpen && wide ? 400 : 0 }}
-      transition={reduceMotion ? { duration: 0 } : { duration: 0.36, ease: [0.22, 1, 0.36, 1] }}
+      animate={{ paddingRight: aiOpen && wide ? aiWidth : 0 }}
+      transition={reduceMotion || aiResizing ? { duration: 0 } : { duration: 0.36, ease: [0.22, 1, 0.36, 1] }}
     >
-      <div className="shrink-0 flex items-center gap-3 h-8 box-content py-4 pl-16 pr-4 border-b border-border">{/* same height as the AI panel header, so both lines meet */}
+      <div className="@container shrink-0 flex items-center gap-3 h-8 box-content py-4 pl-16 pr-4 border-b border-border">{/* same height as the AI panel header, so both lines meet */}
         {showEditor ? (
           <>
             <button onClick={() => { rememberOpen(null); setFolder(null); setProgress(null); }} className="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground">
@@ -346,8 +349,10 @@ export function ProjectModePage() {
             <span className="text-sm font-medium truncate">{openProject.name}</span>
             {openProject.repo && <span className="text-xs text-muted-foreground truncate">{openProject.repo}</span>}
             {openProject.repo && folder && (
-              <button onClick={handleOpenPushModal} disabled={pushing} className="ml-auto shrink-0 flex items-center gap-2 h-8 px-3 rounded-full border border-border text-sm hover:bg-secondary disabled:opacity-50">
-                {pushing ? <Spinner className="size-4" /> : <Github className="size-4" />} Push to GitHub
+              <button onClick={handleOpenPushModal} disabled={pushing} title="Push to GitHub" aria-label="Push to GitHub" className="ml-auto shrink-0 flex items-center gap-2 h-8 px-3 rounded-full border border-border text-sm hover:bg-secondary disabled:opacity-50">
+                {pushing ? <Spinner className="size-4" /> : <Github className="size-4" />}
+                {/* When the AI panel is dragged wide the top bar gets narrow: then only the GitHub icon shows */}
+                <span className="hidden @[36rem]:inline">Push to GitHub</span>
               </button>
             )}
           </>
@@ -583,7 +588,7 @@ export function ProjectModePage() {
         </div>
       )}
 
-      <AskAiPanel open={aiOpen} onOpenChange={setAiOpen} variant="overlay" hideClearChat />
+      <AskAiPanel open={aiOpen} onOpenChange={setAiOpen} variant="overlay" hideClearChat overlayWidth={aiWidth} onOverlayWidthChange={setAiWidth} onOverlayResizingChange={setAiResizing} />
       <PushToGithubModal
         isOpen={isPushModalOpen}
         onClose={() => setIsPushModalOpen(false)}
