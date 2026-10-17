@@ -514,12 +514,12 @@ export function ProjectModePage() {
               {/* Step 1 (must): connect GitHub. Step 2 (optional): pick a repo, or enter without one */}
               {githubConnected === false ? (
                 <>
-                  <h2 className="text-lg font-semibold">Step 1: Connect GitHub</h2>
+                  <h2 className="text-lg font-semibold">Connect GitHub</h2>
                   <p className="text-sm text-muted-foreground">Connecting GitHub is needed before you can open "{linking.name}". Your code is only kept on GitHub.</p>
                 </>
               ) : (
                 <>
-                  <h2 className="text-lg font-semibold">Step 2: Link a GitHub repo (optional)</h2>
+                  <h2 className="text-lg font-semibold">Link a GitHub repo</h2>
                   <p className="text-sm text-muted-foreground">For "{linking.name}". Pick a repo below, or enter the project without a repo. You or the Agent can make a repo any time.</p>
                 </>
               )}
