@@ -123,9 +123,17 @@ export function ProjectModePage() {
   }, [openWithoutRepo, loadProjects]);
 
   const [githubAccount, setGithubAccount] = useState<GithubAccount | null>(null);
+  // GitHub must be connected to use Project Mode at all (code is only kept on GitHub)
+  const checkGithub = useCallback(() => {
+    api("/github/me").then(({ res, data }) => {
+      setGithubAccount(res.ok ? data : null);
+      if (res.status === 409) { setGithubConnected(false); setGithubExpired(data.error === "github_expired"); }
+      else if (res.ok) { setGithubConnected(true); setGithubExpired(false); }
+    }).catch(() => setGithubAccount(null));
+  }, []);
   useEffect(() => {
     if (!isSuperAdmin) return;
-    api("/github/me").then(({ res, data }) => setGithubAccount(res.ok ? data : null)).catch(() => setGithubAccount(null));
+    checkGithub();
   }, [isSuperAdmin]);
 
   const loadRepos = useCallback(async () => {
@@ -366,6 +374,17 @@ export function ProjectModePage() {
         </div>
       ) : !isSuperAdmin ? (
         <div className="flex-1" />
+      ) : githubConnected === false ? (
+        <div className="flex-1 flex items-center justify-center px-6">
+          <div className="w-full max-w-md rounded-xl border border-border bg-background p-6 flex flex-col gap-4 text-center">
+            <Github className="size-8 mx-auto" />
+            <h1 className="text-xl font-semibold">{githubExpired ? "Reconnect GitHub" : "Connect GitHub to use Project Mode"}</h1>
+            <p className="text-sm text-muted-foreground">Project Mode needs your GitHub account. Your code is only kept on GitHub, never on our servers.</p>
+            <button onClick={() => setHubOpen(true)} className="flex items-center justify-center gap-2 bg-foreground text-background px-4 py-2 rounded-full font-medium text-sm hover:opacity-90">
+              <Github className="size-4" /> {githubExpired ? "Reconnect GitHub" : "Connect GitHub"}
+            </button>
+          </div>
+        </div>
       ) : (
         <div className="flex-1 overflow-y-auto px-6 py-8">
           <div className="max-w-5xl mx-auto w-full">
@@ -597,7 +616,7 @@ export function ProjectModePage() {
         </div>
       )}
 
-      <AiHubModal isOpen={hubOpen} onClose={() => { setHubOpen(false); loadRepos(); }} />
+      <AiHubModal isOpen={hubOpen} onClose={() => { setHubOpen(false); loadRepos(); checkGithub(); }} />
     </motion.div>
   );
 }
