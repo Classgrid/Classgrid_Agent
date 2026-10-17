@@ -955,13 +955,15 @@ async function readPageDirect(startUrl, pageLinks = []) {
                 if (article.title) markdown = `# ${article.title}\n\n${markdown}`;
                 // The page's links (up to 30, first ones, no in-page anchors), given apart from the text so it can be followed
                 const seenLinks = new Set();
+                // Turndown puts backslashes before Markdown signs (dd\-mm, 2321\_7, \( \)): take them out for reading
+                const unescapeMd = (t) => t.replace(/\\([\\`*_{}[\]()#+\-.!~=>|])/g, "$1");
                 for (const m of markdown.matchAll(/(?<!!)\[([^\]\n]{2,80})\]\(((?:https?:\/\/|\/)[^()\s]*(?:\([^()\s]*\)[^()\s]*)*)/g)) {
                     if (pageLinks.length >= 30) break;
                     let href;
-                    try { href = new URL(m[2], url).href; } catch { continue; }
+                    try { href = new URL(unescapeMd(m[2]), url).href; } catch { continue; }
                     if (seenLinks.has(href) || /^(\\?\[|!)/.test(m[1]) || /\.(png|jpe?g|gif|svg|webp)(\?|$)/i.test(href)) continue;
                     seenLinks.add(href);
-                    pageLinks.push({ text: m[1].trim(), url: href });
+                    pageLinks.push({ text: unescapeMd(m[1]).trim(), url: href });
                 }
                 // Images and link targets take most of the space on big pages (Wikipedia: thumbnails, citations):
                 // keep the link text only, drop images. open_url serves the page in parts, so the cap is high.
@@ -973,6 +975,7 @@ async function readPageDirect(startUrl, pageLinks = []) {
                     .replace(/([^\s]) {2,}(?=[^\s])/g, "$1 ")
                     .replace(/ +([.,;:])/g, "$1")
                     .replace(/\n{3,}/g, "\n\n");
+                markdown = unescapeMd(markdown);
                 return markdown.length > PAGE_TEXT_MAX ? `${markdown.slice(0, PAGE_TEXT_MAX)}\n\n[The page is longer than the reader keeps; the rest was left out.]` : markdown;
             }
         } catch (readErr) {
