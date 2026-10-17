@@ -134,7 +134,16 @@ export function ProjectModePage() {
   useEffect(() => {
     if (!isSuperAdmin) return;
     checkGithub();
-  }, [isSuperAdmin]);
+    // Connected or disconnected somewhere else (AI Hub panel, another tab): check again
+    const again = () => { checkGithub(); loadProjects(); };
+    const onVisible = () => { if (document.visibilityState === "visible") again(); };
+    window.addEventListener("classgrid:integrations-changed", again);
+    document.addEventListener("visibilitychange", onVisible);
+    return () => {
+      window.removeEventListener("classgrid:integrations-changed", again);
+      document.removeEventListener("visibilitychange", onVisible);
+    };
+  }, [isSuperAdmin, checkGithub, loadProjects]);
 
   const loadRepos = useCallback(async () => {
     const { res, data } = await api("/github/repos");
@@ -301,7 +310,7 @@ export function ProjectModePage() {
     loadReview(review);
   };
 
-  const showEditor = isSuperAdmin && openProject && (folder || progress);
+  const showEditor = isSuperAdmin && githubConnected !== false && openProject && (folder || progress); // no GitHub: back to the Connect GitHub screen
   const editorLoaded = () => {
     setProgress((p) => p && { ...p, label: "Almost ready", target: 100 });
     window.setTimeout(() => setProgress(null), 1200);

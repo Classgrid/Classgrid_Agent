@@ -293,6 +293,7 @@ export function AiHubModal({ isOpen, onClose, onSendPrompt, initialTab = "plugin
         if (res.ok) {
           toast.success(`${name} disconnected successfully`);
           await fetchStatus();
+          window.dispatchEvent(new Event("classgrid:integrations-changed")); // e.g. Project Mode re-checks GitHub
         } else {
           toast.error(`Failed to disconnect ${name}`);
         }
