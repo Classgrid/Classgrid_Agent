@@ -2171,6 +2171,7 @@ CRITICAL: NEVER use github_workspace_connector to write file content directly to
 Choose the correct deployment path based on the user's answer in Phase 1:
 
 PATH A — Classgrid Cloud:
+   0. First publish with the deploy_to_classgrid_cloud tool (site: <chosen-name>, paths: every website file). It takes seconds and the site is live at <chosen-name>.sites.classgrid.in. Use the deploy.js script below ONLY if that tool fails.
    1. Write a deploy.js script to the sandbox using run_code. Your deploy.js MUST:
       a) Install the SDK: require('child_process').execSync('npm install @aws-sdk/client-s3');
       b) Connect to Cloudflare R2 (NOT AWS S3!):
@@ -4080,6 +4081,7 @@ If they ask whether their college/school uses Classgrid, say you can't see that 
             email: req.user?.email,
             hasOrg: !!orgId && String(orgId) !== PUBLIC_CHAT_ORG_ID
         });
+        if (isProjectChat) toolPlan.allowedToolNames.delete("deploy_to_classgrid_cloud"); // Classgrid Cloud is for Agent mode HTML sites
         const seenToolNames = new Set();
         // Every tool this user may use (one definition per name), in a fixed order.
         const fullToolList = orderTools([...llmConfig.tools, buildLoadToolsTool(toolPlan.allowedGroups)].filter(t => {

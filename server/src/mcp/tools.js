@@ -3988,6 +3988,10 @@ export const handleToolCall = async (name, args, context = {}) => {
       // Reads the files from the chat's sandbox on the server and uploads them to R2 (no npm install in a fresh
       // sandbox box, which took minutes). Only file names pass through the model.
       const { userEmail = '', sessionId = 'default' } = context;
+      // Classgrid Cloud is for simple HTML sites made in Agent mode, not for Project Mode projects
+      if (await projectForChat(sessionId).catch(() => null)) {
+        return { content: [{ type: 'text', text: 'Classgrid Cloud publishing is not available in Project Mode. Projects are published through GitHub and Vercel.' }], isError: true };
+      }
       const site = String(args.site || '').trim().toLowerCase();
       if (!/^[a-z0-9](?:[a-z0-9-]{1,38}[a-z0-9])$/.test(site)) {
         return { content: [{ type: 'text', text: 'Error: the site name must be 3-40 lowercase letters, numbers or dashes (not starting or ending with a dash).' }], isError: true };
