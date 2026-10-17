@@ -922,6 +922,8 @@ async function isPublicUrl(u) {
         return addrs.length > 0 && addrs.every((a) => !isPrivateIp(a.address));
     } catch { return false; }
 }
+const PAGE_TEXT_MAX = 300000; // characters kept from one page (open_url serves it in parts of 11,000)
+
 async function readPageDirect(startUrl) {
     try {
         let url = startUrl, r = null;
@@ -940,7 +942,7 @@ async function readPageDirect(startUrl) {
         if (!r || !r.ok) return "";
         const type = r.headers.get("content-type") || "";
         const body = (await r.text()).slice(0, 3000000);
-        if (!/html/i.test(type)) return body.trim().slice(0, 50000);
+        if (!/html/i.test(type)) return body.trim().slice(0, PAGE_TEXT_MAX);
         // Best quality first: Readability finds the main content and Turndown turns it into Markdown (title, headings,
         // lists, links). linkedom keeps it light on the server.
         try {
@@ -951,7 +953,14 @@ async function readPageDirect(startUrl) {
                 turndown.remove(["script", "style", "noscript", "svg"]);
                 let markdown = turndown.turndown(article.content);
                 if (article.title) markdown = `# ${article.title}\n\n${markdown}`;
-                return markdown.slice(0, 50000);
+                // Images and link targets take most of the space on big pages (Wikipedia: thumbnails, citations):
+                // keep the link text only, drop images. open_url serves the page in parts, so the cap is high.
+                markdown = markdown
+                    .replace(/\[\\\[[^\]\n]{0,40}\\\]\]\([^)\n]*\)/g, "") // citation marks like [\[37\]](#cite_note-…)
+                    .replace(/!\[[^\]\n]*\]\([^)\n]*\)/g, "")
+                    .replace(/\[([^\]\n]*)\]\([^)\n]*\)/g, "$1")
+                    .replace(/\n{3,}/g, "\n\n");
+                return markdown.length > PAGE_TEXT_MAX ? `${markdown.slice(0, PAGE_TEXT_MAX)}\n\n[The page is longer than the reader keeps; the rest was left out.]` : markdown;
             }
         } catch (readErr) {
             console.warn(`[open_url] Readability could not read ${url}, using the plain text reader: ${readErr.message}`);
