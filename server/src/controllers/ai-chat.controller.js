@@ -2646,11 +2646,11 @@ If they ask whether their college/school uses Classgrid, say you can't see that 
                                         };
                                         const r = CLAUDE_CHAT_MODELS.has(model)
                                             // All three read-only tools stay loaded (no tool search needed)
-                                            ? await streamClaudeChat({ ...helperArgs, model, loadedToolNames: new Set(readOnly), answerAtDepthLimit: true })
-                                            : await streamChat({ ...helperArgs, provider: cloudflareStreamProvider(model), maxTokens: 8192, maxContinuations: 2, answerAtDepthLimit: true }); // room for thinking plus a full report
+                                            ? await streamClaudeChat({ ...helperArgs, model, loadedToolNames: new Set(readOnly), answerAtDepthLimit: true, maxContinuations: 3 })
+                                            : await streamChat({ ...helperArgs, provider: cloudflareStreamProvider(model), maxTokens: 8192, maxContinuations: 6, answerAtDepthLimit: true }); // a long report keeps going instead of being cut
                                         if (userId && r.usage?.total_tokens) deductTokens(userId, orgId, chargeableTokens(r.usage, model), tokenSource).catch(() => {});
                                         if (!String(r.answer || "").trim()) { lastError = "no answer"; break; } // try the next model
-                                        return finish("done", `Helper ${i + 1} (${task.slice(0, 80)}):\n${String(r.answer).slice(0, 12000)}`);
+                                        return finish("done", `Helper ${i + 1} (${task.slice(0, 80)}):\n${String(r.answer).slice(0, 40000)}`);
                                     } catch (e) {
                                         lastError = String(e?.message || e);
                                         // "Too many requests": wait once and retry this model, then move to the next one
