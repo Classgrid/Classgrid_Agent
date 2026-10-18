@@ -77,6 +77,8 @@ export function PlaygroundPage() {
 
   const run = useMemo(() => runs.find((r) => r.id === selectedId) || runs[0] || null, [runs, selectedId]);
   const spent = run?.rounds[run.rounds.length - 1]?.spent ?? 0;
+  // Real tokens of all rounds (input + output), before the model price is applied
+  const totalTokens = run?.rounds.reduce((sum, r) => sum + r.input + r.output, 0) ?? 0;
   const status = !run ? null : run.end ? (run.end.stopped ? "stopped" : "done") : run.stop || run.rounds.some((r) => r.cut) ? "stopped" : "running";
 
   return (
@@ -111,7 +113,7 @@ export function PlaygroundPage() {
 
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
             <StatCard title="Balance at start" value={n(run.spendable)} icon={Coins} trend={shortModel(run.model)} />
-            <StatCard title="Spent so far" value={n(spent)} icon={Gauge} trend={run.spendable ? `${Math.min(100, Math.round((spent / run.spendable) * 100))}% of the balance` : undefined} />
+            <StatCard title="Spent so far" value={n(spent)} icon={Gauge} trend={`${n(totalTokens)} real tokens${run.spendable ? ` · ${Math.min(100, Math.round((spent / run.spendable) * 100))}% of the balance` : ""}`} />
             <StatCard title="Rounds" value={run.rounds.length} icon={Repeat} trend={`${run.tools.length} tool call${run.tools.length === 1 ? "" : "s"}`} />
             <Card>
               <CardHeader className="pb-2"><CardTitle className="text-sm font-medium">Status</CardTitle></CardHeader>
@@ -139,7 +141,8 @@ export function PlaygroundPage() {
                     <TableHead className="text-right">Input</TableHead>
                     <TableHead className="text-right">Cached</TableHead>
                     <TableHead className="text-right">Output</TableHead>
-                    <TableHead className="text-right">This round costs</TableHead>
+                    <TableHead className="text-right">Total tokens</TableHead>
+                    <TableHead className="text-right">Taken from balance</TableHead>
                     <TableHead className="text-right">Total so far</TableHead>
                     <TableHead className="text-right">Left</TableHead>
                     <TableHead>Time</TableHead>
@@ -157,6 +160,7 @@ export function PlaygroundPage() {
                         {r.cacheRead > 0 && !r.cacheCounted && <Badge variant="neutral" className="ml-1">full price</Badge>}
                       </TableCell>
                       <TableCell className="text-right">{n(r.output)}</TableCell>
+                      <TableCell className="text-right">{n(r.input + r.output)}</TableCell>
                       <TableCell className="text-right">{n(r.cost)}</TableCell>
                       <TableCell className="text-right">{n(r.spent)}</TableCell>
                       <TableCell className="text-right">{r.spendable === null ? "No limit" : n(r.spendable - r.spent)}</TableCell>
@@ -165,12 +169,12 @@ export function PlaygroundPage() {
                   ))}
                   {status === "running" && (
                     <TableRow>
-                      <TableCell colSpan={10}><Badge variant="info" dot>Round {run.rounds.length + 1} running…</Badge></TableCell>
+                      <TableCell colSpan={11}><Badge variant="info" dot>Round {run.rounds.length + 1} running…</Badge></TableCell>
                     </TableRow>
                   )}
                   {run.stop && (
                     <TableRow>
-                      <TableCell colSpan={10}>
+                      <TableCell colSpan={11}>
                         <Badge variant="warning">Stopped ({run.stop.who}): spent {n(run.stop.spent)} of {n(run.stop.spendable)}, nothing left for another round</Badge>
                       </TableCell>
                     </TableRow>
