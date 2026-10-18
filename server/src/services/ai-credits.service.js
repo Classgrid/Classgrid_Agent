@@ -303,7 +303,7 @@ export const deductTokens = async (userId, orgId, tokenAmount, source) => {
             const currentBalance = Math.max(0, user?.ai_tokens?.ai_credits_balance || 0);
             const actualDeduction = Math.min(tokenAmount, currentBalance);
             if (actualDeduction <= 0) {
-                return { success: true, remaining: 0, limit: 0, type: "personal", uncharged: tokenAmount };
+                return { success: true, remaining: 0, limit: 0, type: "personal" };
             }
             const updatedUser = await User.findByIdAndUpdate(userId, {
                 $inc: {
@@ -311,7 +311,7 @@ export const deductTokens = async (userId, orgId, tokenAmount, source) => {
                     "ai_tokens.total_ai_tokens_used": actualDeduction
                 }
             }, { returnDocument: 'after' });
-            result = { success: true, remaining: Math.max(0, updatedUser.ai_tokens.ai_credits_balance), limit: updatedUser.ai_tokens.ai_credits_balance + actualDeduction, type: "personal", uncharged: tokenAmount - actualDeduction };
+            result = { success: true, remaining: Math.max(0, updatedUser.ai_tokens.ai_credits_balance), limit: updatedUser.ai_tokens.ai_credits_balance + actualDeduction, type: "personal" };
             triggerEmailAlerts(userId, orgId, "personal", currentBalance, result.remaining, user?.ai_tokens?.total_ai_credits_purchased || currentBalance);
 
         } else if (source === "promotion") {
@@ -320,7 +320,7 @@ export const deductTokens = async (userId, orgId, tokenAmount, source) => {
             const currentBalance = Math.max(0, user?.ai_tokens?.promotion_credits_balance || 0);
             const actualDeduction = Math.min(tokenAmount, currentBalance);
             if (actualDeduction <= 0) {
-                return { success: true, remaining: 0, limit: 0, type: "promotion", uncharged: tokenAmount };
+                return { success: true, remaining: 0, limit: 0, type: "promotion" };
             }
             const updatedUser = await User.findByIdAndUpdate(userId, {
                 $inc: {
@@ -328,7 +328,7 @@ export const deductTokens = async (userId, orgId, tokenAmount, source) => {
                     "ai_tokens.total_ai_tokens_used": actualDeduction
                 }
             }, { returnDocument: 'after' });
-            result = { success: true, remaining: Math.max(0, updatedUser.ai_tokens.promotion_credits_balance), limit: updatedUser.ai_tokens.promotion_credits_balance + actualDeduction, type: "promotion", uncharged: tokenAmount - actualDeduction };
+            result = { success: true, remaining: Math.max(0, updatedUser.ai_tokens.promotion_credits_balance), limit: updatedUser.ai_tokens.promotion_credits_balance + actualDeduction, type: "promotion" };
             triggerEmailAlerts(userId, orgId, "promotion", currentBalance, result.remaining, user?.ai_tokens?.total_promotion_credits_granted || currentBalance);
 
         } else if (source === "weekly_free") {
@@ -364,7 +364,6 @@ export const deductTokens = async (userId, orgId, tokenAmount, source) => {
                     result.spilledTo = next;
                     result.spilledTokens = overflow;
                     result.spill = spill;
-                    if (spill?.uncharged) result.uncharged = spill.uncharged; // the credit pool ran out too
                 } else {
                     result.uncharged = overflow;
                 }
@@ -379,7 +378,7 @@ export const deductTokens = async (userId, orgId, tokenAmount, source) => {
             const headroom = Math.max(0, orgLimit - orgUsed);
             const actualDeduction = Math.min(tokenAmount, headroom);
             if (actualDeduction <= 0) {
-                return { success: true, remaining: 0, limit: orgLimit, type: "pro", uncharged: tokenAmount };
+                return { success: true, remaining: 0, limit: orgLimit, type: "pro" };
             }
             const updatedOrg = await Organization.findByIdAndUpdate(orgId, {
                 $inc: {
@@ -390,7 +389,7 @@ export const deductTokens = async (userId, orgId, tokenAmount, source) => {
             await User.findByIdAndUpdate(userId, {
                 $inc: { "ai_tokens.total_ai_tokens_used": actualDeduction }
             });
-            result = { success: true, remaining: Math.max(0, updatedOrg.ai_config.pro_pool_limit - updatedOrg.ai_config.pro_used_this_period), limit: updatedOrg.ai_config.pro_pool_limit, type: "pro", uncharged: tokenAmount - actualDeduction };
+            result = { success: true, remaining: Math.max(0, updatedOrg.ai_config.pro_pool_limit - updatedOrg.ai_config.pro_used_this_period), limit: updatedOrg.ai_config.pro_pool_limit, type: "pro" };
         }
 
         if (result.success) {

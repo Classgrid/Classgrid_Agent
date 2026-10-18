@@ -1183,51 +1183,11 @@ export const streamAskAi = async (req, res) => {
     // provider reports it. Before every further round its input is measured (the previous round plus the text
     // added since, ~3 characters per token), and what it may write is capped to what is left after that; with
     // too little left the answer stops there. spendable is set by the quota check (undefined = no limit).
-    const liveMeter = { spent: 0, spendable: undefined, stopped: false };
-    // Playground (super admins): this answer's rounds, tool calls and live words go to the super admin's own live
-    // channel, so the Playground page can show them next to the chat. Nothing is sent for other users.
-    const playgroundRun = req.user?.role === "super_admin" && userId
-        ? { id: `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`, rounds: {}, pending: { text: "", thought: "" }, timer: null }
-        : null;
-    const playgroundIo = playgroundRun ? import("../services/socket.service.js").then((m) => m.getIO()).catch(() => null) : null;
-    const playground = (event, data) => {
-        if (!playgroundRun) return;
-        playgroundIo.then((io) => io?.to(String(userId)).emit(`playground:${event}`, { runId: playgroundRun.id, at: Date.now(), ...data })).catch(() => {});
-    };
-    const flushPlaygroundText = () => {
-        if (!playgroundRun) return;
-        clearTimeout(playgroundRun.timer);
-        playgroundRun.timer = null;
-        const { text, thought } = playgroundRun.pending;
-        if (text || thought) playground("text", { text, thought });
-        playgroundRun.pending = { text: "", thought: "" };
-    };
-    // Live words, sent in small batches (every quarter second) instead of one event per word
-    const playgroundText = (kind, piece) => {
-        if (!playgroundRun || !piece) return;
-        playgroundRun.pending[kind] += piece;
-        if (!playgroundRun.timer) playgroundRun.timer = setTimeout(flushPlaygroundText, 250);
-    };
-    const meterHooks = (model, who = "Agent") => {
+    const liveMeter = { spent: 0, spendable: undefined };
+    const meterHooks = (model) => {
         const outputWeight = chargeableTokens({ prompt_tokens: 0, completion_tokens: 1000 }, model) / 1000;
         return {
-            onRoundUsage: (u) => {
-                const cost = chargeableTokens(u, model);
-                liveMeter.spent += cost;
-                if (playgroundRun) {
-                    flushPlaygroundText();
-                    const round = (playgroundRun.rounds[who] = (playgroundRun.rounds[who] || 0) + 1);
-                    playground("round", {
-                        who, model, round, cost, spent: liveMeter.spent, spendable: liveMeter.spendable ?? null,
-                        input: u.prompt_tokens || 0, output: u.completion_tokens || 0,
-                        // Claude's cached input is charged at the cache price; Cloudflare reports cached tokens too,
-                        // but they are charged at the full price (cacheCounted false)
-                        cacheRead: u.cache_read_input_tokens || u.prompt_tokens_details?.cached_tokens || 0,
-                        cacheWrite: u.cache_creation_input_tokens || 0,
-                        cacheCounted: !!u.cache_read_input_tokens,
-                    });
-                }
-            },
+            onRoundUsage: (u) => { liveMeter.spent += chargeableTokens(u, model); },
             nextRound: (last, addedChars) => {
                 if (liveMeter.spendable === undefined) return null;
                 // A provider that cached last round's prompt (Claude) reads it again at the cache price
@@ -1235,12 +1195,7 @@ export const streamAskAi = async (req, res) => {
                 const input = (last.prompt_tokens || 0) + (last.completion_tokens || 0) + Math.ceil(addedChars / 3);
                 const inputCost = chargeableTokens({ prompt_tokens: input, completion_tokens: 0, cache_read_input_tokens: cached }, model);
                 const maxTokens = Math.floor((liveMeter.spendable - liveMeter.spent - inputCost) / outputWeight);
-                if (maxTokens < 1024) {
-                    liveMeter.stopped = true;
-                    playground("stop", { who, spent: liveMeter.spent, spendable: liveMeter.spendable, nextInputCost: inputCost });
-                    return { stop: true };
-                }
-                return { maxTokens };
+                return maxTokens < 1024 ? { stop: true } : { maxTokens };
             },
         };
     };
@@ -2680,7 +2635,6 @@ If they ask whether their college/school uses Classgrid, say you can't see that 
                                 if (Date.now() > deadline) return "Time is up: do not call any more tools. Write your full final answer now from what you already found.";
                                 const id = `h${i}-${stepNo++}`;
                                 emitHelper({ helper: i, id, tool: n, args: a });
-                                playground("tool", { who: `Helper ${i + 1}`, tool: n, detail: JSON.stringify(a ?? {}).slice(0, 200) });
                                 const out = await helperHandlers[n](a);
                                 emitHelper({ helper: i, id, result: String(out).slice(0, 6000) });
                                 return out;
@@ -2712,8 +2666,8 @@ If they ask whether their college/school uses Classgrid, say you can't see that 
                                         };
                                         const r = CLAUDE_CHAT_MODELS.has(model)
                                             // All three read-only tools stay loaded (no tool search needed)
-                                            ? await streamClaudeChat({ ...helperArgs, ...meterHooks(model, `Helper ${i + 1}`), model, loadedToolNames: new Set(readOnly), answerAtDepthLimit: true, maxContinuations: 3 })
-                                            : await streamChat({ ...helperArgs, ...meterHooks(model, `Helper ${i + 1}`), provider: cloudflareStreamProvider(model), maxTokens: 8192, maxContinuations: 6, answerAtDepthLimit: true }); // a long report keeps going instead of being cut
+                                            ? await streamClaudeChat({ ...helperArgs, ...meterHooks(model), model, loadedToolNames: new Set(readOnly), answerAtDepthLimit: true, maxContinuations: 3 })
+                                            : await streamChat({ ...helperArgs, ...meterHooks(model), provider: cloudflareStreamProvider(model), maxTokens: 8192, maxContinuations: 6, answerAtDepthLimit: true }); // a long report keeps going instead of being cut
                                         if (userId && r.usage?.total_tokens) deductTokens(userId, orgId, chargeableTokens(r.usage, model), tokenSource).catch(() => {});
                                         if (!String(r.answer || "").trim()) { lastError = "no answer"; break; } // try the next model
                                         return finish("done", `Helper ${i + 1} (${task.slice(0, 80)}):\n${String(r.answer).slice(0, 40000)}`);
@@ -4128,7 +4082,6 @@ If they ask whether their college/school uses Classgrid, say you can't see that 
                                 status: 'loading'
                             });
                             try { if (!res.writableEnded) res.write(`data: ${JSON.stringify({ type: "tool_start", tool: toolName, args })}\n\n`); } catch (e) { }
-                            playground("tool", { who: "Agent", tool: toolName, detail: JSON.stringify(args ?? {}).slice(0, 200) });
                         }
                         let resultStr;
                         try { resultStr = await handler(args); } catch (err) { resultStr = "Error: " + (err.message || String(err)); }
@@ -4269,7 +4222,6 @@ If a tool fails, never show the error message; say only: "Something went wrong o
             if (check.remaining !== undefined) llmConfig.defaultMaxTokens = Math.max(1, Math.min(8192, check.remaining));
             quotaRemaining = check.remaining;
             liveMeter.spendable = check.spendable ?? check.remaining;
-            playground("start", { question: String(body.question || "").slice(0, 300), model: typeof body.selectedModel === "string" ? body.selectedModel : "auto", spendable: liveMeter.spendable ?? null });
         } catch (err) {
             console.error("Quota check error:", err);
             res.write(`data: ${JSON.stringify({ type: "error", error: "We couldn't check your AI usage balance right now, so this message was not answered. Please try again in a minute." })}\n\n`);
@@ -4369,7 +4321,6 @@ If a tool fails, never show the error message; say only: "Something went wrong o
                         console.log(`[AI-TIMING] first thought at +${Date.now() - requestStartedAt}ms`);
                     }
                     accThought += thought;
-                    playgroundText("thought", thought);
                     if (requestAborted || res.writableEnded) return;
                     try { res.write(`data: ${JSON.stringify({ type: "thought", thought })}\n\n`); } catch (e) { }
                 };
@@ -4379,7 +4330,6 @@ If a tool fails, never show the error message; say only: "Something went wrong o
                         console.log(`[AI-TIMING] first answer token at +${Date.now() - requestStartedAt}ms`);
                     }
                     shownAnswerText += token || "";
-                    playgroundText("text", token);
                     if (requestAborted || res.writableEnded) return;
                     try { res.write(`data: ${JSON.stringify({ type: "token", token })}\n\n`); } catch (e) { }
                 };
@@ -4665,17 +4615,6 @@ If a tool fails, never show the error message; say only: "Something went wrong o
 
                     // The tokenSource was determined earlier via hasEnoughTokens
                     const deductionResult = await deductTokens(userId, orgId, poolTokens, tokenSource);
-                    flushPlaygroundText();
-                    playground("end", {
-                        model: usedModel,
-                        realCost: poolTokens, // the answering model (helpers are charged on their own, in meterTotal)
-                        charged: Math.max(0, poolTokens - (deductionResult?.uncharged || 0)),
-                        uncharged: deductionResult?.uncharged || 0,
-                        balanceAfter: deductionResult?.remaining ?? null,
-                        meterTotal: liveMeter.spent,
-                        spendable: liveMeter.spendable ?? null,
-                        stopped: liveMeter.stopped,
-                    });
 
                     if (deductionResult && deductionResult.success) {
                         const totalUsed = deductionResult.limit - deductionResult.remaining;
