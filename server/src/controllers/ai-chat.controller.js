@@ -2618,16 +2618,16 @@ If they ask whether their college/school uses Classgrid, say you can't see that 
                             const finish = (state, text) => { emitHelper({ helper: i, state }); return text; };
                             await sleep(i * 1500); // start a little apart, so the model service isn't hit all at once
                             emitHelper({ helper: i, state: "running" });
-                            // Different models have separate request limits, so helpers take turns: helpers 1, 3, 5 use
-                            // DeepSeek V4 Flash and fall back to GLM 5.3 if it fails; helpers 2, 4 use GLM 5.3
-                            const models = i % 2 === 0 ? [CF_FLASH_MODEL, HELPER_GLM_MODEL] : [HELPER_GLM_MODEL];
+                            // Each helper has its own model (separate request limits): 1 DeepSeek V4 Flash, 2 Claude Haiku 5.5,
+                            // 3 Claude Opus 5.5, 4 Claude Sonnet 5.5, 5 GLM 5.3. If a model fails, the helper falls back to GLM 5.3
+                            const primary = [CF_FLASH_MODEL, "claude-haiku-5-5", "claude-opus-5-5", "claude-sonnet-5-5", HELPER_GLM_MODEL][i] || HELPER_GLM_MODEL;
+                            const models = primary === HELPER_GLM_MODEL ? [HELPER_GLM_MODEL] : [primary, HELPER_GLM_MODEL];
                             let lastError = "";
                             for (const model of models) {
                                 for (let attempt = 1; attempt <= 2; attempt++) {
                                     try {
                                         emitHelper({ helper: i, state: "restart" }); // a retry starts its report again
-                                        const r = await streamChat({
-                                            provider: cloudflareStreamProvider(model),
+                                        const helperArgs = {
                                             messages: [
                                                 { role: "system", content: "You are a helper exploring a code project for another AI. Use the tools to look at the project (you can only read it). Read the actual code, not just file names. Then answer the task in full, with everything you found: what each relevant file and function does, how the parts work together step by step (frontend, API routes, backend, database, config), the important endpoints, data and settings, with file paths and line numbers. For example, if the task is to explore login, explain the whole flow from start to end: the frontend page and components, the form and what it sends, the API calls, the backend routes, controllers and services, checks and errors, tokens or sessions, the database models, and the config it uses. Never answer with only a list of file names. Don't guess; say what you could not find." },
                                                 { role: "user", content: task }
@@ -2636,12 +2636,13 @@ If they ask whether their college/school uses Classgrid, say you can't see that 
                                             toolHandlers: liveHandlers,
                                             onToken: (piece) => emitHelper({ helper: i, text: piece }),
                                             onThought: (piece) => emitHelper({ helper: i, thought: piece }),
-                                            maxTokens: 6000,
                                             maxToolDepth: 30, // big repos need more looking around before a full answer
-                                            maxContinuations: 1,
-                                            answerAtDepthLimit: true,
                                             timeoutMs: 240000
-                                        });
+                                        };
+                                        const r = CLAUDE_CHAT_MODELS.has(model)
+                                            // All three read-only tools stay loaded (no tool search needed)
+                                            ? await streamClaudeChat({ ...helperArgs, model, loadedToolNames: new Set(readOnly) })
+                                            : await streamChat({ ...helperArgs, provider: cloudflareStreamProvider(model), maxTokens: 6000, maxContinuations: 1, answerAtDepthLimit: true });
                                         if (userId && r.usage?.total_tokens) deductTokens(userId, orgId, chargeableTokens(r.usage, model), tokenSource).catch(() => {});
                                         if (!String(r.answer || "").trim()) { lastError = "no answer"; break; } // try the next model
                                         return finish("done", `Helper ${i + 1} (${task.slice(0, 80)}):\n${String(r.answer).slice(0, 12000)}`);
