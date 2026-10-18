@@ -60,10 +60,7 @@ function createThinkSplitter(emitText, emitThought) {
 
 // Sent when an answer was cut off by the length limit, so the model picks up exactly where it stopped
 export const THINKING_CUT_PROMPT = "You ran out of room while thinking and wrote no answer yet. Stop planning now and write the final answer directly, without drafting it again in your thinking. Finish everything that was asked.";
-// Added to what was written so far when the user's tokens run out between rounds (nextRound)
-export const BUDGET_STOP_NOTE = "_(Stopped here: your AI tokens ran out while I was working. Top up AI credits or wait for your token reset, then ask me to continue.)_";
-export const budgetStopAnswer = (text) => `${String(text || "").trim()}\n\n${BUDGET_STOP_NOTE}`.trim();
-export const CONTINUE_PROMPT ="Your previous reply was cut off by the length limit. Continue EXACTLY where it stopped, even mid-word, mid-sentence or mid-code, without repeating anything and without any preamble, apology or comment. If you were inside a code block, keep writing inside it (do not open a new ```). Finish everything that was asked.";
+export const CONTINUE_PROMPT = "Your previous reply was cut off by the length limit. Continue EXACTLY where it stopped, even mid-word, mid-sentence or mid-code, without repeating anything and without any preamble, apology or comment. If you were inside a code block, keep writing inside it (do not open a new ```). Finish everything that was asked.";
 
 async function streamOneRound({ provider, messages, tools, temperature, maxTokens, timeoutMs, signal, onToken, onThought }) {
     const controller = new AbortController();
@@ -177,12 +174,6 @@ export async function streamChat({
     // At the tool-round limit, ask for an answer from what was found instead of the fixed "couldn't find" text
     answerAtDepthLimit = false,
     outputBudget,
-    // Live token check: onRoundUsage(usage) gets each round's usage as soon as the provider reports it.
-    // nextRound(lastRoundUsage, addedChars) is asked before every further round, with the size of the text
-    // added since that round (tool results etc.): { stop: true } ends the answer there, { maxTokens } caps
-    // what the next round may write
-    onRoundUsage,
-    nextRound,
     signal,
     onToken,
     onThought,
@@ -198,26 +189,10 @@ export async function streamChat({
     let continuedText = ""; // earlier parts of an answer that was cut off and continued
     let continuations = 0;
     let lastIntro = ""; // start of the previous tool round's text, to catch a model stuck repeating itself
-    let lastRoundUsage = null; // the previous round's usage, for the live token check
-    let lastRoundText = "";
-    let sentAt = 0; // conversation length when the previous round was sent: later messages are new text
-    // The next round's real size: the previous round (its input plus what it wrote) plus the text added since
-    const planNextRound = () => {
-        if (!lastRoundUsage || !nextRound) return { maxTokens };
-        const addedChars = conversation.slice(sentAt).reduce((n, m) => n + String(m.content ?? "").length, 0);
-        const plan = nextRound(lastRoundUsage, addedChars) || {};
-        return plan.stop ? { stop: true } : { maxTokens: plan.maxTokens ? Math.min(maxTokens, plan.maxTokens) : maxTokens };
-    };
-    const budgetStop = () => {
-        console.log(`[AI-STREAM] stopped between rounds: the user's tokens ran out (toolsRun=${toolsRun})`);
-        return { answer: budgetStopAnswer(continuedText + lastRoundText), usage, toolsRun, stoppedForBudget: true };
-    };
 
     try {
         for (;;) {
             if (signal?.aborted) throw new StreamChatError("Request aborted");
-            const plan = planNextRound();
-            if (plan.stop) return budgetStop();
 
             // Keep reasoning from separate rounds visually separate in the thought stream.
             const separateThought = (piece) => {
@@ -227,9 +202,8 @@ export async function streamChat({
 
             const roundTools = currentTools();
             const sentToolNames = new Set(roundTools.map(t => t.function.name));
-            sentAt = conversation.length;
             const round = await streamOneRound({
-                provider, messages: conversation, tools: roundTools, temperature, maxTokens: plan.maxTokens, timeoutMs, signal,
+                provider, messages: conversation, tools: roundTools, temperature, maxTokens, timeoutMs, signal,
                 onToken, onThought: separateThought
             });
             if (round.reasoning) hadReasoning = true;
@@ -238,10 +212,7 @@ export async function streamChat({
                 usage.prompt_tokens += round.usage.prompt_tokens || 0;
                 usage.completion_tokens += round.usage.completion_tokens || 0;
                 usage.total_tokens += round.usage.total_tokens || 0;
-                onRoundUsage?.(round.usage);
-                lastRoundUsage = round.usage;
             }
-            lastRoundText = round.rawText || "";
 
             if (round.toolCalls.length === 0) {
                 const roomLeft = outputBudget === undefined || outputBudget - usage.completion_tokens >= 2048;
@@ -266,18 +237,14 @@ export async function streamChat({
 
             if (depth >= maxToolDepth) {
                 if (answerAtDepthLimit) {
-                    sentAt = conversation.length;
                     conversation.push({ role: "assistant", content: round.text || "", tool_calls: round.toolCalls });
                     for (const call of round.toolCalls) conversation.push({ role: "tool", tool_call_id: call.id, content: "Not run: no more tool calls are possible." });
                     conversation.push({ role: "user", content: "No more tool calls are possible. Answer now from what you found so far, and say what you could not check." });
-                    const lastPlan = planNextRound();
-                    if (lastPlan.stop) return budgetStop();
-                    const last = await streamOneRound({ provider, messages: conversation, tools: [], temperature, maxTokens: lastPlan.maxTokens, timeoutMs, signal, onToken: undefined, onThought: undefined });
+                    const last = await streamOneRound({ provider, messages: conversation, tools: [], temperature, maxTokens, timeoutMs, signal, onToken: undefined, onThought: undefined });
                     if (last.usage) {
                         usage.prompt_tokens += last.usage.prompt_tokens || 0;
                         usage.completion_tokens += last.usage.completion_tokens || 0;
                         usage.total_tokens += last.usage.total_tokens || 0;
-                        onRoundUsage?.(last.usage);
                     }
                     return { answer: (continuedText + (last.rawText || "")).trim() || null, usage, toolsRun };
                 }

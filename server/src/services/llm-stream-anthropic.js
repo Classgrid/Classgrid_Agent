@@ -13,7 +13,7 @@
 //   "drop_block" makes a prefix mismatch degrade instead of failing the request.
 
 import Anthropic from "@anthropic-ai/sdk";
-import { StreamChatError, CONTINUE_PROMPT, THINKING_CUT_PROMPT, budgetStopAnswer } from "./llm-stream.js";
+import { StreamChatError, CONTINUE_PROMPT, THINKING_CUT_PROMPT } from "./llm-stream.js";
 
 export const CLAUDE_CHAT_MODELS = new Set([
     "claude-haiku-5-5",
@@ -320,10 +320,6 @@ export async function streamClaudeChat({
     // At the tool-round limit, ask for an answer from what was found instead of the fixed "couldn't find" text
     answerAtDepthLimit = false,
     outputBudget,
-    // Live token check (same as streamChat): onRoundUsage(usage) after each round, nextRound(lastRoundUsage,
-    // addedChars) before every further round ({ stop: true } ends the answer, { maxTokens } caps the next round)
-    onRoundUsage,
-    nextRound,
     signal,
     onToken,
     onThought,
@@ -418,28 +414,9 @@ export async function streamClaudeChat({
         ? params.max_tokens
         : Math.max(1024, Math.min(params.max_tokens, outputBudget - (usage.output_tokens || 0)));
 
-    let lastRoundUsage = null; // the previous round's usage, for the live token check
-    let lastRoundText = "";
-    let sentAt = 0; // conversation length when the previous round was sent: later messages are new text
-    // Text a message adds to the next round (tool results and text; what Claude wrote is already in its output count)
-    const textLength = (content) => typeof content === "string" ? content.length
-        : Array.isArray(content) ? content.reduce((n, b) => n + (b?.type === "text" ? String(b.text || "").length : b?.type === "tool_result" ? textLength(b.content) : 0), 0)
-        : 0;
-    // The next round's real size: the previous round (its input plus what it wrote) plus the text added since
-    const planNextRound = () => {
-        if (!lastRoundUsage || !nextRound) return {};
-        const addedChars = conversation.slice(sentAt).reduce((n, m) => n + textLength(m.content), 0);
-        return nextRound(lastRoundUsage, addedChars) || {};
-    };
-    const budgetStop = () => {
-        console.log(`[AI-STREAM] Claude stopped between rounds: the user's tokens ran out (toolsRun=${toolsRun})`);
-        return { answer: budgetStopAnswer(continuedText + lastRoundText), usage, toolsRun, servedModel, stoppedForBudget: true };
-    };
     try {
         for (;;) {
             if (signal?.aborted) throw new StreamChatError("Request aborted");
-            const plan = planNextRound();
-            if (plan.stop) return budgetStop();
 
             thoughtThisRound = false;
             const emitThought = (piece) => {
@@ -450,9 +427,8 @@ export async function streamClaudeChat({
             };
             let roundText = "";
             const splitter = createThinkSplitter((piece) => { roundText += piece; onToken?.(piece); }, emitThought);
-            sentAt = conversation.length;
             const stream = getClient().beta.messages.stream(
-                { ...params, max_tokens: plan.maxTokens ? Math.min(roundMaxTokens(), plan.maxTokens) : roundMaxTokens(), messages: conversation },
+                { ...params, max_tokens: roundMaxTokens(), messages: conversation },
                 { signal, timeout: timeoutMs },
             );
 
@@ -477,12 +453,6 @@ export async function streamClaudeChat({
             const message = await stream.finalMessage();
             roundUsage = null;
             addUsage(usage, message.usage);
-            // This round alone, in the same shape as the running total (prompt_tokens includes cached input)
-            const thisRound = { input_tokens: 0, output_tokens: 0, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 };
-            addUsage(thisRound, message.usage);
-            onRoundUsage?.(thisRound);
-            lastRoundUsage = thisRound;
-            lastRoundText = roundText;
             if (message.model) servedModel = message.model;
             if (thoughtThisRound) hadReasoning = true;
 
@@ -532,16 +502,11 @@ export async function streamClaudeChat({
                         ...toolUses.map((c) => ({ type: "tool_result", tool_use_id: c.id, content: "Not run: no more tool calls are possible.", is_error: true })),
                         { type: "text", text: "No more tool calls are possible. Answer now from what you found so far, and say what you could not check." },
                     ] });
-                    const lastPlan = planNextRound();
-                    if (lastPlan.stop) return budgetStop();
                     const last = await getClient().beta.messages.stream(
-                        { ...params, max_tokens: lastPlan.maxTokens ? Math.min(roundMaxTokens(), lastPlan.maxTokens) : roundMaxTokens(), messages: conversation, tool_choice: { type: "none" } },
+                        { ...params, max_tokens: roundMaxTokens(), messages: conversation, tool_choice: { type: "none" } },
                         { signal, timeout: timeoutMs },
                     ).finalMessage();
                     addUsage(usage, last.usage);
-                    const lastRound = { input_tokens: 0, output_tokens: 0, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 };
-                    addUsage(lastRound, last.usage);
-                    onRoundUsage?.(lastRound);
                     const lastText = (last.content || []).filter((b) => b.type === "text").map((b) => b.text).join("").trim();
                     if (lastText) onToken?.(lastText);
                     return { answer: (continuedText + lastText).trim() || null, usage, toolsRun, servedModel };

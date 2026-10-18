@@ -145,12 +145,7 @@ export const hasEnoughTokens = async (userId, orgId, requiredTokens = 1, { paidO
     }
 
     if (usedThisWeek + requiredTokens <= weeklyLimit) {
-        // spendable: what a long answer may use in total. deductTokens spills free-pool overflow into the first
-        // credit pool, so that pool's balance counts too (the live check between rounds stops at this number).
-        const spill = pickCreditSource(user);
-        const t = user.ai_tokens || {};
-        const spillBalance = spill === "promotion" ? (t.promotion_credits_balance || 0) : spill === "personal" ? (t.ai_credits_balance || 0) : 0;
-        return { allowed: true, source: "weekly_free", remaining: weeklyLimit - usedThisWeek, spendable: weeklyLimit - usedThisWeek + spillBalance };
+        return { allowed: true, source: "weekly_free", remaining: weeklyLimit - usedThisWeek };
     }
 
     // 3. FIFO LOGIC: Determine which came FIRST between Top-Up (Paid) and Granted (Promotion)
