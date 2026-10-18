@@ -2592,7 +2592,7 @@ If they ask whether their college/school uses Classgrid, say you can't see that 
                         async (args) => (await handleToolCall(toolName, args, { sessionId })).content[0].text,
                     ])),
                     // Up to 4 read-only helpers explore the project at the same time (cheap Flash model, list/read/search
-                    // only, never change anything) and each returns a short summary; their tokens are charged like the chat's
+                    // only, never change anything) and each returns a full report; their tokens are charged like the chat's
                     run_project_helpers: async (args) => {
                         const tasks = (Array.isArray(args?.tasks) ? args.tasks : []).map((t) => String(t || "").trim()).filter(Boolean).slice(0, 4);
                         if (!tasks.length) return "Error: give 1 to 4 tasks.";
@@ -2604,8 +2604,20 @@ If they ask whether their college/school uses Classgrid, say you can't see that 
                         ];
                         const helperHandlers = Object.fromEntries(readOnly.map((n) => [n, async (a) => (await handleToolCall(n, a, { sessionId })).content[0].text]));
                         const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+                        // Live view: each helper's file reads/searches and its report as it writes it
+                        const emitHelper = (data) => { if (!res.writableEnded) res.write(`data: ${JSON.stringify({ type: "helper_progress", ...data })}\n\n`); };
                         const results = await Promise.all(tasks.map(async (task, i) => {
+                            let stepNo = 0;
+                            const liveHandlers = Object.fromEntries(readOnly.map((n) => [n, async (a) => {
+                                const id = `h${i}-${stepNo++}`;
+                                emitHelper({ helper: i, id, tool: n, args: a });
+                                const out = await helperHandlers[n](a);
+                                emitHelper({ helper: i, id, result: String(out).slice(0, 6000) });
+                                return out;
+                            }]));
+                            const finish = (state, text) => { emitHelper({ helper: i, state }); return text; };
                             await sleep(i * 1500); // start a little apart, so the model service isn't hit all at once
+                            emitHelper({ helper: i, state: "running" });
                             // Different models have separate request limits, so helpers take turns: helpers 1, 3 use
                             // DeepSeek V4 Flash and fall back to GLM 5.3 if it fails; helpers 2, 4 use GLM 5.3
                             const models = i % 2 === 0 ? [CF_FLASH_MODEL, HELPER_GLM_MODEL] : [HELPER_GLM_MODEL];
@@ -2613,23 +2625,25 @@ If they ask whether their college/school uses Classgrid, say you can't see that 
                             for (const model of models) {
                                 for (let attempt = 1; attempt <= 2; attempt++) {
                                     try {
+                                        emitHelper({ helper: i, state: "restart" }); // a retry starts its report again
                                         const r = await streamChat({
                                             provider: cloudflareStreamProvider(model),
                                             messages: [
-                                                { role: "system", content: "You are a helper exploring a code project for another AI. Use the tools to look at the project (you can only read it), then answer the task in under 150 words: the facts you found, with file paths and line numbers. Don't guess; say what you could not find." },
+                                                { role: "system", content: "You are a helper exploring a code project for another AI. Use the tools to look at the project (you can only read it). Read the actual code, not just file names. Then answer the task in full, with everything you found: what each relevant file and function does, how the parts work together step by step (frontend, API routes, backend, database, config), the important endpoints, data and settings, with file paths and line numbers. For example, if the task is to explore login, explain the whole flow from start to end: the frontend page and components, the form and what it sends, the API calls, the backend routes, controllers and services, checks and errors, tokens or sessions, the database models, and the config it uses. Never answer with only a list of file names. Don't guess; say what you could not find." },
                                                 { role: "user", content: task }
                                             ],
                                             tools: helperTools,
-                                            toolHandlers: helperHandlers,
+                                            toolHandlers: liveHandlers,
+                                            onToken: (piece) => emitHelper({ helper: i, text: piece }),
                                             maxTokens: 6000,
-                                            maxToolDepth: 20, // big repos need more looking around before an answer
+                                            maxToolDepth: 30, // big repos need more looking around before a full answer
                                             maxContinuations: 1,
                                             answerAtDepthLimit: true,
                                             timeoutMs: 240000
                                         });
                                         if (userId && r.usage?.total_tokens) deductTokens(userId, orgId, chargeableTokens(r.usage, model), tokenSource).catch(() => {});
                                         if (!String(r.answer || "").trim()) { lastError = "no answer"; break; } // try the next model
-                                        return `Helper ${i + 1} (${task.slice(0, 80)}):\n${String(r.answer).slice(0, 1400)}`;
+                                        return finish("done", `Helper ${i + 1} (${task.slice(0, 80)}):\n${String(r.answer).slice(0, 12000)}`);
                                     } catch (e) {
                                         lastError = String(e?.message || e);
                                         // "Too many requests": wait once and retry this model, then move to the next one
@@ -2638,7 +2652,7 @@ If they ask whether their college/school uses Classgrid, say you can't see that 
                                     }
                                 }
                             }
-                            return `Helper ${i + 1} (${task.slice(0, 80)}) failed: ${lastError}`;
+                            return finish("failed", `Helper ${i + 1} (${task.slice(0, 80)}) failed: ${lastError}`);
                         }));
                         return results.join("\n\n");
                     },

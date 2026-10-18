@@ -481,7 +481,7 @@ export const getMcpTools = () => [
   },
   {
     name: 'run_project_helpers',
-    description: 'Send 1 to 4 helper agents to explore the open Project Mode project at the same time. Each helper can only read the project (list, read, search) and returns a short summary with file paths and line numbers. Give each helper one clear task.',
+    description: 'Send 1 to 4 helper agents to explore the open Project Mode project at the same time. Each helper can only read the project (list, read, search) and returns a full, detailed report of what it found and how it works, with file paths and line numbers. Give each helper one clear task.',
     inputSchema: {
       type: 'object',
       properties: { tasks: { type: 'array', items: { type: 'string' }, description: 'One task per helper (1-4).' } },

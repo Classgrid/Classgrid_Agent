@@ -381,7 +381,7 @@ type UIFileAttachment = {
 
 export type AgentStep =
   | { id: string, type: "thought", title: string, details: string, status: "loading" | "success" }
-  | { id: string, type: "tool", tool: string, args: any, result?: string, status: "loading" | "success" | "error" };
+  | { id: string, type: "tool", tool: string, args: any, result?: string, status: "loading" | "success" | "error", helpers?: { state: string, actions: { id: string, tool: string, args: any, result?: string, status: string }[], text: string }[] };
 
 export type ChatMessage = {
   id: string;
@@ -4041,6 +4041,26 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
                     ...prev.slice(0, -1),
                     { ...lastMsg, steps: updatedSteps }
                   ];
+                });
+              } else if (event.type === "helper_progress" && typeof event.helper === "number") {
+                // Project Mode helpers working: each helper's reads/searches and its report as it is written
+                setMessages((prev) => {
+                  const lastMsg = prev[prev.length - 1];
+                  if (!lastMsg || lastMsg.role !== "assistant" || !lastMsg.steps) return prev;
+                  const idx = lastMsg.steps.map((s) => s.type === 'tool' && s.tool === 'run_project_helpers' && s.status === 'loading').lastIndexOf(true);
+                  const step = lastMsg.steps[idx];
+                  if (!step || step.type !== 'tool') return prev;
+                  const helpers = [...(step.helpers || [])];
+                  const h = { state: 'waiting', actions: [] as { id: string, tool: string, args: any, result?: string, status: string }[], text: '', ...(helpers[event.helper] || {}) };
+                  if (event.tool) h.actions = [...h.actions, { id: String(event.id), tool: event.tool, args: event.args, status: 'loading' }];
+                  else if (event.id && typeof event.result === 'string') h.actions = h.actions.map((a) => (a.id === event.id ? { ...a, result: event.result, status: 'success' } : a));
+                  if (event.text) h.text += event.text;
+                  if (event.state === 'restart') h.text = '';
+                  else if (event.state) h.state = event.state;
+                  helpers[event.helper] = h;
+                  const updatedSteps = [...lastMsg.steps];
+                  updatedSteps[idx] = { ...step, helpers };
+                  return [...prev.slice(0, -1), { ...lastMsg, steps: updatedSteps }];
                 });
               } else if (event.type === "chat_ended") {
                 chatEndedSeen = true;

@@ -9,7 +9,7 @@ import { cn } from '@/lib/utils';
 export const PROJECT_EXPLORE_TOOLS = new Set(['view_project_file', 'search_project', 'list_project_files', 'search_project_by_meaning']);
 export const PROJECT_EDIT_TOOLS = new Set(['write_project_file', 'edit_project_file']);
 
-type Step = { id: string; tool: string; status?: string; args?: any; result?: string };
+type Step = { id: string; tool: string; status?: string; args?: any; result?: string; helpers?: HelperLive[] };
 
 const baseName = (p = '') => String(p).replace(/\\/g, '/').replace(/\/+$/, '').split('/').pop() || p || 'project';
 const lineCount = (s = '') => (String(s) === '' ? 0 : String(s).split('\n').length);
@@ -266,9 +266,18 @@ function parseHelpers(result?: string): HelperResult[] {
     .filter(Boolean) as HelperResult[];
 }
 
-function HelperItem({ task, answer, failed, loading }: { task: string; answer?: string; failed?: boolean; loading?: boolean }) {
-  const [open, setOpen] = useState(false);
-  const canOpen = !loading && !!answer;
+// What one helper is doing right now (sent live while the helpers work)
+// Each read/search is shown the same way as the main Agent's own steps
+export type HelperLive = { state: string; actions: { id: string; tool: string; args: any; result?: string; status: string }[]; text: string };
+
+function HelperItem({ task, answer, failed, loading, live }: { task: string; answer?: string; failed?: boolean; loading?: boolean; live?: HelperLive }) {
+  // Helpers seen working in this session start open, so their live work is visible
+  const [openState, setOpen] = useState<boolean | null>(null);
+  const open = openState ?? !!live;
+  const running = loading && live?.state !== 'done' && live?.state !== 'failed';
+  const report = answer || live?.text || '';
+  const canOpen = !!report || !!live?.actions.length;
+  const isFailed = failed || live?.state === 'failed';
   return (
     <div className="flex flex-col">
       <button
@@ -277,11 +286,17 @@ function HelperItem({ task, answer, failed, loading }: { task: string; answer?: 
         disabled={!canOpen}
         className={cn('flex min-w-0 items-start gap-1.5 py-1 text-[13px] text-left text-slate-500 dark:text-[#8a8a8a]', canOpen && 'hover:text-foreground')}
       >
-        {loading ? <Spinner className="size-3 shrink-0" /> : <span className={cn('size-1.5 shrink-0 rounded-full', failed ? 'bg-red-500' : 'bg-emerald-500')} />}
+        {running ? <Spinner className="size-3 shrink-0" /> : <span className={cn('size-1.5 shrink-0 rounded-full', isFailed ? 'bg-red-500' : 'bg-emerald-500')} />}
         <span className="min-w-0 break-words">{task}</span>
         {canOpen && (open ? <ChevronDown className="size-3.5 shrink-0" /> : <ChevronRight className="size-3.5 shrink-0" />)}
       </button>
-      {open && answer && <div className="ml-3 mb-1 whitespace-pre-wrap border-l border-border pl-3 text-[13px] text-foreground/80">{answer}</div>}
+      {open && (
+        <div className="ml-3 mb-1 flex flex-col border-l border-border pl-3">
+          {live?.actions.map((a) => <ExploreItem key={a.id} step={a} />)}
+          {running && live?.state === 'running' && !live.text && !live.actions.some((a) => a.status === 'loading') && <div className="flex items-center gap-1.5 py-1 text-[13px] text-slate-500 dark:text-[#8a8a8a]"><Spinner className="size-3 shrink-0" />Thinking</div>}
+          {report && <div className="mt-1 whitespace-pre-wrap text-[13px] text-foreground/80">{report}</div>}
+        </div>
+      )}
     </div>
   );
 }
@@ -302,8 +317,8 @@ export function ProjectHelpersStep({ step }: { step: Step }) {
       {isOpen && (
         <div className="ml-10 flex flex-col">
           {loading || !results.length
-            ? tasks.map((t, i) => <HelperItem key={i} task={t} loading={loading} answer={loading ? undefined : String(step.result || '')} />)
-            : results.map((r, i) => <HelperItem key={i} task={r.task} answer={r.answer} failed={r.failed} />)}
+            ? tasks.map((t, i) => <HelperItem key={i} task={t} loading={loading} live={step.helpers?.[i]} answer={loading ? undefined : String(step.result || '')} />)
+            : results.map((r, i) => <HelperItem key={i} task={r.task} answer={r.answer} failed={r.failed} live={step.helpers?.[i]} />)}
         </div>
       )}
     </div>
