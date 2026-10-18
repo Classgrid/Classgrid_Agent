@@ -2608,7 +2608,11 @@ If they ask whether their college/school uses Classgrid, say you can't see that 
                         const emitHelper = (data) => { if (!res.writableEnded) res.write(`data: ${JSON.stringify({ type: "helper_progress", ...data })}\n\n`); };
                         const results = await Promise.all(tasks.map(async (task, i) => {
                             let stepNo = 0;
+                            // Each try gets 4 minutes of looking around; after that the tools say "time is up", so the
+                            // helper writes its report from what it already read instead of running on with no answer
+                            let deadline = 0;
                             const liveHandlers = Object.fromEntries(readOnly.map((n) => [n, async (a) => {
+                                if (Date.now() > deadline) return "Time is up: do not call any more tools. Write your full final answer now from what you already found.";
                                 const id = `h${i}-${stepNo++}`;
                                 emitHelper({ helper: i, id, tool: n, args: a });
                                 const out = await helperHandlers[n](a);
@@ -2627,6 +2631,7 @@ If they ask whether their college/school uses Classgrid, say you can't see that 
                                 for (let attempt = 1; attempt <= 2; attempt++) {
                                     try {
                                         emitHelper({ helper: i, state: "restart" }); // a retry starts its report again
+                                        deadline = Date.now() + 4 * 60 * 1000;
                                         const helperArgs = {
                                             messages: [
                                                 { role: "system", content: "You are a helper exploring a code project for another AI. Use the tools to look at the project (you can only read it). Read the actual code, not just file names. Then answer the task in full, with everything you found: what each relevant file and function does, how the parts work together step by step (frontend, API routes, backend, database, config), the important endpoints, data and settings, with file paths and line numbers. For example, if the task is to explore login, explain the whole flow from start to end: the frontend page and components, the form and what it sends, the API calls, the backend routes, controllers and services, checks and errors, tokens or sessions, the database models, and the config it uses. Never answer with only a list of file names. Don't guess; say what you could not find." },
@@ -2642,7 +2647,7 @@ If they ask whether their college/school uses Classgrid, say you can't see that 
                                         const r = CLAUDE_CHAT_MODELS.has(model)
                                             // All three read-only tools stay loaded (no tool search needed)
                                             ? await streamClaudeChat({ ...helperArgs, model, loadedToolNames: new Set(readOnly), answerAtDepthLimit: true })
-                                            : await streamChat({ ...helperArgs, provider: cloudflareStreamProvider(model), maxTokens: 6000, maxContinuations: 1, answerAtDepthLimit: true });
+                                            : await streamChat({ ...helperArgs, provider: cloudflareStreamProvider(model), maxTokens: 8192, maxContinuations: 2, answerAtDepthLimit: true }); // room for thinking plus a full report
                                         if (userId && r.usage?.total_tokens) deductTokens(userId, orgId, chargeableTokens(r.usage, model), tokenSource).catch(() => {});
                                         if (!String(r.answer || "").trim()) { lastError = "no answer"; break; } // try the next model
                                         return finish("done", `Helper ${i + 1} (${task.slice(0, 80)}):\n${String(r.answer).slice(0, 12000)}`);
