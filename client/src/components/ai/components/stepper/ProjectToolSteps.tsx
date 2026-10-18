@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { ChevronDown, ChevronRight, Folder, FileText, Github } from 'lucide-react';
 import { Spinner } from '@/components/marketing_ui/spinner';
 import { CombinedReasoningBlock } from './CombinedReasoningBlock';
@@ -271,6 +271,26 @@ function parseHelpers(result?: string): HelperResult[] {
 // Each read/search is shown the same way as the main Agent's own steps
 export type HelperLive = { state: string; actions: { id: string; tool: string; args: any; result?: string; status: string }[]; text: string };
 
+// A box with its own scroll and a height limit, so live helper work doesn't push the page around.
+// It keeps showing the newest lines, unless the user scrolled up to read.
+function FollowBox({ children, className, follow }: { children: React.ReactNode; className?: string; follow: unknown }) {
+  const ref = useRef<HTMLDivElement>(null);
+  const stick = useRef(true);
+  useEffect(() => {
+    const el = ref.current;
+    if (el && stick.current) el.scrollTop = el.scrollHeight;
+  }, [follow]);
+  return (
+    <div
+      ref={ref}
+      onScroll={(e) => { const el = e.currentTarget; stick.current = el.scrollHeight - el.scrollTop - el.clientHeight < 24; }}
+      className={cn('overflow-y-auto overscroll-contain pr-1', className)}
+    >
+      {children}
+    </div>
+  );
+}
+
 function HelperItem({ task, answer, failed, loading, live }: { task: string; answer?: string; failed?: boolean; loading?: boolean; live?: HelperLive }) {
   // Helpers seen working in this session start open, so their live work is visible
   const [openState, setOpen] = useState<boolean | null>(null);
@@ -292,18 +312,32 @@ function HelperItem({ task, answer, failed, loading, live }: { task: string; ans
         {canOpen && (open ? <ChevronDown className="size-3.5 shrink-0" /> : <ChevronRight className="size-3.5 shrink-0" />)}
       </button>
       {open && (
-        <div className="ml-3 mb-1 flex flex-col border-l border-border pl-3">
-          {live?.actions.map((a, i) => a.tool === '__thought'
-            ? <CombinedReasoningBlock key={a.id} sentences={String(a.result || '').split(/\n\s*\n/).map((s) => s.trim()).filter(Boolean)} isStreaming={!!running && i === live.actions.length - 1 && !live.text} />
-            : <ExploreItem key={a.id} step={a} />)}
-          {running && live?.state === 'running' && !live.text && !live.actions.some((a) => a.status === 'loading') && live.actions[live.actions.length - 1]?.tool !== '__thought' && (
-            // Same glowing "Thinking" as the main answer
-            <p className="py-1 w-fit bg-[linear-gradient(110deg,#404040,35%,#fff,50%,#404040,75%,#404040)] bg-[length:200%_100%] bg-clip-text text-[13px] font-medium text-transparent" style={{ animation: "shimmer 2.5s linear infinite" }}>
-              Thinking
-              <style>{`@keyframes shimmer { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }`}</style>
-            </p>
+        <div className="ml-3 mb-2 flex flex-col gap-1.5 border-l border-border pl-3">
+          {!!live?.actions.length && (
+            <>
+              <div className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">Work</div>
+              <FollowBox className="max-h-[240px]" follow={`${live.actions.length}:${live.actions[live.actions.length - 1]?.result?.length || 0}:${live.state}`}>
+                {live.actions.map((a, i) => a.tool === '__thought'
+                  ? <CombinedReasoningBlock key={a.id} sentences={String(a.result || '').split(/\n\s*\n/).map((s) => s.trim()).filter(Boolean)} isStreaming={!!running && i === live.actions.length - 1 && !live.text} />
+                  : <ExploreItem key={a.id} step={a} />)}
+                {running && live.state === 'running' && !live.text && !live.actions.some((a) => a.status === 'loading') && live.actions[live.actions.length - 1]?.tool !== '__thought' && (
+                  // Same glowing "Thinking" as the main answer
+                  <p className="py-1 w-fit bg-[linear-gradient(110deg,#404040,35%,#fff,50%,#404040,75%,#404040)] bg-[length:200%_100%] bg-clip-text text-[13px] font-medium text-transparent" style={{ animation: "shimmer 2.5s linear infinite" }}>
+                    Thinking
+                    <style>{`@keyframes shimmer { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }`}</style>
+                  </p>
+                )}
+              </FollowBox>
+            </>
           )}
-          {report && <div className="mt-1 whitespace-pre-wrap text-[13px] text-foreground/80">{report}</div>}
+          {report && (
+            <>
+              {!!live?.actions.length && <div className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">Result</div>}
+              <FollowBox className="max-h-[260px]" follow={report.length}>
+                <div className="whitespace-pre-wrap text-[13px] text-foreground/80">{report}</div>
+              </FollowBox>
+            </>
+          )}
         </div>
       )}
     </div>
