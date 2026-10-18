@@ -4,7 +4,7 @@ import { PageHeader } from "@/components/layout/PageHeader";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/marketing_ui/card";
 import { Badge } from "@/components/marketing_ui/badge";
 import { Button } from "@/components/marketing_ui/button";
-import { ScrollArea } from "@/components/marketing_ui/scroll-area";
+import { ScrollArea, ScrollBar } from "@/components/marketing_ui/scroll-area";
 import { StatCard } from "@/components/marketing_ui/StatCard";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/marketing_ui/table";
 import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/marketing_ui/empty";
@@ -132,7 +132,10 @@ export function PlaygroundPage() {
               <CardDescription>One row per trip to the AI, with the real numbers the provider sent back. Each round sends the conversation again, so input grows. Cached input is the part the model remembered from the last round. "cut" means the round's real input used up the tokens left, so it was stopped before writing anything.</CardDescription>
             </CardHeader>
             <CardContent>
-              <Table>
+              {/* Scrolls sideways so every column (up to Time) stays visible */}
+              <ScrollArea className="w-full">
+              <div className="w-max min-w-full">
+              <Table className="whitespace-nowrap">
                 <TableHeader>
                   <TableRow>
                     <TableHead>#</TableHead>
@@ -181,6 +184,9 @@ export function PlaygroundPage() {
                   )}
                 </TableBody>
               </Table>
+              </div>
+              <ScrollBar orientation="horizontal" />
+              </ScrollArea>
             </CardContent>
           </Card>
 
