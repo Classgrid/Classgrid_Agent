@@ -32,7 +32,6 @@ const time = (at: number) => new Date(at).toLocaleTimeString("en-IN", { hour: "2
 export function PlaygroundPage() {
   const [runs, setRuns] = useState<Run[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [connected, setConnected] = useState(false);
 
   useEffect(() => {
     // The live connection can open a moment after the page: look for it until it is there
@@ -52,9 +51,6 @@ export function PlaygroundPage() {
     const onEnd = (d: any) => update(d.runId, (r) => ({ ...r, end: d as EndInfo }));
 
     const attach = (s: NonNullable<ReturnType<typeof getSocket>>) => {
-      setConnected(s.connected);
-      s.on("connect", () => setConnected(true));
-      s.on("disconnect", () => setConnected(false));
       s.on("playground:start", onStart);
       s.on("playground:round", onRound);
       s.on("playground:tool", onTool);
@@ -85,14 +81,8 @@ export function PlaygroundPage() {
 
   return (
     <div className="flex flex-col gap-6 w-full max-w-7xl mx-auto p-4 sm:p-6 lg:p-8 pb-12">
-      <PageHeader
-        title="Playground"
-        description="Your own AI messages, live: every round's tokens, each tool call and the words as they are written. Open the chat in another tab and send a message."
-      >
-        <div className="flex items-center gap-2">
-          <Badge variant={connected ? "success" : "neutral"} dot>{connected ? "Live" : "Connecting"}</Badge>
-          <Button variant="outline" onClick={() => { setRuns([]); setSelectedId(null); }} disabled={!runs.length}>Clear</Button>
-        </div>
+      <PageHeader title="Playground">
+        <Button variant="outline" onClick={() => { setRuns([]); setSelectedId(null); }} disabled={!runs.length}>Clear</Button>
       </PageHeader>
 
       {!run ? (
