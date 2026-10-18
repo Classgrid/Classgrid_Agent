@@ -38,6 +38,7 @@ import { getBrandingForHost, injectBranding } from "../src/services/branding-res
 
 import connectDB from "../config/db.js";
 import passportConfig from "../src/services/passport.service.js";
+import Organization from "../src/models/Organization.js";
 
 import authRoutes from "../src/routes/auth.routes.js";
 import vercelAuthRoutes from "../src/routes/auth.vercel.routes.js";
@@ -196,6 +197,28 @@ const isOAuthProviderPath = (path) => {
   return p === "/oauth" || p.startsWith("/oauth/");
 };
 
+// White-labeled ERP domains (e.g. erp.mycollege.edu) are allowed only when an organization has verified them.
+// The answer is kept for 5 minutes per domain, so most requests don't touch the database.
+const orgDomainCache = new Map();
+async function isVerifiedOrgDomain(origin) {
+  let host;
+  try { host = new URL(origin).hostname.toLowerCase(); } catch { return false; }
+  const cached = orgDomainCache.get(host);
+  if (cached && Date.now() - cached.at < 5 * 60 * 1000) return cached.ok;
+  try {
+    const org = await Organization.findOne({
+      $or: [
+        { "erp_domain.domain": host, "erp_domain.status": { $in: ["verified", "active"] }, "erp_domain.is_enabled": { $ne: false } },
+        { "custom_domain.domain": host, "custom_domain.status": { $in: ["verified", "active"] }, "custom_domain.is_enabled": { $ne: false } },
+      ],
+    }).select("_id").lean();
+    orgDomainCache.set(host, { ok: !!org, at: Date.now() });
+    return !!org;
+  } catch {
+    return cached?.ok || false; // database hiccup: keep the last answer
+  }
+}
+
 const apiCors = cors({
     origin: function (origin, callback) {
       // Allow requests with no origin (mobile apps, curl, server-to-server)
@@ -211,8 +234,8 @@ const apiCors = cors({
         "https://nikhil.quantumchem.site"
       ];
 
-      // Allow any *.classgrid.in subdomain (tenant portals)
-      const isClassgridSubdomain = /^https:\/\/[a-z0-9-]+\.classgrid\.in$/.test(origin);
+      // Allow any *.classgrid.in subdomain (tenant portals), except cdn (it serves files users upload)
+      const isClassgridSubdomain = /^https:\/\/[a-z0-9-]+\.classgrid\.in$/.test(origin) && origin !== "https://cdn.classgrid.in";
       const isLocalSubdomain = /^http:\/\/[a-z0-9-]+\.localhost(:\d+)?$/.test(origin);
       const isLocalhostDev = /^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin);
 
@@ -220,10 +243,10 @@ const apiCors = cors({
         return callback(null, true);
       }
 
-      // For white-labeled custom domains (e.g. erp.mycollege.edu), we must allow the origin dynamically.
-      // Since we use Bearer tokens for auth, reflecting any https:// origin is safe.
+      // White-labeled custom domains (e.g. erp.mycollege.edu): only ones an organization has verified.
+      // Reflecting any https:// origin let other websites use the login cookie (SameSite=None on .classgrid.in).
       if (origin.startsWith("https://")) {
-        return callback(null, true);
+        return isVerifiedOrgDomain(origin).then((ok) => callback(ok ? null : new Error(`CORS blocked: ${origin}`), ok));
       }
 
       callback(new Error(`CORS blocked: ${origin}`));
@@ -231,7 +254,14 @@ const apiCors = cors({
     credentials: true
   });
 
-app.use((req, res, next) => (isOAuthProviderPath(req.path) ? next() : apiCors(req, res, next)));
+// Remote MCP and its discovery files use Bearer tokens only: any website may call them, but never with the login cookie
+const tokenOnlyCors = cors({ origin: "*", credentials: false });
+app.use((req, res, next) => {
+  if (isOAuthProviderPath(req.path)) return next();
+  const p = String(req.path || "").toLowerCase();
+  if (p === "/mcp" || p.startsWith("/mcp/") || p.startsWith("/.well-known/")) return tokenOnlyCors(req, res, next);
+  return apiCors(req, res, next);
+});
 
 // /oauth/*: credentialed CORS only for the Classgrid consent page. The login cookie is SameSite=None on
 // .classgrid.in, so reflecting any https origin here let other websites read the user's details and get
