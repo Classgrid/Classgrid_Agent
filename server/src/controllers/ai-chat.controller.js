@@ -2641,7 +2641,7 @@ If they ask whether their college/school uses Classgrid, say you can't see that 
                                         };
                                         const r = CLAUDE_CHAT_MODELS.has(model)
                                             // All three read-only tools stay loaded (no tool search needed)
-                                            ? await streamClaudeChat({ ...helperArgs, model, loadedToolNames: new Set(readOnly) })
+                                            ? await streamClaudeChat({ ...helperArgs, model, loadedToolNames: new Set(readOnly), answerAtDepthLimit: true })
                                             : await streamChat({ ...helperArgs, provider: cloudflareStreamProvider(model), maxTokens: 6000, maxContinuations: 1, answerAtDepthLimit: true });
                                         if (userId && r.usage?.total_tokens) deductTokens(userId, orgId, chargeableTokens(r.usage, model), tokenSource).catch(() => {});
                                         if (!String(r.answer || "").trim()) { lastError = "no answer"; break; } // try the next model

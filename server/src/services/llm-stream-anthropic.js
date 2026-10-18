@@ -317,6 +317,8 @@ export async function streamClaudeChat({
     // Auto-continue: when the answer hits max_tokens it is continued in the same reply, up to this many times,
     // while outputBudget (the user's remaining tokens; undefined = no limit) still has room
     maxContinuations = 0,
+    // At the tool-round limit, ask for an answer from what was found instead of the fixed "couldn't find" text
+    answerAtDepthLimit = false,
     outputBudget,
     signal,
     onToken,
@@ -493,6 +495,22 @@ export async function streamClaudeChat({
                 return { answer: (continuedText + piece).trim() || null, usage, toolsRun, servedModel };
             }
             if (depth >= maxToolDepth) {
+                if (answerAtDepthLimit) {
+                    // Same as the Cloudflare path: no more tools, answer from what was found so far
+                    conversation.push({ role: "assistant", content });
+                    conversation.push({ role: "user", content: [
+                        ...toolUses.map((c) => ({ type: "tool_result", tool_use_id: c.id, content: "Not run: no more tool calls are possible.", is_error: true })),
+                        { type: "text", text: "No more tool calls are possible. Answer now from what you found so far, and say what you could not check." },
+                    ] });
+                    const last = await getClient().beta.messages.stream(
+                        { ...params, max_tokens: roundMaxTokens(), messages: conversation, tool_choice: { type: "none" } },
+                        { signal, timeout: timeoutMs },
+                    ).finalMessage();
+                    addUsage(usage, last.usage);
+                    const lastText = (last.content || []).filter((b) => b.type === "text").map((b) => b.text).join("").trim();
+                    if (lastText) onToken?.(lastText);
+                    return { answer: (continuedText + lastText).trim() || null, usage, toolsRun, servedModel };
+                }
                 return { answer: "I searched but couldn't find a clear answer. Could you try rephrasing?", usage, toolsRun, servedModel };
             }
 
