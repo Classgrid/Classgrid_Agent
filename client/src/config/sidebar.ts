@@ -123,6 +123,7 @@ export const dashboardConfigs: DashboardConfig[] = [
         label: "OVERVIEW",
         items: [
           { label: "Agent", to: "/superadmin/dashboard", icon: Play },
+          { label: "Playground", to: "/superadmin/playground", icon: Activity },
           { label: "Analytics", to: "/superadmin/analytics", icon: FileBarChart }
         ]
       },

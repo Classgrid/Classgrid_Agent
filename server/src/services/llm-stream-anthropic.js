@@ -13,7 +13,7 @@
 //   "drop_block" makes a prefix mismatch degrade instead of failing the request.
 
 import Anthropic from "@anthropic-ai/sdk";
-import { StreamChatError, CONTINUE_PROMPT, THINKING_CUT_PROMPT } from "./llm-stream.js";
+import { StreamChatError, CONTINUE_PROMPT, THINKING_CUT_PROMPT, budgetStopAnswer } from "./llm-stream.js";
 
 export const CLAUDE_CHAT_MODELS = new Set([
     "claude-haiku-5-5",
@@ -320,6 +320,12 @@ export async function streamClaudeChat({
     // At the tool-round limit, ask for an answer from what was found instead of the fixed "couldn't find" text
     answerAtDepthLimit = false,
     outputBudget,
+    // Live token check, real numbers only (same as streamChat): onRoundUsage(usage) after each round, tokensLeft(),
+    // maxOutputTokens(), and inputTooBig(usage) with the round's real input from its first event
+    onRoundUsage,
+    tokensLeft,
+    maxOutputTokens,
+    inputTooBig,
     signal,
     onToken,
     onThought,
@@ -414,9 +420,30 @@ export async function streamClaudeChat({
         ? params.max_tokens
         : Math.max(1024, Math.min(params.max_tokens, outputBudget - (usage.output_tokens || 0)));
 
+    // One round's Anthropic usage in the same shape as the running total (prompt_tokens includes cached input)
+    const roundShape = (u) => {
+        const r = { input_tokens: 0, output_tokens: 0, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 };
+        addUsage(r, u);
+        return r;
+    };
+    let lastRoundText = "";
+    const budgetStop = (why) => {
+        console.log(`[AI-STREAM] Claude stopped: the user's tokens ran out (${why}, toolsRun=${toolsRun})`);
+        return { answer: budgetStopAnswer(continuedText + lastRoundText), usage, toolsRun, servedModel, stoppedForBudget: true };
+    };
+    // What the next round may write: the user's real tokens left at this model's output price
+    const budgetMaxTokens = () => {
+        const cap = maxOutputTokens?.();
+        return cap === undefined || cap === null ? roundMaxTokens() : Math.min(roundMaxTokens(), Math.floor(cap));
+    };
+
     try {
         for (;;) {
             if (signal?.aborted) throw new StreamChatError("Request aborted");
+            const left = tokensLeft?.();
+            if (left !== undefined && left !== null && left <= 0) return budgetStop("nothing left");
+            const roundMax = budgetMaxTokens();
+            if (roundMax < 1) return budgetStop("nothing left to write with");
 
             thoughtThisRound = false;
             const emitThought = (piece) => {
@@ -428,13 +455,21 @@ export async function streamClaudeChat({
             let roundText = "";
             const splitter = createThinkSplitter((piece) => { roundText += piece; onToken?.(piece); }, emitThought);
             const stream = getClient().beta.messages.stream(
-                { ...params, max_tokens: roundMaxTokens(), messages: conversation },
+                { ...params, max_tokens: roundMax, messages: conversation },
                 { signal, timeout: timeoutMs },
             );
 
+            // The first event carries this round's real input count: if that alone uses up the user's tokens,
+            // the round is cut right there, before anything is written
+            let budgetCut = false;
             for await (const event of stream) {
                 if (event.type === "message_start") {
                     roundUsage = { ...(event.message?.usage || {}) };
+                    if (inputTooBig?.(roundShape(roundUsage))) {
+                        budgetCut = true;
+                        stream.abort();
+                        break;
+                    }
                     continue;
                 }
                 if (event.type === "message_delta") {
@@ -449,10 +484,19 @@ export async function streamClaudeChat({
                 }
             }
             splitter.flush();
+            if (budgetCut) {
+                const cutRound = roundShape({ input_tokens: roundUsage.input_tokens, cache_read_input_tokens: roundUsage.cache_read_input_tokens, cache_creation_input_tokens: roundUsage.cache_creation_input_tokens });
+                addUsage(usage, cutRound);
+                roundUsage = null;
+                onRoundUsage?.(cutRound, { cut: true });
+                return budgetStop("this round's input alone used up the tokens left");
+            }
 
             const message = await stream.finalMessage();
             roundUsage = null;
             addUsage(usage, message.usage);
+            onRoundUsage?.(roundShape(message.usage), { cut: false });
+            lastRoundText = roundText;
             if (message.model) servedModel = message.model;
             if (thoughtThisRound) hadReasoning = true;
 
@@ -502,11 +546,16 @@ export async function streamClaudeChat({
                         ...toolUses.map((c) => ({ type: "tool_result", tool_use_id: c.id, content: "Not run: no more tool calls are possible.", is_error: true })),
                         { type: "text", text: "No more tool calls are possible. Answer now from what you found so far, and say what you could not check." },
                     ] });
+                    const leftNow = tokensLeft?.();
+                    if (leftNow !== undefined && leftNow !== null && leftNow <= 0) return budgetStop("nothing left");
+                    const lastMax = budgetMaxTokens();
+                    if (lastMax < 1) return budgetStop("nothing left to write with");
                     const last = await getClient().beta.messages.stream(
-                        { ...params, max_tokens: roundMaxTokens(), messages: conversation, tool_choice: { type: "none" } },
+                        { ...params, max_tokens: lastMax, messages: conversation, tool_choice: { type: "none" } },
                         { signal, timeout: timeoutMs },
                     ).finalMessage();
                     addUsage(usage, last.usage);
+                    onRoundUsage?.(roundShape(last.usage), { cut: false });
                     const lastText = (last.content || []).filter((b) => b.type === "text").map((b) => b.text).join("").trim();
                     if (lastText) onToken?.(lastText);
                     return { answer: (continuedText + lastText).trim() || null, usage, toolsRun, servedModel };

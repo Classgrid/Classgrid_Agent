@@ -145,7 +145,12 @@ export const hasEnoughTokens = async (userId, orgId, requiredTokens = 1, { paidO
     }
 
     if (usedThisWeek + requiredTokens <= weeklyLimit) {
-        return { allowed: true, source: "weekly_free", remaining: weeklyLimit - usedThisWeek };
+        // spendable: what one answer may use in total. deductTokens spills free-pool overflow into the first
+        // credit pool, so that pool's balance counts too (the live token check during an answer stops at this number).
+        const spill = pickCreditSource(user);
+        const t = user.ai_tokens || {};
+        const spillBalance = spill === "promotion" ? (t.promotion_credits_balance || 0) : spill === "personal" ? (t.ai_credits_balance || 0) : 0;
+        return { allowed: true, source: "weekly_free", remaining: weeklyLimit - usedThisWeek, spendable: weeklyLimit - usedThisWeek + spillBalance };
     }
 
     // 3. FIFO LOGIC: Determine which came FIRST between Top-Up (Paid) and Granted (Promotion)
@@ -298,7 +303,7 @@ export const deductTokens = async (userId, orgId, tokenAmount, source) => {
             const currentBalance = Math.max(0, user?.ai_tokens?.ai_credits_balance || 0);
             const actualDeduction = Math.min(tokenAmount, currentBalance);
             if (actualDeduction <= 0) {
-                return { success: true, remaining: 0, limit: 0, type: "personal" };
+                return { success: true, remaining: 0, limit: 0, type: "personal", uncharged: tokenAmount };
             }
             const updatedUser = await User.findByIdAndUpdate(userId, {
                 $inc: {
@@ -306,7 +311,7 @@ export const deductTokens = async (userId, orgId, tokenAmount, source) => {
                     "ai_tokens.total_ai_tokens_used": actualDeduction
                 }
             }, { returnDocument: 'after' });
-            result = { success: true, remaining: Math.max(0, updatedUser.ai_tokens.ai_credits_balance), limit: updatedUser.ai_tokens.ai_credits_balance + actualDeduction, type: "personal" };
+            result = { success: true, remaining: Math.max(0, updatedUser.ai_tokens.ai_credits_balance), limit: updatedUser.ai_tokens.ai_credits_balance + actualDeduction, type: "personal", uncharged: tokenAmount - actualDeduction };
             triggerEmailAlerts(userId, orgId, "personal", currentBalance, result.remaining, user?.ai_tokens?.total_ai_credits_purchased || currentBalance);
 
         } else if (source === "promotion") {
@@ -315,7 +320,7 @@ export const deductTokens = async (userId, orgId, tokenAmount, source) => {
             const currentBalance = Math.max(0, user?.ai_tokens?.promotion_credits_balance || 0);
             const actualDeduction = Math.min(tokenAmount, currentBalance);
             if (actualDeduction <= 0) {
-                return { success: true, remaining: 0, limit: 0, type: "promotion" };
+                return { success: true, remaining: 0, limit: 0, type: "promotion", uncharged: tokenAmount };
             }
             const updatedUser = await User.findByIdAndUpdate(userId, {
                 $inc: {
@@ -323,7 +328,7 @@ export const deductTokens = async (userId, orgId, tokenAmount, source) => {
                     "ai_tokens.total_ai_tokens_used": actualDeduction
                 }
             }, { returnDocument: 'after' });
-            result = { success: true, remaining: Math.max(0, updatedUser.ai_tokens.promotion_credits_balance), limit: updatedUser.ai_tokens.promotion_credits_balance + actualDeduction, type: "promotion" };
+            result = { success: true, remaining: Math.max(0, updatedUser.ai_tokens.promotion_credits_balance), limit: updatedUser.ai_tokens.promotion_credits_balance + actualDeduction, type: "promotion", uncharged: tokenAmount - actualDeduction };
             triggerEmailAlerts(userId, orgId, "promotion", currentBalance, result.remaining, user?.ai_tokens?.total_promotion_credits_granted || currentBalance);
 
         } else if (source === "weekly_free") {
@@ -359,6 +364,7 @@ export const deductTokens = async (userId, orgId, tokenAmount, source) => {
                     result.spilledTo = next;
                     result.spilledTokens = overflow;
                     result.spill = spill;
+                    if (spill?.uncharged) result.uncharged = spill.uncharged; // the credit pool ran out too
                 } else {
                     result.uncharged = overflow;
                 }
@@ -373,7 +379,7 @@ export const deductTokens = async (userId, orgId, tokenAmount, source) => {
             const headroom = Math.max(0, orgLimit - orgUsed);
             const actualDeduction = Math.min(tokenAmount, headroom);
             if (actualDeduction <= 0) {
-                return { success: true, remaining: 0, limit: orgLimit, type: "pro" };
+                return { success: true, remaining: 0, limit: orgLimit, type: "pro", uncharged: tokenAmount };
             }
             const updatedOrg = await Organization.findByIdAndUpdate(orgId, {
                 $inc: {
@@ -384,7 +390,7 @@ export const deductTokens = async (userId, orgId, tokenAmount, source) => {
             await User.findByIdAndUpdate(userId, {
                 $inc: { "ai_tokens.total_ai_tokens_used": actualDeduction }
             });
-            result = { success: true, remaining: Math.max(0, updatedOrg.ai_config.pro_pool_limit - updatedOrg.ai_config.pro_used_this_period), limit: updatedOrg.ai_config.pro_pool_limit, type: "pro" };
+            result = { success: true, remaining: Math.max(0, updatedOrg.ai_config.pro_pool_limit - updatedOrg.ai_config.pro_used_this_period), limit: updatedOrg.ai_config.pro_pool_limit, type: "pro", uncharged: tokenAmount - actualDeduction };
         }
 
         if (result.success) {

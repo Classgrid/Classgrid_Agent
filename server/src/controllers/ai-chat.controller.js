@@ -1179,6 +1179,72 @@ export const streamAskAi = async (req, res) => {
     // Identity comes only from the auth middleware (the route requires a login), never from the body.
     const userId = req.user?.id || null;
     let tokenSource = "personal";
+    // Live token meter for this answer (main model + helpers), real numbers only: each round's real usage is added
+    // when the provider reports it; a round may write at most what the user has left (at the model's output price);
+    // a round whose real input (sent before anything is written) uses up what is left is cut; with nothing left
+    // the answer stops. spendable is set by the quota check (undefined = no limit).
+    const liveMeter = { spent: 0, spendable: undefined, stopped: false };
+    // Playground (super admins): this answer's rounds, tool calls and live words go to the super admin's own live
+    // channel, so the Playground page can show them next to the chat. Nothing is sent for other users.
+    const playgroundRun = req.user?.role === "super_admin" && userId
+        ? { id: `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`, rounds: {}, pending: { text: "", thought: "" }, timer: null }
+        : null;
+    const playgroundIo = playgroundRun ? import("../services/socket.service.js").then((m) => m.getIO()).catch(() => null) : null;
+    const playground = (event, data) => {
+        if (!playgroundRun) return;
+        playgroundIo.then((io) => io?.to(String(userId)).emit(`playground:${event}`, { runId: playgroundRun.id, at: Date.now(), ...data })).catch(() => {});
+    };
+    const flushPlaygroundText = () => {
+        if (!playgroundRun) return;
+        clearTimeout(playgroundRun.timer);
+        playgroundRun.timer = null;
+        const { text, thought } = playgroundRun.pending;
+        if (text || thought) playground("text", { text, thought });
+        playgroundRun.pending = { text: "", thought: "" };
+    };
+    // Live words, sent in small batches (every quarter second) instead of one event per word
+    const playgroundText = (kind, piece) => {
+        if (!playgroundRun || !piece) return;
+        playgroundRun.pending[kind] += piece;
+        if (!playgroundRun.timer) playgroundRun.timer = setTimeout(flushPlaygroundText, 250);
+    };
+    const meterHooks = (model, who = "Agent") => {
+        const outputWeight = chargeableTokens({ prompt_tokens: 0, completion_tokens: 1000 }, model) / 1000;
+        const left = () => liveMeter.spendable === undefined ? undefined : liveMeter.spendable - liveMeter.spent;
+        return {
+            onRoundUsage: (u, { cut } = {}) => {
+                const cost = chargeableTokens(u, model);
+                liveMeter.spent += cost;
+                if (cut) liveMeter.stopped = true;
+                if (playgroundRun) {
+                    flushPlaygroundText();
+                    const round = (playgroundRun.rounds[who] = (playgroundRun.rounds[who] || 0) + 1);
+                    playground("round", {
+                        who, model, round, cost, cut: !!cut, spent: liveMeter.spent, spendable: liveMeter.spendable ?? null,
+                        input: u.prompt_tokens || 0, output: u.completion_tokens || 0,
+                        // Claude's cached input is charged at the cache price; Cloudflare reports cached tokens too,
+                        // but they are charged at the full price (cacheCounted false)
+                        cacheRead: u.cache_read_input_tokens || u.prompt_tokens_details?.cached_tokens || 0,
+                        cacheWrite: u.cache_creation_input_tokens || 0,
+                        cacheCounted: !!u.cache_read_input_tokens,
+                    });
+                }
+            },
+            tokensLeft: () => {
+                const l = left();
+                if (l !== undefined && l <= 0 && !liveMeter.stopped) {
+                    liveMeter.stopped = true;
+                    playground("stop", { who, spent: liveMeter.spent, spendable: liveMeter.spendable });
+                }
+                return l;
+            },
+            maxOutputTokens: () => {
+                const l = left();
+                return l === undefined ? undefined : Math.max(0, l) / outputWeight;
+            },
+            inputTooBig: (u) => liveMeter.spendable !== undefined && liveMeter.spent + chargeableTokens(u, model) >= liveMeter.spendable,
+        };
+    };
     let availableTokensToGenerate = 8192;
     let orgId = req.user?.organization_id || null;
 
@@ -2615,6 +2681,7 @@ If they ask whether their college/school uses Classgrid, say you can't see that 
                                 if (Date.now() > deadline) return "Time is up: do not call any more tools. Write your full final answer now from what you already found.";
                                 const id = `h${i}-${stepNo++}`;
                                 emitHelper({ helper: i, id, tool: n, args: a });
+                                playground("tool", { who: `Helper ${i + 1}`, tool: n, detail: JSON.stringify(a ?? {}).slice(0, 200) });
                                 const out = await helperHandlers[n](a);
                                 emitHelper({ helper: i, id, result: String(out).slice(0, 6000) });
                                 return out;
@@ -2646,8 +2713,8 @@ If they ask whether their college/school uses Classgrid, say you can't see that 
                                         };
                                         const r = CLAUDE_CHAT_MODELS.has(model)
                                             // All three read-only tools stay loaded (no tool search needed)
-                                            ? await streamClaudeChat({ ...helperArgs, model, loadedToolNames: new Set(readOnly), answerAtDepthLimit: true, maxContinuations: 3 })
-                                            : await streamChat({ ...helperArgs, provider: cloudflareStreamProvider(model), maxTokens: 8192, maxContinuations: 6, answerAtDepthLimit: true }); // a long report keeps going instead of being cut
+                                            ? await streamClaudeChat({ ...helperArgs, ...meterHooks(model, `Helper ${i + 1}`), model, loadedToolNames: new Set(readOnly), answerAtDepthLimit: true, maxContinuations: 3 })
+                                            : await streamChat({ ...helperArgs, ...meterHooks(model, `Helper ${i + 1}`), provider: cloudflareStreamProvider(model), maxTokens: 8192, maxContinuations: 6, answerAtDepthLimit: true }); // a long report keeps going instead of being cut
                                         if (userId && r.usage?.total_tokens) deductTokens(userId, orgId, chargeableTokens(r.usage, model), tokenSource).catch(() => {});
                                         if (!String(r.answer || "").trim()) { lastError = "no answer"; break; } // try the next model
                                         return finish("done", `Helper ${i + 1} (${task.slice(0, 80)}):\n${String(r.answer).slice(0, 40000)}`);
@@ -4062,6 +4129,7 @@ If they ask whether their college/school uses Classgrid, say you can't see that 
                                 status: 'loading'
                             });
                             try { if (!res.writableEnded) res.write(`data: ${JSON.stringify({ type: "tool_start", tool: toolName, args })}\n\n`); } catch (e) { }
+                            playground("tool", { who: "Agent", tool: toolName, detail: JSON.stringify(args ?? {}).slice(0, 200) });
                         }
                         let resultStr;
                         try { resultStr = await handler(args); } catch (err) { resultStr = "Error: " + (err.message || String(err)); }
@@ -4201,6 +4269,8 @@ If a tool fails, never show the error message; say only: "Something went wrong o
             tokenSource = check.source;
             if (check.remaining !== undefined) llmConfig.defaultMaxTokens = Math.max(1, Math.min(8192, check.remaining));
             quotaRemaining = check.remaining;
+            liveMeter.spendable = check.spendable ?? check.remaining;
+            playground("start", { question: String(body.question || "").slice(0, 300), model: typeof body.selectedModel === "string" ? body.selectedModel : "auto", spendable: liveMeter.spendable ?? null });
         } catch (err) {
             console.error("Quota check error:", err);
             res.write(`data: ${JSON.stringify({ type: "error", error: "We couldn't check your AI usage balance right now, so this message was not answered. Please try again in a minute." })}\n\n`);
@@ -4300,6 +4370,7 @@ If a tool fails, never show the error message; say only: "Something went wrong o
                         console.log(`[AI-TIMING] first thought at +${Date.now() - requestStartedAt}ms`);
                     }
                     accThought += thought;
+                    playgroundText("thought", thought);
                     if (requestAborted || res.writableEnded) return;
                     try { res.write(`data: ${JSON.stringify({ type: "thought", thought })}\n\n`); } catch (e) { }
                 };
@@ -4309,6 +4380,7 @@ If a tool fails, never show the error message; say only: "Something went wrong o
                         console.log(`[AI-TIMING] first answer token at +${Date.now() - requestStartedAt}ms`);
                     }
                     shownAnswerText += token || "";
+                    playgroundText("text", token);
                     if (requestAborted || res.writableEnded) return;
                     try { res.write(`data: ${JSON.stringify({ type: "token", token })}\n\n`); } catch (e) { }
                 };
@@ -4369,6 +4441,7 @@ If a tool fails, never show the error message; say only: "Something went wrong o
                                 // An answer cut off by the length limit (e.g. "draw 40 cards") is continued in the same reply
                                 maxContinuations: 3,
                                 outputBudget: quotaRemaining,
+                                ...meterHooks(requestedModel),
                                 timeoutMs: llmConfig.providers[0].timeoutMs,
                                 systemCacheBoundary,
                                 // Images and PDFs attached to this message are sent to Claude directly (native vision),
@@ -4430,6 +4503,7 @@ If a tool fails, never show the error message; say only: "Something went wrong o
                                 maxToolDepth: 100,
                                 maxContinuations: 3,
                                 outputBudget: quotaRemaining,
+                                ...meterHooks(model),
                                 timeoutMs: llmConfig.providers[0].timeoutMs,
                                 signal: streamAbort.signal,
                                 onStatus,
@@ -4592,6 +4666,17 @@ If a tool fails, never show the error message; say only: "Something went wrong o
 
                     // The tokenSource was determined earlier via hasEnoughTokens
                     const deductionResult = await deductTokens(userId, orgId, poolTokens, tokenSource);
+                    flushPlaygroundText();
+                    playground("end", {
+                        model: usedModel,
+                        realCost: poolTokens, // the answering model (helpers are charged on their own, in meterTotal)
+                        charged: Math.max(0, poolTokens - (deductionResult?.uncharged || 0)),
+                        uncharged: deductionResult?.uncharged || 0,
+                        balanceAfter: deductionResult?.remaining ?? null,
+                        meterTotal: liveMeter.spent,
+                        spendable: liveMeter.spendable ?? null,
+                        stopped: liveMeter.stopped,
+                    });
 
                     if (deductionResult && deductionResult.success) {
                         const totalUsed = deductionResult.limit - deductionResult.remaining;

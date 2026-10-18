@@ -60,9 +60,12 @@ function createThinkSplitter(emitText, emitThought) {
 
 // Sent when an answer was cut off by the length limit, so the model picks up exactly where it stopped
 export const THINKING_CUT_PROMPT = "You ran out of room while thinking and wrote no answer yet. Stop planning now and write the final answer directly, without drafting it again in your thinking. Finish everything that was asked.";
-export const CONTINUE_PROMPT = "Your previous reply was cut off by the length limit. Continue EXACTLY where it stopped, even mid-word, mid-sentence or mid-code, without repeating anything and without any preamble, apology or comment. If you were inside a code block, keep writing inside it (do not open a new ```). Finish everything that was asked.";
+// Added to what was written so far when the user's tokens run out during an answer
+export const BUDGET_STOP_NOTE = "_(Stopped here: your AI tokens ran out while I was working. Top up AI credits or wait for your token reset, then ask me to continue.)_";
+export const budgetStopAnswer = (text) => `${String(text || "").trim()}\n\n${BUDGET_STOP_NOTE}`.trim();
+export const CONTINUE_PROMPT ="Your previous reply was cut off by the length limit. Continue EXACTLY where it stopped, even mid-word, mid-sentence or mid-code, without repeating anything and without any preamble, apology or comment. If you were inside a code block, keep writing inside it (do not open a new ```). Finish everything that was asked.";
 
-async function streamOneRound({ provider, messages, tools, temperature, maxTokens, timeoutMs, signal, onToken, onThought }) {
+async function streamOneRound({ provider, messages, tools, temperature, maxTokens, timeoutMs, signal, onToken, onThought, inputTooBig }) {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(new Error(`Timeout after ${timeoutMs}ms`)), timeoutMs);
     const onOuterAbort = () => controller.abort(signal.reason);
@@ -108,8 +111,16 @@ async function streamOneRound({ provider, messages, tools, temperature, maxToken
             (piece) => { text += piece; onToken?.(piece); },
             emitReasoning
         );
+        // The first usage Cloudflare sends already has this round's real input count: if that alone uses up the
+        // user's tokens (inputTooBig), the round is cut right there, before anything is written
+        let inputChecked = false;
+        let budgetCut = false;
 
         for (;;) {
+            if (budgetCut) {
+                reader.cancel().catch(() => {});
+                break;
+            }
             const { done, value } = await reader.read();
             if (done) break;
             buffer += decoder.decode(value, { stream: true });
@@ -127,6 +138,13 @@ async function streamOneRound({ provider, messages, tools, temperature, maxToken
                 // Cloudflare attaches usage to every chunk; the largest total is the round's final count.
                 if (chunk.usage && (!usage || (chunk.usage.total_tokens || 0) >= (usage.total_tokens || 0))) {
                     usage = chunk.usage;
+                }
+                if (!inputChecked && usage?.prompt_tokens > 0) {
+                    inputChecked = true;
+                    if (inputTooBig?.({ prompt_tokens: usage.prompt_tokens, completion_tokens: 0, total_tokens: usage.prompt_tokens })) {
+                        budgetCut = true;
+                        break;
+                    }
                 }
 
                 if (chunk.choices?.[0]?.finish_reason) finishReason = chunk.choices[0].finish_reason;
@@ -147,6 +165,10 @@ async function streamOneRound({ provider, messages, tools, temperature, maxToken
         }
         splitter.flush();
 
+        if (budgetCut) {
+            // Only the input was used; nothing written in this round counts as an answer or a tool call
+            return { text: text.trim(), rawText: text, finishReason: "budget", reasoning, usage: { prompt_tokens: usage.prompt_tokens, completion_tokens: 0, total_tokens: usage.prompt_tokens }, toolCalls: [], budgetCut: true };
+        }
         return { text: text.trim(), rawText: text, finishReason, reasoning, usage, toolCalls: toolCalls.filter(Boolean) };
     } finally {
         clearTimeout(timeout);
@@ -174,6 +196,13 @@ export async function streamChat({
     // At the tool-round limit, ask for an answer from what was found instead of the fixed "couldn't find" text
     answerAtDepthLimit = false,
     outputBudget,
+    // Live token check, real numbers only: onRoundUsage(usage) gets each round's real usage when the provider
+    // reports it; tokensLeft() is the user's real tokens left, maxOutputTokens() how much a round may write with
+    // them, inputTooBig(usage) checks a round's real input (sent before anything is written)
+    onRoundUsage,
+    tokensLeft,
+    maxOutputTokens,
+    inputTooBig,
     signal,
     onToken,
     onThought,
@@ -189,10 +218,24 @@ export async function streamChat({
     let continuedText = ""; // earlier parts of an answer that was cut off and continued
     let continuations = 0;
     let lastIntro = ""; // start of the previous tool round's text, to catch a model stuck repeating itself
+    let lastRoundText = "";
+    const budgetStop = (why) => {
+        console.log(`[AI-STREAM] stopped: the user's tokens ran out (${why}, toolsRun=${toolsRun})`);
+        return { answer: budgetStopAnswer(continuedText + lastRoundText), usage, toolsRun, stoppedForBudget: true };
+    };
+    // What the next round may write: the user's real tokens left at this model's output price (no limit = maxTokens)
+    const roundMaxTokens = () => {
+        const cap = maxOutputTokens?.();
+        return cap === undefined || cap === null ? maxTokens : Math.min(maxTokens, Math.floor(cap));
+    };
 
     try {
         for (;;) {
             if (signal?.aborted) throw new StreamChatError("Request aborted");
+            const left = tokensLeft?.();
+            if (left !== undefined && left !== null && left <= 0) return budgetStop("nothing left");
+            const roundMax = roundMaxTokens();
+            if (roundMax < 1) return budgetStop("nothing left to write with");
 
             // Keep reasoning from separate rounds visually separate in the thought stream.
             const separateThought = (piece) => {
@@ -203,8 +246,8 @@ export async function streamChat({
             const roundTools = currentTools();
             const sentToolNames = new Set(roundTools.map(t => t.function.name));
             const round = await streamOneRound({
-                provider, messages: conversation, tools: roundTools, temperature, maxTokens, timeoutMs, signal,
-                onToken, onThought: separateThought
+                provider, messages: conversation, tools: roundTools, temperature, maxTokens: roundMax, timeoutMs, signal,
+                onToken, onThought: separateThought, inputTooBig
             });
             if (round.reasoning) hadReasoning = true;
 
@@ -212,7 +255,10 @@ export async function streamChat({
                 usage.prompt_tokens += round.usage.prompt_tokens || 0;
                 usage.completion_tokens += round.usage.completion_tokens || 0;
                 usage.total_tokens += round.usage.total_tokens || 0;
+                onRoundUsage?.(round.usage, { cut: !!round.budgetCut });
             }
+            if (round.budgetCut) return budgetStop("this round's input alone used up the tokens left");
+            lastRoundText = round.rawText || "";
 
             if (round.toolCalls.length === 0) {
                 const roomLeft = outputBudget === undefined || outputBudget - usage.completion_tokens >= 2048;
@@ -240,12 +286,18 @@ export async function streamChat({
                     conversation.push({ role: "assistant", content: round.text || "", tool_calls: round.toolCalls });
                     for (const call of round.toolCalls) conversation.push({ role: "tool", tool_call_id: call.id, content: "Not run: no more tool calls are possible." });
                     conversation.push({ role: "user", content: "No more tool calls are possible. Answer now from what you found so far, and say what you could not check." });
-                    const last = await streamOneRound({ provider, messages: conversation, tools: [], temperature, maxTokens, timeoutMs, signal, onToken: undefined, onThought: undefined });
+                    const leftNow = tokensLeft?.();
+                    if (leftNow !== undefined && leftNow !== null && leftNow <= 0) return budgetStop("nothing left");
+                    const lastMax = roundMaxTokens();
+                    if (lastMax < 1) return budgetStop("nothing left to write with");
+                    const last = await streamOneRound({ provider, messages: conversation, tools: [], temperature, maxTokens: lastMax, timeoutMs, signal, onToken: undefined, onThought: undefined, inputTooBig });
                     if (last.usage) {
                         usage.prompt_tokens += last.usage.prompt_tokens || 0;
                         usage.completion_tokens += last.usage.completion_tokens || 0;
                         usage.total_tokens += last.usage.total_tokens || 0;
+                        onRoundUsage?.(last.usage, { cut: !!last.budgetCut });
                     }
+                    if (last.budgetCut) return budgetStop("this round's input alone used up the tokens left");
                     return { answer: (continuedText + (last.rawText || "")).trim() || null, usage, toolsRun };
                 }
                 return { answer: "I searched but couldn't find a clear answer. Could you try rephrasing?", usage, toolsRun };
