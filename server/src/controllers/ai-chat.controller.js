@@ -1179,6 +1179,26 @@ export const streamAskAi = async (req, res) => {
     // Identity comes only from the auth middleware (the route requires a login), never from the body.
     const userId = req.user?.id || null;
     let tokenSource = "personal";
+    // Live token meter for this answer (main model + helpers): each round's real cost is added as soon as the
+    // provider reports it. Before every further round its input is measured (the previous round plus the text
+    // added since, ~3 characters per token), and what it may write is capped to what is left after that; with
+    // too little left the answer stops there. spendable is set by the quota check (undefined = no limit).
+    const liveMeter = { spent: 0, spendable: undefined };
+    const meterHooks = (model) => {
+        const outputWeight = chargeableTokens({ prompt_tokens: 0, completion_tokens: 1000 }, model) / 1000;
+        return {
+            onRoundUsage: (u) => { liveMeter.spent += chargeableTokens(u, model); },
+            nextRound: (last, addedChars) => {
+                if (liveMeter.spendable === undefined) return null;
+                // A provider that cached last round's prompt (Claude) reads it again at the cache price
+                const cached = (last.cache_read_input_tokens || 0) + (last.cache_creation_input_tokens || 0) > 0 ? (last.prompt_tokens || 0) : 0;
+                const input = (last.prompt_tokens || 0) + (last.completion_tokens || 0) + Math.ceil(addedChars / 3);
+                const inputCost = chargeableTokens({ prompt_tokens: input, completion_tokens: 0, cache_read_input_tokens: cached }, model);
+                const maxTokens = Math.floor((liveMeter.spendable - liveMeter.spent - inputCost) / outputWeight);
+                return maxTokens < 1024 ? { stop: true } : { maxTokens };
+            },
+        };
+    };
     let availableTokensToGenerate = 8192;
     let orgId = req.user?.organization_id || null;
 
@@ -2646,8 +2666,8 @@ If they ask whether their college/school uses Classgrid, say you can't see that 
                                         };
                                         const r = CLAUDE_CHAT_MODELS.has(model)
                                             // All three read-only tools stay loaded (no tool search needed)
-                                            ? await streamClaudeChat({ ...helperArgs, model, loadedToolNames: new Set(readOnly), answerAtDepthLimit: true, maxContinuations: 3 })
-                                            : await streamChat({ ...helperArgs, provider: cloudflareStreamProvider(model), maxTokens: 8192, maxContinuations: 6, answerAtDepthLimit: true }); // a long report keeps going instead of being cut
+                                            ? await streamClaudeChat({ ...helperArgs, ...meterHooks(model), model, loadedToolNames: new Set(readOnly), answerAtDepthLimit: true, maxContinuations: 3 })
+                                            : await streamChat({ ...helperArgs, ...meterHooks(model), provider: cloudflareStreamProvider(model), maxTokens: 8192, maxContinuations: 6, answerAtDepthLimit: true }); // a long report keeps going instead of being cut
                                         if (userId && r.usage?.total_tokens) deductTokens(userId, orgId, chargeableTokens(r.usage, model), tokenSource).catch(() => {});
                                         if (!String(r.answer || "").trim()) { lastError = "no answer"; break; } // try the next model
                                         return finish("done", `Helper ${i + 1} (${task.slice(0, 80)}):\n${String(r.answer).slice(0, 40000)}`);
@@ -4201,6 +4221,7 @@ If a tool fails, never show the error message; say only: "Something went wrong o
             tokenSource = check.source;
             if (check.remaining !== undefined) llmConfig.defaultMaxTokens = Math.max(1, Math.min(8192, check.remaining));
             quotaRemaining = check.remaining;
+            liveMeter.spendable = check.spendable ?? check.remaining;
         } catch (err) {
             console.error("Quota check error:", err);
             res.write(`data: ${JSON.stringify({ type: "error", error: "We couldn't check your AI usage balance right now, so this message was not answered. Please try again in a minute." })}\n\n`);
@@ -4369,6 +4390,7 @@ If a tool fails, never show the error message; say only: "Something went wrong o
                                 // An answer cut off by the length limit (e.g. "draw 40 cards") is continued in the same reply
                                 maxContinuations: 3,
                                 outputBudget: quotaRemaining,
+                                ...meterHooks(requestedModel),
                                 timeoutMs: llmConfig.providers[0].timeoutMs,
                                 systemCacheBoundary,
                                 // Images and PDFs attached to this message are sent to Claude directly (native vision),
@@ -4430,6 +4452,7 @@ If a tool fails, never show the error message; say only: "Something went wrong o
                                 maxToolDepth: 100,
                                 maxContinuations: 3,
                                 outputBudget: quotaRemaining,
+                                ...meterHooks(model),
                                 timeoutMs: llmConfig.providers[0].timeoutMs,
                                 signal: streamAbort.signal,
                                 onStatus,
