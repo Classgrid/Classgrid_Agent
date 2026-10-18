@@ -4054,6 +4054,13 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
                   const h = { state: 'waiting', actions: [] as { id: string, tool: string, args: any, result?: string, status: string }[], text: '', ...(helpers[event.helper] || {}) };
                   if (event.tool) h.actions = [...h.actions, { id: String(event.id), tool: event.tool, args: event.args, status: 'loading' }];
                   else if (event.id && typeof event.result === 'string') h.actions = h.actions.map((a) => (a.id === event.id ? { ...a, result: event.result, status: 'success' } : a));
+                  else if (typeof event.thought === 'string') {
+                    // Thinking goes between the helper's steps: add to the current thought, or start a new one after a step
+                    const last = h.actions[h.actions.length - 1];
+                    h.actions = last?.tool === '__thought'
+                      ? [...h.actions.slice(0, -1), { ...last, result: (last.result || '') + event.thought }]
+                      : [...h.actions, { id: `t${h.actions.length}`, tool: '__thought', args: null, result: event.thought, status: 'loading' }];
+                  }
                   if (event.text) h.text += event.text;
                   if (event.state === 'restart') h.text = '';
                   else if (event.state) h.state = event.state;

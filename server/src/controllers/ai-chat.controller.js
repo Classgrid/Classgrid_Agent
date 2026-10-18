@@ -2635,6 +2635,7 @@ If they ask whether their college/school uses Classgrid, say you can't see that 
                                             tools: helperTools,
                                             toolHandlers: liveHandlers,
                                             onToken: (piece) => emitHelper({ helper: i, text: piece }),
+                                            onThought: (piece) => emitHelper({ helper: i, thought: piece }),
                                             maxTokens: 6000,
                                             maxToolDepth: 30, // big repos need more looking around before a full answer
                                             maxContinuations: 1,

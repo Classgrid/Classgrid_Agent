@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { ChevronDown, ChevronRight, Folder, FileText, Github } from 'lucide-react';
 import { Spinner } from '@/components/marketing_ui/spinner';
+import { CombinedReasoningBlock } from './CombinedReasoningBlock';
 import { cn } from '@/lib/utils';
 
 // Steps of the Project Mode file tools, shown like a code editor's agent: "Edited calculator.ts +26 -0",
@@ -292,8 +293,10 @@ function HelperItem({ task, answer, failed, loading, live }: { task: string; ans
       </button>
       {open && (
         <div className="ml-3 mb-1 flex flex-col border-l border-border pl-3">
-          {live?.actions.map((a) => <ExploreItem key={a.id} step={a} />)}
-          {running && live?.state === 'running' && !live.text && !live.actions.some((a) => a.status === 'loading') && (
+          {live?.actions.map((a, i) => a.tool === '__thought'
+            ? <CombinedReasoningBlock key={a.id} sentences={String(a.result || '').split(/\n\s*\n/).map((s) => s.trim()).filter(Boolean)} isStreaming={!!running && i === live.actions.length - 1 && !live.text} />
+            : <ExploreItem key={a.id} step={a} />)}
+          {running && live?.state === 'running' && !live.text && !live.actions.some((a) => a.status === 'loading') && live.actions[live.actions.length - 1]?.tool !== '__thought' && (
             // Same glowing "Thinking" as the main answer
             <p className="py-1 w-fit bg-[linear-gradient(110deg,#404040,35%,#fff,50%,#404040,75%,#404040)] bg-[length:200%_100%] bg-clip-text text-[13px] font-medium text-transparent" style={{ animation: "shimmer 2.5s linear infinite" }}>
               Thinking
@@ -309,7 +312,8 @@ function HelperItem({ task, answer, failed, loading, live }: { task: string; ans
 
 export function ProjectHelpersStep({ step }: { step: Step }) {
   const loading = step.status === 'loading';
-  const tasks: string[] = Array.isArray(step.args?.tasks) ? step.args.tasks.map((t: unknown) => String(t)) : [];
+  // Only the first 4 tasks run (the server takes up to 4 helpers)
+  const tasks: string[] = Array.isArray(step.args?.tasks) ? step.args.tasks.map((t: unknown) => String(t)).filter((t: string) => t.trim()).slice(0, 4) : [];
   const results = loading ? [] : parseHelpers(step.result);
   const n = loading ? tasks.length : results.length || tasks.length;
   const [open, setOpen] = useState<boolean | null>(null);
