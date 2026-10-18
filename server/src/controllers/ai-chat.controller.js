@@ -2738,6 +2738,10 @@ If they ask whether their college/school uses Classgrid, say you can't see that 
                     },
 
                     unified_db_query: async (args) => {
+                        // Second lock behind the staff-only tool group: staff role AND an @classgrid.in email
+                        if (!(isStaffRole(req.user?.role) && String(req.user?.email || "").trim().toLowerCase().endsWith("@classgrid.in"))) {
+                            return "Error: database queries are only available to Classgrid staff.";
+                        }
                         if (args && args.collectionOrTable) {
                             const tableKey = `${args.source || 'unknown'}:${args.collectionOrTable}`;
                             const queryCount = queriedTables.get(tableKey) || 0;

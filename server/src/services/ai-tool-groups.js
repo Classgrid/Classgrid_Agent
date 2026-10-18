@@ -74,6 +74,8 @@ export const TOOL_GROUPS = [
         description: "Query the database with the access rules of the user's role.",
         tools: ["unified_db_query"],
         pattern: /\b(db|database|mongo\w*|redis|sql|query|collections?|schema|records?|table|rows?)\b/i,
+        // Raw database access (Redis, Supabase, Mongo): Classgrid staff only, like the other internal tools
+        staffOnly: true,
     },
     {
         id: "files_docs",
