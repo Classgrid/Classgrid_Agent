@@ -53,6 +53,7 @@ import GoLive from "../models/GoLive.js";
 import { dispatchNotification } from "./notification.service.js";
 import User from "../models/User.js";
 import accessLogger from "../config/logger.js";
+import { primarySupabaseClient } from "../config/supabaseClient.js";
 
 // Live Chat Analytics: push fresh numbers to the "superadmin:analytics" room every 20 s,
 // only while at least one super admin has the page open (the loop stops when the room is empty).
@@ -168,10 +169,21 @@ export const initSocket = (server, { path } = {}) => {
         });
 
         // ── Thread Chat (replaces Supabase Realtime) ──
-        socket.on("join_thread", (threadId) => {
+        socket.on("join_thread", async (threadId) => {
             if (!threadId) return;
-            const roomName = `thread:${threadId}`;
-            socket.join(roomName);
+            // Only members get a thread's live messages (same check as the thread REST routes)
+            try {
+                const { data } = await primarySupabaseClient
+                    .from("chat_thread_members")
+                    .select("id")
+                    .eq("thread_id", String(threadId))
+                    .eq("user_id", String(socket.userId))
+                    .maybeSingle();
+                if (!data) return;
+            } catch {
+                return; // can't check right now: don't join
+            }
+            socket.join(`thread:${threadId}`);
         });
 
         socket.on("leave_thread", (threadId) => {
@@ -188,7 +200,8 @@ export const initSocket = (server, { path } = {}) => {
         });
 
         socket.on("thread_typing", ({ threadId, isTyping, activityType }) => {
-            if (!threadId) return;
+            // Only someone who joined the thread (a member) can show "typing" in it
+            if (!threadId || !socket.rooms.has(`thread:${threadId}`)) return;
             socket.to(`thread:${threadId}`).emit("thread:typing", {
                 userId: socket.userId,
                 isTyping,
