@@ -346,8 +346,8 @@ function HelperItem({ task, answer, failed, loading, live }: { task: string; ans
 
 export function ProjectHelpersStep({ step }: { step: Step }) {
   const loading = step.status === 'loading';
-  // Only the first 4 tasks run (the server takes up to 4 helpers)
-  const tasks: string[] = Array.isArray(step.args?.tasks) ? step.args.tasks.map((t: unknown) => String(t)).filter((t: string) => t.trim()).slice(0, 4) : [];
+  // Only the first 5 tasks run (the server takes up to 5 helpers)
+  const tasks: string[] = Array.isArray(step.args?.tasks) ? step.args.tasks.map((t: unknown) => String(t)).filter((t: string) => t.trim()).slice(0, 5) : [];
   const results = loading ? [] : parseHelpers(step.result);
   const n = loading ? tasks.length : results.length || tasks.length;
   const [open, setOpen] = useState<boolean | null>(null);

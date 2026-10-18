@@ -2591,11 +2591,11 @@ If they ask whether their college/school uses Classgrid, say you can't see that 
                         toolName,
                         async (args) => (await handleToolCall(toolName, args, { sessionId })).content[0].text,
                     ])),
-                    // Up to 4 read-only helpers explore the project at the same time (cheap Flash model, list/read/search
+                    // Up to 5 read-only helpers explore the project at the same time (cheap Flash model, list/read/search
                     // only, never change anything) and each returns a full report; their tokens are charged like the chat's
                     run_project_helpers: async (args) => {
-                        const tasks = (Array.isArray(args?.tasks) ? args.tasks : []).map((t) => String(t || "").trim()).filter(Boolean).slice(0, 4);
-                        if (!tasks.length) return "Error: give 1 to 4 tasks.";
+                        const tasks = (Array.isArray(args?.tasks) ? args.tasks : []).map((t) => String(t || "").trim()).filter(Boolean).slice(0, 5);
+                        if (!tasks.length) return "Error: give 1 to 5 tasks.";
                         const readOnly = ["list_project_files", "view_project_file", "search_project"];
                         const helperTools = [
                             { type: "function", function: { name: "list_project_files", description: "List files and folders of the project.", parameters: { type: "object", properties: { path: { type: "string", description: "Folder, relative. Empty = root." }, depth: { type: "number", description: "Levels to show (1-6)." } } } } },
@@ -2618,7 +2618,7 @@ If they ask whether their college/school uses Classgrid, say you can't see that 
                             const finish = (state, text) => { emitHelper({ helper: i, state }); return text; };
                             await sleep(i * 1500); // start a little apart, so the model service isn't hit all at once
                             emitHelper({ helper: i, state: "running" });
-                            // Different models have separate request limits, so helpers take turns: helpers 1, 3 use
+                            // Different models have separate request limits, so helpers take turns: helpers 1, 3, 5 use
                             // DeepSeek V4 Flash and fall back to GLM 5.3 if it fails; helpers 2, 4 use GLM 5.3
                             const models = i % 2 === 0 ? [CF_FLASH_MODEL, HELPER_GLM_MODEL] : [HELPER_GLM_MODEL];
                             let lastError = "";
