@@ -4,7 +4,7 @@ import { isAuthenticated, requireRole } from "../middleware/auth.middleware.js";
 import User from "../models/User.js";
 import IdeProject from "../models/IdeProject.js";
 import { githubUser } from "../services/github-token.service.js";
-import { pushProject, revealInEditor, checkpointChanges, rejectCheckpoint, undoToCheckpoint, backupAndRemoveProjectCode, GIT, safeGitConfig } from "../services/ide-project.service.js";
+import { pushProject, revealInEditor, checkpointChanges, rejectCheckpoint, undoToCheckpoint, backupAndRemoveProjectCode } from "../services/ide-project.service.js";
 import mongoose from "mongoose";
 import connectDB from "../../config/db.js";
 import redis from "../config/redis.js";
@@ -169,7 +169,7 @@ router.post("/github/open", isAuthenticated, requireRole("super_admin"), async (
     ssh = await sandboxSsh();
 
     if (!replace) {
-      const { stdout } = await ssh.execCommand(`${safeGitConfig(dir)}\n[ -d ${dir}/.git ] && ${GIT} -C ${dir} status --porcelain | head -1`);
+      const { stdout } = await ssh.execCommand(`[ -d ${dir}/.git ] && git -C ${dir} status --porcelain | head -1`);
       if (stdout.trim()) return res.status(409).json({ error: "unsaved_changes" });
     }
 
@@ -184,8 +184,8 @@ router.post("/github/open", isAuthenticated, requireRole("super_admin"), async (
       console.error("[IDE] Clone failed:", (clone.stdout || clone.stderr).replace(auth, "***"));
       return res.status(502).json({ error: "Could not download this repo" });
     }
-    if (user.github_name) await ssh.execCommand(`${GIT} -C ${dir} config user.name ${JSON.stringify(user.github_name)}`);
-    if (user.github_email) await ssh.execCommand(`${GIT} -C ${dir} config user.email ${JSON.stringify(user.github_email)}`);
+    if (user.github_name) await ssh.execCommand(`git -C ${dir} config user.name ${JSON.stringify(user.github_name)}`);
+    if (user.github_email) await ssh.execCommand(`git -C ${dir} config user.email ${JSON.stringify(user.github_email)}`);
 
     res.json({ ok: true, folder: `/home/workspace/chats/${sessionId}/project` });
   } catch (e) {
@@ -339,7 +339,7 @@ router.post("/projects/:id/open", isAuthenticated, async (req, res) => {
     if (!user) return res.status(409).json({ error: "github_not_connected" });
     if (project.repo && !resuming) {
       if (!req.body?.replace) {
-        const { stdout } = await ssh.execCommand(`${safeGitConfig(dir)}\n[ -d ${dir}/.git ] && ${GIT} -C ${dir} status --porcelain | head -1`);
+        const { stdout } = await ssh.execCommand(`[ -d ${dir}/.git ] && git -C ${dir} status --porcelain | head -1`);
         if (stdout.trim()) return res.status(409).json({ error: "unsaved_changes" });
       }
       const auth = Buffer.from(`x-access-token:${user.github_access_token}`).toString("base64");
@@ -353,8 +353,8 @@ router.post("/projects/:id/open", isAuthenticated, async (req, res) => {
         console.error("[IDE] Clone failed:", (clone.stdout || clone.stderr).replace(auth, "***"));
         return res.status(502).json({ error: "Could not download this repo" });
       }
-      if (user.github_name) await ssh.execCommand(`${GIT} -C ${dir} config user.name ${JSON.stringify(user.github_name)}`);
-      if (user.github_email) await ssh.execCommand(`${GIT} -C ${dir} config user.email ${JSON.stringify(user.github_email)}`);
+      if (user.github_name) await ssh.execCommand(`git -C ${dir} config user.name ${JSON.stringify(user.github_name)}`);
+      if (user.github_email) await ssh.execCommand(`git -C ${dir} config user.email ${JSON.stringify(user.github_email)}`);
     } else if (!project.repo) {
       // An empty project (no repo yet): a git folder, so changes can be tracked and the AI can make a repo for it later
       await ssh.execCommand(`mkdir -p ${dir} && cd ${dir} && ([ -d .git ] || git init -q -b main)`);

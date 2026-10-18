@@ -28,31 +28,6 @@ export async function sandboxSsh() {
 export const projectHostDir = (p) => `/home/ubuntu/ide_users/${p.owner}/projects/${p._id}`;
 const q = (s) => `'${String(s).replace(/'/g, `'\\''`)}'`;
 
-// git on the sandbox host for a user's project. The project's .git folder can be changed by the user (editor
-// terminal) and by AI runs, and git runs programs named there (hooks, fsmonitor, filters, diff/merge drivers,
-// signing...) - on the host. So hooks and fsmonitor are always off (GIT), and safeGitConfig(dir) rewrites
-// .git/config to a clean copy (GitHub remote, branch tracking, name/email kept) before the backend uses git.
-export const GIT = "git -c core.hooksPath=/dev/null -c core.fsmonitor=false";
-export const safeGitConfig = (dir) => [
-  "D=" + q(dir) + "; C=\"$D/.git/config\"",
-  // A .git that is a link or a file could point git at another folder: set it aside
-  "if [ -L \"$D/.git\" ] || [ -f \"$D/.git\" ]; then mv \"$D/.git\" \"$D/.git-unsafe-$(date +%s)\"; fi",
-  "if [ -f \"$C\" ]; then",
-  "  url=$(git config --file \"$C\" --get remote.origin.url); name=$(git config --file \"$C\" --get user.name); email=$(git config --file \"$C\" --get user.email)",
-  "  ver=$(git config --file \"$C\" --get core.repositoryformatversion); fmt=$(git config --file \"$C\" --get extensions.objectformat)",
-  "  branches=$(git config --file \"$C\" --get-regexp '^branch\\..*\\.(remote|merge)$')",
-  "  tmp=$(mktemp)",
-  "  printf '[core]\\n\\trepositoryformatversion = %s\\n\\tfilemode = true\\n\\tbare = false\\n\\tlogallrefupdates = true\\n' \"${ver:-0}\" > \"$tmp\"",
-  "  [ -n \"$fmt\" ] && git config --file \"$tmp\" extensions.objectformat \"$fmt\"",
-  "  [ -n \"$url\" ] && git config --file \"$tmp\" remote.origin.url \"$url\" && git config --file \"$tmp\" remote.origin.fetch '+refs/heads/*:refs/remotes/origin/*'",
-  "  [ -n \"$name\" ] && git config --file \"$tmp\" user.name \"$name\"",
-  "  [ -n \"$email\" ] && git config --file \"$tmp\" user.email \"$email\"",
-  "  printf '%s\\n' \"$branches\" | while read -r k v; do [ -n \"$k\" ] && git config --file \"$tmp\" \"$k\" \"$v\"; done",
-  // A fresh file (if .git/config were a link, writing through it would change the file it points to)
-  "  rm -f \"$C\"; cat \"$tmp\" > \"$C\"; rm -f \"$tmp\"",
-  "fi",
-].join("\n");
-
 // Newest file change on disk (node_modules and .git skipped), as a Date, or null if there is nothing to read.
 // Used to persist the real "last edited" time before the project code leaves the sandbox.
 async function newestFileEdit(ssh, project) {
@@ -308,7 +283,7 @@ export async function updateProjectRepo(project, ssh, { new_name, description, h
     await IdeProject.updateOne({ _id: project._id }, { $set: { repo: gh.full_name } });
     project.repo = gh.full_name;
     const dir = projectHostDir(project);
-    await ssh.execCommand(`[ -d ${q(dir)}/.git ] && ${GIT} -C ${q(dir)} remote set-url origin ${q(`https://github.com/${gh.full_name}.git`)}`);
+    await ssh.execCommand(`[ -d ${q(dir)}/.git ] && git -C ${q(dir)} remote set-url origin ${q(`https://github.com/${gh.full_name}.git`)}`);
   }
   const changed = [
     gh.full_name !== old && `renamed ${old} to ${gh.full_name}`,
@@ -344,18 +319,17 @@ export async function createRepoForProject(project, ssh, { name, private: isPriv
   const dir = projectHostDir(project);
   const branch = gh.default_branch || "main";
   await ssh.execCommand(`mkdir -p ${q(dir)} && cd ${q(dir)} && ([ -d .git ] || git init -q -b ${q(branch)})`);
-  await ssh.execCommand(safeGitConfig(dir));
-  await ssh.execCommand(`${GIT} -C ${q(dir)} remote remove origin 2>/dev/null; ${GIT} -C ${q(dir)} remote add origin ${q(`https://github.com/${gh.full_name}.git`)}`);
-  await ssh.execCommand(`${GIT} -C ${q(dir)} config user.name ${q(owner.github_name || "Classgrid")} && ${GIT} -C ${q(dir)} config user.email ${q(owner.github_email || "code@classgrid.in")}`);
-  await ssh.execCommand(`${GIT} -C ${q(dir)} add -A`);
-  const { stdout: staged } = await ssh.execCommand(`${GIT} -C ${q(dir)} diff --cached --stat | tail -1`);
-  if (staged.trim()) await ssh.execCommand(`${GIT} -C ${q(dir)} commit -q -m "First version"`);
-  const { stdout: hasCommit } = await ssh.execCommand(`${GIT} -C ${q(dir)} rev-parse -q --verify HEAD`);
+  await ssh.execCommand(`git -C ${q(dir)} remote remove origin 2>/dev/null; git -C ${q(dir)} remote add origin ${q(`https://github.com/${gh.full_name}.git`)}`);
+  await ssh.execCommand(`git -C ${q(dir)} config user.name ${q(owner.github_name || "Classgrid")} && git -C ${q(dir)} config user.email ${q(owner.github_email || "code@classgrid.in")}`);
+  await ssh.execCommand(`git -C ${q(dir)} add -A`);
+  const { stdout: staged } = await ssh.execCommand(`git -C ${q(dir)} diff --cached --stat | tail -1`);
+  if (staged.trim()) await ssh.execCommand(`git -C ${q(dir)} commit -q -m "First version"`);
+  const { stdout: hasCommit } = await ssh.execCommand(`git -C ${q(dir)} rev-parse -q --verify HEAD`);
   if (!hasCommit.trim()) return `Created ${gh.private ? "private" : "public"} repo ${gh.full_name} (${gh.html_url}) and linked it to this project. The project has no files yet, so nothing was pushed.`;
   const auth = Buffer.from(`x-access-token:${owner.github_access_token}`).toString("base64");
   const push = await ssh.execCommand(
     `GIT_TERMINAL_PROMPT=0 GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=http.https://github.com/.extraheader GIT_CONFIG_VALUE_0="AUTHORIZATION: basic ${auth}" ` +
-    `${GIT} -C ${q(dir)} push -u origin HEAD:${q(branch)} 2>&1 | tail -5`
+    `git -C ${q(dir)} push -u origin HEAD:${q(branch)} 2>&1 | tail -5`
   );
   const out = (push.stdout || push.stderr || "").split(auth).join("***");
   if (/rejected|error|fatal/i.test(out)) return `Created and linked ${gh.full_name}, but the first push failed: ${out.slice(0, 800)}`;
@@ -373,30 +347,29 @@ export async function pushProject(project, ssh, message) {
   const dir = projectHostDir(project);
   const { stdout: isRepo } = await ssh.execCommand(`[ -d ${q(dir)}/.git ] && echo yes`);
   if (!isRepo.trim()) return "The project code is not downloaded. Open the project in Project Mode first.";
-  await ssh.execCommand(safeGitConfig(dir));
 
-  await ssh.execCommand(`${GIT} -C ${q(dir)} add -A`);
-  const { stdout: staged } = await ssh.execCommand(`${GIT} -C ${q(dir)} diff --cached --stat | tail -1`);
+  await ssh.execCommand(`git -C ${q(dir)} add -A`);
+  const { stdout: staged } = await ssh.execCommand(`git -C ${q(dir)} diff --cached --stat | tail -1`);
   if (staged.trim()) {
-    const commit = await ssh.execCommand(`${GIT} -C ${q(dir)} commit -q -F -`, { stdin: msg });
+    const commit = await ssh.execCommand(`git -C ${q(dir)} commit -q -F -`, { stdin: msg });
     if (commit.code) return `Commit failed: ${(commit.stderr || commit.stdout).slice(0, 500)}`;
   }
-  const { stdout: branch } = await ssh.execCommand(`${GIT} -C ${q(dir)} rev-parse --abbrev-ref HEAD`);
+  const { stdout: branch } = await ssh.execCommand(`git -C ${q(dir)} rev-parse --abbrev-ref HEAD`);
   const auth = Buffer.from(`x-access-token:${owner.github_access_token}`).toString("base64");
   const gitAuth = `GIT_TERMINAL_PROMPT=0 GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=http.https://github.com/.extraheader GIT_CONFIG_VALUE_0="AUTHORIZATION: basic ${auth}"`;
   // Someone else may have pushed to the same branch since the project was downloaded: take their commits
   // first and put ours on top, so the push is not rejected. If the same lines were changed, stop and say so.
   const b = q(branch.trim() || "main");
-  const fetch = await ssh.execCommand(`${gitAuth} ${GIT} -C ${q(dir)} fetch -q origin ${b}`);
+  const fetch = await ssh.execCommand(`${gitAuth} git -C ${q(dir)} fetch -q origin ${b}`);
   if (!fetch.code) { // the branch is on GitHub (a brand-new empty repo has nothing to take)
-    const rebase = await ssh.execCommand(`${GIT} -C ${q(dir)} -c user.name=Classgrid -c user.email=code@classgrid.in rebase -q FETCH_HEAD`);
+    const rebase = await ssh.execCommand(`git -C ${q(dir)} -c user.name=Classgrid -c user.email=code@classgrid.in rebase -q FETCH_HEAD`);
     if (rebase.code) {
-      await ssh.execCommand(`${GIT} -C ${q(dir)} rebase --abort 2>/dev/null`);
-      const { stdout: files } = await ssh.execCommand(`${GIT} -C ${q(dir)} diff --name-only HEAD FETCH_HEAD 2>/dev/null | head -20 | paste -sd, -`);
+      await ssh.execCommand(`git -C ${q(dir)} rebase --abort 2>/dev/null`);
+      const { stdout: files } = await ssh.execCommand(`git -C ${q(dir)} diff --name-only HEAD FETCH_HEAD 2>/dev/null | head -20 | paste -sd, -`);
       return `Push stopped: GitHub has new commits that change the same lines as this project's changes, so they could not be joined by themselves. Nothing was lost. Files that differ: ${files.trim() || "unknown"}.`;
     }
   }
-  const push = await ssh.execCommand(`${gitAuth} ${GIT} -C ${q(dir)} push origin HEAD 2>&1 | tail -5`);
+  const push = await ssh.execCommand(`${gitAuth} git -C ${q(dir)} push origin HEAD 2>&1 | tail -5`);
   const out = (push.stdout || push.stderr || "").split(auth).join("***");
   if (/rejected|error|fatal/i.test(out)) return `Push failed: ${out.slice(0, 800)}`;
   return `${staged.trim() ? `Committed (${staged.trim()}) and pushed` : "Nothing new to commit; pushed"} to ${project.repo} (${branch.trim() || "current branch"}).`;
@@ -466,14 +439,14 @@ export async function projectSnapshot(ssh, project) {
   const dir = projectHostDir(project);
   const idx = `/tmp/cg-index-${project._id}-${Date.now()}`;
   const { stdout, code } = await ssh.execCommand(
-    `${safeGitConfig(dir)}\n[ -d ${q(dir)}/.git ] && cd ${q(dir)} && GIT_INDEX_FILE=${idx} ${GIT} add -A -- . ${SNAPSHOT_SKIP} 2>/dev/null && GIT_INDEX_FILE=${idx} ${GIT} write-tree; rm -f ${idx}`
+    `[ -d ${q(dir)}/.git ] && cd ${q(dir)} && GIT_INDEX_FILE=${idx} git add -A -- . ${SNAPSHOT_SKIP} 2>/dev/null && GIT_INDEX_FILE=${idx} git write-tree; rm -f ${idx}`
   );
   return code === 0 && /^[0-9a-f]{40}$/.test(stdout.trim()) ? stdout.trim() : null;
 }
 
 export async function projectChangesBetween(ssh, project, before, after) {
   if (!before || !after || before === after) return [];
-  const { stdout } = await ssh.execCommand(`${GIT} -C ${q(projectHostDir(project))} diff --numstat ${before} ${after} | head -50`);
+  const { stdout } = await ssh.execCommand(`git -C ${q(projectHostDir(project))} diff --numstat ${before} ${after} | head -50`);
   return stdout.trim().split("\n").filter(Boolean).map((l) => {
     const [a, r, ...file] = l.split("\t");
     return { file: file.join("\t"), added: Number(a) || 0, removed: Number(r) || 0 };
@@ -690,7 +663,7 @@ ${rulesFile.text}`);
     const prev = await redis.get(LAST_SNAPSHOT(sessionId)).catch(() => null);
     const now = prev ? await projectSnapshot(ssh, project) : null;
     if (prev && now && prev !== now) {
-      const { stdout: diff } = await ssh.execCommand(`${GIT} -C ${q(projectHostDir(project))} diff --unified=2 ${prev} ${now} | head -c 6000`);
+      const { stdout: diff } = await ssh.execCommand(`git -C ${q(projectHostDir(project))} diff --unified=2 ${prev} ${now} | head -c 6000`);
       userDiff = diff.trim();
       let file = null;
       for (const l of userDiff.split("\n")) {
@@ -737,11 +710,11 @@ async function snapshotCommit(ssh, project, label) {
   const tree = await projectSnapshot(ssh, project);
   if (!tree) return null;
   const { stdout, code } = await ssh.execCommand(
-    `${GIT} -C ${q(dir)} -c user.name=Classgrid -c user.email=checkpoint@classgrid.in commit-tree ${tree} -m ${q(label)}`
+    `git -C ${q(dir)} -c user.name=Classgrid -c user.email=checkpoint@classgrid.in commit-tree ${tree} -m ${q(label)}`
   );
   const commit = stdout.trim();
   if (code || !/^[0-9a-f]{40}$/.test(commit)) return null;
-  await ssh.execCommand(`${GIT} -C ${q(dir)} update-ref refs/classgrid/${label} ${commit}`);
+  await ssh.execCommand(`git -C ${q(dir)} update-ref refs/classgrid/${label} ${commit}`);
   return commit;
 }
 
@@ -783,7 +756,7 @@ async function loadCheckpoint(project, sessionId, id, ssh) {
   const cp = JSON.parse((await redis.get(CP_KEY(sessionId, id))) || "null");
   if (!cp || cp.project !== String(project._id)) throw new Error("This answer's changes can't be reviewed anymore");
   const dir = projectHostDir(project);
-  const { code } = await ssh.execCommand(`${GIT} -C ${q(dir)} cat-file -e ${cp.before}`);
+  const { code } = await ssh.execCommand(`git -C ${q(dir)} cat-file -e ${cp.before}`);
   if (code) throw new Error("This answer's changes can't be reviewed anymore (the project was downloaded fresh)");
   return { cp, dir };
 }
@@ -791,16 +764,15 @@ async function loadCheckpoint(project, sessionId, id, ssh) {
 // The AI's changes in one answer: each file with +/- and its diff
 export async function checkpointChanges(project, ssh, sessionId, id) {
   const { cp, dir } = await loadCheckpoint(project, sessionId, id, ssh);
-  await ssh.execCommand(safeGitConfig(dir));
   const after = cp.after || (await snapshotCommit(ssh, project, `cp-${id}-now`));
-  const { stdout: stat } = await ssh.execCommand(`${GIT} -C ${q(dir)} diff --numstat ${cp.before} ${after} | head -100`);
-  const { stdout: status } = await ssh.execCommand(`${GIT} -C ${q(dir)} diff --name-status ${cp.before} ${after} | head -100`);
+  const { stdout: stat } = await ssh.execCommand(`git -C ${q(dir)} diff --numstat ${cp.before} ${after} | head -100`);
+  const { stdout: status } = await ssh.execCommand(`git -C ${q(dir)} diff --name-status ${cp.before} ${after} | head -100`);
   const kinds = Object.fromEntries(status.trim().split("\n").filter(Boolean).map((l) => { const [k, ...f] = l.split("\t"); return [f.join("\t"), k[0]]; }));
   const files = [];
   for (const line of stat.trim().split("\n").filter(Boolean)) {
     const [a, r, ...f] = line.split("\t");
     const file = f.join("\t");
-    const { stdout: diff } = await ssh.execCommand(`${GIT} -C ${q(dir)} diff --unified=3 ${cp.before} ${after} -- ${q(file)} | head -c 60000`);
+    const { stdout: diff } = await ssh.execCommand(`git -C ${q(dir)} diff --unified=3 ${cp.before} ${after} -- ${q(file)} | head -c 60000`);
     files.push({ file, added: Number(a) || 0, removed: Number(r) || 0, kind: { A: "added", D: "deleted" }[kinds[file]] || "changed", diff });
   }
   return { files, finished: !!cp.after };
@@ -809,15 +781,14 @@ export async function checkpointChanges(project, ssh, sessionId, id) {
 // Reject: put back what the file(s) were before this answer (files the AI created are removed)
 export async function rejectCheckpoint(project, ssh, sessionId, id, onlyFile) {
   const { cp, dir } = await loadCheckpoint(project, sessionId, id, ssh);
-  await ssh.execCommand(safeGitConfig(dir));
   const after = cp.after || (await snapshotCommit(ssh, project, `cp-${id}-now`));
-  const { stdout } = await ssh.execCommand(`${GIT} -C ${q(dir)} diff --name-status ${cp.before} ${after}`);
+  const { stdout } = await ssh.execCommand(`git -C ${q(dir)} diff --name-status ${cp.before} ${after}`);
   let entries = stdout.trim().split("\n").filter(Boolean).map((l) => { const [k, ...f] = l.split("\t"); return { kind: k[0], file: f.join("\t") }; });
   if (onlyFile) entries = entries.filter((e) => e.file === onlyFile);
   for (const e of entries) {
     const { full } = resolveInProject(project, e.file);
     if (e.kind === "A") await ssh.execCommand(`rm -f ${q(full)}`);
-    else await ssh.execCommand(`mkdir -p ${q(path.posix.dirname(full))} && ${GIT} -C ${q(dir)} show ${cp.before}:${q(e.file)} > ${q(full)}`);
+    else await ssh.execCommand(`mkdir -p ${q(path.posix.dirname(full))} && git -C ${q(dir)} show ${cp.before}:${q(e.file)} > ${q(full)}`);
   }
   return entries.length;
 }
@@ -825,14 +796,13 @@ export async function rejectCheckpoint(project, ssh, sessionId, id, onlyFile) {
 // Undo: the whole project back to how it was before this answer (later changes are undone too)
 export async function undoToCheckpoint(project, ssh, sessionId, id) {
   const { cp, dir } = await loadCheckpoint(project, sessionId, id, ssh);
-  await ssh.execCommand(safeGitConfig(dir));
   const now = await snapshotCommit(ssh, project, `cp-${id}-undo`);
-  const { stdout } = await ssh.execCommand(`${GIT} -C ${q(dir)} diff --name-status ${cp.before} ${now}`);
+  const { stdout } = await ssh.execCommand(`git -C ${q(dir)} diff --name-status ${cp.before} ${now}`);
   const entries = stdout.trim().split("\n").filter(Boolean).map((l) => { const [k, ...f] = l.split("\t"); return { kind: k[0], file: f.join("\t") }; });
   for (const e of entries) {
     const { full } = resolveInProject(project, e.file);
     if (e.kind === "A") await ssh.execCommand(`rm -f ${q(full)}`);
-    else await ssh.execCommand(`mkdir -p ${q(path.posix.dirname(full))} && ${GIT} -C ${q(dir)} show ${cp.before}:${q(e.file)} > ${q(full)}`);
+    else await ssh.execCommand(`mkdir -p ${q(path.posix.dirname(full))} && git -C ${q(dir)} show ${cp.before}:${q(e.file)} > ${q(full)}`);
   }
   return entries.length;
 }
@@ -872,9 +842,8 @@ export async function backupAndRemoveProjectCode(ssh, project) {
     await ssh.execCommand(`rm -rf ${q(dir)}`); // a folder without a repo has nothing to save
     return { removed: true };
   }
-  await ssh.execCommand(safeGitConfig(dir));
-  const { stdout: dirty } = await ssh.execCommand(`${GIT} -C ${q(dir)} status --porcelain | head -1`);
-  const { stdout: ahead } = await ssh.execCommand(`${GIT} -C ${q(dir)} rev-list --count @{u}..HEAD 2>/dev/null || echo 0`);
+  const { stdout: dirty } = await ssh.execCommand(`git -C ${q(dir)} status --porcelain | head -1`);
+  const { stdout: ahead } = await ssh.execCommand(`git -C ${q(dir)} rev-list --count @{u}..HEAD 2>/dev/null || echo 0`);
   let backupBranch = null;
   if (dirty.trim() || Number(ahead.trim()) > 0) {
     await connectDB();
@@ -883,10 +852,10 @@ export async function backupAndRemoveProjectCode(ssh, project) {
     const stamp = new Date().toISOString().slice(0, 16).replace(/[-:T]/g, "").replace(/^(\d{8})(\d{4})$/, "$1-$2");
     backupBranch = `classgrid-backup-${stamp}`;
     const auth = Buffer.from(`x-access-token:${owner.github_access_token}`).toString("base64");
-    await ssh.execCommand(`${GIT} -C ${q(dir)} checkout -q -b ${backupBranch} && ${GIT} -C ${q(dir)} add -A && ${GIT} -C ${q(dir)} -c user.name=Classgrid -c user.email=backup@classgrid.in commit -q -m "Classgrid: unsaved work, saved when the project was closed" || true`);
+    await ssh.execCommand(`git -C ${q(dir)} checkout -q -b ${backupBranch} && git -C ${q(dir)} add -A && git -C ${q(dir)} -c user.name=Classgrid -c user.email=backup@classgrid.in commit -q -m "Classgrid: unsaved work, saved when the project was closed" || true`);
     const push = await ssh.execCommand(
       `GIT_TERMINAL_PROMPT=0 GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=http.https://github.com/.extraheader GIT_CONFIG_VALUE_0="AUTHORIZATION: basic ${auth}" ` +
-      `${GIT} -C ${q(dir)} push -q origin ${backupBranch} 2>&1 | tail -3`
+      `git -C ${q(dir)} push -q origin ${backupBranch} 2>&1 | tail -3`
     );
     if (/rejected|error|fatal/i.test(push.stdout || push.stderr || "")) {
       console.error("[IDE] Backup push failed, keeping the code:", String(push.stdout || push.stderr).split(auth).join("***").slice(0, 300));
