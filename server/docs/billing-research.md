@@ -11,7 +11,7 @@
 ─────────────────────────────────────────────────────────
 🚨 NAMING CONVENTION RULE 🚨
 1. "CLASSGRID PLATFORM" is strictly the REPO NAME.
-2. "CLASSGRID ERP" is the actual PRODUCT NAME.
+2. chat.classgrid.in (Classgrid AI) is the actual PRODUCT. The ERP is shut down.
 3. NEVER use "Classgrid Platform" anywhere in the frontend UI or user-facing text.
 ─────────────────────────────────────────────────────────
 -->

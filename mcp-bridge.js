@@ -1,5 +1,17 @@
 #!/usr/bin/env node
 /*
+ * ─────────────────────────────────────────────────────────
+ * 🚨 ERP SHUT DOWN 🚨
+ * The Classgrid ERP is shut down and will never work or be worked on again.
+ * The org admin dashboard and every dashboard other than chat.classgrid.in and the
+ * super admin dashboard are banned, and so is all ERP backend code.
+ * Any issue or bug in the ERP or the org admin dashboard is banned too: do not look
+ * for it, report it or fix it.
+ * Do not build, fix, test or talk about ERP features. Only chat.classgrid.in and the
+ * super admin dashboard are live.
+ * ─────────────────────────────────────────────────────────
+ */
+/*
  * DEPRECATED: this stdio-to-SSE bridge no longer works and is kept only to explain what replaced it.
  *
  * The old shared-key SSE endpoint (/api/mcp/sse, /api/mcp/messages) has been retired and answers 410 Gone.

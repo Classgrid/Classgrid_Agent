@@ -1,3 +1,15 @@
+/*
+ * ─────────────────────────────────────────────────────────
+ * 🚨 ERP SHUT DOWN 🚨
+ * The Classgrid ERP is shut down and will never work or be worked on again.
+ * The org admin dashboard and every dashboard other than chat.classgrid.in and the
+ * super admin dashboard are banned, and so is all ERP backend code.
+ * Any issue or bug in the ERP or the org admin dashboard is banned too: do not look
+ * for it, report it or fix it.
+ * Do not build, fix, test or talk about ERP features. Only chat.classgrid.in and the
+ * super admin dashboard are live.
+ * ─────────────────────────────────────────────────────────
+ */
 // WhatsApp-style blocking for Grid chat. The block list is loaded once and kept live over the
 // user's Socket.IO channel: the server emits "user:block_updated" to both people on every block/unblock.
 import { useCallback, useMemo, useRef } from "react";

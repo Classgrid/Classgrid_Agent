@@ -31,7 +31,7 @@
  * ─────────────────────────────────────────────────────────
  * 🚨 NAMING CONVENTION RULE 🚨
  * 1. "CLASSGRID PLATFORM" is strictly the REPO NAME.
- * 2. "CLASSGRID ERP" is the actual PRODUCT NAME.
+ * 2. chat.classgrid.in (Classgrid AI) is the actual PRODUCT. The ERP is shut down.
  * 3. NEVER use "Classgrid Platform" anywhere in the frontend UI or user-facing text.
  * ─────────────────────────────────────────────────────────
  */
@@ -213,7 +213,7 @@ export default mongoose.models.AcademicHierarchy ||
  * ─────────────────────────────────────────────────────────
  * 🚨 NAMING CONVENTION RULE 🚨
  * 1. "CLASSGRID PLATFORM" is strictly the REPO NAME.
- * 2. "CLASSGRID ERP" is the actual PRODUCT NAME.
+ * 2. chat.classgrid.in (Classgrid AI) is the actual PRODUCT. The ERP is shut down.
  * 3. NEVER use "Classgrid Platform" anywhere in the frontend UI or user-facing text.
  * ─────────────────────────────────────────────────────────
  */
@@ -346,7 +346,7 @@ export default mongoose.model("ActivityLog", activityLogSchema);
  * ─────────────────────────────────────────────────────────
  * 🚨 NAMING CONVENTION RULE 🚨
  * 1. "CLASSGRID PLATFORM" is strictly the REPO NAME.
- * 2. "CLASSGRID ERP" is the actual PRODUCT NAME.
+ * 2. chat.classgrid.in (Classgrid AI) is the actual PRODUCT. The ERP is shut down.
  * 3. NEVER use "Classgrid Platform" anywhere in the frontend UI or user-facing text.
  * ─────────────────────────────────────────────────────────
  */
@@ -564,7 +564,7 @@ export default mongoose.models.AdminAuditLog ||
  * ─────────────────────────────────────────────────────────
  * 🚨 NAMING CONVENTION RULE 🚨
  * 1. "CLASSGRID PLATFORM" is strictly the REPO NAME.
- * 2. "CLASSGRID ERP" is the actual PRODUCT NAME.
+ * 2. chat.classgrid.in (Classgrid AI) is the actual PRODUCT. The ERP is shut down.
  * 3. NEVER use "Classgrid Platform" anywhere in the frontend UI or user-facing text.
  * ─────────────────────────────────────────────────────────
  */
@@ -881,7 +881,7 @@ export default mongoose.models.AdmissionApplication || mongoose.model("Admission
  * ─────────────────────────────────────────────────────────
  * 🚨 NAMING CONVENTION RULE 🚨
  * 1. "CLASSGRID PLATFORM" is strictly the REPO NAME.
- * 2. "CLASSGRID ERP" is the actual PRODUCT NAME.
+ * 2. chat.classgrid.in (Classgrid AI) is the actual PRODUCT. The ERP is shut down.
  * 3. NEVER use "Classgrid Platform" anywhere in the frontend UI or user-facing text.
  * ─────────────────────────────────────────────────────────
  */
@@ -1014,7 +1014,7 @@ export default mongoose.models.AdmissionConfig || mongoose.model("AdmissionConfi
  * ─────────────────────────────────────────────────────────
  * 🚨 NAMING CONVENTION RULE 🚨
  * 1. "CLASSGRID PLATFORM" is strictly the REPO NAME.
- * 2. "CLASSGRID ERP" is the actual PRODUCT NAME.
+ * 2. chat.classgrid.in (Classgrid AI) is the actual PRODUCT. The ERP is shut down.
  * 3. NEVER use "Classgrid Platform" anywhere in the frontend UI or user-facing text.
  * ─────────────────────────────────────────────────────────
  */
@@ -1104,7 +1104,7 @@ export default mongoose.models.AdmissionOTP || mongoose.model("AdmissionOTP", ad
  * ─────────────────────────────────────────────────────────
  * 🚨 NAMING CONVENTION RULE 🚨
  * 1. "CLASSGRID PLATFORM" is strictly the REPO NAME.
- * 2. "CLASSGRID ERP" is the actual PRODUCT NAME.
+ * 2. chat.classgrid.in (Classgrid AI) is the actual PRODUCT. The ERP is shut down.
  * 3. NEVER use "Classgrid Platform" anywhere in the frontend UI or user-facing text.
  * ─────────────────────────────────────────────────────────
  */
@@ -1230,7 +1230,7 @@ export default mongoose.models.AiUsageLog || mongoose.model("AiUsageLog", aiUsag
  * ─────────────────────────────────────────────────────────
  * 🚨 NAMING CONVENTION RULE 🚨
  * 1. "CLASSGRID PLATFORM" is strictly the REPO NAME.
- * 2. "CLASSGRID ERP" is the actual PRODUCT NAME.
+ * 2. chat.classgrid.in (Classgrid AI) is the actual PRODUCT. The ERP is shut down.
  * 3. NEVER use "Classgrid Platform" anywhere in the frontend UI or user-facing text.
  * ─────────────────────────────────────────────────────────
  */
@@ -1336,7 +1336,7 @@ export default mongoose.models.Artifact || mongoose.model('Artifact', artifactSc
  * ─────────────────────────────────────────────────────────
  * 🚨 NAMING CONVENTION RULE 🚨
  * 1. "CLASSGRID PLATFORM" is strictly the REPO NAME.
- * 2. "CLASSGRID ERP" is the actual PRODUCT NAME.
+ * 2. chat.classgrid.in (Classgrid AI) is the actual PRODUCT. The ERP is shut down.
  * 3. NEVER use "Classgrid Platform" anywhere in the frontend UI or user-facing text.
  * ─────────────────────────────────────────────────────────
  */
@@ -1440,7 +1440,7 @@ export default mongoose.model("Assignment", assignmentSchema);
  * ─────────────────────────────────────────────────────────
  * 🚨 NAMING CONVENTION RULE 🚨
  * 1. "CLASSGRID PLATFORM" is strictly the REPO NAME.
- * 2. "CLASSGRID ERP" is the actual PRODUCT NAME.
+ * 2. chat.classgrid.in (Classgrid AI) is the actual PRODUCT. The ERP is shut down.
  * 3. NEVER use "Classgrid Platform" anywhere in the frontend UI or user-facing text.
  * ─────────────────────────────────────────────────────────
  */
@@ -1549,7 +1549,7 @@ export default mongoose.model("AssignmentSubmission", submissionSchema);
  * ─────────────────────────────────────────────────────────
  * 🚨 NAMING CONVENTION RULE 🚨
  * 1. "CLASSGRID PLATFORM" is strictly the REPO NAME.
- * 2. "CLASSGRID ERP" is the actual PRODUCT NAME.
+ * 2. chat.classgrid.in (Classgrid AI) is the actual PRODUCT. The ERP is shut down.
  * 3. NEVER use "Classgrid Platform" anywhere in the frontend UI or user-facing text.
  * ─────────────────────────────────────────────────────────
  */
@@ -1690,7 +1690,7 @@ export default mongoose.model("Attendance", attendanceSchema);
  * ─────────────────────────────────────────────────────────
  * 🚨 NAMING CONVENTION RULE 🚨
  * 1. "CLASSGRID PLATFORM" is strictly the REPO NAME.
- * 2. "CLASSGRID ERP" is the actual PRODUCT NAME.
+ * 2. chat.classgrid.in (Classgrid AI) is the actual PRODUCT. The ERP is shut down.
  * 3. NEVER use "Classgrid Platform" anywhere in the frontend UI or user-facing text.
  * ─────────────────────────────────────────────────────────
  */
@@ -1801,7 +1801,7 @@ export default mongoose.models.AttendanceAppeal || mongoose.model("AttendanceApp
  * ─────────────────────────────────────────────────────────
  * 🚨 NAMING CONVENTION RULE 🚨
  * 1. "CLASSGRID PLATFORM" is strictly the REPO NAME.
- * 2. "CLASSGRID ERP" is the actual PRODUCT NAME.
+ * 2. chat.classgrid.in (Classgrid AI) is the actual PRODUCT. The ERP is shut down.
  * 3. NEVER use "Classgrid Platform" anywhere in the frontend UI or user-facing text.
  * ─────────────────────────────────────────────────────────
  */
@@ -1953,7 +1953,7 @@ export default mongoose.models.AttendanceRecord ||
  * ─────────────────────────────────────────────────────────
  * 🚨 NAMING CONVENTION RULE 🚨
  * 1. "CLASSGRID PLATFORM" is strictly the REPO NAME.
- * 2. "CLASSGRID ERP" is the actual PRODUCT NAME.
+ * 2. chat.classgrid.in (Classgrid AI) is the actual PRODUCT. The ERP is shut down.
  * 3. NEVER use "Classgrid Platform" anywhere in the frontend UI or user-facing text.
  * ─────────────────────────────────────────────────────────
  */
@@ -2104,7 +2104,7 @@ export default mongoose.models.AttendanceSession ||
  * ─────────────────────────────────────────────────────────
  * 🚨 NAMING CONVENTION RULE 🚨
  * 1. "CLASSGRID PLATFORM" is strictly the REPO NAME.
- * 2. "CLASSGRID ERP" is the actual PRODUCT NAME.
+ * 2. chat.classgrid.in (Classgrid AI) is the actual PRODUCT. The ERP is shut down.
  * 3. NEVER use "Classgrid Platform" anywhere in the frontend UI or user-facing text.
  * ─────────────────────────────────────────────────────────
  */
@@ -2205,7 +2205,7 @@ export default mongoose.models.BillingAuditLog || mongoose.model("BillingAuditLo
  * ─────────────────────────────────────────────────────────
  * 🚨 NAMING CONVENTION RULE 🚨
  * 1. "CLASSGRID PLATFORM" is strictly the REPO NAME.
- * 2. "CLASSGRID ERP" is the actual PRODUCT NAME.
+ * 2. chat.classgrid.in (Classgrid AI) is the actual PRODUCT. The ERP is shut down.
  * 3. NEVER use "Classgrid Platform" anywhere in the frontend UI or user-facing text.
  * ─────────────────────────────────────────────────────────
  */
@@ -2305,7 +2305,7 @@ export default mongoose.models.BillingEligibilityRule || mongoose.model("Billing
  * ─────────────────────────────────────────────────────────
  * 🚨 NAMING CONVENTION RULE 🚨
  * 1. "CLASSGRID PLATFORM" is strictly the REPO NAME.
- * 2. "CLASSGRID ERP" is the actual PRODUCT NAME.
+ * 2. chat.classgrid.in (Classgrid AI) is the actual PRODUCT. The ERP is shut down.
  * 3. NEVER use "Classgrid Platform" anywhere in the frontend UI or user-facing text.
  * ─────────────────────────────────────────────────────────
  */
@@ -2418,7 +2418,7 @@ export default mongoose.models.BillingExportJob || mongoose.model("BillingExport
  * ─────────────────────────────────────────────────────────
  * 🚨 NAMING CONVENTION RULE 🚨
  * 1. "CLASSGRID PLATFORM" is strictly the REPO NAME.
- * 2. "CLASSGRID ERP" is the actual PRODUCT NAME.
+ * 2. chat.classgrid.in (Classgrid AI) is the actual PRODUCT. The ERP is shut down.
  * 3. NEVER use "Classgrid Platform" anywhere in the frontend UI or user-facing text.
  * ─────────────────────────────────────────────────────────
  */
@@ -2519,7 +2519,7 @@ export default mongoose.models.BillingHandoff || mongoose.model("BillingHandoff"
  * ─────────────────────────────────────────────────────────
  * 🚨 NAMING CONVENTION RULE 🚨
  * 1. "CLASSGRID PLATFORM" is strictly the REPO NAME.
- * 2. "CLASSGRID ERP" is the actual PRODUCT NAME.
+ * 2. chat.classgrid.in (Classgrid AI) is the actual PRODUCT. The ERP is shut down.
  * 3. NEVER use "Classgrid Platform" anywhere in the frontend UI or user-facing text.
  * ─────────────────────────────────────────────────────────
  */
@@ -2621,7 +2621,7 @@ export default mongoose.models.BillingMetricDefinition || mongoose.model("Billin
  * ─────────────────────────────────────────────────────────
  * 🚨 NAMING CONVENTION RULE 🚨
  * 1. "CLASSGRID PLATFORM" is strictly the REPO NAME.
- * 2. "CLASSGRID ERP" is the actual PRODUCT NAME.
+ * 2. chat.classgrid.in (Classgrid AI) is the actual PRODUCT. The ERP is shut down.
  * 3. NEVER use "Classgrid Platform" anywhere in the frontend UI or user-facing text.
  * ─────────────────────────────────────────────────────────
  */
@@ -2733,7 +2733,7 @@ export default mongoose.models.BillingModule || mongoose.model("BillingModule", 
  * ─────────────────────────────────────────────────────────
  * 🚨 NAMING CONVENTION RULE 🚨
  * 1. "CLASSGRID PLATFORM" is strictly the REPO NAME.
- * 2. "CLASSGRID ERP" is the actual PRODUCT NAME.
+ * 2. chat.classgrid.in (Classgrid AI) is the actual PRODUCT. The ERP is shut down.
  * 3. NEVER use "Classgrid Platform" anywhere in the frontend UI or user-facing text.
  * ─────────────────────────────────────────────────────────
  */
@@ -2831,7 +2831,7 @@ export default mongoose.models.BillingModuleVersion || mongoose.model("BillingMo
  * ─────────────────────────────────────────────────────────
  * 🚨 NAMING CONVENTION RULE 🚨
  * 1. "CLASSGRID PLATFORM" is strictly the REPO NAME.
- * 2. "CLASSGRID ERP" is the actual PRODUCT NAME.
+ * 2. chat.classgrid.in (Classgrid AI) is the actual PRODUCT. The ERP is shut down.
  * 3. NEVER use "Classgrid Platform" anywhere in the frontend UI or user-facing text.
  * ─────────────────────────────────────────────────────────
  */
@@ -2934,7 +2934,7 @@ export default mongoose.models.BillingPlan || mongoose.model("BillingPlan", bill
  * ─────────────────────────────────────────────────────────
  * 🚨 NAMING CONVENTION RULE 🚨
  * 1. "CLASSGRID PLATFORM" is strictly the REPO NAME.
- * 2. "CLASSGRID ERP" is the actual PRODUCT NAME.
+ * 2. chat.classgrid.in (Classgrid AI) is the actual PRODUCT. The ERP is shut down.
  * 3. NEVER use "Classgrid Platform" anywhere in the frontend UI or user-facing text.
  * ─────────────────────────────────────────────────────────
  */
@@ -3032,7 +3032,7 @@ export default mongoose.models.BillingPlanVersion || mongoose.model("BillingPlan
  * ─────────────────────────────────────────────────────────
  * 🚨 NAMING CONVENTION RULE 🚨
  * 1. "CLASSGRID PLATFORM" is strictly the REPO NAME.
- * 2. "CLASSGRID ERP" is the actual PRODUCT NAME.
+ * 2. chat.classgrid.in (Classgrid AI) is the actual PRODUCT. The ERP is shut down.
  * 3. NEVER use "Classgrid Platform" anywhere in the frontend UI or user-facing text.
  * ─────────────────────────────────────────────────────────
  */
@@ -3164,7 +3164,7 @@ export default mongoose.models.CanteenItem || mongoose.model("CanteenItem", cant
  * ─────────────────────────────────────────────────────────
  * 🚨 NAMING CONVENTION RULE 🚨
  * 1. "CLASSGRID PLATFORM" is strictly the REPO NAME.
- * 2. "CLASSGRID ERP" is the actual PRODUCT NAME.
+ * 2. chat.classgrid.in (Classgrid AI) is the actual PRODUCT. The ERP is shut down.
  * 3. NEVER use "Classgrid Platform" anywhere in the frontend UI or user-facing text.
  * ─────────────────────────────────────────────────────────
  */
@@ -3279,7 +3279,7 @@ export default mongoose.models.CanteenOrder || mongoose.model("CanteenOrder", ca
  * ─────────────────────────────────────────────────────────
  * 🚨 NAMING CONVENTION RULE 🚨
  * 1. "CLASSGRID PLATFORM" is strictly the REPO NAME.
- * 2. "CLASSGRID ERP" is the actual PRODUCT NAME.
+ * 2. chat.classgrid.in (Classgrid AI) is the actual PRODUCT. The ERP is shut down.
  * 3. NEVER use "Classgrid Platform" anywhere in the frontend UI or user-facing text.
  * ─────────────────────────────────────────────────────────
  */
@@ -3488,7 +3488,7 @@ export default mongoose.models.CETAllotment || mongoose.model("CETAllotment", CE
  * ─────────────────────────────────────────────────────────
  * 🚨 NAMING CONVENTION RULE 🚨
  * 1. "CLASSGRID PLATFORM" is strictly the REPO NAME.
- * 2. "CLASSGRID ERP" is the actual PRODUCT NAME.
+ * 2. chat.classgrid.in (Classgrid AI) is the actual PRODUCT. The ERP is shut down.
  * 3. NEVER use "Classgrid Platform" anywhere in the frontend UI or user-facing text.
  * ─────────────────────────────────────────────────────────
  */
@@ -3605,7 +3605,7 @@ export default mongoose.models.Changelog ||
  * ─────────────────────────────────────────────────────────
  * 🚨 NAMING CONVENTION RULE 🚨
  * 1. "CLASSGRID PLATFORM" is strictly the REPO NAME.
- * 2. "CLASSGRID ERP" is the actual PRODUCT NAME.
+ * 2. chat.classgrid.in (Classgrid AI) is the actual PRODUCT. The ERP is shut down.
  * 3. NEVER use "Classgrid Platform" anywhere in the frontend UI or user-facing text.
  * ─────────────────────────────────────────────────────────
  */
@@ -3802,7 +3802,7 @@ export default mongoose.model("Classroom", classroomSchema);
  * ─────────────────────────────────────────────────────────
  * 🚨 NAMING CONVENTION RULE 🚨
  * 1. "CLASSGRID PLATFORM" is strictly the REPO NAME.
- * 2. "CLASSGRID ERP" is the actual PRODUCT NAME.
+ * 2. chat.classgrid.in (Classgrid AI) is the actual PRODUCT. The ERP is shut down.
  * 3. NEVER use "Classgrid Platform" anywhere in the frontend UI or user-facing text.
  * ─────────────────────────────────────────────────────────
  */
@@ -3932,7 +3932,7 @@ export default mongoose.model("ClassroomMembership", classroomMembershipSchema);
  * ─────────────────────────────────────────────────────────
  * 🚨 NAMING CONVENTION RULE 🚨
  * 1. "CLASSGRID PLATFORM" is strictly the REPO NAME.
- * 2. "CLASSGRID ERP" is the actual PRODUCT NAME.
+ * 2. chat.classgrid.in (Classgrid AI) is the actual PRODUCT. The ERP is shut down.
  * 3. NEVER use "Classgrid Platform" anywhere in the frontend UI or user-facing text.
  * ─────────────────────────────────────────────────────────
  */
@@ -4062,7 +4062,7 @@ export default mongoose.models.ContentReport ||
  * ─────────────────────────────────────────────────────────
  * 🚨 NAMING CONVENTION RULE 🚨
  * 1. "CLASSGRID PLATFORM" is strictly the REPO NAME.
- * 2. "CLASSGRID ERP" is the actual PRODUCT NAME.
+ * 2. chat.classgrid.in (Classgrid AI) is the actual PRODUCT. The ERP is shut down.
  * 3. NEVER use "Classgrid Platform" anywhere in the frontend UI or user-facing text.
  * ─────────────────────────────────────────────────────────
  */
@@ -4159,7 +4159,7 @@ export default mongoose.models.CoursePlaylist || mongoose.model("CoursePlaylist"
  * ─────────────────────────────────────────────────────────
  * 🚨 NAMING CONVENTION RULE 🚨
  * 1. "CLASSGRID PLATFORM" is strictly the REPO NAME.
- * 2. "CLASSGRID ERP" is the actual PRODUCT NAME.
+ * 2. chat.classgrid.in (Classgrid AI) is the actual PRODUCT. The ERP is shut down.
  * 3. NEVER use "Classgrid Platform" anywhere in the frontend UI or user-facing text.
  * ─────────────────────────────────────────────────────────
  */
@@ -4335,7 +4335,7 @@ export default mongoose.models.CourseVideo || mongoose.model("CourseVideo", cour
  * ─────────────────────────────────────────────────────────
  * 🚨 NAMING CONVENTION RULE 🚨
  * 1. "CLASSGRID PLATFORM" is strictly the REPO NAME.
- * 2. "CLASSGRID ERP" is the actual PRODUCT NAME.
+ * 2. chat.classgrid.in (Classgrid AI) is the actual PRODUCT. The ERP is shut down.
  * 3. NEVER use "Classgrid Platform" anywhere in the frontend UI or user-facing text.
  * ─────────────────────────────────────────────────────────
  */
@@ -4442,7 +4442,7 @@ export default mongoose.models.CreditNote || mongoose.model("CreditNote", credit
  * ─────────────────────────────────────────────────────────
  * 🚨 NAMING CONVENTION RULE 🚨
  * 1. "CLASSGRID PLATFORM" is strictly the REPO NAME.
- * 2. "CLASSGRID ERP" is the actual PRODUCT NAME.
+ * 2. chat.classgrid.in (Classgrid AI) is the actual PRODUCT. The ERP is shut down.
  * 3. NEVER use "Classgrid Platform" anywhere in the frontend UI or user-facing text.
  * ─────────────────────────────────────────────────────────
  */
@@ -4535,7 +4535,7 @@ export default mongoose.models.CreditNoteLineItem || mongoose.model("CreditNoteL
  * ─────────────────────────────────────────────────────────
  * 🚨 NAMING CONVENTION RULE 🚨
  * 1. "CLASSGRID PLATFORM" is strictly the REPO NAME.
- * 2. "CLASSGRID ERP" is the actual PRODUCT NAME.
+ * 2. chat.classgrid.in (Classgrid AI) is the actual PRODUCT. The ERP is shut down.
  * 3. NEVER use "Classgrid Platform" anywhere in the frontend UI or user-facing text.
  * ─────────────────────────────────────────────────────────
  */
@@ -4745,7 +4745,7 @@ export default mongoose.models.DemoRequest || mongoose.model("DemoRequest", demo
  * ─────────────────────────────────────────────────────────
  * 🚨 NAMING CONVENTION RULE 🚨
  * 1. "CLASSGRID PLATFORM" is strictly the REPO NAME.
- * 2. "CLASSGRID ERP" is the actual PRODUCT NAME.
+ * 2. chat.classgrid.in (Classgrid AI) is the actual PRODUCT. The ERP is shut down.
  * 3. NEVER use "Classgrid Platform" anywhere in the frontend UI or user-facing text.
  * ─────────────────────────────────────────────────────────
  */
@@ -4844,7 +4844,7 @@ export default mongoose.model("DeviceVerification", deviceVerificationSchema);
  * ─────────────────────────────────────────────────────────
  * 🚨 NAMING CONVENTION RULE 🚨
  * 1. "CLASSGRID PLATFORM" is strictly the REPO NAME.
- * 2. "CLASSGRID ERP" is the actual PRODUCT NAME.
+ * 2. chat.classgrid.in (Classgrid AI) is the actual PRODUCT. The ERP is shut down.
  * 3. NEVER use "Classgrid Platform" anywhere in the frontend UI or user-facing text.
  * ─────────────────────────────────────────────────────────
  */
@@ -4976,7 +4976,7 @@ export default mongoose.models.Discount || mongoose.model("Discount", discountSc
  * ─────────────────────────────────────────────────────────
  * 🚨 NAMING CONVENTION RULE 🚨
  * 1. "CLASSGRID PLATFORM" is strictly the REPO NAME.
- * 2. "CLASSGRID ERP" is the actual PRODUCT NAME.
+ * 2. chat.classgrid.in (Classgrid AI) is the actual PRODUCT. The ERP is shut down.
  * 3. NEVER use "Classgrid Platform" anywhere in the frontend UI or user-facing text.
  * ─────────────────────────────────────────────────────────
  */
@@ -5061,7 +5061,7 @@ export default mongoose.models.DiscountRedemption || mongoose.model("DiscountRed
  * ─────────────────────────────────────────────────────────
  * 🚨 NAMING CONVENTION RULE 🚨
  * 1. "CLASSGRID PLATFORM" is strictly the REPO NAME.
- * 2. "CLASSGRID ERP" is the actual PRODUCT NAME.
+ * 2. chat.classgrid.in (Classgrid AI) is the actual PRODUCT. The ERP is shut down.
  * 3. NEVER use "Classgrid Platform" anywhere in the frontend UI or user-facing text.
  * ─────────────────────────────────────────────────────────
  */
@@ -5163,7 +5163,7 @@ export default mongoose.model("DropdownMaster", dropdownMasterSchema);
  * ─────────────────────────────────────────────────────────
  * 🚨 NAMING CONVENTION RULE 🚨
  * 1. "CLASSGRID PLATFORM" is strictly the REPO NAME.
- * 2. "CLASSGRID ERP" is the actual PRODUCT NAME.
+ * 2. chat.classgrid.in (Classgrid AI) is the actual PRODUCT. The ERP is shut down.
  * 3. NEVER use "Classgrid Platform" anywhere in the frontend UI or user-facing text.
  * ─────────────────────────────────────────────────────────
  */
@@ -5296,7 +5296,7 @@ export default EmailJob;
  * ─────────────────────────────────────────────────────────
  * 🚨 NAMING CONVENTION RULE 🚨
  * 1. "CLASSGRID PLATFORM" is strictly the REPO NAME.
- * 2. "CLASSGRID ERP" is the actual PRODUCT NAME.
+ * 2. chat.classgrid.in (Classgrid AI) is the actual PRODUCT. The ERP is shut down.
  * 3. NEVER use "Classgrid Platform" anywhere in the frontend UI or user-facing text.
  * ─────────────────────────────────────────────────────────
  */
@@ -5395,7 +5395,7 @@ export default EmailReservation;
  * ─────────────────────────────────────────────────────────
  * 🚨 NAMING CONVENTION RULE 🚨
  * 1. "CLASSGRID PLATFORM" is strictly the REPO NAME.
- * 2. "CLASSGRID ERP" is the actual PRODUCT NAME.
+ * 2. chat.classgrid.in (Classgrid AI) is the actual PRODUCT. The ERP is shut down.
  * 3. NEVER use "Classgrid Platform" anywhere in the frontend UI or user-facing text.
  * ─────────────────────────────────────────────────────────
  */
@@ -5514,7 +5514,7 @@ export default mongoose.model("Exam", examSchema);
  * ─────────────────────────────────────────────────────────
  * 🚨 NAMING CONVENTION RULE 🚨
  * 1. "CLASSGRID PLATFORM" is strictly the REPO NAME.
- * 2. "CLASSGRID ERP" is the actual PRODUCT NAME.
+ * 2. chat.classgrid.in (Classgrid AI) is the actual PRODUCT. The ERP is shut down.
  * 3. NEVER use "Classgrid Platform" anywhere in the frontend UI or user-facing text.
  * ─────────────────────────────────────────────────────────
  */
@@ -5686,7 +5686,7 @@ export default mongoose.model("ExamRecord", examRecordSchema);
  * ─────────────────────────────────────────────────────────
  * 🚨 NAMING CONVENTION RULE 🚨
  * 1. "CLASSGRID PLATFORM" is strictly the REPO NAME.
- * 2. "CLASSGRID ERP" is the actual PRODUCT NAME.
+ * 2. chat.classgrid.in (Classgrid AI) is the actual PRODUCT. The ERP is shut down.
  * 3. NEVER use "Classgrid Platform" anywhere in the frontend UI or user-facing text.
  * ─────────────────────────────────────────────────────────
  */
@@ -5781,7 +5781,7 @@ export default mongoose.model("ExamResult", examResultSchema);
  * ─────────────────────────────────────────────────────────
  * 🚨 NAMING CONVENTION RULE 🚨
  * 1. "CLASSGRID PLATFORM" is strictly the REPO NAME.
- * 2. "CLASSGRID ERP" is the actual PRODUCT NAME.
+ * 2. chat.classgrid.in (Classgrid AI) is the actual PRODUCT. The ERP is shut down.
  * 3. NEVER use "Classgrid Platform" anywhere in the frontend UI or user-facing text.
  * ─────────────────────────────────────────────────────────
  */
@@ -5880,7 +5880,7 @@ export default mongoose.models.FacultyBiometricLog ||
  * ─────────────────────────────────────────────────────────
  * 🚨 NAMING CONVENTION RULE 🚨
  * 1. "CLASSGRID PLATFORM" is strictly the REPO NAME.
- * 2. "CLASSGRID ERP" is the actual PRODUCT NAME.
+ * 2. chat.classgrid.in (Classgrid AI) is the actual PRODUCT. The ERP is shut down.
  * 3. NEVER use "Classgrid Platform" anywhere in the frontend UI or user-facing text.
  * ─────────────────────────────────────────────────────────
  */
@@ -5998,7 +5998,7 @@ export default mongoose.models.FacultyPayroll ||
  * ─────────────────────────────────────────────────────────
  * 🚨 NAMING CONVENTION RULE 🚨
  * 1. "CLASSGRID PLATFORM" is strictly the REPO NAME.
- * 2. "CLASSGRID ERP" is the actual PRODUCT NAME.
+ * 2. chat.classgrid.in (Classgrid AI) is the actual PRODUCT. The ERP is shut down.
  * 3. NEVER use "Classgrid Platform" anywhere in the frontend UI or user-facing text.
  * ─────────────────────────────────────────────────────────
  */
@@ -6117,7 +6117,7 @@ export default mongoose.models.FeatureFlag ||
  * ─────────────────────────────────────────────────────────
  * 🚨 NAMING CONVENTION RULE 🚨
  * 1. "CLASSGRID PLATFORM" is strictly the REPO NAME.
- * 2. "CLASSGRID ERP" is the actual PRODUCT NAME.
+ * 2. chat.classgrid.in (Classgrid AI) is the actual PRODUCT. The ERP is shut down.
  * 3. NEVER use "Classgrid Platform" anywhere in the frontend UI or user-facing text.
  * ─────────────────────────────────────────────────────────
  */
@@ -6180,7 +6180,7 @@ export default mongoose.model('FeeCategory', feeCategorySchema);
  * ─────────────────────────────────────────────────────────
  * 🚨 NAMING CONVENTION RULE 🚨
  * 1. "CLASSGRID PLATFORM" is strictly the REPO NAME.
- * 2. "CLASSGRID ERP" is the actual PRODUCT NAME.
+ * 2. chat.classgrid.in (Classgrid AI) is the actual PRODUCT. The ERP is shut down.
  * 3. NEVER use "Classgrid Platform" anywhere in the frontend UI or user-facing text.
  * ─────────────────────────────────────────────────────────
  */
@@ -6251,7 +6251,7 @@ export default mongoose.model('FeeComponent', feeComponentSchema);
  * ─────────────────────────────────────────────────────────
  * 🚨 NAMING CONVENTION RULE 🚨
  * 1. "CLASSGRID PLATFORM" is strictly the REPO NAME.
- * 2. "CLASSGRID ERP" is the actual PRODUCT NAME.
+ * 2. chat.classgrid.in (Classgrid AI) is the actual PRODUCT. The ERP is shut down.
  * 3. NEVER use "Classgrid Platform" anywhere in the frontend UI or user-facing text.
  * ─────────────────────────────────────────────────────────
  */
@@ -6341,7 +6341,7 @@ export const FeedbackResponse = mongoose.model("FeedbackResponse", feedbackRespo
  * ─────────────────────────────────────────────────────────
  * 🚨 NAMING CONVENTION RULE 🚨
  * 1. "CLASSGRID PLATFORM" is strictly the REPO NAME.
- * 2. "CLASSGRID ERP" is the actual PRODUCT NAME.
+ * 2. chat.classgrid.in (Classgrid AI) is the actual PRODUCT. The ERP is shut down.
  * 3. NEVER use "Classgrid Platform" anywhere in the frontend UI or user-facing text.
  * ─────────────────────────────────────────────────────────
  */
@@ -6473,7 +6473,7 @@ export default mongoose.model("FeedbackForm", feedbackFormSchema);
  * ─────────────────────────────────────────────────────────
  * 🚨 NAMING CONVENTION RULE 🚨
  * 1. "CLASSGRID PLATFORM" is strictly the REPO NAME.
- * 2. "CLASSGRID ERP" is the actual PRODUCT NAME.
+ * 2. chat.classgrid.in (Classgrid AI) is the actual PRODUCT. The ERP is shut down.
  * 3. NEVER use "Classgrid Platform" anywhere in the frontend UI or user-facing text.
  * ─────────────────────────────────────────────────────────
  */
@@ -6573,7 +6573,7 @@ export default mongoose.model("FeedbackResponse", feedbackResponseSchema);
  * ─────────────────────────────────────────────────────────
  * 🚨 NAMING CONVENTION RULE 🚨
  * 1. "CLASSGRID PLATFORM" is strictly the REPO NAME.
- * 2. "CLASSGRID ERP" is the actual PRODUCT NAME.
+ * 2. chat.classgrid.in (Classgrid AI) is the actual PRODUCT. The ERP is shut down.
  * 3. NEVER use "Classgrid Platform" anywhere in the frontend UI or user-facing text.
  * ─────────────────────────────────────────────────────────
  */
@@ -6677,7 +6677,7 @@ export default mongoose.model('FeeRecord', feeRecordSchema);
  * ─────────────────────────────────────────────────────────
  * 🚨 NAMING CONVENTION RULE 🚨
  * 1. "CLASSGRID PLATFORM" is strictly the REPO NAME.
- * 2. "CLASSGRID ERP" is the actual PRODUCT NAME.
+ * 2. chat.classgrid.in (Classgrid AI) is the actual PRODUCT. The ERP is shut down.
  * 3. NEVER use "Classgrid Platform" anywhere in the frontend UI or user-facing text.
  * ─────────────────────────────────────────────────────────
  */
@@ -6777,7 +6777,7 @@ export default FeeStructure;
  * ─────────────────────────────────────────────────────────
  * 🚨 NAMING CONVENTION RULE 🚨
  * 1. "CLASSGRID PLATFORM" is strictly the REPO NAME.
- * 2. "CLASSGRID ERP" is the actual PRODUCT NAME.
+ * 2. chat.classgrid.in (Classgrid AI) is the actual PRODUCT. The ERP is shut down.
  * 3. NEVER use "Classgrid Platform" anywhere in the frontend UI or user-facing text.
  * ─────────────────────────────────────────────────────────
  */
@@ -6883,7 +6883,7 @@ export default mongoose.model('FeeTransaction', feeTransactionSchema);
  * ─────────────────────────────────────────────────────────
  * 🚨 NAMING CONVENTION RULE 🚨
  * 1. "CLASSGRID PLATFORM" is strictly the REPO NAME.
- * 2. "CLASSGRID ERP" is the actual PRODUCT NAME.
+ * 2. chat.classgrid.in (Classgrid AI) is the actual PRODUCT. The ERP is shut down.
  * 3. NEVER use "Classgrid Platform" anywhere in the frontend UI or user-facing text.
  * ─────────────────────────────────────────────────────────
  */
@@ -6981,7 +6981,7 @@ export default mongoose.models.ForumComment ||
  * ─────────────────────────────────────────────────────────
  * 🚨 NAMING CONVENTION RULE 🚨
  * 1. "CLASSGRID PLATFORM" is strictly the REPO NAME.
- * 2. "CLASSGRID ERP" is the actual PRODUCT NAME.
+ * 2. chat.classgrid.in (Classgrid AI) is the actual PRODUCT. The ERP is shut down.
  * 3. NEVER use "Classgrid Platform" anywhere in the frontend UI or user-facing text.
  * ─────────────────────────────────────────────────────────
  */
@@ -7103,7 +7103,7 @@ export default mongoose.models.ForumPost ||
  * ─────────────────────────────────────────────────────────
  * 🚨 NAMING CONVENTION RULE 🚨
  * 1. "CLASSGRID PLATFORM" is strictly the REPO NAME.
- * 2. "CLASSGRID ERP" is the actual PRODUCT NAME.
+ * 2. chat.classgrid.in (Classgrid AI) is the actual PRODUCT. The ERP is shut down.
  * 3. NEVER use "Classgrid Platform" anywhere in the frontend UI or user-facing text.
  * ─────────────────────────────────────────────────────────
  */
@@ -7239,7 +7239,7 @@ export default mongoose.models.GoLive || mongoose.model("GoLive", goLiveSchema);
  * ─────────────────────────────────────────────────────────
  * 🚨 NAMING CONVENTION RULE 🚨
  * 1. "CLASSGRID PLATFORM" is strictly the REPO NAME.
- * 2. "CLASSGRID ERP" is the actual PRODUCT NAME.
+ * 2. chat.classgrid.in (Classgrid AI) is the actual PRODUCT. The ERP is shut down.
  * 3. NEVER use "Classgrid Platform" anywhere in the frontend UI or user-facing text.
  * ─────────────────────────────────────────────────────────
  */
@@ -7321,7 +7321,7 @@ export default mongoose.models.ImpersonationLog ||
  * ─────────────────────────────────────────────────────────
  * 🚨 NAMING CONVENTION RULE 🚨
  * 1. "CLASSGRID PLATFORM" is strictly the REPO NAME.
- * 2. "CLASSGRID ERP" is the actual PRODUCT NAME.
+ * 2. chat.classgrid.in (Classgrid AI) is the actual PRODUCT. The ERP is shut down.
  * 3. NEVER use "Classgrid Platform" anywhere in the frontend UI or user-facing text.
  * ─────────────────────────────────────────────────────────
  */
@@ -7450,7 +7450,7 @@ export default mongoose.models.ImportBatch ||
  * ─────────────────────────────────────────────────────────
  * 🚨 NAMING CONVENTION RULE 🚨
  * 1. "CLASSGRID PLATFORM" is strictly the REPO NAME.
- * 2. "CLASSGRID ERP" is the actual PRODUCT NAME.
+ * 2. chat.classgrid.in (Classgrid AI) is the actual PRODUCT. The ERP is shut down.
  * 3. NEVER use "Classgrid Platform" anywhere in the frontend UI or user-facing text.
  * ─────────────────────────────────────────────────────────
  */
@@ -7604,7 +7604,7 @@ export default mongoose.models.Invoice || mongoose.model("Invoice", invoiceSchem
  * ─────────────────────────────────────────────────────────
  * 🚨 NAMING CONVENTION RULE 🚨
  * 1. "CLASSGRID PLATFORM" is strictly the REPO NAME.
- * 2. "CLASSGRID ERP" is the actual PRODUCT NAME.
+ * 2. chat.classgrid.in (Classgrid AI) is the actual PRODUCT. The ERP is shut down.
  * 3. NEVER use "Classgrid Platform" anywhere in the frontend UI or user-facing text.
  * ─────────────────────────────────────────────────────────
  */
@@ -7691,7 +7691,7 @@ export default mongoose.models.InvoiceDelivery || mongoose.model("InvoiceDeliver
  * ─────────────────────────────────────────────────────────
  * 🚨 NAMING CONVENTION RULE 🚨
  * 1. "CLASSGRID PLATFORM" is strictly the REPO NAME.
- * 2. "CLASSGRID ERP" is the actual PRODUCT NAME.
+ * 2. chat.classgrid.in (Classgrid AI) is the actual PRODUCT. The ERP is shut down.
  * 3. NEVER use "Classgrid Platform" anywhere in the frontend UI or user-facing text.
  * ─────────────────────────────────────────────────────────
  */
@@ -7805,7 +7805,7 @@ export default mongoose.models.InvoiceLineItem || mongoose.model("InvoiceLineIte
  * ─────────────────────────────────────────────────────────
  * 🚨 NAMING CONVENTION RULE 🚨
  * 1. "CLASSGRID PLATFORM" is strictly the REPO NAME.
- * 2. "CLASSGRID ERP" is the actual PRODUCT NAME.
+ * 2. chat.classgrid.in (Classgrid AI) is the actual PRODUCT. The ERP is shut down.
  * 3. NEVER use "Classgrid Platform" anywhere in the frontend UI or user-facing text.
  * ─────────────────────────────────────────────────────────
  */
@@ -7885,7 +7885,7 @@ export default mongoose.models.InvoiceSequence || mongoose.model("InvoiceSequenc
  * ─────────────────────────────────────────────────────────
  * 🚨 NAMING CONVENTION RULE 🚨
  * 1. "CLASSGRID PLATFORM" is strictly the REPO NAME.
- * 2. "CLASSGRID ERP" is the actual PRODUCT NAME.
+ * 2. chat.classgrid.in (Classgrid AI) is the actual PRODUCT. The ERP is shut down.
  * 3. NEVER use "Classgrid Platform" anywhere in the frontend UI or user-facing text.
  * ─────────────────────────────────────────────────────────
  */
@@ -8017,7 +8017,7 @@ export default mongoose.models.Lead || mongoose.model("Lead", leadSchema);
  * ─────────────────────────────────────────────────────────
  * 🚨 NAMING CONVENTION RULE 🚨
  * 1. "CLASSGRID PLATFORM" is strictly the REPO NAME.
- * 2. "CLASSGRID ERP" is the actual PRODUCT NAME.
+ * 2. chat.classgrid.in (Classgrid AI) is the actual PRODUCT. The ERP is shut down.
  * 3. NEVER use "Classgrid Platform" anywhere in the frontend UI or user-facing text.
  * ─────────────────────────────────────────────────────────
  */
@@ -8141,7 +8141,7 @@ export default mongoose.model("LeaveRequest", leaveRequestSchema);
  * ─────────────────────────────────────────────────────────
  * 🚨 NAMING CONVENTION RULE 🚨
  * 1. "CLASSGRID PLATFORM" is strictly the REPO NAME.
- * 2. "CLASSGRID ERP" is the actual PRODUCT NAME.
+ * 2. chat.classgrid.in (Classgrid AI) is the actual PRODUCT. The ERP is shut down.
  * 3. NEVER use "Classgrid Platform" anywhere in the frontend UI or user-facing text.
  * ─────────────────────────────────────────────────────────
  */
@@ -8242,7 +8242,7 @@ export default mongoose.model("Meeting", meetingSchema);
  * ─────────────────────────────────────────────────────────
  * 🚨 NAMING CONVENTION RULE 🚨
  * 1. "CLASSGRID PLATFORM" is strictly the REPO NAME.
- * 2. "CLASSGRID ERP" is the actual PRODUCT NAME.
+ * 2. chat.classgrid.in (Classgrid AI) is the actual PRODUCT. The ERP is shut down.
  * 3. NEVER use "Classgrid Platform" anywhere in the frontend UI or user-facing text.
  * ─────────────────────────────────────────────────────────
  */
@@ -8326,7 +8326,7 @@ export default MeetingChat;
  * ─────────────────────────────────────────────────────────
  * 🚨 NAMING CONVENTION RULE 🚨
  * 1. "CLASSGRID PLATFORM" is strictly the REPO NAME.
- * 2. "CLASSGRID ERP" is the actual PRODUCT NAME.
+ * 2. chat.classgrid.in (Classgrid AI) is the actual PRODUCT. The ERP is shut down.
  * 3. NEVER use "Classgrid Platform" anywhere in the frontend UI or user-facing text.
  * ─────────────────────────────────────────────────────────
  */
@@ -8463,7 +8463,7 @@ export default mongoose.model("Message", messageSchema);
  * ─────────────────────────────────────────────────────────
  * 🚨 NAMING CONVENTION RULE 🚨
  * 1. "CLASSGRID PLATFORM" is strictly the REPO NAME.
- * 2. "CLASSGRID ERP" is the actual PRODUCT NAME.
+ * 2. chat.classgrid.in (Classgrid AI) is the actual PRODUCT. The ERP is shut down.
  * 3. NEVER use "Classgrid Platform" anywhere in the frontend UI or user-facing text.
  * ─────────────────────────────────────────────────────────
  */
@@ -8544,7 +8544,7 @@ export default MessageDraft;
  * ─────────────────────────────────────────────────────────
  * 🚨 NAMING CONVENTION RULE 🚨
  * 1. "CLASSGRID PLATFORM" is strictly the REPO NAME.
- * 2. "CLASSGRID ERP" is the actual PRODUCT NAME.
+ * 2. chat.classgrid.in (Classgrid AI) is the actual PRODUCT. The ERP is shut down.
  * 3. NEVER use "Classgrid Platform" anywhere in the frontend UI or user-facing text.
  * ─────────────────────────────────────────────────────────
  */
@@ -8645,7 +8645,7 @@ export default mongoose.model("Note", noteSchema);
  * ─────────────────────────────────────────────────────────
  * 🚨 NAMING CONVENTION RULE 🚨
  * 1. "CLASSGRID PLATFORM" is strictly the REPO NAME.
- * 2. "CLASSGRID ERP" is the actual PRODUCT NAME.
+ * 2. chat.classgrid.in (Classgrid AI) is the actual PRODUCT. The ERP is shut down.
  * 3. NEVER use "Classgrid Platform" anywhere in the frontend UI or user-facing text.
  * ─────────────────────────────────────────────────────────
  */
@@ -8715,7 +8715,7 @@ export default NotePackage;
  * ─────────────────────────────────────────────────────────
  * 🚨 NAMING CONVENTION RULE 🚨
  * 1. "CLASSGRID PLATFORM" is strictly the REPO NAME.
- * 2. "CLASSGRID ERP" is the actual PRODUCT NAME.
+ * 2. chat.classgrid.in (Classgrid AI) is the actual PRODUCT. The ERP is shut down.
  * 3. NEVER use "Classgrid Platform" anywhere in the frontend UI or user-facing text.
  * ─────────────────────────────────────────────────────────
  */
@@ -8805,7 +8805,7 @@ export default mongoose.model("NoteVersion", noteVersionSchema);
  * ─────────────────────────────────────────────────────────
  * 🚨 NAMING CONVENTION RULE 🚨
  * 1. "CLASSGRID PLATFORM" is strictly the REPO NAME.
- * 2. "CLASSGRID ERP" is the actual PRODUCT NAME.
+ * 2. chat.classgrid.in (Classgrid AI) is the actual PRODUCT. The ERP is shut down.
  * 3. NEVER use "Classgrid Platform" anywhere in the frontend UI or user-facing text.
  * ─────────────────────────────────────────────────────────
  */
@@ -8899,7 +8899,7 @@ export default mongoose.model("NoteView", noteViewSchema);
  * ─────────────────────────────────────────────────────────
  * 🚨 NAMING CONVENTION RULE 🚨
  * 1. "CLASSGRID PLATFORM" is strictly the REPO NAME.
- * 2. "CLASSGRID ERP" is the actual PRODUCT NAME.
+ * 2. chat.classgrid.in (Classgrid AI) is the actual PRODUCT. The ERP is shut down.
  * 3. NEVER use "Classgrid Platform" anywhere in the frontend UI or user-facing text.
  * ─────────────────────────────────────────────────────────
  */
@@ -8999,7 +8999,7 @@ export default mongoose.model("Notification", notificationSchema);
  * ─────────────────────────────────────────────────────────
  * 🚨 NAMING CONVENTION RULE 🚨
  * 1. "CLASSGRID PLATFORM" is strictly the REPO NAME.
- * 2. "CLASSGRID ERP" is the actual PRODUCT NAME.
+ * 2. chat.classgrid.in (Classgrid AI) is the actual PRODUCT. The ERP is shut down.
  * 3. NEVER use "Classgrid Platform" anywhere in the frontend UI or user-facing text.
  * ─────────────────────────────────────────────────────────
  */
@@ -9071,7 +9071,7 @@ export default mongoose.model("Notification", notificationSchema);
  * ─────────────────────────────────────────────────────────
  * 🚨 NAMING CONVENTION RULE 🚨
  * 1. "CLASSGRID PLATFORM" is strictly the REPO NAME.
- * 2. "CLASSGRID ERP" is the actual PRODUCT NAME.
+ * 2. chat.classgrid.in (Classgrid AI) is the actual PRODUCT. The ERP is shut down.
  * 3. NEVER use "Classgrid Platform" anywhere in the frontend UI or user-facing text.
  * ─────────────────────────────────────────────────────────
  */
@@ -9179,7 +9179,7 @@ export default NotificationLog;
  * ─────────────────────────────────────────────────────────
  * 🚨 NAMING CONVENTION RULE 🚨
  * 1. "CLASSGRID PLATFORM" is strictly the REPO NAME.
- * 2. "CLASSGRID ERP" is the actual PRODUCT NAME.
+ * 2. chat.classgrid.in (Classgrid AI) is the actual PRODUCT. The ERP is shut down.
  * 3. NEVER use "Classgrid Platform" anywhere in the frontend UI or user-facing text.
  * ─────────────────────────────────────────────────────────
  */
@@ -9329,7 +9329,7 @@ export const OAuthToken = mongoose.models.OAuthToken || mongoose.model("OAuthTok
  * ─────────────────────────────────────────────────────────
  * 🚨 NAMING CONVENTION RULE 🚨
  * 1. "CLASSGRID PLATFORM" is strictly the REPO NAME.
- * 2. "CLASSGRID ERP" is the actual PRODUCT NAME.
+ * 2. chat.classgrid.in (Classgrid AI) is the actual PRODUCT. The ERP is shut down.
  * 3. NEVER use "Classgrid Platform" anywhere in the frontend UI or user-facing text.
  * ─────────────────────────────────────────────────────────
  */
@@ -9426,7 +9426,7 @@ export default mongoose.models.OnboardingEvent ||
  * ─────────────────────────────────────────────────────────
  * 🚨 NAMING CONVENTION RULE 🚨
  * 1. "CLASSGRID PLATFORM" is strictly the REPO NAME.
- * 2. "CLASSGRID ERP" is the actual PRODUCT NAME.
+ * 2. chat.classgrid.in (Classgrid AI) is the actual PRODUCT. The ERP is shut down.
  * 3. NEVER use "Classgrid Platform" anywhere in the frontend UI or user-facing text.
  * ─────────────────────────────────────────────────────────
  */
@@ -9505,7 +9505,7 @@ export default mongoose.models.OnboardingOTP || mongoose.model("OnboardingOTP", 
  * ─────────────────────────────────────────────────────────
  * 🚨 NAMING CONVENTION RULE 🚨
  * 1. "CLASSGRID PLATFORM" is strictly the REPO NAME.
- * 2. "CLASSGRID ERP" is the actual PRODUCT NAME.
+ * 2. chat.classgrid.in (Classgrid AI) is the actual PRODUCT. The ERP is shut down.
  * 3. NEVER use "Classgrid Platform" anywhere in the frontend UI or user-facing text.
  * ─────────────────────────────────────────────────────────
  */
@@ -10199,7 +10199,7 @@ export default mongoose.models.Organization || mongoose.model("Organization", or
  * ─────────────────────────────────────────────────────────
  * 🚨 NAMING CONVENTION RULE 🚨
  * 1. "CLASSGRID PLATFORM" is strictly the REPO NAME.
- * 2. "CLASSGRID ERP" is the actual PRODUCT NAME.
+ * 2. chat.classgrid.in (Classgrid AI) is the actual PRODUCT. The ERP is shut down.
  * 3. NEVER use "Classgrid Platform" anywhere in the frontend UI or user-facing text.
  * ─────────────────────────────────────────────────────────
  */
@@ -10336,7 +10336,7 @@ export default OrganizationAnnouncement;
  * ─────────────────────────────────────────────────────────
  * 🚨 NAMING CONVENTION RULE 🚨
  * 1. "CLASSGRID PLATFORM" is strictly the REPO NAME.
- * 2. "CLASSGRID ERP" is the actual PRODUCT NAME.
+ * 2. chat.classgrid.in (Classgrid AI) is the actual PRODUCT. The ERP is shut down.
  * 3. NEVER use "Classgrid Platform" anywhere in the frontend UI or user-facing text.
  * ─────────────────────────────────────────────────────────
  */
@@ -10432,7 +10432,7 @@ export default mongoose.models.OrganizationBillingUsageSnapshot || mongoose.mode
  * ─────────────────────────────────────────────────────────
  * 🚨 NAMING CONVENTION RULE 🚨
  * 1. "CLASSGRID PLATFORM" is strictly the REPO NAME.
- * 2. "CLASSGRID ERP" is the actual PRODUCT NAME.
+ * 2. chat.classgrid.in (Classgrid AI) is the actual PRODUCT. The ERP is shut down.
  * 3. NEVER use "Classgrid Platform" anywhere in the frontend UI or user-facing text.
  * ─────────────────────────────────────────────────────────
  */
@@ -10508,7 +10508,7 @@ export default mongoose.models.OrganizationCreditAccount || mongoose.model("Orga
  * ─────────────────────────────────────────────────────────
  * 🚨 NAMING CONVENTION RULE 🚨
  * 1. "CLASSGRID PLATFORM" is strictly the REPO NAME.
- * 2. "CLASSGRID ERP" is the actual PRODUCT NAME.
+ * 2. chat.classgrid.in (Classgrid AI) is the actual PRODUCT. The ERP is shut down.
  * 3. NEVER use "Classgrid Platform" anywhere in the frontend UI or user-facing text.
  * ─────────────────────────────────────────────────────────
  */
@@ -10609,7 +10609,7 @@ export default mongoose.models.OrganizationCreditEntry || mongoose.model("Organi
  * ─────────────────────────────────────────────────────────
  * 🚨 NAMING CONVENTION RULE 🚨
  * 1. "CLASSGRID PLATFORM" is strictly the REPO NAME.
- * 2. "CLASSGRID ERP" is the actual PRODUCT NAME.
+ * 2. chat.classgrid.in (Classgrid AI) is the actual PRODUCT. The ERP is shut down.
  * 3. NEVER use "Classgrid Platform" anywhere in the frontend UI or user-facing text.
  * ─────────────────────────────────────────────────────────
  */
@@ -10735,7 +10735,7 @@ export default mongoose.model("OrganizationPending", organizationPendingSchema);
  * ─────────────────────────────────────────────────────────
  * 🚨 NAMING CONVENTION RULE 🚨
  * 1. "CLASSGRID PLATFORM" is strictly the REPO NAME.
- * 2. "CLASSGRID ERP" is the actual PRODUCT NAME.
+ * 2. chat.classgrid.in (Classgrid AI) is the actual PRODUCT. The ERP is shut down.
  * 3. NEVER use "Classgrid Platform" anywhere in the frontend UI or user-facing text.
  * ─────────────────────────────────────────────────────────
  */
@@ -10831,7 +10831,7 @@ export default mongoose.models.OrganizationPriceOverride || mongoose.model("Orga
  * ─────────────────────────────────────────────────────────
  * 🚨 NAMING CONVENTION RULE 🚨
  * 1. "CLASSGRID PLATFORM" is strictly the REPO NAME.
- * 2. "CLASSGRID ERP" is the actual PRODUCT NAME.
+ * 2. chat.classgrid.in (Classgrid AI) is the actual PRODUCT. The ERP is shut down.
  * 3. NEVER use "Classgrid Platform" anywhere in the frontend UI or user-facing text.
  * ─────────────────────────────────────────────────────────
  */
@@ -10889,7 +10889,7 @@ export default mongoose.models.OrganizationRequest || mongoose.model("Organizati
  * ─────────────────────────────────────────────────────────
  * 🚨 NAMING CONVENTION RULE 🚨
  * 1. "CLASSGRID PLATFORM" is strictly the REPO NAME.
- * 2. "CLASSGRID ERP" is the actual PRODUCT NAME.
+ * 2. chat.classgrid.in (Classgrid AI) is the actual PRODUCT. The ERP is shut down.
  * 3. NEVER use "Classgrid Platform" anywhere in the frontend UI or user-facing text.
  * ─────────────────────────────────────────────────────────
  */
@@ -11031,7 +11031,7 @@ export default mongoose.models.OrganizationResourceUsage ||
  * ─────────────────────────────────────────────────────────
  * 🚨 NAMING CONVENTION RULE 🚨
  * 1. "CLASSGRID PLATFORM" is strictly the REPO NAME.
- * 2. "CLASSGRID ERP" is the actual PRODUCT NAME.
+ * 2. chat.classgrid.in (Classgrid AI) is the actual PRODUCT. The ERP is shut down.
  * 3. NEVER use "Classgrid Platform" anywhere in the frontend UI or user-facing text.
  * ─────────────────────────────────────────────────────────
  */
@@ -11142,7 +11142,7 @@ export default mongoose.models.OrganizationSubscription || mongoose.model("Organ
  * ─────────────────────────────────────────────────────────
  * 🚨 NAMING CONVENTION RULE 🚨
  * 1. "CLASSGRID PLATFORM" is strictly the REPO NAME.
- * 2. "CLASSGRID ERP" is the actual PRODUCT NAME.
+ * 2. chat.classgrid.in (Classgrid AI) is the actual PRODUCT. The ERP is shut down.
  * 3. NEVER use "Classgrid Platform" anywhere in the frontend UI or user-facing text.
  * ─────────────────────────────────────────────────────────
  */
@@ -11233,7 +11233,7 @@ export default mongoose.models.OrganizationSubscriptionItem || mongoose.model("O
  * ─────────────────────────────────────────────────────────
  * 🚨 NAMING CONVENTION RULE 🚨
  * 1. "CLASSGRID PLATFORM" is strictly the REPO NAME.
- * 2. "CLASSGRID ERP" is the actual PRODUCT NAME.
+ * 2. chat.classgrid.in (Classgrid AI) is the actual PRODUCT. The ERP is shut down.
  * 3. NEVER use "Classgrid Platform" anywhere in the frontend UI or user-facing text.
  * ─────────────────────────────────────────────────────────
  */
@@ -11324,7 +11324,7 @@ export default mongoose.models.OrganizationUsage || mongoose.model("Organization
  * ─────────────────────────────────────────────────────────
  * 🚨 NAMING CONVENTION RULE 🚨
  * 1. "CLASSGRID PLATFORM" is strictly the REPO NAME.
- * 2. "CLASSGRID ERP" is the actual PRODUCT NAME.
+ * 2. chat.classgrid.in (Classgrid AI) is the actual PRODUCT. The ERP is shut down.
  * 3. NEVER use "Classgrid Platform" anywhere in the frontend UI or user-facing text.
  * ─────────────────────────────────────────────────────────
  */
@@ -11539,7 +11539,7 @@ export default mongoose.models.OrganizationUsageDaily ||
  * ─────────────────────────────────────────────────────────
  * 🚨 NAMING CONVENTION RULE 🚨
  * 1. "CLASSGRID PLATFORM" is strictly the REPO NAME.
- * 2. "CLASSGRID ERP" is the actual PRODUCT NAME.
+ * 2. chat.classgrid.in (Classgrid AI) is the actual PRODUCT. The ERP is shut down.
  * 3. NEVER use "Classgrid Platform" anywhere in the frontend UI or user-facing text.
  * ─────────────────────────────────────────────────────────
  */
@@ -11648,7 +11648,7 @@ export default mongoose.model("OrgDropdownOverride", orgDropdownOverrideSchema);
  * ─────────────────────────────────────────────────────────
  * 🚨 NAMING CONVENTION RULE 🚨
  * 1. "CLASSGRID PLATFORM" is strictly the REPO NAME.
- * 2. "CLASSGRID ERP" is the actual PRODUCT NAME.
+ * 2. chat.classgrid.in (Classgrid AI) is the actual PRODUCT. The ERP is shut down.
  * 3. NEVER use "Classgrid Platform" anywhere in the frontend UI or user-facing text.
  * ─────────────────────────────────────────────────────────
  */
@@ -11745,7 +11745,7 @@ export default mongoose.model("OrgSubject", orgSubjectSchema);
  * ─────────────────────────────────────────────────────────
  * 🚨 NAMING CONVENTION RULE 🚨
  * 1. "CLASSGRID PLATFORM" is strictly the REPO NAME.
- * 2. "CLASSGRID ERP" is the actual PRODUCT NAME.
+ * 2. chat.classgrid.in (Classgrid AI) is the actual PRODUCT. The ERP is shut down.
  * 3. NEVER use "Classgrid Platform" anywhere in the frontend UI or user-facing text.
  * ─────────────────────────────────────────────────────────
  */
@@ -11862,7 +11862,7 @@ export default OrgSubscription;
  * ─────────────────────────────────────────────────────────
  * 🚨 NAMING CONVENTION RULE 🚨
  * 1. "CLASSGRID PLATFORM" is strictly the REPO NAME.
- * 2. "CLASSGRID ERP" is the actual PRODUCT NAME.
+ * 2. chat.classgrid.in (Classgrid AI) is the actual PRODUCT. The ERP is shut down.
  * 3. NEVER use "Classgrid Platform" anywhere in the frontend UI or user-facing text.
  * ─────────────────────────────────────────────────────────
  */
@@ -12342,7 +12342,7 @@ export default mongoose.model("OrgWebsiteContent", OrgWebsiteContentSchema);
  * ─────────────────────────────────────────────────────────
  * 🚨 NAMING CONVENTION RULE 🚨
  * 1. "CLASSGRID PLATFORM" is strictly the REPO NAME.
- * 2. "CLASSGRID ERP" is the actual PRODUCT NAME.
+ * 2. chat.classgrid.in (Classgrid AI) is the actual PRODUCT. The ERP is shut down.
  * 3. NEVER use "Classgrid Platform" anywhere in the frontend UI or user-facing text.
  * ─────────────────────────────────────────────────────────
  */
@@ -12486,7 +12486,7 @@ export default mongoose.model("PastPaper", pastPaperSchema);
  * ─────────────────────────────────────────────────────────
  * 🚨 NAMING CONVENTION RULE 🚨
  * 1. "CLASSGRID PLATFORM" is strictly the REPO NAME.
- * 2. "CLASSGRID ERP" is the actual PRODUCT NAME.
+ * 2. chat.classgrid.in (Classgrid AI) is the actual PRODUCT. The ERP is shut down.
  * 3. NEVER use "Classgrid Platform" anywhere in the frontend UI or user-facing text.
  * ─────────────────────────────────────────────────────────
  */
@@ -12585,7 +12585,7 @@ export default mongoose.models.PaymentAttempt || mongoose.model("PaymentAttempt"
  * ─────────────────────────────────────────────────────────
  * 🚨 NAMING CONVENTION RULE 🚨
  * 1. "CLASSGRID PLATFORM" is strictly the REPO NAME.
- * 2. "CLASSGRID ERP" is the actual PRODUCT NAME.
+ * 2. chat.classgrid.in (Classgrid AI) is the actual PRODUCT. The ERP is shut down.
  * 3. NEVER use "Classgrid Platform" anywhere in the frontend UI or user-facing text.
  * ─────────────────────────────────────────────────────────
  */
@@ -12669,7 +12669,7 @@ export default PaymentCounter;
  * ─────────────────────────────────────────────────────────
  * 🚨 NAMING CONVENTION RULE 🚨
  * 1. "CLASSGRID PLATFORM" is strictly the REPO NAME.
- * 2. "CLASSGRID ERP" is the actual PRODUCT NAME.
+ * 2. chat.classgrid.in (Classgrid AI) is the actual PRODUCT. The ERP is shut down.
  * 3. NEVER use "Classgrid Platform" anywhere in the frontend UI or user-facing text.
  * ─────────────────────────────────────────────────────────
  */
@@ -12851,7 +12851,7 @@ export default mongoose.models.PaymentFailure || mongoose.model("PaymentFailure"
  * ─────────────────────────────────────────────────────────
  * 🚨 NAMING CONVENTION RULE 🚨
  * 1. "CLASSGRID PLATFORM" is strictly the REPO NAME.
- * 2. "CLASSGRID ERP" is the actual PRODUCT NAME.
+ * 2. chat.classgrid.in (Classgrid AI) is the actual PRODUCT. The ERP is shut down.
  * 3. NEVER use "Classgrid Platform" anywhere in the frontend UI or user-facing text.
  * ─────────────────────────────────────────────────────────
  */
@@ -12968,7 +12968,7 @@ export default mongoose.models.PaymentOrder || mongoose.model("PaymentOrder", pa
  * ─────────────────────────────────────────────────────────
  * 🚨 NAMING CONVENTION RULE 🚨
  * 1. "CLASSGRID PLATFORM" is strictly the REPO NAME.
- * 2. "CLASSGRID ERP" is the actual PRODUCT NAME.
+ * 2. chat.classgrid.in (Classgrid AI) is the actual PRODUCT. The ERP is shut down.
  * 3. NEVER use "Classgrid Platform" anywhere in the frontend UI or user-facing text.
  * ─────────────────────────────────────────────────────────
  */
@@ -13085,7 +13085,7 @@ export default mongoose.models.PaymentRefund || mongoose.model("PaymentRefund", 
  * ─────────────────────────────────────────────────────────
  * 🚨 NAMING CONVENTION RULE 🚨
  * 1. "CLASSGRID PLATFORM" is strictly the REPO NAME.
- * 2. "CLASSGRID ERP" is the actual PRODUCT NAME.
+ * 2. chat.classgrid.in (Classgrid AI) is the actual PRODUCT. The ERP is shut down.
  * 3. NEVER use "Classgrid Platform" anywhere in the frontend UI or user-facing text.
  * ─────────────────────────────────────────────────────────
  */
@@ -13183,7 +13183,7 @@ export default mongoose.models.PaymentRequest ||
  * ─────────────────────────────────────────────────────────
  * 🚨 NAMING CONVENTION RULE 🚨
  * 1. "CLASSGRID PLATFORM" is strictly the REPO NAME.
- * 2. "CLASSGRID ERP" is the actual PRODUCT NAME.
+ * 2. chat.classgrid.in (Classgrid AI) is the actual PRODUCT. The ERP is shut down.
  * 3. NEVER use "Classgrid Platform" anywhere in the frontend UI or user-facing text.
  * ─────────────────────────────────────────────────────────
  */
@@ -13282,7 +13282,7 @@ export default mongoose.models.PaymentSettlement || mongoose.model("PaymentSettl
  * ─────────────────────────────────────────────────────────
  * 🚨 NAMING CONVENTION RULE 🚨
  * 1. "CLASSGRID PLATFORM" is strictly the REPO NAME.
- * 2. "CLASSGRID ERP" is the actual PRODUCT NAME.
+ * 2. chat.classgrid.in (Classgrid AI) is the actual PRODUCT. The ERP is shut down.
  * 3. NEVER use "Classgrid Platform" anywhere in the frontend UI or user-facing text.
  * ─────────────────────────────────────────────────────────
  */
@@ -13441,7 +13441,7 @@ export default mongoose.models.PaymentTransaction || mongoose.model("PaymentTran
  * ─────────────────────────────────────────────────────────
  * 🚨 NAMING CONVENTION RULE 🚨
  * 1. "CLASSGRID PLATFORM" is strictly the REPO NAME.
- * 2. "CLASSGRID ERP" is the actual PRODUCT NAME.
+ * 2. chat.classgrid.in (Classgrid AI) is the actual PRODUCT. The ERP is shut down.
  * 3. NEVER use "Classgrid Platform" anywhere in the frontend UI or user-facing text.
  * ─────────────────────────────────────────────────────────
  */
@@ -13545,7 +13545,7 @@ export default mongoose.model("Plan", planSchema);
  * ─────────────────────────────────────────────────────────
  * 🚨 NAMING CONVENTION RULE 🚨
  * 1. "CLASSGRID PLATFORM" is strictly the REPO NAME.
- * 2. "CLASSGRID ERP" is the actual PRODUCT NAME.
+ * 2. chat.classgrid.in (Classgrid AI) is the actual PRODUCT. The ERP is shut down.
  * 3. NEVER use "Classgrid Platform" anywhere in the frontend UI or user-facing text.
  * ─────────────────────────────────────────────────────────
  */
@@ -13647,7 +13647,7 @@ export default mongoose.models.PlanModule || mongoose.model("PlanModule", planMo
  * ─────────────────────────────────────────────────────────
  * 🚨 NAMING CONVENTION RULE 🚨
  * 1. "CLASSGRID PLATFORM" is strictly the REPO NAME.
- * 2. "CLASSGRID ERP" is the actual PRODUCT NAME.
+ * 2. chat.classgrid.in (Classgrid AI) is the actual PRODUCT. The ERP is shut down.
  * 3. NEVER use "Classgrid Platform" anywhere in the frontend UI or user-facing text.
  * ─────────────────────────────────────────────────────────
  */
@@ -13736,7 +13736,7 @@ export default mongoose.model("PlatformModule", platformModuleSchema);
  * ─────────────────────────────────────────────────────────
  * 🚨 NAMING CONVENTION RULE 🚨
  * 1. "CLASSGRID PLATFORM" is strictly the REPO NAME.
- * 2. "CLASSGRID ERP" is the actual PRODUCT NAME.
+ * 2. chat.classgrid.in (Classgrid AI) is the actual PRODUCT. The ERP is shut down.
  * 3. NEVER use "Classgrid Platform" anywhere in the frontend UI or user-facing text.
  * ─────────────────────────────────────────────────────────
  */
@@ -13853,7 +13853,7 @@ export default mongoose.models.PlatformTransaction ||
  * ─────────────────────────────────────────────────────────
  * 🚨 NAMING CONVENTION RULE 🚨
  * 1. "CLASSGRID PLATFORM" is strictly the REPO NAME.
- * 2. "CLASSGRID ERP" is the actual PRODUCT NAME.
+ * 2. chat.classgrid.in (Classgrid AI) is the actual PRODUCT. The ERP is shut down.
  * 3. NEVER use "Classgrid Platform" anywhere in the frontend UI or user-facing text.
  * ─────────────────────────────────────────────────────────
  */
@@ -13939,7 +13939,7 @@ export default mongoose.model("PushSubscription", pushSubscriptionSchema);
  * ─────────────────────────────────────────────────────────
  * 🚨 NAMING CONVENTION RULE 🚨
  * 1. "CLASSGRID PLATFORM" is strictly the REPO NAME.
- * 2. "CLASSGRID ERP" is the actual PRODUCT NAME.
+ * 2. chat.classgrid.in (Classgrid AI) is the actual PRODUCT. The ERP is shut down.
  * 3. NEVER use "Classgrid Platform" anywhere in the frontend UI or user-facing text.
  * ─────────────────────────────────────────────────────────
  */
@@ -14047,7 +14047,7 @@ export default mongoose.model("Quiz", quizSchema);
  * ─────────────────────────────────────────────────────────
  * 🚨 NAMING CONVENTION RULE 🚨
  * 1. "CLASSGRID PLATFORM" is strictly the REPO NAME.
- * 2. "CLASSGRID ERP" is the actual PRODUCT NAME.
+ * 2. chat.classgrid.in (Classgrid AI) is the actual PRODUCT. The ERP is shut down.
  * 3. NEVER use "Classgrid Platform" anywhere in the frontend UI or user-facing text.
  * ─────────────────────────────────────────────────────────
  */
@@ -14137,7 +14137,7 @@ export default mongoose.model("QuizSession", quizSessionSchema);
  * ─────────────────────────────────────────────────────────
  * 🚨 NAMING CONVENTION RULE 🚨
  * 1. "CLASSGRID PLATFORM" is strictly the REPO NAME.
- * 2. "CLASSGRID ERP" is the actual PRODUCT NAME.
+ * 2. chat.classgrid.in (Classgrid AI) is the actual PRODUCT. The ERP is shut down.
  * 3. NEVER use "Classgrid Platform" anywhere in the frontend UI or user-facing text.
  * ─────────────────────────────────────────────────────────
  */
@@ -14246,7 +14246,7 @@ export default mongoose.models.ReconciliationMismatch || mongoose.model("Reconci
  * ─────────────────────────────────────────────────────────
  * 🚨 NAMING CONVENTION RULE 🚨
  * 1. "CLASSGRID PLATFORM" is strictly the REPO NAME.
- * 2. "CLASSGRID ERP" is the actual PRODUCT NAME.
+ * 2. chat.classgrid.in (Classgrid AI) is the actual PRODUCT. The ERP is shut down.
  * 3. NEVER use "Classgrid Platform" anywhere in the frontend UI or user-facing text.
  * ─────────────────────────────────────────────────────────
  */
@@ -14337,7 +14337,7 @@ export default mongoose.models.ReconciliationRun || mongoose.model("Reconciliati
  * ─────────────────────────────────────────────────────────
  * 🚨 NAMING CONVENTION RULE 🚨
  * 1. "CLASSGRID PLATFORM" is strictly the REPO NAME.
- * 2. "CLASSGRID ERP" is the actual PRODUCT NAME.
+ * 2. chat.classgrid.in (Classgrid AI) is the actual PRODUCT. The ERP is shut down.
  * 3. NEVER use "Classgrid Platform" anywhere in the frontend UI or user-facing text.
  * ─────────────────────────────────────────────────────────
  */
@@ -14420,7 +14420,7 @@ export default mongoose.models.ResultAuditLog || mongoose.model("ResultAuditLog"
  * ─────────────────────────────────────────────────────────
  * 🚨 NAMING CONVENTION RULE 🚨
  * 1. "CLASSGRID PLATFORM" is strictly the REPO NAME.
- * 2. "CLASSGRID ERP" is the actual PRODUCT NAME.
+ * 2. chat.classgrid.in (Classgrid AI) is the actual PRODUCT. The ERP is shut down.
  * 3. NEVER use "Classgrid Platform" anywhere in the frontend UI or user-facing text.
  * ─────────────────────────────────────────────────────────
  */
@@ -14521,7 +14521,7 @@ export default Review;
  * ─────────────────────────────────────────────────────────
  * 🚨 NAMING CONVENTION RULE 🚨
  * 1. "CLASSGRID PLATFORM" is strictly the REPO NAME.
- * 2. "CLASSGRID ERP" is the actual PRODUCT NAME.
+ * 2. chat.classgrid.in (Classgrid AI) is the actual PRODUCT. The ERP is shut down.
  * 3. NEVER use "Classgrid Platform" anywhere in the frontend UI or user-facing text.
  * ─────────────────────────────────────────────────────────
  */
@@ -14620,7 +14620,7 @@ export default mongoose.models.RoleRequest || mongoose.model("RoleRequest", role
  * ─────────────────────────────────────────────────────────
  * 🚨 NAMING CONVENTION RULE 🚨
  * 1. "CLASSGRID PLATFORM" is strictly the REPO NAME.
- * 2. "CLASSGRID ERP" is the actual PRODUCT NAME.
+ * 2. chat.classgrid.in (Classgrid AI) is the actual PRODUCT. The ERP is shut down.
  * 3. NEVER use "Classgrid Platform" anywhere in the frontend UI or user-facing text.
  * ─────────────────────────────────────────────────────────
  */
@@ -14801,7 +14801,7 @@ export default mongoose.models.SaasInvoice || mongoose.model("SaasInvoice", saas
  * ─────────────────────────────────────────────────────────
  * 🚨 NAMING CONVENTION RULE 🚨
  * 1. "CLASSGRID PLATFORM" is strictly the REPO NAME.
- * 2. "CLASSGRID ERP" is the actual PRODUCT NAME.
+ * 2. chat.classgrid.in (Classgrid AI) is the actual PRODUCT. The ERP is shut down.
  * 3. NEVER use "Classgrid Platform" anywhere in the frontend UI or user-facing text.
  * ─────────────────────────────────────────────────────────
  */
@@ -14943,7 +14943,7 @@ export default mongoose.models.ScheduledNotification ||
  * ─────────────────────────────────────────────────────────
  * 🚨 NAMING CONVENTION RULE 🚨
  * 1. "CLASSGRID PLATFORM" is strictly the REPO NAME.
- * 2. "CLASSGRID ERP" is the actual PRODUCT NAME.
+ * 2. chat.classgrid.in (Classgrid AI) is the actual PRODUCT. The ERP is shut down.
  * 3. NEVER use "Classgrid Platform" anywhere in the frontend UI or user-facing text.
  * ─────────────────────────────────────────────────────────
  */
@@ -15137,7 +15137,7 @@ export default mongoose.models.SchoolReportCard || mongoose.model("SchoolReportC
  * ─────────────────────────────────────────────────────────
  * 🚨 NAMING CONVENTION RULE 🚨
  * 1. "CLASSGRID PLATFORM" is strictly the REPO NAME.
- * 2. "CLASSGRID ERP" is the actual PRODUCT NAME.
+ * 2. chat.classgrid.in (Classgrid AI) is the actual PRODUCT. The ERP is shut down.
  * 3. NEVER use "Classgrid Platform" anywhere in the frontend UI or user-facing text.
  * ─────────────────────────────────────────────────────────
  */
@@ -15223,7 +15223,7 @@ export default mongoose.models.SeatConfig || mongoose.model("SeatConfig", seatCo
  * ─────────────────────────────────────────────────────────
  * 🚨 NAMING CONVENTION RULE 🚨
  * 1. "CLASSGRID PLATFORM" is strictly the REPO NAME.
- * 2. "CLASSGRID ERP" is the actual PRODUCT NAME.
+ * 2. chat.classgrid.in (Classgrid AI) is the actual PRODUCT. The ERP is shut down.
  * 3. NEVER use "Classgrid Platform" anywhere in the frontend UI or user-facing text.
  * ─────────────────────────────────────────────────────────
  */
@@ -15348,7 +15348,7 @@ export default mongoose.models.SmsLog || mongoose.model("SmsLog", smsLogSchema);
  * ─────────────────────────────────────────────────────────
  * 🚨 NAMING CONVENTION RULE 🚨
  * 1. "CLASSGRID PLATFORM" is strictly the REPO NAME.
- * 2. "CLASSGRID ERP" is the actual PRODUCT NAME.
+ * 2. chat.classgrid.in (Classgrid AI) is the actual PRODUCT. The ERP is shut down.
  * 3. NEVER use "Classgrid Platform" anywhere in the frontend UI or user-facing text.
  * ─────────────────────────────────────────────────────────
  */
@@ -15464,7 +15464,7 @@ export default mongoose.model('StudentFeeLedger', studentFeeLedgerSchema);
  * ─────────────────────────────────────────────────────────
  * 🚨 NAMING CONVENTION RULE 🚨
  * 1. "CLASSGRID PLATFORM" is strictly the REPO NAME.
- * 2. "CLASSGRID ERP" is the actual PRODUCT NAME.
+ * 2. chat.classgrid.in (Classgrid AI) is the actual PRODUCT. The ERP is shut down.
  * 3. NEVER use "Classgrid Platform" anywhere in the frontend UI or user-facing text.
  * ─────────────────────────────────────────────────────────
  */
@@ -15664,7 +15664,7 @@ export default mongoose.model("StudentMark", studentMarkSchema);
  * ─────────────────────────────────────────────────────────
  * 🚨 NAMING CONVENTION RULE 🚨
  * 1. "CLASSGRID PLATFORM" is strictly the REPO NAME.
- * 2. "CLASSGRID ERP" is the actual PRODUCT NAME.
+ * 2. chat.classgrid.in (Classgrid AI) is the actual PRODUCT. The ERP is shut down.
  * 3. NEVER use "Classgrid Platform" anywhere in the frontend UI or user-facing text.
  * ─────────────────────────────────────────────────────────
  */
@@ -15747,7 +15747,7 @@ export default mongoose.models.SubscriptionChange || mongoose.model("Subscriptio
  * ─────────────────────────────────────────────────────────
  * 🚨 NAMING CONVENTION RULE 🚨
  * 1. "CLASSGRID PLATFORM" is strictly the REPO NAME.
- * 2. "CLASSGRID ERP" is the actual PRODUCT NAME.
+ * 2. chat.classgrid.in (Classgrid AI) is the actual PRODUCT. The ERP is shut down.
  * 3. NEVER use "Classgrid Platform" anywhere in the frontend UI or user-facing text.
  * ─────────────────────────────────────────────────────────
  */
@@ -15839,7 +15839,7 @@ export default mongoose.models.SubscriptionSchedule || mongoose.model("Subscript
  * ─────────────────────────────────────────────────────────
  * 🚨 NAMING CONVENTION RULE 🚨
  * 1. "CLASSGRID PLATFORM" is strictly the REPO NAME.
- * 2. "CLASSGRID ERP" is the actual PRODUCT NAME.
+ * 2. chat.classgrid.in (Classgrid AI) is the actual PRODUCT. The ERP is shut down.
  * 3. NEVER use "Classgrid Platform" anywhere in the frontend UI or user-facing text.
  * ─────────────────────────────────────────────────────────
  */
@@ -15979,7 +15979,7 @@ export default SupportConversation;
  * ─────────────────────────────────────────────────────────
  * 🚨 NAMING CONVENTION RULE 🚨
  * 1. "CLASSGRID PLATFORM" is strictly the REPO NAME.
- * 2. "CLASSGRID ERP" is the actual PRODUCT NAME.
+ * 2. chat.classgrid.in (Classgrid AI) is the actual PRODUCT. The ERP is shut down.
  * 3. NEVER use "Classgrid Platform" anywhere in the frontend UI or user-facing text.
  * ─────────────────────────────────────────────────────────
  */
@@ -16166,7 +16166,7 @@ export default mongoose.models.SupportTicket ||
  * ─────────────────────────────────────────────────────────
  * 🚨 NAMING CONVENTION RULE 🚨
  * 1. "CLASSGRID PLATFORM" is strictly the REPO NAME.
- * 2. "CLASSGRID ERP" is the actual PRODUCT NAME.
+ * 2. chat.classgrid.in (Classgrid AI) is the actual PRODUCT. The ERP is shut down.
  * 3. NEVER use "Classgrid Platform" anywhere in the frontend UI or user-facing text.
  * ─────────────────────────────────────────────────────────
  */
@@ -16257,7 +16257,7 @@ export default mongoose.models.SystemLog || mongoose.model("SystemLog", systemLo
  * ─────────────────────────────────────────────────────────
  * 🚨 NAMING CONVENTION RULE 🚨
  * 1. "CLASSGRID PLATFORM" is strictly the REPO NAME.
- * 2. "CLASSGRID ERP" is the actual PRODUCT NAME.
+ * 2. chat.classgrid.in (Classgrid AI) is the actual PRODUCT. The ERP is shut down.
  * 3. NEVER use "Classgrid Platform" anywhere in the frontend UI or user-facing text.
  * ─────────────────────────────────────────────────────────
  */
@@ -16317,7 +16317,7 @@ export default SystemSettings;
  * ─────────────────────────────────────────────────────────
  * 🚨 NAMING CONVENTION RULE 🚨
  * 1. "CLASSGRID PLATFORM" is strictly the REPO NAME.
- * 2. "CLASSGRID ERP" is the actual PRODUCT NAME.
+ * 2. chat.classgrid.in (Classgrid AI) is the actual PRODUCT. The ERP is shut down.
  * 3. NEVER use "Classgrid Platform" anywhere in the frontend UI or user-facing text.
  * ─────────────────────────────────────────────────────────
  */
@@ -16404,7 +16404,7 @@ export default mongoose.models.TaxRule || mongoose.model("TaxRule", taxRuleSchem
  * ─────────────────────────────────────────────────────────
  * 🚨 NAMING CONVENTION RULE 🚨
  * 1. "CLASSGRID PLATFORM" is strictly the REPO NAME.
- * 2. "CLASSGRID ERP" is the actual PRODUCT NAME.
+ * 2. chat.classgrid.in (Classgrid AI) is the actual PRODUCT. The ERP is shut down.
  * 3. NEVER use "Classgrid Platform" anywhere in the frontend UI or user-facing text.
  * ─────────────────────────────────────────────────────────
  */
@@ -16512,7 +16512,7 @@ export default mongoose.models.TaxRuleVersion || mongoose.model("TaxRuleVersion"
  * ─────────────────────────────────────────────────────────
  * 🚨 NAMING CONVENTION RULE 🚨
  * 1. "CLASSGRID PLATFORM" is strictly the REPO NAME.
- * 2. "CLASSGRID ERP" is the actual PRODUCT NAME.
+ * 2. chat.classgrid.in (Classgrid AI) is the actual PRODUCT. The ERP is shut down.
  * 3. NEVER use "Classgrid Platform" anywhere in the frontend UI or user-facing text.
  * ─────────────────────────────────────────────────────────
  */
@@ -16616,7 +16616,7 @@ export default mongoose.model('TeacherPlan', teacherPlanningSchema);
  * ─────────────────────────────────────────────────────────
  * 🚨 NAMING CONVENTION RULE 🚨
  * 1. "CLASSGRID PLATFORM" is strictly the REPO NAME.
- * 2. "CLASSGRID ERP" is the actual PRODUCT NAME.
+ * 2. chat.classgrid.in (Classgrid AI) is the actual PRODUCT. The ERP is shut down.
  * 3. NEVER use "Classgrid Platform" anywhere in the frontend UI or user-facing text.
  * ─────────────────────────────────────────────────────────
  */
@@ -16760,7 +16760,7 @@ export default mongoose.models.Trajectory || mongoose.model('Trajectory', trajec
  * ─────────────────────────────────────────────────────────
  * 🚨 NAMING CONVENTION RULE 🚨
  * 1. "CLASSGRID PLATFORM" is strictly the REPO NAME.
- * 2. "CLASSGRID ERP" is the actual PRODUCT NAME.
+ * 2. chat.classgrid.in (Classgrid AI) is the actual PRODUCT. The ERP is shut down.
  * 3. NEVER use "Classgrid Platform" anywhere in the frontend UI or user-facing text.
  * ─────────────────────────────────────────────────────────
  */
@@ -16862,7 +16862,7 @@ export default Transaction;
  * â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
  * ðŸš¨ NAMING CONVENTION RULE ðŸš¨
  * 1. "CLASSGRID PLATFORM" is strictly the REPO NAME.
- * 2. "CLASSGRID ERP" is the actual PRODUCT NAME.
+ * 2. chat.classgrid.in (Classgrid AI) is the actual PRODUCT. The ERP is shut down.
  * 3. NEVER use "Classgrid Platform" anywhere in the frontend UI or user-facing text.
  * â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
  */
@@ -17542,7 +17542,7 @@ export default mongoose.models.User || mongoose.model("User", userSchema);
  * ─────────────────────────────────────────────────────────
  * 🚨 NAMING CONVENTION RULE 🚨
  * 1. "CLASSGRID PLATFORM" is strictly the REPO NAME.
- * 2. "CLASSGRID ERP" is the actual PRODUCT NAME.
+ * 2. chat.classgrid.in (Classgrid AI) is the actual PRODUCT. The ERP is shut down.
  * 3. NEVER use "Classgrid Platform" anywhere in the frontend UI or user-facing text.
  * ─────────────────────────────────────────────────────────
  */
@@ -18073,7 +18073,7 @@ export default mongoose.models.UserProfile || mongoose.model("UserProfile", user
  * ─────────────────────────────────────────────────────────
  * 🚨 NAMING CONVENTION RULE 🚨
  * 1. "CLASSGRID PLATFORM" is strictly the REPO NAME.
- * 2. "CLASSGRID ERP" is the actual PRODUCT NAME.
+ * 2. chat.classgrid.in (Classgrid AI) is the actual PRODUCT. The ERP is shut down.
  * 3. NEVER use "Classgrid Platform" anywhere in the frontend UI or user-facing text.
  * ─────────────────────────────────────────────────────────
  */
@@ -18168,7 +18168,7 @@ export default mongoose.model("Verification", verificationSchema);
  * ─────────────────────────────────────────────────────────
  * 🚨 NAMING CONVENTION RULE 🚨
  * 1. "CLASSGRID PLATFORM" is strictly the REPO NAME.
- * 2. "CLASSGRID ERP" is the actual PRODUCT NAME.
+ * 2. chat.classgrid.in (Classgrid AI) is the actual PRODUCT. The ERP is shut down.
  * 3. NEVER use "Classgrid Platform" anywhere in the frontend UI or user-facing text.
  * ─────────────────────────────────────────────────────────
  */
@@ -18269,7 +18269,7 @@ export default mongoose.models.VideoProgress || mongoose.model("VideoProgress", 
  * ─────────────────────────────────────────────────────────
  * 🚨 NAMING CONVENTION RULE 🚨
  * 1. "CLASSGRID PLATFORM" is strictly the REPO NAME.
- * 2. "CLASSGRID ERP" is the actual PRODUCT NAME.
+ * 2. chat.classgrid.in (Classgrid AI) is the actual PRODUCT. The ERP is shut down.
  * 3. NEVER use "Classgrid Platform" anywhere in the frontend UI or user-facing text.
  * ─────────────────────────────────────────────────────────
  */
@@ -18391,7 +18391,7 @@ export default VivaRecord;
  * ─────────────────────────────────────────────────────────
  * 🚨 NAMING CONVENTION RULE 🚨
  * 1. "CLASSGRID PLATFORM" is strictly the REPO NAME.
- * 2. "CLASSGRID ERP" is the actual PRODUCT NAME.
+ * 2. chat.classgrid.in (Classgrid AI) is the actual PRODUCT. The ERP is shut down.
  * 3. NEVER use "Classgrid Platform" anywhere in the frontend UI or user-facing text.
  * ─────────────────────────────────────────────────────────
  */

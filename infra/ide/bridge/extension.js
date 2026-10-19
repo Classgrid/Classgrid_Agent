@@ -1,3 +1,15 @@
+/*
+ * ─────────────────────────────────────────────────────────
+ * 🚨 ERP SHUT DOWN 🚨
+ * The Classgrid ERP is shut down and will never work or be worked on again.
+ * The org admin dashboard and every dashboard other than chat.classgrid.in and the
+ * super admin dashboard are banned, and so is all ERP backend code.
+ * Any issue or bug in the ERP or the org admin dashboard is banned too: do not look
+ * for it, report it or fix it.
+ * Do not build, fix, test or talk about ERP features. Only chat.classgrid.in and the
+ * super admin dashboard are live.
+ * ─────────────────────────────────────────────────────────
+ */
 // Classgrid bridge (runs in the user's own editor box):
 // 1. Opens a file at the right lines when the Classgrid chat asks (~/.classgrid/open.json).
 // 2. Keeps ~/.classgrid/context.json up to date with what the user is looking at (open file, cursor, selection,
