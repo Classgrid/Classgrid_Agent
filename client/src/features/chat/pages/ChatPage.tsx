@@ -80,6 +80,7 @@ import {
   type OrgUser,
   type Poll,
 } from "../services/chatApi";
+import { getCachedMessages, setCachedMessages } from "../services/chatCache";
 import { useUserChannel, useThreadChannel, useOrgChannel } from "../hooks/useRealtimeChat";
 import { useOnlineUsers } from "../context/PresenceContext";
 import { useChatBlocks } from "../hooks/useChatBlocks";
@@ -389,11 +390,25 @@ function ChatPageInner() {
   };
 
   // -- Load Messages when Thread Selected --
+  // Which chat the messages on screen belong to. Right after switching chats the screen still has the old chat's
+  // messages for a moment; they must never be saved under the new chat.
+  const messagesThreadRef = useRef<string | null>(null);
+  const activeThreadIdRef = useRef<string | null>(null);
+  activeThreadIdRef.current = activeThread?.id || null;
+  const serverLoadedRef = useRef<string | null>(null); // the chat whose newest messages came from the server
+  const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   useEffect(() => {
-    if (activeThread && messages.length > 0) {
-      messageCache.current[activeThread.id] = messages;
+    if (!activeThread || messagesLoading || messagesThreadRef.current !== activeThread.id) return;
+    messageCache.current[activeThread.id] = messages;
+    // Everything loaded for this chat is also saved in the browser (a moment later, not on every change)
+    if (currentUserId) {
+      const threadId = activeThread.id;
+      const toSave = messages.filter((m) => !String(m.id).startsWith("temp-"));
+      if (saveTimer.current) clearTimeout(saveTimer.current);
+      saveTimer.current = setTimeout(() => { setCachedMessages(String(currentUserId), threadId, toSave); }, 500);
     }
-  }, [messages, activeThread]);
+  }, [messages, activeThread, messagesLoading, currentUserId]);
 
   useEffect(() => {
     // When switching away from a thread, cancel any pending fetch
@@ -410,12 +425,24 @@ function ChatPageInner() {
       setTypingUsers({});
       
       // Instantly show cached messages if we have them, without loading spinner
-      if (messageCache.current[activeThread.id]) {
-        setMessages(messageCache.current[activeThread.id]);
+      const threadId = activeThread.id;
+      messagesThreadRef.current = threadId;
+      serverLoadedRef.current = null;
+      if (messageCache.current[threadId]) {
+        setMessages(messageCache.current[threadId]);
         setMessagesLoading(false);
       } else {
         setMessages([]); // Clear previous chat instantly
-        setMessagesLoading(true);
+        setMessagesLoading(true); // skeleton until the saved copy or the server answers
+        // Saved in this browser from an earlier visit: show it at once (unless the server already answered)
+        if (currentUserId) {
+          getCachedMessages<ChatMessage>(String(currentUserId), threadId).then((saved) => {
+            if (!saved || activeThreadIdRef.current !== threadId || serverLoadedRef.current === threadId) return;
+            messageCache.current[threadId] = saved;
+            setMessages(saved);
+            setMessagesLoading(false);
+          });
+        }
       }
 
       loadMessages(activeThread.id);
@@ -454,6 +481,8 @@ function ChatPageInner() {
             return newMsgs;
           });
         } else {
+          serverLoadedRef.current = threadId;
+          messagesThreadRef.current = threadId;
           setMessages(msgs);
           messageCache.current[threadId] = msgs;
         }

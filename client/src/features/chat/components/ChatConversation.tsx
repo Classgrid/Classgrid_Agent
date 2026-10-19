@@ -46,6 +46,7 @@ import { useEffect, useRef, useState, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { ChevronDown } from "lucide-react";
 import { Spinner } from "@/components/marketing_ui/spinner";
+import { Skeleton } from "@/components/marketing_ui/skeleton";
 import { ChatBubble } from "./ChatBubble";
 import type { ChatMessage, ChatThread, OrgUser, Poll } from "../services/chatApi";
 
@@ -227,8 +228,23 @@ export function ChatConversation({
         className="flex-1 min-h-0 overflow-y-auto p-4 bg-muted/20 custom-scrollbar flex flex-col"
       >
         <div ref={contentRef} className="flex flex-col mt-auto justify-end">
+          {/* First load of a chat with nothing to show yet: message bubbles as placeholders */}
+          {isLoading && messages.length === 0 && (
+            <div className="flex flex-col gap-4 py-2">
+              {[
+                { mine: false, w: "w-48" }, { mine: false, w: "w-64" }, { mine: true, w: "w-40" },
+                { mine: false, w: "w-56" }, { mine: true, w: "w-72" }, { mine: true, w: "w-32" }, { mine: false, w: "w-44" },
+              ].map((b, i) => (
+                <div key={i} className={`flex items-end gap-2 ${b.mine ? "justify-end" : "justify-start"}`}>
+                  {!b.mine && <Skeleton className="w-8 h-8 rounded-full shrink-0" />}
+                  <Skeleton className={`h-10 ${b.w} max-w-[70%] rounded-2xl`} />
+                </div>
+              ))}
+            </div>
+          )}
+
           {/* Loading indicator at top */}
-          {isLoading && hasMore && (
+          {isLoading && hasMore && messages.length > 0 && (
             <div className="flex justify-center py-4">
               <Spinner className="w-5 h-5 text-muted-foreground" />
             </div>

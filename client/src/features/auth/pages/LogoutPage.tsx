@@ -46,6 +46,7 @@ import { useEffect } from "react";
 import { useSearchParams } from "react-router-dom";
 import { Spinner } from "@/components/marketing_ui/spinner";
 import { apiClient } from "@/lib/apiClient";
+import { clearChatCache } from "@/features/chat/services/chatCache";
 
 export function LogoutPage() {
   const [searchParams] = useSearchParams();
@@ -70,6 +71,7 @@ export function LogoutPage() {
       if (pushDismissed) localStorage.setItem("push_banner_dismissed", pushDismissed);
       
       sessionStorage.clear();
+      await clearChatCache(); // Grids chats saved in this browser
       // Clear cookies safely
       document.cookie.split(";").forEach(c => {
         document.cookie = c.replace(/^ +/, "").replace(/=.*/, "=;expires=" + new Date().toUTCString() + ";path=/");
