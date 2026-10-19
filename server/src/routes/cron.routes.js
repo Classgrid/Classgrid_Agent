@@ -276,6 +276,19 @@ router.get("/process-scheduled-messages", async (req, res) => {
         let failedCount = 0;
 
         for (const msg of pendingMessages) {
+            // Claim it first: mark it sent (only while still pending). If that doesn't work it isn't sent now, so a
+            // message can never be sent again every minute (the old "sent" update set a sent_at column that doesn't
+            // exist, failed silently and left it pending), and two server processes can't both send it.
+            const { data: claimed, error: claimErr } = await sb
+                .from('chat_scheduled_messages')
+                .update({ status: 'sent' })
+                .eq('id', msg.id)
+                .eq('status', 'pending')
+                .select('id');
+            if (claimErr || !claimed || claimed.length === 0) {
+                if (claimErr) console.error(`[Cron] Could not claim scheduled message ${msg.id}:`, claimErr.message);
+                continue;
+            }
             try {
                 const { data: thread } = await sb
                     .from('chat_threads')
@@ -329,10 +342,7 @@ router.get("/process-scheduled-messages", async (req, res) => {
                     .update({ last_message: lastMsgText, last_message_at: new Date().toISOString() })
                     .eq('id', msg.thread_id);
 
-                // 4. Update scheduled message status to 'sent'
-                await sb.from('chat_scheduled_messages')
-                    .update({ status: 'sent', sent_at: new Date().toISOString() })
-                    .eq('id', msg.id);
+                // 4. Already marked 'sent' when it was claimed above
 
                 // 5. Broadcast
                 const broadcastPayload = {
