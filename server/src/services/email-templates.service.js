@@ -381,7 +381,6 @@ export const getPasswordResetEmailHtml = (resetLink) => {
   const content = `
     <p>We received a request to reset the password for your Classgrid account. This link expires in <strong>5 minutes</strong>.</p>
     <a href="${resetLink}" class="btn">Reset Password</a>
-    <p style="margin-top:20px;font-size:13px;color:#6b7280;">If you did not request this password reset, you can safely ignore this email. Your password will remain unchanged.</p>
   `;
   return baseTemplate({
     content,
