@@ -190,8 +190,13 @@ function ChatPageInner() {
   // -- Deep link: ?threadId=... (e.g. from a bell notification) opens that chat once threads are loaded --
   const [searchParams, setSearchParams] = useSearchParams();
   const linkedThreadId = searchParams.get("threadId");
+  // Opened once per link: the link stays in the address for a moment, and every chat-list update meanwhile
+  // used to open the chat again, which loaded it again, updated the list again... in an endless loop.
+  const handledLinkRef = useRef<string | null>(null);
   useEffect(() => {
-    if (!linkedThreadId || threads.length === 0) return;
+    if (!linkedThreadId) { handledLinkRef.current = null; return; }
+    if (threads.length === 0 || handledLinkRef.current === linkedThreadId) return;
+    handledLinkRef.current = linkedThreadId;
     const target = threads.find((t) => t.id === linkedThreadId);
     if (target) setActiveThread(target);
     const next = new URLSearchParams(searchParams);
@@ -371,7 +376,7 @@ function ChatPageInner() {
     } else {
       setPolls([]);
     }
-  }, [activeThread]);
+  }, [activeThread?.id]); // only when another chat is opened, not when this chat's details change
 
   const loadThreads = async () => {
     try {
@@ -485,7 +490,7 @@ function ChatPageInner() {
       setMessages([]);
       setReplyTo(null);
     }
-  }, [activeThread]);
+  }, [activeThread?.id]); // only when another chat is opened (a fresh copy of the same chat used to reload it in a loop)
 
   const loadMessages = async (threadId: string, before?: string) => {
     // If not paginating, abort any ongoing requests to prevent race conditions
