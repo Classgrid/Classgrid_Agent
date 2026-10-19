@@ -163,6 +163,7 @@ import { useQuery } from "@tanstack/react-query";
 import { apiClient } from "@/lib/apiClient";
 import { AgentNestedMenu } from "@/components/ai/components/AgentSidebar";
 import { AiChatSearchPalette } from "@/components/ai/components/AiChatSearchPalette";
+import { ChatMessageToasts } from "@/components/layout/ChatMessageToasts";
 
 interface AppSidebarProps {
   role: DashboardRole;
@@ -258,15 +259,19 @@ export function AppSidebar({ role, user }: AppSidebarProps) {
   const sectionsWithBadges = filteredSections.map(section => ({
     ...section,
     items: section.items.map(item => {
-      if (item.label === "Chat" && chatUnreadData && chatUnreadData > 0) {
+      if ((item.label === "Chat" || item.label === "Grids") && chatUnreadData && chatUnreadData > 0) {
         return { ...item, badge: chatUnreadData > 99 ? '99+' : chatUnreadData.toString() };
       }
       return item;
     })
   }));
 
+  // Where Grids lives in this dashboard (for the new-message popup)
+  const gridsItem = config.sections.flatMap((s) => s.items).find((item) => item.label === "Grids" || item.label === "Chat");
+
   return (
     <Sidebar variant="sidebar" collapsible="icon" className="!bg-background !border-r-0">
+      {gridsItem?.to && <ChatMessageToasts chatPath={gridsItem.to} />}
       <SidebarHeader className={showStorageMenu || showAgentMenu ? "gap-1 p-2 pb-0" : ""}>
         <div className="flex items-center w-full group-data-[collapsible=icon]:justify-center">
           <SidebarSwitcher user={user ?? null} />
