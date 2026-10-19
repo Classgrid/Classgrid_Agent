@@ -227,7 +227,7 @@ export function ResetPasswordPage() {
           </p>
         </div>
         <footer className="absolute bottom-6 text-center text-xs text-gray-500">
-          Â© {new Date().getFullYear()}, Classgrid Education. All Rights Reserved.
+          © {new Date().getFullYear()}, Classgrid Education. All Rights Reserved.
         </footer>
       </main>
     );
@@ -290,7 +290,7 @@ export function ResetPasswordPage() {
         `}</style>
 
         <footer className="absolute bottom-6 text-center text-xs text-gray-500">
-          Â© {new Date().getFullYear()}, Classgrid Education. All Rights Reserved.
+          © {new Date().getFullYear()}, Classgrid Education. All Rights Reserved.
         </footer>
       </main>
     );
@@ -448,7 +448,7 @@ export function ResetPasswordPage() {
       </div>
 
       <footer className="absolute bottom-6 text-center text-xs text-gray-500">
-        Â© {new Date().getFullYear()}, Classgrid Education. All Rights Reserved.
+        © {new Date().getFullYear()}, Classgrid Education. All Rights Reserved.
       </footer>
     </main>
   );
