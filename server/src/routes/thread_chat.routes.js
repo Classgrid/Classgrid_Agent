@@ -2969,6 +2969,8 @@ router.post('/forward', isAuthenticated, async (req, res) => {
     await Promise.all(updatePromises);
 
     // 5. Broadcast to all target threads
+    const lastByThread = new Map(); // newest forwarded copy per chat, for the chat-list update
+    const countByThread = new Map();
     for (const msg of insertedMessages || []) {
       const fullMsg = {
         ...msg,
@@ -2977,6 +2979,25 @@ router.post('/forward', isAuthenticated, async (req, res) => {
         is_deleted: false
       };
       broadcastToChannel(`thread:${msg.thread_id}`, 'new_message', fullMsg);
+      lastByThread.set(msg.thread_id, fullMsg);
+      countByThread.set(msg.thread_id, (countByThread.get(msg.thread_id) || 0) + 1);
+    }
+
+    // 6. Every member's chat list (and unread count), like a normal message - forwarded copies used to show
+    // only after a refresh. Chats with someone who blocked me stay silent.
+    const listThreadIds = [...lastByThread.keys()].filter(tid => !silentThreads.has(tid));
+    if (listThreadIds.length > 0) {
+      const { data: members } = await sb.from('chat_thread_members').select('thread_id, user_id').in('thread_id', listThreadIds);
+      for (const m of members || []) {
+        broadcastToChannel(`user:${m.user_id}`, 'thread_updated', {
+          threadId: m.thread_id,
+          messageId: lastByThread.get(m.thread_id).id,
+          message: lastByThread.get(m.thread_id),
+        });
+        if (m.user_id !== userId) {
+          for (let i = 0; i < (countByThread.get(m.thread_id) || 0); i++) incrUnread(m.user_id, m.thread_id);
+        }
+      }
     }
 
     res.json({ success: true, forwardedCount: insertedMessages?.length });
