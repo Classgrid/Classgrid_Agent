@@ -153,7 +153,7 @@ export function useThreadChannel(
   userId: string | null,
   handlers: {
     onNewMessage?: (msg: any) => void;
-    onMessageDeleted?: (data: { messageId: string }) => void;
+    onMessageDeleted?: (data: { messageId?: string; messageIds?: string[] }) => void;
     onReactionUpdate?: (data: { messageId: string; reactions: any }) => void;
     onReadReceipt?: (data: { userId: string; lastReadAt: string }) => void;
     onTyping?: (data: { userId: string; isTyping?: boolean; activityType?: 'typing' | 'recording' | 'uploading' | null }) => void;
@@ -168,6 +168,7 @@ export function useThreadChannel(
   useRealtimeChannel(threadId ? `thread:${threadId}` : null, {
     new_message: (payload: any) => handlers.onNewMessage?.(payload),
     message_deleted: (payload: any) => handlers.onMessageDeleted?.(payload),
+    messages_bulk_deleted: (payload: any) => handlers.onMessageDeleted?.(payload),
     reaction_update: (payload: any) => handlers.onReactionUpdate?.(payload),
     read_receipt: (payload: any) => handlers.onReadReceipt?.(payload),
     typing: (payload: any) => handlers.onTyping?.(payload),

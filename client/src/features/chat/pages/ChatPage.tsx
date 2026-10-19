@@ -242,8 +242,8 @@ function ChatPageInner() {
         // Refetch to get accurate server state
         if (activeThread) {
           try {
-            const { messages: freshMsgs } = await fetchMessages(activeThread.id);
-            setMessages(freshMsgs);
+            const freshMsgs = await fetchMessages(activeThread.id);
+            if (Array.isArray(freshMsgs)) setMessages(freshMsgs);
           } catch { /* ignore refetch error */ }
         }
         toast.error(
@@ -900,10 +900,12 @@ function ChatPageInner() {
         return next;
       });
     },
-    onMessageDeleted: ({ messageId }) => {
+    onMessageDeleted: (payload: any) => {
+      const ids: string[] = payload?.messageIds || (payload?.messageId ? [payload.messageId] : []);
+      if (ids.length === 0) return;
       setMessages((prev) => {
-        const next = prev.map((m) => (m.id === messageId ? { ...m, is_deleted: true, message: "This message was deleted" } : m));
-        if (next.length > 0 && next[next.length - 1].id === messageId && activeThread) {
+        const next = prev.map((m) => (ids.includes(m.id) ? { ...m, is_deleted: true, message: "This message was deleted" } : m));
+        if (next.length > 0 && ids.includes(next[next.length - 1].id) && activeThread) {
           setThreads(tPrev => tPrev.map(t => t.id === activeThread.id ? { ...t, lastMessage: "This message was deleted" } : t));
         }
         return next;

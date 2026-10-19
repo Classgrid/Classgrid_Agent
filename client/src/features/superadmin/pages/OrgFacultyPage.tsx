@@ -104,7 +104,7 @@ export function OrgFacultyPage() {
     );
   }
 
-  const { faculty } = data;
+  const faculty = data.faculty ?? [];
   const activeFaculty = faculty.filter(f => f.status === "active").length;
   const orgAdmins = faculty.filter(f => f.role === "org_admin").length;
   const teachers = faculty.filter(f => f.role === "teacher").length;

@@ -112,7 +112,7 @@ export function OrgFeesPage() {
     );
   }
 
-  const { fees } = data;
+  const fees = data.fees ?? [];
   const totalStructures = fees.length;
   
   let totalRevenuePotential = 0;

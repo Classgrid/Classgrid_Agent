@@ -113,7 +113,7 @@ export function OrgStudentsPage() {
     );
   }
 
-  const { students } = data;
+  const students = data.students ?? [];
   const activeStudents = students.filter(s => s.status === "active").length;
   
   // Calculate batch distribution

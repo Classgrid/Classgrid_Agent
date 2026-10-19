@@ -119,7 +119,9 @@ export function OrgHierarchyPage() {
     );
   }
 
-  const { nodes, classrooms, subjects } = data;
+  const nodes = data.nodes ?? [];
+  const classrooms = data.classrooms ?? [];
+  const subjects = data.subjects ?? [];
   const rootNodes = nodes.filter(n => !n.parent_id);
   const activeClassrooms = classrooms.filter(c => c.is_active).length;
   const activeSubjects = subjects.filter(s => s.is_active).length;

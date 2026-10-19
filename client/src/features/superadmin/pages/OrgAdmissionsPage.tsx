@@ -113,7 +113,8 @@ export function OrgAdmissionsPage() {
     );
   }
 
-  const { configs, applicationsCount } = data;
+  const configs = data.configs ?? [];
+  const applicationsCount = data.applicationsCount;
   const activeConfigs = configs.filter(c => c.status === "active").length;
   
   return (
