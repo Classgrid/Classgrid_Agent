@@ -4219,7 +4219,7 @@ export const handleToolCall = async (name, args, context = {}) => {
           content: [{ type: 'text', text: `[Sandbox Execution Results]\n\nEXIT CODE: ${result.code}${!result.stdout && !result.stderr ? ' (no output)' : ''}\n\nSTDOUT:\n${result.stdout}\nSTDERR:\n${result.stderr}${formatProjectChanges(projectChanges)}` }],
         };
       } catch (e) {
-        return { content: [{ type: 'text', text: `Failed to connect to AWS Sandbox: ${e.message}` }] };
+        return { content: [{ type: 'text', text: `Failed to connect to Sandbox: ${e.message}` }] };
       }
     }
 
