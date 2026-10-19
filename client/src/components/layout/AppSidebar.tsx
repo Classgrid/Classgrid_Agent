@@ -255,6 +255,8 @@ export function AppSidebar({ role, user }: AppSidebarProps) {
     refetchInterval: 30000,
   });
 
+  // Only on chat.classgrid.in and superadmin.classgrid.in (the other dashboards are the shut-down ERP)
+  const gridsDashboard = /^(chat|superadmin)\./.test(window.location.hostname) || /^\/(agent|superadmin)(\/|$)/.test(window.location.pathname);
   // The Grids page is named "Grids", "Grid" or "Chat" in different dashboards; its address always ends in /chat
   const isGridsItem = (item: { label: string; to?: string }) => /\/chat$/.test(item.to || "") || ["Grids", "Grid", "Chat"].includes(item.label);
 
@@ -262,7 +264,7 @@ export function AppSidebar({ role, user }: AppSidebarProps) {
   const sectionsWithBadges = filteredSections.map(section => ({
     ...section,
     items: section.items.map(item => {
-      if (isGridsItem(item) && chatUnreadData && chatUnreadData > 0) {
+      if (gridsDashboard && isGridsItem(item) && chatUnreadData && chatUnreadData > 0) {
         return { ...item, badge: chatUnreadData > 99 ? '99+' : chatUnreadData.toString() };
       }
       return item;
@@ -270,7 +272,7 @@ export function AppSidebar({ role, user }: AppSidebarProps) {
   }));
 
   // Where Grids lives in this dashboard (for the new-message popup)
-  const gridsItem = config.sections.flatMap((s) => s.items).find(isGridsItem);
+  const gridsItem = gridsDashboard ? config.sections.flatMap((s) => s.items).find(isGridsItem) : undefined;
 
   return (
     <Sidebar variant="sidebar" collapsible="icon" className="!bg-background !border-r-0">
