@@ -1533,6 +1533,18 @@ router.post('/:id/messages', isAuthenticated, upload.array('files', 80), async (
     // Alert ALL thread members via their global user channel so their sidebars update
     sb.from('chat_thread_members').select('user_id').eq('thread_id', threadId).then(async ({ data: members }) => {
       if (members) {
+        // The chat-list update goes out first: the lookups below are only for unread counts and notifications
+        members.forEach((m) => {
+          // Blocked by this member: no sidebar update for them
+          if (blockedRecipientId && m.user_id === blockedRecipientId) return;
+          // Broadcast to ALL members including sender so their sidebar also updates instantly
+          broadcastToChannel(`user:${m.user_id}`, 'thread_updated', {
+            threadId,
+            messageId: msgId,
+            message: broadcastPayload,
+          });
+        });
+
         // Fetch user preferences to check mutes
         const memberIds = members.map(m => m.user_id).filter(id => id !== userId && /^[0-9a-fA-F]{24}$/.test(id));
         let userMutes = {};
@@ -1551,14 +1563,8 @@ router.post('/:id/messages', isAuthenticated, upload.array('files', 80), async (
         const notificationsToInsert = [];
 
         members.forEach((m) => {
-          // Blocked by this member: no sidebar update, unread count or notification for them
+          // Blocked by this member: no unread count or notification for them
           if (blockedRecipientId && m.user_id === blockedRecipientId) return;
-          // Broadcast to ALL members including sender so their sidebar also updates instantly
-          broadcastToChannel(`user:${m.user_id}`, 'thread_updated', {
-            threadId,
-            messageId: msgId,
-            message: broadcastPayload,
-          });
 
           if (m.user_id !== userId) {
             // Increment Redis unread counter for OTHER members only (not the sender)

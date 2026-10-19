@@ -573,6 +573,22 @@ function ChatPageInner() {
     setMessages((prev) => [...prev, tempMessage]);
     setReplyTo(null);
 
+    // My own chat list shows the new last message at once (the server's update arrives a moment later)
+    const sentThreadId = activeThread.id;
+    const firstFile = files[0];
+    const filePreview = !firstFile ? "" : files.length > 1 ? `[FILE] ${files.length} files`
+      : firstFile.type.startsWith("image/") ? `[IMAGE] ${text.trim() || "Photo"}`
+      : firstFile.type.startsWith("video/") ? `[VIDEO] ${text.trim() || "Video"}`
+      : firstFile.type.startsWith("audio/") ? `[AUDIO] ${text.trim() || "Voice message"}`
+      : firstFile.type === "application/pdf" ? `[PDF] ${text.trim() || firstFile.name}`
+      : `[FILE] ${text.trim() || firstFile.name}`;
+    setThreads((prev) => {
+      const existing = prev.find((t) => t.id === sentThreadId);
+      if (!existing) return prev;
+      const updated = { ...existing, lastMessage: filePreview || text, lastMessageAt: tempMessage.created_at };
+      return [updated, ...prev.filter((t) => t.id !== sentThreadId)];
+    });
+
     try {
       const replyData = replyTo
         ? { id: replyTo.id, sender_name: replyTo.sender_name, message: replyTo.message }
