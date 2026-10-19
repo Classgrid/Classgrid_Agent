@@ -47,6 +47,7 @@ import { MessageSquare, Users, Sparkles, Lock, Zap, Paperclip } from "lucide-rea
 import { useQueryClient } from "@tanstack/react-query";
 import { useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
+import { Skeleton } from "@/components/marketing_ui/skeleton";
 import { useCurrentUser } from "@/features/auth/queries/useCurrentUser";
 import {
   fetchThreads,
@@ -376,6 +377,20 @@ function ChatPageInner() {
   useEffect(() => {
     loadThreads();
   }, [activeFilter]);
+
+  // View Profile finds the person in the contacts list. Opened before the list has loaded, the profile waits for
+  // it (a skeleton shows); if the list is loaded but the person isn't in it, the list is loaded once more.
+  const profileRetriedFor = useRef<string | null>(null);
+  useEffect(() => {
+    if (!profileUserId || usersLoading || orgUsers.some((u) => u._id === profileUserId)) return;
+    if (profileRetriedFor.current !== profileUserId) {
+      profileRetriedFor.current = profileUserId;
+      loadOrgUsers();
+    } else {
+      toast.error("Couldn't load this profile. Please try again.");
+      setProfileUserId(null);
+    }
+  }, [profileUserId, orgUsers, usersLoading]);
 
   const loadOrgUsers = async () => {
     setUsersLoading(true);
@@ -1584,7 +1599,19 @@ function ChatPageInner() {
       {/* Full Screen Shared Profile View */}
       {!!profileUserId && (() => {
         const selectedUserForProfile = orgUsers.find(u => u._id === profileUserId);
-        if (!selectedUserForProfile) return null;
+        // Contacts still loading: the profile's shape as a skeleton (it opens as soon as they arrive)
+        if (!selectedUserForProfile) return (
+          <div className="absolute inset-0 z-50 bg-background overflow-y-auto animate-in fade-in duration-200">
+            <Skeleton className="h-40 w-full rounded-none" />
+            <div className="px-6 -mt-12 flex flex-col gap-3">
+              <Skeleton className="w-24 h-24 rounded-full border-4 border-background" />
+              <Skeleton className="h-6 w-48" />
+              <Skeleton className="h-4 w-32" />
+              <Skeleton className="h-4 w-72 max-w-full mt-2" />
+              <Skeleton className="h-4 w-64 max-w-full" />
+            </div>
+          </div>
+        );
         return (
           <div className="absolute inset-0 z-50 bg-background overflow-y-auto animate-in fade-in duration-200">
             <Suspense fallback={null}>
