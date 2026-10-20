@@ -80,13 +80,21 @@ router.get("/connect", isAuthenticated, (req, res) => {
     const oauth2Client = getOAuth2Client();
     const service = req.query.service || 'all';
 
+    // One Google login is shared by Gmail, Drive, Calendar, Classroom, Meet and Forms, so ask again for the
+    // ones already connected. YouTube has its own login and must never be mixed in (Google blocks the request).
+    const idToService = { gmail: 'gmail', gcal: 'calendar', gdrive: 'drive', gclass: 'classroom', gmeet: 'meet', gforms: 'forms' };
+    const alreadyConnected = service === 'youtube' ? [] :
+        (req.user.metadata?.connected_google_services || []).map(id => idToService[id]).filter(Boolean);
+    const wanted = new Set([service, ...alreadyConnected]);
+    const wants = (name) => wanted.has(name);
+
     let scopes = [];
 
-    if (service === 'calendar' || service === 'meet' || service === 'all') {
+    if (wants('calendar') || wants('meet') || wants('all')) {
         scopes.push('https://www.googleapis.com/auth/calendar');
         scopes.push('https://www.googleapis.com/auth/calendar.events');
     }
-    if (service === 'classroom' || service === 'all') {
+    if (wants('classroom') || wants('all')) {
         scopes.push('https://www.googleapis.com/auth/classroom.courses.readonly');
         scopes.push('https://www.googleapis.com/auth/classroom.coursework.me.readonly');
         scopes.push('https://www.googleapis.com/auth/classroom.coursework.students');
@@ -110,17 +118,17 @@ router.get("/connect", isAuthenticated, (req, res) => {
         scopes.push('https://www.googleapis.com/auth/classroom.courseworkmaterials');
     }
 
-    if (service === 'drive' || service === 'all') {
+    if (wants('drive') || wants('all')) {
         scopes.push('https://www.googleapis.com/auth/drive.readonly');
         scopes.push('https://www.googleapis.com/auth/drive.file');
     }
 
-    if (service === 'gmail' || service === 'all') {
+    if (wants('gmail') || wants('all')) {
         scopes.push('https://www.googleapis.com/auth/gmail.modify');
         scopes.push('https://www.googleapis.com/auth/gmail.send');
     }
 
-    if (service === 'forms' || service === 'all') {
+    if (wants('forms') || wants('all')) {
         scopes.push('https://www.googleapis.com/auth/forms.body');
         scopes.push('https://www.googleapis.com/auth/forms.responses.readonly');
     }
@@ -143,9 +151,9 @@ router.get("/connect", isAuthenticated, (req, res) => {
     const url = oauth2Client.generateAuthUrl({
         access_type: 'offline', // Required to get a refresh token
         prompt: 'consent',      // Force consent screen to guarantee refresh token is provided
-        scope: scopes,
+        scope: [...new Set(scopes)],
         state: statePayload,
-        include_granted_scopes: service === 'youtube' ? false : true
+        include_granted_scopes: false
     });
 
     res.json({ url });
