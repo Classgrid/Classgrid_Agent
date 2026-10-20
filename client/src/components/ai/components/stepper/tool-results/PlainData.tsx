@@ -42,7 +42,7 @@ function Rows({ data, depth }: { data: Record<string, any>; depth: number }) {
         <div className="grid grid-cols-[minmax(96px,150px)_1fr] gap-x-5 gap-y-[5px] text-[13.5px] leading-[1.5]">
           {shown.map(([k, v]) => (
             <React.Fragment key={k}>
-              <span className="text-slate-400 dark:text-[#7d7d7d] truncate">{humanizeKey(k)}</span>
+              <span className="text-slate-400 dark:text-[#7d7d7d] break-words">{humanizeKey(k)}</span>
               <span className="text-slate-800 dark:text-[#e2e2e2] min-w-0"><Text value={v} /></span>
             </React.Fragment>
           ))}
@@ -93,7 +93,7 @@ function Table({ rows }: { rows: any[] }) {
               <tr key={i} className="border-t border-slate-200/80 dark:border-[#303030]">
                 {cols.map((c) => (
                   <td key={c} className="py-1 pr-4 align-top text-slate-800 dark:text-[#e2e2e2] max-w-[280px]">
-                    <span className="line-clamp-2"><Text value={r[c]} /></span>
+                    <span className="break-words"><Text value={r[c]} /></span>
                   </td>
                 ))}
               </tr>

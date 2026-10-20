@@ -57,7 +57,7 @@ export function AudioTranscribeStep({ args, result, status }: AudioTranscribeSte
         <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full py-1">
           <div className={cn('h-1.5 w-1.5 rounded-full', failed ? 'bg-red-400' : 'bg-slate-300 dark:bg-[#4a4a4a]')} />
         </div>
-        <ShimmerText active={loading} timer={false} className="font-medium text-[14px] text-slate-500 dark:text-[#8a8a8a] truncate">
+        <ShimmerText active={loading} timer={false} className="font-medium text-[14px] text-slate-500 dark:text-[#8a8a8a] min-w-0 break-words">
           {loading ? 'Transcribing audio...' : failed ? 'Could not transcribe audio' : 'Transcribed audio'}
         </ShimmerText>
       </div>
@@ -70,7 +70,7 @@ export function AudioTranscribeStep({ args, result, status }: AudioTranscribeSte
           aria-expanded={open}
         >
           <span className="text-slate-400 dark:text-[#7d7d7d]">{loading ? 'Listening to' : 'Listened to'}</span>
-          <span className="text-slate-800 dark:text-[#e6e6e6] truncate">{fileName}</span>
+          <span className="text-slate-800 dark:text-[#e6e6e6] min-w-0 break-all">{fileName}</span>
           <ChevronRight className={cn('h-3.5 w-3.5 shrink-0 text-slate-400 transition-transform', open && 'rotate-90')} />
         </button>
 

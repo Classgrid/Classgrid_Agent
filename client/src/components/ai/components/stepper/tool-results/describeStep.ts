@@ -31,10 +31,9 @@ const RECIPIENT_ARGS = ['to', 'phone_number', 'phoneNumber', 'recipient', 'email
 const NICE: Array<[RegExp, string]> = [[/\bwhatsapp\b/g, 'WhatsApp'], [/\bgithub\b/g, 'GitHub'], [/\bcdn\b/g, 'CDN'], [/\bai\b/g, 'AI'], [/\burl\b/g, 'URL'], [/\bclassgrid\b/g, 'Classgrid'], [/\brag\b/g, 'RAG']];
 const nice = (t: string) => NICE.reduce((acc, [re, v]) => acc.replace(re, v), t);
 
-const clip = (raw: string, n = 40) => {
-  const s = raw.split('\n')[0]!.trim();
-  return s.length > n ? `${s.slice(0, n - 1)}…` : s;
-};
+// Full first line, never cut with "…": long labels wrap onto the next line instead
+const clip = (raw: string, _n?: number) => raw.split('\n')[0]!.trim();
+const andMore = (shown: number, total: number) => (total > shown ? ` and ${total - shown} more` : '');
 const str = (v: any) => (v === undefined || v === null || v === '' || typeof v === 'object' ? undefined : String(v));
 
 /** "list_classroom_assignments" → { verb: "list", noun: "classroom assignments" } */
@@ -81,15 +80,15 @@ export function describeStep(tool: string, args: any, result: unknown, status: '
   const items = Array.isArray(parsed.data) ? parsed.data : listVerb ? list : null;
   if (items && (listVerb || verb === 'get' || verb === 'read')) {
     if (items.length === 0) return `No ${nounText} found${target && verb !== 'list' ? ` for "${clip(target, 30)}"` : ''}`;
-    const names = items.slice(0, 2).map((it) => (typeof it === 'object' ? str(pick(it, TITLE_KEYS)) : str(it))).filter(Boolean).map((n) => clip(n!, 28));
+    const names = items.slice(0, 3).map((it) => (typeof it === 'object' ? str(pick(it, TITLE_KEYS)) : str(it))).filter(Boolean).map((n) => clip(n!));
     const count = items.length === 1 ? `1 ${singular(nounText)}` : `${items.length} ${nounText}`;
-    return `${PAST[verb] === 'Read' || PAST[verb] === 'Searched' || PAST[verb] === 'Queried' || PAST[verb] === 'Recalled' ? 'Found' : PAST[verb]} ${count}${names.length ? `: ${names.join(', ')}${items.length > names.length ? '…' : ''}` : ''}`;
+    return `${PAST[verb] === 'Read' || PAST[verb] === 'Searched' || PAST[verb] === 'Queried' || PAST[verb] === 'Recalled' ? 'Found' : PAST[verb]} ${count}${names.length ? `: ${names.join(', ')}${andMore(names.length, items.length)}` : ''}`;
   }
   // Text lists ("- ID: x, Name: y" lines)
   const bullets = parsed.data === undefined ? text.split('\n').filter((l) => /^\s*[-•*]\s+\S/.test(l)) : [];
   if (listVerb && bullets.length) {
-    const names = bullets.slice(0, 2).map((l) => l.match(/Name:\s*([^,]+)/)?.[1] ?? l.replace(/^\s*[-•*]\s+/, '')).map((n) => clip(n.trim(), 28));
-    return `Found ${bullets.length === 1 ? `1 ${singular(nounText)}` : `${bullets.length} ${nounText}`}: ${names.join(', ')}${bullets.length > 2 ? '…' : ''}`;
+    const names = bullets.slice(0, 3).map((l) => l.match(/Name:\s*([^,]+)/)?.[1] ?? l.replace(/^\s*[-•*]\s+/, '')).map((n) => clip(n.trim()));
+    return `Found ${bullets.length === 1 ? `1 ${singular(nounText)}` : `${bullets.length} ${nounText}`}: ${names.join(', ')}${andMore(names.length, bullets.length)}`;
   }
 
   // "Total members: 38" / { count: 12 }

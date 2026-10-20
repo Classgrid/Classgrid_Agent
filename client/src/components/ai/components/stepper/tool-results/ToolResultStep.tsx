@@ -67,7 +67,7 @@ export function ToolResultStep({ tool, args, result, status, text, defaultOpen =
           <div className={cn('h-1.5 w-1.5 rounded-full transition-colors', status === 'error' ? 'bg-red-400' : 'bg-slate-300 dark:bg-[#4a4a4a]')} />
         </div>
         <div className="flex items-center gap-1.5 font-medium text-[14px] text-slate-500 dark:text-[#8a8a8a] group-hover:text-slate-700 dark:group-hover:text-[#c9c9c9] transition-colors min-w-0">
-          <ShimmerText active={status === 'loading'} className="truncate">{text}</ShimmerText>
+          <ShimmerText active={status === 'loading'} className="min-w-0 break-words">{text}</ShimmerText>
           {canOpen && <ChevronRight className={cn('h-3.5 w-3.5 shrink-0 transition-transform', cardOpen && 'rotate-90')} />}
         </div>
       </button>
@@ -85,7 +85,7 @@ export function ToolResultStep({ tool, args, result, status, text, defaultOpen =
             aria-expanded={detailOpen}
           >
             <span className="text-slate-400 dark:text-[#7d7d7d]">Used {app}</span>
-            <span className="text-slate-800 dark:text-[#e6e6e6] truncate">{action}</span>
+            <span className="text-slate-800 dark:text-[#e6e6e6] min-w-0 break-words">{action}</span>
             <ChevronRight className={cn('h-3.5 w-3.5 shrink-0 text-slate-400 transition-transform', detailOpen && 'rotate-90')} />
           </button>
 
