@@ -4984,7 +4984,9 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
                                           }
 
                                           // Image the AI is looking at: shown right away (live), then its answer
-                                          if (step.tool === 'analyze_image' || step.tool === 'view_image') {
+                                          const isImageUpload = step.tool === 'upload_sandbox_file_to_cdn'
+                                            && (/^image\//.test(String(step.args?.mimeType ?? '')) || /\.(png|jpe?g|gif|webp)$/i.test(String(step.args?.sandboxFilePath ?? '')));
+                                          if (step.tool === 'analyze_image' || step.tool === 'view_image' || isImageUpload) {
                                             elements.push(
                                               <ImageReadStep
                                                 key={step.id}
@@ -4992,7 +4994,9 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
                                                 args={step.args}
                                                 result={step.result}
                                                 status={step.status}
-                                                text={step.status === 'loading' ? 'Analyzing image...' : 'Analyzed image'}
+                                                text={isImageUpload
+                                                  ? (step.status === 'loading' ? 'Uploading image...' : 'Uploaded image')
+                                                  : (step.status === 'loading' ? 'Analyzing image...' : 'Analyzed image')}
                                               />
                                             );
                                             return;

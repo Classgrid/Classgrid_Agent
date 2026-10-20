@@ -33,15 +33,19 @@ function readResult(result: unknown): { answer: string; images: string[] } {
   return { answer: typeof result === 'string' ? result.replace(/^\s*VISION AI ANSWER:\s*/i, '') : '', images: [] };
 }
 
-export function ImageReadStep({ args, result, status, text }: ImageReadStepProps) {
+export function ImageReadStep({ tool, args, result, status, text }: ImageReadStepProps) {
   const [open, setOpen] = useState(true);
   const [broken, setBroken] = useState(false);
   const url: string | undefined = typeof args?.url === 'string' && /^https?:\/\//.test(args.url) ? args.url : undefined;
   const path: string = String(args?.sandboxFilePath ?? url ?? '');
   const fileName = decodeURIComponent(path.split('?')[0]!.split('/').filter(Boolean).pop() ?? 'image');
   const { answer, images } = readResult(result);
-  const src = url ?? (images[0] ? `data:${mimeFor(path)};base64,${images[0]}` : undefined);
+  // Uploads (upload_sandbox_file_to_cdn): the picture is the public CDN link in the result
+  const isUpload = /upload/.test(tool);
+  const uploadedUrl = isUpload ? answer.match(/https?:\/\/[^\s"')]+/)?.[0] : undefined;
+  const src = url ?? uploadedUrl ?? (images[0] ? `data:${mimeFor(path)};base64,${images[0]}` : undefined);
   const loading = status === 'loading';
+  const verb = isUpload ? (loading ? 'Uploading' : 'Uploaded') : 'Read';
   const failed = status === 'error' || /^(error|failed)/i.test(answer.trim());
 
   return (
@@ -60,7 +64,7 @@ export function ImageReadStep({ args, result, status, text }: ImageReadStepProps
           className="flex w-full items-center gap-2 px-3.5 py-2.5 text-left text-[14px] cursor-pointer hover:bg-slate-50 dark:hover:bg-[#1d1d1d] transition-colors"
           aria-expanded={open}
         >
-          <span className="text-slate-400 dark:text-[#7d7d7d]">Read</span>
+          <span className="text-slate-400 dark:text-[#7d7d7d]">{verb}</span>
           <span className="text-slate-800 dark:text-[#e6e6e6] truncate">{fileName}</span>
           <ChevronRight className={cn('h-3.5 w-3.5 shrink-0 text-slate-400 transition-transform', open && 'rotate-90')} />
         </button>
@@ -78,12 +82,12 @@ export function ImageReadStep({ args, result, status, text }: ImageReadStepProps
               </a>
             ) : (
               <div className="flex h-24 w-40 items-center justify-center rounded-lg bg-slate-100 dark:bg-[#222] text-[12.5px] text-slate-400 dark:text-[#7d7d7d]">
-                {loading ? 'Opening image…' : 'Image not available'}
+                {loading ? (isUpload ? 'Uploading…' : 'Opening image…') : 'Image not available'}
               </div>
             )}
             {args?.question && <span className="text-[13px] text-slate-500 dark:text-[#9a9a9a]">{String(args.question)}</span>}
             {loading ? (
-              <span className="text-[13px] text-slate-400 dark:text-[#7d7d7d] animate-pulse">Looking at the image…</span>
+              <span className="text-[13px] text-slate-400 dark:text-[#7d7d7d] animate-pulse">{isUpload ? 'Uploading the image…' : 'Looking at the image…'}</span>
             ) : answer ? (
               <div className="rounded-lg bg-[#f1f1ef] dark:bg-[#222222] px-3 py-2.5 flex flex-col gap-1 max-h-[300px] overflow-y-auto [scrollbar-width:thin]">
                 <span className="text-[13px] text-slate-600 dark:text-[#a9a9a9]">Response</span>
