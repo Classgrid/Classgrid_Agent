@@ -7,6 +7,7 @@ import { ChevronRight } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { parseResult, sanitize, maskSecretsInText, humanizeKey } from './primitives';
 import { PlainData } from './PlainData';
+import { ShimmerText } from '../ShimmerText';
 
 interface ToolResultStepProps {
   tool: string;
@@ -66,7 +67,7 @@ export function ToolResultStep({ tool, args, result, status, text, defaultOpen =
           <div className={cn('h-1.5 w-1.5 rounded-full transition-colors', status === 'error' ? 'bg-red-400' : 'bg-slate-300 dark:bg-[#4a4a4a]')} />
         </div>
         <div className="flex items-center gap-1.5 font-medium text-[14px] text-slate-500 dark:text-[#8a8a8a] group-hover:text-slate-700 dark:group-hover:text-[#c9c9c9] transition-colors min-w-0">
-          <span className="truncate">{text}</span>
+          <ShimmerText active={status === 'loading'} className="truncate">{text}</ShimmerText>
           {canOpen && <ChevronRight className={cn('h-3.5 w-3.5 shrink-0 transition-transform', cardOpen && 'rotate-90')} />}
         </div>
       </button>

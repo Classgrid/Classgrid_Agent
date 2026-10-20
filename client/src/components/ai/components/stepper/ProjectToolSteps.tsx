@@ -15,6 +15,7 @@ import { ChevronDown, ChevronRight, Folder, FileText, Github } from 'lucide-reac
 import { Spinner } from '@/components/marketing_ui/spinner';
 import { CombinedReasoningBlock } from './CombinedReasoningBlock';
 import { cn } from '@/lib/utils';
+import { ShimmerText } from './ShimmerText';
 
 // Steps of the Project Mode file tools, shown like a code editor's agent: "Edited calculator.ts +26 -0",
 // and reading/searching grouped as "Exploring 2 files, 1 search".
@@ -99,7 +100,7 @@ export function ProjectEditStep({ step }: { step: Step }) {
   return (
     <div className="flex flex-col">
       <Row onClick={loading ? undefined : () => setOpen(!open)} open={open}>
-        <span className="shrink-0">{loading ? 'Editing' : failed ? 'Could not edit' : step.tool === 'write_project_file' ? 'Created' : 'Edited'}</span>
+        <ShimmerText active={loading} className="shrink-0">{loading ? 'Editing' : failed ? 'Could not edit' : step.tool === 'write_project_file' ? 'Created' : 'Edited'}</ShimmerText>
         <FileBadge path={path} />
         <FileLink path={path} find={edits[0]?.new_text?.split("\n").find((l) => l.trim()) || undefined} />
         {!failed && <span className="shrink-0 text-xs text-green-600 dark:text-green-500">+{added}</span>}
@@ -145,7 +146,7 @@ function ExploreItem({ step }: { step: Step }) {
       <div className="flex flex-col">
         <div className="flex items-center gap-1.5 py-1 text-[14px] text-slate-500 dark:text-[#8a8a8a]">
           <button type="button" disabled={!places.length} onClick={() => setOpen(!open)} className="flex min-w-0 items-center gap-1.5 hover:text-foreground disabled:hover:text-inherit">
-            <span className="shrink-0">{loading ? 'Searching by meaning' : 'Searched by meaning'}</span>
+            <ShimmerText active={loading} className="shrink-0">{loading ? 'Searching by meaning' : 'Searched by meaning'}</ShimmerText>
             <Name>{step.args?.query}</Name>
             {!loading && <span className="shrink-0 rounded-full bg-secondary px-2 text-xs">{places.length} place{places.length === 1 ? '' : 's'}</span>}
           </button>
@@ -257,7 +258,7 @@ export function ProjectExploreGroup({ steps }: { steps: Step[] }) {
   return (
     <div className="flex flex-col">
       <Row onClick={() => setOpen(!isOpen)} open={isOpen}>
-        <span className="shrink-0">{busy ? 'Exploring' : 'Explored'}</span>
+        <ShimmerText active={busy} className="shrink-0">{busy ? 'Exploring' : 'Explored'}</ShimmerText>
         <Name>{parts}</Name>
         {busy && <Spinner className="size-3.5 shrink-0" />}
       </Row>
@@ -367,7 +368,7 @@ export function ProjectHelpersStep({ step }: { step: Step }) {
   return (
     <div className="flex flex-col">
       <Row onClick={() => setOpen(!isOpen)} open={isOpen}>
-        <span className="shrink-0">{loading ? `Sending ${n} helper${n === 1 ? '' : 's'}` : `${n} helper${n === 1 ? '' : 's'} explored`}</span>
+        <ShimmerText active={loading} className="shrink-0">{loading ? `Sending ${n} helper${n === 1 ? '' : 's'}` : `${n} helper${n === 1 ? '' : 's'} explored`}</ShimmerText>
         {loading && <Spinner className="size-3.5 shrink-0" />}
       </Row>
       {isOpen && (
@@ -405,7 +406,7 @@ export function ProjectBackgroundStep({ step }: { step: Step }) {
   return (
     <div className="flex flex-col">
       <Row onClick={canOpen ? () => setOpen(!open) : undefined} open={open}>
-        <span className="shrink-0">{label}</span>
+        <ShimmerText active={loading} className="shrink-0">{label}</ShimmerText>
         {name && <code className="truncate rounded bg-muted px-1.5 py-0.5 font-mono text-[12px] text-foreground/90">{name}</code>}
         {loading && <Spinner className="size-3.5 shrink-0" />}
       </Row>
@@ -445,7 +446,7 @@ export function TerminalStep({ name, description, command, output, status }: { n
         {loading
           ? <Spinner className="size-3 shrink-0" />
           : <span className={cn('size-2 shrink-0 rounded-full', failed ? 'bg-red-500' : 'bg-emerald-500')} />}
-        <span className="shrink-0 text-[14px] font-semibold text-foreground">{name}</span>
+        <ShimmerText active={loading} className="shrink-0 text-[14px] font-semibold text-foreground">{name}</ShimmerText>
         {description && <span className="truncate text-[14px] text-muted-foreground group-hover:text-foreground">{description}</span>}
         {isOpen ? <ChevronDown className="size-3.5 shrink-0 text-muted-foreground" /> : <ChevronRight className="size-3.5 shrink-0 text-muted-foreground" />}
       </button>
@@ -474,7 +475,7 @@ export function ProjectPushStep({ step }: { step: Step }) {
   return (
     <Row>
       <Github className="size-3.5 shrink-0" />
-      <span className="shrink-0">{loading ? 'Pushing to GitHub' : failed ? 'Push failed' : 'Pushed to GitHub'}</span>
+      <ShimmerText active={loading} className="shrink-0">{loading ? 'Pushing to GitHub' : failed ? 'Push failed' : 'Pushed to GitHub'}</ShimmerText>
       {repo && <Name>{repo}</Name>}
       {loading && <Spinner className="size-3.5 shrink-0" />}
     </Row>

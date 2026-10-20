@@ -3,6 +3,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { ChevronRight, Music } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { ShimmerText } from '../ShimmerText';
 
 interface AudioTranscribeStepProps {
   args?: any;
@@ -56,9 +57,9 @@ export function AudioTranscribeStep({ args, result, status }: AudioTranscribeSte
         <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full py-1">
           <div className={cn('h-1.5 w-1.5 rounded-full', failed ? 'bg-red-400' : 'bg-slate-300 dark:bg-[#4a4a4a]')} />
         </div>
-        <span className="font-medium text-[14px] text-slate-500 dark:text-[#8a8a8a] truncate">
+        <ShimmerText active={loading} className="font-medium text-[14px] text-slate-500 dark:text-[#8a8a8a] truncate">
           {loading ? 'Transcribing audio...' : failed ? 'Could not transcribe audio' : 'Transcribed audio'}
-        </span>
+        </ShimmerText>
       </div>
 
       <div className="ml-10 mr-2 mb-2 mt-0.5 rounded-xl border border-slate-200 dark:border-[#2a2a2a] bg-white dark:bg-[#171717] overflow-hidden">

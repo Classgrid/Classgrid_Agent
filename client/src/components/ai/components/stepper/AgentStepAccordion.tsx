@@ -22,6 +22,7 @@
 import React, { useState } from 'react';
 import { ChevronRight, ChevronDown, CheckCircle2, Loader2, XCircle } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { ShimmerText } from './ShimmerText';
 
 export type StepStatus = 'loading' | 'success' | 'error';
 
@@ -97,7 +98,7 @@ export function AgentStepAccordion({
           status === 'error' ? "text-red-700 dark:text-[#ff7b72]" : "text-slate-600 dark:text-[#a3a3a3]"
         )}>
           {icon && <span className="text-muted-foreground flex shrink-0 [&>svg]:size-3.5">{icon}</span>}
-          <span className="truncate">{title}</span>
+          <ShimmerText active={status === 'loading'} className="truncate">{title}</ShimmerText>
           <div className="opacity-50 group-hover/accordion:opacity-100 transition-opacity flex items-center justify-center">
             {isExpanded ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
           </div>
