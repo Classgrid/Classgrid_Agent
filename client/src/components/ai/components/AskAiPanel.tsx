@@ -194,6 +194,7 @@ import { CdnUploadView } from "./stepper/CdnUploadView";
 import { EmailSentView } from "./stepper/EmailSentView";
 import { ToolResultStep } from "./stepper/tool-results/ToolResultStep";
 import { describeStep } from "./stepper/tool-results/describeStep";
+import { StepWorkingContext } from "./stepper/ShimmerText";
 import { ImageReadStep } from "./stepper/tool-results/ImageReadStep";
 import { AudioTranscribeStep } from "./stepper/tool-results/AudioTranscribeStep";
 import { FileMentionChip, parseFileMention, parseProjectLink, FilesChangedSummary, ProjectEditStep, ProjectExploreGroup, ProjectPushStep, ProjectRunChanges, ProjectHelpersStep, TerminalStep, PROJECT_BACKGROUND_TOOLS, PROJECT_EDIT_TOOLS, PROJECT_EXPLORE_TOOLS } from "./stepper/ProjectToolSteps";
@@ -5050,11 +5051,13 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
                                     })()}
                                   </AgentStepper>
                                     );
+                                    // Every step label keeps its shine until the whole reply is finished
+                                    const stepperLive = <StepWorkingContext.Provider value={!workDone}>{stepper}</StepWorkingContext.Provider>;
                                     return toolSteps.length > 0 ? (
                                       <MasterWorkflowWrapper isFinished={workDone} durationMs={message.workedMs} stepCount={toolSteps.length}>
-                                        {stepper}
+                                        {stepperLive}
                                       </MasterWorkflowWrapper>
-                                    ) : stepper;
+                                    ) : stepperLive;
                                   })()}
                                 </div>
                               )}

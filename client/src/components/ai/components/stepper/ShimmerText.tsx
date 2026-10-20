@@ -1,9 +1,16 @@
 // The running look of the main "Thinking 2s" label (CombinedReasoningBlock) for any step label:
-// the moving shine plus a live seconds counter, both only while the step runs.
-import React, { useEffect, useState } from 'react';
+// the moving shine plus a live seconds counter.
+// The shine keeps going on every step until the whole reply is finished (StepWorkingContext); the seconds counter
+// only runs while that step itself is working. "Thought" is not a ShimmerText, so it still stops on its own.
+import React, { createContext, useContext, useEffect, useState } from 'react';
 import { cn } from '@/lib/utils';
 
+/** True while the AI is still working on this reply (steps running or the answer still being written) */
+export const StepWorkingContext = createContext(false);
+
 export function ShimmerText({ active, className, children, timer = true }: { active: boolean; className?: string; children: React.ReactNode; timer?: boolean }) {
+  const replyWorking = useContext(StepWorkingContext);
+  const shine = active || replyWorking;
   const [seconds, setSeconds] = useState(0);
   useEffect(() => {
     if (!active) return;
@@ -13,7 +20,7 @@ export function ShimmerText({ active, className, children, timer = true }: { act
     return () => clearInterval(id);
   }, [active]);
 
-  if (!active) return <span className={className}>{children}</span>;
+  if (!shine) return <span className={className}>{children}</span>;
   return (
     <>
       <span
@@ -23,7 +30,7 @@ export function ShimmerText({ active, className, children, timer = true }: { act
       >
         {children}
       </span>
-      {timer && <span className="shrink-0 text-sm font-normal text-muted-foreground tabular-nums">{seconds}s</span>}
+      {timer && active && <span className="shrink-0 text-sm font-normal text-muted-foreground tabular-nums">{seconds}s</span>}
       <style>{`@keyframes shimmer { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }`}</style>
     </>
   );
