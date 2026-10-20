@@ -1,8 +1,18 @@
-// The moving shine the main "Thinking" label uses (CombinedReasoningBlock), for any step label while it runs.
-import React from 'react';
+// The running look of the main "Thinking 2s" label (CombinedReasoningBlock) for any step label:
+// the moving shine plus a live seconds counter, both only while the step runs.
+import React, { useEffect, useState } from 'react';
 import { cn } from '@/lib/utils';
 
-export function ShimmerText({ active, className, children }: { active: boolean; className?: string; children: React.ReactNode }) {
+export function ShimmerText({ active, className, children, timer = true }: { active: boolean; className?: string; children: React.ReactNode; timer?: boolean }) {
+  const [seconds, setSeconds] = useState(0);
+  useEffect(() => {
+    if (!active) return;
+    const started = Date.now();
+    setSeconds(0);
+    const id = setInterval(() => setSeconds(Math.floor((Date.now() - started) / 1000)), 1000);
+    return () => clearInterval(id);
+  }, [active]);
+
   if (!active) return <span className={className}>{children}</span>;
   return (
     <>
@@ -13,6 +23,7 @@ export function ShimmerText({ active, className, children }: { active: boolean; 
       >
         {children}
       </span>
+      {timer && <span className="shrink-0 text-sm font-normal text-muted-foreground tabular-nums">{seconds}s</span>}
       <style>{`@keyframes shimmer { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }`}</style>
     </>
   );
