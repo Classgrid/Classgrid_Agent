@@ -73,6 +73,10 @@ export function ToolResultStep({ tool, args, result, status, text, defaultOpen =
 
       {cardOpen && canOpen && (
         <div className="ml-10 mr-2 mb-2 mt-0.5 rounded-xl border border-slate-200 dark:border-[#2a2a2a] bg-white dark:bg-[#171717] overflow-hidden">
+          <div className="flex items-center gap-2 px-3.5 py-2.5 text-[14px] border-b border-slate-200 dark:border-[#2a2a2a]">
+            <span className="text-slate-400 dark:text-[#7d7d7d]">Loaded</span>
+            <span className="text-slate-800 dark:text-[#e6e6e6]">{app}</span>
+          </div>
           <button
             type="button"
             onClick={() => setDetailOpen((o) => !o)}
