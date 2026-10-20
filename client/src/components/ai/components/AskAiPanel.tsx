@@ -192,7 +192,7 @@ import { DocumentGenerationView } from "./stepper/DocumentGenerationView";
 import { KnowledgeBaseSearchView } from "./stepper/KnowledgeBaseSearchView";
 import { CdnUploadView } from "./stepper/CdnUploadView";
 import { EmailSentView } from "./stepper/EmailSentView";
-import { SimpleLogStepView } from "./stepper/SimpleLogStepView";
+import { ToolResultStep } from "./stepper/tool-results/ToolResultStep";
 import { FileMentionChip, parseFileMention, parseProjectLink, FilesChangedSummary, ProjectEditStep, ProjectExploreGroup, ProjectPushStep, ProjectRunChanges, ProjectHelpersStep, TerminalStep, PROJECT_BACKGROUND_TOOLS, PROJECT_EDIT_TOOLS, PROJECT_EXPLORE_TOOLS } from "./stepper/ProjectToolSteps";
 import { CombinedReasoningBlock } from "./stepper/CombinedReasoningBlock";
 import { AiFeedbackModal } from "./AiFeedbackModal";
@@ -5003,8 +5003,12 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
                                           }
 
                                           elements.push(
-                                            <SimpleLogStepView
+                                            <ToolResultStep
                                               key={step.id}
+                                              tool={step.tool}
+                                              args={step.args}
+                                              result={step.result}
+                                              status={step.status}
                                               text={step.status === 'success' ? dynamicText : loadingText}
                                             />
                                           );
