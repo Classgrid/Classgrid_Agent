@@ -193,6 +193,7 @@ import { KnowledgeBaseSearchView } from "./stepper/KnowledgeBaseSearchView";
 import { CdnUploadView } from "./stepper/CdnUploadView";
 import { EmailSentView } from "./stepper/EmailSentView";
 import { ToolResultStep } from "./stepper/tool-results/ToolResultStep";
+import { ImageReadStep } from "./stepper/tool-results/ImageReadStep";
 import { FileMentionChip, parseFileMention, parseProjectLink, FilesChangedSummary, ProjectEditStep, ProjectExploreGroup, ProjectPushStep, ProjectRunChanges, ProjectHelpersStep, TerminalStep, PROJECT_BACKGROUND_TOOLS, PROJECT_EDIT_TOOLS, PROJECT_EXPLORE_TOOLS } from "./stepper/ProjectToolSteps";
 import { CombinedReasoningBlock } from "./stepper/CombinedReasoningBlock";
 import { AiFeedbackModal } from "./AiFeedbackModal";
@@ -4978,6 +4979,21 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
                                                   error={step.error || (!cdnUrl ? step.result : undefined)}
                                                 />
                                               </AgentStepAccordion>
+                                            );
+                                            return;
+                                          }
+
+                                          // Image the AI is looking at: shown right away (live), then its answer
+                                          if (step.tool === 'analyze_image' || step.tool === 'view_image') {
+                                            elements.push(
+                                              <ImageReadStep
+                                                key={step.id}
+                                                tool={step.tool}
+                                                args={step.args}
+                                                result={step.result}
+                                                status={step.status}
+                                                text={step.status === 'loading' ? 'Analyzing image...' : 'Analyzed image'}
+                                              />
                                             );
                                             return;
                                           }
