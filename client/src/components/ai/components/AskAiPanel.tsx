@@ -193,6 +193,7 @@ import { KnowledgeBaseSearchView } from "./stepper/KnowledgeBaseSearchView";
 import { CdnUploadView } from "./stepper/CdnUploadView";
 import { EmailSentView } from "./stepper/EmailSentView";
 import { ToolResultStep } from "./stepper/tool-results/ToolResultStep";
+import { describeStep } from "./stepper/tool-results/describeStep";
 import { ImageReadStep } from "./stepper/tool-results/ImageReadStep";
 import { AudioTranscribeStep } from "./stepper/tool-results/AudioTranscribeStep";
 import { FileMentionChip, parseFileMention, parseProjectLink, FilesChangedSummary, ProjectEditStep, ProjectExploreGroup, ProjectPushStep, ProjectRunChanges, ProjectHelpersStep, TerminalStep, PROJECT_BACKGROUND_TOOLS, PROJECT_EDIT_TOOLS, PROJECT_EXPLORE_TOOLS } from "./stepper/ProjectToolSteps";
@@ -5029,6 +5030,8 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
                                             loadingText = `Using Zoom to ${step.args.operation.replace(/_/g, ' ')}...`;
                                           }
 
+                                          // Say what the step actually did and found ("Found 5 classroom assignments: …")
+                                          const described = describeStep(step.tool, step.args, step.result, step.status);
                                           elements.push(
                                             <ToolResultStep
                                               key={step.id}
@@ -5036,7 +5039,7 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
                                               args={step.args}
                                               result={step.result}
                                               status={step.status}
-                                              text={step.status === 'success' ? dynamicText : loadingText}
+                                              text={described ?? (step.status === 'success' ? dynamicText : loadingText)}
                                             />
                                           );
                                         }
