@@ -194,6 +194,7 @@ import { CdnUploadView } from "./stepper/CdnUploadView";
 import { EmailSentView } from "./stepper/EmailSentView";
 import { ToolResultStep } from "./stepper/tool-results/ToolResultStep";
 import { ImageReadStep } from "./stepper/tool-results/ImageReadStep";
+import { AudioTranscribeStep } from "./stepper/tool-results/AudioTranscribeStep";
 import { FileMentionChip, parseFileMention, parseProjectLink, FilesChangedSummary, ProjectEditStep, ProjectExploreGroup, ProjectPushStep, ProjectRunChanges, ProjectHelpersStep, TerminalStep, PROJECT_BACKGROUND_TOOLS, PROJECT_EDIT_TOOLS, PROJECT_EXPLORE_TOOLS } from "./stepper/ProjectToolSteps";
 import { CombinedReasoningBlock } from "./stepper/CombinedReasoningBlock";
 import { AiFeedbackModal } from "./AiFeedbackModal";
@@ -4984,6 +4985,12 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
                                           }
 
                                           // Image the AI is looking at: shown right away (live), then its answer
+                                          // Audio being turned into text: the file with a player right away, then the transcript
+                                          if (step.tool === 'transcribe_audio') {
+                                            elements.push(<AudioTranscribeStep key={step.id} args={step.args} result={step.result} status={step.status} />);
+                                            return;
+                                          }
+
                                           const isImageUpload = step.tool === 'upload_sandbox_file_to_cdn'
                                             && (/^image\//.test(String(step.args?.mimeType ?? '')) || /\.(png|jpe?g|gif|webp)$/i.test(String(step.args?.sandboxFilePath ?? '')));
                                           if (step.tool === 'analyze_image' || step.tool === 'view_image' || isImageUpload) {
