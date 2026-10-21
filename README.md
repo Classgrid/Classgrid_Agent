@@ -56,6 +56,8 @@
   </p>
 </div>
 
+<p align="center"><a href="https://www.classgrid.in/agent"><img src="./docs/readme/agent-hero.png" alt="Do anything with Classgrid AI" width="100%" /></a></p>
+
 ---
 
 **Classgrid AI** lives at **[chat.classgrid.in](https://chat.classgrid.in)**. It is one place to talk to an AI agent that can actually do the work, build inside your own code, and chat with the people you work with.
@@ -71,6 +73,8 @@ It has three parts:
 ## Agent Mode
 
 Ask in plain words and the agent works it out step by step. You can watch each step as it happens: what it searched, what code it ran, what it found.
+
+<p align="center"><a href="https://chat.classgrid.in"><img src="./docs/readme/agent-app.png" alt="Classgrid AI agent" width="100%" /></a></p>
 
 - **Research:** searches the web, opens pages and cites its sources
 - **Your files:** reads PDFs, Word, Excel, PowerPoint, CSV, images and audio; analyses spreadsheets and draws charts
