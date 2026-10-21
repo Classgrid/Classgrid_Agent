@@ -194,6 +194,7 @@ import { CdnUploadView } from "./stepper/CdnUploadView";
 import { EmailSentView } from "./stepper/EmailSentView";
 import { ToolResultStep } from "./stepper/tool-results/ToolResultStep";
 import { describeStep } from "./stepper/tool-results/describeStep";
+import { specialStepTitle, emailTitle } from "./stepper/tool-results/stepTitles";
 import { StepWorkingContext } from "./stepper/ShimmerText";
 import { ImageReadStep } from "./stepper/tool-results/ImageReadStep";
 import { AudioTranscribeStep } from "./stepper/tool-results/AudioTranscribeStep";
@@ -4790,11 +4791,12 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
                                             elements.push(
                                               <AgentStepAccordion
                                                 key={step.id}
-                                                title={step.tool === 'run_code' ? 'Executing Code' : 'Running a command'}
+                                                title={specialStepTitle(step.tool, step.args, step.result, step.status) ?? (step.tool === 'run_code' ? 'Executing Code' : 'Running a command')}
                                                 status={step.status}                                              >
                                                 <TerminalToolView
                                                   command={step.args?.command || step.args?.code || 'Running...'}
                                                   output={step.result || 'Waiting for output...'}
+                                                  running={step.status === 'loading'}
                                                 />
                                               </AgentStepAccordion>
                                             );
@@ -4814,7 +4816,7 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
                                             elements.push(
                                               <AgentStepAccordion
                                                 key={step.id}
-                                                title="Querying Database"
+                                                title={specialStepTitle(step.tool, step.args, step.result, step.status) ?? "Querying Database"}
                                                 status={step.status}                                              >
                                                 <DatabaseQueryView
                                                   query={JSON.stringify(step.args, null, 2)}
@@ -4829,7 +4831,7 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
                                             elements.push(
                                               <AgentStepAccordion
                                                 key={step.id}
-                                                title="Uploaded File"
+                                                title={specialStepTitle(step.tool, step.args, step.result, step.status) ?? "Uploaded File"}
                                                 status={step.status}                                              >
                                                 <FileActionView fileName={step.args?.url?.split('/').pop() || 'document'} />
                                               </AgentStepAccordion>
@@ -4841,7 +4843,7 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
                                             const draftingStep = (
                                               <AgentStepAccordion
                                                 key={`${step.id}-draft`}
-                                                title={step.status === 'success' ? "Drafted email" : "Drafting email"}
+                                                title={emailTitle(step.args, false, step.status) ?? (step.status === 'success' ? "Drafted email" : "Drafting email")}
                                                 status={step.status === 'success' ? 'success' : step.status}                                              >
                                                 <EmailActionView
                                                   to={step.args?.to || "Unknown Recipient"}
@@ -4861,7 +4863,7 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
                                                   {draftingStep}
                                                   <AgentStepAccordion
                                                     key={`${step.id}-sent`}
-                                                    title="Sent email"
+                                                    title={emailTitle(step.args, true, "success") ?? "Sent email"}
                                                     status="success"
                                                   >
                                                     <EmailSentView
@@ -4881,7 +4883,7 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
                                             elements.push(
                                               <AgentStepAccordion
                                                 key={step.id}
-                                                title={step.status === 'loading' ? "Opening page" : step.status === 'error' ? "Couldn't open page" : "Opened page"}
+                                                title={specialStepTitle(step.tool, step.args, step.result, step.status) ?? (step.status === 'loading' ? "Opening page" : step.status === 'error' ? "Couldn't open page" : "Opened page")}
                                                 status={step.status}
                                               >
                                                 <OpenPageView url={step.args?.url} result={step.result} status={step.status} />
@@ -4910,7 +4912,7 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
                                             elements.push(
                                               <AgentStepAccordion
                                                 key={step.id}
-                                                title="Searched the web"
+                                                title={specialStepTitle(step.tool, step.args, step.result, step.status) ?? "Searched the web"}
                                                 status={step.status}                                              >
                                                 <WebSearchView
                                                   query={step.args?.query}
@@ -4935,7 +4937,7 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
                                             elements.push(
                                               <AgentStepAccordion
                                                 key={step.id}
-                                                title={step.tool === 'generate_pdf_from_db' ? "Generating database report" : "Generating PDF document"}
+                                                title={specialStepTitle(step.tool, step.args, step.result, step.status) ?? (step.tool === 'generate_pdf_from_db' ? "Generating database report" : "Generating PDF document")}
                                                 status={step.status}                                              >
                                                 <DocumentGenerationView
                                                   fileName={step.args?.title ? `${step.args.title.replace(/[^a-z0-9]/gi, '_').toLowerCase()}.pdf` : fileName}
@@ -4951,7 +4953,7 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
                                             elements.push(
                                               <AgentStepAccordion
                                                 key={step.id}
-                                                title="Searched Knowledge Base"
+                                                title={specialStepTitle(step.tool, step.args, step.result, step.status) ?? "Searched Knowledge Base"}
                                                 status={step.status}                                              >
                                                 <KnowledgeBaseSearchView
                                                   results={[{
@@ -4972,7 +4974,7 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
                                             elements.push(
                                               <AgentStepAccordion
                                                 key={step.id}
-                                                title="Upload file to CDN"
+                                                title={specialStepTitle(step.tool, step.args, step.result, step.status) ?? "Upload file to CDN"}
                                                 status={step.status}                                                icon={<UploadCloud className="h-4 w-4" />}
                                               >
                                                 <CdnUploadView

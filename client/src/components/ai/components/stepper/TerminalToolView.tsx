@@ -22,14 +22,17 @@
 import React, { useState } from 'react';
 import { Laptop } from 'lucide-react';
 import { ToolOutputContainer } from './ToolOutputContainer';
+import { Spinner } from '@/components/marketing_ui/spinner';
 import { cn } from '@/lib/utils';
 
 interface TerminalToolViewProps {
   command: string;
   output: string;
+  /** The command is still running: show a spinner next to "Waiting for output..." */
+  running?: boolean;
 }
 
-export function TerminalToolView({ command, output }: TerminalToolViewProps) {
+export function TerminalToolView({ command, output, running = false }: TerminalToolViewProps) {
   const [activeTab, setActiveTab] = useState<'command' | 'output'>('output');
 
   // Extremely basic pseudo-syntax highlighting for the Command view
@@ -85,7 +88,9 @@ export function TerminalToolView({ command, output }: TerminalToolViewProps) {
             <div className="leading-relaxed">{formatCommand(typeof command === 'object' ? JSON.stringify(command) : String(command || ''))}</div>
           ) : (
             <div className="leading-relaxed text-slate-600 dark:text-[#d4d4d4]">
-              {typeof output === 'object' ? JSON.stringify(output, null, 2) : (output || 'Waiting for output...')}
+              {typeof output === 'object' ? JSON.stringify(output, null, 2) : running && (!output || output === 'Waiting for output...') ? (
+                <span className="inline-flex items-center gap-2"><Spinner className="size-3.5 shrink-0" />Waiting for output...</span>
+              ) : (output || 'Waiting for output...')}
             </div>
           )}
         </div>
