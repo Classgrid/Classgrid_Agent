@@ -461,18 +461,12 @@ export function AgentNestedMenu({ searchQuery = "" }: { searchQuery?: string }) 
         toast.error(data.error === "chat_in_other_project" ? "This chat is already in another project." : data.error || "Could not move the chat.");
         return false;
       }
+      // Go straight to Project Mode with this chat. No project is marked open, so the editor does not start;
+      // the user opens the editor from the project when they want it.
       const projectPath = baseAgentPath.replace(/\/agent$/, "/project");
-      toast.success(`Moved to ${project.name}`, {
-        action: {
-          label: "Open",
-          onClick: () => {
-            try { localStorage.setItem("cg_project_open", project.id); } catch { /* storage blocked */ }
-            navigate(`${projectPath}/${sessionId}`);
-          },
-        },
-      });
-      if (activeSessionId === sessionId) window.dispatchEvent(new Event("agent:new-chat"));
-      fetchSessions(true);
+      toast.success(`Moved to ${project.name}`);
+      try { localStorage.removeItem("cg_project_open"); } catch { /* storage blocked */ }
+      navigate(`${projectPath}/${sessionId}`);
       return true;
     } catch {
       toast.error("Could not move the chat.");

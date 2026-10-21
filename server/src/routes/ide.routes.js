@@ -290,10 +290,19 @@ router.get("/projects", isAuthenticated, async (req, res) => {
   res.json({ projects: list });
 });
 
+// Each user's project names are unique (ignoring upper/lower case), so the project list is never ambiguous
+const escapeRegex = (text) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+const nameTaken = (ownerId, name, exceptId) => IdeProject.findOne({
+  owner: ownerId,
+  ...(exceptId ? { _id: { $ne: exceptId } } : {}),
+  name: new RegExp(`^${escapeRegex(name)}$`, "i"),
+}).select("_id").lean();
+
 router.post("/projects", isAuthenticated, async (req, res) => {
   const name = String(req.body?.name || "").trim().slice(0, 80);
   if (!name) return res.status(400).json({ error: "Give the project a name" });
   await connectDB();
+  if (await nameTaken(req.user._id, name)) return res.status(409).json({ error: `You already have a project called "${name}". Pick another name.` });
   const project = await IdeProject.create({ owner: req.user._id, name });
   res.json({ project: projectJson(project) });
 });
@@ -304,6 +313,7 @@ router.patch("/projects/:id", isAuthenticated, async (req, res) => {
   if (req.body?.name !== undefined) {
     const name = String(req.body.name).trim().slice(0, 80);
     if (!name) return res.status(400).json({ error: "Give the project a name" });
+    if (await nameTaken(req.user._id, name, project._id)) return res.status(409).json({ error: `You already have a project called "${name}". Pick another name.` });
     project.name = name;
   }
   if (req.body?.repo !== undefined) {
