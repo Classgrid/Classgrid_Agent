@@ -21,7 +21,7 @@
 
 import React from "react";
 import { createPortal } from "react-dom";
-import { MessageSquare, Plus, Search, Pin, MoreHorizontal, Pencil, Trash2, Share, Copy, Mail, Check, Link2, FileText, ExternalLink, X, Loader2, SquarePen, Calendar, Library } from "lucide-react";
+import { MessageSquare, Plus, Search, Pin, MoreHorizontal, Pencil, Trash2, Share, Copy, Mail, Check, Link2, FileText, ExternalLink, X, Loader2, SquarePen, Calendar, Library, FolderInput, FolderPlus, Folder } from "lucide-react";
 import { format } from "date-fns";
 import { NikhilDateCalendar } from "@/components/marketing_ui/nikhil_date_calendar";
 import { useNavigate, useLocation } from "react-router-dom";
@@ -32,7 +32,8 @@ import { Input } from "@/components/marketing_ui/input";
 import { Button } from "@/components/marketing_ui/button";
 import { Accordion, AccordionItem, AccordionTrigger, AccordionContent } from "@/components/marketing_ui/accordion";
 
-import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator } from "@/components/marketing_ui/dropdown-menu";
+import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuSub, DropdownMenuSubTrigger, DropdownMenuSubContent } from "@/components/marketing_ui/dropdown-menu";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/marketing_ui/dialog";
 import { DangerConfirmDialog } from "@/components/marketing_ui/danger-confirm-dialog";
 import { toast } from "sonner";
 import { fetchWithRescue } from "@/lib/rescue";
@@ -77,6 +78,11 @@ export function AgentNestedMenu({ searchQuery = "" }: { searchQuery?: string }) 
   const [sharePreviewMessages, setSharePreviewMessages] = React.useState<any[]>([]);
   const [isLoadingPreview, setIsLoadingPreview] = React.useState(false);
   const [deleteSessionId, setDeleteSessionId] = React.useState<string | null>(null);
+  // Move to project: the user's own Project Mode projects, and the "New project" dialog
+  const [projects, setProjects] = React.useState<{ id: string; name: string }[] | null>(null);
+  const [newProjectFor, setNewProjectFor] = React.useState<string | null>(null);
+  const [newProjectName, setNewProjectName] = React.useState("");
+  const [isMovingChat, setIsMovingChat] = React.useState(false);
   const [isDeletingSession, setIsDeletingSession] = React.useState(false);
 
   React.useEffect(() => {
@@ -432,6 +438,75 @@ export function AgentNestedMenu({ searchQuery = "" }: { searchQuery?: string }) 
     navigate(`${baseAgentPath}/${sessionId}`);
   };
 
+  const loadProjects = () => {
+    fetchWithRescue(`${endpointPrefix}/api/ide/projects`, { credentials: "include" })
+      .then((res) => res.json())
+      .then((data) => setProjects(Array.isArray(data.projects) ? data.projects.map((p: any) => ({ id: String(p.id), name: String(p.name || "Untitled") })) : []))
+      .catch(() => setProjects([]));
+  };
+
+  /** Move an Agent chat into a Project Mode project: it then leaves the Agent list and opens in Project Mode */
+  const moveChatToProject = async (sessionId: string, project: { id: string; name: string }) => {
+    setIsMovingChat(true);
+    try {
+      const res = await fetchWithRescue(`${endpointPrefix}/api/ide/projects/${project.id}/chats`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sessionId }),
+        credentials: "include",
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        toast.error(data.error === "chat_in_other_project" ? "This chat is already in another project." : data.error || "Could not move the chat.");
+        return false;
+      }
+      const projectPath = baseAgentPath.replace(/\/agent$/, "/project");
+      toast.success(`Moved to ${project.name}`, {
+        action: {
+          label: "Open",
+          onClick: () => {
+            try { localStorage.setItem("cg_project_open", project.id); } catch { /* storage blocked */ }
+            navigate(`${projectPath}/${sessionId}`);
+          },
+        },
+      });
+      if (activeSessionId === sessionId) window.dispatchEvent(new Event("agent:new-chat"));
+      fetchSessions(true);
+      return true;
+    } catch {
+      toast.error("Could not move the chat.");
+      return false;
+    } finally {
+      setIsMovingChat(false);
+    }
+  };
+
+  const createProjectAndMove = async () => {
+    const name = newProjectName.trim();
+    if (!name || !newProjectFor) return;
+    setIsMovingChat(true);
+    try {
+      const res = await fetchWithRescue(`${endpointPrefix}/api/ide/projects`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name }),
+        credentials: "include",
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data.project) { toast.error(data.error || "Could not create the project."); return; }
+      const project = { id: String(data.project.id), name: String(data.project.name) };
+      setProjects((list) => (list ? [project, ...list] : [project]));
+      if (await moveChatToProject(newProjectFor, project)) {
+        setNewProjectFor(null);
+        setNewProjectName("");
+      }
+    } catch {
+      toast.error("Could not create the project.");
+    } finally {
+      setIsMovingChat(false);
+    }
+  };
+
   const renderSessionItem = (session: ChatSession) => {
     const isEditing = editingSessionId === session.id;
 
@@ -526,6 +601,45 @@ export function AgentNestedMenu({ searchQuery = "" }: { searchQuery?: string }) 
                   <Pin className="w-4 h-4 text-slate-500 dark:text-white/70" strokeWidth={2} />
                   {session.pinned ? "Unpin chat" : "Pin chat"}
                 </DropdownMenuItem>
+
+                {!isProjectMode && (
+                  <DropdownMenuSub onOpenChange={(open) => { if (open && projects === null) loadProjects(); }}>
+                    <DropdownMenuSubTrigger className="gap-3 py-2 px-3 text-[14px] cursor-pointer hover:bg-slate-100 dark:hover:bg-[#343541] focus:bg-slate-100 dark:focus:bg-[#343541] rounded-xl transition-colors data-popup-open:bg-slate-100 dark:data-popup-open:bg-[#343541]">
+                      <FolderInput className="w-4 h-4 text-slate-500 dark:text-white/70" strokeWidth={2} />
+                      Move to project
+                    </DropdownMenuSubTrigger>
+                    <DropdownMenuSubContent
+                      sideOffset={8}
+                      className="w-[200px] max-h-[320px] overflow-y-auto z-[101] bg-white dark:bg-[#202123] text-slate-700 dark:text-[#ececf1] border border-slate-200 dark:border-white/10 rounded-2xl p-2 shadow-2xl"
+                    >
+                      <DropdownMenuItem
+                        className="gap-3 py-2 px-3 text-[14px] cursor-pointer hover:bg-slate-100 dark:hover:bg-[#343541] focus:bg-slate-100 dark:focus:bg-[#343541] rounded-xl transition-colors"
+                        onClick={() => { setPinnedOpen(false); setRecentOpen(false); setNewProjectName(""); setNewProjectFor(session.id); }}
+                      >
+                        <FolderPlus className="w-4 h-4 text-slate-500 dark:text-white/70" strokeWidth={2} />
+                        New project
+                      </DropdownMenuItem>
+                      {projects === null ? (
+                        <div className="flex items-center gap-2 px-3 py-2 text-[13px] text-slate-400"><Loader2 className="w-3.5 h-3.5 animate-spin" />Loading…</div>
+                      ) : projects.length > 0 && (
+                        <>
+                          <DropdownMenuSeparator className="bg-slate-100 dark:bg-white/10 my-1.5 mx-1" />
+                          {projects.map((p) => (
+                            <DropdownMenuItem
+                              key={p.id}
+                              disabled={isMovingChat}
+                              className="gap-3 py-2 px-3 text-[14px] cursor-pointer hover:bg-slate-100 dark:hover:bg-[#343541] focus:bg-slate-100 dark:focus:bg-[#343541] rounded-xl transition-colors"
+                              onClick={() => { setPinnedOpen(false); setRecentOpen(false); moveChatToProject(session.id, p); }}
+                            >
+                              <Folder className="w-4 h-4 shrink-0 text-slate-500 dark:text-white/70" strokeWidth={2} />
+                              <span className="break-words min-w-0">{p.name}</span>
+                            </DropdownMenuItem>
+                          ))}
+                        </>
+                      )}
+                    </DropdownMenuSubContent>
+                  </DropdownMenuSub>
+                )}
 
                 <DropdownMenuSeparator className="bg-slate-100 dark:bg-white/10 my-1.5 mx-1" />
 
@@ -982,6 +1096,36 @@ export function AgentNestedMenu({ searchQuery = "" }: { searchQuery?: string }) 
         </div>,
         document.body
       )}
+      <Dialog open={newProjectFor !== null} onOpenChange={(open) => { if (!open) setNewProjectFor(null); }}>
+        <DialogContent className="sm:max-w-[440px]">
+          <DialogHeader>
+            <DialogTitle>Create project</DialogTitle>
+          </DialogHeader>
+          <div className="flex flex-col gap-3">
+            <label className="text-[13px] font-medium text-muted-foreground" htmlFor="move-new-project-name">Project name</label>
+            <div className="relative">
+              <Folder className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+              <Input
+                id="move-new-project-name"
+                autoFocus
+                className="pl-9"
+                placeholder="My project"
+                maxLength={80}
+                value={newProjectName}
+                onChange={(e) => setNewProjectName(e.target.value)}
+                onKeyDown={(e) => { if (e.key === "Enter") createProjectAndMove(); }}
+              />
+            </div>
+            <p className="text-[12.5px] text-muted-foreground">The chat moves into this project and continues in Project Mode.</p>
+          </div>
+          <DialogFooter>
+            <Button disabled={!newProjectName.trim() || isMovingChat} onClick={createProjectAndMove}>
+              {isMovingChat && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
+              Create project
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
       <DangerConfirmDialog
         open={deleteSessionId !== null}
         onOpenChange={(open) => { if (!open) setDeleteSessionId(null); }}
