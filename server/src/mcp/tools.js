@@ -3644,7 +3644,8 @@ export const handleToolCall = async (name, args, context = {}) => {
 
         if (!aiResponse.ok) {
           const errText = await aiResponse.text();
-          return { content: [{ type: 'text', text: `Error from Cloudflare API: ${aiResponse.status} - ${errText}` }] };
+          console.error("[transcribe_audio] failed:", aiResponse.status, errText);
+          return { content: [{ type: 'text', text: "Transcription failed. Please try again." }] };
         }
 
         const aiResult = await aiResponse.json();
@@ -3652,10 +3653,12 @@ export const handleToolCall = async (name, args, context = {}) => {
         if (aiResult.success && aiResult.result && aiResult.result.text) {
           return { content: [{ type: 'text', text: aiResult.result.text }] };
         } else {
-          return { content: [{ type: 'text', text: `Transcription failed or returned unexpected format: ${JSON.stringify(aiResult)}` }] };
+          console.error("[transcribe_audio] unexpected result:", JSON.stringify(aiResult));
+          return { content: [{ type: 'text', text: "Transcription failed. Please try again." }] };
         }
       } catch (e) {
-        return { content: [{ type: 'text', text: `Error in transcribe_audio: ${e.message}` }] };
+        console.error("[transcribe_audio] error:", e.message);
+        return { content: [{ type: 'text', text: "Transcription failed. Please try again." }] };
       }
     }
 

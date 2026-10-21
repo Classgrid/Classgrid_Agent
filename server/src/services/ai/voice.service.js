@@ -126,6 +126,6 @@ export const transcribeAudio = async (buffer, mimetype = 'audio/webm') => {
         return json.result.text;
     } catch (err) {
         console.error("[Voice Service] Transcription Error:", err);
-        throw new Error(`Transcription failed: ${err.message}`);
+        throw new Error("Transcription failed. Please try again.");
     }
 };

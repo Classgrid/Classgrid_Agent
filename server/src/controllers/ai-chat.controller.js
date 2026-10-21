@@ -3135,7 +3135,8 @@ If they ask whether their college/school uses Classgrid, say you can't see that 
                             const json = await visionResponse.json();
                             return "VISION AI ANSWER:\n" + (json.result?.response || JSON.stringify(json.result));
                         } catch (e) {
-                            return `FAILED to analyze image: ${e.message}`;
+                            console.error("[analyze_image] failed:", e.message);
+                            return "FAILED to analyze image: the image could not be read.";
                         }
                     },
                     parse_document: async (args) => {
@@ -5898,7 +5899,7 @@ export const generateImage = async (req, res) => {
                 console.error("Failed to give back image slot:", refundErr.message);
             }
         }
-        res.status(500).json({ error: String(e.stack || e.message || e) });
+        res.status(500).json({ error: "Could not create the image. Please try again." });
     }
 };
 
