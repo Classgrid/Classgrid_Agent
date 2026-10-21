@@ -77,7 +77,7 @@ export function SettingsVerifiedDomainCard() {
             Verify your domain
           </h3>
           <p className="text-sm text-muted-foreground">
-            Prove you own a domain by adding one DNS record. You can verify one domain. This only verifies ownership; nothing is hosted on your domain.
+            Prove you own a domain by adding one DNS record. You can verify one domain.
           </p>
         </div>
 
