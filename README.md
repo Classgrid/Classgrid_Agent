@@ -27,169 +27,113 @@
 <div align="center">
   <img src="./client/public/logos/logo.png" alt="Classgrid logo" width="128" />
 
-  <h1>Classgrid | Platform Desktop</h1>
+  <h1>Classgrid AI</h1>
+
+  <p><strong>Do anything with Classgrid AI.</strong><br />Ask, research, analyse your files and automate your everyday work.</p>
 
   <p>
-    <strong>The operating system for Educational Institutions - built for institutions, real-time learning, and scale.</strong>
-  </p>
-
-  <p>
+    <a href="https://chat.classgrid.in">Open Classgrid AI</a>
+    &middot;
+    <a href="https://www.classgrid.in/agent">Agent</a>
+    &middot;
     <a href="https://www.classgrid.in">Website</a>
     &middot;
     <a href="https://www.classgrid.in/blog">Blog</a>
     &middot;
-    <a href="https://www.classgrid.in/case-studies">Case Studies</a>
-    &middot;
     <a href="https://www.classgrid.in/changelog">Changelog</a>
-    &middot;
-    <a href="https://github.com/Classgrid/Classgrid_marketting">Marketing Repo</a>
     &middot;
     <a href="./CODE_OF_CONDUCT.md">Code of Conduct</a>
   </p>
 
   <p>
+    <img alt="License: MIT" src="https://img.shields.io/badge/License-MIT-22C55E?style=for-the-badge" />
+    <img alt="Open source harness" src="https://img.shields.io/badge/Agent_harness-Open_source-111111?style=for-the-badge" />
     <img alt="React 19" src="https://img.shields.io/badge/React-19-149ECA?style=for-the-badge&logo=react&logoColor=white" />
-    <img alt="Vite" src="https://img.shields.io/badge/Vite-7-646CFF?style=for-the-badge&logo=vite&logoColor=white" />
     <img alt="TypeScript" src="https://img.shields.io/badge/TypeScript-Strict-3178C6?style=for-the-badge&logo=typescript&logoColor=white" />
-    <img alt="Tailwind CSS" src="https://img.shields.io/badge/Tailwind-CSS-06B6D4?style=for-the-badge&logo=tailwindcss&logoColor=white" />
     <img alt="Node.js" src="https://img.shields.io/badge/Node.js-Runtime-339933?style=for-the-badge&logo=nodedotjs&logoColor=white" />
-    <img alt="Express" src="https://img.shields.io/badge/Express-API-000000?style=for-the-badge&logo=express&logoColor=white" />
-    <img alt="MongoDB" src="https://img.shields.io/badge/MongoDB-NoSQL-47A248?style=for-the-badge&logo=mongodb&logoColor=white" />
-    <img alt="Supabase" src="https://img.shields.io/badge/Supabase-Postgres-3FCF8E?style=for-the-badge&logo=supabase&logoColor=white" />
-    <img alt="Redis" src="https://img.shields.io/badge/Redis-Queues-DC382D?style=for-the-badge&logo=redis&logoColor=white" />
     <img alt="Socket.IO" src="https://img.shields.io/badge/Socket.IO-Realtime-010101?style=for-the-badge&logo=socketdotio&logoColor=white" />
-    <img alt="OpenAI" src="https://img.shields.io/badge/OpenAI-AI-412991?style=for-the-badge&logo=openai&logoColor=white" />
-    <img alt="Groq" src="https://img.shields.io/badge/Groq-Inference-F55036?style=for-the-badge" />
-    <img alt="Gemini" src="https://img.shields.io/badge/Gemini-AI-4285F4?style=for-the-badge&logo=googlegemini&logoColor=white" />
-    <img alt="Razorpay" src="https://img.shields.io/badge/Razorpay-Payments-0C72E9?style=for-the-badge&logo=razorpay&logoColor=white" />
-    <img alt="Agora" src="https://img.shields.io/badge/Agora-Live_Class-099DFD?style=for-the-badge" />
-    <img alt="Expo" src="https://img.shields.io/badge/Expo-Mobile-000020?style=for-the-badge&logo=expo&logoColor=white" />
-    <img alt="AWS EC2" src="https://img.shields.io/badge/AWS-EC2-FF9900?style=for-the-badge&logo=amazonaws&logoColor=white" />
-    <img alt="Nginx" src="https://img.shields.io/badge/Nginx-Proxy-009639?style=for-the-badge&logo=nginx&logoColor=white" />
-    <img alt="PM2" src="https://img.shields.io/badge/PM2-Process_Manager-2B037A?style=for-the-badge" />
-    <img alt="Vercel" src="https://img.shields.io/badge/Vercel-Edge-000000?style=for-the-badge&logo=vercel&logoColor=white" />
-    <img alt="Cloudflare R2" src="https://img.shields.io/badge/Cloudflare-R2-F38020?style=for-the-badge&logo=cloudflare&logoColor=white" />
-
+    <img alt="Docker" src="https://img.shields.io/badge/Docker-Sandbox-2496ED?style=for-the-badge&logo=docker&logoColor=white" />
   </p>
 </div>
 
 ---
 
-> Proprietary and Confidential. This repository is private and is not open source.
+**Classgrid AI** lives at **[chat.classgrid.in](https://chat.classgrid.in)**. It is one place to talk to an AI agent that can actually do the work, build inside your own code, and chat with the people you work with.
 
-Classgrid Platform Desktop is the private monorepo for the Classgrid education operating system. It combines a React web application, an Express API, shared packages, mobile/Android workspaces, and deployment assets for running the platform across development, Vercel, and AWS EC2 environments.
+It has three parts:
 
-This codebase contains business logic, product strategy, platform architecture, and integration code owned by Classgrid. Do not copy, redistribute, mirror, sell, sublicense, or publish any part of this repository without written permission from Classgrid.
+| | What it is |
+|---|---|
+| **Agent Mode** | An AI agent that thinks, uses tools, runs code and shows every step live |
+| **Project Mode** | The agent working inside your GitHub repository, with a browser IDE |
+| **Grids** | Real-time chat with people: direct messages, groups, polls and files |
 
-## Product Scope
+## Agent Mode
 
-Classgrid is built for institutions that need one connected platform for teaching, learning, admissions, administration, communication, automation, and analytics. The platform includes classroom management, attendance, notes, assignments, live and recorded learning, admissions workflows, fees, payroll, canteen operations, support, public organization websites, AI-assisted academic tools, internal admin operations, and real-time communication.
+Ask in plain words and the agent works it out step by step. You can watch each step as it happens: what it searched, what code it ran, what it found.
 
-The system is designed as a multi-tenant platform. Organizations can operate with separate users, roles, academic structures, classroom data, public pages, and operational workflows while sharing a common platform backend and frontend shell.
+- **Research:** searches the web, opens pages and cites its sources
+- **Your files:** reads PDFs, Word, Excel, PowerPoint, CSV, images and audio; analyses spreadsheets and draws charts
+- **Runs real code:** Python, Node.js and terminal commands in a private sandbox, then checks its own output
+- **Makes things:** reports, PDFs, documents, images and websites, with a download link
+- **Works with your apps:** reads and sends email, files, calendar events, Classroom work and more
+- **Schedules:** daily briefs, weekly reports and reminders, by email and WhatsApp
+- **Remembers:** finds earlier messages in long chats and keeps your files across the conversation
+
+**Connected apps**
+
+<p><img src="https://cdn.classgrid.in/classgrid_intgration/Gmail_icon_%282026%29.svg" alt="Gmail" height="28" /> &nbsp; <img src="https://cdn.classgrid.in/classgrid_intgration/Google_Drive_icon_%282026%29.svg" alt="Google Drive" height="28" /> &nbsp; <img src="https://cdn.classgrid.in/classgrid_intgration/google.svg" alt="Google Workspace" height="28" /> &nbsp; <img src="https://cdn.classgrid.in/classgrid_intgration/Notion-logo.svg" alt="Notion" height="28" /> &nbsp; <img src="https://cdn.classgrid.in/classgrid_intgration/github-icon.svg" alt="GitHub" height="28" /> &nbsp; <img src="https://cdn.classgrid.in/classgrid_intgration/slack-new-logo-logo-svgrepo-com.svg" alt="Slack" height="28" /> &nbsp; <img src="https://cdn.classgrid.in/classgrid_intgration/whatsapp-svgrepo-com_%281%29.svg" alt="WhatsApp" height="28" /> &nbsp; <img src="https://cdn.classgrid.in/classgrid_intgration/Meta_Platforms_logo.svg" alt="Meta" height="28" /></p>
+
+**Models you can choose**
+
+<p><img src="https://cdn.classgrid.in/classgrid_intgration/Claude_AI_symbol.svg" alt="Claude" height="28" /> &nbsp; <img src="https://cdn.classgrid.in/classgrid_intgration/DeepSeek_logo.svg" alt="DeepSeek" height="28" /> &nbsp; <img src="https://cdn.classgrid.in/classgrid_intgration/chatgpt-light_%281%29.svg" alt="OpenAI" height="28" /> &nbsp; <img src="https://cdn.classgrid.in/classgrid_intgration/Qwen_logo.svg" alt="Qwen" height="28" /> &nbsp; <img src="https://cdn.classgrid.in/classgrid_intgration/glmv-color.svg" alt="GLM" height="28" /> &nbsp; <img src="https://cdn.classgrid.in/classgrid_intgration/kimi-ai-icon.svg" alt="Kimi" height="28" /> &nbsp; <img src="https://cdn.classgrid.in/classgrid_intgration/mistral-ai-icon.svg" alt="Mistral" height="28" /> &nbsp; <img src="https://cdn.classgrid.in/classgrid_intgration/nvidia-nemotron.svg" alt="NVIDIA Nemotron" height="28" /></p>
+
+## Project Mode
+
+The agent works inside **your own GitHub repository**.
+
+- Connect GitHub, pick a repo, and the agent explores, edits files and runs commands in it
+- Each user gets their own private workspace and browser IDE; nothing is shared between users
+- Review every change (files edited, lines added and removed), then push to GitHub
+
+## Grids
+
+Real-time chat built into Classgrid AI.
+
+- Direct messages and group chats with live updates and unread counts
+- Polls, announcements, file and voice-note sharing, message forwarding
+- The agent can read and send Grid messages for you when you ask
+
+## Open-source agent harness
+
+The **agent harness** is the engine behind Classgrid AI: the loop that lets the model think, call tools, run code in a sandbox, check its own work and stream every step to the chat live. We are building it in the open.
+
+- The harness and this repository are open source under the **[MIT License](./license.md)**
+- You are free to use, copy, modify and build on it, as long as the license notice stays with it
 
 ## Repository Map
 
 ```text
 classgrid_platform/
-|-- client/                  # React 19 + Vite web application
-|   |-- src/
-|   |   |-- app/             # App-level composition
-|   |   |-- components/      # Reusable UI components
-|   |   |-- config/          # Frontend configuration
-|   |   |-- features/        # Product feature modules
-|   |   |-- hooks/           # React hooks
-|   |   |-- layouts/         # Shared layouts
-|   |   |-- lib/             # API clients, Firebase, Supabase, helpers
-|   |   |-- styles/          # Global and feature styling
-|   |   |-- types/           # TypeScript types
-|   |   `-- utils/           # Frontend utilities
-|   |-- package.json
-|   `-- vite.config.js
-|
-|-- server/                  # Node.js + Express API
-|   |-- api/                 # Serverless/API entry surface
-|   |-- config/              # Runtime configuration and database setup
-|   |-- src/
-|   |   |-- config/          # Service clients and adapters
-|   |   |-- controllers/     # Request handlers
-|   |   |-- middleware/      # Auth, validation, tenancy, uploads, limits
-|   |   |-- models/          # MongoDB/Mongoose domain models
-|   |   |-- routes/          # Express route modules
-|   |   |-- scripts/         # Operational scripts
-|   |   |-- services/        # Business logic and third-party integrations
-|   |   |-- sql/             # SQL/Supabase setup assets
-|   |   |-- utils/           # Backend utilities
-|   |   `-- workers/         # Background workers
-|   |-- migrations/          # Deployment/runtime migrations
-|   |-- ecosystem.config.cjs # PM2 process and deploy configuration
-|   |-- server.js            # Node runtime entry point
-|   `-- package.json
-|
-|-- mobile/                  # Expo React Native mobile app
-|-- android/                 # Android-specific workspace/assets
-|-- packages/                # Shared packages such as types and design tokens
-|-- docs/                    # Architecture, audit, and planning docs
-|-- scripts/                 # Root-level utility scripts
-|-- supabase/                # Supabase-related setup
-|-- marketing_content/       # Product and marketing content drafts
-|-- package.json             # Root monorepo scripts
+|-- client/                  # React 19 + Vite web app (chat.classgrid.in)
+|   `-- src/components/ai/   # Agent chat, step views, Project Mode UI
+|-- server/                  # Node.js + Express API (api.classgrid.in)
+|   |-- src/controllers/     # Agent chat loop and request handlers
+|   |-- src/services/        # Model streaming, tools, billing, integrations
+|   |-- src/mcp/             # Tool definitions the agent can call
+|   `-- src/routes/          # API routes (chat, Grids, voice, connectors)
+|-- ai-sandbox-worker/       # Sandbox worker used to run the agent's code
+|-- packages/                # Shared packages
+|-- docs/                    # Architecture notes
 `-- README.md
 ```
 
 ## Technology Stack
 
-### Frontend
-
-- React 19, React DOM, React Router DOM v7
-- Vite 7, TypeScript, ESLint
-- Tailwind CSS, Radix UI, shadcn-style components, Base UI
-- Zustand, SWR, TanStack Query, TanStack Table
-- Framer Motion, Motion, GSAP, Recharts, Embla Carousel
-- Tiptap, Monaco Editor, KaTeX, MathQuill, React Markdown
-- Firebase client SDK, Supabase client SDK
-- HTML5 QR code, webcam, image compression, XLSX workflows
-
-### Backend
-
-- Node.js, Express, ESM modules
-- MongoDB with Mongoose
-- Supabase clients for chat, storage, subscribers, relational data, and vector workflows
-- Socket.IO for real-time collaboration and communication
-- Redis/ioredis and BullMQ for caching, queues, pub/sub, and workers
-- Passport, JWT, sessions, cookies, bcrypt, role-based middleware
-- Helmet, rate limiting, validation, upload middleware, structured logging
-- Nodemailer, Brevo/SMTP, Resend for email flows
-- Razorpay for payment workflows
-- Agora, Zoom, Google APIs, Firebase Admin, AWS S3-related integrations
-- OpenAI, Anthropic, Google GenAI/Gemini, Groq, Hugging Face for AI workflows
-- Puppeteer, PDF tooling, XLSX tooling, cron jobs, background workers
-
-### Mobile
-
-- Expo 54, React Native 0.81, Expo Router
-- React Navigation, React Query, Zustand
-- Secure Store, MMKV, splash screen, fonts, haptics, web browser support
-- EAS build scripts for Android preview, production, and development builds
-
-### Infrastructure
-
-- Frontend: Vercel or equivalent static/edge hosting for the Vite build
-- Backend: AWS EC2 running Node.js behind Nginx
-- Process manager: PM2 using `server/ecosystem.config.cjs`
-- Database: MongoDB Atlas or managed MongoDB-compatible deployment
-- Additional data/storage: Supabase, Firebase, AWS S3-compatible storage where configured
-- Cache/queues/realtime scaling: Redis
-- Domains and TLS: Nginx reverse proxy with HTTPS certificates
-
-## Key Platform Areas
-
-- Authentication, OAuth, organization onboarding, role-based access, and device verification
-- Super admin operations, organization provisioning, subscriptions, plan controls, audits, and platform health
-- Classroom creation, memberships, chat, threads, announcements, assignments, notes, quizzes, marks, attendance, timetable, results, and video learning
-- Admissions engine, CET/direct tracks, applicant documents, verification, merit workflows, seat configuration, fee initiation, and enrollment
-- Fees, ledgers, payroll, canteen, marketplace, support tickets, feedback, CRM, leads, and public organization websites
-- AI-assisted chat, quiz generation, OCR, proctoring, viva, past-paper analysis, learning assistance, and embeddings
-- Real-time communication through Socket.IO, Agora, Zoom, push notifications, email, and SMS
+- **Frontend:** React 19, Vite, TypeScript, Tailwind CSS, Framer Motion, React Markdown, KaTeX, Mermaid
+- **Backend:** Node.js, Express, MongoDB, Supabase, Redis, BullMQ, Socket.IO
+- **Agent:** streaming tool-use loop across Claude, DeepSeek, GLM, Kimi, Qwen, Mistral and other models; Docker sandbox for code; Cloudflare R2 CDN for files
+- **Hosting:** frontend on Vercel, backend on AWS EC2 with PM2 and Nginx
 
 ## Local Development
 
@@ -406,7 +350,7 @@ Environment setup on EC2:
 
 ## Git and Source-Control Rules
 
-- This repository is private and proprietary.
+- This repository is open source under the MIT License; secrets and production config never are.
 - Do not commit `.env`, secret JSON, private keys, generated logs, build outputs, or temporary screenshots.
 - Review `git status --short` before every commit.
 - Use `git check-ignore -v server/.env` before pushing when working near backend secrets.
@@ -415,7 +359,7 @@ Environment setup on EC2:
 
 ## Conduct and Collaboration
 
-All authorized collaborators must follow the [Classgrid Code of Conduct](./CODE_OF_CONDUCT.md). It covers professional collaboration, confidentiality, secret handling, private-repository access, security escalation, and enforcement expectations for Classgrid work.
+All contributors must follow the [Classgrid Code of Conduct](./CODE_OF_CONDUCT.md). It covers professional collaboration, confidentiality, secret handling, private-repository access, security escalation, and enforcement expectations for Classgrid work.
 
 ## Deployment Targets
 
@@ -439,8 +383,8 @@ Before pushing or deploying:
 - Confirm `NODE_ENV=production` for production backend runtime.
 - Confirm `/api/health` returns a healthy response after deploy.
 
-## Ownership and License
+## License
 
-Copyright (c) 2026 Classgrid. All rights reserved.
+Classgrid AI and its agent harness are open source under the **MIT License**. See [license.md](./license.md).
 
-This software is proprietary and confidential. It is not open source. No license is granted for public use, redistribution, modification, or commercial use unless Classgrid provides explicit written permission.
+Copyright (c) 2026 Classgrid.
