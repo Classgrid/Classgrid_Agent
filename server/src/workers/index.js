@@ -54,30 +54,20 @@
  * ─────────────────────────────────────────────────────────
  */
 
-import './email-provisioning.worker.js';
 // import './alarmWorker.js'; // Retired build-robot watchdog (N2): its alarms posted hidden "continue building" chat messages
 
 // Import other workers here as they are created
 import './chat-persistence.worker.js';
-import './attendance.worker.js';
 import './ai-schedule.worker.js';
 import { initCronJobs } from './cleanup.worker.js';
 
-import { initAdmissionCronJobs } from './admission-deadline-checker.cron.js';
-import { initPromotionSchedulerCron } from './promotion-scheduler.cron.js';
 import { initScheduledNotificationWorker } from './scheduled-notification.worker.js';
-import { initOrganizationUsageDailyWorker } from './organization-usage-daily.worker.js';
-import { initMonthlyInvoiceWorker } from './monthly-invoice.worker.js';
 import { initBillingExportWorker } from './billing-export.worker.js';
 import { initMarketingEmailWorker } from './marketing-email-blast.worker.js';
 import { initCronLinkJobs } from './cron-links.worker.js';
 
 initCronJobs();
-initAdmissionCronJobs();
-initPromotionSchedulerCron();
 initScheduledNotificationWorker();
-initOrganizationUsageDailyWorker();
-initMonthlyInvoiceWorker();
 initBillingExportWorker();
 initMarketingEmailWorker();
 initCronLinkJobs(); // agent review emails, ticket auto-close, expired messages (were cron-job.org links)
