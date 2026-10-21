@@ -472,6 +472,14 @@ const userSchema = new mongoose.Schema(
       default: []
     },
 
+    // One domain the user proved they own with a DNS TXT record (verify only, nothing is hosted on it)
+    verifiedDomain: {
+      domain: { type: String, default: null, lowercase: true, trim: true },
+      token: { type: String, default: null },
+      verified: { type: Boolean, default: false },
+      verifiedAt: { type: Date, default: null },
+    },
+
     // ðŸ“§ Email notification preferences
     emailNotifications: {
       // Delivery mode: instant (default), daily digest, weekly summary

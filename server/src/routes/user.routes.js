@@ -69,6 +69,7 @@ import { normalizeWhatsappNumber } from "../services/ai-feature-limits.js";
 
 import { getProfileSchema } from "../utils/profile-schemas.js";
 import { isSharedTestWhatsapp } from "../utils/chat-onboarding.js";
+import { normalizeDomain, newVerificationToken, dnsInstructions, hasVerificationRecord } from "../services/user-domain.service.js";
 
 const router = express.Router();
 
@@ -761,6 +762,91 @@ router.post("/upload-aws-url", isAuthenticated, async (req, res) => {
   } catch (error) {
     console.error("GET AWS S3 UPLOAD URL ERROR:", error);
     res.status(500).json({ message: "Failed to generate AWS upload URL" });
+  }
+});
+
+// =======================
+// VERIFY YOUR DOMAIN (one per user, verify only — nothing is hosted)
+// =======================
+const domainState = (vd) => {
+  if (!vd?.domain) return { domain: null, verified: false };
+  return {
+    domain: vd.domain,
+    verified: !!vd.verified,
+    verifiedAt: vd.verifiedAt || null,
+    dns: vd.verified ? null : dnsInstructions(vd.domain, vd.token),
+  };
+};
+
+router.get("/domain", isAuthenticated, async (req, res) => {
+  try {
+    const user = await User.findById(req.user._id).select("verifiedDomain").lean();
+    if (!user) return res.status(404).json({ message: "User not found" });
+    res.json(domainState(user.verifiedDomain));
+  } catch (error) {
+    console.error("GET DOMAIN ERROR:", error.message);
+    res.status(500).json({ message: "Server error" });
+  }
+});
+
+// Start verifying a domain: gives the TXT record to add. Replaces a domain that is not verified yet.
+router.post("/domain", isAuthenticated, async (req, res) => {
+  try {
+    const domain = normalizeDomain(req.body?.domain);
+    if (!domain) return res.status(400).json({ message: "Enter a valid domain, like example.com" });
+    const user = await User.findById(req.user._id).select("verifiedDomain");
+    if (!user) return res.status(404).json({ message: "User not found" });
+    if (user.verifiedDomain?.verified) {
+      return res.status(409).json({ message: `You already verified ${user.verifiedDomain.domain}. Remove it first to verify a different domain.` });
+    }
+    const takenBy = await User.findOne({ _id: { $ne: user._id }, "verifiedDomain.domain": domain, "verifiedDomain.verified": true }).select("_id").lean();
+    if (takenBy) return res.status(409).json({ message: "This domain is already verified by another account." });
+    user.verifiedDomain = { domain, token: newVerificationToken(), verified: false, verifiedAt: null };
+    await user.save();
+    res.json(domainState(user.verifiedDomain));
+  } catch (error) {
+    console.error("ADD DOMAIN ERROR:", error.message);
+    res.status(500).json({ message: "Server error" });
+  }
+});
+
+// Check the TXT record now
+router.post("/domain/verify", isAuthenticated, async (req, res) => {
+  try {
+    const user = await User.findById(req.user._id).select("verifiedDomain");
+    if (!user) return res.status(404).json({ message: "User not found" });
+    const vd = user.verifiedDomain;
+    if (!vd?.domain || !vd.token) return res.status(400).json({ message: "Add a domain first." });
+    if (vd.verified) return res.json(domainState(vd));
+    const takenBy = await User.findOne({ _id: { $ne: user._id }, "verifiedDomain.domain": vd.domain, "verifiedDomain.verified": true }).select("_id").lean();
+    if (takenBy) return res.status(409).json({ message: "This domain is already verified by another account." });
+    let found = false;
+    try {
+      found = await hasVerificationRecord(vd.domain, vd.token);
+    } catch (err) {
+      console.error("DOMAIN DNS LOOKUP ERROR:", err.code || err.message);
+      return res.status(502).json({ message: "Could not check DNS right now. Please try again in a minute." });
+    }
+    if (!found) {
+      return res.status(422).json({ message: "We couldn't find the TXT record yet. DNS changes can take a few minutes (sometimes up to an hour) to show up.", ...domainState(vd) });
+    }
+    user.verifiedDomain.verified = true;
+    user.verifiedDomain.verifiedAt = new Date();
+    await user.save();
+    res.json(domainState(user.verifiedDomain));
+  } catch (error) {
+    console.error("VERIFY DOMAIN ERROR:", error.message);
+    res.status(500).json({ message: "Server error" });
+  }
+});
+
+router.delete("/domain", isAuthenticated, async (req, res) => {
+  try {
+    await User.updateOne({ _id: req.user._id }, { $set: { verifiedDomain: { domain: null, token: null, verified: false, verifiedAt: null } } });
+    res.json({ domain: null, verified: false });
+  } catch (error) {
+    console.error("REMOVE DOMAIN ERROR:", error.message);
+    res.status(500).json({ message: "Server error" });
   }
 });
 
