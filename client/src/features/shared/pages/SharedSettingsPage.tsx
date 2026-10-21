@@ -160,7 +160,8 @@ export function SharedSettingsPage() {
     <div className="flex flex-col gap-6 w-full max-w-4xl mx-auto p-4 sm:p-6 lg:p-8 pb-12">
       <SettingsAppearanceCard />
       <SettingsPrivacyCard />
-      <SettingsVerifiedDomainCard />
+      {/* Users only: the super admin dashboard does not verify domains */}
+      {!isProfileLoading && profileData?.role !== "super_admin" && <SettingsVerifiedDomainCard />}
       {isChatApp && <SettingsIdentityCard />}
       
       {!isProfileLoading && profileData?.role !== "org_admin" && profileData?.role !== "super_admin" && profileData?.role !== "user" && !isChatApp && (
