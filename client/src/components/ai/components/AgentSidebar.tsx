@@ -35,6 +35,7 @@ import { Accordion, AccordionItem, AccordionTrigger, AccordionContent } from "@/
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuSub, DropdownMenuSubTrigger, DropdownMenuSubContent } from "@/components/marketing_ui/dropdown-menu";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/marketing_ui/dialog";
 import { DangerConfirmDialog } from "@/components/marketing_ui/danger-confirm-dialog";
+import { Spinner } from "@/components/marketing_ui/spinner";
 import { toast } from "sonner";
 import { fetchWithRescue } from "@/lib/rescue";
 
@@ -620,7 +621,7 @@ export function AgentNestedMenu({ searchQuery = "" }: { searchQuery?: string }) 
                         New project
                       </DropdownMenuItem>
                       {projects === null ? (
-                        <div className="flex items-center gap-2 px-3 py-2 text-[13px] text-slate-400"><Loader2 className="w-3.5 h-3.5 animate-spin" />Loading…</div>
+                        <div className="flex items-center gap-2 px-3 py-2 text-[13px] text-slate-400"><Spinner className="size-3.5" />Loading…</div>
                       ) : projects.length > 0 && (
                         <>
                           <DropdownMenuSeparator className="bg-slate-100 dark:bg-white/10 my-1.5 mx-1" />
@@ -1097,7 +1098,7 @@ export function AgentNestedMenu({ searchQuery = "" }: { searchQuery?: string }) 
         document.body
       )}
       <Dialog open={newProjectFor !== null} onOpenChange={(open) => { if (!open) setNewProjectFor(null); }}>
-        <DialogContent className="sm:max-w-[440px]">
+        <DialogContent className="sm:max-w-[440px]" overlayClassName="supports-backdrop-filter:backdrop-blur-none !backdrop-blur-none !bg-black/40">
           <DialogHeader>
             <DialogTitle>Create project</DialogTitle>
           </DialogHeader>
@@ -1119,8 +1120,8 @@ export function AgentNestedMenu({ searchQuery = "" }: { searchQuery?: string }) 
             <p className="text-[12.5px] text-muted-foreground">The chat moves into this project and continues in Project Mode.</p>
           </div>
           <DialogFooter>
-            <Button disabled={!newProjectName.trim() || isMovingChat} onClick={createProjectAndMove}>
-              {isMovingChat && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
+            <Button variant="secondary" disabled={!newProjectName.trim() || isMovingChat} onClick={createProjectAndMove}>
+              {isMovingChat && <Spinner className="size-4 mr-2" />}
               Create project
             </Button>
           </DialogFooter>
