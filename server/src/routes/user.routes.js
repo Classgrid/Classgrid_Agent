@@ -775,6 +775,8 @@ const domainState = (vd) => {
     verified: !!vd.verified,
     verifiedAt: vd.verifiedAt || null,
     dns: vd.verified ? null : dnsInstructions(vd.domain, vd.token),
+    // The record that proved it, shown with a green tick on the verified card
+    record: vd.verified && vd.token ? dnsInstructions(vd.domain, vd.token) : null,
   };
 };
 
