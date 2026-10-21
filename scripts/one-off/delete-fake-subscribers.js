@@ -18,7 +18,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 dotenv.config({ path: path.join(__dirname, 'server/.env') });
 
-import { primarySupabaseClient as supabase } from './server/src/config/supabaseClient.js';
+import { primarySupabaseClient as supabase } from '../../server/src/config/supabaseClient.js';
 
 async function run() {
   console.log('Connected to Supabase. Attempting to delete test emails...');

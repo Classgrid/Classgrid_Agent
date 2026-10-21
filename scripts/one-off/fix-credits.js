@@ -11,7 +11,7 @@
  * ─────────────────────────────────────────────────────────
  */
 import mongoose from 'mongoose';
-import User from './server/src/models/User.js';
+import User from '../../server/src/models/User.js';
 
 async function run() {
   await mongoose.connect('mongodb://127.0.0.1:27017/classgrid');

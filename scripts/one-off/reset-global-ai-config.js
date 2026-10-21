@@ -12,7 +12,7 @@
  */
 import mongoose from "mongoose";
 import dotenv from "dotenv";
-import GlobalAiConfig from "./server/src/models/GlobalAiConfig.js";
+import GlobalAiConfig from "../../server/src/models/GlobalAiConfig.js";
 
 dotenv.config({ path: "./server/.env" });
 

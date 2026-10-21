@@ -19,7 +19,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 dotenv.config({ path: path.join(__dirname, 'server/.env') });
 
 mongoose.connect(process.env.MONGO_URI).then(async () => {
-    const AiUsageLog = (await import('./server/src/models/AiUsageLog.js')).default;
+    const AiUsageLog = (await import('../../server/src/models/AiUsageLog.js')).default;
     const logs = await AiUsageLog.find({ promptTokens: 0, totalTokens: { $gt: 0 } });
     console.log('Found logs with 0 prompt but >0 total:', logs.length);
     
