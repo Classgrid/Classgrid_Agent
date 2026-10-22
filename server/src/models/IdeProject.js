@@ -19,6 +19,7 @@ const ideProjectSchema = new mongoose.Schema(
     owner: { type: mongoose.Schema.Types.ObjectId, ref: "User", required: true, index: true },
     name: { type: String, required: true, trim: true, maxlength: 80 },
     repo: { type: String, default: null }, // "owner/name" on GitHub
+    logo: { type: String, default: null }, // the project's picture (R2 link), picked and cropped by the user
     chatSessionIds: { type: [String], default: [], index: true },
     lastOpenedAt: { type: Date, default: null },
     // Unpushed work pushed to GitHub when the project left the sandbox, shown once on the next open

@@ -221,7 +221,16 @@ async function ownProject(req, res) {
   return project;
 }
 
-const projectJson = (p) => ({ id: p._id, name: p.name, repo: p.repo, lastOpenedAt: p.lastOpenedAt, createdAt: p.createdAt, updatedAt: p.updatedAt });
+const projectJson = (p) => ({ id: p._id, name: p.name, repo: p.repo, logo: p.logo || null, lastOpenedAt: p.lastOpenedAt, createdAt: p.createdAt, updatedAt: p.updatedAt });
+
+// A project logo must be a picture this user uploaded to our R2 (same upload as the profile picture).
+// Returns the link, null to remove the logo, or undefined when the link is not allowed.
+function projectLogo(value, userId) {
+  if (value === null || value === "") return null;
+  const link = String(value);
+  const base = (process.env.R2_PUBLIC_URL || `https://pub-${process.env.R2_ACCOUNT_ID}.r2.dev`).replace(/\/$/, "");
+  return link.length < 600 && link.startsWith(`${base}/${userId}/`) ? link : undefined;
+}
 
 // "Last edited" follows real file edits: newest file change on disk (node_modules and .git skipped), never older than the saved record.
 // If the sandbox cannot be reached, the saved record time is used.
@@ -303,7 +312,9 @@ router.post("/projects", isAuthenticated, async (req, res) => {
   if (!name) return res.status(400).json({ error: "Give the project a name" });
   await connectDB();
   if (await nameTaken(req.user._id, name)) return res.status(409).json({ error: `You already have a project called "${name}". Pick another name.` });
-  const project = await IdeProject.create({ owner: req.user._id, name });
+  const logo = req.body?.logo !== undefined ? projectLogo(req.body.logo, req.user._id) : null;
+  if (logo === undefined) return res.status(400).json({ error: "Could not use this logo. Upload it again." });
+  const project = await IdeProject.create({ owner: req.user._id, name, logo });
   res.json({ project: projectJson(project) });
 });
 
@@ -325,8 +336,53 @@ router.patch("/projects/:id", isAuthenticated, async (req, res) => {
     }
     project.repo = req.body.repo;
   }
+  if (req.body?.logo !== undefined) {
+    const logo = projectLogo(req.body.logo, req.user._id);
+    if (logo === undefined) return res.status(400).json({ error: "Could not use this logo. Upload it again." });
+    project.logo = logo;
+  }
   await project.save();
   res.json({ project: projectJson(project) });
+});
+
+// The repo's GitHub details for the project card, like Vercel shows: branch, last commit, repo link.
+// Kept in Redis for 60s per project so opening the page doesn't call GitHub again and again.
+const GIT_INFO_KEY = (id) => `ide:gitInfo:${id}`;
+router.get("/projects/:id/github", isAuthenticated, async (req, res) => {
+  const project = await ownProject(req, res);
+  if (!project) return;
+  if (!project.repo) return res.json({ repoUrl: null, branch: null, commit: null });
+  try {
+    const cached = await redis.get(GIT_INFO_KEY(project._id)).catch(() => null);
+    if (cached) return res.json(JSON.parse(cached));
+    const user = await githubTokenFor(req.user._id);
+    if (!user) return res.status(409).json({ error: "github_not_connected" });
+    const headers = { Authorization: `Bearer ${user.github_access_token}`, Accept: "application/vnd.github+json", "User-Agent": "Classgrid" };
+    const repoRes = await fetch(`https://api.github.com/repos/${project.repo}`, { headers });
+    if (repoRes.status === 401) return res.status(409).json({ error: "github_expired" });
+    if (!repoRes.ok) return res.json({ repoUrl: `https://github.com/${project.repo}`, branch: null, commit: null });
+    const repo = await repoRes.json();
+    const branch = repo.default_branch || null; // Project Mode opens the default branch
+    let commit = null;
+    if (branch) {
+      const cRes = await fetch(`https://api.github.com/repos/${project.repo}/commits/${encodeURIComponent(branch)}`, { headers });
+      if (cRes.ok) {
+        const c = await cRes.json();
+        commit = {
+          message: String(c.commit?.message || "").split("\n")[0].slice(0, 200),
+          date: c.commit?.committer?.date || c.commit?.author?.date || null,
+          sha: String(c.sha || "").slice(0, 7),
+          url: c.html_url || null,
+        };
+      }
+    }
+    const info = { repoUrl: repo.html_url || `https://github.com/${project.repo}`, branch, commit };
+    redis.set(GIT_INFO_KEY(project._id), JSON.stringify(info), "EX", 60).catch(() => {});
+    res.json(info);
+  } catch (e) {
+    console.error("[IDE] GitHub info failed:", e.message);
+    res.status(500).json({ error: "Could not load GitHub details" });
+  }
 });
 
 router.delete("/projects/:id", isAuthenticated, async (req, res) => {

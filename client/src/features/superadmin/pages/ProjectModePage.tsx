@@ -13,7 +13,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import { useParams } from "react-router-dom";
-import { ArrowLeft, FolderGit2, Github, Pencil, Plus, Trash2 } from "lucide-react";
+import { ArrowLeft, FolderGit2, GitBranch, GitCommitHorizontal, Github, ImagePlus, Pencil, Plus, Trash2 } from "lucide-react";
 import { Spinner } from "@/components/marketing_ui/spinner";
 import { Skeleton } from "@/components/marketing_ui/skeleton";
 import { DangerConfirmDialog } from "@/components/marketing_ui/danger-confirm-dialog";
@@ -26,12 +26,14 @@ import { fetchWithRescue } from "@/lib/rescue";
 import { Progress, ProgressLabel, ProgressValue } from "@/components/marketing_ui/progress";
 import { OPEN_PROJECT_FILE_EVENT, REVIEW_CHECKPOINT_EVENT, markCheckpoint } from "@/components/ai/components/stepper/ProjectToolSteps";
 import { PushToGithubModal } from "../components/PushToGithubModal";
+import { ImageCropperModal } from "@/components/marketing_ui/ImageCropperModal";
+import { apiClient } from "@/lib/apiClient";
 
 const backendUrl = import.meta.env.VITE_API_URL || "https://api.classgrid.in";
 const OPEN_PROJECT_KEY = "cg_project_open"; // which project this browser had open (per-viewer convenience)
 const AI_PANEL_KEY = "cg_project_ai_closed"; // whether the AI panel was closed (per-viewer convenience)
 
-type Project = { id: string; name: string; repo: string | null; lastOpenedAt: string | null; createdAt?: string; updatedAt: string };
+type Project = { id: string; name: string; repo: string | null; logo?: string | null; lastOpenedAt: string | null; createdAt?: string; updatedAt: string };
 type GithubAccount = { login: string | null; name: string | null; email: string | null; avatar: string | null };
 
 async function api(path: string, init?: RequestInit) {
@@ -71,6 +73,63 @@ function LoadingSmoke() {
         />
       ))}
     </>
+  );
+}
+
+// The project's picture, or the folder icon when it has none
+function ProjectLogo({ logo, className = "size-10" }: { logo?: string | null; className?: string }) {
+  return logo
+    ? <img src={logo} alt="" className={`${className} shrink-0 rounded-lg border border-border object-cover`} />
+    : <span className={`${className} shrink-0 rounded-lg border border-border flex items-center justify-center`}><FolderGit2 className="size-5 text-muted-foreground" /></span>;
+}
+
+function timeAgo(iso: string) {
+  const secs = Math.max(1, Math.round((Date.now() - new Date(iso).getTime()) / 1000));
+  if (secs < 60) return `${secs}s ago`;
+  const mins = Math.floor(secs / 60);
+  if (mins < 60) return `${mins}m ago`;
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  if (days < 30) return `${days}d ago`;
+  const months = Math.floor(days / 30);
+  if (months < 12) return `${months}mo ago`;
+  return `${Math.floor(months / 12)}y ago`;
+}
+
+// Like Vercel: the repo link, the branch, and the last commit (message and how long ago)
+function ProjectGitInfo({ project }: { project: Project }) {
+  const [info, setInfo] = useState<{ repoUrl: string | null; branch: string | null; commit: { message: string; date: string | null; sha: string; url: string | null } | null } | null>(null);
+  useEffect(() => {
+    let live = true;
+    api(`/projects/${project.id}/github`).then(({ res, data }) => { if (live) setInfo(res.ok ? data : { repoUrl: null, branch: null, commit: null }); }).catch(() => {});
+    return () => { live = false; };
+  }, [project.id, project.repo]);
+  const repoUrl = info?.repoUrl || `https://github.com/${project.repo}`;
+  return (
+    <div className="flex flex-col gap-1.5 min-w-0">
+      {info === null ? (
+        <Skeleton className="h-4 w-64 max-w-full" />
+      ) : info.commit ? (
+        <a href={info.commit.url || repoUrl} target="_blank" rel="noreferrer" className="flex items-center gap-1.5 text-sm text-foreground hover:underline min-w-0 max-w-full w-fit">
+          <GitCommitHorizontal className="size-4 shrink-0" />
+          <span className="truncate">{info.commit.message || info.commit.sha}</span>
+        </a>
+      ) : null}
+      <div className="flex items-center gap-1.5 text-xs text-muted-foreground min-w-0 flex-wrap">
+        <a href={repoUrl} target="_blank" rel="noreferrer" className="flex items-center gap-1.5 hover:text-foreground min-w-0 max-w-full">
+          <Github className="size-3.5 shrink-0" /><span className="truncate">{project.repo}</span>
+        </a>
+        {info === null ? (
+          <Skeleton className="h-3 w-24" />
+        ) : (
+          <>
+            {info.branch && <span className="flex items-center gap-1 shrink-0">· <GitBranch className="size-3.5" />{info.branch}</span>}
+            {info.commit?.date && <span className="shrink-0">· {timeAgo(info.commit.date)}</span>}
+          </>
+        )}
+      </div>
+    </div>
   );
 }
 
@@ -127,7 +186,7 @@ export function ProjectModePage() {
     const t = window.setInterval(() => setProgress((p) => {
       if (!p?.lines) return p;
       const i = p.lines.indexOf(p.label);
-      return { ...p, label: p.lines[Math.min(i + 1, p.lines.length - 1)] };
+      return { ...p, label: p.lines[Math.min(i + 1, p.lines.length - 1)] ?? p.label };
     }), 3000);
     return () => window.clearInterval(t);
   }, [progress?.lines]);
@@ -204,7 +263,7 @@ export function ProjectModePage() {
     rememberOpen(project.id);
     setFolder(null);
     const newLines = !resume && !project.repo ? NEW_PROJECT_LINES : undefined;
-    setProgress({ label: resume ? "Reconnecting to your project" : newLines ? newLines[0] : "Downloading the latest code from GitHub", value: 3, target: 70, lines: newLines });
+    setProgress({ label: resume ? "Reconnecting to your project" : newLines ? (newLines[0] ?? "") : "Downloading the latest code from GitHub", value: 3, target: 70, lines: newLines });
     try {
       const { res, data } = await api(`/projects/${project.id}/open`, { method: "POST", body: JSON.stringify({ replace, resume }) });
       if (res.status === 409 && data.error === "unsaved_changes") {
@@ -246,12 +305,53 @@ export function ProjectModePage() {
     }
   }, [openId, sessionId, folder]);
 
+  // Project logo: pick a picture, crop it (same crop tool as the profile page), it is saved to R2
+  const [newLogo, setNewLogo] = useState<string | null>(null);
+  const [cropSrc, setCropSrc] = useState<string | null>(null);
+  const [logoFor, setLogoFor] = useState<string | null>(null); // "new" or a project id
+  const [logoBusy, setLogoBusy] = useState<string | null>(null);
+  const logoInputRef = useRef<HTMLInputElement | null>(null);
+  const pickLogo = (forId: string) => { setLogoFor(forId); logoInputRef.current?.click(); };
+  const onLogoFile = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+    if (!file.type.startsWith("image/")) { toast.error("Pick a picture for the logo."); return; }
+    if (file.size > 5 * 1024 * 1024) { toast.error(`Please select an image smaller than 5MB. This file is ${(file.size / (1024 * 1024)).toFixed(1)}MB.`); return; }
+    const reader = new FileReader();
+    reader.onload = (ev) => setCropSrc(ev.target?.result as string);
+    reader.readAsDataURL(file);
+  };
+  const saveLogo = async (blob: Blob) => {
+    const target = logoFor;
+    if (!target) return;
+    setLogoBusy(target);
+    try {
+      const ext = blob.type === "image/png" ? "png" : "jpg";
+      const { data } = await apiClient.post("/api/user/upload-url", { fileName: `project-logo-${Date.now()}.${ext}`, fileType: blob.type });
+      const put = await fetch(data.uploadUrl, { method: "PUT", body: blob, headers: { "Content-Type": blob.type } });
+      if (!put.ok) throw new Error("upload failed");
+      if (target === "new") setNewLogo(data.publicUrl);
+      else {
+        const { res, data: saved } = await api(`/projects/${target}`, { method: "PATCH", body: JSON.stringify({ logo: data.publicUrl }) });
+        if (!res.ok) throw new Error(saved.error || "Could not save the logo");
+        setProjects((list) => (list || []).map((p) => (p.id === target ? saved.project : p)));
+        toast.success("Logo updated");
+      }
+    } catch (err: any) {
+      toast.error(err?.message && err.message !== "upload failed" ? err.message : "Could not upload the logo");
+    } finally {
+      setLogoBusy(null);
+    }
+  };
+
   const create = async () => {
     const name = (newName || "").trim();
     if (!name) return;
-    const { res, data } = await api("/projects", { method: "POST", body: JSON.stringify({ name }) });
+    const { res, data } = await api("/projects", { method: "POST", body: JSON.stringify({ name, logo: newLogo }) });
     if (!res.ok) return toast.error(data.error || "Could not create the project");
     setNewName(null);
+    setNewLogo(null);
     setProjects((list) => [data.project, ...(list || [])]);
     setLinking(data.project); // pick a repo, or start empty and make a repo later
     loadRepos();
@@ -502,7 +602,7 @@ export function ProjectModePage() {
             </div>
 
             {projects === null ? (
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+              <div className="flex flex-col gap-4 max-w-3xl">
                 {[0, 1, 2].map((i) => (
                   <div key={i} className="rounded-xl border border-border bg-background p-4 flex flex-col gap-2 min-h-[140px]">
                     <div className="flex items-center gap-2"><Skeleton className="size-5 rounded" /><Skeleton className="h-4 w-32" /></div>
@@ -513,7 +613,7 @@ export function ProjectModePage() {
                 ))}
               </div>
             ) : (
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+              <div className="flex flex-col gap-4 max-w-3xl">
                 {(newName !== null || projects.length === 0) && (
                   <div className="rounded-xl border border-dashed border-border p-4 flex flex-col gap-3 min-h-[140px]">
                     {newName === null ? (
@@ -523,6 +623,15 @@ export function ProjectModePage() {
                     ) : (
                       <>
                         <span className="text-sm font-medium">New project</span>
+                        <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => pickLogo("new")}
+                          title={newLogo ? "Change logo" : "Add logo"}
+                          className="size-9 shrink-0 rounded-md border border-dashed border-border flex items-center justify-center overflow-hidden hover:bg-secondary"
+                        >
+                          {logoBusy === "new" ? <Spinner className="size-4" /> : newLogo ? <img src={newLogo} alt="" className="size-full object-cover" /> : <ImagePlus className="size-4 text-muted-foreground" />}
+                        </button>
                         <input
                           autoFocus
                           value={newName}
@@ -530,10 +639,11 @@ export function ProjectModePage() {
                           onKeyDown={(e) => { if (e.key === "Enter") create(); if (e.key === "Escape") setNewName(null); }}
                           placeholder="Project name"
                           maxLength={80}
-                          className="h-9 rounded-md border border-border bg-background px-3 text-sm focus:outline-none focus:ring-1 focus:ring-ring"
+                          className="h-9 flex-1 min-w-0 rounded-md border border-border bg-background px-3 text-sm focus:outline-none focus:ring-1 focus:ring-ring"
                         />
+                        </div>
                         <div className="flex justify-end gap-2 mt-auto">
-                          <button onClick={() => setNewName(null)} className="px-3 py-1.5 rounded-full text-sm hover:bg-secondary">Cancel</button>
+                          <button onClick={() => { setNewName(null); setNewLogo(null); }} className="px-3 py-1.5 rounded-full text-sm hover:bg-secondary">Cancel</button>
                           <button onClick={create} disabled={!newName.trim()} className="px-3 py-1.5 rounded-full text-sm bg-foreground text-background disabled:opacity-50">Create</button>
                         </div>
                       </>
@@ -542,39 +652,63 @@ export function ProjectModePage() {
                 )}
 
                 {projects.map((p) => (
-                  <div key={p.id} className="group rounded-xl border border-border bg-background p-4 flex flex-col gap-2 min-h-[140px] hover:bg-secondary/60 transition-colors">
-                    {renaming?.id === p.id ? (
-                      <input
-                        autoFocus
-                        value={renaming.name}
-                        onChange={(e) => setRenaming({ id: p.id, name: e.target.value })}
-                        onKeyDown={(e) => { if (e.key === "Enter") rename(); if (e.key === "Escape") setRenaming(null); }}
-                        onBlur={rename}
-                        maxLength={80}
-                        className="h-9 rounded-md border border-border bg-background px-3 text-sm focus:outline-none focus:ring-1 focus:ring-ring"
-                      />
-                    ) : (
-                      <div className="flex items-start gap-2">
-                        <FolderGit2 className="size-5 shrink-0 text-muted-foreground mt-0.5" />
-                        <span className="font-medium truncate flex-1">{p.name}</span>
-                        <button onClick={() => setRenaming({ id: p.id, name: p.name })} title="Rename" className="opacity-0 group-hover:opacity-100 p-1 rounded hover:bg-secondary"><Pencil className="size-3.5" /></button>
-                        <button onClick={() => setDeleting(p)} title="Delete" className="opacity-0 group-hover:opacity-100 p-1 rounded hover:bg-secondary"><Trash2 className="size-3.5" /></button>
+                  <div key={p.id} className="group rounded-xl border border-border bg-background p-5 flex flex-col gap-3 hover:bg-secondary/60 transition-colors">
+                    <div className="flex items-center gap-3 min-w-0">
+                      {renaming?.id === p.id ? (
+                        <button
+                          type="button"
+                          onMouseDown={(e) => e.preventDefault()}
+                          onClick={() => pickLogo(p.id)}
+                          title="Change logo"
+                          className="size-10 shrink-0 rounded-lg border border-dashed border-border flex items-center justify-center overflow-hidden hover:bg-secondary"
+                        >
+                          {logoBusy === p.id ? <Spinner className="size-4" /> : p.logo ? <img src={p.logo} alt="" className="size-full object-cover" /> : <ImagePlus className="size-4 text-muted-foreground" />}
+                        </button>
+                      ) : logoBusy === p.id ? (
+                        <span className="size-10 shrink-0 rounded-lg border border-border flex items-center justify-center"><Spinner className="size-4" /></span>
+                      ) : (
+                        <ProjectLogo logo={p.logo} />
+                      )}
+                      <div className="flex-1 min-w-0 flex flex-col gap-0.5">
+                        {renaming?.id === p.id ? (
+                          <input
+                            autoFocus
+                            value={renaming.name}
+                            onChange={(e) => setRenaming({ id: p.id, name: e.target.value })}
+                            onKeyDown={(e) => { if (e.key === "Enter") rename(); if (e.key === "Escape") setRenaming(null); }}
+                            onBlur={rename}
+                            maxLength={80}
+                            className="h-9 w-full rounded-md border border-border bg-background px-3 text-sm focus:outline-none focus:ring-1 focus:ring-ring"
+                          />
+                        ) : (
+                          <span className="font-medium truncate">{p.name}</span>
+                        )}
+                        <span className="text-xs text-muted-foreground truncate">
+                          {[
+                            p.createdAt && `Created ${new Date(p.createdAt).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' })}`,
+                            p.updatedAt && `Last edited ${new Date(p.updatedAt).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' })}, ${new Date(p.updatedAt).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })}`,
+                            p.lastOpenedAt ? `Opened ${new Date(p.lastOpenedAt).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' })}` : "Never opened",
+                          ].filter(Boolean).join(" · ")}
+                        </span>
                       </div>
-                    )}
+                      {renaming?.id !== p.id && (
+                        <>
+                          <button onClick={() => setRenaming({ id: p.id, name: p.name })} title="Edit name and logo" className="opacity-0 group-hover:opacity-100 p-1.5 rounded hover:bg-secondary shrink-0"><Pencil className="size-3.5" /></button>
+                          <button onClick={() => setDeleting(p)} title="Delete" className="opacity-0 group-hover:opacity-100 p-1.5 rounded hover:bg-secondary shrink-0"><Trash2 className="size-3.5" /></button>
+                        </>
+                      )}
+                      <button
+                        onClick={() => { if (p.repo) open(p); else { setLinking(p); loadRepos(); } }}
+                        disabled={busyId === p.id}
+                        className="shrink-0 flex items-center gap-2 px-3 py-1.5 rounded-full border border-border text-sm hover:bg-secondary disabled:opacity-50"
+                      >
+                        {busyId === p.id ? <Spinner className="size-4" /> : p.repo ? <Github className="size-4" /> : <FolderGit2 className="size-4" />}
+                        {busyId === p.id ? (p.repo ? "Downloading…" : "Opening…") : "Open"}
+                      </button>
+                    </div>
                     {p.repo
-                      ? <span className="text-xs text-muted-foreground truncate">{p.repo}</span>
+                      ? <ProjectGitInfo project={p} />
                       : <span className="text-xs text-muted-foreground">No GitHub repo yet · <button onClick={() => { setLinking(p); loadRepos(); }} className="underline hover:text-foreground">Link one</button></span>}
-                    {p.createdAt && <span className="text-xs text-muted-foreground">Created {new Date(p.createdAt).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' })}</span>}
-                    {p.updatedAt && <span className="text-xs text-muted-foreground">Last edited {new Date(p.updatedAt).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' })}, {new Date(p.updatedAt).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })}</span>}
-                    <span className="text-xs text-muted-foreground">{p.lastOpenedAt ? `Opened ${new Date(p.lastOpenedAt).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' })}` : "Never opened"}</span>
-                    <button
-                      onClick={() => { if (p.repo) open(p); else { setLinking(p); loadRepos(); } }}
-                      disabled={busyId === p.id}
-                      className="mt-auto self-start flex items-center gap-2 px-3 py-1.5 rounded-full border border-border text-sm hover:bg-secondary disabled:opacity-50"
-                    >
-                      {busyId === p.id ? <Spinner className="size-4" /> : p.repo ? <Github className="size-4" /> : <FolderGit2 className="size-4" />}
-                      {busyId === p.id ? (p.repo ? "Downloading…" : "Opening…") : "Open"}
-                    </button>
                   </div>
                 ))}
               </div>
@@ -582,6 +716,16 @@ export function ProjectModePage() {
           </div>
         </div>
       )}
+
+      <input ref={logoInputRef} type="file" accept="image/*" className="hidden" onChange={onLogoFile} />
+      <ImageCropperModal
+        isOpen={!!cropSrc}
+        onClose={() => setCropSrc(null)}
+        imageSrc={cropSrc || ""}
+        aspectRatio={1}
+        title="Crop project logo"
+        onCropComplete={(blob) => { setCropSrc(null); return saveLogo(blob); }}
+      />
 
       <DangerConfirmDialog
         open={!!deleting}
