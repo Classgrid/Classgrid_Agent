@@ -86,6 +86,7 @@ import webPushRoutes from "../src/routes/web-push.routes.js";
 import hierarchyRoutes from "../src/routes/hierarchy.routes.js";
 import callRoutes from "../src/routes/call.routes.js";
 import aiRoutes from "../src/routes/ai.routes.js";
+import aiGridRoutes from "../src/routes/ai-grid.routes.js";
 import aiCreditsRoutes from "../src/routes/ai-credits.routes.js";
 import aiCreditsTopupRoutes from "../src/routes/ai-credits-topup.routes.js";
 import aiLibraryRoutes from "../src/routes/ai-library.routes.js";
@@ -398,6 +399,7 @@ app.use("/api/push", pushRoutes);
 app.use("/api/web-push", webPushRoutes);
 app.use("/api/hierarchy", hierarchyRoutes);
 app.use("/api/call", callRoutes);
+app.use("/api/ai/grid", aiGridRoutes); // Share Grid (shared AI chats)
 app.use("/api/ai", aiRoutes);
 app.use("/api/ai/credits", aiCreditsRoutes);
 app.use("/api/ai/topup", aiCreditsTopupRoutes);

@@ -52,6 +52,7 @@ import {
     memoryText
 } from "../services/ai-chat.service.js";
 import { getHistory, getHistoryCount, appendToHistory, invalidateHistoryCache, getChatTranscript } from "../services/ai-chat-history.service.js";
+import { canAccessSession, getActiveMembers, profilesFor, getSharedSessionsFor } from "../services/ai-chat-grid.service.js";
 import { editorContextFor, rememberProjectSnapshot, sandboxDataDir, startCheckpoint, finishCheckpoint, linkChatToProject } from "../services/ide-project.service.js";
 import { buildEndConversationHandlers, reopenSession } from "../services/ai-end-conversation.service.js";
 import { hasEnoughTokens, deductTokens, getImageGenerationCost, tokenWindowEnd } from "../services/ai-credits.service.js";
@@ -1390,6 +1391,7 @@ export const streamAskAi = async (req, res) => {
 
         // Only the signed-in account (auth middleware), never body.userEmail. No staff-looking default.
         const userEmail = req.user?.email || '';
+        let gridSender = null; // Share Grid: { email, name } of who sent this message, when the chat is shared
 
         if (sessionId && !isIncognito) {
             // ÃƒÂ°Ã…Â¸Ã…Â¡Ã‚Â¨ CRITICAL SECURITY CHECK: Verify Ownership before loading history ÃƒÂ°Ã…Â¸Ã…Â¡Ã‚Â¨
@@ -1399,7 +1401,7 @@ export const streamAskAi = async (req, res) => {
                 res.end();
                 return;
             }
-            if (!userEmail || sessionData.user_email !== userEmail) {
+            if (!userEmail || !(await canAccessSession(sessionData, userEmail))) {
                 console.error(`[SECURITY] Unauthorized chat access attempt! User ${userEmail} tried to access session ${sessionId} owned by ${sessionData.user_email}`);
                 res.write(`data: ${JSON.stringify({ type: "error", error: "Unauthorized. You do not have permission to view this chat." })}\n\n`);
                 res.end();
@@ -1422,6 +1424,15 @@ export const streamAskAi = async (req, res) => {
                 const sinceSummary = covered !== null ? total - covered : (total % 8) + 8;
                 historyDepth = Math.min(Math.max(sinceSummary + 2, 4), 30);
                 volatilePrompt += `\n\n<long_term_memory>\nA background model's summary of messages 1-${covered ?? "?"} of this chat (not their exact text; for the exact text of an older message call recall_chat or search_recall_chat). The messages after it follow in full.\n${memoryText(sessionData.long_term_memory)}\n</long_term_memory>`;
+            }
+
+            // Share Grid: the AI sees each user message as "Name: text" and knows who is in the chat
+            const gridMembers = await getActiveMembers(sessionId);
+            if (gridMembers.length > 1) {
+                const people = await profilesFor(gridMembers.map((m) => m.user_email));
+                const label = (e) => people[String(e).toLowerCase()]?.name || e;
+                gridSender = { email: userEmail.toLowerCase(), name: label(userEmail.toLowerCase()) };
+                volatilePrompt += `\n\n<shared_chat>\nThis is a Share Grid chat: one Classgrid AI chat that ${gridMembers.length} people use together (not a Grids group chat). The people:${gridMembers.map((m) => `${label(m.user_email)}${m.role === "owner" ? " (owner)" : ""}`).join(", ")}. Each user message starts with the name of the person who sent it. The latest message is from ${gridSender.name}.\n</shared_chat>`;
             }
 
             // Ownership verified, safe to load history
@@ -1474,9 +1485,11 @@ export const streamAskAi = async (req, res) => {
 
         // 2b. Save user message: to Supabase (source of truth) + Redis (cache) in parallel
         if (!isIncognito && sessionId && body.question) {
-            saveMessage(sessionId, "user", body.question, body.fileUrls || []).catch(err => console.error("Failed to save user message:", err));
+            saveMessage(sessionId, "user", body.question, body.fileUrls || [], gridSender?.email || null)
+                .then(() => { if (gridSender) req.app.get("io")?.to(`aigrid:${sessionId}`).emit("aigrid:update", { sessionId, kind: "messages" }); })
+                .catch(err => console.error("Failed to save user message:", err));
             // The file links go into the AI's history too, so follow-ups can re-open an uploaded file.
-            appendToHistory(sessionId, "user", body.question, body.fileUrls || []).catch(err => console.error("Failed to append user msg to Redis:", err));
+            appendToHistory(sessionId, "user", gridSender ? `${gridSender.name}: ${body.question}` : body.question, body.fileUrls || []).catch(err => console.error("Failed to append user msg to Redis:", err));
 
             // Every TITLE_REFRESH_EVERY user messages, re-title the chat from its recent messages,
             // unless the user renamed it themselves.
@@ -1499,7 +1512,7 @@ export const streamAskAi = async (req, res) => {
         if (body.question) {
             // Include image URLs in the SDK's expected format if needed
             // Currently, simple string content is supported by the AI core, but if they had fileUrls, we append them as context.
-            let content = body.question;
+            let content = gridSender ? `${gridSender.name}: ${body.question}` : body.question;
             if (body.fileUrls && body.fileUrls.length > 0) {
                 content += "\n\nAttached Files:\n" + body.fileUrls.join('\n');
             }
@@ -4771,7 +4784,9 @@ If a tool fails, never show the error message; say only: "Something went wrong o
                         worked_ms: Date.now() - requestStartedAt
                     });
                 }
-                saveMessage(sessionId, "assistant", savedContent, []).catch(err => console.error("Failed to save assistant message:", err));
+                saveMessage(sessionId, "assistant", savedContent, [])
+                    .then(() => { if (gridSender) req.app.get("io")?.to(`aigrid:${sessionId}`).emit("aigrid:update", { sessionId, kind: "messages" }); })
+                    .catch(err => console.error("Failed to save assistant message:", err));
                 appendToHistory(sessionId, "assistant", savedContent).catch(err => console.error("Failed to append assistant reply to Redis:", err));
                 // Project Mode: remember the project's state now, so the next turn can show what the user changed themselves
                 rememberProjectSnapshot(sessionId).catch(() => {});
@@ -4858,6 +4873,10 @@ export const getChatSessions = async (req, res) => {
                 sessions = (sessions || []).filter((s) => !ids.has(s.id));
             }
         }
+        if (!project) {
+            const shared = await getSharedSessionsFor(email).catch(() => []);
+            if (shared.length) sessions = [...shared, ...(sessions || [])].sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)));
+        }
         res.json({ sessions });
     } catch (e) {
         console.error("Error getting sessions:", e);
@@ -4874,7 +4893,7 @@ export const getChatSession = async (req, res) => {
             return res.status(404).json({ error: "Session not found" });
         }
 
-        if (session.user_email !== req.user?.email) {
+        if (!(await canAccessSession(session, req.user?.email))) {
             return res.status(403).json({ error: "Forbidden" });
         }
 
@@ -4917,12 +4936,12 @@ export const reopenChatSession = async (req, res) => {
 export const getChatSessionMessages = async (req, res) => {
     try {
         const { id } = req.params;
-        // Same owner check as getChatSession: only the chat's owner can read its messages
+        // Same check as getChatSession: the chat's owner or a Share Grid member
         const [session, messages] = await Promise.all([getSessionById(id), getSessionMessages(id)]);
         if (!session) {
             return res.status(404).json({ error: "Session not found" });
         }
-        if (session.user_email !== req.user?.email) {
+        if (!(await canAccessSession(session, req.user?.email))) {
             return res.status(403).json({ error: "Forbidden" });
         }
         res.json({ messages });
@@ -4984,6 +5003,10 @@ export const updateChatSession = async (req, res) => {
     try {
         const { id } = req.params;
         const { title, pinned } = req.body;
+        // Only the chat's owner renames or pins it (Share Grid members can't)
+        const owned = await getSessionById(id);
+        if (!owned) return res.status(404).json({ error: "Session not found" });
+        if (owned.user_email !== req.user?.email) return res.status(403).json({ error: "Only the chat owner can do this." });
         let updatedSession = null;
         if (title !== undefined) {
             updatedSession = await updateSessionTitle(id, title);
@@ -5003,6 +5026,10 @@ export const updateChatSession = async (req, res) => {
 export const deleteChatSession = async (req, res) => {
     try {
         const { id } = req.params;
+        // Only the chat's owner deletes it (Share Grid members can leave instead)
+        const owned = await getSessionById(id);
+        if (!owned) return res.status(404).json({ error: "Session not found" });
+        if (owned.user_email !== req.user?.email) return res.status(403).json({ error: "Only the chat owner can delete this chat." });
         await deleteSession(id);
         // Purge Redis cache for this session so stale history is never served
         invalidateHistoryCache(id).catch(err => console.warn("Failed to invalidate Redis cache on delete:", err));

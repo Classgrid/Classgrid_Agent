@@ -124,6 +124,7 @@ import { OrgFeesPage } from "@/features/superadmin/pages/OrgFeesPage";
 import { OrgAdmissionsPage } from "@/features/superadmin/pages/OrgAdmissionsPage";
 import { PlatformAnnouncementsPage } from "@/features/superadmin/pages/PlatformAnnouncementsPage";
 import { SharedChatPage } from "@/features/shared/pages/SharedChatPage";
+import { GridJoinPage } from "@/components/ai/components/share-grid/GridJoinPage";
 import { SharedProfilePage } from "@/features/shared/pages/SharedProfilePage";
 import { AgentProfilePage } from "@/features/public-chat/pages/AgentProfilePage";
 
@@ -404,6 +405,8 @@ export function AppRouter() {
 
       {/* Public shared chat viewer (no auth required) */}
       <Route path="/shared/:shareId" element={<SharedChatPage />} />
+      {/* Share Grid invite (checks login itself, so a signed-out visitor sees the invite first) */}
+      <Route path="/grid/join/:token" element={<GridJoinPage />} />
     </Routes>
   );
 }

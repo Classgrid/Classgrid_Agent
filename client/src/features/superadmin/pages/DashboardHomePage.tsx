@@ -20,8 +20,11 @@
  */
 
 import { AskAiPanel } from "@/components/ai/components/AskAiPanel";
+import { useResumeGridInvite } from "@/components/ai/components/share-grid/GridJoinPage";
 
 export function DashboardHomePage() {
+  // Back from login with a Share Grid invite: open it
+  useResumeGridInvite();
   return (
     <div className="flex flex-col w-full h-full relative bg-background">
       <AskAiPanel 

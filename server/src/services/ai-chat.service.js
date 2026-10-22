@@ -67,12 +67,15 @@ export async function updateSessionTitle(sessionId, title) {
 /**
  * Saves a message to an existing chat session.
  */
-export async function saveMessage(sessionId, role, content, fileUrls = []) {
+export async function saveMessage(sessionId, role, content, fileUrls = [], senderEmail = null) {
     if (!sessionId) return null;
 
+    // sender_email is set only in Share Grid chats (who of the people sent it)
+    const row = { session_id: sessionId, role, content, file_urls: fileUrls };
+    if (senderEmail) row.sender_email = senderEmail;
     const { data, error } = await primarySupabaseClient
         .from('ai_chat_messages')
-        .insert([{ session_id: sessionId, role, content, file_urls: fileUrls }])
+        .insert([row])
         .select()
         .single();
 
@@ -184,7 +187,7 @@ export async function triggerMemoryAgent(sessionId) {
     try {
         const { data: messages, error } = await primarySupabaseClient
             .from('ai_chat_messages')
-            .select('role, content, created_at')
+            .select('role, content, created_at, sender_email')
             .eq('session_id', sessionId)
             .order('created_at', { ascending: true });
 
@@ -209,10 +212,14 @@ export async function triggerMemoryAgent(sessionId) {
         const newMessages = messages.slice(Math.min(covered, total));
         if (newMessages.length === 0) return;
 
+        // Share Grid chats: each user message says who sent it ("USER (Rahul)"), so the summary keeps who said what
+        const { profilesFor } = await import('./ai-chat-grid.service.js');
+        const senders = newMessages.some((m) => m.sender_email) ? await profilesFor(newMessages.map((m) => m.sender_email)) : {};
+        const who = (m) => (m.role === 'user' && m.sender_email ? ` (${senders[String(m.sender_email).toLowerCase()]?.name || m.sender_email})` : '');
         const input = [
             `PREVIOUS MEMORY:\n${previous ? memoryText(previous) : "(empty)"}`,
             `NEW MESSAGES (${covered + 1} to ${total}):`,
-            ...newMessages.map((m, i) => `[${covered + i + 1}] ${String(m.role).toUpperCase()}: ${plainMessageText(m.content).slice(0, MEMORY_MESSAGE_CHARS)}`)
+            ...newMessages.map((m, i) => `[${covered + i + 1}] ${String(m.role).toUpperCase()}${who(m)}: ${plainMessageText(m.content).slice(0, MEMORY_MESSAGE_CHARS)}`)
         ].join("\n\n");
 
         console.log(`[Memory Agent] Updating memory for session ${sessionId} (messages ${covered + 1}-${total})...`);

@@ -49,6 +49,7 @@
 
 import redis from '../config/redis.js';
 import { getSessionMessages } from './ai-chat.service.js';
+import { senderLabels } from './ai-chat-grid.service.js';
 
 const REDIS_KEY_PREFIX  = 'ai:chat:history:';
 const MAX_HISTORY       = 500;   // absolute cap stored in Redis
@@ -219,15 +220,18 @@ export async function warmCache(sessionId) {
         if (!dbMessages || dbMessages.length === 0) return;
 
         const key = redisKey(sessionId);
+        // Share Grid chats: user messages start with the sender's name, as when they were sent
+        const label = (await senderLabels(dbMessages)) || (() => '');
 
         // Write all messages into Redis as a pipeline (atomic, fast)
         const pipeline = redis.pipeline();
         for (const msg of dbMessages) {
             if (msg.role === 'user' || msg.role === 'assistant') {
                 const files = Array.isArray(msg.file_urls) ? msg.file_urls.filter(Boolean) : [];
+                const content = label(msg) + (msg.content || '');
                 pipeline.rpush(key, JSON.stringify(files.length
-                    ? { role: msg.role, content: msg.content || '', fileUrls: files }
-                    : { role: msg.role, content: msg.content || '' }));
+                    ? { role: msg.role, content, fileUrls: files }
+                    : { role: msg.role, content }));
             }
         }
         pipeline.ltrim(key, -MAX_HISTORY, -1);
@@ -268,6 +272,7 @@ async function getHistoryFromSupabase(sessionId, depth = DEFAULT_DEPTH) {
     try {
         const dbMessages = await getSessionMessages(sessionId);
         if (!dbMessages) return [];
+        const label = (await senderLabels(dbMessages)) || (() => '');
         return dbMessages
             .slice(-depth)
             .map(m => {
@@ -280,7 +285,7 @@ async function getHistoryFromSupabase(sessionId, depth = DEFAULT_DEPTH) {
                         }
                     } catch {}
                 }
-                return { role: m.role, content: withFileLinks(text, m.file_urls) };
+                return { role: m.role, content: withFileLinks(label(m) + text, m.file_urls) };
             });
     } catch (err) {
         console.error(`[ChatHistory] Supabase fallback also failed for session ${sessionId}:`, err?.message);

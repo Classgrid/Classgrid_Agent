@@ -189,6 +189,7 @@ import { MasterWorkflowWrapper } from "./stepper/MasterWorkflowWrapper";
 import { OpenPageView } from "./stepper/OpenPageView";
 import { EmailActionView } from "./stepper/EmailActionView";
 import { DocumentGenerationView } from "./stepper/DocumentGenerationView";
+import { ShareGridPanel, useShareGrid, GridSenderTag } from "./share-grid/ShareGridPanel";
 import { KnowledgeBaseSearchView } from "./stepper/KnowledgeBaseSearchView";
 import { CdnUploadView } from "./stepper/CdnUploadView";
 import { EmailSentView } from "./stepper/EmailSentView";
@@ -419,6 +420,8 @@ export type ChatMessage = {
   contextTitle?: string;
   attachments?: AiAttachment[];
   hidden?: boolean;
+  /** Share Grid: who sent this user message (empty for old messages and for the AI) */
+  senderEmail?: string;
 };
 
 export type QueuedMessage = {
@@ -1453,6 +1456,44 @@ function answerFileLinks(text: string): { url: string; name: string }[] {
   });
 }
 
+// Share Grid live refresh: a saved message from the server → a chat message (same as the chat loaders)
+function toChatMessage(m: any): ChatMessage {
+  let content = m.content;
+  let thought, steps, sources, workedMs: number | undefined, checkpoint: string | undefined;
+  if (m.role === "assistant" && typeof m.content === "string") {
+    try {
+      const parsed = JSON.parse(m.content);
+      if (parsed && typeof parsed === "object" && parsed.classgrid_ai_message) {
+        content = parsed.content;
+        thought = parsed.thought;
+        steps = parsed.steps;
+        sources = parsed.sources;
+        workedMs = typeof parsed.worked_ms === "number" ? parsed.worked_ms : undefined;
+        checkpoint = typeof parsed.checkpoint === "string" ? parsed.checkpoint : undefined;
+      }
+    } catch { /* plain text */ }
+  }
+  return {
+    id: m.id || crypto.randomUUID(),
+    role: m.role,
+    content,
+    thought,
+    steps,
+    sources,
+    workedMs,
+    checkpoint,
+    fileUrls: m.file_urls || undefined,
+    senderEmail: m.sender_email || undefined,
+    attachments: m.file_urls && m.file_urls.length > 0 ? m.file_urls.map((url: string) => ({
+      url,
+      name: url.split("/").pop() || "attachment",
+      mimeType: mimeFromUrl(url),
+      size: 0,
+    })) : undefined,
+    createdAt: m.created_at ? new Date(m.created_at).getTime() : Date.now(),
+  };
+}
+
 // Header icon before Share: two circles, each with a line
 function ShareGridIcon({ className }: { className?: string }) {
   return (
@@ -1974,6 +2015,7 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
   const [isLoadingChat, setIsLoadingChat] = useState(false);
   const [isPinned, setIsPinned] = useState(false);
   const [showFilesPanel, setShowFilesPanel] = useState(false);
+  const [showGridPanel, setShowGridPanel] = useState(false);
   const [isAiHubOpen, setIsAiHubOpen] = useState(false);
   const [aiHubInitialTab, setAiHubInitialTab] = useState<string>("plugins");
 
@@ -2860,6 +2902,7 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
               workedMs: workedMs,
               checkpoint,
               fileUrls: m.file_urls || undefined,
+              senderEmail: m.sender_email || undefined,
               attachments: m.file_urls && m.file_urls.length > 0 ? m.file_urls.map((url: string) => ({
                 url: url,
                 name: url.split('/').pop() || "attachment",
@@ -3001,6 +3044,7 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
               workedMs: workedMs,
               checkpoint,
               fileUrls: m.file_urls || undefined,
+              senderEmail: m.sender_email || undefined,
               attachments: m.file_urls && m.file_urls.length > 0 ? m.file_urls.map((url: string) => ({
                 url: url,
                 name: url.split('/').pop() || "attachment",
@@ -3045,6 +3089,28 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
     }
   }, [messages, sessionId, variant]);
   const [submitting, setSubmitting] = useState(false);
+
+  // Share Grid: people in this chat, and live updates when someone else sends a message
+  const gridSessionId = sessionId && sessionId !== "schedule" && sessionId !== "library" ? sessionId : null;
+  const gridSubmittingRef = useRef(submitting);
+  gridSubmittingRef.current = submitting;
+  const refreshSharedMessages = React.useCallback(async () => {
+    if (!gridSessionId || gridSubmittingRef.current) return; // my own reply is streaming: it shows already
+    try {
+      const prefix = import.meta.env.VITE_API_URL || "https://api.classgrid.in";
+      const res = await fetchWithRescue(`${prefix}/api/ai/sessions/${gridSessionId}/messages`, { credentials: "include" });
+      if (!res.ok) return;
+      const data = await res.json();
+      if (!gridSubmittingRef.current) setMessages((data.messages || []).map(toChatMessage));
+    } catch { /* next update will try again */ }
+  }, [gridSessionId]);
+  const grid = useShareGrid(gridSessionId, refreshSharedMessages);
+  const gridMyEmail = (session?.user?.email || "").toLowerCase();
+  const gridPeople = React.useMemo(() => Object.fromEntries((grid.data?.members || []).map((p) => [p.email, p])), [grid.data]);
+  const gridOwner = grid.data?.members?.find((p) => p.role === "owner");
+  // Messages from before the chat was shared have no sender: they are the owner's
+  const gridStart = gridOwner?.joinedAt ? new Date(gridOwner.joinedAt).getTime() : 0;
+  const gridSenderOf = (m: ChatMessage) => m.senderEmail?.toLowerCase() || (m.createdAt < gridStart ? gridOwner?.email : gridMyEmail);
   const [error, setError] = useState("");
   const [isTerminated, setIsTerminated] = useState(false);
 
@@ -4374,6 +4440,7 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
             <button
               type="button"
               aria-label="Share Grid"
+              onClick={() => { setShowFilesPanel(false); setShowGridPanel((o) => !o); }}
               className="flex items-center justify-center h-8 w-8 rounded-md hover:bg-black/5 dark:hover:bg-white/10 transition-colors cursor-pointer"
             >
               <ShareGridIcon className="h-4 w-4" />
@@ -4563,6 +4630,10 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
                     style={index < messages.length - 6 ? { contentVisibility: "auto", containIntrinsicSize: "auto 240px" } : undefined}
                   >
                     <div className={cn("flex flex-col gap-1.5 min-w-0", isUser ? "items-end max-w-[75%]" : "w-full")}>
+                      {isUser && grid.shared && (() => {
+                        const who = gridSenderOf(message);
+                        return who && who !== gridMyEmail && gridPeople[who] ? <GridSenderTag person={gridPeople[who]} /> : null;
+                      })()}
 
                       {/* ── Text Bubble ── */}
                       {(message.content || (message.steps && message.steps.length > 0) || (message.thought && message.thought.trim().length > 0) || (message.attachments && message.attachments.length > 0) || (!isUser && index === messages.length - 1 && thinking)) && (
@@ -6044,6 +6115,7 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
                   <button
                     type="button"
                     aria-label="Share Grid"
+                    onClick={() => { setShowFilesPanel(false); setShowGridPanel((o) => !o); }}
                     className="flex items-center justify-center h-8 w-8 rounded-md hover:bg-black/5 dark:hover:bg-white/10 transition-colors cursor-pointer"
                   >
                     <ShareGridIcon className="h-4 w-4" />
@@ -6666,9 +6738,12 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
                 planStepStatus={planStepStatus}
               />
             )}
+            {showGridPanel && !showFilesPanel && gridSessionId && (
+              <ShareGridPanel key="share-grid" sessionId={gridSessionId} myEmail={gridMyEmail} onClose={() => setShowGridPanel(false)} />
+            )}
           </AnimatePresence>
           {/* Right-side TOC showing user questions */}
-          {tocItems.length > 0 && !showFilesPanel && <ScrollSpyTOC tocItems={tocItems} activeSection={activeSection} />}
+          {tocItems.length > 0 && !showFilesPanel && !showGridPanel && <ScrollSpyTOC tocItems={tocItems} activeSection={activeSection} />}
         </div>
       ) : null}
 

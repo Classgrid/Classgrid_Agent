@@ -66,6 +66,8 @@ import { dispatchNotification } from "./notification.service.js";
 import User from "../models/User.js";
 import accessLogger from "../config/logger.js";
 import { primarySupabaseClient } from "../config/supabaseClient.js";
+import { canAccessSession } from "./ai-chat-grid.service.js";
+import { getSessionById } from "./ai-chat.service.js";
 
 // Live Chat Analytics: push fresh numbers to the "superadmin:analytics" room every 20 s,
 // only while at least one super admin has the page open (the loop stops when the room is empty).
@@ -196,6 +198,25 @@ export const initSocket = (server, { path } = {}) => {
                 return; // can't check right now: don't join
             }
             socket.join(`thread:${threadId}`);
+        });
+
+        // ── Share Grid: live updates for a shared Classgrid AI chat (owner and members only) ──
+        socket.on("join_ai_grid", async (sessionId) => {
+            if (!sessionId) return;
+            try {
+                const [session, user] = await Promise.all([
+                    getSessionById(String(sessionId)),
+                    User.findById(socket.userId).select("email").lean(),
+                ]);
+                if (!user?.email || !(await canAccessSession(session, user.email))) return;
+            } catch {
+                return;
+            }
+            socket.join(`aigrid:${sessionId}`);
+        });
+
+        socket.on("leave_ai_grid", (sessionId) => {
+            if (sessionId) socket.leave(`aigrid:${sessionId}`);
         });
 
         socket.on("leave_thread", (threadId) => {
