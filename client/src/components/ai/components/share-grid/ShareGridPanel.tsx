@@ -405,11 +405,20 @@ export function ShareGridPanel({ sessionId, myEmail, onClose }: { sessionId: str
 
                 <form
                   className="flex gap-2"
-                  onSubmit={(e) => { e.preventDefault(); if (email.trim()) sendInvites([email.trim()], "email"); }}
+                  onSubmit={(e) => {
+                    e.preventDefault();
+                    // One or more emails, split by comma, space or new line: name@gmail.com, friend@gmail.com
+                    const list = [...new Set(email.split(/[\s,;]+/).map((x) => x.trim().toLowerCase()).filter(Boolean))];
+                    if (!list.length) return;
+                    const bad = list.filter((x) => !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(x));
+                    if (bad.length) { toast.error(`Not a valid email: ${bad.join(", ")}`); return; }
+                    if (list.length > spotsLeft) { toast.error(spotsLeft === 1 ? "Only 1 more person can join." : `Only ${spotsLeft} more people can join.`); return; }
+                    sendInvites(list, "email");
+                  }}
                 >
                   <div className="relative flex-1">
                     <Mail className="h-3.5 w-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
-                    <Input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="Invite by email" className="h-10 pl-8 text-sm" aria-label="Invite by email" disabled={full} />
+                    <Input type="text" inputMode="email" autoComplete="off" spellCheck={false} value={email} onChange={(e) => setEmail(e.target.value)} placeholder="name@gmail.com, friend@gmail.com" className="h-10 pl-8 text-sm" aria-label="Invite by email (one or more, split by commas)" disabled={full} />
                   </div>
                   <Button type="submit" className="h-10 px-4" disabled={!email.trim() || full || busy === "email"}>
                     {busy === "email" && <Spinner className="size-4 mr-2" />}
