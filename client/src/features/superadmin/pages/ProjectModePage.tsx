@@ -77,10 +77,10 @@ function LoadingSmoke() {
 }
 
 // The project's picture, or the folder icon when it has none
-function ProjectLogo({ logo, className = "size-14" }: { logo?: string | null; className?: string }) {
+function ProjectLogo({ logo, className = "size-32" }: { logo?: string | null; className?: string }) {
   return logo
     ? <img src={logo} alt="" className={`${className} shrink-0 rounded-xl border border-border object-cover`} />
-    : <span className={`${className} shrink-0 rounded-xl border border-border flex items-center justify-center`}><FolderGit2 className="size-6 text-muted-foreground" /></span>;
+    : <span className={`${className} shrink-0 rounded-xl border border-border flex items-center justify-center`}><FolderGit2 className="size-10 text-muted-foreground" /></span>;
 }
 
 function timeAgo(iso: string) {
@@ -661,12 +661,12 @@ export function ProjectModePage() {
                           onMouseDown={(e) => e.preventDefault()}
                           onClick={() => pickLogo(p.id)}
                           title="Change logo"
-                          className="size-14 shrink-0 rounded-xl border border-dashed border-border flex items-center justify-center overflow-hidden hover:bg-secondary"
+                          className="size-32 shrink-0 rounded-xl border border-dashed border-border flex items-center justify-center overflow-hidden hover:bg-secondary"
                         >
-                          {logoBusy === p.id ? <Spinner className="size-4" /> : p.logo ? <img src={p.logo} alt="" className="size-full object-cover" /> : <ImagePlus className="size-4 text-muted-foreground" />}
+                          {logoBusy === p.id ? <Spinner className="size-6" /> : p.logo ? <img src={p.logo} alt="" className="size-full object-cover" /> : <ImagePlus className="size-8 text-muted-foreground" />}
                         </button>
                       ) : logoBusy === p.id ? (
-                        <span className="size-14 shrink-0 rounded-xl border border-border flex items-center justify-center"><Spinner className="size-5" /></span>
+                        <span className="size-32 shrink-0 rounded-xl border border-border flex items-center justify-center"><Spinner className="size-6" /></span>
                       ) : (
                         <ProjectLogo logo={p.logo} />
                       )}
