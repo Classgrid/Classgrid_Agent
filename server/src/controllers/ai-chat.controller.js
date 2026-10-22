@@ -5199,7 +5199,8 @@ export const createPublicShare = async (req, res) => {
                 if (!userEmail) return;
 
                 const session = await getSessionById(id);
-                if (!session || session.user_email !== userEmail) return;
+                // The owner or a Share Grid member can make a read-only share link
+                if (!session || !(await canAccessSession(session, userEmail))) return;
 
                 const messages = await getSessionMessages(id) || [];
 
