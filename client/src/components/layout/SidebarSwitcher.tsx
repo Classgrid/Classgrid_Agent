@@ -139,7 +139,7 @@ export function SidebarSwitcher({ user }: { user: { role?: string; name?: string
                 )}
               </div>
               {/* With the logo hidden: bigger name, lined up with the search box and menu below */}
-              <div className="grid flex-1 gap-0.5 pl-4 text-center text-sm leading-tight">
+              <div className="grid flex-1 gap-0.5 pl-6 text-center text-sm leading-tight">
                 <span className="text-2xl font-semibold tracking-tight text-foreground whitespace-normal break-words leading-none">
                   {orgName}
                 </span>
