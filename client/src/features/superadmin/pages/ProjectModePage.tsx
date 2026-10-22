@@ -646,14 +646,14 @@ export function ProjectModePage() {
                     ) : (
                       <>
                         <span className="text-sm font-medium">New project</span>
-                        <div className="flex items-center gap-2">
+                        <div className="flex items-center gap-4">
                         <button
                           type="button"
                           onClick={() => pickLogo("new")}
                           title={newLogo ? "Change logo" : "Add logo"}
-                          className="size-9 shrink-0 rounded-md border border-dashed border-border flex items-center justify-center overflow-hidden hover:bg-secondary"
+                          className="size-32 shrink-0 rounded-xl border border-dashed border-border flex flex-col items-center justify-center gap-1.5 overflow-hidden hover:bg-secondary text-muted-foreground"
                         >
-                          {logoBusy === "new" ? <Spinner className="size-4" /> : newLogo ? <img src={newLogo} alt="" className="size-full object-cover" /> : <ImagePlus className="size-4 text-muted-foreground" />}
+                          {logoBusy === "new" ? <Spinner className="size-6" /> : newLogo ? <img src={newLogo} alt="" className="size-full object-cover" /> : <><ImagePlus className="size-8" /><span className="text-xs">Add logo</span></>}
                         </button>
                         <input
                           autoFocus
