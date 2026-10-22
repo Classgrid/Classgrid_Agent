@@ -77,10 +77,10 @@ function LoadingSmoke() {
 }
 
 // The project's picture, or the folder icon when it has none
-function ProjectLogo({ logo, className = "size-10" }: { logo?: string | null; className?: string }) {
+function ProjectLogo({ logo, className = "size-14" }: { logo?: string | null; className?: string }) {
   return logo
-    ? <img src={logo} alt="" className={`${className} shrink-0 rounded-lg border border-border object-cover`} />
-    : <span className={`${className} shrink-0 rounded-lg border border-border flex items-center justify-center`}><FolderGit2 className="size-5 text-muted-foreground" /></span>;
+    ? <img src={logo} alt="" className={`${className} shrink-0 rounded-xl border border-border object-cover`} />
+    : <span className={`${className} shrink-0 rounded-xl border border-border flex items-center justify-center`}><FolderGit2 className="size-6 text-muted-foreground" /></span>;
 }
 
 function timeAgo(iso: string) {
@@ -653,19 +653,19 @@ export function ProjectModePage() {
 
                 {projects.map((p) => (
                   <div key={p.id} className="group rounded-xl border border-border bg-background p-5 flex flex-col gap-3 hover:bg-secondary/60 transition-colors">
-                    <div className="flex items-center gap-3 min-w-0">
+                    <div className="flex items-center gap-4 min-w-0">
                       {renaming?.id === p.id ? (
                         <button
                           type="button"
                           onMouseDown={(e) => e.preventDefault()}
                           onClick={() => pickLogo(p.id)}
                           title="Change logo"
-                          className="size-10 shrink-0 rounded-lg border border-dashed border-border flex items-center justify-center overflow-hidden hover:bg-secondary"
+                          className="size-14 shrink-0 rounded-xl border border-dashed border-border flex items-center justify-center overflow-hidden hover:bg-secondary"
                         >
                           {logoBusy === p.id ? <Spinner className="size-4" /> : p.logo ? <img src={p.logo} alt="" className="size-full object-cover" /> : <ImagePlus className="size-4 text-muted-foreground" />}
                         </button>
                       ) : logoBusy === p.id ? (
-                        <span className="size-10 shrink-0 rounded-lg border border-border flex items-center justify-center"><Spinner className="size-4" /></span>
+                        <span className="size-14 shrink-0 rounded-xl border border-border flex items-center justify-center"><Spinner className="size-5" /></span>
                       ) : (
                         <ProjectLogo logo={p.logo} />
                       )}
