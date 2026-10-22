@@ -89,7 +89,9 @@ export function SidebarSwitcher({ user }: { user: { role?: string; name?: string
 
   // 1. Resolve Organization Branding from Backend User Object
   const currentRole = user?.role || "super_admin";
-  const orgName = user?.organization?.sidebar_name || user?.organization?.name || (currentRole === "super_admin" ? (user?.sidebar_name || user?.name || "Super Admin").replace(/\s*Platform\s*$/i, "") : "Classgrid");
+  const rawOrgName = user?.organization?.sidebar_name || user?.organization?.name || (currentRole === "super_admin" ? user?.sidebar_name || user?.name || "Super Admin" : "Classgrid");
+  // Super admin: no "Platform" after the name, wherever the name comes from
+  const orgName = currentRole === "super_admin" ? rawOrgName.replace(/\s*Platform\s*$/i, "") || rawOrgName : rawOrgName;
   const orgLogo = user?.organization?.sidebar_logo_url || user?.organization?.logo_url || (currentRole === "super_admin" ? (user as any)?.platformLogo : undefined);
 
   // 2. Resolve Roles
