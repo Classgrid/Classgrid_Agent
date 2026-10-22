@@ -1494,6 +1494,34 @@ function toChatMessage(m: any): ChatMessage {
   };
 }
 
+// The user's own message bubble: markdown they pasted (links, bold, inline code, lists) shows formatted.
+// Plain markdown only: raw HTML is skipped and unsafe links are removed by react-markdown.
+const USER_MD_COMPONENTS: any = {
+  p: ({ children }: any) => <p className="m-0 [&+p]:mt-2">{children}</p>,
+  a: ({ href, children }: any) => (
+    <a href={href} target="_blank" rel="noreferrer" className="underline underline-offset-2 text-blue-600 dark:text-blue-400 break-all">{children}</a>
+  ),
+  code: ({ children }: any) => <code className="bg-black/5 dark:bg-white/10 px-1 py-0.5 rounded text-[14px] font-mono break-words">{children}</code>,
+  pre: ({ children }: any) => <pre className="my-1 p-2 rounded-lg bg-black/5 dark:bg-white/10 overflow-x-auto text-[14px] whitespace-pre">{children}</pre>,
+  ul: ({ children }: any) => <ul className="list-disc pl-5 my-1">{children}</ul>,
+  ol: ({ children }: any) => <ol className="list-decimal pl-5 my-1">{children}</ol>,
+  li: ({ children }: any) => <li className="my-0.5">{children}</li>,
+  h1: ({ children }: any) => <p className="m-0 font-semibold">{children}</p>,
+  h2: ({ children }: any) => <p className="m-0 font-semibold">{children}</p>,
+  h3: ({ children }: any) => <p className="m-0 font-semibold">{children}</p>,
+  h4: ({ children }: any) => <p className="m-0 font-semibold">{children}</p>,
+  blockquote: ({ children }: any) => <blockquote className="border-l-2 border-foreground/30 pl-2 my-1">{children}</blockquote>,
+  img: () => null,
+};
+function UserMessageText({ text }: { text: string }) {
+  return (
+    <div className="text-[16px] leading-[24px] break-words text-[#37352f] dark:text-[#F0EFED] cursor-text">
+      {/* every line break the user typed stays a line break */}
+      <ReactMarkdown remarkPlugins={[remarkGfm]} components={USER_MD_COMPONENTS} skipHtml>{String(text || "").replace(/\n/g, "  \n")}</ReactMarkdown>
+    </div>
+  );
+}
+
 // Header icon before Share: two circles, each with a line
 function ShareGridIcon({ className }: { className?: string }) {
   return (
@@ -2676,6 +2704,34 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
         }
         return [...prev, pastedText];
       });
+      return;
+    }
+
+    // Copied text with formatting (from a website, a doc, an AI answer): keep it as markdown, so links, bold,
+    // code and lists stay and the sent message shows them formatted. Plain text pastes are unchanged.
+    const pastedHtml = e.clipboardData?.getData("text/html") || "";
+    const hasFiles = Array.from(e.clipboardData?.items || []).some((it) => it.kind === "file");
+    if (!hasFiles && pastedHtml && /<(a\s[^>]*href|strong|b|em|i|code|pre|ul|ol|h[1-6]|blockquote|del|s)[\s>]/i.test(pastedHtml)) {
+      e.preventDefault();
+      const el = e.currentTarget;
+      const start = el.selectionStart ?? el.value.length;
+      const end = el.selectionEnd ?? el.value.length;
+      let markdown = pastedText || "";
+      try {
+        const TurndownService = (await import("turndown")).default;
+        const td = new TurndownService({ headingStyle: "atx", codeBlockStyle: "fenced", bulletListMarker: "-", emDelimiter: "*" });
+        td.remove(["script", "style", "img", "meta", "head"] as any);
+        const doc = new DOMParser().parseFromString(pastedHtml, "text/html");
+        // Google Docs wraps the whole copy in a "not bold" <b>: unwrap it so everything doesn't turn bold
+        doc.querySelectorAll('b[id^="docs-internal-guid"]').forEach((b) => b.replaceWith(...Array.from(b.childNodes)));
+        markdown = td.turndown(doc.body.innerHTML).trim() || markdown;
+      } catch { /* keep the plain text */ }
+      setInput((prev) => prev.slice(0, start) + markdown + prev.slice(end));
+      setTimeout(() => {
+        try { el.selectionStart = el.selectionEnd = start + markdown.length; } catch { /* textarea gone */ }
+        el.style.height = "auto";
+        el.style.height = `${Math.min(el.scrollHeight, 180)}px`;
+      }, 10);
       return;
     }
 
@@ -4757,17 +4813,13 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
                                               {stripMarkdownForPreview(quotedText).length > 100 ? "..." : ""}
                                             </span>
                                           </div>
-                                          <p className="text-[16px] leading-[24px] break-words break-all whitespace-pre-wrap text-[#37352f] dark:text-[#F0EFED] cursor-text">
-                                            {userReply}
-                                          </p>
+                                          <UserMessageText text={userReply} />
                                         </div>
                                       );
                                     }
 
                                     return (
-                                      <p className="text-[16px] leading-[24px] break-words break-all whitespace-pre-wrap text-[#37352f] dark:text-[#F0EFED] cursor-text">
-                                        {rawContent}
-                                      </p>
+                                      <UserMessageText text={rawContent} />
                                     );
                                   })()}
 
