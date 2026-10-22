@@ -256,31 +256,62 @@ function speakingDone(call) {
     });
 }
 
-async function handleUtterance(call, chunks) {
+// Each piece the caller says is turned into text right away; pieces are joined in the order they were said
+function transcribe(call, chunks) {
+    const seq = call.sttNext++;
+    speechToText(chunks)
+        .catch((e) => { console.error("[WA call] speech to text failed:", e.message); return ""; })
+        .then((text) => {
+            call.sttResults.set(seq, text);
+            while (call.sttResults.has(call.sttApplied)) {
+                const t = call.sttResults.get(call.sttApplied);
+                call.sttResults.delete(call.sttApplied);
+                call.sttApplied++;
+                if (t) { call.heard.push(t); call.transcript.push(`Caller: ${t}`); }
+            }
+            respondWhenReady(call);
+        });
+}
+
+// The caller is still talking, or some of what they said is still being turned into text
+const waitingForCaller = (call) => call.speech.active || call.sttApplied < call.sttNext;
+
+async function respondWhenReady(call) {
+    if (call.ended || call.busy || !call.heard.length || waitingForCaller(call)) return;
     call.busy = true;
+    const gen = ++call.gen;
+    const said = call.heard.splice(0).join(" ");
+    const mark = call.messages.length;
+    call.messages.push({ role: "user", content: said });
     try {
-        const said = await speechToText(chunks);
-        if (!said || call.ended) return;
-        call.transcript.push(`Caller: ${said}`);
-        call.messages.push({ role: "user", content: said });
-        await reply(call);
+        const answered = await reply(call, gen);
+        if (!answered) {
+            // The caller said more before the AI started talking: drop this answer, answer everything together
+            call.messages.length = mark;
+            call.heard.unshift(said);
+        }
     } catch (e) {
         console.error("[WA call] turn failed:", e.message);
+        call.messages.length = mark;
         await speak(call, "Sorry, I had a problem there. Could you say that again?");
     } finally {
         call.busy = false;
-        if (call.pending.length) setImmediate(() => nextTurn(call));
+        setImmediate(() => respondWhenReady(call));
     }
 }
 
-async function reply(call) {
+// Returns false when the caller started talking again before the AI said or did anything (the answer is dropped)
+async function reply(call, gen) {
     // A few rounds, so the AI can use a project tool and then talk about the result
     for (let round = 0; round < 4 && !call.ended; round++) {
         const { text, tools } = await claudeTurn(call);
+        if (round === 0 && gen !== call.gen) return false;
+        const voice = text ? await textToSpeech(text).catch((e) => { console.error("[WA call] TTS failed:", e.message); return null; }) : null;
+        if (round === 0 && gen !== call.gen) return false;
         if (text) call.transcript.push(`AI: ${text}`);
+        if (voice && !call.ended) call.outQueue.push(voice);
         const hangUp = tools.find((t) => t.name === "end_call");
-        await speak(call, text);
-        if (!tools.length) return;
+        if (!tools.length) return true;
         // Every tool the AI asked for gets its answer in one message
         const results = [];
         for (const t of tools) {
@@ -290,7 +321,9 @@ async function reply(call) {
                 const project = t.input?.project_name ? await findProject(call.user, t.input.project_name).catch(() => null) : null;
                 if (task) call.tasks.push({ task, project });
                 call.transcript.push(`AI saved a task: ${task}`);
-                content = project || !t.input?.project_name
+                content = !task
+                    ? "Nothing was saved: the task text was empty. Call start_task again with the full task."
+                    : project || !t.input?.project_name
                     ? `Task saved (${call.tasks.length} so far). It starts when the call ends.`
                     : `Task saved (${call.tasks.length} so far), but there is no project called "${t.input.project_name}".`;
             } else if (t.name === "end_call") {
@@ -307,22 +340,17 @@ async function reply(call) {
         if (hangUp) {
             await speakingDone(call);
             endCall(call.id, "AI hung up");
-            return;
+            return true;
         }
     }
+    return true;
 }
 
 function wrapUp(call) {
     if (call.ended) return;
-    const run = async () => {
-        while (call.busy && !call.ended) await new Promise((r) => setTimeout(r, 100));
-        if (call.ended) return;
-        // Added only between turns, so it never lands between a tool request and its answer
-        call.messages.push({ role: "user", content: "[The call ends in about 15 seconds.]" });
-        call.busy = true;
-        try { await reply(call); } catch (e) { console.error("[WA call] wrap-up failed:", e.message); } finally { call.busy = false; }
-    };
-    run();
+    // Joined with whatever the caller says next, or answered on its own
+    call.heard.push("[The call ends in about 15 seconds.]");
+    respondWhenReady(call);
 }
 
 // The time limit: if the caller is talking or the AI is answering right now, let it finish first
@@ -330,7 +358,7 @@ function timeUp(call) {
     const limit = call.startedAt + MAX_CALL_MS + OVERTIME_MS;
     const check = () => {
         if (call.ended) return;
-        const talking = call.speech.active || call.busy || call.outCurrent || call.outQueue.length > 0;
+        const talking = waitingForCaller(call) || call.busy || call.outCurrent || call.outQueue.length > 0;
         if (talking && Date.now() < limit) call.hardStop = setTimeout(check, 500);
         else endCall(call.id, "5 minute limit");
     };
@@ -475,7 +503,8 @@ export async function answerCall({ id, from, sdp, user, tokenSource }) {
         startedAt: Date.now(), ended: false, busy: false, tasks: [],
         messages: [], transcript: [],
         outQueue: [], outCurrent: null, outPos: 0, speechEndedAt: 0,
-        speech: { active: false, chunks: [], loud: 0, quiet: 0, ms: 0 }, pending: [],
+        speech: { active: false, chunks: [], loud: 0, quiet: 0, ms: 0 },
+        heard: [], sttNext: 0, sttApplied: 0, sttResults: new Map(), gen: 0,
     };
     calls.set(id, call);
 
@@ -538,7 +567,7 @@ export async function answerCall({ id, from, sdp, user, tokenSource }) {
     speak(call, hello);
 }
 
-// Simple voice detection: a turn starts when the caller gets loud and ends after 0.8 s of quiet.
+// Simple voice detection: a piece of speech starts when the caller gets loud and ends after 1 s of quiet.
 // While the AI is talking (and a moment after) the caller's audio is ignored, so the AI never hears itself.
 function listen(call, samples) {
     if (call.ended) return;
@@ -556,6 +585,7 @@ function listen(call, samples) {
         if (s.chunks.length > 100) s.chunks.shift(); // keep 1 s of audio from just before the speech is noticed
         if (s.loud >= (aiTalking ? 250 : 60)) {
             s.active = true; s.ms = 0; s.quiet = 0;
+            call.gen++; // an answer still being prepared is dropped; it is redone with everything the caller says
             if (aiTalking) { call.outQueue = []; call.outCurrent = null; call.speechEndedAt = Date.now(); } // caller talks over the AI: it stops
         }
         return;
@@ -563,17 +593,12 @@ function listen(call, samples) {
     s.chunks.push(samples);
     s.ms += ms;
     s.quiet = loud ? 0 : s.quiet + ms;
-    if (s.quiet >= 800 || s.ms >= 15000) {
+    if (s.quiet >= 1000 || s.ms >= 15000) {
         const chunks = s.chunks;
         s.active = false; s.chunks = []; s.loud = 0; s.quiet = 0; s.ms = 0;
-        if (chunks.length > 40) { call.pending.push(chunks); nextTurn(call); }
+        if (chunks.length > 40) transcribe(call, chunks);
+        else respondWhenReady(call); // just a noise: answer what was already said
     }
-}
-
-// One turn at a time; what the caller says meanwhile waits and is answered next
-async function nextTurn(call) {
-    if (call.busy) return;
-    while (call.pending.length && !call.ended && !call.busy) await handleUtterance(call, call.pending.shift());
 }
 
 // ─── Webhook entry (from the ai.classgrid.in server) ──────────
