@@ -407,15 +407,15 @@ export function ProjectModePage() {
       {showEditor ? (
         <div className="relative flex-1 flex flex-col">
           {folder && !openProject.repo && (
-            <div className="shrink-0 flex items-center gap-3 px-4 py-2 border-b border-amber-500/20 bg-amber-500/10 text-sm">
+            <div className="shrink-0 flex flex-wrap items-center gap-x-3 gap-y-2 px-4 py-2 border-b border-amber-500/20 bg-amber-500/10 text-sm overflow-hidden">
               <AlertTriangle className="size-4 shrink-0 text-amber-600 dark:text-amber-400" />
-              <span className="flex-1 text-amber-700 dark:text-amber-400">This project has no GitHub repo yet. Code is only kept on GitHub, so make a repo and push your work.</span>
+              <span className="flex-1 min-w-[14rem] text-amber-700 dark:text-amber-400">This project has no GitHub repo yet. Code is only kept on GitHub, so make a repo and push your work.</span>
               <button
                 onClick={() => {
                   setAiOpen(true);
                   setTimeout(() => window.dispatchEvent(new CustomEvent("agent:ask", { detail: { text: "Create a GitHub repo for this project and push the code to it." } })), 400);
                 }}
-                className="shrink-0 h-8 px-3 rounded-full border border-border bg-background text-sm text-foreground hover:bg-secondary"
+                className="shrink-0 max-w-full h-8 px-3 rounded-full border border-border bg-background text-sm text-foreground hover:bg-secondary whitespace-nowrap truncate"
               >
                 Ask Agent to create repo
               </button>
