@@ -307,7 +307,8 @@ const RichChatInput = forwardRef<any, Props>(function RichChatInput(
         if (a) { e.preventDefault(); if (/^https?:\/\//i.test(href)) window.open(href, "_blank", "noopener,noreferrer"); }
       }}
       className={cn(
-        "whitespace-pre-wrap break-words cursor-text",
+        // inline-block like the old textarea, so the chat box keeps the exact old size
+        "inline-block align-baseline whitespace-pre-wrap break-words cursor-text",
         "empty:before:content-[attr(data-placeholder)] empty:before:opacity-50 empty:before:pointer-events-none",
         "[&_a]:text-blue-600 dark:[&_a]:text-blue-400 [&_a]:underline [&_a]:underline-offset-2",
         "[&_code]:bg-black/5 dark:[&_code]:bg-white/10 [&_code]:px-1 [&_code]:py-0.5 [&_code]:rounded [&_code]:font-mono [&_code]:text-[0.9em]",
