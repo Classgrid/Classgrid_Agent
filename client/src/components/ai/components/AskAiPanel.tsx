@@ -5489,6 +5489,8 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
               );
             })}
             {gridJoinLines.after.map((j) => <GridJoinLine key={`join-${j.email}`} {...j} />)}
+            {/* Share Grid: the agent is answering someone else (sending is blocked until it is done) */}
+            {gridBlockedBy && <GridReplyingLine person={gridBlockedBy} />}
 
             {/* Rendering priority message right after the normal messages */}
             {priorityMessage && (
@@ -5641,7 +5643,6 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
                   )}
                 </>
               )}
-              {gridBlockedBy && <GridReplyingLine person={gridBlockedBy} />}
               <form onSubmit={handleSubmit} className={cn("space-y-2", endedView && "hidden")}>
                 <div className={cn(
                   variant === "overlay" ? "w-full" : "sm:w-[80%]",
@@ -6334,7 +6335,6 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
                             )}
                           </>
                         )}
-                        {gridBlockedBy && <GridReplyingLine person={gridBlockedBy} />}
                         <form onSubmit={handleSubmit} className={cn("space-y-2", endedView && "hidden")}>
                           <div className={cn(
                             "group relative w-full shadow-sm rounded-2xl border border-border !bg-white dark:!bg-[#0f0f0f] focus-within:border-black/80 dark:focus-within:border-white/50 focus-within:ring-1 focus-within:ring-black/80 dark:focus-within:ring-white/50 transition-all duration-300"

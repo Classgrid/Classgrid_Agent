@@ -1335,6 +1335,7 @@ export const streamAskAi = async (req, res) => {
     res.write(':' + Array(2048).join(' ') + '\n\n');
 
     let keepAliveInterval = null;
+    let releaseGridLock = null; // Share Grid: unlocks "Agent is responding to …" when this request is fully done (see finally)
     try {
 
         if (body.question === "__ban_check__") {
@@ -1439,8 +1440,9 @@ export const streamAskAi = async (req, res) => {
                 // One reply at a time: while the agent answers one person, the others see
                 // "Agent is responding to <name> (<email>)" and can't send until it's done
                 const replyKey = `ai:grid-replying:${sessionId}`;
-                const replyMine = JSON.stringify({ email: gridSender.email, name: gridSender.name });
-                const gotReply = await redis.set(replyKey, replyMine, "EX", 600, "NX").catch(() => "OK");
+                // Each request has its own id, so an older request finishing can't unlock a newer one
+                const replyMine = JSON.stringify({ email: gridSender.email, name: gridSender.name, id: crypto.randomBytes(8).toString("hex") });
+                let gotReply = await redis.set(replyKey, replyMine, "EX", 300, "NX").catch((e) => { console.error("[ShareGrid] lock error:", e?.message); return "OK"; });
                 if (!gotReply) {
                     let current = null;
                     try { current = JSON.parse((await redis.get(replyKey)) || "null"); } catch { /* treat as free */ }
@@ -1450,18 +1452,28 @@ export const streamAskAi = async (req, res) => {
                         res.end();
                         return;
                     }
+                    // Same person again (e.g. their queued message): this newer request takes over the lock
+                    gotReply = await redis.set(replyKey, replyMine, "EX", 300).catch(() => "OK");
                 }
                 const gridIo = req.app.get("io");
-                console.log(`[ShareGrid] lock ${gotReply ? "taken" : "kept"} by ${gridSender.email} in ${sessionId}`);
+                console.log(`[ShareGrid] lock taken by ${gridSender.email} in ${sessionId}`);
                 gridIo?.to(`aigrid:${sessionId}`).emit("aigrid:update", { sessionId, kind: "reply_start", by: gridSender.email, name: gridSender.name });
-                res.on("close", () => {
-                    // The whole reply is done (thinking, tools, answer): wait 1 full second, then unlock
+                // Long replies keep the lock (it would expire after 5 minutes only if the server stopped)
+                const lockHeartbeat = setInterval(async () => {
+                    try { if ((await redis.get(replyKey)) === replyMine) await redis.expire(replyKey, 300); } catch { /* next beat */ }
+                }, 60 * 1000);
+                // Called once at the very end of this request (the finally below): thinking, tools, answer and
+                // saving are all done, even if the sender reloaded or closed the tab. Then wait 1 full second.
+                releaseGridLock = () => {
+                    clearInterval(lockHeartbeat);
                     setTimeout(async () => {
-                        try { if ((await redis.get(replyKey)) === replyMine) await redis.del(replyKey); } catch { /* expires by itself */ }
+                        let mine = false;
+                        try { mine = (await redis.get(replyKey)) === replyMine; if (mine) await redis.del(replyKey); } catch { /* expires by itself */ }
+                        if (!mine) return; // a newer request by the same person holds it now
                         console.log(`[ShareGrid] lock released by ${gridSender.email} in ${sessionId}`);
                         gridIo?.to(`aigrid:${sessionId}`).emit("aigrid:update", { sessionId, kind: "reply_end", by: gridSender.email });
                     }, 1000);
-                });
+                };
 
                 const people = await gridProfilesText(sessionId, grid, userEmail);
                 volatilePrompt += `\n\n<shared_chat>\nThis is a Share Grid chat: one Classgrid AI chat that ${grid.members.length} people use together (not a Grids group chat). Each user message starts with the name of the person who sent it. The latest message is from ${gridSender.name}.\nThe people in this chat and their profiles:\n${people}\n</shared_chat>`;
@@ -4872,6 +4884,7 @@ If a tool fails, never show the error message; say only: "Something went wrong o
         }
     } finally {
         if (keepAliveInterval) clearInterval(keepAliveInterval);
+        if (releaseGridLock) releaseGridLock();
         if (!res.writableEnded) {
             res.write('data: [DONE]\n\n');
             res.end();

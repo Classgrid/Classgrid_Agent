@@ -123,8 +123,13 @@ export function GridJoinLine({ name, email, via, at }: { name: string; email: st
 export function GridReplyingLine({ person }: { person: { name: string; email: string } }) {
   const showEmail = person.email && person.name !== person.email;
   return (
-    <div className="flex items-center gap-2 px-2 pb-2 text-[13px] text-muted-foreground" role="status" aria-live="polite">
-      <Spinner className="size-3.5 shrink-0" />
+    <div className="flex items-center gap-2.5 w-full my-4 text-[14px] text-muted-foreground" role="status" aria-live="polite">
+      {/* Three bouncing dots */}
+      <span className="flex items-end gap-1 h-3 shrink-0" aria-hidden="true">
+        {[0, 150, 300].map((delay) => (
+          <span key={delay} className="h-1.5 w-1.5 rounded-full bg-muted-foreground/70 animate-bounce" style={{ animationDelay: `${delay}ms` }} />
+        ))}
+      </span>
       <span className="min-w-0 break-words">
         Agent is responding to <span className="font-semibold text-foreground/80">{person.name}</span>
         {showEmail ? ` (${person.email})` : ""}. You can send when it's done.
