@@ -605,11 +605,17 @@ export function ProjectModePage() {
             {projects === null ? (
               <div className="flex flex-col gap-4 max-w-3xl">
                 {[0, 1, 2].map((i) => (
-                  <div key={i} className="rounded-xl border border-border bg-background p-4 flex flex-col gap-2 min-h-[140px]">
-                    <div className="flex items-center gap-2"><Skeleton className="size-5 rounded" /><Skeleton className="h-4 w-32" /></div>
-                    <Skeleton className="h-3 w-40" />
-                    <Skeleton className="h-3 w-28" />
-                    <Skeleton className="mt-auto h-8 w-20 rounded-full" />
+                  <div key={i} className="rounded-xl border border-border bg-background p-5 flex flex-col gap-3">
+                    <div className="flex items-center gap-4 min-w-0">
+                      <Skeleton className="size-32 shrink-0 rounded-xl" />
+                      <div className="flex-1 min-w-0 flex flex-col gap-2">
+                        <Skeleton className="h-4 w-36" />
+                        <Skeleton className="h-3 w-72 max-w-full" />
+                      </div>
+                      <Skeleton className="h-9 w-24 shrink-0 rounded-full" />
+                    </div>
+                    <Skeleton className="h-4 w-64 max-w-full" />
+                    <Skeleton className="h-3 w-48 max-w-full" />
                   </div>
                 ))}
               </div>
