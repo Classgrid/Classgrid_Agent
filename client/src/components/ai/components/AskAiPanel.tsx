@@ -143,7 +143,7 @@ import {
 import { cn } from "../utils";
 import { CodeBlockClient } from "./CodeBlockClient";
 import { ModelPicker, useSelectedModel, MODEL_GROUPS, AUTO_MODEL_ID } from "./ModelPicker";
-import { StarterCards, CapabilityStrip, TypingGreeting } from "./AgentHomeExtras";
+import { TypingGreeting } from "./AgentHomeExtras";
 import { toast } from "sonner";
 import FilePreviewModal, { type FilePreviewSource } from "./FilePreviewModal";
 import { DocsImageViewer } from "./DocsImageViewer";
@@ -4642,9 +4642,6 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
                 <h2 className="text-xl font-semibold text-foreground tracking-tight min-h-[1.75rem]">
                   <TypingGreeting name={user?.name} paused={input.trim().length > 0} />
                 </h2>
-                <p className="text-sm text-muted-foreground">
-                  Your AI agent
-                </p>
               </div>
             </div>
           </>
@@ -6313,9 +6310,6 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
                     <h2 className="text-xl font-semibold text-foreground tracking-tight min-h-[1.75rem]">
                       <TypingGreeting name={user?.name} paused={input.trim().length > 0} />
                     </h2>
-                    <p className="text-sm text-muted-foreground">
-                      Your AI agent
-                    </p>
                   </div>
 
                   {/* Inline input form â€” not using panelInput */}
@@ -6785,13 +6779,6 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
                     )}
                   </div>
 
-                  {/* Show what the agent can do: starter prompts + the user's connected apps / scheduled tasks */}
-                  {!isTerminated && !readOnly && (
-                    <div className="hidden sm:flex w-full flex-col items-center gap-3">
-                      <StarterCards onPick={(prompt) => askQuestionRef.current?.(prompt)} />
-                      <CapabilityStrip integrations={INTEGRATIONS_LIST} />
-                    </div>
-                  )}
                 </div>
               </div>
             ) : (
