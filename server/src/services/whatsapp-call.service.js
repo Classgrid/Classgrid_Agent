@@ -152,6 +152,16 @@ const START_TASK_TOOL = {
     },
 };
 
+const ASK_CLASSGRID_TOOL = {
+    name: "ask_classgrid",
+    description: "Ask the Classgrid Agent right now, during the call, and get its answer back to tell the caller. It has everything in the caller's account: classrooms, chats, schedules, files, connected apps (Gmail, Google Calendar, Google Drive, Notion and more), web search and all other Classgrid tools. Use it for anything to look up or do while the caller is on the line. It can take from a few seconds to a minute.",
+    input_schema: {
+        type: "object",
+        properties: { request: { type: "string", description: "What to look up or do, with every detail the caller gave." } },
+        required: ["request"],
+    },
+};
+
 const END_CALL_TOOL = {
     name: "end_call",
     description: "Hang up the phone call (after what you say now is spoken).",
@@ -215,7 +225,7 @@ async function claudeTurn(call) {
             model: CALL_MODEL,
             max_tokens: 400,
             system: systemPrompt(call.user),
-            tools: isOwner(call.user) ? [START_TASK_TOOL, END_CALL_TOOL, ...PROJECT_TOOLS] : [START_TASK_TOOL, END_CALL_TOOL],
+            tools: isOwner(call.user) ? [ASK_CLASSGRID_TOOL, START_TASK_TOOL, END_CALL_TOOL, ...PROJECT_TOOLS] : [ASK_CLASSGRID_TOOL, START_TASK_TOOL, END_CALL_TOOL],
             messages: call.messages,
         }),
     });
@@ -295,6 +305,9 @@ async function reply(call) {
                     : `Task saved (${call.tasks.length} so far), but there is no project called "${t.input.project_name}".`;
             } else if (t.name === "end_call") {
                 content = "Hanging up.";
+            } else if (t.name === "ask_classgrid") {
+                call.transcript.push(`AI asked Classgrid: ${t.input?.request || ""}`);
+                content = await askClassgridLive(call, String(t.input?.request || ""));
             } else if (isOwner(call.user)) {
                 call.transcript.push(`AI used ${t.name} ${JSON.stringify(t.input || {})}`);
                 content = await runProjectTool(call, t).catch((e) => `Failed: ${e.message}`);
@@ -353,9 +366,8 @@ export function endCall(callId, why = "ended") {
 }
 
 async function afterCall(call) {
-    // Nothing said, nothing to do
-    const spoke = call.transcript.some((l) => l.startsWith("Caller:"));
-    if (!call.tasks.length && !spoke) return;
+    // Only saved tasks run after the call (questions were already answered live with ask_classgrid)
+    if (!call.tasks.length) return;
     let task = call.tasks.length === 1
         ? call.tasks[0].task
         : call.tasks.length > 1
@@ -380,6 +392,23 @@ async function afterCall(call) {
     }
     const short = result.answer.length > 1500 ? `${result.answer.slice(0, 1500).trimEnd()}…` : result.answer;
     await sendWhatsappText(call.from, `${short}${link}`);
+}
+
+// A live question during the call: the full Agent answers (all tools and plugins of the account). All live questions
+// of one call go into one chat. If it takes over 60 s the call goes on, and the answer is sent on WhatsApp when ready.
+async function askClassgridLive(call, request) {
+    if (!request.trim()) return "No request was given.";
+    const question = `[Live question during a WhatsApp voice call with the user. Your answer is read out on the call, so keep it short and spoken; no tables or links.]\n${request}`;
+    const run = runAgentTask(call.user, question, null, (id) => { call.liveSessionId ||= id; }, call.liveSessionId || null);
+    const timeout = new Promise((resolve) => setTimeout(() => resolve(null), 60 * 1000));
+    const result = await Promise.race([run, timeout]);
+    if (!result) {
+        run.then((r) => sendWhatsappText(call.from, `${r.answer || `Classgrid AI could not finish this${r.error ? `: ${r.error}` : "."}`}${r.sessionId ? `\n\n${CHAT_URL}/agent/${r.sessionId}` : ""}`))
+            .catch(() => {});
+        return "Still working on it. The answer will be sent to the caller on WhatsApp when it is ready.";
+    }
+    if (!result.answer) return `Classgrid could not answer${result.error ? `: ${result.error}` : "."}`;
+    return result.answer.slice(0, 4000);
 }
 
 // A short login token for this user, for calling our own routes as them (same checks as their own login)
@@ -421,19 +450,19 @@ function keepProjectOpen(userId) {
 // Runs the Classgrid Agent as this user through the normal chat route (same login checks, AI credits and saved
 // chat as when they use chat.classgrid.in). The route makes the new chat and tells its id (session_info).
 // Returns { sessionId, answer, error }.
-async function runAgentTask(user, question, projectId, onSession) {
+async function runAgentTask(user, question, projectId, onSession, sessionId = null) {
     const port = process.env.PORT || 3000;
     const res = await fetch(`http://127.0.0.1:${port}/api/ai/ask`, {
         method: "POST",
         headers: { Authorization: `Bearer ${userToken(user)}`, "Content-Type": "application/json" },
         // projectId: the chat is saved inside that Project Mode project
-        body: JSON.stringify({ question, ...(projectId ? { projectId: String(projectId) } : {}) }),
+        body: JSON.stringify({ question, ...(sessionId ? { sessionId } : {}), ...(projectId ? { projectId: String(projectId) } : {}) }),
     });
     if (!res.ok || !res.body) {
         const err = await res.json().catch(() => ({}));
         return { sessionId: null, answer: "", error: err.message || err.error || `the request failed (${res.status})` };
     }
-    let buffer = "", answer = "", streamed = "", error = "", sessionId = null;
+    let buffer = "", answer = "", streamed = "", error = "";
     const decoder = new TextDecoder();
     for await (const chunk of res.body) {
         buffer += decoder.decode(chunk, { stream: true });
