@@ -3,9 +3,9 @@
 // A user calls the Classgrid WhatsApp number. Meta sends the call to the ai.classgrid.in server (same machine), which
 // passes it here. If the caller's number is the verified WhatsApp of exactly one Classgrid account, the call is
 // answered as that person: their voice goes to Cloudflare Whisper (speech to text), Claude talks with them, and the
-// reply is spoken back with Cloudflare Aura (text to speech). A call lasts at most 2 minutes. When the AI has the task
-// (or the time is up) the call ends and the Classgrid Agent does the work in the background as that user, in a new
-// chat in their account; the result is sent to them on WhatsApp.
+// reply is spoken back with Cloudflare Aura (text to speech). A call lasts at most 5 minutes (never cut mid-sentence).
+// The AI saves the caller's tasks during the call; when the call ends, the Classgrid Agent does them in the
+// background as that user, in a new chat in their account, and the result is sent to them on WhatsApp.
 //
 // Media is WebRTC (Meta's Calling API): we answer Meta's SDP offer from our own peer connection (@roamhq/wrtc),
 // audio is 48 kHz Opus. UDP 10000-60000 is open on the server for it.
@@ -21,8 +21,9 @@ import { chargeableTokens } from "./ai-token-pricing.js";
 
 const GRAPH = "https://graph.facebook.com/v22.0";
 const CALL_MODEL = "claude-haiku-5-5"; // fastest Claude, so the voice replies come quickly
-const MAX_CALL_MS = 2 * 60 * 1000;
-const WRAP_UP_MS = 105 * 1000; // at 1:45 the AI is told the time is almost up
+const MAX_CALL_MS = 5 * 60 * 1000;
+const WRAP_UP_MS = MAX_CALL_MS - 15 * 1000; // 15 s before the end the AI is told the time is almost up
+const OVERTIME_MS = 30 * 1000; // at the limit, a sentence or answer in progress may finish (up to 30 s more)
 const SAMPLE_RATE = 48000;
 const FRAME = SAMPLE_RATE / 100; // 10 ms of audio
 const CHAT_URL = "https://chat.classgrid.in";
@@ -140,7 +141,7 @@ async function textToSpeech(text) {
 
 const START_TASK_TOOL = {
     name: "start_task",
-    description: "Hand the caller's task to the Classgrid Agent, which then does the full work in their Classgrid account after the call (it has their chats, projects, GitHub, Vercel and connected apps) and sends them the result on WhatsApp. Calling this ends the phone call.",
+    description: "Save a task for the Classgrid Agent. When the call ends, the Agent does all saved tasks, in order, in the caller's Classgrid account (it has their chats, projects, GitHub, Vercel, Google and other connected apps) and sends them the result on WhatsApp. The call goes on after this.",
     input_schema: {
         type: "object",
         properties: {
@@ -149,6 +150,12 @@ const START_TASK_TOOL = {
         },
         required: ["task"],
     },
+};
+
+const END_CALL_TOOL = {
+    name: "end_call",
+    description: "Hang up the phone call (after what you say now is spoken).",
+    input_schema: { type: "object", properties: {} },
 };
 
 // Project Mode tools, for the owner's account only (Project Mode is super admin only for now)
@@ -195,7 +202,7 @@ function systemPrompt(user) {
         "You are Classgrid AI on a WhatsApp voice call with a Classgrid user.",
         `Caller: ${user.name || "unknown name"} (${user.email}). Time: ${now} (India).`,
         "What you say is read out by an English text-to-speech voice, so write plain spoken English: short sentences, no markdown, no lists, no emojis, no links.",
-        "The call can last at most 2 minutes.",
+        "The call can last at most 5 minutes.",
         "After the call the Classgrid Agent does the work in the caller's account and sends them the result on WhatsApp.",
     ].join("\n");
 }
@@ -208,7 +215,7 @@ async function claudeTurn(call) {
             model: CALL_MODEL,
             max_tokens: 400,
             system: systemPrompt(call.user),
-            tools: isOwner(call.user) ? [START_TASK_TOOL, ...PROJECT_TOOLS] : [START_TASK_TOOL],
+            tools: isOwner(call.user) ? [START_TASK_TOOL, END_CALL_TOOL, ...PROJECT_TOOLS] : [START_TASK_TOOL, END_CALL_TOOL],
             messages: call.messages,
         }),
     });
@@ -262,6 +269,7 @@ async function handleUtterance(call, chunks) {
         await speak(call, "Sorry, I had a problem there. Could you say that again?");
     } finally {
         call.busy = false;
+        if (call.pending.length) setImmediate(() => nextTurn(call));
     }
 }
 
@@ -270,17 +278,23 @@ async function reply(call) {
     for (let round = 0; round < 4 && !call.ended; round++) {
         const { text, tools } = await claudeTurn(call);
         if (text) call.transcript.push(`AI: ${text}`);
-        const start = tools.find((t) => t.name === "start_task");
-        await speak(call, text || (start ? "Okay, I'm on it. I'll send you the result on WhatsApp." : ""));
+        const hangUp = tools.find((t) => t.name === "end_call");
+        await speak(call, text);
         if (!tools.length) return;
         // Every tool the AI asked for gets its answer in one message
         const results = [];
         for (const t of tools) {
             let content;
             if (t.name === "start_task") {
-                call.task = String(t.input?.task || "").trim() || null;
-                call.taskProject = t.input?.project_name ? await findProject(call.user, t.input.project_name).catch(() => null) : null;
-                content = "Task handed to the Agent. The call is ending.";
+                const task = String(t.input?.task || "").trim();
+                const project = t.input?.project_name ? await findProject(call.user, t.input.project_name).catch(() => null) : null;
+                if (task) call.tasks.push({ task, project });
+                call.transcript.push(`AI saved a task: ${task}`);
+                content = project || !t.input?.project_name
+                    ? `Task saved (${call.tasks.length} so far). It starts when the call ends.`
+                    : `Task saved (${call.tasks.length} so far), but there is no project called "${t.input.project_name}".`;
+            } else if (t.name === "end_call") {
+                content = "Hanging up.";
             } else if (isOwner(call.user)) {
                 call.transcript.push(`AI used ${t.name} ${JSON.stringify(t.input || {})}`);
                 content = await runProjectTool(call, t).catch((e) => `Failed: ${e.message}`);
@@ -290,25 +304,37 @@ async function reply(call) {
             results.push({ type: "tool_result", tool_use_id: t.id, content });
         }
         call.messages.push({ role: "user", content: results });
-        if (start) {
+        if (hangUp) {
             await speakingDone(call);
-            endCall(call.id, "task");
+            endCall(call.id, "AI hung up");
             return;
         }
     }
 }
 
 function wrapUp(call) {
-    if (call.ended || call.task) return;
+    if (call.ended) return;
     const run = async () => {
         while (call.busy && !call.ended) await new Promise((r) => setTimeout(r, 100));
-        if (call.ended || call.task) return;
+        if (call.ended) return;
         // Added only between turns, so it never lands between a tool request and its answer
         call.messages.push({ role: "user", content: "[The call ends in about 15 seconds.]" });
         call.busy = true;
         try { await reply(call); } catch (e) { console.error("[WA call] wrap-up failed:", e.message); } finally { call.busy = false; }
     };
     run();
+}
+
+// The time limit: if the caller is talking or the AI is answering right now, let it finish first
+function timeUp(call) {
+    const limit = call.startedAt + MAX_CALL_MS + OVERTIME_MS;
+    const check = () => {
+        if (call.ended) return;
+        const talking = call.speech.active || call.busy || call.outCurrent || call.outQueue.length > 0;
+        if (talking && Date.now() < limit) call.hardStop = setTimeout(check, 500);
+        else endCall(call.id, "5 minute limit");
+    };
+    check();
 }
 
 export function endCall(callId, why = "ended") {
@@ -329,9 +355,13 @@ export function endCall(callId, why = "ended") {
 async function afterCall(call) {
     // Nothing said, nothing to do
     const spoke = call.transcript.some((l) => l.startsWith("Caller:"));
-    if (!call.task && !spoke) return;
-    let task = call.task || `The user called Classgrid on WhatsApp. Here is the call:\n${call.transcript.join("\n")}\n\nDo what they asked.`;
-    const project = call.taskProject;
+    if (!call.tasks.length && !spoke) return;
+    let task = call.tasks.length === 1
+        ? call.tasks[0].task
+        : call.tasks.length > 1
+            ? `Do these tasks in this order:\n${call.tasks.map((t, i) => `${i + 1}. ${t.task}`).join("\n")}`
+            : `The user called Classgrid on WhatsApp. Here is the call:\n${call.transcript.join("\n")}\n\nDo what they asked.`;
+    const project = call.tasks.find((t) => t.project)?.project || null;
     let stopKeepOpen = () => {};
     if (project) {
         // Open the project like the Project Mode page does, so the Agent works inside its files
@@ -442,10 +472,10 @@ export async function answerCall({ id, from, sdp, user, tokenSource }) {
     const source = new nonstandard.RTCAudioSource();
     const call = {
         id, from, user, pc, source, tokenSource,
-        startedAt: Date.now(), ended: false, busy: false, task: null,
+        startedAt: Date.now(), ended: false, busy: false, tasks: [],
         messages: [], transcript: [],
         outQueue: [], outCurrent: null, outPos: 0, speechEndedAt: 0,
-        speech: { active: false, chunks: [], loud: 0, quiet: 0, ms: 0 },
+        speech: { active: false, chunks: [], loud: 0, quiet: 0, ms: 0 }, pending: [],
     };
     calls.set(id, call);
 
@@ -498,7 +528,7 @@ export async function answerCall({ id, from, sdp, user, tokenSource }) {
     }, 10);
 
     call.wrapTimer = setTimeout(() => wrapUp(call), WRAP_UP_MS);
-    call.hardStop = setTimeout(() => endCall(id, "2 minute limit"), MAX_CALL_MS);
+    call.hardStop = setTimeout(() => timeUp(call), MAX_CALL_MS);
 
     // Greeting
     const first = String(user.name || "").split(" ")[0];
@@ -512,16 +542,22 @@ export async function answerCall({ id, from, sdp, user, tokenSource }) {
 // While the AI is talking (and a moment after) the caller's audio is ignored, so the AI never hears itself.
 function listen(call, samples) {
     if (call.ended) return;
-    const talking = call.outCurrent || call.outQueue.length > 0 || Date.now() - call.speechEndedAt < 400;
     const s = call.speech;
-    if (call.busy || talking) { s.active = false; s.chunks = []; s.loud = 0; s.quiet = 0; s.ms = 0; return; }
+    const aiTalking = !!call.outCurrent || call.outQueue.length > 0;
+    // Right after the AI stops, a short tail of its own voice can still come back: skip it
+    if (!aiTalking && !s.active && Date.now() - call.speechEndedAt < 300) { s.loud = 0; s.chunks = []; return; }
     const ms = (samples.length / SAMPLE_RATE) * 1000;
-    const loud = rms(samples) > 700;
+    // While the AI talks, only a clearly louder voice for a moment counts (not an echo of the AI)
+    const loud = rms(samples) > (aiTalking ? 1500 : 700);
     if (!s.active) {
-        s.loud = loud ? s.loud + ms : 0;
+        // Loud time adds up, quiet gaps (between words) take it down slowly, so a voice is noticed quickly
+        s.loud = loud ? s.loud + ms : Math.max(0, s.loud - ms / 2);
         s.chunks.push(samples);
-        if (s.chunks.length > 30) s.chunks.shift(); // keep a little audio from just before the speech starts
-        if (s.loud >= 60) { s.active = true; s.ms = 0; s.quiet = 0; }
+        if (s.chunks.length > 100) s.chunks.shift(); // keep 1 s of audio from just before the speech is noticed
+        if (s.loud >= (aiTalking ? 250 : 60)) {
+            s.active = true; s.ms = 0; s.quiet = 0;
+            if (aiTalking) { call.outQueue = []; call.outCurrent = null; call.speechEndedAt = Date.now(); } // caller talks over the AI: it stops
+        }
         return;
     }
     s.chunks.push(samples);
@@ -530,8 +566,14 @@ function listen(call, samples) {
     if (s.quiet >= 800 || s.ms >= 15000) {
         const chunks = s.chunks;
         s.active = false; s.chunks = []; s.loud = 0; s.quiet = 0; s.ms = 0;
-        if (chunks.length > 40) handleUtterance(call, chunks);
+        if (chunks.length > 40) { call.pending.push(chunks); nextTurn(call); }
     }
+}
+
+// One turn at a time; what the caller says meanwhile waits and is answered next
+async function nextTurn(call) {
+    if (call.busy) return;
+    while (call.pending.length && !call.ended && !call.busy) await handleUtterance(call, call.pending.shift());
 }
 
 // ─── Webhook entry (from the ai.classgrid.in server) ──────────
