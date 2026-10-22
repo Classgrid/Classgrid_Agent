@@ -189,7 +189,7 @@ import { MasterWorkflowWrapper } from "./stepper/MasterWorkflowWrapper";
 import { OpenPageView } from "./stepper/OpenPageView";
 import { EmailActionView } from "./stepper/EmailActionView";
 import { DocumentGenerationView } from "./stepper/DocumentGenerationView";
-import { ShareGridPanel, useShareGrid, GridSenderTag } from "./share-grid/ShareGridPanel";
+import { ShareGridPanel, useShareGrid, GridSenderTag, GridJoinLine } from "./share-grid/ShareGridPanel";
 import { KnowledgeBaseSearchView } from "./stepper/KnowledgeBaseSearchView";
 import { CdnUploadView } from "./stepper/CdnUploadView";
 import { EmailSentView } from "./stepper/EmailSentView";
@@ -3111,6 +3111,25 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
   // Messages from before the chat was shared have no sender: they are the owner's
   const gridStart = gridOwner?.joinedAt ? new Date(gridOwner.joinedAt).getTime() : 0;
   const gridSenderOf = (m: ChatMessage) => m.senderEmail?.toLowerCase() || (m.createdAt < gridStart ? gridOwner?.email : gridMyEmail);
+  // "X joined the chat" lines: each one shows just before the first message sent after that person joined
+  const gridJoinLines = React.useMemo(() => {
+    if (!grid.shared || !grid.data) return { byMessage: {} as Record<string, any[]>, after: [] as any[] };
+    const via: Record<string, string> = {};
+    for (const h of grid.data.history) if (h.status === "accepted" && h.email && !via[h.email.toLowerCase()]) via[h.email.toLowerCase()] = h.type;
+    const joins = grid.data.members
+      .filter((p) => p.role === "member" && p.joinedAt)
+      .map((p) => ({ name: p.name, email: p.email, via: via[p.email], at: new Date(p.joinedAt as string).getTime() }))
+      .sort((a, b) => a.at - b.at);
+    const visible = messages.filter((m) => !m.hidden && !(m.role === "user" && typeof m.content === "string" && m.content.trim().startsWith("[SYSTEM:")));
+    const byMessage: Record<string, any[]> = {};
+    const after: any[] = [];
+    for (const j of joins) {
+      const next = visible.find((m) => m.createdAt >= j.at);
+      if (next) (byMessage[next.id] ||= []).push(j);
+      else after.push(j);
+    }
+    return { byMessage, after };
+  }, [grid.shared, grid.data, messages]);
   const [error, setError] = useState("");
   const [isTerminated, setIsTerminated] = useState(false);
 
@@ -4615,6 +4634,7 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
 
               return (
                 <React.Fragment key={message.id}>
+                  {(gridJoinLines.byMessage[message.id] || []).map((j) => <GridJoinLine key={`join-${j.email}`} {...j} />)}
                   {showDateHeader && formattedDate && (
                     <div className="flex justify-center w-full my-6">
                       <span className="text-[11px] font-semibold text-muted-foreground">{formattedDate}</span>
@@ -5462,6 +5482,7 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
                 </React.Fragment>
               );
             })}
+            {gridJoinLines.after.map((j) => <GridJoinLine key={`join-${j.email}`} {...j} />)}
 
             {/* Rendering priority message right after the normal messages */}
             {priorityMessage && (

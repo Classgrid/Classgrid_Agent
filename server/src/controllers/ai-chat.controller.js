@@ -52,7 +52,7 @@ import {
     memoryText
 } from "../services/ai-chat.service.js";
 import { getHistory, getHistoryCount, appendToHistory, invalidateHistoryCache, getChatTranscript } from "../services/ai-chat-history.service.js";
-import { canAccessSession, gridLabelMap, getSharedSessionsFor } from "../services/ai-chat-grid.service.js";
+import { canAccessSession, gridLabelMap, gridProfilesText, getSharedSessionsFor } from "../services/ai-chat-grid.service.js";
 import { editorContextFor, rememberProjectSnapshot, sandboxDataDir, startCheckpoint, finishCheckpoint, linkChatToProject } from "../services/ide-project.service.js";
 import { buildEndConversationHandlers, reopenSession } from "../services/ai-end-conversation.service.js";
 import { hasEnoughTokens, deductTokens, getImageGenerationCost, tokenWindowEnd } from "../services/ai-credits.service.js";
@@ -1436,7 +1436,8 @@ export const streamAskAi = async (req, res) => {
                 }
                 const label = (e) => grid.labels[String(e).toLowerCase()] || e;
                 gridSender = { email: userEmail.toLowerCase(), name: label(userEmail.toLowerCase()) };
-                volatilePrompt += `\n\n<shared_chat>\nThis is a Share Grid chat: one Classgrid AI chat that ${grid.members.length} people use together (not a Grids group chat). The people: ${grid.members.map((m) => `${label(m.user_email)} <${String(m.user_email).toLowerCase()}>${m.role === "owner" ? " (owner, started this chat)" : ""}`).join(", ")}. Each user message starts with the name of the person who sent it. The latest message is from ${gridSender.name}.\n</shared_chat>`;
+                const people = await gridProfilesText(sessionId, grid, userEmail);
+                volatilePrompt += `\n\n<shared_chat>\nThis is a Share Grid chat: one Classgrid AI chat that ${grid.members.length} people use together (not a Grids group chat). Each user message starts with the name of the person who sent it. The latest message is from ${gridSender.name}.\nThe people in this chat and their profiles:\n${people}\n</shared_chat>`;
             }
 
             // Ownership verified, safe to load history

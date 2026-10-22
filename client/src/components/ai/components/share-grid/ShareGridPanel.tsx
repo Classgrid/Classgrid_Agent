@@ -3,7 +3,7 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { motion } from "framer-motion";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Check, Link2, Mail, Users, X, UserMinus, Search, Clock } from "lucide-react";
+import { Check, Link2, Mail, Users, X, UserMinus, UserPlus, Search, Clock } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/marketing_ui/button";
 import { Input } from "@/components/marketing_ui/input";
@@ -65,6 +65,34 @@ function PersonAvatar({ name, avatar, size = 32 }: { name: string; avatar?: stri
   ) : (
     <div className="rounded-full shrink-0 flex items-center justify-center bg-muted text-muted-foreground font-medium" style={{ width: size, height: size, fontSize: size * 0.42 }}>
       {initial}
+    </div>
+  );
+}
+
+/** A line in the chat where someone joined: "Rahul (rahul@x.com) joined the chat via the invite link · Oct 22, 11:11 AM". */
+/** The squiggly line that flanks a centered divider label (same look as the "Switched to <model>" divider). */
+function WaveLine({ className }: { className?: string }) {
+  const id = React.useId().replace(/:/g, "");
+  return (
+    <svg className={cn("h-3 w-full shrink", className)} preserveAspectRatio="none" aria-hidden="true">
+      <pattern id={id} width="14" height="12" patternUnits="userSpaceOnUse">
+        <path d="M0 6 Q3.5 0 7 6 T14 6" fill="none" stroke="currentColor" strokeWidth="1.25" />
+      </pattern>
+      <rect width="100%" height="100%" fill={`url(#${id})`} />
+    </svg>
+  );
+}
+
+export function GridJoinLine({ name, email, via, at }: { name: string; email: string; via?: string; at: number }) {
+  const how = via === "link" ? " via the invite link" : via === "email" ? " from an email invite" : via === "grids" ? " from Grids" : "";
+  const when = new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }).format(new Date(at));
+  return (
+    <div className="flex items-center gap-3 w-full my-5 px-4 text-muted-foreground/50">
+      <WaveLine />
+      <span className="shrink-0 text-[12px] text-center text-muted-foreground">
+        <span className="font-semibold text-foreground/80">{name}</span> ({email}) joined the chat{how} · {when}
+      </span>
+      <WaveLine />
     </div>
   );
 }

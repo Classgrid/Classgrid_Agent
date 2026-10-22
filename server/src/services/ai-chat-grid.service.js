@@ -44,9 +44,9 @@ export async function canAccessSession(session, email) {
 export async function profilesFor(emails) {
     const list = [...new Set((emails || []).map(norm).filter(Boolean))];
     if (list.length === 0) return {};
-    const users = await User.find({ email: { $in: list } }).select("name email profilePicture").lean();
+    const users = await User.find({ email: { $in: list } }).select("name email profilePicture privacySettings").lean();
     const out = {};
-    for (const u of users) out[norm(u.email)] = { name: u.name || u.email, avatar: u.profilePicture || "" };
+    for (const u of users) out[norm(u.email)] = { name: u.name || u.email, avatar: u.profilePicture || "", hideEmail: !!u.privacySettings?.hideEmail };
     for (const e of list) if (!out[e]) out[e] = { name: e.split("@")[0], avatar: "" };
     return out;
 }
@@ -137,10 +137,68 @@ export async function gridLabelMap(sessionId) {
     members.forEach((m, i) => {
         const email = norm(m.user_email);
         const sameName = names.filter((n) => n.toLowerCase() === names[i].toLowerCase()).length > 1;
-        labels[email] = sameName ? `${names[i]} (${email.split("@")[0]})` : names[i];
+        // (someone who hides their email gets a number instead of their email name)
+        labels[email] = !sameName ? names[i] : profiles[email]?.hideEmail ? `${names[i]} (${i + 1})` : `${names[i]} (${email.split("@")[0]})`;
     });
     const owner = norm(members.find((m) => m.role === "owner")?.user_email);
     return { labels, owner, members };
+}
+
+const IST = (d) => d ? new Date(d).toLocaleString("en-IN", { timeZone: "Asia/Kolkata", day: "numeric", month: "short", year: "numeric", hour: "numeric", minute: "2-digit" }) + " IST" : null;
+
+/**
+ * For the AI: every person's full profile (what their profile page shows), how and when they joined.
+ * Same privacy as the profile page: a hidden email or hobbies is left out for other people, and someone
+ * who blocked the viewer shows only their name.
+ */
+export async function gridProfilesText(sessionId, grid, viewerEmail) {
+    const viewer = norm(viewerEmail);
+    const emails = grid.members.map((m) => norm(m.user_email));
+    const users = await User.find({ email: { $in: emails } })
+        .select("_id name email role bio hobby metadata organization_id lastLoginAt createdAt privacySettings blocked_users")
+        .populate("organization_id", "name")
+        .lean();
+    const byEmail = Object.fromEntries(users.map((u) => [norm(u.email), u]));
+    const viewerId = String(byEmail[viewer]?._id || "");
+    const { data: joins } = await sb.from("ai_chat_grid_invites").select("invite_type, accepted_by_email, invited_email, accepted_at")
+        .eq("session_id", sessionId).eq("status", "accepted").order("accepted_at", { ascending: false }).limit(100);
+    const joinedVia = {};
+    for (const j of joins || []) { const e = norm(j.accepted_by_email || j.invited_email); if (e && !joinedVia[e]) joinedVia[e] = j.invite_type; }
+    let forum = {};
+    try {
+        const rows = await User.db.collection("forumusers").find({ email: { $in: emails } }).project({ email: 1, username: 1 }).toArray();
+        forum = Object.fromEntries(rows.map((r) => [norm(r.email), r.username]));
+    } catch { /* forum names are optional */ }
+
+    const viaText = { link: "the invite link", email: "an email invite", grids: "an invite from Grids" };
+    return grid.members.map((m) => {
+        const email = norm(m.user_email);
+        const u = byEmail[email] || {};
+        const self = email === viewer;
+        const blockedViewer = !self && viewerId && (u.blocked_users || []).map(String).includes(viewerId);
+        const hideEmail = !self && !!u.privacySettings?.hideEmail;
+        const hideHobbies = !self && !!u.privacySettings?.hideHobbies;
+        const lines = [`- ${grid.labels[email] || u.name || email}${hideEmail || blockedViewer ? "" : ` <${email}>`}${self ? " (the person sending the latest message)" : ""}`];
+        lines.push(m.role === "owner"
+            ? `  In this chat: owner, started this chat${m.joined_at ? `; shared it from ${IST(m.joined_at)}` : ""}`
+            : `  In this chat: member, joined ${IST(m.joined_at)}${joinedVia[email] ? ` via ${viaText[joinedVia[email]]}` : ""}`);
+        if (blockedViewer) return lines.join("\n");
+        const md = u.metadata || {};
+        if (["super_admin", "co_super_admin"].includes(u.role)) lines.push("  Classgrid team member");
+        if (u.organization_id?.name) lines.push(`  Organization: ${u.organization_id.name}`);
+        if (u.bio || md.bio) lines.push(`  Bio: ${String(u.bio || md.bio).slice(0, 500)}`);
+        if (!hideHobbies && (u.hobby || md.hobby)) lines.push(`  Hobbies: ${String(u.hobby || md.hobby).slice(0, 500)}`);
+        if (md.job_role) lines.push(`  Job role: ${md.job_role}`);
+        const stack = Array.isArray(md.tech_stack) ? md.tech_stack.join(", ") : typeof md.tech_stack === "string" ? md.tech_stack : "";
+        if (stack.trim()) lines.push(`  Tech stack: ${stack}`);
+        if (forum[email]) lines.push(`  Forum username: @${forum[email]}`);
+        const links = [["LinkedIn", md.linkedin_url], ["GitHub", md.github_url], ["X/Twitter", md.twitter_url], ["Instagram", md.instagram_url], ["Facebook", md.facebook_url], ["Portfolio", md.portfolio_url]]
+            .filter(([, url]) => typeof url === "string" && url.trim());
+        if (links.length) lines.push(`  Links: ${links.map(([k, url]) => `${k} ${url}`).join(", ")}`);
+        if (u.createdAt) lines.push(`  On Classgrid since: ${IST(u.createdAt)}`);
+        if (u.lastLoginAt) lines.push(`  Last seen: ${IST(u.lastLoginAt)}`);
+        return lines.join("\n");
+    }).join("\n");
 }
 
 /**
