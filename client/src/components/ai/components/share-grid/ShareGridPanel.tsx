@@ -349,6 +349,13 @@ export function ShareGridPanel({ sessionId, myEmail, onClose }: { sessionId: str
                 </Button>
                 {pickOpen && (
                   <div className="rounded-xl border border-border/60 p-2 flex flex-col gap-2">
+                    <div className="flex items-center justify-between pl-1">
+                      <span className="text-xs font-medium text-muted-foreground">Pick people from your Grids</span>
+                      <Button variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground hover:text-foreground" aria-label="Close" title="Close"
+                        onClick={() => { setPickOpen(false); setPicked([]); setSearch(""); }}>
+                        <X className="h-4 w-4" />
+                      </Button>
+                    </div>
                     <div className="relative">
                       <Search className="h-3.5 w-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
                       <Input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search people" className="h-9 pl-8 text-sm" aria-label="Search people" />
