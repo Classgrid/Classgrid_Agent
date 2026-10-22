@@ -13,7 +13,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import { useParams } from "react-router-dom";
-import { ArrowLeft, FolderGit2, GitBranch, GitCommitHorizontal, Github, ImagePlus, Pencil, Plus, Trash2 } from "lucide-react";
+import { ArrowLeft, FolderGit2, GitBranch, GitCommitHorizontal, Github, ImagePlus, Plus } from "lucide-react";
+import { Button } from "@/components/marketing_ui/button";
 import { Spinner } from "@/components/marketing_ui/spinner";
 import { Skeleton } from "@/components/marketing_ui/skeleton";
 import { DangerConfirmDialog } from "@/components/marketing_ui/danger-confirm-dialog";
@@ -700,8 +701,8 @@ export function ProjectModePage() {
                       </div>
                       {renaming?.id !== p.id && (
                         <>
-                          <button onClick={() => setRenaming({ id: p.id, name: p.name })} title="Edit name and logo" className="opacity-0 group-hover:opacity-100 p-1.5 rounded hover:bg-secondary shrink-0"><Pencil className="size-3.5" /></button>
-                          <button onClick={() => setDeleting(p)} title="Delete" className="opacity-0 group-hover:opacity-100 p-1.5 rounded hover:bg-secondary shrink-0"><Trash2 className="size-3.5" /></button>
+                          <Button variant="outline" onClick={() => setRenaming({ id: p.id, name: p.name })} className="shrink-0">Edit</Button>
+                          <Button variant="destructive" onClick={() => setDeleting(p)} className="shrink-0">Delete</Button>
                         </>
                       )}
                       <button
