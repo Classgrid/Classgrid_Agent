@@ -316,10 +316,10 @@ export function ShareGridPanel({ sessionId, myEmail, onClose }: { sessionId: str
       className="shrink-0 h-full bg-background border-l border-border/50 flex flex-col overflow-hidden shadow-xl z-50 max-sm:fixed max-sm:inset-0 max-sm:!w-full max-sm:z-[130] max-sm:border-l-0"
     >
       <div className="shrink-0 flex items-center justify-between px-4 pt-3 h-14 border-b border-border/50">
-        <Button variant="secondary" size="sm" className="text-xs h-8 pointer-events-none">
-          <Users className="h-4 w-4 mr-2" />
+        <div className="flex items-center gap-2 text-sm font-semibold text-foreground">
+          <Users className="h-4 w-4" />
           Share Grid
-        </Button>
+        </div>
         <Button variant="ghost" size="icon" onClick={onClose} className="h-8 w-8 shrink-0 ml-2 text-muted-foreground hover:text-foreground" aria-label="Close">
           <X className="h-4 w-4" />
         </Button>
@@ -338,12 +338,12 @@ export function ShareGridPanel({ sessionId, myEmail, onClose }: { sessionId: str
                   {full ? `This chat has ${max} people, the most it can have.` : `${spotsLeft} more ${spotsLeft === 1 ? "person" : "people"} can join (up to ${max} in total).`}
                 </p>
 
-                <Button variant="secondary" className="justify-start h-10" disabled={busy === "link"} onClick={copyLink}>
+                <Button variant="outline" className="justify-start h-10 font-medium" disabled={busy === "link"} onClick={copyLink}>
                   {busy === "link" ? <Spinner className="size-4 mr-2" /> : copied ? <Check className="h-4 w-4 mr-2" /> : <Link2 className="h-4 w-4 mr-2" />}
                   {copied ? "Copied" : "Copy invite link"}
                 </Button>
 
-                <Button variant="secondary" className="justify-start h-10" disabled={full} onClick={() => setPickOpen((o) => !o)}>
+                <Button variant="outline" className="justify-start h-10 font-medium" disabled={full} onClick={() => setPickOpen((o) => !o)}>
                   <Users className="h-4 w-4 mr-2" />
                   Add from Grids
                 </Button>
@@ -389,7 +389,7 @@ export function ShareGridPanel({ sessionId, myEmail, onClose }: { sessionId: str
                         );
                       })}
                     </div>
-                    <Button variant="secondary" size="sm" disabled={picked.length === 0 || busy === "grids"} onClick={() => sendInvites(picked, "grids")}>
+                    <Button size="sm" disabled={picked.length === 0 || busy === "grids"} onClick={() => sendInvites(picked, "grids")}>
                       {busy === "grids" && <Spinner className="size-4 mr-2" />}
                       {picked.length > 1 ? `Invite ${picked.length} people` : "Invite"}
                     </Button>
@@ -404,7 +404,7 @@ export function ShareGridPanel({ sessionId, myEmail, onClose }: { sessionId: str
                     <Mail className="h-3.5 w-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
                     <Input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="Invite by email" className="h-10 pl-8 text-sm" aria-label="Invite by email" disabled={full} />
                   </div>
-                  <Button type="submit" variant="secondary" className="h-10 px-4" disabled={!email.trim() || full || busy === "email"}>
+                  <Button type="submit" className="h-10 px-4" disabled={!email.trim() || full || busy === "email"}>
                     {busy === "email" && <Spinner className="size-4 mr-2" />}
                     Invite
                   </Button>
