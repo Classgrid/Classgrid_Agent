@@ -190,7 +190,8 @@ const IMAGE_EXT = /\.(png|jpe?g|gif|webp|bmp|svg|heic|heif|avif|ico|tiff?)$/i;
  */
 export async function readAttachedDocuments(fileUrls, { maxFiles = 10, perFileChars = 40000, totalChars = 120000, timeoutMs = 15000 } = {}) {
     const urls = (Array.isArray(fileUrls) ? fileUrls : [])
-        .filter((u) => typeof u === "string" && /^https?:\/\//i.test(u) && !IMAGE_EXT.test(u.split(/[?#]/)[0]))
+        // PDFs only: Excel, PowerPoint and Word stay with the AI's own parse_document tool
+        .filter((u) => typeof u === "string" && /^https?:\/\//i.test(u) && /\.pdf$/i.test(u.split(/[?#]/)[0]))
         .slice(0, maxFiles);
     if (urls.length === 0) return "";
 
