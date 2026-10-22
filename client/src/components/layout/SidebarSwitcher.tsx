@@ -54,7 +54,7 @@
  * ─────────────────────────────────────────────────────────
  */
 
-import React, { useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { motion, useReducedMotion } from "framer-motion";
 import { Link, useLocation } from "react-router-dom";
 import { apiClient as api } from "@/lib/apiClient";
@@ -80,6 +80,11 @@ import { SidebarMenu, SidebarMenuItem, SidebarMenuButton, useSidebar } from "@/c
 export function SidebarSwitcher({ user }: { user: { role?: string; name?: string; sidebar_name?: string; additional_roles?: string[]; organization?: { sidebar_name?: string; name?: string; logo_url?: string; sidebar_logo_url?: string }, metadata?: Record<string, any> } | null }) {
   const { isMobile, state: sidebarState } = useSidebar();
   const collapsed = sidebarState === "collapsed" && !isMobile; // closed sidebar: only the logo shows
+  // Opening/closing the sidebar already animates its width; the logo then changes at once (no second
+  // animation on top of it, which made the sidebar lag). The smooth slide is only for hover.
+  const lastCollapsed = useRef(collapsed);
+  const sidebarToggled = lastCollapsed.current !== collapsed;
+  useEffect(() => { lastCollapsed.current = collapsed; }, [collapsed]);
   // Modes: Agent (the chat) and Project. Super admins stay under /superadmin, everyone else under /c.
   const { pathname } = useLocation();
   const isSuperAdminArea = pathname.startsWith("/superadmin");
@@ -133,7 +138,7 @@ export function SidebarSwitcher({ user }: { user: { role?: string; name?: string
           <DropdownMenuTrigger render={
             <SidebarMenuButton
               size="lg"
-              className="data-[state=open]:bg-sidebar-accent data-[state=open]:text-sidebar-accent-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              className="group-data-[collapsible=icon]:p-0! data-[state=open]:bg-sidebar-accent data-[state=open]:text-sidebar-accent-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring"
             />
           }>
               {/* Logo hidden until hover: it slides in from the left and pushes the name to the right
@@ -141,13 +146,15 @@ export function SidebarSwitcher({ user }: { user: { role?: string; name?: string
               <motion.div
                 aria-hidden={!(logoShown || collapsed)}
                 initial={false}
-                animate={logoShown || collapsed
+                animate={collapsed
+                  ? { width: 32, marginRight: 0, opacity: 1, x: 0, filter: "blur(0px)" }
+                  : logoShown
                   ? { width: 36, marginRight: 0, opacity: 1, x: 0, filter: "blur(0px)" }
                   : { width: 0, marginRight: -8, opacity: 0, x: reduceMotion ? 0 : -14, filter: reduceMotion ? "blur(0px)" : "blur(4px)" }}
-                transition={{ duration: reduceMotion ? 0 : 0.35, ease: [0.22, 1, 0.36, 1] }}
-                className="h-9 shrink-0 overflow-hidden"
+                transition={{ duration: reduceMotion || sidebarToggled || collapsed ? 0 : 0.35, ease: [0.22, 1, 0.36, 1] }}
+                className={`${collapsed ? "h-8" : "h-9"} shrink-0 overflow-hidden`}
               >
-                <div className={`flex h-9 w-9 items-center justify-center rounded-md ${orgLogo ? 'bg-transparent' : 'bg-emerald-500 text-white shadow-sm overflow-hidden'}`}>
+                <div className={`flex ${collapsed ? "size-8" : "h-9 w-9"} items-center justify-center rounded-md ${orgLogo ? 'bg-transparent' : 'bg-emerald-500 text-white shadow-sm overflow-hidden'}`}>
                   {orgLogo ? (
                     <img src={orgLogo} alt={orgName} className="w-full h-full object-contain rounded-md" />
                   ) : (
