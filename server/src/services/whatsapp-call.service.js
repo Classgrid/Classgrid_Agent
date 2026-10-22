@@ -13,6 +13,7 @@
 
 import jwt from "jsonwebtoken";
 import User from "../models/User.js";
+import redis from "../config/redis.js";
 import { normalizeWhatsappNumber } from "./ai-feature-limits.js";
 import { isSharedTestWhatsapp } from "../utils/chat-onboarding.js";
 import { hasEnoughTokens, deductTokens } from "./ai-credits.service.js";
@@ -329,9 +330,19 @@ async function afterCall(call) {
     // Nothing said, nothing to do
     const spoke = call.transcript.some((l) => l.startsWith("Caller:"));
     if (!call.task && !spoke) return;
-    const task = call.task || `The user called Classgrid on WhatsApp. Here is the call:\n${call.transcript.join("\n")}\n\nDo what they asked.`;
-    const result = await runAgentTask(call.user, `[From a WhatsApp call]\n${task}`, call.taskProject?._id, (sessionId) =>
-        sendWhatsappText(call.from, `Got it. Classgrid AI is working on it now. I'll send you the result here when it's done.\n\nFollow along: ${CHAT_URL}/agent/${sessionId}`));
+    let task = call.task || `The user called Classgrid on WhatsApp. Here is the call:\n${call.transcript.join("\n")}\n\nDo what they asked.`;
+    const project = call.taskProject;
+    let stopKeepOpen = () => {};
+    if (project) {
+        // Open the project like the Project Mode page does, so the Agent works inside its files
+        const opened = await openProject(call.user, project._id);
+        if (opened.ok) stopKeepOpen = keepProjectOpen(call.user._id);
+        else task += `\n\n(The project "${project.name}" could not be opened in the editor: ${opened.error}. Work without its files and tell the user.)`;
+    }
+    const where = project ? ` in your project "${project.name}"` : "";
+    const result = await runAgentTask(call.user, `[From a WhatsApp call]\n${task}`, project?._id, (sessionId) =>
+        sendWhatsappText(call.from, `Got it. Classgrid AI is working on it now${where}. I'll send you the result here when it's done.\n\nFollow along: ${CHAT_URL}/agent/${sessionId}`))
+        .finally(() => stopKeepOpen());
     const link = result.sessionId ? `\n\nFull result: ${CHAT_URL}/agent/${result.sessionId}` : "";
     if (!result.answer) {
         await sendWhatsappText(call.from, `Classgrid AI could not finish this task${result.error ? `: ${result.error}` : "."}${link}`);
@@ -341,19 +352,50 @@ async function afterCall(call) {
     await sendWhatsappText(call.from, `${short}${link}`);
 }
 
-// Runs the Classgrid Agent as this user through the normal chat route (same login checks, AI credits and saved
-// chat as when they use chat.classgrid.in). The route makes the new chat and tells its id (session_info).
-// Returns { sessionId, answer, error }.
-async function runAgentTask(user, question, projectId, onSession) {
-    const token = jwt.sign(
+// A short login token for this user, for calling our own routes as them (same checks as their own login)
+function userToken(user) {
+    return jwt.sign(
         { id: user._id, role: user.role, organizationId: user.organization_id || null, rememberMe: false },
         process.env.JWT_SECRET || "dev_secret",
         { expiresIn: "2h" }
     );
+}
+
+// Opens a Project Mode project through the normal route (downloads its code or keeps what is there, starts the
+// editor box). resume: never throws away work that is not pushed yet.
+async function openProject(user, projectId) {
+    try {
+        const port = process.env.PORT || 3000;
+        const res = await fetch(`http://127.0.0.1:${port}/api/ide/projects/${projectId}/open`, {
+            method: "POST",
+            headers: { Authorization: `Bearer ${userToken(user)}`, "Content-Type": "application/json" },
+            body: JSON.stringify({ resume: true }),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (res.ok) return { ok: true };
+        return { ok: false, error: data.error === "github_not_connected" ? "GitHub is not connected (AI Hub)" : data.error || `status ${res.status}` };
+    } catch (e) {
+        return { ok: false, error: e.message };
+    }
+}
+
+// The sandbox removes a project's code 5 minutes after its editor closes. While the Agent works on it from a call
+// (no editor open), the box is marked as in use every minute (same key the editor uses, ide:seen:<user>).
+function keepProjectOpen(userId) {
+    const mark = () => redis.set(`ide:seen:${userId}`, String(Date.now()), "EX", 24 * 60 * 60).catch(() => {});
+    mark();
+    const timer = setInterval(mark, 60 * 1000);
+    return () => clearInterval(timer);
+}
+
+// Runs the Classgrid Agent as this user through the normal chat route (same login checks, AI credits and saved
+// chat as when they use chat.classgrid.in). The route makes the new chat and tells its id (session_info).
+// Returns { sessionId, answer, error }.
+async function runAgentTask(user, question, projectId, onSession) {
     const port = process.env.PORT || 3000;
     const res = await fetch(`http://127.0.0.1:${port}/api/ai/ask`, {
         method: "POST",
-        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+        headers: { Authorization: `Bearer ${userToken(user)}`, "Content-Type": "application/json" },
         // projectId: the chat is saved inside that Project Mode project
         body: JSON.stringify({ question, ...(projectId ? { projectId: String(projectId) } : {}) }),
     });
