@@ -120,7 +120,7 @@ export function ProjectModePage() {
   };
   // Opening a project: download, then the editor loads. The bar moves toward each step's target while it waits.
   const [progress, setProgress] = useState<{ label: string; value: number; target: number; lines?: string[] } | null>(null);
-  // A new project (no GitHub repo yet) has nothing to download: show a new line every second instead
+  // A new project (no GitHub repo yet) has nothing to download: show a new line every 3 seconds instead
   useEffect(() => {
     const lines = progress?.lines;
     if (!lines?.length) return;
@@ -128,7 +128,7 @@ export function ProjectModePage() {
       if (!p?.lines) return p;
       const i = p.lines.indexOf(p.label);
       return { ...p, label: p.lines[Math.min(i + 1, p.lines.length - 1)] };
-    }), 1000);
+    }), 3000);
     return () => window.clearInterval(t);
   }, [progress?.lines]);
   useEffect(() => {
