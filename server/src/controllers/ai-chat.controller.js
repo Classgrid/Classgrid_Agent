@@ -1491,7 +1491,7 @@ export const streamAskAi = async (req, res) => {
                 };
 
                 const people = await gridProfilesText(sessionId, grid, userEmail);
-                volatilePrompt += `\n\n<shared_chat>\nThis is a Share Grid chat: one Classgrid AI chat that ${grid.members.length} people use together (not a Grids group chat). Each user message starts with the name of the person who sent it. The latest message is from ${gridSender.name}.\nThe people in this chat and their profiles:\n${people}\n</shared_chat>`;
+                volatilePrompt += `\n\n<shared_chat>\nThis is a Share Grid chat: one Classgrid AI chat that ${grid.members.length} people use together (not a Grids group chat). Each user message starts with the name of the person who sent it. The latest message is from ${gridSender.name}.\nThe system turns off plugins (connected apps like Gmail, Google Drive, Notion, Slack) in Share Grid chats, so you can't use them here. If someone asks, tell them plugins work in their own private chats.\nThe people in this chat and their profiles:\n${people}\n</shared_chat>`;
             }
 
             // Ownership verified, safe to load history
@@ -1958,7 +1958,9 @@ CRITICAL: If you call ANY integration tool (e.g. Google Classroom, Gmail, Google
         let supabaseConnected = false;
         let sanityConnected = false;
 
-        if (req.user) {
+        // Share Grid: plugins (connected apps) are off in shared chats: they'd act on one person's accounts
+        // and show that person's data to everyone in the chat
+        if (req.user && !gridSender) {
             try {
                 const latestUser = latestUserResult;
                 if (latestUser) {
@@ -5063,10 +5065,19 @@ export const updateChatSession = async (req, res) => {
     try {
         const { id } = req.params;
         const { title, pinned } = req.body;
-        // Only the chat's owner renames or pins it (Share Grid members can't)
+        // Only the chat's owner renames it. A Share Grid member can pin it in their own list only.
         const owned = await getSessionById(id);
         if (!owned) return res.status(404).json({ error: "Session not found" });
-        if (owned.user_email !== req.user?.email) return res.status(403).json({ error: "Only the chat owner can do this." });
+        if (owned.user_email !== req.user?.email) {
+            if (title === undefined && pinned !== undefined && (await canAccessSession(owned, req.user?.email))) {
+                const { primarySupabaseClient } = await import('../config/supabaseClient.js');
+                const { error } = await primarySupabaseClient.from('ai_chat_grid_members').update({ pinned: !!pinned })
+                    .eq('session_id', id).eq('user_email', String(req.user.email).toLowerCase());
+                if (error) return res.status(500).json({ error: "Could not pin this chat." });
+                return res.json({ success: true, session: { ...owned, pinned: !!pinned } });
+            }
+            return res.status(403).json({ error: "Only the chat owner can do this." });
+        }
         let updatedSession = null;
         if (title !== undefined) {
             updatedSession = await updateSessionTitle(id, title);

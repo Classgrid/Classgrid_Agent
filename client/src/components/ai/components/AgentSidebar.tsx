@@ -584,6 +584,7 @@ export function AgentNestedMenu({ searchQuery = "" }: { searchQuery?: string }) 
                   <Pencil className="w-4 h-4 text-slate-500 dark:text-white/70" strokeWidth={2} />
                   Rename
                 </DropdownMenuItem>
+                </>)}
 
                 <DropdownMenuItem
                   className="gap-3 py-2 px-3 text-[14px] cursor-pointer hover:bg-slate-100 dark:hover:bg-[#343541] focus:bg-slate-100 dark:focus:bg-[#343541] focus:text-slate-900 dark:focus:text-[#ececf1] rounded-xl transition-colors"
@@ -600,7 +601,6 @@ export function AgentNestedMenu({ searchQuery = "" }: { searchQuery?: string }) 
                   <Pin className="w-4 h-4 text-slate-500 dark:text-white/70" strokeWidth={2} />
                   {session.pinned ? "Unpin chat" : "Pin chat"}
                 </DropdownMenuItem>
-                </>)}
 
                 {!isProjectMode && !(session as any).shared && (
                   <DropdownMenuSub onOpenChange={(open) => { if (open && projects === null) loadProjects(); }}>

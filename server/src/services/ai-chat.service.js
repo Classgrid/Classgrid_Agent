@@ -224,7 +224,9 @@ export async function triggerMemoryAgent(sessionId) {
         const input = [
             `PREVIOUS MEMORY:\n${previous ? memoryText(previous) : "(empty)"}`,
             `NEW MESSAGES (${covered + 1} to ${total}):`,
-            ...newMessages.map((m, i) => `[${covered + i + 1}] ${String(m.role).toUpperCase()}${who(m)}: ${plainMessageText(m.content).slice(0, MEMORY_MESSAGE_CHARS)}`)
+            ...newMessages.map((m, i) => `[${covered + i + 1}] ${String(m.role).toUpperCase()}${who(m)}: ${plainMessageText(m.content).slice(0, MEMORY_MESSAGE_CHARS)}`),
+            // Share Grid: several people use this chat, so facts are kept per person
+            ...(grid ? [`NOTE: This chat is shared by ${grid.members.length} people: ${Object.values(grid.labels).join(", ")}. Write the User facts separately for each person, under their name, so one person's facts and preferences are never applied to another.`] : [])
         ].join("\n\n");
 
         console.log(`[Memory Agent] Updating memory for session ${sessionId} (messages ${covered + 1}-${total})...`);

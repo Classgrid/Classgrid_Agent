@@ -108,13 +108,12 @@ export async function addMember(session, email) {
 export async function getSharedSessionsFor(email) {
     const me = norm(email);
     if (!me) return [];
-    const { data: rows } = await sb
-        .from("ai_chat_grid_members")
-        .select("session_id")
-        .eq("user_email", me)
-        .eq("role", "member")
-        .is("removed_at", null)
-        .limit(500);
+    // Each member pins a shared chat in their own list (ai_chat_grid_members.pinned). Before that column
+    // exists the read falls back to no pins, so shared chats never disappear from the list.
+    const read = (cols) => sb.from("ai_chat_grid_members").select(cols).eq("user_email", me).eq("role", "member").is("removed_at", null).limit(500);
+    let { data: rows, error } = await read("session_id, pinned");
+    if (error) ({ data: rows } = await read("session_id"));
+    const pinnedBy = Object.fromEntries((rows || []).map((r) => [r.session_id, !!r.pinned]));
     const ids = (rows || []).map((r) => r.session_id);
     if (ids.length === 0) return [];
     const { data } = await sb
@@ -122,7 +121,7 @@ export async function getSharedSessionsFor(email) {
         .select("id, title, created_at, pinned")
         .in("id", ids)
         .eq("is_incognito", false);
-    return (data || []).map((s) => ({ ...s, pinned: false, shared: true }));
+    return (data || []).map((s) => ({ ...s, pinned: !!pinnedBy[s.id], shared: true }));
 }
 
 /**
