@@ -60,7 +60,7 @@ import { useTheme } from "next-themes";
 import { X, Save, Shield, Camera, Loader, Mail, Phone, Heart, 
   Lock, Smartphone, Globe, Calendar, Clock,
   Palette, Activity, BadgeCheck, ShieldAlert,
-  Instagram, Facebook, Linkedin, Github, FileBox, Users, GraduationCap, Edit, ChevronRight
+  Instagram, Facebook, Linkedin, Github, FileBox, Users, Edit, ChevronRight
 } from "lucide-react";
 import { apiClient } from "@/lib/apiClient";
 import { Textarea } from "@/components/marketing_ui/textarea";
@@ -172,12 +172,6 @@ export function SharedProfilePage({ publicUser, groupData, mode = "user", onClos
   const { data: groupsData, isLoading: groupsLoading } = useQuery({
     queryKey: ["groups-in-common", targetUserId],
     queryFn: () => apiClient.get(`/api/chat/groups-in-common/${targetUserId}`).then((r) => r.data),
-    enabled: !!targetUserId && !isGroup,
-  });
-
-  const { data: academicData, isLoading: academicLoading } = useQuery({
-    queryKey: ["academic-status", targetUserId],
-    queryFn: () => apiClient.get(`/api/classroom/academic-status/${targetUserId}`).then((r) => r.data),
     enabled: !!targetUserId && !isGroup,
   });
 
@@ -681,8 +675,8 @@ export function SharedProfilePage({ publicUser, groupData, mode = "user", onClos
 
                     <div className="w-full h-px bg-gradient-to-r from-transparent via-border to-transparent my-6 opacity-60" />
 
-                    {/* Groups & Academic Status in Glass Cards */}
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4 w-full">
+                    {/* Groups in Common */}
+                    <div className="grid grid-cols-1 gap-4 w-full">
                       <div className="flex flex-col gap-3 p-4 rounded-xl border border-border/40 bg-muted/20 dark:bg-white/[0.02] hover:bg-muted/40 dark:hover:bg-white/[0.04] transition-colors">
                         <div className="flex items-center gap-2 text-sm font-semibold text-foreground/80">
                           <Users size={16} className="text-blue-500" />
@@ -702,28 +696,6 @@ export function SharedProfilePage({ publicUser, groupData, mode = "user", onClos
                             ))
                           ) : (
                             <span className="text-xs text-muted-foreground italic">No groups in common</span>
-                          )}
-                        </div>
-                      </div>
-                      
-                      <div className="flex flex-col gap-3 p-4 rounded-xl border border-border/40 bg-muted/20 dark:bg-white/[0.02] hover:bg-muted/40 dark:hover:bg-white/[0.04] transition-colors">
-                        <div className="flex items-center gap-2 text-sm font-semibold text-foreground/80">
-                          <GraduationCap size={16} className="text-purple-500" />
-                          Academic Status
-                        </div>
-                        <div className="text-sm text-foreground/90 font-medium">
-                          {academicLoading ? (
-                            <div className="flex flex-col gap-2">
-                              <div className="h-4 w-32 bg-muted rounded animate-pulse" />
-                              <div className="h-3 w-40 bg-muted rounded animate-pulse" />
-                            </div>
-                          ) : academicData?.status ? (
-                            <div className="flex flex-col gap-1">
-                              <span className="font-semibold">{academicData.status.primaryText}</span>
-                              <span className="text-xs text-muted-foreground">{academicData.status.secondaryText}</span>
-                            </div>
-                          ) : (
-                            <span className="text-xs text-muted-foreground italic">Academic status not available</span>
                           )}
                         </div>
                       </div>
