@@ -157,6 +157,7 @@ import { FollowUps, ActionCards, ReportCard, Timetable, AttendanceCalendar, Stud
 import { WidgetBlock } from "./WidgetBlock";
 import { ScrollSpyTOC, MobileTOCButton } from "./TOC";
 import AIThinkingBlock from "./AIThinkingBlock";
+import RichChatInput from "./RichChatInput";
 import ReactMarkdown from "react-markdown";
 import remarkMath from "remark-math";
 import remarkGfm from "remark-gfm";
@@ -2711,7 +2712,7 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
     // code and lists stay and the sent message shows them formatted. Plain text pastes are unchanged.
     const pastedHtml = e.clipboardData?.getData("text/html") || "";
     const hasFiles = Array.from(e.clipboardData?.items || []).some((it) => it.kind === "file");
-    if (!hasFiles && pastedHtml && /<(a\s[^>]*href|strong|b|em|i|code|pre|ul|ol|h[1-6]|blockquote|del|s)[\s>]/i.test(pastedHtml)) {
+    if (e.currentTarget.tagName === "TEXTAREA" && !hasFiles && pastedHtml && /<(a\s[^>]*href|strong|b|em|i|code|pre|ul|ol|h[1-6]|blockquote|del|s)[\s>]/i.test(pastedHtml)) {
       e.preventDefault();
       const el = e.currentTarget;
       const start = el.selectionStart ?? el.value.length;
@@ -5997,11 +5998,9 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
                     </div>
                   )}
 
-                  <textarea
+                  <RichChatInput
                     id="ask-ai-input"
                     name="askAiQuestion"
-                    data-no-ring="true"
-                    suppressHydrationWarning
                     ref={inputRef as any}
                     disabled={isRecording || isTranscribing || !!chatEnded}
                     value={input}
@@ -6093,7 +6092,6 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
                       }
                     }}
                     placeholder={attachedFiles.length > 0 ? "Add a message or send files..." : "Ask a question..."}
-                    autoComplete="off"
                     className={cn(
                       // mb-12 (not pb-12): the scrolling text area ends above the buttons, so long text never slides under them
                       "w-full resize-none bg-transparent mb-12 pb-1 pl-4 pr-4 text-[16px] sm:text-sm focus:outline-none overflow-y-auto chat-scrollbar leading-relaxed transition-all duration-300",
@@ -6625,11 +6623,9 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
                               )}
                             </AnimatePresence>
 
-                            <textarea
+                            <RichChatInput
                               id="ask-ai-input"
                               name="askAiQuestion"
-                              data-no-ring="true"
-                              suppressHydrationWarning
                               ref={inputRef as any}
                               disabled={isRecording || isTranscribing}
                               value={input}
@@ -6721,7 +6717,6 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
                                 }
                               }}
                               placeholder="Ask anything, analyse a file, or schedule a task…"
-                              autoComplete="off"
                               className={cn(
                                 "w-full resize-none bg-transparent mb-12 pb-1 pl-4 pr-4 sm:pl-24 pt-4 rounded-2xl text-[16px] sm:text-sm focus:outline-none overflow-y-auto chat-scrollbar leading-relaxed transition-all duration-300",
                                 showFilesPanel ? "sm:pr-32" : "sm:pr-60",

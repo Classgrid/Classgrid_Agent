@@ -80,7 +80,8 @@ export function ProjectModePage() {
   const { sessionId } = useParams<{ sessionId?: string }>();
 
   const [projects, setProjects] = useState<Project[] | null>(null);
-  const [openId, setOpenId] = useState<string | null>(() => { try { return localStorage.getItem(OPEN_PROJECT_KEY); } catch { return null; } });
+  // No project opens by itself: Project Mode starts on the project list until the user opens one
+  const [openId, setOpenId] = useState<string | null>(null);
   const [folder, setFolder] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [newName, setNewName] = useState<string | null>(null);
@@ -91,7 +92,8 @@ export function ProjectModePage() {
   const [githubExpired, setGithubExpired] = useState(false);
   const [hubOpen, setHubOpen] = useState(false);
   // The AI panel on the right can be closed (the editor then uses the full width) and opened again from the top bar
-  const [aiOpen, setAiOpenState] = useState(() => { try { return localStorage.getItem(AI_PANEL_KEY) !== "1"; } catch { return true; } });
+  // The AI panel starts closed every time and opens only when the user clicks the Agent button
+  const [aiOpen, setAiOpenState] = useState(false);
   // The editor's width slides together with the AI panel (same timing as the panel), on screens where the panel shows
   const [wide, setWide] = useState(() => typeof window !== "undefined" && window.matchMedia("(min-width: 640px)").matches);
   // The AI panel starts at its normal 400 px and can be dragged wider; the editor's space follows it at once
