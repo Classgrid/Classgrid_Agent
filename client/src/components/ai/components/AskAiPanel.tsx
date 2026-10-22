@@ -4634,8 +4634,8 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
             <div className="flex flex-col items-center justify-center py-16 gap-5 select-none">
               {/* Logo on the left of the greeting, one line */}
               <div className="flex items-center justify-center gap-3">
-                <img src="/logo.png" alt="Classgrid" className="h-10 w-10 shrink-0 object-contain" />
-                <h2 className="text-xl font-semibold text-foreground tracking-tight min-h-[1.75rem]">
+                <img src="/logo.png" alt="Classgrid" className="h-8 w-8 sm:h-9 sm:w-9 shrink-0 object-contain" />
+                <h2 style={{ fontFamily: "Newsreader, Georgia, serif" }} className="font-normal text-[1.75rem] sm:text-[2.25rem] leading-tight tracking-[-0.01em] text-[#141413] dark:text-[#faf9f5] min-h-[2.5rem]">
                   <TypingGreeting name={user?.name} paused={input.trim().length > 0} />
                 </h2>
               </div>
@@ -6299,9 +6299,9 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
 
                   {/* Logo on the left of the greeting, one line */}
                   <div className="flex items-center justify-center gap-3 mt-auto sm:mt-0">
-                    <img src="/logo.png" alt="Classgrid" className="h-10 w-10 shrink-0 object-contain" />
+                    <img src="/logo.png" alt="Classgrid" className="h-8 w-8 sm:h-9 sm:w-9 shrink-0 object-contain" />
                     {/* Fixed height so the input below never moves while the line types; pauses while the user types */}
-                    <h2 className="text-xl font-semibold text-foreground tracking-tight min-h-[1.75rem]">
+                    <h2 style={{ fontFamily: "Newsreader, Georgia, serif" }} className="font-normal text-[1.75rem] sm:text-[2.25rem] leading-tight tracking-[-0.01em] text-[#141413] dark:text-[#faf9f5] min-h-[2.5rem]">
                       <TypingGreeting name={user?.name} paused={input.trim().length > 0} />
                     </h2>
                   </div>
