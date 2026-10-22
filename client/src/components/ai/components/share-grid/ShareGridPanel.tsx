@@ -8,6 +8,7 @@ import { toast } from "sonner";
 import { Button } from "@/components/marketing_ui/button";
 import { Input } from "@/components/marketing_ui/input";
 import { Spinner } from "@/components/marketing_ui/spinner";
+import { Skeleton } from "@/components/marketing_ui/skeleton";
 import { apiClient } from "@/lib/apiClient";
 import { getSocket } from "@/lib/socketClient";
 import { cn } from "@/lib/utils";
@@ -74,6 +75,46 @@ export function GridSenderTag({ person }: { person: { name: string; avatar?: str
     <div className="flex items-center gap-1.5 text-[12px] text-muted-foreground px-1">
       <PersonAvatar name={person.name} avatar={person.avatar} size={18} />
       <span className="font-medium">{person.name}</span>
+    </div>
+  );
+}
+
+/** Panel placeholder while it loads: the same blocks as the real panel */
+function PanelSkeleton() {
+  return (
+    <div className="flex flex-col gap-6" aria-busy="true">
+      <div className="flex flex-col gap-2.5">
+        <Skeleton className="h-4 w-28" />
+        <Skeleton className="h-3 w-52" />
+        <Skeleton className="h-10 w-full rounded-md" />
+        <Skeleton className="h-10 w-full rounded-md" />
+        <Skeleton className="h-10 w-full rounded-md" />
+      </div>
+      <div className="flex flex-col gap-2">
+        <Skeleton className="h-4 w-24" />
+        {[0, 1].map((i) => (
+          <div key={i} className="flex items-center gap-3 p-2.5 rounded-lg border border-border/50">
+            <Skeleton className="h-8 w-8 rounded-full" />
+            <div className="flex-1 flex flex-col gap-1.5">
+              <Skeleton className="h-3.5 w-32" />
+              <Skeleton className="h-3 w-20" />
+            </div>
+          </div>
+        ))}
+      </div>
+      <div className="flex flex-col gap-2">
+        <Skeleton className="h-4 w-16" />
+        {[0, 1, 2].map((i) => (
+          <div key={i} className="flex items-start gap-2.5 py-2">
+            <Skeleton className="h-3.5 w-3.5 rounded-sm mt-0.5" />
+            <div className="flex-1 flex flex-col gap-1.5">
+              <Skeleton className="h-3.5 w-48" />
+              <Skeleton className="h-3 w-16" />
+            </div>
+            <Skeleton className="h-5 w-16 rounded-md" />
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
@@ -207,7 +248,7 @@ export function ShareGridPanel({ sessionId, myEmail, onClose }: { sessionId: str
 
       <div className="flex-1 overflow-y-auto w-full sm:w-[400px] p-4 flex flex-col gap-6">
         {isLoading || !data ? (
-          <div className="flex items-center gap-2 text-sm text-muted-foreground"><Spinner className="size-4" />Loading…</div>
+          <PanelSkeleton />
         ) : (
           <>
             {/* Invite (owner only) */}
@@ -235,7 +276,17 @@ export function ShareGridPanel({ sessionId, myEmail, onClose }: { sessionId: str
                     </div>
                     <div className="max-h-56 overflow-y-auto flex flex-col">
                       {contactsQuery.isLoading ? (
-                        <div className="flex items-center gap-2 text-xs text-muted-foreground p-2"><Spinner className="size-3.5" />Loading…</div>
+                        <div className="flex flex-col" aria-busy="true">
+                          {[0, 1, 2].map((i) => (
+                            <div key={i} className="flex items-center gap-2.5 px-2 py-1.5">
+                              <Skeleton className="h-7 w-7 rounded-full" />
+                              <div className="flex-1 flex flex-col gap-1.5">
+                                <Skeleton className="h-3.5 w-28" />
+                                <Skeleton className="h-3 w-40" />
+                              </div>
+                            </div>
+                          ))}
+                        </div>
                       ) : contacts.length === 0 ? (
                         <div className="text-xs text-muted-foreground p-2">No one to add from your Grids.</div>
                       ) : contacts.map((c) => {

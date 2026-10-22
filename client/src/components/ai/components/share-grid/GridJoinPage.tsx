@@ -7,6 +7,7 @@ import { Users } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/marketing_ui/button";
 import { Spinner } from "@/components/marketing_ui/spinner";
+import { Skeleton } from "@/components/marketing_ui/skeleton";
 import { apiClient } from "@/lib/apiClient";
 import { useCurrentUser } from "@/features/auth/queries/useCurrentUser";
 import { getLoginPathForPath } from "@/features/auth/auth-helpers";
@@ -84,7 +85,13 @@ export function GridJoinPage() {
         <img src="/logos/logo.png" alt="Classgrid" className="h-10 w-10 rounded-lg" />
 
         {userLoading || (user && invite.isLoading) ? (
-          <div className="flex items-center gap-2 text-sm text-muted-foreground"><Spinner className="size-4" />Loading…</div>
+          <div className="w-full flex flex-col items-center gap-4" aria-busy="true">
+            <Skeleton className="h-5 w-56" />
+            <Skeleton className="h-14 w-full rounded-lg" />
+            <Skeleton className="h-3 w-full" />
+            <Skeleton className="h-10 w-full rounded-md" />
+            <Skeleton className="h-10 w-full rounded-md" />
+          </div>
         ) : !user ? (
           <>
             <h1 className="text-lg font-semibold">You're invited to a Classgrid AI chat</h1>

@@ -1429,9 +1429,14 @@ export const streamAskAi = async (req, res) => {
             // Share Grid: the AI sees each user message as "Name: text" and knows who is in the chat
             const grid = await gridLabelMap(sessionId);
             if (grid) {
+                const labeledKey = `ai:grid-labeled:${sessionId}`;
+                if (!(await redis.get(labeledKey).catch(() => "1"))) {
+                    await invalidateHistoryCache(sessionId).catch(() => {});
+                    redis.set(labeledKey, "1", "EX", 60 * 60 * 24 * 30).catch(() => {});
+                }
                 const label = (e) => grid.labels[String(e).toLowerCase()] || e;
                 gridSender = { email: userEmail.toLowerCase(), name: label(userEmail.toLowerCase()) };
-                volatilePrompt += `\n\n<shared_chat>\nThis is a Share Grid chat: one Classgrid AI chat that ${grid.members.length} people use together (not a Grids group chat). The people: ${grid.members.map((m) => `${label(m.user_email)}${m.role === "owner" ? " (owner, started this chat)" : ""}`).join(", ")}. Each user message starts with the name of the person who sent it. The latest message is from ${gridSender.name}.\n</shared_chat>`;
+                volatilePrompt += `\n\n<shared_chat>\nThis is a Share Grid chat: one Classgrid AI chat that ${grid.members.length} people use together (not a Grids group chat). The people: ${grid.members.map((m) => `${label(m.user_email)} <${String(m.user_email).toLowerCase()}>${m.role === "owner" ? " (owner, started this chat)" : ""}`).join(", ")}. Each user message starts with the name of the person who sent it. The latest message is from ${gridSender.name}.\n</shared_chat>`;
             }
 
             // Ownership verified, safe to load history
