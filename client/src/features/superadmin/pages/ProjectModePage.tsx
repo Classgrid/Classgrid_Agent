@@ -78,8 +78,9 @@ function LoadingSmoke() {
 }
 
 // Our GitHub logo (black), turned white in dark mode
-function GithubIcon({ className = "size-4" }: { className?: string }) {
-  return <img src="https://cdn.classgrid.in/classgrid_intgration/github-icon.svg" alt="" aria-hidden className={`${className} dark:invert`} />;
+// onDark: for buttons with the opposite colours (black in light mode, white in dark mode)
+function GithubIcon({ className = "size-4", onDark = false }: { className?: string; onDark?: boolean }) {
+  return <img src="https://cdn.classgrid.in/classgrid_intgration/github-icon.svg" alt="" aria-hidden className={`${className} ${onDark ? "invert dark:invert-0" : "dark:invert"}`} />;
 }
 
 // The project's picture, or the folder icon when it has none
@@ -576,7 +577,7 @@ export function ProjectModePage() {
             <h1 className="text-xl font-semibold">{githubExpired ? "Reconnect GitHub" : "Connect GitHub to use Project Mode"}</h1>
             <p className="text-sm text-muted-foreground">Project Mode needs your GitHub account. Your code is only kept on GitHub, never on our servers.</p>
             <button onClick={() => setHubOpen(true)} className="flex items-center justify-center gap-2 bg-foreground text-background px-4 py-2 rounded-full font-medium text-sm hover:opacity-90">
-              <GithubIcon className="size-4" /> {githubExpired ? "Reconnect GitHub" : "Connect GitHub"}
+              <GithubIcon className="size-4" onDark /> {githubExpired ? "Reconnect GitHub" : "Connect GitHub"}
             </button>
           </div>
         </div>
@@ -771,7 +772,7 @@ export function ProjectModePage() {
             </div>
             {githubConnected === false ? (
               <button onClick={() => setHubOpen(true)} className="flex items-center justify-center gap-2 bg-foreground text-background px-4 py-2 rounded-full font-medium text-sm hover:opacity-90">
-                <GithubIcon className="size-4" /> {githubExpired ? "Reconnect GitHub" : "Connect GitHub"}
+                <GithubIcon className="size-4" onDark /> {githubExpired ? "Reconnect GitHub" : "Connect GitHub"}
               </button>
             ) : repos === null ? (
               <div className="flex justify-center py-6"><Spinner className="size-5 text-muted-foreground" /></div>
