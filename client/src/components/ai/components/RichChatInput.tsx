@@ -301,9 +301,10 @@ const RichChatInput = forwardRef<any, Props>(function RichChatInput(
       onKeyDown={handleKeyDown}
       onPaste={handlePaste}
       onClick={(e) => {
-        // links inside the box don't open while typing; Ctrl/Cmd+click opens them
+        // a click on a link in the box opens it in a new tab
         const a = (e.target as HTMLElement).closest?.("a");
-        if (a) { e.preventDefault(); if (e.ctrlKey || e.metaKey) window.open(a.getAttribute("href") || "", "_blank", "noopener"); }
+        const href = a?.getAttribute("href") || "";
+        if (a) { e.preventDefault(); if (/^https?:\/\//i.test(href)) window.open(href, "_blank", "noopener,noreferrer"); }
       }}
       className={cn(
         "whitespace-pre-wrap break-words cursor-text",
