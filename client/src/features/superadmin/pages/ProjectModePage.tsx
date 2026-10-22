@@ -690,7 +690,6 @@ export function ProjectModePage() {
                             value={renaming.name}
                             onChange={(e) => setRenaming({ id: p.id, name: e.target.value })}
                             onKeyDown={(e) => { if (e.key === "Enter") rename(); if (e.key === "Escape") setRenaming(null); }}
-                            onBlur={rename}
                             maxLength={80}
                             className="h-9 w-full rounded-md border border-border bg-background px-3 text-sm focus:outline-none focus:ring-1 focus:ring-ring"
                           />
@@ -705,7 +704,12 @@ export function ProjectModePage() {
                           ].filter(Boolean).join(" · ")}
                         </span>
                       </div>
-                      {renaming?.id !== p.id && (
+                      {renaming?.id === p.id ? (
+                        <>
+                          <Button variant="outline" onClick={() => setRenaming(null)} className="shrink-0">Cancel</Button>
+                          <Button onClick={rename} disabled={!renaming.name.trim()} className="shrink-0">Save</Button>
+                        </>
+                      ) : (
                         <>
                           <Button variant="outline" onClick={() => setRenaming({ id: p.id, name: p.name })} className="shrink-0">Edit</Button>
                           <Button variant="destructive" onClick={() => setDeleting(p)} className="shrink-0">Delete</Button>
