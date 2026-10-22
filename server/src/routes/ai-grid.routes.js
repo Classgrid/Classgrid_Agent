@@ -4,6 +4,7 @@ import { isAuthenticated } from "../middleware/auth.middleware.js";
 import { primarySupabaseClient as sb } from "../config/supabaseClient.js";
 import { getSessionById } from "../services/ai-chat.service.js";
 import { sendEmail } from "../services/aws-ses.service.js";
+import { baseTemplate } from "../services/email-templates.service.js";
 import User from "../models/User.js";
 import {
     GRID_MAX_PEOPLE, newInviteToken, canAccessSession, gridSummary, ensureOwnerMember, addMember, profilesFor, getActiveMembers,
@@ -51,23 +52,27 @@ async function inviteHistory(sessionId) {
     }));
 }
 
-async function sendInviteEmail({ to, inviterName, title, token }) {
+async function sendInviteEmail({ to, inviterName, inviterEmail, title, token }) {
     const link = joinUrl(token);
-    const html = `<!DOCTYPE html><html><body style="font-family: Arial, sans-serif; color: #1f2937; line-height: 1.6; max-width: 560px; margin: 0 auto; padding: 24px;">
-      <h2 style="margin: 0 0 12px;">You're invited to a Classgrid AI chat</h2>
-      <p><b>${escapeHtml(inviterName)}</b> invited you to join the chat <b>"${escapeHtml(title)}"</b> on Classgrid AI.</p>
-      <p>You can read the chat, send messages and ask the AI together.</p>
-      <p style="margin: 24px 0;"><a href="${link}" style="background: #111827; color: #ffffff; text-decoration: none; padding: 10px 18px; border-radius: 8px; display: inline-block;">Accept invite</a></p>
-      <p style="font-size: 13px; color: #6b7280;">Or open this link: ${link}</p>
-      <p style="font-size: 12px; color: #9ca3af; margin-top: 32px;">If you don't know ${escapeHtml(inviterName)}, you can ignore this email.</p>
-    </body></html>`;
+    const who = `${escapeHtml(inviterName)} (${escapeHtml(inviterEmail)})`;
+    // Our standard Classgrid email design (same as verify-email and password-reset)
+    const html = baseTemplate({
+        title: "You're invited to a Classgrid AI chat",
+        content: `
+    <p><strong>${who}</strong> invited you to join the chat <strong>"${escapeHtml(title)}"</strong> on Classgrid AI.</p>
+    <p>You can read the chat, send messages and ask the AI together.</p>
+    <a href="${link}" class="btn">Accept invite</a>
+    <p>Or open this link: <a href="${link}">${link}</a></p>
+  `,
+        ignoreText: `If you don't know ${who}, you can ignore this email.`,
+    });
     await sendEmail({
         fromName: "Classgrid",
         fromEmail: "hello@classgrid.in",
         to,
-        subject: `${inviterName} invited you to a chat on Classgrid AI`,
+        subject: `${inviterName} (${inviterEmail}) invited you to a chat on Classgrid AI`,
         html,
-        text: `${inviterName} invited you to join the chat "${title}" on Classgrid AI. Accept: ${link}`,
+        text: `${inviterName} (${inviterEmail}) invited you to join the chat "${title}" on Classgrid AI. Accept: ${link}`,
     });
 }
 
@@ -84,7 +89,7 @@ async function inviteEmail(req, session, email, type) {
     }]);
     if (error) return { email: to, error: "Could not save the invite." };
     try {
-        await sendInviteEmail({ to, inviterName: req.user.name || req.user.email, title: session.title || "Chat", token });
+        await sendInviteEmail({ to, inviterName: req.user.name || req.user.email, inviterEmail: norm(req.user.email), title: session.title || "Chat", token });
     } catch (e) {
         console.error("[ShareGrid] invite email failed:", e?.message);
         return { email: to, error: "Invite saved, but the email could not be sent." };
