@@ -21,7 +21,7 @@
 
 import React from "react";
 import { createPortal } from "react-dom";
-import { MessageSquare, Plus, Search, Pin, MoreHorizontal, Pencil, Trash2, Share, Copy, Mail, Check, Link2, FileText, ExternalLink, X, Loader2, SquarePen, Calendar, Library, FolderInput, FolderPlus, Folder } from "lucide-react";
+import { MessageSquare, Plus, Search, Pin, MoreHorizontal, Pencil, Trash2, Share, Copy, Mail, Check, Link2, FileText, ExternalLink, X, Loader2, SquarePen, Calendar, Library, FolderInput, FolderPlus, Folder, Star } from "lucide-react";
 import { format } from "date-fns";
 import { NikhilDateCalendar } from "@/components/marketing_ui/nikhil_date_calendar";
 import { useNavigate, useLocation } from "react-router-dom";
@@ -540,6 +540,10 @@ export function AgentNestedMenu({ searchQuery = "" }: { searchQuery?: string }) 
                     <ChatBubbleIcon className="w-[15px] h-[15px] shrink-0 text-muted-foreground/80" />
                   )}
                   <span className="truncate block min-w-0 flex-1">{displayTitle}</span>
+                  {/* Share Grid: this chat is shared with other people */}
+                  {(session as any).grid && (
+                    <Star className="w-3 h-3 shrink-0 fill-current text-amber-500 dark:text-amber-400" aria-label="Shared chat" />
+                  )}
                 </div>
               }
             />

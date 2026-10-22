@@ -241,3 +241,16 @@ export async function leaveSharedChat(session, email) {
     await sb.from("ai_chat_grid_invites").update({ status: "revoked" }).eq("session_id", session.id).eq("invite_type", "link").eq("status", "pending");
     return "transferred";
 }
+
+/** Ids of the chats this person is in that are shared right now (2 or more people), for the star in the chat list. */
+export async function sharedChatIdsFor(email) {
+    const me = norm(email);
+    if (!me) return new Set();
+    const { data: mine } = await sb.from("ai_chat_grid_members").select("session_id").eq("user_email", me).is("removed_at", null).limit(1000);
+    const ids = [...new Set((mine || []).map((r) => r.session_id))];
+    if (ids.length === 0) return new Set();
+    const { data: all } = await sb.from("ai_chat_grid_members").select("session_id").in("session_id", ids).is("removed_at", null).limit(5000);
+    const count = {};
+    for (const r of all || []) count[r.session_id] = (count[r.session_id] || 0) + 1;
+    return new Set(Object.keys(count).filter((id) => count[id] >= 2));
+}

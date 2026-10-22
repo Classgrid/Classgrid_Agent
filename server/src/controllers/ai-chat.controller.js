@@ -52,7 +52,7 @@ import {
     memoryText
 } from "../services/ai-chat.service.js";
 import { getHistory, getHistoryCount, appendToHistory, invalidateHistoryCache, getChatTranscript } from "../services/ai-chat-history.service.js";
-import { canAccessSession, gridLabelMap, gridProfilesText, getSharedSessionsFor, leaveSharedChat } from "../services/ai-chat-grid.service.js";
+import { canAccessSession, gridLabelMap, gridProfilesText, getSharedSessionsFor, leaveSharedChat, sharedChatIdsFor } from "../services/ai-chat-grid.service.js";
 import { editorContextFor, rememberProjectSnapshot, sandboxDataDir, startCheckpoint, finishCheckpoint, linkChatToProject } from "../services/ide-project.service.js";
 import { buildEndConversationHandlers, reopenSession } from "../services/ai-end-conversation.service.js";
 import { hasEnoughTokens, deductTokens, getImageGenerationCost, tokenWindowEnd } from "../services/ai-credits.service.js";
@@ -4939,6 +4939,9 @@ export const getChatSessions = async (req, res) => {
             const shared = await getSharedSessionsFor(email).catch(() => []);
             if (shared.length) sessions = [...shared, ...(sessions || [])].sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)));
         }
+        // Share Grid: mark chats shared with 2+ people (a star in the chat list)
+        const gridIds = await sharedChatIdsFor(email).catch(() => new Set());
+        if (gridIds.size) sessions = (sessions || []).map((s) => (gridIds.has(s.id) ? { ...s, grid: true } : s));
         res.json({ sessions });
     } catch (e) {
         console.error("Error getting sessions:", e);
