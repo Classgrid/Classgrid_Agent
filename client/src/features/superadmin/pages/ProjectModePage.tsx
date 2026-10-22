@@ -11,7 +11,7 @@
  * ─────────────────────────────────────────────────────────
  */
 import { useCallback, useEffect, useRef, useState } from "react";
-import { motion, useReducedMotion } from "framer-motion";
+import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import { useParams } from "react-router-dom";
 import { ArrowLeft, FolderGit2, Github, Pencil, Plus, Trash2 } from "lucide-react";
 import { Spinner } from "@/components/marketing_ui/spinner";
@@ -428,7 +428,32 @@ export function ProjectModePage() {
             <div className="absolute inset-0 isolate overflow-hidden flex items-center justify-center !bg-[#fafafa] dark:!bg-[#000000]">
               <LoadingSmoke />
               <Progress value={Math.round(progress.value)} className="w-[min(360px,80%)]">
-                <ProgressLabel>{progress.label}</ProgressLabel>
+                <ProgressLabel>
+                  {/* each line comes in word by word (fade, lift, unblur) and fades out before the next */}
+                  <AnimatePresence mode="wait" initial={false}>
+                    <motion.span
+                      key={progress.label}
+                      className="inline-block"
+                      initial="hidden"
+                      animate="show"
+                      exit={reduceMotion ? { opacity: 0 } : { opacity: 0, y: -6, filter: "blur(4px)", transition: { duration: 0.2, ease: "easeIn" } }}
+                      variants={{ hidden: {}, show: { transition: { staggerChildren: reduceMotion ? 0 : 0.045 } } }}
+                    >
+                      {progress.label.split(" ").map((w, i) => (
+                        <motion.span
+                          key={i}
+                          className="inline-block whitespace-pre"
+                          variants={{
+                            hidden: reduceMotion ? { opacity: 0 } : { opacity: 0, y: 6, filter: "blur(4px)" },
+                            show: { opacity: 1, y: 0, filter: "blur(0px)", transition: { duration: 0.35, ease: [0.22, 1, 0.36, 1] } },
+                          }}
+                        >
+                          {w + (i < progress.label.split(" ").length - 1 ? " " : "")}
+                        </motion.span>
+                      ))}
+                    </motion.span>
+                  </AnimatePresence>
+                </ProgressLabel>
                 <ProgressValue />
               </Progress>
             </div>
