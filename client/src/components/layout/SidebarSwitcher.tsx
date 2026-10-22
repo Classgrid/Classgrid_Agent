@@ -78,7 +78,8 @@ import {
 import { SidebarMenu, SidebarMenuItem, SidebarMenuButton, useSidebar } from "@/components/marketing_ui/sidebar";
 
 export function SidebarSwitcher({ user }: { user: { role?: string; name?: string; sidebar_name?: string; additional_roles?: string[]; organization?: { sidebar_name?: string; name?: string; logo_url?: string; sidebar_logo_url?: string }, metadata?: Record<string, any> } | null }) {
-  const { isMobile } = useSidebar();
+  const { isMobile, state: sidebarState } = useSidebar();
+  const collapsed = sidebarState === "collapsed" && !isMobile; // closed sidebar: only the logo shows
   // Modes: Agent (the chat) and Project. Super admins stay under /superadmin, everyone else under /c.
   const { pathname } = useLocation();
   const isSuperAdminArea = pathname.startsWith("/superadmin");
@@ -138,9 +139,9 @@ export function SidebarSwitcher({ user }: { user: { role?: string; name?: string
               {/* Logo hidden until hover: it slides in from the left and pushes the name to the right
                   (same smooth easing as the Project Mode loading lines) */}
               <motion.div
-                aria-hidden={!logoShown}
+                aria-hidden={!(logoShown || collapsed)}
                 initial={false}
-                animate={logoShown
+                animate={logoShown || collapsed
                   ? { width: 36, marginRight: 0, opacity: 1, x: 0, filter: "blur(0px)" }
                   : { width: 0, marginRight: -8, opacity: 0, x: reduceMotion ? 0 : -14, filter: reduceMotion ? "blur(0px)" : "blur(4px)" }}
                 transition={{ duration: reduceMotion ? 0 : 0.35, ease: [0.22, 1, 0.36, 1] }}
@@ -155,7 +156,7 @@ export function SidebarSwitcher({ user }: { user: { role?: string; name?: string
                 </div>
               </motion.div>
               {/* With the logo hidden: bigger name, lined up with the search box and menu below */}
-              <div className="grid flex-1 gap-0.5 pl-2 text-left text-sm leading-tight">
+              <div className={`grid flex-1 gap-0.5 pl-2 text-left text-sm leading-tight ${collapsed ? "hidden" : ""}`}>
                 <span className="text-2xl font-semibold tracking-tight text-foreground whitespace-normal break-words leading-none">
                   {orgName}
                 </span>
@@ -165,7 +166,7 @@ export function SidebarSwitcher({ user }: { user: { role?: string; name?: string
                   </span>
                 )}
               </div>
-              <ChevronsUpDown className="ml-auto size-4 text-muted-foreground" />
+              {!collapsed && <ChevronsUpDown className="ml-auto size-4 text-muted-foreground" />}
           </DropdownMenuTrigger>
           <DropdownMenuContent
             className="w-[--radix-dropdown-menu-trigger-width] min-w-56 rounded-xl shadow-xl border-border bg-popover text-popover-foreground p-1"
