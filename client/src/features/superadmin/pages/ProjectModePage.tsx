@@ -106,7 +106,12 @@ function timeAgo(iso: string) {
 
 // Like Vercel: the repo link, the branch, and the last commit (message and how long ago)
 function ProjectGitInfo({ project }: { project: Project }) {
-  const [info, setInfo] = useState<{ repoUrl: string | null; branch: string | null; commit: { message: string; date: string | null; sha: string; url: string | null } | null } | null>(null);
+  const [info, setInfo] = useState<{
+    repoUrl: string | null;
+    branch: string | null;
+    commit: { message: string; date: string | null; sha: string; url: string | null } | null;
+    vercel?: { name: string; dashboardUrl: string; appUrl: string; domain: string } | null;
+  } | null>(null);
   useEffect(() => {
     let live = true;
     api(`/projects/${project.id}/github`).then(({ res, data }) => { if (live) setInfo(res.ok ? data : { repoUrl: null, branch: null, commit: null }); }).catch(() => {});
@@ -136,6 +141,16 @@ function ProjectGitInfo({ project }: { project: Project }) {
           </>
         )}
       </div>
+      {info?.vercel && (
+        <div className="flex items-center gap-1.5 text-xs text-muted-foreground min-w-0 flex-wrap">
+          <a href={info.vercel.dashboardUrl} target="_blank" rel="noreferrer" className="flex items-center gap-1.5 hover:text-foreground min-w-0 max-w-full">
+            <img src="https://cdn.classgrid.in/classgrid_intgration/vercel-icon-svgrepo-com.svg" alt="" aria-hidden className="size-3.5 shrink-0 dark:invert" />
+            <span className="truncate">{info.vercel.name}</span>
+          </a>
+          <span className="shrink-0">·</span>
+          <a href={info.vercel.appUrl} target="_blank" rel="noreferrer" className="hover:text-foreground underline underline-offset-2 truncate min-w-0">{info.vercel.domain}</a>
+        </div>
+      )}
     </div>
   );
 }

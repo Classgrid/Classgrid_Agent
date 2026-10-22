@@ -348,10 +348,44 @@ router.patch("/projects/:id", isAuthenticated, async (req, res) => {
 // The repo's GitHub details for the project card, like Vercel shows: branch, last commit, repo link.
 // Kept in Redis for 60s per project so opening the page doesn't call GitHub again and again.
 const GIT_INFO_KEY = (id) => `ide:gitInfo:${id}`;
+
+// The Vercel project made from this repo, when the user connected Vercel: its dashboard link and its live app link.
+// Any Vercel problem just means no Vercel line on the card.
+async function vercelFor(userId, repo) {
+  try {
+    const user = await User.findById(userId).select("vercel_access_token vercel_team_id").lean();
+    if (!user?.vercel_access_token) return null;
+    const headers = { Authorization: `Bearer ${user.vercel_access_token}` };
+    const team = user.vercel_team_id ? `&teamId=${encodeURIComponent(user.vercel_team_id)}` : "";
+    const pRes = await fetch(`https://api.vercel.com/v10/projects?repoUrl=${encodeURIComponent(`https://github.com/${repo}`)}&limit=1${team}`, { headers });
+    if (!pRes.ok) return null;
+    const project = (await pRes.json())?.projects?.[0];
+    if (!project?.name) return null;
+    const domains = project.targets?.production?.alias || [];
+    const domain = domains.find((d) => !d.endsWith(".vercel.app")) || domains[0] || `${project.name}.vercel.app`;
+    let slug = null;
+    if (user.vercel_team_id) {
+      const t = await fetch(`https://api.vercel.com/v2/teams/${encodeURIComponent(user.vercel_team_id)}`, { headers });
+      if (t.ok) slug = (await t.json())?.slug || null;
+    } else {
+      const u = await fetch("https://api.vercel.com/v2/user", { headers });
+      if (u.ok) slug = (await u.json())?.user?.username || null;
+    }
+    return {
+      name: project.name,
+      dashboardUrl: slug ? `https://vercel.com/${slug}/${project.name}` : "https://vercel.com/dashboard",
+      appUrl: `https://${domain}`,
+      domain,
+    };
+  } catch (e) {
+    console.error("[IDE] Vercel info failed:", e.message);
+    return null;
+  }
+}
 router.get("/projects/:id/github", isAuthenticated, async (req, res) => {
   const project = await ownProject(req, res);
   if (!project) return;
-  if (!project.repo) return res.json({ repoUrl: null, branch: null, commit: null });
+  if (!project.repo) return res.json({ repoUrl: null, branch: null, commit: null, vercel: null });
   try {
     const cached = await redis.get(GIT_INFO_KEY(project._id)).catch(() => null);
     if (cached) return res.json(JSON.parse(cached));
@@ -376,7 +410,8 @@ router.get("/projects/:id/github", isAuthenticated, async (req, res) => {
         };
       }
     }
-    const info = { repoUrl: repo.html_url || `https://github.com/${project.repo}`, branch, commit };
+    const vercel = await vercelFor(req.user._id, project.repo);
+    const info = { repoUrl: repo.html_url || `https://github.com/${project.repo}`, branch, commit, vercel };
     redis.set(GIT_INFO_KEY(project._id), JSON.stringify(info), "EX", 60).catch(() => {});
     res.json(info);
   } catch (e) {
