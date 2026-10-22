@@ -12,6 +12,7 @@
  */
 // CLASSGRID USES CLOUDFLARE USAGE TO CALCULATE TOKENS, NOT GPT-TOKENIZER (WHICH IS ONLY A FALLBACK)
 import express from "express";
+import crypto from "crypto";
 import { isAuthenticated } from "../middleware/auth.middleware.js";
 import User from "../models/User.js";
 import connectDB from "../../config/db.js";
@@ -121,6 +122,29 @@ router.post("/webhook", async (req, res) => {
     } catch (err) {
         console.error("WhatsApp Webhook Error:", err);
         res.sendStatus(500);
+    }
+});
+
+// ─────────────────────────────────────────────
+// POST /api/whatsapp/calls-internal
+// WhatsApp voice calls, passed on by the ai.classgrid.in server (same machine) that receives Meta's webhook.
+// Only accepted from this machine and with its signature (HMAC of the body with the shared WhatsApp key).
+// ─────────────────────────────────────────────
+router.post("/calls-internal", async (req, res) => {
+    const ip = String(req.socket?.remoteAddress || "");
+    const local = ip === "127.0.0.1" || ip === "::1" || ip === "::ffff:127.0.0.1";
+    const key = process.env.WHATSAPP_ACCESS_TOKEN || "";
+    const sent = String(req.headers["x-classgrid-call-signature"] || "");
+    const expected = key ? crypto.createHmac("sha256", key).update(JSON.stringify(req.body || {})).digest("hex") : "";
+    const ok = local && expected && sent.length === expected.length && crypto.timingSafeEqual(Buffer.from(sent), Buffer.from(expected));
+    if (!ok) return res.sendStatus(403);
+    res.sendStatus(200); // Meta must get its answer fast; the call is handled after this
+    try {
+        const { handleCallsWebhook } = await import("../services/whatsapp-call.service.js");
+        await connectDB();
+        await handleCallsWebhook(req.body);
+    } catch (err) {
+        console.error("WhatsApp call error:", err);
     }
 });
 

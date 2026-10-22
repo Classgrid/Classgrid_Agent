@@ -1,0 +1,520 @@
+// WhatsApp voice calls to the business number, answered by Classgrid AI.
+//
+// A user calls the Classgrid WhatsApp number. Meta sends the call to the ai.classgrid.in server (same machine), which
+// passes it here. If the caller's number is the verified WhatsApp of exactly one Classgrid account, the call is
+// answered as that person: their voice goes to Cloudflare Whisper (speech to text), Claude talks with them, and the
+// reply is spoken back with Cloudflare Aura (text to speech). A call lasts at most 2 minutes. When the AI has the task
+// (or the time is up) the call ends and the Classgrid Agent does the work in the background as that user, in a new
+// chat in their account; the result is sent to them on WhatsApp.
+//
+// Media is WebRTC (Meta's Calling API): we answer Meta's SDP offer from our own peer connection (@roamhq/wrtc),
+// audio is 48 kHz Opus. UDP 10000-60000 is open on the server for it.
+// Off switch: WHATSAPP_CALLS_DISABLED=true leaves every call unanswered (as before this feature).
+
+import crypto from "crypto";
+import jwt from "jsonwebtoken";
+import User from "../models/User.js";
+import { normalizeWhatsappNumber } from "./ai-feature-limits.js";
+import { isSharedTestWhatsapp } from "../utils/chat-onboarding.js";
+import { hasEnoughTokens, deductTokens } from "./ai-credits.service.js";
+import { chargeableTokens } from "./ai-token-pricing.js";
+
+const GRAPH = "https://graph.facebook.com/v22.0";
+const CALL_MODEL = "claude-haiku-5-5"; // fastest Claude, so the voice replies come quickly
+const MAX_CALL_MS = 2 * 60 * 1000;
+const WRAP_UP_MS = 105 * 1000; // at 1:45 the AI is told the time is almost up
+const SAMPLE_RATE = 48000;
+const FRAME = SAMPLE_RATE / 100; // 10 ms of audio
+const CHAT_URL = "https://chat.classgrid.in";
+
+const calls = new Map(); // call id -> live call
+
+let wrtcPromise = null;
+function loadWrtc() {
+    // Loaded only when a call comes, so the server always starts even if this native module is missing
+    wrtcPromise ||= import("@roamhq/wrtc").then((m) => m.default || m);
+    return wrtcPromise;
+}
+
+// ─── Meta Graph API ───────────────────────────────────────────
+
+async function graph(path, body) {
+    const phoneId = process.env.WHATSAPP_PHONE_ID;
+    const res = await fetch(`${GRAPH}/${phoneId}/${path}`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${process.env.WHATSAPP_ACCESS_TOKEN}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ messaging_product: "whatsapp", ...body }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(`Meta ${path} ${res.status}: ${JSON.stringify(data.error || data).slice(0, 300)}`);
+    return data;
+}
+
+const callAction = (callId, action, sdp) =>
+    graph("calls", { call_id: callId, action, ...(sdp ? { session: { sdp_type: "answer", sdp } } : {}) });
+
+function sendWhatsappText(to, text) {
+    return graph("messages", { recipient_type: "individual", to, type: "text", text: { preview_url: true, body: text.slice(0, 4000) } })
+        .catch((e) => console.error("[WA call] WhatsApp message failed:", e.message));
+}
+
+// ─── Who is calling ───────────────────────────────────────────
+
+// The owner's own number is on many accounts (shared test number), so calls from it always use the owner's account
+const OWNER_EMAIL = "nikhil.shinde@classgrid.in";
+const OWNER_NUMBER = "918623947038";
+// For now only the owner's number is answered; set WHATSAPP_CALLS_FOR_ALL=true to answer every verified user
+const callsForAll = () => process.env.WHATSAPP_CALLS_FOR_ALL === "true";
+
+// The Classgrid account whose verified WhatsApp is this number. Other shared test numbers (on several accounts on
+// purpose) and numbers on more than one account are not answered: the AI must know exactly whose account it works in.
+async function findCaller(from) {
+    const number = normalizeWhatsappNumber(from);
+    if (number === OWNER_NUMBER) return User.findOne({ email: OWNER_EMAIL }).select("-password -verificationToken");
+    if (!callsForAll() || !number || isSharedTestWhatsapp(number)) return null;
+    const last10 = number.slice(-10);
+    const candidates = await User.find({ "metadata.whatsappPhone": { $regex: `${last10}$` } })
+        .select("-password -verificationToken").limit(5);
+    const matches = candidates.filter((u) => normalizeWhatsappNumber(u.metadata?.whatsappPhone) === number);
+    return matches.length === 1 ? matches[0] : null;
+}
+
+// ─── Audio helpers ────────────────────────────────────────────
+
+function wav16k(chunks) {
+    // 48 kHz mono chunks -> 16 kHz mono WAV (Whisper)
+    const total = chunks.reduce((n, c) => n + c.length, 0);
+    const pcm48 = new Int16Array(total);
+    let o = 0;
+    for (const c of chunks) { pcm48.set(c, o); o += c.length; }
+    const n = Math.floor(total / 3);
+    const pcm16 = new Int16Array(n);
+    for (let i = 0; i < n; i++) pcm16[i] = (pcm48[i * 3] + pcm48[i * 3 + 1] + pcm48[i * 3 + 2]) / 3;
+    const b = Buffer.alloc(44 + n * 2);
+    b.write("RIFF", 0); b.writeUInt32LE(36 + n * 2, 4); b.write("WAVE", 8); b.write("fmt ", 12);
+    b.writeUInt32LE(16, 16); b.writeUInt16LE(1, 20); b.writeUInt16LE(1, 22); b.writeUInt32LE(16000, 24);
+    b.writeUInt32LE(32000, 28); b.writeUInt16LE(2, 32); b.writeUInt16LE(16, 34); b.write("data", 36); b.writeUInt32LE(n * 2, 40);
+    Buffer.from(pcm16.buffer).copy(b, 44);
+    return b;
+}
+
+function mono(samples, channels) {
+    if (channels === 1) return samples;
+    const out = new Int16Array(samples.length / channels);
+    for (let i = 0; i < out.length; i++) {
+        let s = 0;
+        for (let c = 0; c < channels; c++) s += samples[i * channels + c];
+        out[i] = s / channels;
+    }
+    return out;
+}
+
+function rms(samples) {
+    let s = 0;
+    for (let i = 0; i < samples.length; i++) s += samples[i] * samples[i];
+    return Math.sqrt(s / (samples.length || 1));
+}
+
+const cfUrl = (model) => `https://api.cloudflare.com/client/v4/accounts/${process.env.CLOUDFLARE_ACCOUNT_ID}/ai/run/${model}`;
+const cfHeaders = (type) => ({ Authorization: `Bearer ${process.env.CLOUDFLARE_WORKERS_AI_TOKEN}`, "Content-Type": type });
+
+async function speechToText(chunks) {
+    const res = await fetch(cfUrl("@cf/openai/whisper-large-v3-turbo"), { method: "POST", headers: cfHeaders("audio/wav"), body: wav16k(chunks) });
+    const json = await res.json().catch(() => ({}));
+    return String(json?.result?.text || "").trim();
+}
+
+async function textToSpeech(text) {
+    // Raw 16-bit 48 kHz mono, the call's own format
+    const res = await fetch(cfUrl("@cf/deepgram/aura-2-en"), {
+        method: "POST",
+        headers: cfHeaders("application/json"),
+        body: JSON.stringify({ text, encoding: "linear16", sample_rate: SAMPLE_RATE, container: "none" }),
+    });
+    if (!res.ok) throw new Error(`TTS ${res.status}`);
+    const buf = Buffer.from(await res.arrayBuffer());
+    return new Int16Array(buf.buffer, buf.byteOffset, Math.floor(buf.length / 2));
+}
+
+// ─── Claude (the talking part) ────────────────────────────────
+
+const START_TASK_TOOL = {
+    name: "start_task",
+    description: "Hand the caller's task to the Classgrid Agent, which then does the full work in their Classgrid account after the call (it has their chats, projects, GitHub, Vercel and connected apps) and sends them the result on WhatsApp. Calling this ends the phone call.",
+    input_schema: {
+        type: "object",
+        properties: {
+            task: { type: "string", description: "The complete task with every detail the caller gave, written for the Agent." },
+            project_name: { type: "string", description: "Optional: the name of one of the caller's Project Mode projects this task belongs to. The Agent's chat is then saved inside that project." },
+        },
+        required: ["task"],
+    },
+};
+
+// Project Mode tools, for the owner's account only (Project Mode is super admin only for now)
+const PROJECT_TOOLS = [
+    {
+        name: "make_project",
+        description: "Create a new Project Mode project in the caller's account with this name.",
+        input_schema: { type: "object", properties: { name: { type: "string", description: "The project name." } }, required: ["name"] },
+    },
+    {
+        name: "list_projects",
+        description: "List the caller's Project Mode projects (name and linked GitHub repo).",
+        input_schema: { type: "object", properties: {} },
+    },
+];
+
+const isOwner = (user) => String(user?.email || "").toLowerCase() === OWNER_EMAIL;
+const escapeRegex = (text) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+async function findProject(user, name) {
+    const { default: IdeProject } = await import("../models/IdeProject.js");
+    return IdeProject.findOne({ owner: user._id, name: new RegExp(`^${escapeRegex(String(name || "").trim())}$`, "i") });
+}
+
+async function runProjectTool(call, tool) {
+    const { default: IdeProject } = await import("../models/IdeProject.js");
+    if (tool.name === "list_projects") {
+        const list = await IdeProject.find({ owner: call.user._id }).select("name repo").sort({ updatedAt: -1 }).limit(20).lean();
+        return list.length ? list.map((p) => `${p.name}${p.repo ? ` (GitHub: ${p.repo})` : " (no GitHub repo yet)"}`).join("\n") : "No projects yet.";
+    }
+    if (tool.name === "make_project") {
+        const name = String(tool.input?.name || "").trim().slice(0, 80);
+        if (!name) return "No name was given.";
+        if (await findProject(call.user, name)) return `A project called "${name}" already exists.`;
+        await IdeProject.create({ owner: call.user._id, name });
+        return `Project "${name}" was created.`;
+    }
+    return "Unknown tool.";
+}
+
+function systemPrompt(user) {
+    const now = new Date().toLocaleString("en-IN", { timeZone: "Asia/Kolkata", dateStyle: "full", timeStyle: "short" });
+    return [
+        "You are Classgrid AI on a WhatsApp voice call with a Classgrid user.",
+        `Caller: ${user.name || "unknown name"} (${user.email}). Time: ${now} (India).`,
+        "What you say is read out by an English text-to-speech voice, so write plain spoken English: short sentences, no markdown, no lists, no emojis, no links.",
+        "The call can last at most 2 minutes.",
+        "After the call the Classgrid Agent does the work in the caller's account and sends them the result on WhatsApp.",
+    ].join("\n");
+}
+
+async function claudeTurn(call) {
+    const res = await fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        headers: { "x-api-key": process.env.ANTHROPIC_API_KEY, "anthropic-version": "2023-06-01", "content-type": "application/json" },
+        body: JSON.stringify({
+            model: CALL_MODEL,
+            max_tokens: 400,
+            system: systemPrompt(call.user),
+            tools: isOwner(call.user) ? [START_TASK_TOOL, ...PROJECT_TOOLS] : [START_TASK_TOOL],
+            messages: call.messages,
+        }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(`Claude ${res.status}: ${JSON.stringify(data.error || data).slice(0, 300)}`);
+    const u = data.usage || {};
+    const usage = {
+        prompt_tokens: (u.input_tokens || 0) + (u.cache_read_input_tokens || 0) + (u.cache_creation_input_tokens || 0),
+        completion_tokens: u.output_tokens || 0,
+        cache_read_input_tokens: u.cache_read_input_tokens || 0,
+        cache_creation_input_tokens: u.cache_creation_input_tokens || 0,
+    };
+    deductTokens(call.user._id, call.user.organization_id || null, chargeableTokens(usage, CALL_MODEL), call.tokenSource)
+        .catch((e) => console.error("[WA call] token charge failed:", e.message));
+    call.messages.push({ role: "assistant", content: data.content || [] });
+    const text = (data.content || []).filter((b) => b.type === "text").map((b) => b.text).join(" ").trim();
+    const tools = (data.content || []).filter((b) => b.type === "tool_use");
+    return { text, tools };
+}
+
+// ─── Call life ────────────────────────────────────────────────
+
+async function speak(call, text) {
+    if (!text || call.ended) return;
+    try {
+        const pcm = await textToSpeech(text);
+        call.outQueue.push(pcm);
+    } catch (e) {
+        console.error("[WA call] TTS failed:", e.message);
+    }
+}
+
+// Waits until everything queued has been played (or the call ended)
+function speakingDone(call) {
+    return new Promise((resolve) => {
+        const check = () => (call.ended || (call.outQueue.length === 0 && !call.outCurrent) ? resolve() : setTimeout(check, 50));
+        check();
+    });
+}
+
+async function handleUtterance(call, chunks) {
+    call.busy = true;
+    try {
+        const said = await speechToText(chunks);
+        if (!said || call.ended) return;
+        call.transcript.push(`Caller: ${said}`);
+        call.messages.push({ role: "user", content: said });
+        await reply(call);
+    } catch (e) {
+        console.error("[WA call] turn failed:", e.message);
+        await speak(call, "Sorry, I had a problem there. Could you say that again?");
+    } finally {
+        call.busy = false;
+    }
+}
+
+async function reply(call) {
+    // A few rounds, so the AI can use a project tool and then talk about the result
+    for (let round = 0; round < 4 && !call.ended; round++) {
+        const { text, tools } = await claudeTurn(call);
+        if (text) call.transcript.push(`AI: ${text}`);
+        const start = tools.find((t) => t.name === "start_task");
+        await speak(call, text || (start ? "Okay, I'm on it. I'll send you the result on WhatsApp." : ""));
+        if (!tools.length) return;
+        // Every tool the AI asked for gets its answer in one message
+        const results = [];
+        for (const t of tools) {
+            let content;
+            if (t.name === "start_task") {
+                call.task = String(t.input?.task || "").trim() || null;
+                call.taskProject = t.input?.project_name ? await findProject(call.user, t.input.project_name).catch(() => null) : null;
+                content = "Task handed to the Agent. The call is ending.";
+            } else if (isOwner(call.user)) {
+                call.transcript.push(`AI used ${t.name} ${JSON.stringify(t.input || {})}`);
+                content = await runProjectTool(call, t).catch((e) => `Failed: ${e.message}`);
+            } else {
+                content = "This tool is not available.";
+            }
+            results.push({ type: "tool_result", tool_use_id: t.id, content });
+        }
+        call.messages.push({ role: "user", content: results });
+        if (start) {
+            await speakingDone(call);
+            endCall(call.id, "task");
+            return;
+        }
+    }
+}
+
+function wrapUp(call) {
+    if (call.ended || call.task) return;
+    const run = async () => {
+        while (call.busy && !call.ended) await new Promise((r) => setTimeout(r, 100));
+        if (call.ended || call.task) return;
+        // Added only between turns, so it never lands between a tool request and its answer
+        call.messages.push({ role: "user", content: "[The call ends in about 15 seconds.]" });
+        call.busy = true;
+        try { await reply(call); } catch (e) { console.error("[WA call] wrap-up failed:", e.message); } finally { call.busy = false; }
+    };
+    run();
+}
+
+export function endCall(callId, why = "ended") {
+    const call = calls.get(callId);
+    if (!call || call.ended) return;
+    call.ended = true;
+    calls.delete(callId);
+    clearInterval(call.ticker);
+    clearTimeout(call.wrapTimer);
+    clearTimeout(call.hardStop);
+    try { call.sink?.stop(); } catch { /* already stopped */ }
+    try { call.pc?.close(); } catch { /* already closed */ }
+    if (why !== "remote") callAction(callId, "terminate").catch(() => { /* call already over */ });
+    console.log(`[WA call] ${callId} ended (${why}) after ${Math.round((Date.now() - call.startedAt) / 1000)}s`);
+    afterCall(call).catch((e) => console.error("[WA call] after-call work failed:", e.message));
+}
+
+async function afterCall(call) {
+    // Nothing said, nothing to do
+    const spoke = call.transcript.some((l) => l.startsWith("Caller:"));
+    if (!call.task && !spoke) return;
+    const task = call.task || `The user called Classgrid on WhatsApp. Here is the call:\n${call.transcript.join("\n")}\n\nDo what they asked.`;
+    const sessionId = crypto.randomUUID();
+    await sendWhatsappText(call.from, `Got it. Classgrid AI is working on it now. I'll send you the result here when it's done.\n\nFollow along: ${CHAT_URL}/agent/${sessionId}`);
+    const answer = await runAgentTask(call.user, `[From a WhatsApp call]\n${task}`, sessionId, call.taskProject?._id);
+    const short = answer.length > 1500 ? `${answer.slice(0, 1500).trimEnd()}…` : answer;
+    await sendWhatsappText(call.from, `${short || "Your task is done."}\n\nFull result: ${CHAT_URL}/agent/${sessionId}`);
+}
+
+// Runs the Classgrid Agent as this user through the normal chat route (same login checks, AI credits and saved
+// chat as when they use chat.classgrid.in), and returns the final answer text.
+async function runAgentTask(user, question, sessionId, projectId) {
+    const token = jwt.sign(
+        { id: user._id, role: user.role, organizationId: user.organization_id || null, rememberMe: false },
+        process.env.JWT_SECRET || "dev_secret",
+        { expiresIn: "2h" }
+    );
+    const port = process.env.PORT || 3000;
+    const res = await fetch(`http://127.0.0.1:${port}/api/ai/ask`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+        // projectId: the chat is saved inside that Project Mode project
+        body: JSON.stringify({ question, sessionId, ...(projectId ? { projectId: String(projectId) } : {}) }),
+    });
+    if (!res.ok || !res.body) {
+        const err = await res.json().catch(() => ({}));
+        return err.message || err.error || "Classgrid AI could not run this task.";
+    }
+    let buffer = "", answer = "", streamed = "";
+    const decoder = new TextDecoder();
+    for await (const chunk of res.body) {
+        buffer += decoder.decode(chunk, { stream: true });
+        let i;
+        while ((i = buffer.indexOf("\n\n")) !== -1) {
+            const event = buffer.slice(0, i);
+            buffer = buffer.slice(i + 2);
+            const line = event.split("\n").find((l) => l.startsWith("data: "));
+            if (!line) continue;
+            try {
+                const data = JSON.parse(line.slice(6));
+                if (data.type === "token" && data.token) streamed += data.token;
+                if (data.type === "answer" && data.answer) answer = data.answer;
+                if (data.type === "error" && data.message && !answer) answer = data.message;
+            } catch { /* not JSON */ }
+        }
+    }
+    return String(answer || streamed).trim();
+}
+
+function filterAnswerSdp(sdp) {
+    // Only UDP candidates that Meta can reach (no TCP, no loopback)
+    return sdp.split("\r\n").filter((line) => {
+        if (!line.startsWith("a=candidate:")) return true;
+        return / udp /i.test(line) && !/ (127\.0\.0\.1|::1) /.test(line);
+    }).join("\r\n");
+}
+
+export async function answerCall({ id, from, sdp, user, tokenSource }) {
+    const { RTCPeerConnection, nonstandard } = await loadWrtc();
+    const pc = new RTCPeerConnection({ iceServers: [{ urls: "stun:stun.l.google.com:19302" }], portRange: { min: 10000, max: 60000 } });
+    const source = new nonstandard.RTCAudioSource();
+    const call = {
+        id, from, user, pc, source, tokenSource,
+        startedAt: Date.now(), ended: false, busy: false, task: null,
+        messages: [], transcript: [],
+        outQueue: [], outCurrent: null, outPos: 0, speechEndedAt: 0,
+        speech: { active: false, chunks: [], loud: 0, quiet: 0, ms: 0 },
+    };
+    calls.set(id, call);
+
+    pc.ontrack = (e) => {
+        if (e.track.kind !== "audio" || call.sink) return;
+        call.sink = new nonstandard.RTCAudioSink(e.track);
+        call.sink.ondata = (d) => listen(call, mono(d.samples, d.channelCount || 1));
+    };
+    pc.onconnectionstatechange = () => {
+        if (["failed", "closed"].includes(pc.connectionState)) endCall(id, `connection ${pc.connectionState}`);
+    };
+
+    await pc.setRemoteDescription({ type: "offer", sdp });
+    pc.addTrack(source.createTrack());
+    await pc.setLocalDescription(await pc.createAnswer());
+    await new Promise((resolve) => {
+        if (pc.iceGatheringState === "complete") return resolve();
+        pc.onicegatheringstatechange = () => pc.iceGatheringState === "complete" && resolve();
+        setTimeout(resolve, 3000);
+    });
+    const answer = filterAnswerSdp(pc.localDescription.sdp);
+
+    await callAction(id, "pre_accept", answer);
+    await callAction(id, "accept", answer);
+    console.log(`[WA call] ${id} answered for ${user.email}`);
+
+    // Audio out: one 10 ms frame each tick (silence when the AI is not talking, so WhatsApp keeps the call open)
+    let sent = 0;
+    const t0 = Date.now();
+    call.ticker = setInterval(() => {
+        const due = Math.floor((Date.now() - t0) / 10);
+        while (sent < due && !call.ended) {
+            const frame = new Int16Array(FRAME);
+            let filled = 0;
+            while (filled < FRAME) {
+                if (!call.outCurrent) {
+                    call.outCurrent = call.outQueue.shift() || null;
+                    call.outPos = 0;
+                    if (!call.outCurrent) break;
+                }
+                const take = Math.min(FRAME - filled, call.outCurrent.length - call.outPos);
+                frame.set(call.outCurrent.subarray(call.outPos, call.outPos + take), filled);
+                filled += take;
+                call.outPos += take;
+                if (call.outPos >= call.outCurrent.length) { call.outCurrent = null; call.speechEndedAt = Date.now(); }
+            }
+            try { source.onData({ samples: frame, sampleRate: SAMPLE_RATE, bitsPerSample: 16, channelCount: 1, numberOfFrames: FRAME }); } catch { /* closing */ }
+            sent++;
+        }
+    }, 10);
+
+    call.wrapTimer = setTimeout(() => wrapUp(call), WRAP_UP_MS);
+    call.hardStop = setTimeout(() => endCall(id, "2 minute limit"), MAX_CALL_MS);
+
+    // Greeting
+    const first = String(user.name || "").split(" ")[0];
+    const hello = `Hi${first ? ` ${first}` : ""}, this is Classgrid AI. What can I do for you?`;
+    call.transcript.push(`AI: ${hello}`);
+    call.messages.push({ role: "user", content: "[Call connected.]" }, { role: "assistant", content: hello });
+    speak(call, hello);
+}
+
+// Simple voice detection: a turn starts when the caller gets loud and ends after 0.8 s of quiet.
+// While the AI is talking (and a moment after) the caller's audio is ignored, so the AI never hears itself.
+function listen(call, samples) {
+    if (call.ended) return;
+    const talking = call.outCurrent || call.outQueue.length > 0 || Date.now() - call.speechEndedAt < 400;
+    const s = call.speech;
+    if (call.busy || talking) { s.active = false; s.chunks = []; s.loud = 0; s.quiet = 0; s.ms = 0; return; }
+    const ms = (samples.length / SAMPLE_RATE) * 1000;
+    const loud = rms(samples) > 700;
+    if (!s.active) {
+        s.loud = loud ? s.loud + ms : 0;
+        s.chunks.push(samples);
+        if (s.chunks.length > 30) s.chunks.shift(); // keep a little audio from just before the speech starts
+        if (s.loud >= 60) { s.active = true; s.ms = 0; s.quiet = 0; }
+        return;
+    }
+    s.chunks.push(samples);
+    s.ms += ms;
+    s.quiet = loud ? 0 : s.quiet + ms;
+    if (s.quiet >= 800 || s.ms >= 15000) {
+        const chunks = s.chunks;
+        s.active = false; s.chunks = []; s.loud = 0; s.quiet = 0; s.ms = 0;
+        if (chunks.length > 40) handleUtterance(call, chunks);
+    }
+}
+
+// ─── Webhook entry (from the ai.classgrid.in server) ──────────
+
+export async function handleCallsWebhook(value) {
+    for (const c of value?.calls || []) {
+        try {
+            if (c.event === "terminate") { endCall(c.id, "remote"); continue; }
+            if (c.event !== "connect" || c.direction !== "USER_INITIATED" || !c.session?.sdp || calls.has(c.id)) continue;
+            if (process.env.WHATSAPP_CALLS_DISABLED === "true") continue;
+            const from = c.from || value.contacts?.[0]?.wa_id;
+            const user = await findCaller(from);
+            if (!user) {
+                if (!callsForAll()) continue; // owner-only for now: other calls stay unanswered, as before
+                console.log(`[WA call] ${c.id} from an unlinked number, not answered`);
+                await callAction(c.id, "reject").catch(() => {});
+                await sendWhatsappText(from, "This WhatsApp number is not linked to a Classgrid account. Sign in on https://chat.classgrid.in and verify this number, then call again.");
+                continue;
+            }
+            // Same credit check as the chat; if the check itself fails the call is not answered
+            const enough = await hasEnoughTokens(user._id, user.organization_id || null, 1).catch(() => null);
+            if (!enough?.allowed) {
+                await callAction(c.id, "reject").catch(() => {});
+                await sendWhatsappText(from, /insufficient/i.test(enough?.reason || "")
+                    ? `You're out of Classgrid AI credits right now. Top up on ${CHAT_URL} to use calls.`
+                    : "Classgrid AI can't take calls for your account right now. Please try again later.");
+                continue;
+            }
+            await answerCall({ id: c.id, from, sdp: c.session.sdp, user, tokenSource: enough.source || "personal" });
+        } catch (e) {
+            console.error(`[WA call] ${c.id} failed:`, e.message);
+            if (calls.has(c.id)) endCall(c.id, "error");
+            else callAction(c.id, "terminate").catch(() => {});
+        }
+    }
+}
