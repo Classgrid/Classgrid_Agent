@@ -365,12 +365,21 @@ export function ProjectModePage() {
     loadRepos();
   };
 
+  const [renameBusy, setRenameBusy] = useState(false);
   const rename = async () => {
-    if (!renaming) return;
-    const { res, data } = await api(`/projects/${renaming.id}`, { method: "PATCH", body: JSON.stringify({ name: renaming.name }) });
-    if (!res.ok) return toast.error(data.error || "Could not rename the project");
-    setProjects((list) => (list || []).map((p) => (p.id === renaming.id ? data.project : p)));
-    setRenaming(null);
+    if (!renaming || renameBusy || !renaming.name.trim()) return;
+    setRenameBusy(true);
+    try {
+      const { res, data } = await api(`/projects/${renaming.id}`, { method: "PATCH", body: JSON.stringify({ name: renaming.name }) });
+      if (!res.ok) { toast.error(data.error || "Could not rename the project"); return; }
+      setProjects((list) => (list || []).map((p) => (p.id === renaming.id ? data.project : p)));
+      setRenaming(null);
+      toast.success("Project saved");
+    } catch {
+      toast.error("Could not rename the project");
+    } finally {
+      setRenameBusy(false);
+    }
   };
 
   const [deleting, setDeleting] = useState<Project | null>(null);
@@ -721,8 +730,10 @@ export function ProjectModePage() {
                       </div>
                       {renaming?.id === p.id ? (
                         <>
-                          <Button variant="outline" onClick={() => setRenaming(null)} className="shrink-0">Cancel</Button>
-                          <Button onClick={rename} disabled={!renaming.name.trim()} className="shrink-0">Save</Button>
+                          <Button variant="outline" onClick={() => setRenaming(null)} disabled={renameBusy} className="shrink-0">Cancel</Button>
+                          <Button onClick={rename} disabled={renameBusy || !renaming.name.trim()} className="shrink-0">
+                            {renameBusy && <Spinner className="size-4" />} Save
+                          </Button>
                         </>
                       ) : (
                         <>
