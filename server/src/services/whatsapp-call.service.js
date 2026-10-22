@@ -11,7 +11,6 @@
 // audio is 48 kHz Opus. UDP 10000-60000 is open on the server for it.
 // Off switch: WHATSAPP_CALLS_DISABLED=true leaves every call unanswered (as before this feature).
 
-import crypto from "crypto";
 import jwt from "jsonwebtoken";
 import User from "../models/User.js";
 import { normalizeWhatsappNumber } from "./ai-feature-limits.js";
@@ -61,7 +60,7 @@ function sendWhatsappText(to, text) {
 // ─── Who is calling ───────────────────────────────────────────
 
 // The owner's own number is on many accounts (shared test number), so calls from it always use the owner's account
-const OWNER_EMAIL = "nikhil.shinde@classgrid.in";
+const OWNER_EMAIL = "nikhilsubsun123@gmail.com";
 const OWNER_NUMBER = "918623947038";
 // For now only the owner's number is answered; set WHATSAPP_CALLS_FOR_ALL=true to answer every verified user
 const callsForAll = () => process.env.WHATSAPP_CALLS_FOR_ALL === "true";
@@ -331,16 +330,21 @@ async function afterCall(call) {
     const spoke = call.transcript.some((l) => l.startsWith("Caller:"));
     if (!call.task && !spoke) return;
     const task = call.task || `The user called Classgrid on WhatsApp. Here is the call:\n${call.transcript.join("\n")}\n\nDo what they asked.`;
-    const sessionId = crypto.randomUUID();
-    await sendWhatsappText(call.from, `Got it. Classgrid AI is working on it now. I'll send you the result here when it's done.\n\nFollow along: ${CHAT_URL}/agent/${sessionId}`);
-    const answer = await runAgentTask(call.user, `[From a WhatsApp call]\n${task}`, sessionId, call.taskProject?._id);
-    const short = answer.length > 1500 ? `${answer.slice(0, 1500).trimEnd()}…` : answer;
-    await sendWhatsappText(call.from, `${short || "Your task is done."}\n\nFull result: ${CHAT_URL}/agent/${sessionId}`);
+    const result = await runAgentTask(call.user, `[From a WhatsApp call]\n${task}`, call.taskProject?._id, (sessionId) =>
+        sendWhatsappText(call.from, `Got it. Classgrid AI is working on it now. I'll send you the result here when it's done.\n\nFollow along: ${CHAT_URL}/agent/${sessionId}`));
+    const link = result.sessionId ? `\n\nFull result: ${CHAT_URL}/agent/${result.sessionId}` : "";
+    if (!result.answer) {
+        await sendWhatsappText(call.from, `Classgrid AI could not finish this task${result.error ? `: ${result.error}` : "."}${link}`);
+        return;
+    }
+    const short = result.answer.length > 1500 ? `${result.answer.slice(0, 1500).trimEnd()}…` : result.answer;
+    await sendWhatsappText(call.from, `${short}${link}`);
 }
 
 // Runs the Classgrid Agent as this user through the normal chat route (same login checks, AI credits and saved
-// chat as when they use chat.classgrid.in), and returns the final answer text.
-async function runAgentTask(user, question, sessionId, projectId) {
+// chat as when they use chat.classgrid.in). The route makes the new chat and tells its id (session_info).
+// Returns { sessionId, answer, error }.
+async function runAgentTask(user, question, projectId, onSession) {
     const token = jwt.sign(
         { id: user._id, role: user.role, organizationId: user.organization_id || null, rememberMe: false },
         process.env.JWT_SECRET || "dev_secret",
@@ -351,13 +355,13 @@ async function runAgentTask(user, question, sessionId, projectId) {
         method: "POST",
         headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
         // projectId: the chat is saved inside that Project Mode project
-        body: JSON.stringify({ question, sessionId, ...(projectId ? { projectId: String(projectId) } : {}) }),
+        body: JSON.stringify({ question, ...(projectId ? { projectId: String(projectId) } : {}) }),
     });
     if (!res.ok || !res.body) {
         const err = await res.json().catch(() => ({}));
-        return err.message || err.error || "Classgrid AI could not run this task.";
+        return { sessionId: null, answer: "", error: err.message || err.error || `the request failed (${res.status})` };
     }
-    let buffer = "", answer = "", streamed = "";
+    let buffer = "", answer = "", streamed = "", error = "", sessionId = null;
     const decoder = new TextDecoder();
     for await (const chunk of res.body) {
         buffer += decoder.decode(chunk, { stream: true });
@@ -369,13 +373,17 @@ async function runAgentTask(user, question, sessionId, projectId) {
             if (!line) continue;
             try {
                 const data = JSON.parse(line.slice(6));
+                if (data.type === "session_info" && data.sessionId && !sessionId) {
+                    sessionId = data.sessionId;
+                    onSession?.(sessionId);
+                }
                 if (data.type === "token" && data.token) streamed += data.token;
                 if (data.type === "answer" && data.answer) answer = data.answer;
-                if (data.type === "error" && data.message && !answer) answer = data.message;
+                if (data.type === "error") error = data.message || data.error || "unknown error";
             } catch { /* not JSON */ }
         }
     }
-    return String(answer || streamed).trim();
+    return { sessionId, answer: String(answer || streamed).trim(), error };
 }
 
 function filterAnswerSdp(sdp) {
