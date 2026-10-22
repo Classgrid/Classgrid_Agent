@@ -26,13 +26,13 @@ const roomUsers = new Map<string, number>();
 const errorText = (err: any, fallback: string) => err?.message || err?.response?.data?.error || fallback;
 
 /** Panel data for a chat, plus live updates: refreshes when someone joins, is invited or sends a message. */
-export function useShareGrid(sessionId: string | null | undefined, onMessagesChanged?: (e: { by?: string }) => void) {
+export function useShareGrid(sessionId: string | null | undefined, onMessagesChanged?: (e: { by?: string; kind?: string; reason?: string | null; canReopen?: boolean }) => void) {
   const queryClient = useQueryClient();
   const query = useQuery<GridData>({
     queryKey: gridKey(sessionId || ""),
     queryFn: async () => (await apiClient.get<GridData>(`/api/ai/grid/${sessionId}`)).data,
     enabled: !!sessionId,
-    staleTime: 30_000,
+    staleTime: 0,
   });
   const shared = (query.data?.members?.length || 0) > 1;
   const onMessagesRef = useRef(onMessagesChanged);
@@ -52,23 +52,30 @@ export function useShareGrid(sessionId: string | null | undefined, onMessagesCha
     const socket = getSocket();
     if (!socket) return;
     const join = () => socket.emit("join_ai_grid", sessionId);
+    // Back online after a drop: events may have been missed, so start fresh from the server
+    const onReconnect = () => {
+      join();
+      setLiveReplying(null);
+      queryClient.invalidateQueries({ queryKey: gridKey(sessionId) });
+      onMessagesRef.current?.({ kind: "messages" });
+    };
     // The chat and the panel both use this hook; the screen leaves the room only when the last one closes
     // (closing the panel used to take the whole screen out of the room, so live updates stopped)
     const users = (roomUsers.get(sessionId) || 0) + 1;
     roomUsers.set(sessionId, users);
     if (users === 1) join();
-    socket.on("connect", join);
-    const onUpdate = (e: { sessionId: string; kind: string; by?: string; name?: string }) => {
+    socket.io.on("reconnect", onReconnect);
+    const onUpdate = (e: { sessionId: string; kind: string; by?: string; name?: string; reason?: string | null; canReopen?: boolean }) => {
       if (e?.sessionId !== sessionId) return;
       // Show "Agent is responding to …" right away; the refetch below confirms it
       if (e.kind === "reply_start" && e.by) setLiveReplying({ email: e.by, name: e.name || e.by });
       if (e.kind === "reply_end") setLiveReplying((cur) => (cur && e.by && cur.email !== e.by ? cur : null));
       queryClient.invalidateQueries({ queryKey: gridKey(sessionId) });
-      if (e.kind === "messages") onMessagesRef.current?.(e);
+      if (e.kind === "messages" || e.kind === "ended") onMessagesRef.current?.(e);
     };
     socket.on("aigrid:update", onUpdate);
     return () => {
-      socket.off("connect", join);
+      socket.io.off("reconnect", onReconnect);
       socket.off("aigrid:update", onUpdate);
       const left = (roomUsers.get(sessionId) || 1) - 1;
       if (left > 0) roomUsers.set(sessionId, left);
@@ -291,7 +298,7 @@ export function ShareGridPanel({ sessionId, myEmail, onClose }: { sessionId: str
     try {
       await apiClient.delete(`/api/ai/grid/${sessionId}/members/${encodeURIComponent(person.email)}`);
       toast.success(leaving ? "You left this chat." : `${person.name} was removed.`);
-      if (leaving) window.location.assign("/agent/chat");
+      if (leaving) window.location.assign(window.location.pathname.startsWith("/superadmin") ? "/superadmin/agent" : "/agent");
       else refresh();
     } catch (err) {
       toast.error(errorText(err, "Could not remove."));

@@ -194,7 +194,10 @@ export function AgentNestedMenu({ searchQuery = "" }: { searchQuery?: string }) 
     }
   };
 
+  // A shared chat someone else owns: "delete" means leave it
+  const deleteIsShared = !!(sessions.find((x) => x.id === deleteSessionId) as any)?.shared;
   const handleDeleteSession = async (id: string) => {
+    const leaving = !!(sessions.find((x) => x.id === id) as any)?.shared;
     setIsDeletingSession(true);
     try {
       const res = await fetchWithRescue(`${endpointPrefix}/api/ai/sessions/${id}`, {
@@ -202,7 +205,7 @@ export function AgentNestedMenu({ searchQuery = "" }: { searchQuery?: string }) 
         credentials: "include"
       });
       if (res.ok) {
-        toast.success("Chat deleted");
+        toast.success(leaving ? "You left the chat" : "Chat deleted");
         setDeleteSessionId(null);
         if (activeSessionId === id) window.dispatchEvent(new Event("agent:new-chat"));
         fetchSessions(true);
@@ -568,6 +571,7 @@ export function AgentNestedMenu({ searchQuery = "" }: { searchQuery?: string }) 
                   Share
                 </DropdownMenuItem>
 
+                {!(session as any).shared && (<>
                 <DropdownMenuItem
                   className="gap-3 py-2 px-3 text-[14px] cursor-pointer hover:bg-slate-100 dark:hover:bg-[#343541] focus:bg-slate-100 dark:focus:bg-[#343541] focus:text-slate-900 dark:focus:text-[#ececf1] rounded-xl transition-colors"
                   onClick={() => {
@@ -596,8 +600,9 @@ export function AgentNestedMenu({ searchQuery = "" }: { searchQuery?: string }) 
                   <Pin className="w-4 h-4 text-slate-500 dark:text-white/70" strokeWidth={2} />
                   {session.pinned ? "Unpin chat" : "Pin chat"}
                 </DropdownMenuItem>
+                </>)}
 
-                {!isProjectMode && (
+                {!isProjectMode && !(session as any).shared && (
                   <DropdownMenuSub onOpenChange={(open) => { if (open && projects === null) loadProjects(); }}>
                     <DropdownMenuSubTrigger className="gap-3 py-2 px-3 text-[14px] cursor-pointer hover:bg-slate-100 dark:hover:bg-[#343541] focus:bg-slate-100 dark:focus:bg-[#343541] rounded-xl transition-colors data-popup-open:bg-slate-100 dark:data-popup-open:bg-[#343541]">
                       <FolderInput className="w-4 h-4 text-slate-500 dark:text-white/70" strokeWidth={2} />
@@ -647,7 +652,7 @@ export function AgentNestedMenu({ searchQuery = "" }: { searchQuery?: string }) 
                   }}
                 >
                   <Trash2 className="w-4 h-4 text-[#ef4444]" strokeWidth={2} />
-                  Delete
+                  {(session as any).shared ? "Leave chat" : "Delete"}
                 </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
@@ -1124,10 +1129,10 @@ export function AgentNestedMenu({ searchQuery = "" }: { searchQuery?: string }) 
       <DangerConfirmDialog
         open={deleteSessionId !== null}
         onOpenChange={(open) => { if (!open) setDeleteSessionId(null); }}
-        title="Delete chat"
-        description="This will permanently delete this chat and all its messages. This action cannot be undone."
-        warningMessage="This chat will be permanently deleted."
-        actionLabel="Delete chat"
+        title={deleteIsShared ? "Leave chat" : "Delete chat"}
+        description={deleteIsShared ? "This removes the shared chat from your list. It stays for the other people in it." : "This will permanently delete this chat and all its messages. This action cannot be undone."}
+        warningMessage={deleteIsShared ? "You will leave this shared chat." : "This chat will be permanently deleted."}
+        actionLabel={deleteIsShared ? "Leave chat" : "Delete chat"}
         isLoading={isDeletingSession}
         onConfirm={() => { if (deleteSessionId) handleDeleteSession(deleteSessionId); }}
       />

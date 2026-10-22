@@ -3094,18 +3094,33 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
   const gridSessionId = sessionId && sessionId !== "schedule" && sessionId !== "library" ? sessionId : null;
   const gridSubmittingRef = useRef(submitting);
   gridSubmittingRef.current = submitting;
+  const gridOpenChatRef = useRef(gridSessionId);
+  gridOpenChatRef.current = gridSessionId;
   const gridMyEmailRef = useRef("");
   gridMyEmailRef.current = (session?.user?.email || "").toLowerCase();
-  const refreshSharedMessages = React.useCallback(async (e?: { by?: string }) => {
+  const refreshSharedMessages = React.useCallback(async (e?: { by?: string; kind?: string; reason?: string | null; canReopen?: boolean }) => {
+    // The chat was ended (by anyone's message): it ends on my screen too
+    if (e?.kind === "ended") {
+      setChatEnded({ reason: e.reason ?? null, canReopen: !!e.canReopen });
+      setMessageQueue([]);
+      setPriorityMessage(null);
+    }
     if (!gridSessionId || gridSubmittingRef.current) return; // my own reply is streaming: it shows already
     // My own message and its reply are already on my screen: reloading them re-draws the chat (the Thought box flashed)
     if (e?.by && e.by.toLowerCase() === gridMyEmailRef.current) return;
     try {
       const prefix = import.meta.env.VITE_API_URL || "https://api.classgrid.in";
-      const res = await fetchWithRescue(`${prefix}/api/ai/sessions/${gridSessionId}/messages`, { credentials: "include" });
+      const forChat = gridSessionId;
+      const res = await fetchWithRescue(`${prefix}/api/ai/sessions/${forChat}/messages`, { credentials: "include" });
+      if (gridOpenChatRef.current !== forChat) return; // the user opened another chat meanwhile
+      if (res.status === 403 || res.status === 404) {
+        toast.error("You're no longer in this shared chat.");
+        window.location.assign(window.location.pathname.startsWith("/superadmin") ? "/superadmin/agent" : "/agent");
+        return;
+      }
       if (!res.ok) return;
       const data = await res.json();
-      if (!gridSubmittingRef.current) setMessages((data.messages || []).map(toChatMessage));
+      if (gridOpenChatRef.current === forChat && !gridSubmittingRef.current) setMessages((data.messages || []).map(toChatMessage));
     } catch { /* next update will try again */ }
   }, [gridSessionId]);
   const grid = useShareGrid(gridSessionId, refreshSharedMessages);
@@ -4394,8 +4409,8 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
     const lastMsg = messages[messages.length - 1];
     const isTyping = lastMsg?.role === "assistant" && lastMsg.typing === true;
 
-    // If we are fully done generating and typing
-    if (!thinking && !submitting && !isTyping) {
+    // If we are fully done generating and typing (and, in a shared chat, the agent isn't answering someone else)
+    if (!thinking && !submitting && !isTyping && !gridBlockedBy) {
       // First check if there is a priority message
       if (priorityMessage) {
         setSubmitting(true);
@@ -4423,7 +4438,7 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
         }, 50); // fast fire
       }
     }
-  }, [thinking, submitting, messages, messageQueue.length, priorityMessage]);
+  }, [thinking, submitting, messages, messageQueue.length, priorityMessage, gridBlockedBy]);
 
   // ─── Panel content (shared between desktop sidebar and mobile bottom-sheet) ───
   const pendingQueueUI = null;
@@ -4658,7 +4673,7 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
                     <div className={cn("flex flex-col gap-1.5 min-w-0", isUser ? "items-end max-w-[75%]" : "w-full")}>
                       {isUser && grid.shared && (() => {
                         const who = gridSenderOf(message);
-                        return who && who !== gridMyEmail && gridPeople[who] ? <GridSenderTag person={gridPeople[who]} /> : null;
+                        return who && who !== gridMyEmail ? <GridSenderTag person={gridPeople[who] || { name: who }} /> : null;
                       })()}
 
                       {/* ── Text Bubble ── */}
@@ -4759,6 +4774,7 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
                                   {/* Hover Actions (Copy / Edit) */}
                                   {typeof message.content === 'string' && message.content.replace(/\[Attached file:.*?\]/g, '').trim().length > 0 && (
                                     <div className="absolute top-full right-0 mt-1 opacity-0 group-hover:opacity-100 transition-opacity flex flex-row items-center gap-1 z-50 before:absolute before:-top-4 before:left-0 before:right-0 before:h-4">
+                                      {!(grid.shared && (gridSenderOf(message) !== gridMyEmail || gridBlockedBy)) && (
                                       <TooltipProvider delayDuration={200}>
                                         <Tooltip>
                                           <TooltipTrigger asChild>
@@ -4779,6 +4795,7 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
                                           </TooltipContent>
                                         </Tooltip>
                                       </TooltipProvider>
+                                      )}
 
                                       <TooltipProvider delayDuration={200}>
                                         <Tooltip>

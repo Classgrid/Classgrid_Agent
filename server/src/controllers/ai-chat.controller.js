@@ -52,7 +52,7 @@ import {
     memoryText
 } from "../services/ai-chat.service.js";
 import { getHistory, getHistoryCount, appendToHistory, invalidateHistoryCache, getChatTranscript } from "../services/ai-chat-history.service.js";
-import { canAccessSession, gridLabelMap, gridProfilesText, getSharedSessionsFor } from "../services/ai-chat-grid.service.js";
+import { canAccessSession, gridLabelMap, gridProfilesText, getSharedSessionsFor, leaveSharedChat } from "../services/ai-chat-grid.service.js";
 import { editorContextFor, rememberProjectSnapshot, sandboxDataDir, startCheckpoint, finishCheckpoint, linkChatToProject } from "../services/ide-project.service.js";
 import { buildEndConversationHandlers, reopenSession } from "../services/ai-end-conversation.service.js";
 import { hasEnoughTokens, deductTokens, getImageGenerationCost, tokenWindowEnd } from "../services/ai-credits.service.js";
@@ -1378,6 +1378,14 @@ export const streamAskAi = async (req, res) => {
 
         let sessionId = body.sessionId;
         const isIncognito = body.isIncognito || false;
+        if (isIncognito && sessionId) {
+            const saved = await getSessionById(sessionId).catch(() => null);
+            if (saved && !(await canAccessSession(saved, req.user?.email || ''))) {
+                res.write(`data: ${JSON.stringify({ type: "error", error: "Unauthorized. You do not have permission to view this chat." })}\n\n`);
+                res.end();
+                return;
+            }
+        }
 
         // ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ HISTORY: Read from Redis (hot) ÃƒÂ¢Ã¢â‚¬Â Ã¢â‚¬â„¢ Supabase (cold). NEVER trust frontend body.history. ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬
         // The frontend no longer controls chat history. The backend owns it entirely.
@@ -1459,7 +1467,9 @@ export const streamAskAi = async (req, res) => {
                 console.log(`[ShareGrid] lock taken by ${gridSender.email} in ${sessionId}`);
                 gridIo?.to(`aigrid:${sessionId}`).emit("aigrid:update", { sessionId, kind: "reply_start", by: gridSender.email, name: gridSender.name });
                 // Long replies keep the lock (it would expire after 5 minutes only if the server stopped)
+                let lockBeats = 0;
                 const lockHeartbeat = setInterval(async () => {
+                    if (++lockBeats > 10) { clearInterval(lockHeartbeat); return; } // stuck reply: the lock runs out ~15 min in
                     try { if ((await redis.get(replyKey)) === replyMine) await redis.expire(replyKey, 300); } catch { /* next beat */ }
                 }, 60 * 1000);
                 // Called once at the very end of this request (the finally below): thinking, tools, answer and
@@ -1467,6 +1477,11 @@ export const streamAskAi = async (req, res) => {
                 releaseGridLock = () => {
                     clearInterval(lockHeartbeat);
                     setTimeout(async () => {
+                        // The chat was ended during this reply: end it on everyone's screen
+                        try {
+                            const after = await getSessionById(sessionId);
+                            if (after?.ended) gridIo?.to(`aigrid:${sessionId}`).emit("aigrid:update", { sessionId, kind: "ended", by: gridSender.email, reason: after.end_reason || null, canReopen: after.end_reason === "user_requested" });
+                        } catch { /* they see it on their next load */ }
                         let mine = false;
                         try { mine = (await redis.get(replyKey)) === replyMine; if (mine) await redis.del(replyKey); } catch { /* expires by itself */ }
                         if (!mine) return; // a newer request by the same person holds it now
@@ -1645,7 +1660,7 @@ You are currently talking to Nikhil Shinde (nikhil.shinde@classgrid.in), the CRE
 
         // Project Mode: what the user sees in the code editor (open file, cursor, selection, errors) and what they changed
         // A message sent from Project Mode links this chat to the open project first (from the very first message)
-        if (sessionId && !isIncognito && /^[0-9a-f]{24}$/i.test(String(body.projectId || "")) && req.user?._id) {
+        if (sessionId && !isIncognito && !gridSender && /^[0-9a-f]{24}$/i.test(String(body.projectId || "")) && req.user?._id) {
             await linkChatToProject(req.user._id, body.projectId, sessionId).catch(() => {});
         }
         const projectContext = sessionId && !isIncognito ? await editorContextFor(sessionId).catch(() => "") : "";
@@ -5071,10 +5086,16 @@ export const updateChatSession = async (req, res) => {
 export const deleteChatSession = async (req, res) => {
     try {
         const { id } = req.params;
-        // Only the chat's owner deletes it (Share Grid members can leave instead)
         const owned = await getSessionById(id);
         if (!owned) return res.status(404).json({ error: "Session not found" });
-        if (owned.user_email !== req.user?.email) return res.status(403).json({ error: "Only the chat owner can delete this chat." });
+        if (!(await canAccessSession(owned, req.user?.email))) return res.status(403).json({ error: "Forbidden" });
+        // Share Grid: deleting a shared chat only takes it off your list. A member leaves; the owner leaves and
+        // the person who joined first becomes the new owner. The chat is really deleted only when nobody is left.
+        const outcome = await leaveSharedChat(owned, req.user.email);
+        if (outcome !== "delete") {
+            req.app.get("io")?.to(`aigrid:${id}`).emit("aigrid:update", { sessionId: id, kind: "members", by: String(req.user.email).toLowerCase() });
+            return res.json({ success: true, left: true });
+        }
         await deleteSession(id);
         // Purge Redis cache for this session so stale history is never served
         invalidateHistoryCache(id).catch(err => console.warn("Failed to invalidate Redis cache on delete:", err));
@@ -5905,7 +5926,7 @@ export const generateImage = async (req, res) => {
             // Only the user's own chat can receive the image.
             if (activeSessionId) {
                 const sessionData = await getSessionById(activeSessionId).catch(() => null);
-                if (!sessionData || sessionData.user_email !== userEmail) activeSessionId = null;
+                if (!sessionData || !(await canAccessSession(sessionData, userEmail))) activeSessionId = null;
             }
             if (!activeSessionId && userEmail) {
                 const newSession = await createSession(userEmail, prompt.substring(0, 50));

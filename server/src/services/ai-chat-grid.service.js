@@ -215,3 +215,30 @@ export async function senderLabels(sessionId) {
         return `${grid.labels[email] || email || "Owner"}: `;
     };
 }
+
+/**
+ * Someone deletes a shared chat from their list. A member just leaves it. The owner leaves too, and the
+ * chat stays for the others: the person who joined first becomes the new owner. Only when nobody else is
+ * left is the chat really deleted ("delete").
+ * Returns "left" | "transferred" | "delete".
+ */
+export async function leaveSharedChat(session, email) {
+    const me = norm(email);
+    const members = await getActiveMembers(session.id);
+    const others = members.filter((m) => norm(m.user_email) !== me);
+    const now = new Date().toISOString();
+    if (norm(session.user_email) !== me) {
+        await sb.from("ai_chat_grid_members").update({ removed_at: now }).eq("session_id", session.id).eq("user_email", me);
+        return "left";
+    }
+    if (others.length === 0) return "delete";
+    const next = others.find((m) => m.role === "member") || others[0];
+    const newOwner = norm(next.user_email);
+    const { error } = await sb.from("ai_chat_sessions").update({ user_email: newOwner, pinned: false }).eq("id", session.id);
+    if (error) throw error;
+    await sb.from("ai_chat_grid_members").update({ role: "owner" }).eq("session_id", session.id).eq("user_email", newOwner);
+    await sb.from("ai_chat_grid_members").update({ removed_at: now, role: "member" }).eq("session_id", session.id).eq("user_email", me);
+    // The old owner's invite link stops working; the new owner can make a new one
+    await sb.from("ai_chat_grid_invites").update({ status: "revoked" }).eq("session_id", session.id).eq("invite_type", "link").eq("status", "pending");
+    return "transferred";
+}

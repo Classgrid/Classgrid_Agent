@@ -29,6 +29,8 @@ async function loadOwnedSession(req, res) {
     const session = await getSessionById(req.params.sessionId);
     if (!session || session.is_incognito) { res.status(404).json({ error: "Chat not found." }); return null; }
     if (norm(session.user_email) !== norm(req.user?.email)) { res.status(403).json({ error: "Only the chat owner can do this." }); return null; }
+    const IdeProject = (await import("../models/IdeProject.js")).default;
+    if (await IdeProject.exists({ chatSessionIds: session.id })) { res.status(400).json({ error: "Project Mode chats can't be shared." }); return null; }
     return session;
 }
 
@@ -187,6 +189,9 @@ router.delete("/:sessionId/members/:email", isAuthenticated, async (req, res) =>
         if (target === norm(session.user_email)) return res.status(400).json({ error: "The owner can't be removed." });
         if (!isOwner && target !== me) return res.status(403).json({ error: "Only the chat owner can remove people." });
         await sb.from("ai_chat_grid_members").update({ removed_at: new Date().toISOString() }).eq("session_id", session.id).eq("user_email", target);
+        if (isOwner && target !== me) {
+            await sb.from("ai_chat_grid_invites").update({ status: "revoked" }).eq("session_id", session.id).eq("invite_type", "link").eq("status", "pending");
+        }
         emitGridUpdate(req, session.id, "members");
         res.json({ ok: true });
     } catch (e) {
