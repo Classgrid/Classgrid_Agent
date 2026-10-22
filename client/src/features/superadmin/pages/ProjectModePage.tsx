@@ -704,6 +704,21 @@ export function ProjectModePage() {
                           ].filter(Boolean).join(" · ")}
                         </span>
                       </div>
+                      <button
+                        onClick={() => { if (p.repo) open(p); else { setLinking(p); loadRepos(); } }}
+                        disabled={busyId === p.id}
+                        className="self-start shrink-0 flex items-center gap-2 px-3 py-1.5 rounded-full border border-border text-sm hover:bg-secondary disabled:opacity-50"
+                      >
+                        {busyId === p.id ? <Spinner className="size-4" /> : p.repo ? <GithubIcon className="size-4" /> : <FolderGit2 className="size-4" />}
+                        {busyId === p.id ? (p.repo ? "Downloading…" : "Opening…") : "Open"}
+                      </button>
+                    </div>
+                    <div className="flex items-end gap-3 min-w-0">
+                      <div className="flex-1 min-w-0">
+                        {p.repo
+                          ? <ProjectGitInfo project={p} />
+                          : <span className="text-xs text-muted-foreground">No GitHub repo yet · <button onClick={() => { setLinking(p); loadRepos(); }} className="underline hover:text-foreground">Link one</button></span>}
+                      </div>
                       {renaming?.id === p.id ? (
                         <>
                           <Button variant="outline" onClick={() => setRenaming(null)} className="shrink-0">Cancel</Button>
@@ -715,18 +730,7 @@ export function ProjectModePage() {
                           <Button variant="destructive" onClick={() => setDeleting(p)} className="shrink-0">Delete</Button>
                         </>
                       )}
-                      <button
-                        onClick={() => { if (p.repo) open(p); else { setLinking(p); loadRepos(); } }}
-                        disabled={busyId === p.id}
-                        className="shrink-0 flex items-center gap-2 px-3 py-1.5 rounded-full border border-border text-sm hover:bg-secondary disabled:opacity-50"
-                      >
-                        {busyId === p.id ? <Spinner className="size-4" /> : p.repo ? <GithubIcon className="size-4" /> : <FolderGit2 className="size-4" />}
-                        {busyId === p.id ? (p.repo ? "Downloading…" : "Opening…") : "Open"}
-                      </button>
                     </div>
-                    {p.repo
-                      ? <ProjectGitInfo project={p} />
-                      : <span className="text-xs text-muted-foreground">No GitHub repo yet · <button onClick={() => { setLinking(p); loadRepos(); }} className="underline hover:text-foreground">Link one</button></span>}
                   </div>
                 ))}
               </div>
