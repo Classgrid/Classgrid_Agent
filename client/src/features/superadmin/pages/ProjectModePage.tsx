@@ -13,7 +13,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import { useParams } from "react-router-dom";
-import { ArrowLeft, FolderGit2, GitBranch, GitCommitHorizontal, Github, ImagePlus, Plus } from "lucide-react";
+import { ArrowLeft, FolderGit2, GitBranch, GitCommitHorizontal, ImagePlus, Plus } from "lucide-react";
 import { Button } from "@/components/marketing_ui/button";
 import { Spinner } from "@/components/marketing_ui/spinner";
 import { Skeleton } from "@/components/marketing_ui/skeleton";
@@ -77,6 +77,11 @@ function LoadingSmoke() {
   );
 }
 
+// Our GitHub logo (black), turned white in dark mode
+function GithubIcon({ className = "size-4" }: { className?: string }) {
+  return <img src="https://cdn.classgrid.in/classgrid_intgration/github-icon.svg" alt="" aria-hidden className={`${className} dark:invert`} />;
+}
+
 // The project's picture, or the folder icon when it has none
 function ProjectLogo({ logo, className = "size-32" }: { logo?: string | null; className?: string }) {
   return logo
@@ -119,7 +124,7 @@ function ProjectGitInfo({ project }: { project: Project }) {
       ) : null}
       <div className="flex items-center gap-1.5 text-xs text-muted-foreground min-w-0 flex-wrap">
         <a href={repoUrl} target="_blank" rel="noreferrer" className="flex items-center gap-1.5 hover:text-foreground min-w-0 max-w-full">
-          <Github className="size-3.5 shrink-0" /><span className="truncate">{project.repo}</span>
+          <GithubIcon className="size-3.5 shrink-0" /><span className="truncate">{project.repo}</span>
         </a>
         {info === null ? (
           <Skeleton className="h-3 w-24" />
@@ -487,7 +492,7 @@ export function ProjectModePage() {
             {openProject.repo && <span className="text-xs text-muted-foreground truncate">{openProject.repo}</span>}
             {openProject.repo && folder && (
               <button onClick={handleOpenPushModal} disabled={pushing} title="Push to GitHub" aria-label="Push to GitHub" className="ml-auto shrink-0 flex items-center gap-2 h-8 px-3 rounded-full border border-border text-sm hover:bg-secondary disabled:opacity-50">
-                {pushing ? <Spinner className="size-4" /> : <Github className="size-4" />}
+                {pushing ? <Spinner className="size-4" /> : <GithubIcon className="size-4" />}
                 {/* Normal panel size: full text. Once the AI panel is dragged wider: only the GitHub icon */}
                 {aiWidth <= 440 && <span>Push to GitHub</span>}
               </button>
@@ -567,11 +572,11 @@ export function ProjectModePage() {
       ) : githubConnected === false ? (
         <div className="flex-1 flex items-center justify-center px-6">
           <div className="w-full max-w-md rounded-xl border border-border bg-background p-6 flex flex-col gap-4 text-center">
-            <Github className="size-8 mx-auto" />
+            <GithubIcon className="size-8 mx-auto" />
             <h1 className="text-xl font-semibold">{githubExpired ? "Reconnect GitHub" : "Connect GitHub to use Project Mode"}</h1>
             <p className="text-sm text-muted-foreground">Project Mode needs your GitHub account. Your code is only kept on GitHub, never on our servers.</p>
             <button onClick={() => setHubOpen(true)} className="flex items-center justify-center gap-2 bg-foreground text-background px-4 py-2 rounded-full font-medium text-sm hover:opacity-90">
-              <Github className="size-4" /> {githubExpired ? "Reconnect GitHub" : "Connect GitHub"}
+              <GithubIcon className="size-4" /> {githubExpired ? "Reconnect GitHub" : "Connect GitHub"}
             </button>
           </div>
         </div>
@@ -586,7 +591,7 @@ export function ProjectModePage() {
                   <div className="flex items-center gap-2.5 mt-4">
                     {githubAccount.avatar
                       ? <img src={githubAccount.avatar} alt="" className="size-8 rounded-full border border-border" />
-                      : <div className="size-8 rounded-full border border-border flex items-center justify-center"><Github className="size-4" /></div>}
+                      : <div className="size-8 rounded-full border border-border flex items-center justify-center"><GithubIcon className="size-4" /></div>}
                     <div className="flex flex-col min-w-0">
                       <span className="text-sm font-medium truncate">
                         {githubAccount.name}{githubAccount.login && githubAccount.login !== githubAccount.name ? <span className="text-muted-foreground font-normal"> @{githubAccount.login}</span> : null}
@@ -710,7 +715,7 @@ export function ProjectModePage() {
                         disabled={busyId === p.id}
                         className="shrink-0 flex items-center gap-2 px-3 py-1.5 rounded-full border border-border text-sm hover:bg-secondary disabled:opacity-50"
                       >
-                        {busyId === p.id ? <Spinner className="size-4" /> : p.repo ? <Github className="size-4" /> : <FolderGit2 className="size-4" />}
+                        {busyId === p.id ? <Spinner className="size-4" /> : p.repo ? <GithubIcon className="size-4" /> : <FolderGit2 className="size-4" />}
                         {busyId === p.id ? (p.repo ? "Downloading…" : "Opening…") : "Open"}
                       </button>
                     </div>
@@ -766,7 +771,7 @@ export function ProjectModePage() {
             </div>
             {githubConnected === false ? (
               <button onClick={() => setHubOpen(true)} className="flex items-center justify-center gap-2 bg-foreground text-background px-4 py-2 rounded-full font-medium text-sm hover:opacity-90">
-                <Github className="size-4" /> {githubExpired ? "Reconnect GitHub" : "Connect GitHub"}
+                <GithubIcon className="size-4" /> {githubExpired ? "Reconnect GitHub" : "Connect GitHub"}
               </button>
             ) : repos === null ? (
               <div className="flex justify-center py-6"><Spinner className="size-5 text-muted-foreground" /></div>
@@ -776,7 +781,7 @@ export function ProjectModePage() {
               <div className="max-h-[50vh] overflow-y-auto -mx-2">
                 {repos.map((r) => (
                   <button key={r.fullName} onClick={() => linkRepo(r.fullName)} className="w-full flex items-center gap-2 px-2 py-2 rounded-md text-left text-sm hover:bg-secondary">
-                    <Github className="size-4 shrink-0 text-muted-foreground" />
+                    <GithubIcon className="size-4 shrink-0 text-muted-foreground" />
                     <span className="truncate flex-1">{r.fullName}</span>
                     {r.private && <span className="text-xs text-muted-foreground">private</span>}
                   </button>
