@@ -274,6 +274,7 @@ export function ProjectModePage() {
     if (!res.ok) return toast.error("Could not delete the project");
     setProjects((list) => (list || []).filter((p) => p.id !== project.id));
     if (openId === project.id) { rememberOpen(null); setFolder(null); }
+    toast.success(`"${project.name}" deleted`);
   };
 
   const linkRepo = async (repo: string) => {
