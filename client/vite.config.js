@@ -58,12 +58,13 @@ export default defineConfig({
     port: 5173,
     strictPort: false,
     proxy: {
+      // `npm run dev` sets CG_DEV_BACKEND to the local backend; plain `dev:client` keeps the live one
       "/api": {
-        target: "https://api.classgrid.in",
+        target: process.env.CG_DEV_BACKEND || "https://api.classgrid.in",
         changeOrigin: true
       },
       "/socket.io": {
-        target: "https://api.classgrid.in",
+        target: process.env.CG_DEV_BACKEND || "https://api.classgrid.in",
         changeOrigin: true,
         ws: true
       }

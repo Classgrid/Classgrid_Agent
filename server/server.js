@@ -67,7 +67,8 @@ import app from "./api/index.js";
 import http from "http";
 
 // 👷 Start Background Workers
-import "./src/workers/index.js";
+// Local dev (`npm run dev` in client sets CG_LOCAL_DEV=1) skips them: the live server stays the only one running schedules, emails and cron jobs
+if (process.env.CG_LOCAL_DEV !== "1") await import("./src/workers/index.js");
 
 const PORT = process.env.PORT || 3000;
 

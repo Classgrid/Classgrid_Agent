@@ -44,10 +44,10 @@ function pipeWithLabel(child, label) {
   child.stderr?.on("data", (chunk) => process.stderr.write(`[${label}] ${chunk}`));
 }
 
-function run(label, args, cwd) {
+function run(label, args, cwd, extraEnv = {}) {
   const child = spawn(npmCmd, args, {
     cwd,
-    env: process.env,
+    env: { ...process.env, ...extraEnv },
     shell: process.platform === "win32",
     stdio: ["inherit", "pipe", "pipe"],
   });
@@ -88,8 +88,11 @@ if (backendAlreadyRunning) {
   console.log("[dev] Backend already running at http://localhost:3000");
 } else {
   console.log("[dev] Starting backend at http://localhost:3000");
-  run("server", ["run", "dev"], serverDir);
+  run("server", ["run", "dev"], serverDir, { CG_LOCAL_DEV: "1" });
 }
 
-console.log("[dev] Starting Vite at http://localhost:5173");
-run("client", ["run", "dev:client"], clientDir);
+// The app talks to the local backend. Set here, not in .env files: Vite keeps values already
+// in the environment over .env.local, so the env files stay as they are.
+const localBackend = "http://localhost:3000";
+console.log(`[dev] Starting Vite at http://localhost:5173 (backend: ${localBackend})`);
+run("client", ["run", "dev:client"], clientDir, { VITE_API_URL: localBackend, CG_DEV_BACKEND: localBackend });
