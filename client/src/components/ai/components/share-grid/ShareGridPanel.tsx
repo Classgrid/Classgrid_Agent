@@ -157,7 +157,8 @@ function timeAgo(iso: string | null | undefined) {
 }
 
 function historyText(h: GridHistoryItem) {
-  const who = h.name || h.email || "Someone";
+  // Always the full email; with the name in front when the person has a Classgrid account
+  const who = h.email ? (h.name && h.name !== h.email ? `${h.name} (${h.email})` : h.email) : (h.name || "Someone");
   if (h.type === "link") return h.status === "accepted" ? `${who} joined with the invite link` : h.status === "revoked" ? "Invite link turned off" : "Invite link made";
   const how = h.type === "grids" ? "from Grids" : "by email";
   if (h.status === "accepted") return `${who} accepted the invite (${how})`;
@@ -378,6 +379,7 @@ export function ShareGridPanel({ sessionId, myEmail, onClose }: { sessionId: str
                       <div className="text-sm font-medium truncate text-foreground">
                         {p.name}{p.email === me ? " (you)" : ""}
                       </div>
+                      <div className="text-[11px] text-muted-foreground truncate">{p.email}</div>
                       <div className="text-[11px] text-muted-foreground">
                         {p.role === "owner" ? "Owner" : "Member"}
                         {p.messageCount !== null && ` · ${p.messageCount} ${p.messageCount === 1 ? "message" : "messages"}`}

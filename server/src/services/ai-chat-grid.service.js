@@ -47,7 +47,8 @@ export async function profilesFor(emails) {
     const users = await User.find({ email: { $in: list } }).select("name email profilePicture privacySettings").lean();
     const out = {};
     for (const u of users) out[norm(u.email)] = { name: u.name || u.email, avatar: u.profilePicture || "", hideEmail: !!u.privacySettings?.hideEmail };
-    for (const e of list) if (!out[e]) out[e] = { name: e.split("@")[0], avatar: "" };
+    // No Classgrid account yet: the full email stands in for the name
+    for (const e of list) if (!out[e]) out[e] = { name: e, avatar: "" };
     return out;
 }
 
@@ -138,7 +139,7 @@ export async function gridLabelMap(sessionId) {
         const email = norm(m.user_email);
         const sameName = names.filter((n) => n.toLowerCase() === names[i].toLowerCase()).length > 1;
         // (someone who hides their email gets a number instead of their email name)
-        labels[email] = !sameName ? names[i] : profiles[email]?.hideEmail ? `${names[i]} (${i + 1})` : `${names[i]} (${email.split("@")[0]})`;
+        labels[email] = !sameName ? names[i] : profiles[email]?.hideEmail ? `${names[i]} (${i + 1})` : `${names[i]} (${email})`;
     });
     const owner = norm(members.find((m) => m.role === "owner")?.user_email);
     return { labels, owner, members };
