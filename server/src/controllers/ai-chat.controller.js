@@ -1491,7 +1491,7 @@ export const streamAskAi = async (req, res) => {
         // 2b. Save user message: to Supabase (source of truth) + Redis (cache) in parallel
         if (!isIncognito && sessionId && body.question) {
             saveMessage(sessionId, "user", body.question, body.fileUrls || [], gridSender?.email || null)
-                .then(() => { if (gridSender) req.app.get("io")?.to(`aigrid:${sessionId}`).emit("aigrid:update", { sessionId, kind: "messages" }); })
+                .then(() => { if (gridSender) req.app.get("io")?.to(`aigrid:${sessionId}`).emit("aigrid:update", { sessionId, kind: "messages", by: gridSender.email }); })
                 .catch(err => console.error("Failed to save user message:", err));
             // The file links go into the AI's history too, so follow-ups can re-open an uploaded file.
             appendToHistory(sessionId, "user", gridSender ? `${gridSender.name}: ${body.question}` : body.question, body.fileUrls || []).catch(err => console.error("Failed to append user msg to Redis:", err));
@@ -1520,6 +1520,13 @@ export const streamAskAi = async (req, res) => {
             let content = gridSender ? `${gridSender.name}: ${body.question}` : body.question;
             if (body.fileUrls && body.fileUrls.length > 0) {
                 content += "\n\nAttached Files:\n" + body.fileUrls.join('\n');
+                // Models that can't open files (DeepSeek etc.) get the documents' text with the message, read all
+                // at once, instead of calling parse_document file by file. Claude reads the files itself.
+                if (!CLAUDE_CHAT_MODELS.has(typeof body.selectedModel === "string" ? body.selectedModel : "")) {
+                    const { readAttachedDocuments } = await import('../services/document-text.service.js');
+                    const docsText = await readAttachedDocuments(body.fileUrls).catch(() => "");
+                    if (docsText) content += `\n\nText of the attached documents (pictures inside them, like screenshots, are not included):\n${docsText}`;
+                }
             }
 
             // Short replies like "okay" or "thanks" go to the AI like any other message: "okay" often means
@@ -4790,7 +4797,7 @@ If a tool fails, never show the error message; say only: "Something went wrong o
                     });
                 }
                 saveMessage(sessionId, "assistant", savedContent, [])
-                    .then(() => { if (gridSender) req.app.get("io")?.to(`aigrid:${sessionId}`).emit("aigrid:update", { sessionId, kind: "messages" }); })
+                    .then(() => { if (gridSender) req.app.get("io")?.to(`aigrid:${sessionId}`).emit("aigrid:update", { sessionId, kind: "messages", by: gridSender.email }); })
                     .catch(err => console.error("Failed to save assistant message:", err));
                 appendToHistory(sessionId, "assistant", savedContent).catch(err => console.error("Failed to append assistant reply to Redis:", err));
                 // Project Mode: remember the project's state now, so the next turn can show what the user changed themselves

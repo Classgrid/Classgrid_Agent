@@ -19,10 +19,12 @@ export type GridData = { isOwner: boolean; maxPeople: number; members: GridPerso
 type Contact = { email: string; name: string; avatar: string };
 
 const gridKey = (sessionId: string) => ["share-grid", sessionId];
+// How many parts of the page are using each chat's live room
+const roomUsers = new Map<string, number>();
 const errorText = (err: any, fallback: string) => err?.message || err?.response?.data?.error || fallback;
 
 /** Panel data for a chat, plus live updates: refreshes when someone joins, is invited or sends a message. */
-export function useShareGrid(sessionId: string | null | undefined, onMessagesChanged?: () => void) {
+export function useShareGrid(sessionId: string | null | undefined, onMessagesChanged?: (e: { by?: string }) => void) {
   const queryClient = useQueryClient();
   const query = useQuery<GridData>({
     queryKey: gridKey(sessionId || ""),
@@ -39,18 +41,24 @@ export function useShareGrid(sessionId: string | null | undefined, onMessagesCha
     const socket = getSocket();
     if (!socket) return;
     const join = () => socket.emit("join_ai_grid", sessionId);
-    join();
+    // The chat and the panel both use this hook; the screen leaves the room only when the last one closes
+    // (closing the panel used to take the whole screen out of the room, so live updates stopped)
+    const users = (roomUsers.get(sessionId) || 0) + 1;
+    roomUsers.set(sessionId, users);
+    if (users === 1) join();
     socket.on("connect", join);
-    const onUpdate = (e: { sessionId: string; kind: string }) => {
+    const onUpdate = (e: { sessionId: string; kind: string; by?: string }) => {
       if (e?.sessionId !== sessionId) return;
       queryClient.invalidateQueries({ queryKey: gridKey(sessionId) });
-      if (e.kind === "messages") onMessagesRef.current?.();
+      if (e.kind === "messages") onMessagesRef.current?.(e);
     };
     socket.on("aigrid:update", onUpdate);
     return () => {
       socket.off("connect", join);
       socket.off("aigrid:update", onUpdate);
-      socket.emit("leave_ai_grid", sessionId);
+      const left = (roomUsers.get(sessionId) || 1) - 1;
+      if (left > 0) roomUsers.set(sessionId, left);
+      else { roomUsers.delete(sessionId); socket.emit("leave_ai_grid", sessionId); }
     };
   }, [sessionId, queryClient]);
 

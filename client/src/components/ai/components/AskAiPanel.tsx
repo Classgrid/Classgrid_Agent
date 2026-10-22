@@ -3094,8 +3094,12 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
   const gridSessionId = sessionId && sessionId !== "schedule" && sessionId !== "library" ? sessionId : null;
   const gridSubmittingRef = useRef(submitting);
   gridSubmittingRef.current = submitting;
-  const refreshSharedMessages = React.useCallback(async () => {
+  const gridMyEmailRef = useRef("");
+  gridMyEmailRef.current = (session?.user?.email || "").toLowerCase();
+  const refreshSharedMessages = React.useCallback(async (e?: { by?: string }) => {
     if (!gridSessionId || gridSubmittingRef.current) return; // my own reply is streaming: it shows already
+    // My own message and its reply are already on my screen: reloading them re-draws the chat (the Thought box flashed)
+    if (e?.by && e.by.toLowerCase() === gridMyEmailRef.current) return;
     try {
       const prefix = import.meta.env.VITE_API_URL || "https://api.classgrid.in";
       const res = await fetchWithRescue(`${prefix}/api/ai/sessions/${gridSessionId}/messages`, { credentials: "include" });

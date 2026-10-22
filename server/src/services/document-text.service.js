@@ -109,7 +109,8 @@ function workbookText(buffer, kind) {
 }
 
 async function pdfText(buffer) {
-    const pdfParse = (await import("pdf-parse")).default;
+    // The package index runs a self-test (reads test/data/*.pdf) when loaded with import(); the lib file is the parser itself
+    const pdfParse = (await import("pdf-parse/lib/pdf-parse.js")).default;
     let data;
     try {
         data = await pdfParse(buffer);
@@ -176,4 +177,43 @@ export async function extractDocumentText(buffer, { fileName = "", contentType =
         throw new DocumentReadError("This is an image, not a document. Use the analyze_image tool for images.");
     }
     throw new DocumentReadError("This file type can't be read as a document. Supported: PDF, Word (.docx), PowerPoint (.pptx), Excel (.xlsx, .xls), CSV and text files.");
+}
+
+// Images are read by the vision tools, not here
+const IMAGE_EXT = /\.(png|jpe?g|gif|webp|bmp|svg|heic|heif|avif|ico|tiff?)$/i;
+
+/**
+ * Reads the text of every document attached to a message, all at once, so a model that can't open
+ * files itself (DeepSeek etc.) gets the contents with the message instead of calling parse_document
+ * file by file. Pictures inside the files (e.g. screenshots in a PDF) have no text and are not included.
+ * Returns "" when nothing could be read.
+ */
+export async function readAttachedDocuments(fileUrls, { maxFiles = 10, perFileChars = 40000, totalChars = 120000, timeoutMs = 15000 } = {}) {
+    const urls = (Array.isArray(fileUrls) ? fileUrls : [])
+        .filter((u) => typeof u === "string" && /^https?:\/\//i.test(u) && !IMAGE_EXT.test(u.split(/[?#]/)[0]))
+        .slice(0, maxFiles);
+    if (urls.length === 0) return "";
+
+    const parts = await Promise.all(urls.map(async (url) => {
+        const name = decodeURIComponent(url.split(/[?#]/)[0].split("/").pop() || "file").replace(/^\d{10,}-/, "");
+        try {
+            const res = await fetch(url, { headers: { "User-Agent": "Mozilla/5.0" }, signal: AbortSignal.timeout(timeoutMs) });
+            if (!res.ok) return null;
+            if (Number(res.headers.get("content-length")) > MAX_DOCUMENT_BYTES) return null;
+            const buffer = Buffer.from(await res.arrayBuffer());
+            const doc = await extractDocumentText(buffer, { fileName: name, contentType: res.headers.get("content-type") || "" });
+            if (!doc.text) return `--- ${name} (${doc.kind}): no text in this file (it may be only pictures) ---`;
+            const cut = doc.text.length > perFileChars;
+            return `--- ${name} (${doc.kind}${doc.detail ? `, ${doc.detail}` : ""}) ---\n${doc.text.slice(0, perFileChars)}${cut ? `\n[cut here: the file is longer; call parse_document with this file's link to read the rest]` : ""}`;
+        } catch (err) {
+            // e.g. a PDF that is only pictures: say so, so the AI knows without trying the file itself
+            if (err instanceof DocumentReadError) return `--- ${name}: ${err.message} ---`;
+            return null; // not reachable (or too slow): the AI can still use its tools on the link
+        }
+    }));
+
+    let text = parts.filter(Boolean).join("\n\n");
+    if (!text) return "";
+    if (text.length > totalChars) text = text.slice(0, totalChars) + "\n[cut here: the files are longer; call parse_document on a file's link to read the rest]";
+    return text;
 }
