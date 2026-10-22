@@ -38,6 +38,7 @@ import { useParams } from "react-router-dom";
 import ReactMarkdown from "react-markdown";
 import remarkMath from "remark-math";
 import remarkGfm from "remark-gfm";
+import remarkGithubAlerts from "remark-github-alerts";
 import rehypeKatex from "rehype-katex";
 import { MermaidViewer } from "@/components/ai/components/MermaidViewer";
 import { CopyBlockClient } from "@/components/ai/components/CopyBlockClient";
@@ -132,13 +133,14 @@ function MessageRow({ msg, isUser }: { msg: SharedMessage; isUser: boolean }) {
     <div className="shared-msg-row assistant-row">
       <div className="assistant-content overflow-visible break-words max-w-none">
         <ReactMarkdown
-          remarkPlugins={[remarkMath, remarkGfm]}
+          remarkPlugins={[remarkMath, remarkGfm, remarkGithubAlerts]}
           rehypePlugins={[rehypeKatex]}
           components={{
             pre({ children }: any) {
               return <>{children}</>;
             },
-            code({ node, inline, className, children, ...props }: any) {
+            code({ node, className, children, ...props }: any) {
+              const inline = !className?.includes("language-") && !String(children).replace(/\n$/, "").includes("\n");
               const match = /language-(\w+)/.exec(className || "");
               const language = match ? match[1] : "";
               
@@ -167,7 +169,7 @@ function MessageRow({ msg, isUser }: { msg: SharedMessage; isUser: boolean }) {
               }
 
               return (
-                <code className="bg-slate-100 dark:bg-white/10 text-emerald-600 dark:text-emerald-400 px-1.5 py-0.5 rounded-md text-[13px] font-mono break-words" {...props}>
+                <code className="bg-slate-100 dark:bg-white/10 border border-slate-200 dark:border-white/10 shadow-sm text-[#c92a2a] dark:text-[#ff6b6b] px-[5px] py-[2px] rounded-[3px] text-[13px] font-mono break-words mx-0.5" {...props}>
                   {children}
                 </code>
               );
