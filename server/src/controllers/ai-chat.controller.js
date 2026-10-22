@@ -1445,16 +1445,22 @@ export const streamAskAi = async (req, res) => {
                     let current = null;
                     try { current = JSON.parse((await redis.get(replyKey)) || "null"); } catch { /* treat as free */ }
                     if (current && current.email !== gridSender.email) {
+                        console.log(`[ShareGrid] blocked ${gridSender.email} in ${sessionId}: agent is answering ${current.email}`);
                         res.write(`data: ${JSON.stringify({ type: "error", error: `The agent is responding to ${current.name} (${current.email}). Please wait until it finishes.` })}\n\n`);
                         res.end();
                         return;
                     }
                 }
                 const gridIo = req.app.get("io");
+                console.log(`[ShareGrid] lock ${gotReply ? "taken" : "kept"} by ${gridSender.email} in ${sessionId}`);
                 gridIo?.to(`aigrid:${sessionId}`).emit("aigrid:update", { sessionId, kind: "reply_start", by: gridSender.email, name: gridSender.name });
-                res.on("close", async () => {
-                    try { if ((await redis.get(replyKey)) === replyMine) await redis.del(replyKey); } catch { /* expires by itself */ }
-                    gridIo?.to(`aigrid:${sessionId}`).emit("aigrid:update", { sessionId, kind: "reply_end", by: gridSender.email });
+                res.on("close", () => {
+                    // The whole reply is done (thinking, tools, answer): wait 1 full second, then unlock
+                    setTimeout(async () => {
+                        try { if ((await redis.get(replyKey)) === replyMine) await redis.del(replyKey); } catch { /* expires by itself */ }
+                        console.log(`[ShareGrid] lock released by ${gridSender.email} in ${sessionId}`);
+                        gridIo?.to(`aigrid:${sessionId}`).emit("aigrid:update", { sessionId, kind: "reply_end", by: gridSender.email });
+                    }, 1000);
                 });
 
                 const people = await gridProfilesText(sessionId, grid, userEmail);

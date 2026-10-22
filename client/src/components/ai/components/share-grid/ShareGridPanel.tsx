@@ -37,6 +37,15 @@ export function useShareGrid(sessionId: string | null | undefined, onMessagesCha
   const shared = (query.data?.members?.length || 0) > 1;
   const onMessagesRef = useRef(onMessagesChanged);
   onMessagesRef.current = onMessagesChanged;
+  // Who the agent is answering, from the live "reply_start" / "reply_end" signals. A reload of the panel
+  // data can't clear it early; only "reply_end" (or a 10 minute safety limit) does.
+  const [liveReplying, setLiveReplying] = useState<GridReplying>(null);
+  useEffect(() => setLiveReplying(null), [sessionId]);
+  useEffect(() => {
+    if (!liveReplying) return;
+    const t = setTimeout(() => setLiveReplying(null), 10 * 60 * 1000);
+    return () => clearTimeout(t);
+  }, [liveReplying]);
 
   useEffect(() => {
     if (!sessionId) return;
@@ -52,10 +61,8 @@ export function useShareGrid(sessionId: string | null | undefined, onMessagesCha
     const onUpdate = (e: { sessionId: string; kind: string; by?: string; name?: string }) => {
       if (e?.sessionId !== sessionId) return;
       // Show "Agent is responding to …" right away; the refetch below confirms it
-      if (e.kind === "reply_start" || e.kind === "reply_end") {
-        queryClient.setQueryData<GridData>(gridKey(sessionId), (old) =>
-          old ? { ...old, replying: e.kind === "reply_start" && e.by ? { email: e.by, name: e.name || e.by } : null } : old);
-      }
+      if (e.kind === "reply_start" && e.by) setLiveReplying({ email: e.by, name: e.name || e.by });
+      if (e.kind === "reply_end") setLiveReplying((cur) => (cur && e.by && cur.email !== e.by ? cur : null));
       queryClient.invalidateQueries({ queryKey: gridKey(sessionId) });
       if (e.kind === "messages") onMessagesRef.current?.(e);
     };
@@ -69,7 +76,7 @@ export function useShareGrid(sessionId: string | null | undefined, onMessagesCha
     };
   }, [sessionId, queryClient]);
 
-  return { data: query.data, isLoading: query.isLoading, shared, replying: (query.data?.replying || null) as GridReplying, refresh: () => queryClient.invalidateQueries({ queryKey: gridKey(sessionId || "") }) };
+  return { data: query.data, isLoading: query.isLoading, shared, replying: (liveReplying || query.data?.replying || null) as GridReplying, refresh: () => queryClient.invalidateQueries({ queryKey: gridKey(sessionId || "") }) };
 }
 
 function PersonAvatar({ name, avatar, size = 32 }: { name: string; avatar?: string; size?: number }) {
