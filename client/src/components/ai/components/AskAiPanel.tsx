@@ -4632,13 +4632,9 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
           <>
             {/* PostHog-style centered greeting with logo & suggestion chips */}
             <div className="flex flex-col items-center justify-center py-16 gap-5 select-none">
-              {/* Classgrid Logo — same size as PostHog */}
-              <div className="flex items-center gap-2">
-                <img src="/logo.png" alt="Classgrid" className="h-12 w-12 object-contain" />
-              </div>
-
-              {/* Greeting */}
-              <div className="text-center space-y-1.5">
+              {/* Logo on the left of the greeting, one line */}
+              <div className="flex items-center justify-center gap-3">
+                <img src="/logo.png" alt="Classgrid" className="h-10 w-10 shrink-0 object-contain" />
                 <h2 className="text-xl font-semibold text-foreground tracking-tight min-h-[1.75rem]">
                   <TypingGreeting name={user?.name} paused={input.trim().length > 0} />
                 </h2>
@@ -6301,11 +6297,9 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
                 {/* Phones: greeting in the middle, input pinned to the bottom (like ChatGPT); desktop: one centered block */}
                 <div className="max-w-[68rem] w-full flex flex-col items-center gap-6 flex-1 sm:flex-none">
 
-                  {/* Logo */}
-                  <img src="/logo.png" alt="Classgrid" className="h-12 w-12 object-contain mt-auto sm:mt-0" />
-
-                  {/* Greeting */}
-                  <div className="text-center space-y-1.5">
+                  {/* Logo on the left of the greeting, one line */}
+                  <div className="flex items-center justify-center gap-3 mt-auto sm:mt-0">
+                    <img src="/logo.png" alt="Classgrid" className="h-10 w-10 shrink-0 object-contain" />
                     {/* Fixed height so the input below never moves while the line types; pauses while the user types */}
                     <h2 className="text-xl font-semibold text-foreground tracking-tight min-h-[1.75rem]">
                       <TypingGreeting name={user?.name} paused={input.trim().length > 0} />
