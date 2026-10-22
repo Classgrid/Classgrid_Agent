@@ -1520,13 +1520,6 @@ export const streamAskAi = async (req, res) => {
             let content = gridSender ? `${gridSender.name}: ${body.question}` : body.question;
             if (body.fileUrls && body.fileUrls.length > 0) {
                 content += "\n\nAttached Files:\n" + body.fileUrls.join('\n');
-                // Models that can't open files (DeepSeek etc.) get the documents' text with the message, read all
-                // at once, instead of calling parse_document file by file. Claude reads the files itself.
-                if (!CLAUDE_CHAT_MODELS.has(typeof body.selectedModel === "string" ? body.selectedModel : "")) {
-                    const { readAttachedDocuments } = await import('../services/document-text.service.js');
-                    const docsText = await readAttachedDocuments(body.fileUrls).catch(() => "");
-                    if (docsText) content += `\n\nText of the attached documents (pictures inside them, like screenshots, are not included):\n${docsText}`;
-                }
             }
 
             // Short replies like "okay" or "thanks" go to the AI like any other message: "okay" often means
