@@ -3,7 +3,6 @@
 import React, { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
-import { Users } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/marketing_ui/button";
 import { Spinner } from "@/components/marketing_ui/spinner";
@@ -115,16 +114,6 @@ export function GridJoinPage() {
             <h1 className="text-lg font-semibold">
               {info.owner?.name || "Someone"} invited you to a chat
             </h1>
-            <div className="w-full rounded-lg border border-border/60 bg-muted/30 px-3 py-2.5 text-left">
-              <div className="text-sm font-medium truncate">{info.title}</div>
-              <div className="flex items-center gap-1.5 text-xs text-muted-foreground mt-0.5">
-                <Users className="h-3.5 w-3.5" />
-                {info.people} of {info.maxPeople} people
-              </div>
-            </div>
-            <p className="text-xs text-muted-foreground">
-              Everyone in the chat sees all its messages, and the AI knows who sent each one. Your messages use your own AI credits.
-            </p>
             {info.already ? (
               <Button variant="secondary" className="w-full" onClick={() => navigate(chatPath(info.sessionId, (user as any)?.role), { replace: true })}>Open chat</Button>
             ) : info.used ? (
