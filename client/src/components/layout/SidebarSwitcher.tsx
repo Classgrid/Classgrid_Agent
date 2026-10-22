@@ -130,7 +130,8 @@ export function SidebarSwitcher({ user }: { user: { role?: string; name?: string
               className="data-[state=open]:bg-sidebar-accent data-[state=open]:text-sidebar-accent-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring"
             />
           }>
-              <div className={`flex h-9 w-9 items-center justify-center rounded-md shrink-0 ${orgLogo ? 'bg-transparent' : 'bg-emerald-500 text-white shadow-sm overflow-hidden'}`}>
+              {/* Logo hidden for now (owner's choice); remove "hidden" to show it again */}
+              <div className={`hidden h-9 w-9 items-center justify-center rounded-md shrink-0 ${orgLogo ? 'bg-transparent' : 'bg-emerald-500 text-white shadow-sm overflow-hidden'}`}>
                 {orgLogo ? (
                   <img src={orgLogo} alt={orgName} className="w-full h-full object-contain rounded-md" />
                 ) : (
