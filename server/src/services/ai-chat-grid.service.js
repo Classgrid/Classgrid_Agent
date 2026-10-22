@@ -97,6 +97,9 @@ export async function addMember(session, email) {
         .from("ai_chat_grid_members")
         .upsert([{ session_id: session.id, user_email: me, role: "member", joined_at: new Date().toISOString(), removed_at: null }], { onConflict: "session_id,user_email" });
     if (error) return { error: "Could not join this chat.", status: 500 };
+    // The AI's cached history has no names yet: rebuild it with "Name: …" on every user message
+    const { invalidateHistoryCache } = await import("./ai-chat-history.service.js");
+    await invalidateHistoryCache(session.id).catch(() => {});
     return { ok: true };
 }
 
@@ -122,12 +125,34 @@ export async function getSharedSessionsFor(email) {
 }
 
 /**
- * For the AI: each user message in a shared chat starts with the sender's name ("Rahul: …"),
- * so it knows who asked what. Old messages (no sender) stay as they are.
+ * Names the AI sees for the people in a shared chat. Two people with the same name also get their
+ * email name ("Nikhil Shinde (nikhilsubsun123)"). Null when the chat isn't shared (fewer than 2 people).
  */
-export async function senderLabels(dbMessages) {
-    const emails = (dbMessages || []).map((m) => m.sender_email).filter(Boolean);
-    if (emails.length === 0) return null;
-    const profiles = await profilesFor(emails);
-    return (m) => (m.role === "user" && m.sender_email ? `${profiles[norm(m.sender_email)]?.name || m.sender_email}: ` : "");
+export async function gridLabelMap(sessionId) {
+    const members = await getActiveMembers(sessionId);
+    if (members.length < 2) return null;
+    const profiles = await profilesFor(members.map((m) => m.user_email));
+    const names = members.map((m) => profiles[norm(m.user_email)]?.name || m.user_email);
+    const labels = {};
+    members.forEach((m, i) => {
+        const email = norm(m.user_email);
+        const sameName = names.filter((n) => n.toLowerCase() === names[i].toLowerCase()).length > 1;
+        labels[email] = sameName ? `${names[i]} (${email.split("@")[0]})` : names[i];
+    });
+    const owner = norm(members.find((m) => m.role === "owner")?.user_email);
+    return { labels, owner, members };
+}
+
+/**
+ * For the AI: in a shared chat each user message starts with the sender's name ("Rahul: …"), so it knows
+ * who asked what. Messages from before the chat was shared have no sender: they are the owner's.
+ */
+export async function senderLabels(sessionId) {
+    const grid = await gridLabelMap(sessionId);
+    if (!grid) return null;
+    return (m) => {
+        if (m.role !== "user") return "";
+        const email = norm(m.sender_email) || grid.owner;
+        return `${grid.labels[email] || email || "Owner"}: `;
+    };
 }

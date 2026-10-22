@@ -52,7 +52,7 @@ import {
     memoryText
 } from "../services/ai-chat.service.js";
 import { getHistory, getHistoryCount, appendToHistory, invalidateHistoryCache, getChatTranscript } from "../services/ai-chat-history.service.js";
-import { canAccessSession, getActiveMembers, profilesFor, getSharedSessionsFor } from "../services/ai-chat-grid.service.js";
+import { canAccessSession, gridLabelMap, getSharedSessionsFor } from "../services/ai-chat-grid.service.js";
 import { editorContextFor, rememberProjectSnapshot, sandboxDataDir, startCheckpoint, finishCheckpoint, linkChatToProject } from "../services/ide-project.service.js";
 import { buildEndConversationHandlers, reopenSession } from "../services/ai-end-conversation.service.js";
 import { hasEnoughTokens, deductTokens, getImageGenerationCost, tokenWindowEnd } from "../services/ai-credits.service.js";
@@ -1427,12 +1427,11 @@ export const streamAskAi = async (req, res) => {
             }
 
             // Share Grid: the AI sees each user message as "Name: text" and knows who is in the chat
-            const gridMembers = await getActiveMembers(sessionId);
-            if (gridMembers.length > 1) {
-                const people = await profilesFor(gridMembers.map((m) => m.user_email));
-                const label = (e) => people[String(e).toLowerCase()]?.name || e;
+            const grid = await gridLabelMap(sessionId);
+            if (grid) {
+                const label = (e) => grid.labels[String(e).toLowerCase()] || e;
                 gridSender = { email: userEmail.toLowerCase(), name: label(userEmail.toLowerCase()) };
-                volatilePrompt += `\n\n<shared_chat>\nThis is a Share Grid chat: one Classgrid AI chat that ${gridMembers.length} people use together (not a Grids group chat). The people:${gridMembers.map((m) => `${label(m.user_email)}${m.role === "owner" ? " (owner)" : ""}`).join(", ")}. Each user message starts with the name of the person who sent it. The latest message is from ${gridSender.name}.\n</shared_chat>`;
+                volatilePrompt += `\n\n<shared_chat>\nThis is a Share Grid chat: one Classgrid AI chat that ${grid.members.length} people use together (not a Grids group chat). The people: ${grid.members.map((m) => `${label(m.user_email)}${m.role === "owner" ? " (owner, started this chat)" : ""}`).join(", ")}. Each user message starts with the name of the person who sent it. The latest message is from ${gridSender.name}.\n</shared_chat>`;
             }
 
             // Ownership verified, safe to load history

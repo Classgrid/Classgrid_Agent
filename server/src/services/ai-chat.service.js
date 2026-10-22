@@ -213,9 +213,14 @@ export async function triggerMemoryAgent(sessionId) {
         if (newMessages.length === 0) return;
 
         // Share Grid chats: each user message says who sent it ("USER (Rahul)"), so the summary keeps who said what
-        const { profilesFor } = await import('./ai-chat-grid.service.js');
-        const senders = newMessages.some((m) => m.sender_email) ? await profilesFor(newMessages.map((m) => m.sender_email)) : {};
-        const who = (m) => (m.role === 'user' && m.sender_email ? ` (${senders[String(m.sender_email).toLowerCase()]?.name || m.sender_email})` : '');
+        // (messages from before the chat was shared are the owner's)
+        const { gridLabelMap } = await import('./ai-chat-grid.service.js');
+        const grid = await gridLabelMap(sessionId);
+        const who = (m) => {
+            if (!grid || m.role !== 'user') return '';
+            const email = String(m.sender_email || '').toLowerCase() || grid.owner;
+            return ` (${grid.labels[email] || email})`;
+        };
         const input = [
             `PREVIOUS MEMORY:\n${previous ? memoryText(previous) : "(empty)"}`,
             `NEW MESSAGES (${covered + 1} to ${total}):`,

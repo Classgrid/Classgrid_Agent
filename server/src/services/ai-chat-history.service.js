@@ -221,7 +221,7 @@ export async function warmCache(sessionId) {
 
         const key = redisKey(sessionId);
         // Share Grid chats: user messages start with the sender's name, as when they were sent
-        const label = (await senderLabels(dbMessages)) || (() => '');
+        const label = (await senderLabels(sessionId)) || (() => '');
 
         // Write all messages into Redis as a pipeline (atomic, fast)
         const pipeline = redis.pipeline();
@@ -272,7 +272,7 @@ async function getHistoryFromSupabase(sessionId, depth = DEFAULT_DEPTH) {
     try {
         const dbMessages = await getSessionMessages(sessionId);
         if (!dbMessages) return [];
-        const label = (await senderLabels(dbMessages)) || (() => '');
+        const label = (await senderLabels(sessionId)) || (() => '');
         return dbMessages
             .slice(-depth)
             .map(m => {
