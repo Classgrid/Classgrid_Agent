@@ -1436,6 +1436,27 @@ export const streamAskAi = async (req, res) => {
                 }
                 const label = (e) => grid.labels[String(e).toLowerCase()] || e;
                 gridSender = { email: userEmail.toLowerCase(), name: label(userEmail.toLowerCase()) };
+                // One reply at a time: while the agent answers one person, the others see
+                // "Agent is responding to <name> (<email>)" and can't send until it's done
+                const replyKey = `ai:grid-replying:${sessionId}`;
+                const replyMine = JSON.stringify({ email: gridSender.email, name: gridSender.name });
+                const gotReply = await redis.set(replyKey, replyMine, "EX", 600, "NX").catch(() => "OK");
+                if (!gotReply) {
+                    let current = null;
+                    try { current = JSON.parse((await redis.get(replyKey)) || "null"); } catch { /* treat as free */ }
+                    if (current && current.email !== gridSender.email) {
+                        res.write(`data: ${JSON.stringify({ type: "error", error: `The agent is responding to ${current.name} (${current.email}). Please wait until it finishes.` })}\n\n`);
+                        res.end();
+                        return;
+                    }
+                }
+                const gridIo = req.app.get("io");
+                gridIo?.to(`aigrid:${sessionId}`).emit("aigrid:update", { sessionId, kind: "reply_start", by: gridSender.email, name: gridSender.name });
+                res.on("close", async () => {
+                    try { if ((await redis.get(replyKey)) === replyMine) await redis.del(replyKey); } catch { /* expires by itself */ }
+                    gridIo?.to(`aigrid:${sessionId}`).emit("aigrid:update", { sessionId, kind: "reply_end", by: gridSender.email });
+                });
+
                 const people = await gridProfilesText(sessionId, grid, userEmail);
                 volatilePrompt += `\n\n<shared_chat>\nThis is a Share Grid chat: one Classgrid AI chat that ${grid.members.length} people use together (not a Grids group chat). Each user message starts with the name of the person who sent it. The latest message is from ${gridSender.name}.\nThe people in this chat and their profiles:\n${people}\n</shared_chat>`;
             }

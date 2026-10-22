@@ -15,7 +15,9 @@ import { cn } from "@/lib/utils";
 
 export type GridPerson = { email: string; name: string; avatar?: string; role: "owner" | "member"; messageCount: number | null; joinedAt?: string };
 type GridHistoryItem = { id: string; type: "link" | "grids" | "email"; status: "pending" | "accepted" | "declined" | "revoked"; email: string | null; name: string | null; invitedBy: string; createdAt: string; acceptedAt: string | null };
-export type GridData = { isOwner: boolean; maxPeople: number; members: GridPerson[]; history: GridHistoryItem[]; link: string | null };
+/** Who the agent is answering right now (one reply at a time in a shared chat) */
+export type GridReplying = { email: string; name: string } | null;
+export type GridData = { isOwner: boolean; maxPeople: number; members: GridPerson[]; history: GridHistoryItem[]; link: string | null; replying?: GridReplying };
 type Contact = { email: string; name: string; avatar: string };
 
 const gridKey = (sessionId: string) => ["share-grid", sessionId];
@@ -47,8 +49,13 @@ export function useShareGrid(sessionId: string | null | undefined, onMessagesCha
     roomUsers.set(sessionId, users);
     if (users === 1) join();
     socket.on("connect", join);
-    const onUpdate = (e: { sessionId: string; kind: string; by?: string }) => {
+    const onUpdate = (e: { sessionId: string; kind: string; by?: string; name?: string }) => {
       if (e?.sessionId !== sessionId) return;
+      // Show "Agent is responding to …" right away; the refetch below confirms it
+      if (e.kind === "reply_start" || e.kind === "reply_end") {
+        queryClient.setQueryData<GridData>(gridKey(sessionId), (old) =>
+          old ? { ...old, replying: e.kind === "reply_start" && e.by ? { email: e.by, name: e.name || e.by } : null } : old);
+      }
       queryClient.invalidateQueries({ queryKey: gridKey(sessionId) });
       if (e.kind === "messages") onMessagesRef.current?.(e);
     };
@@ -62,7 +69,7 @@ export function useShareGrid(sessionId: string | null | undefined, onMessagesCha
     };
   }, [sessionId, queryClient]);
 
-  return { data: query.data, isLoading: query.isLoading, shared, refresh: () => queryClient.invalidateQueries({ queryKey: gridKey(sessionId || "") }) };
+  return { data: query.data, isLoading: query.isLoading, shared, replying: (query.data?.replying || null) as GridReplying, refresh: () => queryClient.invalidateQueries({ queryKey: gridKey(sessionId || "") }) };
 }
 
 function PersonAvatar({ name, avatar, size = 32 }: { name: string; avatar?: string; size?: number }) {
@@ -101,6 +108,20 @@ export function GridJoinLine({ name, email, via, at }: { name: string; email: st
         <span className="font-semibold text-foreground/80">{name}</span> ({email}) joined the chat{how} · {when}
       </span>
       <WaveLine />
+    </div>
+  );
+}
+
+/** Above the input while the agent answers someone else: sending is blocked until it's done. */
+export function GridReplyingLine({ person }: { person: { name: string; email: string } }) {
+  const showEmail = person.email && person.name !== person.email;
+  return (
+    <div className="flex items-center gap-2 px-2 pb-2 text-[13px] text-muted-foreground" role="status" aria-live="polite">
+      <Spinner className="size-3.5 shrink-0" />
+      <span className="min-w-0 break-words">
+        Agent is responding to <span className="font-semibold text-foreground/80">{person.name}</span>
+        {showEmail ? ` (${person.email})` : ""}. You can send when it's done.
+      </span>
     </div>
   );
 }

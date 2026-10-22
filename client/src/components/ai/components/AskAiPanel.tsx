@@ -189,7 +189,7 @@ import { MasterWorkflowWrapper } from "./stepper/MasterWorkflowWrapper";
 import { OpenPageView } from "./stepper/OpenPageView";
 import { EmailActionView } from "./stepper/EmailActionView";
 import { DocumentGenerationView } from "./stepper/DocumentGenerationView";
-import { ShareGridPanel, useShareGrid, GridSenderTag, GridJoinLine } from "./share-grid/ShareGridPanel";
+import { ShareGridPanel, useShareGrid, GridSenderTag, GridJoinLine, GridReplyingLine } from "./share-grid/ShareGridPanel";
 import { KnowledgeBaseSearchView } from "./stepper/KnowledgeBaseSearchView";
 import { CdnUploadView } from "./stepper/CdnUploadView";
 import { EmailSentView } from "./stepper/EmailSentView";
@@ -3115,6 +3115,8 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
   // Messages from before the chat was shared have no sender: they are the owner's
   const gridStart = gridOwner?.joinedAt ? new Date(gridOwner.joinedAt).getTime() : 0;
   const gridSenderOf = (m: ChatMessage) => m.senderEmail?.toLowerCase() || (m.createdAt < gridStart ? gridOwner?.email : gridMyEmail);
+  // The agent is answering someone else in this shared chat: I can't send until it's done
+  const gridBlockedBy = grid.replying && grid.replying.email.toLowerCase() !== gridMyEmail ? grid.replying : null;
   // "X joined the chat" lines: each one shows just before the first message sent after that person joined
   const gridJoinLines = React.useMemo(() => {
     if (!grid.shared || !grid.data) return { byMessage: {} as Record<string, any[]>, after: [] as any[] };
@@ -3321,7 +3323,7 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
 
   const hasDocsContext = pageContext?.path?.startsWith("/docs") && pageContext.path !== lastSentDocsPath;
   const isAnyFileUploading = attachedFiles.some(f => f.status === "uploading");
-  const canSubmit = (input.trim().length > 0 || hasDocsContext || attachedFiles.length > 0 || pastedTexts.length > 0) && !isAnyFileUploading;
+  const canSubmit = (input.trim().length > 0 || hasDocsContext || attachedFiles.length > 0 || pastedTexts.length > 0) && !isAnyFileUploading && !gridBlockedBy;
   const emptyState = useMemo(() => messages.length === 0, [messages.length]);
   const suggestedQuestions = useMemo(() => suggestedQuestionsForPage(pageContext, session?.user?.role), [pageContext, session?.user?.role]);
 
@@ -5639,6 +5641,7 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
                   )}
                 </>
               )}
+              {gridBlockedBy && <GridReplyingLine person={gridBlockedBy} />}
               <form onSubmit={handleSubmit} className={cn("space-y-2", endedView && "hidden")}>
                 <div className={cn(
                   variant === "overlay" ? "w-full" : "sm:w-[80%]",
@@ -6331,6 +6334,7 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
                             )}
                           </>
                         )}
+                        {gridBlockedBy && <GridReplyingLine person={gridBlockedBy} />}
                         <form onSubmit={handleSubmit} className={cn("space-y-2", endedView && "hidden")}>
                           <div className={cn(
                             "group relative w-full shadow-sm rounded-2xl border border-border !bg-white dark:!bg-[#0f0f0f] focus-within:border-black/80 dark:focus-within:border-white/50 focus-within:ring-1 focus-within:ring-black/80 dark:focus-within:ring-white/50 transition-all duration-300"

@@ -6,6 +6,7 @@ import { getSessionById } from "../services/ai-chat.service.js";
 import { sendEmail } from "../services/aws-ses.service.js";
 import { baseTemplate } from "../services/email-templates.service.js";
 import User from "../models/User.js";
+import redis from "../config/redis.js";
 import {
     GRID_MAX_PEOPLE, newInviteToken, canAccessSession, gridSummary, ensureOwnerMember, addMember, profilesFor, getActiveMembers,
 } from "../services/ai-chat-grid.service.js";
@@ -112,7 +113,10 @@ router.get("/:sessionId", isAuthenticated, async (req, res) => {
         }
         // Not shared yet: show the owner as the only person
         const people = members.length ? members : [{ email: norm(session.user_email), role: "owner", messageCount: null, ...(await profilesFor([session.user_email]))[norm(session.user_email)] }];
-        res.json({ isOwner, maxPeople: GRID_MAX_PEOPLE, members: people, history, link });
+        // Who the agent is answering right now (one reply at a time in a shared chat)
+        let replying = null;
+        try { replying = JSON.parse((await redis.get(`ai:grid-replying:${session.id}`)) || "null"); } catch { /* none */ }
+        res.json({ isOwner, maxPeople: GRID_MAX_PEOPLE, members: people, history, link, replying });
     } catch (e) {
         console.error("[ShareGrid] panel failed:", e);
         res.status(500).json({ error: "Could not load Share Grid." });
