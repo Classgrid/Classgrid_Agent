@@ -138,12 +138,13 @@ export function SidebarSwitcher({ user }: { user: { role?: string; name?: string
                   <Building2 className="size-5 text-white" />
                 )}
               </div>
-              <div className="grid flex-1 text-left text-sm leading-tight">
-                <span className="font-semibold text-foreground whitespace-normal break-words leading-tight">
+              {/* With the logo hidden: bigger name, lined up with the search box and menu below */}
+              <div className="grid flex-1 gap-0.5 pl-2 text-left text-sm leading-tight">
+                <span className="text-base font-semibold text-foreground whitespace-normal break-words leading-tight">
                   {orgName}
                 </span>
                 {user?.metadata?.show_role_in_sidebar !== false && (
-                  <span className="truncate text-xs text-muted-foreground">
+                  <span className="truncate text-[13px] text-muted-foreground">
                     {formatRole(user?.metadata?.job_role || currentRole)}
                   </span>
                 )}
