@@ -121,7 +121,9 @@ export function GridJoinLine({ name, email, via, at }: { name: string; email: st
 
 /** Above the input while the agent answers someone else: sending is blocked until it's done. */
 export function GridReplyingLine({ person }: { person: { name: string; email: string } }) {
-  const showEmail = person.email && person.name !== person.email;
+  // Two people with the same name already come as "Name (email)": show the email only once
+  const name = person.email ? person.name.replace(` (${person.email})`, "") : person.name;
+  const showEmail = person.email && name !== person.email;
   return (
     <div className="flex items-center gap-2.5 w-full my-4 text-[14px] text-muted-foreground" role="status" aria-live="polite">
       {/* Three bouncing dots */}
@@ -131,7 +133,7 @@ export function GridReplyingLine({ person }: { person: { name: string; email: st
         ))}
       </span>
       <span className="min-w-0 break-words">
-        Agent is responding to <span className="font-semibold text-foreground/80">{person.name}</span>
+        Agent is responding to <span className="font-semibold text-foreground/80">{name}</span>
         {showEmail ? ` (${person.email})` : ""}. You can send when it's done.
       </span>
     </div>
