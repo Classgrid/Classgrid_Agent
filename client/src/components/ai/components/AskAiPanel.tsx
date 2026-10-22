@@ -1441,6 +1441,18 @@ function linkCitations(text: string, sources: ChatSource[]): string {
     .join("");
 }
 
+// Files our CDN serves that the answer links to (made by the AI): shown as file cards under the answer
+const ANSWER_FILE_LINK = /https:\/\/cdn\.classgrid\.in\/[^\s)\]"'<>]+?\.(?:pdf|csv|xlsx|xls|docx|doc|pptx|txt|zip)(?![\w/])/gi;
+function answerFileLinks(text: string): { url: string; name: string }[] {
+  const urls = [...new Set(text.match(ANSWER_FILE_LINK) || [])];
+  return urls.map((url) => {
+    let name = url.split("/").pop() || url;
+    try { name = decodeURIComponent(name); } catch { /* keep as is */ }
+    // Drop the upload timestamp in front: "1792640743942-report_clean.pdf" → "report_clean.pdf"
+    return { url, name: name.replace(/^\d{10,}[-_]/, "") };
+  });
+}
+
 const AssistantMessageContent = memo(({ content, sources, createdAt, isTyping, onApprovalAction, isHistorical, onRetry, currentStepIndex, setActiveBuildSessionId }: { content: string, sources?: ChatSource[], createdAt?: number, isTyping?: boolean, onApprovalAction?: (text: string) => void, isHistorical?: boolean, onRetry?: (error: string) => void, currentStepIndex?: number, setActiveBuildSessionId?: (id: string) => void }) => {
   // `components` below must keep a stable identity: a new object makes ReactMarkdown remount
   // every code block and Mermaid diagram. So it reads changing props from refs, which are
@@ -1813,6 +1825,7 @@ const AssistantMessageContent = memo(({ content, sources, createdAt, isTyping, o
     };
   }, []);
 
+  const fileLinks = React.useMemo(() => answerFileLinks(content || ""), [content]);
 
   return (
     <div className="space-y-4 text-[16px] leading-[24px] overflow-visible break-words max-w-none">
@@ -1823,6 +1836,20 @@ const AssistantMessageContent = memo(({ content, sources, createdAt, isTyping, o
       >
         {preprocessLaTeX(processedContent)}
       </ReactMarkdown>
+      {fileLinks.length > 0 && (
+        <div className="flex flex-col gap-2">
+          {fileLinks.map((f) => (
+            <DocumentGenerationView
+              key={f.url}
+              fileName={f.name}
+              size=""
+              hideAnimation
+              url={f.url}
+              onClick={() => window.open(f.url, "_blank", "noopener")}
+            />
+          ))}
+        </div>
+      )}
     </div>
   );
 }, (prevProps, nextProps) => {

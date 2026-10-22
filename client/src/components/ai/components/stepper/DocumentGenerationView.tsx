@@ -29,9 +29,11 @@ interface DocumentGenerationViewProps {
   size: string;
   hideAnimation?: boolean;
   onClick?: () => void;
+  /** File link: the download button saves it */
+  url?: string;
 }
 
-export function DocumentGenerationView({ fileName, pageCount, size, hideAnimation, onClick }: DocumentGenerationViewProps) {
+export function DocumentGenerationView({ fileName, pageCount, size, hideAnimation, onClick, url }: DocumentGenerationViewProps) {
   const safeFileName = typeof fileName === 'object' ? JSON.stringify(fileName) : String(fileName || '');
   const [stage, setStage] = useState<'uploading' | 'processing' | 'complete'>(hideAnimation ? 'complete' : 'uploading');
   const [progress, setProgress] = useState(0);
@@ -169,7 +171,7 @@ export function DocumentGenerationView({ fileName, pageCount, size, hideAnimatio
               {safeFileName}
             </span>
             <span className="text-[13px] text-slate-500 dark:text-[#8a8a8a] mt-0.5">
-              {pageCount ? `${pageCount} ${pageCount === 1 ? 'page' : 'pages'} • ` : ''}{size} • {fileTypeLabel}
+              {pageCount ? `${pageCount} ${pageCount === 1 ? 'page' : 'pages'} • ` : ''}{size ? `${size} • ` : ''}{fileTypeLabel}
             </span>
           </div>
         </div>
@@ -177,9 +179,22 @@ export function DocumentGenerationView({ fileName, pageCount, size, hideAnimatio
         {/* Download Button */}
         <button 
           className="shrink-0 h-8 w-8 flex items-center justify-center rounded-full text-slate-400 dark:text-[#666666] group-hover:text-slate-700 dark:group-hover:text-[#eeeeee] hover:bg-slate-200/50 dark:hover:bg-white/10 transition-colors ml-4"
-          onClick={(e) => {
+          onClick={async (e) => {
             e.stopPropagation();
-            // Implement download logic here
+            if (!url) return;
+            // Save the file; if the browser can't fetch it, open it in a new tab instead
+            try {
+              const res = await fetch(url);
+              if (!res.ok) throw new Error(String(res.status));
+              const blobUrl = URL.createObjectURL(await res.blob());
+              const a = document.createElement('a');
+              a.href = blobUrl;
+              a.download = safeFileName;
+              a.click();
+              setTimeout(() => URL.revokeObjectURL(blobUrl), 1000);
+            } catch {
+              window.open(url, '_blank', 'noopener');
+            }
           }}
         >
           <Download className="h-4 w-4" />
