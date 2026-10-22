@@ -1453,6 +1453,18 @@ function answerFileLinks(text: string): { url: string; name: string }[] {
   });
 }
 
+// Header icon before Share: two circles, each with a line
+function ShareGridIcon({ className }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" className={className} aria-hidden="true">
+      <circle cx="6" cy="7" r="3" />
+      <path d="M12 7h8" />
+      <circle cx="6" cy="17" r="3" />
+      <path d="M12 17h8" />
+    </svg>
+  );
+}
+
 const AssistantMessageContent = memo(({ content, sources, createdAt, isTyping, onApprovalAction, isHistorical, onRetry, currentStepIndex, setActiveBuildSessionId }: { content: string, sources?: ChatSource[], createdAt?: number, isTyping?: boolean, onApprovalAction?: (text: string) => void, isHistorical?: boolean, onRetry?: (error: string) => void, currentStepIndex?: number, setActiveBuildSessionId?: (id: string) => void }) => {
   // `components` below must keep a stable identity: a new object makes ReactMarkdown remount
   // every code block and Mermaid diagram. So it reads changing props from refs, which are
@@ -4359,6 +4371,13 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
         {/* NEW TOP RIGHT HEADER ACTIONS */}
         {variant === "full-page" && messages.length > 0 && sessionId && (
           <div className="flex items-center gap-1 mr-2 text-muted-foreground">
+            <button
+              type="button"
+              aria-label="Share Grid"
+              className="flex items-center justify-center h-8 w-8 rounded-md hover:bg-black/5 dark:hover:bg-white/10 transition-colors cursor-pointer"
+            >
+              <ShareGridIcon className="h-4 w-4" />
+            </button>
             {/* Direct Share Button */}
             <button
               onClick={handleDirectShare}
@@ -6022,6 +6041,13 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
                 <div className="flex items-center gap-1 text-muted-foreground">
                   {/* Questions list (the side list is hidden on smaller screens and phones) */}
                   <MobileTOCButton tocItems={tocItems} activeSection={activeSection} />
+                  <button
+                    type="button"
+                    aria-label="Share Grid"
+                    className="flex items-center justify-center h-8 w-8 rounded-md hover:bg-black/5 dark:hover:bg-white/10 transition-colors cursor-pointer"
+                  >
+                    <ShareGridIcon className="h-4 w-4" />
+                  </button>
                   {/* Direct Share Button */}
                   <button
                     onClick={handleDirectShare}
