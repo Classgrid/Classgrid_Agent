@@ -74,6 +74,14 @@ function LoadingSmoke() {
   );
 }
 
+const NEW_PROJECT_LINES = [
+  "Starting your new project",
+  "You can ask the Agent to build a website or an app",
+  "You can ask it to write, fix or explain code",
+  "You can ask it to make a GitHub repo and push your code",
+  "Getting your editor ready",
+];
+
 export function ProjectModePage() {
   const { data: currentUser } = useCurrentUser();
   const isSuperAdmin = !!currentUser; // every logged-in user; each gets their own editor box with only their own projects
@@ -111,7 +119,18 @@ export function ProjectModePage() {
     try { v ? localStorage.removeItem(AI_PANEL_KEY) : localStorage.setItem(AI_PANEL_KEY, "1"); } catch { /* storage blocked */ }
   };
   // Opening a project: download, then the editor loads. The bar moves toward each step's target while it waits.
-  const [progress, setProgress] = useState<{ label: string; value: number; target: number } | null>(null);
+  const [progress, setProgress] = useState<{ label: string; value: number; target: number; lines?: string[] } | null>(null);
+  // A new project (no GitHub repo yet) has nothing to download: show a new line every second instead
+  useEffect(() => {
+    const lines = progress?.lines;
+    if (!lines?.length) return;
+    const t = window.setInterval(() => setProgress((p) => {
+      if (!p?.lines) return p;
+      const i = p.lines.indexOf(p.label);
+      return { ...p, label: p.lines[Math.min(i + 1, p.lines.length - 1)] };
+    }), 1000);
+    return () => window.clearInterval(t);
+  }, [progress?.lines]);
   useEffect(() => {
     if (!progress || progress.value >= progress.target) return;
     const t = window.setTimeout(() => setProgress((p) => p && { ...p, value: Math.min(p.target, p.value + Math.max(0.4, (p.target - p.value) * 0.06)) }), 250);
@@ -184,7 +203,8 @@ export function ProjectModePage() {
     }
     rememberOpen(project.id);
     setFolder(null);
-    setProgress({ label: resume ? "Reconnecting to your project" : "Downloading the latest code from GitHub", value: 3, target: 70 });
+    const newLines = !resume && !project.repo ? NEW_PROJECT_LINES : undefined;
+    setProgress({ label: resume ? "Reconnecting to your project" : newLines ? newLines[0] : "Downloading the latest code from GitHub", value: 3, target: 70, lines: newLines });
     try {
       const { res, data } = await api(`/projects/${project.id}/open`, { method: "POST", body: JSON.stringify({ replace, resume }) });
       if (res.status === 409 && data.error === "unsaved_changes") {
@@ -197,7 +217,7 @@ export function ProjectModePage() {
       if (res.status === 409) { setProgress(null); rememberOpen(wasOpen); setGithubConnected(false); setLinking(project); loadRepos(); return; }
       if (!res.ok) throw new Error(data.error || "Could not open this project");
       setFolder(data.folder);
-      setProgress({ label: "Starting the editor", value: 70, target: 95 });
+      setProgress((p) => (p?.lines ? { ...p, value: Math.max(p.value, 70), target: 95 } : { label: "Starting the editor", value: 70, target: 95 }));
       if (data.backup) toast(`Your unsaved work from last time was saved to the GitHub branch "${data.backup}".`, { duration: 12000 });
       if (data.installing) toast("Installing the project's packages in the background. Red marks in the editor go away when it finishes (about a minute the first time).");
     } catch (e: any) {
