@@ -340,6 +340,7 @@ export function ProjectModePage() {
       }
     } catch (err: any) {
       toast.error(err?.message && err.message !== "upload failed" ? err.message : "Could not upload the logo");
+      throw err; // the crop window shows it failed
     } finally {
       setLogoBusy(null);
     }
@@ -724,7 +725,7 @@ export function ProjectModePage() {
         imageSrc={cropSrc || ""}
         aspectRatio={1}
         title="Crop project logo"
-        onCropComplete={(blob) => { setCropSrc(null); return saveLogo(blob); }}
+        onCropComplete={saveLogo}
       />
 
       <DangerConfirmDialog
