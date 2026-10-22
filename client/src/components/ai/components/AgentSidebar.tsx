@@ -542,7 +542,7 @@ export function AgentNestedMenu({ searchQuery = "" }: { searchQuery?: string }) 
                   <span className="truncate block min-w-0 flex-1">{displayTitle}</span>
                   {/* Share Grid: this chat is shared with other people */}
                   {(session as any).grid && (
-                    <Star className="w-3 h-3 shrink-0 fill-current text-amber-500 dark:text-amber-400" aria-label="Shared chat" />
+                    <Star className="w-3 h-3 shrink-0 fill-current text-foreground" aria-label="Shared chat" />
                   )}
                 </div>
               }
