@@ -55,6 +55,7 @@
  */
 
 import React, { useState } from "react";
+import { motion, useReducedMotion } from "framer-motion";
 import { Link, useLocation } from "react-router-dom";
 import { apiClient as api } from "@/lib/apiClient";
 import { toast } from "sonner";
@@ -91,6 +92,8 @@ export function SidebarSwitcher({ user }: { user: { role?: string; name?: string
   const currentRole = user?.role || "super_admin";
   const rawOrgName = user?.organization?.sidebar_name || user?.organization?.name || (currentRole === "super_admin" ? user?.sidebar_name || user?.name || "Super Admin" : "Classgrid");
   // Super admin: no "Platform" after the name, wherever the name comes from
+  const [logoShown, setLogoShown] = useState(false);
+  const reduceMotion = useReducedMotion();
   const orgName = currentRole === "super_admin" ? rawOrgName.replace(/\s*Platform\s*$/i, "") || rawOrgName : rawOrgName;
   const orgLogo = user?.organization?.sidebar_logo_url || user?.organization?.logo_url || (currentRole === "super_admin" ? (user as any)?.platformLogo : undefined);
 
@@ -124,7 +127,7 @@ export function SidebarSwitcher({ user }: { user: { role?: string; name?: string
 
   return (
     <SidebarMenu>
-      <SidebarMenuItem>
+      <SidebarMenuItem onMouseEnter={() => setLogoShown(true)} onMouseLeave={() => setLogoShown(false)}>
         <DropdownMenu>
           <DropdownMenuTrigger render={
             <SidebarMenuButton
@@ -132,14 +135,25 @@ export function SidebarSwitcher({ user }: { user: { role?: string; name?: string
               className="data-[state=open]:bg-sidebar-accent data-[state=open]:text-sidebar-accent-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring"
             />
           }>
-              {/* Logo hidden for now (owner's choice); remove "hidden" to show it again */}
-              <div className={`hidden h-9 w-9 items-center justify-center rounded-md shrink-0 ${orgLogo ? 'bg-transparent' : 'bg-emerald-500 text-white shadow-sm overflow-hidden'}`}>
-                {orgLogo ? (
-                  <img src={orgLogo} alt={orgName} className="w-full h-full object-contain rounded-md" />
-                ) : (
-                  <Building2 className="size-5 text-white" />
-                )}
-              </div>
+              {/* Logo hidden until hover: it slides in from the left and pushes the name to the right
+                  (same smooth easing as the Project Mode loading lines) */}
+              <motion.div
+                aria-hidden={!logoShown}
+                initial={false}
+                animate={logoShown
+                  ? { width: 36, marginRight: 0, opacity: 1, x: 0, filter: "blur(0px)" }
+                  : { width: 0, marginRight: -8, opacity: 0, x: reduceMotion ? 0 : -14, filter: reduceMotion ? "blur(0px)" : "blur(4px)" }}
+                transition={{ duration: reduceMotion ? 0 : 0.35, ease: [0.22, 1, 0.36, 1] }}
+                className="h-9 shrink-0 overflow-hidden"
+              >
+                <div className={`flex h-9 w-9 items-center justify-center rounded-md ${orgLogo ? 'bg-transparent' : 'bg-emerald-500 text-white shadow-sm overflow-hidden'}`}>
+                  {orgLogo ? (
+                    <img src={orgLogo} alt={orgName} className="w-full h-full object-contain rounded-md" />
+                  ) : (
+                    <Building2 className="size-5 text-white" />
+                  )}
+                </div>
+              </motion.div>
               {/* With the logo hidden: bigger name, lined up with the search box and menu below */}
               <div className="grid flex-1 gap-0.5 pl-2 text-left text-sm leading-tight">
                 <span className="text-2xl font-semibold tracking-tight text-foreground whitespace-normal break-words leading-none">
