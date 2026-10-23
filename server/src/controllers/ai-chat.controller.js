@@ -3561,10 +3561,9 @@ If they ask whether their college/school uses Classgrid, say you can't see that 
                         if (args.fromEmail) args.fromEmail = String(args.fromEmail).trim();
                         if (args.fromName) args.fromName = String(args.fromName).replace(/["\r\n<>]/g, "").trim().slice(0, 80) || undefined;
 
-                        // Role and email from the signed-in account only (body.userRole could be set by anyone).
-                        const isSuperAdmin = req.user?.email?.endsWith('@classgrid.in') || ['super_admin', 'co_super_admin', 'org_admin'].includes(req.user?.role);
-                        if (!isSuperAdmin) {
-                            return "SECURITY ERROR: Access Denied. Only Admins are authorized to use the AI email sending tool.";
+                        // Every signed-in user can send email with the AI (no admin-only check)
+                        if (!req.user?._id) {
+                            return "FAILED: Sign in to send email.";
                         }
 
                         // ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ EXTERNAL EMAIL SAFETY GATE ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬
@@ -3573,7 +3572,9 @@ If they ask whether their college/school uses Classgrid, say you can't see that 
                         // autonomously emailing real people (e.g. investors, partners)
                         // with AI-generated content that the user hasn't reviewed.
                         const recipientEmail = (args.to || '').trim().toLowerCase();
-                        const isExternalRecipient = recipientEmail && !recipientEmail.endsWith('@classgrid.in');
+                        // The user's own email is not external: sending to yourself needs no confirmation
+                        const ownEmail = String(req.user?.email || '').trim().toLowerCase();
+                        const isExternalRecipient = recipientEmail && !recipientEmail.endsWith('@classgrid.in') && recipientEmail !== ownEmail;
 
                         if (isExternalRecipient) {
                             // Check if the user explicitly confirmed sending in their last message
