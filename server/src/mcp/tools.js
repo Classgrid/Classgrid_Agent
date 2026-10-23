@@ -923,14 +923,16 @@ export const getMcpTools = () => [
   },
   {
     name: 'send_whatsapp_message',
-    description: 'Send a WhatsApp text message globally using the platform WhatsApp Business account. Use this whenever the user asks you to send a WhatsApp message.',
+    description: 'Send a WhatsApp message globally using the platform WhatsApp Business account: text, or a real file (PDF and other documents, JPG/PNG photos, MP3/OGG audio, MP4 video) with fileUrl. Use this whenever the user asks you to send a WhatsApp message. WhatsApp formatting: *bold*, _italic_, ~strike~, ```code```; links are plain URLs (no Markdown).',
     inputSchema: {
       type: 'object',
       properties: {
         toPhoneNumber: { type: 'string', description: 'The recipient phone number with country code (e.g. 919876543210).' },
-        messageText: { type: 'string', description: 'The text message to send.' }
+        messageText: { type: 'string', description: 'The text message to send. With a file it is the caption (up to 1024 characters; audio has no caption).' },
+        fileUrl: { type: 'string', description: 'Optional: a public https link to a file to send as a real WhatsApp file (for example a cdn.classgrid.in PDF from generate_pdf).' },
+        fileName: { type: 'string', description: 'Optional: the file name shown for a document (for example "Study Guide.pdf").' }
       },
-      required: ['toPhoneNumber', 'messageText']
+      required: ['toPhoneNumber']
     }
   },
   {

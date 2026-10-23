@@ -3563,6 +3563,26 @@ If they ask whether their college/school uses Classgrid, say you can't see that 
                                 return `FAILED: "${toPhoneNumber}" is not a valid WhatsApp number. Nothing was sent and nothing was counted. Ask the user for the number with country code.`;
                             }
 
+                            // A file (fileUrl) goes as a real WhatsApp file: images as photos, audio and video as media,
+                            // everything else (PDF, Word, Excel, CSV...) as a document. The text is its caption.
+                            const fileUrl = String(args.fileUrl || "").trim();
+                            let payload;
+                            if (fileUrl) {
+                                if (!/^https:\/\//i.test(fileUrl)) return `FAILED: fileUrl must be a public https link (for example a cdn.classgrid.in file). Nothing was sent.`;
+                                const ext = (fileUrl.split("?")[0].match(/\.([a-z0-9]{2,5})$/i)?.[1] || "").toLowerCase();
+                                const kind = ["jpg", "jpeg", "png"].includes(ext) ? "image"
+                                    : ["mp3", "ogg", "m4a", "aac", "amr"].includes(ext) ? "audio"
+                                    : ["mp4", "3gp"].includes(ext) ? "video" : "document";
+                                const caption = String(messageText || "").slice(0, 1024);
+                                const media = { link: fileUrl };
+                                if (kind !== "audio" && caption) media.caption = caption;
+                                if (kind === "document") media.filename = String(args.fileName || decodeURIComponent(fileUrl.split("?")[0].split("/").pop() || "file")).slice(0, 240);
+                                payload = { type: kind, [kind]: media };
+                            } else {
+                                if (!String(messageText || "").trim()) return "FAILED: Give messageText (or a fileUrl). Nothing was sent.";
+                                payload = { type: "text", text: { preview_url: false, body: messageText } };
+                            }
+
                             const res = await fetch(`https://graph.facebook.com/v17.0/${process.env.WHATSAPP_PHONE_ID}/messages`, {
                                 method: 'POST',
                                 headers: {
@@ -3573,11 +3593,7 @@ If they ask whether their college/school uses Classgrid, say you can't see that 
                                     messaging_product: "whatsapp",
                                     recipient_type: "individual",
                                     to: recipient,
-                                    type: "text",
-                                    text: {
-                                        preview_url: false,
-                                        body: messageText
-                                    }
+                                    ...payload
                                 })
                             });
 
