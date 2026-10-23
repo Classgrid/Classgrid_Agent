@@ -253,6 +253,7 @@ function systemPrompt(user) {
         "What you say is read out by an English text-to-speech voice, so write plain spoken English: short sentences, no markdown, no lists, no emojis, no links.",
         "The call can last at most 5 minutes.",
         "After the call the Classgrid Agent does the work in the caller's account and sends them the result on WhatsApp.",
+        "The caller can also send extra details or files (photos, PDFs, documents) in this WhatsApp chat; the Agent reads their latest WhatsApp messages before it sends the final result.",
     ].join("\n");
 }
 
@@ -421,6 +422,8 @@ async function afterCall(call) {
         else task += `\n\n(The project "${project.name}" could not be opened in the editor: ${opened.error}. Work without its files and tell the user.)`;
     }
     const where = project ? ` in your project "${project.name}"` : "";
+    // Owner's rule: before the final email or WhatsApp, the Agent checks the user's latest WhatsApp messages
+    task += "\n\n(The user may send follow-ups or files in the Classgrid WhatsApp chat while you work. Before you send the final result by email or WhatsApp, read their latest WhatsApp messages with read_whatsapp_messages and use anything new they added.)";
     const result = await runAgentTask(call.user, `[From a WhatsApp call]\n${task}`, project?._id, (sessionId) =>
         sendWhatsappText(call.from, `Got it. Classgrid AI is working on it now${where}. I'll send you the result here when it's done.\n\nFollow along: ${CHAT_URL}/agent/${sessionId}`))
         .finally(() => stopKeepOpen());

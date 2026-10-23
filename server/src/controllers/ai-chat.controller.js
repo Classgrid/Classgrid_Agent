@@ -2165,6 +2165,7 @@ CRITICAL: If you call ANY integration tool (e.g. Google Classroom, Gmail, Google
                     if (facebookConnected) allowedConnectorNames.add('facebook_connector');
                     if (instagramConnected) allowedConnectorNames.add('instagram_connector');
                     allowedConnectorNames.add('send_whatsapp_message');
+                    allowedConnectorNames.add('read_whatsapp_messages');
 
                     let activeDescriptions = [];
                     let disconnectedLinks = [];
@@ -3501,6 +3502,25 @@ If they ask whether their college/school uses Classgrid, say you can't see that 
                             });
                         } catch (e) {
                             return "Web Search failed: " + e;
+                        }
+                    },
+                    read_whatsapp_messages: async (args) => {
+                        try {
+                            const phone = req.user?.metadata?.whatsappPhone;
+                            if (!phone) return "FAILED: This account has no verified WhatsApp number, so there are no WhatsApp messages to read.";
+                            const { readRecentMessages } = await import('../services/whatsapp-inbox.service.js');
+                            const count = Math.max(1, Math.min(20, Number(args?.count) || 5));
+                            const items = await readRecentMessages(phone, count);
+                            if (!items.length) return "No WhatsApp messages from the user in the last 3 days.";
+                            const when = (ms) => new Date(ms).toLocaleString("en-IN", { timeZone: "Asia/Kolkata", dateStyle: "medium", timeStyle: "short" });
+                            const fileLine = (m) => m.fileUrl
+                                ? `\n   File${m.media?.filename ? ` (${m.media.filename})` : ""}: ${m.fileUrl}`
+                                : m.fileError ? `\n   (a file could not be loaded: ${m.fileError})` : "";
+                            return "The user's latest WhatsApp messages to Classgrid (newest first, India time):\n" + items.map((m, i) =>
+                                `${i + 1}. [${when(m.at)}] ${m.type}${m.text ? `: ${m.text}` : ""}${fileLine(m)}`
+                            ).join("\n");
+                        } catch (e) {
+                            return `FAILED to read WhatsApp messages: ${e.message}`;
                         }
                     },
                     send_whatsapp_message: async (args) => {
