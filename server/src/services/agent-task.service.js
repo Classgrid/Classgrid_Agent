@@ -365,7 +365,7 @@ export async function wakeTask(taskId, reason) {
             ? `${header}The user's WhatsApp messages (oldest first, India time). ${files}\n${messageLines(msgs)}`
             : `${header}[You were asleep. You were woken because ${WHY[reason] || reason}.]` +
             `${task.note ? `\nYour note from before: ${task.note}` : ""}` +
-            `\nThe task: ${goal.slice(0, 4000)}` +
+            `\nThe task: ${goal.slice(-4000)}` +
             `${msgs.length ? `\n\nNew WhatsApp messages from the user (oldest first, India time). ${files}\n${messageLines(msgs)}` : ""}` +
             "\n\nContinue the task.";
 
