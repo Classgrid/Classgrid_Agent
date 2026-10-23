@@ -210,7 +210,7 @@ async function textToSpeech(text, retried = false) {
             method: "POST",
             headers: cfHeaders("application/json"),
             body: JSON.stringify({ text, encoding: "linear16", sample_rate: SAMPLE_RATE, container: "none" }),
-            signal: AbortSignal.timeout(15000),
+            signal: AbortSignal.timeout(20000),
         });
     } catch (e) {
         if (!retried) return textToSpeech(text, true);
@@ -359,13 +359,32 @@ async function claudeTurn(call, { noTools = false } = {}) {
 
 // ─── Call life ────────────────────────────────────────────────
 
+// A reply in parts of one or a few sentences (the voice service takes longer the longer the text is)
+function speechParts(text) {
+    const sentences = String(text).replace(/\s+/g, " ").match(/[^.!?]+[.!?]+["')\]]*|[^.!?]+$/g) || [String(text)];
+    const parts = [];
+    for (const s of sentences) {
+        const t = s.trim();
+        if (!t) continue;
+        // The first sentence goes alone (it plays sooner); short sentences after it are joined
+        if (parts.length > 1 && parts[parts.length - 1].length + t.length < 160) parts[parts.length - 1] += ` ${t}`;
+        else parts.push(t);
+    }
+    return parts;
+}
+
+// Spoken part by part: every part is made into voice at the same time and played in order as soon as it is
+// ready, so the first words come quickly and a long reply never hits the voice service's time limit
 async function speak(call, text) {
     if (!text || call.ended) return;
-    try {
-        const pcm = await textToSpeech(text);
-        call.outQueue.push(pcm);
-    } catch (e) {
-        console.error("[WA call] TTS failed:", e.message);
+    const gen = call.speakGen || 0;
+    const audio = speechParts(text).map((part) =>
+        textToSpeech(part).catch((e) => { console.error("[WA call] TTS failed:", e.message); return null; }));
+    for (const next of audio) {
+        const pcm = await next;
+        // The caller talked over the AI: the rest of this reply is dropped
+        if (call.ended || (call.speakGen || 0) !== gen) return;
+        if (pcm) call.outQueue.push(pcm);
     }
 }
 
@@ -927,7 +946,8 @@ function listen(call, samples) {
         if (s.chunks.length > 100) s.chunks.shift(); // keep 1 s of audio from just before the speech is noticed
         if (s.loud >= (aiTalking ? 250 : 60)) {
             s.active = true; s.ms = 0; s.quiet = 0; s.loudMs = s.loud;
-            if (aiTalking) { call.outQueue = []; call.outCurrent = null; call.speechEndedAt = Date.now(); } // caller talks over the AI: it stops
+            // Caller talks over the AI: it stops (also the parts of its reply still being made)
+            if (aiTalking) { call.outQueue = []; call.outCurrent = null; call.speechEndedAt = Date.now(); call.speakGen = (call.speakGen || 0) + 1; }
         }
         return;
     }
