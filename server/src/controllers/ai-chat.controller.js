@@ -2166,6 +2166,7 @@ CRITICAL: If you call ANY integration tool (e.g. Google Classroom, Gmail, Google
                     if (instagramConnected) allowedConnectorNames.add('instagram_connector');
                     allowedConnectorNames.add('send_whatsapp_message');
                     allowedConnectorNames.add('read_whatsapp_messages');
+                    allowedConnectorNames.add('wait_for_whatsapp_reply');
 
                     let activeDescriptions = [];
                     let disconnectedLinks = [];
@@ -3502,6 +3503,25 @@ If they ask whether their college/school uses Classgrid, say you can't see that 
                             });
                         } catch (e) {
                             return "Web Search failed: " + e;
+                        }
+                    },
+                    wait_for_whatsapp_reply: async (args) => {
+                        try {
+                            const phone = req.user?.metadata?.whatsappPhone;
+                            if (!phone) return "FAILED: This account has no verified WhatsApp number.";
+                            const { waitForReply } = await import('../services/whatsapp-inbox.service.js');
+                            const minutes = Math.max(1, Math.min(15, Number(args?.timeout_minutes) || 10));
+                            const items = await waitForReply(phone, Date.now() - 2000, minutes * 60 * 1000);
+                            if (!items.length) return `The user did not reply on WhatsApp within ${minutes} minutes.`;
+                            const when = (ms) => new Date(ms).toLocaleString("en-IN", { timeZone: "Asia/Kolkata", dateStyle: "medium", timeStyle: "short" });
+                            const fileLine = (m) => m.fileUrl
+                                ? `\n   File${m.media?.filename ? ` (${m.media.filename})` : ""}: ${m.fileUrl}`
+                                : m.fileError ? `\n   (a file could not be loaded: ${m.fileError})` : "";
+                            return "The user replied on WhatsApp (oldest first, India time):\n" + items.map((m, i) =>
+                                `${i + 1}. [${when(m.at)}] ${m.type}${m.text ? `: ${m.text}` : ""}${fileLine(m)}`
+                            ).join("\n");
+                        } catch (e) {
+                            return `FAILED to wait for a WhatsApp reply: ${e.message}`;
                         }
                     },
                     read_whatsapp_messages: async (args) => {

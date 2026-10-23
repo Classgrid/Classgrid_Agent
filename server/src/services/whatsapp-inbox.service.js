@@ -60,3 +60,23 @@ export async function readRecentMessages(phone, count = 5) {
     }
     return items;
 }
+
+// Waits for the user's next WhatsApp message after `sinceMs` (checks every 3 s, at most `timeoutMs`).
+// Returns the new messages (oldest first, files as links), or [] when nothing came in time.
+export async function waitForReply(phone, sinceMs, timeoutMs) {
+    const number = normalizeWhatsappNumber(phone);
+    if (!number) return [];
+    const until = Date.now() + timeoutMs;
+    while (Date.now() < until) {
+        const raw = await redis.lrange(INBOX_KEY(number), 0, KEEP - 1).catch(() => []);
+        const fresh = raw.map((r) => { try { return JSON.parse(r); } catch { return null; } }).filter((m) => m && m.at > sinceMs);
+        if (fresh.length) {
+            // A few seconds more, so a reply sent as several messages (text, then a file) arrives together
+            await new Promise((r) => setTimeout(r, 5000));
+            const all = await readRecentMessages(phone, KEEP);
+            return all.filter((m) => m.at > sinceMs).reverse();
+        }
+        await new Promise((r) => setTimeout(r, 3000));
+    }
+    return [];
+}
