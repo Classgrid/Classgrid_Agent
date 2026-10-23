@@ -380,18 +380,27 @@ async function speak(call, text) {
     const gen = call.speakGen || 0;
     const audio = speechParts(text).map((part) =>
         textToSpeech(part).catch((e) => { console.error("[WA call] TTS failed:", e.message); return null; }));
-    for (const next of audio) {
-        const pcm = await next;
-        // The caller talked over the AI: the rest of this reply is dropped
-        if (call.ended || (call.speakGen || 0) !== gen) return;
-        if (pcm) call.outQueue.push(pcm);
+    // The AI counts as talking for the whole reply, also in the short gaps between its parts (else its own
+    // voice coming back from the phone in a gap would be taken as the caller speaking)
+    call.speakingParts = (call.speakingParts || 0) + 1;
+    try {
+        for (const next of audio) {
+            const pcm = await next;
+            // The caller talked over the AI: the rest of this reply is dropped
+            if (call.ended || (call.speakGen || 0) !== gen) return;
+            if (pcm) call.outQueue.push(pcm);
+        }
+    } finally {
+        call.speakingParts--;
     }
 }
+
+const aiIsTalking = (call) => !!call.outCurrent || call.outQueue.length > 0 || (call.speakingParts || 0) > 0;
 
 // Waits until everything queued has been played (or the call ended)
 function speakingDone(call) {
     return new Promise((resolve) => {
-        const check = () => (call.ended || (call.outQueue.length === 0 && !call.outCurrent) ? resolve() : setTimeout(check, 50));
+        const check = () => (call.ended || !aiIsTalking(call) ? resolve() : setTimeout(check, 50));
         check();
     });
 }
@@ -491,7 +500,7 @@ function timeUp(call) {
     const limit = call.startedAt + MAX_CALL_MS + OVERTIME_MS;
     const check = () => {
         if (call.ended) return;
-        const talking = call.speech.active || call.busy || call.outCurrent || call.outQueue.length > 0;
+        const talking = call.speech.active || call.busy || aiIsTalking(call);
         if (talking && Date.now() < limit) call.hardStop = setTimeout(check, 500);
         else endCall(call.id, "15 minute limit");
     };
@@ -933,7 +942,7 @@ export async function answerCall({ id, from, sdp, user, tokenSource, callsLine =
 function listen(call, samples) {
     if (call.ended) return;
     const s = call.speech;
-    const aiTalking = !!call.outCurrent || call.outQueue.length > 0;
+    const aiTalking = aiIsTalking(call);
     // Right after the AI stops, a short tail of its own voice can still come back: skip it
     if (!aiTalking && !s.active && Date.now() - call.speechEndedAt < 300) { s.loud = 0; s.chunks = []; return; }
     const ms = (samples.length / SAMPLE_RATE) * 1000;
