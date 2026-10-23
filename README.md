@@ -1,3 +1,5 @@
+[![AgentShield Security](https://merx.help/badge/A+.svg)](https://merx.help/shield)
+
 <!--
 ─────────────────────────────────────────────────────────
 🚨 HOSTING & ARCHITECTURE RULE 🚨
