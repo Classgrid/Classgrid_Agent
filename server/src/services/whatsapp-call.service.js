@@ -33,6 +33,21 @@ const CALL_MODEL = "claude-haiku-5-5"; // fastest Claude, so the voice replies c
 const MAX_CALL_MS = 5 * 60 * 1000;
 const WRAP_UP_MS = MAX_CALL_MS - 15 * 1000; // 15 s before the end the AI is told the time is almost up
 const OVERTIME_MS = 30 * 1000; // at the limit, a sentence or answer in progress may finish (up to 30 s more)
+// Owner's rule (2026-10-23): one phone number gets at most 5 answered calls in any 24 hours (so at most 5
+// background jobs: all tasks of one call run as one job)
+const MAX_CALLS_PER_DAY = 5;
+const DAY_MS = 24 * 60 * 60 * 1000;
+const CALLS_KEY = (number) => `wa:calls:${number}`;
+
+// How many calls this number had in the last 24 h, and when the oldest of them stops counting
+async function callsToday(number) {
+    const key = CALLS_KEY(number);
+    const now = Date.now();
+    await redis.zremrangebyscore(key, 0, now - DAY_MS);
+    const count = await redis.zcard(key);
+    const oldest = await redis.zrange(key, 0, 0, "WITHSCORES");
+    return { count, nextAt: oldest?.[1] ? Number(oldest[1]) + DAY_MS : now };
+}
 const SAMPLE_RATE = 48000;
 const FRAME = SAMPLE_RATE / 100; // 10 ms of audio
 const CHAT_URL = "https://chat.classgrid.in";
@@ -672,7 +687,17 @@ export async function handleCallsWebhook(value) {
                     : "Classgrid AI can't take calls for your account right now. Please try again later.");
                 continue;
             }
+            // 5 calls per number in 24 hours (if the count can't be read, the call is answered)
+            const number = normalizeWhatsappNumber(from);
+            const today = await callsToday(number).catch(() => null);
+            if (today && today.count >= MAX_CALLS_PER_DAY) {
+                await callAction(c.id, "reject").catch(() => {});
+                const next = new Date(today.nextAt).toLocaleString("en-IN", { timeZone: "Asia/Kolkata", dateStyle: "medium", timeStyle: "short" });
+                await sendWhatsappText(from, `You've used all ${MAX_CALLS_PER_DAY} Classgrid AI calls for the last 24 hours. You can call again after ${next} (India time).`);
+                continue;
+            }
             await answerCall({ id: c.id, from, sdp: c.session.sdp, user, tokenSource: enough.source || "personal" });
+            redis.zadd(CALLS_KEY(number), Date.now(), c.id).then(() => redis.expire(CALLS_KEY(number), 2 * 24 * 60 * 60)).catch(() => {});
         } catch (e) {
             console.error(`[WA call] ${c.id} failed:`, e.message);
             if (calls.has(c.id)) endCall(c.id, "error");
