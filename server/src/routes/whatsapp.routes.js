@@ -87,12 +87,10 @@ router.get("/webhook", async (req, res) => {
     const token = req.query['hub.verify_token'];
     const challenge = req.query['hub.challenge'];
 
-    if (mode === 'subscribe' && token) {
-        // In a real multi-tenant app, you would look up the token in the DB.
-        // For now, if the token matches any user's verifyToken, accept it.
-        // We will just accept it if the token is passed and challenge exists.
+    // Only Meta's verify token is accepted, and the challenge goes back as plain text (never as a page)
+    if (mode === 'subscribe' && token && process.env.WHATSAPP_WEBHOOK_VERIFY_TOKEN && token === process.env.WHATSAPP_WEBHOOK_VERIFY_TOKEN) {
         console.log("WhatsApp Webhook verified!");
-        return res.status(200).send(challenge);
+        return res.status(200).type("text/plain").send(String(challenge || ""));
     } else {
         res.sendStatus(403);
     }
@@ -143,10 +141,17 @@ router.post("/webhook", async (req, res) => {
 function fromWhatsappServer(req) {
     const ip = String(req.socket?.remoteAddress || "");
     const local = ip === "127.0.0.1" || ip === "::1" || ip === "::ffff:127.0.0.1";
+    // Requests through nginx also come from this machine, but they carry these headers; the WhatsApp server's don't
+    if (!local || req.headers["x-forwarded-for"] || req.headers["x-real-ip"]) return false;
     const key = process.env.WHATSAPP_ACCESS_TOKEN || "";
-    const sent = String(req.headers["x-classgrid-call-signature"] || "");
-    const expected = key ? crypto.createHmac("sha256", key).update(JSON.stringify(req.body || {})).digest("hex") : "";
-    return !!(local && expected && sent.length === expected.length && crypto.timingSafeEqual(Buffer.from(sent), Buffer.from(expected)));
+    if (!key) return false;
+    try {
+        const sent = Buffer.from(String(req.headers["x-classgrid-call-signature"] || ""), "hex");
+        const expected = crypto.createHmac("sha256", key).update(JSON.stringify(req.body || {})).digest();
+        return sent.length === expected.length && crypto.timingSafeEqual(sent, expected);
+    } catch {
+        return false;
+    }
 }
 
 router.post("/calls-internal", async (req, res) => {
@@ -168,12 +173,20 @@ router.post("/calls-internal", async (req, res) => {
 // ─────────────────────────────────────────────
 router.post("/messages-internal", async (req, res) => {
     if (!fromWhatsappServer(req)) return res.sendStatus(403);
-    res.sendStatus(200);
     try {
-        const { saveIncomingMessages } = await import("../services/whatsapp-inbox.service.js");
+        const { saveIncomingMessages, isNumberBusy } = await import("../services/whatsapp-inbox.service.js");
         await saveIncomingMessages(req.body);
+        // Delivery reports: a message Meta accepted but then failed to deliver stops counting toward the limit
+        if (req.body?.statuses?.length) {
+            const { handleWhatsappStatusUpdates } = await import("../services/ai-feature-limits.js");
+            await handleWhatsappStatusUpdates(req.body.statuses).catch((e) => console.error("WhatsApp status update error:", e.message));
+        }
+        // busy: an Agent or a call is using this number's chat, so the old help bot should not answer it
+        const from = req.body?.messages?.[0]?.from;
+        res.json({ busy: from ? await isNumberBusy(from) : false });
     } catch (err) {
         console.error("WhatsApp message save error:", err);
+        if (!res.headersSent) res.json({ busy: false });
     }
 });
 

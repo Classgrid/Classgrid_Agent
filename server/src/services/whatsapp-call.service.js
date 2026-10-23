@@ -20,6 +20,7 @@
 // audio is 48 kHz Opus. UDP 10000-60000 is open on the server for it.
 // Off switch: WHATSAPP_CALLS_DISABLED=true leaves every call unanswered (as before this feature).
 
+import crypto from "crypto";
 import jwt from "jsonwebtoken";
 import User from "../models/User.js";
 import redis from "../config/redis.js";
@@ -27,6 +28,8 @@ import { normalizeWhatsappNumber } from "./ai-feature-limits.js";
 import { isSharedTestWhatsapp } from "../utils/chat-onboarding.js";
 import { hasEnoughTokens, deductTokens } from "./ai-credits.service.js";
 import { chargeableTokens } from "./ai-token-pricing.js";
+import { toWhatsappText, splitWhatsappText } from "./ai-feature-limits.js";
+import { BUSY_KEY, markLastIn } from "./whatsapp-inbox.service.js";
 
 const GRAPH = "https://graph.facebook.com/v22.0";
 const CALL_MODEL = "claude-haiku-5-5"; // fastest Claude, so the voice replies come quickly
@@ -78,10 +81,15 @@ async function graph(path, body) {
 const callAction = (callId, action, sdp) =>
     graph("calls", { call_id: callId, action, ...(sdp ? { session: { sdp_type: "answer", sdp } } : {}) });
 
-function sendWhatsappText(to, text) {
-    return graph("messages", { recipient_type: "individual", to, type: "text", text: { preview_url: true, body: text.slice(0, 4000) } })
-        .catch((e) => console.error("[WA call] WhatsApp message failed:", e.message));
+async function sendWhatsappText(to, text) {
+    for (const part of splitWhatsappText(toWhatsappText(text))) {
+        await graph("messages", { recipient_type: "individual", to, type: "text", text: { preview_url: true, body: part } })
+            .catch((e) => console.error("[WA call] WhatsApp message failed:", e.message));
+    }
 }
+
+// While a call or a call task uses this number's chat, the old WhatsApp help bot stays quiet
+const markBusy = (number, seconds = 300) => redis.set(BUSY_KEY(number), "1", "EX", seconds).catch(() => {});
 
 // ─── Who is calling ───────────────────────────────────────────
 
@@ -144,19 +152,32 @@ const cfUrl = (model) => `https://api.cloudflare.com/client/v4/accounts/${proces
 const cfHeaders = (type) => ({ Authorization: `Bearer ${process.env.CLOUDFLARE_WORKERS_AI_TOKEN}`, "Content-Type": type });
 
 async function speechToText(chunks) {
-    const res = await fetch(cfUrl("@cf/openai/whisper-large-v3-turbo"), { method: "POST", headers: cfHeaders("audio/wav"), body: wav16k(chunks) });
+    const res = await fetch(cfUrl("@cf/openai/whisper-large-v3-turbo"), {
+        method: "POST", headers: cfHeaders("audio/wav"), body: wav16k(chunks), signal: AbortSignal.timeout(15000),
+    });
+    if (!res.ok) throw new Error(`speech to text ${res.status}`);
     const json = await res.json().catch(() => ({}));
     return String(json?.result?.text || "").trim();
 }
 
-async function textToSpeech(text) {
+async function textToSpeech(text, retried = false) {
     // Raw 16-bit 48 kHz mono, the call's own format
-    const res = await fetch(cfUrl("@cf/deepgram/aura-2-en"), {
-        method: "POST",
-        headers: cfHeaders("application/json"),
-        body: JSON.stringify({ text, encoding: "linear16", sample_rate: SAMPLE_RATE, container: "none" }),
-    });
-    if (!res.ok) throw new Error(`TTS ${res.status}`);
+    let res;
+    try {
+        res = await fetch(cfUrl("@cf/deepgram/aura-2-en"), {
+            method: "POST",
+            headers: cfHeaders("application/json"),
+            body: JSON.stringify({ text, encoding: "linear16", sample_rate: SAMPLE_RATE, container: "none" }),
+            signal: AbortSignal.timeout(15000),
+        });
+    } catch (e) {
+        if (!retried) return textToSpeech(text, true);
+        throw e;
+    }
+    if (!res.ok) {
+        if (!retried) return textToSpeech(text, true);
+        throw new Error(`TTS ${res.status}`);
+    }
     const buf = Buffer.from(await res.arrayBuffer());
     return new Int16Array(buf.buffer, buf.byteOffset, Math.floor(buf.length / 2));
 }
@@ -257,18 +278,25 @@ function systemPrompt(user) {
     ].join("\n");
 }
 
-async function claudeTurn(call) {
-    const res = await fetch("https://api.anthropic.com/v1/messages", {
+async function claudeTurn(call, { noTools = false } = {}) {
+    const ask = () => fetch("https://api.anthropic.com/v1/messages", {
         method: "POST",
         headers: { "x-api-key": process.env.ANTHROPIC_API_KEY, "anthropic-version": "2023-06-01", "content-type": "application/json" },
         body: JSON.stringify({
             model: CALL_MODEL,
-            max_tokens: 400,
+            max_tokens: 1024,
             system: systemPrompt(call.user),
             tools: [ASK_CLASSGRID_TOOL, START_TASK_TOOL, END_CALL_TOOL, ...PROJECT_TOOLS],
+            ...(noTools ? { tool_choice: { type: "none" } } : {}),
             messages: call.messages,
         }),
+        signal: AbortSignal.timeout(30000),
     });
+    let res = await ask();
+    if (res.status === 429 || res.status >= 500) {
+        await new Promise((r) => setTimeout(r, 1500));
+        res = await ask();
+    }
     const data = await res.json().catch(() => ({}));
     if (!res.ok) throw new Error(`Claude ${res.status}: ${JSON.stringify(data.error || data).slice(0, 300)}`);
     const u = data.usage || {};
@@ -280,10 +308,11 @@ async function claudeTurn(call) {
     };
     deductTokens(call.user._id, call.user.organization_id || null, chargeableTokens(usage, CALL_MODEL), call.tokenSource)
         .catch((e) => console.error("[WA call] token charge failed:", e.message));
-    call.messages.push({ role: "assistant", content: data.content || [] });
+    // An empty answer is not kept (the API refuses a conversation with an empty message in it)
+    if (data.content?.length) call.messages.push({ role: "assistant", content: data.content });
     const text = (data.content || []).filter((b) => b.type === "text").map((b) => b.text).join(" ").trim();
     const tools = (data.content || []).filter((b) => b.type === "tool_use");
-    return { text, tools };
+    return { text, tools, cutOff: data.stop_reason === "max_tokens" };
 }
 
 // ─── Call life ────────────────────────────────────────────────
@@ -323,45 +352,60 @@ async function handleUtterance(call, chunks) {
     }
 }
 
+async function runTool(call, t, cutOff) {
+    // A tool request cut off by the answer length limit has a broken input: ask the AI to try again
+    if (cutOff) return { content: "Your request was cut off before it was complete. Try again, shorter.", is_error: true };
+    if (t.name === "start_task") {
+        const task = String(t.input?.task || "").trim();
+        const project = t.input?.project_name ? await findProject(call.user, t.input.project_name).catch(() => null) : null;
+        if (!task) return { content: "Nothing was saved: the task text was empty. Call start_task again with the full task.", is_error: true };
+        call.tasks.push({ task, project });
+        call.transcript.push(`AI saved a task: ${task}`);
+        return {
+            content: project || !t.input?.project_name
+                ? `Task saved (${call.tasks.length} so far). It starts when the call ends.`
+                : `Task saved (${call.tasks.length} so far), but there is no project called "${t.input.project_name}". ${await projectNames(call.user)}`,
+        };
+    }
+    if (t.name === "end_call") return { content: "Hanging up." };
+    if (t.name === "ask_classgrid") {
+        call.transcript.push(`AI asked Classgrid: ${t.input?.request || ""}`);
+        return { content: await askClassgridLive(call, String(t.input?.request || ""), t.input?.project_name) };
+    }
+    if (PROJECT_TOOLS.some((p) => p.name === t.name)) {
+        call.transcript.push(`AI used ${t.name} ${JSON.stringify(t.input || {})}`);
+        return { content: await runProjectTool(call, t) };
+    }
+    return { content: "This tool is not available.", is_error: true };
+}
+
 async function reply(call) {
-    // A few rounds, so the AI can use a project tool and then talk about the result
+    // A few rounds, so the AI can use a tool and then talk about the result
     for (let round = 0; round < 4 && !call.ended; round++) {
-        const { text, tools } = await claudeTurn(call);
+        const { text, tools, cutOff } = await claudeTurn(call);
         if (text) call.transcript.push(`AI: ${text}`);
-        const hangUp = tools.find((t) => t.name === "end_call");
         await speak(call, text);
-        if (!tools.length) return;
-        // Every tool the AI asked for gets its answer in one message
+        if (!tools.length || call.ended) return;
+        // Every tool the AI asked for gets its answer in one message, even when a tool fails
+        // (a request without its answer would make every later turn of the call fail)
         const results = [];
         for (const t of tools) {
-            let content;
-            if (t.name === "start_task") {
-                const task = String(t.input?.task || "").trim();
-                const project = t.input?.project_name ? await findProject(call.user, t.input.project_name).catch(() => null) : null;
-                if (task) call.tasks.push({ task, project });
-                call.transcript.push(`AI saved a task: ${task}`);
-                content = project || !t.input?.project_name
-                    ? `Task saved (${call.tasks.length} so far). It starts when the call ends.`
-                    : `Task saved (${call.tasks.length} so far), but there is no project called "${t.input.project_name}". ${await projectNames(call.user)}`;
-            } else if (t.name === "end_call") {
-                content = "Hanging up.";
-            } else if (t.name === "ask_classgrid") {
-                call.transcript.push(`AI asked Classgrid: ${t.input?.request || ""}`);
-                content = await askClassgridLive(call, String(t.input?.request || ""), t.input?.project_name);
-            } else if (PROJECT_TOOLS.some((p) => p.name === t.name)) {
-                call.transcript.push(`AI used ${t.name} ${JSON.stringify(t.input || {})}`);
-                content = await runProjectTool(call, t).catch((e) => `Failed: ${e.message}`);
-            } else {
-                content = "This tool is not available.";
-            }
-            results.push({ type: "tool_result", tool_use_id: t.id, content });
+            let out;
+            try { out = await runTool(call, t, cutOff); } catch (e) { out = { content: `Failed: ${e.message}`, is_error: true }; }
+            results.push({ type: "tool_result", tool_use_id: t.id, content: String(out.content || "Done."), ...(out.is_error ? { is_error: true } : {}) });
         }
         call.messages.push({ role: "user", content: results });
-        if (hangUp) {
+        if (tools.some((t) => t.name === "end_call") && !cutOff) {
             await speakingDone(call);
             endCall(call.id, "AI hung up");
             return;
         }
+    }
+    // Still using tools after 4 rounds: one last answer without tools, so the results are said
+    if (!call.ended) {
+        const { text } = await claudeTurn(call, { noTools: true });
+        if (text) call.transcript.push(`AI: ${text}`);
+        await speak(call, text);
     }
 }
 
@@ -373,7 +417,10 @@ function wrapUp(call) {
         // Added only between turns, so it never lands between a tool request and its answer
         call.messages.push({ role: "user", content: "[The call ends in about 15 seconds.]" });
         call.busy = true;
-        try { await reply(call); } catch (e) { console.error("[WA call] wrap-up failed:", e.message); } finally { call.busy = false; }
+        try { await reply(call); } catch (e) { console.error("[WA call] wrap-up failed:", e.message); } finally {
+            call.busy = false;
+            if (call.pending.length) nextTurn(call); // what the caller said meanwhile is answered
+        }
     };
     run();
 }
@@ -402,25 +449,62 @@ export function endCall(callId, why = "ended") {
     try { call.pc?.close(); } catch { /* already closed */ }
     if (why !== "remote") callAction(callId, "terminate").catch(() => { /* call already over */ });
     console.log(`[WA call] ${callId} ended (${why}) after ${Math.round((Date.now() - call.startedAt) / 1000)}s`);
-    afterCall(call).catch((e) => console.error("[WA call] after-call work failed:", e.message));
+    afterCall(call, why).catch((e) => console.error("[WA call] after-call work failed:", e.message));
 }
 
-async function afterCall(call) {
-    // Only saved tasks run after the call (questions were already answered live with ask_classgrid)
-    if (!call.tasks.length) return;
-    let task = call.tasks.length === 1
-        ? call.tasks[0].task
-        : `Do these tasks in this order:\n${call.tasks.map((t, i) => `${i + 1}. ${t.task}`).join("\n")}`;
-    const project = call.tasks.find((t) => t.project)?.project || null;
-    // Owner's rule: before the final email or WhatsApp, the Agent checks the user's latest WhatsApp messages
-    task += "\n\n(The user may send follow-ups or files in the Classgrid WhatsApp chat while you work. Before you send the final result by email or WhatsApp, read their latest WhatsApp messages with read_whatsapp_messages and use anything new they added.)";
-    // Your answer is sent to this same user on WhatsApp: talk to them directly ("you"), not about them
-    const question = `[From a WhatsApp call. The person reading your answer is the user who called: your final answer is sent to them on WhatsApp, so talk to them directly ("you"), not about them.]\n${task}`;
-    await runCallJob({
-        id: call.id, userId: String(call.user._id), from: call.from, question,
-        projectId: project ? String(project._id) : null, projectName: project?.name || null,
-        sessionId: null, startedAt: Date.now(),
+// A 2-3 line recap of a call with no saved task, written by the call model from the conversation
+async function callSummary(call) {
+    const lines = call.transcript.filter((l) => l.startsWith("Caller:") || l.startsWith("AI:")).join("\n").slice(-6000);
+    if (!lines) return "";
+    const res = await fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        headers: { "x-api-key": process.env.ANTHROPIC_API_KEY, "anthropic-version": "2023-06-01", "content-type": "application/json" },
+        body: JSON.stringify({
+            model: CALL_MODEL,
+            max_tokens: 300,
+            system: "Write a short WhatsApp recap (2-3 lines, no title, plain text, WhatsApp *bold* allowed) of this Classgrid AI phone call for the caller, talking to them as \"you\". Include any answers they were given.",
+            messages: [{ role: "user", content: lines }],
+        }),
+        signal: AbortSignal.timeout(20000),
     });
+    const data = await res.json().catch(() => ({}));
+    const u = data.usage || {};
+    deductTokens(call.user._id, call.user.organization_id || null, chargeableTokens({ prompt_tokens: u.input_tokens || 0, completion_tokens: u.output_tokens || 0 }, CALL_MODEL), call.tokenSource).catch(() => {});
+    return (data.content || []).filter((b) => b.type === "text").map((b) => b.text).join(" ").trim();
+}
+
+async function afterCall(call, why) {
+    if (why === "error" || /^connection/.test(why)) {
+        await sendWhatsappText(call.from, `Sorry, the call dropped${call.tasks.length ? ", but your request is saved and Classgrid AI is working on it" : ""}. You can call again anytime.`);
+    }
+    if (!call.tasks.length) {
+        // No task: a short recap of the call (questions were already answered live)
+        if (call.transcript.some((l) => l.startsWith("Caller:"))) {
+            const recap = await callSummary(call).catch(() => "");
+            if (recap) await sendWhatsappText(call.from, `📞 *Your call with Classgrid AI*\n${recap}`);
+        }
+        return;
+    }
+    // One background job per project (tasks without a project run together), so each runs in its own project
+    const groups = new Map();
+    for (const t of call.tasks) {
+        const key = t.project ? String(t.project._id) : "none";
+        if (!groups.has(key)) groups.set(key, { project: t.project || null, tasks: [] });
+        groups.get(key).tasks.push(t.task);
+    }
+    let n = 0;
+    for (const { project, tasks } of groups.values()) {
+        let task = tasks.length === 1 ? tasks[0] : `Do these tasks in this order:\n${tasks.map((t, i) => `${i + 1}. ${t}`).join("\n")}`;
+        // Owner's rule: before the final email or WhatsApp, the Agent checks the user's latest WhatsApp messages
+        task += "\n\n(The user may send follow-ups or files in the Classgrid WhatsApp chat while you work. Before you send the final result by email or WhatsApp, read their latest WhatsApp messages with read_whatsapp_messages and use anything new they added.)";
+        // The answer is sent to this same user on WhatsApp: talk to them directly ("you"), not about them
+        const question = `[From a WhatsApp call. The person reading your answer is the user who called: your final answer is sent to them on WhatsApp, so talk to them directly ("you"), not about them.]\n${task}`;
+        runCallJob({
+            id: groups.size > 1 ? `${call.id}:${n++}` : call.id, userId: String(call.user._id), from: call.from, question,
+            projectId: project ? String(project._id) : null, projectName: project?.name || null,
+            sessionId: null, startedAt: Date.now(), attempts: 0, steps: [], callsLine: call.callsLine || "",
+        }).catch((e) => console.error(`[WA call] task for ${call.id} failed:`, e.message));
+    }
 }
 
 // ─── Call tasks survive server restarts ───────────────────────
@@ -431,17 +515,37 @@ const JOB_KEY = (id) => `wa:job:${id}`;
 const JOB_LOCK = (id) => `wa:job-lock:${id}`;
 const JOBS = "wa:jobs";
 const JOB_TTL_S = 2 * 24 * 60 * 60;
+const LOCK_TTL_S = 300;
+const MAX_TRIES = 3;
+// Renew or free the lock only while it is still ours (another server may have taken it after a long stall)
+const RENEW_IF_MINE = "if redis.call('get', KEYS[1]) == ARGV[1] then return redis.call('expire', KEYS[1], ARGV[2]) else return 0 end";
+const DEL_IF_MINE = "if redis.call('get', KEYS[1]) == ARGV[1] then return redis.call('del', KEYS[1]) else return 0 end";
 
-async function runCallJob(job, { resumed = false } = {}) {
+async function runCallJob(job, { resumed = false, lockToken = null } = {}) {
+    const token = lockToken || crypto.randomUUID();
+    if (!lockToken) {
+        const took = await redis.set(JOB_LOCK(job.id), token, "EX", LOCK_TTL_S, "NX").catch(() => "OK");
+        if (!took) return; // another server is already running it
+    }
     const save = () => redis.set(JOB_KEY(job.id), JSON.stringify(job), "EX", JOB_TTL_S).catch(() => {});
+    const forget = async () => { await redis.del(JOB_KEY(job.id)).catch(() => {}); await redis.srem(JOBS, job.id).catch(() => {}); };
+    job.attempts = (job.attempts || 0) + 1;
     await save();
     await redis.sadd(JOBS, job.id).catch(() => {});
-    await redis.set(JOB_LOCK(job.id), "1", "EX", 120).catch(() => {});
-    const heartbeat = setInterval(() => redis.set(JOB_LOCK(job.id), "1", "EX", 120).catch(() => {}), 60 * 1000);
+    markBusy(job.from);
+    const heartbeat = setInterval(() => {
+        redis.eval(RENEW_IF_MINE, 1, JOB_LOCK(job.id), token, LOCK_TTL_S).catch(() => {});
+        markBusy(job.from);
+    }, 60 * 1000);
     let stopKeepOpen = () => {};
     try {
+        if (job.attempts > MAX_TRIES) {
+            await sendWhatsappText(job.from, `Sorry, Classgrid AI could not finish your task after ${MAX_TRIES} tries.${job.sessionId ? `\n\nWhat it did so far: ${CHAT_URL}/agent/${job.sessionId}` : ""}`);
+            await forget();
+            return;
+        }
         const user = await User.findById(job.userId).select("-password -verificationToken");
-        if (!user) return;
+        if (!user) { await forget(); return; }
         let question = job.question;
         if (job.projectId) {
             // Open the project like the Project Mode page does, so the Agent works inside its files
@@ -450,28 +554,32 @@ async function runCallJob(job, { resumed = false } = {}) {
             else question += `\n\n(The project "${job.projectName}" could not be opened in the editor: ${opened.error}. Work without its files and tell the user.)`;
         }
         if (resumed) {
-            question = `[The Classgrid server restarted while you were working on this task, so you stopped partway. Look at what is already done in this chat and finish the rest. Don't repeat finished steps (for example, don't send the same email or WhatsApp message again).]\n${question}`;
+            const done = (job.steps || []).length ? `\nSteps already done before the restart (don't repeat them, for example don't send the same email or WhatsApp message again):\n${job.steps.map((x) => `- ${x}`).join("\n")}` : "";
+            question = `[The Classgrid server restarted while you were working on this task, so you stopped partway. Look at what is already done in this chat and finish the rest. Don't repeat finished steps.${done}]\n${question}`;
         }
         const where = job.projectName ? ` in your project "${job.projectName}"` : "";
         const result = await runAgentTask(user, question, job.projectId, (sessionId) => {
             if (job.sessionId) return;
             job.sessionId = sessionId;
             save();
-            sendWhatsappText(job.from, `Got it. Classgrid AI is working on it now${where}. I'll send you the result here when it's done.\n\nFollow along: ${CHAT_URL}/agent/${sessionId}`);
-        }, job.sessionId);
+            sendWhatsappText(job.from, `Got it. Classgrid AI is working on it now${where}. I'll send you the result here when it's done.${job.callsLine ? `\n${job.callsLine}` : ""}\n\nFollow along: ${CHAT_URL}/agent/${sessionId}`);
+        }, job.sessionId, (stepText) => {
+            // Each finished tool step is kept, so a resume after a restart knows what not to redo
+            job.steps = [...(job.steps || []), stepText].slice(-40);
+            save();
+        });
         const link = result.sessionId || job.sessionId ? `\n\nFull result: ${CHAT_URL}/agent/${result.sessionId || job.sessionId}` : "";
         if (!result.answer) {
             await sendWhatsappText(job.from, `Classgrid AI could not finish this task${result.error ? `: ${result.error}` : "."}${link}`);
         } else {
-            const short = result.answer.length > 1500 ? `${result.answer.slice(0, 1500).trimEnd()}…` : result.answer;
+            const short = result.answer.length > 3000 ? `${result.answer.slice(0, 3000).trimEnd()}…` : result.answer;
             await sendWhatsappText(job.from, `${short}${link}`);
         }
-        await redis.del(JOB_KEY(job.id)).catch(() => {});
-        await redis.srem(JOBS, job.id).catch(() => {});
+        await forget();
     } finally {
         clearInterval(heartbeat);
         stopKeepOpen();
-        await redis.del(JOB_LOCK(job.id)).catch(() => {});
+        await redis.eval(DEL_IF_MINE, 1, JOB_LOCK(job.id), token).catch(() => {});
     }
 }
 
@@ -483,11 +591,12 @@ export function startCallJobResumer() {
                 const raw = await redis.get(JOB_KEY(id));
                 if (!raw) { await redis.srem(JOBS, id); continue; }
                 // Take the task only if no running server holds it
-                const took = await redis.set(JOB_LOCK(id), "1", "EX", 120, "NX");
+                const token = crypto.randomUUID();
+                const took = await redis.set(JOB_LOCK(id), token, "EX", LOCK_TTL_S, "NX");
                 if (!took) continue;
                 const job = JSON.parse(raw);
-                console.log(`[WA call] Continuing task ${id} after a restart (chat ${job.sessionId || "not made yet"})`);
-                runCallJob(job, { resumed: true }).catch((e) => console.error(`[WA call] task ${id} failed:`, e.message));
+                console.log(`[WA call] Continuing task ${id} after a restart (try ${(job.attempts || 0) + 1}, chat ${job.sessionId || "not made yet"})`);
+                runCallJob(job, { resumed: true, lockToken: token }).catch((e) => console.error(`[WA call] task ${id} failed:`, e.message));
             }
         } catch (e) {
             console.error("[WA call] task check failed:", e.message);
@@ -501,6 +610,8 @@ export function startCallJobResumer() {
 // of one call go into one chat. If it takes over 60 s the call goes on, and the answer is sent on WhatsApp when ready.
 async function askClassgridLive(call, request, projectName) {
     if (!request.trim()) return "No request was given.";
+    const pendingKey = projectName ? `p:${looseName(projectName)}` : "none";
+    if (call.livePending[pendingKey]) return "The earlier request is still being worked on; its answer will be sent to the caller on WhatsApp when it is ready.";
     let question = `[Live question during a WhatsApp voice call with the user. Your answer is read out on the call, so keep it short and spoken; no tables or links.]\n${request}`;
     const work = (async () => {
         // A project: open it first (keeps work that is not pushed yet) so the Agent reads its files. Each project
@@ -520,11 +631,12 @@ async function askClassgridLive(call, request, projectName) {
             stopKeepOpen();
         }
     })();
+    call.livePending[pendingKey] = true;
+    const safeWork = work.catch((e) => ({ answer: "", error: e.message })).finally(() => { call.livePending[pendingKey] = false; });
     const timeout = new Promise((resolve) => setTimeout(() => resolve(null), 90 * 1000));
-    const result = await Promise.race([work, timeout]);
+    const result = await Promise.race([safeWork, timeout]);
     if (!result) {
-        work.then((r) => sendWhatsappText(call.from, `${r.answer || `Classgrid AI could not finish this${r.error ? `: ${r.error}` : "."}`}${r.sessionId ? `\n\n${CHAT_URL}/agent/${r.sessionId}` : ""}`))
-            .catch(() => {});
+        safeWork.then((r) => sendWhatsappText(call.from, `${r.answer || `Classgrid AI could not finish this${r.error ? `: ${r.error}` : "."}`}${r.sessionId ? `\n\n${CHAT_URL}/agent/${r.sessionId}` : ""}`));
         return "Still working on it. The answer will be sent to the caller on WhatsApp when it is ready.";
     }
     if (!result.answer) return `Classgrid could not answer${result.error ? `: ${result.error}` : "."}`;
@@ -536,7 +648,7 @@ function userToken(user) {
     return jwt.sign(
         { id: user._id, role: user.role, organizationId: user.organization_id || null, rememberMe: false },
         process.env.JWT_SECRET || "dev_secret",
-        { expiresIn: "2h" }
+        { expiresIn: "12h" }
     );
 }
 
@@ -570,7 +682,7 @@ function keepProjectOpen(userId) {
 // Runs the Classgrid Agent as this user through the normal chat route (same login checks, AI credits and saved
 // chat as when they use chat.classgrid.in). The route makes the new chat and tells its id (session_info).
 // Returns { sessionId, answer, error }.
-async function runAgentTask(user, question, projectId, onSession, sessionId = null) {
+async function runAgentTask(user, question, projectId, onSession, sessionId = null, onStep = null) {
     const port = process.env.PORT || 3000;
     const res = await fetch(`http://127.0.0.1:${port}/api/ai/ask`, {
         method: "POST",
@@ -583,6 +695,7 @@ async function runAgentTask(user, question, projectId, onSession, sessionId = nu
         return { sessionId: null, answer: "", error: err.message || err.error || `the request failed (${res.status})` };
     }
     let buffer = "", answer = "", streamed = "", error = "";
+    const toolArgs = {}; // tool name -> its input, for the finished-steps list
     const decoder = new TextDecoder();
     for await (const chunk of res.body) {
         buffer += decoder.decode(chunk, { stream: true });
@@ -598,13 +711,18 @@ async function runAgentTask(user, question, projectId, onSession, sessionId = nu
                     sessionId = data.sessionId;
                     onSession?.(sessionId);
                 }
+                if (data.type === "tool_start") toolArgs[data.tool || data.name] = data.args || data.input || {};
+                if (data.type === "tool_result" && onStep) {
+                    const name = data.tool || data.name || "tool";
+                    onStep(`${name} ${JSON.stringify(toolArgs[name] || {}).slice(0, 160)}`);
+                }
                 if (data.type === "token" && data.token) streamed += data.token;
                 if (data.type === "answer" && data.answer) answer = data.answer;
                 if (data.type === "error") error = data.message || data.error || "unknown error";
             } catch { /* not JSON */ }
         }
     }
-    return { sessionId, answer: String(answer || streamed).trim(), error };
+    return { sessionId, answer: String(answer || (error ? "" : streamed)).trim(), error };
 }
 
 // The server's public IPv4, read from AWS (EC2 instance metadata, IMDSv2). Put in the answer as a candidate, so
@@ -647,16 +765,16 @@ function filterAnswerSdp(sdp, publicIpv4) {
 const candidateSummary = (sdp) => sdp.split("\r\n").filter((l) => l.startsWith("a=candidate:"))
     .map((l) => { const p = l.split(" "); return `${p[7] || "?"} ${p[2]} ${p[4]}:${p[5]}`; }).join(", ") || "none";
 
-export async function answerCall({ id, from, sdp, user, tokenSource }) {
+export async function answerCall({ id, from, sdp, user, tokenSource, callsLine = "" }) {
     const { RTCPeerConnection, nonstandard } = await loadWrtc();
     const pc = new RTCPeerConnection({ iceServers: [{ urls: "stun:stun.l.google.com:19302" }], portRange: { min: 10000, max: 60000 } });
     const source = new nonstandard.RTCAudioSource();
     const call = {
-        id, from, user, pc, source, tokenSource,
+        id, from, user, pc, source, tokenSource, callsLine,
         startedAt: Date.now(), ended: false, busy: false, tasks: [],
         messages: [], transcript: [],
         outQueue: [], outCurrent: null, outPos: 0, speechEndedAt: 0,
-        speech: { active: false, chunks: [], loud: 0, quiet: 0, ms: 0 }, pending: [], liveSessions: {},
+        speech: { active: false, chunks: [], loud: 0, quiet: 0, ms: 0, loudMs: 0 }, pending: [], liveSessions: {}, livePending: {},
     };
     calls.set(id, call);
 
@@ -690,8 +808,11 @@ export async function answerCall({ id, from, sdp, user, tokenSource }) {
     call.theirCandidates = candidateSummary(sdp);
     step(`answer ready (gathering ${pc.iceGatheringState})`);
 
+    // WhatsApp may have ended the call while we were getting ready (the caller hung up)
+    if (endedEarly(id) || call.ended) { endCall(id, "remote"); return false; }
     await callAction(id, "pre_accept", answer);
     await callAction(id, "accept", answer);
+    if (endedEarly(id) || call.ended) { endCall(id, "remote"); return false; }
     console.log(`[WA call] ${id} answered for ${user.email}`);
 
     // Audio out: one 10 ms frame each tick (silence when the AI is not talking, so WhatsApp keeps the call open)
@@ -728,6 +849,7 @@ export async function answerCall({ id, from, sdp, user, tokenSource }) {
     call.transcript.push(`AI: ${hello}`);
     call.messages.push({ role: "user", content: "[Call connected.]" }, { role: "assistant", content: hello });
     speak(call, hello);
+    return true;
 }
 
 // Simple voice detection: a turn starts when the caller gets loud and ends after 0.8 s of quiet.
@@ -747,7 +869,7 @@ function listen(call, samples) {
         s.chunks.push(samples);
         if (s.chunks.length > 100) s.chunks.shift(); // keep 1 s of audio from just before the speech is noticed
         if (s.loud >= (aiTalking ? 250 : 60)) {
-            s.active = true; s.ms = 0; s.quiet = 0;
+            s.active = true; s.ms = 0; s.quiet = 0; s.loudMs = s.loud;
             if (aiTalking) { call.outQueue = []; call.outCurrent = null; call.speechEndedAt = Date.now(); } // caller talks over the AI: it stops
         }
         return;
@@ -755,10 +877,12 @@ function listen(call, samples) {
     s.chunks.push(samples);
     s.ms += ms;
     s.quiet = loud ? 0 : s.quiet + ms;
+    if (loud) s.loudMs += ms;
     if (s.quiet >= 800 || s.ms >= 15000) {
         const chunks = s.chunks;
-        s.active = false; s.chunks = []; s.loud = 0; s.quiet = 0; s.ms = 0;
-        if (chunks.length > 40) { call.pending.push(chunks); nextTurn(call); }
+        const realSpeech = s.loudMs >= 150; // a short burst of noise is not sent (Whisper "hears" words in noise)
+        s.active = false; s.chunks = []; s.loud = 0; s.quiet = 0; s.ms = 0; s.loudMs = 0;
+        if (realSpeech) { call.pending.push(chunks); nextTurn(call); }
     }
 }
 
@@ -770,13 +894,23 @@ async function nextTurn(call) {
 
 // ─── Webhook entry (from the ai.classgrid.in server) ──────────
 
+// Calls being set up (a repeated "connect" is ignored) and calls WhatsApp already ended (an early "terminate")
+const startingCalls = new Set();
+const endedCalls = new Map(); // call id -> when it ended
+const endedEarly = (id) => endedCalls.has(id);
+
 export async function handleCallsWebhook(value) {
+    for (const [id, at] of endedCalls) if (Date.now() - at > 10 * 60 * 1000) endedCalls.delete(id);
     for (const c of value?.calls || []) {
+        if (c.event === "terminate") { endedCalls.set(c.id, Date.now()); endCall(c.id, "remote"); continue; }
+        if (c.event !== "connect" || c.direction !== "USER_INITIATED" || !c.session?.sdp) continue;
+        if (calls.has(c.id) || startingCalls.has(c.id) || endedCalls.has(c.id)) continue;
+        startingCalls.add(c.id);
         try {
-            if (c.event === "terminate") { endCall(c.id, "remote"); continue; }
-            if (c.event !== "connect" || c.direction !== "USER_INITIATED" || !c.session?.sdp || calls.has(c.id)) continue;
             if (process.env.WHATSAPP_CALLS_DISABLED === "true") continue;
             const from = c.from || value.contacts?.[0]?.wa_id;
+            // A call opens WhatsApp's 24-hour window for messages to this number
+            markLastIn(normalizeWhatsappNumber(from));
             const user = await findCaller(from);
             if (!user) {
                 if (!callsForAll()) continue; // owner-only mode: other calls stay unanswered
@@ -803,12 +937,16 @@ export async function handleCallsWebhook(value) {
                 await sendWhatsappText(from, `You've used all ${MAX_CALLS_PER_DAY} Classgrid AI calls for the last 24 hours. You can call again after ${next} (India time).`);
                 continue;
             }
-            await answerCall({ id: c.id, from, sdp: c.session.sdp, user, tokenSource: enough.source || "personal" });
-            redis.zadd(CALLS_KEY(number), Date.now(), c.id).then(() => redis.expire(CALLS_KEY(number), 2 * 24 * 60 * 60)).catch(() => {});
+            markBusy(number, MAX_CALL_MS / 1000 + 120);
+            const callsLine = `(Call ${(today?.count || 0) + 1} of ${MAX_CALLS_PER_DAY} you can make in 24 hours.)`;
+            const answered = await answerCall({ id: c.id, from, sdp: c.session.sdp, user, tokenSource: enough.source || "personal", callsLine });
+            if (answered) redis.zadd(CALLS_KEY(number), Date.now(), c.id).then(() => redis.expire(CALLS_KEY(number), 2 * 24 * 60 * 60)).catch(() => {});
         } catch (e) {
             console.error(`[WA call] ${c.id} failed:`, e.message);
             if (calls.has(c.id)) endCall(c.id, "error");
             else callAction(c.id, "terminate").catch(() => {});
+        } finally {
+            startingCalls.delete(c.id);
         }
     }
 }
