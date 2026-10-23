@@ -33,9 +33,9 @@ const CALL_MODEL = "claude-haiku-5-5"; // fastest Claude, so the voice replies c
 const MAX_CALL_MS = 5 * 60 * 1000;
 const WRAP_UP_MS = MAX_CALL_MS - 15 * 1000; // 15 s before the end the AI is told the time is almost up
 const OVERTIME_MS = 30 * 1000; // at the limit, a sentence or answer in progress may finish (up to 30 s more)
-// Owner's rule (2026-10-23): one phone number gets at most 5 answered calls in any 24 hours (so at most 5
+// Owner's rule (2026-10-23): one phone number gets at most 50 answered calls in any 24 hours (so at most 50
 // background jobs: all tasks of one call run as one job)
-const MAX_CALLS_PER_DAY = 5;
+const MAX_CALLS_PER_DAY = 50;
 const DAY_MS = 24 * 60 * 60 * 1000;
 const CALLS_KEY = (number) => `wa:calls:${number}`;
 
@@ -687,7 +687,7 @@ export async function handleCallsWebhook(value) {
                     : "Classgrid AI can't take calls for your account right now. Please try again later.");
                 continue;
             }
-            // 5 calls per number in 24 hours (if the count can't be read, the call is answered)
+            // 50 calls per number in 24 hours (if the count can't be read, the call is answered)
             const number = normalizeWhatsappNumber(from);
             const today = await callsToday(number).catch(() => null);
             if (today && today.count >= MAX_CALLS_PER_DAY) {
