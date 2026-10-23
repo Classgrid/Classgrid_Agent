@@ -3586,7 +3586,15 @@ If they ask whether their college/school uses Classgrid, say you can't see that 
                             // everything else (PDF, Word, Excel, CSV...) as a document. The text is its caption.
                             // Text is turned into WhatsApp formatting and split into parts of up to 4000 characters.
                             const { toWhatsappText, splitWhatsappText } = await import('../services/ai-feature-limits.js');
-                            const text = toWhatsappText(messageText || "").trim();
+                            // Owner's rule: a PDF always goes as a real PDF file, never as a link. Our own PDF link in the
+                            // text (cdn.classgrid.in) becomes the file when no file was given.
+                            let plainText = String(messageText || "");
+                            if (!String(args.fileUrl || "").trim()) {
+                                const { splitPdfLinks } = await import('../services/whatsapp-call.service.js');
+                                const found = splitPdfLinks(plainText);
+                                if (found.pdfs.length === 1) { args.fileUrl = found.pdfs[0]; plainText = found.text; }
+                            }
+                            const text = toWhatsappText(plainText).trim();
                             const fileUrl = String(args.fileUrl || "").trim();
                             const messages = [];
                             if (fileUrl) {

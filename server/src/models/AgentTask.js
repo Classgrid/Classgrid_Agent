@@ -19,6 +19,8 @@ const agentTaskSchema = new mongoose.Schema({
   wake_on_reply: { type: Boolean, default: true },
   note: { type: String, default: '' },
   sleep_message: { type: String, default: '' },
+  // The Agent's last answer, so the small model knows what the user is replying to
+  last_answer: { type: String, default: '' },
   slept_at: { type: Date, default: null },
   // The newest WhatsApp message this task has already taken in
   last_seen_msg_at: { type: Number, default: 0 },

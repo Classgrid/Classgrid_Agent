@@ -79,15 +79,44 @@ async function smallModel(user, system, text) {
 
 // done: finished (or it can't be done and the Agent said why) · wait_user: it asked the user something or waits
 // for their ok · continue: it stopped partway and can still go on alone
-async function checkTask(user, goal, latest, answer) {
+export async function checkTask(user, goal, latest, answer) {
+    const first = await checkOnce(user, goal, latest, answer);
+    // "Waiting for the user" while the agent asked no question: the small model looks once more
+    if (first === "wait_user" && !String(answer || "").includes("?")) return checkOnce(user, goal, latest, answer);
+    return first;
+}
+
+async function checkOnce(user, goal, latest, answer) {
     const out = await smallModel(user,
-        'You check the work of an AI agent. Reply with only one JSON object: {"status":"done"} if the task is finished (or the agent explained why it cannot be done), {"status":"wait_user"} if the agent asked the user a question or is waiting for their answer or approval, or {"status":"continue"} if the agent stopped partway and still has work it can do without the user.',
+        'You check the work of an AI agent. Read the task, the user\'s latest messages and the agent\'s last message, then reply with only one JSON object:\n' +
+        '{"status":"done"}: the agent did what the user asked last (for example it sent the email, the file or the answer) and does not need anything from the user. A polite ending like "let me know if you need anything else" still means done. Also done if the agent explained why it cannot be done.\n' +
+        '{"status":"wait_user"}: the agent asked the user a real question, or needs their ok or choice before it can go on (for example "Does this look okay?").\n' +
+        '{"status":"continue"}: the agent stopped partway and says it will still do more steps itself.',
         `Task:\n${String(goal || "").slice(-3000)}${latest ? `\n\nThe user's latest messages:\n${String(latest).slice(-2000)}` : ""}\n\nThe agent's last message:\n${String(answer || "").slice(-4000)}`,
     ).catch((e) => { console.error("[agent task] check failed:", e.message); return null; });
     // Its final answer counts; its thinking only if the answer has no status (then its last word there)
     const pick = /"status"\s*:\s*"(done|wait_user|continue)"/g;
     const found = [...String(out?.answer || "").matchAll(pick)][0] || [...String(out?.thinking || "").matchAll(pick)].at(-1);
     return found ? found[1] : "wait_user"; // unsure: send the answer and wait for the user
+}
+
+// The fast first reply to the user's WhatsApp messages: { action: "answer" | "work", text }
+async function frontDesk(user, task, msgs) {
+    const out = await smallModel(user,
+        'You are the fast front desk of Classgrid AI on WhatsApp. A bigger AI agent does the real work (it can use the user\'s apps, email, files and the web, make PDFs and more). Read the user\'s new WhatsApp messages and reply with only one JSON object:\n' +
+        '{"action":"answer","text":"..."} only when you can fully answer yourself, with no tools and no facts you don\'t have, and the agent needs to do nothing (for example a greeting or a thank-you). Add "task_done":true when the user says the task is finished or they need nothing more (for example "thanks, it is done now"), or\n' +
+        '{"action":"work","text":"..."} for everything else (a request, a file, a question, or an answer to something the agent asked, like "yes"). Then text is one short friendly line saying you are on it, for example "Got it, emailing the invoice to you now 📧".\n' +
+        'Write text in the user\'s language and talk to them as "you". Never say something was done when it was not.',
+        `${task.goal ? `The task so far:\n${task.goal.slice(-2000)}\n\n` : ""}${task.last_answer ? `The agent's last message to the user:\n${task.last_answer.slice(-2000)}\n\n` : ""}The user's new WhatsApp messages:\n${messageLines(msgs).slice(-3000)}`,
+    ).catch((e) => { console.error("[agent task] front desk failed:", e.message); return null; });
+    try {
+        const json = JSON.parse(String(out?.answer || "").match(/\{[\s\S]*\}/)?.[0] || "{}");
+        const text = String(json.text || "").trim().slice(0, 1000);
+        if (json.action === "answer" && text) return { action: "answer", text, taskDone: json.task_done === true };
+        return { action: "work", text };
+    } catch {
+        return { action: "work", text: "" };
+    }
 }
 
 // ─── The sleep tool ───────────────────────────────────────────
@@ -142,9 +171,13 @@ async function endTask(task, answer = "") {
     );
     if (!ended) return;
     console.log(`[agent task] ${task._id} ended after 48 hours`);
-    if (task.phone) {
-        await sendWhatsappText(task.phone, `Sorry, Classgrid AI could not finish your task in 48 hours, so it has stopped.${answer ? `\n\nWhere it got to:\n${short(answer)}` : ""}${chatLink(task.session_id, "What it did so far")}`);
+    if (!task.phone) return;
+    // It was only waiting for the user's reply (no time set): closed, nothing failed
+    if (task.status === "sleeping" && !task.wake_at && task.wake_on_reply) {
+        await sendWhatsappText(task.phone, `This task is now closed (48 hours have passed). Message me anytime to start a new one.${chatLink(task.session_id, "The chat")}`);
+        return;
     }
+    await sendWhatsappText(task.phone, `Sorry, Classgrid AI could not finish your task in 48 hours, so it has stopped.${answer ? `\n\nWhere it got to:\n${short(answer)}` : ""}${chatLink(task.session_id, "What it did so far")}`);
 }
 
 async function pauseForTokens(task, user, resetDate) {
@@ -179,6 +212,7 @@ export async function afterRun({ user, phone, sessionId, projectId, projectName,
         });
     }
     if (sessionId && !task.session_id) task.session_id = sessionId;
+    if (result.answer) task.last_answer = String(result.answer).slice(-4000);
     const say = (text) => (task.origin === "whatsapp" && task.phone && text ? sendWhatsappText(task.phone, text) : null);
     task.heartbeat_at = null;
 
@@ -224,7 +258,8 @@ export async function afterRun({ user, phone, sessionId, projectId, projectName,
         note: verdict === "done" ? "" : "You asked the user something. Go on when they answer.",
     });
     await task.save();
-    await say(`${short(result.answer)}${verdict === "done" ? chatLink(task.session_id) : ""}`);
+    // Done: the user is told clearly that the task is completed, with the chat link
+    await say(`${short(result.answer)}${verdict === "done" ? `\n\n✅ *Task completed.*${chatLink(task.session_id)}` : ""}`);
     return wakeIfUnread(task._id);
 }
 
@@ -278,6 +313,21 @@ export async function wakeTask(taskId, reason) {
         });
         if (reason === "reply") task.origin = "whatsapp";
         if (task.phone) noteMessagesRead(task.phone, msgs);
+
+        // Owner's rule: every message gets a reply. The small model answers first: a simple message (hi, thanks)
+        // it answers itself and the big model doesn't run; for real work it says a short "on it" and the big
+        // model does the work.
+        if (reason === "reply" && msgs.length && task.phone) {
+            const desk = await frontDesk(user, task, msgs);
+            if (desk.text) await sendWhatsappText(task.phone, desk.text);
+            if (desk.action === "answer" && desk.taskDone && !newWork) {
+                // The user said it is finished: close the task and tell them clearly
+                await AgentTask.updateOne({ _id: task._id }, { $set: { status: "done", wake_at: null, heartbeat_at: null, note: "" } });
+                await sendWhatsappText(task.phone, `✅ *Task completed.*${chatLink(task.session_id)}`);
+                return;
+            }
+            if (desk.action === "answer") return putBack();
+        }
 
         const header = task.origin === "whatsapp"
             ? `[From WhatsApp. Your answer is sent to the user on WhatsApp, so talk to them directly ("you"), not about them.]\n`

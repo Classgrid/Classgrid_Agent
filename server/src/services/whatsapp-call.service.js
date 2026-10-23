@@ -91,10 +91,37 @@ async function graph(path, body) {
 const callAction = (callId, action, sdp) =>
     graph("calls", { call_id: callId, action, ...(sdp ? { session: { sdp_type: "answer", sdp } } : {}) });
 
+// Owner's rule: a PDF always goes on WhatsApp as a real PDF file, never as a link. Our own PDF links
+// (cdn.classgrid.in) are taken out of the text and sent as documents.
+const CDN_PDF = /https:\/\/cdn\.classgrid\.in\/[^\s)\]>"'`]+?\.pdf\b/gi;
+export function splitPdfLinks(text) {
+    const pdfs = [...new Set(String(text || "").match(CDN_PDF) || [])];
+    if (!pdfs.length) return { text: String(text || ""), pdfs };
+    const rest = String(text).replace(CDN_PDF, "")
+        .split("\n").filter((l) => !/^[\s📄📎🔗:*_\-–•·()[\]]*$/u.test(l) || !l.trim()).join("\n")
+        .replace(/\n{3,}/g, "\n\n").trim();
+    return { text: rest, pdfs };
+}
+const pdfName = (url) => decodeURIComponent(url.split("?")[0].split("/").pop() || "file.pdf").slice(0, 240);
+
 export async function sendWhatsappText(to, text) {
-    for (const part of splitWhatsappText(toWhatsappText(text))) {
-        await graph("messages", { recipient_type: "individual", to, type: "text", text: { preview_url: true, body: part } })
-            .catch((e) => console.error("[WA call] WhatsApp message failed:", e.message));
+    const { text: rest, pdfs } = splitPdfLinks(text);
+    const body = toWhatsappText(rest);
+    // One PDF and a short text: the text is the PDF's caption
+    const caption = pdfs.length === 1 && body && body.length <= 1024 ? body : "";
+    if (!caption) {
+        for (const part of splitWhatsappText(body)) {
+            await graph("messages", { recipient_type: "individual", to, type: "text", text: { preview_url: true, body: part } })
+                .catch((e) => console.error("[WA call] WhatsApp message failed:", e.message));
+        }
+    }
+    for (const url of pdfs) {
+        await graph("messages", { recipient_type: "individual", to, type: "document", document: { link: url, filename: pdfName(url), ...(caption ? { caption } : {}) } })
+            .catch(async (e) => {
+                console.error("[WA call] WhatsApp PDF failed:", e.message);
+                // The file couldn't go: at least the link
+                await graph("messages", { recipient_type: "individual", to, type: "text", text: { preview_url: true, body: `${caption ? `${caption}\n\n` : ""}${url}` } }).catch(() => {});
+            });
     }
 }
 
