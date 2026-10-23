@@ -154,10 +154,13 @@ const START_TASK_TOOL = {
 
 const ASK_CLASSGRID_TOOL = {
     name: "ask_classgrid",
-    description: "Ask the Classgrid Agent right now, during the call, and get its answer back to tell the caller. It has everything in the caller's account: classrooms, chats, schedules, files, connected apps (Gmail, Google Calendar, Google Drive, Notion and more), web search and all other Classgrid tools. Use it for anything to look up or do while the caller is on the line. It can take from a few seconds to a minute.",
+    description: "Ask the Classgrid Agent right now, during the call, and get its answer back to tell the caller. It has everything in the caller's account: classrooms, chats, schedules, files, connected apps (Gmail, Google Calendar, Google Drive, Notion and more), web search and all other Classgrid tools. Use it for anything to look up or do while the caller is on the line. With project_name it first opens that Project Mode project (as the editor does) so the Agent can read and change its files. It can take from a few seconds to a minute (longer when a project has to be opened).",
     input_schema: {
         type: "object",
-        properties: { request: { type: "string", description: "What to look up or do, with every detail the caller gave." } },
+        properties: {
+            request: { type: "string", description: "What to look up or do, with every detail the caller gave." },
+            project_name: { type: "string", description: "Optional: the name of one of the caller's Project Mode projects to open and work in." },
+        },
         required: ["request"],
     },
 };
@@ -185,9 +188,22 @@ const PROJECT_TOOLS = [
 const isOwner = (user) => String(user?.email || "").toLowerCase() === OWNER_EMAIL;
 const escapeRegex = (text) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
+// Names said on a call come through speech to text, so spaces, capitals and dashes are ignored ("ghost bot" = "GhostBot")
+const looseName = (n) => String(n || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+
 async function findProject(user, name) {
     const { default: IdeProject } = await import("../models/IdeProject.js");
-    return IdeProject.findOne({ owner: user._id, name: new RegExp(`^${escapeRegex(String(name || "").trim())}$`, "i") });
+    const exact = await IdeProject.findOne({ owner: user._id, name: new RegExp(`^${escapeRegex(String(name || "").trim())}$`, "i") });
+    if (exact || !looseName(name)) return exact;
+    const all = await IdeProject.find({ owner: user._id }).select("name").limit(100);
+    return all.find((p) => looseName(p.name) === looseName(name)) || null;
+}
+
+// For "not found" answers: the caller's real project names, so the AI can pick the right one or ask
+async function projectNames(user) {
+    const { default: IdeProject } = await import("../models/IdeProject.js");
+    const list = await IdeProject.find({ owner: user._id }).select("name").sort({ updatedAt: -1 }).limit(20).lean().catch(() => []);
+    return list.length ? `The caller's projects are: ${list.map((p) => p.name).join(", ")}.` : "The caller has no projects.";
 }
 
 async function runProjectTool(call, tool) {
@@ -302,12 +318,12 @@ async function reply(call) {
                 call.transcript.push(`AI saved a task: ${task}`);
                 content = project || !t.input?.project_name
                     ? `Task saved (${call.tasks.length} so far). It starts when the call ends.`
-                    : `Task saved (${call.tasks.length} so far), but there is no project called "${t.input.project_name}".`;
+                    : `Task saved (${call.tasks.length} so far), but there is no project called "${t.input.project_name}". ${await projectNames(call.user)}`;
             } else if (t.name === "end_call") {
                 content = "Hanging up.";
             } else if (t.name === "ask_classgrid") {
                 call.transcript.push(`AI asked Classgrid: ${t.input?.request || ""}`);
-                content = await askClassgridLive(call, String(t.input?.request || ""));
+                content = await askClassgridLive(call, String(t.input?.request || ""), t.input?.project_name);
             } else if (isOwner(call.user)) {
                 call.transcript.push(`AI used ${t.name} ${JSON.stringify(t.input || {})}`);
                 content = await runProjectTool(call, t).catch((e) => `Failed: ${e.message}`);
@@ -396,14 +412,31 @@ async function afterCall(call) {
 
 // A live question during the call: the full Agent answers (all tools and plugins of the account). All live questions
 // of one call go into one chat. If it takes over 60 s the call goes on, and the answer is sent on WhatsApp when ready.
-async function askClassgridLive(call, request) {
+async function askClassgridLive(call, request, projectName) {
     if (!request.trim()) return "No request was given.";
-    const question = `[Live question during a WhatsApp voice call with the user. Your answer is read out on the call, so keep it short and spoken; no tables or links.]\n${request}`;
-    const run = runAgentTask(call.user, question, null, (id) => { call.liveSessionId ||= id; }, call.liveSessionId || null);
-    const timeout = new Promise((resolve) => setTimeout(() => resolve(null), 60 * 1000));
-    const result = await Promise.race([run, timeout]);
+    let question = `[Live question during a WhatsApp voice call with the user. Your answer is read out on the call, so keep it short and spoken; no tables or links.]\n${request}`;
+    const work = (async () => {
+        // A project: open it first (keeps work that is not pushed yet) so the Agent reads its files. Each project
+        // gets its own live chat, because a chat stays with the project it started in.
+        let project = null, stopKeepOpen = () => {};
+        if (projectName) {
+            project = await findProject(call.user, projectName).catch(() => null);
+            if (!project) return { answer: "", error: `there is no project called "${projectName}". ${await projectNames(call.user)}` };
+            const opened = await openProject(call.user, project._id);
+            if (opened.ok) stopKeepOpen = keepProjectOpen(call.user._id);
+            else question += `\n\n(The project "${project.name}" could not be opened: ${opened.error}. Tell the user.)`;
+        }
+        const key = project ? String(project._id) : "none";
+        try {
+            return await runAgentTask(call.user, question, project?._id, (id) => { call.liveSessions[key] ||= id; }, call.liveSessions[key] || null);
+        } finally {
+            stopKeepOpen();
+        }
+    })();
+    const timeout = new Promise((resolve) => setTimeout(() => resolve(null), 90 * 1000));
+    const result = await Promise.race([work, timeout]);
     if (!result) {
-        run.then((r) => sendWhatsappText(call.from, `${r.answer || `Classgrid AI could not finish this${r.error ? `: ${r.error}` : "."}`}${r.sessionId ? `\n\n${CHAT_URL}/agent/${r.sessionId}` : ""}`))
+        work.then((r) => sendWhatsappText(call.from, `${r.answer || `Classgrid AI could not finish this${r.error ? `: ${r.error}` : "."}`}${r.sessionId ? `\n\n${CHAT_URL}/agent/${r.sessionId}` : ""}`))
             .catch(() => {});
         return "Still working on it. The answer will be sent to the caller on WhatsApp when it is ready.";
     }
@@ -504,7 +537,7 @@ export async function answerCall({ id, from, sdp, user, tokenSource }) {
         startedAt: Date.now(), ended: false, busy: false, tasks: [],
         messages: [], transcript: [],
         outQueue: [], outCurrent: null, outPos: 0, speechEndedAt: 0,
-        speech: { active: false, chunks: [], loud: 0, quiet: 0, ms: 0 }, pending: [],
+        speech: { active: false, chunks: [], loud: 0, quiet: 0, ms: 0 }, pending: [], liveSessions: {},
     };
     calls.set(id, call);
 
