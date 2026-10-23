@@ -546,13 +546,45 @@ async function runAgentTask(user, question, projectId, onSession, sessionId = nu
     return { sessionId, answer: String(answer || streamed).trim(), error };
 }
 
-function filterAnswerSdp(sdp) {
+// The server's public IPv4, read from AWS (EC2 instance metadata, IMDSv2). Put in the answer as a candidate, so
+// WhatsApp always gets an address it can reach, even when the STUN lookup is slow. Kept once found.
+let publicIp = null;
+async function serverPublicIp() {
+    if (publicIp) return publicIp;
+    try {
+        const token = await fetch("http://169.254.169.254/latest/api/token", {
+            method: "PUT", headers: { "X-aws-ec2-metadata-token-ttl-seconds": "21600" }, signal: AbortSignal.timeout(1000),
+        }).then((r) => (r.ok ? r.text() : ""));
+        const ip = await fetch("http://169.254.169.254/latest/meta-data/public-ipv4", {
+            headers: token ? { "X-aws-ec2-metadata-token": token } : {}, signal: AbortSignal.timeout(1000),
+        }).then((r) => (r.ok ? r.text() : ""));
+        if (/^\d{1,3}(\.\d{1,3}){3}$/.test(ip.trim())) publicIp = ip.trim();
+    } catch { /* not on EC2 (local): STUN gives the public address */ }
+    return publicIp;
+}
+
+function filterAnswerSdp(sdp, publicIpv4) {
     // Only UDP candidates that Meta can reach (no TCP, no loopback)
-    return sdp.split("\r\n").filter((line) => {
+    const lines = sdp.split("\r\n").filter((line) => {
         if (!line.startsWith("a=candidate:")) return true;
         return / udp /i.test(line) && !/ (127\.0\.0\.1|::1) /.test(line);
-    }).join("\r\n");
+    });
+    if (!publicIpv4) return lines.join("\r\n");
+    // For each private IPv4 host candidate, the same port on the public IP (EC2 maps it 1:1), unless STUN already added it
+    const out = [];
+    for (const line of lines) {
+        out.push(line);
+        const m = line.match(/^a=candidate:(\S+) 1 udp (\d+) (10\.\S+|172\.(1[6-9]|2\d|3[01])\.\S+|192\.168\.\S+) (\d+) typ host/i);
+        if (m && !lines.some((l) => l.includes(` ${publicIpv4} ${m[5]} `))) {
+            out.push(`a=candidate:${m[1]}9 1 udp ${Number(m[2]) - 1} ${publicIpv4} ${m[5]} typ host generation 0`);
+        }
+    }
+    return out.join("\r\n");
 }
+
+// The kinds of candidates in an SDP, for the log ("host 172.31.32.242:10000, srflx 13.x.x.x:10000")
+const candidateSummary = (sdp) => sdp.split("\r\n").filter((l) => l.startsWith("a=candidate:"))
+    .map((l) => { const p = l.split(" "); return `${p[7] || "?"} ${p[2]} ${p[4]}:${p[5]}`; }).join(", ") || "none";
 
 export async function answerCall({ id, from, sdp, user, tokenSource }) {
     const { RTCPeerConnection, nonstandard } = await loadWrtc();
@@ -572,7 +604,15 @@ export async function answerCall({ id, from, sdp, user, tokenSource }) {
         call.sink = new nonstandard.RTCAudioSink(e.track);
         call.sink.ondata = (d) => listen(call, mono(d.samples, d.channelCount || 1));
     };
+    // Connection steps with times, written to the log when the connection fails (to see why)
+    const steps = [];
+    const step = (what) => steps.push(`${((Date.now() - call.startedAt) / 1000).toFixed(1)}s ${what}`);
+    pc.oniceconnectionstatechange = () => step(`ice ${pc.iceConnectionState}`);
     pc.onconnectionstatechange = () => {
+        step(`connection ${pc.connectionState}`);
+        if (pc.connectionState === "failed") {
+            console.error(`[WA call] ${id} connection failed. Steps: ${steps.join(" | ")}. Our candidates: ${call.ourCandidates}. WhatsApp candidates: ${call.theirCandidates}`);
+        }
         if (["failed", "closed"].includes(pc.connectionState)) endCall(id, `connection ${pc.connectionState}`);
     };
 
@@ -584,7 +624,10 @@ export async function answerCall({ id, from, sdp, user, tokenSource }) {
         pc.onicegatheringstatechange = () => pc.iceGatheringState === "complete" && resolve();
         setTimeout(resolve, 3000);
     });
-    const answer = filterAnswerSdp(pc.localDescription.sdp);
+    const answer = filterAnswerSdp(pc.localDescription.sdp, await serverPublicIp());
+    call.ourCandidates = candidateSummary(answer);
+    call.theirCandidates = candidateSummary(sdp);
+    step(`answer ready (gathering ${pc.iceGatheringState})`);
 
     await callAction(id, "pre_accept", answer);
     await callAction(id, "accept", answer);
