@@ -30,6 +30,7 @@ import { hasEnoughTokens, deductTokens } from "./ai-credits.service.js";
 import { chargeableTokens } from "./ai-token-pricing.js";
 import { toWhatsappText, splitWhatsappText } from "./ai-feature-limits.js";
 import { BUSY_KEY, markLastIn } from "./whatsapp-inbox.service.js";
+import { BUDGET_STOP_NOTE } from "./llm-stream.js";
 
 const GRAPH = "https://graph.facebook.com/v22.0";
 const CALL_MODEL = "claude-haiku-5-5"; // fastest Claude, so the voice replies come quickly
@@ -56,6 +57,15 @@ const FRAME = SAMPLE_RATE / 100; // 10 ms of audio
 const CHAT_URL = "https://chat.classgrid.in";
 
 const calls = new Map(); // call id -> live call
+const jobNumbers = new Map(); // number -> call tasks running for it on this server
+
+// A live call, or a call task running, for this number (then a new WhatsApp message is taken in after it)
+export function numberInUse(number) {
+    const n = normalizeWhatsappNumber(number);
+    if ((jobNumbers.get(n) || 0) > 0) return "task";
+    for (const c of calls.values()) if (normalizeWhatsappNumber(c.from) === n && !c.ended) return "call";
+    return null;
+}
 
 let wrtcPromise = null;
 function loadWrtc() {
@@ -81,12 +91,17 @@ async function graph(path, body) {
 const callAction = (callId, action, sdp) =>
     graph("calls", { call_id: callId, action, ...(sdp ? { session: { sdp_type: "answer", sdp } } : {}) });
 
-async function sendWhatsappText(to, text) {
+export async function sendWhatsappText(to, text) {
     for (const part of splitWhatsappText(toWhatsappText(text))) {
         await graph("messages", { recipient_type: "individual", to, type: "text", text: { preview_url: true, body: part } })
             .catch((e) => console.error("[WA call] WhatsApp message failed:", e.message));
     }
 }
+
+// Blue ticks on a message the user sent, and "typing…" for a while
+export const markWhatsappRead = (messageId) =>
+    graph("messages", { status: "read", message_id: messageId, typing_indicator: { type: "text" } })
+        .catch((e) => console.error("[WA call] mark read failed:", e.message));
 
 // While a call or a call task uses this number's chat, the old WhatsApp help bot stays quiet
 const markBusy = (number, seconds = 300) => redis.set(BUSY_KEY(number), "1", "EX", seconds).catch(() => {});
@@ -101,7 +116,7 @@ const callsForAll = () => process.env.WHATSAPP_CALLS_FOR_ALL !== "false";
 
 // The Classgrid account whose verified WhatsApp is this number. Other shared test numbers (on several accounts on
 // purpose) and numbers on more than one account are not answered: the AI must know exactly whose account it works in.
-async function findCaller(from) {
+export async function findCaller(from) {
     const number = normalizeWhatsappNumber(from);
     if (number === OWNER_NUMBER) return User.findOne({ email: OWNER_EMAIL }).select("-password -verificationToken");
     if (!callsForAll() || !number || isSharedTestWhatsapp(number)) return null;
@@ -533,6 +548,8 @@ async function runCallJob(job, { resumed = false, lockToken = null } = {}) {
     await save();
     await redis.sadd(JOBS, job.id).catch(() => {});
     markBusy(job.from);
+    const number = normalizeWhatsappNumber(job.from);
+    jobNumbers.set(number, (jobNumbers.get(number) || 0) + 1);
     const heartbeat = setInterval(() => {
         redis.eval(RENEW_IF_MINE, 1, JOB_LOCK(job.id), token, LOCK_TTL_S).catch(() => {});
         markBusy(job.from);
@@ -558,6 +575,8 @@ async function runCallJob(job, { resumed = false, lockToken = null } = {}) {
             question = `[The Classgrid server restarted while you were working on this task, so you stopped partway. Look at what is already done in this chat and finish the rest. Don't repeat finished steps.${done}]\n${question}`;
         }
         const where = job.projectName ? ` in your project "${job.projectName}"` : "";
+        const runStartedAt = new Date();
+        let stepsThisRun = 0;
         const result = await runAgentTask(user, question, job.projectId, (sessionId) => {
             if (job.sessionId) return;
             job.sessionId = sessionId;
@@ -566,18 +585,20 @@ async function runCallJob(job, { resumed = false, lockToken = null } = {}) {
         }, job.sessionId, (stepText) => {
             // Each finished tool step is kept, so a resume after a restart knows what not to redo
             job.steps = [...(job.steps || []), stepText].slice(-40);
+            if (!stepText.startsWith("sleep_until")) stepsThisRun++;
             save();
+        }, { taskOrigin: "whatsapp" });
+        // What happens next (send the answer, wait for the user, keep working, retry later) is decided in one
+        // place, the same for every long task
+        const { afterRun } = await import("./agent-task.service.js");
+        await afterRun({
+            user, phone: job.from, sessionId: result.sessionId || job.sessionId, projectId: job.projectId,
+            projectName: job.projectName, goal: job.question, origin: "whatsapp", result, steps: stepsThisRun, runStartedAt,
         });
-        const link = result.sessionId || job.sessionId ? `\n\nFull result: ${CHAT_URL}/agent/${result.sessionId || job.sessionId}` : "";
-        if (!result.answer) {
-            await sendWhatsappText(job.from, `Classgrid AI could not finish this task${result.error ? `: ${result.error}` : "."}${link}`);
-        } else {
-            const short = result.answer.length > 3000 ? `${result.answer.slice(0, 3000).trimEnd()}…` : result.answer;
-            await sendWhatsappText(job.from, `${short}${link}`);
-        }
         await forget();
     } finally {
         clearInterval(heartbeat);
+        jobNumbers.set(number, Math.max(0, (jobNumbers.get(number) || 1) - 1));
         stopKeepOpen();
         await redis.eval(DEL_IF_MINE, 1, JOB_LOCK(job.id), token).catch(() => {});
     }
@@ -654,7 +675,7 @@ function userToken(user) {
 
 // Opens a Project Mode project through the normal route (downloads its code or keeps what is there, starts the
 // editor box). resume: never throws away work that is not pushed yet.
-async function openProject(user, projectId) {
+export async function openProject(user, projectId) {
     try {
         const port = process.env.PORT || 3000;
         const res = await fetch(`http://127.0.0.1:${port}/api/ide/projects/${projectId}/open`, {
@@ -672,7 +693,7 @@ async function openProject(user, projectId) {
 
 // The sandbox removes a project's code 5 minutes after its editor closes. While the Agent works on it from a call
 // (no editor open), the box is marked as in use every minute (same key the editor uses, ide:seen:<user>).
-function keepProjectOpen(userId) {
+export function keepProjectOpen(userId) {
     const mark = () => redis.set(`ide:seen:${userId}`, String(Date.now()), "EX", 24 * 60 * 60).catch(() => {});
     mark();
     const timer = setInterval(mark, 60 * 1000);
@@ -682,18 +703,21 @@ function keepProjectOpen(userId) {
 // Runs the Classgrid Agent as this user through the normal chat route (same login checks, AI credits and saved
 // chat as when they use chat.classgrid.in). The route makes the new chat and tells its id (session_info).
 // Returns { sessionId, answer, error }.
-async function runAgentTask(user, question, projectId, onSession, sessionId = null, onStep = null) {
+// quota: set when the user's AI tokens ran out ({ resetDate }), so the task can wait for them to come back.
+export async function runAgentTask(user, question, projectId, onSession, sessionId = null, onStep = null, extraBody = {}) {
     const port = process.env.PORT || 3000;
     const res = await fetch(`http://127.0.0.1:${port}/api/ai/ask`, {
         method: "POST",
         headers: { Authorization: `Bearer ${userToken(user)}`, "Content-Type": "application/json" },
         // projectId: the chat is saved inside that Project Mode project
-        body: JSON.stringify({ question, ...(sessionId ? { sessionId } : {}), ...(projectId ? { projectId: String(projectId) } : {}) }),
+        body: JSON.stringify({ question, ...(sessionId ? { sessionId } : {}), ...(projectId ? { projectId: String(projectId) } : {}), ...extraBody }),
     });
     if (!res.ok || !res.body) {
         const err = await res.json().catch(() => ({}));
-        return { sessionId: null, answer: "", error: err.message || err.error || `the request failed (${res.status})` };
+        const quota = err.error === "ai_quota_exceeded" || err.code === "fable_needs_paid_credits" ? { resetDate: err.resetDate || null } : null;
+        return { sessionId, answer: "", error: err.message || err.error || `the request failed (${res.status})`, quota };
     }
+    let quota = null;
     let buffer = "", answer = "", streamed = "", error = "";
     const toolArgs = {}; // tool name -> its input, for the finished-steps list
     const decoder = new TextDecoder();
@@ -718,11 +742,17 @@ async function runAgentTask(user, question, projectId, onSession, sessionId = nu
                 }
                 if (data.type === "token" && data.token) streamed += data.token;
                 if (data.type === "answer" && data.answer) answer = data.answer;
-                if (data.type === "error") error = data.message || data.error || "unknown error";
+                if (data.type === "error") {
+                    error = data.message || data.error || "unknown error";
+                    if (String(data.error || "").startsWith("ai_quota_exceeded")) quota = { resetDate: String(data.error).split("|")[1] || null };
+                }
             } catch { /* not JSON */ }
         }
     }
-    return { sessionId, answer: String(answer || (error ? "" : streamed)).trim(), error };
+    const finalAnswer = String(answer || (error ? "" : streamed)).trim();
+    // Tokens ran out partway through: the answer ends with the budget note
+    if (!quota && finalAnswer.endsWith(BUDGET_STOP_NOTE)) quota = { resetDate: null };
+    return { sessionId, answer: finalAnswer, error, quota };
 }
 
 // The server's public IPv4, read from AWS (EC2 instance metadata, IMDSv2). Put in the answer as a candidate, so

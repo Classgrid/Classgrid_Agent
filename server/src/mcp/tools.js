@@ -956,6 +956,19 @@ export const getMcpTools = () => [
     }
   },
   {
+    name: 'sleep_until',
+    description: "Pause this task and end your run now, until something wakes you: a time (wake_at), the user's next WhatsApp message (wake_on_whatsapp_reply), or both. Nothing runs and no tokens are used while you sleep. When you wake, this chat continues and you are told what woke you.",
+    inputSchema: {
+      type: 'object',
+      properties: {
+        wake_at: { type: 'string', description: 'When to wake, ISO 8601 with the time zone (for example 2026-10-23T23:05:00+05:30).' },
+        wake_on_whatsapp_reply: { type: 'boolean', description: "Wake when the user sends a WhatsApp message." },
+        note: { type: 'string', description: 'What you will do when you wake (only you see this).' },
+        message: { type: 'string', description: 'Optional short text for the user now. When the task came from WhatsApp, it is also sent to them on WhatsApp.' }
+      }
+    }
+  },
+  {
     name: 'transcribe_audio',
     description: 'Convert an audio file (mp3, wav, webm) into text. STRICT RULE: NEVER pass a video file (.mp4) directly to this tool. If you have a video, you MUST first use run_code to extract it to .mp3 using ffmpeg, upload the mp3 to the CDN, and ONLY pass the new .mp3 URL to this tool!',
     inputSchema: {

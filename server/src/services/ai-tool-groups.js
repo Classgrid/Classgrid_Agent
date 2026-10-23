@@ -46,6 +46,7 @@ export const CORE_TOOL_NAMES = [
     "search_knowledge_base",
     "warn_user",
     "end_conversation",
+    "sleep_until",
 ];
 
 // Tool definitions with no handler behind them: every call fails today, so they are not offered.

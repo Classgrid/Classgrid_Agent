@@ -3505,6 +3505,17 @@ If they ask whether their college/school uses Classgrid, say you can't see that 
                             return "Web Search failed: " + e;
                         }
                     },
+                    sleep_until: async (args) => {
+                        try {
+                            const { sleepFromTool } = await import('../services/agent-task.service.js');
+                            return await sleepFromTool({
+                                user: req.user, sessionId: isIncognito ? null : sessionId, projectId: body.projectId,
+                                origin: body.taskOrigin === 'whatsapp' ? 'whatsapp' : 'chat', question: body.question, args,
+                            });
+                        } catch (e) {
+                            return `FAILED to sleep: ${e.message}`;
+                        }
+                    },
                     wait_for_whatsapp_reply: async (args) => {
                         try {
                             const phone = req.user?.metadata?.whatsappPhone;
@@ -3517,6 +3528,8 @@ If they ask whether their college/school uses Classgrid, say you can't see that 
                             res.on('close', () => stop.abort());
                             const items = await waitForReply(phone, since, minutes * 60 * 1000, stop.signal);
                             if (!items.length) return `The user did not reply on WhatsApp within ${minutes} minutes.`;
+                            const { noteMessagesRead } = await import('../services/whatsapp-inbox.service.js');
+                            noteMessagesRead(phone, items);
                             const when = (ms) => new Date(ms).toLocaleString("en-IN", { timeZone: "Asia/Kolkata", dateStyle: "medium", timeStyle: "short" });
                             const fileLine = (m) => m.fileUrl
                                 ? `\n   File${m.media?.filename ? ` (${m.media.filename})` : ""}: ${m.fileUrl}`
@@ -3536,6 +3549,8 @@ If they ask whether their college/school uses Classgrid, say you can't see that 
                             const count = Math.max(1, Math.min(20, Number(args?.count) || 5));
                             const items = await readRecentMessages(phone, count);
                             if (!items.length) return "No WhatsApp messages from the user in the last 3 days.";
+                            const { noteMessagesRead } = await import('../services/whatsapp-inbox.service.js');
+                            noteMessagesRead(phone, items);
                             const when = (ms) => new Date(ms).toLocaleString("en-IN", { timeZone: "Asia/Kolkata", dateStyle: "medium", timeStyle: "short" });
                             const fileLine = (m) => m.fileUrl
                                 ? `\n   File${m.media?.filename ? ` (${m.media.filename})` : ""}: ${m.fileUrl}`

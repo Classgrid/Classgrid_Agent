@@ -128,6 +128,25 @@ export async function waitForReply(phone, sinceMs, timeoutMs, signal) {
     return [];
 }
 
+// The newest message the Agent has already read with its WhatsApp tools, so a long task doesn't get it twice
+const READ_UPTO_KEY = (number) => `wa:readupto:${number}`;
+export async function noteMessagesRead(phone, items) {
+    const number = normalizeWhatsappNumber(phone);
+    const newest = Math.max(0, ...(items || []).map((m) => Number(m.at) || 0));
+    if (!number || !newest) return;
+    const now = Number(await redis.get(READ_UPTO_KEY(number)).catch(() => 0)) || 0;
+    if (newest > now) await redis.set(READ_UPTO_KEY(number), String(newest), "EX", TTL_S).catch(() => {});
+}
+
+// Messages (not reactions) newer than `sinceMs` that the Agent has not read yet: oldest first, files as links
+export async function unreadMessages(phone, sinceMs = 0) {
+    const number = normalizeWhatsappNumber(phone);
+    if (!number) return [];
+    const readUpTo = Number(await redis.get(READ_UPTO_KEY(number)).catch(() => 0)) || 0;
+    const after = Math.max(Number(sinceMs) || 0, readUpTo);
+    return withFiles((await inbox(number)).filter((m) => m.at > after && m.type !== "reaction").reverse());
+}
+
 // Is an Agent or a call using this number's chat right now (so the old help bot should stay quiet)?
 export async function isNumberBusy(phone) {
     const number = normalizeWhatsappNumber(phone);

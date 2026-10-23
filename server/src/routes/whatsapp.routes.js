@@ -181,9 +181,15 @@ router.post("/messages-internal", async (req, res) => {
             const { handleWhatsappStatusUpdates } = await import("../services/ai-feature-limits.js");
             await handleWhatsappStatusUpdates(req.body.statuses).catch((e) => console.error("WhatsApp status update error:", e.message));
         }
-        // busy: an Agent or a call is using this number's chat, so the old help bot should not answer it
+        // A verified number (one account): Classgrid AI answers it (wakes its task or starts one), so the old
+        // help bot stays quiet. busy: an Agent or a call is using this number's chat, so the help bot stays quiet.
         const from = req.body?.messages?.[0]?.from;
-        res.json({ busy: from ? await isNumberBusy(from) : false });
+        let taken = false;
+        if (from) {
+            const { onWhatsappMessage } = await import("../services/agent-task.service.js");
+            taken = await onWhatsappMessage(req.body).catch((e) => { console.error("[agent task] WhatsApp message failed:", e.message); return false; });
+        }
+        res.json({ busy: taken || (from ? await isNumberBusy(from) : false) });
     } catch (err) {
         console.error("WhatsApp message save error:", err);
         if (!res.headersSent) res.json({ busy: false });
