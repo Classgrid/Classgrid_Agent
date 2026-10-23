@@ -562,7 +562,7 @@ async function runCallJob(job, { resumed = false, lockToken = null } = {}) {
             if (job.sessionId) return;
             job.sessionId = sessionId;
             save();
-            sendWhatsappText(job.from, `Got it. Classgrid AI is working on it now${where}. I'll send you the result here when it's done.${job.callsLine ? `\n${job.callsLine}` : ""}\n\nFollow along: ${CHAT_URL}/agent/${sessionId}`);
+            sendWhatsappText(job.from, `Got it. Classgrid AI is working on it now${where}. I'll send you the result here when it's done.${job.callsLine ? `\n${job.callsLine}` : ""}`);
         }, job.sessionId, (stepText) => {
             // Each finished tool step is kept, so a resume after a restart knows what not to redo
             job.steps = [...(job.steps || []), stepText].slice(-40);
