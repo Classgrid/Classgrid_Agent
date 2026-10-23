@@ -64,8 +64,8 @@ function sendWhatsappText(to, text) {
 // The owner's own number is on many accounts (shared test number), so calls from it always use the owner's account
 const OWNER_EMAIL = "nikhilsubsun123@gmail.com";
 const OWNER_NUMBER = "918623947038";
-// For now only the owner's number is answered; set WHATSAPP_CALLS_FOR_ALL=true to answer every verified user
-const callsForAll = () => process.env.WHATSAPP_CALLS_FOR_ALL === "true";
+// Every user whose verified WhatsApp is the calling number is answered; WHATSAPP_CALLS_FOR_ALL=false limits it to the owner
+const callsForAll = () => process.env.WHATSAPP_CALLS_FOR_ALL !== "false";
 
 // The Classgrid account whose verified WhatsApp is this number. Other shared test numbers (on several accounts on
 // purpose) and numbers on more than one account are not answered: the AI must know exactly whose account it works in.
@@ -616,7 +616,7 @@ export async function handleCallsWebhook(value) {
             const from = c.from || value.contacts?.[0]?.wa_id;
             const user = await findCaller(from);
             if (!user) {
-                if (!callsForAll()) continue; // owner-only for now: other calls stay unanswered, as before
+                if (!callsForAll()) continue; // owner-only mode: other calls stay unanswered
                 console.log(`[WA call] ${c.id} from an unlinked number, not answered`);
                 await callAction(c.id, "reject").catch(() => {});
                 await sendWhatsappText(from, "This WhatsApp number is not linked to a Classgrid account. Sign in on https://chat.classgrid.in and verify this number, then call again.");
