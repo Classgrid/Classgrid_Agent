@@ -171,7 +171,7 @@ const END_CALL_TOOL = {
     input_schema: { type: "object", properties: {} },
 };
 
-// Project Mode tools, for the owner's account only (Project Mode is super admin only for now)
+// Project Mode tools, for every caller (their own projects)
 const PROJECT_TOOLS = [
     {
         name: "make_project",
@@ -185,7 +185,6 @@ const PROJECT_TOOLS = [
     },
 ];
 
-const isOwner = (user) => String(user?.email || "").toLowerCase() === OWNER_EMAIL;
 const escapeRegex = (text) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
 // Names said on a call come through speech to text, so spaces, capitals and dashes are ignored ("ghost bot" = "GhostBot")
@@ -241,7 +240,7 @@ async function claudeTurn(call) {
             model: CALL_MODEL,
             max_tokens: 400,
             system: systemPrompt(call.user),
-            tools: isOwner(call.user) ? [ASK_CLASSGRID_TOOL, START_TASK_TOOL, END_CALL_TOOL, ...PROJECT_TOOLS] : [ASK_CLASSGRID_TOOL, START_TASK_TOOL, END_CALL_TOOL],
+            tools: [ASK_CLASSGRID_TOOL, START_TASK_TOOL, END_CALL_TOOL, ...PROJECT_TOOLS],
             messages: call.messages,
         }),
     });
@@ -324,7 +323,7 @@ async function reply(call) {
             } else if (t.name === "ask_classgrid") {
                 call.transcript.push(`AI asked Classgrid: ${t.input?.request || ""}`);
                 content = await askClassgridLive(call, String(t.input?.request || ""), t.input?.project_name);
-            } else if (isOwner(call.user)) {
+            } else if (PROJECT_TOOLS.some((p) => p.name === t.name)) {
                 call.transcript.push(`AI used ${t.name} ${JSON.stringify(t.input || {})}`);
                 content = await runProjectTool(call, t).catch((e) => `Failed: ${e.message}`);
             } else {
