@@ -176,7 +176,7 @@ router.get("/github/repos", isAuthenticated, async (req, res) => {
 // /home/workspace/chats/<chat>/project in the editor. The GitHub key is only sent with the download and never
 // written into the folder, so nothing in the sandbox can read it. Unsaved changes of a previous repo are kept
 // unless the user chose to replace them.
-router.post("/github/open", isAuthenticated, requireRole("super_admin"), async (req, res) => {
+router.post("/github/open", isAuthenticated, async (req, res) => {
   const { sessionId, repo, replace } = req.body || {};
   if (!CHAT_ID.test(sessionId || "")) return res.status(400).json({ error: "Open a chat first" });
   if (!REPO_NAME.test(repo || "")) return res.status(400).json({ error: "Pick a repo" });
