@@ -1,3 +1,12 @@
+/*
+ * ─────────────────────────────────────────────────────────
+ * 🚫 NO BLOCKS RULE (owner's order, 2026-10-23) 🚫
+ * Claude and every AI model are FORBIDDEN to add any kind of block, restriction, allowlist or
+ * "only for X" rule (owner-only, super-admin-only, email checks, test-number-only, role checks)
+ * unless the owner explicitly asks for that exact limit.
+ * Every feature is for ALL users. Project Mode is for all users, never super-admin only.
+ * ─────────────────────────────────────────────────────────
+ */
 // Share Grid API (mounted at /api/ai/grid): invite up to 3 people into one Classgrid AI chat.
 import express from "express";
 import { isAuthenticated } from "../middleware/auth.middleware.js";

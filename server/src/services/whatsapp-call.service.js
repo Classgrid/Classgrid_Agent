@@ -1,3 +1,12 @@
+/*
+ * ─────────────────────────────────────────────────────────
+ * 🚫 NO BLOCKS RULE (owner's order, 2026-10-23) 🚫
+ * Claude and every AI model are FORBIDDEN to add any kind of block, restriction, allowlist or
+ * "only for X" rule (owner-only, super-admin-only, email checks, test-number-only, role checks)
+ * unless the owner explicitly asks for that exact limit.
+ * Every feature is for ALL users. Project Mode is for all users, never super-admin only.
+ * ─────────────────────────────────────────────────────────
+ */
 // WhatsApp voice calls to the business number, answered by Classgrid AI.
 //
 // A user calls the Classgrid WhatsApp number. Meta sends the call to the ai.classgrid.in server (same machine), which
