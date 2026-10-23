@@ -562,17 +562,27 @@ async function afterCall(call, why) {
         if (!groups.has(key)) groups.set(key, { project: t.project || null, tasks: [] });
         groups.get(key).tasks.push(t.task);
     }
+    // Work the AI started live during the call for the same project finishes first; the task then carries on in
+    // that same chat instead of doing it all again (it once built one project twice)
+    const announced = call.liveWorks.length > 0;
+    if (announced) {
+        // The user hears from us now, not only when the live work is done (the task doesn't say it again)
+        await sendWhatsappText(call.from, `Got it. Classgrid AI is working on it now. I'll send you the result here when it's done.${call.callsLine ? `\n${call.callsLine}` : ""}`);
+        await Promise.all(call.liveWorks);
+    }
     let n = 0;
-    for (const { project, tasks } of groups.values()) {
+    for (const [key, { project, tasks }] of groups.entries()) {
+        const liveSession = call.liveSessions[key] || null;
         let task = tasks.length === 1 ? tasks[0] : `Do these tasks in this order:\n${tasks.map((t, i) => `${i + 1}. ${t}`).join("\n")}`;
+        if (liveSession) task = `[During the call you already started on this in this chat. Look at what is already done here and do only what is left. Don't build or send anything again that is already done.]\n${task}`;
         // Owner's rule: before the final email or WhatsApp, the Agent checks the user's latest WhatsApp messages
         task += "\n\n(The user may send follow-ups or files in the Classgrid WhatsApp chat while you work. Before you send the final result by email or WhatsApp, read their latest WhatsApp messages with read_whatsapp_messages and use anything new they added.)";
         // The answer is sent to this same user on WhatsApp: talk to them directly ("you"), not about them
-        const question = `[From a WhatsApp call. The person reading your answer is the user who called: your final answer is sent to them on WhatsApp, so talk to them directly ("you"), not about them.]\n${task}`;
+        const question = `[From a WhatsApp call. The person reading your answer is the user who called: your final answer is sent to them on WhatsApp, so talk to them directly ("you"), not about them. Owner's rule for WhatsApp: keep it short, say only what you did (no full feature list), and never repeat what you already sent.]\n${task}`;
         runCallJob({
             id: groups.size > 1 ? `${call.id}:${n++}` : call.id, userId: String(call.user._id), from: call.from, question,
             projectId: project ? String(project._id) : null, projectName: project?.name || null,
-            sessionId: null, startedAt: Date.now(), attempts: 0, steps: [], callsLine: call.callsLine || "",
+            sessionId: liveSession, startedAt: Date.now(), attempts: 0, steps: [], callsLine: call.callsLine || "", announced,
         }).catch((e) => console.error(`[WA call] task for ${call.id} failed:`, e.message));
     }
 }
@@ -632,15 +642,17 @@ async function runCallJob(job, { resumed = false, lockToken = null } = {}) {
         const where = job.projectName ? ` in your project "${job.projectName}"` : "";
         const runStartedAt = new Date();
         let stepsThisRun = 0;
+        const sends = []; // WhatsApp messages the Agent sent itself during this run
         const result = await runAgentTask(user, question, job.projectId, (sessionId) => {
             if (job.sessionId) return;
             job.sessionId = sessionId;
             save();
-            sendWhatsappText(job.from, `Got it. Classgrid AI is working on it now${where}. I'll send you the result here when it's done.${job.callsLine ? `\n${job.callsLine}` : ""}`);
-        }, job.sessionId, (stepText) => {
+            if (!job.announced) sendWhatsappText(job.from, `Got it. Classgrid AI is working on it now${where}. I'll send you the result here when it's done.${job.callsLine ? `\n${job.callsLine}` : ""}`);
+        }, job.sessionId, (stepText, info) => {
             // Each finished tool step is kept, so a resume after a restart knows what not to redo
             job.steps = [...(job.steps || []), stepText].slice(-40);
             if (!stepText.startsWith("sleep_until")) stepsThisRun++;
+            if (info?.name === "send_whatsapp_message") sends.push(info);
             save();
         }, { taskOrigin: "whatsapp" });
         // What happens next (send the answer, wait for the user, keep working, retry later) is decided in one
@@ -648,7 +660,7 @@ async function runCallJob(job, { resumed = false, lockToken = null } = {}) {
         const { afterRun } = await import("./agent-task.service.js");
         await afterRun({
             user, phone: job.from, sessionId: result.sessionId || job.sessionId, projectId: job.projectId,
-            projectName: job.projectName, goal: job.question, origin: "whatsapp", result, steps: stepsThisRun, runStartedAt,
+            projectName: job.projectName, goal: job.question, origin: "whatsapp", result, steps: stepsThisRun, runStartedAt, sends,
         });
         await forget();
     } finally {
@@ -702,17 +714,23 @@ async function askClassgridLive(call, request, projectName) {
         }
         const key = project ? String(project._id) : "none";
         try {
-            return await runAgentTask(call.user, question, project?._id, (id) => { call.liveSessions[key] ||= id; }, call.liveSessions[key] || null);
+            return { ...(await runAgentTask(call.user, question, project?._id, (id) => { call.liveSessions[key] ||= id; }, call.liveSessions[key] || null)), key };
         } finally {
             stopKeepOpen();
         }
     })();
     call.livePending[pendingKey] = true;
     const safeWork = work.catch((e) => ({ answer: "", error: e.message })).finally(() => { call.livePending[pendingKey] = false; });
+    // After the call, a saved task for the same project waits for this work and carries on in its chat
+    call.liveWorks.push(safeWork);
     const timeout = new Promise((resolve) => setTimeout(() => resolve(null), 90 * 1000));
     const result = await Promise.race([safeWork, timeout]);
     if (!result) {
-        safeWork.then((r) => sendWhatsappText(call.from, `${r.answer || `Classgrid AI could not finish this${r.error ? `: ${r.error}` : "."}`}${r.sessionId ? `\n\n${CHAT_URL}/agent/${r.sessionId}` : ""}`));
+        safeWork.then((r) => {
+            // A saved task for the same project carries on in this chat and sends the result (no second message)
+            if (call.ended && call.tasks.some((t) => (t.project ? String(t.project._id) : "none") === r.key)) return;
+            sendWhatsappText(call.from, `${r.answer || `Classgrid AI could not finish this${r.error ? `: ${r.error}` : "."}`}${r.sessionId ? `\n\n${CHAT_URL}/agent/${r.sessionId}` : ""}`);
+        });
         return "Still working on it. The answer will be sent to the caller on WhatsApp when it is ready.";
     }
     if (!result.answer) return `Classgrid could not answer${result.error ? `: ${result.error}` : "."}`;
@@ -793,7 +811,7 @@ export async function runAgentTask(user, question, projectId, onSession, session
                 if (data.type === "tool_start") toolArgs[data.tool || data.name] = data.args || data.input || {};
                 if (data.type === "tool_result" && onStep) {
                     const name = data.tool || data.name || "tool";
-                    onStep(`${name} ${JSON.stringify(toolArgs[name] || {}).slice(0, 160)}`);
+                    onStep(`${name} ${JSON.stringify(toolArgs[name] || {}).slice(0, 160)}`, { name, args: toolArgs[name] || {}, result: String(data.result ?? "") });
                 }
                 if (data.type === "token" && data.token) streamed += data.token;
                 if (data.type === "answer" && data.answer) answer = data.answer;
@@ -859,7 +877,7 @@ export async function answerCall({ id, from, sdp, user, tokenSource, callsLine =
         startedAt: Date.now(), ended: false, busy: false, tasks: [],
         messages: [], transcript: [],
         outQueue: [], outCurrent: null, outPos: 0, speechEndedAt: 0,
-        speech: { active: false, chunks: [], loud: 0, quiet: 0, ms: 0, loudMs: 0 }, pending: [], liveSessions: {}, livePending: {},
+        speech: { active: false, chunks: [], loud: 0, quiet: 0, ms: 0, loudMs: 0 }, pending: [], liveSessions: {}, livePending: {}, liveWorks: [],
     };
     calls.set(id, call);
 
