@@ -21,13 +21,6 @@ const agentTaskSchema = new mongoose.Schema({
   sleep_message: { type: String, default: '' },
   // The Agent's last answer, so the small model knows what the user is replying to
   last_answer: { type: String, default: '' },
-  // Every step the Agent did (tool + short input), written as it works
-  step_log: [{ at: { type: Date, default: Date.now }, text: String, _id: false }],
-  // Written by the Agent itself with complete_task: the task is over (owner's rule: only the Agent closes it)
-  report: { type: String, default: '' },
-  completed_at: { type: Date, default: null },
-  // WhatsApp messages older than this belong to other tasks and are not shown to this one
-  messages_since: { type: Date, default: null },
   slept_at: { type: Date, default: null },
   // The newest WhatsApp message this task has already taken in
   last_seen_msg_at: { type: Number, default: 0 },
@@ -38,6 +31,8 @@ const agentTaskSchema = new mongoose.Schema({
   work_started_at: { type: Date, default: Date.now },
   heartbeat_at: { type: Date, default: null },
   wake_count: { type: Number, default: 0 },
+  // When the big model ended the task itself (end_task tool)
+  ended_by_ai_at: { type: Date, default: null },
 }, { timestamps: true });
 
 agentTaskSchema.index({ phone: 1, updatedAt: -1 });

@@ -1387,19 +1387,6 @@ export const streamAskAi = async (req, res) => {
 
         let sessionId = body.sessionId;
         const isIncognito = body.isIncognito || false;
-        // The WhatsApp number of this task: the caller's number (a call or WhatsApp task sends it as taskPhone; it is
-        // used only when that number belongs to this same account), else the account's verified number
-        let taskPhoneCache;
-        const taskWhatsappPhone = async () => {
-            if (taskPhoneCache !== undefined) return taskPhoneCache;
-            taskPhoneCache = req.user?.metadata?.whatsappPhone || null;
-            if (body.taskPhone) {
-                const { findCaller } = await import('../services/whatsapp-call.service.js');
-                const owner = await findCaller(String(body.taskPhone)).catch(() => null);
-                if (owner && String(owner._id) === String(req.user?._id)) taskPhoneCache = String(body.taskPhone);
-            }
-            return taskPhoneCache;
-        };
         if (isIncognito && sessionId) {
             const saved = await getSessionById(sessionId).catch(() => null);
             if (saved && !(await canAccessSession(saved, req.user?.email || ''))) {
@@ -3524,15 +3511,22 @@ If they ask whether their college/school uses Classgrid, say you can't see that 
                             return await sleepFromTool({
                                 user: req.user, sessionId: isIncognito ? null : sessionId, projectId: body.projectId,
                                 origin: body.taskOrigin === 'whatsapp' ? 'whatsapp' : 'chat', question: body.question, args,
-                                phone: await taskWhatsappPhone(),
                             });
                         } catch (e) {
                             return `FAILED to sleep: ${e.message}`;
                         }
                     },
+                    end_task: async (args) => {
+                        try {
+                            const { endTaskFromTool } = await import('../services/agent-task.service.js');
+                            return await endTaskFromTool({ sessionId: isIncognito ? null : sessionId, summary: String(args?.summary || '') });
+                        } catch (e) {
+                            return `FAILED to end the task: ${e.message}`;
+                        }
+                    },
                     wait_for_whatsapp_reply: async (args) => {
                         try {
-                            const phone = await taskWhatsappPhone();
+                            const phone = req.user?.metadata?.whatsappPhone;
                             if (!phone) return "FAILED: This account has no verified WhatsApp number.";
                             const { waitForReply } = await import('../services/whatsapp-inbox.service.js');
                             const minutes = Math.max(1, Math.min(15, Number(args?.timeout_minutes) || 10));
@@ -3544,6 +3538,11 @@ If they ask whether their college/school uses Classgrid, say you can't see that 
                             if (!items.length) return `The user did not reply on WhatsApp within ${minutes} minutes.`;
                             const { noteMessagesRead } = await import('../services/whatsapp-inbox.service.js');
                             noteMessagesRead(phone, items);
+                            // Read now, so the task's record doesn't give them to it again
+                            if (!isIncognito && sessionId) {
+                                const { markTaskMessagesRead } = await import('../services/agent-task.service.js');
+                                await markTaskMessagesRead(sessionId, items.map((m) => m.id));
+                            }
                             const when = (ms) => new Date(ms).toLocaleString("en-IN", { timeZone: "Asia/Kolkata", dateStyle: "medium", timeStyle: "short" });
                             const fileLine = (m) => m.fileUrl
                                 ? `\n   File${m.media?.filename ? ` (${m.media.filename})` : ""}: ${m.fileUrl}`
@@ -3557,16 +3556,18 @@ If they ask whether their college/school uses Classgrid, say you can't see that 
                     },
                     read_whatsapp_messages: async (args) => {
                         try {
-                            const phone = await taskWhatsappPhone();
+                            const phone = req.user?.metadata?.whatsappPhone;
                             if (!phone) return "FAILED: This account has no verified WhatsApp number, so there are no WhatsApp messages to read.";
                             const { readRecentMessages } = await import('../services/whatsapp-inbox.service.js');
                             const count = Math.max(1, Math.min(20, Number(args?.count) || 5));
-                            // Only this task's messages (older ones belong to other tasks)
-                            const { messagesSinceFor } = await import('../services/agent-task.service.js');
-                            const items = await readRecentMessages(phone, count, await messagesSinceFor(isIncognito ? null : sessionId));
-                            if (!items.length) return "No WhatsApp messages from the user for this task yet.";
+                            // A task's chat reads only that task's messages, from its record (owner's design)
+                            const { taskMessagesFor, markTaskMessagesRead } = await import('../services/agent-task.service.js');
+                            const fromTask = isIncognito ? null : await taskMessagesFor(sessionId, count);
+                            const items = fromTask || await readRecentMessages(phone, count);
+                            if (!items.length) return fromTask ? "No WhatsApp messages from the user for this task yet." : "No WhatsApp messages from the user in the last 3 days.";
                             const { noteMessagesRead } = await import('../services/whatsapp-inbox.service.js');
                             noteMessagesRead(phone, items);
+                            if (fromTask) await markTaskMessagesRead(sessionId, items.map((m) => m.id));
                             const when = (ms) => new Date(ms).toLocaleString("en-IN", { timeZone: "Asia/Kolkata", dateStyle: "medium", timeStyle: "short" });
                             const fileLine = (m) => m.fileUrl
                                 ? `\n   File${m.media?.filename ? ` (${m.media.filename})` : ""}: ${m.fileUrl}`
@@ -3601,11 +3602,10 @@ If they ask whether their college/school uses Classgrid, say you can't see that 
                             // A file (fileUrl) goes as a real WhatsApp file: images as photos, audio and video as media,
                             // everything else (PDF, Word, Excel, CSV...) as a document. The text is its caption.
                             // Text is turned into WhatsApp formatting and split into parts of up to 4000 characters.
-                            const { toWhatsappText, splitWhatsappText, stripThinking } = await import('../services/ai-feature-limits.js');
+                            const { toWhatsappText, splitWhatsappText } = await import('../services/ai-feature-limits.js');
                             // Owner's rule: a PDF always goes as a real PDF file, never as a link. Our own PDF link in the
                             // text (cdn.classgrid.in) becomes the file when no file was given.
-                            // The AI's private thinking is never sent
-                            let plainText = stripThinking(messageText);
+                            let plainText = String(messageText || "");
                             if (!String(args.fileUrl || "").trim()) {
                                 const { splitPdfLinks } = await import('../services/whatsapp-call.service.js');
                                 const found = splitPdfLinks(plainText);
@@ -3613,11 +3613,6 @@ If they ask whether their college/school uses Classgrid, say you can't see that 
                             }
                             const text = toWhatsappText(plainText).trim();
                             const fileUrl = String(args.fileUrl || "").trim();
-                            // The same message or file is not sent twice within 15 minutes (a repeat from a resumed run)
-                            const { wasSent, rememberSent } = await import('../services/whatsapp-inbox.service.js');
-                            if (await wasSent(recipient, fileUrl ? { fileUrl } : { text })) {
-                                return "NOT SENT: this exact message/file was already sent to this person in the last 15 minutes.";
-                            }
                             const messages = [];
                             if (fileUrl) {
                                 if (!/^https:\/\//i.test(fileUrl)) return `FAILED: fileUrl must be a public https link (for example a cdn.classgrid.in file). Nothing was sent.`;
@@ -3669,7 +3664,6 @@ If they ask whether their college/school uses Classgrid, say you can't see that 
                                 firstId ||= out.data?.messages?.[0]?.id;
                             }
                             await recordDirectWhatsappSend(req.user._id, firstId);
-                            await rememberSent(recipient, { text, fileUrl });
                             // WhatsApp's 24-hour rule: Meta accepts the message now, but drops it later if this person
                             // hasn't messaged or called Classgrid in the last 24 hours (known only from now on)
                             const { LAST_IN_KEY } = await import('../services/whatsapp-inbox.service.js');
@@ -4358,19 +4352,6 @@ If they ask whether their college/school uses Classgrid, say you can't see that 
                         }
                         let resultStr;
                         try { resultStr = await handler(args); } catch (err) { resultStr = "Error: " + (err.message || String(err)); }
-                        // New WhatsApp messages from the user, passed on by the small AI while this task runs: they reach
-                        // the AI at the front of this tool result (never cut off), so it never has to stop (owner's design)
-                        if (sessionId && !isIncognito && typeof resultStr === "string") {
-                            try {
-                                const { takeUpdates } = await import('../services/whatsapp-updates.service.js');
-                                const ups = await takeUpdates(sessionId);
-                                if (ups.length) {
-                                    resultStr = `[New from the user on WhatsApp while you work: ${ups.map((u) => u.text).join(" | ")}]\n\n${resultStr}`;
-                                    const { noteMessagesRead } = await import('../services/whatsapp-inbox.service.js');
-                                    for (const u of ups) if (u.phone && u.ids?.length) noteMessagesRead(u.phone, u.ids.map((id) => ({ id })));
-                                }
-                            } catch { /* no updates */ }
-                        }
 
                         if (!silentTool) {
                             const step = accSteps.find(s => s.tool === toolName && s.status === 'loading');
@@ -4411,8 +4392,7 @@ If they ask whether their college/school uses Classgrid, say you can't see that 
             role: req.user?.role,
             email: req.user?.email,
             hasOrg: !!orgId && String(orgId) !== PUBLIC_CHAT_ORG_ID,
-            // Background tasks (WhatsApp calls and long tasks) get every tool from the start, so a short reply like
-            // "yes" still has Gmail, Drive and the rest
+            // Background tasks (WhatsApp calls and long tasks) get every tool from the start (owner's rule)
             loadAll: body.allTools === true
         });
         if (isProjectChat) toolPlan.allowedToolNames.delete("deploy_to_classgrid_cloud"); // Classgrid Cloud is for Agent mode HTML sites

@@ -28,8 +28,8 @@ import { normalizeWhatsappNumber } from "./ai-feature-limits.js";
 import { isSharedTestWhatsapp } from "../utils/chat-onboarding.js";
 import { hasEnoughTokens, deductTokens } from "./ai-credits.service.js";
 import { chargeableTokens } from "./ai-token-pricing.js";
-import { toWhatsappText, splitWhatsappText, stripThinking } from "./ai-feature-limits.js";
-import { BUSY_KEY, markLastIn, wasSent, rememberSent } from "./whatsapp-inbox.service.js";
+import { toWhatsappText, splitWhatsappText } from "./ai-feature-limits.js";
+import { BUSY_KEY, markLastIn } from "./whatsapp-inbox.service.js";
 import { BUDGET_STOP_NOTE } from "./llm-stream.js";
 
 const GRAPH = "https://graph.facebook.com/v22.0";
@@ -58,24 +58,6 @@ const CHAT_URL = "https://chat.classgrid.in";
 
 const calls = new Map(); // call id -> live call
 const jobNumbers = new Map(); // number -> call tasks running for it on this server
-// Owner's rule (2026-10-24): a new WhatsApp message comes first. Every running AI run is kept here so it can be
-// stopped at once when the user writes (number -> { controller, live })
-const runningRuns = new Map();
-export function startRun(number) {
-    const n = normalizeWhatsappNumber(number);
-    const run = { controller: new AbortController(), live: {} };
-    runningRuns.set(n, run);
-    return { control: { signal: run.controller.signal, live: run.live }, done: () => { if (runningRuns.get(n) === run) runningRuns.delete(n); } };
-}
-// Stops this number's running AI run. "waiting": it is waiting for the user's reply right now (it gets the message
-// itself, no need to stop). false: nothing is running.
-export function stopRunFor(number) {
-    const run = runningRuns.get(normalizeWhatsappNumber(number));
-    if (!run) return false;
-    if (run.live.tool === "wait_for_whatsapp_reply") return "waiting";
-    run.controller.abort();
-    return true;
-}
 
 // A live call, or a call task running, for this number (then a new WhatsApp message is taken in after it)
 export function numberInUse(number) {
@@ -123,28 +105,18 @@ export function splitPdfLinks(text) {
 const pdfName = (url) => decodeURIComponent(url.split("?")[0].split("/").pop() || "file.pdf").slice(0, 240);
 
 export async function sendWhatsappText(to, text) {
-    // The AI's private thinking (<thinking>…</thinking>) is never sent to the user
-    text = stripThinking(text);
-    if (!text) return;
-    const { text: rest, pdfs: allPdfs } = splitPdfLinks(text);
+    const { text: rest, pdfs } = splitPdfLinks(text);
     const body = toWhatsappText(rest);
-    // Owner's rule: the same message or file is never sent twice in a task
-    const pdfs = [];
-    for (const url of allPdfs) if (!(await wasSent(to, { fileUrl: url }))) pdfs.push(url);
-    if (allPdfs.length > pdfs.length) console.log(`[WA call] ${allPdfs.length - pdfs.length} PDF(s) already sent to ${to}, not sent again`);
     // One PDF and a short text: the text is the PDF's caption
     const caption = pdfs.length === 1 && body && body.length <= 1024 ? body : "";
     if (!caption) {
         for (const part of splitWhatsappText(body)) {
-            if (await wasSent(to, { text: part })) { console.log(`[WA call] message already sent to ${to}, not sent again`); continue; }
             await graph("messages", { recipient_type: "individual", to, type: "text", text: { preview_url: true, body: part } })
-                .then(() => rememberSent(to, { text: part }))
                 .catch((e) => console.error("[WA call] WhatsApp message failed:", e.message));
         }
     }
     for (const url of pdfs) {
         await graph("messages", { recipient_type: "individual", to, type: "document", document: { link: url, filename: pdfName(url), ...(caption ? { caption } : {}) } })
-            .then(() => rememberSent(to, { text: caption, fileUrl: url }))
             .catch(async (e) => {
                 console.error("[WA call] WhatsApp PDF failed:", e.message);
                 // The file couldn't go: at least the link
@@ -153,9 +125,9 @@ export async function sendWhatsappText(to, text) {
     }
 }
 
-// Blue ticks on a message the user sent; with typing, also "typing…" for a while (only just before a reply)
-export const markWhatsappRead = (messageId, typing = false) =>
-    graph("messages", { status: "read", message_id: messageId, ...(typing ? { typing_indicator: { type: "text" } } : {}) })
+// Blue ticks on a message the user sent, and "typing…" for a while
+export const markWhatsappRead = (messageId) =>
+    graph("messages", { status: "read", message_id: messageId, typing_indicator: { type: "text" } })
         .catch((e) => console.error("[WA call] mark read failed:", e.message));
 
 // While a call or a call task uses this number's chat, the old WhatsApp help bot stays quiet
@@ -260,7 +232,7 @@ const START_TASK_TOOL = {
     input_schema: {
         type: "object",
         properties: {
-            task: { type: "string", description: "The complete task with every detail the caller gave, written for the Agent. If you told the caller the Agent will ask them something on WhatsApp, write those questions in the task." },
+            task: { type: "string", description: "The complete task with every detail the caller gave, written for the Agent." },
             project_name: { type: "string", description: "Optional: the name of one of the caller's Project Mode projects this task belongs to. The Agent's chat is then saved inside that project." },
         },
         required: ["task"],
@@ -282,7 +254,7 @@ const ASK_CLASSGRID_TOOL = {
 
 const END_CALL_TOOL = {
     name: "end_call",
-    description: "Hang up the phone call (after what you say now is spoken). Only when the caller says goodbye or asks to end the call.",
+    description: "Hang up the phone call (after what you say now is spoken).",
     input_schema: { type: "object", properties: {} },
 };
 
@@ -344,7 +316,6 @@ function systemPrompt(user) {
         "What you say is read out by an English text-to-speech voice, so write plain spoken English: short sentences, no markdown, no lists, no emojis, no links.",
         "The call can last at most 15 minutes.",
         "After the call the Classgrid Agent does the work in the caller's account and sends them the result on WhatsApp.",
-        "You can never hang up: only the caller ends the call. When the conversation seems finished, politely tell them they can end the call whenever they like.",
         "The caller can also send extra details or files (photos, PDFs, documents) in this WhatsApp chat; the Agent reads their latest WhatsApp messages before it sends the final result.",
     ].join("\n");
 }
@@ -357,9 +328,9 @@ async function claudeTurn(call, { noTools = false } = {}) {
             model: CALL_MODEL,
             max_tokens: 1024,
             system: systemPrompt(call.user),
-            // Owner's rule (2026-10-24): the AI can never hang up, only the caller ends a call (END_CALL_TOOL is not
-            // given). ask_classgrid stays, so the AI can look things up during the call instead of guessing.
-            tools: [ASK_CLASSGRID_TOOL, START_TASK_TOOL, ...PROJECT_TOOLS],
+            // Owner's rule (2026-10-24): no work during the call; the saved tasks start when it ends (ask_classgrid
+            // is not given)
+            tools: [START_TASK_TOOL, END_CALL_TOOL, ...PROJECT_TOOLS],
             ...(noTools ? { tool_choice: { type: "none" } } : {}),
             messages: call.messages,
         }),
@@ -411,22 +382,18 @@ async function speak(call, text) {
     const gen = call.speakGen || 0;
     const audio = speechParts(text).map((part) =>
         textToSpeech(part).catch((e) => { console.error("[WA call] TTS failed:", e.message); return null; }));
-    // The AI counts as talking from its first sound to the end of the reply, also in the short gaps between its
-    // parts (else its own voice coming back from the phone in a gap would be taken as the caller speaking). The
-    // wait for the first sound doesn't count, so the caller is heard while the voice is being made.
-    let counted = false;
+    // The AI counts as talking for the whole reply, also in the short gaps between its parts (else its own
+    // voice coming back from the phone in a gap would be taken as the caller speaking)
+    call.speakingParts = (call.speakingParts || 0) + 1;
     try {
         for (const next of audio) {
             const pcm = await next;
             // The caller talked over the AI: the rest of this reply is dropped
             if (call.ended || (call.speakGen || 0) !== gen) return;
-            if (pcm) {
-                call.outQueue.push(pcm);
-                if (!counted) { counted = true; call.speakingParts = (call.speakingParts || 0) + 1; }
-            }
+            if (pcm) call.outQueue.push(pcm);
         }
     } finally {
-        if (counted) call.speakingParts--;
+        call.speakingParts--;
     }
 }
 
@@ -442,29 +409,17 @@ function speakingDone(call) {
 
 async function handleUtterance(call, chunks) {
     call.busy = true;
-    const gen = (call.turnGen = (call.turnGen || 0) + 1);
     try {
-        let said = chunks ? await speechToText(chunks) : "";
-        // What the caller said just before, when they went on talking while the AI was still thinking
-        if (call.carry) { said = `${call.carry} ${said}`.trim(); call.carry = ""; }
+        const said = await speechToText(chunks);
         if (!said || call.ended) return;
-        // They started talking again meanwhile: nothing is answered yet, all of it is answered together
-        if (call.turnGen !== gen) { call.carry = said; return; }
-        const marks = [call.messages.length, call.transcript.length];
         call.transcript.push(`Caller: ${said}`);
         call.messages.push({ role: "user", content: said });
-        await reply(call, gen, () => {
-            call.messages.length = marks[0];
-            call.transcript.length = marks[1];
-            call.carry = said;
-        });
+        await reply(call);
     } catch (e) {
         console.error("[WA call] turn failed:", e.message);
         await speak(call, "Sorry, I had a problem there. Could you say that again?");
     } finally {
         call.busy = false;
-        // Words from a dropped turn are answered as soon as the caller is quiet (if nothing else is coming)
-        if (!call.pending.length && call.carry && !call.speech.active) call.pending.push(null);
         if (call.pending.length) setImmediate(() => nextTurn(call));
     }
 }
@@ -496,13 +451,10 @@ async function runTool(call, t, cutOff) {
     return { content: "This tool is not available.", is_error: true };
 }
 
-// gen + dropTurn: when the caller starts talking again before the AI has said anything (and no tool ran), this
-// answer is dropped and what they said is answered together with what they say next
-async function reply(call, gen, dropTurn) {
+async function reply(call) {
     // A few rounds, so the AI can use a tool and then talk about the result
     for (let round = 0; round < 4 && !call.ended; round++) {
         const { text, tools, cutOff } = await claudeTurn(call);
-        if (dropTurn && round === 0 && call.turnGen !== gen && !tools.length) { dropTurn(); return; }
         if (text) call.transcript.push(`AI: ${text}`);
         await speak(call, text);
         if (!tools.length || call.ended) return;
@@ -565,7 +517,6 @@ export function endCall(callId, why = "ended") {
     clearInterval(call.ticker);
     clearTimeout(call.wrapTimer);
     clearTimeout(call.hardStop);
-    clearInterval(call.idleTimer);
     try { call.sink?.stop(); } catch { /* already stopped */ }
     try { call.pc?.close(); } catch { /* already closed */ }
     if (why !== "remote") callAction(callId, "terminate").catch(() => { /* call already over */ });
@@ -619,17 +570,17 @@ async function afterCall(call, why) {
     if (announced) {
         // The user hears from us now, not only when the live work is done (the task doesn't say it again)
         await sendWhatsappText(call.from, `Got it. Classgrid AI is working on it now. I'll send you the result here when it's done.${call.callsLine ? `\n${call.callsLine}` : ""}`);
-        await Promise.race([Promise.all(call.liveWorks), new Promise((r) => setTimeout(r, 10 * 60 * 1000))]);
+        await Promise.all(call.liveWorks);
     }
     let n = 0;
     for (const [key, { project, tasks }] of groups.entries()) {
         const liveSession = call.liveSessions[key] || null;
         let task = tasks.length === 1 ? tasks[0] : `Do these tasks in this order:\n${tasks.map((t, i) => `${i + 1}. ${t}`).join("\n")}`;
-        if (liveSession) task = `[During the call you already started on this in this chat.]\n${task}`;
+        if (liveSession) task = `[During the call you already started on this in this chat. Look at what is already done here and do only what is left. Don't build or send anything again that is already done.]\n${task}`;
         // Owner's rule: before the final email or WhatsApp, the Agent checks the user's latest WhatsApp messages
         task += "\n\n(The user may send follow-ups or files in the Classgrid WhatsApp chat while you work. Before you send the final result by email or WhatsApp, read their latest WhatsApp messages with read_whatsapp_messages and use anything new they added.)";
         // The answer is sent to this same user on WhatsApp: talk to them directly ("you"), not about them
-        const question = `[From a WhatsApp call. The person reading your answer is the user who called: your final answer is sent to them on WhatsApp, so talk to them directly ("you"), not about them.]\n${task}`;
+        const question = `[From a WhatsApp call. The person reading your answer is the user who called: your final answer is sent to them on WhatsApp, so talk to them directly ("you"), not about them. Owner's rule for WhatsApp: keep it short, say only what you did (no full feature list), and never repeat what you already sent.]\n${task}`;
         runCallJob({
             id: groups.size > 1 ? `${call.id}:${n++}` : call.id, userId: String(call.user._id), from: call.from, question,
             projectId: project ? String(project._id) : null, projectName: project?.name || null,
@@ -675,11 +626,6 @@ async function runCallJob(job, { resumed = false, lockToken = null } = {}) {
     try {
         if (job.attempts > MAX_TRIES) {
             await sendWhatsappText(job.from, `Sorry, Classgrid AI could not finish your task after ${MAX_TRIES} tries.${job.sessionId ? `\n\nWhat it did so far: ${CHAT_URL}/agent/${job.sessionId}` : ""}`);
-            // Its task is not left "working" forever: the user's next WhatsApp message wakes it
-            if (job.sessionId) {
-                const { default: AgentTask } = await import("../models/AgentTask.js");
-                await AgentTask.updateOne({ session_id: job.sessionId, status: "working" }, { $set: { status: "sleeping", heartbeat_at: null, wake_at: null, wake_on_reply: true } }).catch(() => {});
-            }
             await forget();
             return;
         }
@@ -693,51 +639,46 @@ async function runCallJob(job, { resumed = false, lockToken = null } = {}) {
             else question += `\n\n(The project "${job.projectName}" could not be opened in the editor: ${opened.error}. Work without its files and tell the user.)`;
         }
         if (resumed) {
-            const done = (job.steps || []).length ? `\nSteps done so far:\n${job.steps.map((x) => `- ${x}`).join("\n")}` : "";
-            question = `[The Classgrid server restarted while you were working on this task, so you stopped partway. Look at what is already done in this chat and finish the rest.${done}]\n${question}`;
+            const done = (job.steps || []).length ? `\nSteps already done before the restart (don't repeat them, for example don't send the same email or WhatsApp message again):\n${job.steps.map((x) => `- ${x}`).join("\n")}` : "";
+            question = `[The Classgrid server restarted while you were working on this task, so you stopped partway. Look at what is already done in this chat and finish the rest. Don't repeat finished steps.${done}]\n${question}`;
         }
         const where = job.projectName ? ` in your project "${job.projectName}"` : "";
         const runStartedAt = new Date();
         let stepsThisRun = 0;
         const sends = []; // WhatsApp messages the Agent sent itself during this run
-        const run = startRun(job.from);
-        // While the big AI works, the small AI answers the user's new WhatsApp messages and passes them on (owner's design)
-        const updates = await import("./whatsapp-updates.service.js");
-        const upd = updates.taskStarted(job.from, { user, goal: job.question, send: (text) => sendWhatsappText(job.from, text) });
-        if (job.sessionId) updates.taskSessionReady(job.from, job.sessionId);
+        const tasks = await import("./agent-task.service.js");
+        // The task and its record (owner's design) exist from the start, so the user's WhatsApp messages during the
+        // work are saved for it (the same task again after a restart)
+        if (!job.taskId) {
+            job.taskId = await tasks.startCallTask({ user, phone: job.from, question: job.question, sessionId: job.sessionId, callStartedAt: job.callStartedAt });
+            await save();
+        }
+        const { default: AgentTask } = await import("../models/AgentTask.js");
+        const taskBeat = setInterval(() => AgentTask.updateOne({ _id: job.taskId, status: "working" }, { $set: { heartbeat_at: new Date() } }).catch(() => {}), 60 * 1000);
         const result = await runAgentTask(user, question, job.projectId, (sessionId) => {
-            updates.taskSessionReady(job.from, sessionId);
+            tasks.setTaskSession(job.taskId, sessionId);
             if (job.sessionId) return;
             job.sessionId = sessionId;
             save();
-            // The task exists from the start (with the caller's number), so its messages and steps belong to it
-            import("./agent-task.service.js").then((t) => t.logStep({ user, sessionId, origin: "whatsapp", text: "task started", since: job.callStartedAt, phone: job.from }))
-                .catch(() => {});
             if (!job.announced) sendWhatsappText(job.from, `Got it. Classgrid AI is working on it now${where}. I'll send you the result here when it's done.${job.callsLine ? `\n${job.callsLine}` : ""}`);
         }, job.sessionId, (stepText, info) => {
             // Each finished tool step is kept, so a resume after a restart knows what not to redo
             job.steps = [...(job.steps || []), stepText].slice(-40);
             if (!stepText.startsWith("sleep_until")) stepsThisRun++;
             if (info?.name === "send_whatsapp_message") sends.push(info);
+            tasks.logTaskStep(job.taskId, info);
             save();
-            // Owner's rule: every step is written to the task in MongoDB (messages from before the call are not
-            // this task's)
-            import("./agent-task.service.js").then((t) => t.logStep({ user, sessionId: job.sessionId, origin: "whatsapp", text: stepText, since: job.callStartedAt, phone: job.from }))
-                .catch(() => {});
-        }, { taskOrigin: "whatsapp", taskPhone: job.from, allTools: true }, run.control)
-            .finally(() => { run.done(); updates.taskEnded(job.from, upd); });
+        }, { taskOrigin: "whatsapp" }).finally(() => clearInterval(taskBeat));
         // What happens next (send the answer, wait for the user, keep working, retry later) is decided in one
         // place, the same for every long task
-        const { afterRun } = await import("./agent-task.service.js");
-        await afterRun({
+        await tasks.afterRun({
             user, phone: job.from, sessionId: result.sessionId || job.sessionId, projectId: job.projectId,
             projectName: job.projectName, goal: job.question, origin: "whatsapp", result, steps: stepsThisRun, runStartedAt, sends,
+            taskId: job.taskId,
         });
         await forget();
     } finally {
         clearInterval(heartbeat);
-        // The old help bot may answer this number again (the Agent's task takes its messages from now on)
-        redis.del(BUSY_KEY(job.from)).catch(() => {});
         jobNumbers.set(number, Math.max(0, (jobNumbers.get(number) || 1) - 1));
         stopKeepOpen();
         await redis.eval(DEL_IF_MINE, 1, JOB_LOCK(job.id), token).catch(() => {});
@@ -850,30 +791,9 @@ export function keepProjectOpen(userId) {
 // chat as when they use chat.classgrid.in). The route makes the new chat and tells its id (session_info).
 // Returns { sessionId, answer, error }.
 // quota: set when the user's AI tokens ran out ({ resetDate }), so the task can wait for them to come back.
-// control: { signal, live } — signal stops the run (a new WhatsApp message came); live.tool is the tool running now.
-// A stopped run returns { aborted: true }.
-export async function runAgentTask(user, question, projectId, onSession, sessionId = null, onStep = null, extraBody = {}, control = {}) {
-    // A run never hangs forever: after 3 hours it is stopped (the task then tries again 5 minutes later)
-    const timeLimit = AbortSignal.timeout(3 * 60 * 60 * 1000);
-    // (AbortSignal.any needs Node 20.3+; on an older Node only the stop signal is used)
-    const signal = !control.signal ? timeLimit : typeof AbortSignal.any === "function" ? AbortSignal.any([control.signal, timeLimit]) : control.signal;
-    const runControl = { ...control, signal };
-    try {
-        return await runAgentTaskOnce(user, question, projectId, onSession, sessionId, onStep, extraBody, runControl);
-    } catch (e) {
-        if (control.signal?.aborted) return { sessionId: runControl.sessionId || sessionId, answer: "", error: "stopped for new WhatsApp messages", aborted: true };
-        if (timeLimit.aborted) {
-            console.error("[agent task] a run took over 3 hours and was stopped");
-            return { sessionId: runControl.sessionId || sessionId, answer: "", error: "the run took over 3 hours and was stopped" };
-        }
-        throw e;
-    }
-}
-
-async function runAgentTaskOnce(user, question, projectId, onSession, sessionId, onStep, extraBody, control) {
+export async function runAgentTask(user, question, projectId, onSession, sessionId = null, onStep = null, extraBody = {}) {
     const port = process.env.PORT || 3000;
     const res = await fetch(`http://127.0.0.1:${port}/api/ai/ask`, {
-        signal: control.signal,
         method: "POST",
         headers: { Authorization: `Bearer ${userToken(user)}`, "Content-Type": "application/json" },
         // projectId: the chat is saved inside that Project Mode project
@@ -901,14 +821,9 @@ async function runAgentTaskOnce(user, question, projectId, onSession, sessionId,
                 const data = JSON.parse(line.slice(6));
                 if (data.type === "session_info" && data.sessionId && !sessionId) {
                     sessionId = data.sessionId;
-                    control.sessionId = sessionId;
                     onSession?.(sessionId);
                 }
-                if (data.type === "tool_start") {
-                    toolArgs[data.tool || data.name] = data.args || data.input || {};
-                    if (control.live) control.live.tool = data.tool || data.name;
-                }
-                if (data.type === "tool_result" && control.live) control.live.tool = null;
+                if (data.type === "tool_start") toolArgs[data.tool || data.name] = data.args || data.input || {};
                 if (data.type === "tool_result" && onStep) {
                     const name = data.tool || data.name || "tool";
                     onStep(`${name} ${JSON.stringify(toolArgs[name] || {}).slice(0, 160)}`, { name, args: toolArgs[name] || {}, result: String(data.result ?? "") });
@@ -1045,8 +960,6 @@ export async function answerCall({ id, from, sdp, user, tokenSource, callsLine =
 
     call.wrapTimer = setTimeout(() => wrapUp(call), WRAP_UP_MS);
     call.hardStop = setTimeout(() => timeUp(call), MAX_CALL_MS);
-    call.lastActiveAt = Date.now();
-    call.idleTimer = setInterval(() => checkIdle(call), 1000);
 
     // Greeting
     const first = String(user.name || "").split(" ")[0];
@@ -1057,25 +970,7 @@ export async function answerCall({ id, from, sdp, user, tokenSource, callsLine =
     return true;
 }
 
-// Owner's rule (2026-10-24): the AI never hangs up, except when nobody speaks for 60 seconds (the caller is
-// silent and the AI is neither talking nor working). It says goodbye first; if the caller speaks then, it stays.
-const IDLE_MS = 60 * 1000;
-async function checkIdle(call) {
-    if (call.ended || call.idleBye) return;
-    if (call.speech.active || call.busy || call.pending.length || call.carry || aiIsTalking(call)) { call.lastActiveAt = Date.now(); return; }
-    if (Date.now() - call.lastActiveAt < IDLE_MS) return;
-    call.idleBye = true;
-    const bye = "I can't hear anything, so I'll end the call now. Call me back anytime. Bye!";
-    call.transcript.push(`AI: ${bye}`);
-    await speak(call, bye);
-    await speakingDone(call);
-    // The caller spoke during the goodbye: the call goes on
-    if (call.speech.active || call.busy || call.pending.length) { call.idleBye = false; call.lastActiveAt = Date.now(); return; }
-    endCall(call.id, "nobody spoke for 60 s");
-}
-
-// Simple voice detection: a turn starts when the caller gets loud and ends after 1.5 s of quiet (owner: let them
-// finish; a short pause to think is not the end).
+// Simple voice detection: a turn starts when the caller gets loud and ends after 0.8 s of quiet.
 // While the AI is talking (and a moment after) the caller's audio is ignored, so the AI never hears itself.
 function listen(call, samples) {
     if (call.ended) return;
@@ -1102,16 +997,11 @@ function listen(call, samples) {
     s.ms += ms;
     s.quiet = loud ? 0 : s.quiet + ms;
     if (loud) s.loudMs += ms;
-    if (s.quiet >= 1500 || s.ms >= 30000) {
+    if (s.quiet >= 800 || s.ms >= 15000) {
         const chunks = s.chunks;
         const realSpeech = s.loudMs >= 150; // a short burst of noise is not sent (Whisper "hears" words in noise)
         s.active = false; s.chunks = []; s.loud = 0; s.quiet = 0; s.ms = 0; s.loudMs = 0;
-        // Caller went on talking (real speech, not noise) while the AI was still thinking: that answer is dropped
-        // and everything they said is answered together
-        if (realSpeech && call.busy) call.turnGen = (call.turnGen || 0) + 1;
         if (realSpeech) { call.pending.push(chunks); nextTurn(call); }
-        // It was only noise, but a dropped turn is waiting: answer what they said before
-        else if (call.carry && !call.busy && !call.pending.length) { call.pending.push(null); nextTurn(call); }
     }
 }
 

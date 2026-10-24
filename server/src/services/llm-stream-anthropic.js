@@ -649,7 +649,11 @@ export async function streamClaudeChat({
                 // A handler may return { text, toolReferences }: load_tools hands Claude the deferred tools it
                 // asked for as tool_reference blocks, which the API expands into their full definitions.
                 const isObjectResult = content && typeof content === "object" && "text" in content;
-                if (isObjectResult && typeof content.stopAnswer === "string") stopAnswer = content.stopAnswer;
+                if (isObjectResult && typeof content.stopAnswer === "string") {
+                    // sleep_until: what the AI wrote before it (often its question to the user) is kept, not lost
+                    const said = call.name === "sleep_until" ? String(text || "").trim() : "";
+                    stopAnswer = said && !content.stopAnswer.includes(said) ? `${said}\n\n${content.stopAnswer}` : content.stopAnswer;
+                }
                 const refs = isObjectResult && Array.isArray(content.toolReferences)
                     ? content.toolReferences.filter((n) => deferredToolNames.has(n))
                     : [];

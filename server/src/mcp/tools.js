@@ -969,6 +969,16 @@ export const getMcpTools = () => [
     }
   },
   {
+    name: 'end_task',
+    description: "Mark this chat's task as ended. The user is told it is completed, and the task's saved record (its WhatsApp messages and steps) is deleted 1 hour later.",
+    inputSchema: {
+      type: 'object',
+      properties: {
+        summary: { type: 'string', description: 'A short summary of the task.' }
+      }
+    }
+  },
+  {
     name: 'transcribe_audio',
     description: 'Convert an audio file (mp3, wav, webm) into text. STRICT RULE: NEVER pass a video file (.mp4) directly to this tool. If you have a video, you MUST first use run_code to extract it to .mp3 using ffmpeg, upload the mp3 to the CDN, and ONLY pass the new .mp3 URL to this tool!',
     inputSchema: {

@@ -286,13 +286,3 @@ export function splitWhatsappText(text, max = 4000) {
     if (rest) parts.push(rest);
     return parts;
 }
-
-/** The AI's private thinking is never sent to the user: <think>/<thinking> blocks, an opening tag that was never
- *  closed (cut to the end) and a closing tag with no opening tag (everything before it is cut). */
-export function stripThinking(text) {
-    let t = String(text || "").replace(/<(thinking|think)>[\s\S]*?<\/\1>/gi, "");
-    t = t.replace(/<(thinking|think)>[\s\S]*$/i, "");
-    const close = t.search(/<\/(thinking|think)>/i);
-    if (close !== -1) t = t.slice(t.indexOf(">", close) + 1);
-    return t.trim();
-}

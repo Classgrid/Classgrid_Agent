@@ -97,79 +97,16 @@ async function withFiles(items) {
     return items;
 }
 
-// Owner's rule: when a task is completed it is gone from the AI's mind. Messages sent before that moment are
-// never given to the AI again.
-const CUTOFF_KEY = (number) => `wa:cutoff:${number}`;
-export async function forgetMessagesBefore(phone, ms = Date.now()) {
-    const number = normalizeWhatsappNumber(phone);
-    if (number) await redis.set(CUTOFF_KEY(number), String(ms), "EX", TTL_S).catch(() => {});
-    // A new task starts with a clean "already sent" list
-    if (number) await redis.del(SENT_KEY(number), `${SENT_KEY(number)}:list`).catch(() => {});
-}
-
-// ─── Never the same message twice (owner's rule, 2026-10-24) ────
-// Everything sent to a number during a task (text and files) is remembered; the same text or the same file (same
-// content, by its ETag) is never sent again. The list is wiped when the task ends.
-const SENT_KEY = (number) => `wa:sent:${number}`;
-const SENT_TTL_S = 15 * 60;
-const textKey = (text) => "t:" + crypto.createHash("sha1").update(String(text || "").toLowerCase().replace(/[\s*_~`]+/g, " ").trim()).digest("hex");
-
-// The file's content fingerprint (R2 gives an ETag); its URL if that can't be read
-export async function fileKey(url) {
-    try {
-        const res = await fetch(url, { method: "HEAD", signal: AbortSignal.timeout(5000) });
-        const tag = res.headers.get("etag") || `${res.headers.get("content-length") || ""}:${res.headers.get("last-modified") || ""}`;
-        return "f:" + crypto.createHash("sha1").update(`${url}|${tag}`).digest("hex");
-    } catch {
-        return "f:" + crypto.createHash("sha1").update(String(url)).digest("hex");
-    }
-}
-
-export async function wasSent(phone, { text = "", fileUrl = "" } = {}) {
-    const number = normalizeWhatsappNumber(phone);
-    if (!number) return false;
-    const key = fileUrl ? await fileKey(fileUrl) : text ? textKey(text) : null;
-    if (!key) return false;
-    return !!(await redis.sismember(SENT_KEY(number), key).catch(() => 0));
-}
-
-export async function rememberSent(phone, { text = "", fileUrl = "" } = {}) {
-    const number = normalizeWhatsappNumber(phone);
-    if (!number) return;
-    const keys = [];
-    if (text) keys.push(textKey(text));
-    if (fileUrl) keys.push(await fileKey(fileUrl));
-    if (!keys.length) return;
-    // Kept 15 minutes: stops a repeat from a resumed run, never a real message sent again later
-    await redis.sadd(SENT_KEY(number), ...keys).catch(() => {});
-    await redis.expire(SENT_KEY(number), SENT_TTL_S).catch(() => {});
-    // A short readable list, so a resumed AI knows what it already sent
-    await redis.rpush(`${SENT_KEY(number)}:list`, JSON.stringify({ at: Date.now(), text: String(text || "").slice(0, 200), file: fileUrl || "" })).catch(() => {});
-    await redis.ltrim(`${SENT_KEY(number)}:list`, -30, -1).catch(() => {});
-    await redis.expire(`${SENT_KEY(number)}:list`, SENT_TTL_S).catch(() => {});
-}
-
-// What was already sent in this task, for the resumed AI ("" when nothing)
-export async function sentSummary(phone) {
-    const number = normalizeWhatsappNumber(phone);
-    if (!number) return "";
-    const raw = await redis.lrange(`${SENT_KEY(number)}:list`, 0, -1).catch(() => []);
-    const items = raw.map((r) => { try { return JSON.parse(r); } catch { return null; } }).filter(Boolean);
-    return items.map((m) => `- ${m.file ? `file ${m.file}${m.text ? ` with "${m.text}"` : ""}` : `"${m.text}"`}`).join("\n").slice(0, 3000);
-}
-
 async function inbox(number) {
     const raw = await redis.lrange(INBOX_KEY(number), 0, KEEP - 1).catch(() => []);
-    const cutoff = Number(await redis.get(CUTOFF_KEY(number)).catch(() => 0)) || 0;
-    return raw.map((r) => { try { return JSON.parse(r); } catch { return null; } }).filter((m) => m && m.at > cutoff);
+    return raw.map((r) => { try { return JSON.parse(r); } catch { return null; } }).filter(Boolean);
 }
 
-// The user's latest WhatsApp messages to Classgrid (newest first), with files turned into links.
-// sinceMs: only messages from this task's time (older ones belong to other tasks)
-export async function readRecentMessages(phone, count = 5, sinceMs = 0) {
+// The user's latest WhatsApp messages to Classgrid (newest first), with files turned into links
+export async function readRecentMessages(phone, count = 5) {
     const number = normalizeWhatsappNumber(phone);
     if (!number) return [];
-    return withFiles((await inbox(number)).filter((m) => m.at >= sinceMs).slice(0, Math.max(1, Math.min(count, KEEP))));
+    return withFiles((await inbox(number)).slice(0, Math.max(1, Math.min(count, KEEP))));
 }
 
 // Waits for the user's next WhatsApp message after `sinceMs` (checks every 3 s, at most `timeoutMs`, stops when
@@ -191,26 +128,44 @@ export async function waitForReply(phone, sinceMs, timeoutMs, signal) {
     return [];
 }
 
-// The messages the Agent has already read with its WhatsApp tools (by message id, so two messages in the same
-// second or a late file are never skipped), so a long task doesn't get them twice
-const READ_IDS_KEY = (number) => `wa:readids:${number}`;
+// The newest message the Agent has already read with its WhatsApp tools, so a long task doesn't get it twice
+const READ_UPTO_KEY = (number) => `wa:readupto:${number}`;
 export async function noteMessagesRead(phone, items) {
     const number = normalizeWhatsappNumber(phone);
-    const ids = (items || []).map((m) => m.id).filter(Boolean);
-    if (!number || !ids.length) return;
-    await redis.sadd(READ_IDS_KEY(number), ...ids).catch(() => {});
-    await redis.expire(READ_IDS_KEY(number), TTL_S).catch(() => {});
+    const newest = Math.max(0, ...(items || []).map((m) => Number(m.at) || 0));
+    if (!number || !newest) return;
+    const now = Number(await redis.get(READ_UPTO_KEY(number)).catch(() => 0)) || 0;
+    if (newest > now) await redis.set(READ_UPTO_KEY(number), String(newest), "EX", TTL_S).catch(() => {});
 }
 
-// Messages (not reactions) newer than `sinceMs` that the Agent has not read yet: oldest first. files: false only
-// checks (no file downloads), for quick decisions.
-export async function unreadMessages(phone, sinceMs = 0, { files = true } = {}) {
+// Messages (not reactions) newer than `sinceMs` that the Agent has not read yet: oldest first, files as links
+export async function unreadMessages(phone, sinceMs = 0) {
     const number = normalizeWhatsappNumber(phone);
     if (!number) return [];
-    const read = new Set(await redis.smembers(READ_IDS_KEY(number)).catch(() => []));
-    // ">=": a message in the same second as the last one read still counts (read ones are skipped by id)
-    const items = (await inbox(number)).filter((m) => m.at >= (Number(sinceMs) || 0) && m.type !== "reaction" && !read.has(m.id)).reverse();
-    return files ? withFiles(items) : items;
+    const readUpTo = Number(await redis.get(READ_UPTO_KEY(number)).catch(() => 0)) || 0;
+    const after = Math.max(Number(sinceMs) || 0, readUpTo);
+    return withFiles((await inbox(number)).filter((m) => m.at > after && m.type !== "reaction").reverse());
+}
+
+// These messages of a number (by WhatsApp message id), oldest first, with files turned into links
+export async function messagesByIds(phone, ids) {
+    const number = normalizeWhatsappNumber(phone);
+    if (!number || !ids?.length) return [];
+    const want = new Set(ids);
+    return withFiles((await inbox(number)).filter((m) => want.has(m.id)).reverse());
+}
+
+// Messages of a number since `sinceMs` (oldest first, files as links), read or not
+export async function messagesSince(phone, sinceMs) {
+    const number = normalizeWhatsappNumber(phone);
+    if (!number) return [];
+    return withFiles((await inbox(number)).filter((m) => m.at >= (Number(sinceMs) || 0) && m.type !== "reaction").reverse());
+}
+
+// The newest message time the Agent already read with its own WhatsApp tools
+export async function readUpTo(phone) {
+    const number = normalizeWhatsappNumber(phone);
+    return number ? Number(await redis.get(READ_UPTO_KEY(number)).catch(() => 0)) || 0 : 0;
 }
 
 // Is an Agent or a call using this number's chat right now (so the old help bot should stay quiet)?
