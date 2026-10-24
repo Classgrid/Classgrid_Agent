@@ -870,8 +870,26 @@ async function buildDeepContext(userEmail) {
 
 // Pre-request quota estimate: ~4 characters per token over everything sent (rules, history, message, tools),
 // plus room for the reply. MIN_PROMPT_TOKENS is the smallest real request (rules + core tools, "hi" ~3.8k).
+// Tavily keys (owner's choice): TAVILY_API_KEY, then TAVILY_API_KEY_2 and TAVILY_API_KEY_3. When a key's monthly
+// limit is used up (432, or 429), the next key is tried, and later calls start from the key that last worked.
+const tavilyKeys = () => [process.env.TAVILY_API_KEY, process.env.TAVILY_API_KEY_2, process.env.TAVILY_API_KEY_3].map((k) => k?.trim()).filter(Boolean);
+let tavilyStart = 0;
+async function tavilyFetch(url, payload) {
+    const keys = tavilyKeys();
+    let res = null;
+    for (let i = 0; i < keys.length; i++) {
+        const at = (tavilyStart + i) % keys.length;
+        res = await fetch(url, {
+            method: "POST",
+            headers: { "Content-Type": "application/json", "Authorization": `Bearer ${keys[at]}` },
+            body: JSON.stringify({ ...payload, api_key: keys[at] }),
+        });
+        if (res.status !== 432 && res.status !== 429) { tavilyStart = at; return res; }
+    }
+    return res;
+}
 // search_web include/exclude_domains: plain hostnames only ("https://www.x.com/a" -> "x.com"), at most 10
-const cleanDomains = (list) => (Array.isArray(list) ? list : [])
+const cleanDomains =(list) => (Array.isArray(list) ? list : [])
     .map((d) => String(d || "").trim().toLowerCase().replace(/^https?:\/\//, "").replace(/^www\./, "").split("/")[0])
     .filter((d) => /^[a-z0-9.-]+\.[a-z]{2,}$/.test(d))
     .slice(0, 10);
@@ -3343,7 +3361,6 @@ If they ask whether their college/school uses Classgrid, say you can't see that 
                     },
                     open_url: async (args) => {
                         // Read one specific page (the official site or docs) via Tavily Extract
-                        const tavilyKey = process.env.TAVILY_API_KEY?.trim();
                         let target;
                         try {
                             target = new URL(String(args.url || "").trim());
@@ -3357,12 +3374,8 @@ If they ask whether their college/school uses Classgrid, say you can't see that 
                             const pageLinks = [];
                             let text = await readPageDirect(target.href, pageLinks);
                             const OPEN_URL_USE_TAVILY = true;
-                            if (!text && OPEN_URL_USE_TAVILY) try {
-                                const exRes = await fetch("https://api.tavily.com/extract", {
-                                    method: "POST",
-                                    headers: { "Content-Type": "application/json", "Authorization": `Bearer ${tavilyKey}` },
-                                    body: JSON.stringify({ api_key: tavilyKey, urls: [target.href], extract_depth: "advanced", format: "markdown" })
-                                });
+                            if (!text && OPEN_URL_USE_TAVILY && tavilyKeys().length) try {
+                                const exRes = await tavilyFetch("https://api.tavily.com/extract", { urls: [target.href], extract_depth: "advanced", format: "markdown" });
                                 if (exRes.ok) {
                                     const exData = await exRes.json();
                                     const page = Array.isArray(exData.results) ? exData.results[0] : null;
@@ -3422,14 +3435,9 @@ If they ask whether their college/school uses Classgrid, say you can't see that 
                     },
 
                     search_web: async (args) => {
-                        const tavilyKey = process.env.TAVILY_API_KEY?.trim();
-                        if (!tavilyKey) return "Search failed because TAVILY_API_KEY is missing.";
+                        if (!tavilyKeys().length) return "Search failed because TAVILY_API_KEY is missing.";
                         try {
-                            const callTavily = (extra) => fetch("https://api.tavily.com/search", {
-                                method: "POST",
-                                headers: { "Content-Type": "application/json" },
-                                body: JSON.stringify({
-                                    api_key: tavilyKey,
+                            const callTavily = (extra) => tavilyFetch("https://api.tavily.com/search", {
                                     query: args.query,
                                     search_depth: "advanced",
                                     ...(cleanDomains(args.exclude_domains).length ? { exclude_domains: cleanDomains(args.exclude_domains) } : {}),
@@ -3443,7 +3451,6 @@ If they ask whether their college/school uses Classgrid, say you can't see that 
                                     include_image_descriptions: true,
                                     max_results: 8,
                                     ...extra
-                                })
                             });
                             // Official sources: the model's include_domains, or (when it gave none) the official domains
                             // of the products/companies named in the query (OFFICIAL_DOMAINS map)
