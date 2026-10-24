@@ -558,13 +558,11 @@ async function afterCall(call, why) {
         }
         return;
     }
-    // One background job per project (tasks without a project run together), so each runs in its own project
-    const groups = new Map();
-    for (const t of call.tasks) {
-        const key = t.project ? String(t.project._id) : "none";
-        if (!groups.has(key)) groups.set(key, { project: t.project || null, tasks: [] });
-        groups.get(key).tasks.push(t.task);
-    }
+    // Owner's rule (2026-10-24): one call = one background job. All its tasks run together in one chat, inside the
+    // project if any of them names one (a call once split into two jobs: double "Got it", and the user's replies
+    // went to the job without the project)
+    const project = call.tasks.find((t) => t.project)?.project || null;
+    const groups = new Map([[project ? String(project._id) : "none", { project, tasks: call.tasks.map((t) => t.task) }]]);
     // Work the AI started live during the call for the same project finishes first; the task then carries on in
     // that same chat instead of doing it all again (it once built one project twice)
     const announced = call.liveWorks.length > 0;
@@ -651,7 +649,10 @@ async function runCallJob(job, { resumed = false, lockToken = null } = {}) {
         // The task and its record (owner's design) exist from the start, so the user's WhatsApp messages during the
         // work are saved for it (the same task again after a restart)
         if (!job.taskId) {
-            job.taskId = await tasks.startCallTask({ user, phone: job.from, question: job.question, sessionId: job.sessionId, callStartedAt: job.callStartedAt });
+            job.taskId = await tasks.startCallTask({
+                user, phone: job.from, question: job.question, sessionId: job.sessionId, callStartedAt: job.callStartedAt,
+                projectId: job.projectId, projectName: job.projectName,
+            });
             await save();
         }
         const { default: AgentTask } = await import("../models/AgentTask.js");

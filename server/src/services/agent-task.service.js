@@ -208,10 +208,12 @@ export async function endTaskFromTool({ sessionId, summary }) {
 
 // A call's task gets its record when its work starts: older open tasks of the number are closed, and the WhatsApp
 // messages the user sent since the call started are put in the new task's record
-export async function startCallTask({ user, phone, question, sessionId, callStartedAt }) {
+export async function startCallTask({ user, phone, question, sessionId, callStartedAt, projectId = null, projectName = null }) {
     const number = normalizeWhatsappNumber(phone) || null;
     const task = await AgentTask.create({
         user_id: user._id, organization_id: user.organization_id || null, phone: number, session_id: sessionId || null,
+        // The task works inside this Project Mode project (every wake-up opens it)
+        project_id: projectId ? String(projectId) : null, project_name: projectName || null,
         origin: "whatsapp", goal: String(question || "").slice(0, 8000), status: "working", heartbeat_at: new Date(),
         work_started_at: new Date(), last_seen_msg_at: callStartedAt || Date.now(),
     });

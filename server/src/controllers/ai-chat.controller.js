@@ -2287,8 +2287,9 @@ CRITICAL INSTRUCTION FOR GOOGLE WORKSPACE & CLASSROOM DISAMBIGUATION: If the use
 
         // --- DO NOT TOUCH THIS BLOCK ---
         // These instructions were painstakingly negotiated. Do not let any AI rewrite or modify them.
-        // (Agent mode only: Project Mode works in the user's own repo, so it never gets these.)
-        if (!isProjectChat) dynamicSystemPrompt += promptBlock("code_sandbox|connector:github|connector:vercel", `\n\nWEBSITE DEPLOYMENT INSTRUCTIONS:
+        // (Agent mode only: Project Mode works in the user's own repo, so it never gets these. Tasks from WhatsApp calls
+        // and messages never get them either, owner's rule 2026-10-24.)
+        if (!isProjectChat && body.taskOrigin !== 'whatsapp') dynamicSystemPrompt += promptBlock("code_sandbox|connector:github|connector:vercel", `\n\nWEBSITE DEPLOYMENT INSTRUCTIONS:
 **CRITICAL RULE: YOU MUST ONLY USE THIS PLAN FLOW WHEN BUILDING A WEBSITE. FOR ANY OTHER CHAT OR QUESTIONS, NEVER GENERATE A PLAN BLOCK!**
 **IMPORTANT RULE FOR FRAMEWORKS**: 
 - If the user chooses **Vercel + GitHub**, you are COMPLETELY FREE to use React, Next.js, Vite, or any other modern stack! 
@@ -4422,7 +4423,8 @@ If they ask whether their college/school uses Classgrid, say you can't see that 
             // Background tasks (WhatsApp calls and long tasks) get every tool from the start (owner's rule)
             loadAll: body.allTools === true
         });
-        if (isProjectChat) toolPlan.allowedToolNames.delete("deploy_to_classgrid_cloud"); // Classgrid Cloud is for Agent mode HTML sites
+        // Classgrid Cloud is for Agent mode HTML sites (not Project Mode, not WhatsApp call/message tasks)
+        if (isProjectChat || body.taskOrigin === 'whatsapp') toolPlan.allowedToolNames.delete("deploy_to_classgrid_cloud");
         const seenToolNames = new Set();
         // Every tool this user may use (one definition per name), in a fixed order.
         const fullToolList = orderTools([...llmConfig.tools, buildLoadToolsTool(toolPlan.allowedGroups)].filter(t => {
