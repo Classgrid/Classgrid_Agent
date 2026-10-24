@@ -317,6 +317,7 @@ function systemPrompt(user) {
         "The call can last at most 15 minutes.",
         "After the call the Classgrid Agent does the work in the caller's account and sends them the result on WhatsApp.",
         "The caller can also send extra details or files (photos, PDFs, documents) in this WhatsApp chat; the Agent reads their latest WhatsApp messages before it sends the final result.",
+        "You have your own email address: agent@classgrid.in. When the caller wants to email you (for example keys, files or details), tell them to send it to agent@classgrid.in; the Agent reads every email there.",
     ].join("\n");
 }
 
