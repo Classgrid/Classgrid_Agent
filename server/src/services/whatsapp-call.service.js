@@ -12,7 +12,7 @@
 // A user calls the Classgrid WhatsApp number. Meta sends the call to the ai.classgrid.in server (same machine), which
 // passes it here. If the caller's number is the verified WhatsApp of exactly one Classgrid account, the call is
 // answered as that person: their voice goes to Cloudflare Whisper (speech to text), Claude talks with them, and the
-// reply is spoken back with Cloudflare Aura (text to speech). A call lasts at most 15 minutes (never cut mid-sentence).
+// reply is spoken back with Cloudflare Aura (text to speech). A call lasts at most 5 minutes (never cut mid-sentence).
 // The AI saves the caller's tasks during the call; when the call ends, the Classgrid Agent does them in the
 // background as that user, in a new chat in their account, and the result is sent to them on WhatsApp.
 //
@@ -30,10 +30,10 @@ import { chargeableTokens } from "./ai-token-pricing.js";
 
 const GRAPH = "https://graph.facebook.com/v22.0";
 const CALL_MODEL = "claude-haiku-5-5"; // fastest Claude, so the voice replies come quickly
-const MAX_CALL_MS = 15 * 60 * 1000;
+const MAX_CALL_MS = 5 * 60 * 1000;
 const WRAP_UP_MS = MAX_CALL_MS - 15 * 1000; // 15 s before the end the AI is told the time is almost up
 const OVERTIME_MS = 30 * 1000; // at the limit, a sentence or answer in progress may finish (up to 30 s more)
-// Owner's rule (2026-10-23): one phone number gets at most 50 answered calls in any 24 hours (so at most 50
+// Owner's rule (2026-10-23): one phone number gets at most 5 answered calls in any 24 hours (so at most 5
 // background jobs: all tasks of one call run as one job)
 const MAX_CALLS_PER_DAY = 50;
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -251,9 +251,8 @@ function systemPrompt(user) {
         "You are Classgrid AI on a WhatsApp voice call with a Classgrid user.",
         `Caller: ${user.name || "unknown name"} (${user.email}). Time: ${now} (India).`,
         "What you say is read out by an English text-to-speech voice, so write plain spoken English: short sentences, no markdown, no lists, no emojis, no links.",
-        "The call can last at most 15 minutes.",
+        "The call can last at most 5 minutes.",
         "After the call the Classgrid Agent does the work in the caller's account and sends them the result on WhatsApp.",
-        "The caller can also send extra details or files (photos, PDFs, documents) in this WhatsApp chat; the Agent reads their latest WhatsApp messages before it sends the final result.",
     ].join("\n");
 }
 
@@ -385,7 +384,7 @@ function timeUp(call) {
         if (call.ended) return;
         const talking = call.speech.active || call.busy || call.outCurrent || call.outQueue.length > 0;
         if (talking && Date.now() < limit) call.hardStop = setTimeout(check, 500);
-        else endCall(call.id, "15 minute limit");
+        else endCall(call.id, "5 minute limit");
     };
     check();
 }
@@ -422,28 +421,9 @@ async function afterCall(call) {
         else task += `\n\n(The project "${project.name}" could not be opened in the editor: ${opened.error}. Work without its files and tell the user.)`;
     }
     const where = project ? ` in your project "${project.name}"` : "";
-    // Owner's rule: before the final email or WhatsApp, the Agent checks the user's latest WhatsApp messages
-    task += "\n\n(The user may send follow-ups or files in the Classgrid WhatsApp chat while you work. Before you send the final result by email or WhatsApp, read their latest WhatsApp messages with read_whatsapp_messages and use anything new they added.)";
-    // While the big AI works, the small AI answers the user's new WhatsApp messages and passes them on (owner's design)
-    const updates = await import("./whatsapp-updates.service.js");
-    updates.taskStarted(call.from, { user: call.user, goal: task, send: (text) => sendWhatsappText(call.from, text) });
-    let result;
-    try {
-        result = await runAgentTask(call.user, `[From a WhatsApp call]\n${task}`, project?._id, (sessionId) => {
-            updates.taskSessionReady(call.from, sessionId);
-            sendWhatsappText(call.from, `Got it. Classgrid AI is working on it now${where}. I'll send you the result here when it's done.\n\nFollow along: ${CHAT_URL}/agent/${sessionId}`);
-        });
-        // Updates that came after its last step: it runs once more with them (at most 3 times)
-        for (let i = 0; i < 3 && result.sessionId; i++) {
-            const left = await updates.takeUpdates(result.sessionId);
-            if (!left.length) break;
-            const next = await runAgentTask(call.user, `[New from the user on WhatsApp while you were working: ${left.join(" | ")}]\nContinue the task with this.`, project?._id, null, result.sessionId);
-            if (next.answer || !result.answer) result = { ...next, sessionId: result.sessionId };
-        }
-    } finally {
-        updates.taskEnded(call.from);
-        stopKeepOpen();
-    }
+    const result = await runAgentTask(call.user, `[From a WhatsApp call]\n${task}`, project?._id, (sessionId) =>
+        sendWhatsappText(call.from, `Got it. Classgrid AI is working on it now${where}. I'll send you the result here when it's done.\n\nFollow along: ${CHAT_URL}/agent/${sessionId}`))
+        .finally(() => stopKeepOpen());
     const link = result.sessionId ? `\n\nFull result: ${CHAT_URL}/agent/${result.sessionId}` : "";
     if (!result.answer) {
         await sendWhatsappText(call.from, `Classgrid AI could not finish this task${result.error ? `: ${result.error}` : "."}${link}`);
@@ -532,8 +512,7 @@ async function runAgentTask(user, question, projectId, onSession, sessionId = nu
         method: "POST",
         headers: { Authorization: `Bearer ${userToken(user)}`, "Content-Type": "application/json" },
         // projectId: the chat is saved inside that Project Mode project
-        // allTools: every tool and plugin is loaded from the start (owner's rule)
-        body: JSON.stringify({ question, allTools: true, ...(sessionId ? { sessionId } : {}), ...(projectId ? { projectId: String(projectId) } : {}) }),
+        body: JSON.stringify({ question, ...(sessionId ? { sessionId } : {}), ...(projectId ? { projectId: String(projectId) } : {}) }),
     });
     if (!res.ok || !res.body) {
         const err = await res.json().catch(() => ({}));
@@ -564,45 +543,13 @@ async function runAgentTask(user, question, projectId, onSession, sessionId = nu
     return { sessionId, answer: String(answer || streamed).trim(), error };
 }
 
-// The server's public IPv4, read from AWS (EC2 instance metadata, IMDSv2). Put in the answer as a candidate, so
-// WhatsApp always gets an address it can reach, even when the STUN lookup is slow. Kept once found.
-let publicIp = null;
-async function serverPublicIp() {
-    if (publicIp) return publicIp;
-    try {
-        const token = await fetch("http://169.254.169.254/latest/api/token", {
-            method: "PUT", headers: { "X-aws-ec2-metadata-token-ttl-seconds": "21600" }, signal: AbortSignal.timeout(1000),
-        }).then((r) => (r.ok ? r.text() : ""));
-        const ip = await fetch("http://169.254.169.254/latest/meta-data/public-ipv4", {
-            headers: token ? { "X-aws-ec2-metadata-token": token } : {}, signal: AbortSignal.timeout(1000),
-        }).then((r) => (r.ok ? r.text() : ""));
-        if (/^\d{1,3}(\.\d{1,3}){3}$/.test(ip.trim())) publicIp = ip.trim();
-    } catch { /* not on EC2 (local): STUN gives the public address */ }
-    return publicIp;
-}
-
-function filterAnswerSdp(sdp, publicIpv4) {
+function filterAnswerSdp(sdp) {
     // Only UDP candidates that Meta can reach (no TCP, no loopback)
-    const lines = sdp.split("\r\n").filter((line) => {
+    return sdp.split("\r\n").filter((line) => {
         if (!line.startsWith("a=candidate:")) return true;
         return / udp /i.test(line) && !/ (127\.0\.0\.1|::1) /.test(line);
-    });
-    if (!publicIpv4) return lines.join("\r\n");
-    // For each private IPv4 host candidate, the same port on the public IP (EC2 maps it 1:1), unless STUN already added it
-    const out = [];
-    for (const line of lines) {
-        out.push(line);
-        const m = line.match(/^a=candidate:(\S+) 1 udp (\d+) (10\.\S+|172\.(1[6-9]|2\d|3[01])\.\S+|192\.168\.\S+) (\d+) typ host/i);
-        if (m && !lines.some((l) => l.includes(` ${publicIpv4} ${m[5]} `))) {
-            out.push(`a=candidate:${m[1]}9 1 udp ${Number(m[2]) - 1} ${publicIpv4} ${m[5]} typ host generation 0`);
-        }
-    }
-    return out.join("\r\n");
+    }).join("\r\n");
 }
-
-// The kinds of candidates in an SDP, for the log ("host 172.31.32.242:10000, srflx 13.x.x.x:10000")
-const candidateSummary = (sdp) => sdp.split("\r\n").filter((l) => l.startsWith("a=candidate:"))
-    .map((l) => { const p = l.split(" "); return `${p[7] || "?"} ${p[2]} ${p[4]}:${p[5]}`; }).join(", ") || "none";
 
 export async function answerCall({ id, from, sdp, user, tokenSource }) {
     const { RTCPeerConnection, nonstandard } = await loadWrtc();
@@ -622,15 +569,7 @@ export async function answerCall({ id, from, sdp, user, tokenSource }) {
         call.sink = new nonstandard.RTCAudioSink(e.track);
         call.sink.ondata = (d) => listen(call, mono(d.samples, d.channelCount || 1));
     };
-    // Connection steps with times, written to the log when the connection fails (to see why)
-    const steps = [];
-    const step = (what) => steps.push(`${((Date.now() - call.startedAt) / 1000).toFixed(1)}s ${what}`);
-    pc.oniceconnectionstatechange = () => step(`ice ${pc.iceConnectionState}`);
     pc.onconnectionstatechange = () => {
-        step(`connection ${pc.connectionState}`);
-        if (pc.connectionState === "failed") {
-            console.error(`[WA call] ${id} connection failed. Steps: ${steps.join(" | ")}. Our candidates: ${call.ourCandidates}. WhatsApp candidates: ${call.theirCandidates}`);
-        }
         if (["failed", "closed"].includes(pc.connectionState)) endCall(id, `connection ${pc.connectionState}`);
     };
 
@@ -642,10 +581,7 @@ export async function answerCall({ id, from, sdp, user, tokenSource }) {
         pc.onicegatheringstatechange = () => pc.iceGatheringState === "complete" && resolve();
         setTimeout(resolve, 3000);
     });
-    const answer = filterAnswerSdp(pc.localDescription.sdp, await serverPublicIp());
-    call.ourCandidates = candidateSummary(answer);
-    call.theirCandidates = candidateSummary(sdp);
-    step(`answer ready (gathering ${pc.iceGatheringState})`);
+    const answer = filterAnswerSdp(pc.localDescription.sdp);
 
     await callAction(id, "pre_accept", answer);
     await callAction(id, "accept", answer);
@@ -751,7 +687,7 @@ export async function handleCallsWebhook(value) {
                     : "Classgrid AI can't take calls for your account right now. Please try again later.");
                 continue;
             }
-            // 50 calls per number in 24 hours (if the count can't be read, the call is answered)
+            // 5 calls per number in 24 hours (if the count can't be read, the call is answered)
             const number = normalizeWhatsappNumber(from);
             const today = await callsToday(number).catch(() => null);
             if (today && today.count >= MAX_CALLS_PER_DAY) {

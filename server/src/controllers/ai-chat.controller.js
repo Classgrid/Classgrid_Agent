@@ -2165,8 +2165,6 @@ CRITICAL: If you call ANY integration tool (e.g. Google Classroom, Gmail, Google
                     if (facebookConnected) allowedConnectorNames.add('facebook_connector');
                     if (instagramConnected) allowedConnectorNames.add('instagram_connector');
                     allowedConnectorNames.add('send_whatsapp_message');
-                    allowedConnectorNames.add('read_whatsapp_messages');
-                    allowedConnectorNames.add('wait_for_whatsapp_reply');
 
                     let activeDescriptions = [];
                     let disconnectedLinks = [];
@@ -3505,44 +3503,6 @@ If they ask whether their college/school uses Classgrid, say you can't see that 
                             return "Web Search failed: " + e;
                         }
                     },
-                    wait_for_whatsapp_reply: async (args) => {
-                        try {
-                            const phone = req.user?.metadata?.whatsappPhone;
-                            if (!phone) return "FAILED: This account has no verified WhatsApp number.";
-                            const { waitForReply } = await import('../services/whatsapp-inbox.service.js');
-                            const minutes = Math.max(1, Math.min(15, Number(args?.timeout_minutes) || 10));
-                            const items = await waitForReply(phone, Date.now() - 2000, minutes * 60 * 1000);
-                            if (!items.length) return `The user did not reply on WhatsApp within ${minutes} minutes.`;
-                            const when = (ms) => new Date(ms).toLocaleString("en-IN", { timeZone: "Asia/Kolkata", dateStyle: "medium", timeStyle: "short" });
-                            const fileLine = (m) => m.fileUrl
-                                ? `\n   File${m.media?.filename ? ` (${m.media.filename})` : ""}: ${m.fileUrl}`
-                                : m.fileError ? `\n   (a file could not be loaded: ${m.fileError})` : "";
-                            return "The user replied on WhatsApp (oldest first, India time):\n" + items.map((m, i) =>
-                                `${i + 1}. [${when(m.at)}] ${m.type}${m.text ? `: ${m.text}` : ""}${fileLine(m)}`
-                            ).join("\n");
-                        } catch (e) {
-                            return `FAILED to wait for a WhatsApp reply: ${e.message}`;
-                        }
-                    },
-                    read_whatsapp_messages: async (args) => {
-                        try {
-                            const phone = req.user?.metadata?.whatsappPhone;
-                            if (!phone) return "FAILED: This account has no verified WhatsApp number, so there are no WhatsApp messages to read.";
-                            const { readRecentMessages } = await import('../services/whatsapp-inbox.service.js');
-                            const count = Math.max(1, Math.min(20, Number(args?.count) || 5));
-                            const items = await readRecentMessages(phone, count);
-                            if (!items.length) return "No WhatsApp messages from the user in the last 3 days.";
-                            const when = (ms) => new Date(ms).toLocaleString("en-IN", { timeZone: "Asia/Kolkata", dateStyle: "medium", timeStyle: "short" });
-                            const fileLine = (m) => m.fileUrl
-                                ? `\n   File${m.media?.filename ? ` (${m.media.filename})` : ""}: ${m.fileUrl}`
-                                : m.fileError ? `\n   (a file could not be loaded: ${m.fileError})` : "";
-                            return "The user's latest WhatsApp messages to Classgrid (newest first, India time):\n" + items.map((m, i) =>
-                                `${i + 1}. [${when(m.at)}] ${m.type}${m.text ? `: ${m.text}` : ""}${fileLine(m)}`
-                            ).join("\n");
-                        } catch (e) {
-                            return `FAILED to read WhatsApp messages: ${e.message}`;
-                        }
-                    },
                     send_whatsapp_message: async (args) => {
                         const { toPhoneNumber, messageText } = args;
                         try {
@@ -4270,15 +4230,6 @@ If they ask whether their college/school uses Classgrid, say you can't see that 
                         }
                         let resultStr;
                         try { resultStr = await handler(args); } catch (err) { resultStr = "Error: " + (err.message || String(err)); }
-                        // New WhatsApp messages from the user, passed on by the small AI while this task runs: they
-                        // reach the AI with this tool result, so it never has to stop (owner's design)
-                        if (sessionId && typeof resultStr === "string") {
-                            try {
-                                const { takeUpdates } = await import('../services/whatsapp-updates.service.js');
-                                const ups = await takeUpdates(sessionId);
-                                if (ups.length) resultStr += `\n\n[New from the user on WhatsApp while you work: ${ups.join(" | ")}. Use this in the task.]`;
-                            } catch { /* no updates */ }
-                        }
 
                         if (!silentTool) {
                             const step = accSteps.find(s => s.tool === toolName && s.status === 'loading');
@@ -4318,9 +4269,7 @@ If they ask whether their college/school uses Classgrid, say you can't see that 
             stickyGroupIds: Object.keys(stickyAged),
             role: req.user?.role,
             email: req.user?.email,
-            hasOrg: !!orgId && String(orgId) !== PUBLIC_CHAT_ORG_ID,
-            // Background tasks from WhatsApp calls get every tool and plugin from the start (owner's rule)
-            loadAll: body.allTools === true
+            hasOrg: !!orgId && String(orgId) !== PUBLIC_CHAT_ORG_ID
         });
         if (isProjectChat) toolPlan.allowedToolNames.delete("deploy_to_classgrid_cloud"); // Classgrid Cloud is for Agent mode HTML sites
         const seenToolNames = new Set();
