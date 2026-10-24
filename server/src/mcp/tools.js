@@ -970,15 +970,18 @@ export const getMcpTools = () => [
   },
   {
     name: 'read_agent_email',
-    description: "Read the emails the user sent from their account email to Classgrid AI's own email address, agent@classgrid.in (newest first). Search by date and time range, subject words and text words. Returns each email's date, from, to, subject and full text.",
+    description: "Read the emails in Classgrid AI's own mailbox, agent@classgrid.in (newest first): read and unread, from any sender. Search by sender, date and time range, subject words, text words and read state, and mark emails read or unread. Returns each email's date, from, to, subject, read state, folder and full text.",
     inputSchema: {
       type: 'object',
       properties: {
+        from_email: { type: 'string', description: 'Only emails from this sender address.' },
         from_date: { type: 'string', description: 'Only emails from this date and time on, ISO 8601 with the time zone (for example 2026-10-24T09:00:00+05:30).' },
         to_date: { type: 'string', description: 'Only emails up to this date and time, ISO 8601 with the time zone.' },
         subject: { type: 'string', description: 'Only emails whose subject contains these words.' },
         text: { type: 'string', description: 'Only emails whose text or subject contains these words.' },
-        count: { type: 'number', description: 'How many emails to return (1-10, default 5).' }
+        status: { type: 'string', enum: ['all', 'read', 'unread'], description: 'Read state to return (default all).' },
+        mark_as: { type: 'string', enum: ['read', 'unread'], description: 'Mark the returned emails as read or unread.' },
+        count: { type: 'number', description: 'How many emails to return (1-20, default 5).' }
       }
     }
   },
