@@ -972,7 +972,8 @@ export async function answerCall({ id, from, sdp, user, tokenSource, callsLine =
     return true;
 }
 
-// Simple voice detection: a turn starts when the caller gets loud and ends after 0.8 s of quiet.
+// Simple voice detection: a turn starts when the caller gets loud and ends after 1.8 s of quiet (owner: let them
+// finish; a pause between sentences is not the end), or after 30 s of talking.
 // While the AI is talking (and a moment after) the caller's audio is ignored, so the AI never hears itself.
 function listen(call, samples) {
     if (call.ended) return;
@@ -999,7 +1000,7 @@ function listen(call, samples) {
     s.ms += ms;
     s.quiet = loud ? 0 : s.quiet + ms;
     if (loud) s.loudMs += ms;
-    if (s.quiet >= 800 || s.ms >= 15000) {
+    if (s.quiet >= 1800 || s.ms >= 30000) {
         const chunks = s.chunks;
         const realSpeech = s.loudMs >= 150; // a short burst of noise is not sent (Whisper "hears" words in noise)
         s.active = false; s.chunks = []; s.loud = 0; s.quiet = 0; s.ms = 0; s.loudMs = 0;
