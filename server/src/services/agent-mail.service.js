@@ -78,7 +78,14 @@ async function attachmentsOf(folderId, messageId) {
                 if (!res.ok) throw new Error(`download failed (${res.status})`);
                 const buffer = Buffer.from(await res.arrayBuffer());
                 if (buffer.length > MAX_FILE_BYTES) throw new Error("too big (max 25 MB)");
-                const sentType = (res.headers.get("content-type") || "application/octet-stream").split(";")[0];
+                // Zoho often sends a generic type: the file's name tells the real one
+                const byName = { pdf: "application/pdf", png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", gif: "image/gif", webp: "image/webp",
+                    doc: "application/msword", docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                    xls: "application/vnd.ms-excel", xlsx: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    ppt: "application/vnd.ms-powerpoint", pptx: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+                    txt: "text/plain", csv: "text/csv", zip: "application/zip", mp3: "audio/mpeg", mp4: "video/mp4" }[(name.match(/\.([a-z0-9]+)$/i)?.[1] || "").toLowerCase()];
+                const headerType = (res.headers.get("content-type") || "application/octet-stream").split(";")[0];
+                const sentType = headerType === "application/octet-stream" && byName ? byName : headerType;
                 const type = ACTIVE_TYPE.test(sentType) ? "application/octet-stream" : sentType;
                 const { randomUUID } = await import("crypto");
                 const { generateR2UploadUrl } = await import("./r2.service.js");
