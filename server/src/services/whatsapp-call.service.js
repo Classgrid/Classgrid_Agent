@@ -232,7 +232,7 @@ const START_TASK_TOOL = {
     input_schema: {
         type: "object",
         properties: {
-            task: { type: "string", description: "The complete task with every detail the caller gave, written for the Agent." },
+            task: { type: "string", description: "The complete task with every detail the caller gave, written for the Agent. If you told the caller the Agent will ask them something on WhatsApp, write those questions in the task." },
             project_name: { type: "string", description: "Optional: the name of one of the caller's Project Mode projects this task belongs to. The Agent's chat is then saved inside that project." },
         },
         required: ["task"],
@@ -254,7 +254,7 @@ const ASK_CLASSGRID_TOOL = {
 
 const END_CALL_TOOL = {
     name: "end_call",
-    description: "Hang up the phone call (after what you say now is spoken).",
+    description: "Hang up the phone call (after what you say now is spoken). Only when the caller says goodbye or asks to end the call.",
     input_schema: { type: "object", properties: {} },
 };
 
@@ -407,17 +407,29 @@ function speakingDone(call) {
 
 async function handleUtterance(call, chunks) {
     call.busy = true;
+    const gen = (call.turnGen = (call.turnGen || 0) + 1);
     try {
-        const said = await speechToText(chunks);
+        let said = chunks ? await speechToText(chunks) : "";
+        // What the caller said just before, when they went on talking while the AI was still thinking
+        if (call.carry) { said = `${call.carry} ${said}`.trim(); call.carry = ""; }
         if (!said || call.ended) return;
+        // They started talking again meanwhile: nothing is answered yet, all of it is answered together
+        if (call.turnGen !== gen) { call.carry = said; return; }
+        const marks = [call.messages.length, call.transcript.length];
         call.transcript.push(`Caller: ${said}`);
         call.messages.push({ role: "user", content: said });
-        await reply(call);
+        await reply(call, gen, () => {
+            call.messages.length = marks[0];
+            call.transcript.length = marks[1];
+            call.carry = said;
+        });
     } catch (e) {
         console.error("[WA call] turn failed:", e.message);
         await speak(call, "Sorry, I had a problem there. Could you say that again?");
     } finally {
         call.busy = false;
+        // Words from a dropped turn are answered as soon as the caller is quiet (if nothing else is coming)
+        if (!call.pending.length && call.carry && !call.speech.active) call.pending.push(null);
         if (call.pending.length) setImmediate(() => nextTurn(call));
     }
 }
@@ -449,10 +461,13 @@ async function runTool(call, t, cutOff) {
     return { content: "This tool is not available.", is_error: true };
 }
 
-async function reply(call) {
+// gen + dropTurn: when the caller starts talking again before the AI has said anything (and no tool ran), this
+// answer is dropped and what they said is answered together with what they say next
+async function reply(call, gen, dropTurn) {
     // A few rounds, so the AI can use a tool and then talk about the result
     for (let round = 0; round < 4 && !call.ended; round++) {
         const { text, tools, cutOff } = await claudeTurn(call);
+        if (dropTurn && round === 0 && call.turnGen !== gen && !tools.length) { dropTurn(); return; }
         if (text) call.transcript.push(`AI: ${text}`);
         await speak(call, text);
         if (!tools.length || call.ended) return;
@@ -575,6 +590,9 @@ async function afterCall(call, why) {
         const liveSession = call.liveSessions[key] || null;
         let task = tasks.length === 1 ? tasks[0] : `Do these tasks in this order:\n${tasks.map((t, i) => `${i + 1}. ${t}`).join("\n")}`;
         if (liveSession) task = `[During the call you already started on this in this chat. Look at what is already done here and do only what is left. Don't build or send anything again that is already done.]\n${task}`;
+        // The Agent sees what was said on the call (for example a promise to ask the caller something on WhatsApp)
+        const said = call.transcript.filter((l) => l.startsWith("Caller:") || l.startsWith("AI:")).join("\n").slice(-4000);
+        if (said) task += `\n\n(What was said on the call, for context:\n${said})`;
         // Owner's rule: before the final email or WhatsApp, the Agent checks the user's latest WhatsApp messages
         task += "\n\n(The user may send follow-ups or files in the Classgrid WhatsApp chat while you work. Before you send the final result by email or WhatsApp, read their latest WhatsApp messages with read_whatsapp_messages and use anything new they added.)";
         // The answer is sent to this same user on WhatsApp: talk to them directly ("you"), not about them
@@ -583,6 +601,7 @@ async function afterCall(call, why) {
             id: groups.size > 1 ? `${call.id}:${n++}` : call.id, userId: String(call.user._id), from: call.from, question,
             projectId: project ? String(project._id) : null, projectName: project?.name || null,
             sessionId: liveSession, startedAt: Date.now(), attempts: 0, steps: [], callsLine: call.callsLine || "", announced,
+            callStartedAt: call.startedAt,
         }).catch((e) => console.error(`[WA call] task for ${call.id} failed:`, e.message));
     }
 }
@@ -654,6 +673,10 @@ async function runCallJob(job, { resumed = false, lockToken = null } = {}) {
             if (!stepText.startsWith("sleep_until")) stepsThisRun++;
             if (info?.name === "send_whatsapp_message") sends.push(info);
             save();
+            // Owner's rule: every step is written to the task in MongoDB (messages from before the call are not
+            // this task's)
+            import("./agent-task.service.js").then((t) => t.logStep({ user, sessionId: job.sessionId, origin: "whatsapp", text: stepText, since: job.callStartedAt }))
+                .catch(() => {});
         }, { taskOrigin: "whatsapp" });
         // What happens next (send the answer, wait for the user, keep working, retry later) is decided in one
         // place, the same for every long task
@@ -955,7 +978,8 @@ export async function answerCall({ id, from, sdp, user, tokenSource, callsLine =
     return true;
 }
 
-// Simple voice detection: a turn starts when the caller gets loud and ends after 0.8 s of quiet.
+// Simple voice detection: a turn starts when the caller gets loud and ends after 1.5 s of quiet (owner: let them
+// finish; a short pause to think is not the end).
 // While the AI is talking (and a moment after) the caller's audio is ignored, so the AI never hears itself.
 function listen(call, samples) {
     if (call.ended) return;
@@ -965,14 +989,17 @@ function listen(call, samples) {
     if (!aiTalking && !s.active && Date.now() - call.speechEndedAt < 300) { s.loud = 0; s.chunks = []; return; }
     const ms = (samples.length / SAMPLE_RATE) * 1000;
     // While the AI talks, only a clearly louder voice for a moment counts (not an echo of the AI)
-    const loud = rms(samples) > (aiTalking ? 1500 : 700);
+    const loud = rms(samples) > (aiTalking ? 1200 : 700);
     if (!s.active) {
         // Loud time adds up, quiet gaps (between words) take it down slowly, so a voice is noticed quickly
         s.loud = loud ? s.loud + ms : Math.max(0, s.loud - ms / 2);
         s.chunks.push(samples);
         if (s.chunks.length > 100) s.chunks.shift(); // keep 1 s of audio from just before the speech is noticed
-        if (s.loud >= (aiTalking ? 250 : 60)) {
+        if (s.loud >= (aiTalking ? 200 : 60)) {
             s.active = true; s.ms = 0; s.quiet = 0; s.loudMs = s.loud;
+            // Caller goes on talking while the AI is still thinking (has said nothing yet): that answer is dropped
+            // and everything they said is answered together
+            if (!aiTalking && call.busy) call.turnGen = (call.turnGen || 0) + 1;
             // Caller talks over the AI: it stops (also the parts of its reply still being made)
             if (aiTalking) { call.outQueue = []; call.outCurrent = null; call.speechEndedAt = Date.now(); call.speakGen = (call.speakGen || 0) + 1; }
         }
@@ -982,11 +1009,13 @@ function listen(call, samples) {
     s.ms += ms;
     s.quiet = loud ? 0 : s.quiet + ms;
     if (loud) s.loudMs += ms;
-    if (s.quiet >= 800 || s.ms >= 15000) {
+    if (s.quiet >= 1500 || s.ms >= 30000) {
         const chunks = s.chunks;
         const realSpeech = s.loudMs >= 150; // a short burst of noise is not sent (Whisper "hears" words in noise)
         s.active = false; s.chunks = []; s.loud = 0; s.quiet = 0; s.ms = 0; s.loudMs = 0;
         if (realSpeech) { call.pending.push(chunks); nextTurn(call); }
+        // It was only noise, but a dropped turn is waiting: answer what they said before
+        else if (call.carry && !call.busy && !call.pending.length) { call.pending.push(null); nextTurn(call); }
     }
 }
 

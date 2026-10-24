@@ -30,7 +30,7 @@ import redis from "../config/redis.js";
 import { normalizeWhatsappNumber } from "./ai-feature-limits.js";
 import { hasEnoughTokens, deductTokens } from "./ai-credits.service.js";
 import { chargeableTokens } from "./ai-token-pricing.js";
-import { unreadMessages, noteMessagesRead } from "./whatsapp-inbox.service.js";
+import { unreadMessages, noteMessagesRead, forgetMessagesBefore } from "./whatsapp-inbox.service.js";
 import {
     sendWhatsappText, markWhatsappRead, findCaller, numberInUse, runAgentTask, openProject, keepProjectOpen,
 } from "./whatsapp-call.service.js";
@@ -138,6 +138,39 @@ async function closingMessage(user, task, { closed = false } = {}) {
     return String(out?.answer || "").replace(/^```[a-z]*\n?|```$/g, "").replace(/^["']|["']$/g, "").trim().slice(0, 1500);
 }
 
+// ─── Step log and task end (owner's rule, 2026-10-24) ─────────
+// The backend writes every step the Agent does to the task in MongoDB as it works. When the backend sends
+// "Task completed", it marks the task ended in MongoDB and wipes its WhatsApp messages from the AI's memory.
+
+const taskBase = (user, origin, since) => ({
+    user_id: user._id, organization_id: user.organization_id || null,
+    phone: normalizeWhatsappNumber(user?.metadata?.whatsappPhone) || null, origin: origin === "whatsapp" ? "whatsapp" : "chat",
+    work_started_at: new Date(), last_seen_msg_at: Date.now() - 2 * 60 * 1000, ...(since ? { messages_since: new Date(since) } : {}),
+});
+
+export async function logStep({ user, sessionId, origin, text, since = null }) {
+    if (!sessionId || !text) return;
+    await AgentTask.updateOne({ session_id: sessionId }, {
+        $push: { step_log: { $each: [{ at: new Date(), text: String(text).slice(0, 300) }], $slice: -200 } },
+        $setOnInsert: { ...taskBase(user, origin, since), status: "working" },
+    }, { upsert: true }).catch((e) => console.error("[agent task] step log failed:", e.message));
+}
+
+// WhatsApp messages older than this belong to other tasks (0: no limit)
+export async function messagesSinceFor(sessionId) {
+    if (!sessionId) return 0;
+    const t = await AgentTask.findOne({ session_id: sessionId }).select("messages_since work_started_at").lean().catch(() => null);
+    if (!t) return 0;
+    return new Date(t.messages_since || new Date(t.work_started_at).getTime() - 10 * 60 * 1000).getTime();
+}
+
+async function closeTask(task, report = "") {
+    await AgentTask.updateOne({ _id: task._id }, {
+        $set: { status: "done", wake_at: null, heartbeat_at: null, note: "", completed_at: new Date(), ...(report ? { report } : {}) },
+    });
+    if (task.phone) await forgetMessagesBefore(task.phone);
+}
+
 // ─── The sleep tool ───────────────────────────────────────────
 
 export async function sleepFromTool({ user, sessionId, projectId, origin, question, args }) {
@@ -191,6 +224,8 @@ async function endTask(task, answer = "") {
     if (!ended) return;
     console.log(`[agent task] ${task._id} ended after 48 hours`);
     if (!task.phone) return;
+    // Over: its WhatsApp messages are forgotten (a new task never sees them)
+    await forgetMessagesBefore(task.phone);
     // It was only waiting for the user's reply (no time set): closed, nothing failed
     if (task.status === "sleeping" && !task.wake_at && task.wake_on_reply) {
         const user = await User.findById(task.user_id).select("_id organization_id").catch(() => null);
@@ -245,6 +280,9 @@ export async function afterRun({ user, phone, sessionId, projectId, projectName,
         });
     }
     if (sessionId && !task.session_id) task.session_id = sessionId;
+    // A task first made by the step log has no goal or project yet
+    if (!task.goal && goal) task.goal = String(goal).slice(0, 8000);
+    if (!task.project_id && projectId) Object.assign(task, { project_id: String(projectId), project_name: projectName || null });
     if (result.answer) task.last_answer = String(result.answer).slice(-4000);
     const say = (text) => (task.origin === "whatsapp" && task.phone && text ? sendWhatsappText(task.phone, text) : null);
     task.heartbeat_at = null;
@@ -286,16 +324,19 @@ export async function afterRun({ user, phone, sessionId, projectId, projectName,
         wakeTask(task._id, "continue").catch((e) => console.error("[agent task] continue failed:", e.message));
         return;
     }
-    Object.assign(task, {
-        status: verdict === "done" ? "done" : "sleeping", wake_at: null, wake_on_reply: true,
-        note: verdict === "done" ? "" : "You asked the user something. Go on when they answer.",
-    });
+    if (verdict === "done") {
+        // Owner's rule: the backend ends the task when "Task completed" is sent. In MongoDB it is marked ended
+        // (done, completed_at, report), and its WhatsApp messages are wiped from the AI's memory for good.
+        await task.save();
+        await closeTask(task, short(result.answer));
+        const repeat = alreadySent(result.answer, sends, task.phone);
+        await say(`${repeat ? "" : `${short(result.answer)}\n\n`}✅ *Task completed.*${chatLink(task.session_id)}`);
+        return;
+    }
+    Object.assign(task, { status: "sleeping", wake_at: null, wake_on_reply: true, note: "You asked the user something. Go on when they answer." });
     await task.save();
-    // Done: the user is told clearly that the task is completed, with the chat link. What the Agent already sent
-    // them itself on WhatsApp is not sent a second time (then only the "completed" line goes).
-    const repeat = alreadySent(result.answer, sends, task.phone);
-    if (verdict === "done") await say(`${repeat ? "" : `${short(result.answer)}\n\n`}✅ *Task completed.*${chatLink(task.session_id)}`);
-    else if (!repeat) await say(short(result.answer));
+    // What the Agent already sent them itself on WhatsApp is not sent a second time
+    if (!alreadySent(result.answer, sends, task.phone)) await say(short(result.answer));
     return wakeIfUnread(task._id);
 }
 
@@ -365,7 +406,7 @@ export async function wakeTask(taskId, reason) {
             if (desk.text && !(desk.action === "answer" && desk.taskDone && !newWork)) await sendWhatsappText(task.phone, desk.text);
             if (desk.action === "answer" && desk.taskDone && !newWork) {
                 // The user said it is finished: close the task and tell them clearly
-                await AgentTask.updateOne({ _id: task._id }, { $set: { status: "done", wake_at: null, heartbeat_at: null, note: "" } });
+                await closeTask(task);
                 const recap = await closingMessage(user, task);
                 await sendWhatsappText(task.phone, `${recap ? `${recap}\n\n` : ""}✅ *Task completed.*${chatLink(task.session_id)}`);
                 return;
@@ -399,6 +440,8 @@ export async function wakeTask(taskId, reason) {
         }, task.session_id, (stepText, info) => {
             if (!stepText.startsWith("sleep_until")) steps++;
             if (info?.name === "send_whatsapp_message") sends.push(info);
+            // Owner's rule: every step is written to the task in MongoDB
+            AgentTask.updateOne({ _id: task._id }, { $push: { step_log: { $each: [{ at: new Date(), text: stepText.slice(0, 300) }], $slice: -200 } } }).catch(() => {});
         }, { taskOrigin: task.origin });
         await afterRun({
             user, phone: task.phone, sessionId: result.sessionId || task.session_id, projectId: task.project_id,

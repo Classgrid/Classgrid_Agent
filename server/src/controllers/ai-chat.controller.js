@@ -3547,7 +3547,9 @@ If they ask whether their college/school uses Classgrid, say you can't see that 
                             if (!phone) return "FAILED: This account has no verified WhatsApp number, so there are no WhatsApp messages to read.";
                             const { readRecentMessages } = await import('../services/whatsapp-inbox.service.js');
                             const count = Math.max(1, Math.min(20, Number(args?.count) || 5));
-                            const items = await readRecentMessages(phone, count);
+                            // Only this task's messages (older ones belong to other tasks)
+                            const { messagesSinceFor } = await import('../services/agent-task.service.js');
+                            const items = await readRecentMessages(phone, count, await messagesSinceFor(isIncognito ? null : sessionId));
                             if (!items.length) return "No WhatsApp messages from the user in the last 3 days.";
                             const { noteMessagesRead } = await import('../services/whatsapp-inbox.service.js');
                             noteMessagesRead(phone, items);

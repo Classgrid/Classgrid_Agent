@@ -97,16 +97,26 @@ async function withFiles(items) {
     return items;
 }
 
-async function inbox(number) {
-    const raw = await redis.lrange(INBOX_KEY(number), 0, KEEP - 1).catch(() => []);
-    return raw.map((r) => { try { return JSON.parse(r); } catch { return null; } }).filter(Boolean);
+// Owner's rule: when a task is completed it is gone from the AI's mind. Messages sent before that moment are
+// never given to the AI again.
+const CUTOFF_KEY = (number) => `wa:cutoff:${number}`;
+export async function forgetMessagesBefore(phone, ms = Date.now()) {
+    const number = normalizeWhatsappNumber(phone);
+    if (number) await redis.set(CUTOFF_KEY(number), String(ms), "EX", TTL_S).catch(() => {});
 }
 
-// The user's latest WhatsApp messages to Classgrid (newest first), with files turned into links
-export async function readRecentMessages(phone, count = 5) {
+async function inbox(number) {
+    const raw = await redis.lrange(INBOX_KEY(number), 0, KEEP - 1).catch(() => []);
+    const cutoff = Number(await redis.get(CUTOFF_KEY(number)).catch(() => 0)) || 0;
+    return raw.map((r) => { try { return JSON.parse(r); } catch { return null; } }).filter((m) => m && m.at > cutoff);
+}
+
+// The user's latest WhatsApp messages to Classgrid (newest first), with files turned into links.
+// sinceMs: only messages from this task's time (older ones belong to other tasks)
+export async function readRecentMessages(phone, count = 5, sinceMs = 0) {
     const number = normalizeWhatsappNumber(phone);
     if (!number) return [];
-    return withFiles((await inbox(number)).slice(0, Math.max(1, Math.min(count, KEEP))));
+    return withFiles((await inbox(number)).filter((m) => m.at >= sinceMs).slice(0, Math.max(1, Math.min(count, KEEP))));
 }
 
 // Waits for the user's next WhatsApp message after `sinceMs` (checks every 3 s, at most `timeoutMs`, stops when
