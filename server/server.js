@@ -152,6 +152,10 @@ setTimeout(async () => {
 
 server.listen(PORT, () => {
   console.log(`🔥 Server running at http://localhost:${PORT} (Socket.io Native)`);
+  // WhatsApp call tasks stopped by a restart are continued (main server only, never on local dev)
+  if (process.env.CG_LOCAL_DEV !== "1") {
+    import("./src/services/whatsapp-call.service.js").then((m) => m.startCallJobResumer()).catch((e) => console.error("[WA call] task resumer failed to start:", e.message));
+  }
 });
 
 // ─────────────────────────────────────────────────────────

@@ -20,6 +20,7 @@
 // audio is 48 kHz Opus. UDP 10000-60000 is open on the server for it.
 // Off switch: WHATSAPP_CALLS_DISABLED=true leaves every call unanswered (as before this feature).
 
+import crypto from "crypto";
 import jwt from "jsonwebtoken";
 import User from "../models/User.js";
 import redis from "../config/redis.js";
@@ -413,26 +414,104 @@ async function afterCall(call) {
             ? `Do these tasks in this order:\n${call.tasks.map((t, i) => `${i + 1}. ${t.task}`).join("\n")}`
             : `The user called Classgrid on WhatsApp. Here is the call:\n${call.transcript.join("\n")}\n\nDo what they asked.`;
     const project = call.tasks.find((t) => t.project)?.project || null;
-    let stopKeepOpen = () => {};
-    if (project) {
-        // Open the project like the Project Mode page does, so the Agent works inside its files
-        const opened = await openProject(call.user, project._id);
-        if (opened.ok) stopKeepOpen = keepProjectOpen(call.user._id);
-        else task += `\n\n(The project "${project.name}" could not be opened in the editor: ${opened.error}. Work without its files and tell the user.)`;
-    }
-    const where = project ? ` in your project "${project.name}"` : "";
     // Owner's rule: before the final email or WhatsApp, the Agent checks the user's latest WhatsApp messages
     task += "\n\n(The user may send follow-ups or files in the Classgrid WhatsApp chat while you work. Before you send the final result by email or WhatsApp, read their latest WhatsApp messages with read_whatsapp_messages and use anything new they added.)";
-    const result = await runAgentTask(call.user, `[From a WhatsApp call]\n${task}`, project?._id, (sessionId) =>
-        sendWhatsappText(call.from, `Got it. Classgrid AI is working on it now${where}. I'll send you the result here when it's done.\n\nFollow along: ${CHAT_URL}/agent/${sessionId}`))
-        .finally(() => stopKeepOpen());
-    const link = result.sessionId ? `\n\nFull result: ${CHAT_URL}/agent/${result.sessionId}` : "";
-    if (!result.answer) {
-        await sendWhatsappText(call.from, `Classgrid AI could not finish this task${result.error ? `: ${result.error}` : "."}${link}`);
-        return;
+    // The answer is sent to this same user on WhatsApp: talk to them directly ("you"), not about them
+    const question = `[From a WhatsApp call. The person reading your answer is the user who called: your final answer is sent to them on WhatsApp, so talk to them directly ("you"), not about them.]\n${task}`;
+    await runCallJob({
+        id: call.id, userId: String(call.user._id), from: call.from, question,
+        projectId: project ? String(project._id) : null, projectName: project?.name || null, sessionId: null, attempts: 0,
+    });
+}
+
+// ─── Call tasks survive server restarts ───────────────────────
+// Every task from a call is saved in Redis while it runs. A deploy or crash restarts the server and stops the run;
+// the server then finds the unfinished task and continues it in the same chat. A running task renews its lock every
+// minute, so only tasks whose server is gone are picked up (and only once). At most 3 tries.
+const JOB_KEY = (id) => `wa:job:${id}`;
+const JOB_LOCK = (id) => `wa:job-lock:${id}`;
+const JOBS = "wa:jobs";
+const JOB_TTL_S = 2 * 24 * 60 * 60;
+const LOCK_TTL_S = 300;
+const MAX_TRIES = 3;
+// Renew or free the lock only while it is still ours
+const RENEW_IF_MINE = "if redis.call('get', KEYS[1]) == ARGV[1] then return redis.call('expire', KEYS[1], ARGV[2]) else return 0 end";
+const DEL_IF_MINE = "if redis.call('get', KEYS[1]) == ARGV[1] then return redis.call('del', KEYS[1]) else return 0 end";
+
+async function runCallJob(job, { resumed = false, lockToken = null } = {}) {
+    const token = lockToken || crypto.randomUUID();
+    if (!lockToken) {
+        const took = await redis.set(JOB_LOCK(job.id), token, "EX", LOCK_TTL_S, "NX").catch(() => "OK");
+        if (!took) return; // another server is already running it
     }
-    const short = result.answer.length > 1500 ? `${result.answer.slice(0, 1500).trimEnd()}…` : result.answer;
-    await sendWhatsappText(call.from, `${short}${link}`);
+    const save = () => redis.set(JOB_KEY(job.id), JSON.stringify(job), "EX", JOB_TTL_S).catch(() => {});
+    const forget = async () => { await redis.del(JOB_KEY(job.id)).catch(() => {}); await redis.srem(JOBS, job.id).catch(() => {}); };
+    job.attempts = (job.attempts || 0) + 1;
+    await save();
+    await redis.sadd(JOBS, job.id).catch(() => {});
+    const heartbeat = setInterval(() => redis.eval(RENEW_IF_MINE, 1, JOB_LOCK(job.id), token, LOCK_TTL_S).catch(() => {}), 60 * 1000);
+    let stopKeepOpen = () => {};
+    try {
+        if (job.attempts > MAX_TRIES) {
+            await sendWhatsappText(job.from, `Sorry, Classgrid AI could not finish your task after ${MAX_TRIES} tries.${job.sessionId ? `\n\nWhat it did so far: ${CHAT_URL}/agent/${job.sessionId}` : ""}`);
+            await forget();
+            return;
+        }
+        const user = await User.findById(job.userId).select("-password -verificationToken");
+        if (!user) { await forget(); return; }
+        let question = job.question;
+        if (job.projectId) {
+            // Open the project like the Project Mode page does, so the Agent works inside its files
+            const opened = await openProject(user, job.projectId);
+            if (opened.ok) stopKeepOpen = keepProjectOpen(user._id);
+            else question += `\n\n(The project "${job.projectName}" could not be opened in the editor: ${opened.error}. Work without its files and tell the user.)`;
+        }
+        if (resumed) {
+            question = `[The Classgrid server restarted while you were working on this task, so you stopped partway. Look at what is already done in this chat and finish the rest. Don't repeat finished steps, for example don't send the same email or WhatsApp message again.]\n${question}`;
+        }
+        const where = job.projectName ? ` in your project "${job.projectName}"` : "";
+        const result = await runAgentTask(user, question, job.projectId, (sessionId) => {
+            if (job.sessionId) return;
+            job.sessionId = sessionId;
+            save();
+            sendWhatsappText(job.from, `Got it. Classgrid AI is working on it now${where}. I'll send you the result here when it's done.\n\nFollow along: ${CHAT_URL}/agent/${sessionId}`);
+        }, job.sessionId);
+        const sessionId = result.sessionId || job.sessionId;
+        const link = sessionId ? `\n\nFull result: ${CHAT_URL}/agent/${sessionId}` : "";
+        if (!result.answer) {
+            await sendWhatsappText(job.from, `Classgrid AI could not finish this task${result.error ? `: ${result.error}` : "."}${link}`);
+        } else {
+            const short = result.answer.length > 1500 ? `${result.answer.slice(0, 1500).trimEnd()}…` : result.answer;
+            await sendWhatsappText(job.from, `${short}${link}`);
+        }
+        await forget();
+    } finally {
+        clearInterval(heartbeat);
+        stopKeepOpen();
+        await redis.eval(DEL_IF_MINE, 1, JOB_LOCK(job.id), token).catch(() => {});
+    }
+}
+
+// Main server only: every 2 minutes, continue call tasks whose server stopped (no live lock)
+export function startCallJobResumer() {
+    const check = async () => {
+        try {
+            for (const id of await redis.smembers(JOBS)) {
+                const raw = await redis.get(JOB_KEY(id));
+                if (!raw) { await redis.srem(JOBS, id); continue; }
+                const token = crypto.randomUUID();
+                const took = await redis.set(JOB_LOCK(id), token, "EX", LOCK_TTL_S, "NX");
+                if (!took) continue;
+                const job = JSON.parse(raw);
+                console.log(`[WA call] Continuing task ${id} after a restart (try ${(job.attempts || 0) + 1}, chat ${job.sessionId || "not made yet"})`);
+                runCallJob(job, { resumed: true, lockToken: token }).catch((e) => console.error(`[WA call] task ${id} failed:`, e.message));
+            }
+        } catch (e) {
+            console.error("[WA call] task check failed:", e.message);
+        }
+    };
+    setTimeout(check, 30 * 1000);
+    setInterval(check, 2 * 60 * 1000);
 }
 
 // A live question during the call: the full Agent answers (all tools and plugins of the account). All live questions
