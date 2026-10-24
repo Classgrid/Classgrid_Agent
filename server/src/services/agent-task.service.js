@@ -141,7 +141,8 @@ async function saveTaskMessages(task, items) {
     if (!items?.length) return;
     const log = await taskLogFor(task);
     const have = new Set((log.whatsapp_messages || []).map((m) => m.wa_id));
-    const till = task.phone ? await readUpTo(task.phone) : 0;
+    // (only WhatsApp messages can already have been read by the big model's WhatsApp tools; emails come in unread)
+    const till = task.phone && items.some((m) => m.type !== "email") ? await readUpTo(task.phone) : 0;
     const fresh = items.filter((m) => m.id && !have.has(m.id) && m.type !== "reaction").map((m) => toLogItem(m, till));
     if (fresh.length) await TaskLog.updateOne({ _id: log._id }, { $push: { whatsapp_messages: { $each: fresh, $slice: -200 } } });
 }
@@ -435,6 +436,7 @@ const WHY = {
     tokens: "the user's AI tokens are back",
     continue: "your last run ended before the task was finished",
     restart: "the Classgrid server restarted while you were working",
+    email: "the user sent you a new email at agent@classgrid.in (it is in the messages below, with any attachments as links)",
 };
 
 function messageLines(msgs) {
@@ -456,7 +458,7 @@ export async function wakeTask(taskId, reason) {
         if (!user) return AgentTask.updateOne({ _id: task._id }, { $set: { status: "ended", heartbeat_at: null } });
         // The user's new messages come from the task's record (the small model's side saved them there)
         const msgs = await unreadInLog(task);
-        if (reason === "reply" && !msgs.length) return putBack();
+        if ((reason === "reply" || reason === "email") && !msgs.length) return putBack();
         // A finished (or ended) task that gets a new message starts new work, with its own 48 hours
         const newWork = was === "done" || was === "ended";
         if (newWork && reason !== "reply") return putBack();
@@ -626,4 +628,67 @@ export function startAgentTaskAlarm() {
     const tick = () => runAlarm().catch((e) => console.error("[agent task] alarm failed:", e.message));
     setTimeout(tick, 60 * 1000);
     setInterval(tick, ALARM_MS);
+}
+
+// ─── Emails to Classgrid AI's own inbox (agent@classgrid.in), owner's design ─
+// Works the same as a WhatsApp message: an email from a Classgrid user's account email gets a short positive reply
+// from the small model (by email), goes into the user's open task (or starts a new one), and wakes the big model.
+
+const escapeRx = (s) => String(s).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+async function onAgentEmail(email) {
+    const address = String(email.fromAddress || "").trim().toLowerCase();
+    if (!address || address.endsWith("@classgrid.in") && address.startsWith("agent@")) return;
+    const user = await User.findOne({ email: new RegExp(`^${escapeRx(address)}$`, "i") }).select("-password -verificationToken");
+    if (!user) return; // not a Classgrid user
+    const phone = normalizeWhatsappNumber(user.metadata?.whatsappPhone) || null;
+    let task = await AgentTask.findOne({ user_id: user._id, status: { $in: OPEN } }).sort({ updatedAt: -1 });
+    const files = (email.attachments || []).map((a) => a.url ? `\nAttachment (${a.name}): ${a.url}` : `\n(attachment ${a.name} could not be loaded: ${a.error})`).join("");
+    const item = { id: `email:${email.id}`, at: email.at, type: "email", text: `Subject: ${email.subject}\n${String(email.text || "").slice(0, 8000)}${files}` };
+    // 1. The small model's reply, by email
+    const reply = (await frontDesk(user, [item], !task)) || "Got it! Your task is updated and I'm on it.";
+    const { sendEmail } = await import("./aws-ses.service.js");
+    const safe = reply.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+    await sendEmail({
+        to: user.email, subject: /^re:/i.test(email.subject) ? email.subject : `Re: ${email.subject}`, text: reply,
+        html: `<div style="white-space:pre-wrap;font-family:Arial,sans-serif;font-size:14px">${safe}</div>`,
+        fromName: "Classgrid AI", fromEmail: "agent@classgrid.in",
+    }).catch((e) => console.error("[agent task] email reply failed:", e.message));
+    // 2. No open task: a new task starts with this email
+    if (!task) {
+        task = await AgentTask.create({
+            user_id: user._id, organization_id: user.organization_id || null, phone, origin: phone ? "whatsapp" : "chat",
+            status: "sleeping", wake_on_reply: true, work_started_at: new Date(), last_seen_msg_at: Date.now(),
+        });
+        console.log(`[agent task] email from ${address}: new task ${task._id}`);
+    }
+    // 3. Saved in the task's record for the big model, then passed to it (a running one gets it after its run)
+    await saveTaskMessages(task, [item]);
+    await logSmall(task, "user", reply);
+    if (task.status === "working" && task.heartbeat_at && task.heartbeat_at >= new Date(Date.now() - STALE_MS)) return;
+    if (task.status === "working") await AgentTask.updateOne({ _id: task._id, status: "working" }, { $set: { status: "sleeping", heartbeat_at: null } });
+    await wakeTask(task._id, "email");
+}
+
+async function checkAgentEmails() {
+    const took = await redis.set("agent-mail-watch", String(process.pid), "EX", 40, "NX").catch(() => "OK");
+    if (!took) return;
+    const { isAgentMailConfigured, searchAgentMail } = await import("./agent-mail.service.js");
+    if (!isAgentMailConfigured()) return;
+    // From the last check (the first time: the last 5 minutes); emails already handled are skipped
+    const since = Number(await redis.get("agent-mail:since").catch(() => 0)) || Date.now() - 5 * 60 * 1000;
+    const emails = await searchAgentMail({ fromMs: since, count: 20, markAs: "read" });
+    for (const e of [...emails].reverse()) {
+        const fresh = await redis.set(`agent-mail:seen:${e.id}`, "1", "EX", 7 * 24 * 60 * 60, "NX").catch(() => "OK");
+        if (!fresh) continue;
+        await onAgentEmail(e).catch((err) => console.error("[agent task] email handling failed:", err.message));
+    }
+    const newest = Math.max(since, ...emails.map((e) => e.at));
+    await redis.set("agent-mail:since", String(newest - 60 * 1000)).catch(() => {});
+}
+
+export function startAgentEmailWatcher() {
+    const tick = () => checkAgentEmails().catch((e) => console.error("[agent task] email check failed:", e.message));
+    setTimeout(tick, 30 * 1000);
+    setInterval(tick, 45 * 1000);
 }

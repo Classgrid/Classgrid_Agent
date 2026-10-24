@@ -148,7 +148,7 @@ export async function searchAgentMail({ fromEmail = "", fromMs = 0, toMs = Infin
         if (words && !body.toLowerCase().includes(words) && !String(m.subject || "").toLowerCase().includes(words)) continue;
         const hasAttachment = m.hasAttachment === "1" || m.hasAttachment === true;
         out.push({
-            id: String(m.messageId), folderId: String(m.folderId), at: m.at, folder: m.folderName, from: m.sender || m.fromAddr,
+            id: String(m.messageId), folderId: String(m.folderId), at: m.at, folder: m.folderName, from: m.sender || m.fromAddr, fromAddress: m.fromAddr,
             to: m.toAddress || "agent@classgrid.in", subject: m.subject || "(no subject)", text: body.slice(0, 20000),
             read: String(m.status) === "1", hasAttachment,
             attachments: hasAttachment ? await attachmentsOf(m.folderId, m.messageId).catch((e) => [{ name: "attachments", error: e.message }]) : [],
