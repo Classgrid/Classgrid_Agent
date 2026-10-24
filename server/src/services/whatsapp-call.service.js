@@ -545,13 +545,43 @@ async function runAgentTask(user, question, projectId, onSession, sessionId = nu
     return { sessionId, answer: String(answer || streamed).trim(), error };
 }
 
-function filterAnswerSdp(sdp) {
+// The server's public IPv4, read from AWS (EC2 instance metadata, IMDSv2). Put in the answer as a candidate, so
+// WhatsApp always gets an address it can reach, even when the STUN lookup is slow. Kept once found.
+let publicIp = null;
+async function serverPublicIp() {
+    if (publicIp) return publicIp;
+    try {
+        const token = await fetch("http://169.254.169.254/latest/api/token", {
+            method: "PUT", headers: { "X-aws-ec2-metadata-token-ttl-seconds": "21600" }, signal: AbortSignal.timeout(1000),
+        }).then((r) => (r.ok ? r.text() : ""));
+        const ip = await fetch("http://169.254.169.254/latest/meta-data/public-ipv4", {
+            headers: token ? { "X-aws-ec2-metadata-token": token } : {}, signal: AbortSignal.timeout(1000),
+        }).then((r) => (r.ok ? r.text() : ""));
+        if (/^\d+\.\d+\.\d+\.\d+$/.test(ip.trim())) publicIp = ip.trim();
+    } catch { /* not on AWS (local dev) */ }
+    return publicIp;
+}
+
+function filterAnswerSdp(sdp, publicIpv4) {
     // Only UDP candidates that Meta can reach (no TCP, no loopback)
-    return sdp.split("\r\n").filter((line) => {
+    const lines = sdp.split("\r\n").filter((line) => {
         if (!line.startsWith("a=candidate:")) return true;
         return / udp /i.test(line) && !/ (127\.0\.0\.1|::1) /.test(line);
-    }).join("\r\n");
+    });
+    // The public address as an extra candidate (same port as the server's own UDP candidate), if it isn't there yet
+    if (publicIpv4 && !lines.some((l) => l.startsWith("a=candidate:") && l.includes(` ${publicIpv4} `))) {
+        const host = lines.findIndex((l) => l.startsWith("a=candidate:") && / udp /i.test(l) && / typ host/.test(l) && /\d+\.\d+\.\d+\.\d+/.test(l.split(" ")[4] || ""));
+        if (host !== -1) {
+            const p = lines[host].split(" ");
+            lines.splice(host + 1, 0, `a=candidate:${p[0].slice(12)}9 ${p[1]} udp 1686052607 ${publicIpv4} ${p[5]} typ srflx raddr ${p[4]} rport ${p[5]} generation 0`);
+        }
+    }
+    return lines.join("\r\n");
 }
+
+// Short list of the candidates in an SDP (for the log when a call's connection fails)
+const candidateSummary = (sdp) => sdp.split("\r\n").filter((l) => l.startsWith("a=candidate:"))
+    .map((l) => { const p = l.split(" "); return `${p[7] || "?"} ${p[2] || ""} ${p[4] || ""}:${p[5] || ""}`; }).join(", ") || "none";
 
 export async function answerCall({ id, from, sdp, user, tokenSource }) {
     const { RTCPeerConnection, nonstandard } = await loadWrtc();
@@ -571,8 +601,19 @@ export async function answerCall({ id, from, sdp, user, tokenSource }) {
         call.sink = new nonstandard.RTCAudioSink(e.track);
         call.sink.ondata = (d) => listen(call, mono(d.samples, d.channelCount || 1));
     };
+    // Each connection step with its time, written to the log if the connection fails
+    const steps = [];
+    const step = (what) => steps.push(`${((Date.now() - call.startedAt) / 1000).toFixed(1)}s ${what}`);
+    let answer = "";
+    pc.oniceconnectionstatechange = () => step(`ice ${pc.iceConnectionState}`);
     pc.onconnectionstatechange = () => {
-        if (["failed", "closed"].includes(pc.connectionState)) endCall(id, `connection ${pc.connectionState}`);
+        step(`connection ${pc.connectionState}`);
+        if (["failed", "closed"].includes(pc.connectionState)) {
+            if (pc.connectionState === "failed") {
+                console.error(`[WA call] ${id} connection failed. Steps: ${steps.join(" | ")}. Our candidates: ${candidateSummary(answer)}. WhatsApp candidates: ${candidateSummary(sdp)}`);
+            }
+            endCall(id, `connection ${pc.connectionState}`);
+        }
     };
 
     await pc.setRemoteDescription({ type: "offer", sdp });
@@ -583,7 +624,8 @@ export async function answerCall({ id, from, sdp, user, tokenSource }) {
         pc.onicegatheringstatechange = () => pc.iceGatheringState === "complete" && resolve();
         setTimeout(resolve, 3000);
     });
-    const answer = filterAnswerSdp(pc.localDescription.sdp);
+    step(`answer ready (gathering ${pc.iceGatheringState})`);
+    answer = filterAnswerSdp(pc.localDescription.sdp, await serverPublicIp());
 
     await callAction(id, "pre_accept", answer);
     await callAction(id, "accept", answer);
