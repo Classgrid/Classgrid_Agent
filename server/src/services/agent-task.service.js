@@ -352,6 +352,8 @@ function alreadySent(answer, sends, phone) {
 export async function afterRun({ user, phone, sessionId, projectId, projectName, goal, origin, result, steps = 0, runStartedAt, taskId = null, latest = "", sends = [] }) {
     const started = runStartedAt || new Date();
     let task = taskId ? await AgentTask.findById(taskId) : null;
+    // Its task was deleted from MongoDB: nothing is sent and nothing is made again
+    if (taskId && !task) { console.log(`[agent task] ${taskId} was deleted, nothing more is done`); return; }
     if (!task && sessionId) task = await AgentTask.findOne({ session_id: sessionId });
     if (task && sessionId && !task.session_id) await setTaskSession(task._id, sessionId);
     if (!task) {

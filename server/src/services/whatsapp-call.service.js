@@ -622,7 +622,15 @@ async function runCallJob(job, { resumed = false, lockToken = null } = {}) {
         markBusy(job.from);
     }, 60 * 1000);
     let stopKeepOpen = () => {};
+    const { default: AgentTask } = await import("../models/AgentTask.js");
+    // The task was deleted from MongoDB: its job stops for good (no restart, no messages, nothing made again)
+    const taskGone = async () => !!job.taskId && !(await AgentTask.exists({ _id: job.taskId }).catch(() => true));
     try {
+        if (await taskGone()) {
+            console.log(`[WA call] task ${job.id} was deleted, its job stops`);
+            await forget();
+            return;
+        }
         if (job.attempts > MAX_TRIES) {
             await sendWhatsappText(job.from, `Sorry, Classgrid AI could not finish your task after ${MAX_TRIES} tries.${job.sessionId ? `\n\nWhat it did so far: ${CHAT_URL}/agent/${job.sessionId}` : ""}`);
             await forget();
@@ -655,8 +663,12 @@ async function runCallJob(job, { resumed = false, lockToken = null } = {}) {
             });
             await save();
         }
-        const { default: AgentTask } = await import("../models/AgentTask.js");
-        const taskBeat = setInterval(() => AgentTask.updateOne({ _id: job.taskId, status: "working" }, { $set: { heartbeat_at: new Date() } }).catch(() => {}), 60 * 1000);
+        // Every minute: the task is marked as running, and if it was deleted meanwhile the run is stopped
+        const stop = new AbortController();
+        const taskBeat = setInterval(async () => {
+            if (await taskGone()) { stop.abort(); return; }
+            AgentTask.updateOne({ _id: job.taskId, status: "working" }, { $set: { heartbeat_at: new Date() } }).catch(() => {});
+        }, 60 * 1000);
         const result = await runAgentTask(user, question, job.projectId, (sessionId) => {
             tasks.setTaskSession(job.taskId, sessionId);
             if (job.sessionId) return;
@@ -670,7 +682,12 @@ async function runCallJob(job, { resumed = false, lockToken = null } = {}) {
             if (info?.name === "send_whatsapp_message") sends.push(info);
             tasks.logTaskStep(job.taskId, info);
             save();
-        }, { taskOrigin: "whatsapp" }).finally(() => clearInterval(taskBeat));
+        }, { taskOrigin: "whatsapp" }, stop.signal).finally(() => clearInterval(taskBeat));
+        if (result.aborted || await taskGone()) {
+            console.log(`[WA call] task ${job.id} was deleted during its run, its job stops`);
+            await forget();
+            return;
+        }
         // What happens next (send the answer, wait for the user, keep working, retry later) is decided in one
         // place, the same for every long task
         await tasks.afterRun({
@@ -793,9 +810,20 @@ export function keepProjectOpen(userId) {
 // chat as when they use chat.classgrid.in). The route makes the new chat and tells its id (session_info).
 // Returns { sessionId, answer, error }.
 // quota: set when the user's AI tokens ran out ({ resetDate }), so the task can wait for them to come back.
-export async function runAgentTask(user, question, projectId, onSession, sessionId = null, onStep = null, extraBody = {}) {
+// signal: stops the run (its task was deleted); a stopped run returns { aborted: true }
+export async function runAgentTask(user, question, projectId, onSession, sessionId = null, onStep = null, extraBody = {}, signal = null) {
+    try {
+        return await runAgentTaskOnce(user, question, projectId, onSession, sessionId, onStep, extraBody, signal);
+    } catch (e) {
+        if (signal?.aborted) return { sessionId, answer: "", error: "the task was deleted", aborted: true };
+        throw e;
+    }
+}
+
+async function runAgentTaskOnce(user, question, projectId, onSession, sessionId, onStep, extraBody, signal) {
     const port = process.env.PORT || 3000;
     const res = await fetch(`http://127.0.0.1:${port}/api/ai/ask`, {
+        ...(signal ? { signal } : {}),
         method: "POST",
         headers: { Authorization: `Bearer ${userToken(user)}`, "Content-Type": "application/json" },
         // projectId: the chat is saved inside that Project Mode project
