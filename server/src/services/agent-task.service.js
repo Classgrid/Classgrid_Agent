@@ -731,8 +731,9 @@ async function checkAgentEmails() {
         if (!fresh) continue;
         await onAgentEmail(e).catch((err) => console.error("[agent task] email handling failed:", err.message));
     }
-    const newest = Math.max(since, ...emails.map((e) => e.at));
-    await redis.set("agent-mail:since", String(newest - 60 * 1000)).catch(() => {});
+    // Moves forward only when a new email came in; with none, the time stays (it never slides back to old emails)
+    if (emails.length) await redis.set("agent-mail:since", String(Math.max(since, Math.max(...emails.map((e) => e.at)) - 60 * 1000))).catch(() => {});
+    else if (!(await redis.get("agent-mail:since").catch(() => null))) await redis.set("agent-mail:since", String(since)).catch(() => {});
 }
 
 export function startAgentEmailWatcher() {
