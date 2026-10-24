@@ -81,15 +81,40 @@ async function mediaToCdn(media) {
     return publicUrl;
 }
 
-// The user's latest WhatsApp messages to Classgrid (newest first), with files turned into links
-export async function readRecentMessages(phone, count = 5) {
-    const number = normalizeWhatsappNumber(phone);
-    if (!number) return [];
+async function inbox(number, count = KEEP) {
     const raw = await redis.lrange(INBOX_KEY(number), 0, Math.max(1, Math.min(count, KEEP)) - 1).catch(() => []);
-    const items = raw.map((r) => { try { return JSON.parse(r); } catch { return null; } }).filter(Boolean);
+    return raw.map((r) => { try { return JSON.parse(r); } catch { return null; } }).filter(Boolean);
+}
+
+async function withFiles(items) {
     for (const item of items) {
         if (!item.media) continue;
         try { item.fileUrl = await mediaToCdn(item.media); } catch (e) { item.fileError = e.message; }
     }
     return items;
+}
+
+// The user's latest WhatsApp messages to Classgrid (newest first), with files turned into links
+export async function readRecentMessages(phone, count = 5) {
+    const number = normalizeWhatsappNumber(phone);
+    if (!number) return [];
+    return withFiles(await inbox(number, count));
+}
+
+// Waits for the user's next WhatsApp message after `sinceMs` (checks every 3 s, at most `timeoutMs`, stops when
+// `signal` aborts). Reactions don't count as a reply. Returns the new messages (oldest first, files as links).
+export async function waitForReply(phone, sinceMs, timeoutMs, signal) {
+    const number = normalizeWhatsappNumber(phone);
+    if (!number) return [];
+    const until = Date.now() + timeoutMs;
+    const isReply = (m) => m.at > sinceMs && m.type !== "reaction";
+    while (Date.now() < until && !signal?.aborted) {
+        if ((await inbox(number)).some(isReply)) {
+            // A few seconds more, so a reply sent as several messages (text, then a file) arrives together
+            await new Promise((r) => setTimeout(r, 5000));
+            return withFiles((await inbox(number)).filter(isReply).reverse());
+        }
+        await new Promise((r) => setTimeout(r, 3000));
+    }
+    return [];
 }

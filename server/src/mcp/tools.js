@@ -944,6 +944,16 @@ export const getMcpTools = () => [
     }
   },
   {
+    name: 'wait_for_whatsapp_reply',
+    description: "Wait for the user's next WhatsApp message to Classgrid (for example after you asked them a question with send_whatsapp_message) and get it back, with any files as links. Waits up to timeout_minutes; returns that nothing came if they don't reply in time.",
+    inputSchema: {
+      type: 'object',
+      properties: {
+        timeout_minutes: { type: 'number', description: 'How long to wait (1-5 minutes, default 5).' }
+      }
+    }
+  },
+  {
     name: 'transcribe_audio',
     description: 'Convert an audio file (mp3, wav, webm) into text. STRICT RULE: NEVER pass a video file (.mp4) directly to this tool. If you have a video, you MUST first use run_code to extract it to .mp3 using ffmpeg, upload the mp3 to the CDN, and ONLY pass the new .mp3 URL to this tool!',
     inputSchema: {
