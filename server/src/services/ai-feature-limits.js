@@ -260,3 +260,39 @@ export async function handleWhatsappStatusUpdates(statuses) {
         console.warn(`[WhatsApp] Delivery failed for ${s.id} to ${s.recipient_id}: ${JSON.stringify(s.errors || [])}`);
     }
 }
+
+/** Markdown from the AI → WhatsApp formatting (*bold*, _italic_, ~strike~, plain links). Simple regexes only. */
+export function toWhatsappText(text) {
+    return String(text || "")
+        .replace(/!\[([^\]\n]*)\]\(([^)\s]+)\)/g, (_, alt, url) => (alt ? `${alt}: ${url}` : url))
+        .replace(/\[([^\]\n]+)\]\(([^)\s]+)\)/g, (_, label, url) => (label === url ? url : `${label}: ${url}`))
+        .replace(/\*\*([^*\n]+)\*\*/g, "*$1*")
+        .replace(/__([^_\n]+)__/g, "*$1*")
+        .replace(/~~([^~\n]+)~~/g, "~$1~")
+        .replace(/^#{1,6}[ \t]+(.+)$/gm, "*$1*");
+}
+
+/** WhatsApp text messages can be at most 4096 characters: split at paragraph breaks (then lines, then hard). */
+export function splitWhatsappText(text, max = 4000) {
+    const parts = [];
+    let rest = String(text || "");
+    while (rest.length > max) {
+        let cut = rest.lastIndexOf("\n\n", max);
+        if (cut < max / 2) cut = rest.lastIndexOf("\n", max);
+        if (cut < max / 2) cut = max;
+        parts.push(rest.slice(0, cut).trimEnd());
+        rest = rest.slice(cut).trimStart();
+    }
+    if (rest) parts.push(rest);
+    return parts;
+}
+
+/** The AI's private thinking is never sent to the user: <think>/<thinking> blocks, an opening tag that was never
+ *  closed (cut to the end) and a closing tag with no opening tag (everything before it is cut). */
+export function stripThinking(text) {
+    let t = String(text || "").replace(/<(thinking|think)>[\s\S]*?<\/\1>/gi, "");
+    t = t.replace(/<(thinking|think)>[\s\S]*$/i, "");
+    const close = t.search(/<\/(thinking|think)>/i);
+    if (close !== -1) t = t.slice(t.indexOf(">", close) + 1);
+    return t.trim();
+}
