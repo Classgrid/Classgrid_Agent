@@ -421,8 +421,6 @@ async function afterCall(call) {
         else task += `\n\n(The project "${project.name}" could not be opened in the editor: ${opened.error}. Work without its files and tell the user.)`;
     }
     const where = project ? ` in your project "${project.name}"` : "";
-    // Owner's rule: before the final email or WhatsApp, the Agent checks the user's latest WhatsApp messages
-    task += "\n\n(The user may send follow-ups or files in the Classgrid WhatsApp chat while you work. Before you send the final result by email or WhatsApp, read their latest WhatsApp messages with read_whatsapp_messages and use anything new they added.)";
     const result = await runAgentTask(call.user, `[From a WhatsApp call]\n${task}`, project?._id, (sessionId) =>
         sendWhatsappText(call.from, `Got it. Classgrid AI is working on it now${where}. I'll send you the result here when it's done.\n\nFollow along: ${CHAT_URL}/agent/${sessionId}`))
         .finally(() => stopKeepOpen());
@@ -545,46 +543,12 @@ async function runAgentTask(user, question, projectId, onSession, sessionId = nu
     return { sessionId, answer: String(answer || streamed).trim(), error };
 }
 
-// This server's public IPv4, asked once from the EC2 metadata service (IMDSv2)
-let publicIpPromise = null;
-function serverPublicIp() {
-    if (!publicIpPromise) {
-        publicIpPromise = (async () => {
-            const base = "http://169.254.169.254/latest";
-            const token = await fetch(`${base}/api/token`, {
-                method: "PUT", headers: { "X-aws-ec2-metadata-token-ttl-seconds": "300" }, signal: AbortSignal.timeout(2000),
-            }).then((r) => (r.ok ? r.text() : ""));
-            const ip = await fetch(`${base}/meta-data/public-ipv4`, {
-                headers: token ? { "X-aws-ec2-metadata-token": token } : {}, signal: AbortSignal.timeout(2000),
-            }).then((r) => (r.ok ? r.text() : ""));
-            return /^\d+\.\d+\.\d+\.\d+$/.test(ip.trim()) ? ip.trim() : null;
-        })().catch(() => null);
-    }
-    return publicIpPromise;
-}
-
-function filterAnswerSdp(sdp, publicIpv4) {
+function filterAnswerSdp(sdp) {
     // Only UDP candidates that Meta can reach (no TCP, no loopback)
-    const lines = sdp.split("\r\n").filter((line) => {
+    return sdp.split("\r\n").filter((line) => {
         if (!line.startsWith("a=candidate:")) return true;
         return / udp /i.test(line) && !/ (127\.0\.0\.1|::1) /.test(line);
-    });
-    // EC2 has only a private IP on its network card: add the public IP with the same port, so Meta can reach us
-    if (publicIpv4 && !lines.some((l) => l.startsWith("a=candidate:") && l.includes(` ${publicIpv4} `))) {
-        const extra = [];
-        for (const line of lines) {
-            const m = line.match(/^a=candidate:(\S+) (\d+) udp \d+ (\d+\.\d+\.\d+\.\d+) (\d+) typ host/i);
-            if (m && m[2] === "1") extra.push(`a=candidate:${m[1]}9 1 udp 1686052607 ${publicIpv4} ${m[4]} typ srflx raddr ${m[3]} rport ${m[4]} generation 0`);
-        }
-        const at = lines.findIndex((l) => l.startsWith("a=candidate:"));
-        if (at >= 0) lines.splice(at, 0, ...extra);
-    }
-    return lines.join("\r\n");
-}
-
-function candidateSummary(sdp) {
-    return sdp.split("\r\n").filter((l) => l.startsWith("a=candidate:"))
-        .map((l) => l.split(" ").slice(2, 8).join(" ")).join(" | ");
+    }).join("\r\n");
 }
 
 export async function answerCall({ id, from, sdp, user, tokenSource }) {
@@ -606,7 +570,6 @@ export async function answerCall({ id, from, sdp, user, tokenSource }) {
         call.sink.ondata = (d) => listen(call, mono(d.samples, d.channelCount || 1));
     };
     pc.onconnectionstatechange = () => {
-        if (pc.connectionState === "failed") console.log(`[WA call] ${id} connection failed (ice ${pc.iceConnectionState}, gathering ${pc.iceGatheringState})`);
         if (["failed", "closed"].includes(pc.connectionState)) endCall(id, `connection ${pc.connectionState}`);
     };
 
@@ -618,8 +581,7 @@ export async function answerCall({ id, from, sdp, user, tokenSource }) {
         pc.onicegatheringstatechange = () => pc.iceGatheringState === "complete" && resolve();
         setTimeout(resolve, 3000);
     });
-    const answer = filterAnswerSdp(pc.localDescription.sdp, await serverPublicIp());
-    console.log(`[WA call] ${id} candidates: ${candidateSummary(answer)}`);
+    const answer = filterAnswerSdp(pc.localDescription.sdp);
 
     await callAction(id, "pre_accept", answer);
     await callAction(id, "accept", answer);

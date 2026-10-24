@@ -934,26 +934,6 @@ export const getMcpTools = () => [
     }
   },
   {
-    name: 'read_whatsapp_messages',
-    description: "Read the latest messages the user sent to the Classgrid WhatsApp chat from their own verified WhatsApp number (newest first, with the time). Files they sent (photos, PDFs, documents, voice notes) come back as links you can open with parse_document, analyze_image or transcribe_audio. Use it to see follow-ups, extra details or files the user added on WhatsApp.",
-    inputSchema: {
-      type: 'object',
-      properties: {
-        count: { type: 'number', description: 'How many recent messages to read (1-20, default 5).' }
-      }
-    }
-  },
-  {
-    name: 'wait_for_whatsapp_reply',
-    description: "Wait for the user's next message in the Classgrid WhatsApp chat (from their verified number), for up to 5 minutes. Returns the new messages as soon as one arrives (files come back as links), or says no reply came in time.",
-    inputSchema: {
-      type: 'object',
-      properties: {
-        minutes: { type: 'number', description: 'How long to wait (1-5, default 5).' }
-      }
-    }
-  },
-  {
     name: 'transcribe_audio',
     description: 'Convert an audio file (mp3, wav, webm) into text. STRICT RULE: NEVER pass a video file (.mp4) directly to this tool. If you have a video, you MUST first use run_code to extract it to .mp3 using ffmpeg, upload the mp3 to the CDN, and ONLY pass the new .mp3 URL to this tool!',
     inputSchema: {

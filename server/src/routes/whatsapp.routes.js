@@ -139,18 +139,14 @@ router.post("/webhook", async (req, res) => {
 // WhatsApp voice calls, passed on by the ai.classgrid.in server (same machine) that receives Meta's webhook.
 // Only accepted from this machine and with its signature (HMAC of the body with the shared WhatsApp key).
 // ─────────────────────────────────────────────
-// From this machine, signed by the ai.classgrid.in server with the shared WhatsApp key
-function fromWhatsappServer(req) {
+router.post("/calls-internal", async (req, res) => {
     const ip = String(req.socket?.remoteAddress || "");
     const local = ip === "127.0.0.1" || ip === "::1" || ip === "::ffff:127.0.0.1";
     const key = process.env.WHATSAPP_ACCESS_TOKEN || "";
     const sent = String(req.headers["x-classgrid-call-signature"] || "");
     const expected = key ? crypto.createHmac("sha256", key).update(JSON.stringify(req.body || {})).digest("hex") : "";
-    return !!(local && expected && sent.length === expected.length && crypto.timingSafeEqual(Buffer.from(sent), Buffer.from(expected)));
-}
-
-router.post("/calls-internal", async (req, res) => {
-    if (!fromWhatsappServer(req)) return res.sendStatus(403);
+    const ok = local && expected && sent.length === expected.length && crypto.timingSafeEqual(Buffer.from(sent), Buffer.from(expected));
+    if (!ok) return res.sendStatus(403);
     res.sendStatus(200); // Meta must get its answer fast; the call is handled after this
     try {
         const { handleCallsWebhook } = await import("../services/whatsapp-call.service.js");
@@ -158,22 +154,6 @@ router.post("/calls-internal", async (req, res) => {
         await handleCallsWebhook(req.body);
     } catch (err) {
         console.error("WhatsApp call error:", err);
-    }
-});
-
-// ─────────────────────────────────────────────
-// POST /api/whatsapp/messages-internal
-// Messages users send to the Classgrid WhatsApp number (text and files), passed on by the ai.classgrid.in server.
-// Kept so the Agent can read follow-ups a user sends while it works (read_whatsapp_messages).
-// ─────────────────────────────────────────────
-router.post("/messages-internal", async (req, res) => {
-    if (!fromWhatsappServer(req)) return res.sendStatus(403);
-    res.sendStatus(200);
-    try {
-        const { saveIncomingMessages } = await import("../services/whatsapp-inbox.service.js");
-        await saveIncomingMessages(req.body);
-    } catch (err) {
-        console.error("WhatsApp message save error:", err);
     }
 });
 
