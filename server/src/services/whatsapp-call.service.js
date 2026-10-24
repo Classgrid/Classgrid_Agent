@@ -561,7 +561,18 @@ async function afterCall(call, why) {
     // Owner's rule (2026-10-24): one call = one background job. All its tasks run together in one chat, inside the
     // project if any of them names one (a call once split into two jobs: double "Got it", and the user's replies
     // went to the job without the project)
-    const project = call.tasks.find((t) => t.project)?.project || null;
+    // Owner's rule (2026-10-24): call work always runs in Project Mode, never in Agent mode. No project named on the
+    // call: one is made now, named after the task, so the work starts inside it
+    let project = call.tasks.find((t) => t.project)?.project || null;
+    if (!project) {
+        const { default: IdeProject } = await import("../models/IdeProject.js");
+        const words = String(call.tasks[0]?.task || "Call task").replace(/[^a-zA-Z0-9 ]/g, " ").split(/\s+/).filter((w) => w.length > 2).slice(0, 4);
+        const base = (words.map((w) => w[0].toUpperCase() + w.slice(1).toLowerCase()).join(" ") || "Call Task").slice(0, 60);
+        let name = base;
+        for (let i = 2; await findProject(call.user, name).catch(() => null); i++) name = `${base} ${i}`;
+        project = await IdeProject.create({ owner: call.user._id, name }).catch((e) => { console.error("[WA call] project could not be made:", e.message); return null; });
+        if (project) console.log(`[WA call] ${call.id}: no project named, made "${name}" (Project Mode only)`);
+    }
     const groups = new Map([[project ? String(project._id) : "none", { project, tasks: call.tasks.map((t) => t.task) }]]);
     // Work the AI started live during the call for the same project finishes first; the task then carries on in
     // that same chat instead of doing it all again (it once built one project twice)
