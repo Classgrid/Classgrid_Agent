@@ -421,6 +421,8 @@ async function afterCall(call) {
         else task += `\n\n(The project "${project.name}" could not be opened in the editor: ${opened.error}. Work without its files and tell the user.)`;
     }
     const where = project ? ` in your project "${project.name}"` : "";
+    // Owner's rule: before the final email or WhatsApp, the Agent checks the user's latest WhatsApp messages
+    task += "\n\n(The user may send follow-ups or files in the Classgrid WhatsApp chat while you work. Before you send the final result by email or WhatsApp, read their latest WhatsApp messages with read_whatsapp_messages and use anything new they added.)";
     const result = await runAgentTask(call.user, `[From a WhatsApp call]\n${task}`, project?._id, (sessionId) =>
         sendWhatsappText(call.from, `Got it. Classgrid AI is working on it now${where}. I'll send you the result here when it's done.\n\nFollow along: ${CHAT_URL}/agent/${sessionId}`))
         .finally(() => stopKeepOpen());
