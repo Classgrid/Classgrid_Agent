@@ -270,6 +270,21 @@ export const projectTools = {
   stop_background_command: (sessionId, { job_id }) => withProject(sessionId, (project, ssh) => stopBackgroundJob(ssh, sessionId, job_id)),
 
   update_project_github_repo: (sessionId, args) => withProject(sessionId, (project, ssh) => updateProjectRepo(project, ssh, args || {})),
+
+  // The Classgrid project's own name (what the user sees in Project Mode); same check as renaming it on the website
+  rename_project: async (sessionId, { new_name }) => {
+    const project = await projectForChat(sessionId);
+    if (!project) return "No project is open in this chat. The user opens one in Project Mode.";
+    const name = String(new_name || "").trim().slice(0, 80);
+    if (!name) return "Error: give the new project name.";
+    const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const taken = await IdeProject.findOne({ owner: project.owner, _id: { $ne: project._id }, name: new RegExp(`^${escaped}$`, "i") }).select("_id").lean();
+    if (taken) return `The user already has a project called "${name}", so the project was not renamed.`;
+    await IdeProject.updateOne({ _id: project._id }, { $set: { name } });
+    const { default: AgentTask } = await import("../models/AgentTask.js");
+    await AgentTask.updateMany({ project_id: String(project._id) }, { $set: { project_name: name } }).catch(() => {});
+    return `Project renamed from "${project.name}" to "${name}".`;
+  },
 };
 
 // Rename the project's GitHub repo or change its description, website or public/private setting.

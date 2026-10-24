@@ -354,6 +354,18 @@ export const getMcpTools = () => [
   },
 
   {
+    name: 'rename_project',
+    description: "Rename the Classgrid project open in this chat (the name the user sees in Project Mode). Fails if the user already has a project with that name.",
+    inputSchema: {
+      type: 'object',
+      properties: {
+        new_name: { type: 'string', description: 'The new project name (up to 80 characters).' }
+      },
+      required: ['new_name']
+    }
+  },
+
+  {
     name: 'list_project_files',
     description: 'List the files and folders of the Project Mode project open in this chat (the same code the user sees in the code editor). node_modules and .git are left out.',
     inputSchema: {

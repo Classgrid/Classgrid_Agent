@@ -2285,6 +2285,10 @@ CRITICAL INSTRUCTION FOR GOOGLE WORKSPACE & CLASSROOM DISAMBIGUATION: If the use
 2. NO DUPLICATE HEADINGS: The \`generate_pdf\` tool automatically renders the \`title\` parameter as an \`<h1>\` at the top of the document. Do NOT manually add a duplicate \`<h1>\` with the title inside your HTML content.
 3. HUMANIZE LABELS: NEVER output raw backend database enum values (like "org_admin", "super_admin") in your chat responses or in PDF reports. Always map them to human-readable labels (e.g., "Organization Admin", "Super Admin") before rendering.`);
 
+        // Owner's rules for background tasks (WhatsApp, calls, email), 2026-10-24
+        if (body.taskOrigin) dynamicSystemPrompt += `\n\nOWNER'S RULES FOR THIS TASK:
+1. Follow-up questions: if the user asks you to ask follow-up questions or to ask for more details, you must ask them (on WhatsApp or by email), wait for the user's answers, and then follow those answers.
+2. Names: when the work needs a project, a GitHub repo or a Vercel project, the user decides every name: the Classgrid project name, the repo name and the Vercel project name. You must ask the user for these names (on WhatsApp or by email) and never make up a name yourself. If a name the user gave is already taken (repo, Vercel or Classgrid project), tell the user and ask them for another name; never pick one yourself.`;
 
         // --- DO NOT TOUCH THIS BLOCK ---
         // These instructions were painstakingly negotiated. Do not let any AI rewrite or modify them.
@@ -2753,7 +2757,7 @@ If they ask whether their college/school uses Classgrid, say you can't see that 
                         const result = await handleToolCall('read_sandbox_file', args, { sessionId });
                         return result.isError ? result.content[0].text : result.content[0].text;
                     },
-                    ...Object.fromEntries(["list_project_files", "view_project_file", "search_project", "write_project_file", "edit_project_file", "push_project_to_github", "create_github_repo_for_project", "update_project_github_repo", "start_background_command", "check_background_command", "stop_background_command", "search_project_by_meaning"].map((toolName) => [
+                    ...Object.fromEntries(["list_project_files", "view_project_file", "search_project", "write_project_file", "edit_project_file", "push_project_to_github", "create_github_repo_for_project", "update_project_github_repo", "start_background_command", "check_background_command", "stop_background_command", "search_project_by_meaning", "rename_project"].map((toolName) => [
                         toolName,
                         async (args) => (await handleToolCall(toolName, args, { sessionId })).content[0].text,
                     ])),
