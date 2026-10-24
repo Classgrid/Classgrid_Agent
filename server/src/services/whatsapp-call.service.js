@@ -545,12 +545,46 @@ async function runAgentTask(user, question, projectId, onSession, sessionId = nu
     return { sessionId, answer: String(answer || streamed).trim(), error };
 }
 
-function filterAnswerSdp(sdp) {
+// This server's public IPv4, asked once from the EC2 metadata service (IMDSv2)
+let publicIpPromise = null;
+function serverPublicIp() {
+    if (!publicIpPromise) {
+        publicIpPromise = (async () => {
+            const base = "http://169.254.169.254/latest";
+            const token = await fetch(`${base}/api/token`, {
+                method: "PUT", headers: { "X-aws-ec2-metadata-token-ttl-seconds": "300" }, signal: AbortSignal.timeout(2000),
+            }).then((r) => (r.ok ? r.text() : ""));
+            const ip = await fetch(`${base}/meta-data/public-ipv4`, {
+                headers: token ? { "X-aws-ec2-metadata-token": token } : {}, signal: AbortSignal.timeout(2000),
+            }).then((r) => (r.ok ? r.text() : ""));
+            return /^\d+\.\d+\.\d+\.\d+$/.test(ip.trim()) ? ip.trim() : null;
+        })().catch(() => null);
+    }
+    return publicIpPromise;
+}
+
+function filterAnswerSdp(sdp, publicIpv4) {
     // Only UDP candidates that Meta can reach (no TCP, no loopback)
-    return sdp.split("\r\n").filter((line) => {
+    const lines = sdp.split("\r\n").filter((line) => {
         if (!line.startsWith("a=candidate:")) return true;
         return / udp /i.test(line) && !/ (127\.0\.0\.1|::1) /.test(line);
-    }).join("\r\n");
+    });
+    // EC2 has only a private IP on its network card: add the public IP with the same port, so Meta can reach us
+    if (publicIpv4 && !lines.some((l) => l.startsWith("a=candidate:") && l.includes(` ${publicIpv4} `))) {
+        const extra = [];
+        for (const line of lines) {
+            const m = line.match(/^a=candidate:(\S+) (\d+) udp \d+ (\d+\.\d+\.\d+\.\d+) (\d+) typ host/i);
+            if (m && m[2] === "1") extra.push(`a=candidate:${m[1]}9 1 udp 1686052607 ${publicIpv4} ${m[4]} typ srflx raddr ${m[3]} rport ${m[4]} generation 0`);
+        }
+        const at = lines.findIndex((l) => l.startsWith("a=candidate:"));
+        if (at >= 0) lines.splice(at, 0, ...extra);
+    }
+    return lines.join("\r\n");
+}
+
+function candidateSummary(sdp) {
+    return sdp.split("\r\n").filter((l) => l.startsWith("a=candidate:"))
+        .map((l) => l.split(" ").slice(2, 8).join(" ")).join(" | ");
 }
 
 export async function answerCall({ id, from, sdp, user, tokenSource }) {
@@ -572,6 +606,7 @@ export async function answerCall({ id, from, sdp, user, tokenSource }) {
         call.sink.ondata = (d) => listen(call, mono(d.samples, d.channelCount || 1));
     };
     pc.onconnectionstatechange = () => {
+        if (pc.connectionState === "failed") console.log(`[WA call] ${id} connection failed (ice ${pc.iceConnectionState}, gathering ${pc.iceGatheringState})`);
         if (["failed", "closed"].includes(pc.connectionState)) endCall(id, `connection ${pc.connectionState}`);
     };
 
@@ -583,7 +618,8 @@ export async function answerCall({ id, from, sdp, user, tokenSource }) {
         pc.onicegatheringstatechange = () => pc.iceGatheringState === "complete" && resolve();
         setTimeout(resolve, 3000);
     });
-    const answer = filterAnswerSdp(pc.localDescription.sdp);
+    const answer = filterAnswerSdp(pc.localDescription.sdp, await serverPublicIp());
+    console.log(`[WA call] ${id} candidates: ${candidateSummary(answer)}`);
 
     await callAction(id, "pre_accept", answer);
     await callAction(id, "accept", answer);
