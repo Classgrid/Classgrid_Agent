@@ -316,6 +316,8 @@ function systemPrompt(user) {
         "What you say is read out by an English text-to-speech voice, so write plain spoken English: short sentences, no markdown, no lists, no emojis, no links.",
         "The call can last at most 15 minutes.",
         "After the call the Classgrid Agent does the work in the caller's account and sends them the result on WhatsApp.",
+        "You can never hang up: only the caller ends the call. When the conversation seems finished, politely tell them they can end the call whenever they like.",
+        "No work starts during the call: you save the caller's tasks with start_task, and the Agent starts on them only after the call ends.",
         "The caller can also send extra details or files (photos, PDFs, documents) in this WhatsApp chat; the Agent reads their latest WhatsApp messages before it sends the final result.",
     ].join("\n");
 }
@@ -328,7 +330,9 @@ async function claudeTurn(call, { noTools = false } = {}) {
             model: CALL_MODEL,
             max_tokens: 1024,
             system: systemPrompt(call.user),
-            tools: [ASK_CLASSGRID_TOOL, START_TASK_TOOL, END_CALL_TOOL, ...PROJECT_TOOLS],
+            // Owner's rules (2026-10-24): the AI can never hang up, only the caller ends a call (END_CALL_TOOL is not
+            // given); and no work starts during the call, only after it ends (ASK_CLASSGRID_TOOL is not given)
+            tools: [START_TASK_TOOL, ...PROJECT_TOOLS],
             ...(noTools ? { tool_choice: { type: "none" } } : {}),
             messages: call.messages,
         }),
@@ -530,6 +534,7 @@ export function endCall(callId, why = "ended") {
     clearInterval(call.ticker);
     clearTimeout(call.wrapTimer);
     clearTimeout(call.hardStop);
+    clearInterval(call.idleTimer);
     try { call.sink?.stop(); } catch { /* already stopped */ }
     try { call.pc?.close(); } catch { /* already closed */ }
     if (why !== "remote") callAction(callId, "terminate").catch(() => { /* call already over */ });
@@ -596,7 +601,7 @@ async function afterCall(call, why) {
         // Owner's rule: before the final email or WhatsApp, the Agent checks the user's latest WhatsApp messages
         task += "\n\n(The user may send follow-ups or files in the Classgrid WhatsApp chat while you work. Before you send the final result by email or WhatsApp, read their latest WhatsApp messages with read_whatsapp_messages and use anything new they added.)";
         // The answer is sent to this same user on WhatsApp: talk to them directly ("you"), not about them
-        const question = `[From a WhatsApp call. The person reading your answer is the user who called: your final answer is sent to them on WhatsApp, so talk to them directly ("you"), not about them. Owner's rule for WhatsApp: keep it short, say only what you did (no full feature list), and never repeat what you already sent.]\n${task}`;
+        const question = `[From a WhatsApp call. The person reading your answer is the user who called: your final answer is sent to them on WhatsApp, so talk to them directly ("you"), not about them. Owner's rule for WhatsApp: keep it short, say only what you did (no full feature list), and never repeat what you already sent. If you need the user's answer or must wait, use sleep_until (wake_on_whatsapp_reply or wake_at); when your run ends without it, the task counts as completed.]\n${task}`;
         runCallJob({
             id: groups.size > 1 ? `${call.id}:${n++}` : call.id, userId: String(call.user._id), from: call.from, question,
             projectId: project ? String(project._id) : null, projectName: project?.name || null,
@@ -968,6 +973,8 @@ export async function answerCall({ id, from, sdp, user, tokenSource, callsLine =
 
     call.wrapTimer = setTimeout(() => wrapUp(call), WRAP_UP_MS);
     call.hardStop = setTimeout(() => timeUp(call), MAX_CALL_MS);
+    call.lastActiveAt = Date.now();
+    call.idleTimer = setInterval(() => checkIdle(call), 1000);
 
     // Greeting
     const first = String(user.name || "").split(" ")[0];
@@ -976,6 +983,23 @@ export async function answerCall({ id, from, sdp, user, tokenSource, callsLine =
     call.messages.push({ role: "user", content: "[Call connected.]" }, { role: "assistant", content: hello });
     speak(call, hello);
     return true;
+}
+
+// Owner's rule (2026-10-24): the AI never hangs up, except when nobody speaks for 14 seconds (the caller is
+// silent and the AI is neither talking nor working). It says goodbye first; if the caller speaks then, it stays.
+const IDLE_MS = 14 * 1000;
+async function checkIdle(call) {
+    if (call.ended || call.idleBye) return;
+    if (call.speech.active || call.busy || call.pending.length || aiIsTalking(call)) { call.lastActiveAt = Date.now(); return; }
+    if (Date.now() - call.lastActiveAt < IDLE_MS) return;
+    call.idleBye = true;
+    const bye = "I can't hear anything, so I'll end the call now. Call me back anytime. Bye!";
+    call.transcript.push(`AI: ${bye}`);
+    await speak(call, bye);
+    await speakingDone(call);
+    // The caller spoke during the goodbye: the call goes on
+    if (call.speech.active || call.busy || call.pending.length) { call.idleBye = false; call.lastActiveAt = Date.now(); return; }
+    endCall(call.id, "nobody spoke for 14 s");
 }
 
 // Simple voice detection: a turn starts when the caller gets loud and ends after 1.5 s of quiet (owner: let them
