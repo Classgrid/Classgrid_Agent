@@ -706,7 +706,9 @@ async function checkAgentEmails() {
     if (!isAgentMailConfigured()) return;
     // From the last check (the first time: the last 5 minutes); emails already handled are skipped
     const since = Number(await redis.get("agent-mail:since").catch(() => 0)) || Date.now() - 5 * 60 * 1000;
-    const emails = await searchAgentMail({ fromMs: since, count: 20, markAs: "read" });
+    // Only unread emails, and each is marked read once handled: an email that was handled (or belongs to a finished
+    // task) is read in the mailbox, so it never comes back, even after the server's memory is cleared
+    const emails = await searchAgentMail({ fromMs: since, status: "unread", count: 20, markAs: "read" });
     for (const e of [...emails].reverse()) {
         const fresh = await redis.set(`agent-mail:seen:${e.id}`, "1", "EX", 7 * 24 * 60 * 60, "NX").catch(() => "OK");
         if (!fresh) continue;
