@@ -329,9 +329,9 @@ async function claudeTurn(call, { noTools = false } = {}) {
             model: CALL_MODEL,
             max_tokens: 1024,
             system: systemPrompt(call.user),
-            // Owner's rule (2026-10-24): no work during the call; the saved tasks start when it ends (ask_classgrid
-            // is not given)
-            tools: [START_TASK_TOOL, END_CALL_TOOL, ...PROJECT_TOOLS],
+            // ask_classgrid is back (owner's choice, 2026-10-24 evening): the AI can work during the call, so it opens
+            // or makes the project right away and the tasks are saved with it
+            tools: [ASK_CLASSGRID_TOOL, START_TASK_TOOL, END_CALL_TOOL, ...PROJECT_TOOLS],
             ...(noTools ? { tool_choice: { type: "none" } } : {}),
             messages: call.messages,
         }),
