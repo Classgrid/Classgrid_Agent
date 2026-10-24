@@ -196,6 +196,23 @@ async function endTaskLog(taskId, summary = "") {
 }
 
 // The end_task tool: the big model ends this chat's task; its record is deleted 1 hour later
+// Owner's rule (2026-10-24): background work always runs in Project Mode, never in Agent mode. A new task gets its
+// own project, named after the user's first words.
+async function projectForNewTask(user, text) {
+    try {
+        const { default: IdeProject } = await import("../models/IdeProject.js");
+        const words = String(text || "").replace(/[^a-zA-Z0-9 ]/g, " ").split(/\s+/).filter((w) => w.length > 2).slice(0, 4);
+        const base = (words.map((w) => w[0].toUpperCase() + w.slice(1).toLowerCase()).join(" ") || "My Task").slice(0, 60);
+        let name = base;
+        for (let i = 2; await IdeProject.exists({ owner: user._id, name }); i++) name = `${base} ${i}`;
+        const project = await IdeProject.create({ owner: user._id, name });
+        return { project_id: String(project._id), project_name: project.name };
+    } catch (e) {
+        console.error("[agent task] project could not be made:", e.message);
+        return {};
+    }
+}
+
 export async function endTaskFromTool({ sessionId, summary }) {
     if (!sessionId) return "No open task in this chat.";
     const task = await AgentTask.findOneAndUpdate(
@@ -592,8 +609,10 @@ async function takeMessages(number, user, ids, replied = "") {
         task = await AgentTask.create({
             user_id: user._id, organization_id: user.organization_id || null, phone: number, origin: "whatsapp",
             status: "sleeping", wake_on_reply: true, work_started_at: new Date(), last_seen_msg_at: Date.now(),
+            // Project Mode only (owner's rule)
+            ...(await projectForNewTask(user, items.map((m) => m.text).join(" "))),
         });
-        console.log(`[agent task] ${number}: new task ${task._id}`);
+        console.log(`[agent task] ${number}: new task ${task._id} in project "${task.project_name || "-"}"`);
     }
     // 4. Saved in the task's record for the big model
     await saveTaskMessages(task, items);
@@ -667,8 +686,10 @@ async function onAgentEmail(email) {
         task = await AgentTask.create({
             user_id: user._id, organization_id: user.organization_id || null, phone, origin: phone ? "whatsapp" : "chat",
             status: "sleeping", wake_on_reply: true, work_started_at: new Date(), last_seen_msg_at: Date.now(),
+            // Project Mode only (owner's rule)
+            ...(await projectForNewTask(user, email.subject)),
         });
-        console.log(`[agent task] email from ${address}: new task ${task._id}`);
+        console.log(`[agent task] email from ${address}: new task ${task._id} in project "${task.project_name || "-"}"`);
     }
     // 3. Saved in the task's record for the big model, then passed to it (a running one gets it after its run)
     await saveTaskMessages(task, [item]);
