@@ -53,6 +53,50 @@ async function mailFolders() {
     return folderCache;
 }
 
+// Attachments: Zoho's links only open with our Zoho key, so each file is downloaded once and put on our CDN (R2);
+// the AI gets a normal link it can open (parse_document, analyze_image, ...)
+const MAX_FILE_BYTES = 25 * 1024 * 1024;
+const ACTIVE_TYPE = /(html|svg|xml|javascript|ecmascript)/i; // stored as plain downloads, never run as a page
+const attachmentLinks = new Map(); // attachment id -> CDN link (kept while the server runs)
+
+async function attachmentsOf(folderId, messageId) {
+    const info = await zoho(`/folders/${folderId}/messages/${messageId}/attachmentinfo`);
+    const list = info?.attachments || [];
+    const out = [];
+    for (const a of list) {
+        const id = String(a.attachmentId || "");
+        const name = String(a.attachmentName || "file");
+        if (!id) continue;
+        try {
+            if (Number(a.attachmentSize) > MAX_FILE_BYTES) throw new Error(`too big (${Math.round(a.attachmentSize / 1048576)} MB, max 25 MB)`);
+            let url = attachmentLinks.get(id);
+            if (!url) {
+                const res = await fetch(`${ZOHO_MAIL}/accounts/${process.env.ZOHO_MAIL_ACCOUNT_ID}/folders/${folderId}/messages/${messageId}/attachments/${id}`, {
+                    headers: { Authorization: `Zoho-oauthtoken ${await zohoToken()}` },
+                    signal: AbortSignal.timeout(60000),
+                });
+                if (!res.ok) throw new Error(`download failed (${res.status})`);
+                const buffer = Buffer.from(await res.arrayBuffer());
+                if (buffer.length > MAX_FILE_BYTES) throw new Error("too big (max 25 MB)");
+                const sentType = (res.headers.get("content-type") || "application/octet-stream").split(";")[0];
+                const type = ACTIVE_TYPE.test(sentType) ? "application/octet-stream" : sentType;
+                const { randomUUID } = await import("crypto");
+                const { generateR2UploadUrl } = await import("./r2.service.js");
+                const safe = name.replace(/[^a-zA-Z0-9.-]/g, "_").slice(-100);
+                const { uploadUrl, publicUrl } = await generateR2UploadUrl(`email-files/${randomUUID()}-${safe}`, type);
+                const put = await fetch(uploadUrl, { method: "PUT", body: buffer, headers: { "Content-Type": type }, signal: AbortSignal.timeout(60000) });
+                if (!put.ok) throw new Error(`upload failed (${put.status})`);
+                url = publicUrl;
+                attachmentLinks.set(id, url);
+            }
+            out.push({ name, url });
+        } catch (e) {
+            out.push({ name, error: e.message });
+        }
+    }
+    return out;
+}
+
 const emailOf = (sender) => (String(sender || "").match(/<([^>]+)>/)?.[1] || String(sender || "")).trim().toLowerCase();
 
 // HTML email body → plain text
@@ -95,10 +139,12 @@ export async function searchAgentMail({ fromEmail = "", fromMs = 0, toMs = Infin
         const content = await zoho(`/folders/${m.folderId}/messages/${m.messageId}/content`).catch(() => null);
         const body = toText(content?.content || "");
         if (words && !body.toLowerCase().includes(words) && !String(m.subject || "").toLowerCase().includes(words)) continue;
+        const hasAttachment = m.hasAttachment === "1" || m.hasAttachment === true;
         out.push({
             id: String(m.messageId), folderId: String(m.folderId), at: m.at, folder: m.folderName, from: m.sender || m.fromAddr,
             to: m.toAddress || "agent@classgrid.in", subject: m.subject || "(no subject)", text: body.slice(0, 20000),
-            read: String(m.status) === "1", hasAttachment: m.hasAttachment === "1" || m.hasAttachment === true,
+            read: String(m.status) === "1", hasAttachment,
+            attachments: hasAttachment ? await attachmentsOf(m.folderId, m.messageId).catch((e) => [{ name: "attachments", error: e.message }]) : [],
         });
     }
     const mark = async (list, mode) => {
