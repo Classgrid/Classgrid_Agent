@@ -623,13 +623,10 @@ async function afterCall(call, why) {
         const liveSession = call.liveSessions[key] || null;
         let task = tasks.length === 1 ? tasks[0] : `Do these tasks in this order:\n${tasks.map((t, i) => `${i + 1}. ${t}`).join("\n")}`;
         if (liveSession) task = `[During the call you already started on this in this chat. Look at what is already done here and do only what is left. Don't build or send anything again that is already done.]\n${task}`;
-        // The Agent sees what was said on the call (for example a promise to ask the caller something on WhatsApp)
-        const said = call.transcript.filter((l) => l.startsWith("Caller:") || l.startsWith("AI:")).join("\n").slice(-4000);
-        if (said) task += `\n\n(What was said on the call, for context:\n${said})`;
         // Owner's rule: before the final email or WhatsApp, the Agent checks the user's latest WhatsApp messages
         task += "\n\n(The user may send follow-ups or files in the Classgrid WhatsApp chat while you work. Before you send the final result by email or WhatsApp, read their latest WhatsApp messages with read_whatsapp_messages and use anything new they added.)";
         // The answer is sent to this same user on WhatsApp: talk to them directly ("you"), not about them
-        const question = `[From a WhatsApp call. The person reading your answer is the user who called: your final answer is sent to them on WhatsApp, so talk to them directly ("you"), not about them. Owner's rule for WhatsApp: keep it short, say only what you did (no full feature list), and never repeat what you already sent. If you need the user's answer or must wait, use sleep_until (wake_on_whatsapp_reply or wake_at); when your run ends without it, the task counts as completed.]\n${task}`;
+        const question = `[From a WhatsApp call. The person reading your answer is the user who called: your final answer is sent to them on WhatsApp, so talk to them directly ("you"), not about them.]\n${task}`;
         runCallJob({
             id: groups.size > 1 ? `${call.id}:${n++}` : call.id, userId: String(call.user._id), from: call.from, question,
             projectId: project ? String(project._id) : null, projectName: project?.name || null,
