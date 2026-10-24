@@ -100,3 +100,17 @@ export async function readRecentMessages(phone, count = 5) {
     if (!number) return [];
     return withFiles(await inbox(number, count));
 }
+
+// Waits until the user sends a WhatsApp message newer than `since` (ms), up to `waitMs`. Returns the new messages
+// (oldest first, files turned into links), or [] if none came in time.
+export async function waitForReply(phone, since, waitMs, signal) {
+    const number = normalizeWhatsappNumber(phone);
+    if (!number) return [];
+    const until = Date.now() + waitMs;
+    while (Date.now() < until && !signal?.aborted) {
+        const fresh = (await inbox(number)).filter((m) => m.at > since);
+        if (fresh.length) return withFiles(fresh.reverse());
+        await new Promise((r) => setTimeout(r, 3000));
+    }
+    return [];
+}
