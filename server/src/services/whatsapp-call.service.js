@@ -58,6 +58,24 @@ const CHAT_URL = "https://chat.classgrid.in";
 
 const calls = new Map(); // call id -> live call
 const jobNumbers = new Map(); // number -> call tasks running for it on this server
+// Owner's rule (2026-10-24): a new WhatsApp message comes first. Every running AI run is kept here so it can be
+// stopped at once when the user writes (number -> { controller, live })
+const runningRuns = new Map();
+export function startRun(number) {
+    const n = normalizeWhatsappNumber(number);
+    const run = { controller: new AbortController(), live: {} };
+    runningRuns.set(n, run);
+    return { control: { signal: run.controller.signal, live: run.live }, done: () => { if (runningRuns.get(n) === run) runningRuns.delete(n); } };
+}
+// Stops this number's running AI run. "waiting": it is waiting for the user's reply right now (it gets the message
+// itself, no need to stop). false: nothing is running.
+export function stopRunFor(number) {
+    const run = runningRuns.get(normalizeWhatsappNumber(number));
+    if (!run) return false;
+    if (run.live.tool === "wait_for_whatsapp_reply") return "waiting";
+    run.controller.abort();
+    return true;
+}
 
 // A live call, or a call task running, for this number (then a new WhatsApp message is taken in after it)
 export function numberInUse(number) {
@@ -667,6 +685,7 @@ async function runCallJob(job, { resumed = false, lockToken = null } = {}) {
         const runStartedAt = new Date();
         let stepsThisRun = 0;
         const sends = []; // WhatsApp messages the Agent sent itself during this run
+        const run = startRun(job.from);
         const result = await runAgentTask(user, question, job.projectId, (sessionId) => {
             if (job.sessionId) return;
             job.sessionId = sessionId;
@@ -682,7 +701,17 @@ async function runCallJob(job, { resumed = false, lockToken = null } = {}) {
             // this task's)
             import("./agent-task.service.js").then((t) => t.logStep({ user, sessionId: job.sessionId, origin: "whatsapp", text: stepText, since: job.callStartedAt }))
                 .catch(() => {});
-        }, { taskOrigin: "whatsapp" });
+        }, { taskOrigin: "whatsapp" }, run.control).finally(run.done);
+        // Stopped because the user sent a WhatsApp message: the task answers them first, then carries on
+        if (result.aborted) {
+            const { stoppedForMessages } = await import("./agent-task.service.js");
+            await stoppedForMessages({
+                user, phone: job.from, sessionId: result.sessionId || job.sessionId, projectId: job.projectId,
+                projectName: job.projectName, goal: job.question, steps: job.steps || [], since: job.callStartedAt,
+            });
+            await forget();
+            return;
+        }
         // What happens next (send the answer, wait for the user, keep working, retry later) is decided in one
         // place, the same for every long task
         const { afterRun } = await import("./agent-task.service.js");
@@ -805,9 +834,22 @@ export function keepProjectOpen(userId) {
 // chat as when they use chat.classgrid.in). The route makes the new chat and tells its id (session_info).
 // Returns { sessionId, answer, error }.
 // quota: set when the user's AI tokens ran out ({ resetDate }), so the task can wait for them to come back.
-export async function runAgentTask(user, question, projectId, onSession, sessionId = null, onStep = null, extraBody = {}) {
+// control: { signal, live } — signal stops the run (a new WhatsApp message came); live.tool is the tool running now.
+// A stopped run returns { aborted: true }.
+export async function runAgentTask(user, question, projectId, onSession, sessionId = null, onStep = null, extraBody = {}, control = {}) {
+    const port = process.env.PORT || 3000;
+    try {
+        return await runAgentTaskOnce(user, question, projectId, onSession, sessionId, onStep, extraBody, control);
+    } catch (e) {
+        if (control.signal?.aborted) return { sessionId: control.sessionId || sessionId, answer: "", error: "stopped for new WhatsApp messages", aborted: true };
+        throw e;
+    }
+}
+
+async function runAgentTaskOnce(user, question, projectId, onSession, sessionId, onStep, extraBody, control) {
     const port = process.env.PORT || 3000;
     const res = await fetch(`http://127.0.0.1:${port}/api/ai/ask`, {
+        signal: control.signal,
         method: "POST",
         headers: { Authorization: `Bearer ${userToken(user)}`, "Content-Type": "application/json" },
         // projectId: the chat is saved inside that Project Mode project
@@ -834,9 +876,14 @@ export async function runAgentTask(user, question, projectId, onSession, session
                 const data = JSON.parse(line.slice(6));
                 if (data.type === "session_info" && data.sessionId && !sessionId) {
                     sessionId = data.sessionId;
+                    control.sessionId = sessionId;
                     onSession?.(sessionId);
                 }
-                if (data.type === "tool_start") toolArgs[data.tool || data.name] = data.args || data.input || {};
+                if (data.type === "tool_start") {
+                    toolArgs[data.tool || data.name] = data.args || data.input || {};
+                    if (control.live) control.live.tool = data.tool || data.name;
+                }
+                if (data.type === "tool_result" && control.live) control.live.tool = null;
                 if (data.type === "tool_result" && onStep) {
                     const name = data.tool || data.name || "tool";
                     onStep(`${name} ${JSON.stringify(toolArgs[name] || {}).slice(0, 160)}`, { name, args: toolArgs[name] || {}, result: String(data.result ?? "") });

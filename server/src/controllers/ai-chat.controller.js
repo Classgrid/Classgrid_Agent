@@ -3576,6 +3576,8 @@ If they ask whether their college/school uses Classgrid, say you can't see that 
                             }
                             const { checkWhatsappLimit, recordDirectWhatsappSend, normalizeWhatsappNumber, formatResetTime } = await import('../services/ai-feature-limits.js');
                             const waLimit = await checkWhatsappLimit(req.user);
+                            // The user's own number (a reply to it unlocks the work when mustReplyFirst is set)
+                            const ownNumber = (n) => !!n && (n === normalizeWhatsappNumber(req.user?.metadata?.whatsappPhone) || (body.replyTo && n === normalizeWhatsappNumber(body.replyTo)));
                             if (!waLimit.allowed) {
                                 return `FAILED: This user has used ${waLimit.used} of ${waLimit.limit} WhatsApp messages allowed in the last ${waLimit.periodText || "7 days"} (the limit is set by Classgrid admins). No message was sent.${waLimit.resetText ? ` Reset time: ${waLimit.resetText}${req.user?.role === "super_admin" ? "" : " (share only if the user asks)"}.` : ""} Tell the user exactly this; do not guess other reasons.`;
                             }
@@ -3649,6 +3651,8 @@ If they ask whether their college/school uses Classgrid, say you can't see that 
                                 firstId ||= out.data?.messages?.[0]?.id;
                             }
                             await recordDirectWhatsappSend(req.user._id, firstId);
+                            // A reply to the user's own number unlocks the rest of the work (mustReplyFirst)
+                            if (ownNumber(recipient)) req._whatsappReplied = true;
                             // WhatsApp's 24-hour rule: Meta accepts the message now, but drops it later if this person
                             // hasn't messaged or called Classgrid in the last 24 hours (known only from now on)
                             const { LAST_IN_KEY } = await import('../services/whatsapp-inbox.service.js');
@@ -3766,6 +3770,8 @@ If they ask whether their college/school uses Classgrid, say you can't see that 
                             }
 
                             const info = await sendEmail(emailPayload);
+                            // An email to the user's own address is also a reply (when WhatsApp can't send, e.g. the limit)
+                            if (String(args.to || "").toLowerCase().split(/[,;\s]+/).includes(String(req.user?.email || "").toLowerCase())) req._whatsappReplied = true;
 
                             await NotificationLog.create({
                                 type: "EMAIL",
@@ -4336,7 +4342,14 @@ If they ask whether their college/school uses Classgrid, say you can't see that 
                             playground("tool", { who: "Agent", tool: toolName, detail: JSON.stringify(args ?? {}).slice(0, 200) });
                         }
                         let resultStr;
-                        try { resultStr = await handler(args); } catch (err) { resultStr = "Error: " + (err.message || String(err)); }
+                        // Owner's rule (2026-10-24): the user's new WhatsApp message comes first. A task woken by it
+                        // (mustReplyFirst) can do no other work until it has replied to them on WhatsApp.
+                        const REPLY_FIRST_OK = ["send_whatsapp_message", "send_email", "read_whatsapp_messages", "wait_for_whatsapp_reply", "sleep_until", "get_my_profile", "internal_thought_process", "update_plan_step"];
+                        if (body.mustReplyFirst === true && !req._whatsappReplied && !REPLY_FIRST_OK.includes(toolName)) {
+                            resultStr = "BLOCKED: the user sent you new WhatsApp messages. Reply to them first with send_whatsapp_message (to their own WhatsApp number); you can't do any other work until you have replied. If WhatsApp can't send (for example the WhatsApp limit is reached), reply by email to their own address with send_email, or sleep with sleep_until until the limit resets.";
+                        } else {
+                            try { resultStr = await handler(args); } catch (err) { resultStr = "Error: " + (err.message || String(err)); }
+                        }
 
                         if (!silentTool) {
                             const step = accSteps.find(s => s.tool === toolName && s.status === 'loading');
