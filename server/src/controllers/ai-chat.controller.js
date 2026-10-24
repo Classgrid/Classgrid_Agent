@@ -4309,7 +4309,9 @@ If they ask whether their college/school uses Classgrid, say you can't see that 
             stickyGroupIds: Object.keys(stickyAged),
             role: req.user?.role,
             email: req.user?.email,
-            hasOrg: !!orgId && String(orgId) !== PUBLIC_CHAT_ORG_ID
+            hasOrg: !!orgId && String(orgId) !== PUBLIC_CHAT_ORG_ID,
+            // Background tasks from WhatsApp calls get every tool and plugin from the start (owner's rule)
+            loadAll: body.allTools === true
         });
         if (isProjectChat) toolPlan.allowedToolNames.delete("deploy_to_classgrid_cloud"); // Classgrid Cloud is for Agent mode HTML sites
         const seenToolNames = new Set();

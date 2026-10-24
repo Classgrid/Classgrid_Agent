@@ -515,7 +515,8 @@ async function runAgentTask(user, question, projectId, onSession, sessionId = nu
         method: "POST",
         headers: { Authorization: `Bearer ${userToken(user)}`, "Content-Type": "application/json" },
         // projectId: the chat is saved inside that Project Mode project
-        body: JSON.stringify({ question, ...(sessionId ? { sessionId } : {}), ...(projectId ? { projectId: String(projectId) } : {}) }),
+        // allTools: every tool and plugin is loaded from the start (owner's rule)
+        body: JSON.stringify({ question, allTools: true, ...(sessionId ? { sessionId } : {}), ...(projectId ? { projectId: String(projectId) } : {}) }),
     });
     if (!res.ok || !res.body) {
         const err = await res.json().catch(() => ({}));
