@@ -12,7 +12,7 @@
 // A user calls the Classgrid WhatsApp number. Meta sends the call to the ai.classgrid.in server (same machine), which
 // passes it here. If the caller's number is the verified WhatsApp of exactly one Classgrid account, the call is
 // answered as that person: their voice goes to Cloudflare Whisper (speech to text), Claude talks with them, and the
-// reply is spoken back with Cloudflare Aura (text to speech). A call lasts at most 5 minutes (never cut mid-sentence).
+// reply is spoken back with Cloudflare Aura (text to speech). A call lasts at most 15 minutes (never cut mid-sentence).
 // The AI saves the caller's tasks during the call; when the call ends, the Classgrid Agent does them in the
 // background as that user, in a new chat in their account, and the result is sent to them on WhatsApp.
 //
@@ -30,7 +30,7 @@ import { chargeableTokens } from "./ai-token-pricing.js";
 
 const GRAPH = "https://graph.facebook.com/v22.0";
 const CALL_MODEL = "claude-haiku-5-5"; // fastest Claude, so the voice replies come quickly
-const MAX_CALL_MS = 5 * 60 * 1000;
+const MAX_CALL_MS = 15 * 60 * 1000;
 const WRAP_UP_MS = MAX_CALL_MS - 15 * 1000; // 15 s before the end the AI is told the time is almost up
 const OVERTIME_MS = 30 * 1000; // at the limit, a sentence or answer in progress may finish (up to 30 s more)
 // Owner's rule (2026-10-23): one phone number gets at most 5 answered calls in any 24 hours (so at most 5
@@ -251,7 +251,7 @@ function systemPrompt(user) {
         "You are Classgrid AI on a WhatsApp voice call with a Classgrid user.",
         `Caller: ${user.name || "unknown name"} (${user.email}). Time: ${now} (India).`,
         "What you say is read out by an English text-to-speech voice, so write plain spoken English: short sentences, no markdown, no lists, no emojis, no links.",
-        "The call can last at most 5 minutes.",
+        "The call can last at most 15 minutes.",
         "After the call the Classgrid Agent does the work in the caller's account and sends them the result on WhatsApp.",
     ].join("\n");
 }
