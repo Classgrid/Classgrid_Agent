@@ -67,15 +67,22 @@ function toText(html) {
 
 // Emails in the AI's mailbox (every received folder), newest first, read and unread. Filters: sender, time range,
 // subject words, text words, read state. markAs ("read" | "unread") marks the returned emails.
-// Returns [{ id, at, folder, from, to, subject, text, read, hasAttachment }].
+// Returns [{ id, at, folder, from, to, subject, text, read, hasAttachment }], with .total (all emails in the mailbox)
+// and .matched (emails that match the filters).
 export async function searchAgentMail({ fromEmail = "", fromMs = 0, toMs = Infinity, subject = "", text = "", status = "all", count = 5, markAs = "" }) {
     const want = String(fromEmail || "").trim().toLowerCase();
     const subj = String(subject || "").trim().toLowerCase();
     const state = ["read", "unread"].includes(status) ? `&status=${status}` : "";
     const all = [];
+    let total = 0;
     for (const f of await mailFolders()) {
-        const list = (await zoho(`/messages/view?folderId=${f.id}&limit=200${state}`).catch(() => null)) || [];
-        for (const m of list) all.push({ ...m, folderName: f.name, folderId: m.folderId || f.id });
+        const list = (await zoho(`/messages/view?folderId=${f.id}&limit=200`).catch(() => null)) || [];
+        total += list.length;
+        for (const m of list) {
+            const read = String(m.status) === "1";
+            if (state && (status === "read") !== read) continue;
+            all.push({ ...m, folderName: f.name, folderId: m.folderId || f.id });
+        }
     }
     const matches = all
         .map((m) => ({ ...m, at: Number(m.receivedTime || m.sentDateInGMT) || 0, fromAddr: (m.fromAddress || emailOf(m.sender)).toLowerCase() }))
@@ -94,13 +101,20 @@ export async function searchAgentMail({ fromEmail = "", fromMs = 0, toMs = Infin
             read: String(m.status) === "1", hasAttachment: m.hasAttachment === "1" || m.hasAttachment === true,
         });
     }
-    if (out.length && (markAs === "read" || markAs === "unread")) {
+    const mark = async (list, mode) => {
         const byFolder = new Map();
-        for (const m of out) byFolder.set(m.folderId, [...(byFolder.get(m.folderId) || []), m.id]);
-        for (const [folderId, ids] of byFolder) {
-            await zoho("/updatemessage", { method: "PUT", body: { mode: markAs === "read" ? "markAsRead" : "markAsUnread", messageId: ids, folderId } });
-        }
+        for (const m of list) byFolder.set(m.folderId, [...(byFolder.get(m.folderId) || []), m.id]);
+        for (const [folderId, ids] of byFolder) await zoho("/updatemessage", { method: "PUT", body: { mode, messageId: ids, folderId } });
+    };
+    if (out.length && (markAs === "read" || markAs === "unread")) {
+        await mark(out, markAs === "read" ? "markAsRead" : "markAsUnread");
         for (const m of out) m.read = markAs === "read";
+    } else {
+        // Opening an email marks it read in Zoho: emails that were unread are put back to unread
+        const wasUnread = out.filter((m) => !m.read);
+        if (wasUnread.length) await mark(wasUnread, "markAsUnread").catch(() => {});
     }
+    out.total = total;
+    out.matched = words ? out.length : matches.length;
     return out;
 }
