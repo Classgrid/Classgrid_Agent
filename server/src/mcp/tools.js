@@ -987,7 +987,7 @@ export const getMcpTools = () => [
   },
   {
     name: 'end_task',
-    description: "Mark this chat's task as ended. The user is told it is completed, and the task's saved record (its WhatsApp messages and steps) is deleted 1 hour later.",
+    description: "Mark this chat's task as ended. The user is told it is completed, and the task's saved record (its WhatsApp messages and steps) is deleted 1 hour later. Until this is used, the task stays open and waits for the user's next message. When you are sure the work is done, first ask the user to confirm the task is complete, and use this only after they confirm (a message like \"done, thanks\" already counts as confirmation). If continuing the task would be harmful or dangerous, you may end it yourself without asking.",
     inputSchema: {
       type: 'object',
       properties: {

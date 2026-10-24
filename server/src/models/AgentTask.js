@@ -33,6 +33,8 @@ const agentTaskSchema = new mongoose.Schema({
   wake_count: { type: Number, default: 0 },
   // When the big model ended the task itself (end_task tool)
   ended_by_ai_at: { type: Date, default: null },
+  // When the task began (a call task: when the call started); its chat only sees emails from this time on
+  started_at: { type: Date, default: null },
 }, { timestamps: true });
 
 agentTaskSchema.index({ phone: 1, updatedAt: -1 });

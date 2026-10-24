@@ -3528,9 +3528,12 @@ If they ask whether their college/school uses Classgrid, say you can't see that 
                             const toMs = ms(args?.to_date);
                             if (args?.from_date && fromMs === null) return "ERROR: from_date is not a valid date and time. Use ISO 8601, for example 2026-10-24T09:00:00+05:30.";
                             if (args?.to_date && toMs === null) return "ERROR: to_date is not a valid date and time. Use ISO 8601, for example 2026-10-24T18:00:00+05:30.";
+                            // A task's chat only sees emails from when its task began, never an old task's emails (owner's design)
+                            const { taskStartFor } = await import('../services/agent-task.service.js');
+                            const taskStart = isIncognito ? null : await taskStartFor(sessionId);
                             // Owner's choice (2026-10-24): every email in the AI's mailbox, read and unread, from any sender
                             const items = await searchAgentMail({
-                                fromEmail: args?.from_email || "", fromMs: fromMs ?? 0, toMs: toMs ?? Infinity,
+                                fromEmail: args?.from_email || "", fromMs: Math.max(fromMs ?? 0, taskStart ?? 0), toMs: toMs ?? Infinity,
                                 subject: args?.subject || "", text: args?.text || "", status: args?.status || "all",
                                 count: Number(args?.count) || 5, markAs: args?.mark_as || "",
                             });

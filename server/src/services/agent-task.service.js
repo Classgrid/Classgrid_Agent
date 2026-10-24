@@ -189,6 +189,19 @@ export async function taskMessagesFor(sessionId, count = 5) {
     return (log.whatsapp_messages || []).slice(-Math.max(1, Math.min(count, 20))).reverse().map(fromLogItem);
 }
 
+// When this chat's open task began (ms), or null when the chat has no open task: its email tool only shows emails
+// from then on, so a new task never sees an old task's emails (like its WhatsApp messages)
+export async function taskStartFor(sessionId) {
+    if (!sessionId) return null;
+    const log = await TaskLog.findOne({ session_id: sessionId, ended: false }).select("agent_task_id whatsapp_messages createdAt").lean().catch(() => null);
+    if (!log) return null;
+    const task = log.agent_task_id ? await AgentTask.findById(log.agent_task_id).select("started_at createdAt").lean().catch(() => null) : null;
+    const times = [task?.started_at, task?.createdAt, log.createdAt].map((d) => d ? new Date(d).getTime() : NaN)
+        .concat((log.whatsapp_messages || []).map((m) => Number(m.at)))
+        .filter((t) => Number.isFinite(t) && t > 0);
+    return times.length ? Math.min(...times) : null;
+}
+
 async function endTaskLog(taskId, summary = "") {
     await TaskLog.updateMany({ agent_task_id: taskId, ended: false }, {
         $set: { ended: true, ended_at: new Date(), ...(summary ? { summary: String(summary).slice(0, 3000) } : {}) },
@@ -233,7 +246,7 @@ export async function startCallTask({ user, phone, question, sessionId, callStar
         // The task works inside this Project Mode project (every wake-up opens it)
         project_id: projectId ? String(projectId) : null, project_name: projectName || null,
         origin: "whatsapp", goal: String(question || "").slice(0, 8000), status: "working", heartbeat_at: new Date(),
-        work_started_at: new Date(), last_seen_msg_at: callStartedAt || Date.now(),
+        work_started_at: new Date(), last_seen_msg_at: callStartedAt || Date.now(), started_at: new Date(callStartedAt || Date.now()),
     });
     if (number) {
         const older = await AgentTask.find({ phone: number, _id: { $ne: task._id }, status: { $in: ["sleeping", "waiting_tokens"] } }).select("_id").lean();
