@@ -233,7 +233,7 @@ const START_TASK_TOOL = {
         type: "object",
         properties: {
             task: { type: "string", description: "The complete task with every detail the caller gave, written for the Agent." },
-            project_name: { type: "string", description: "Optional: the name of one of the caller's Project Mode projects this task belongs to. The Agent's chat is then saved inside that project." },
+            project_name: { type: "string", description: "Optional: the name of one of the caller's projects this task belongs to. The Agent's chat is then saved inside that project." },
         },
         required: ["task"],
     },
@@ -241,12 +241,12 @@ const START_TASK_TOOL = {
 
 const ASK_CLASSGRID_TOOL = {
     name: "ask_classgrid",
-    description: "Ask the Classgrid Agent right now, during the call, and get its answer back to tell the caller. It has everything in the caller's account: classrooms, chats, schedules, files, connected apps (Gmail, Google Calendar, Google Drive, Notion and more), web search and all other Classgrid tools. Use it for anything to look up or do while the caller is on the line. With project_name it first opens that Project Mode project (as the editor does) so the Agent can read and change its files. It can take from a few seconds to a minute (longer when a project has to be opened).",
+    description: "Ask the Classgrid Agent right now, during the call, and get its answer back to tell the caller. It has everything in the caller's account: classrooms, chats, schedules, files, connected apps (Gmail, Google Calendar, Google Drive, Notion and more), web search and all other Classgrid tools. Use it for anything to look up or do while the caller is on the line. With project_name it first opens that project (as the editor does) so the Agent can read and change its files. It can take from a few seconds to a minute (longer when a project has to be opened).",
     input_schema: {
         type: "object",
         properties: {
             request: { type: "string", description: "What to look up or do, with every detail the caller gave." },
-            project_name: { type: "string", description: "Optional: the name of one of the caller's Project Mode projects to open and work in." },
+            project_name: { type: "string", description: "Optional: the name of one of the caller's projects to open and work in." },
         },
         required: ["request"],
     },
@@ -262,12 +262,12 @@ const END_CALL_TOOL = {
 const PROJECT_TOOLS = [
     {
         name: "make_project",
-        description: "Create a new Project Mode project in the caller's account with this name.",
+        description: "Create a new project in the caller's account with this name.",
         input_schema: { type: "object", properties: { name: { type: "string", description: "The project name." } }, required: ["name"] },
     },
     {
         name: "list_projects",
-        description: "List the caller's Project Mode projects (name and linked GitHub repo).",
+        description: "List the caller's projects (name and linked GitHub repo).",
         input_schema: { type: "object", properties: {} },
     },
 ];
