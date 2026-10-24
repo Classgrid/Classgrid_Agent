@@ -585,6 +585,10 @@ export async function onWhatsappMessage(value) {
     const number = normalizeWhatsappNumber(first.from);
     const user = await findCaller(number).catch(() => null);
     if (!user) return false;
+    // Owner's rule: a new task starts only from a call. With no open task (and no call or task run on this number),
+    // the message is not taken, so the normal WhatsApp bot answers it
+    const open = waiting.has(number) || numberInUse(number) || await AgentTask.exists({ phone: number, status: { $in: OPEN } }).catch(() => null);
+    if (!open) return false;
     const real = value.messages.filter((m) => m.type !== "reaction");
     if (!real.length) return true;
     for (const m of real) markWhatsappRead(m.id);
