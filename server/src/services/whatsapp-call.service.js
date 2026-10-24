@@ -424,9 +424,26 @@ async function afterCall(call) {
     const where = project ? ` in your project "${project.name}"` : "";
     // Owner's rule: before the final email or WhatsApp, the Agent checks the user's latest WhatsApp messages
     task += "\n\n(The user may send follow-ups or files in the Classgrid WhatsApp chat while you work. Before you send the final result by email or WhatsApp, read their latest WhatsApp messages with read_whatsapp_messages and use anything new they added.)";
-    const result = await runAgentTask(call.user, `[From a WhatsApp call]\n${task}`, project?._id, (sessionId) =>
-        sendWhatsappText(call.from, `Got it. Classgrid AI is working on it now${where}. I'll send you the result here when it's done.\n\nFollow along: ${CHAT_URL}/agent/${sessionId}`))
-        .finally(() => stopKeepOpen());
+    // While the big AI works, the small AI answers the user's new WhatsApp messages and passes them on (owner's design)
+    const updates = await import("./whatsapp-updates.service.js");
+    updates.taskStarted(call.from, { user: call.user, goal: task, send: (text) => sendWhatsappText(call.from, text) });
+    let result;
+    try {
+        result = await runAgentTask(call.user, `[From a WhatsApp call]\n${task}`, project?._id, (sessionId) => {
+            updates.taskSessionReady(call.from, sessionId);
+            sendWhatsappText(call.from, `Got it. Classgrid AI is working on it now${where}. I'll send you the result here when it's done.\n\nFollow along: ${CHAT_URL}/agent/${sessionId}`);
+        });
+        // Updates that came after its last step: it runs once more with them (at most 3 times)
+        for (let i = 0; i < 3 && result.sessionId; i++) {
+            const left = await updates.takeUpdates(result.sessionId);
+            if (!left.length) break;
+            const next = await runAgentTask(call.user, `[New from the user on WhatsApp while you were working: ${left.join(" | ")}]\nContinue the task with this.`, project?._id, null, result.sessionId);
+            if (next.answer || !result.answer) result = { ...next, sessionId: result.sessionId };
+        }
+    } finally {
+        updates.taskEnded(call.from);
+        stopKeepOpen();
+    }
     const link = result.sessionId ? `\n\nFull result: ${CHAT_URL}/agent/${result.sessionId}` : "";
     if (!result.answer) {
         await sendWhatsappText(call.from, `Classgrid AI could not finish this task${result.error ? `: ${result.error}` : "."}${link}`);

@@ -168,13 +168,18 @@ router.post("/calls-internal", async (req, res) => {
 // ─────────────────────────────────────────────
 router.post("/messages-internal", async (req, res) => {
     if (!fromWhatsappServer(req)) return res.sendStatus(403);
-    res.sendStatus(200);
+    let busy = false;
     try {
         const { saveIncomingMessages } = await import("../services/whatsapp-inbox.service.js");
         await saveIncomingMessages(req.body);
+        // A task is running for this number: the small AI answers and passes the message to the big AI
+        const { onIncomingMessages } = await import("../services/whatsapp-updates.service.js");
+        busy = onIncomingMessages(req.body);
     } catch (err) {
         console.error("WhatsApp message save error:", err);
     }
+    // busy: the old help bot stays quiet
+    res.json({ busy });
 });
 
 export default router;

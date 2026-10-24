@@ -4270,6 +4270,15 @@ If they ask whether their college/school uses Classgrid, say you can't see that 
                         }
                         let resultStr;
                         try { resultStr = await handler(args); } catch (err) { resultStr = "Error: " + (err.message || String(err)); }
+                        // New WhatsApp messages from the user, passed on by the small AI while this task runs: they
+                        // reach the AI with this tool result, so it never has to stop (owner's design)
+                        if (sessionId && typeof resultStr === "string") {
+                            try {
+                                const { takeUpdates } = await import('../services/whatsapp-updates.service.js');
+                                const ups = await takeUpdates(sessionId);
+                                if (ups.length) resultStr += `\n\n[New from the user on WhatsApp while you work: ${ups.join(" | ")}. Use this in the task.]`;
+                            } catch { /* no updates */ }
+                        }
 
                         if (!silentTool) {
                             const step = accSteps.find(s => s.tool === toolName && s.status === 'loading');
