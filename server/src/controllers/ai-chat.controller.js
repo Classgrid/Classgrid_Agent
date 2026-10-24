@@ -3600,6 +3600,11 @@ If they ask whether their college/school uses Classgrid, say you can't see that 
                             }
                             const text = toWhatsappText(plainText).trim();
                             const fileUrl = String(args.fileUrl || "").trim();
+                            // Owner's rule: the same message or file is never sent twice in a task
+                            const { wasSent, rememberSent } = await import('../services/whatsapp-inbox.service.js');
+                            if (await wasSent(recipient, fileUrl ? { fileUrl } : { text })) {
+                                return "ALREADY SENT: you already sent this exact message/file to this person in this task. Don't send it again; carry on from where you stopped.";
+                            }
                             const messages = [];
                             if (fileUrl) {
                                 if (!/^https:\/\//i.test(fileUrl)) return `FAILED: fileUrl must be a public https link (for example a cdn.classgrid.in file). Nothing was sent.`;
@@ -3651,6 +3656,7 @@ If they ask whether their college/school uses Classgrid, say you can't see that 
                                 firstId ||= out.data?.messages?.[0]?.id;
                             }
                             await recordDirectWhatsappSend(req.user._id, firstId);
+                            await rememberSent(recipient, { text, fileUrl });
                             // A reply to the user's own number unlocks the rest of the work (mustReplyFirst)
                             if (ownNumber(recipient)) req._whatsappReplied = true;
                             // WhatsApp's 24-hour rule: Meta accepts the message now, but drops it later if this person
@@ -4392,6 +4398,8 @@ If they ask whether their college/school uses Classgrid, say you can't see that 
             hasOrg: !!orgId && String(orgId) !== PUBLIC_CHAT_ORG_ID
         });
         if (isProjectChat) toolPlan.allowedToolNames.delete("deploy_to_classgrid_cloud"); // Classgrid Cloud is for Agent mode HTML sites
+        // replyOnly: a quick text reply with no tools (a long task answering the user's new WhatsApp message first)
+        if (body.replyOnly === true) { toolPlan.allowedToolNames.clear(); toolPlan.loadedNames.clear?.(); }
         const seenToolNames = new Set();
         // Every tool this user may use (one definition per name), in a fixed order.
         const fullToolList = orderTools([...llmConfig.tools, buildLoadToolsTool(toolPlan.allowedGroups)].filter(t => {

@@ -103,6 +103,57 @@ const CUTOFF_KEY = (number) => `wa:cutoff:${number}`;
 export async function forgetMessagesBefore(phone, ms = Date.now()) {
     const number = normalizeWhatsappNumber(phone);
     if (number) await redis.set(CUTOFF_KEY(number), String(ms), "EX", TTL_S).catch(() => {});
+    // A new task starts with a clean "already sent" list
+    if (number) await redis.del(SENT_KEY(number), `${SENT_KEY(number)}:list`).catch(() => {});
+}
+
+// ─── Never the same message twice (owner's rule, 2026-10-24) ────
+// Everything sent to a number during a task (text and files) is remembered; the same text or the same file (same
+// content, by its ETag) is never sent again. The list is wiped when the task ends.
+const SENT_KEY = (number) => `wa:sent:${number}`;
+const textKey = (text) => "t:" + crypto.createHash("sha1").update(String(text || "").toLowerCase().replace(/[\s*_~`]+/g, " ").trim()).digest("hex");
+
+// The file's content fingerprint (R2 gives an ETag); its URL if that can't be read
+export async function fileKey(url) {
+    try {
+        const res = await fetch(url, { method: "HEAD", signal: AbortSignal.timeout(5000) });
+        const tag = res.headers.get("etag") || `${res.headers.get("content-length") || ""}:${res.headers.get("last-modified") || ""}`;
+        return "f:" + crypto.createHash("sha1").update(`${url}|${tag}`).digest("hex");
+    } catch {
+        return "f:" + crypto.createHash("sha1").update(String(url)).digest("hex");
+    }
+}
+
+export async function wasSent(phone, { text = "", fileUrl = "" } = {}) {
+    const number = normalizeWhatsappNumber(phone);
+    if (!number) return false;
+    const key = fileUrl ? await fileKey(fileUrl) : text ? textKey(text) : null;
+    if (!key) return false;
+    return !!(await redis.sismember(SENT_KEY(number), key).catch(() => 0));
+}
+
+export async function rememberSent(phone, { text = "", fileUrl = "" } = {}) {
+    const number = normalizeWhatsappNumber(phone);
+    if (!number) return;
+    const keys = [];
+    if (text) keys.push(textKey(text));
+    if (fileUrl) keys.push(await fileKey(fileUrl));
+    if (!keys.length) return;
+    await redis.sadd(SENT_KEY(number), ...keys).catch(() => {});
+    await redis.expire(SENT_KEY(number), TTL_S).catch(() => {});
+    // A short readable list, so a resumed AI knows what it already sent
+    await redis.rpush(`${SENT_KEY(number)}:list`, JSON.stringify({ at: Date.now(), text: String(text || "").slice(0, 200), file: fileUrl || "" })).catch(() => {});
+    await redis.ltrim(`${SENT_KEY(number)}:list`, -30, -1).catch(() => {});
+    await redis.expire(`${SENT_KEY(number)}:list`, TTL_S).catch(() => {});
+}
+
+// What was already sent in this task, for the resumed AI ("" when nothing)
+export async function sentSummary(phone) {
+    const number = normalizeWhatsappNumber(phone);
+    if (!number) return "";
+    const raw = await redis.lrange(`${SENT_KEY(number)}:list`, 0, -1).catch(() => []);
+    const items = raw.map((r) => { try { return JSON.parse(r); } catch { return null; } }).filter(Boolean);
+    return items.map((m) => `- ${m.file ? `file ${m.file}${m.text ? ` with "${m.text}"` : ""}` : `"${m.text}"`}`).join("\n").slice(0, 3000);
 }
 
 async function inbox(number) {

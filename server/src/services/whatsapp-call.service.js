@@ -29,7 +29,7 @@ import { isSharedTestWhatsapp } from "../utils/chat-onboarding.js";
 import { hasEnoughTokens, deductTokens } from "./ai-credits.service.js";
 import { chargeableTokens } from "./ai-token-pricing.js";
 import { toWhatsappText, splitWhatsappText } from "./ai-feature-limits.js";
-import { BUSY_KEY, markLastIn } from "./whatsapp-inbox.service.js";
+import { BUSY_KEY, markLastIn, wasSent, rememberSent } from "./whatsapp-inbox.service.js";
 import { BUDGET_STOP_NOTE } from "./llm-stream.js";
 
 const GRAPH = "https://graph.facebook.com/v22.0";
@@ -123,18 +123,25 @@ export function splitPdfLinks(text) {
 const pdfName = (url) => decodeURIComponent(url.split("?")[0].split("/").pop() || "file.pdf").slice(0, 240);
 
 export async function sendWhatsappText(to, text) {
-    const { text: rest, pdfs } = splitPdfLinks(text);
+    const { text: rest, pdfs: allPdfs } = splitPdfLinks(text);
     const body = toWhatsappText(rest);
+    // Owner's rule: the same message or file is never sent twice in a task
+    const pdfs = [];
+    for (const url of allPdfs) if (!(await wasSent(to, { fileUrl: url }))) pdfs.push(url);
+    if (allPdfs.length > pdfs.length) console.log(`[WA call] ${allPdfs.length - pdfs.length} PDF(s) already sent to ${to}, not sent again`);
     // One PDF and a short text: the text is the PDF's caption
     const caption = pdfs.length === 1 && body && body.length <= 1024 ? body : "";
     if (!caption) {
         for (const part of splitWhatsappText(body)) {
+            if (await wasSent(to, { text: part })) { console.log(`[WA call] message already sent to ${to}, not sent again`); continue; }
             await graph("messages", { recipient_type: "individual", to, type: "text", text: { preview_url: true, body: part } })
+                .then(() => rememberSent(to, { text: part }))
                 .catch((e) => console.error("[WA call] WhatsApp message failed:", e.message));
         }
     }
     for (const url of pdfs) {
         await graph("messages", { recipient_type: "individual", to, type: "document", document: { link: url, filename: pdfName(url), ...(caption ? { caption } : {}) } })
+            .then(() => rememberSent(to, { text: caption, fileUrl: url }))
             .catch(async (e) => {
                 console.error("[WA call] WhatsApp PDF failed:", e.message);
                 // The file couldn't go: at least the link
@@ -837,11 +844,19 @@ export function keepProjectOpen(userId) {
 // control: { signal, live } — signal stops the run (a new WhatsApp message came); live.tool is the tool running now.
 // A stopped run returns { aborted: true }.
 export async function runAgentTask(user, question, projectId, onSession, sessionId = null, onStep = null, extraBody = {}, control = {}) {
-    const port = process.env.PORT || 3000;
+    // A run never hangs forever: after 45 minutes it is stopped (the task then tries again 5 minutes later)
+    const timeLimit = AbortSignal.timeout(45 * 60 * 1000);
+    // (AbortSignal.any needs Node 20.3+; on an older Node only the stop signal is used)
+    const signal = !control.signal ? timeLimit : typeof AbortSignal.any === "function" ? AbortSignal.any([control.signal, timeLimit]) : control.signal;
+    const runControl = { ...control, signal };
     try {
-        return await runAgentTaskOnce(user, question, projectId, onSession, sessionId, onStep, extraBody, control);
+        return await runAgentTaskOnce(user, question, projectId, onSession, sessionId, onStep, extraBody, runControl);
     } catch (e) {
-        if (control.signal?.aborted) return { sessionId: control.sessionId || sessionId, answer: "", error: "stopped for new WhatsApp messages", aborted: true };
+        if (control.signal?.aborted) return { sessionId: runControl.sessionId || sessionId, answer: "", error: "stopped for new WhatsApp messages", aborted: true };
+        if (timeLimit.aborted) {
+            console.error("[agent task] a run took over 45 minutes and was stopped");
+            return { sessionId: runControl.sessionId || sessionId, answer: "", error: "the run took over 45 minutes and was stopped" };
+        }
         throw e;
     }
 }
