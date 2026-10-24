@@ -123,6 +123,9 @@ export function splitPdfLinks(text) {
 const pdfName = (url) => decodeURIComponent(url.split("?")[0].split("/").pop() || "file.pdf").slice(0, 240);
 
 export async function sendWhatsappText(to, text) {
+    // The AI's private thinking (<thinking>…</thinking>) is never sent to the user
+    text = String(text || "").replace(/<(thinking|think)>[\s\S]*?<\/\1>/gi, "").replace(/<\/?(thinking|think)>/gi, "").trim();
+    if (!text) return;
     const { text: rest, pdfs: allPdfs } = splitPdfLinks(text);
     const body = toWhatsappText(rest);
     // Owner's rule: the same message or file is never sent twice in a task
