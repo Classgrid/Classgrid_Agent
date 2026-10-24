@@ -3591,7 +3591,11 @@ If they ask whether their college/school uses Classgrid, say you can't see that 
                             // A task's chat reads only that task's messages, from its record (owner's design)
                             const { taskMessagesFor, markTaskMessagesRead } = await import('../services/agent-task.service.js');
                             const fromTask = isIncognito ? null : await taskMessagesFor(sessionId, count);
-                            const items = fromTask || await readRecentMessages(phone, count);
+                            // A call's live work (whatsappSince): only messages sent since the call started, never older ones
+                            const since = Number(body.whatsappSince) || 0;
+                            const items = fromTask || (since
+                                ? (await readRecentMessages(phone, 20)).filter((m) => m.at >= since).slice(0, count)
+                                : await readRecentMessages(phone, count));
                             if (!items.length) return fromTask ? "No WhatsApp messages from the user for this task yet." : "No WhatsApp messages from the user in the last 3 days.";
                             const { noteMessagesRead } = await import('../services/whatsapp-inbox.service.js');
                             noteMessagesRead(phone, items);

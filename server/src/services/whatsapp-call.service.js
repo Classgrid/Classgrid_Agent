@@ -573,7 +573,8 @@ async function afterCall(call, why) {
     }
     let n = 0;
     for (const [key, { project, tasks }] of groups.entries()) {
-        const liveSession = call.liveSessions[key] || null;
+        // The work after the call carries on in the chat the live work used during the call, so it sees all of it
+        const liveSession = call.liveSessions[key] || (!project ? Object.values(call.liveSessions)[0] : null) || null;
         let task = tasks.length === 1 ? tasks[0] : `Do these tasks in this order:\n${tasks.map((t, i) => `${i + 1}. ${t}`).join("\n")}`;
         if (liveSession) task = `[During the call you already started on this in this chat. Look at what is already done here and do only what is left. Don't build or send anything again that is already done.]\n${task}`;
         // Owner's rule: before the final email or WhatsApp, the Agent checks the user's latest WhatsApp messages
@@ -747,7 +748,8 @@ async function askClassgridLive(call, request, projectName) {
         }
         const key = project ? String(project._id) : "none";
         try {
-            return { ...(await runAgentTask(call.user, question, project?._id, (id) => { call.liveSessions[key] ||= id; }, call.liveSessions[key] || null)), key };
+            // whatsappSince: the live work reads only the WhatsApp messages sent since this call started (no old ones)
+            return { ...(await runAgentTask(call.user, question, project?._id, (id) => { call.liveSessions[key] ||= id; }, call.liveSessions[key] || null, null, { whatsappSince: call.startedAt })), key };
         } finally {
             stopKeepOpen();
         }
