@@ -128,7 +128,7 @@ export const TOOL_GROUPS = [
     {
         id: "email_messaging",
         description: "Send emails and WhatsApp messages.",
-        tools: ["send_email", "send_whatsapp_message"],
+        tools: ["send_email", "send_whatsapp_message", "read_whatsapp_messages", "wait_for_whatsapp_reply"],
         pattern: /\b(e-?mails?|mail\s+(to|kar\w*|bhej\w*)|send\s+mail|whats\s*app|sms|notify|parents?\s+ko)\b|ईमेल|मेल|व्हाट्सएप/i,
     },
     // Connector groups: only offered when that integration is connected (its tool is in the list).
