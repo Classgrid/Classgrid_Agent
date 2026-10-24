@@ -653,7 +653,7 @@ export async function streamClaudeChat({
                 const refs = isObjectResult && Array.isArray(content.toolReferences)
                     ? content.toolReferences.filter((n) => deferredToolNames.has(n))
                     : [];
-                const resultText = String((isObjectResult ? content.text : content) ?? "").slice(0, call.name === "run_project_helpers" || call.name === "read_whatsapp_messages" || call.name === "wait_for_whatsapp_reply" ? 200000 : call.name === "open_url" || call.name === "view_project_file" || call.name === "search_project" ? 20000 : 6000);
+                const resultText = String((isObjectResult ? content.text : content) ?? "").slice(0, call.name === "run_project_helpers" ? 200000 : call.name === "open_url" || call.name === "view_project_file" || call.name === "search_project" ? 20000 : 6000);
                 // The tool_result can only hold the references, so a loaded group's rules follow as a text block.
                 if (refs.length > 0 && content.instructions) extraTexts.push(String(content.instructions));
                 const images = refs.length > 0 || isError ? [] : await toolResultImages(call.name, isObjectResult ? content : null, resultText);

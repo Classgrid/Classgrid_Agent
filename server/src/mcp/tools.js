@@ -923,49 +923,14 @@ export const getMcpTools = () => [
   },
   {
     name: 'send_whatsapp_message',
-    description: 'Send a WhatsApp message globally using the platform WhatsApp Business account: text, or a real file (PDF and other documents, JPG/PNG photos, MP3/OGG audio, MP4 video) with fileUrl. Use this whenever the user asks you to send a WhatsApp message. WhatsApp formatting: *bold*, _italic_, ~strike~, ```code```; links are plain URLs (no Markdown).',
+    description: 'Send a WhatsApp text message globally using the platform WhatsApp Business account. Use this whenever the user asks you to send a WhatsApp message.',
     inputSchema: {
       type: 'object',
       properties: {
         toPhoneNumber: { type: 'string', description: 'The recipient phone number with country code (e.g. 919876543210).' },
-        messageText: { type: 'string', description: 'The text message to send. With a file it is the caption (up to 1024 characters; audio has no caption).' },
-        fileUrl: { type: 'string', description: 'Optional: a public https link to a file to send as a real WhatsApp file (for example a cdn.classgrid.in PDF from generate_pdf).' },
-        fileName: { type: 'string', description: 'Optional: the file name shown for a document (for example "Study Guide.pdf").' }
+        messageText: { type: 'string', description: 'The text message to send.' }
       },
-      required: ['toPhoneNumber']
-    }
-  },
-  {
-    name: 'read_whatsapp_messages',
-    description: "Read the latest messages the user sent to the Classgrid WhatsApp chat from their own verified WhatsApp number (newest first, with the time). Files they sent (photos, PDFs, documents, voice notes) come back as links you can open with parse_document, analyze_image or transcribe_audio. Use it to see follow-ups, extra details or files the user added on WhatsApp.",
-    inputSchema: {
-      type: 'object',
-      properties: {
-        count: { type: 'number', description: 'How many recent messages to read (1-20, default 5).' }
-      }
-    }
-  },
-  {
-    name: 'wait_for_whatsapp_reply',
-    description: "Wait for the user's next WhatsApp message to Classgrid (for example after you asked them a question with send_whatsapp_message) and get it back, with any files as links. Waits up to timeout_minutes; returns that nothing came if they don't reply in time.",
-    inputSchema: {
-      type: 'object',
-      properties: {
-        timeout_minutes: { type: 'number', description: 'How long to wait (1-15 minutes, default 10).' }
-      }
-    }
-  },
-  {
-    name: 'sleep_until',
-    description: "Pause this task and end your run now, until something wakes you: a time (wake_at), the user's next WhatsApp message (wake_on_whatsapp_reply), or both. Nothing runs and no tokens are used while you sleep. When you wake, this chat continues and you are told what woke you.",
-    inputSchema: {
-      type: 'object',
-      properties: {
-        wake_at: { type: 'string', description: 'When to wake, ISO 8601 with the time zone (for example 2026-10-23T23:05:00+05:30).' },
-        wake_on_whatsapp_reply: { type: 'boolean', description: "Wake when the user sends a WhatsApp message." },
-        note: { type: 'string', description: 'What you will do when you wake (only you see this).' },
-        message: { type: 'string', description: 'Optional short text for the user now. When the task came from WhatsApp, it is also sent to them on WhatsApp.' }
-      }
+      required: ['toPhoneNumber', 'messageText']
     }
   },
   {

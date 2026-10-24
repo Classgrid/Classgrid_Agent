@@ -46,7 +46,6 @@ export const CORE_TOOL_NAMES = [
     "search_knowledge_base",
     "warn_user",
     "end_conversation",
-    "sleep_until",
 ];
 
 // Tool definitions with no handler behind them: every call fails today, so they are not offered.
@@ -129,7 +128,7 @@ export const TOOL_GROUPS = [
     {
         id: "email_messaging",
         description: "Send emails and WhatsApp messages.",
-        tools: ["send_email", "send_whatsapp_message", "read_whatsapp_messages", "wait_for_whatsapp_reply"],
+        tools: ["send_email", "send_whatsapp_message"],
         pattern: /\b(e-?mails?|mail\s+(to|kar\w*|bhej\w*)|send\s+mail|whats\s*app|sms|notify|parents?\s+ko)\b|ईमेल|मेल|व्हाट्सएप/i,
     },
     // Connector groups: only offered when that integration is connected (its tool is in the list).

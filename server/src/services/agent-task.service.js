@@ -469,34 +469,7 @@ export async function wakeTask(taskId, reason) {
         const sends = []; // WhatsApp messages the Agent sent itself during this run
         const doneSteps = [];
         const run = task.phone ? startRun(task.phone) : { control: {}, done: () => {} };
-        // Owner's rule: the user's new WhatsApp message is answered first, quickly. A short run with no tools writes
-        // the reply and the server sends it at once (server messages don't count toward the WhatsApp limit); then
-        // the work goes on.
-        let mainQuestion = question;
-        if ((reason === "reply" || reason === "stopped") && msgs.length && task.phone) {
-            const quick = await runAgentTask(user,
-                `${header}[The user just sent you new WhatsApp messages. Reply to them now, briefly and directly. In this step you have no tools; right after it you carry on with the task.]\nThe task: ${goal.slice(-2000)}\n\nNew WhatsApp messages from the user (oldest first, India time). ${files}\n${messageLines(msgs)}`,
-                task.project_id, (sessionId) => {
-                    task.session_id ||= sessionId;
-                    AgentTask.updateOne({ _id: task._id, session_id: null }, { $set: { session_id: sessionId } }).catch(() => {});
-                }, task.session_id, null, { taskOrigin: task.origin, replyOnly: true }, run.control);
-            if (quick.aborted) {
-                run.done();
-                if (heartbeat) { clearInterval(heartbeat); heartbeat = null; }
-                await stoppedForMessages({ user, phone: task.phone, sessionId: quick.sessionId || task.session_id, steps: [], taskId: task._id });
-                return;
-            }
-            if (quick.answer) {
-                await sendWhatsappText(task.phone, short(quick.answer));
-                // Counted as already sent, so the final answer doesn't repeat it
-                sends.push({ name: "send_whatsapp_message", args: { toPhoneNumber: task.phone, messageText: quick.answer }, result: "SUCCESS" });
-                mainQuestion = `${question}\n\n(You already replied to these messages: "${quick.answer.slice(0, 1500)}". Don't send that again; now carry on with the task.)`;
-                console.log(`[agent task] ${task._id}: replied to the new WhatsApp messages`);
-            } else {
-                console.log(`[agent task] ${task._id}: quick reply failed (${quick.error || "no answer"}), going on with the task`);
-            }
-        }
-        const result = await runAgentTask(user, mainQuestion, task.project_id, (sessionId) => {
+        const result = await runAgentTask(user, question, task.project_id, (sessionId) => {
             AgentTask.updateOne({ _id: task._id, session_id: null }, { $set: { session_id: sessionId } }).catch(() => {});
         }, task.session_id, (stepText, info) => {
             if (!stepText.startsWith("sleep_until")) steps++;
@@ -555,19 +528,6 @@ async function takeMessages(number, user) {
     const inUse = numberInUse(number);
     // On a call: taken in when the call is over. A call task running: it takes them in when it ends.
     if (inUse === "call") { console.log(`[agent task] ${number}: message waits for the call to end`); setTimeout(() => takeMessages(number, user).catch(() => {}), 60 * 1000); return; }
-    // Owner's rule: a new WhatsApp message comes first. The running AI is stopped at once; it then answers the
-    // message and carries on (if it is waiting for this reply right now, it simply gets it)
-    // (If the running AI has already read the message itself, it is not stopped: it already has it)
-    const unreadNow = await unreadMessages(number, 0);
-    if (!unreadNow.length && (inUse === "task" || await AgentTask.exists({ phone: number, status: "working" }))) {
-        console.log(`[agent task] ${number}: the running AI already read this message, it goes on`);
-        return;
-    }
-    const stopped = unreadNow.length ? stopRunFor(number) : false;
-    if (stopped) {
-        console.log(`[agent task] ${number}: new WhatsApp message: ${stopped === "waiting" ? "the AI is waiting for this reply and gets it" : "stopped the running AI so it answers this first"}`);
-        return;
-    }
     if (inUse === "task") { console.log(`[agent task] ${number}: message kept for the running call task`); return; }
     if (await AgentTask.exists({ phone: number, status: "working", heartbeat_at: { $gte: new Date(Date.now() - STALE_MS) } })) { console.log(`[agent task] ${number}: message kept for the running task`); return; }
     // The open task of this number (a finished one is not woken again)
