@@ -172,7 +172,7 @@ export function SuperAdminProfileView({ profileData, isReadOnly }: { profileData
       });
       queryClient.invalidateQueries({ queryKey: ["global-profile"] });
       queryClient.invalidateQueries({ queryKey: ["current-user"] });
-      toast.success("Super Admin profile updated successfully");
+      toast.success("Profile updated successfully");
       setIsEditing(false);
     } catch (error: any) {
       toast.error(error?.message || error?.response?.data?.message || "Failed to save profile");
