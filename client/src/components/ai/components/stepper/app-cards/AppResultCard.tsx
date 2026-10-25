@@ -8,8 +8,20 @@ import { FailLine } from './shared';
 
 export const APP_CARD_TOOLS = new Set(['canva_connector', 'spotify_connector']);
 
+/** The tool's JSON as it came. Not run through parseResult: its secret masking blanks "sig=" / "X-Amz-Signature="
+ * in links, which breaks Canva's signed image and download links (the user's own designs, shown as images here). */
+function readResult(result: unknown): { data: any; text: string } {
+  if (result !== null && typeof result === 'object') return { data: result, text: '' };
+  const raw = String(result ?? '').trim();
+  try {
+    const data = JSON.parse(raw);
+    if (data && typeof data === 'object') return { data, text: '' };
+  } catch { /* not JSON: an error or a sentence */ }
+  return parseResult(raw);
+}
+
 export function AppResultCard({ tool, args, result }: { tool: string; args: any; result: unknown }) {
-  const { data, text } = parseResult(result);
+  const { data, text } = readResult(result);
   const brand = tool === 'canva_connector' ? 'canva' : 'spotify';
   // A tool error comes back as text ("Error: …"): show it plainly
   if (data === undefined) return /^error\b/i.test(text.trim()) ? <FailLine brand={brand} text={text.replace(/^error:\s*/i, '')} /> : null;
