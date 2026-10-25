@@ -195,7 +195,7 @@ import { KnowledgeBaseSearchView } from "./stepper/KnowledgeBaseSearchView";
 import { CdnUploadView } from "./stepper/CdnUploadView";
 import { EmailSentView } from "./stepper/EmailSentView";
 import { ToolResultStep } from "./stepper/tool-results/ToolResultStep";
-import { AppReplyResults } from "./stepper/app-cards/AppResultCard";
+import { answerLinkCard } from "./FileLinkCard";
 import { IncognitoBar, IncognitoButton, loadIncognitoChat, saveIncognitoChat, clearIncognitoChat } from "./IncognitoMode";
 import { describeStep } from "./stepper/tool-results/describeStep";
 import { specialStepTitle, emailTitle } from "./stepper/tool-results/stepTitles";
@@ -1854,6 +1854,9 @@ const AssistantMessageContent = memo(({ content, sources, createdAt, isTyping, o
         // Project Mode: a link to a project file or folder opens it in the code editor, not as a web page
         const projectLink = parseProjectLink(href);
         if (projectLink) return <FileMentionChip {...projectLink} label={children} />;
+        // A link to a file (PDF, PPTX, PNG, Canva export…) or an app (Spotify, YouTube, GitHub, Google Docs…) shows as its own card
+        const linkCard = typeof href === "string" ? answerLinkCard(href, children) : null;
+        if (linkCard) return linkCard;
         const external = href && /^https?:\/\//i.test(href);
         return (
           <a
@@ -5316,12 +5319,6 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
                                   })()}
                                 </div>
                               )}
-
-                              {/* Canva and Spotify results as cards in the reply itself, above the answer text (like ChatGPT apps) */}
-                              <AppReplyResults
-                                steps={message.steps}
-                                done={!(index === messages.length - 1 && (thinking || submitting || !!message.typing)) && !(message.steps || []).some((s) => s.status === 'loading')}
-                              />
 
                               {/* Old thought accordion removed — CombinedReasoningBlock above stepper handles all thought display now */}
                               {message.content.includes("[IMAGE_GENERATION") ? (() => {

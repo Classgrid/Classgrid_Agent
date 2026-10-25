@@ -895,7 +895,7 @@ export const getMcpTools = () => [
   },
   {
     name: 'canva_connector',
-    description: "Work in the user's connected Canva account (Canva REST API): search, read and create designs, export designs as files, upload images, manage folders, comments and brand templates. Export, upload, autofill, resize and import wait for Canva to finish and return the result.",
+    description: "Work in the user's connected Canva account (Canva REST API): search, read and create designs, export designs as files, upload images, manage folders, comments and brand templates. Export, upload, autofill, resize and import wait for Canva to finish and return the result. Canva's API cannot add or edit content inside a design: create_design makes a blank design. import_design_from_url turns a public .pptx, .pdf, .docx, .key or image file into a fully editable Canva design with its slides, text and pictures.",
     inputSchema: {
       type: 'object',
       properties: {
