@@ -12,7 +12,7 @@
  */
 // CLASSGRID USES CLOUDFLARE USAGE TO CALCULATE TOKENS, NOT GPT-TOKENIZER (WHICH IS ONLY A FALLBACK)
 import React, { useState } from "react";
-import { User, Globe, Code, PenTool, Database, Microscope, Target, Megaphone, TrendingUp, Headset, Settings, PenLine, Laptop, Users, Building, UserPlus, PiggyBank, Scale, Star } from "lucide-react";
+import { User, Globe, Code, PenTool, Database, Microscope, Target, Megaphone, TrendingUp, Headset, Settings, PenLine, Laptop, Users, Building, UserPlus, PiggyBank, Scale, Star, GraduationCap, BookOpen, Award, UserCheck, Presentation, School, Heart, ChartLine, Rocket, Video, Stethoscope, Search } from "lucide-react";
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from "@/components/marketing_ui/select";
 import { Button } from "@/components/marketing_ui/button";
 import { Spinner } from "@/components/marketing_ui/spinner";
@@ -25,12 +25,24 @@ import { useQueryClient } from "@tanstack/react-query";
 
 
 const ROLES = [
+  { value: "student", label: "Student", icon: GraduationCap },
+  { value: "teacher", label: "Teacher", icon: BookOpen },
+  { value: "professor", label: "Professor", icon: Award },
+  { value: "faculty", label: "Faculty", icon: UserCheck },
+  { value: "lecturer", label: "Lecturer", icon: Presentation },
+  { value: "tutor", label: "Tutor", icon: BookOpen },
+  { value: "principal", label: "Principal", icon: School },
+  { value: "parent", label: "Parent", icon: Heart },
   { value: "software_engineer", label: "Software Engineer", icon: Code },
+  { value: "web_developer", label: "Web Developer", icon: Globe },
   { value: "designer", label: "Designer", icon: PenTool },
   { value: "data_scientist", label: "Data Scientist", icon: Database },
+  { value: "data_analyst", label: "Data Analyst", icon: ChartLine },
   { value: "researcher", label: "Researcher", icon: Microscope },
   { value: "product_manager", label: "Product Manager", icon: Target },
+  { value: "founder", label: "Founder", icon: Rocket },
   { value: "marketer", label: "Marketer", icon: Megaphone },
+  { value: "content_creator", label: "Content Creator", icon: Video },
   { value: "sales", label: "Sales", icon: TrendingUp },
   { value: "customer_support", label: "Customer Support", icon: Headset },
   { value: "operations", label: "Operations", icon: Settings },
@@ -41,6 +53,8 @@ const ROLES = [
   { value: "hr", label: "Human Resources", icon: UserPlus },
   { value: "finance", label: "Finance", icon: PiggyBank },
   { value: "legal", label: "Legal", icon: Scale },
+  { value: "doctor", label: "Doctor", icon: Stethoscope },
+  { value: "job_seeker", label: "Job Seeker", icon: Search },
   { value: "other", label: "Other", icon: Star },
 ];
 

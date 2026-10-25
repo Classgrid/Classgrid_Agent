@@ -18,7 +18,7 @@ import { REGEXP_ONLY_DIGITS_AND_CHARS } from "input-otp";
 import { InputOTP, InputOTPGroup, InputOTPSlot } from "@/components/marketing_ui/input-otp";
 import { Spinner } from "@/components/marketing_ui/spinner";
 import { useTheme } from "next-themes";
-import { Eye, EyeOff, Check, GraduationCap, BookOpen, Shield, Code, PenTool, Database, Microscope, Target, Megaphone, TrendingUp, Headset, Settings, PenLine, Laptop, Users, Building, UserPlus, PiggyBank, Scale, Star, ChevronRight, ChevronDown, Search } from "lucide-react";
+import { Eye, EyeOff, Check, GraduationCap, BookOpen, Shield, Code, PenTool, Database, Microscope, Target, Megaphone, TrendingUp, Headset, Settings, PenLine, Laptop, Users, Building, UserPlus, PiggyBank, Scale, Star, ChevronRight, ChevronDown, Search, Award, UserCheck, Presentation, School, Heart, Globe, ChartLine, Rocket, Video, Stethoscope } from "lucide-react";
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from "@/components/marketing_ui/select";
 import { Popover, PopoverTrigger, PopoverContent } from "@/components/marketing_ui/popover";
 import { customArray } from "country-codes-list";
@@ -57,12 +57,24 @@ function LastUsedTag({ className = "" }: { className?: string }) {
 const Confetti = lazy(() => import("react-confetti"));
 
 const ROLES = [
+  { value: "student", label: "Student", icon: GraduationCap },
+  { value: "teacher", label: "Teacher", icon: BookOpen },
+  { value: "professor", label: "Professor", icon: Award },
+  { value: "faculty", label: "Faculty", icon: UserCheck },
+  { value: "lecturer", label: "Lecturer", icon: Presentation },
+  { value: "tutor", label: "Tutor", icon: BookOpen },
+  { value: "principal", label: "Principal", icon: School },
+  { value: "parent", label: "Parent", icon: Heart },
   { value: "software_engineer", label: "Software Engineer", icon: Code },
+  { value: "web_developer", label: "Web Developer", icon: Globe },
   { value: "designer", label: "Designer", icon: PenTool },
   { value: "data_scientist", label: "Data Scientist", icon: Database },
+  { value: "data_analyst", label: "Data Analyst", icon: ChartLine },
   { value: "researcher", label: "Researcher", icon: Microscope },
   { value: "product_manager", label: "Product Manager", icon: Target },
+  { value: "founder", label: "Founder", icon: Rocket },
   { value: "marketer", label: "Marketer", icon: Megaphone },
+  { value: "content_creator", label: "Content Creator", icon: Video },
   { value: "sales", label: "Sales", icon: TrendingUp },
   { value: "customer_support", label: "Customer Support", icon: Headset },
   { value: "operations", label: "Operations", icon: Settings },
@@ -73,6 +85,8 @@ const ROLES = [
   { value: "hr", label: "Human Resources", icon: UserPlus },
   { value: "finance", label: "Finance", icon: PiggyBank },
   { value: "legal", label: "Legal", icon: Scale },
+  { value: "doctor", label: "Doctor", icon: Stethoscope },
+  { value: "job_seeker", label: "Job Seeker", icon: Search },
   { value: "other", label: "Other", icon: Star },
 ];
 
