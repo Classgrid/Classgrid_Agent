@@ -195,6 +195,7 @@ import { KnowledgeBaseSearchView } from "./stepper/KnowledgeBaseSearchView";
 import { CdnUploadView } from "./stepper/CdnUploadView";
 import { EmailSentView } from "./stepper/EmailSentView";
 import { ToolResultStep } from "./stepper/tool-results/ToolResultStep";
+import { AppReplyResults } from "./stepper/app-cards/AppResultCard";
 import { IncognitoBar, IncognitoButton, loadIncognitoChat, saveIncognitoChat, clearIncognitoChat } from "./IncognitoMode";
 import { describeStep } from "./stepper/tool-results/describeStep";
 import { specialStepTitle, emailTitle } from "./stepper/tool-results/stepTitles";
@@ -5315,6 +5316,12 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
                                   })()}
                                 </div>
                               )}
+
+                              {/* Canva and Spotify results as cards in the reply itself, above the answer text (like ChatGPT apps) */}
+                              <AppReplyResults
+                                steps={message.steps}
+                                done={!(index === messages.length - 1 && (thinking || submitting || !!message.typing)) && !(message.steps || []).some((s) => s.status === 'loading')}
+                              />
 
                               {/* Old thought accordion removed — CombinedReasoningBlock above stepper handles all thought display now */}
                               {message.content.includes("[IMAGE_GENERATION") ? (() => {

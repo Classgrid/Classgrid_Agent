@@ -32,6 +32,19 @@ export function AppResultCard({ tool, args, result }: { tool: string; args: any;
   );
 }
 
+/** In the reply itself (like ChatGPT apps): one card for every Canva / Spotify result of this reply, above the answer
+ * text, once the work is done (while it works, the cards show under each step) */
+export function AppReplyResults({ steps, done }: { steps?: any[]; done: boolean }) {
+  if (!done) return null;
+  const results = (steps || []).filter((s) => s?.type === 'tool' && s.status === 'success' && APP_CARD_TOOLS.has(s.tool) && s.result !== undefined && s.result !== null && s.result !== '');
+  if (!results.length) return null;
+  return (
+    <div className="flex flex-col gap-2.5 mb-3 max-w-[560px]">
+      {results.map((s, i) => <AppResultCard key={s.id ?? i} tool={s.tool} args={s.args} result={s.result} />)}
+    </div>
+  );
+}
+
 /** A card that can't be drawn must never break the chat */
 class CardBoundary extends React.Component<{ children: React.ReactNode }, { failed: boolean }> {
   state = { failed: false };
