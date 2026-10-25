@@ -196,7 +196,6 @@ import { CdnUploadView } from "./stepper/CdnUploadView";
 import { EmailSentView } from "./stepper/EmailSentView";
 import { ToolResultStep } from "./stepper/tool-results/ToolResultStep";
 import { answerLinkCard } from "./FileLinkCard";
-import { CanvaDisplay } from "./answer-cards/canva";
 import { IncognitoBar, IncognitoButton, loadIncognitoChat, saveIncognitoChat, clearIncognitoChat } from "./IncognitoMode";
 import { describeStep } from "./stepper/tool-results/describeStep";
 import { specialStepTitle, emailTitle } from "./stepper/tool-results/stepTitles";
@@ -2542,6 +2541,7 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
   const [pastedTexts, setPastedTexts] = useState<string[]>([]);
   const [editingMode, setEditingMode] = useState<'input' | number | null>(null);
   const [previewFile, setPreviewFile] = useState<FilePreviewSource | null>(null);
+  // File cards in the answer (PDF, Word, PowerPoint, Excel) open in the chat's own file viewer
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const isRestoredRef = useRef(false);
 
@@ -5462,10 +5462,6 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
                                 />
                               )}
                             </div>
-                          )}
-                          {/* Canva: the finished results to look at and use (designs, slides, files, images, folders), under the answer */}
-                          {!isUser && !message.typing && (message.steps || []).some((s: any) => s.type === 'tool' && s.tool === 'canva_connector') && (
-                            <div className="pl-1 mt-3 max-w-[640px]"><CanvaDisplay steps={(message.steps || []) as any[]} /></div>
                           )}
                           {!isUser && !message.typing && message.content.length > 0 && !message.content.includes("```approval") && !/^\s*\[IMAGE_GENERATION_[^\]]*\]\s*$/.test(message.content) && !message.content.trim().startsWith("ai_quota_exceeded") && message.content.trim() !== "ai_blocked" && (
                             <div className="pl-1 mt-3">
