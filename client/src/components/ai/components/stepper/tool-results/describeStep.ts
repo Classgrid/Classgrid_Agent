@@ -9,6 +9,8 @@ const PAST: Record<string, string> = {
   reply: 'Replied to', attach: 'Attached', send: 'Sent', upload: 'Uploaded', mark: 'Marked', publish: 'Published', invite: 'Invited',
   archive: 'Archived', push: 'Pushed', deploy: 'Deployed', transcribe: 'Transcribed', query: 'Queried', manage: 'Updated',
   warn: 'Warned', end: 'Ended', generate: 'Generated', analyze: 'Analyzed', parse: 'Read', stop: 'Stopped', start: 'Started', check: 'Checked',
+  import: 'Imported', export: 'Exported', move: 'Moved', rename: 'Renamed', resize: 'Resized', autofill: 'Made', play: 'Started playing',
+  pause: 'Paused', next: 'Skipped to', previous: 'Went back to', transfer: 'Moved', set: 'Set',
 };
 const ING: Record<string, string> = {
   list: 'Finding', search: 'Searching', find: 'Finding', get: 'Reading', read: 'Reading', view: 'Viewing', count: 'Counting', recall: 'Recalling',
@@ -17,6 +19,8 @@ const ING: Record<string, string> = {
   reply: 'Replying to', attach: 'Attaching', send: 'Sending', upload: 'Uploading', mark: 'Marking', publish: 'Publishing', invite: 'Inviting',
   archive: 'Archiving', push: 'Pushing', deploy: 'Deploying', transcribe: 'Transcribing', query: 'Querying', manage: 'Updating',
   warn: 'Warning', end: 'Ending', generate: 'Generating', analyze: 'Analyzing', parse: 'Reading', stop: 'Stopping', start: 'Starting', check: 'Checking',
+  import: 'Importing', export: 'Exporting', move: 'Moving', rename: 'Renaming', resize: 'Resizing', autofill: 'Making', play: 'Playing',
+  pause: 'Pausing', next: 'Skipping to', previous: 'Going back to', transfer: 'Moving', set: 'Setting',
 };
 
 const APP: Record<string, string> = {

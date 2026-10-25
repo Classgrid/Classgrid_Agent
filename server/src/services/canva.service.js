@@ -43,7 +43,8 @@ async function call(token, method, path, body) {
     });
     if (res.status === 204) return { success: true };
     const data = await res.json().catch(() => ({}));
-    if (!res.ok) throw new Error(`Canva API ${res.status}: ${data?.message || data?.code || data?.error || "request failed"}`);
+    // A plan limit comes with Canva's upgrade link (upsell_url): it is kept in the message so the user can see it
+    if (!res.ok) throw new Error(`Canva API ${res.status}: ${data?.message || data?.code || data?.error || "request failed"}${data?.upsell_url ? ` Upgrade link: ${data.upsell_url}` : ""}`);
     return data;
 }
 
