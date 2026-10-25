@@ -195,8 +195,8 @@ import { KnowledgeBaseSearchView } from "./stepper/KnowledgeBaseSearchView";
 import { CdnUploadView } from "./stepper/CdnUploadView";
 import { EmailSentView } from "./stepper/EmailSentView";
 import { ToolResultStep } from "./stepper/tool-results/ToolResultStep";
-import { answerLinkCard } from "./FileLinkCard";
-import { IncognitoBar, IncognitoButton, loadIncognitoChat, saveIncognitoChat, clearIncognitoChat } from "./IncognitoMode";
+import { IncognitoBar, IncognitoButton, loadIncognitoChat, loadIncognitoSessionId, saveIncognitoChat, clearIncognitoChat } from "./IncognitoMode";
+import { IncognitoTransition, type IncognitoRun } from "./IncognitoTransition";
 import { describeStep } from "./stepper/tool-results/describeStep";
 import { specialStepTitle, emailTitle } from "./stepper/tool-results/stepTitles";
 import { StepWorkingContext } from "./stepper/ShimmerText";
@@ -1854,9 +1854,6 @@ const AssistantMessageContent = memo(({ content, sources, createdAt, isTyping, o
         // Project Mode: a link to a project file or folder opens it in the code editor, not as a web page
         const projectLink = parseProjectLink(href);
         if (projectLink) return <FileMentionChip {...projectLink} label={children} />;
-        // A link to a file (PDF, PPTX, PNG, Canva export…) or an app (Spotify, YouTube, GitHub, Google Docs…) shows as its own card
-        const linkCard = typeof href === "string" ? answerLinkCard(href, children) : null;
-        if (linkCard) return linkCard;
         const external = href && /^https?:\/\//i.test(href);
         return (
           <a
@@ -2472,8 +2469,8 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
     window.dispatchEvent(new PopStateEvent("popstate"));
   }, [localSessionId, routeSessionId, variant]);
 
-  // Incognito (full page only): nothing is saved on the server; the open incognito chat lives in this browser's local
-  // storage, so a refresh brings it back (unless the address is for a saved chat)
+  // Incognito (full page only): the server saves the chat hidden from the user's lists; this browser keeps its id and
+  // messages in local storage, so a refresh brings it back (unless the address is for a saved chat). Closing deletes it.
   const [isIncognito, setIsIncognito] = useState(() => {
     try {
       return variant === "full-page" && !routeSessionId && !new URLSearchParams(window.location.search).get("session") && !!loadIncognitoChat()?.length;
@@ -2484,13 +2481,15 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
     if (!isIncognito) return;
     const saved = loadIncognitoChat();
     if (saved?.length) setMessages((prev) => (prev.length ? prev : saved));
+    const savedId = loadIncognitoSessionId();
+    if (savedId) setSessionId(savedId);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   useEffect(() => {
     if (!isIncognito) return;
-    const t = setTimeout(() => saveIncognitoChat(messages), 400);
+    const t = setTimeout(() => saveIncognitoChat(messages, sessionId), 400);
     return () => clearTimeout(t);
-  }, [isIncognito, messages]);
+  }, [isIncognito, messages, sessionId]);
   // "New Chat" or opening a saved chat from the sidebar leaves incognito (like claude.ai)
   useEffect(() => {
     const leave = () => {
@@ -2501,16 +2500,30 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
     window.addEventListener("agent:load-chat", leave);
     return () => { window.removeEventListener("agent:new-chat", leave); window.removeEventListener("agent:load-chat", leave); };
   }, []);
-  const startIncognito = () => {
+  const enterIncognitoNow = () => {
     clearIncognitoChat();
     enteringIncognitoRef.current = true;
     setIsIncognito(true);
     window.dispatchEvent(new Event("agent:new-chat"));
   };
-  const exitIncognito = () => {
+  const leaveIncognitoNow = () => {
     clearIncognitoChat();
     setIsIncognito(false);
     window.dispatchEvent(new Event("agent:new-chat"));
+  };
+  // Opening / closing play the cover animation from the pressed button; the chat switches while the screen is covered
+  const [incognitoRun, setIncognitoRun] = useState<IncognitoRun | null>(null);
+  const incognitoPoint = (e?: React.MouseEvent<HTMLElement>) => {
+    const r = e?.currentTarget?.getBoundingClientRect();
+    return r ? { x: r.left + r.width / 2, y: r.top + r.height / 2 } : { x: window.innerWidth - 40, y: 40 };
+  };
+  const startIncognito = (e?: React.MouseEvent<HTMLElement>) => {
+    if (incognitoRun) return;
+    setIncognitoRun({ kind: "enter", ...incognitoPoint(e), id: Date.now() });
+  };
+  const exitIncognito = (e?: React.MouseEvent<HTMLElement>) => {
+    if (incognitoRun) return;
+    setIncognitoRun({ kind: "exit", ...incognitoPoint(e), id: Date.now() });
   };
   const [copiedAll, setCopiedAll] = useState(false);
   const [lastSentDocsPath, setLastSentDocsPath] = useState<string | null>(null);
@@ -3195,7 +3208,7 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
   const [submitting, setSubmitting] = useState(false);
 
   // Share Grid: people in this chat, and live updates when someone else sends a message
-  const gridSessionId = sessionId && sessionId !== "schedule" && sessionId !== "library" ? sessionId : null;
+  const gridSessionId = sessionId && !isIncognito && sessionId !== "schedule" && sessionId !== "library" ? sessionId : null;
   const gridSubmittingRef = useRef(submitting);
   gridSubmittingRef.current = submitting;
   const gridOpenChatRef = useRef(gridSessionId);
@@ -4107,10 +4120,6 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
           userContext: userContext,
           sessionId: (options && options.explicitSessionId !== undefined) ? (options.explicitSessionId ?? undefined) : (sessionId ?? undefined),
           isIncognito: isIncognito,
-          // Incognito: the server keeps nothing, so the earlier messages of this chat come from the browser
-          incognitoHistory: isIncognito
-            ? messages.filter((m) => (m.role === "user" || m.role === "assistant") && typeof m.content === "string" && m.content.trim()).slice(-24).map((m) => ({ role: m.role, content: m.content.slice(0, 8000) }))
-            : undefined,
           // Project Mode: the project open next to the chat (the backend links the chat to it)
           projectId: (() => { try { return window.location.pathname.split("/").includes("project") ? localStorage.getItem("cg_project_open") || undefined : undefined; } catch { return undefined; } })(),
           fileUrls: uploadedAttachments.length > 0 ? uploadedAttachments.map(a => a.url) : [],
@@ -4188,8 +4197,13 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
               } else if (event.type === "session_info" && event.sessionId) {
                 setSessionId(event.sessionId);
                 setEndedCheckedFor(event.sessionId);
-                window.dispatchEvent(new CustomEvent("agent:session-created", { detail: { id: event.sessionId, title: question } }));
-                window.dispatchEvent(new Event("agent:refresh-sessions"));
+                if (isIncognito) {
+                  saveIncognitoChat(messages, event.sessionId); // remembered at once, so closing right away still deletes it
+                } else {
+                  // An incognito chat never shows up in the sidebar
+                  window.dispatchEvent(new CustomEvent("agent:session-created", { detail: { id: event.sessionId, title: question } }));
+                  window.dispatchEvent(new Event("agent:refresh-sessions"));
+                }
               } else if (event.type === "answer") {
                 finalPayload = event;
               } else if (event.type === "generated_image" && event.url) {
@@ -4583,7 +4597,7 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
         )}
 
         {/* NEW TOP RIGHT HEADER ACTIONS */}
-        {variant === "full-page" && messages.length > 0 && sessionId && (
+        {variant === "full-page" && messages.length > 0 && sessionId && !isIncognito && (
           <div className="flex items-center gap-1 mr-2 text-muted-foreground">
             <button
               type="button"
@@ -6246,6 +6260,11 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
         // Incognito: a dark frame with the "Incognito" bar on top and the chat in a rounded panel (like claude.ai)
         // It covers the whole screen, sidebar included (z-45: above the sidebar, below menus and dialogs at z-50)
         <div className={isIncognito ? "fixed inset-0 z-[45] w-full h-[100dvh] bg-[#ffffff] dark:bg-[#0f0f0f] flex flex-col overflow-hidden" : "contents"}>
+        <IncognitoTransition
+          run={incognitoRun}
+          onCovered={() => (incognitoRun?.kind === "enter" ? enterIncognitoNow() : leaveIncognitoNow())}
+          onDone={() => setIncognitoRun(null)}
+        />
         {isIncognito && <IncognitoBar onClose={exitIncognito} />}
         <div className={isIncognito
           ? "flex-1 min-h-0 mx-1.5 mb-1.5 sm:mx-2 sm:mb-2 rounded-2xl border border-slate-200 dark:border-[#262626] !bg-[#fafafa] dark:!bg-[#000000] flex flex-row overflow-hidden"
@@ -6260,7 +6279,7 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
                 <IncognitoButton onClick={startIncognito} />
               )}
 
-              {messages.length > 0 && sessionId && sessionId !== "schedule" && sessionId !== "library" && (
+              {messages.length > 0 && sessionId && !isIncognito && sessionId !== "schedule" && sessionId !== "library" && (
                 <div className="flex items-center gap-1 text-muted-foreground">
                   {/* Questions list (the side list is hidden on smaller screens and phones) */}
                   <MobileTOCButton tocItems={tocItems} activeSection={activeSection} />
@@ -6365,7 +6384,16 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
                     <img src="/logo.png" alt="Classgrid" className="h-9 w-9 sm:h-[46px] sm:w-[46px] shrink-0 object-contain" />
                     {/* Fixed height so the input below never moves while the line types; pauses while the user types */}
                     <h2 style={{ fontFamily: "Newsreader, Georgia, serif" }} className="font-normal text-[1.75rem] sm:text-[2.25rem] leading-tight tracking-[-0.01em] text-[#141413] dark:text-[#faf9f5] min-h-[2.5rem]">
-                      {isIncognito ? "You’re incognito" : <TypingGreeting name={user?.name} paused={input.trim().length > 0} />}
+                      {isIncognito ? (
+                        <motion.span
+                          className="inline-block"
+                          initial={{ opacity: 0, y: 14, filter: "blur(8px)" }}
+                          animate={{ opacity: 1, y: 0, filter: "blur(0px)" }}
+                          transition={{ duration: 0.6, ease: [0.22, 1, 0.36, 1], delay: 0.2 }}
+                        >
+                          You’re incognito
+                        </motion.span>
+                      ) : <TypingGreeting name={user?.name} paused={input.trim().length > 0} />}
                     </h2>
                   </div>
 

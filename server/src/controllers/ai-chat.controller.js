@@ -1406,15 +1406,10 @@ export const streamAskAi = async (req, res) => {
         }
 
         let sessionId = body.sessionId;
-        const isIncognito = body.isIncognito || false;
-        if (isIncognito && sessionId) {
-            const saved = await getSessionById(sessionId).catch(() => null);
-            if (saved && !(await canAccessSession(saved, req.user?.email || ''))) {
-                res.write(`data: ${JSON.stringify({ type: "error", error: "Unauthorized. You do not have permission to view this chat." })}\n\n`);
-                res.end();
-                return;
-            }
-        }
+        // Incognito chats run like any chat (saved messages, Redis history, background summary). They are marked
+        // is_incognito, so the user's lists never show them, and the browser deletes them when incognito is closed.
+        const hideFromUser = !!body.isIncognito;
+        const isIncognito = false;
 
         // ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ HISTORY: Read from Redis (hot) ÃƒÂ¢Ã¢â‚¬Â Ã¢â‚¬â„¢ Supabase (cold). NEVER trust frontend body.history. ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬
         // The frontend no longer controls chat history. The backend owns it entirely.
@@ -1527,16 +1522,6 @@ export const streamAskAi = async (req, res) => {
             messages = await getHistory(sessionId, historyDepth);
         }
 
-        // Incognito: nothing is saved on the server. The browser keeps the chat in its local storage (so a refresh keeps
-        // it) and sends the earlier messages back as incognitoHistory, so the AI still sees the conversation. Only user
-        // and assistant text is taken (never system), at most the last historyDepth messages, each cut to 8,000 characters.
-        if (isIncognito && Array.isArray(body.incognitoHistory)) {
-            messages = body.incognitoHistory
-                .filter((m) => m && (m.role === "user" || m.role === "assistant") && typeof m.content === "string" && m.content.trim())
-                .slice(-historyDepth)
-                .map((m) => ({ role: m.role, content: m.content.slice(0, 8000) }));
-        }
-
         // --- INJECT SCHEDULE CONTEXT ---
         if (body.scheduleContext) {
             volatilePrompt += `\n\n<schedule_context>\nThis conversation was triggered by a Scheduled Task firing. Here is the metadata for this schedule:\n`;
@@ -1564,11 +1549,12 @@ export const streamAskAi = async (req, res) => {
                 initialTitle = initialTitle.length > 50 ? initialTitle.substring(0, 47) + "..." : initialTitle;
             }
             
-            const session = await createSession(userEmail, initialTitle, false);
+            const session = await createSession(userEmail, initialTitle, hideFromUser);
             if (session) {
                 sessionId = session.id;
-                // Generate a real title in the background (delayed 5s to avoid competing with main LLM call for API rate limits)
-                if (!skipAutoTitle) {
+                // Generate a real title in the background (delayed 5s to avoid competing with main LLM call for API rate limits).
+                // Incognito chats are never listed, so they need no title.
+                if (!skipAutoTitle && !hideFromUser) {
                     // A file sent without text arrives as "Please analyze the attached file(s)." — give the titler the
                     // file names too, or it titles the chat "No Files Provided"
                     const fileNames = (body.fileUrls || []).map((u) => String(u).split(/[?#]/)[0].split('/').pop().replace(/^\d{10,}-/, '')).filter(Boolean);
@@ -1591,7 +1577,7 @@ export const streamAskAi = async (req, res) => {
 
             // Every TITLE_REFRESH_EVERY user messages, re-title the chat from its recent messages,
             // unless the user renamed it themselves.
-            if (!String(body.question).trim().startsWith("[SYSTEM")) {
+            if (!String(body.question).trim().startsWith("[SYSTEM") && !hideFromUser) {
                 const titleCountKey = `ai:title-count:${sessionId}`;
                 const titleSessionId = sessionId;
                 const recentUserText = [

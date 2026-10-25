@@ -36,11 +36,10 @@ import OpenAI from 'openai';
  * Creates a new AI chat session.
  */
 export async function createSession(userEmail, title, isIncognito = false) {
-    if (isIncognito) return null; // Do not save incognito sessions
-
+    // Incognito chats are saved like any chat but marked is_incognito: hidden from the user's lists, deleted when closed
     const { data, error } = await primarySupabaseClient
         .from('ai_chat_sessions')
-        .insert([{ user_email: userEmail, title, is_incognito: false }])
+        .insert([{ user_email: userEmail, title, is_incognito: !!isIncognito }])
         .select()
         .single();
 

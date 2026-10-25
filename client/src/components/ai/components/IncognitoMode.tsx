@@ -1,7 +1,11 @@
-// Incognito chat (like claude.ai): a ghost button on a new chat, a dark "Incognito" bar with a close button, and the
-// chat kept only in this browser's local storage (so a refresh keeps it). The server saves nothing for incognito chats.
+// Incognito chat (like claude.ai): a ghost button on a new chat, a dark "Incognito" bar with a close button. The server
+// saves it like any chat but hidden from the user's lists; this browser keeps its id and messages in local storage (so a
+// refresh keeps it), and closing incognito deletes the chat on the server.
 import React from 'react';
 import { X } from 'lucide-react';
+import { motion } from 'framer-motion';
+
+const EASE_OUT: [number, number, number, number] = [0.22, 1, 0.36, 1];
 
 /** Ghost icon: round top, wavy bottom, two eyes */
 export function GhostIcon({ className = 'h-5 w-5' }: { className?: string }) {
@@ -26,7 +30,7 @@ export function GhostIconSolid({ className = 'h-5 w-5' }: { className?: string }
 }
 
 /** The ghost button at the top right of a new chat */
-export function IncognitoButton({ onClick }: { onClick: () => void }) {
+export function IncognitoButton({ onClick }: { onClick: (e: React.MouseEvent<HTMLButtonElement>) => void }) {
   return (
     <button
       type="button"
@@ -40,17 +44,41 @@ export function IncognitoButton({ onClick }: { onClick: () => void }) {
   );
 }
 
-/** The dark bar above an incognito chat */
-export function IncognitoBar({ onClose }: { onClose: () => void }) {
+/** The dark bar above an incognito chat (slides in after the opening animation) */
+export function IncognitoBar({ onClose }: { onClose: (e: React.MouseEvent<HTMLButtonElement>) => void }) {
   return (
     <div className="shrink-0 flex items-center justify-between h-12 px-4 sm:px-5 text-[#141413] dark:text-white">
       <div className="flex items-center gap-2.5">
-        <GhostIconSolid className="h-5 w-5" />
-        <span className="text-[15px] font-medium">Incognito</span>
+        <motion.span
+          initial={{ opacity: 0, scale: 0.4, rotate: -14 }}
+          animate={{ opacity: 1, scale: 1, rotate: 0 }}
+          transition={{ type: 'spring', stiffness: 420, damping: 18, delay: 0.25 }}
+          className="flex"
+        >
+          <GhostIconSolid className="h-5 w-5" />
+        </motion.span>
+        <motion.span
+          initial={{ opacity: 0, x: -8, filter: 'blur(4px)' }}
+          animate={{ opacity: 1, x: 0, filter: 'blur(0px)' }}
+          transition={{ duration: 0.45, ease: EASE_OUT, delay: 0.32 }}
+          className="text-[15px] font-medium"
+        >
+          Incognito
+        </motion.span>
       </div>
-      <button type="button" onClick={onClose} aria-label="Leave incognito" title="Leave incognito" className="flex h-8 w-8 items-center justify-center rounded-md text-[#141413]/70 hover:text-[#141413] hover:bg-black/5 dark:text-white/80 dark:hover:text-white dark:hover:bg-white/10 transition-colors cursor-pointer">
+      <motion.button
+        type="button"
+        onClick={onClose}
+        aria-label="Leave incognito"
+        title="Leave incognito"
+        initial={{ opacity: 0, rotate: -90, scale: 0.6 }}
+        animate={{ opacity: 1, rotate: 0, scale: 1 }}
+        transition={{ duration: 0.45, ease: EASE_OUT, delay: 0.38 }}
+        whileTap={{ scale: 0.88 }}
+        className="flex h-8 w-8 items-center justify-center rounded-md text-[#141413]/70 hover:text-[#141413] hover:bg-black/5 dark:text-white/80 dark:hover:text-white dark:hover:bg-white/10 transition-colors cursor-pointer"
+      >
         <X className="h-5 w-5" />
-      </button>
+      </motion.button>
     </div>
   );
 }
@@ -64,9 +92,21 @@ export function loadIncognitoChat(): any[] | null {
     return Array.isArray(parsed?.messages) ? parsed.messages : null;
   } catch { return null; }
 }
-export function saveIncognitoChat(messages: any[]) {
-  try { localStorage.setItem(KEY, JSON.stringify({ messages, savedAt: Date.now() })); } catch { /* storage full or blocked */ }
+export function loadIncognitoSessionId(): string | null {
+  try {
+    const raw = localStorage.getItem(KEY);
+    const id = raw ? JSON.parse(raw)?.sessionId : null;
+    return typeof id === 'string' && id ? id : null;
+  } catch { return null; }
 }
+export function saveIncognitoChat(messages: any[], sessionId?: string | null) {
+  try { localStorage.setItem(KEY, JSON.stringify({ messages, sessionId: sessionId || loadIncognitoSessionId(), savedAt: Date.now() })); } catch { /* storage full or blocked */ }
+}
+/** Closes the incognito chat: deletes it on the server (messages, history cache) and forgets it in this browser */
 export function clearIncognitoChat() {
+  const sessionId = loadIncognitoSessionId();
   try { localStorage.removeItem(KEY); } catch { /* blocked */ }
+  if (!sessionId) return;
+  const api = (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_API_URL) || 'https://api.classgrid.in';
+  fetch(`${api}/api/ai/sessions/${sessionId}`, { method: 'DELETE', credentials: 'include', keepalive: true }).catch(() => { /* gone already or offline */ });
 }
