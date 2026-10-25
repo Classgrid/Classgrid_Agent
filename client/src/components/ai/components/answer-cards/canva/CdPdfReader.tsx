@@ -1,12 +1,11 @@
-// A PDF to read right in the chat
+// A PDF as a small file row: name, open in a new tab, download
 import React from 'react';
 import { CdPdfToolbar } from './CdPdfToolbar';
 
 export function CdPdfReader({ url }: { url: string }) {
   return (
-    <div className="flex flex-col gap-2">
+    <div className="rounded-xl border border-slate-200 px-3 py-2.5 dark:border-[#2a2a2a]">
       <CdPdfToolbar url={url} />
-      <iframe src={url} title="PDF" loading="lazy" className="h-[460px] w-full rounded-xl border border-slate-200 bg-white dark:border-[#2a2a2a]" />
     </div>
   );
 }

@@ -4,8 +4,8 @@
 // phrasing elements (img, iframe, video, audio), because a link sits inside a paragraph or list item.
 import React, { useState } from 'react';
 import {
-  FileText, Presentation, Sheet, FileArchive, Film, Image as ImageIcon, File, Download, ExternalLink, Music, Code2, Eye,
-  EyeOff, Github, Globe, MapPin, PenTool, BookOpen, FileSpreadsheet, ClipboardList, HardDrive, Play,
+  FileText, Presentation, Sheet, FileArchive, Film, Image as ImageIcon, File, Download, ExternalLink, Music, Code2,
+  Github, Globe, MapPin, PenTool, BookOpen, FileSpreadsheet, ClipboardList, HardDrive, Play,
 } from 'lucide-react';
 
 // ─── Shared pieces ───
@@ -54,43 +54,27 @@ function OpenButton({ href, label = 'Open' }: { href: string; label?: string }) 
     </a>
   );
 }
-function PreviewToggle({ open, onToggle }: { open: boolean; onToggle: () => void }) {
-  return (
-    <button type="button" onClick={onToggle} title={open ? 'Hide preview' : 'Preview'} aria-label={open ? 'Hide preview' : 'Preview'} className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-slate-500 hover:bg-slate-100 hover:text-slate-900 dark:text-[#9a9a9a] dark:hover:bg-[#262626] dark:hover:text-white transition-colors cursor-pointer">
-      {open ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-    </button>
-  );
-}
-function Frame({ src, title, height = 360 }: { src: string; title: string; height?: number }) {
-  return <iframe src={src} title={title} loading="lazy" className="block w-full border-0 border-b border-slate-200 dark:border-[#2a2a2a] bg-white" style={{ height }} allow="autoplay; clipboard-write; encrypted-media; fullscreen; picture-in-picture" />;
-}
-
 type CardProps = { href: string; children?: React.ReactNode };
-const officeViewer = (href: string) => `https://view.officeapps.live.com/op/embed.aspx?src=${encodeURIComponent(href)}`;
 
 // ─── Files ───
-/** 1. PDF: preview in the chat */
+/** 1. PDF (no third-party viewer: open or download) */
 function PdfCard({ href, children }: CardProps) {
-  const [open, setOpen] = useState(false);
   return (
-    <Shell wide={open}>
-      {open && <Frame src={href} title="PDF preview" height={460} />}
-      <Row icon={FileText} tint="bg-red-500/10 text-red-600 dark:text-red-400" title={nameFrom(children, fileName(href))} sub="PDF document" actions={<><PreviewToggle open={open} onToggle={() => setOpen((o) => !o)} /><OpenIcon href={href} /><DownloadButton href={href} /></>} />
+    <Shell>
+      <Row icon={FileText} tint="bg-red-500/10 text-red-600 dark:text-red-400" title={nameFrom(children, fileName(href))} sub="PDF document" actions={<><OpenIcon href={href} /><DownloadButton href={href} /></>} />
     </Shell>
   );
 }
-/** 2–4. PowerPoint, Word, Excel: preview through Office's online viewer */
+/** 2–4. PowerPoint, Word, Excel (no third-party viewer: open or download) */
 function OfficeCard({ href, children, kind }: CardProps & { kind: 'pptx' | 'docx' | 'xlsx' }) {
-  const [open, setOpen] = useState(false);
   const meta = kind === 'pptx'
     ? { icon: Presentation, tint: 'bg-orange-500/10 text-orange-600 dark:text-orange-400', sub: 'PowerPoint presentation' }
     : kind === 'docx'
       ? { icon: FileText, tint: 'bg-blue-500/10 text-blue-600 dark:text-blue-400', sub: 'Word document' }
       : { icon: Sheet, tint: 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400', sub: 'Excel spreadsheet' };
   return (
-    <Shell wide={open}>
-      {open && <Frame src={officeViewer(href)} title={`${meta.sub} preview`} height={kind === 'pptx' ? 340 : 440} />}
-      <Row icon={meta.icon} tint={meta.tint} title={nameFrom(children, fileName(href))} sub={meta.sub} actions={<><PreviewToggle open={open} onToggle={() => setOpen((o) => !o)} /><OpenIcon href={href} /><DownloadButton href={href} /></>} />
+    <Shell>
+      <Row icon={meta.icon} tint={meta.tint} title={nameFrom(children, fileName(href))} sub={meta.sub} actions={<><OpenIcon href={href} /><DownloadButton href={href} /></>} />
     </Shell>
   );
 }
