@@ -197,6 +197,7 @@ import { EmailSentView } from "./stepper/EmailSentView";
 import { ToolResultStep } from "./stepper/tool-results/ToolResultStep";
 import { IncognitoBar, IncognitoButton, loadIncognitoChat, loadIncognitoSessionId, saveIncognitoChat, clearIncognitoChat } from "./IncognitoMode";
 import { IncognitoTransition, type IncognitoRun } from "./IncognitoTransition";
+import { SpotifyDisplay } from "./answer-cards/spotify";
 import { describeStep } from "./stepper/tool-results/describeStep";
 import { specialStepTitle, emailTitle } from "./stepper/tool-results/stepTitles";
 import { StepWorkingContext } from "./stepper/ShimmerText";
@@ -5476,6 +5477,10 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
                                 />
                               )}
                             </div>
+                          )}
+                          {/* Spotify: the finished results (songs, playlists, artists, albums, now playing), only when this answer used Spotify */}
+                          {!isUser && !message.typing && (message.steps || []).some((s: any) => s.type === 'tool' && s.tool === 'spotify_connector') && (
+                            <div className="pl-1 mt-3 max-w-[640px]"><SpotifyDisplay steps={(message.steps || []) as any[]} /></div>
                           )}
                           {!isUser && !message.typing && message.content.length > 0 && !message.content.includes("```approval") && !/^\s*\[IMAGE_GENERATION_[^\]]*\]\s*$/.test(message.content) && !message.content.trim().startsWith("ai_quota_exceeded") && message.content.trim() !== "ai_blocked" && (
                             <div className="pl-1 mt-3">

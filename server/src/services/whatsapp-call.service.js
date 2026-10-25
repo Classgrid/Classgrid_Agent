@@ -234,8 +234,9 @@ const START_TASK_TOOL = {
         properties: {
             task: { type: "string", description: "The complete task with every detail the caller gave, written for the Agent." },
             project_name: { type: "string", description: "Optional: the name of one of the caller's projects this task belongs to. The Agent's chat is then saved inside that project." },
+            coding_work: { type: "boolean", description: "true when this task is coding or website work, so it runs in Project Mode; false for everything else (documents, slides, emails, research and other normal work), so it runs in a normal Agent chat." },
         },
-        required: ["task"],
+        required: ["task", "coding_work"],
     },
 };
 
@@ -432,7 +433,7 @@ async function runTool(call, t, cutOff) {
         const task = String(t.input?.task || "").trim();
         const project = t.input?.project_name ? await findProject(call.user, t.input.project_name).catch(() => null) : null;
         if (!task) return { content: "Nothing was saved: the task text was empty. Call start_task again with the full task.", is_error: true };
-        call.tasks.push({ task, project });
+        call.tasks.push({ task, project, coding: t.input?.coding_work === true });
         call.transcript.push(`AI saved a task: ${task}`);
         return {
             content: project || !t.input?.project_name
@@ -561,10 +562,11 @@ async function afterCall(call, why) {
     // Owner's rule (2026-10-24): one call = one background job. All its tasks run together in one chat, inside the
     // project if any of them names one (a call once split into two jobs: double "Got it", and the user's replies
     // went to the job without the project)
-    // Owner's rule (2026-10-24): call work always runs in Project Mode, never in Agent mode. No project named on the
-    // call: one is made now, named after the task, so the work starts inside it
+    // Owner's rule (2026-10-26): only coding or website work runs in Project Mode; everything else (a PPTX, an email,
+    // research) runs in a normal Agent chat with no project. Coding work with no project named on the call: one is
+    // made now, named after the task, so the work starts inside it
     let project = call.tasks.find((t) => t.project)?.project || null;
-    if (!project) {
+    if (!project && call.tasks.some((t) => t.coding)) {
         const { default: IdeProject } = await import("../models/IdeProject.js");
         const words = String(call.tasks[0]?.task || "Call task").replace(/[^a-zA-Z0-9 ]/g, " ").split(/\s+/).filter((w) => w.length > 2).slice(0, 4);
         const base = (words.map((w) => w[0].toUpperCase() + w.slice(1).toLowerCase()).join(" ") || "Call Task").slice(0, 60);
