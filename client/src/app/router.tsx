@@ -401,6 +401,8 @@ export function AppRouter() {
           <Route path="/student/*" element={<GenericPage title="Student Module" />} />
         </Route>
       </Route>
+      {/* Old /work links go to /agent */}
+      <Route path="/work/*" element={<Navigate to="/agent" replace />} />
       <Route path="*" element={<NotFoundPage />} />
 
       {/* Public shared chat viewer (no auth required) */}

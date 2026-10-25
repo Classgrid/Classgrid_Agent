@@ -138,6 +138,8 @@ export const TOOL_GROUPS = [
     { id: "connector:microsoft", description: "Microsoft 365: Outlook, OneDrive, Teams, SharePoint.", tools: ["microsoft_workspace_connector"], pattern: new RegExp(String.raw`\b(outlook|microsoft|ms\s*365|office\s*365|onedrive|teams|sharepoint|hotmail|${MAIL_MEETING})\b`, "i") },
     { id: "connector:zoom", description: "Zoom meetings.", tools: ["zoom_connector"], pattern: /\b(zoom|meetings?|meet|video\s*call)\b/i },
     { id: "connector:slack", description: "Slack messages and channels.", tools: ["slack_workspace_connector"], pattern: /\b(slack|channels?)\b/i },
+    { id: "connector:canva", description: "Canva designs, exports, folders, comments and brand templates.", tools: ["canva_connector"], pattern: /\bcanva\b/i },
+    { id: "connector:spotify", description: "Spotify music, playback, playlists and library.", tools: ["spotify_connector"], pattern: /\b(spotify|songs?|music|playlists?|play(ing)?\s+(a\s+)?song)\b/i },
     { id: "connector:github", description: "GitHub repositories, commits, pull requests and branches.", tools: ["github_workspace_connector"], pattern: /\b(git\s*hub|repo\w*|commits?|pull\s*request|pr|branch|push)\b/i },
     { id: "connector:vercel", description: "Vercel deployments, projects and domains.", tools: ["vercel_connector"], pattern: /\b(vercel|deploy\w*|hosting|domain|live\s*kar\w*)\b/i },
     { id: "connector:notion", description: "Notion pages and databases.", tools: ["notion_connector"], pattern: /\b(notion|wiki)\b/i },

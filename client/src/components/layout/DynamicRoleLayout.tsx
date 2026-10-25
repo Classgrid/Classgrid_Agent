@@ -69,9 +69,12 @@ export function DynamicRoleLayout() {
   
   const hostname = window.location.hostname;
   const subdomain = hostname.split(".")[0];
-  const role = subdomain === "chat" ? "public_chat" : ((user.role as DashboardRole) || "student");
-  
-  if (role === "public_chat" || role === "user" || user.organization_id === "6ac4b95e0f8a97f45e98b0ff" || user.organization?._id === "6ac4b95e0f8a97f45e98b0ff") {
+  // The ERP is shut down: only super admins keep their own dashboard; everyone else (on every address, localhost
+  // too) gets Classgrid AI with its sidebar
+  const isStaff = user.role === "super_admin" || user.role === "co_super_admin";
+  const role: DashboardRole = subdomain === "chat" || !isStaff ? "public_chat" : "super_admin";
+
+  if (role === "public_chat") {
     const path = window.location.pathname;
     const isAllowed = path === "/agent" || path.startsWith("/agent/") || path === "/c" || path.startsWith("/c/") || path === "/chat" || path === "/requests" || path.startsWith("/requests/") || path === "/audit" || path === "/profile" || path === "/settings" || path === "/classgrid-ai";
     if (!isAllowed) {

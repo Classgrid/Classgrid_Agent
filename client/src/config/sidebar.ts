@@ -655,7 +655,7 @@ export const dashboardConfigs: DashboardConfig[] = [
         items: [
           { label: "Classrooms", to: "/classrooms", icon: Home },
           { label: "Discover", to: "/discover", icon: Compass },
-          { label: "Work", to: "/work", icon: BookOpen },
+          { label: "Work", to: "/agent", icon: BookOpen },
           { label: "Schedule", to: "/tools", icon: Calendar }
         ]
       },

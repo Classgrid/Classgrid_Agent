@@ -101,13 +101,19 @@ router.get("/status", isAuthenticated, async (req, res) => {
         // Slack — ONLY if real OAuth token exists
         if (isValidToken(user.slack_access_token)) connected.push("slack");
 
+        // Canva — ONLY if real OAuth token exists
+        if (isValidToken(user.canva_access_token) || isValidToken(user.canva_refresh_token)) connected.push("canva");
+
+        // Spotify — ONLY if real OAuth token exists
+        if (isValidToken(user.spotify_access_token) || isValidToken(user.spotify_refresh_token)) connected.push("spotify");
+
         // GitHub — ONLY if real OAuth token exists
         if (isValidToken(user.github_access_token)) connected.push("github");
 
         // Generic integrations (Claude, ChatGPT, Cursor, etc)
         if (user.metadata && Array.isArray(user.metadata.connected_integrations)) {
             const genericIntegrations = user.metadata.connected_integrations.filter(id => 
-                !["slack", "github", "mcp-notion", "vercel", "zoom", "outlook", "teams"].includes(id)
+                !["slack", "canva", "spotify", "github", "mcp-notion", "vercel", "zoom", "outlook", "teams"].includes(id)
             );
             connected.push(...genericIntegrations);
         }
@@ -169,6 +175,17 @@ router.post("/disconnect/:id", isAuthenticated, async (req, res) => {
             user.slack_access_token = undefined;
             user.slack_refresh_token = undefined;
             user.slack_email = undefined;
+        } else if (id === 'canva') {
+            user.canva_access_token = undefined;
+            user.canva_refresh_token = undefined;
+            user.canva_token_expires_at = undefined;
+            user.canva_name = undefined;
+        } else if (id === 'spotify') {
+            user.spotify_access_token = undefined;
+            user.spotify_refresh_token = undefined;
+            user.spotify_token_expires_at = undefined;
+            user.spotify_name = undefined;
+            user.spotify_email = undefined;
         } else if (id === 'github') {
             user.github_access_token = undefined;
             user.github_refresh_token = undefined;

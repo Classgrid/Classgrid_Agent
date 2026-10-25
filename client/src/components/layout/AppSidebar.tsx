@@ -234,12 +234,8 @@ export function AppSidebar({ role, user }: AppSidebarProps) {
     { label: "Notes", to: "/superadmin/storage/notes", icon: StickyNote },
   ];
 
-  if (!config) {
-    return null;
-  }
-
   // Filter sections based on search query
-  const filteredSections = config.sections.map(section => {
+  const filteredSections = (config?.sections ?? []).map(section => {
     const filteredItems = section.items.filter(item => 
       item.label.toLowerCase().includes(searchQuery.toLowerCase())
     );
@@ -272,7 +268,12 @@ export function AppSidebar({ role, user }: AppSidebarProps) {
   }));
 
   // Where Grids lives in this dashboard (for the new-message popup)
-  const gridsItem = gridsDashboard ? config.sections.flatMap((s) => s.items).find(isGridsItem) : undefined;
+  const gridsItem = gridsDashboard ? (config?.sections ?? []).flatMap((s) => s.items).find(isGridsItem) : undefined;
+
+  // No sidebar for this role (only after every hook above, so the hook order never changes between renders)
+  if (!config) {
+    return null;
+  }
 
   return (
     <Sidebar variant="sidebar" collapsible="icon" className="!bg-background !border-r-0">

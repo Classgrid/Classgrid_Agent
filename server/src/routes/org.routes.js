@@ -578,7 +578,7 @@ router.post("/request-role", isAuthenticated, async (req, res) => {
                 try {
                     const roleLabel = ERP_ROLE_LABELS[role] || role;
                     const frontendUrl = getOrgFrontendUrl(req, org);
-                    const dashboardPath = ERP_DASHBOARD_PATHS[role] || '/work';
+                    const dashboardPath = ERP_DASHBOARD_PATHS[role] || '/agent';
                     await sendEmail({
                         to: targetUser.email,
                         subject: `Security Notice: ${roleLabel} privileges granted at ${org.name}`,
@@ -1488,7 +1488,7 @@ router.post("/change-role", isAuthenticated, requireRole("org_admin"), async (re
             const org = await Organization.findById(orgId).select('name subdomain custom_domain').lean();
             const roleLabel = ERP_ROLE_LABELS[newRole] || newRole;
             const frontendUrl = getOrgFrontendUrl(req, org);
-            const dashboardPath = ERP_DASHBOARD_PATHS[newRole] || '/work';
+            const dashboardPath = ERP_DASHBOARD_PATHS[newRole] || '/agent';
             await sendEmail({
                 to: user.email,
                 subject: `Security Notice: Your role has been updated to ${roleLabel} at ${org?.name || 'your organization'}`,

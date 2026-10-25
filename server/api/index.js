@@ -366,12 +366,16 @@ app.use("/api/digest", digestRoutes);
 app.use("/api/cron", cronRoutes);
 import githubRoutes from "../src/routes/auth.github.routes.js";
 import slackRoutes from "../src/routes/auth.slack.routes.js";
+import canvaRoutes from "../src/routes/auth.canva.routes.js";
+import spotifyRoutes from "../src/routes/auth.spotify.routes.js";
 
 app.use("/api/google-workspace", googleWorkspaceRoutes);
 app.use("/api/auth/microsoft", microsoftRoutes);
 app.use("/api/auth/notion", notionRoutes);
 app.use("/api/auth/github", githubRoutes);
 app.use("/api/auth/slack", slackRoutes);
+app.use("/api/auth/canva", canvaRoutes);
+app.use("/api/auth/spotify", spotifyRoutes);
 app.use("/api/auth/supabase", supabaseRoutes);
 app.use("/api/auth/meta", metaRoutes);
 app.use("/api/sanity", sanityRoutes);

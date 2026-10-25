@@ -8,6 +8,7 @@ import { cn } from '@/lib/utils';
 import { parseResult, sanitize, maskSecretsInText, humanizeKey } from './primitives';
 import { PlainData } from './PlainData';
 import { ShimmerText } from '../ShimmerText';
+import { AppResultCard, APP_CARD_TOOLS } from '../app-cards/AppResultCard';
 
 interface ToolResultStepProps {
   tool: string;
@@ -31,7 +32,7 @@ const APP_NAMES: Record<string, string> = {
   google_workspace_connector: 'Google Workspace', microsoft_workspace_connector: 'Microsoft', github_workspace_connector: 'GitHub',
   slack_workspace_connector: 'Slack', notion_connector: 'Notion', zoom_connector: 'Zoom', vercel_connector: 'Vercel', supabase_connector: 'Supabase',
   sanity_connector: 'Sanity', youtube_connector: 'YouTube', facebook_connector: 'Facebook', instagram_connector: 'Instagram',
-  whatsapp_business_connector: 'WhatsApp', aws_ses_connector: 'AWS SES',
+  whatsapp_business_connector: 'WhatsApp', aws_ses_connector: 'AWS SES', canva_connector: 'Canva', spotify_connector: 'Spotify',
 };
 
 /** "Used Google Workspace  List drive files" / "Used Classgrid  Get my profile" */
@@ -71,6 +72,13 @@ export function ToolResultStep({ tool, args, result, status, text, defaultOpen =
           {canOpen && <ChevronRight className={cn('h-3.5 w-3.5 shrink-0 transition-transform', cardOpen && 'rotate-90')} />}
         </div>
       </button>
+
+      {/* Apps with pictures or media (Canva, Spotify) show their card right under the step */}
+      {status !== 'loading' && hasResult && APP_CARD_TOOLS.has(tool) && (
+        <div className="ml-10 mr-2 mb-2 mt-0.5 max-w-[560px]">
+          <AppResultCard tool={tool} args={args} result={result} />
+        </div>
+      )}
 
       {cardOpen && canOpen && (
         <div className="ml-10 mr-2 mb-2 mt-0.5 rounded-xl border border-slate-200 dark:border-[#2a2a2a] bg-white dark:bg-[#171717] overflow-hidden">

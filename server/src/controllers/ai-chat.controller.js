@@ -1527,6 +1527,16 @@ export const streamAskAi = async (req, res) => {
             messages = await getHistory(sessionId, historyDepth);
         }
 
+        // Incognito: nothing is saved on the server. The browser keeps the chat in its local storage (so a refresh keeps
+        // it) and sends the earlier messages back as incognitoHistory, so the AI still sees the conversation. Only user
+        // and assistant text is taken (never system), at most the last historyDepth messages, each cut to 8,000 characters.
+        if (isIncognito && Array.isArray(body.incognitoHistory)) {
+            messages = body.incognitoHistory
+                .filter((m) => m && (m.role === "user" || m.role === "assistant") && typeof m.content === "string" && m.content.trim())
+                .slice(-historyDepth)
+                .map((m) => ({ role: m.role, content: m.content.slice(0, 8000) }));
+        }
+
         // --- INJECT SCHEDULE CONTEXT ---
         if (body.scheduleContext) {
             volatilePrompt += `\n\n<schedule_context>\nThis conversation was triggered by a Scheduled Task firing. Here is the metadata for this schedule:\n`;
@@ -2224,6 +2234,24 @@ CRITICAL: If you call ANY integration tool (e.g. Google Classroom, Gmail, Google
                         allowedConnectorNames.add('slack_workspace_connector');
                     } else {
                         disconnectedLinks.push(`[Slack](/api/auth/slack/connect)`);
+                    }
+
+                    const canvaConnected = !!(latestUser.canva_access_token || latestUser.canva_refresh_token);
+                    if (canvaConnected) {
+                        const canvaName = latestUser.canva_name ? `(Connected as: ${latestUser.canva_name}) ` : '';
+                        activeDescriptions.push(`- **Canva**: CONNECTED. ${canvaName}${promptBlock("connector:canva", `Use the 'canva_connector' tool to search, read and create designs, export them (pdf, png, jpg, pptx, mp4...), upload images, manage folders, comments and brand templates in the user's Canva account.`)}`);
+                        allowedConnectorNames.add('canva_connector');
+                    } else {
+                        disconnectedLinks.push(`[Canva](/api/auth/canva/connect)`);
+                    }
+
+                    const spotifyConnected = !!(latestUser.spotify_access_token || latestUser.spotify_refresh_token);
+                    if (spotifyConnected) {
+                        const spotifyName = latestUser.spotify_email || latestUser.spotify_name ? `(Connected as: ${latestUser.spotify_email || latestUser.spotify_name}) ` : '';
+                        activeDescriptions.push(`- **Spotify**: CONNECTED. ${spotifyName}${promptBlock("connector:spotify", `Use the 'spotify_connector' tool to search music, see and control playback, manage playlists and the saved library, and read top and recently played tracks in the user's Spotify account.`)}`);
+                        allowedConnectorNames.add('spotify_connector');
+                    } else {
+                        disconnectedLinks.push(`[Spotify](/api/auth/spotify/connect)`);
                     }
 
                     const githubConnected = !!latestUser.github_access_token;
@@ -3926,6 +3954,14 @@ If they ask whether their college/school uses Classgrid, say you can't see that 
                         const userEmail = req.user?.email || '';
                         const result = await handleToolCall('slack_workspace_connector', args, { userEmail });
                         return result.isError ? result.content[0].text : result.content[0].text;
+                    },
+                    canva_connector: async (args) => {
+                        const result = await handleToolCall('canva_connector', args, { userEmail: req.user?.email || '' });
+                        return result.content[0].text;
+                    },
+                    spotify_connector: async (args) => {
+                        const result = await handleToolCall('spotify_connector', args, { userEmail: req.user?.email || '' });
+                        return result.content[0].text;
                     },
                     github_workspace_connector: async (args) => {
                         const userEmail = req.user?.email || '';

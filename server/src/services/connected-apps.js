@@ -39,6 +39,8 @@ export function getConnectedAppToolNames(user) {
     if (user.zoom_refresh_token || user.zoom_access_token) names.add("zoom_connector");
     if (user.notion_access_token) names.add("notion_connector");
     if (user.slack_access_token) names.add("slack_workspace_connector");
+    if (user.canva_access_token || user.canva_refresh_token) names.add("canva_connector");
+    if (user.spotify_access_token || user.spotify_refresh_token) names.add("spotify_connector");
     if (user.github_access_token) names.add("github_workspace_connector");
     const googleServices = user.metadata?.connected_google_services;
     if (Array.isArray(googleServices) && googleServices.includes("youtube")) names.add("youtube_connector");

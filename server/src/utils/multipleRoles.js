@@ -198,7 +198,7 @@ export function getDashboardForRole(role) {
  */
 export function getDashboardPathForRole(role) {
     const dashKey = ROLE_TO_DASHBOARD[role];
-    return DASHBOARD_PATHS[dashKey] || '/work';
+    return DASHBOARD_PATHS[dashKey] || '/agent';
 }
 
 /**

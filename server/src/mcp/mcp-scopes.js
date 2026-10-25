@@ -83,7 +83,7 @@ export const MCP_SCOPES = Object.freeze([
         sensitive: true,
         tools: [
             "google_workspace_connector", "microsoft_workspace_connector", "notion_connector",
-            "slack_workspace_connector", "github_workspace_connector", "zoom_connector", "youtube_connector",
+            "slack_workspace_connector", "canva_connector", "spotify_connector","github_workspace_connector", "zoom_connector", "youtube_connector",
         ],
     },
     {

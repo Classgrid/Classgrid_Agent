@@ -894,6 +894,79 @@ export const getMcpTools = () => [
     }
   },
   {
+    name: 'canva_connector',
+    description: "Work in the user's connected Canva account (Canva REST API): search, read and create designs, export designs as files, upload images, manage folders, comments and brand templates. Export, upload, autofill, resize and import wait for Canva to finish and return the result.",
+    inputSchema: {
+      type: 'object',
+      properties: {
+        operation: {
+          type: 'string',
+          enum: ['get_profile', 'list_designs', 'get_design', 'get_design_pages', 'get_export_formats', 'create_design', 'export_design', 'upload_asset_from_url', 'get_asset', 'update_asset', 'delete_asset', 'create_folder', 'get_folder', 'rename_folder', 'delete_folder', 'list_folder_items', 'move_item', 'create_comment', 'reply_comment', 'get_comment_thread', 'list_comment_replies', 'list_brand_templates', 'get_brand_template_dataset', 'autofill_brand_template', 'resize_design', 'import_design_from_url'],
+          description: 'The operation to perform.'
+        },
+        design_id: { type: 'string', description: 'Canva design ID (get_design, get_design_pages, get_export_formats, export_design, resize_design and the comment operations).' },
+        query: { type: 'string', description: 'Search text (list_designs, list_brand_templates).' },
+        ownership: { type: 'string', enum: ['any', 'owned', 'shared'], description: 'Which designs to list (list_designs).' },
+        sort_by: { type: 'string', description: 'list_designs: relevance, modified_descending, modified_ascending, title_descending or title_ascending. list_folder_items: created_ascending, created_descending, modified_ascending, modified_descending, title_ascending or title_descending.' },
+        limit: { type: 'number', description: 'Max results (list_designs 1-100, list_comment_replies).' },
+        continuation: { type: 'string', description: 'Continuation token from the previous page of results.' },
+        design_type: { type: 'string', enum: ['doc', 'email', 'presentation', 'whiteboard'], description: 'Preset design type (create_design, resize_design). Give width and height instead for a custom size.' },
+        width: { type: 'number', description: 'Custom size in pixels, 40-8000 (create_design, resize_design), or the export width for jpg/png/gif.' },
+        height: { type: 'number', description: 'Custom size in pixels, 40-8000 (create_design, resize_design), or the export height for jpg/png/gif.' },
+        title: { type: 'string', description: 'Title of the new design (create_design, autofill_brand_template, import_design_from_url).' },
+        asset_id: { type: 'string', description: 'Canva asset ID (get_asset, update_asset, delete_asset, or an image to start a new design with in create_design).' },
+        format: { type: 'string', enum: ['pdf', 'jpg', 'png', 'gif', 'pptx', 'mp4', 'csv', 'html_bundle', 'html_standalone'], description: 'Export file type (export_design). Use get_export_formats to see which ones a design supports.' },
+        pages: { type: 'array', items: { type: 'number' }, description: 'Page numbers to export, starting at 1 (export_design). Leave out for all pages.' },
+        quality: { type: 'string', description: 'export_design: jpg quality 1-100, or the mp4 quality (e.g. horizontal_1080p).' },
+        size: { type: 'string', enum: ['a4', 'a3', 'letter', 'legal'], description: 'PDF paper size (export_design).' },
+        url: { type: 'string', description: 'Public file URL (upload_asset_from_url, import_design_from_url).' },
+        name: { type: 'string', description: 'Name for the asset or folder (upload_asset_from_url, update_asset, create_folder, rename_folder).' },
+        tags: { type: 'array', items: { type: 'string' }, description: 'Asset tags (update_asset).' },
+        mime_type: { type: 'string', description: 'File type of the imported file, if known (import_design_from_url).' },
+        folder_id: { type: 'string', description: 'Folder ID; "root" means the top level of Projects (create_folder parent, get_folder, rename_folder, delete_folder, list_folder_items, move_item destination).' },
+        item_id: { type: 'string', description: 'ID of the design, folder or image to move (move_item).' },
+        item_types: { type: 'string', description: 'Comma-separated item types to list: design, folder, image (list_folder_items).' },
+        thread_id: { type: 'string', description: 'Comment thread ID (reply_comment, get_comment_thread, list_comment_replies).' },
+        message: { type: 'string', description: 'Comment text, 1-2048 characters (create_comment, reply_comment).' },
+        assignee_id: { type: 'string', description: 'User to assign the comment to; they must also be mentioned in the message as [user_id:team_id] (create_comment).' },
+        brand_template_id: { type: 'string', description: 'Brand template ID (get_brand_template_dataset, autofill_brand_template).' },
+        data: { type: 'object', description: 'autofill_brand_template: the template fields to fill, e.g. { "headline": { "type": "text", "text": "Hello" }, "photo": { "type": "image", "asset_id": "..." } }. Use get_brand_template_dataset for the field names.' }
+      },
+      required: ['operation']
+    }
+  },
+  {
+    name: 'spotify_connector',
+    description: "Use the user's connected Spotify account: search music, see and control what is playing (playback control needs Spotify Premium and Spotify open on a device), manage playlists and the saved library, and read top and recently played tracks. Spotify items are given by URI, e.g. spotify:track:ID.",
+    inputSchema: {
+      type: 'object',
+      properties: {
+        operation: {
+          type: 'string',
+          enum: ['get_profile', 'search', 'get_current_playback', 'get_devices', 'play', 'pause', 'next', 'previous', 'set_volume', 'set_shuffle', 'set_repeat', 'add_to_queue', 'transfer_playback', 'list_playlists', 'get_playlist_items', 'create_playlist', 'add_to_playlist', 'remove_from_playlist', 'update_playlist', 'get_top_items', 'get_recently_played', 'get_saved_tracks', 'save_to_library', 'remove_from_library'],
+          description: 'The operation to perform.'
+        },
+        query: { type: 'string', description: 'Search text (search).' },
+        type: { type: 'string', description: 'search: comma-separated track, artist, album, playlist. get_top_items: tracks or artists.' },
+        limit: { type: 'number', description: 'Max results (search allows at most 10).' },
+        offset: { type: 'number', description: 'How many results to skip, for the next page.' },
+        uris: { type: 'array', items: { type: 'string' }, description: 'Spotify URIs (play, add_to_playlist, remove_from_playlist, save_to_library, remove_from_library).' },
+        uri: { type: 'string', description: 'One track or episode URI (add_to_queue).' },
+        context_uri: { type: 'string', description: 'Album, artist or playlist URI to play (play).' },
+        device_id: { type: 'string', description: 'Device to use, from get_devices (player operations, transfer_playback).' },
+        volume: { type: 'number', description: 'Volume 0-100 (set_volume).' },
+        state: { type: 'boolean', description: 'set_shuffle: on or off. transfer_playback: start playing on the new device.' },
+        repeat: { type: 'string', enum: ['track', 'context', 'off'], description: 'Repeat mode (set_repeat).' },
+        playlist_id: { type: 'string', description: 'Playlist ID (get_playlist_items, add_to_playlist, remove_from_playlist, update_playlist).' },
+        name: { type: 'string', description: 'Playlist name (create_playlist, update_playlist).' },
+        description: { type: 'string', description: 'Playlist description (create_playlist, update_playlist).' },
+        public: { type: 'boolean', description: 'Whether the playlist is public (create_playlist, update_playlist).' },
+        time_range: { type: 'string', enum: ['short_term', 'medium_term', 'long_term'], description: 'About 4 weeks, 6 months or about 1 year (get_top_items).' }
+      },
+      required: ['operation']
+    }
+  },
+  {
     name: 'github_workspace_connector',
     description: 'Interact with GitHub API to list repos, read/write files, manage issues/PRs, search code, read commit history, and more using the connected user token. push_sandbox_files pushes every file you wrote to the sandbox (/data/) to a repo in ONE commit; the server reads the files itself, so do not read them back first.',
     inputSchema: {
@@ -5835,6 +5908,38 @@ export const handleToolCall = async (name, args, context = {}) => {
         return { content: [{ type: 'text', text: 'YES: An email was already sent to ' + recipientEmail + ' recently. DO NOT SEND AGAIN.' }] };
       }
       return { content: [{ type: 'text', text: 'NO: No recent email found for ' + recipientEmail + '. Safe to send.' }] };
+    }
+
+    if (name === 'canva_connector') {
+      const { userEmail = '' } = context;
+      const user = await mongoose.models.User.findOne({ email: userEmail });
+      const { getCanvaAccessToken, runCanvaOperation } = await import('../services/canva.service.js');
+      const token = user ? await getCanvaAccessToken(user) : null;
+      if (!token) {
+        return { content: [{ type: 'text', text: "Error: No Canva account connected (or its login expired). Tell the user to connect Canva in Plugins." }] };
+      }
+      try {
+        const result = await runCanvaOperation(token, args || {});
+        return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
+      } catch (e) {
+        return { content: [{ type: 'text', text: `Error: ${e.message}` }], isError: true };
+      }
+    }
+
+    if (name === 'spotify_connector') {
+      const { userEmail = '' } = context;
+      const user = await mongoose.models.User.findOne({ email: userEmail });
+      const { getSpotifyAccessToken, runSpotifyOperation } = await import('../services/spotify.service.js');
+      const token = user ? await getSpotifyAccessToken(user) : null;
+      if (!token) {
+        return { content: [{ type: 'text', text: "Error: No Spotify account connected (or its login expired). Tell the user to connect Spotify in Plugins." }] };
+      }
+      try {
+        const result = await runSpotifyOperation(token, args || {});
+        return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
+      } catch (e) {
+        return { content: [{ type: 'text', text: `Error: ${e.message}` }], isError: true };
+      }
     }
 
     if (name === 'slack_workspace_connector') {

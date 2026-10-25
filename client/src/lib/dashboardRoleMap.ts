@@ -114,7 +114,7 @@ export const ROLE_TO_DASHBOARD: Record<string, DashboardKey> = {
 /** Full dashboard metadata for the 10 dashboards */
 export const DASHBOARDS: Record<DashboardKey, DashboardInfo> = {
   student:         { key: "student",         label: "Student Dashboard",         path: "/student/work",                icon: "🎓" },
-  faculty:         { key: "faculty",          label: "Faculty Dashboard",          path: "/work",                        icon: "📚" },
+  faculty:         { key: "faculty",          label: "Faculty Dashboard",          path: "/agent",                       icon: "📚" },
   org_admin:       { key: "org_admin",        label: "Admin Dashboard",            path: "/org/admin/dashboard",         icon: "🏛️" },
   admissions:      { key: "admissions",       label: "Admissions Dashboard",       path: "/dept/admissions/dashboard",   icon: "🎓" },
   examination:     { key: "examination",      label: "Examination Dashboard",      path: "/dept/exams/dashboard",        icon: "📝" },

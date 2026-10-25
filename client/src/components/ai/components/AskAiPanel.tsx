@@ -195,6 +195,7 @@ import { KnowledgeBaseSearchView } from "./stepper/KnowledgeBaseSearchView";
 import { CdnUploadView } from "./stepper/CdnUploadView";
 import { EmailSentView } from "./stepper/EmailSentView";
 import { ToolResultStep } from "./stepper/tool-results/ToolResultStep";
+import { IncognitoBar, IncognitoButton, loadIncognitoChat, saveIncognitoChat, clearIncognitoChat } from "./IncognitoMode";
 import { describeStep } from "./stepper/tool-results/describeStep";
 import { specialStepTitle, emailTitle } from "./stepper/tool-results/stepTitles";
 import { StepWorkingContext } from "./stepper/ShimmerText";
@@ -1962,6 +1963,8 @@ export const INTEGRATIONS_LIST: any[] = [
   { id: "vercel", name: "Vercel", imgUrl: "https://cdn.classgrid.in/classgrid_intgration/vercel-icon-svgrepo-com.svg", invertInDarkMode: true },
   { id: "slack", name: "Slack", imgUrl: "https://cdn.classgrid.in/classgrid_intgration/slack-new-logo-logo-svgrepo-com.svg" },
   { id: "github", name: "GitHub", imgUrl: "https://cdn.classgrid.in/classgrid_intgration/github-icon.svg", invertInDarkMode: true },
+  { id: "canva", name: "Canva", imgUrl: "https://cdn.classgrid.in/classgrid_intgration/canva.svg" },
+  { id: "spotify", name: "Spotify", imgUrl: "https://cdn.classgrid.in/classgrid_intgration/spotify.svg" },
   { id: "youtube", name: "YouTube", imgUrl: "https://cdn.classgrid.in/youtube-icon.svg" },
   { id: "supabase", name: "Supabase", imgUrl: "https://cdn.classgrid.in/classgrid_intgration/supabase-icon.svg" },
   { id: "sanity", name: "Sanity CMS", imgUrl: "https://cdn.classgrid.in/classgrid_intgration/sanity-icon-logo-png_seeklogo-653456.png", invertInDarkMode: true },
@@ -2465,7 +2468,46 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
     window.dispatchEvent(new PopStateEvent("popstate"));
   }, [localSessionId, routeSessionId, variant]);
 
-  const [isIncognito, setIsIncognito] = useState(false);
+  // Incognito (full page only): nothing is saved on the server; the open incognito chat lives in this browser's local
+  // storage, so a refresh brings it back (unless the address is for a saved chat)
+  const [isIncognito, setIsIncognito] = useState(() => {
+    try {
+      return variant === "full-page" && !routeSessionId && !new URLSearchParams(window.location.search).get("session") && !!loadIncognitoChat()?.length;
+    } catch { return false; }
+  });
+  const enteringIncognitoRef = useRef(false);
+  useEffect(() => {
+    if (!isIncognito) return;
+    const saved = loadIncognitoChat();
+    if (saved?.length) setMessages((prev) => (prev.length ? prev : saved));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  useEffect(() => {
+    if (!isIncognito) return;
+    const t = setTimeout(() => saveIncognitoChat(messages), 400);
+    return () => clearTimeout(t);
+  }, [isIncognito, messages]);
+  // "New Chat" or opening a saved chat from the sidebar leaves incognito (like claude.ai)
+  useEffect(() => {
+    const leave = () => {
+      if (enteringIncognitoRef.current) { enteringIncognitoRef.current = false; return; }
+      setIsIncognito((on) => { if (on) clearIncognitoChat(); return false; });
+    };
+    window.addEventListener("agent:new-chat", leave);
+    window.addEventListener("agent:load-chat", leave);
+    return () => { window.removeEventListener("agent:new-chat", leave); window.removeEventListener("agent:load-chat", leave); };
+  }, []);
+  const startIncognito = () => {
+    clearIncognitoChat();
+    enteringIncognitoRef.current = true;
+    setIsIncognito(true);
+    window.dispatchEvent(new Event("agent:new-chat"));
+  };
+  const exitIncognito = () => {
+    clearIncognitoChat();
+    setIsIncognito(false);
+    window.dispatchEvent(new Event("agent:new-chat"));
+  };
   const [copiedAll, setCopiedAll] = useState(false);
   const [lastSentDocsPath, setLastSentDocsPath] = useState<string | null>(null);
   const [showScrollButton, setShowScrollButton] = useState(false);
@@ -4060,6 +4102,10 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
           userContext: userContext,
           sessionId: (options && options.explicitSessionId !== undefined) ? (options.explicitSessionId ?? undefined) : (sessionId ?? undefined),
           isIncognito: isIncognito,
+          // Incognito: the server keeps nothing, so the earlier messages of this chat come from the browser
+          incognitoHistory: isIncognito
+            ? messages.filter((m) => (m.role === "user" || m.role === "assistant") && typeof m.content === "string" && m.content.trim()).slice(-24).map((m) => ({ role: m.role, content: m.content.slice(0, 8000) }))
+            : undefined,
           // Project Mode: the project open next to the chat (the backend links the chat to it)
           projectId: (() => { try { return window.location.pathname.split("/").includes("project") ? localStorage.getItem("cg_project_open") || undefined : undefined; } catch { return undefined; } })(),
           fileUrls: uploadedAttachments.length > 0 ? uploadedAttachments.map(a => a.url) : [],
@@ -5709,7 +5755,8 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
               <form onSubmit={handleSubmit} className={cn("space-y-2", endedView && "hidden")}>
                 <div className={cn(
                   variant === "overlay" ? "w-full" : "sm:w-[80%]",
-                  "group relative w-full mx-auto shadow-sm rounded-2xl border border-border !bg-white dark:!bg-[#0f0f0f] focus-within:border-black/80 dark:focus-within:border-white/50 focus-within:ring-1 focus-within:ring-black/80 dark:focus-within:ring-white/50 transition-all duration-300"
+                  "group relative w-full mx-auto shadow-sm rounded-2xl border border-border !bg-white dark:!bg-[#0f0f0f] focus-within:border-black/80 dark:focus-within:border-white/50 focus-within:ring-1 focus-within:ring-black/80 dark:focus-within:ring-white/50 transition-all duration-300",
+                  isIncognito && "border-dashed border-slate-300 dark:border-[#3a3a3a]"
                 )}>
                   {/* Hidden file input */}
                   <input
@@ -6191,11 +6238,22 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
           FULL-PAGE: ChatGPT-style centered layout
           ────────────────────────────────────────────────────────────────────────── */}
       {variant === "full-page" ? (
-        <div className="w-full h-[100dvh] !bg-[#fafafa] dark:!bg-[#000000] flex flex-row overflow-hidden">
+        // Incognito: a dark frame with the "Incognito" bar on top and the chat in a rounded panel (like claude.ai)
+        // It covers the whole screen, sidebar included (z-45: above the sidebar, below menus and dialogs at z-50)
+        <div className={isIncognito ? "fixed inset-0 z-[45] w-full h-[100dvh] bg-[#ffffff] dark:bg-[#0f0f0f] flex flex-col overflow-hidden" : "contents"}>
+        {isIncognito && <IncognitoBar onClose={exitIncognito} />}
+        <div className={isIncognito
+          ? "flex-1 min-h-0 mx-1.5 mb-1.5 sm:mx-2 sm:mb-2 rounded-2xl border border-slate-200 dark:border-[#262626] !bg-[#fafafa] dark:!bg-[#000000] flex flex-row overflow-hidden"
+          : "w-full h-[100dvh] !bg-[#fafafa] dark:!bg-[#000000] flex flex-row overflow-hidden"}>
           <div className="flex-1 min-w-0 min-h-0 relative flex flex-col h-full overflow-hidden">
             {/* Sidebar toggle and Top Right Header Actions */}
             <div className="shrink-0 flex items-center justify-between px-3 sm:px-6 pt-3 h-14">
-              <SidebarTrigger />
+              {isIncognito ? <span /> : <SidebarTrigger />}
+
+              {/* Ghost button on a new chat: start an incognito chat */}
+              {emptyState && !isIncognito && !isLoadingChat && sessionId !== "schedule" && sessionId !== "library" && (
+                <IncognitoButton onClick={startIncognito} />
+              )}
 
               {messages.length > 0 && sessionId && sessionId !== "schedule" && sessionId !== "library" && (
                 <div className="flex items-center gap-1 text-muted-foreground">
@@ -6302,7 +6360,7 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
                     <img src="/logo.png" alt="Classgrid" className="h-9 w-9 sm:h-[46px] sm:w-[46px] shrink-0 object-contain" />
                     {/* Fixed height so the input below never moves while the line types; pauses while the user types */}
                     <h2 style={{ fontFamily: "Newsreader, Georgia, serif" }} className="font-normal text-[1.75rem] sm:text-[2.25rem] leading-tight tracking-[-0.01em] text-[#141413] dark:text-[#faf9f5] min-h-[2.5rem]">
-                      <TypingGreeting name={user?.name} paused={input.trim().length > 0} />
+                      {isIncognito ? "You’re incognito" : <TypingGreeting name={user?.name} paused={input.trim().length > 0} />}
                     </h2>
                   </div>
 
@@ -6392,7 +6450,8 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
                         )}
                         <form onSubmit={handleSubmit} className={cn("space-y-2", endedView && "hidden")}>
                           <div className={cn(
-                            "group relative w-full shadow-sm rounded-2xl border border-border !bg-white dark:!bg-[#0f0f0f] focus-within:border-black/80 dark:focus-within:border-white/50 focus-within:ring-1 focus-within:ring-black/80 dark:focus-within:ring-white/50 transition-all duration-300"
+                            "group relative w-full shadow-sm rounded-2xl border border-border !bg-white dark:!bg-[#0f0f0f] focus-within:border-black/80 dark:focus-within:border-white/50 focus-within:ring-1 focus-within:ring-black/80 dark:focus-within:ring-white/50 transition-all duration-300",
+                            isIncognito && "border-dashed border-slate-300 dark:border-[#3a3a3a]"
                           )}>
                             <input
                               ref={fileInputRef}
@@ -6771,6 +6830,11 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
                         </form>
                       </>
                     )}
+                    {isIncognito && (
+                      <p className="mt-5 text-center text-[13.5px] leading-relaxed text-slate-500 dark:text-[#8a8a8a]">
+                        Incognito chats are not saved to your history or search.<br className="hidden sm:block" /> They stay in this browser until you close them.
+                      </p>
+                    )}
                   </div>
 
                 </div>
@@ -6818,6 +6882,7 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
           </AnimatePresence>
           {/* Right-side TOC showing user questions */}
           {tocItems.length > 0 && !showFilesPanel && !showGridPanel && <ScrollSpyTOC tocItems={tocItems} activeSection={activeSection} />}
+        </div>
         </div>
       ) : null}
 

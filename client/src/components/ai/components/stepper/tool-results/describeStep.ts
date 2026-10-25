@@ -23,6 +23,7 @@ const APP: Record<string, string> = {
   google_workspace_connector: 'Google', microsoft_workspace_connector: 'Microsoft', github_workspace_connector: 'GitHub', slack_workspace_connector: 'Slack',
   notion_connector: 'Notion', zoom_connector: 'Zoom', vercel_connector: 'Vercel', supabase_connector: 'Supabase', sanity_connector: 'Sanity',
   youtube_connector: 'YouTube', facebook_connector: 'Facebook', instagram_connector: 'Instagram', whatsapp_business_connector: 'WhatsApp', aws_ses_connector: 'AWS SES',
+  canva_connector: 'Canva', spotify_connector: 'Spotify',
 };
 
 const TITLE_KEYS = ['title', 'name', 'subject', 'summary', 'topic', 'question', 'full_name', 'displayName', 'institutionName', 'snippet.title', 'info.title', 'filename', 'path', 'message'];

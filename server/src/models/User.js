@@ -661,6 +661,42 @@ const userSchema = new mongoose.Schema(
       type: String,
       default: null,
     },
+    canva_access_token: {
+      type: String,
+      default: null,
+    },
+    canva_refresh_token: {
+      type: String,
+      default: null,
+    },
+    canva_token_expires_at: {
+      type: Date,
+      default: null,
+    },
+    canva_name: {
+      type: String,
+      default: null,
+    },
+    spotify_access_token: {
+      type: String,
+      default: null,
+    },
+    spotify_refresh_token: {
+      type: String,
+      default: null,
+    },
+    spotify_token_expires_at: {
+      type: Date,
+      default: null,
+    },
+    spotify_name: {
+      type: String,
+      default: null,
+    },
+    spotify_email: {
+      type: String,
+      default: null,
+    },
     webex_access_token: {
       type: String,
       default: null,

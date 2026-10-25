@@ -87,7 +87,7 @@ export function useImpersonateUser() {
   return useMutation({
     mutationFn: (id: string) => usersApi.impersonateUser(id),
     onSuccess: (data) => {
-      window.location.href = "/work";
+      window.location.href = "/agent";
     },
     onError: (error: any) => {
       alert(error?.message || "Failed to impersonate user.");

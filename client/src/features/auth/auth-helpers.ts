@@ -224,47 +224,8 @@ export function getRedirectPath(role: string | null | undefined) {
     const subdomain = window.location.hostname.split('.')[0];
     if (subdomain === 'chat') return '/c/agent';
   }
-  const normalized = normalizeAuthRole(role);
-
-  switch (normalized) {
-    case "super_admin":
-      return "/superadmin/dashboard";
-    case "library_manager":
-    case "library_admin":
-      return "/dept/library/dashboard";
-    case "attendance_admin":
-      return "/dept/attendance/dashboard";
-    case "hr_dept":
-      return "/dept/hr/dashboard";
-    case "hostel_dept":
-      return "/dept/hostel/dashboard";
-    case "exam_controller":
-      return "/dept/exams/dashboard";
-    case "fee_manager":
-      return "/dept/fees/dashboard";
-    case "admission_head":
-    case "admission_verifier":
-    case "admission_counselor":
-    case "admission_clerk":
-      return "/dept/admissions/dashboard";
-    case "transport_manager":
-      return "/dept/transport/dashboard";
-    case "student":
-      return "/student/dashboard";
-    case "teacher":
-    case "faculty":
-      return "/faculty/dashboard";
-    case "org_admin":
-    case "hod":
-    case "principal":
-    case "vice_principal":
-    case "tpo_officer":
-    case "counselor":
-    case "coordinator":
-      return "/org/dashboard";
-    default:
-      return "/work";
-  }
+  // The ERP dashboards are shut down: super admins go to the super admin dashboard, everyone else to Classgrid AI
+  return normalizeAuthRole(role) === "super_admin" ? "/superadmin/dashboard" : "/agent";
 }
 
 /** Resolve mandatory first-login steps before the normal role dashboard. */
@@ -348,23 +309,8 @@ export function redirectToBrandingFallback(error: unknown) {
 }
 
 export function getLoginPathForPath(pathname: string) {
-  if (pathname.startsWith("/superadmin")) {
-    return "/superadmin/login";
-  }
-
-  if (pathname.startsWith("/org") || pathname.startsWith("/dept")) {
-    return "/admin/login";
-  }
-
-  if (pathname.startsWith("/student")) {
-    return "/student/login";
-  }
-
-  if (pathname.startsWith("/work") || pathname.startsWith("/classroom")) {
-    return "/faculty/login";
-  }
-
-  return "/login";
+  // Only two login pages are left: super admin, and Classgrid AI for everyone else (the ERP logins are gone)
+  return pathname.startsWith("/superadmin") ? "/superadmin/login" : "/login";
 }
 
 type AuthHeadingArgs = {
