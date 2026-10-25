@@ -321,7 +321,7 @@ export function NewChatSidebar({
                       <div className={`flex-1 min-w-0 pb-3 pt-1 ${index !== filteredUsers.length - 1 ? 'border-b border-border' : ''}`}>
                         <p className={`text-[17px] truncate transition-colors duration-200 ${isSelected ? 'text-primary font-medium' : 'text-foreground group-hover:text-foreground/90'}`}>{user.name}</p>
                         <p className="text-[13px] text-muted-foreground truncate mt-0.5">
-                          {user.role ? (user.role === 'super_admin' ? 'Classgrid Staff' : user.role.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())) : 'Member'} {user.email ? `• ${user.email}` : ""}
+                          {user.role === 'super_admin' ? 'Classgrid Staff' : user.metadata?.job_role || (user.role ? user.role.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase()) : 'Member')} {user.email ? `• ${user.email}` : ""}
                         </p>
                       </div>
                       {isSelected && (

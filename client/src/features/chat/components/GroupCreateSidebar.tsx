@@ -311,7 +311,7 @@ export function GroupCreateSidebar({
                               </p>
                             </div>
                             <p className="text-[13px] text-muted-foreground truncate mt-0.5">
-                              {user.role ? user.role.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase()) : 'Member'} {user.email ? `• ${user.email}` : ''}
+                              {user.metadata?.job_role || (user.role ? user.role.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase()) : 'Member')} {user.email ? `• ${user.email}` : ''}
                             </p>
                           </div>
                         </button>

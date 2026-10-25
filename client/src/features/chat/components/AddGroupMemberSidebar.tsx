@@ -240,7 +240,7 @@ export function AddGroupMemberSidebar({
                           {user.name}
                         </p>
                         <p className="text-[13px] text-muted-foreground truncate">
-                          {user.role === 'super_admin' ? 'Classgrid Staff' : user.role === 'org_admin' ? 'Organization Admin' : user.role ? user.role.charAt(0).toUpperCase() + user.role.slice(1) : ''}
+                          {user.role === 'super_admin' ? 'Classgrid Staff' : user.role === 'org_admin' ? 'Organization Admin' : user.metadata?.job_role ? user.metadata.job_role : user.role ? user.role.charAt(0).toUpperCase() + user.role.slice(1) : ''}
                         </p>
                       </div>
                     </button>

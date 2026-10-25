@@ -89,7 +89,7 @@ export function ChatUserProfileSidebar({ user, onClose }: ChatUserProfileSidebar
         </Avatar>
         
         <h3 className="text-xl font-bold text-foreground text-center">{user.name}</h3>
-        <p className="text-sm font-medium text-emerald-600 mt-1">{user.role === 'super_admin' ? 'CLASSGRID STAFF' : (user.role?.replace("_", " ").toUpperCase() || "USER")}</p>
+        <p className="text-sm font-medium text-emerald-600 mt-1">{user.role === 'super_admin' ? 'CLASSGRID STAFF' : (user.metadata?.job_role?.toUpperCase() || user.role?.replace("_", " ").toUpperCase() || "USER")}</p>
         
         <div className="w-full mt-8 space-y-4">
           {user.email && (

@@ -640,7 +640,7 @@ router.get('/', isAuthenticated, async (req, res) => {
     const otherUserIds = otherMembers.map(m => m.user_id).filter(id => /^[0-9a-fA-F]{24}$/.test(id));
     let userMap = {};
     if (otherUserIds.length > 0) {
-      const users = await User.find({ _id: { $in: otherUserIds } }).select('name profilePicture role email phoneNumber bio prn blocked_users').lean();
+      const users = await User.find({ _id: { $in: otherUserIds } }).select('name profilePicture role email phoneNumber bio prn blocked_users metadata.job_role').lean();
       const viewerId = req.user._id.toString();
       users.forEach(u => {
         // This person blocked me: only their name, no photo / bio / contact details (WhatsApp-style)
@@ -729,7 +729,8 @@ router.get('/', isAuthenticated, async (req, res) => {
           type: 'dm',
           name: otherUser?.name || 'User',
           avatar: otherUser?.profilePicture || (otherUser?.name || 'U')[0].toUpperCase(),
-          role: otherUser?.role ? (otherUser.role === 'super_admin' ? 'Classgrid Staff' : otherUser.role.charAt(0).toUpperCase() + otherUser.role.slice(1).replace('_', ' ')) : '',
+          // The job role the person picked at sign-up or on their profile ("Student"), else the account type
+          role: otherUser?.role === 'super_admin' ? 'Classgrid Staff' : otherUser?.metadata?.job_role || (otherUser?.role ? otherUser.role.charAt(0).toUpperCase() + otherUser.role.slice(1).replace('_', ' ') : ''),
           otherUserId,
           email: otherUser?.email || '',
           phoneNumber: otherUser?.phoneNumber || '',
