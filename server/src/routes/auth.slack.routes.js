@@ -33,7 +33,7 @@ const SLACK_CLIENT_SECRET = "6d586b933a83e67f3256c02ab349b766";
 const getSlackAuthUrl = (statePayload) => {
     const clientId = SLACK_CLIENT_ID;
     const redirectUri = `${process.env.BACKEND_URL}/api/auth/slack/callback`;
-    const scopes = ['channels:history', 'channels:read', 'channels:write', 'chat:write', 'groups:read', 'groups:write', 'users:read', 'users:read.email', 'search:read'];
+    const scopes = ['channels:history', 'channels:read', 'channels:write', 'chat:write', 'groups:history', 'groups:read', 'groups:write', 'users:read', 'users:read.email', 'search:read'];
     
     const authUrl = new URL(`https://slack.com/oauth/v2/authorize`);
     authUrl.searchParams.append('client_id', clientId);
