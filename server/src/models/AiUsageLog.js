@@ -140,5 +140,6 @@ const aiUsageLogSchema = new mongoose.Schema(
 
 aiUsageLogSchema.index({ organization_id: 1, createdAt: -1 });
 aiUsageLogSchema.index({ provider: 1, createdAt: -1 });
+aiUsageLogSchema.index({ userId: 1, createdAt: -1 });
 
 export default mongoose.models.AiUsageLog || mongoose.model("AiUsageLog", aiUsageLogSchema);

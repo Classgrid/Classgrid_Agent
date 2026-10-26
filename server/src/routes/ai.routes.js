@@ -135,6 +135,49 @@ router.get("/model-access", isAuthenticated, async (req, res) => {
 router.get("/my-usage", isAuthenticated, getMyUsage);
 router.get("/org-usage", isAuthenticated, getOrgUsage);
 
+// Profile "Token activity" heatmap: the user's tokens per day (India time), from/to as YYYY-MM-DD
+router.get("/my-token-activity", isAuthenticated, async (req, res) => {
+    try {
+        const mongoose = (await import("mongoose")).default;
+        const AiUsageLog = (await import("../models/AiUsageLog.js")).default;
+        const DAY_MS = 24 * 60 * 60 * 1000;
+        const isDay = (s) => typeof s === "string" && /^\d{4}-\d{2}-\d{2}$/.test(s);
+        const istDayStart = (s) => new Date(`${s}T00:00:00+05:30`);
+
+        const todayIst = new Date(Date.now() + 5.5 * 60 * 60 * 1000).toISOString().slice(0, 10);
+        const to = isDay(req.query.to) ? req.query.to : todayIst;
+        let from = isDay(req.query.from) ? req.query.from : new Date(istDayStart(to).getTime() - 364 * DAY_MS + 5.5 * 60 * 60 * 1000).toISOString().slice(0, 10);
+
+        let start = istDayStart(from);
+        const end = new Date(istDayStart(to).getTime() + DAY_MS);
+        if (isNaN(start.getTime()) || isNaN(end.getTime()) || start >= end) {
+            return res.status(400).json({ error: "Invalid date range" });
+        }
+        // Keep one lookup to at most ~3 years so a huge range can't load the database
+        const maxSpan = 1100 * DAY_MS;
+        if (end - start > maxSpan) start = new Date(end.getTime() - maxSpan);
+
+        const rows = await AiUsageLog.aggregate([
+            { $match: { userId: new mongoose.Types.ObjectId(String(req.user.id)), createdAt: { $gte: start, $lt: end } } },
+            {
+                $group: {
+                    _id: { $dateToString: { format: "%Y-%m-%d", date: "$createdAt", timezone: "Asia/Kolkata" } },
+                    tokens: { $sum: "$totalTokens" },
+                },
+            },
+            { $sort: { _id: 1 } },
+        ]);
+
+        res.json({
+            from: new Date(start.getTime() + 5.5 * 60 * 60 * 1000).toISOString().slice(0, 10),
+            to,
+            days: rows.map((r) => ({ date: r._id, tokens: r.tokens })),
+        });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
 // Chat History & Sessions
 router.get("/sessions", isAuthenticated, getChatSessions);
 router.get("/sessions/:id", isAuthenticated, getChatSession);
