@@ -1,6 +1,8 @@
 // CLASSGRID USES CLOUDFLARE USAGE TO CALCULATE TOKENS, NOT GPT-TOKENIZER (WHICH IS ONLY A FALLBACK)
-import React, { useMemo, useRef, useState } from "react";
+import React, { useLayoutEffect, useMemo, useRef, useState } from "react";
+import gsap from "gsap";
 import { useQuery } from "@tanstack/react-query";
+import { motion } from "framer-motion";
 import { addDays, endOfWeek, format, min, startOfWeek } from "date-fns";
 import { apiClient } from "@/lib/apiClient";
 import { NikhilDateCalendar } from "@/components/marketing_ui/nikhil_date_calendar";
@@ -31,6 +33,14 @@ const LEVEL_CLASSES = [
 
 const GAP = 3;
 
+// Cells pop in as a left-to-right wave when the view changes (bars rise from the bottom)
+const EASE = [0.22, 1, 0.36, 1] as const;
+const popIn = (delay: number) => ({
+  initial: { opacity: 0, scale: 0.4 },
+  animate: { opacity: 1, scale: 1 },
+  transition: { duration: 0.4, ease: EASE, delay },
+});
+
 const levelFor = (value: number, max: number) => {
   if (!value || !max) return 0;
   const r = value / max;
@@ -50,6 +60,17 @@ export function TokenActivityHeatmap() {
   });
   const [tip, setTip] = useState<Tip>(null);
   const boxRef = useRef<HTMLDivElement>(null);
+  const tipRef = useRef<HTMLDivElement>(null);
+
+  // GSAP: the hover card springs up above the square each time it moves
+  useLayoutEffect(() => {
+    if (!tipRef.current) return;
+    gsap.fromTo(
+      tipRef.current,
+      { xPercent: -50, yPercent: -100, y: 6, scale: 0.9, opacity: 0 },
+      { xPercent: -50, yPercent: -100, y: 0, scale: 1, opacity: 1, duration: 0.22, ease: "power3.out" }
+    );
+  }, [tip?.title, tip?.x, tip?.y]);
 
   const fromKey = format(range.from, "yyyy-MM-dd");
   const toKey = format(range.to, "yyyy-MM-dd");
@@ -117,8 +138,9 @@ export function TokenActivityHeatmap() {
     if (view === "daily") {
       if (!day.inRange) return <div key={dayIndex} className="aspect-square" />;
       return (
-        <div
+        <motion.div
           key={dayIndex}
+          {...(day.tokens > 0 ? popIn(weekIndex * 0.008 + dayIndex * 0.02) : {})}
           className={cn("aspect-square rounded-[3px] transition-colors", LEVEL_CLASSES[levelFor(day.tokens, maxDay)])}
           onMouseEnter={(e) => showTip(e, format(day.date, "MMM d"), `${formatTokens(day.tokens)} tokens`)}
           onMouseLeave={() => setTip(null)}
@@ -141,8 +163,9 @@ export function TokenActivityHeatmap() {
         : `Total by ${format(min([week.days[6].date, range.to, new Date()]), "MMM d, yyyy")}`;
 
     return (
-      <div
+      <motion.div
         key={dayIndex}
+        {...(isFilled ? popIn(weekIndex * 0.008 + (6 - dayIndex) * 0.03) : {})}
         className={cn("aspect-square rounded-[3px] transition-colors", isFilled ? LEVEL_CLASSES[levelFor(value, max)] : LEVEL_CLASSES[0])}
         onMouseEnter={isFilled ? (e) => showTip(e, title, `${formatTokens(value)} tokens`) : undefined}
         onMouseLeave={() => setTip(null)}
@@ -183,7 +206,7 @@ export function TokenActivityHeatmap() {
 
       <div ref={boxRef} className="relative" onMouseLeave={() => setTip(null)}>
         <div className={cn("w-full", isLoading && "animate-pulse")}>
-          <div className="grid" style={{ gap: GAP, gridTemplateColumns: `repeat(${weeks.length}, minmax(0, 1fr))` }}>
+          <div key={view} className="grid" style={{ gap: GAP, gridTemplateColumns: `repeat(${weeks.length}, minmax(0, 1fr))` }}>
             {weeks.map((_, wi) => (
               <div key={wi} className="grid grid-rows-7" style={{ gap: GAP }}>
                 {Array.from({ length: 7 }, (_, di) => renderCell(wi, di))}
@@ -209,7 +232,8 @@ export function TokenActivityHeatmap() {
 
         {tip && (
           <div
-            className="pointer-events-none absolute z-20 -translate-x-1/2 -translate-y-full rounded-xl border border-border bg-popover px-3 py-2 text-xs text-popover-foreground shadow-lg whitespace-nowrap"
+            ref={tipRef}
+            className="pointer-events-none absolute z-20 rounded-xl bg-foreground px-3 py-2 text-xs text-background shadow-lg whitespace-nowrap"
             style={{ left: tip.x, top: tip.y - 6 }}
           >
             <div>{tip.title}</div>
