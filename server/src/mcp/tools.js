@@ -877,11 +877,18 @@ export const getMcpTools = () => [
   },
   {
     name: 'slack_workspace_connector',
-    description: 'Interact with Slack API to list channels, read/send messages, create channels, search messages, list users, invite users to channels, and archive/delete channels using the connected user token.',
+    description: 'Interact with Slack API to list and search channels, read/send messages, read threads, create channels, search messages, list and search users, read a user profile, invite users to channels, archive/delete channels, and create, read and update canvases using the connected user token.',
     inputSchema: {
       type: 'object',
       properties: {
-        operation: { type: 'string', enum: ['list_channels', 'read_channel_messages', 'send_message', 'create_channel', 'list_users', 'search_messages', 'invite_to_channel', 'archive_channel'], description: 'The operation to perform.' },
+        operation: { type: 'string', enum: ['list_channels', 'search_channels', 'read_channel_messages', 'read_thread', 'send_message', 'create_channel', 'list_users', 'search_users', 'read_user_profile', 'search_messages', 'invite_to_channel', 'archive_channel', 'create_canvas', 'read_canvas', 'update_canvas'], description: 'The operation to perform.' },
+        threadTs: { type: 'string', description: 'The ts of the thread\'s first message (for read_thread; with send_message it replies in that thread).' },
+        userId: { type: 'string', description: 'Slack user ID (for read_user_profile).' },
+        canvasId: { type: 'string', description: 'Canvas ID, e.g. F1234ABCD (for read_canvas, update_canvas).' },
+        title: { type: 'string', description: 'Canvas title (for create_canvas; with update_canvas and canvasChange "rename" it is the new title).' },
+        markdown: { type: 'string', description: 'Canvas content in markdown (for create_canvas, update_canvas).' },
+        canvasChange: { type: 'string', enum: ['insert_at_end', 'insert_at_start', 'replace', 'rename'], description: 'How update_canvas changes the canvas (default insert_at_end; replace without sectionId replaces the whole canvas).' },
+        sectionId: { type: 'string', description: 'Optional: the canvas section to replace (for update_canvas with replace).' },
         channelId: { type: 'string', description: 'The ID of the channel (required for read_channel_messages, send_message, invite_to_channel, archive_channel).' },
         text: { type: 'string', description: 'The text content to send (required for send_message).' },
         limit: { type: 'number', description: 'Max results to return (for read_channel_messages).' },
@@ -5943,7 +5950,7 @@ export const handleToolCall = async (name, args, context = {}) => {
     }
 
     if (name === 'slack_workspace_connector') {
-      const { operation, channelId, text, limit = 10, channelName, isPrivate, query, userIds } = args;
+      const { operation, channelId, text, limit = 10, channelName, isPrivate, query, userIds, threadTs, userId, canvasId, title, markdown, canvasChange = 'insert_at_end', sectionId } = args;
       const { userEmail = '' } = context;
 
       const user = await mongoose.models.User.findOne({ email: userEmail });
@@ -5974,7 +5981,7 @@ export const handleToolCall = async (name, args, context = {}) => {
           const res = await fetch(`https://slack.com/api/chat.postMessage`, {
             method: 'POST',
             headers: { "Authorization": `Bearer ${accessToken}`, "Content-Type": "application/json" },
-            body: JSON.stringify({ channel: channelId, text })
+            body: JSON.stringify({ channel: channelId, text, ...(threadTs ? { thread_ts: threadTs } : {}) })
           });
           const data = await res.json();
           if (!data.ok) throw new Error(data.error || "Failed to send message");
@@ -6024,6 +6031,92 @@ export const handleToolCall = async (name, args, context = {}) => {
           const data = await res.json();
           if (!data.ok) throw new Error(data.error || "Failed to archive channel");
           return { content: [{ type: 'text', text: JSON.stringify({ success: true, message: `Successfully deleted/archived channel ${channelId}` }, null, 2) }] };
+        } else if (operation === 'search_channels') {
+          if (!query) throw new Error("query is required for search_channels");
+          const q = String(query).toLowerCase().replace(/^#/, '');
+          const found = [];
+          let cursor = '';
+          for (let page = 0; page < 10 && found.length < 50; page++) {
+            const res = await fetch(`https://slack.com/api/conversations.list?types=public_channel,private_channel&exclude_archived=true&limit=200${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}`, {
+              headers: { "Authorization": `Bearer ${accessToken}` }
+            });
+            const data = await res.json();
+            if (!data.ok) throw new Error(data.error || "Failed to search channels");
+            for (const c of data.channels) {
+              if (`${c.name} ${c.topic?.value || ''} ${c.purpose?.value || ''}`.toLowerCase().includes(q)) found.push({ id: c.id, name: c.name, is_private: c.is_private, members: c.num_members, topic: c.topic?.value || '' });
+            }
+            cursor = data.response_metadata?.next_cursor || '';
+            if (!cursor) break;
+          }
+          return { content: [{ type: 'text', text: JSON.stringify(found.slice(0, 50), null, 2) }] };
+        } else if (operation === 'read_thread') {
+          if (!channelId || !threadTs) throw new Error("channelId and threadTs are required for read_thread");
+          const res = await fetch(`https://slack.com/api/conversations.replies?channel=${encodeURIComponent(channelId)}&ts=${encodeURIComponent(threadTs)}&limit=${Math.min(Number(limit) || 50, 200)}`, {
+            headers: { "Authorization": `Bearer ${accessToken}` }
+          });
+          const data = await res.json();
+          if (!data.ok) throw new Error(data.error || "Failed to read thread");
+          return { content: [{ type: 'text', text: JSON.stringify(data.messages.map(m => ({ user: m.user, text: m.text, ts: m.ts })), null, 2) }] };
+        } else if (operation === 'search_users') {
+          if (!query) throw new Error("query is required for search_users");
+          const q = String(query).toLowerCase().replace(/^@/, '');
+          const found = [];
+          let cursor = '';
+          for (let page = 0; page < 10 && found.length < 50; page++) {
+            const res = await fetch(`https://slack.com/api/users.list?limit=200${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}`, {
+              headers: { "Authorization": `Bearer ${accessToken}` }
+            });
+            const data = await res.json();
+            if (!data.ok) throw new Error(data.error || "Failed to search users");
+            for (const u of data.members) {
+              if (u.deleted) continue;
+              if (`${u.name} ${u.real_name || ''} ${u.profile?.display_name || ''} ${u.profile?.email || ''}`.toLowerCase().includes(q)) found.push({ id: u.id, name: u.name, real_name: u.real_name, email: u.profile?.email || '', title: u.profile?.title || '' });
+            }
+            cursor = data.response_metadata?.next_cursor || '';
+            if (!cursor) break;
+          }
+          return { content: [{ type: 'text', text: JSON.stringify(found.slice(0, 50), null, 2) }] };
+        } else if (operation === 'read_user_profile') {
+          if (!userId) throw new Error("userId is required for read_user_profile");
+          const res = await fetch(`https://slack.com/api/users.info?user=${encodeURIComponent(userId)}`, {
+            headers: { "Authorization": `Bearer ${accessToken}` }
+          });
+          const data = await res.json();
+          if (!data.ok) throw new Error(data.error || "Failed to read user profile");
+          const u = data.user, p = u.profile || {};
+          return { content: [{ type: 'text', text: JSON.stringify({ id: u.id, name: u.name, real_name: u.real_name, display_name: p.display_name, title: p.title, email: p.email, phone: p.phone, status: [p.status_emoji, p.status_text].filter(Boolean).join(' '), timezone: u.tz, is_admin: u.is_admin, is_bot: u.is_bot }, null, 2) }] };
+        } else if (operation === 'create_canvas') {
+          const res = await fetch(`https://slack.com/api/canvases.create`, {
+            method: 'POST',
+            headers: { "Authorization": `Bearer ${accessToken}`, "Content-Type": "application/json" },
+            body: JSON.stringify({ ...(title ? { title } : {}), ...(markdown ? { document_content: { type: 'markdown', markdown } } : {}), ...(channelId ? { channel_id: channelId } : {}) })
+          });
+          const data = await res.json();
+          if (!data.ok) throw new Error(data.error || "Failed to create canvas");
+          return { content: [{ type: 'text', text: JSON.stringify({ success: true, canvas_id: data.canvas_id }, null, 2) }] };
+        } else if (operation === 'read_canvas') {
+          if (!canvasId) throw new Error("canvasId is required for read_canvas");
+          const res = await fetch(`https://slack.com/api/canvases.getContent`, {
+            method: 'POST',
+            headers: { "Authorization": `Bearer ${accessToken}`, "Content-Type": "application/json" },
+            body: JSON.stringify({ canvas_id: canvasId, content_type: 'markdown' })
+          });
+          const data = await res.json();
+          if (!data.ok) throw new Error(data.error || "Failed to read canvas");
+          return { content: [{ type: 'text', text: String(data.content || '').slice(0, 50000) }] };
+        } else if (operation === 'update_canvas') {
+          if (!canvasId) throw new Error("canvasId is required for update_canvas");
+          const change = canvasChange === 'rename'
+            ? { operation: 'rename', title_content: { type: 'markdown', markdown: String(title || markdown || '') } }
+            : { operation: canvasChange, ...(canvasChange === 'replace' && sectionId ? { section_id: sectionId } : {}), document_content: { type: 'markdown', markdown: String(markdown || '') } };
+          const res = await fetch(`https://slack.com/api/canvases.edit`, {
+            method: 'POST',
+            headers: { "Authorization": `Bearer ${accessToken}`, "Content-Type": "application/json" },
+            body: JSON.stringify({ canvas_id: canvasId, changes: [change] })
+          });
+          const data = await res.json();
+          if (!data.ok) throw new Error(data.error || "Failed to update canvas");
+          return { content: [{ type: 'text', text: JSON.stringify({ success: true, canvas_id: canvasId }, null, 2) }] };
         } else {
           throw new Error(`Unsupported operation: ${operation}`);
         }

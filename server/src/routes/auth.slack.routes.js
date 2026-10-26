@@ -33,7 +33,19 @@ const SLACK_CLIENT_SECRET = "6d586b933a83e67f3256c02ab349b766";
 const getSlackAuthUrl = (statePayload) => {
     const clientId = SLACK_CLIENT_ID;
     const redirectUri = `${process.env.BACKEND_URL}/api/auth/slack/callback`;
-    const scopes = ['channels:history', 'channels:read', 'channels:write', 'chat:write', 'groups:history', 'groups:read', 'groups:write', 'users:read', 'users:read.email', 'search:read'];
+    // Must match the User Token Scopes in the Slack app settings (a scope missing there fails the whole connect).
+    // admin.*, auditlogs:read (Enterprise Grid admins only) and email/profile (Sign in with Slack) are not asked for.
+    const scopes = [
+        'bookmarks:read', 'canvases:write',
+        'channels:history', 'channels:read', 'channels:write', 'channels:write.invites',
+        'chat:write', 'files:read', 'files:write',
+        'groups:history', 'groups:read', 'groups:write', 'groups:write.topic',
+        'im:read', 'mpim:read', 'pins:read', 'pins:write', 'reactions:read',
+        'search:read', 'search:read.files', 'search:read.im', 'search:read.mpim', 'search:read.public', 'search:read.users',
+        'stars:read', 'stars:write', 'team:read', 'usergroups:read',
+        'users.profile:read', 'users.profile:write', 'users:read', 'users:read.email', 'users:write',
+        'workflows.templates:write'
+    ];
     
     const authUrl = new URL(`https://slack.com/oauth/v2/authorize`);
     authUrl.searchParams.append('client_id', clientId);
