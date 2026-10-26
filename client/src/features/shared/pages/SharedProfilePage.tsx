@@ -81,6 +81,7 @@ import { useCurrentUser } from "@/features/auth/queries/useCurrentUser";
 import { useOnlineUsers } from "@/features/chat/context/PresenceContext";
 import { formatDistanceToNow } from "date-fns";
 import { SharedMediaView } from "../components/SharedMediaView";
+import { TokenActivityHeatmap } from "../components/TokenActivityHeatmap";
 
 type ProfileData = {
   name: string;
@@ -758,6 +759,13 @@ export function SharedProfilePage({ publicUser, groupData, mode = "user", onClos
                     profileData={profileData?.user || {}}
                   />
                 )}
+              </div>
+            )}
+
+            {/* Token activity heatmap - only on the user's own profile */}
+            {!isReadOnly && !isGroup && (
+              <div className="w-full max-w-3xl mx-auto mb-8 border rounded-xl bg-card shadow-sm px-6 py-5">
+                <TokenActivityHeatmap />
               </div>
             )}
 
