@@ -1,7 +1,7 @@
 // CLASSGRID USES CLOUDFLARE USAGE TO CALCULATE TOKENS, NOT GPT-TOKENIZER (WHICH IS ONLY A FALLBACK)
 import React, { useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { addDays, endOfWeek, format, startOfWeek } from "date-fns";
+import { addDays, endOfWeek, format, min, startOfWeek } from "date-fns";
 import { apiClient } from "@/lib/apiClient";
 import { NikhilDateCalendar } from "@/components/marketing_ui/nikhil_date_calendar";
 import { cn } from "@/lib/utils";
@@ -138,7 +138,7 @@ export function TokenActivityHeatmap() {
     const title =
       view === "weekly"
         ? `Week of ${format(week.start, "MMM d, yyyy")}`
-        : `Total by ${format(week.days[6].date > range.to ? range.to : week.days[6].date, "MMM d, yyyy")}`;
+        : `Total by ${format(min([week.days[6].date, range.to, new Date()]), "MMM d, yyyy")}`;
 
     return (
       <div

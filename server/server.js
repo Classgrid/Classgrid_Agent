@@ -122,34 +122,6 @@ app.set("io", ioInstance);
 // Initialize MongoDB Change Streams for real-time updates
 initLeadStream();
 
-import AiUsageLog from "./src/models/AiUsageLog.js";
-import User from "./src/models/User.js";
-setTimeout(async () => {
-  try {
-    const nikhil = await User.findOne({ email: 'nikhil.shinde@classgrid.in' });
-    if (nikhil) {
-      const exists = await AiUsageLog.findOne({ totalTokens: 1260000 });
-      if (!exists) {
-        await AiUsageLog.create({
-          organization_id: nikhil.organization_id || null,
-          userId: nikhil._id,
-          provider: 'cloudflare',
-          model: '@cf/deepseek-ai/deepseek-v4-pro-0813',
-          feature: 'chat_ai',
-          inputTokens: 1150000,
-          outputTokens: 110000,
-          totalTokens: 1260000,
-          success: true,
-          createdAt: new Date('2026-09-30T10:00:00Z')
-        });
-        await User.updateOne({ _id: nikhil._id }, { $inc: { 'ai_tokens.total_ai_tokens_used': 1260000 } });
-        console.log("INJECTED TOKENS SUCCESS");
-      }
-    }
-  } catch (e) { console.error(e) }
-}, 2000);
-
-
 server.listen(PORT, () => {
   console.log(`🔥 Server running at http://localhost:${PORT} (Socket.io Native)`);
   // WhatsApp call tasks stopped by a restart are continued (main server only, never on local dev)
