@@ -4534,6 +4534,38 @@ If a tool fails, never show the error message; say only: "Something went wrong o
             // fallback (which calls .slice on tool results) still gets a usable string.
             return Object.assign(new String(text), { text, toolReferences: toolNames, instructions });
         };
+        // Client tools (benchmark harnesses such as Terminal-Bench): the caller lists up to 5 tools that run on its own
+        // side. When the model calls one, the call is streamed to the caller as client_tool_call and the answer waits
+        // until the caller posts the result to /api/ai/client-tool-result (at most 15 minutes per call).
+        const clientTools = Array.isArray(body.clientTools) ? body.clientTools.slice(0, 5) : [];
+        for (const ct of clientTools) {
+            const name = String(ct?.name || "");
+            if (!/^[a-z][a-z0-9_]{0,39}$/.test(name) || llmConfig.toolHandlers[name] || fullToolList.some(t => t.function.name === name)) continue;
+            const def = { type: "function", function: { name, description: String(ct.description || "").slice(0, 2000), parameters: ct.parameters && typeof ct.parameters === "object" ? ct.parameters : { type: "object", properties: {} } } };
+            fullToolList.push(def);
+            activeToolList.push(def);
+            toolPlan.allowedToolNames.add(name);
+            toolPlan.loadedNames.add(name);
+            llmConfig.toolHandlers[name] = async (args) => {
+                const id = crypto.randomBytes(12).toString("hex");
+                await redis.set(`ai:clienttool:owner:${id}`, String(userId), "EX", 3600);
+                if (res.writableEnded) return "ERROR: the caller is no longer connected.";
+                res.write(`data: ${JSON.stringify({ type: "client_tool_call", id, name, args: args || {} })}\n\n`);
+                const until = Date.now() + 15 * 60 * 1000;
+                let lastBeat = Date.now();
+                while (Date.now() < until && !res.writableEnded && !res.destroyed) {
+                    const result = await redis.get(`ai:clienttool:${id}`).catch(() => null);
+                    if (result !== null) {
+                        redis.del(`ai:clienttool:${id}`, `ai:clienttool:owner:${id}`).catch(() => {});
+                        return result;
+                    }
+                    // A comment line keeps the connection open while the command runs on the caller's side
+                    if (Date.now() - lastBeat > 15000) { res.write(": waiting for client tool\n\n"); lastBeat = Date.now(); }
+                    await new Promise(r => setTimeout(r, 400));
+                }
+                return "ERROR: the caller did not send this tool's result in time.";
+            };
+        }
         console.log(`[AI-TOOLS] groups=[${toolPlan.activeGroupIds.join(",")}] sent=${activeToolList.length}/${fullToolList.length} tools staff=${toolPlan.staff}`);
 
         // Quota check, part 2: the real prompt (rules + history + message + loaded tools, ~4 chars per token) plus
@@ -5301,6 +5333,16 @@ export const updateChatSession = async (req, res) => {
         console.error("Error updating session:", e);
         res.status(500).json({ error: "Failed to update session" });
     }
+};
+
+// The result of a client tool call (see clientTools in streamAskAi): only the user whose answer made the call can send it
+export const clientToolResult = async (req, res) => {
+    const id = String(req.body?.id || "");
+    if (!/^[0-9a-f]{24}$/.test(id)) return res.status(400).json({ error: "Bad tool call id" });
+    const owner = await redis.get(`ai:clienttool:owner:${id}`).catch(() => null);
+    if (!owner || owner !== String(req.user?.id)) return res.status(404).json({ error: "Unknown tool call" });
+    await redis.set(`ai:clienttool:${id}`, String(req.body?.result ?? "").slice(0, 60000), "EX", 3600);
+    res.json({ ok: true });
 };
 
 export const deleteChatSession = async (req, res) => {

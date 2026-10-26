@@ -70,7 +70,7 @@ import {
     chatWithSyllabus, 
     getMyPersona 
 } from "../controllers/ai.controller.js";
-import { streamAskAi, getChatSessions, getChatSession, getChatSessionMessages, uploadChatImage, updateChatSession, deleteChatSession, shareChatSession, reopenChatSession, createPublicShare, getPublicShare, submitAiFeedback, getAgentReviews, updateAgentReviewStatus, processAgentReviewsCron, deleteAgentReview, bulkDeleteAgentReviews, generateImage, getMyGeneratedImages, deleteGeneratedImage, getMyUsage, getOrgUsage, getSkills, createSkill, updateSkill, deleteSkill, getPreferences, updatePreferences } from "../controllers/ai-chat.controller.js";
+import { streamAskAi, clientToolResult, getChatSessions, getChatSession, getChatSessionMessages, uploadChatImage, updateChatSession, deleteChatSession, shareChatSession, reopenChatSession, createPublicShare, getPublicShare, submitAiFeedback, getAgentReviews, updateAgentReviewStatus, processAgentReviewsCron, deleteAgentReview, bulkDeleteAgentReviews, generateImage, getMyGeneratedImages, deleteGeneratedImage, getMyUsage, getOrgUsage, getSkills, createSkill, updateSkill, deleteSkill, getPreferences, updatePreferences } from "../controllers/ai-chat.controller.js";
 
 import { getFavicon } from "../controllers/ai-favicon.controller.js";
 import { getMarket } from "../controllers/ai-widgets.controller.js";
@@ -97,6 +97,8 @@ router.get("/my-persona", isAuthenticated, getMyPersona);
 
 // Global AI Panel SSE Chat
 router.post("/ask", isAuthenticated, requireChatOnboarding, streamAskAi);
+// A caller's result for a tool it runs on its own side (clientTools on /ask, used by benchmark harnesses)
+router.post("/client-tool-result", isAuthenticated, clientToolResult);
 router.post("/feedback", isAuthenticated, submitAiFeedback);
 router.get("/agent-reviews", isAuthenticated, getAgentReviews);
 router.put("/agent-reviews/:id/status", isAuthenticated, updateAgentReviewStatus);
