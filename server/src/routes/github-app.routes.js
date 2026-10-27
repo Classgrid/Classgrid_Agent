@@ -33,7 +33,7 @@ router.get("/events", isAuthenticated, async (req, res) => {
 
 // GitHub's "Setup URL": after installing the app, the user goes straight back into Project Mode
 router.get("/installed", (req, res) => {
-  res.redirect(`${process.env.FRONTEND_URL || "https://chat.classgrid.in"}/c/project?github_app=installed`);
+  res.redirect("https://chat.classgrid.in/c/project?github_app=installed");
 });
 
 // GitHub webhook (raw body, signed with GITHUB_APP_WEBHOOK_SECRET)
