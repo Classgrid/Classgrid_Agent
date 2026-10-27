@@ -177,6 +177,7 @@ export function ProjectModePage() {
   const [renaming, setRenaming] = useState<{ id: string; name: string } | null>(null);
   const [linking, setLinking] = useState<Project | null>(null);
   const [appGate, setAppGate] = useState<{ project: Project; installUrl: string } | null>(null);
+  const appInstalledRef = useRef<Record<string, boolean>>({}); // repos the Projects page already found the app on
   const [repos, setRepos] = useState<{ fullName: string; private: boolean }[] | null>(null);
   const [githubConnected, setGithubConnected] = useState<boolean | null>(null);
   const [githubExpired, setGithubExpired] = useState(false);
@@ -273,7 +274,7 @@ export function ProjectModePage() {
   // Open = download the project's code fresh from GitHub, then show it in the editor
   const open = async (project: Project, replace = false, resume = false) => {
     // A must, like connecting GitHub: a project with a repo opens only once the Classgrid app is installed on it
-    if (project.repo) {
+    if (project.repo && !appInstalledRef.current[project.repo]) {
       const res = await fetchWithRescue(`${backendUrl}/api/github-app/status?repo=${encodeURIComponent(project.repo)}`, { credentials: "include" }).catch(() => null);
       const data = res?.ok ? await res.json().catch(() => null) : null;
       if (data?.ready && !data.installed) { setAppGate({ project, installUrl: data.installUrl }); return; }
@@ -542,6 +543,7 @@ export function ProjectModePage() {
       if (!info?.ready) { setAppCard(null); return; }
       const status = await Promise.all(repos.map(async (repo) => ({ repo, data: await get(`status?repo=${encodeURIComponent(repo)}`) })));
       if (stop) return;
+      status.forEach((s) => { appInstalledRef.current[s.repo] = !!s.data?.installed; });
       const missing = status.filter((s) => s.data?.ready && !s.data.installed).map((s) => s.repo);
       setAppCard(missing.length || (!repos.length && !info.installed) ? { repos: missing, installUrl: info.installUrl } : null);
     };
