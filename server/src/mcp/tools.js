@@ -71,7 +71,7 @@ async function projectMountFor(sessionId) {
   const chatDir = `/home/ubuntu/sandbox_data/${sessionId}`;
   const plain = { prep: '', mount: ` -v ${chatDir}:/data`, runnerDir: '/data', isProject: false };
   try {
-    const project = await IdeProject.findOne({ chatSessionIds: sessionId }).select('_id owner').lean();
+    const project = await projectForChat(sessionId); // the project on the user's screen, like the file tools
     if (!project) return plain;
     const userDir = `/home/ubuntu/ide_users/${project.owner}`;
     const dir = `${userDir}/projects/${project._id}`;

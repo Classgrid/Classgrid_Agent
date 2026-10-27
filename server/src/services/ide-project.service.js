@@ -69,8 +69,16 @@ async function newestFileEdit(ssh, project) {
   return Number.isFinite(secs) ? new Date(Math.round(secs * 1000)) : null;
 }
 
+// The project a chat works on: the one on the user's screen (sent with their latest message and checked to be
+// theirs), so files, commands and pushes never land in another project when a chat started elsewhere;
+// else the project the chat belongs to
 export async function projectForChat(sessionId) {
   await connectDB();
+  const onScreen = await redis.get(UI_PROJECT(sessionId)).catch(() => null);
+  if (onScreen) {
+    const p = await IdeProject.findById(onScreen).lean().catch(() => null);
+    if (p) return p;
+  }
   return IdeProject.findOne({ chatSessionIds: sessionId }).lean();
 }
 
@@ -728,10 +736,13 @@ const PROJECT_MODE_RULES = `PROJECT MODE RULES (this chat is in Project Mode; th
 - Secret keys (API keys, passwords, database links) never go in front-end code, in VITE_/NEXT_PUBLIC_ variables, or in any file pushed to GitHub. Keep them only in the hosting's environment settings (for example Vercel Environment Variables) and use them only from server code (for example a Vercel serverless function in api/); the front end calls that server code.`;
 
 // A chat sent from Project Mode belongs to the project that is open there (only the owner's own projects)
+const UI_PROJECT = (sessionId) => `ide:uiProject:${sessionId}`;
+
 export async function linkChatToProject(userId, projectId, sessionId) {
   await connectDB();
   const project = await IdeProject.findOne({ _id: projectId, owner: userId }).select("_id");
   if (!project) return;
+  await redis.set(UI_PROJECT(sessionId), String(project._id), "EX", 24 * 60 * 60).catch(() => {}); // the user's own project on screen
   // A chat stays with the project it started in (chats are kept per project); it is never moved to another one
   const other = await IdeProject.findOne({ owner: userId, chatSessionIds: sessionId, _id: { $ne: project._id } }).select("_id").lean();
   if (other) return;
