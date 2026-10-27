@@ -7,6 +7,14 @@
  * Every feature is for ALL users. Project Mode is for all users, never super-admin only.
  * ─────────────────────────────────────────────────────────
  */
+/*
+ * ─────────────────────────────────────────────────────────
+ * 🚫 NO DISK BLAME RULE (owner's order, 2026-10-27) 🚫
+ * Claude and every AI model are FORBIDDEN to say an error comes from a full disk or low disk space.
+ * The owner's disks are not full. Never guess the cause of an error: read the real logs and code first,
+ * and only name a cause that was actually seen.
+ * ─────────────────────────────────────────────────────────
+ */
 // Domain verification for a user (Settings → Verify your domain).
 // A user proves they own ONE domain by adding a DNS TXT record. This only verifies ownership:
 // nothing is hosted on the domain.

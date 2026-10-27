@@ -7,6 +7,14 @@
  * Every feature is for ALL users. Project Mode is for all users, never super-admin only.
  * ─────────────────────────────────────────────────────────
  */
+/*
+ * ─────────────────────────────────────────────────────────
+ * 🚫 NO DISK BLAME RULE (owner's order, 2026-10-27) 🚫
+ * Claude and every AI model are FORBIDDEN to say an error comes from a full disk or low disk space.
+ * The owner's disks are not full. Never guess the cause of an error: read the real logs and code first,
+ * and only name a cause that was actually seen.
+ * ─────────────────────────────────────────────────────────
+ */
 // Share Grid: up to 4 people (owner + 3) in one Classgrid AI chat.
 // Tables: ai_chat_grid_members, ai_chat_grid_invites, and ai_chat_messages.sender_email (see sql/ai_chat_grid.sql).
 import crypto from "crypto";

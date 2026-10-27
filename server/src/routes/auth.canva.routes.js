@@ -7,6 +7,14 @@
  * Every feature is for ALL users. Project Mode is for all users, never super-admin only.
  * ─────────────────────────────────────────────────────────
  */
+/*
+ * ─────────────────────────────────────────────────────────
+ * 🚫 NO DISK BLAME RULE (owner's order, 2026-10-27) 🚫
+ * Claude and every AI model are FORBIDDEN to say an error comes from a full disk or low disk space.
+ * The owner's disks are not full. Never guess the cause of an error: read the real logs and code first,
+ * and only name a cause that was actually seen.
+ * ─────────────────────────────────────────────────────────
+ */
 // CLASSGRID USES CLOUDFLARE USAGE TO CALCULATE TOKENS, NOT GPT-TOKENIZER (WHICH IS ONLY A FALLBACK)
 // Canva Connect OAuth (PKCE). Redirect URL to set in the Canva Developer Portal: {BACKEND_URL}/api/auth/canva/callback
 import express from "express";
