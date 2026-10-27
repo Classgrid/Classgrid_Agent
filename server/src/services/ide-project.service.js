@@ -424,14 +424,28 @@ export async function pushProject(project, ssh, message) {
     const commit = await ssh.execCommand(`git -C ${q(dir)} ${as} commit -q -F -`, { stdin: `${msg}\n\n${coAuthorLine()}\n` });
     if (commit.code) return `Commit failed: ${(commit.stderr || commit.stdout).slice(0, 500)}`;
   }
-  const { stdout: branch } = await ssh.execCommand(`git -C ${q(dir)} rev-parse --abbrev-ref HEAD`);
+  // Owner's rule: the AI never pushes straight to the repo's main branch. Its work goes on a classgrid/ branch
+  // with a pull request, and the repo owner merges it. GITHUB_DIRECT_PUSH=1 in the server .env allows direct pushes.
+  const direct = process.env.GITHUB_DIRECT_PUSH === "1";
+  let branch = (await ssh.execCommand(`git -C ${q(dir)} rev-parse --abbrev-ref HEAD`)).stdout.trim() || "main";
+  let base = null;
+  if (!direct && !branch.startsWith("classgrid/")) {
+    const { stdout: ahead } = await ssh.execCommand(`git -C ${q(dir)} rev-list --count ${q(`origin/${branch}`)}..HEAD 2>/dev/null || echo 1`);
+    if (ahead.trim() === "0") return `Nothing new to push: ${project.repo} (${branch}) already has all of this project's changes.`;
+    base = branch;
+    const stamp = new Date().toISOString().slice(0, 16).replace(/[-:T]/g, "").replace(/^(\d{8})(\d{4})$/, "$1-$2");
+    const prBranch = `classgrid/${stamp}`;
+    const sw = await ssh.execCommand(`git -C ${q(dir)} checkout -q -b ${q(prBranch)}`);
+    if (sw.code) return `Could not make the pull request branch: ${(sw.stderr || sw.stdout).slice(0, 300)}`;
+    branch = prBranch;
+  }
   const auth = Buffer.from(`x-access-token:${key}`).toString("base64");
   const gitAuth = `GIT_TERMINAL_PROMPT=0 GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=http.https://github.com/.extraheader GIT_CONFIG_VALUE_0="AUTHORIZATION: basic ${auth}"`;
   // Someone else may have pushed to the same branch since the project was downloaded: take their commits
   // first and put ours on top, so the push is not rejected. If the same lines were changed, stop and say so.
-  const b = q(branch.trim() || "main");
-  const fetch = await ssh.execCommand(`${gitAuth} git -C ${q(dir)} fetch -q origin ${b}`);
-  if (!fetch.code) { // the branch is on GitHub (a brand-new empty repo has nothing to take)
+  const b = q(branch);
+  const pulled = await ssh.execCommand(`${gitAuth} git -C ${q(dir)} fetch -q origin ${b}`);
+  if (!pulled.code) { // the branch is on GitHub (a brand-new empty repo or a new PR branch has nothing to take)
     const rebase = await ssh.execCommand(`git -C ${q(dir)} ${as || "-c user.name=Classgrid -c user.email=code@classgrid.in"} rebase -q FETCH_HEAD`);
     if (rebase.code) {
       await ssh.execCommand(`git -C ${q(dir)} rebase --abort 2>/dev/null`);
@@ -439,10 +453,33 @@ export async function pushProject(project, ssh, message) {
       return `Push stopped: GitHub has new commits that change the same lines as this project's changes, so they could not be joined by themselves. Nothing was lost. Files that differ: ${files.trim() || "unknown"}.`;
     }
   }
-  const push = await ssh.execCommand(`${gitAuth} git -C ${q(dir)} push origin HEAD 2>&1 | tail -5`);
+  const push = await ssh.execCommand(`${gitAuth} git -C ${q(dir)} push -u origin HEAD 2>&1 | tail -5`);
   const out = (push.stdout || push.stderr || "").split(auth).join("***");
   if (/rejected|error|fatal/i.test(out)) return `Push failed: ${out.slice(0, 800)}`;
-  return `${staged.trim() ? `Committed (${staged.trim()}) and pushed` : "Nothing new to commit; pushed"} to ${project.repo} (${branch.trim() || "current branch"}).`;
+  const done = staged.trim() ? `Committed (${staged.trim()}) and pushed` : "Nothing new to commit; pushed";
+  if (direct) return `${done} to ${project.repo} (${branch}).`;
+
+  // The pull request for this branch: the open one if it exists (new pushes update it), else a new one
+  const ghApi = async (path, init = {}) => {
+    const r = await fetch(`https://api.github.com/repos/${project.repo}${path}`, {
+      ...init,
+      headers: { Authorization: `Bearer ${key}`, Accept: "application/vnd.github+json", "User-Agent": "Classgrid", "Content-Type": "application/json" },
+    });
+    return { ok: r.ok, status: r.status, data: await r.json().catch(() => ({})) };
+  };
+  const repoOwner = project.repo.split("/")[0];
+  const open = await ghApi(`/pulls?state=open&head=${encodeURIComponent(`${repoOwner}:${branch}`)}`);
+  let pr = Array.isArray(open.data) ? open.data[0] : null;
+  if (!pr) {
+    if (!base) base = (await ghApi("")).data.default_branch || "main";
+    const made = await ghApi("/pulls", {
+      method: "POST",
+      body: JSON.stringify({ title: msg.split("\n")[0].slice(0, 200), head: branch, base, body: `${msg}\n\nMade by Classgrid AI in Project Mode. Review it and merge when it looks right.` }),
+    });
+    if (!made.ok) return `${done} to the branch ${branch} of ${project.repo}, but the pull request could not be opened: ${made.data.errors?.[0]?.message || made.data.message || made.status}`;
+    pr = made.data;
+  }
+  return `${done} to the branch ${branch} of ${project.repo} (not to ${pr.base?.ref || base || "the main branch"}). Pull request #${pr.number}: ${pr.html_url}. It is not merged: the repo owner reviews and merges it on GitHub.`;
 }
 
 // Open a project file in the owner's code editor at given lines (or at the given text). The Classgrid add-on in

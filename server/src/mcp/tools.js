@@ -452,7 +452,7 @@ export const getMcpTools = () => [
   },
   {
     name: 'push_project_to_github',
-    description: 'Commit all changes in the open Project Mode project and push them to its GitHub repo (current branch), using the user\'s connected GitHub account.',
+    description: 'Commit all changes in the open Project Mode project, push them to a classgrid/ branch of its GitHub repo and open (or update) a pull request for the repo owner to review and merge. It never pushes straight to the main branch. Returns the pull request link.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -6243,6 +6243,22 @@ export const handleToolCall = async (name, args, context = {}) => {
           const contentEncoded = Buffer.from(content, 'utf8').toString('base64');
           const payload = { message: withCoAuthor(message), content: contentEncoded, ...(commitAs ? { author: commitAs, committer: commitAs } : {}) };
           if (branch) payload.branch = branch;
+          // Owner's rule: never straight onto the main branch; a classgrid/ branch made from it + a pull request
+          let filePrBase = null;
+          if (process.env.GITHUB_DIRECT_PUSH !== '1') {
+            const info = await (await fetch(`https://api.github.com/repos/${owner}/${repo}`, { headers })).json().catch(() => ({}));
+            const def = info.default_branch || 'main';
+            if (!branch || branch === def) {
+              const head = await (await fetch(`https://api.github.com/repos/${owner}/${repo}/git/ref/heads/${def}`, { headers })).json().catch(() => ({}));
+              if (head.object?.sha) {
+                const prBranch = `classgrid/${new Date().toISOString().slice(0, 19).replace(/[-:T]/g, '')}`;
+                const made = await fetch(`https://api.github.com/repos/${owner}/${repo}/git/refs`, { method: 'POST', headers: { ...headers, 'Content-Type': 'application/json' }, body: JSON.stringify({ ref: `refs/heads/${prBranch}`, sha: head.object.sha }) });
+                if (!made.ok) throw new Error(`could not make the pull request branch (${made.status})`);
+                payload.branch = prBranch;
+                filePrBase = def;
+              }
+            }
+          }
           if (sha) payload.sha = sha;
           const res = await fetch(`https://api.github.com/repos/${owner}/${repo}/contents/${filePath}`, {
             method: 'PUT',
@@ -6251,7 +6267,13 @@ export const handleToolCall = async (name, args, context = {}) => {
           });
           const data = await res.json();
           if (data.message) throw new Error(data.message);
-          return { content: [{ type: 'text', text: JSON.stringify({ commit: data.commit.html_url, content: data.content?.html_url }, null, 2) }] };
+          let filePr = null;
+          if (filePrBase) {
+            const pr = await fetch(`https://api.github.com/repos/${owner}/${repo}/pulls`, { method: 'POST', headers: { ...headers, 'Content-Type': 'application/json' }, body: JSON.stringify({ title: String(message).split('\n')[0].slice(0, 200), head: payload.branch, base: filePrBase, body: 'Made by Classgrid AI. Review it and merge when it looks right.' }) });
+            const prData = await pr.json().catch(() => ({}));
+            filePr = pr.ok ? prData.html_url : `not opened: ${prData.errors?.[0]?.message || prData.message || pr.status}`;
+          }
+          return { content: [{ type: 'text', text: JSON.stringify({ commit: data.commit.html_url, content: data.content?.html_url, ...(filePr ? { branch: payload.branch, pull_request: filePr, merged: false } : {}) }, null, 2) }] };
         } else if (operation === 'push_sandbox_files') {
           // All sandbox files in one commit, read by the server: no file content passes through the model,
           // which used to cost two extra rounds (read back + push) and two extra copies of every file.
@@ -6274,7 +6296,15 @@ export const handleToolCall = async (name, args, context = {}) => {
 
           const repoInfo = await gh('');
           if (!repoInfo.ok) throw new Error(repoInfo.data.message || `repo not found (${repoInfo.status})`);
-          const targetBranch = branch || repoInfo.data.default_branch || 'main';
+          const defaultBranch = repoInfo.data.default_branch || 'main';
+          let targetBranch = branch || defaultBranch;
+          // Owner's rule: never commit straight onto the main branch of a repo that already has commits. The work
+          // goes on a classgrid/ branch with a pull request for the repo owner to merge (GITHUB_DIRECT_PUSH=1 allows direct)
+          let prBase = null;
+          if (process.env.GITHUB_DIRECT_PUSH !== '1' && targetBranch === defaultBranch && (await gh(`/git/ref/heads/${defaultBranch}`)).ok) {
+            prBase = defaultBranch;
+            targetBranch = `classgrid/${new Date().toISOString().slice(0, 19).replace(/[-:T]/g, '')}`;
+          }
           if (!/^[\w.\-/]+$/.test(targetBranch) || targetBranch.includes('..')) throw new Error(`invalid branch name: ${targetBranch}`);
 
           let ref = await gh(`/git/ref/heads/${targetBranch}`);
@@ -6316,7 +6346,12 @@ export const handleToolCall = async (name, args, context = {}) => {
           const update = await gh(`/git/refs/heads/${targetBranch}`, { method: 'PATCH', body: JSON.stringify({ sha: commit.data.sha }) });
           if (!update.ok) throw new Error(update.data.message || 'could not update the branch');
 
-          return { content: [{ type: 'text', text: JSON.stringify({ commit: commit.data.html_url, branch: targetBranch, files_pushed: paths }, null, 2) }] };
+          let pullRequest = null;
+          if (prBase) {
+            const pr = await gh('/pulls', { method: 'POST', body: JSON.stringify({ title: String(message || 'Add website files').split('\n')[0].slice(0, 200), head: targetBranch, base: prBase, body: 'Made by Classgrid AI. Review it and merge when it looks right.' }) });
+            pullRequest = pr.ok ? pr.data.html_url : `not opened: ${pr.data.errors?.[0]?.message || pr.data.message || pr.status}`;
+          }
+          return { content: [{ type: 'text', text: JSON.stringify({ commit: commit.data.html_url, branch: targetBranch, files_pushed: paths, ...(pullRequest ? { pull_request: pullRequest, merged: false, note: `Not merged into ${prBase}: the repo owner reviews and merges the pull request.` } : {}) }, null, 2) }] };
         } else if (operation === 'create_pull_request') {
           if (!owner || !repo || !title || !head || !base) throw new Error("owner, repo, title, head, and base are required for create_pull_request");
           const res = await fetch(`https://api.github.com/repos/${owner}/${repo}/pulls`, {
