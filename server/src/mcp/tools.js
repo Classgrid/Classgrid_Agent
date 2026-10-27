@@ -719,11 +719,13 @@ export const getMcpTools = () => [
   },
   {
     name: 'vercel_connector',
-    description: 'Interact with Vercel API to create projects linked to GitHub, list projects, or deployments, and manage project environment variables.',
+    description: 'Interact with Vercel API to create projects linked to GitHub, list projects, or deployments, deploy a branch, and manage project environment variables. deploy builds a branch of the project\'s GitHub repo with the user\'s own Vercel account (a preview, or production), so it is never blocked by Vercel\'s commit-author check, which blocks commits made by the Classgrid AI account on free Vercel plans.',
     inputSchema: {
       type: 'object',
       properties: {
-        operation: { type: 'string', enum: ['list_projects', 'list_deployments', 'get_deployment', 'create_project', 'add_env_variable'], description: 'The Vercel operation to perform.' },
+        operation: { type: 'string', enum: ['list_projects', 'list_deployments', 'get_deployment', 'create_project', 'add_env_variable', 'deploy'], description: 'The Vercel operation to perform.' },
+        ref: { type: 'string', description: 'The Git branch to build (required for deploy), e.g. the classgrid/ pull request branch or main.' },
+        target: { type: 'string', enum: ['preview', 'production'], description: 'For deploy: preview (default) or production.' },
         projectId: { type: 'string', description: 'The Vercel Project ID (required for list_deployments and add_env_variable).' },
         limit: { type: 'number', description: 'Max number of results to return (default 10).' },
         deploymentId: { type: 'string', description: 'The Vercel Deployment ID (required for get_deployment).' },
@@ -5042,7 +5044,7 @@ export const handleToolCall = async (name, args, context = {}) => {
     // }
 
     if (name === 'vercel_connector') {
-      const { operation, projectId, limit = 10, deploymentId, projectName, githubRepo, envKey, envValue, envTarget, isClassgridManaged } = args;
+      const { operation, projectId, limit = 10, deploymentId, projectName, githubRepo, envKey, envValue, envTarget, isClassgridManaged, ref, target } = args;
       const { userEmail = '', userRole = '' } = context;
 
       let vercelToken = '';
@@ -5084,6 +5086,23 @@ export const handleToolCall = async (name, args, context = {}) => {
               repo: githubRepo
             }
           });
+        } else if (operation === 'deploy') {
+          // Built with the user's own Vercel key, so the deployment belongs to the user and Vercel never blocks it
+          // (Git-triggered builds of commits by the Classgrid AI account are blocked on free Vercel plans)
+          if (!projectId || !ref) throw new Error("projectId and ref are required for deploy");
+          const auth = { headers: { 'Authorization': `Bearer ${vercelToken}`, 'Content-Type': 'application/json' } };
+          const proj = await fetch(`https://api.vercel.com/v9/projects/${encodeURIComponent(projectId)}`, auth);
+          const projData = await proj.json().catch(() => ({}));
+          if (!proj.ok) throw new Error(`Vercel project not found: ${projData.error?.message || proj.status}`);
+          if (!projData.link?.repoId) throw new Error("This Vercel project is not linked to a GitHub repo");
+          const dep = await fetch(`https://api.vercel.com/v13/deployments`, {
+            method: 'POST',
+            ...auth,
+            body: JSON.stringify({ name: projData.name, project: projData.id, ...(target === 'production' ? { target: 'production' } : {}), gitSource: { type: 'github', repoId: projData.link.repoId, ref } }),
+          });
+          const depData = await dep.json().catch(() => ({}));
+          if (!dep.ok) throw new Error(`Vercel could not start the build: ${depData.error?.message || dep.status}`);
+          return { content: [{ type: 'text', text: JSON.stringify({ deploymentId: depData.id, status: depData.readyState || depData.status || 'QUEUED', url: depData.url ? `https://${depData.url}` : null, target: target === 'production' ? 'production' : 'preview', branch: ref, note: 'Built with the user\'s own Vercel account. Usually ready in about a minute; check it with get_deployment.' }, null, 2) }] };
         } else if (operation === 'add_env_variable') {
           if (!projectId || !envKey || !envValue || !envTarget) throw new Error("projectId, envKey, envValue, and envTarget are required to add an env variable");
           endpoint = `/v10/projects/${projectId}/env`;
