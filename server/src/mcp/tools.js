@@ -59,7 +59,7 @@ import { SESClient, GetSendStatisticsCommand, ListIdentitiesCommand } from '@aws
 import puppeteer from 'puppeteer';
 import IdeProject from '../models/IdeProject.js';
 import { ensureFreshGithubToken } from '../services/github-token.service.js';
-import { repoAppToken, coAuthorLine } from '../services/github-app.service.js';
+import { repoAppToken, classgridAuthor, userCoAuthorLine } from '../services/github-app.service.js';
 import { projectTools, projectForChat, projectSnapshot, projectChangesBetween, formatProjectChanges, sandboxDataDir } from '../services/ide-project.service.js';
 
 // What the sandbox container sees as /data, and where the hidden runner script is.
@@ -6155,7 +6155,8 @@ export const handleToolCall = async (name, args, context = {}) => {
       }
 
       let accessToken = '';
-      let commitAs = null; // through the Classgrid app: commits keep the user's name, Classgrid AI is co-author
+      const commitAs = classgridAuthor(); // GitHub lists only main authors as contributors: Classgrid AI is the author...
+      let userLine = ''; // ...and the user is co-author
       if (isClassgridManaged) {
         accessToken = process.env.GITHUB_MASTER_TOKEN || process.env.GITHUB_TOKEN;
         if (!accessToken) throw new Error("GITHUB_MASTER_TOKEN environment variable is not configured on the server.");
@@ -6166,19 +6167,17 @@ export const handleToolCall = async (name, args, context = {}) => {
         }
         await ensureFreshGithubToken(user); // keys run out after about 8 hours; renew with the saved refresh key
         accessToken = user.github_access_token;
+        userLine = userCoAuthorLine(user);
         // Work on one repo (files, commits, issues, PRs) goes through the Classgrid app when it is installed on
         // that repo; commits keep the user's name with Classgrid AI as co-author; listing or making repos stays on the user's account
         if (owner && repo && operation !== 'create_repo') {
           const appKey = await repoAppToken(`${owner}/${repo}`).catch(() => null);
-          if (appKey) {
-            accessToken = appKey;
-            if (user.github_email) commitAs = { name: user.github_name || user.name || user.github_email, email: user.github_email };
-          }
+          if (appKey) accessToken = appKey;
         }
       }
 
-      // Owner's rule: every commit the AI makes names Classgrid AI as co-author, with or without the Classgrid app
-      const withCoAuthor = (m) => `${m}\n\n${coAuthorLine()}`;
+      // Owner's rule: every commit the AI makes is by Classgrid AI, with the user as co-author
+      const withCoAuthor = (m) => (userLine ? `${m}\n\n${userLine}` : m);
       const headers = {
         "Authorization": `Bearer ${accessToken}`,
         "Accept": "application/vnd.github.v3+json",

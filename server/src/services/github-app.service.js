@@ -72,6 +72,14 @@ export async function accountAppToken(login) {
 // (a normal GitHub user with agent@classgrid.in verified) as co-author next to the user, like Claude's commits
 export const coAuthorLine = () => `Co-authored-by: ${process.env.GITHUB_COAUTHOR || "Classgrid AI <agent@classgrid.in>"}`;
 
+// GitHub's Contributors list counts only a commit's main author, never co-authors. So the AI's commits are made
+// by the Classgrid AI account (agent@classgrid.in, verified on the classgrid-agent GitHub user) with the user as co-author.
+export const classgridAuthor = () => {
+  const m = String(process.env.GITHUB_COAUTHOR || "Classgrid AI <agent@classgrid.in>").match(/^(.*?)\s*<(.+)>$/);
+  return { name: m?.[1] || "Classgrid AI", email: m?.[2] || "agent@classgrid.in" };
+};
+export const userCoAuthorLine = (u) => (u?.github_name && u?.github_email ? `Co-authored-by: ${u.github_name} <${u.github_email}>` : "");
+
 let bot = null;
 // The name and email GitHub links to the app's bot user, so its commits show the Classgrid logo
 export async function appBotIdentity() {

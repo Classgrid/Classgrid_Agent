@@ -32,7 +32,7 @@ import { NodeSSH } from "node-ssh";
 import IdeProject from "../models/IdeProject.js";
 import User from "../models/User.js";
 import { githubUser } from "./github-token.service.js";
-import { githubAppReady, githubAppInstallUrl, repoAppToken, coAuthorLine } from "./github-app.service.js";
+import { githubAppReady, githubAppInstallUrl, repoAppToken, classgridAuthor, userCoAuthorLine } from "./github-app.service.js";
 import connectDB from "../../config/db.js";
 import redis from "../config/redis.js";
 
@@ -381,7 +381,9 @@ export async function createRepoForProject(project, ssh, { name, private: isPriv
   const appKey = await repoAppToken(gh.full_name).catch(() => null);
   await ssh.execCommand(`git -C ${q(dir)} add -A`);
   const { stdout: staged } = await ssh.execCommand(`git -C ${q(dir)} diff --cached --stat | tail -1`);
-  if (staged.trim()) await ssh.execCommand(`git -C ${q(dir)} commit -q -F -`, { stdin: `First version\n\n${coAuthorLine()}\n` });
+  const me = classgridAuthor(); // GitHub lists only main authors as contributors: Classgrid AI is the author, the user co-author
+  const userLine = userCoAuthorLine(owner);
+  if (staged.trim()) await ssh.execCommand(`git -C ${q(dir)} -c user.name=${q(me.name)} -c user.email=${q(me.email)} commit -q -F -`, { stdin: `First version${userLine ? `\n\n${userLine}` : ""}\n` });
   const { stdout: hasCommit } = await ssh.execCommand(`git -C ${q(dir)} rev-parse -q --verify HEAD`);
   if (!hasCommit.trim()) return `Created ${gh.private ? "private" : "public"} repo ${gh.full_name} (${gh.html_url}) and linked it to this project. The project has no files yet, so nothing was pushed.`;
   const auth = Buffer.from(`x-access-token:${appKey || owner.github_access_token}`).toString("base64");
@@ -410,7 +412,9 @@ export async function pushProject(project, ssh, message) {
     if (!owner?.github_access_token) return "GitHub is not connected. The user connects it in AI Hub, then tries again.";
     key = owner.github_access_token;
   }
-  const as = owner?.github_name && owner?.github_email ? `-c user.name=${q(owner.github_name)} -c user.email=${q(owner.github_email)}` : "";
+  const me = classgridAuthor(); // GitHub lists only main authors as contributors: Classgrid AI is the author, the user co-author
+  const as = `-c user.name=${q(me.name)} -c user.email=${q(me.email)}`;
+  const userLine = userCoAuthorLine(owner);
 
   const dir = projectHostDir(project);
   const { stdout: isRepo } = await ssh.execCommand(`[ -d ${q(dir)}/.git ] && echo yes`);
@@ -419,7 +423,7 @@ export async function pushProject(project, ssh, message) {
   await ssh.execCommand(`git -C ${q(dir)} add -A`);
   const { stdout: staged } = await ssh.execCommand(`git -C ${q(dir)} diff --cached --stat | tail -1`);
   if (staged.trim()) {
-    const commit = await ssh.execCommand(`git -C ${q(dir)} ${as} commit -q -F -`, { stdin: `${msg}\n\n${coAuthorLine()}\n` });
+    const commit = await ssh.execCommand(`git -C ${q(dir)} ${as} commit -q -F -`, { stdin: `${msg}${userLine ? `\n\n${userLine}` : ""}\n` });
     if (commit.code) return `Commit failed: ${(commit.stderr || commit.stdout).slice(0, 500)}`;
   }
   // Owner's rule: the AI never pushes straight to the repo's main branch. Its work goes on a classgrid/ branch
@@ -960,7 +964,7 @@ export async function backupAndRemoveProjectCode(ssh, project) {
     const stamp = new Date().toISOString().slice(0, 16).replace(/[-:T]/g, "").replace(/^(\d{8})(\d{4})$/, "$1-$2");
     backupBranch = `classgrid-backup-${stamp}`;
     const auth = Buffer.from(`x-access-token:${key}`).toString("base64");
-    await ssh.execCommand(`git -C ${q(dir)} checkout -q -b ${backupBranch} && git -C ${q(dir)} add -A && git -C ${q(dir)} -c user.name=Classgrid -c user.email=backup@classgrid.in commit -q -m "Classgrid: unsaved work, saved when the project was closed" -m ${q(coAuthorLine())} || true`);
+    await ssh.execCommand(`git -C ${q(dir)} checkout -q -b ${backupBranch} && git -C ${q(dir)} add -A && git -C ${q(dir)} -c user.name=${q(classgridAuthor().name)} -c user.email=${q(classgridAuthor().email)} commit -q -m "Classgrid: unsaved work, saved when the project was closed" || true`);
     const push = await ssh.execCommand(
       `GIT_TERMINAL_PROMPT=0 GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=http.https://github.com/.extraheader GIT_CONFIG_VALUE_0="AUTHORIZATION: basic ${auth}" ` +
       `git -C ${q(dir)} push -q origin ${backupBranch} 2>&1 | tail -3`
