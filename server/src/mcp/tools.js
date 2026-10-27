@@ -59,7 +59,7 @@ import { SESClient, GetSendStatisticsCommand, ListIdentitiesCommand } from '@aws
 import puppeteer from 'puppeteer';
 import IdeProject from '../models/IdeProject.js';
 import { ensureFreshGithubToken } from '../services/github-token.service.js';
-import { repoAppToken } from '../services/github-app.service.js';
+import { repoAppToken, coAuthorLine } from '../services/github-app.service.js';
 import { projectTools, projectForChat, projectSnapshot, projectChangesBetween, formatProjectChanges, sandboxDataDir } from '../services/ide-project.service.js';
 
 // What the sandbox container sees as /data, and where the hidden runner script is.
@@ -6155,6 +6155,7 @@ export const handleToolCall = async (name, args, context = {}) => {
       }
 
       let accessToken = '';
+      let commitAs = null; // through the Classgrid app: commits keep the user's name, Classgrid AI is co-author
       if (isClassgridManaged) {
         accessToken = process.env.GITHUB_MASTER_TOKEN || process.env.GITHUB_TOKEN;
         if (!accessToken) throw new Error("GITHUB_MASTER_TOKEN environment variable is not configured on the server.");
@@ -6166,13 +6167,17 @@ export const handleToolCall = async (name, args, context = {}) => {
         await ensureFreshGithubToken(user); // keys run out after about 8 hours; renew with the saved refresh key
         accessToken = user.github_access_token;
         // Work on one repo (files, commits, issues, PRs) goes through the Classgrid app when it is installed on
-        // that repo, so commits show as Classgrid[bot]; listing or making repos stays on the user's account
+        // that repo; commits keep the user's name with Classgrid AI as co-author; listing or making repos stays on the user's account
         if (owner && repo && operation !== 'create_repo') {
           const appKey = await repoAppToken(`${owner}/${repo}`).catch(() => null);
-          if (appKey) accessToken = appKey;
+          if (appKey) {
+            accessToken = appKey;
+            if (user.github_email) commitAs = { name: user.github_name || user.name || user.github_email, email: user.github_email };
+          }
         }
       }
 
+      const withCoAuthor = (m) => commitAs ? `${m}\n\n${coAuthorLine()}` : m;
       const headers = {
         "Authorization": `Bearer ${accessToken}`,
         "Accept": "application/vnd.github.v3+json",
@@ -6236,7 +6241,7 @@ export const handleToolCall = async (name, args, context = {}) => {
         } else if (operation === 'create_or_update_file') {
           if (!owner || !repo || !filePath || !content || !message) throw new Error("owner, repo, path, content, and message are required for create_or_update_file");
           const contentEncoded = Buffer.from(content, 'utf8').toString('base64');
-          const payload = { message, content: contentEncoded };
+          const payload = { message: withCoAuthor(message), content: contentEncoded, ...(commitAs ? { author: commitAs, committer: commitAs } : {}) };
           if (branch) payload.branch = branch;
           if (sha) payload.sha = sha;
           const res = await fetch(`https://api.github.com/repos/${owner}/${repo}/contents/${filePath}`, {
@@ -6288,7 +6293,7 @@ export const handleToolCall = async (name, args, context = {}) => {
             const first = paths.includes('README.md') ? 'README.md' : paths[0];
             const init = await gh(`/contents/${first.split('/').map(encodeURIComponent).join('/')}`, {
               method: 'PUT',
-              body: JSON.stringify({ message: message || 'Initial commit', content: files[first], branch: targetBranch })
+              body: JSON.stringify({ message: withCoAuthor(message || 'Initial commit'), content: files[first], branch: targetBranch, ...(commitAs ? { author: commitAs, committer: commitAs } : {}) })
             });
             if (!init.ok) throw new Error(init.data.message || `could not create the first commit (${init.status})`);
             ref = await gh(`/git/ref/heads/${targetBranch}`);
@@ -6306,7 +6311,7 @@ export const handleToolCall = async (name, args, context = {}) => {
           }
           const newTree = await gh('/git/trees', { method: 'POST', body: JSON.stringify({ base_tree: parent.data.tree.sha, tree }) });
           if (!newTree.ok) throw new Error(newTree.data.message || 'could not create the tree');
-          const commit = await gh('/git/commits', { method: 'POST', body: JSON.stringify({ message: message || 'Add website files', tree: newTree.data.sha, parents: [parentSha] }) });
+          const commit = await gh('/git/commits', { method: 'POST', body: JSON.stringify({ message: withCoAuthor(message || 'Add website files'), tree: newTree.data.sha, parents: [parentSha], ...(commitAs ? { author: commitAs, committer: commitAs } : {}) }) });
           if (!commit.ok) throw new Error(commit.data.message || 'could not create the commit');
           const update = await gh(`/git/refs/heads/${targetBranch}`, { method: 'PATCH', body: JSON.stringify({ sha: commit.data.sha }) });
           if (!update.ok) throw new Error(update.data.message || 'could not update the branch');
