@@ -51,6 +51,7 @@ import { SESClient, GetSendStatisticsCommand, ListIdentitiesCommand } from '@aws
 import puppeteer from 'puppeteer';
 import IdeProject from '../models/IdeProject.js';
 import { ensureFreshGithubToken } from '../services/github-token.service.js';
+import { repoAppToken } from '../services/github-app.service.js';
 import { projectTools, projectForChat, projectSnapshot, projectChangesBetween, formatProjectChanges, sandboxDataDir } from '../services/ide-project.service.js';
 
 // What the sandbox container sees as /data, and where the hidden runner script is.
@@ -455,11 +456,12 @@ export const getMcpTools = () => [
 
   {
     name: 'create_github_repo_for_project',
-    description: 'Create a new GitHub repo on the user\'s connected GitHub account for the open Project Mode project (only when it has no repo yet), link it to the project, and push the project\'s files to it.',
+    description: 'Create a new GitHub repo on the user\'s connected GitHub account, or in a GitHub organization, for the open Project Mode project (only when it has no repo yet), link it to the project, and push the project\'s files to it. In an organization that has the Classgrid app installed, the Classgrid app makes the repo.',
     inputSchema: {
       type: 'object',
       properties: {
         name: { type: 'string', description: 'Repo name (letters, numbers, dots, dashes, underscores).' },
+        organization: { type: 'string', description: 'GitHub organization to make the repo in. Leave out to make it on the user\'s own account.' },
         private: { type: 'boolean', description: 'Private repo (default true).' },
         description: { type: 'string', description: 'Short repo description.' }
       },
@@ -6155,6 +6157,12 @@ export const handleToolCall = async (name, args, context = {}) => {
         }
         await ensureFreshGithubToken(user); // keys run out after about 8 hours; renew with the saved refresh key
         accessToken = user.github_access_token;
+        // Work on one repo (files, commits, issues, PRs) goes through the Classgrid app when it is installed on
+        // that repo, so commits show as Classgrid[bot]; listing or making repos stays on the user's account
+        if (owner && repo && operation !== 'create_repo') {
+          const appKey = await repoAppToken(`${owner}/${repo}`).catch(() => null);
+          if (appKey) accessToken = appKey;
+        }
       }
 
       const headers = {

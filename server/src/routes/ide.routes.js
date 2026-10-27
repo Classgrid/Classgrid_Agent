@@ -26,6 +26,7 @@ import User from "../models/User.js";
 import IdeProject from "../models/IdeProject.js";
 import { githubUser } from "../services/github-token.service.js";
 import { pushProject, revealInEditor, checkpointChanges, rejectCheckpoint, undoToCheckpoint, backupAndRemoveProjectCode } from "../services/ide-project.service.js";
+import { repoAppToken } from "../services/github-app.service.js";
 import mongoose from "mongoose";
 import connectDB from "../../config/db.js";
 import redis from "../config/redis.js";
@@ -194,7 +195,9 @@ router.post("/github/open", isAuthenticated, async (req, res) => {
       if (stdout.trim()) return res.status(409).json({ error: "unsaved_changes" });
     }
 
-    const auth = Buffer.from(`x-access-token:${user.github_access_token}`).toString("base64");
+    // Download through the Classgrid app when it is installed on the repo, else with the user's key as before
+    const key = (await repoAppToken(repo).catch(() => null)) || user.github_access_token;
+    const auth = Buffer.from(`x-access-token:${key}`).toString("base64");
     const clone = await ssh.execCommand(
       `mkdir -p /home/ubuntu/sandbox_data/${sessionId}/scratch && rm -rf ${dir} && ` +
       `GIT_TERMINAL_PROMPT=0 GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=http.https://github.com/.extraheader GIT_CONFIG_VALUE_0="AUTHORIZATION: basic ${auth}" ` +
@@ -464,7 +467,9 @@ router.post("/projects/:id/open", isAuthenticated, async (req, res) => {
         const { stdout } = await ssh.execCommand(`[ -d ${dir}/.git ] && git -C ${dir} status --porcelain | head -1`);
         if (stdout.trim()) return res.status(409).json({ error: "unsaved_changes" });
       }
-      const auth = Buffer.from(`x-access-token:${user.github_access_token}`).toString("base64");
+      // Download through the Classgrid app when it is installed on the repo, else with the user's key as before
+      const key = (await repoAppToken(project.repo).catch(() => null)) || user.github_access_token;
+      const auth = Buffer.from(`x-access-token:${key}`).toString("base64");
       const clone = await ssh.execCommand(
         `rm -rf ${dir} && mkdir -p ${dir}/.. && ` +
         `GIT_TERMINAL_PROMPT=0 GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=http.https://github.com/.extraheader GIT_CONFIG_VALUE_0="AUTHORIZATION: basic ${auth}" ` +

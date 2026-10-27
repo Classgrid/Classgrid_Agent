@@ -53,6 +53,16 @@ export async function accountHasApp(login) {
   return r.status === 200;
 }
 
+// A key for everything the app may do on a whole GitHub account (e.g. making repos in an organization), or null
+export async function accountAppToken(login) {
+  if (!githubAppReady() || !login) return null;
+  const jwt = appJwt();
+  const inst = await gh(`/users/${encodeURIComponent(login)}/installation`, { headers: { Authorization: `Bearer ${jwt}` } });
+  if (inst.status !== 200) return null;
+  const tok = await gh(`/app/installations/${inst.body.id}/access_tokens`, { method: "POST", headers: { Authorization: `Bearer ${jwt}` } });
+  return tok.status === 201 ? tok.body.token : null;
+}
+
 let bot = null;
 // The name and email GitHub links to the app's bot user, so its commits show the Classgrid logo
 export async function appBotIdentity() {
