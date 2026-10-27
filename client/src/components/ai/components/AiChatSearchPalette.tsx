@@ -118,7 +118,7 @@ export function AiChatSearchPalette({
         let listQuery = "?mode=agent";
         if (location.pathname.split("/").includes("project")) {
           let openProject: string | null = null;
-          try { openProject = localStorage.getItem("cg_project_open"); } catch { /* storage blocked */ }
+          try { openProject = (sessionStorage.getItem("cg_project_open") || localStorage.getItem("cg_project_open")); } catch { /* storage blocked */ }
           listQuery = `?project=${openProject || "all"}`;
         }
         const res = await fetchWithRescue(`${endpointPrefix}/api/ai/sessions${listQuery}`, { credentials: "include" });

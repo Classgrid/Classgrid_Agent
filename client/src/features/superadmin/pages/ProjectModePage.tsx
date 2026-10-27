@@ -223,7 +223,10 @@ export function ProjectModePage() {
   const openProject = projects?.find((p) => p.id === openId) || null;
   const rememberOpen = (id: string | null) => {
     setOpenId(id);
+    // sessionStorage is per tab: with projects open in two tabs, each tab's AI works on its own project
+    // (localStorage is shared by all tabs and only kept as the fallback)
     try { id ? localStorage.setItem(OPEN_PROJECT_KEY, id) : localStorage.removeItem(OPEN_PROJECT_KEY); } catch { /* storage blocked */ }
+    try { id ? sessionStorage.setItem(OPEN_PROJECT_KEY, id) : sessionStorage.removeItem(OPEN_PROJECT_KEY); } catch { /* storage blocked */ }
     window.dispatchEvent(new Event("agent:refresh-sessions")); // the left list shows this project's chats
   };
 
@@ -332,7 +335,15 @@ export function ProjectModePage() {
   useEffect(() => {
     if (openId && sessionId && folder) {
       chatProjectRef.current = openId;
-      api(`/projects/${openId}/chats`, { method: "POST", body: JSON.stringify({ sessionId }) });
+      api(`/projects/${openId}/chats`, { method: "POST", body: JSON.stringify({ sessionId }) }).then(({ res, data }) => {
+        // The open chat belongs to another project (e.g. the page was reloaded on an old chat): start a new chat
+        // for this project, else the AI would keep working on the other project's code
+        if (res.status !== 409 || data.error !== "chat_in_other_project") return;
+        const parts = window.location.pathname.split("/");
+        const i = parts.indexOf("project");
+        if (i !== -1 && parts.length > i + 1) window.history.pushState({}, "", parts.slice(0, i + 1).join("/"));
+        window.dispatchEvent(new Event("agent:new-chat"));
+      });
     }
   }, [openId, sessionId, folder]);
 

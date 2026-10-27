@@ -1777,7 +1777,7 @@ const AssistantMessageContent = memo(({ content, sources, createdAt, isTyping, o
                 onViewPlan={() => {
                   // Only opens the plan, never sends a message: Project Mode shows the plan/ file in the editor, otherwise the side panel
                   let inProject = false;
-                  try { inProject = window.location.pathname.split("/").includes("project") && !!localStorage.getItem("cg_project_open"); } catch { /* storage blocked */ }
+                  try { inProject = window.location.pathname.split("/").includes("project") && !!(sessionStorage.getItem("cg_project_open") || localStorage.getItem("cg_project_open")); } catch { /* storage blocked */ }
                   if (inProject) window.dispatchEvent(new CustomEvent("classgrid:open-project-file", { detail: { plan: true, planTitle: parsedProps.planTitle } }));
                   else window.dispatchEvent(new Event("classgrid:open-plan-panel"));
                 }}
@@ -2970,7 +2970,7 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
           const parts = window.location.pathname.split("/");
           const agentAt = parts.indexOf("agent");
           if (sData.projectId && agentAt !== -1) {
-            try { localStorage.setItem("cg_project_open", sData.projectId); } catch { /* storage blocked */ }
+            try { localStorage.setItem("cg_project_open", sData.projectId); sessionStorage.setItem("cg_project_open", sData.projectId); } catch { /* storage blocked */ }
             parts[agentAt] = "project";
             window.location.assign(parts.slice(0, agentAt + 1).join("/") + `/${id}`);
             return;
@@ -4122,7 +4122,7 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
           sessionId: (options && options.explicitSessionId !== undefined) ? (options.explicitSessionId ?? undefined) : (sessionId ?? undefined),
           isIncognito: isIncognito,
           // Project Mode: the project open next to the chat (the backend links the chat to it)
-          projectId: (() => { try { return window.location.pathname.split("/").includes("project") ? localStorage.getItem("cg_project_open") || undefined : undefined; } catch { return undefined; } })(),
+          projectId: (() => { try { return window.location.pathname.split("/").includes("project") ? (sessionStorage.getItem("cg_project_open") || localStorage.getItem("cg_project_open")) || undefined : undefined; } catch { return undefined; } })(),
           fileUrls: uploadedAttachments.length > 0 ? uploadedAttachments.map(a => a.url) : [],
           attachments: uploadedAttachments.length > 0 ? uploadedAttachments.map(a => ({ url: a.url, name: a.name, mimeType: a.mimeType })) : undefined,
           history: messages

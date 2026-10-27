@@ -105,7 +105,7 @@ export function AgentNestedMenu({ searchQuery = "" }: { searchQuery?: string }) 
     let listQuery = "?mode=agent";
     if (window.location.pathname.split("/").includes("project")) {
       let openProject: string | null = null;
-      try { openProject = localStorage.getItem("cg_project_open"); } catch { /* storage blocked */ }
+      try { openProject = (sessionStorage.getItem("cg_project_open") || localStorage.getItem("cg_project_open")); } catch { /* storage blocked */ }
       listQuery = `?project=${openProject || "all"}`; // no project open: chats of all projects
     }
     fetchWithRescue(endpoint + listQuery, { credentials: "include" })
@@ -468,7 +468,7 @@ export function AgentNestedMenu({ searchQuery = "" }: { searchQuery?: string }) 
       // the user opens the editor from the project when they want it.
       const projectPath = baseAgentPath.replace(/\/agent$/, "/project");
       toast.success(`Moved to ${project.name}`);
-      try { localStorage.removeItem("cg_project_open"); } catch { /* storage blocked */ }
+      try { localStorage.removeItem("cg_project_open"); sessionStorage.removeItem("cg_project_open"); } catch { /* storage blocked */ }
       navigate(`${projectPath}/${sessionId}`);
       return true;
     } catch {
