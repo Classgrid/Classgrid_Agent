@@ -9,6 +9,14 @@
  */
 /*
  * ─────────────────────────────────────────────────────────
+ * 🚫 NO DISK BLAME RULE (owner's order, 2026-10-27) 🚫
+ * Claude and every AI model are FORBIDDEN to say an error comes from a full disk or low disk space.
+ * The owner's disks are not full. Never guess the cause of an error: read the real logs and code first,
+ * and only name a cause that was actually seen.
+ * ─────────────────────────────────────────────────────────
+ */
+/*
+ * ─────────────────────────────────────────────────────────
  * 🚨 ERP SHUT DOWN 🚨
  * The Classgrid ERP is shut down and will never work or be worked on again.
  * The org admin dashboard and every dashboard other than chat.classgrid.in and the
@@ -24,7 +32,7 @@ import { NodeSSH } from "node-ssh";
 import IdeProject from "../models/IdeProject.js";
 import User from "../models/User.js";
 import { githubUser } from "./github-token.service.js";
-import { githubAppReady, githubAppInstallUrl, repoAppToken, appBotIdentity, accountAppToken } from "./github-app.service.js";
+import { githubAppReady, githubAppInstallUrl, repoAppToken, accountAppToken, coAuthorLine } from "./github-app.service.js";
 import connectDB from "../../config/db.js";
 import redis from "../config/redis.js";
 
@@ -373,11 +381,9 @@ export async function createRepoForProject(project, ssh, { name, private: isPriv
   // The first push goes through the Classgrid app when the app is installed on the new repo (e.g. installed
   // for all the account's repos), else with the user's key as before
   const appKey = await repoAppToken(gh.full_name).catch(() => null);
-  const bot = appKey ? await appBotIdentity() : null;
-  const as = bot ? `-c user.name=${q(bot.name)} -c user.email=${q(bot.email)}` : "";
   await ssh.execCommand(`git -C ${q(dir)} add -A`);
   const { stdout: staged } = await ssh.execCommand(`git -C ${q(dir)} diff --cached --stat | tail -1`);
-  if (staged.trim()) await ssh.execCommand(`git -C ${q(dir)} ${as} commit -q -m "First version"`);
+  if (staged.trim()) await ssh.execCommand(`git -C ${q(dir)} commit -q -F -`, { stdin: `First version\n\n${coAuthorLine()}\n` });
   const { stdout: hasCommit } = await ssh.execCommand(`git -C ${q(dir)} rev-parse -q --verify HEAD`);
   if (!hasCommit.trim()) return `Created ${gh.private ? "private" : "public"} repo ${gh.full_name} (${gh.html_url}) and linked it to this project. The project has no files yet, so nothing was pushed.`;
   const auth = Buffer.from(`x-access-token:${appKey || orgAppKey || owner?.github_access_token}`).toString("base64");
@@ -396,18 +402,17 @@ export async function pushProject(project, ssh, message) {
   if (!msg) return "Error: a commit message is needed";
   await connectDB();
   // With the Classgrid GitHub app set up, the push goes through the app installed on the repo (never the user's
-  // own GitHub key) and the commit is made by the app's bot, so Classgrid shows as a contributor.
-  let key, as = "";
+  // own GitHub key). The commit is in the user's name with Classgrid AI as co-author, so both show as contributors.
+  const owner = await githubUser(project.owner, "github_name github_email");
+  let key;
   if (githubAppReady()) {
     key = await repoAppToken(project.repo).catch(() => null);
     if (!key) return `The Classgrid app is not installed on ${project.repo}. The user installs it on this repo (${githubAppInstallUrl()}), then tries again.`;
-    const bot = await appBotIdentity();
-    as = `-c user.name=${q(bot.name)} -c user.email=${q(bot.email)}`;
   } else {
-    const owner = await githubUser(project.owner);
     if (!owner?.github_access_token) return "GitHub is not connected. The user connects it in AI Hub, then tries again.";
     key = owner.github_access_token;
   }
+  const as = owner?.github_name && owner?.github_email ? `-c user.name=${q(owner.github_name)} -c user.email=${q(owner.github_email)}` : "";
 
   const dir = projectHostDir(project);
   const { stdout: isRepo } = await ssh.execCommand(`[ -d ${q(dir)}/.git ] && echo yes`);
@@ -416,7 +421,7 @@ export async function pushProject(project, ssh, message) {
   await ssh.execCommand(`git -C ${q(dir)} add -A`);
   const { stdout: staged } = await ssh.execCommand(`git -C ${q(dir)} diff --cached --stat | tail -1`);
   if (staged.trim()) {
-    const commit = await ssh.execCommand(`git -C ${q(dir)} ${as} commit -q -F -`, { stdin: msg });
+    const commit = await ssh.execCommand(`git -C ${q(dir)} ${as} commit -q -F -`, { stdin: `${msg}\n\n${coAuthorLine()}\n` });
     if (commit.code) return `Commit failed: ${(commit.stderr || commit.stdout).slice(0, 500)}`;
   }
   const { stdout: branch } = await ssh.execCommand(`git -C ${q(dir)} rev-parse --abbrev-ref HEAD`);

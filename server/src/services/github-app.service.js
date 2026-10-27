@@ -68,6 +68,10 @@ export async function accountAppToken(login) {
   return tok.status === 201 ? tok.body.token : null;
 }
 
+// Every AI commit stays in the user's name and ends with this line, so GitHub shows the Classgrid AI account
+// (a normal GitHub user with agent@classgrid.in verified) as co-author next to the user, like Claude's commits
+export const coAuthorLine = () => `Co-authored-by: ${process.env.GITHUB_COAUTHOR || "Classgrid AI <agent@classgrid.in>"}`;
+
 let bot = null;
 // The name and email GitHub links to the app's bot user, so its commits show the Classgrid logo
 export async function appBotIdentity() {
