@@ -6177,7 +6177,8 @@ export const handleToolCall = async (name, args, context = {}) => {
         }
       }
 
-      const withCoAuthor = (m) => commitAs ? `${m}\n\n${coAuthorLine()}` : m;
+      // Owner's rule: every commit the AI makes names Classgrid AI as co-author, with or without the Classgrid app
+      const withCoAuthor = (m) => `${m}\n\n${coAuthorLine()}`;
       const headers = {
         "Authorization": `Bearer ${accessToken}`,
         "Accept": "application/vnd.github.v3+json",

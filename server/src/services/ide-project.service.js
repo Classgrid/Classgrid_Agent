@@ -960,7 +960,7 @@ export async function backupAndRemoveProjectCode(ssh, project) {
     const stamp = new Date().toISOString().slice(0, 16).replace(/[-:T]/g, "").replace(/^(\d{8})(\d{4})$/, "$1-$2");
     backupBranch = `classgrid-backup-${stamp}`;
     const auth = Buffer.from(`x-access-token:${key}`).toString("base64");
-    await ssh.execCommand(`git -C ${q(dir)} checkout -q -b ${backupBranch} && git -C ${q(dir)} add -A && git -C ${q(dir)} -c user.name=Classgrid -c user.email=backup@classgrid.in commit -q -m "Classgrid: unsaved work, saved when the project was closed" || true`);
+    await ssh.execCommand(`git -C ${q(dir)} checkout -q -b ${backupBranch} && git -C ${q(dir)} add -A && git -C ${q(dir)} -c user.name=Classgrid -c user.email=backup@classgrid.in commit -q -m "Classgrid: unsaved work, saved when the project was closed" -m ${q(coAuthorLine())} || true`);
     const push = await ssh.execCommand(
       `GIT_TERMINAL_PROMPT=0 GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=http.https://github.com/.extraheader GIT_CONFIG_VALUE_0="AUTHORIZATION: basic ${auth}" ` +
       `git -C ${q(dir)} push -q origin ${backupBranch} 2>&1 | tail -3`
