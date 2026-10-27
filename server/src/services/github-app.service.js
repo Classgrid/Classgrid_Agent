@@ -26,13 +26,18 @@ async function gh(path, opts = {}) {
   return { status: res.status, body: await res.json().catch(() => ({})) };
 }
 
-const tokens = new Map(); // "owner/repo" -> { token, expires }
+const tokens = new Map(); // "owner/repo" -> { token, expires, checked }
+const RECHECK_MS = 60 * 1000; // a remembered key is used for a minute at most, so an uninstall shows up fast
+
+// GitHub said the app was uninstalled or lost repos: forget every remembered key
+export const forgetAppTokens = () => tokens.clear();
 
 // A short-lived key that can push to this one repo, or null when the Classgrid app is not installed on it
 export async function repoAppToken(repo) {
   if (!githubAppReady() || !repo) return null;
   const hit = tokens.get(repo);
-  if (hit && hit.expires - Date.now() > 5 * 60 * 1000) return hit.token;
+  if (hit && Date.now() - hit.checked < RECHECK_MS && hit.expires - Date.now() > 5 * 60 * 1000) return hit.token;
+  tokens.delete(repo);
   const jwt = appJwt();
   const inst = await gh(`/repos/${repo}/installation`, { headers: { Authorization: `Bearer ${jwt}` } });
   if (inst.status !== 200) return null;
@@ -42,7 +47,7 @@ export async function repoAppToken(repo) {
     body: JSON.stringify({ repositories: [repo.split("/")[1]] }),
   });
   if (tok.status !== 201) return null;
-  tokens.set(repo, { token: tok.body.token, expires: new Date(tok.body.expires_at).getTime() });
+  tokens.set(repo, { token: tok.body.token, expires: new Date(tok.body.expires_at).getTime(), checked: Date.now() });
   return tok.body.token;
 }
 

@@ -2,7 +2,7 @@
 // and the webhook GitHub calls with push / Actions / check results.
 import express from "express";
 import { isAuthenticated } from "../middleware/auth.middleware.js";
-import { githubAppReady, githubAppInstallUrl, repoAppToken, repoEvents, saveRepoEvent, webhookSignatureOk, accountHasApp } from "../services/github-app.service.js";
+import { githubAppReady, githubAppInstallUrl, repoAppToken, repoEvents, saveRepoEvent, webhookSignatureOk, accountHasApp, forgetAppTokens } from "../services/github-app.service.js";
 
 const router = express.Router();
 const REPO_NAME = /^[A-Za-z0-9._-]+\/[A-Za-z0-9._-]+$/;
@@ -43,6 +43,8 @@ router.post("/webhook", express.raw({ type: "application/json", limit: "5mb" }),
   try {
     const type = req.get("x-github-event");
     const p = JSON.parse(req.body.toString("utf8"));
+    if (type === "installation" || type === "installation_repositories") forgetAppTokens(); // installed, removed or repos changed
+
     const repo = p.repository?.full_name;
     if (!repo) return;
     if (type === "push") {
