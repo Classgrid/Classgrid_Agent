@@ -176,6 +176,7 @@ export function ProjectModePage() {
   const [newName, setNewName] = useState<string | null>(null);
   const [renaming, setRenaming] = useState<{ id: string; name: string } | null>(null);
   const [linking, setLinking] = useState<Project | null>(null);
+  const [appGate, setAppGate] = useState<{ project: Project; installUrl: string } | null>(null);
   const [repos, setRepos] = useState<{ fullName: string; private: boolean }[] | null>(null);
   const [githubConnected, setGithubConnected] = useState<boolean | null>(null);
   const [githubExpired, setGithubExpired] = useState(false);
@@ -271,6 +272,13 @@ export function ProjectModePage() {
 
   // Open = download the project's code fresh from GitHub, then show it in the editor
   const open = async (project: Project, replace = false, resume = false) => {
+    // A must, like connecting GitHub: a project with a repo opens only once the Classgrid app is installed on it
+    if (project.repo) {
+      const res = await fetchWithRescue(`${backendUrl}/api/github-app/status?repo=${encodeURIComponent(project.repo)}`, { credentials: "include" }).catch(() => null);
+      const data = res?.ok ? await res.json().catch(() => null) : null;
+      if (data?.ready && !data.installed) { setAppGate({ project, installUrl: data.installUrl }); return; }
+    }
+    setAppGate(null);
     setBusyId(project.id);
     const wasOpen = openId;
     // Opening a different project starts a fresh chat for it: the old chat stays with its own project (chats are
@@ -494,6 +502,15 @@ export function ProjectModePage() {
     loadReview(review);
   };
 
+  // Back from GitHub's install page: open the waiting project once the app is installed on its repo
+  useEffect(() => {
+    if (!appGate) return;
+    const recheck = () => { if (document.visibilityState === "visible") open(appGate.project); };
+    window.addEventListener("focus", recheck);
+    return () => window.removeEventListener("focus", recheck);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [appGate]);
+
   // The AI pushes through the Classgrid GitHub app, so the app must be installed on the open project's repo
   const [appInstall, setAppInstall] = useState<{ installed: boolean; installUrl?: string } | null>(null);
   useEffect(() => {
@@ -605,7 +622,7 @@ export function ProjectModePage() {
           {folder && openProject.repo && appInstall && !appInstall.installed && (
             <div className="shrink-0 flex flex-wrap items-center gap-x-3 gap-y-2 px-4 py-2 border-b border-amber-500/20 bg-amber-500/10 text-sm overflow-hidden">
               <AlertTriangle className="size-4 shrink-0 text-amber-600 dark:text-amber-400" />
-              <span className="flex-1 min-w-[14rem] text-amber-700 dark:text-amber-400">Install the Classgrid app on {openProject.repo} so Classgrid AI can push its work there.</span>
+              <span className="flex-1 min-w-[14rem] text-amber-700 dark:text-amber-400">Install the Classgrid app on {openProject.repo}.</span>
               <a
                 href={appInstall.installUrl}
                 target="_blank"
@@ -701,8 +718,9 @@ export function ProjectModePage() {
                 <div className="flex-1 min-w-0 flex flex-col gap-1">
                   <span className="font-medium">{appCard.repos.length ? "Install the Classgrid app" : "New: the Classgrid GitHub app"}</span>
                   <span className="text-sm text-muted-foreground">
-                    Classgrid AI now pushes your code through the Classgrid GitHub app, not your own GitHub account.{" "}
-                    {appCard.repos.length ? `Install it on ${appCard.repos.join(", ")} so the AI can push there.` : "Install it on the repos you use with Project Mode."}
+                    {appCard.repos.length
+                      ? `Required for ${appCard.repos.join(", ")}.`
+                      : "Required for the repositories you work on."}
                   </span>
                 </div>
                 <a href={appCard.installUrl} target="_blank" rel="noreferrer" className="shrink-0 flex items-center gap-2 bg-foreground text-background px-4 py-2 rounded-full font-medium text-sm hover:opacity-90 whitespace-nowrap">
@@ -864,6 +882,23 @@ export function ProjectModePage() {
         isLoading={deleteBusy}
         onConfirm={() => deleting && remove(deleting)}
       />
+
+      {appGate && (
+        <div className="fixed inset-0 z-[130] bg-black/60 flex items-center justify-center p-4" onClick={() => setAppGate(null)}>
+          <div className="w-full max-w-md rounded-xl border border-border bg-background p-5 flex flex-col gap-4" onClick={(e) => e.stopPropagation()}>
+            <div>
+              <h2 className="text-lg font-semibold">Install the Classgrid app</h2>
+              <p className="text-sm text-muted-foreground">Required for {appGate.project.repo}.</p>
+            </div>
+            <a href={appGate.installUrl} target="_blank" rel="noreferrer" className="flex items-center justify-center gap-2 bg-foreground text-background px-4 py-2 rounded-full font-medium text-sm hover:opacity-90">
+              <GithubIcon className="size-4" onDark /> Install app
+            </a>
+            <div className="flex justify-end">
+              <button onClick={() => setAppGate(null)} className="px-3 py-1.5 rounded-full text-sm hover:bg-secondary">Cancel</button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {linking && (
         <div className="fixed inset-0 z-[130] bg-black/60 flex items-center justify-center p-4" onClick={() => setLinking(null)}>
