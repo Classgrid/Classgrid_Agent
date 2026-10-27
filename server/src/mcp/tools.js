@@ -6270,7 +6270,7 @@ export const handleToolCall = async (name, args, context = {}) => {
           if (data.message) throw new Error(data.message);
           let filePr = null;
           if (filePrBase) {
-            const pr = await fetch(`https://api.github.com/repos/${owner}/${repo}/pulls`, { method: 'POST', headers: { ...headers, 'Content-Type': 'application/json' }, body: JSON.stringify({ title: String(message).split('\n')[0].slice(0, 200), head: payload.branch, base: filePrBase, body: 'Made by Classgrid AI. Review it and merge when it looks right.' }) });
+            const pr = await fetch(`https://api.github.com/repos/${owner}/${repo}/pulls`, { method: 'POST', headers: { ...headers, 'Content-Type': 'application/json' }, body: JSON.stringify({ title: String(message).split('\n')[0].slice(0, 200), head: payload.branch, base: filePrBase }) });
             const prData = await pr.json().catch(() => ({}));
             filePr = pr.ok ? prData.html_url : `not opened: ${prData.errors?.[0]?.message || prData.message || pr.status}`;
           }
@@ -6349,7 +6349,7 @@ export const handleToolCall = async (name, args, context = {}) => {
 
           let pullRequest = null;
           if (prBase) {
-            const pr = await gh('/pulls', { method: 'POST', body: JSON.stringify({ title: String(message || 'Add website files').split('\n')[0].slice(0, 200), head: targetBranch, base: prBase, body: 'Made by Classgrid AI. Review it and merge when it looks right.' }) });
+            const pr = await gh('/pulls', { method: 'POST', body: JSON.stringify({ title: String(message || 'Add website files').split('\n')[0].slice(0, 200), head: targetBranch, base: prBase }) });
             pullRequest = pr.ok ? pr.data.html_url : `not opened: ${pr.data.errors?.[0]?.message || pr.data.message || pr.status}`;
           }
           return { content: [{ type: 'text', text: JSON.stringify({ commit: commit.data.html_url, branch: targetBranch, files_pushed: paths, ...(pullRequest ? { pull_request: pullRequest, merged: false, note: `Not merged into ${prBase}: the repo owner reviews and merges the pull request.` } : {}) }, null, 2) }] };

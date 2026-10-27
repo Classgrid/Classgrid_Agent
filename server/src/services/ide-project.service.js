@@ -472,7 +472,7 @@ export async function pushProject(project, ssh, message) {
     if (!base) base = (await ghApi("")).data.default_branch || "main";
     const made = await ghApi("/pulls", {
       method: "POST",
-      body: JSON.stringify({ title: msg.split("\n")[0].slice(0, 200), head: branch, base, body: `${msg}\n\nMade by Classgrid AI in Project Mode. Review it and merge when it looks right.` }),
+      body: JSON.stringify({ title: msg.split("\n")[0].slice(0, 200), head: branch, base, body: msg }),
     });
     if (!made.ok) return `${done} to the branch ${branch} of ${project.repo}, but the pull request could not be opened: ${made.data.errors?.[0]?.message || made.data.message || made.status}`;
     pr = made.data;
