@@ -318,6 +318,18 @@ const getDeviceFromUA = (ua) => {
     return `${browser} on ${os}`;
 };
 
+// Details shown in the new-browser login code email: account, login method, device, place, IP address and app
+// (the time is added by the email)
+const getLoginDetails = async (req, method = '', account = '') => {
+    const ip = req.headers['x-forwarded-for']?.split(',')[0]?.trim() || req.socket?.remoteAddress || 'Unknown';
+    const city = await Promise.race([
+        getLocationFromIP(req),
+        new Promise((resolve) => setTimeout(() => resolve('Unknown location'), 3000)), // never hold up the code email
+    ]).catch(() => 'Unknown location');
+    const fromChat = [req.headers.origin, req.headers.referer].some((h) => String(h || '').includes('chat.classgrid.in'));
+    return { account, method, device: getDeviceFromUA(req.headers['user-agent']), city, ip, app: fromChat ? 'Classgrid AI for web' : 'Classgrid for web' };
+};
+
 // Helper: Send Vercel-style "no account" email (rate-limited, fire-and-forget)
 export const sendNoAccountEmail = async (email, req, orgSlug = '') => {
     const lastSent = noAccountEmailCooldown.get(email);
@@ -1612,13 +1624,14 @@ export const login = async (req, res) => {
                 );
 
                 const { getNewDeviceOtpHtml, getNewDeviceOtpPlainText } = await import("../services/email-templates.service.js");
+                const loginDetails = await getLoginDetails(req, 'Password', user.email);
 
                 try {
                     await sendEmail({
                         to: user.email,
                         subject: "security alert: New Device Detected",
-                        html: getNewDeviceOtpHtml ? getNewDeviceOtpHtml(user.name, otp) : `<p>Your Classgrid verification code is: <strong>${otp}</strong></p>`,
-                        text: getNewDeviceOtpPlainText ? getNewDeviceOtpPlainText(user.name, otp) : `Your Classgrid verification code is: ${otp}`,
+                        html: getNewDeviceOtpHtml ? getNewDeviceOtpHtml(user.name, otp, loginDetails) : `<p>Your Classgrid verification code is: <strong>${otp}</strong></p>`,
+                        text: getNewDeviceOtpPlainText ? getNewDeviceOtpPlainText(user.name, otp, loginDetails) : `Your Classgrid verification code is: ${otp}`,
                     });
                 } catch (emailErr) {
                     console.error("Failed to send device OTP:", emailErr);
@@ -1761,13 +1774,14 @@ export const requestLoginOtp = async (req, res) => {
         );
 
         const { getNewDeviceOtpHtml, getNewDeviceOtpPlainText } = await import("../services/email-templates.service.js");
+        const loginDetails = await getLoginDetails(req, 'Email code', user.email);
 
         try {
             await sendEmail({
                 to: normalizedEmail,
                 subject: "Classgrid - Your Login Code",
-                html: getNewDeviceOtpHtml ? getNewDeviceOtpHtml(user.name, otp) : `<p>Your Classgrid verification code is: <strong>${otp}</strong></p>`,
-                text: getNewDeviceOtpPlainText ? getNewDeviceOtpPlainText(user.name, otp) : `Your Classgrid verification code is: ${otp}`,
+                html: getNewDeviceOtpHtml ? getNewDeviceOtpHtml(user.name, otp, loginDetails) : `<p>Your Classgrid verification code is: <strong>${otp}</strong></p>`,
+                text: getNewDeviceOtpPlainText ? getNewDeviceOtpPlainText(user.name, otp, loginDetails) : `Your Classgrid verification code is: ${otp}`,
             });
         } catch (emailErr) {
             console.error("Failed to send login OTP:", emailErr);
@@ -2019,12 +2033,13 @@ export const oauthCallback = async (req, res) => {
                 );
 
                 const { getNewDeviceOtpHtml, getNewDeviceOtpPlainText } = await import("../services/email-templates.service.js");
+                const loginDetails = await getLoginDetails(req, `Sign in with ${String(provider || 'Google').replace(/^./, (c) => c.toUpperCase())}`, req.user.email);
                 try {
                     await sendEmail({
                         to: userEmail,
                         subject: "Security Alert: New Device Detected",
-                        html: getNewDeviceOtpHtml ? getNewDeviceOtpHtml(req.user.name, otp) : `<p>Your Classgrid verification code is: <strong>${otp}</strong></p>`,
-                        text: getNewDeviceOtpPlainText ? getNewDeviceOtpPlainText(req.user.name, otp) : `Your Classgrid verification code is: ${otp}`,
+                        html: getNewDeviceOtpHtml ? getNewDeviceOtpHtml(req.user.name, otp, loginDetails) : `<p>Your Classgrid verification code is: <strong>${otp}</strong></p>`,
+                        text: getNewDeviceOtpPlainText ? getNewDeviceOtpPlainText(req.user.name, otp, loginDetails) : `Your Classgrid verification code is: ${otp}`,
                     });
                 } catch (emailErr) {
                     console.error("Failed to send OAuth device OTP:", emailErr);
@@ -2577,13 +2592,14 @@ export const resendDeviceOtp = async (req, res) => {
         );
 
         const { getNewDeviceOtpHtml, getNewDeviceOtpPlainText } = await import("../services/email-templates.service.js");
+        const loginDetails = await getLoginDetails(req, 'Email code', user.email);
 
         try {
             await sendEmail({
                 to: user.email,
                 subject: "Security Alert: New Device Detected",
-                html: getNewDeviceOtpHtml ? getNewDeviceOtpHtml(user.name, otp) : `<p>Your Classgrid verification code is: <strong>${otp}</strong></p>`,
-                text: getNewDeviceOtpPlainText ? getNewDeviceOtpPlainText(user.name, otp) : `Your Classgrid verification code is: ${otp}`,
+                html: getNewDeviceOtpHtml ? getNewDeviceOtpHtml(user.name, otp, loginDetails) : `<p>Your Classgrid verification code is: <strong>${otp}</strong></p>`,
+                text: getNewDeviceOtpPlainText ? getNewDeviceOtpPlainText(user.name, otp, loginDetails) : `Your Classgrid verification code is: ${otp}`,
             });
         } catch (emailErr) {
             console.error("Failed to resend device OTP:", emailErr);

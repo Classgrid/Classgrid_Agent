@@ -2345,7 +2345,7 @@ If you believe you should have access, please reach out to your institution admi
 };
 
 // ------------- NEW DEVICE OTP -------------
-export const getNewDeviceOtpHtml = (userName, otp) => {
+export const getNewDeviceOtpHtml = (userName, otp, details = null) => {
   const content = `
     <p>Hi <strong>${userName}</strong>,</p>
     <p>We noticed a login attempt to your Classgrid account from a new device or browser. To protect your account, please verify this device using the code below.</p>
@@ -2355,7 +2355,17 @@ export const getNewDeviceOtpHtml = (userName, otp) => {
       <span class="code" style="font-size:32px; letter-spacing:8px; color:#111111;">${otp}</span>
       <p style="margin-top:12px; font-size:13px; color:#6b7280;">This code expires in <strong style="color:#111111;">10 minutes</strong>.</p>
     </div>
-
+${details ? `
+    <div class="box">
+      <div class="meta">Please review the details</div>
+      ${details.account ? `<p><strong>Account:</strong> ${details.account}</p>` : ""}
+      ${details.method ? `<p><strong>Login method:</strong> ${details.method}</p>` : ""}
+      <p><strong>IP &amp; approximate location:</strong> ${details.ip || "Unknown"} - ${details.city || "Unknown location"}</p>
+      <p><strong>Device:</strong> ${details.device || "Unknown device"}</p>
+      <p><strong>Time:</strong> ${formatDate(new Date())}</p>
+      ${details.app ? `<p><strong>Application:</strong> ${details.app}</p>` : ""}
+    </div>
+` : ""}
     <p>Enter this code on the login page to verify your device. If you did not attempt to log in, please secure your account immediately.</p>
   `;
   return baseTemplate({
@@ -2365,7 +2375,7 @@ export const getNewDeviceOtpHtml = (userName, otp) => {
   });
 };
 
-export const getNewDeviceOtpPlainText = (userName, otp) => {
+export const getNewDeviceOtpPlainText = (userName, otp, details = null) => {
   return `New Device Login Detected
 
 Hi ${userName},
@@ -2375,7 +2385,13 @@ We noticed a login attempt from a new device or browser.
 Your Verification Code: ${otp}
 
 This code expires in 10 minutes. Enter it on the login page to verify your device.
-
+${details ? `
+Please review the details
+${details.account ? `Account: ${details.account}\n` : ""}${details.method ? `Login method: ${details.method}\n` : ""}IP & approximate location: ${details.ip || "Unknown"} - ${details.city || "Unknown location"}
+Device: ${details.device || "Unknown device"}
+Time: ${formatDate(new Date())}
+${details.app ? `Application: ${details.app}` : ""}
+` : ""}
 If you did not attempt to log in, please reset your password immediately.
 
 &copy; ${new Date().getFullYear()} Classgrid. All rights reserved.`;
