@@ -494,6 +494,54 @@ export function ProjectModePage() {
     loadReview(review);
   };
 
+  // The AI pushes through the Classgrid GitHub app, so the app must be installed on the open project's repo
+  const [appInstall, setAppInstall] = useState<{ installed: boolean; installUrl?: string } | null>(null);
+  useEffect(() => {
+    const repo = openProject?.repo;
+    if (!repo) { setAppInstall(null); return; }
+    const check = async () => {
+      const res = await fetchWithRescue(`${backendUrl}/api/github-app/status?repo=${encodeURIComponent(repo)}`, { credentials: "include" }).catch(() => null);
+      const data = res?.ok ? await res.json().catch(() => null) : null;
+      setAppInstall(data?.ready ? { installed: !!data.installed, installUrl: data.installUrl } : null);
+    };
+    check();
+    window.addEventListener("focus", check); // back from GitHub's install page
+    return () => window.removeEventListener("focus", check);
+  }, [openProject?.repo]);
+  // Projects page card: shown to everyone with GitHub connected until the Classgrid app is installed on their
+  // project repos (or on their account, when they have no repo yet). It has no close button: it must be seen.
+  const [appCard, setAppCard] = useState<{ repos: string[]; installUrl: string } | null>(null);
+  useEffect(() => {
+    if (!githubConnected || !projects) return;
+    const repos = [...new Set(projects.map((p) => p.repo).filter(Boolean))] as string[];
+    let stop = false;
+    const get = async (path: string) => {
+      const res = await fetchWithRescue(`${backendUrl}/api/github-app/${path}`, { credentials: "include" }).catch(() => null);
+      return res?.ok ? await res.json().catch(() => null) : null;
+    };
+    const check = async () => {
+      const info = await get(`info?login=${encodeURIComponent(githubAccount?.login || "")}`);
+      if (stop) return;
+      if (!info?.ready) { setAppCard(null); return; }
+      const status = await Promise.all(repos.map(async (repo) => ({ repo, data: await get(`status?repo=${encodeURIComponent(repo)}`) })));
+      if (stop) return;
+      const missing = status.filter((s) => s.data?.ready && !s.data.installed).map((s) => s.repo);
+      setAppCard(missing.length || (!repos.length && !info.installed) ? { repos: missing, installUrl: info.installUrl } : null);
+    };
+    check();
+    window.addEventListener("focus", check); // back from GitHub's install page
+    return () => { stop = true; window.removeEventListener("focus", check); };
+  }, [githubConnected, projects, githubAccount?.login]);
+
+  // GitHub sends the user back here (?github_app=installed) after installing the app
+  useEffect(() => {
+    const url = new URL(window.location.href);
+    if (url.searchParams.get("github_app") !== "installed") return;
+    toast.success("Classgrid app installed");
+    url.searchParams.delete("github_app");
+    window.history.replaceState(null, "", url.toString());
+  }, []);
+
   const showEditor = isSuperAdmin && githubConnected !== false && openProject && (folder || progress); // no GitHub: back to the Connect GitHub screen
   const editorLoaded = () => {
     setProgress((p) => p && { ...p, label: "Almost ready", target: 100 });
@@ -552,6 +600,20 @@ export function ProjectModePage() {
               >
                 Ask Agent to create repo
               </button>
+            </div>
+          )}
+          {folder && openProject.repo && appInstall && !appInstall.installed && (
+            <div className="shrink-0 flex flex-wrap items-center gap-x-3 gap-y-2 px-4 py-2 border-b border-amber-500/20 bg-amber-500/10 text-sm overflow-hidden">
+              <AlertTriangle className="size-4 shrink-0 text-amber-600 dark:text-amber-400" />
+              <span className="flex-1 min-w-[14rem] text-amber-700 dark:text-amber-400">Install the Classgrid app on {openProject.repo} so Classgrid AI can push its work there.</span>
+              <a
+                href={appInstall.installUrl}
+                target="_blank"
+                rel="noreferrer"
+                className="shrink-0 max-w-full h-8 px-3 inline-flex items-center gap-2 rounded-full border border-border bg-background text-sm text-foreground hover:bg-secondary whitespace-nowrap truncate"
+              >
+                <GithubIcon className="size-4" /> Install Classgrid app
+              </a>
             </div>
           )}
           {folder && (
@@ -632,6 +694,22 @@ export function ProjectModePage() {
                 </button>
               )}
             </div>
+
+            {appCard && (
+              <div className="max-w-3xl mb-4 rounded-xl border border-border bg-background p-5 flex items-center gap-4">
+                <GithubIcon className="size-8 shrink-0" />
+                <div className="flex-1 min-w-0 flex flex-col gap-1">
+                  <span className="font-medium">{appCard.repos.length ? "Install the Classgrid app" : "New: the Classgrid GitHub app"}</span>
+                  <span className="text-sm text-muted-foreground">
+                    Classgrid AI now pushes your code through the Classgrid GitHub app, not your own GitHub account.{" "}
+                    {appCard.repos.length ? `Install it on ${appCard.repos.join(", ")} so the AI can push there.` : "Install it on the repos you use with Project Mode."}
+                  </span>
+                </div>
+                <a href={appCard.installUrl} target="_blank" rel="noreferrer" className="shrink-0 flex items-center gap-2 bg-foreground text-background px-4 py-2 rounded-full font-medium text-sm hover:opacity-90 whitespace-nowrap">
+                  <GithubIcon className="size-4" onDark /> Install app
+                </a>
+              </div>
+            )}
 
             {projects === null ? (
               <div className="flex flex-col gap-4 max-w-3xl">

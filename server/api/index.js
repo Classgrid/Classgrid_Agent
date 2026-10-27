@@ -109,6 +109,7 @@ import forumRoutes from "../src/routes/forum.routes.js";
 import supportRoutes from "../src/routes/support.routes.js";
 import changelogRoutes from "../src/routes/changelog.routes.js";
 import ideRoutes from "../src/routes/ide.routes.js";
+import githubAppRoutes from "../src/routes/github-app.routes.js";
 import publicRoutes from "../src/routes/public.routes.js";
 import uploadRoutes from "../src/routes/upload.routes.js";
 import systemRoutes from "../src/routes/system.routes.js";
@@ -266,6 +267,7 @@ app.use((req, res, next) => {
     req.originalUrl.startsWith('/api/admission/payments/webhook') ||
     req.originalUrl.startsWith('/api/payments/webhook') ||
     req.originalUrl.startsWith('/api/webhooks/razorpay') ||
+    req.originalUrl.startsWith('/api/github-app/webhook') ||
     isRemoteMcpPath(req.path)
   ) {
     return next();
@@ -429,6 +431,7 @@ app.use("/api/forum", forumRoutes);
 app.use("/api/support", supportRoutes);
 app.use("/api/changelog", changelogRoutes);
 app.use("/api/ide", ideRoutes);
+app.use("/api/github-app", githubAppRoutes);
 app.use("/api/public", publicRoutes);
 app.use("/api/upload", uploadRoutes);
 app.use("/api/build", buildRoutes);

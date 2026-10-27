@@ -24,6 +24,7 @@ import { NodeSSH } from "node-ssh";
 import IdeProject from "../models/IdeProject.js";
 import User from "../models/User.js";
 import { githubUser } from "./github-token.service.js";
+import { githubAppReady, githubAppInstallUrl, repoAppToken, appBotIdentity } from "./github-app.service.js";
 import connectDB from "../../config/db.js";
 import redis from "../config/redis.js";
 
@@ -377,8 +378,19 @@ export async function pushProject(project, ssh, message) {
   const msg = String(message || "").trim().slice(0, 500);
   if (!msg) return "Error: a commit message is needed";
   await connectDB();
-  const owner = await githubUser(project.owner);
-  if (!owner?.github_access_token) return "GitHub is not connected. The user connects it in AI Hub, then tries again.";
+  // With the Classgrid GitHub app set up, the push goes through the app installed on the repo (never the user's
+  // own GitHub key) and the commit is made by the app's bot, so Classgrid shows as a contributor.
+  let key, as = "";
+  if (githubAppReady()) {
+    key = await repoAppToken(project.repo).catch(() => null);
+    if (!key) return `The Classgrid app is not installed on ${project.repo}. The user installs it on this repo (${githubAppInstallUrl()}), then tries again.`;
+    const bot = await appBotIdentity();
+    as = `-c user.name=${q(bot.name)} -c user.email=${q(bot.email)}`;
+  } else {
+    const owner = await githubUser(project.owner);
+    if (!owner?.github_access_token) return "GitHub is not connected. The user connects it in AI Hub, then tries again.";
+    key = owner.github_access_token;
+  }
 
   const dir = projectHostDir(project);
   const { stdout: isRepo } = await ssh.execCommand(`[ -d ${q(dir)}/.git ] && echo yes`);
@@ -387,18 +399,18 @@ export async function pushProject(project, ssh, message) {
   await ssh.execCommand(`git -C ${q(dir)} add -A`);
   const { stdout: staged } = await ssh.execCommand(`git -C ${q(dir)} diff --cached --stat | tail -1`);
   if (staged.trim()) {
-    const commit = await ssh.execCommand(`git -C ${q(dir)} commit -q -F -`, { stdin: msg });
+    const commit = await ssh.execCommand(`git -C ${q(dir)} ${as} commit -q -F -`, { stdin: msg });
     if (commit.code) return `Commit failed: ${(commit.stderr || commit.stdout).slice(0, 500)}`;
   }
   const { stdout: branch } = await ssh.execCommand(`git -C ${q(dir)} rev-parse --abbrev-ref HEAD`);
-  const auth = Buffer.from(`x-access-token:${owner.github_access_token}`).toString("base64");
+  const auth = Buffer.from(`x-access-token:${key}`).toString("base64");
   const gitAuth = `GIT_TERMINAL_PROMPT=0 GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=http.https://github.com/.extraheader GIT_CONFIG_VALUE_0="AUTHORIZATION: basic ${auth}"`;
   // Someone else may have pushed to the same branch since the project was downloaded: take their commits
   // first and put ours on top, so the push is not rejected. If the same lines were changed, stop and say so.
   const b = q(branch.trim() || "main");
   const fetch = await ssh.execCommand(`${gitAuth} git -C ${q(dir)} fetch -q origin ${b}`);
   if (!fetch.code) { // the branch is on GitHub (a brand-new empty repo has nothing to take)
-    const rebase = await ssh.execCommand(`git -C ${q(dir)} -c user.name=Classgrid -c user.email=code@classgrid.in rebase -q FETCH_HEAD`);
+    const rebase = await ssh.execCommand(`git -C ${q(dir)} ${as || "-c user.name=Classgrid -c user.email=code@classgrid.in"} rebase -q FETCH_HEAD`);
     if (rebase.code) {
       await ssh.execCommand(`git -C ${q(dir)} rebase --abort 2>/dev/null`);
       const { stdout: files } = await ssh.execCommand(`git -C ${q(dir)} diff --name-only HEAD FETCH_HEAD 2>/dev/null | head -20 | paste -sd, -`);
@@ -883,11 +895,14 @@ export async function backupAndRemoveProjectCode(ssh, project) {
   let backupBranch = null;
   if (dirty.trim() || Number(ahead.trim()) > 0) {
     await connectDB();
-    const owner = await githubUser(project.owner);
-    if (!owner?.github_access_token || !project.repo) return { removed: false, reason: "unpushed work and no GitHub access" };
+    // Same as pushProject: through the Classgrid app when it is set up, else the owner's GitHub key
+    const key = githubAppReady()
+      ? await repoAppToken(project.repo).catch(() => null)
+      : (await githubUser(project.owner))?.github_access_token;
+    if (!key || !project.repo) return { removed: false, reason: "unpushed work and no GitHub access" };
     const stamp = new Date().toISOString().slice(0, 16).replace(/[-:T]/g, "").replace(/^(\d{8})(\d{4})$/, "$1-$2");
     backupBranch = `classgrid-backup-${stamp}`;
-    const auth = Buffer.from(`x-access-token:${owner.github_access_token}`).toString("base64");
+    const auth = Buffer.from(`x-access-token:${key}`).toString("base64");
     await ssh.execCommand(`git -C ${q(dir)} checkout -q -b ${backupBranch} && git -C ${q(dir)} add -A && git -C ${q(dir)} -c user.name=Classgrid -c user.email=backup@classgrid.in commit -q -m "Classgrid: unsaved work, saved when the project was closed" || true`);
     const push = await ssh.execCommand(
       `GIT_TERMINAL_PROMPT=0 GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=http.https://github.com/.extraheader GIT_CONFIG_VALUE_0="AUTHORIZATION: basic ${auth}" ` +
