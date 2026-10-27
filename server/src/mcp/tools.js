@@ -464,7 +464,7 @@ export const getMcpTools = () => [
 
   {
     name: 'create_github_repo_for_project',
-    description: 'Create a new GitHub repo on the user\'s connected GitHub account, or in a GitHub organization, for the open Project Mode project (only when it has no repo yet), link it to the project, and push the project\'s files to it. In an organization that has the Classgrid app installed, the Classgrid app makes the repo.',
+    description: 'Create a new GitHub repo on the user\'s connected GitHub account, or in a GitHub organization, for the open Project Mode project (only when it has no repo yet), link it to the project, and push the project\'s files to it. The repo is made with the user\'s own GitHub account, so an organization only works if the user may make repos in it.',
     inputSchema: {
       type: 'object',
       properties: {

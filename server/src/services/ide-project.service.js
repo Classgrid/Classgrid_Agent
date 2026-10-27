@@ -32,7 +32,7 @@ import { NodeSSH } from "node-ssh";
 import IdeProject from "../models/IdeProject.js";
 import User from "../models/User.js";
 import { githubUser } from "./github-token.service.js";
-import { githubAppReady, githubAppInstallUrl, repoAppToken, accountAppToken, coAuthorLine } from "./github-app.service.js";
+import { githubAppReady, githubAppInstallUrl, repoAppToken, coAuthorLine } from "./github-app.service.js";
 import connectDB from "../../config/db.js";
 import redis from "../config/redis.js";
 
@@ -355,17 +355,15 @@ export async function createRepoForProject(project, ssh, { name, private: isPriv
   await connectDB();
   const owner = await githubUser(project.owner, "github_name github_email");
 
-  // In an organization that has the Classgrid app, the app makes the repo. GitHub never lets an app make a repo
-  // on a person's own account, so those (and organizations without the app) are made with the user's key.
-  const orgAppKey = org ? await accountAppToken(org).catch(() => null) : null;
-  if (!orgAppKey && !owner?.github_access_token) return "GitHub is not connected. The user connects it in AI Hub, then tries again.";
-  const create = (key) => fetch(org ? `https://api.github.com/orgs/${org}/repos` : "https://api.github.com/user/repos", {
+  // A new repo is always made with the user's own GitHub key, so GitHub itself checks that the user may make repos
+  // there. Never with the Classgrid app: the app is installed on many accounts (Classgrid's own included), and
+  // making repos with it would let any user add repos to an organization they don't belong to.
+  if (!owner?.github_access_token) return "GitHub is not connected. The user connects it in AI Hub, then tries again.";
+  const ghRes = await fetch(org ? `https://api.github.com/orgs/${org}/repos` : "https://api.github.com/user/repos", {
     method: "POST",
-    headers: { Authorization: `Bearer ${key}`, Accept: "application/vnd.github+json", "User-Agent": "Classgrid", "Content-Type": "application/json" },
+    headers: { Authorization: `Bearer ${owner.github_access_token}`, Accept: "application/vnd.github+json", "User-Agent": "Classgrid", "Content-Type": "application/json" },
     body: JSON.stringify({ name: repoName, private: isPrivate !== false, description: description ? String(description).slice(0, 300) : undefined }),
   });
-  let ghRes = await create(orgAppKey || owner?.github_access_token);
-  if (orgAppKey && !ghRes.ok && ghRes.status !== 422 && owner?.github_access_token) ghRes = await create(owner.github_access_token);
   const gh = await ghRes.json().catch(() => ({}));
   if (ghRes.status === 401) return "GitHub refused the saved key. The user reconnects GitHub in AI Hub, then tries again.";
   if (!ghRes.ok) return `Could not create the repo: ${gh.errors?.[0]?.message || gh.message || ghRes.status}`;
@@ -386,7 +384,7 @@ export async function createRepoForProject(project, ssh, { name, private: isPriv
   if (staged.trim()) await ssh.execCommand(`git -C ${q(dir)} commit -q -F -`, { stdin: `First version\n\n${coAuthorLine()}\n` });
   const { stdout: hasCommit } = await ssh.execCommand(`git -C ${q(dir)} rev-parse -q --verify HEAD`);
   if (!hasCommit.trim()) return `Created ${gh.private ? "private" : "public"} repo ${gh.full_name} (${gh.html_url}) and linked it to this project. The project has no files yet, so nothing was pushed.`;
-  const auth = Buffer.from(`x-access-token:${appKey || orgAppKey || owner?.github_access_token}`).toString("base64");
+  const auth = Buffer.from(`x-access-token:${appKey || owner.github_access_token}`).toString("base64");
   const push = await ssh.execCommand(
     `GIT_TERMINAL_PROMPT=0 GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=http.https://github.com/.extraheader GIT_CONFIG_VALUE_0="AUTHORIZATION: basic ${auth}" ` +
     `git -C ${q(dir)} push -u origin HEAD:${q(branch)} 2>&1 | tail -5`
