@@ -529,6 +529,9 @@ export function SharedProfilePage({ publicUser, groupData, mode = "user", onClos
                     <UserBlueMark role={form.role} iconClassName="w-7 h-7" />
                   </h1>
                 </div>
+                {!isGroup && (form.bio || form.metadata?.bio) && (
+                  <p className="mt-2 max-w-2xl whitespace-pre-line text-[15px] leading-relaxed text-foreground/80">{form.bio || form.metadata?.bio}</p>
+                )}
                 <div className="flex flex-col gap-3 mt-2">
                   <div className="flex flex-wrap items-center gap-5 text-sm text-muted-foreground font-medium">
                     {!isGroup && form.email && (

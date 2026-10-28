@@ -890,7 +890,7 @@ router.get("/email-preferences", isAuthenticated, async (req, res) => {
 
     res.json({
       emailNotifications: { ...defaults, ...(user.emailNotifications || {}) },
-      privacySettings: { hideEmail: false, hideHobbies: false, ...(user.privacySettings || {}) },
+      privacySettings: { hideEmail: false, hideHobbies: false, hideBio: false, ...(user.privacySettings || {}) },
     });
   } catch (error) {
     console.error("GET EMAIL PREFS ERROR:", error.message);
@@ -925,6 +925,9 @@ router.put("/email-preferences", isAuthenticated, async (req, res) => {
       }
       if (typeof req.body.privacySettings.hideHobbies === "boolean") {
         updates["privacySettings.hideHobbies"] = req.body.privacySettings.hideHobbies;
+      }
+      if (typeof req.body.privacySettings.hideBio === "boolean") {
+        updates["privacySettings.hideBio"] = req.body.privacySettings.hideBio;
       }
     }
 

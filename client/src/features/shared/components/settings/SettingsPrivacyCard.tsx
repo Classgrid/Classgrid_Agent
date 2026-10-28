@@ -21,7 +21,7 @@ import { toast } from "sonner";
 // Saved as privacySettings.hideEmail / hideHobbies (PUT /api/user/email-preferences); the server
 // then leaves them out of what other people receive, so this is not only hidden on screen.
 
-type PrivacyPrefs = { hideEmail: boolean; hideHobbies: boolean };
+type PrivacyPrefs = { hideEmail: boolean; hideHobbies: boolean; hideBio: boolean };
 const KEY = ["privacy-settings"];
 
 export function SettingsPrivacyCard() {
@@ -30,7 +30,7 @@ export function SettingsPrivacyCard() {
     queryKey: KEY,
     queryFn: async () => {
       const { data } = await apiClient.get<{ privacySettings?: Partial<PrivacyPrefs> }>("/api/user/email-preferences");
-      return { hideEmail: !!data.privacySettings?.hideEmail, hideHobbies: !!data.privacySettings?.hideHobbies };
+      return { hideEmail: !!data.privacySettings?.hideEmail, hideHobbies: !!data.privacySettings?.hideHobbies, hideBio: !!data.privacySettings?.hideBio };
     },
     staleTime: 5 * 60 * 1000,
   });
@@ -52,7 +52,7 @@ export function SettingsPrivacyCard() {
     onSuccess: () => toast.success("Privacy setting saved."),
   });
 
-  const current: PrivacyPrefs = privacy || { hideEmail: false, hideHobbies: false };
+  const current: PrivacyPrefs = privacy || { hideEmail: false, hideHobbies: false, hideBio: false };
   const setShow = (field: keyof PrivacyPrefs, show: boolean) => save.mutate({ ...current, [field]: !show });
 
   return (
@@ -77,7 +77,7 @@ export function SettingsPrivacyCard() {
           />
         </div>
 
-        <div className="flex items-center justify-between gap-4 p-5">
+        <div className="flex items-center justify-between gap-4 p-5 border-b border-border">
           <div className="flex flex-col gap-1">
             <span className="font-semibold text-sm text-foreground">Show Hobbies</span>
             <span className="text-xs text-muted-foreground">Let others see your hobbies on your profile</span>
@@ -85,6 +85,18 @@ export function SettingsPrivacyCard() {
           <Switch
             checked={!current.hideHobbies}
             onCheckedChange={(checked) => setShow("hideHobbies", checked)}
+            disabled={isLoading || save.isPending}
+          />
+        </div>
+
+        <div className="flex items-center justify-between gap-4 p-5">
+          <div className="flex flex-col gap-1">
+            <span className="font-semibold text-sm text-foreground">Show Bio</span>
+            <span className="text-xs text-muted-foreground">Let others see your bio on your profile</span>
+          </div>
+          <Switch
+            checked={!current.hideBio}
+            onCheckedChange={(checked) => setShow("hideBio", checked)}
             disabled={isLoading || save.isPending}
           />
         </div>

@@ -648,9 +648,11 @@ router.get('/', isAuthenticated, async (req, res) => {
     const otherUserIds = otherMembers.map(m => m.user_id).filter(id => /^[0-9a-fA-F]{24}$/.test(id));
     let userMap = {};
     if (otherUserIds.length > 0) {
-      const users = await User.find({ _id: { $in: otherUserIds } }).select('name profilePicture role email phoneNumber bio prn blocked_users metadata.job_role').lean();
+      const users = await User.find({ _id: { $in: otherUserIds } }).select('name profilePicture role email phoneNumber bio prn blocked_users metadata.job_role privacySettings.hideBio').lean();
       const viewerId = req.user._id.toString();
       users.forEach(u => {
+        if (u.privacySettings?.hideBio) u.bio = null;
+        delete u.privacySettings;
         // This person blocked me: only their name, no photo / bio / contact details (WhatsApp-style)
         if ((u.blocked_users || []).includes(viewerId)) {
           u.profilePicture = null; u.bio = null; u.phoneNumber = null; u.email = null;

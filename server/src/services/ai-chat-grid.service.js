@@ -195,6 +195,7 @@ export async function gridProfilesText(sessionId, grid, viewerEmail) {
         const blockedViewer = !self && viewerId && (u.blocked_users || []).map(String).includes(viewerId);
         const hideEmail = !self && !!u.privacySettings?.hideEmail;
         const hideHobbies = !self && !!u.privacySettings?.hideHobbies;
+        const hideBio = !self && !!u.privacySettings?.hideBio;
         const lines = [`- ${grid.labels[email] || u.name || email}${hideEmail || blockedViewer ? "" : ` <${email}>`}${self ? " (the person sending the latest message)" : ""}`];
         lines.push(m.role === "owner"
             ? `  In this chat: owner, started this chat${m.joined_at ? `; shared it from ${IST(m.joined_at)}` : ""}`
@@ -203,7 +204,7 @@ export async function gridProfilesText(sessionId, grid, viewerEmail) {
         const md = u.metadata || {};
         if (["super_admin", "co_super_admin"].includes(u.role)) lines.push("  Classgrid team member");
         if (u.organization_id?.name) lines.push(`  Organization: ${u.organization_id.name}`);
-        if (u.bio || md.bio) lines.push(`  Bio: ${String(u.bio || md.bio).slice(0, 500)}`);
+        if (!hideBio && (u.bio || md.bio)) lines.push(`  Bio: ${String(u.bio || md.bio).slice(0, 500)}`);
         if (!hideHobbies && (u.hobby || md.hobby)) lines.push(`  Hobbies: ${String(u.hobby || md.hobby).slice(0, 500)}`);
         if (md.job_role) lines.push(`  Job role: ${md.job_role}`);
         const stack = Array.isArray(md.tech_stack) ? md.tech_stack.join(", ") : typeof md.tech_stack === "string" ? md.tech_stack : "";

@@ -519,6 +519,7 @@ const userSchema = new mongoose.Schema(
     privacySettings: {
       hideEmail: { type: Boolean, default: false },
       hideHobbies: { type: Boolean, default: false },
+      hideBio: { type: Boolean, default: false },
     },
 
     // ðŸ§ª Demo / Role Sandbox flags

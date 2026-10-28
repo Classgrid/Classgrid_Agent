@@ -193,6 +193,7 @@ router.get('/users', isAuthenticated, async (req, res) => {
       const isSelf = m._id.toString() === viewerId;
       const hideEmail = !isSelf && !!m.privacySettings?.hideEmail;
       const hideHobbies = !isSelf && !!m.privacySettings?.hideHobbies;
+      const hideBio = !isSelf && !!m.privacySettings?.hideBio;
       // This person blocked me: show only their name (no photo, banner, bio, hobby or last seen), like WhatsApp
       const blockedMe = !isSelf && (m.blocked_users || []).includes(viewerId);
       let metadata = blockedMe ? {} : (m.metadata || {});
@@ -200,6 +201,10 @@ router.get('/users', isAuthenticated, async (req, res) => {
         metadata = { ...metadata };
         delete metadata.hobby;
         delete metadata.hobbies;
+      }
+      if (hideBio && metadata && typeof metadata === 'object') {
+        metadata = { ...metadata };
+        delete metadata.bio;
       }
       return {
       _id: m._id.toString(),
@@ -209,7 +214,7 @@ router.get('/users', isAuthenticated, async (req, res) => {
       profilePicture: blockedMe ? null : (m.profilePicture || null),
       profileBanner: blockedMe ? null : (m.profileBanner || null),
       phoneNumber: blockedMe ? null : (m.phoneNumber || null),
-      bio: blockedMe ? null : (m.bio || null),
+      bio: hideBio || blockedMe ? null : (m.bio || null),
       prn: m.prn || null,
       forumUsername: forumMap[m.email] || null,
       metadata,
