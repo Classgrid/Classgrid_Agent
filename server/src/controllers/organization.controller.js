@@ -87,6 +87,7 @@ import { markOnboardingStep, syncDerivedOnboardingProgress } from "../services/o
 import mongoose from "mongoose";
 import redis from "../config/redis.js";
 import { uploadBufferToR2, deleteFromR2, getPresignedUploadUrl } from "../config/r2Client.js";
+import { finishedAccountsMatch, unfinishedChatSignupMatch } from "../utils/chat-onboarding.js";
 import {
     deleteMongoAnnouncementBySupabaseId,
     deliverPublishedOrganizationAnnouncement,
@@ -1074,10 +1075,13 @@ export const getAttendanceAnalytics = async (req, res) => {
 export const getAllUsers = async (req, res) => {
     try {
         await connectDB();
-        const { role, org } = req.query;
+        const { role, org, signup } = req.query;
         const filter = { is_demo: { $ne: true } };
         if (role) filter.role = role;
         if (org) filter.organization_id = org;
+        // Chat sign-ups that stopped before the last step are not users yet: listed only when asked for
+        if (signup === "unfinished") Object.assign(filter, unfinishedChatSignupMatch());
+        else if (signup !== "all") Object.assign(filter, finishedAccountsMatch());
 
         const users = await User.find(filter)
             .select("-password -verificationToken -resetPasswordToken")

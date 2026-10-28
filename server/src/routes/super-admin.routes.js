@@ -76,6 +76,7 @@ import { isAuthenticated, requireRole } from "../middleware/auth.middleware.js";
 import { getBlogSubscribersSb } from "../config/blogSubscribersSupabaseClient.js";
 import UserProfile from "../models/UserProfile.js";
 import { getProfileSchema } from "../utils/profile-schemas.js";
+import { finishedAccountsMatch, unfinishedChatSignupMatch } from "../utils/chat-onboarding.js";
 import {
     broadcastGlobal,
     emailOrgAdmins,
@@ -603,7 +604,7 @@ router.get("/organizations", async (req, res) => {
         const ownerIds = orgs.map((o) => o.owner_id).filter(Boolean);
         const [userCounts, owners] = await Promise.all([
             User.aggregate([
-                { $match: { organization_id: { $in: orgIds } } },
+                { $match: { organization_id: { $in: orgIds }, ...finishedAccountsMatch() } },
                 { $group: { _id: "$organization_id", count: { $sum: 1 } } },
             ]),
             User.find({ _id: { $in: ownerIds } }).select("name email").lean(),
@@ -666,9 +667,9 @@ router.get("/custom-domains/:orgId/full", async (req, res) => {
         }
 
         const [totalStudents, totalFaculty, totalUsers, adminsList] = await Promise.all([
-            User.countDocuments({ organization_id: orgId, role: "student" }),
+            User.countDocuments({ organization_id: orgId, role: "student", ...finishedAccountsMatch() }),
             User.countDocuments({ organization_id: orgId, role: { $in: ["faculty", "hod", "principal"] } }),
-            User.countDocuments({ organization_id: orgId }),
+            User.countDocuments({ organization_id: orgId, ...finishedAccountsMatch() }),
             User.find({
                 organization_id: orgId,
                 role: { $in: ["org_admin", "super_admin", "library_manager", "hod", "principal", "vice_principal", "exam_controller", "fee_manager", "admission_head", "tpo_officer", "coordinator"] }
@@ -1673,7 +1674,7 @@ router.get("/users", async (req, res) => {
     try {
         const User = (await import("../models/User.js")).default;
         const Organization = (await import("../models/Organization.js")).default;
-        const { q = "", role, orgId, status, page = 1, limit = 50 } = req.query;
+        const { q = "", role, orgId, status, signup, page = 1, limit = 50 } = req.query;
         const skip = (parseInt(page) - 1) * parseInt(limit);
 
         const filter = {};
@@ -1686,8 +1687,11 @@ router.get("/users", async (req, res) => {
         if (role) filter.role = role;
         if (orgId) filter.organization_id = orgId;
         if (status) filter.status = status;
+        // Chat sign-ups that stopped before the last step are not users yet: listed only when asked for
+        if (signup === "unfinished") filter.$and = [unfinishedChatSignupMatch()];
+        else if (signup !== "all") filter.$and = [finishedAccountsMatch()];
 
-        const [users, total] = await Promise.all([
+        const [users, total, unfinishedSignups] = await Promise.all([
             User.find(filter)
                 .select("name email role status isEmailVerified organization_id createdAt lastLoginAt profilePicture")
                 .sort({ createdAt: -1 })
@@ -1695,6 +1699,7 @@ router.get("/users", async (req, res) => {
                 .limit(parseInt(limit))
                 .lean(),
             User.countDocuments(filter),
+            User.countDocuments(unfinishedChatSignupMatch()),
         ]);
 
         // Attach org data
@@ -1712,7 +1717,7 @@ router.get("/users", async (req, res) => {
             };
         });
 
-        res.json({ success: true, data: enriched, total, page: parseInt(page), limit: parseInt(limit) });
+        res.json({ success: true, data: enriched, total, unfinishedSignups, page: parseInt(page), limit: parseInt(limit) });
     } catch (err) {
         console.error("[SuperAdmin] global-users error:", err.message);
         res.status(500).json({ success: false, message: "Server error" });
@@ -1941,7 +1946,7 @@ router.get("/system-metrics", async (req, res) => {
                emailsPending, emailsSent, emailsFailed,
                errorLogs24h, warnLogs24h,
                newUsers7d, newOrgs7d] = await Promise.all([
-            User.countDocuments({}),
+            User.countDocuments(finishedAccountsMatch()),
             Organization.countDocuments({}),
             Organization.countDocuments({ status: "active" }),
             Organization.countDocuments({ status: "suspended" }),
@@ -1950,7 +1955,7 @@ router.get("/system-metrics", async (req, res) => {
             EmailJob.countDocuments({ status: "failed" }),
             SystemLog.countDocuments({ level: "error", timestamp: { $gte: last24h } }),
             SystemLog.countDocuments({ level: "warn", timestamp: { $gte: last24h } }),
-            User.countDocuments({ createdAt: { $gte: last7d } }),
+            User.countDocuments({ createdAt: { $gte: last7d }, ...finishedAccountsMatch() }),
             Organization.countDocuments({ createdAt: { $gte: last7d } }),
         ]);
 

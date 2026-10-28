@@ -119,17 +119,20 @@ export function GlobalUsersPage() {
   const [search, setSearch] = useState("");
   const [roleFilter, setRoleFilter] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
+  // "" = finished sign-ups only; "unfinished" = chat sign-ups that stopped before the last step
+  const [signupFilter, setSignupFilter] = useState("");
   const [orgTypeFilter, setOrgTypeFilter] = useState("");
   const [dateFilter, setDateFilter] = useState<Date | undefined>(undefined);
 
   // Fetch users from our newly enriched API
   const { data, isLoading, refetch, isFetching } = useQuery({
-    queryKey: ["global-users", search, roleFilter, statusFilter],
+    queryKey: ["global-users", search, roleFilter, statusFilter, signupFilter],
     queryFn: () => apiClient.get<any>("/api/super-admin/users", { 
         params: { 
             q: search, 
             role: roleFilter || undefined, 
             status: statusFilter || undefined, 
+            signup: signupFilter || undefined,
             limit: 200 
         } 
     }).then(r => r.data),
@@ -138,6 +141,7 @@ export function GlobalUsersPage() {
 
   const allUsers: any[] = data?.data ?? [];
   const total: number = data?.total ?? 0;
+  const unfinishedSignups: number = data?.unfinishedSignups ?? 0;
 
   // Listen for real-time user updates via WebSocket
   React.useEffect(() => {
@@ -300,6 +304,19 @@ export function GlobalUsersPage() {
               onChange={(e) => setStatusFilter(e.target.value)}
             >
               {STATUS_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+            </ResponsiveSelect>
+          </div>
+
+          {/* Sign-up: finished users, or sign-ups that stopped before the last step */}
+          <div className="w-[200px]">
+            <ResponsiveSelect
+              className="flex h-9 w-full items-center rounded-md border border-border bg-transparent px-3 py-1 shadow-sm hover:bg-accent/50 transition-colors text-sm"
+              value={signupFilter}
+              onChange={(e) => setSignupFilter(e.target.value)}
+            >
+              <option value="">Finished sign-ups</option>
+              <option value="unfinished">Unfinished sign-ups ({unfinishedSignups})</option>
+              <option value="all">Everyone</option>
             </ResponsiveSelect>
           </div>
 

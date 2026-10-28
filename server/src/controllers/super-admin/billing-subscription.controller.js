@@ -77,6 +77,7 @@ import SubscriptionChange from "../../models/SubscriptionChange.js";
 import InvoiceGenerator from "../../services/billing/InvoiceGenerator.js";
 import ProrationEngine from "../../services/billing/ProrationEngine.js";
 import { logAdminAction } from "../../services/auditLog.service.js";
+import { finishedAccountsMatch } from "../../utils/chat-onboarding.js";
 
 export const listSubscriptions = async (req, res) => {
     try {
@@ -107,7 +108,7 @@ export const getSubscriptionOverview = async (req, res) => {
                     }
                 }
             ]),
-            User.countDocuments({ status: "active" })
+            User.countDocuments({ status: "active", ...finishedAccountsMatch() })
         ]);
 
         const stats = orgStats[0] || { totalOrgs: 0, activeOrgs: 0, demoOrgs: 0 };

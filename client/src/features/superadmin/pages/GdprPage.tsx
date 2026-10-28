@@ -93,7 +93,7 @@ export function GdprPage() {
 
   const { data, isLoading, refetch, isFetching } = useQuery({
     queryKey: ["gdpr-users", search],
-    queryFn: () => apiClient.get<any>("/api/super-admin/users", { params: { q: search, limit: 100 } }).then(r => r.data),
+    queryFn: () => apiClient.get<any>("/api/super-admin/users", { params: { q: search, limit: 100, signup: "all" } }).then(r => r.data),
     staleTime: 30_000,
   });
 

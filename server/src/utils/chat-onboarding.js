@@ -27,6 +27,8 @@
  * super admin dashboard are live.
  * ─────────────────────────────────────────────────────────
  */
+import mongoose from "mongoose";
+
 // Public chat (chat.classgrid.in) accounts must finish sign-up — a verified WhatsApp number and age —
 // before they can use the AI. ERP users, staff and impersonation sessions are never affected.
 
@@ -44,6 +46,22 @@ export function needsChatOnboarding(user) {
     if (String(user.email || "").toLowerCase().endsWith("@classgrid.in")) return false;
     const meta = user.metadata || {};
     return !meta.whatsappPhone || !meta.age;
+}
+
+// The same rule as needsChatOnboarding, as a MongoDB match: chat sign-ups that stopped before the last
+// step. They are not counted or listed as users until they finish.
+export function unfinishedChatSignupMatch() {
+    return {
+        organization_id: new mongoose.Types.ObjectId(CHAT_PUBLIC_ORG_ID),
+        role: { $in: ["user", "student"] },
+        email: { $not: /@classgrid\.in$/i },
+        $or: [{ "metadata.whatsappPhone": { $in: [null, ""] } }, { "metadata.age": { $in: [null, ""] } }],
+    };
+}
+
+// Every account except unfinished chat sign-ups
+export function finishedAccountsMatch() {
+    return { $nor: [unfinishedChatSignupMatch()] };
 }
 
 // The owner's own WhatsApp number may be linked to several test accounts: it skips the
