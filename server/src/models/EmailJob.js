@@ -109,6 +109,7 @@ const emailJobSchema = new mongoose.Schema(
                 "demo_meeting_scheduled",
                 "demo_meeting_scheduled_internal",
                 "demo_provisioning_onboarding",
+                "billing_alert",
                 "other",
             ],
             default: "other",
