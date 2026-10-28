@@ -55,23 +55,25 @@ interface AiSchedule extends ScheduleRepeat {
   created_at?: string;
 }
 
-const Field = ({ label, value, children }: { label: string; value?: string; children?: React.ReactNode }) => (
-  <div>
-    <label className="text-xs font-medium text-muted-foreground block mb-1.5">{label}</label>
-    <div className="border rounded-lg px-3 py-2.5 bg-background text-sm min-h-[38px] whitespace-pre-wrap leading-relaxed">
-      {children || value || <span className="text-muted-foreground/50">—</span>}
-    </div>
+const Eyebrow = ({ children }: { children: React.ReactNode }) => (
+  <p className="font-mono text-[11px] uppercase tracking-[0.15em] text-muted-foreground">{children}</p>
+);
+
+// One fact in the facts grid
+const Fact = ({ label, children }: { label: string; children: React.ReactNode }) => (
+  <div className="p-5">
+    <Eyebrow>{label}</Eyebrow>
+    <div className="mt-2 text-[15px] text-foreground">{children}</div>
   </div>
 );
 
-const SectionCard = ({ title, subtitle, children }: { title: string; subtitle?: string; children: React.ReactNode }) => (
-  <div className="bg-card border rounded-xl overflow-hidden shadow-sm">
-    <div className="bg-muted/30 px-5 py-4 border-b">
-      <h2 className="font-semibold text-card-foreground text-sm uppercase tracking-wide">{title}</h2>
-      {subtitle && <p className="text-xs text-muted-foreground mt-0.5">{subtitle}</p>}
-    </div>
-    <div className="p-5">{children}</div>
-  </div>
+// A flat section: small label on top, content below
+const Section = ({ label, title, children }: { label: string; title?: string; children: React.ReactNode }) => (
+  <section className="rounded-md border border-border bg-background p-6">
+    <Eyebrow>{label}</Eyebrow>
+    {title && <h2 className="mt-2 text-xl font-medium tracking-[-0.01em] text-foreground">{title}</h2>}
+    <div className="mt-4">{children}</div>
+  </section>
 );
 
 export const ScheduleDetailPage: React.FC<{ id?: string }> = ({ id: propId }) => {
@@ -186,21 +188,17 @@ export const ScheduleDetailPage: React.FC<{ id?: string }> = ({ id: propId }) =>
   // ─── LOADING SKELETON ───
   if (loading) {
     return (
-      <div className="w-full max-w-5xl mx-auto p-6 lg:p-8 pb-16 animate-pulse">
-        <div className="flex items-center gap-3 mb-8 border-b border-border pb-6">
-          <div className="h-8 w-8 bg-muted rounded-lg" />
-          <div className="h-8 w-64 bg-muted rounded-md" />
+      <div className="mx-auto w-full max-w-6xl animate-pulse p-4 pb-16 sm:p-6 lg:p-8">
+        <div className="mb-8 border-b border-border pb-8">
+          <div className="h-3 w-20 rounded bg-muted" />
+          <div className="mt-4 h-10 w-80 rounded bg-muted" />
         </div>
-        <div className="grid grid-cols-1 xl:grid-cols-12 gap-8">
-          <div className="xl:col-span-8 space-y-6">
-            <div className="h-40 bg-card border rounded-xl" />
-            <div className="h-48 bg-card border rounded-xl" />
-            <div className="h-48 bg-card border rounded-xl" />
+        <div className="grid grid-cols-1 gap-6 lg:grid-cols-[minmax(0,1fr)_320px]">
+          <div className="space-y-6">
+            <div className="h-28 rounded-md border border-border" />
+            <div className="h-40 rounded-md border border-border" />
           </div>
-          <div className="xl:col-span-4 space-y-6">
-            <div className="h-56 bg-card border rounded-xl" />
-            <div className="h-40 bg-card border rounded-xl" />
-          </div>
+          <div className="h-80 rounded-md border border-border" />
         </div>
       </div>
     );
@@ -211,17 +209,23 @@ export const ScheduleDetailPage: React.FC<{ id?: string }> = ({ id: propId }) =>
   const createdDateStr = schedule.createdAt || schedule.created_at;
   const summaryText = schedule.summary || schedule.email_subject;
   const detailsText = schedule.action_info;
+  const repeatText = repeatLabel(schedule);
+  const statusLabel = schedule.status === "sent" ? "Completed" : schedule.status.charAt(0).toUpperCase() + schedule.status.slice(1);
+  const statusDot =
+    schedule.status === "pending" ? "bg-blue-500" :
+    schedule.status === "sent" ? "bg-emerald-500" :
+    schedule.status === "failed" ? "bg-red-500" : "bg-slate-400";
 
   return (
-    <div className="w-full max-w-5xl mx-auto p-4 sm:p-6 lg:p-8 pb-16 overflow-y-auto h-full">
+    <div className="mx-auto h-full w-full max-w-6xl overflow-y-auto p-4 pb-16 sm:p-6 lg:p-8">
 
-      {/* ── INLINE NATIVE BREADCRUMB ── */}
+      {/* Breadcrumb */}
       <div className="mb-6">
         <Breadcrumb>
           <BreadcrumbList>
             <BreadcrumbItem>
               <BreadcrumbLink asChild>
-                <div role="button" tabIndex={0} onClick={() => navigate(backPath)} className="hover:text-foreground cursor-pointer bg-transparent border-none p-0 inline-flex">
+                <div role="button" tabIndex={0} onClick={() => navigate(backPath)} className="inline-flex cursor-pointer border-none bg-transparent p-0 hover:text-foreground">
                   Schedules
                 </div>
               </BreadcrumbLink>
@@ -234,281 +238,191 @@ export const ScheduleDetailPage: React.FC<{ id?: string }> = ({ id: propId }) =>
         </Breadcrumb>
       </div>
 
-      {/* ── HEADER ── */}
-      <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-4 border-b border-border pb-6 mb-8">
-        <div className="flex flex-col">
-          <div className="flex items-center gap-3 mb-1">
-            <h1 className="text-2xl sm:text-3xl font-bold tracking-tight">{schedule.title}</h1>
-          </div>
-          {schedule.description && (
-            <p className="text-muted-foreground mt-1 text-sm">{schedule.description}</p>
-          )}
-          {createdDateStr && (
-            <p className="text-muted-foreground text-xs mt-1">
-              Created on {format(new Date(createdDateStr), "dd MMM yyyy, hh:mm a")}
-            </p>
-          )}
+      {/* Heading */}
+      <header className="mb-8 border-b border-border pb-8">
+        <div className="flex flex-wrap items-center gap-3">
+          <Eyebrow>Schedule</Eyebrow>
+          <span className="inline-flex items-center gap-1.5 rounded-sm bg-muted px-2 py-0.5 font-mono text-[11px] uppercase tracking-[0.12em] text-foreground">
+            <span className={`h-1.5 w-1.5 rounded-full ${statusDot}`} />
+            {statusLabel}
+          </span>
         </div>
-      </div>
+        <h1 className="mt-4 text-balance text-3xl font-medium tracking-[-0.03em] text-foreground sm:text-5xl">{schedule.title}</h1>
+        {createdDateStr && (
+          <p className="mt-3 text-sm text-muted-foreground">
+            Created on {format(new Date(createdDateStr), "dd MMM yyyy, hh:mm a")}
+          </p>
+        )}
+      </header>
 
-      <DangerConfirmDialog
-        open={deleteOpen}
-        onOpenChange={setDeleteOpen}
-        title="Delete Schedule"
-        description="Are you sure you want to permanently delete this schedule?"
-        warningMessage="This action cannot be undone."
-        actionLabel="Delete Schedule"
-        cancelLabel="Cancel"
-        onConfirm={handleDelete}
-        variant="danger"
-      />
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-[minmax(0,1fr)_320px]">
 
-      {/* ── 12-COLUMN GRID ── */}
-      <div className="grid grid-cols-1 xl:grid-cols-12 gap-8">
+        {/* Main */}
+        <div className="space-y-6">
 
-        {/* LEFT CONTENT (col-span-8) */}
-        <div className="xl:col-span-8 space-y-6">
+          {/* Facts */}
+          <div className="grid grid-cols-1 divide-y divide-border rounded-md border border-border sm:grid-cols-3 sm:divide-x sm:divide-y-0">
+            <Fact label="Scheduled for">
+              <p className="font-medium">{format(new Date(schedule.scheduled_at), "dd MMM yyyy")}</p>
+              <p className="text-sm text-muted-foreground">{format(new Date(schedule.scheduled_at), "hh:mm a")} · IST</p>
+            </Fact>
+            <Fact label="Repeats">
+              <p className="font-medium">{repeatText || "One time"}</p>
+              {repeatText && schedule.status === "pending" && (
+                <p className="text-sm text-muted-foreground">The time shown is the next run</p>
+              )}
+            </Fact>
+            <Fact label="Schedule ID">
+              <p className="font-mono font-medium">#{schedule._id.slice(-8).toUpperCase()}</p>
+            </Fact>
+          </div>
 
-          {/* SCHEDULE DETAILS */}
-          <SectionCard title="Schedule Details" subtitle="Timing and context of this scheduled task">
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
-              <Field label="Scheduled Date & Time">
-                <div className="flex items-center gap-2">
-                  <Calendar className="w-4 h-4 text-primary shrink-0" />
-                  <span className="font-medium">
-                    {format(new Date(schedule.scheduled_at), "dd MMMM yyyy, hh:mm a")}
-                  </span>
-                </div>
-                <p className="text-[11px] text-muted-foreground mt-1">Asia/Kolkata · IST</p>
-                {repeatLabel(schedule) && (
-                  <p className="text-xs font-medium text-muted-foreground mt-1.5">
-                    {repeatLabel(schedule)}{schedule.status === "pending" ? " · the time above is the next run" : ""}
-                  </p>
-                )}
-              </Field>
-              <Field label="Created On">
-                <div className="flex items-center gap-2">
-                  <Clock className="w-4 h-4 text-muted-foreground shrink-0" />
-                  <span>
-                    {createdDateStr
-                      ? format(new Date(createdDateStr), "dd MMM yyyy, hh:mm a")
-                      : "—"}
-                  </span>
-                </div>
-              </Field>
-              <Field label="Schedule ID" value={`#${schedule._id.slice(-8).toUpperCase()}`} />
-            </div>
-          </SectionCard>
-
-          {/* SUBJECT / TOPIC */}
-          {(summaryText) && (
-            <SectionCard title="Subject / Topic" subtitle="What this schedule is about">
-              <Field label="Subject">
-                <div className="flex items-start gap-2">
-                  <Mail className="w-4 h-4 text-muted-foreground shrink-0 mt-0.5" />
-                  <span>{summaryText}</span>
-                </div>
-              </Field>
-            </SectionCard>
+          {summaryText && (
+            <Section label="Subject" title={summaryText}>
+              {schedule.summary && schedule.summary !== summaryText ? (
+                <p className="text-[15px] leading-relaxed text-muted-foreground">{schedule.summary}</p>
+              ) : (
+                <p className="text-[15px] leading-relaxed text-muted-foreground">What this schedule is about.</p>
+              )}
+            </Section>
           )}
 
-          {/* SUMMARY */}
-          {schedule.summary && (
-            <SectionCard title="Summary" subtitle="Quick overview from the AI">
-              <Field label="Summary" value={schedule.summary} />
-            </SectionCard>
-          )}
-
-          {/* DETAILS & INFORMATION */}
           {detailsText && (
-            <SectionCard title="Details & Information" subtitle="Full context and additional information">
-              <div>
-                <label className="text-xs font-medium text-muted-foreground block mb-1.5">Action Information</label>
-                <div className="border rounded-lg px-3 py-3 bg-background text-sm min-h-[100px] whitespace-pre-wrap leading-relaxed">
-                  {detailsText}
-                </div>
-              </div>
-            </SectionCard>
+            <Section label="Details">
+              <p className="whitespace-pre-wrap text-[15px] leading-relaxed text-foreground">{detailsText}</p>
+            </Section>
           )}
 
-          {/* CALENDAR FOR RESCHEDULING */}
+          {schedule.description && (
+            <Section label="Notes">
+              <p className="whitespace-pre-wrap text-[15px] leading-relaxed text-foreground">{schedule.description}</p>
+            </Section>
+          )}
+
           {schedule.status === "pending" && (
-            <SectionCard title="Reschedule Task" subtitle="Change the scheduled date and time">
+            <Section label="Reschedule" title="Change the date and time">
               <div className="flex flex-col gap-4">
-                <NikhilTimeCalendar
-                  value={selectedDate}
-                  onChange={setSelectedDate}
-                />
-                <div className="flex items-center gap-3 mt-2">
+                <NikhilTimeCalendar value={selectedDate} onChange={setSelectedDate} />
+                <div>
                   <button
                     onClick={handleUpdateSchedule}
                     disabled={isUpdating || !selectedDate || selectedDate.getTime() === new Date(schedule.scheduled_at).getTime()}
-                    className="h-10 px-4 rounded-xl text-sm font-medium flex items-center justify-center bg-[#2C2C2C] text-[#F0EFED] dark:bg-[#F0EFED] dark:text-[#2C2C2C] disabled:opacity-50 transition-opacity cursor-pointer"
+                    className="inline-flex h-11 cursor-pointer items-center gap-1.5 rounded-md bg-foreground px-5 text-[15px] font-medium text-background transition-colors hover:bg-zinc-700 disabled:cursor-not-allowed disabled:opacity-50 dark:hover:bg-zinc-300"
                   >
-                    {isUpdating ? "Saving..." : "Update Schedule"}
+                    {isUpdating ? "Saving..." : "Update schedule"}
                   </button>
                 </div>
               </div>
-            </SectionCard>
+            </Section>
           )}
-
-
-
-          {/* DESCRIPTION */}
-          {schedule.description && (
-            <SectionCard title="Notes" subtitle="Description or notes for this schedule">
-              <Field label="Notes" value={schedule.description} />
-            </SectionCard>
-          )}
-
         </div>
 
-        {/* RIGHT SIDEBAR (col-span-4) */}
-        <div className="xl:col-span-4 sticky top-6 h-[calc(100vh-120px)] flex flex-col">
-          <div className="flex-1 overflow-y-auto pr-1 space-y-6 pb-2">
+        {/* Side panel */}
+        <aside className="space-y-6 lg:sticky lg:top-6 lg:self-start">
 
-            {/* STATUS CARD */}
-            <div className="bg-card border rounded-xl shadow-sm overflow-hidden">
-              <div className="bg-muted/30 px-5 py-4 border-b">
-                <h2 className="font-semibold text-card-foreground text-sm uppercase tracking-wide">Status</h2>
-              </div>
-              <div className="p-5 space-y-4">
-                <div className="flex items-center gap-3">
-                  {schedule.status === "pending" && <AlarmClock className="w-5 h-5 text-blue-500" />}
-                  {schedule.status === "sent" && <CheckCircle2 className="w-5 h-5 text-emerald-500" />}
-                  {schedule.status === "failed" && <AlertCircle className="w-5 h-5 text-red-500" />}
-                  {schedule.status === "cancelled" && <XCircle className="w-5 h-5 text-slate-500" />}
-                  <div>
-                    <p className="text-xs text-muted-foreground mb-0.5">Current Status</p>
-                    <p className="font-semibold text-sm capitalize">{schedule.status === "sent" ? "Completed" : schedule.status}</p>
-                  </div>
-                </div>
-
-                {schedule.status === "pending" && (
-                  <div className="bg-blue-50 dark:bg-blue-950/20 border border-blue-200 dark:border-blue-900/40 rounded-lg p-3 text-xs text-blue-700 dark:text-blue-400">
-                    This schedule is active. An email will be sent automatically at the scheduled time.
-                  </div>
-                )}
-                {schedule.status === "sent" && (
-                  <div className="bg-emerald-50 dark:bg-emerald-950/20 border border-emerald-200 dark:border-emerald-900/40 rounded-lg p-3 text-xs text-emerald-700 dark:text-emerald-400">
-                    Task was completed successfully at the scheduled time.
-                  </div>
-                )}
-              </div>
+          {/* Status */}
+          <section className="rounded-md border border-border bg-muted/40 p-6">
+            <Eyebrow>Status</Eyebrow>
+            <div className="mt-3 flex items-center gap-3">
+              {schedule.status === "pending" && <AlarmClock className="h-5 w-5 text-blue-500" />}
+              {schedule.status === "sent" && <CheckCircle2 className="h-5 w-5 text-emerald-500" />}
+              {schedule.status === "failed" && <AlertCircle className="h-5 w-5 text-red-500" />}
+              {schedule.status === "cancelled" && <XCircle className="h-5 w-5 text-slate-500" />}
+              <p className="text-xl font-medium tracking-[-0.01em] text-foreground">{statusLabel}</p>
             </div>
+            {schedule.status === "pending" && (
+              <p className="mt-3 text-sm leading-relaxed text-muted-foreground">
+                This schedule is active. An email will be sent automatically at the scheduled time.
+              </p>
+            )}
+            {schedule.status === "sent" && (
+              <p className="mt-3 text-sm leading-relaxed text-muted-foreground">
+                Task was completed successfully at the scheduled time.
+              </p>
+            )}
+          </section>
 
-            {/* TIMELINE CARD — vertical stepper */}
-            <div className="bg-card border rounded-xl shadow-sm overflow-hidden">
-              <div className="bg-muted/30 px-5 py-4 border-b">
-                <h2 className="font-semibold text-card-foreground text-sm uppercase tracking-wide">Timeline</h2>
-              </div>
-              <div className="p-5">
-                <div className="relative pl-6">
-                  {/* vertical line */}
-                  <div className="absolute left-[7px] top-1.5 bottom-1.5 w-px bg-border" />
+          {/* Timeline */}
+          <section className="rounded-md border border-border bg-background p-6">
+            <Eyebrow>Timeline</Eyebrow>
+            <div className="relative mt-5 pl-6">
+              <div className="absolute bottom-1.5 left-[5px] top-1.5 w-px bg-border" />
+              {(() => {
+                const history = (schedule as any).reschedule_history || [];
+                const originalDate = history.length > 0 ? history[0].previous_date : schedule.scheduled_at;
+                const isCompleted = schedule.status === "sent";
+                const isFailed = schedule.status === "failed";
 
-                  {(() => {
-                    const history = (schedule as any).reschedule_history || [];
-                    const originalDate = history.length > 0 ? history[0].previous_date : schedule.scheduled_at;
-                    const isCompleted = schedule.status === "sent";
-                    const isFailed = schedule.status === "failed";
+                return (
+                  <>
+                    <div className="relative pb-5">
+                      <div className="absolute -left-6 top-1.5 z-10 h-[11px] w-[11px] rounded-full border-2 border-background bg-foreground" />
+                      <Eyebrow>Created</Eyebrow>
+                      <p className="mt-1 text-sm font-medium text-foreground">
+                        {createdDateStr ? format(new Date(createdDateStr), "dd MMM yyyy, hh:mm a") : "—"}
+                      </p>
+                    </div>
 
-                    return (
-                      <>
-                        {/* Step 1: Created */}
-                        <div className="relative pb-5">
-                          <div className="absolute -left-6 top-1 w-3.5 h-3.5 rounded-full bg-emerald-500 border-2 border-background z-10" />
-                          <p className="text-xs font-medium text-muted-foreground">Created</p>
-                          <p className="text-sm font-semibold text-foreground">
-                            {createdDateStr ? format(new Date(createdDateStr), "dd MMM yyyy") : "—"}
+                    <div className="relative pb-5">
+                      <div className="absolute -left-6 top-1.5 z-10 h-[11px] w-[11px] rounded-full border-2 border-background bg-blue-500" />
+                      <Eyebrow>Scheduled</Eyebrow>
+                      <p className="mt-1 text-sm font-medium text-foreground">
+                        {format(new Date(originalDate), "dd MMM yyyy, hh:mm a")} · IST
+                      </p>
+                    </div>
+
+                    {history.map((entry: any, i: number) => {
+                      const newDate = i + 1 < history.length ? history[i + 1].previous_date : schedule.scheduled_at;
+                      return (
+                        <div key={i} className="relative pb-5">
+                          <div className="absolute -left-6 top-1.5 z-10 h-[11px] w-[11px] rounded-full border-2 border-background bg-amber-500" />
+                          <Eyebrow>Rescheduled</Eyebrow>
+                          <p className="mt-1 text-sm font-medium text-foreground">
+                            {format(new Date(newDate), "dd MMM yyyy, hh:mm a")}
                           </p>
-                          <p className="text-[11px] text-muted-foreground">
-                            {createdDateStr ? format(new Date(createdDateStr), "hh:mm a") : ""}
+                          <p className="text-xs text-muted-foreground">
+                            moved on {format(new Date(entry.rescheduled_at), "dd MMM, hh:mm a")}
                           </p>
                         </div>
+                      );
+                    })}
 
-                        {/* Step 2: Original Scheduled Date */}
-                        <div className="relative pb-5">
-                          <div className="absolute -left-6 top-1 w-3.5 h-3.5 rounded-full bg-blue-500 border-2 border-background z-10" />
-                          <p className="text-xs font-medium text-muted-foreground">Scheduled</p>
-                          <p className="text-sm font-semibold text-foreground">
-                            {format(new Date(originalDate), "dd MMM yyyy")}
+                    <div className="relative">
+                      <div className={`absolute -left-6 top-1.5 z-10 h-[11px] w-[11px] rounded-full border-2 border-background ${isCompleted ? "bg-emerald-500" : isFailed ? "bg-red-500" : "bg-muted-foreground/30"}`} />
+                      <Eyebrow>{isCompleted ? "Completed" : isFailed ? "Failed" : "Pending"}</Eyebrow>
+                      {isCompleted && (schedule as any).sent_at ? (
+                        <p className="mt-1 text-sm font-medium text-foreground">
+                          {format(new Date((schedule as any).sent_at), "dd MMM yyyy, hh:mm a")} · IST
+                        </p>
+                      ) : isCompleted ? (
+                        <p className="mt-1 text-sm font-medium text-emerald-500">Done ✓</p>
+                      ) : isFailed ? (
+                        <>
+                          <p className="mt-1 text-sm font-medium text-red-500">Failed ✗</p>
+                          <p className="mt-1 max-w-[240px] text-xs leading-tight text-red-400">
+                            {schedule.error_message || "Execution failed. Worker caught an error."}
                           </p>
-                          <p className="text-[11px] text-muted-foreground">
-                            {format(new Date(originalDate), "hh:mm a")} · IST
-                          </p>
-                        </div>
-
-                        {/* Step 3+: Each reschedule */}
-                        {history.map((entry: any, i: number) => {
-                          const newDate = i + 1 < history.length ? history[i + 1].previous_date : schedule.scheduled_at;
-                          return (
-                            <div key={i} className="relative pb-5">
-                              <div className="absolute -left-6 top-1 w-3.5 h-3.5 rounded-full bg-amber-500 border-2 border-background z-10" />
-                              <p className="text-xs font-medium text-muted-foreground">Rescheduled</p>
-                              <p className="text-sm font-semibold text-foreground">
-                                {format(new Date(newDate), "dd MMM yyyy")}
-                              </p>
-                              <p className="text-[11px] text-muted-foreground">
-                                {format(new Date(newDate), "hh:mm a")} · moved on {format(new Date(entry.rescheduled_at), "dd MMM, hh:mm a")}
-                              </p>
-                            </div>
-                          );
-                        })}
-
-                        {/* Final Step: Completed / Failed / Pending */}
-                        <div className="relative">
-                          <div className={`absolute -left-6 top-1 w-3.5 h-3.5 rounded-full border-2 border-background z-10 ${isCompleted ? "bg-emerald-500" : isFailed ? "bg-red-500" : "bg-muted-foreground/30"
-                            }`} />
-                          <p className="text-xs font-medium text-muted-foreground">
-                            {isCompleted ? "Completed" : isFailed ? "Failed" : "Pending"}
-                          </p>
-                          {isCompleted && (schedule as any).sent_at ? (
-                            <>
-                              <p className="text-sm font-semibold text-foreground">
-                                {format(new Date((schedule as any).sent_at), "dd MMM yyyy")}
-                              </p>
-                              <p className="text-[11px] text-muted-foreground">
-                                {format(new Date((schedule as any).sent_at), "hh:mm a")} · IST
-                              </p>
-                            </>
-                          ) : isCompleted ? (
-                            <p className="text-sm font-semibold text-emerald-500">Done ✓</p>
-                          ) : isFailed ? (
-                            <>
-                              <p className="text-sm font-semibold text-red-500">Failed ✗</p>
-                              {(schedule.error_message || "Execution failed. Worker caught an error.") && (
-                                <p className="text-[11px] text-red-400 mt-1 max-w-[200px] leading-tight">
-                                  {schedule.error_message || "Execution failed. Worker caught an error."}
-                                </p>
-                              )}
-                            </>
-                          ) : (
-                            <p className="text-sm text-muted-foreground">Awaiting execution…</p>
-                          )}
-                        </div>
-                      </>
-                    );
-                  })()}
-                </div>
-              </div>
-              
-              {/* ── DELETE BUTTON (Matching LeadDetailsPage Pattern) ── */}
-              <div className="p-5 border-t border-red-500/20 bg-red-50/30 dark:bg-red-950/10">
-                <Button 
-                  onClick={() => setDeleteOpen(true)} 
-                  variant="destructive" 
-                  className="w-full h-12 rounded-xl text-sm font-bold"
-                  disabled={isDeleting}
-                >
-                  <Trash2 className="w-4 h-4 mr-2" />
-                  {isDeleting ? "Deleting..." : "Delete Schedule"}
-                </Button>
-              </div>
+                        </>
+                      ) : (
+                        <p className="mt-1 text-sm text-muted-foreground">Awaiting execution…</p>
+                      )}
+                    </div>
+                  </>
+                );
+              })()}
             </div>
+          </section>
 
-          </div>
-        </div>
+          {/* Delete */}
+          <button
+            onClick={() => setDeleteOpen(true)}
+            disabled={isDeleting}
+            className="inline-flex h-11 w-full cursor-pointer items-center justify-center gap-2 rounded-md border border-red-500/30 bg-background text-[15px] font-medium text-red-500 transition-colors hover:bg-red-500/10 disabled:opacity-50"
+          >
+            <Trash2 className="h-4 w-4" />
+            {isDeleting ? "Deleting..." : "Delete schedule"}
+          </button>
+        </aside>
       </div>
 
       <DangerConfirmDialog
