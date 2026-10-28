@@ -503,10 +503,11 @@ router.get("/public/tickets", enforceStrictSession, async (req, res) => {
         res.json({ 
             success: true, 
             tickets: enriched,
-            isPlatformUser: !!registeredUser,
-            hasOrganization: !!(registeredUser && registeredUser.organization_id)
+            isPlatformUser: !!req.user,
+            hasOrganization: !!(req.user && req.user.organization_id)
         });
     } catch (err) {
+        console.error("[Support] Public ticket list error:", err.message);
         res.status(500).json({ success: false, message: "Server error" });
     }
 });
