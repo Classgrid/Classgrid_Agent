@@ -243,8 +243,8 @@ function buildNotificationEmailHtml(post, unsubscribeUrl, recentBlogs, recentCha
       })();
       
   let summary = post.resolvedSummary;
-  let bodyOutro = "We just published a new article on the Classgrid Blog, with ideas and practical tips for getting more done with Classgrid AI.";
-  let ctaLabel = "Read the Full Article";
+  let bodyOutro = "We just published a new blog on the Classgrid Blog, with ideas and practical tips for getting more done with Classgrid AI.";
+  let ctaLabel = "Read the Full Blog";
   let eyebrow = "";
   
   if (isChangelog) {
