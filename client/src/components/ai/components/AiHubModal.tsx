@@ -344,7 +344,7 @@ export function AiHubModal({ isOpen, onClose, onSendPrompt, initialTab = "plugin
       case "outlook": return ["Manage Outlook emails seamlessly", "Summarize corporate communications", "Sync calendar and inbox data"];
       case "teams": return ["Send and read Microsoft Teams messages", "Summarize channel discussions", "Schedule Teams meetings automatically"];
       case "zoom": return ["Create Zoom meetings directly", "Retrieve recording summaries", "Invite participants effortlessly"];
-      case "whatsapp": return ["Send WhatsApp messages to students/parents", "Automate customer support replies", "Broadcast important announcements"];
+      case "whatsapp": return ["Send WhatsApp messages to your contacts", "Automate customer support replies", "Broadcast important announcements"];
       case "vercel": return ["Trigger Vercel deployments", "Monitor project build status", "Manage environment variables seamlessly"];
       case "youtube": return ["Search for educational videos automatically", "Fetch channel statistics and views", "Analyze video comments and engagement"];
       case "supabase": return ["Query your Postgres database naturally", "List and manage storage buckets", "Check active projects and configurations"];
@@ -369,7 +369,7 @@ export function AiHubModal({ isOpen, onClose, onSendPrompt, initialTab = "plugin
       case "outlook": return ["Check my unread Outlook emails", "Draft a professional response to the client", "Find the invoice attachment from last month", "Summarize the weekly digest email", "Delete spam emails from my inbox"];
       case "teams": return ["Send a message to the general channel about the update", "Read the latest messages in the design channel", "Schedule a Teams meeting for the weekly standup", "Summarize the discussion in the engineering team", "Reply to Mark in Teams saying I'm on it"];
       case "zoom": return ["Schedule a Zoom meeting for 3 PM tomorrow", "Create an instant Zoom link for a quick chat", "Find the recording of the last town hall", "Summarize the Zoom transcript from the strategy session", "Cancel my scheduled Zoom meeting for today"];
-      case "whatsapp": return ["Send a WhatsApp reminder to students about the test", "Broadcast the holiday announcement via WhatsApp", "Draft a reply to a parent's inquiry on WhatsApp", "Send the Zoom link to the class WhatsApp group", "Check if there are any unread messages from parents"];
+      case "whatsapp": return ["Send me a WhatsApp reminder about tomorrow's meeting", "Broadcast the launch announcement via WhatsApp", "Draft a reply to a customer's question on WhatsApp", "Send the Zoom link to the team on WhatsApp", "Check if there are any unread WhatsApp messages"];
       case "vercel": return ["Check the status of the latest production deployment", "Trigger a new deployment for the staging branch", "List all active environment variables", "Show me the build logs for the last failed deployment", "Roll back to the previous successful Vercel build"];
       case "youtube": return ["Search YouTube for Next.js tutorials", "What is the sub count of MrBeast?", "Find the top comments on my latest video"];
       case "supabase": return ["List all my Supabase projects", "Query the users table for active accounts", "Show me the files in the 'avatars' storage bucket"];
