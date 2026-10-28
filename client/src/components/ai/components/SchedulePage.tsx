@@ -13,7 +13,7 @@
 // CLASSGRID USES CLOUDFLARE USAGE TO CALCULATE TOKENS, NOT GPT-TOKENIZER (WHICH IS ONLY A FALLBACK)
 import React, { useEffect, useState } from "react";
 import { format, formatDistanceToNow } from "date-fns";
-import { Calendar, Trash2, CheckCircle2, Clock, XCircle, AlertCircle, Plus, Search, Send, Mail, Bell, FileText, BarChart3, BookOpen, GraduationCap, ArrowRight, Video, Presentation, MonitorPlay, Link2, Copy, ExternalLink, Repeat } from "lucide-react";
+import { Calendar, Trash2, CheckCircle2, Clock, XCircle, AlertCircle, Plus, Search, Send, Mail, Bell, FileText, BarChart3, BookOpen, ArrowRight, Video, Presentation, MonitorPlay, Link2, Copy, ExternalLink, Repeat } from "lucide-react";
 import { Button } from "@/components/marketing_ui/button";
 import { Badge } from "@/components/marketing_ui/badge";
 import { toast } from "sonner";
@@ -51,39 +51,39 @@ interface ScheduleSuggestion {
 const SCHEDULE_SUGGESTIONS: ScheduleSuggestion[] = [
   {
     icon: <Mail className="w-5 h-5 text-blue-500" />,
-    title: "Daily summary email",
-    description: "Get a daily email with your assignments, attendance, and upcoming deadlines",
-    prompt: "Schedule a daily summary email for me every morning at 8 AM with my pending assignments, attendance status, and any upcoming deadlines for the week."
+    title: "Morning news briefing",
+    description: "Get a short email every morning with the latest news on topics you pick",
+    prompt: "Every morning at 8 AM, search the web for the latest news on [Topics] and email me a short summary with links."
   },
   {
     icon: <Bell className="w-5 h-5 text-amber-500" />,
-    title: "Assignment deadline reminder",
-    description: "Get reminders before your assignment deadlines so you never miss one",
-    prompt: "Remind me 1 day before every assignment deadline. Send me an email with the assignment name, subject, and due date."
+    title: "Task reminder",
+    description: "Get an email reminder at the exact time you need it",
+    prompt: "Remind me on [Date/Time] to [Task]. Send me an email with the details."
   },
   {
     icon: <BarChart3 className="w-5 h-5 text-violet-500" />,
-    title: "Weekly progress report",
-    description: "Receive a weekly report summarizing your academic progress and attendance",
-    prompt: "Schedule a weekly progress report email every Sunday at 6 PM summarizing my attendance percentage, completed assignments, and upcoming exams for the next week."
+    title: "Weekly topic roundup",
+    description: "Receive a weekly report on the biggest updates in your field",
+    prompt: "Every Monday at 9 AM, research the biggest updates in [Topic or industry] from the past week and email me a short report."
   },
   {
     icon: <BookOpen className="w-5 h-5 text-emerald-500" />,
-    title: "Exam prep reminders",
-    description: "Get study reminders a few days before each exam with key topics",
-    prompt: "Remind me 3 days before every exam. Include the exam name, subject, syllabus topics, and suggested study resources."
+    title: "Daily learning tip",
+    description: "Learn a new skill with one short lesson every day",
+    prompt: "Every day at 7 PM, email me one short lesson on [Skill], with an example and a small practice task."
   },
   {
     icon: <FileText className="w-5 h-5 text-rose-500" />,
-    title: "Fee payment reminder",
-    description: "Never miss a fee payment deadline with timely reminders",
-    prompt: "Schedule a reminder email 3 days before my next fee payment due date with the amount, due date, and payment link."
+    title: "Price tracker",
+    description: "Check a product's price every day and get told when it drops",
+    prompt: "Every day at 10 AM, check the price of [Product] on the web and email me if it drops below [Price]."
   },
   {
-    icon: <GraduationCap className="w-5 h-5 text-cyan-500" />,
-    title: "Class schedule briefing",
-    description: "Get your daily class timetable emailed to you every morning",
-    prompt: "Send me my class timetable every morning at 7:30 AM with the subject, teacher name, and room number for each class."
+    icon: <Calendar className="w-5 h-5 text-cyan-500" />,
+    title: "Meeting prep brief",
+    description: "Get a short prep note for each of today's meetings every morning",
+    prompt: "Every weekday at 8:30 AM, check my Google Calendar for today's meetings and email me a short prep note for each one."
   }
 ];
 
@@ -97,8 +97,8 @@ const INTEGRATION_SUGGESTIONS: ScheduleSuggestion[] = [
   {
     icon: <img src="https://cdn.classgrid.in/classgrid_intgration/zoom-communications-icon_(1).svg" alt="Zoom" className="w-5 h-5 object-contain" />,
     title: "Zoom Meeting",
-    description: "Create a Zoom meeting link and share it with your class",
-    prompt: "Schedule a Zoom meeting for [Date/Time] about [Topic] and send the link to my class."
+    description: "Create a Zoom meeting link and share it with participants",
+    prompt: "Schedule a Zoom meeting for [Date/Time] about [Topic] and send the link to [Emails]."
   },
   {
     icon: <img src="https://cdn.classgrid.in/classgrid_intgration/Google_Classroom_Logo.svg" alt="Google Classroom" className="w-5 h-5 object-contain" />,
@@ -115,8 +115,8 @@ const INTEGRATION_SUGGESTIONS: ScheduleSuggestion[] = [
   {
     icon: <img src="https://cdn.classgrid.in/classgrid_intgration/whatsapp-svgrepo-com_(1).svg" alt="WhatsApp" className="w-5 h-5 object-contain" />,
     title: "WhatsApp Business",
-    description: "Schedule a WhatsApp broadcast to students or parents",
-    prompt: "Schedule a WhatsApp reminder to all parents 1 day before the fee deadline."
+    description: "Schedule a WhatsApp message at the time you choose",
+    prompt: "Send me a WhatsApp reminder on [Date/Time] about [Topic]."
   },
   {
     icon: <img src="https://cdn.classgrid.in/classgrid_intgration/microsoft-teams-svgrepo-com.svg" alt="Microsoft Teams" className="w-5 h-5 object-contain" />,
@@ -132,9 +132,9 @@ const INTEGRATION_SUGGESTIONS: ScheduleSuggestion[] = [
   },
   {
     icon: <img src="/logo.png" alt="Classgrid" className="w-5 h-5 object-contain" />,
-    title: "Classgrid Classroom",
-    description: "Schedule a live class or assignment in Classgrid",
-    prompt: "Schedule a live class in my Classgrid Classroom for [Date/Time] about [Topic]."
+    title: "Classgrid Email",
+    description: "Schedule an email to anyone at the time you choose",
+    prompt: "Send an email to [Email] on [Date/Time] about [Topic]."
   }
 ];
 
