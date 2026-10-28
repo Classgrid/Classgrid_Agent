@@ -839,45 +839,6 @@ export function SupportTicketsPage() {
           onSearchChange={setSearchQuery}
           searchPlaceholder="Search by name, email, or ticket ID..."
         >
-          {/* Org Name */}
-          <div className="w-[150px]">
-            <ResponsiveSelect
-              className="flex h-9 w-full items-center rounded-md border border-border bg-transparent px-3 py-1 shadow-sm hover:bg-accent/50 transition-colors text-sm"
-              value={orgNameFilter}
-              onChange={(e) => setOrgNameFilter(e.target.value)}
-            >
-              <option value="">Org Name: All</option>
-              {orgEntries.map(([name, logo]) => (
-                <option key={name} value={name}>
-                  <span className="flex items-center gap-2">
-                    {logo ? (
-                      <img src={logo} alt="" className="w-4 h-4 rounded-full object-cover shrink-0" />
-                    ) : (
-                      <span className="w-4 h-4 rounded-full bg-muted shrink-0 flex items-center justify-center text-[9px] font-bold text-muted-foreground">{name.charAt(0)}</span>
-                    )}
-                    <span className="truncate">{name}</span>
-                  </span>
-                </option>
-              ))}
-            </ResponsiveSelect>
-          </div>
-
-          {/* Org Type */}
-          <div className="w-[150px]">
-            <ResponsiveSelect
-              className="flex h-9 w-full items-center rounded-md border border-border bg-transparent px-3 py-1 shadow-sm hover:bg-accent/50 transition-colors text-sm"
-              value={orgTypeFilter}
-              onChange={(e) => setOrgTypeFilter(e.target.value)}
-            >
-              <option value="">Org Type: All</option>
-              {orgTypes.map((type) => (
-                <option key={type} value={type}>
-                  {type.charAt(0).toUpperCase() + type.slice(1).replace(/_/g, " ")}
-                </option>
-              ))}
-            </ResponsiveSelect>
-          </div>
-
           {/* Date picker */}
           <div className="w-[180px] max-w-[180px] overflow-hidden relative">
             <NikhilTimeCalendar
