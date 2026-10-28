@@ -164,6 +164,13 @@ export function SidebarUserMenu({ user, customTrigger }: { user: { name: string;
 
           <div className="p-1">
             <DropdownMenuItem className="p-0">
+              <a href="https://classgrid.in" target="_blank" rel="noopener noreferrer" className="flex items-center justify-between w-full cursor-pointer rounded-md py-2 px-3 text-sm hover:bg-accent hover:text-accent-foreground focus:bg-accent focus:text-accent-foreground">
+                <span>Home Page</span>
+                <Icons.House className="w-4 h-4 text-muted-foreground" />
+              </a>
+            </DropdownMenuItem>
+
+            <DropdownMenuItem className="p-0">
               <a href="https://classgrid.in/changelog" target="_blank" rel="noopener noreferrer" className="flex items-center justify-between w-full cursor-pointer rounded-md py-2 px-3 text-sm hover:bg-accent hover:text-accent-foreground focus:bg-accent focus:text-accent-foreground">
                 <span>Changelog</span>
                 <Icons.FileText className="w-4 h-4 text-muted-foreground" />
