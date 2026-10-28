@@ -1094,7 +1094,7 @@ const estimatePromptTokens = (parts) => Math.ceil(parts.reduce((n, p) => n + (ty
 const CF_PRO_MODEL = "@cf/deepseek-ai/deepseek-v4-pro-0813";
 const CF_FLASH_MODEL = "@cf/deepseek-ai/deepseek-v4-flash-0731";
 // The fast model "Auto" uses for short simple messages
-const CF_AUTO_FLASH_MODEL = "@cf/zai-org/glm-4.7-flash";
+const CF_AUTO_FLASH_MODEL = "@cf/zai-org/glm-5.2";
 const HARD_TASK_PATTERN = /\b(code|coding|debug|error|bug|function|script|sql|query|database|analy[sz]e|analysis|compare|explain|why|how (do|does|can|to)|step[- ]by[- ]step|plan|strategy|essay|report|pdf|document|file|diagram|flowchart|mermaid|chart|graph|calculate|solve|math|prove|design|architecture|write|draft|create|generate|build|deploy|schedule|email|summari[sz]e|translate|review|research|detail)/i;
 // "how do/does/can/to ..." asks for an explanation; "how are you" / "how is my day" stays on Flash.
 
@@ -1104,7 +1104,7 @@ function pickChatModel({ question, fileUrls, scheduleContext }) {
     if (!q || q.startsWith("[SYSTEM") || (fileUrls && fileUrls.length > 0) || scheduleContext) return CF_PRO_MODEL;
     if (q.length > 160 || q.includes("```") || q.split("\n").length > 3) return CF_PRO_MODEL;
     if (HARD_TASK_PATTERN.test(q)) return CF_PRO_MODEL;
-    // Short simple messages: GLM 4.7 Flash (platform owner decision, 2026-10-10; was DeepSeek V4 Flash)
+    // Short simple messages: GLM 5.2 (platform owner decision, 2026-10-29; was GLM 4.7 Flash)
     return CF_AUTO_FLASH_MODEL;
 }
 
