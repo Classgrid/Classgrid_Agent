@@ -189,16 +189,69 @@ export const ScheduleDetailPage: React.FC<{ id?: string }> = ({ id: propId }) =>
   if (loading) {
     return (
       <div className="mx-auto w-full max-w-6xl animate-pulse p-4 pb-16 sm:p-6 lg:p-8">
-        <div className="mb-8 border-b border-border pb-8">
-          <div className="h-3 w-20 rounded bg-muted" />
-          <div className="mt-4 h-10 w-80 rounded bg-muted" />
+        {/* Breadcrumb */}
+        <div className="mb-6 flex items-center gap-2">
+          <div className="h-4 w-20 rounded bg-muted" />
+          <div className="h-4 w-3 rounded bg-muted" />
+          <div className="h-4 w-32 rounded bg-muted" />
         </div>
-        <div className="grid grid-cols-1 gap-6 lg:grid-cols-[minmax(0,1fr)_320px]">
-          <div className="space-y-6">
-            <div className="h-28 rounded-md border border-border" />
-            <div className="h-40 rounded-md border border-border" />
+
+        {/* Heading */}
+        <div className="mb-8 border-b border-border pb-8">
+          <div className="flex items-center gap-3">
+            <div className="h-3 w-20 rounded bg-muted" />
+            <div className="h-5 w-24 rounded-sm bg-muted" />
           </div>
-          <div className="h-80 rounded-md border border-border" />
+          <div className="mt-4 h-10 w-full max-w-md rounded bg-muted sm:h-12" />
+          <div className="mt-3 h-4 w-56 rounded bg-muted" />
+        </div>
+
+        <div className="grid grid-cols-1 gap-6 lg:grid-cols-[minmax(0,1fr)_320px]">
+          {/* Main */}
+          <div className="space-y-6">
+            <div className="grid grid-cols-1 divide-y divide-border rounded-md border border-border sm:grid-cols-3 sm:divide-x sm:divide-y-0">
+              {[0, 1, 2].map((i) => (
+                <div key={i} className="p-5">
+                  <div className="h-3 w-24 rounded bg-muted" />
+                  <div className="mt-3 h-4 w-32 rounded bg-muted" />
+                  <div className="mt-2 h-3 w-20 rounded bg-muted" />
+                </div>
+              ))}
+            </div>
+            {[0, 1].map((i) => (
+              <div key={i} className="rounded-md border border-border p-6">
+                <div className="h-3 w-16 rounded bg-muted" />
+                <div className="mt-3 h-6 w-2/3 rounded bg-muted" />
+                <div className="mt-4 h-4 w-full rounded bg-muted" />
+                <div className="mt-2 h-4 w-4/5 rounded bg-muted" />
+              </div>
+            ))}
+          </div>
+
+          {/* Side panel */}
+          <div className="space-y-6">
+            <div className="rounded-md border border-border bg-muted/40 p-6">
+              <div className="h-3 w-14 rounded bg-muted" />
+              <div className="mt-4 flex items-center gap-3">
+                <div className="h-5 w-5 rounded-full bg-muted" />
+                <div className="h-6 w-24 rounded bg-muted" />
+              </div>
+              <div className="mt-4 h-3 w-full rounded bg-muted" />
+              <div className="mt-2 h-3 w-3/4 rounded bg-muted" />
+            </div>
+            <div className="rounded-md border border-border p-6">
+              <div className="h-3 w-16 rounded bg-muted" />
+              <div className="mt-5 space-y-5 pl-6">
+                {[0, 1, 2].map((i) => (
+                  <div key={i}>
+                    <div className="h-3 w-16 rounded bg-muted" />
+                    <div className="mt-2 h-4 w-40 rounded bg-muted" />
+                  </div>
+                ))}
+              </div>
+            </div>
+            <div className="h-11 rounded-md border border-border" />
+          </div>
         </div>
       </div>
     );
