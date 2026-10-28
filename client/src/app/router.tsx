@@ -93,7 +93,6 @@ import { BackupPage } from "@/features/superadmin/pages/BackupPage";
 import { CustomDomainsPage } from "@/features/superadmin/pages/CustomDomainsPage";
 import { AuditLogsPage } from "@/features/superadmin/pages/AuditLogsPage";
 import { SuperadminChatAnalyticsPage } from "@/features/superadmin/pages/SuperadminChatAnalyticsPage";
-import { ClassgridTalkPage } from "@/features/superadmin/pages/ClassgridTalkPage";
 import { TeamPage } from "@/features/superadmin/pages/TeamPage";
 import { BillingPage } from "@/features/superadmin/pages/BillingPage"; // Original, may be repurposed
 import PlansAndBillingPage from "@/features/superadmin/billing/pages/PlansAndBillingPage";
@@ -296,8 +295,8 @@ export function AppRouter() {
           <Route path="/superadmin/support/view/:id" element={<SupportTicketsPage />} />
           <Route path="/superadmin/feedback" element={<FeedbackPage />} />
           <Route path="/superadmin/reviews" element={<ReviewsPage />} />
-          <Route path="/superadmin/talk" element={<ClassgridTalkPage />} />
-          <Route path="/superadmin/classgrid-talk" element={<ClassgridTalkPage />} />
+          <Route path="/superadmin/talk" element={<NavigateWithQuery to="/superadmin/support" replace />} />
+          <Route path="/superadmin/classgrid-talk" element={<NavigateWithQuery to="/superadmin/support" replace />} />
           <Route path="/superadmin/system-health" element={<SystemHealthPage />} />
           <Route path="/superadmin/feature-flags" element={<FeatureFlagsPage />} />
           <Route path="/superadmin/content-moderation" element={<ContentModerationPage />} />

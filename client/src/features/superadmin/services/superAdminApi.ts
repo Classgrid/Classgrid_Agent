@@ -173,6 +173,7 @@ export type SupportTicket = {
   submittedBy?: { _id: string; name: string; email: string; role: string };
   submitterEmail: string;
   submitterName: string;
+  isPlatformUser?: boolean;
   organization_id?: { _id: string; name: string; slug: string };
   assignedTo?: { _id: string; name: string; email: string };
   lastComment?: string;

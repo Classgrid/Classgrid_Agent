@@ -73,6 +73,7 @@
 
 import express from "express";
 import crypto from "crypto";
+import mongoose from "mongoose";
 import { isAuthenticated, requireRole } from "../middleware/auth.middleware.js";
 import SupportTicket from "../models/SupportTicket.js";
 import User from "../models/User.js";
@@ -304,22 +305,19 @@ router.post("/public/tickets", enforceStrictSession, multipleUploads("files", 5)
 
         let organization_id = null;
         if (!isGeneralInquiry) {
+            // Classgrid Talk is merged into support: a registered user (with or without an org)
+            // or a website login account can raise a ticket.
             if (!fullUser) {
-                return res.status(403).json({
-                    success: false,
-                    message: "This email is not registered on Classgrid. Only registered users can raise support tickets."
-                });
+                const websiteAccount = await mongoose.connection.db.collection("forumusers")
+                    .findOne({ email: email.trim().toLowerCase() }, { projection: { _id: 1 } });
+                if (!websiteAccount) {
+                    return res.status(403).json({
+                        success: false,
+                        message: "This email is not registered on Classgrid. Only registered users can raise support tickets."
+                    });
+                }
             }
-
-            // Only users linked to a valid organization can raise tickets.
-            if (!fullUser.organization_id) {
-                return res.status(403).json({
-                    success: false,
-                    message: "Support tickets can only be raised by users who belong to a registered institution on Classgrid. Please contact your institution administrator.",
-                    code: "NO_ORG"
-                });
-            }
-            organization_id = fullUser.organization_id;
+            organization_id = fullUser?.organization_id || null;
         } else {
             // For general inquiries, we optionally attach the org if they have one
             organization_id = fullUser?.organization_id || null;
@@ -485,23 +483,8 @@ router.get("/public/tickets", enforceStrictSession, async (req, res) => {
             return res.status(400).json({ success: false, message: "Email is required" });
         }
 
-        // Check if they are a registered platform user
-        const registeredUser = await verifyRegisteredUser(email);
-        
-        if (registeredUser && !registeredUser.organization_id) {
-            // Block orgless accounts UNLESS they have public inquiries
-            const hasTickets = await SupportTicket.exists({
-                submitterEmail: email.trim().toLowerCase()
-            });
-            if (!hasTickets) {
-                return res.status(403).json({
-                    success: false,
-                    message: "Only users belonging to a registered institution can access support tickets.",
-                    code: "NO_ORG"
-                });
-            }
-        }
-
+        // One support system: users with or without an organization can see their own tickets
+        // (enforceStrictSession above still makes sure it is their own email).
         const tickets = await SupportTicket.find({
             submitterEmail: email.trim().toLowerCase()
         })
@@ -1189,9 +1172,8 @@ router.get("/admin/tickets", isAuthenticated, requireRole("super_admin"), async 
         // Apply type filtering for Classgrid Talk (inquiry) vs Support Tickets (support)
         if (type === 'inquiry') {
             filter.organization_id = null; // Inquiries don't have an associated organization
-        } else if (type === 'support') {
-            filter.organization_id = { $ne: null }; // Support tickets require an organization
         }
+        // type === 'support': one support list, shows Support and old Classgrid Talk tickets together
 
         const skip = (parseInt(page) - 1) * parseInt(limit);
 
@@ -1209,6 +1191,7 @@ router.get("/admin/tickets", isAuthenticated, requireRole("super_admin"), async 
 
         // Fallback for public tickets where submittedBy is missing
         for (let ticket of tickets) {
+            ticket.isPlatformUser = !!ticket.submittedBy;
             if (!ticket.submittedBy && ticket.submitterEmail) {
                 const user = await User.findOne(
                     { email: ticket.submitterEmail.toLowerCase() },
@@ -1216,6 +1199,7 @@ router.get("/admin/tickets", isAuthenticated, requireRole("super_admin"), async 
                 ).populate("organization_id", "name org_type").lean();
                 
                 if (user) {
+                    ticket.isPlatformUser = true;
                     ticket.submitterRole = user.role;
                     ticket.requesterProfilePicture = user.profilePicture;
                     if (!ticket.organization_id && user.organization_id) {
@@ -1228,7 +1212,6 @@ router.get("/admin/tickets", isAuthenticated, requireRole("super_admin"), async 
         // Stats with base filter
         const baseFilter = {};
         if (type === 'inquiry') baseFilter.organization_id = null;
-        else if (type === 'support') baseFilter.organization_id = { $ne: null };
 
         const [openCount, inProgressCount, resolvedCount] = await Promise.all([
             SupportTicket.countDocuments({ ...baseFilter, status: "open" }),

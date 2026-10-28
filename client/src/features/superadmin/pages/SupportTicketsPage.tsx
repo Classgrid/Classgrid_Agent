@@ -219,6 +219,10 @@ function getRequester(ticket: SupportTicket) {
   };
 }
 
+function isPlatformUser(ticket: SupportTicket) {
+  return ticket.isPlatformUser ?? !!ticket.submittedBy;
+}
+
 function getConversation(ticket: SupportTicket) {
   if (ticket.messages?.length) return ticket.messages;
 
@@ -402,10 +406,12 @@ const CATEGORY_LABELS: Record<string, string> = {
 };
 
 export function SupportTicketsPage() {
-  const { id: urlTicketId } = useParams<{ id: string }>();
+  const { id: urlTicketIdParam } = useParams<{ id: string }>();
   const [searchParams, setSearchParams] = useSearchParams();
+  const urlTicketId = urlTicketIdParam || searchParams.get("ticketId") || undefined;
   const navigate = useNavigate();
   const [statusFilter, setStatusFilter] = useState("");
+  const [userTypeFilter, setUserTypeFilter] = useState("");
   const [priorityFilter, setPriorityFilter] = useState("");
   const [orgTypeFilter, setOrgTypeFilter] = useState("");
   const [orgNameFilter, setOrgNameFilter] = useState("");
@@ -567,6 +573,12 @@ export function SupportTicketsPage() {
       result = result.filter((t) => t.submittedBy?.role === roleFilter);
     }
 
+    if (userTypeFilter) {
+      result = result.filter((t) =>
+        userTypeFilter === "user" ? isPlatformUser(t) : !isPlatformUser(t)
+      );
+    }
+
     if (searchQuery.trim()) {
       const q = searchQuery.toLowerCase().trim();
       const cleanQ = q.replace(/^#/, "");
@@ -622,7 +634,7 @@ export function SupportTicketsPage() {
     }
 
     return result;
-  }, [tickets, searchQuery, dateFrom, orgTypeFilter, orgNameFilter, roleFilter, priorityFilter, statusFilter]);
+  }, [tickets, searchQuery, dateFrom, orgTypeFilter, orgNameFilter, roleFilter, userTypeFilter, priorityFilter, statusFilter]);
 
   const displayStats = useMemo(
     () => ({
@@ -902,6 +914,19 @@ export function SupportTicketsPage() {
               ))}
             </ResponsiveSelect>
           </div>
+
+          {/* Classgrid AI account */}
+          <div className="w-[170px]">
+            <ResponsiveSelect
+              className="flex h-9 w-full items-center rounded-md border border-border bg-transparent px-3 py-1 shadow-sm hover:bg-accent/50 transition-colors text-sm"
+              value={userTypeFilter}
+              onChange={(e) => setUserTypeFilter(e.target.value)}
+            >
+              <option value="">Users: All</option>
+              <option value="user">Classgrid AI users</option>
+              <option value="not_user">Not users</option>
+            </ResponsiveSelect>
+          </div>
         </SuperadminFilterBar>
 
         {/* Ticket List */}
@@ -975,6 +1000,14 @@ export function SupportTicketsPage() {
                       <div className="flex items-center gap-2 flex-wrap">
                         <span className="text-[10px] text-muted-foreground">
                           Created: {formatTicketDate(ticket.createdAt)}
+                        </span>
+                        <span
+                          className={`text-[10px] font-bold px-2 py-0.5 rounded-full w-fit ${isPlatformUser(ticket)
+                            ? "text-emerald-600 dark:text-emerald-400 bg-emerald-500/10"
+                            : "text-muted-foreground bg-muted"
+                            }`}
+                        >
+                          {isPlatformUser(ticket) ? "Classgrid AI user" : "Not a user"}
                         </span>
                         {unreadCount > 0 && (
                           <span className="text-[10px] font-bold text-blue-500 bg-blue-500/10 px-2 py-0.5 rounded-full w-fit ml-1">
@@ -1125,7 +1158,15 @@ export function SupportTicketsPage() {
         >
           {statusLabel(selectedTicket.status)}
         </span>
-        
+        <span
+          className={`px-3 py-1 text-xs font-bold rounded-full ${isPlatformUser(selectedTicket)
+            ? "text-emerald-600 dark:text-emerald-400 bg-emerald-500/10"
+            : "text-muted-foreground bg-muted"
+            }`}
+        >
+          {isPlatformUser(selectedTicket) ? "Classgrid AI user" : "Not a user"}
+        </span>
+
       </div>
 
       {/* 2-Column Grid */}

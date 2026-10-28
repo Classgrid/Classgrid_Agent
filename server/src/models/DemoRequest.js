@@ -76,11 +76,12 @@ import mongoose from "mongoose";
 const demoRequestSchema = new mongoose.Schema(
   {
     institutionName: { type: String, required: true, trim: true },
-    orgType: { type: String, required: true, trim: true },
+    // orgType and state were ERP-only; the Classgrid AI demo form does not send them
+    orgType: { type: String, default: "", trim: true },
     adminName: { type: String, required: true, trim: true },
     adminEmail: { type: String, required: true, trim: true, lowercase: true },
     adminPhone: { type: String, required: true, trim: true },
-    state: { type: String, required: true, trim: true },
+    state: { type: String, default: "", trim: true },
     district: { type: String, default: "", trim: true },
     taluka: { type: String, default: "", trim: true },
     cityVillage: { type: String, default: "", trim: true },
@@ -88,7 +89,10 @@ const demoRequestSchema = new mongoose.Schema(
     role: { type: String, default: "", trim: true },
     website: { type: String, default: "", trim: true },
     message: { type: String, default: "" },
-    
+    // Classgrid AI Book a Demo form fields
+    teamSize: { type: String, default: "", trim: true },
+    useCase: { type: String, default: "", trim: true },
+
     // ── Discovery Fields (collected during meeting) ──────────────────
     studentCount: { type: Number, default: null },
     staffCount: { type: Number, default: null },

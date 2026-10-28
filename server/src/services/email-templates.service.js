@@ -2066,12 +2066,15 @@ ${link ? `Open: ${link}` : ""}
 // ------------- DEMO LEAD NOTIFICATIONS -------------
 export const getDemoLeadAlertHtml = (data = {}) => {
   const content = `
-    <p><strong>${data.institutionName || "Institution"}</strong> requested a Classgrid demo.</p>
+    <p><strong>${data.institutionName || "A company"}</strong> requested a Classgrid AI demo.</p>
     <div class="box">
-      <p><strong>Admin:</strong> ${data.adminName || "Not provided"}</p>
+      <p><strong>Name:</strong> ${data.adminName || "Not provided"}</p>
       <p><strong>Email:</strong> ${data.adminEmail || "Not provided"}</p>
       <p><strong>Phone:</strong> ${data.adminPhone || "Not provided"}</p>
       <p><strong>Location:</strong> ${[data.city, data.state].filter(Boolean).join(", ") || "Not provided"}</p>
+      ${data.role ? `<p><strong>Role:</strong> ${data.role}</p>` : ""}
+      ${data.teamSize ? `<p><strong>Team size:</strong> ${data.teamSize}</p>` : ""}
+      ${data.useCase ? `<p><strong>Use case:</strong> ${data.useCase}</p>` : ""}
     </div>
     ${data.dashboardUrl ? `<a href="${data.dashboardUrl}" class="btn">Open Lead</a>` : ""}
   `;
@@ -2082,12 +2085,12 @@ export const getDemoLeadAlertHtml = (data = {}) => {
 export const getDemoLeadAlertPlainText = (data = {}) => {
   return `New Demo Lead
 
-Institution: ${data.institutionName || "Institution"}
-Admin: ${data.adminName || "Not provided"}
+Company: ${data.institutionName || "Not provided"}
+Name: ${data.adminName || "Not provided"}
 Email: ${data.adminEmail || "Not provided"}
 Phone: ${data.adminPhone || "Not provided"}
 Location: ${[data.city, data.state].filter(Boolean).join(", ") || "Not provided"}
-
+${data.role ? `Role: ${data.role}\n` : ""}${data.teamSize ? `Team size: ${data.teamSize}\n` : ""}${data.useCase ? `Use case: ${data.useCase}\n` : ""}
 ${data.dashboardUrl ? `Open Lead: ${data.dashboardUrl}` : ""}
 
 &copy; ${new Date().getFullYear()} Classgrid. All rights reserved.`;

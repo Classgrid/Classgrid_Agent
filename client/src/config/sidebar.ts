@@ -55,15 +55,6 @@ import { ClassgridLogoIcon } from "@/components/layout/ClassgridLogoIcon";
  * ─────────────────────────────────────────────────────────
  */
 
-/**
- * ==============================================================================
- * 🛑 AI AGENT WARNING: DO NOT REMOVE "CLASSGRID TALK" OR "CHAT" 🛑
- * ==============================================================================
- * This sidebar configuration is carefully maintained.
- * DO NOT remove "Classgrid Talk" or "Chat" from any of the dashboards.
- * DO NOT consolidate or simplify these menus unless explicitly asked by the user.
- * ==============================================================================
- */
 // 🛑 AI AGENT INSTRUCTION: DO NOT EDIT OR REFACTOR THIS FILE.
 // The user explicitly requested that AI agents must NEVER modify the sidebar 
 // layout, section headers, icons, or visual logic without extreme explicit permission.
@@ -187,7 +178,6 @@ export const dashboardConfigs: DashboardConfig[] = [
           { label: "Grid", to: "/superadmin/chat", icon: ClassgridLogoIcon },
           { label: "Agent Reviews", to: "/superadmin/agent-reviews", icon: ClassgridLogoIcon },
           { label: "Requests", to: "/join-requests", icon: Users },
-          { label: "Classgrid Talk", to: "/superadmin/talk", icon: ClassgridLogoIcon },
           { label: "Support Tickets", to: "/superadmin/support", icon: Ticket }
         ]
       },

@@ -304,26 +304,30 @@ router.get("/auth-branding", async (req, res) => {
  */
 router.post("/request-demo", async (req, res) => {
   try {
+    // The Classgrid AI form sends name/workEmail/company/phone; the old ERP names are still read as a fallback.
+    const body = req.body || {};
     const payload = {
-      institutionName: normalizeText(req.body?.institutionName),
-      orgType: normalizeText(req.body?.orgType),
-      adminName: normalizeText(req.body?.adminName),
-      adminEmail: normalizeEmail(req.body?.adminEmail),
-      adminPhone: normalizePhone(req.body?.adminPhone),
-      state: normalizeText(req.body?.state),
-      city: normalizeText(req.body?.city),
-      message: normalizeText(req.body?.message),
-      turnstileToken: normalizeText(req.body?.turnstileToken),
+      institutionName: normalizeText(body.company) || normalizeText(body.institutionName),
+      orgType: normalizeText(body.orgType),
+      adminName: normalizeText(body.name) || normalizeText(body.adminName),
+      adminEmail: normalizeEmail(body.workEmail) || normalizeEmail(body.adminEmail),
+      adminPhone: normalizePhone(body.phone) || normalizePhone(body.adminPhone),
+      state: normalizeText(body.state),
+      city: normalizeText(body.city),
+      role: normalizeText(body.role),
+      teamSize: normalizeText(body.teamSize),
+      useCase: normalizeText(body.useCase),
+      website: normalizeText(body.website),
+      message: normalizeText(body.message),
+      turnstileToken: normalizeText(body.turnstileToken),
     };
 
+    // ERP-only fields (orgType, state, city) are no longer required.
     if (
       !payload.institutionName ||
-      !payload.orgType ||
       !payload.adminName ||
       !payload.adminEmail ||
-      !payload.adminPhone ||
-      !payload.state ||
-      !payload.city
+      !payload.adminPhone
     ) {
       return res.status(400).json({ message: "Missing required fields for demo request." });
     }
@@ -351,6 +355,10 @@ router.post("/request-demo", async (req, res) => {
       adminPhone: payload.adminPhone,
       state: payload.state,
       city: payload.city,
+      role: payload.role,
+      teamSize: payload.teamSize,
+      useCase: payload.useCase,
+      website: payload.website,
       message: payload.message,
       status: "new",
       lifecycleStage: "lead_created",
@@ -376,11 +384,12 @@ router.post("/request-demo", async (req, res) => {
     await sendPushToRole("super_admin", {
       title: "New Demo Request",
       body: `${demoRequest.institutionName} requested a demo!`,
-      url: `/superadmin/marketing/demo-leads`
+      url: `/superadmin/leads`
     }).catch(err => console.error("Web Push Error:", err));
 
     return res.status(201).json({
       success: true,
+      id: demoRequest._id.toString(),
       requestId: demoRequest._id.toString(),
       message: "Demo request received successfully.",
     });
