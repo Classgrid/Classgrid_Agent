@@ -243,7 +243,7 @@ function buildNotificationEmailHtml(post, unsubscribeUrl, recentBlogs, recentCha
       })();
       
   let summary = post.resolvedSummary;
-  let bodyOutro = "We just published a new article on the Classgrid Blog with insights, ideas, and practical perspectives for building and managing modern educational institutions.";
+  let bodyOutro = "We just published a new article on the Classgrid Blog, with ideas and practical tips for getting more done with Classgrid AI.";
   let ctaLabel = "Read the Full Article";
   let eyebrow = "";
   
