@@ -1673,18 +1673,14 @@ const sandboxEnvFlags = (isStaff = false) => [...SANDBOX_ENV_ALLOWLIST, ...(isSt
 const SANDBOX_RUNNER_PREFIX = '.cg_run';
 
 // The same meeting or reminder asked for twice (e.g. "book it" said again on a call) is not created again:
-// same start minute and titles that match ignoring case/symbols (or one contains the other).
-const sameTitle = (a, b) => {
-  const norm = (s) => String(s || '').toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
-  const x = norm(a), y = norm(b);
-  return !!x && !!y && (x === y || x.includes(y) || y.includes(x));
-};
+// anything already booked at the same start minute counts, whatever its name (the AI names it differently each time).
+// It is never booked twice: to change it, the existing one is edited or deleted.
 const sameMinute = (a, b) => {
   const t1 = new Date(a).getTime(), t2 = new Date(b).getTime();
   return Number.isFinite(t1) && Number.isFinite(t2) && Math.abs(t1 - t2) < 60000;
 };
 const alreadyExistsText = (what, title, when, extra = '') =>
-  `NOT CREATED AGAIN: a ${what} "${title}" at ${when} already exists${extra}. Nothing was changed or overwritten. Tell the user it is already booked and give its details; create a new one only if the user clearly asks for a second one.`;
+  `NOT CREATED: a ${what} "${title}" is already booked at ${when}${extra}. Nothing was changed or overwritten. Tell the user it is already booked and give its details. Never book another one at this time; if the user wants changes, edit or delete the existing one.`;
 
 export const handleToolCall = async (name, args, context = {}) => {
   // Project Mode file tools (the open project of this chat)
@@ -2441,12 +2437,11 @@ export const handleToolCall = async (name, args, context = {}) => {
         }
 
         const firstAt = rep.first || firstRun;
-        const sameTimeSchedules = await AiSchedule.find({
+        const duplicate = await AiSchedule.findOne({
           user_email: finalUserEmail,
           status: 'pending',
           scheduled_at: { $gte: new Date(firstAt.getTime() - 60000), $lte: new Date(firstAt.getTime() + 60000) },
         }).select('_id title scheduled_at').lean();
-        const duplicate = sameTimeSchedules.find((s) => sameTitle(s.title, args.title));
         if (duplicate) {
           return { content: [{ type: 'text', text: alreadyExistsText('schedule', duplicate.title, duplicate.scheduled_at.toISOString(), ` (schedule_id ${duplicate._id})`) }] };
         }
@@ -5523,7 +5518,7 @@ export const handleToolCall = async (name, args, context = {}) => {
               singleEvents: true,
               maxResults: 20,
             }).catch(() => null);
-            const dup = (existing?.data?.items || []).find((ev) => ev.status !== 'cancelled' && sameMinute(ev.start?.dateTime || ev.start?.date, args.startTime) && sameTitle(ev.summary, args.topic));
+            const dup = (existing?.data?.items || []).find((ev) => ev.status !== 'cancelled' && ev.start?.dateTime && sameMinute(ev.start.dateTime, args.startTime));
             if (dup) {
               return { content: [{ type: 'text', text: alreadyExistsText('Google Calendar event', dup.summary, dup.start?.dateTime || dup.start?.date, `${dup.hangoutLink ? ` (Meet link ${dup.hangoutLink})` : ''}${dup.htmlLink ? ` (event link ${dup.htmlLink})` : ''}`) }] };
             }
@@ -5698,7 +5693,7 @@ export const handleToolCall = async (name, args, context = {}) => {
           const upcoming = await fetch("https://api.zoom.us/v2/users/me/meetings?type=upcoming&page_size=100", {
             headers: { "Authorization": `Bearer ${accessToken}` }
           }).then((r) => r.json()).catch(() => null);
-          const dup = (upcoming?.meetings || []).find((m) => sameMinute(m.start_time, args.startTime) && sameTitle(m.topic, args.topic));
+          const dup = (upcoming?.meetings || []).find((m) => sameMinute(m.start_time, args.startTime));
           if (dup) {
             return { content: [{ type: 'text', text: alreadyExistsText('Zoom meeting', dup.topic, dup.start_time, dup.join_url ? ` (join link ${dup.join_url})` : '') }] };
           }
@@ -5828,7 +5823,7 @@ export const handleToolCall = async (name, args, context = {}) => {
             const view = await fetch(`https://graph.microsoft.com/v1.0/me/calendarView?startDateTime=${encodeURIComponent(new Date(startMs - 60000).toISOString())}&endDateTime=${encodeURIComponent(new Date(startMs + 60000).toISOString())}&$top=20`, {
               headers: { "Authorization": `Bearer ${accessToken}`, "Prefer": 'outlook.timezone="UTC"' }
             }).then((r) => r.json()).catch(() => null);
-            const dup = (view?.value || []).find((ev) => !ev.isCancelled && sameMinute(`${String(ev.start?.dateTime || '').replace(/Z?$/, 'Z')}`, new Date(startMs).toISOString()) && sameTitle(ev.subject, subject));
+            const dup = (view?.value || []).find((ev) => !ev.isCancelled && sameMinute(`${String(ev.start?.dateTime || '').replace(/Z?$/, 'Z')}`, new Date(startMs).toISOString()));
             if (dup) {
               return { content: [{ type: 'text', text: alreadyExistsText('Microsoft Teams/Outlook meeting', dup.subject, `${dup.start?.dateTime} UTC`, dup.onlineMeeting?.joinUrl ? ` (join link ${dup.onlineMeeting.joinUrl})` : '') }] };
             }
