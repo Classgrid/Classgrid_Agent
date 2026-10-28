@@ -503,7 +503,7 @@ router.post("/request-demo/:id/meeting-booked", async (req, res) => {
 
 /**
  * GET /api/public/ai-pricing
- * Live free limits and top-up values for the pricing page on classgrid.in, resolved the same way the app
+ * Live reset times and top-up values for the pricing page on classgrid.in, resolved the same way the app
  * resolves them for a chat.classgrid.in account. Only super admin settings, no user data.
  */
 const AI_PRICING_CACHE_MS = 60 * 1000;
@@ -526,15 +526,12 @@ router.get("/ai-pricing", async (req, res) => {
 
       aiPricingCache = {
         expiresAt: Date.now() + AI_PRICING_CACHE_MS,
+        // Free limit amounts (tokens, images, WhatsApp, image token cost) stay private: only how often they reset
         data: {
-          freeTokens: resolveWeeklyLimit(null, org, config, CHAT_PUBLIC_ORG_ID),
           freeRefill: { value: tokens.value, unit: tokens.unit },
-          imageLimit: resolveFeatureLimit("image", org, config, CHAT_PUBLIC_ORG_ID),
           imageRefill: { value: image.value, unit: image.unit },
-          whatsappLimit: resolveFeatureLimit("whatsapp", org, config, CHAT_PUBLIC_ORG_ID),
           whatsappRefill: { value: whatsapp.value, unit: whatsapp.unit },
           creditsPerInr: positiveNumber(config.credits_per_inr),
-          imageTokenCost: positiveNumber(config.image_generation_token_cost),
           topupMinInr: TOPUP_MIN_INR,
           topupMaxInr: TOPUP_MAX_INR,
           creditValidityDays: 30,
