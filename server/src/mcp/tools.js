@@ -1738,7 +1738,9 @@ export const handleToolCall = async (name, args, context = {}) => {
           is_active: true,
           is_default: false
         });
-        return { content: [{ type: 'text', text: `Skill "${args.name}" created successfully. YOU MUST NOW output exactly this to the user:\n\nCreated skill\n\`\`\`skill\n{"name": "${args.name}", "instructions": "${args.instructions}"}\n\`\`\`` }] };
+        // JSON.stringify keeps quotes and line breaks valid; backticks are escaped so they can't close the block
+        const skillJson = JSON.stringify({ name: args.name, instructions: args.instructions }).replace(/`/g, '\\u0060');
+        return { content: [{ type: 'text', text: `Skill "${args.name}" created successfully. YOU MUST NOW output exactly this to the user:\n\nCreated skill\n\`\`\`skill\n${skillJson}\n\`\`\`` }] };
       } catch (err) {
         return { content: [{ type: 'text', text: `Error creating skill: ${err.message}` }] };
       }
