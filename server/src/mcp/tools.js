@@ -1672,6 +1672,20 @@ const sandboxEnvFlags = (isStaff = false) => [...SANDBOX_ENV_ALLOWLIST, ...(isSt
 // such as /data/script.js and never show up in the preview or a GitHub push.
 const SANDBOX_RUNNER_PREFIX = '.cg_run';
 
+// The same meeting or reminder asked for twice (e.g. "book it" said again on a call) is not created again:
+// same start minute and titles that match ignoring case/symbols (or one contains the other).
+const sameTitle = (a, b) => {
+  const norm = (s) => String(s || '').toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
+  const x = norm(a), y = norm(b);
+  return !!x && !!y && (x === y || x.includes(y) || y.includes(x));
+};
+const sameMinute = (a, b) => {
+  const t1 = new Date(a).getTime(), t2 = new Date(b).getTime();
+  return Number.isFinite(t1) && Number.isFinite(t2) && Math.abs(t1 - t2) < 60000;
+};
+const alreadyExistsText = (what, title, when, extra = '') =>
+  `NOT CREATED AGAIN: a ${what} "${title}" at ${when} already exists${extra}. Nothing was changed or overwritten. Tell the user it is already booked and give its details; create a new one only if the user clearly asks for a second one.`;
+
 export const handleToolCall = async (name, args, context = {}) => {
   // Project Mode file tools (the open project of this chat)
   if (projectTools[name]) {
@@ -2424,6 +2438,17 @@ export const handleToolCall = async (name, args, context = {}) => {
           // Half of WhatsApp (number without message or the other way round) can't be sent
           delete args.whatsapp_phone_number;
           delete args.whatsapp_message;
+        }
+
+        const firstAt = rep.first || firstRun;
+        const sameTimeSchedules = await AiSchedule.find({
+          user_email: finalUserEmail,
+          status: 'pending',
+          scheduled_at: { $gte: new Date(firstAt.getTime() - 60000), $lte: new Date(firstAt.getTime() + 60000) },
+        }).select('_id title scheduled_at').lean();
+        const duplicate = sameTimeSchedules.find((s) => sameTitle(s.title, args.title));
+        if (duplicate) {
+          return { content: [{ type: 'text', text: alreadyExistsText('schedule', duplicate.title, duplicate.scheduled_at.toISOString(), ` (schedule_id ${duplicate._id})`) }] };
         }
 
         const schedule = await AiSchedule.create({
@@ -5489,6 +5514,20 @@ export const handleToolCall = async (name, args, context = {}) => {
         } else if (operation === 'create_event') {
           if (!args.topic || !args.startTime || !args.endTime) throw new Error("topic, startTime, and endTime are required for create_event");
           const calendar = google.calendar({ version: 'v3', auth: oauth2Client });
+          const startMs = new Date(args.startTime).getTime();
+          if (Number.isFinite(startMs)) {
+            const existing = await calendar.events.list({
+              calendarId: 'primary',
+              timeMin: new Date(startMs - 60000).toISOString(),
+              timeMax: new Date(startMs + 60000).toISOString(),
+              singleEvents: true,
+              maxResults: 20,
+            }).catch(() => null);
+            const dup = (existing?.data?.items || []).find((ev) => ev.status !== 'cancelled' && sameMinute(ev.start?.dateTime || ev.start?.date, args.startTime) && sameTitle(ev.summary, args.topic));
+            if (dup) {
+              return { content: [{ type: 'text', text: alreadyExistsText('Google Calendar event', dup.summary, dup.start?.dateTime || dup.start?.date, `${dup.hangoutLink ? ` (Meet link ${dup.hangoutLink})` : ''}${dup.htmlLink ? ` (event link ${dup.htmlLink})` : ''}`) }] };
+            }
+          }
           let eventParams = {
             calendarId: 'primary',
             requestBody: {
@@ -5656,6 +5695,13 @@ export const handleToolCall = async (name, args, context = {}) => {
           return { content: [{ type: 'text', text: JSON.stringify(data.meetings, null, 2) }] };
         } else if (operation === 'create_meeting') {
           if (!args.topic || !args.startTime) throw new Error("topic and startTime are required for create_meeting");
+          const upcoming = await fetch("https://api.zoom.us/v2/users/me/meetings?type=upcoming&page_size=100", {
+            headers: { "Authorization": `Bearer ${accessToken}` }
+          }).then((r) => r.json()).catch(() => null);
+          const dup = (upcoming?.meetings || []).find((m) => sameMinute(m.start_time, args.startTime) && sameTitle(m.topic, args.topic));
+          if (dup) {
+            return { content: [{ type: 'text', text: alreadyExistsText('Zoom meeting', dup.topic, dup.start_time, dup.join_url ? ` (join link ${dup.join_url})` : '') }] };
+          }
           const res = await fetch("https://api.zoom.us/v2/users/me/meetings", {
             method: "POST",
             headers: {
@@ -5777,6 +5823,16 @@ export const handleToolCall = async (name, args, context = {}) => {
           return { content: [{ type: 'text', text: JSON.stringify(data.value, null, 2) }] };
         } else if (operation === 'create_meeting') {
           if (!subject || !startTime || !endTime) throw new Error("subject, startTime, and endTime are required for create_meeting");
+          const startMs = new Date(startTime.endsWith('Z') || /[+-]\d\d:\d\d$/.test(startTime) ? startTime : `${startTime}Z`).getTime();
+          if (Number.isFinite(startMs)) {
+            const view = await fetch(`https://graph.microsoft.com/v1.0/me/calendarView?startDateTime=${encodeURIComponent(new Date(startMs - 60000).toISOString())}&endDateTime=${encodeURIComponent(new Date(startMs + 60000).toISOString())}&$top=20`, {
+              headers: { "Authorization": `Bearer ${accessToken}`, "Prefer": 'outlook.timezone="UTC"' }
+            }).then((r) => r.json()).catch(() => null);
+            const dup = (view?.value || []).find((ev) => !ev.isCancelled && sameMinute(`${String(ev.start?.dateTime || '').replace(/Z?$/, 'Z')}`, new Date(startMs).toISOString()) && sameTitle(ev.subject, subject));
+            if (dup) {
+              return { content: [{ type: 'text', text: alreadyExistsText('Microsoft Teams/Outlook meeting', dup.subject, `${dup.start?.dateTime} UTC`, dup.onlineMeeting?.joinUrl ? ` (join link ${dup.onlineMeeting.joinUrl})` : '') }] };
+            }
+          }
           const res = await fetch(`https://graph.microsoft.com/v1.0/me/events`, {
             method: 'POST',
             headers: { "Authorization": `Bearer ${accessToken}`, "Content-Type": "application/json" },
