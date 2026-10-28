@@ -137,7 +137,7 @@ interface ModelPickerProps {
   disabled?: boolean;
 }
 
-// Claude Fable 5.1 is locked until the person has topped up ₹100 in total (server enforces it too)
+// Claude Fable 5.1 is locked until the person has topped up ₹299 in total (server enforces it too)
 const FABLE_ID = "claude-fable-5-1";
 
 export function ModelPicker({ value, onChange, disabled }: ModelPickerProps) {
@@ -197,13 +197,13 @@ export function ModelPicker({ value, onChange, disabled }: ModelPickerProps) {
                   key={model.id}
                   onClick={() => (locked ? openTopUp() : onChange(model.id))}
                   className="gap-2.5 cursor-pointer py-1.5 items-start"
-                  title={locked ? `Top up ₹${access?.fable.requiredInr ?? 100} in total to unlock` : undefined}
+                  title={locked ? `Top up ₹${access?.fable.requiredInr ?? 299} in total to unlock` : undefined}
                 >
                   <ModelLogoImg logo={model.logo} className={cn("mt-0.5", locked && "opacity-50")} />
                   <div className="flex flex-col flex-1 min-w-0">
                     <span className={cn("truncate", locked && "text-muted-foreground")}>{model.name}</span>
                     <span className="text-xs text-muted-foreground truncate">
-                      {locked ? (access?.fable.toppedUpInr ? `Top up ₹${fableLeft} more to unlock` : `Top up ₹${access?.fable.requiredInr ?? 100} to unlock`) : model.id === FABLE_ID && access && !access.fable.exempt ? "Most capable · uses paid credits only" : model.description}
+                      {locked ? (access?.fable.toppedUpInr ? `Top up ₹${fableLeft} more to unlock` : `Top up ₹${access?.fable.requiredInr ?? 299} to unlock`) : model.id === FABLE_ID && access && !access.fable.exempt ? "Most capable · uses paid credits only" : model.description}
                     </span>
                   </div>
                   {locked ? <Lock className="h-4 w-4 mt-0.5 text-muted-foreground" /> : value === model.id && <Check className="h-4 w-4 mt-0.5" />}

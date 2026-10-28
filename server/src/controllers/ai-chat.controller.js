@@ -1313,7 +1313,7 @@ export const streamAskAi = async (req, res) => {
         return { error: check.reason === "Insufficient tokens." ? "ai_quota_exceeded" : "ai_blocked", message: check.reason, resetDate: resetDate.toISOString() };
     };
     let fablePaidOnly = false;
-    // Claude Fable 5.1 (most expensive model) is locked until the person has topped up ₹100 in total.
+    // Claude Fable 5.1 (most expensive model) is locked until the person has topped up ₹299 in total.
     // 402, not 403: the chat page treats 403 as a ban.
     if (body.selectedModel === "claude-fable-5-1") {
         try {

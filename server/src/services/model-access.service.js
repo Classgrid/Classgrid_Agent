@@ -28,13 +28,13 @@
  * ─────────────────────────────────────────────────────────
  */
 // Premium model access: Claude Fable 5.1 (the most expensive model) unlocks once a person's successful
-// top-ups add up to at least ₹100, and then stays unlocked. Super admins and Classgrid team accounts
+// top-ups add up to at least ₹299, and then stays unlocked. Super admins and Classgrid team accounts
 // (@classgrid.in) can always use it.
 import mongoose from "mongoose";
 import AiCreditTransaction from "../models/AiCreditTransaction.js";
 
 export const FABLE_MODEL = "claude-fable-5-1";
-export const FABLE_UNLOCK_INR = 100;
+export const FABLE_UNLOCK_INR = 299;
 
 // userId -> { unlocked, toppedUpInr, at }. Unlocked is permanent, so it's cached long; locked is re-checked
 // after a minute so a fresh top-up unlocks quickly.

@@ -81,6 +81,12 @@ import {
 } from "../services/notification-email.service.js";
 import { trackOnboardingEvent } from "../services/onboarding-event.service.js";
 import { sendPushToRole } from "../services/push.service.js";
+import GlobalAiConfig from "../models/GlobalAiConfig.js";
+import { resolveWeeklyLimit } from "../services/ai-credits.service.js";
+import { resolveFeatureLimit, resolveResetPeriod } from "../services/ai-feature-limits.js";
+import { FABLE_UNLOCK_INR } from "../services/model-access.service.js";
+import { TOPUP_MIN_INR, TOPUP_MAX_INR } from "../controllers/ai-credits-topup.controller.js";
+import { CHAT_PUBLIC_ORG_ID } from "../utils/chat-onboarding.js";
 
 const router = express.Router();
 const TURNSTILE_VERIFY_URL = "https://challenges.cloudflare.com/turnstile/v0/siteverify";
@@ -492,6 +498,57 @@ router.post("/request-demo/:id/meeting-booked", async (req, res) => {
       success: false,
       message: "Failed to save meeting details.",
     });
+  }
+});
+
+/**
+ * GET /api/public/ai-pricing
+ * Live free limits and top-up values for the pricing page on classgrid.in, resolved the same way the app
+ * resolves them for a chat.classgrid.in account. Only super admin settings, no user data.
+ */
+const AI_PRICING_CACHE_MS = 60 * 1000;
+let aiPricingCache = null;
+
+const positiveNumber = (value) => (typeof value === "number" && Number.isFinite(value) && value > 0 ? value : null);
+
+router.get("/ai-pricing", async (req, res) => {
+  try {
+    if (!aiPricingCache || aiPricingCache.expiresAt <= Date.now()) {
+      const [globalConfig, chatOrg] = await Promise.all([
+        GlobalAiConfig.findOne({ key: "singleton" }).lean(),
+        Organization.findById(CHAT_PUBLIC_ORG_ID).select("ai_config").lean(),
+      ]);
+      const config = globalConfig || {};
+      const org = chatOrg || null;
+      const tokens = resolveResetPeriod("tokens", org, config, CHAT_PUBLIC_ORG_ID);
+      const image = resolveResetPeriod("image", org, config, CHAT_PUBLIC_ORG_ID);
+      const whatsapp = resolveResetPeriod("whatsapp", org, config, CHAT_PUBLIC_ORG_ID);
+
+      aiPricingCache = {
+        expiresAt: Date.now() + AI_PRICING_CACHE_MS,
+        data: {
+          freeTokens: resolveWeeklyLimit(null, org, config, CHAT_PUBLIC_ORG_ID),
+          freeRefill: { value: tokens.value, unit: tokens.unit },
+          imageLimit: resolveFeatureLimit("image", org, config, CHAT_PUBLIC_ORG_ID),
+          imageRefill: { value: image.value, unit: image.unit },
+          whatsappLimit: resolveFeatureLimit("whatsapp", org, config, CHAT_PUBLIC_ORG_ID),
+          whatsappRefill: { value: whatsapp.value, unit: whatsapp.unit },
+          creditsPerInr: positiveNumber(config.credits_per_inr),
+          imageTokenCost: positiveNumber(config.image_generation_token_cost),
+          topupMinInr: TOPUP_MIN_INR,
+          topupMaxInr: TOPUP_MAX_INR,
+          creditValidityDays: 30,
+          premiumUnlockInr: FABLE_UNLOCK_INR,
+          updatedAt: new Date(config.updatedAt || Date.now()).toISOString(),
+        },
+      };
+    }
+
+    res.set("Cache-Control", "public, max-age=60");
+    return res.json(aiPricingCache.data);
+  } catch (error) {
+    console.error("[Public] ai-pricing error:", error);
+    return res.status(500).json({ success: false, message: "Failed to load AI pricing." });
   }
 });
 
