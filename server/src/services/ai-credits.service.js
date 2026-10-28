@@ -230,7 +230,7 @@ export const hasEnoughTokens = async (userId, orgId, requiredTokens = 1, { paidO
 // HELPER TO TRIGGER ALERTS
 const triggerEmailAlerts = async (userId, orgId, type, oldBalance, currentBalance, totalLimit) => {
     try {
-        const user = await User.findById(userId).select('email first_name last_name ai_tokens');
+        const user = await User.findById(userId).select('email name first_name last_name ai_tokens');
         if (!user || !user.email) return;
 
         let subdomain = '';
@@ -239,8 +239,14 @@ const triggerEmailAlerts = async (userId, orgId, type, oldBalance, currentBalanc
             if (org && org.subdomain) subdomain = org.subdomain;
         }
 
-        const userName = user.first_name ? `${user.first_name} ${user.last_name || ''}`.trim() : 'Classgrid User';
-        let resetDate = user.ai_tokens?.week_reset_date ? new Date(user.ai_tokens.week_reset_date).toLocaleDateString('en-IN') : 'next week';
+        const userName = user.name || (user.first_name ? `${user.first_name} ${user.last_name || ''}`.trim() : 'Classgrid User');
+        // Refills can be hours apart (set in the super admin dashboard), so the time is shown too
+        let resetDate = user.ai_tokens?.week_reset_date ? new Date(user.ai_tokens.week_reset_date).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', dateStyle: 'medium', timeStyle: 'short' }) : 'your next refill';
+        if (user.ai_tokens?.week_reset_date) {
+            const msLeft = new Date(user.ai_tokens.week_reset_date).getTime() - Date.now();
+            const hoursLeft = Math.round(msLeft / 3600000);
+            if (msLeft > 0) resetDate += hoursLeft < 1 ? ' (in less than an hour)' : hoursLeft >= 48 ? ` (in about ${Math.round(hoursLeft / 24)} days)` : ` (in about ${hoursLeft} hour${hoursLeft === 1 ? '' : 's'})`;
+        }
         const threshold20 = totalLimit * 0.2;
 
         // Top-Up Alerts
