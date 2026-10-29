@@ -60,6 +60,8 @@ export const CORE_TOOL_NAMES = [
 
 // Tool definitions with no handler behind them: every call fails today, so they are not offered.
 const TOOLS_WITHOUT_HANDLER = new Set(["update_skill", "update_ai_preferences", "search_syllabus_vectors", "read_local_file"]);
+// Classgrid Talk is merged into Support, so its tools are never sent to the AI (the support tools cover every ticket).
+const RETIRED_TOOLS = new Set(["list_classgrid_talks", "read_classgrid_talk_details", "update_classgrid_talk_status", "close_classgrid_talk", "reopen_classgrid_talk", "assign_classgrid_talk", "reply_classgrid_talk", "attach_file_to_classgrid_talk", "edit_classgrid_talk_reply", "add_internal_note_to_classgrid_talk", "read_classgrid_talk_draft", "save_classgrid_talk_draft", "delete_classgrid_talk_draft", "delete_classgrid_talk"]);
 
 const STAFF_ROLES = new Set(["super_admin", "co_super_admin"]);
 export const isStaffRole = (role) => STAFF_ROLES.has(role);
@@ -168,9 +170,8 @@ export const TOOL_GROUPS = [
     },
     {
         id: "internal_support",
-        description: "STAFF: support tickets and Classgrid Talk conversations.",
-        tools: ["list_support_tickets", "read_support_ticket_details", "update_support_ticket_status", "close_support_ticket", "reopen_support_ticket", "assign_support_ticket", "reply_support_ticket", "attach_file_to_support_ticket", "edit_support_ticket_reply", "add_internal_note_to_support_ticket", "read_support_ticket_draft", "save_support_ticket_draft", "delete_support_ticket_draft", "delete_support_ticket",
-            "list_classgrid_talks", "read_classgrid_talk_details", "update_classgrid_talk_status", "close_classgrid_talk", "reopen_classgrid_talk", "assign_classgrid_talk", "reply_classgrid_talk", "attach_file_to_classgrid_talk", "edit_classgrid_talk_reply", "add_internal_note_to_classgrid_talk", "read_classgrid_talk_draft", "save_classgrid_talk_draft", "delete_classgrid_talk_draft", "delete_classgrid_talk"],
+        description: "STAFF: support tickets from platform users (Classgrid AI account) and non-platform users (website account only).",
+        tools: ["list_support_tickets", "read_support_ticket_details", "update_support_ticket_status", "close_support_ticket", "reopen_support_ticket", "assign_support_ticket", "reply_support_ticket", "attach_file_to_support_ticket", "edit_support_ticket_reply", "add_internal_note_to_support_ticket", "read_support_ticket_draft", "save_support_ticket_draft", "delete_support_ticket_draft", "delete_support_ticket"],
         pattern: /\b(tickets?|support|complain\w*|helpdesk|talks?|escalat\w*|shikayat)\b|शिकायत/i,
         staffOnly: true,
     },
@@ -208,7 +209,7 @@ const IMAGE_MIME = /^image\//i;
  */
 // loadAll: every group this user may use is loaded from the start (background tasks: WhatsApp calls, long tasks)
 export function planToolsForMessage({ allTools, text = "", attachments = [], stickyGroupIds = [], role, hasOrg, email, loadAll = false }) {
-    // Internal tools (server logs, terminal, support tickets, Classgrid Talk, leads, all organizations) need BOTH
+    // Internal tools (server logs, terminal, support tickets, leads, all organizations) need BOTH
     // a staff role and an @classgrid.in email, so a staff role alone never unlocks them.
     const staff = isStaffRole(role) && String(email || "").trim().toLowerCase().endsWith("@classgrid.in");
     const present = new Set(allTools.map(toolName));
@@ -220,7 +221,7 @@ export function planToolsForMessage({ allTools, text = "", attachments = [], sti
     const allowedIds = new Set(allowedGroups.map((g) => g.id));
 
     // Tools that belong to no group (e.g. a tool added later) are always loaded, so nothing disappears silently.
-    const ungrouped = allTools.filter((t) => !GROUP_OF_TOOL.has(toolName(t)) && !CORE_TOOL_NAMES.includes(toolName(t)) && !TOOLS_WITHOUT_HANDLER.has(toolName(t)));
+    const ungrouped = allTools.filter((t) => !GROUP_OF_TOOL.has(toolName(t)) && !CORE_TOOL_NAMES.includes(toolName(t)) && !TOOLS_WITHOUT_HANDLER.has(toolName(t)) && !RETIRED_TOOLS.has(toolName(t)));
 
     // NFC so Hindi written with a precomposed nukta letter matches the patterns.
     const normalizedText = String(text).normalize("NFC");

@@ -1254,12 +1254,12 @@ export const getMcpTools = () => [
   // ================= SUPPORT TICKET TOOLS (14) =================
   {
     name: 'list_support_tickets',
-    description: 'List all Support Tickets (organization-linked). Returns ticket summaries with status, priority, subject.',
+    description: 'List all Support Tickets. Classgrid Talk no longer exists; Support covers everyone. Each ticket has userType: "platform" (has a Classgrid AI account) or "non_platform" (classgrid.in website account only). Returns ticket summaries with status, priority, subject.',
     inputSchema: { type: 'object', properties: { status: { type: 'string', description: 'Filter by status: open, in_progress, waiting_on_user, resolved, closed, reopened' }, priority: { type: 'string', description: 'Filter by priority: low, medium, high, critical' }, limit: { type: 'number', description: 'Max tickets to return. Default 50.' } } }
   },
   {
     name: 'read_support_ticket_details',
-    description: 'Read the full details of a Support Ticket including all messages, replies, events, and attachments.',
+    description: 'Read the full details of a Support Ticket including all messages, replies, events, and attachments. userType tells you if the person is a platform user ("platform": has a Classgrid AI account) or a non-platform user ("non_platform": classgrid.in website account only). Always read this before replying.',
     inputSchema: { type: 'object', properties: { ticketId: { type: 'string', description: 'The MongoDB ObjectId of the ticket.' } }, required: ['ticketId'] }
   },
   {
@@ -1284,7 +1284,7 @@ export const getMcpTools = () => [
   },
   {
     name: 'reply_support_ticket',
-    description: 'Send a reply to a Support Ticket. You can toggle email notification ON or OFF.',
+    description: 'Send a reply to a Support Ticket. The reply is sent from the Classgrid AI support account (support@classgrid.in). You can toggle email notification ON or OFF.',
     inputSchema: { type: 'object', properties: { ticketId: { type: 'string', description: 'The MongoDB ObjectId of the ticket.' }, message: { type: 'string', description: 'The reply message content (HTML supported).' }, sendEmail: { type: 'boolean', description: 'If true, sends an email notification to the ticket creator. Default false.' } }, required: ['ticketId', 'message'] }
   },
   {
@@ -2689,9 +2689,18 @@ export const handleToolCall = async (name, args, context = {}) => {
         const SupportTicket = (await import('../models/SupportTicket.js')).default;
         const MessageDraft = (await import('../models/MessageDraft.js')).default;
 
+        const User = (await import('../models/User.js')).default;
+
         const isTalk = name.includes('classgrid_talk');
         const targetId = isTalk ? args.talkId : args.ticketId;
-        const baseQuery = isTalk ? { organization_id: null } : { organization_id: { $ne: null } };
+        // Classgrid Talk is gone: Support covers every ticket, from platform and non-platform users.
+        const baseQuery = isTalk ? { organization_id: null } : {};
+
+        // The AI acts as the Classgrid AI support account (support@classgrid.in).
+        const supportAccount = await User.findOne({ email: 'support@classgrid.in' }).select('name email profilePicture platformLogo').lean();
+        const aiName = supportAccount?.name || 'Classgrid AI';
+        const aiAvatar = supportAccount?.profilePicture || '';
+        const aiEmail = supportAccount?.email || 'support@classgrid.in';
 
         // 1. LIST
         if (name === 'list_support_tickets' || name === 'list_classgrid_talks') {
@@ -2701,9 +2710,17 @@ export const handleToolCall = async (name, args, context = {}) => {
           const tickets = await SupportTicket.find(query)
             .sort({ createdAt: -1 })
             .limit(args.limit || 50)
-            .select('subject status priority category submitterName submitterEmail organization_id assignedTo createdAt updatedAt')
+            .select('subject status priority category submitterName submitterEmail submittedBy organization_id assignedTo createdAt updatedAt')
             .populate('assignedTo', 'name email')
             .lean();
+          // platform = has a Classgrid AI account; non_platform = classgrid.in website account only
+          const emails = [...new Set(tickets.filter(t => !t.submittedBy && t.submitterEmail).map(t => t.submitterEmail.toLowerCase()))];
+          const known = emails.length
+            ? new Set((await User.find({ email: { $in: emails } }).select('email').lean()).map(u => String(u.email).toLowerCase()))
+            : new Set();
+          for (const t of tickets) {
+            t.userType = (t.submittedBy || known.has(String(t.submitterEmail || '').toLowerCase())) ? 'platform' : 'non_platform';
+          }
           return { content: [{ type: 'text', text: JSON.stringify(tickets, null, 2) }] };
         }
 
@@ -2714,6 +2731,8 @@ export const handleToolCall = async (name, args, context = {}) => {
             .populate('submittedBy', 'name email')
             .lean();
           if (!ticket) return { content: [{ type: 'text', text: 'Error: Ticket not found.' }], isError: true };
+          const hasAccount = ticket.submittedBy || (ticket.submitterEmail && await User.exists({ email: String(ticket.submitterEmail).toLowerCase() }));
+          ticket.userType = hasAccount ? 'platform' : 'non_platform';
           return { content: [{ type: 'text', text: JSON.stringify(ticket, null, 2) }] };
         }
 
@@ -2728,11 +2747,11 @@ export const handleToolCall = async (name, args, context = {}) => {
             if (args.status === 'reopened' && ticket.status === 'closed') {
               return { content: [{ type: 'text', text: 'Safety Policy Violation: Closed tickets cannot be reopened. Only resolved tickets can be reopened.' }], isError: true };
             }
-            ticket.events.push({ type: 'statusChanged', label: `Status changed to ${args.status}`, from: ticket.status, to: args.status, actorName: 'AI Admin', actorRole: 'super_admin', createdAt: new Date() });
+            ticket.events.push({ type: 'statusChanged', label: `Status changed to ${args.status}`, from: ticket.status, to: args.status, actorName: aiName, actorRole: 'super_admin', createdAt: new Date() });
             ticket.status = args.status;
           }
           if (args.priority) {
-            ticket.events.push({ type: 'priorityChanged', label: `Priority changed to ${args.priority}`, from: ticket.priority, to: args.priority, actorName: 'AI Admin', actorRole: 'super_admin', createdAt: new Date() });
+            ticket.events.push({ type: 'priorityChanged', label: `Priority changed to ${args.priority}`, from: ticket.priority, to: args.priority, actorName: aiName, actorRole: 'super_admin', createdAt: new Date() });
             ticket.priority = args.priority;
           }
           await ticket.save();
@@ -2743,7 +2762,7 @@ export const handleToolCall = async (name, args, context = {}) => {
         if (name === 'close_support_ticket' || name === 'close_classgrid_talk') {
           const ticket = await SupportTicket.findOne({ _id: targetId, ...baseQuery });
           if (!ticket) return { content: [{ type: 'text', text: 'Error: Ticket not found.' }], isError: true };
-          ticket.events.push({ type: 'statusChanged', label: 'Ticket closed', from: ticket.status, to: 'closed', actorName: 'AI Admin', actorRole: 'super_admin', createdAt: new Date() });
+          ticket.events.push({ type: 'statusChanged', label: 'Ticket closed', from: ticket.status, to: 'closed', actorName: aiName, actorRole: 'super_admin', createdAt: new Date() });
           ticket.status = 'closed';
           ticket.resolvedAt = new Date();
           await ticket.save();
@@ -2757,7 +2776,7 @@ export const handleToolCall = async (name, args, context = {}) => {
           if (ticket.status === 'closed') {
             return { content: [{ type: 'text', text: 'Safety Policy Violation: Closed tickets cannot be reopened. Only resolved tickets can be reopened.' }], isError: true };
           }
-          ticket.events.push({ type: 'reopened', label: 'Ticket reopened', from: ticket.status, to: 'reopened', actorName: 'AI Admin', actorRole: 'super_admin', createdAt: new Date() });
+          ticket.events.push({ type: 'reopened', label: 'Ticket reopened', from: ticket.status, to: 'reopened', actorName: aiName, actorRole: 'super_admin', createdAt: new Date() });
           ticket.status = 'reopened';
           ticket.resolvedAt = null;
           await ticket.save();
@@ -2768,7 +2787,7 @@ export const handleToolCall = async (name, args, context = {}) => {
         if (name === 'assign_support_ticket' || name === 'assign_classgrid_talk') {
           const ticket = await SupportTicket.findOne({ _id: targetId, ...baseQuery });
           if (!ticket) return { content: [{ type: 'text', text: 'Error: Ticket not found.' }], isError: true };
-          ticket.events.push({ type: 'assigned', label: `Assigned to ${args.assignedTo}`, actorName: 'AI Admin', actorRole: 'super_admin', createdAt: new Date() });
+          ticket.events.push({ type: 'assigned', label: `Assigned to ${args.assignedTo}`, actorName: aiName, actorRole: 'super_admin', createdAt: new Date() });
           ticket.assignedTo = args.assignedTo;
           await ticket.save();
           return { content: [{ type: 'text', text: `Ticket assigned to ${args.assignedTo} successfully.` }] };
@@ -2781,18 +2800,18 @@ export const handleToolCall = async (name, args, context = {}) => {
           const now = new Date();
           ticket.replies = ticket.replies || [];
           ticket.messages = ticket.messages || [];
-          ticket.replies.push({ authorName: 'AI Support Admin', authorRole: 'super_admin', message: args.message, createdAt: now });
-          ticket.messages.push({ author: 'AI Support Admin', role: 'admin', body: args.message, date: now, authorRole: 'super_admin', avatar: '', attachments: [] });
-          ticket.events.push({ type: 'adminReply', label: 'AI Admin replied', actorName: 'AI Support Admin', actorRole: 'super_admin', createdAt: now });
+          ticket.replies.push({ author: supportAccount?._id, authorName: aiName, authorRole: 'super_admin', message: args.message, createdAt: now });
+          ticket.messages.push({ author: aiName, role: 'admin', body: args.message, date: now, authorRole: 'super_admin', avatar: aiAvatar, orgName: 'Classgrid', orgLogo: supportAccount?.platformLogo || '', attachments: [] });
+          ticket.events.push({ type: 'adminReply', label: 'Admin replied', actorName: aiName, actorRole: 'super_admin', createdAt: now });
           ticket.lastAdminReplyAt = now;
           ticket.lastComment = now;
-          if (ticket.status === 'open') ticket.status = 'in_progress';
+          if (ticket.status === 'open' || ticket.status === 'reopened') ticket.status = 'in_progress';
           await ticket.save();
 
           if (args.sendEmail) {
             try {
               const { notifyTicketCreatorOfAdminReply } = await import('../services/support-ticket-email.service.js');
-              await notifyTicketCreatorOfAdminReply({ ticket });
+              await notifyTicketCreatorOfAdminReply({ ticket, replyMessage: args.message, adminName: aiName, adminAvatar: aiAvatar, adminEmail: aiEmail });
             } catch (emailErr) {
               return { content: [{ type: 'text', text: `Reply added but email failed: ${emailErr.message}` }] };
             }
@@ -2806,7 +2825,7 @@ export const handleToolCall = async (name, args, context = {}) => {
           if (!ticket) return { content: [{ type: 'text', text: 'Error: Ticket not found.' }], isError: true };
           ticket.attachments = ticket.attachments || [];
           ticket.attachments.push({ url: args.fileUrl, name: args.fileName || 'attachment' });
-          ticket.events.push({ type: 'attachmentAdded', label: 'File attached', actorName: 'AI Admin', actorRole: 'super_admin', createdAt: new Date() });
+          ticket.events.push({ type: 'attachmentAdded', label: 'File attached', actorName: aiName, actorRole: 'super_admin', createdAt: new Date() });
           await ticket.save();
           return { content: [{ type: 'text', text: 'File attached successfully.' }] };
         }
@@ -2830,8 +2849,8 @@ export const handleToolCall = async (name, args, context = {}) => {
           const ticket = await SupportTicket.findOne({ _id: targetId, ...baseQuery });
           if (!ticket) return { content: [{ type: 'text', text: 'Error: Ticket not found.' }], isError: true };
           const now = new Date();
-          ticket.messages.push({ author: 'AI Admin', role: 'admin', body: args.message, date: now, footer: 'internal_note', avatar: '', attachments: [] });
-          ticket.events.push({ type: 'internalNote', label: 'Internal note added', actorName: 'AI Admin', actorRole: 'super_admin', createdAt: now });
+          ticket.messages.push({ author: aiName, role: 'admin', body: args.message, date: now, footer: 'internal_note', avatar: aiAvatar, attachments: [] });
+          ticket.events.push({ type: 'internalNote', label: 'Internal note added', actorName: aiName, actorRole: 'super_admin', createdAt: now });
           await ticket.save();
           return { content: [{ type: 'text', text: 'Internal note added successfully.' }] };
         }
