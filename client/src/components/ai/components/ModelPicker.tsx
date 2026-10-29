@@ -213,7 +213,7 @@ export function ModelPicker({ value, onChange, disabled }: ModelPickerProps) {
                         <span className="shrink-0 rounded-full border border-border px-1.5 py-px text-[10px] font-medium leading-4 text-foreground">New</span>
                       )}
                     </span>
-                    <span className="text-xs text-muted-foreground truncate">
+                    <span className="text-xs text-muted-foreground whitespace-normal break-words">
                       {locked ? (access?.fable.toppedUpInr ? `Top up ₹${fableLeft} more to unlock` : `Top up ₹${access?.fable.requiredInr ?? 299} to unlock`) : model.id === FABLE_ID && access && !access.fable.exempt ? "Most capable · uses paid credits only" : model.description}
                     </span>
                   </div>
