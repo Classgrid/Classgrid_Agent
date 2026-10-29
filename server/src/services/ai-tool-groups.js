@@ -44,6 +44,7 @@ export const LOAD_TOOLS_NAME = "load_tools";
 // Always sent, every user.
 export const CORE_TOOL_NAMES = [
     "get_my_profile",
+    "create_skill", // always loaded so the agent can save a lasting fact even when the user doesn't say "remember"
     "recall_session_context",
     "recall_chat",
     "search_recall_chat",

@@ -147,7 +147,7 @@ async function getMetaLongLivedToken() {
 export const getMcpTools = () => [
   {
     name: 'create_skill',
-    description: 'Create a new custom AI skill (instruction set) for the user. Use this when the user asks you to remember a rule, format, or instruction for future conversations.',
+    description: 'Create a new custom AI skill (instruction set) for the user. It is loaded into all their future chats. Use this when the user asks you to remember a rule, format, fact or instruction for future conversations. You may also use it on your own, without being asked, when the user shares a lasting personal fact or preference that will clearly help in future chats (for example a name, an allergy, an ongoing project, a key date, or how they like answers). Never save one-off details or secrets (passwords, OTPs, card or bank numbers). When you save something on your own, tell the user in one short line what you saved and that they can delete it in Skills settings.',
     inputSchema: {
       type: 'object',
       properties: {
