@@ -2798,10 +2798,12 @@ export const handleToolCall = async (name, args, context = {}) => {
           const ticket = await SupportTicket.findOne({ _id: targetId, ...baseQuery });
           if (!ticket) return { content: [{ type: 'text', text: 'Error: Ticket not found.' }], isError: true };
           const now = new Date();
+          // The ticket page keeps line breaks, so drop the ones between HTML tags (they show as extra blank lines).
+          const replyBody = /<[a-z][\s\S]*>/i.test(args.message) ? String(args.message).replace(/>\s*\n\s*</g, '><').trim() : String(args.message).trim();
           ticket.replies = ticket.replies || [];
           ticket.messages = ticket.messages || [];
-          ticket.replies.push({ author: supportAccount?._id, authorName: aiName, authorRole: 'super_admin', message: args.message, createdAt: now });
-          ticket.messages.push({ author: aiName, role: 'admin', body: args.message, date: now, authorRole: 'super_admin', avatar: aiAvatar, orgName: 'Classgrid', orgLogo: supportAccount?.platformLogo || '', attachments: [] });
+          ticket.replies.push({ author: supportAccount?._id, authorName: aiName, authorRole: 'super_admin', message: replyBody, createdAt: now });
+          ticket.messages.push({ author: aiName, role: 'admin', body: replyBody, date: now, authorRole: 'super_admin', avatar: aiAvatar, orgName: 'Classgrid', orgLogo: supportAccount?.platformLogo || 'https://classgrid.in/logo.png', attachments: [] });
           ticket.events.push({ type: 'adminReply', label: 'Admin replied', actorName: aiName, actorRole: 'super_admin', createdAt: now });
           ticket.lastAdminReplyAt = now;
           ticket.lastComment = now;
@@ -2811,7 +2813,7 @@ export const handleToolCall = async (name, args, context = {}) => {
           if (args.sendEmail) {
             try {
               const { notifyTicketCreatorOfAdminReply } = await import('../services/support-ticket-email.service.js');
-              await notifyTicketCreatorOfAdminReply({ ticket, replyMessage: args.message, adminName: aiName, adminAvatar: aiAvatar, adminEmail: aiEmail });
+              await notifyTicketCreatorOfAdminReply({ ticket, replyMessage: replyBody, adminName: aiName, adminAvatar: aiAvatar, adminEmail: aiEmail });
             } catch (emailErr) {
               return { content: [{ type: 'text', text: `Reply added but email failed: ${emailErr.message}` }] };
             }
