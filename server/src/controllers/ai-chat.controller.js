@@ -59,6 +59,7 @@ import {
     getSessions,
     getSessionMessages,
     updateSessionTitle,
+    otherChatTitles,
     deleteSession,
     updateSessionPinned,
     getSessionById,
@@ -793,10 +794,16 @@ const TITLE_REFRESH_EVERY = 5;
 
 async function generateSessionTitle(sessionId, question) {
     try {
-        const { answer } = await generateShortTitleText(
-            "You are a title generator. Generate a VERY SHORT 2-3 word title for what this conversation is about. Output ONLY the raw words. DO NOT output '**Title:**'. DO NOT use quotes. Ignore greetings unless the conversation is only a greeting.",
-            question
-        );
+        // The user's other chat titles, so this one doesn't repeat them (e.g. three "PM2 Log Search" chats)
+        const taken = await otherChatTitles(sessionId).catch(() => []);
+        const avoid = taken.length
+            ? ` The user already has chats with these titles: ${taken.slice(0, 40).join("; ")}. Do not reuse any of them: if this chat is on the same topic, add the word that makes it different (what exactly it is about).`
+            : "";
+        const titleRule = "You are a title generator. Generate a VERY SHORT 2-3 word title for what this conversation is about. Output ONLY the raw words. DO NOT output '**Title:**'. DO NOT use quotes. Ignore greetings unless the conversation is only a greeting.";
+        let { answer } = await generateShortTitleText(titleRule + avoid, question);
+        // With nothing new to say (e.g. a second "hello"), the model can return no title: ask again without the
+        // list; the number added below then keeps it different
+        if (avoid && !String(answer || "").replace(/\*\*Title:\*\*|Title:|["'*]/gi, "").trim()) ({ answer } = await generateShortTitleText(titleRule, question));
         if (answer && !answer.includes("[RATE_LIMITED]")) {
             let cleanTitle = answer.trim().replace(/^["']|["']$/g, '');
             // Strip common AI prefixes anywhere in the string
@@ -808,6 +815,15 @@ async function generateSessionTitle(sessionId, question) {
             // Hard limit to 28 characters so it never overflows the sidebar, no manual dots
             if (cleanTitle.length > 28) {
                 cleanTitle = cleanTitle.substring(0, 28).trim();
+            }
+
+            // Still the same as another chat: number it ("PM2 Log Search 2"), within the 28 characters
+            const takenLower = new Set(taken.map((t) => t.toLowerCase()));
+            if (cleanTitle && takenLower.has(cleanTitle.toLowerCase())) {
+                for (let n = 2; n < 100; n++) {
+                    const numbered = `${cleanTitle.substring(0, 28 - String(n).length - 1).trim()} ${n}`;
+                    if (!takenLower.has(numbered.toLowerCase())) { cleanTitle = numbered; break; }
+                }
             }
 
             if (cleanTitle.length > 0) {

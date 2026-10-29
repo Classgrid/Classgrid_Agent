@@ -60,6 +60,23 @@ export async function createSession(userEmail, title, isIncognito = false) {
 }
 
 /**
+ * Titles of the same user's other recent chats (newest first), so a new title doesn't repeat one of them.
+ */
+export async function otherChatTitles(sessionId, limit = 40) {
+    if (!sessionId) return [];
+    const { data: own } = await primarySupabaseClient.from('ai_chat_sessions').select('user_email').eq('id', sessionId).single();
+    if (!own?.user_email) return [];
+    const { data } = await primarySupabaseClient
+        .from('ai_chat_sessions')
+        .select('title')
+        .eq('user_email', own.user_email)
+        .neq('id', sessionId)
+        .order('created_at', { ascending: false })
+        .limit(limit);
+    return (data || []).map((r) => String(r.title || '').trim()).filter(Boolean);
+}
+
+/**
  * Updates the title of an existing AI chat session.
  */
 export async function updateSessionTitle(sessionId, title) {
