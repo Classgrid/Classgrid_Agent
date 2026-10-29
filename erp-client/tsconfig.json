@@ -1,0 +1,26 @@
+{
+  // Editor only: the ERP is shut down and nothing here is built. Its files still import packages and
+  // "@/..." pages from client/, so the editor looks for them there.
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "jsx": "react-jsx",
+    "skipLibCheck": true,
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "noEmit": true,
+    "strict": false,
+    "noUncheckedSideEffectImports": false,
+    "baseUrl": ".",
+    "paths": {
+      "@/*": ["src/*", "../client/src/*"],
+      "@shared-types": ["../packages/types/src/index.ts"],
+      "*": ["../client/node_modules/*", "../client/node_modules/@types/*"]
+    },
+    "typeRoots": ["../client/node_modules/@types"],
+    "types": ["react", "react-dom"]
+  },
+  "include": ["src", "../client/node_modules/vite/client.d.ts"]
+}
