@@ -2027,7 +2027,7 @@ export const oauthCallback = async (req, res) => {
                         failedAttempts: 0,
                         resendCount: 0,
                         lastResentAt: new Date(),
-                        expiresAt: new Date(Date.now() + 5 * 60 * 1000) // 5 mins
+                        expiresAt: new Date(Date.now() + 10 * 60 * 1000) // 10 minutes, same as password login and the email
                     },
                     { upsert: true, returnDocument: 'after', setDefaultsOnInsert: true, sort: { createdAt: -1 } }
                 );

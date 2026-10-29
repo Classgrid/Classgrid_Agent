@@ -289,7 +289,8 @@ router.post("/confirm", async (req, res) => {
         let attachments = [];
         try {
             if (handoff.payment_type === "AI_TOPUP") {
-                const creditsAdded = (handoff.amountPaise / 100) * 5000;
+                const { calculateCreditsFromAmount } = await import("../services/ai-credits.service.js");
+                const creditsAdded = await calculateCreditsFromAmount(handoff.amountPaise / 100);
                 const pdfBuffer = await generateAiReceiptPdfBuffer({
                     amountFormatted,
                     creditsAdded,
