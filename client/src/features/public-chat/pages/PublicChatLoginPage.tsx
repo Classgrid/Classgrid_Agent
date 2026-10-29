@@ -42,8 +42,8 @@ function readLastLoginMethod(): LoginMethod | null {
   } catch { return null; }
 }
 const RETURNING_GREETINGS = [
-  { title: "Welcome back to Classgrid 👋", subtitle: "Sign in to continue your learning, check your classes and stay up to date." },
-  { title: "Good to see you again!", subtitle: "Log in to access your courses, schedule and updates in one place." },
+  { title: "Welcome back to Classgrid 👋", subtitle: "Sign in to continue your chats, projects and tasks with Classgrid AI." },
+  { title: "Good to see you again!", subtitle: "Log in to access your chats, schedules and files in one place." },
 ];
 const FIRST_GREETING = { title: "Welcome to Classgrid", subtitle: "Sign in with your email to pick up where you left off." };
 

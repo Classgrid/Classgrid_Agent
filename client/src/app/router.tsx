@@ -177,6 +177,13 @@ export function AppRouter() {
     hostname !== "classgrid.in" &&
     !hostname.endsWith(".classgrid.in");
   const subdomain = hostname.split(".")[0];
+  // Only chat.classgrid.in (Classgrid AI) and the staff/billing addresses are live: every other *.classgrid.in
+  // address (old school subdomains, typos) goes to chat.classgrid.in, same page
+  const LIVE_SUBDOMAINS = ["chat", "superadmin", "billing", "studentbilling", "onboard", "onboarding"];
+  if (hostname.endsWith(".classgrid.in") && !LIVE_SUBDOMAINS.includes(subdomain)) {
+    window.location.replace(`https://chat.classgrid.in${window.location.pathname}${window.location.search}${window.location.hash}`);
+    return null;
+  }
   const isSuperAdmin = subdomain === "superadmin";
   const isOnboarding = subdomain === "onboard" || subdomain === "onboarding" || window.location.pathname.startsWith("/onboard");
   const isBilling = subdomain === "billing" || subdomain === "studentbilling" || window.location.pathname.startsWith("/checkout");
