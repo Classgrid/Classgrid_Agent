@@ -106,6 +106,9 @@ async function attachmentsOf(folderId, messageId) {
 
 const emailOf = (sender) => (String(sender || "").match(/<([^>]+)>/)?.[1] || String(sender || "")).trim().toLowerCase();
 
+// Banned senders (owner's order): the AI never reads, answers or acts on emails from these addresses
+const BANNED_SENDERS = ["security@merx.help"];
+
 // HTML email body → plain text
 function toText(html) {
     return String(html || "")
@@ -137,7 +140,7 @@ export async function searchAgentMail({ fromEmail = "", fromMs = 0, toMs = Infin
     }
     const matches = all
         .map((m) => ({ ...m, at: Number(m.receivedTime || m.sentDateInGMT) || 0, fromAddr: (m.fromAddress || emailOf(m.sender)).toLowerCase() }))
-        .filter((m) => (!want || m.fromAddr === want) && m.at >= fromMs && m.at <= toMs && (!subj || String(m.subject || "").toLowerCase().includes(subj)))
+        .filter((m) => !BANNED_SENDERS.includes(m.fromAddr) && (!want || m.fromAddr === want) && m.at >= fromMs && m.at <= toMs && (!subj || String(m.subject || "").toLowerCase().includes(subj)))
         .sort((a, b) => b.at - a.at);
     const words = String(text || "").trim().toLowerCase();
     const out = [];
