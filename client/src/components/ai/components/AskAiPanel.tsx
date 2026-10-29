@@ -2888,6 +2888,13 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
     if (currentEmail) {
       localStorage.setItem("classgrid_ai_user_email", currentEmail);
     }
+
+    // A question from an "Ask Classgrid" link (chat.classgrid.in/?q=...) goes into the message box, ready to send
+    const pendingPrompt = sessionStorage.getItem("classgrid:pendingPrompt");
+    if (pendingPrompt) {
+      sessionStorage.removeItem("classgrid:pendingPrompt");
+      setInput(pendingPrompt);
+    }
   }, []);
 
   // Listen for external commands (like clicking "New Chat" or an old chat in the sidebar)

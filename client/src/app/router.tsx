@@ -177,6 +177,11 @@ export function AppRouter() {
     hostname !== "classgrid.in" &&
     !hostname.endsWith(".classgrid.in");
   const subdomain = hostname.split(".")[0];
+  // "Ask Classgrid" links (chat.classgrid.in/?q=...) fill the message box: kept for the chat page, also across a login
+  try {
+    const q = new URLSearchParams(window.location.search).get("q");
+    if (q) sessionStorage.setItem("classgrid:pendingPrompt", q);
+  } catch { /* storage blocked: the link just opens the chat */ }
   // Only chat.classgrid.in (Classgrid AI) and the staff/billing addresses are live: every other *.classgrid.in
   // address (old school subdomains, typos) goes to chat.classgrid.in, same page
   const LIVE_SUBDOMAINS = ["chat", "superadmin", "billing", "studentbilling", "onboard", "onboarding"];
