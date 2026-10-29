@@ -5697,7 +5697,7 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
         "relative",
         variant === "full-page"
           // Phones: solid page colour behind the input so messages scrolling under it don't show at its sides
-          ? "max-sm:absolute bottom-0 left-0 right-0 z-10 pointer-events-none max-sm:!bg-[#fafafa] max-sm:dark:!bg-black max-sm:pt-2"
+          ? "absolute bottom-0 left-0 right-0 z-10 pointer-events-none max-sm:!bg-[#fafafa] max-sm:dark:!bg-black max-sm:pt-2"
           : variant === "overlay" ? "" : "border-t border-border"
       )}>
         <AnimatePresence>
