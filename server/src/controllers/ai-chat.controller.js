@@ -1169,9 +1169,63 @@ const CF_PICKER_MODELS = new Map([
     ["@cf/mistralai/mistral-small-3.1-24b-instruct", "openai"],
 ]);
 
-// Cloudflare models that see attached images themselves, like Claude: images go into the message and
-// analyze_image is not offered to them (checked live on 2026-10-29).
+/*
+ * ─────────────────────────────────────────────────────────
+ * 👁 VISION RULE (owner's order, 2026-10-29) 👁
+ * Every model that can see images gets everything Claude has, with no extra wiring per model: attached images
+ * go into its message, view_image shows it Sandbox images (video frames, charts), Classgrid image links from
+ * tools are shown to it, analyze_image on a Classgrid link shows it the image itself, and the analyze_image
+ * detour is not offered when an image is attached. Membership in CF_VISION_MODELS is the only switch.
+ * The server fills it by itself: Cloudflare's catalog marks a model "vision", the model then has to answer a
+ * small picture test correctly, and only then it is added (detectVisionModels, every 12 hours). A model from
+ * another provider on this OpenAI-style chat path (Grok, OpenAI, Mistral…) is added to the list below by hand.
+ * ─────────────────────────────────────────────────────────
+ */
 const CF_VISION_MODELS = new Set(["@cf/deepseek-ai/deepseek-v4.1-flash-1017"]);
+// 64x64 solid red PNG for the picture test (some models refuse very small images)
+const VISION_TEST_PNG = "iVBORw0KGgoAAAANSUhEUgAAAEAAAABACAIAAAAlC+aJAAAAeUlEQVR4nO3PQQkAMAzAwCqpf1ETMxF7HINABFzm7H7dcEEDWtCAFjSgBQ1oQQNa0IAWNKAFDWhBA1rQgBY0oAUNaEEDWtCAFjSgBQ1oQQNa0IAWNKAFDWhBA1rQgBY0oAUNaEEDWtCAFjSgBQ1oQQNa0IAWNKAFj13PLIEAOXyUUwAAAABJRU5ErkJggg==";
+async function detectVisionModels() {
+    try {
+        // Saved results: { vision: [...], tested: [...] }. A model added to the picker since then is tested now.
+        const saved = JSON.parse((await redis.get("ai:vision-models:v2").catch(() => null)) || "null");
+        for (const m of saved?.vision || []) CF_VISION_MODELS.add(m);
+        const tested = new Set(saved?.tested || []);
+        if (saved && [...CF_PICKER_MODELS.keys()].every((m) => tested.has(m))) return;
+        const account = process.env.CLOUDFLARE_ACCOUNT_ID;
+        const token = process.env.CLOUDFLARE_WORKERS_AI_TOKEN;
+        if (!account || !token) return;
+        const res = await fetch(`https://api.cloudflare.com/client/v4/accounts/${account}/ai/models/search?per_page=500`, { headers: { Authorization: `Bearer ${token}` } });
+        const catalog = (await res.json().catch(() => ({})))?.result || [];
+        const markedVision = new Set(catalog.filter((m) => (m.properties || []).some((p) => p.property_id === "vision" && String(p.value) === "true")).map((m) => m.name));
+        const candidates = [...CF_PICKER_MODELS.keys()].filter((m) => markedVision.has(m) && !CF_VISION_MODELS.has(m) && !tested.has(m));
+        const retryLater = new Set(); // busy or broken right now (429, timeout): tested again next time
+        await Promise.all(candidates.map(async (model) => {
+            try {
+                const provider = cloudflareStreamProvider(model);
+                const r = await fetch(provider.url, {
+                    method: "POST",
+                    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+                    signal: AbortSignal.timeout(120000),
+                    body: JSON.stringify({ model, max_tokens: 800, messages: [{ role: "user", content: [{ type: "text", text: "What single colour is this image? Answer with one word." }, { type: "image_url", image_url: { url: `data:image/png;base64,${VISION_TEST_PNG}` } }] }] }),
+                });
+                if (!r.ok && (r.status === 429 || r.status === 408 || r.status >= 500)) { retryLater.add(model); return; }
+                const j = await r.json().catch(() => ({}));
+                const said = j?.result?.choices?.[0]?.message?.content ?? j?.choices?.[0]?.message?.content ?? j?.result?.response ?? "";
+                if (/\bred\b/i.test(String(said))) CF_VISION_MODELS.add(model);
+                else console.warn(`[vision] ${model} is marked vision but failed the picture test: ${String(said || r.status).slice(0, 100)}`);
+            } catch (e) {
+                retryLater.add(model);
+                console.warn(`[vision] picture test for ${model} failed: ${e.message}`);
+            }
+        }));
+        console.log(`[vision] models that see images: ${[...CF_VISION_MODELS].join(", ")}`);
+        await redis.set("ai:vision-models:v2", JSON.stringify({ vision: [...CF_VISION_MODELS], tested: [...CF_PICKER_MODELS.keys()].filter((m) => !retryLater.has(m)) }), "EX", 24 * 60 * 60).catch(() => {});
+    } catch (e) {
+        console.warn("[vision] could not check which models see images:", e.message);
+    }
+}
+setTimeout(() => detectVisionModels(), 20 * 1000);
+setInterval(() => detectVisionModels(), 12 * 60 * 60 * 1000);
 const NO_ANALYZE_IMAGE = new Set(["analyze_image"]);
 const CF_NATIVE_VISION_NOTE = "\n\nNATIVE VISION: You can see images yourself, like Claude. Images attached to the user's message are in it: answer from them right away. To look at an image you made in the Sandbox (video frames, charts, screenshots), use view_image. Images from Classgrid links in tool results are shown to you after the tool result, and analyze_image on a Classgrid image link shows you the image itself.";
 
@@ -2944,7 +2998,7 @@ If they ask whether their college/school uses Classgrid, say you can't see that 
                                         };
                                         const r = CLAUDE_CHAT_MODELS.has(model)
                                             ? await streamClaudeChat({ ...helperArgs, ...meterHooks(model, `Helper ${h.no}`), model, loadedToolNames: new Set([...names, "tell_main"]), answerAtDepthLimit: true, maxContinuations: 3 })
-                                            : await streamChat({ ...helperArgs, ...meterHooks(model, `Helper ${h.no}`), provider: cloudflareStreamProvider(model), maxTokens: 8192, maxContinuations: 6, answerAtDepthLimit: true }); // a long report keeps going instead of being cut
+                                            : await streamChat({ ...helperArgs, ...meterHooks(model, `Helper ${h.no}`), provider: cloudflareStreamProvider(model), seesImages: CF_VISION_MODELS.has(model), maxTokens: 8192, maxContinuations: 6, answerAtDepthLimit: true }); // a long report keeps going instead of being cut
                                         if (userId && r.usage?.total_tokens) deductTokens(userId, orgId, chargeableTokens(r.usage, model), tokenSource).catch(() => {});
                                         if (!String(r.answer || "").trim()) { lastError = "no answer"; break; } // try the next model
                                         h.usedModel = model;
