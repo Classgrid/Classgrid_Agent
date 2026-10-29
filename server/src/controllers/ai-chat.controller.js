@@ -2842,7 +2842,9 @@ If they ask whether their college/school uses Classgrid, say you can't see that 
                         board.helpers = board.helpers.filter((h) => h.state === "running" || !h.reportTaken);
                         const room = Math.max(0, 5 - board.helpers.filter((h) => h.state === "running").length);
                         if (!room) return "Error: 5 helpers are already working. Use check_helpers to wait for one to finish first.";
-                        if (typeof res.on === "function" && !board.stopHooked) { board.stopHooked = true; res.on("close", () => stopHelpers(sessionId)); }
+                        // Helpers stop only when the user stops the chat (the request is cut). If the answer itself ends or
+                        // breaks, they keep working; when they finish, a waiting background task is woken to read their reports.
+                        if (typeof res.on === "function" && board.hookedRes !== res) { board.hookedRes = res; res.on("close", () => { if (requestAborted) stopHelpers(sessionId); }); }
 
                         // The model the main AI asked for (its id or its name in the model list); Fable is too costly for helpers
                         const pickModel = (wanted, i) => {
@@ -2856,7 +2858,7 @@ If they ask whether their college/school uses Classgrid, say you can't see that 
                         const editTools = ["write_project_file", "edit_project_file", "start_background_command", "check_background_command", "stop_background_command"];
                         const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
                         // Live view: each helper's steps and its report as it writes it (shown under this step in the chat)
-                        const emitHelper = (data) => { if (!res.writableEnded) res.write(`data: ${JSON.stringify({ type: "helper_progress", ...data })}\n\n`); };
+                        const emitHelper = (data) => { if (res.writableEnded || res.destroyed) return; try { res.write(`data: ${JSON.stringify({ type: "helper_progress", ...data })}\n\n`); } catch { /* the answer has ended */ } };
 
                         const runHelper = async (h, i) => {
                             let stepNo = 0;
@@ -2895,17 +2897,25 @@ If they ask whether their college/school uses Classgrid, say you can't see that 
                                 : "You are a helper exploring a code project for another AI. Use the tools to look at the project (you can only read it). Read the actual code, not just file names. Then answer the task in full, with everything you found: what each relevant file and function does, how the parts work together step by step (frontend, API routes, backend, database, config), the important endpoints, data and settings, with file paths and line numbers. For example, if the task is to explore login, explain the whole flow from start to end: the frontend page and components, the form and what it sends, the API calls, the backend routes, controllers and services, checks and errors, tokens or sessions, the database models, and the config it uses. Never answer with only a list of file names. Don't guess; say what you could not find. Use tell_main to send the main AI a short note or question; follow any message it sends you.";
                             await sleep(i * 1500); // start a little apart, so the model service isn't hit all at once
                             emitHelper({ helper: i, state: "running" });
-                            // The picked model first; if it fails, the helper falls back to GLM 5.3
-                            const models = h.model === HELPER_GLM_MODEL ? [HELPER_GLM_MODEL] : [h.model, HELPER_GLM_MODEL];
+                            // The picked model first; if it fails, Claude Sonnet 5.5 takes over, then GLM 5.3
+                            const models = [...new Set([h.model, CLAUDE_CHAT_MODELS.has(h.model) ? HELPER_GLM_MODEL : "claude-sonnet-5-5", HELPER_GLM_MODEL])];
                             let lastError = "";
+                            // When every model failed, the helper restarts by itself (up to 2 more times), carrying on from
+                            // the files it already made
+                            for (let round = 0; round < 3; round++) {
+                            if (round > 0) {
+                                emitHelper({ helper: i, state: "running" });
+                                await sleep(10000);
+                            }
+                            const task = round === 0 ? h.task : `${h.task}\n\n(This is restart ${round} of this job: it stopped with an error before. First check which of your files already exist and what is done, then carry on from there.)`;
                             for (const model of models) {
                                 for (let attempt = 1; attempt <= 2; attempt++) {
-                                    if (h.abort.signal.aborted) return { state: "failed", text: "stopped because the chat answer ended" };
+                                    if (h.abort.signal.aborted) return { state: "failed", text: "stopped because the user stopped the chat" };
                                     try {
                                         emitHelper({ helper: i, state: "restart" }); // a retry starts its report again
                                         deadline = Date.now() + (h.canEdit ? 12 : 4) * 60 * 1000;
                                         const helperArgs = {
-                                            messages: [{ role: "system", content: system }, { role: "user", content: h.task }],
+                                            messages: [{ role: "system", content: system }, { role: "user", content: task }],
                                             tools: defs,
                                             toolHandlers: liveHandlers,
                                             onToken: (piece) => emitHelper({ helper: i, text: piece }),
@@ -2923,29 +2933,34 @@ If they ask whether their college/school uses Classgrid, say you can't see that 
                                         return { state: "done", text: String(r.answer).slice(0, 40000) };
                                     } catch (e) {
                                         lastError = String(e?.message || e);
-                                        if (h.abort.signal.aborted) return { state: "failed", text: "stopped because the chat answer ended" };
-                                        // "Too many requests": wait once and retry this model, then move to the next one
-                                        if (/429|rate limit/i.test(lastError) && attempt < 2) { await sleep(4000); continue; }
+                                        if (h.abort.signal.aborted) return { state: "failed", text: "stopped because the user stopped the chat" };
+                                        // "Too many requests", a timeout or a busy server: wait once and retry this model, then move to the next one
+                                        if (/429|408|5\d\d|rate limit|timeout|timed out/i.test(lastError) && attempt < 2) { await sleep(4000); continue; }
                                         break;
                                     }
                                 }
                             }
-                            return { state: "failed", text: lastError };
+                            }
+                            return { state: "failed", text: `${lastError} (tried 3 times on ${models.map((m) => MODEL_DISPLAY_NAMES[m] || m).join(", ")})` };
                         };
 
                         const batch = specs.slice(0, room).map((s, i) => {
                             const h = { no: board.nextNo++, task: s.task, canEdit: s.canEdit, model: pickModel(s.model, i), state: "running", report: "", reportTaken: false, inbox: [], notes: [], notesRead: 0, abort: new AbortController() };
-                            h.promise = runHelper(h, i).then((out) => {
+                            h.promise = runHelper(h, i).catch((e) => ({ state: "failed", text: String(e?.message || e) })).then((out) => {
                                 h.state = out.state;
                                 h.report = out.text;
                                 emitHelper({ helper: i, state: out.state });
+                                // The answer that started them has ended: wake this chat's background task to read the reports
+                                if ((res.writableEnded || res.destroyed) && !requestAborted && !board.helpers.some((x) => x.state === "running")) {
+                                    import("../services/agent-task.service.js").then((m) => m.wakeTaskForSession(sessionId, "helpers")).catch(() => {});
+                                }
                             });
                             board.helpers.push(h);
                             return h;
                         });
                         const label = (h) => `Helper ${h.no} (${MODEL_DISPLAY_NAMES[h.usedModel || h.model] || h.usedModel || h.model}, ${h.canEdit ? "can edit" : "read only"}): ${h.task.slice(0, 80)}`;
                         if (args?.wait === false || args?.wait === "false") {
-                            return `Started ${batch.length} helper(s), working in the background:\n${batch.map(label).join("\n")}\nTalk to them with message_helper and read their notes and reports with check_helpers. Before your final answer, wait until every helper has finished (check_helpers).`;
+                            return `Started ${batch.length} helper(s), working in the background:\n${batch.map(label).join("\n")}\nTalk to them with message_helper and read their notes and reports with check_helpers. Wait for them with check_helpers before your final answer; if your answer has to end first, they keep working and you are woken with their reports when they finish.`;
                         }
                         await Promise.all(batch.map((h) => h.promise));
                         return batch.map((h) => {
@@ -2968,7 +2983,7 @@ If they ask whether their college/school uses Classgrid, say you can't see that 
                     // Status of the helpers: new notes they sent and the reports of the ones that finished (each shown once)
                     check_helpers: async (args) => {
                         const board = helperBoard(sessionId);
-                        if (!board.helpers.length) return "No helpers are working in this chat.";
+                        if (!board.helpers.length) return "No helpers are working in this chat: none were started in this chat's current run, or they all finished and their reports were already given. Do not tell the user that helpers are working. To use helpers, start them with run_project_helpers first.";
                         const waitMs = Math.min(120, Math.max(0, Number(args?.wait_seconds) || 0)) * 1000;
                         const news = () => board.helpers.some((h) => h.notes.length > h.notesRead || (h.state !== "running" && !h.reportTaken));
                         const until = Date.now() + waitMs;
@@ -4956,6 +4971,8 @@ If a tool fails, never show the error message; say only: "Something went wrong o
                                 provider: cloudflareStreamProvider(model),
                                 messages: modelMessages,
                                 excludeTools: sees ? NO_ANALYZE_IMAGE : undefined,
+                                // The answer must not stop: a round that keeps failing moves on to these models
+                                fallbackProviders: ["@cf/deepseek-ai/deepseek-v4.1-flash-1017", HELPER_GLM_MODEL, "@cf/moonshotai/kimi-k2.6"].filter((m) => m !== model).map(cloudflareStreamProvider),
                                 tools: llmConfig.tools,
                                 toolHandlers: llmConfig.toolHandlers,
                                 maxTokens: llmConfig.defaultMaxTokens,

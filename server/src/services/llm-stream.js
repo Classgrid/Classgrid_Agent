@@ -237,7 +237,9 @@ export async function streamChat({
     onThought,
     onStatus,
     // Tool names never sent to this model (e.g. analyze_image for a model that sees images itself)
-    excludeTools
+    excludeTools,
+    // Other models a failed round moves to (same API), so the answer keeps going when one model is down
+    fallbackProviders = []
 }) {
     // `tools` is re-read every round: load_tools can add tools to the same array mid-answer.
     const currentTools = () => tools.filter(t => t?.function?.name !== "internal_thought_process" && !excludeTools?.has(t?.function?.name));
@@ -276,10 +278,34 @@ export async function streamChat({
 
             const roundTools = currentTools();
             const sentToolNames = new Set(roundTools.map(t => t.function.name));
-            const round = await streamOneRound({
-                provider, messages: conversation, tools: roundTools, temperature, maxTokens: roundMax, timeoutMs, signal,
-                onToken, onThought: separateThought, inputTooBig
-            });
+            // The answer must not stop (owner's rule): a failed round (timeout, busy server, any error) is tried again,
+            // up to 6 times, and after 2 failures on the same model it moves to the next fallback model. Text this round
+            // already showed is kept and the model is asked to continue from there, so nothing is shown twice.
+            let round;
+            const roundProviders = [provider, ...fallbackProviders.filter((p) => p?.model && p.model !== provider.model)];
+            for (let tryNo = 0, at = 0; ; tryNo++) {
+                let shownText = "";
+                try {
+                    round = await streamOneRound({
+                        provider: roundProviders[at], messages: conversation, tools: roundTools, temperature, maxTokens: roundMax, timeoutMs, signal,
+                        onToken: (piece) => { shownText += piece; onToken?.(piece); },
+                        onThought: separateThought,
+                        inputTooBig
+                    });
+                    break;
+                } catch (e) {
+                    if (signal?.aborted || tryNo >= 5) throw e;
+                    console.warn(`[AI-STREAM] ${roundProviders[at].model} round failed (${String(e?.message || e).slice(0, 160)}); trying again (${tryNo + 1}/5)`);
+                    if (shownText.trim()) {
+                        continuedText += shownText;
+                        conversation.push({ role: "assistant", content: shownText });
+                        conversation.push({ role: "user", content: CONTINUE_PROMPT });
+                    }
+                    if (tryNo % 2 === 1 && at < roundProviders.length - 1) at++;
+                    onStatus?.("The model is busy, trying again…");
+                    await new Promise((r) => setTimeout(r, Math.min(3000 * (tryNo + 1), 10000)));
+                }
+            }
             if (round.reasoning) hadReasoning = true;
 
             if (round.usage) {

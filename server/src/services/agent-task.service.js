@@ -475,7 +475,15 @@ const WHY = {
     continue: "your last run ended before the task was finished",
     restart: "the Classgrid server restarted while you were working",
     email: "the user sent you a new email at agent@classgrid.in (it is in the messages below, with any attachments as links)",
+    helpers: "your Project Mode helpers finished their work after your last run ended (read their reports with check_helpers, then continue)",
 };
+
+// Wakes this chat's open task, e.g. when its helpers finish after the run that started them has ended
+export async function wakeTaskForSession(sessionId, reason) {
+    if (!sessionId) return;
+    const task = await AgentTask.findOne({ session_id: sessionId, status: { $in: OPEN } }).sort({ updatedAt: -1 }).select("_id").lean().catch(() => null);
+    if (task) await wakeTask(task._id, reason).catch((e) => console.error("[agent task] wake after helpers failed:", e.message));
+}
 
 function messageLines(msgs) {
     return msgs.map((m, i) => `${i + 1}. [${india(m.at)}] ${m.type}${m.text ? `: ${m.text}` : ""}${m.fileUrl ? `\n   File${m.media?.filename ? ` (${m.media.filename})` : ""}: ${m.fileUrl}` : m.fileError ? `\n   (a file could not be loaded: ${m.fileError})` : ""}`).join("\n");
