@@ -574,7 +574,7 @@ export function buildTalkRequestCreationEmailHtml({ ticket, trackingUrl }) {
 <td style="padding:14px 18px;border-bottom:1px solid #eaeaea;color:#111111;font-size:14px;font-weight:600;">#CG-TALK-${escapeHtml(ticketIdShort)}</td>
 </tr>
 <tr>
-<td style="padding:14px 18px;border-bottom:1px solid #eaeaea;border-right:1px solid #eaeaea;color:#6b7280;font-size:13px;font-weight:500;">Institution</td>
+<td style="padding:14px 18px;border-bottom:1px solid #eaeaea;border-right:1px solid #eaeaea;color:#6b7280;font-size:13px;font-weight:500;">Organization</td>
 <td style="padding:14px 18px;border-bottom:1px solid #eaeaea;color:#111111;font-size:14px;">${escapeHtml(institutionLabel)}</td>
 </tr>
 <tr>
@@ -617,7 +617,7 @@ export function buildTalkRequestCreationEmailHtml({ ticket, trackingUrl }) {
 </table>
 
 <h3 style="color:#111111;font-size:16px;margin:0 0 15px;text-transform:uppercase;letter-spacing:0.5px;">While You Wait</h3>
-<p style="color:#374151;font-size:14px;line-height:1.7;margin:0 0 15px;">Explore how Classgrid empowers institutions like yours:</p>
+<p style="color:#374151;font-size:14px;line-height:1.7;margin:0 0 15px;">Explore what Classgrid AI can do for you:</p>
 <ul style="color:#374151;font-size:14px;line-height:1.7;margin:0 0 30px;list-style-type:none;padding:0;">
 <li style="margin-bottom:10px;">🎥 <a href="https://classgrid.in/#demo" style="color:#34d399;text-decoration:none;">Product Demo</a> – Watch Classgrid in action</li>
 </ul>
@@ -665,7 +665,7 @@ export function buildTalkRequestCreationPlainText({ ticket, trackingUrl }) {
         "",
         "REQUEST SUMMARY",
         `Request ID: #CG-TALK-${ticketIdShort}`,
-        `Institution: ${institutionLabel}`,
+        `Organization: ${institutionLabel}`,
         `Subject: ${subject}`,
         `Category: ${categoryLabel}`,
         `Priority: ${priorityLabel}`,
@@ -679,7 +679,7 @@ export function buildTalkRequestCreationPlainText({ ticket, trackingUrl }) {
         "3. Resolution: We will work with you to provide the necessary support or information.",
         "",
         "WHILE YOU WAIT",
-        "Explore how Classgrid empowers institutions like yours:",
+        "Explore what Classgrid AI can do for you:",
         "- Product Demo: https://classgrid.in/#demo",
         "",
         "We look forward to assisting you.",
@@ -761,7 +761,7 @@ ${introHtml}
 <td style="padding:14px 18px;border-bottom:1px solid #eaeaea;color:#111111;font-size:14px;font-weight:600;">#CG-TALK-${escapeHtml(ticketIdShort)}</td>
 </tr>
 <tr>
-<td style="padding:14px 18px;border-bottom:1px solid #eaeaea;border-right:1px solid #eaeaea;color:#6b7280;font-size:13px;font-weight:500;">Institution</td>
+<td style="padding:14px 18px;border-bottom:1px solid #eaeaea;border-right:1px solid #eaeaea;color:#6b7280;font-size:13px;font-weight:500;">Organization</td>
 <td style="padding:14px 18px;border-bottom:1px solid #eaeaea;color:#111111;font-size:14px;">${escapeHtml(institutionLabel)}</td>
 </tr>
 <tr>
@@ -866,7 +866,7 @@ export function buildTalkRequestReplyPlainText({ ticket, replyMessage, conversat
         "",
         "CONVERSATION SUMMARY",
         `Request ID: #CG-TALK-${ticketIdShort}`,
-        `Institution: ${institutionLabel}`,
+        `Organization: ${institutionLabel}`,
         `Subject: ${subject}`,
         `Category: ${categoryLabel}`,
         `Priority: ${priorityLabel}`,
