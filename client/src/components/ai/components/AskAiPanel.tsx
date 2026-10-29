@@ -5689,7 +5689,7 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
 
   const panelInput = readOnly ? null : (
     <div className={cn(
-      variant === "full-page" ? "px-1 sm:px-4 py-4 relative" : "px-4 py-4 relative",
+      variant === "full-page" ? "px-1 sm:px-4 py-4 sm:pt-0 relative" : "px-4 py-4 relative",
       "flex flex-col gap-2"
     )}>
 
@@ -5697,7 +5697,7 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
         "relative",
         variant === "full-page"
           // Phones: solid page colour behind the input so messages scrolling under it don't show at its sides
-          ? "absolute bottom-0 left-0 right-0 z-10 pointer-events-none max-sm:!bg-[#fafafa] max-sm:dark:!bg-black max-sm:pt-2"
+          ? "max-sm:absolute bottom-0 left-0 right-0 z-10 pointer-events-none max-sm:!bg-[#fafafa] max-sm:dark:!bg-black max-sm:pt-2"
           : variant === "overlay" ? "" : "border-t border-border"
       )}>
         <AnimatePresence>
@@ -6406,7 +6406,7 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
                     </div>
                   </div>
                 </div>
-                <div className="shrink-0 !bg-[#fafafa] dark:!bg-[#000000] pt-2 pb-3 sm:pb-6 px-3 sm:px-4 md:px-8 max-w-4xl w-full mx-auto">
+                <div className="shrink-0 !bg-[#fafafa] dark:!bg-[#000000] pt-2 sm:pt-0 pb-3 sm:pb-6 px-3 sm:px-4 md:px-8 max-w-4xl w-full mx-auto">
                   {panelInput}
                 </div>
               </>
@@ -6918,7 +6918,7 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
                 >
                   {panelChat}
                 </div>
-                <div className="shrink-0 !bg-[#fafafa] dark:!bg-[#000000] pt-2 pb-3 sm:pb-6 px-3 sm:px-4 md:px-8 max-w-4xl w-full mx-auto">
+                <div className="shrink-0 !bg-[#fafafa] dark:!bg-[#000000] pt-2 sm:pt-0 pb-3 sm:pb-6 px-3 sm:px-4 md:px-8 max-w-4xl w-full mx-auto">
                   {panelInput}
                 </div>
               </>
