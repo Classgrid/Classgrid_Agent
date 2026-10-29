@@ -38,6 +38,7 @@ import { DangerConfirmDialog } from "@/components/marketing_ui/danger-confirm-di
 import { Spinner } from "@/components/marketing_ui/spinner";
 import { toast } from "sonner";
 import { fetchWithRescue } from "@/lib/rescue";
+import { getSocket } from "@/lib/socketClient";
 
 interface ChatSession {
   id: string;
@@ -132,9 +133,18 @@ export function AgentNestedMenu({ searchQuery = "" }: { searchQuery?: string }) 
         : [{ id, title: String(e.detail?.title || "New chat").slice(0, 60), created_at: new Date().toISOString(), pinned: false }, ...prev]);
     };
 
+    // The server sends a chat's new title the moment it is made, so it shows without a refresh
+    const handleTitle = (data: { sessionId?: string; title?: string }) => {
+      if (!data?.sessionId || !data.title) return;
+      setSessions((prev) => prev.map((s) => (s.id === data.sessionId ? { ...s, title: String(data.title) } : s)));
+    };
+    const socket = getSocket();
+    socket?.on("ai:session_title", handleTitle);
+
     window.addEventListener("agent:refresh-sessions", handleRefresh);
     window.addEventListener("agent:session-created", handleCreated);
     return () => {
+      socket?.off("ai:session_title", handleTitle);
       window.removeEventListener("agent:refresh-sessions", handleRefresh);
       window.removeEventListener("agent:session-created", handleCreated);
     };

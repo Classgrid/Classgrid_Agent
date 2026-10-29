@@ -792,7 +792,7 @@ async function generateShortTitleText(instruction, text) {
 // that opened with "hi" doesn't stay "Simple Greeting" forever.
 const TITLE_REFRESH_EVERY = 5;
 
-async function generateSessionTitle(sessionId, question) {
+async function generateSessionTitle(sessionId, question, userId = null) {
     try {
         // The user's other chat titles, so this one doesn't repeat them (e.g. three "PM2 Log Search" chats)
         const taken = await otherChatTitles(sessionId).catch(() => []);
@@ -830,6 +830,8 @@ async function generateSessionTitle(sessionId, question) {
                 // The user may have renamed the chat while the title was being generated.
                 if (await redis.get(`ai:title-custom:${sessionId}`).catch(() => null)) return;
                 await updateSessionTitle(sessionId, cleanTitle);
+                // Shown in the sidebar at once (no page refresh needed)
+                if (userId) import("../services/socket.service.js").then((m) => m.getIO().to(String(userId)).emit("ai:session_title", { sessionId, title: cleanTitle })).catch(() => {});
             }
         }
     } catch (err) {
@@ -1610,7 +1612,7 @@ export const streamAskAi = async (req, res) => {
                     // file names too, or it titles the chat "No Files Provided"
                     const fileNames = (body.fileUrls || []).map((u) => String(u).split(/[?#]/)[0].split('/').pop().replace(/^\d{10,}-/, '')).filter(Boolean);
                     const titleInput = fileNames.length ? `${body.question}\nAttached files: ${fileNames.join(', ')}` : body.question;
-                    setTimeout(() => generateSessionTitle(sessionId, titleInput).catch(console.error), 5000);
+                    setTimeout(() => generateSessionTitle(sessionId, titleInput, req.user?._id).catch(console.error), 5000);
                 }
 
                 // Send back the sessionId immediately so the frontend sidebar can update instantly
@@ -1639,7 +1641,7 @@ export const streamAskAi = async (req, res) => {
                     if (count === 1) redis.expire(titleCountKey, 60 * 60 * 24 * 90).catch(() => {});
                     if (count < TITLE_REFRESH_EVERY || count % TITLE_REFRESH_EVERY !== 0) return;
                     if (await redis.get(`ai:title-custom:${titleSessionId}`).catch(() => null)) return;
-                    setTimeout(() => generateSessionTitle(titleSessionId, recentUserText).catch(console.error), 5000);
+                    setTimeout(() => generateSessionTitle(titleSessionId, recentUserText, req.user?._id).catch(console.error), 5000);
                 }).catch(() => {});
             }
         }

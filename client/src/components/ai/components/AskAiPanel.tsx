@@ -4219,6 +4219,10 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
                   // An incognito chat never shows up in the sidebar
                   window.dispatchEvent(new CustomEvent("agent:session-created", { detail: { id: event.sessionId, title: question } }));
                   window.dispatchEvent(new Event("agent:refresh-sessions"));
+                  // The real title is made a few seconds after the first message: load the list again so it shows
+                  // without a page refresh (the live title update covers this too when the socket is connected)
+                  setTimeout(() => window.dispatchEvent(new Event("agent:refresh-sessions")), 8000);
+                  setTimeout(() => window.dispatchEvent(new Event("agent:refresh-sessions")), 15000);
                 }
               } else if (event.type === "answer") {
                 finalPayload = event;
