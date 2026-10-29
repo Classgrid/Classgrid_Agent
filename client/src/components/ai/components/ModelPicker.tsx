@@ -52,7 +52,12 @@ export type ChatModelOption = {
   description: string;
   provider: "anthropic" | "cloudflare";
   logo: ModelLogo;
+  /** Day the model was added (YYYY-MM-DD). It shows a "New" badge for NEW_BADGE_DAYS after this date. */
+  addedAt?: string;
 };
+
+const NEW_BADGE_DAYS = 15;
+const isNewModel = (m: ChatModelOption) => !!m.addedAt && Date.now() - Date.parse(m.addedAt) < NEW_BADGE_DAYS * 24 * 60 * 60 * 1000;
 
 export const AUTO_MODEL_ID = "auto";
 
@@ -69,6 +74,7 @@ export const MODEL_GROUPS: { label: string; models: ChatModelOption[] }[] = [
   {
     label: "DeepSeek",
     models: [
+      { id: "@cf/deepseek-ai/deepseek-v4.1-flash-1017", name: "DeepSeek V4.1 Flash", description: "Newest DeepSeek: fast, low cost and sees images", provider: "cloudflare", logo: LOGOS.deepseek, addedAt: "2026-10-29" },
       { id: "@cf/deepseek-ai/deepseek-v4-pro-0813", name: "DeepSeek V4 Pro", description: "Strong reasoning and tool use", provider: "cloudflare", logo: LOGOS.deepseek },
       { id: "@cf/deepseek-ai/deepseek-v4-flash-0731", name: "DeepSeek V4 Flash", description: "Fast and low cost", provider: "cloudflare", logo: LOGOS.deepseek },
     ],
@@ -201,7 +207,12 @@ export function ModelPicker({ value, onChange, disabled }: ModelPickerProps) {
                 >
                   <ModelLogoImg logo={model.logo} className={cn("mt-0.5", locked && "opacity-50")} />
                   <div className="flex flex-col flex-1 min-w-0">
-                    <span className={cn("truncate", locked && "text-muted-foreground")}>{model.name}</span>
+                    <span className="flex items-center gap-1.5 min-w-0">
+                      <span className={cn("truncate", locked && "text-muted-foreground")}>{model.name}</span>
+                      {isNewModel(model) && (
+                        <span className="shrink-0 rounded-full border border-border px-1.5 py-px text-[10px] font-medium leading-4 text-foreground">New</span>
+                      )}
+                    </span>
                     <span className="text-xs text-muted-foreground truncate">
                       {locked ? (access?.fable.toppedUpInr ? `Top up ₹${fableLeft} more to unlock` : `Top up ₹${access?.fable.requiredInr ?? 299} to unlock`) : model.id === FABLE_ID && access && !access.fable.exempt ? "Most capable · uses paid credits only" : model.description}
                     </span>

@@ -38,6 +38,7 @@
 const PRICES = {
     "@cf/deepseek-ai/deepseek-v4-pro-0813": { input: 1.32, output: 3.96, cacheRead: 0.044 },
     "@cf/deepseek-ai/deepseek-v4-flash-0731": { input: 0.44, output: 1.32, cacheRead: 0.014 },
+    "@cf/deepseek-ai/deepseek-v4.1-flash-1017": { input: 0.3, output: 1.2, cacheRead: 0.006 },
     "@cf/openai/gpt-oss-120b": { input: 0.35, output: 0.75 },
     "@cf/openai/gpt-oss-20b": { input: 0.2, output: 0.3 },
     "@cf/moonshotai/kimi-k2.6": { input: 0.95, output: 4, cacheRead: 0.16 },

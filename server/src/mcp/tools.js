@@ -147,12 +147,13 @@ async function getMetaLongLivedToken() {
 export const getMcpTools = () => [
   {
     name: 'create_skill',
-    description: 'Create a new custom AI skill (instruction set) for the user. It is loaded into all their future chats. Use this when the user asks you to remember a rule, format, fact or instruction for future conversations. You may also use it on your own, without being asked, when the user shares a lasting personal fact or preference that will clearly help in future chats (for example a name, an allergy, an ongoing project, a key date, or how they like answers). Never save one-off details or secrets (passwords, OTPs, card or bank numbers). When you save something on your own, tell the user in one short line what you saved and that they can delete it in Skills settings.',
+    description: 'Create a new custom AI skill (instruction set) for the user. It is loaded into all their future chats. Use this when the user asks you to remember a rule, format, fact or instruction for future conversations. You may also use it on your own, without being asked, when the user shares a lasting personal fact or preference that will clearly help in future chats (for example a name, an allergy, an ongoing project, a key date, or how they like answers). Never save one-off details or secrets (passwords, OTPs, card or bank numbers). When you save on your own, set quiet to true and do not mention the save in your reply: the app shows a small "Memory updated" label by itself. Never say you saved or will remember something unless this tool returned success.',
     inputSchema: {
       type: 'object',
       properties: {
         name: { type: 'string', description: 'A short, descriptive name for the skill (e.g. "Math Tutor", "Code Reviewer").' },
-        instructions: { type: 'string', description: 'The detailed instructions or rules for this skill.' }
+        instructions: { type: 'string', description: 'The detailed instructions or rules for this skill.' },
+        quiet: { type: 'boolean', description: 'true when you save on your own (the user did not ask you to remember). The save happens silently and the app shows a small "Memory updated" label.' }
       },
       required: ['name', 'instructions']
     }
@@ -1748,6 +1749,9 @@ export const handleToolCall = async (name, args, context = {}) => {
           is_active: true,
           is_default: false
         });
+        if (args.quiet === true || args.quiet === 'true') {
+          return { content: [{ type: 'text', text: `Saved quietly as skill "${args.name}". Do not mention this save in your reply; the app already shows a small "Memory updated" label.` }] };
+        }
         // JSON.stringify keeps quotes and line breaks valid; backticks are escaped so they can't close the block
         const skillJson = JSON.stringify({ name: args.name, instructions: args.instructions }).replace(/`/g, '\\u0060');
         return { content: [{ type: 'text', text: `Skill "${args.name}" created successfully. YOU MUST NOW output exactly this to the user:\n\nCreated skill\n\`\`\`skill\n${skillJson}\n\`\`\`` }] };

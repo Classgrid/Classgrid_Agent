@@ -251,6 +251,25 @@ async function toAttachmentBlocks(attachments, signal) {
     return blocks;
 }
 
+// The same attached images for Cloudflare models that can see them (OpenAI-style image parts with data URLs).
+export async function toImageUrlParts(attachments, signal) {
+    const parts = [];
+    for (const a of attachments || []) {
+        if (nativeAttachmentKind(a) !== "image") continue;
+        try {
+            const buf = await fetchTrustedFile(a.url, signal);
+            if (!buf || buf.length === 0 || buf.length > MAX_IMAGE_BYTES) continue;
+            const mediaType = sniffImageType(buf);
+            if (!mediaType) continue;
+            parts.push({ type: "image_url", image_url: { url: `data:${mediaType};base64,${buf.toString("base64")}` } });
+        } catch (e) {
+            if (signal?.aborted) throw e;
+            console.warn(`[vision] could not load attachment for native vision (${String(a.url).slice(0, 80)}): ${e.message}`);
+        }
+    }
+    return parts;
+}
+
 function toClaudeMessages(messages, attachmentBlocks) {
     const out = [];
     for (const m of messages) {

@@ -235,10 +235,12 @@ export async function streamChat({
     signal,
     onToken,
     onThought,
-    onStatus
+    onStatus,
+    // Tool names never sent to this model (e.g. analyze_image for a model that sees images itself)
+    excludeTools
 }) {
     // `tools` is re-read every round: load_tools can add tools to the same array mid-answer.
-    const currentTools = () => tools.filter(t => t?.function?.name !== "internal_thought_process");
+    const currentTools = () => tools.filter(t => t?.function?.name !== "internal_thought_process" && !excludeTools?.has(t?.function?.name));
     const conversation = [...messages];
     const usage = { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 };
     let depth = 0;

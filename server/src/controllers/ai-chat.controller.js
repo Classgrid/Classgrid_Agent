@@ -48,7 +48,7 @@
 import { usageStorage } from "../utils/fetch-interceptor.js";
 import { createLLMClient } from "@classgrid/ai/core";
 import { streamChat } from "../services/llm-stream.js";
-import { streamClaudeChat, CLAUDE_CHAT_MODELS } from "../services/llm-stream-anthropic.js";
+import { streamClaudeChat, CLAUDE_CHAT_MODELS, toImageUrlParts } from "../services/llm-stream-anthropic.js";
 import { planToolsForMessage, buildLoadToolsTool, orderTools, groupOfTool, ageSticky, stickyKey, LOAD_TOOLS_NAME, promptBlock, filterPromptBlocks, promptBlocksForGroups, isStaffRole } from "../services/ai-tool-groups.js";
 import { chargeableTokens } from "../services/ai-token-pricing.js";
 import { getPresignedUploadUrl, uploadBufferToR2 } from "../config/r2Client.js";
@@ -218,6 +218,7 @@ ROUTING (right after brief thinking; load the tool's group first if needed): upl
 SUPPORT & PLUGINS
 - Asked "What can you do?", never offer "Support": you are an AI assistant, not a support portal. Never pretend to be the support service.
 - Classgrid Talk no longer exists; it was merged into Support. Classgrid now has only Support (tickets), for everyone: platform users (people with a Classgrid AI account) and non-platform users (people with only a classgrid.in website account). It covers pre-sales and product questions as well as technical and billing help. Never mention Classgrid Talk as a current service.
+- Memory: saved skills are your memory across chats. To remember anything for future chats, call create_skill. When the user shares a lasting personal fact or preference without asking you to remember it, you may save it yourself with quiet: true and not mention it. Never say you saved or will remember something unless create_skill returned success.
 - "Plugins" means 3rd-party integrations (Zoom, Google Meet, Google Classroom, Vercel, GitHub, Canva, etc.), not modules (Attendance, Fees, Library).
 
 INLINE CODE (BACKTICKS) RULE:
@@ -1119,6 +1120,7 @@ const HELPER_GLM_MODEL = "@cf/zai-org/glm-5.3";
 const CF_PICKER_MODELS = new Map([
     [CF_PRO_MODEL, "native"],
     [CF_FLASH_MODEL, "native"],
+    ["@cf/deepseek-ai/deepseek-v4.1-flash-1017", "native"],
     ["@cf/openai/gpt-oss-120b", "native"],
     ["@cf/openai/gpt-oss-20b", "native"],
     ["@cf/moonshotai/kimi-k2.6", "native"],
@@ -1134,6 +1136,12 @@ const CF_PICKER_MODELS = new Map([
     ["@cf/mistralai/mistral-small-3.1-24b-instruct", "openai"],
 ]);
 
+// Cloudflare models that see attached images themselves, like Claude: images go into the message and
+// analyze_image is not offered to them (checked live on 2026-10-29).
+const CF_VISION_MODELS = new Set(["@cf/deepseek-ai/deepseek-v4.1-flash-1017"]);
+const NO_ANALYZE_IMAGE = new Set(["analyze_image"]);
+const CF_NATIVE_VISION_NOTE = "\n\nNATIVE VISION: You can see the images attached to the user's message directly. Answer from them right away; you do not have an analyze_image tool.";
+
 // Names as the model dropdown shows them (client/.../ModelPicker.tsx), for telling the model which one it is.
 const MODEL_DISPLAY_NAMES = {
     "claude-haiku-5-5": "Claude Haiku 5.5",
@@ -1142,6 +1150,7 @@ const MODEL_DISPLAY_NAMES = {
     "claude-fable-5-1": "Claude Fable 5.1",
     [CF_PRO_MODEL]: "DeepSeek V4 Pro",
     [CF_FLASH_MODEL]: "DeepSeek V4 Flash",
+    "@cf/deepseek-ai/deepseek-v4.1-flash-1017": "DeepSeek V4.1 Flash",
     "@cf/openai/gpt-oss-120b": "GPT-OSS 120B",
     "@cf/openai/gpt-oss-20b": "GPT-OSS 20B",
     "@cf/moonshotai/kimi-k2.6": "Kimi K2.6",
@@ -4829,9 +4838,23 @@ If a tool fails, never show the error message; say only: "Something went wrong o
                     for (const model of modelsToTry) {
                         if (messages[0]?.role === "system") messages[0] = { ...messages[0], content: withModelIdentity(messages[0].content, model, isStaffRole(req.user?.role), { selected: requestedModel, previousModel }) };
                         try {
+                            // A model that sees images gets the attached images inside the newest user message (like Claude)
+                            const sees = CF_VISION_MODELS.has(model);
+                            let modelMessages = messages;
+                            if (sees) {
+                                modelMessages = [...messages];
+                                if (modelMessages[0]?.role === "system") modelMessages[0] = { ...modelMessages[0], content: modelMessages[0].content + CF_NATIVE_VISION_NOTE };
+                                const imageParts = await toImageUrlParts([...(Array.isArray(body.attachments) ? body.attachments : []), ...recentGeneratedImageAttachments(messages)], streamAbort.signal);
+                                const lastUser = modelMessages.map((m) => m.role).lastIndexOf("user");
+                                if (imageParts.length > 0 && lastUser > 0) {
+                                    const m = modelMessages[lastUser];
+                                    modelMessages[lastUser] = { ...m, content: [{ type: "text", text: typeof m.content === "string" ? m.content : JSON.stringify(m.content ?? "") }, ...imageParts] };
+                                }
+                            }
                             streamed = await streamChat({
                                 provider: cloudflareStreamProvider(model),
-                                messages,
+                                messages: modelMessages,
+                                excludeTools: sees ? NO_ANALYZE_IMAGE : undefined,
                                 tools: llmConfig.tools,
                                 toolHandlers: llmConfig.toolHandlers,
                                 maxTokens: llmConfig.defaultMaxTokens,

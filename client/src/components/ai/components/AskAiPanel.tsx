@@ -5497,6 +5497,18 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
                           {!isUser && !message.typing && (message.steps || []).some((s: any) => s.type === 'tool' && s.tool === 'spotify_connector') && (
                             <div className="pl-1 mt-3 max-w-[640px]"><SpotifyDisplay steps={(message.steps || []) as any[]} /></div>
                           )}
+                          {/* Quiet memory save: shown only when the create_skill tool really ran and worked */}
+                          {!isUser && !message.typing && (message.steps || []).some((s: any) => s.type === 'tool' && s.tool === 'create_skill' && s.status === 'success' && (s.args?.quiet === true || s.args?.quiet === 'true')) && (
+                            <div className="pl-1 mt-2">
+                              <button
+                                type="button"
+                                onClick={() => window.dispatchEvent(new CustomEvent('open-ai-hub', { detail: { tab: 'skills' } }))}
+                                className="inline-flex items-center gap-1.5 rounded-full border border-border bg-muted/40 px-2.5 py-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
+                              >
+                                <Check className="w-3 h-3" /> Memory updated
+                              </button>
+                            </div>
+                          )}
                           {!isUser && !message.typing && message.content.length > 0 && !message.content.includes("```approval") && !/^\s*\[IMAGE_GENERATION_[^\]]*\]\s*$/.test(message.content) && !message.content.trim().startsWith("ai_quota_exceeded") && message.content.trim() !== "ai_blocked" && (
                             <div className="pl-1 mt-3">
                               <FilesChangedSummary steps={(message.steps || []) as any} checkpoint={message.checkpoint} sessionId={sessionId || undefined} />

@@ -70,6 +70,7 @@ const MODEL_PRICING_USD_PER_M = {
     "@cf/meta/llama-3.3-70b-instruct-fp8-fast": { prompt: 0.293, completion: 2.253 },
     // Models selectable in the AI chat model picker (Cloudflare catalog rates, 2026-10-08)
     "@cf/deepseek-ai/deepseek-v4-flash-0731":   { prompt: 0.44,  completion: 1.32  },
+    "@cf/deepseek-ai/deepseek-v4.1-flash-1017": { prompt: 0.3,   completion: 1.2   },
     "@cf/openai/gpt-oss-120b":                  { prompt: 0.35,  completion: 0.75  },
     "@cf/openai/gpt-oss-20b":                   { prompt: 0.2,   completion: 0.3   },
     "@cf/moonshotai/kimi-k2.6":                 { prompt: 0.95,  completion: 4     },
