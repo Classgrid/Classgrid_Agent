@@ -1173,7 +1173,7 @@ const CF_PICKER_MODELS = new Map([
 // analyze_image is not offered to them (checked live on 2026-10-29).
 const CF_VISION_MODELS = new Set(["@cf/deepseek-ai/deepseek-v4.1-flash-1017"]);
 const NO_ANALYZE_IMAGE = new Set(["analyze_image"]);
-const CF_NATIVE_VISION_NOTE = "\n\nNATIVE VISION: You can see the images attached to the user's message directly. Answer from them right away; you do not have an analyze_image tool.";
+const CF_NATIVE_VISION_NOTE = "\n\nNATIVE VISION: You can see images yourself, like Claude. Images attached to the user's message are in it: answer from them right away. To look at an image you made in the Sandbox (video frames, charts, screenshots), use view_image. Images from Classgrid links in tool results are shown to you after the tool result, and analyze_image on a Classgrid image link shows you the image itself.";
 
 // Names as the model dropdown shows them (client/.../ModelPicker.tsx), for telling the model which one it is.
 const MODEL_DISPLAY_NAMES = {
@@ -4975,20 +4975,25 @@ If a tool fails, never show the error message; say only: "Something went wrong o
                             // A model that sees images gets the attached images inside the newest user message (like Claude)
                             const sees = CF_VISION_MODELS.has(model);
                             let modelMessages = messages;
+                            let imageParts = [];
                             if (sees) {
                                 modelMessages = [...messages];
                                 if (modelMessages[0]?.role === "system") modelMessages[0] = { ...modelMessages[0], content: modelMessages[0].content + CF_NATIVE_VISION_NOTE };
-                                const imageParts = await toImageUrlParts([...(Array.isArray(body.attachments) ? body.attachments : []), ...recentGeneratedImageAttachments(messages)], streamAbort.signal);
+                                imageParts = await toImageUrlParts([...(Array.isArray(body.attachments) ? body.attachments : []), ...recentGeneratedImageAttachments(messages)], streamAbort.signal);
                                 const lastUser = modelMessages.map((m) => m.role).lastIndexOf("user");
                                 if (imageParts.length > 0 && lastUser > 0) {
                                     const m = modelMessages[lastUser];
                                     modelMessages[lastUser] = { ...m, content: [{ type: "text", text: typeof m.content === "string" ? m.content : JSON.stringify(m.content ?? "") }, ...imageParts] };
                                 }
                             }
+                            // view_image (look at a Sandbox image yourself) goes to a model that sees images, like Claude
+                            if (sees && toolPlan.allowedToolNames.has("run_code") && !llmConfig.tools.some((t) => t?.function?.name === "view_image")) llmConfig.tools.push(VIEW_IMAGE_TOOL);
                             streamed = await streamChat({
                                 provider: cloudflareStreamProvider(model),
                                 messages: modelMessages,
-                                excludeTools: sees ? NO_ANALYZE_IMAGE : undefined,
+                                seesImages: sees,
+                                // With an image attached it looks at it directly, so the analyze_image detour is not offered (as for Claude)
+                                excludeTools: sees && imageParts.length > 0 ? NO_ANALYZE_IMAGE : undefined,
                                 // The answer must not stop: a round that keeps failing moves on to these models
                                 fallbackProviders: ["@cf/deepseek-ai/deepseek-v4.1-flash-1017", HELPER_GLM_MODEL, "@cf/moonshotai/kimi-k2.6"].filter((m) => m !== model).map(cloudflareStreamProvider),
                                 tools: llmConfig.tools,

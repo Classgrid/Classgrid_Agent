@@ -251,6 +251,45 @@ async function toAttachmentBlocks(attachments, signal) {
     return blocks;
 }
 
+// Tool images for Cloudflare models that see images, the same ones Claude gets (OpenAI-style image parts with
+// data URLs): images a handler returned (view_image), Classgrid image links in the output of image tools, and
+// analyze_image on a Classgrid link shown as the image itself. Same caps as Claude per result and per run.
+export function makeToolImageCollector(signal) {
+    let sent = 0;
+    let bytes = 0;
+    const seen = new Set();
+    const take = (out, buf) => {
+        if (!buf || buf.length === 0 || buf.length > MAX_IMAGE_BYTES) return;
+        const mediaType = sniffImageType(buf);
+        if (!mediaType) return;
+        const b64 = buf.toString("base64");
+        if (out.length >= MAX_IMAGES_PER_TOOL_RESULT || sent >= MAX_TOOL_IMAGES_PER_RUN || bytes + b64.length > MAX_TOOL_IMAGE_BYTES_PER_RUN) return;
+        sent++;
+        bytes += b64.length;
+        out.push({ type: "image_url", image_url: { url: `data:${mediaType};base64,${b64}` } });
+    };
+    return {
+        async nativeImage(url) {
+            if (!isTrustedAttachmentUrl(String(url || ""))) return null;
+            const out = [];
+            take(out, await fetchTrustedFile(String(url), signal).catch(() => null));
+            return out[0] || null;
+        },
+        async fromResult(toolName, result, text) {
+            const out = [];
+            for (const img of result?.images || []) {
+                try { take(out, Buffer.from(String(img?.data || ""), "base64")); } catch { /* skip a bad image */ }
+            }
+            for (const url of IMAGE_LINK_TOOLS.has(toolName) ? String(text || "").match(TRUSTED_IMAGE_URL) || [] : []) {
+                if (seen.has(url) || !isTrustedAttachmentUrl(url)) continue;
+                seen.add(url);
+                try { take(out, await fetchTrustedFile(url, signal)); } catch (e) { if (signal?.aborted) throw e; }
+            }
+            return out;
+        },
+    };
+}
+
 // The same attached images for Cloudflare models that can see them (OpenAI-style image parts with data URLs).
 export async function toImageUrlParts(attachments, signal) {
     const parts = [];

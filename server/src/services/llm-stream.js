@@ -239,11 +239,14 @@ export async function streamChat({
     // Tool names never sent to this model (e.g. analyze_image for a model that sees images itself)
     excludeTools,
     // Other models a failed round moves to (same API), so the answer keeps going when one model is down
-    fallbackProviders = []
+    fallbackProviders = [],
+    // The model sees images (like Claude): images from tool results are shown to it, not just their links
+    seesImages = false
 }) {
     // `tools` is re-read every round: load_tools can add tools to the same array mid-answer.
     const currentTools = () => tools.filter(t => t?.function?.name !== "internal_thought_process" && !excludeTools?.has(t?.function?.name));
     const conversation = [...messages];
+    const toolImages = seesImages ? (await import("./llm-stream-anthropic.js")).makeToolImageCollector(signal) : null;
     const usage = { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 };
     let depth = 0;
     let toolsRun = 0;
@@ -381,6 +384,7 @@ export async function streamChat({
 
             let countsTowardDepth = false;
             let stopAnswer = null;
+            const roundImages = []; // images from this round's tool results, shown to a model that sees images
             for (const call of round.toolCalls) {
                 const toolName = call.function.name;
                 let toolResult;
@@ -428,7 +432,14 @@ export async function streamChat({
                     const isLoader = toolName === "load_tools";
                     if (!isLoader) { onStatus?.(toolName.replace(/_/g, " ")); toolsRun++; }
                     try {
-                        toolResult = await handler(args);
+                        // analyze_image on a Classgrid image: a model that sees images looks at it itself
+                        const nativeImage = toolImages && toolName === "analyze_image" ? await toolImages.nativeImage(args?.url) : null;
+                        if (nativeImage) {
+                            roundImages.push(nativeImage);
+                            toolResult = `The image is shown to you below; look at it yourself to answer: ${String(args?.question || "describe it").slice(0, 500)}`;
+                        } else {
+                            toolResult = await handler(args);
+                        }
                     } catch (e) {
                         toolResult = `Tool error: ${e instanceof Error ? e.message : String(e)}`;
                     }
@@ -442,10 +453,13 @@ export async function streamChat({
                     const said = toolName === "sleep_until" ? String(round.text || "").trim() : "";
                     stopAnswer = said && !toolResult.stopAnswer.includes(said) ? `${said}\n\n${toolResult.stopAnswer}` : toolResult.stopAnswer;
                 }
+                if (toolImages && !String(resultText ?? "").startsWith("FAILED")) roundImages.push(...await toolImages.fromResult(toolName, toolResult && typeof toolResult === "object" ? toolResult : null, resultText));
                 // load_tools carries the full rules of the loaded groups, so it isn't cut like normal tool output.
                 conversation.push({ role: "tool", tool_call_id: call.id, content: String(resultText ?? "").slice(0, toolName === "run_project_helpers" || toolName === "check_helpers" || toolName === "read_whatsapp_messages" || toolName === "wait_for_whatsapp_reply" ? 200000 : toolName === "load_tools" ? 40000 : toolName === "open_url" || toolName === "view_project_file" || toolName === "search_project" ? 20000 : 6000) });
             }
 
+            // Tool messages hold only text, so the images follow as one message the model looks at
+            if (roundImages.length) conversation.push({ role: "user", content: [{ type: "text", text: "The images from the tool results above. Look at them yourself:" }, ...roundImages] });
             if (stopAnswer) return { answer: stopAnswer, usage, toolsRun };
             if (countsTowardDepth) depth++;
         }
