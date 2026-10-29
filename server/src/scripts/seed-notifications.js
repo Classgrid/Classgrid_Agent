@@ -645,7 +645,7 @@ const templates = [
 <p>This code expires in {{otp_expiry_minutes}} minutes.</p>
 <ul>
   <li><strong>Organization:</strong> {{organization_name}}</li>
-  <li><strong>Fee:</strong> {{fee_name}}</li>
+  <li><strong>Item:</strong> {{fee_name}}</li>
   <li><strong>Amount:</strong> {{amount}}</li>
 </ul>
 <p>Do not share this code with anyone. Classgrid and {{organization_name}} will never ask you to disclose your OTP by phone, message, or email.</p>

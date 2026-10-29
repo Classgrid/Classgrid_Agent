@@ -332,7 +332,7 @@ ${bodyOutro ? `<p style="color:#374151;font-size:14px;line-height:1.7;margin:0 0
 </tr>
 <tr>
 <td style="padding:30px;border-top:1px solid #eaeaea;">
-<p style="color:#374151;font-size:14px;margin:0 0 8px;">Build smarter academic workflows</p>
+<p style="color:#374151;font-size:14px;margin:0 0 8px;">The AI agent for everyday work</p>
 <a href="${siteUrl}" style="color:#6b7280;text-decoration:underline;font-size:13px;margin-bottom:24px;display:inline-block;">classgrid.in &rarr;</a>
 
 <div style="margin-bottom:24px;">

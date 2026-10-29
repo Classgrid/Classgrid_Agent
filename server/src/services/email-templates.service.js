@@ -741,7 +741,7 @@ export const getOrgAdminActivatedHtml = (userName, dashboardLink, adminLoginLink
 export const getSuperAdminCredentialsHtml = (name, email, password, loginLink) => {
   const content = `
     <p>Hi ${name},</p>
-    <p>You have been granted elevated, platform-wide privileges on Classgrid. You are responsible for reviewing and approving organization applications, managing platform settings, and overseeing all activity across the system.</p>
+    <p>You have been granted elevated, platform-wide privileges on Classgrid. You are responsible for managing platform settings, users, AI usage and credits, support, and overseeing all activity across the system.</p>
 
     <div class="box" style="margin-bottom: 12px;">
       <div class="meta">Email</div>
@@ -755,8 +755,8 @@ export const getSuperAdminCredentialsHtml = (name, email, password, loginLink) =
 
     <div class="box" style="margin-bottom: 24px;">
       <p style="margin-bottom: 12px; font-weight: 600; color: #171717;">Your platform-level controls include:</p>
-      <p style="margin-bottom: 8px;">&#x2022; Review and approve or reject organization applications.</p>
-      <p style="margin-bottom: 8px;">&#x2022; Manage all registered organizations and their admin accounts.</p>
+      <p style="margin-bottom: 8px;">&#x2022; Manage users, AI usage and credits.</p>
+      <p style="margin-bottom: 8px;">&#x2022; Handle support tickets and demo leads.</p>
       <p style="margin-bottom: 0;">&#x2022; Monitor platform-wide activity and system health.</p>
     </div>
 
@@ -1374,8 +1374,8 @@ Temporary Password: ${password}
 ? IMPORTANT: Change your password immediately after logging in. Do not share it.
 
 Your platform-level controls include:
-- Review and approve or reject organization applications.
-- Manage all registered organizations and their admin accounts.
+- Manage users, AI usage and credits.
+- Handle support tickets and demo leads.
 - Monitor platform-wide activity and system health.
 
 Login to Super Admin Dashboard: ${loginLink}
@@ -2014,7 +2014,7 @@ export const getAccountDeletionEmailHtml = (userName, reason) => {
       <p style="font-weight: 500; margin-bottom: 0;">${reason || 'No reason provided.'}</p>
     </div>
 
-    <p>All your data, including classroom memberships, sessions, and tokens, has been removed from our platform.</p>
+    <p>All your data, including your chats, files, sessions, and tokens, has been removed from our platform.</p>
 
     <p style="margin-top: 24px;">If you believe this was done in error, please contact our support team immediately:</p>
     <a href="https://app.classgrid.in/support" class="btn" style="background: #ef4444;">Contact Support</a>
@@ -2035,7 +2035,7 @@ Your Classgrid account has been permanently deleted by an administrator.
 
 Reason: ${reason || 'No reason provided.'}
 
-All your data, including classroom memberships, sessions, and tokens, has been removed from our platform.
+All your data, including your chats, files, sessions, and tokens, has been removed from our platform.
 
 If you believe this was done in error, please contact our support team immediately at:
 support@classgrid.in
@@ -2099,7 +2099,7 @@ ${data.dashboardUrl ? `Open Lead: ${data.dashboardUrl}` : ""}
 export const getWelcomeProspectHtml = (data = {}) => {
   const content = `
     <p>Hi ${data.adminName || "there"},</p>
-    <p>We received your demo request for <strong>${data.institutionName || "your institution"}</strong>. Our team will follow up soon.</p>
+    <p>We received your demo request for <strong>${data.institutionName || "your company"}</strong>. Our team will follow up soon.</p>
     ${data.bookingUrl ? `<a href="${data.bookingUrl}" class="btn">Book Demo Slot</a>` : ""}
   `;
 
@@ -2111,7 +2111,7 @@ export const getWelcomeProspectPlainText = (data = {}) => {
 
 Hi ${data.adminName || "there"},
 
-We received your demo request for ${data.institutionName || "your institution"}. Our team will follow up soon.
+We received your demo request for ${data.institutionName || "your company"}. Our team will follow up soon.
 
 ${data.bookingUrl ? `Book Demo Slot: ${data.bookingUrl}` : ""}
 
@@ -2123,7 +2123,7 @@ export const getDemoMeetingScheduledHtml = (data = {}) => {
   
   const content = `
     <p>Hello ${data.adminName || "there"},</p>
-    <p>Weâ€™re writing to let you know that the Classgrid demo meeting for <strong>${data.institutionName || "your institution"}</strong> has been rescheduled.</p>
+    <p>Weâ€™re writing to let you know that the Classgrid demo meeting for <strong>${data.institutionName || "your company"}</strong> has been rescheduled.</p>
     
     <p>Updated meeting details:</p>
     <div class="box">
@@ -2131,7 +2131,7 @@ export const getDemoMeetingScheduledHtml = (data = {}) => {
       <p><strong>Google Meet Link:</strong> ${data.meetingUrl ? `<a href="${data.meetingUrl}">${data.meetingUrl}</a>` : "Not provided"}</p>
     </div>
     
-    <p style="margin-top:20px;">Please use the updated link above to join the meeting. We look forward to speaking with you and showing how Classgrid can support your institution.</p>
+    <p style="margin-top:20px;">Please use the updated link above to join the meeting. We look forward to speaking with you and showing how Classgrid AI can support your team.</p>
     
     <div style="margin-top:30px;">
       <p style="color:#374151;font-size:14px;line-height:1.7;margin:0 0 10px;">Warm regards,</p>
@@ -2155,7 +2155,7 @@ export const getDemoMeetingScheduledPlainText = (data = {}) => {
 
 Hello ${data.adminName || "there"},
 
-Weâ€™re writing to let you know that the Classgrid demo meeting for ${data.institutionName || "your institution"} has been rescheduled.
+Weâ€™re writing to let you know that the Classgrid demo meeting for ${data.institutionName || "your company"} has been rescheduled.
 
 Updated meeting details:
 
@@ -2163,7 +2163,7 @@ Date & Time: ${data.scheduledAt ? formatDate(data.scheduledAt) : "To be confirme
 
 Google Meet Link: ${data.meetingUrl || "Not provided"}
 
-Please use the updated link above to join the meeting. We look forward to speaking with you and showing how Classgrid can support your institution.
+Please use the updated link above to join the meeting. We look forward to speaking with you and showing how Classgrid AI can support your team.
 
 Warm regards,
 
@@ -2293,9 +2293,9 @@ export const getNoAccountSignInAttemptHtml = (email, location = {}) => {
   const city = location.city || "Unknown location";
   if (location.isChat) return getChatNoAccountSignInAttemptHtml(email, device, city);
     const orgUrl = location.orgSlug ? `${location.orgSlug}.classgrid.in` : "Classgrid";
-    const orgNameText = location.orgSlug ? `<strong>${location.orgSlug.toUpperCase()}</strong> (${orgUrl})` : "your institution";
+    const orgNameText = location.orgSlug ? `<strong>${location.orgSlug.toUpperCase()}</strong> (${orgUrl})` : "Classgrid";
     const content = `
-    <p>We received a login attempt for <strong>${email}</strong>, but no account was found for this email in ${orgNameText}. If this was you, please ensure you are using the correct email address provided by your institution.</p>
+    <p>We received a login attempt for <strong>${email}</strong>, but no account was found for this email in ${orgNameText}. If this was you, please make sure you are using the email address you signed up with.</p>
 
     <div class="box">
       <div class="meta">Attempt Details</div>
@@ -2306,12 +2306,12 @@ export const getNoAccountSignInAttemptHtml = (email, location = {}) => {
 
     <h3 style="color:#111111; margin-top:24px;">Why did this happen?</h3>
     <ul style="color:#374151; padding-left:20px; line-height:1.6; margin-bottom:24px;">
-      <li>You may have used a personal email instead of your official institution email.</li>
-      <li>Your institution administrator may not have created your account yet.</li>
+      <li>You may have used a different email address than the one you signed up with.</li>
+      <li>Your account may not have been created yet.</li>
     </ul>
 
     <h3 style="color:#111111;">Next Steps</h3>
-    <p>If you believe you should have access, please reach out to your institution administrator directly.</p>
+    <p>If you believe you should have access, please contact Classgrid support at support@classgrid.in.</p>
   `;
 
   return baseTemplate({
@@ -2327,22 +2327,22 @@ export const getNoAccountSignInAttemptPlainText = (email, location = {}) => {
   if (location.isChat) return getChatNoAccountSignInAttemptPlainText(email, device, city);
 
   const orgUrl = location.orgSlug ? `${location.orgSlug}.classgrid.in` : "Classgrid";
-  const orgNameText = location.orgSlug ? `${location.orgSlug.toUpperCase()} (${orgUrl})` : "your institution";
+  const orgNameText = location.orgSlug ? `${location.orgSlug.toUpperCase()} (${orgUrl})` : "Classgrid";
 
   return `Login attempt
 
-We received a login attempt for ${email}, but no account was found for this email in ${orgNameText}. If this was you, please ensure you are using the correct email address provided by your institution.
+We received a login attempt for ${email}, but no account was found for this email in ${orgNameText}. If this was you, please make sure you are using the email address you signed up with.
 
 Device: ${device}
 Location: ${city}
 Time: ${formatDate(new Date())}
 
 Why did this happen?
-â€¢ You may have used a personal email instead of your official institution email.
-â€¢ Your institution administrator may not have created your account yet.
+â€¢ You may have used a different email address than the one you signed up with.
+â€¢ Your account may not have been created yet.
 
 Next Steps
-If you believe you should have access, please reach out to your institution administrator directly.
+If you believe you should have access, please contact Classgrid support at support@classgrid.in.
 
 &copy; ${new Date().getFullYear()} Classgrid. All rights reserved.`;
 };
@@ -2480,7 +2480,7 @@ This user has permanently deleted their account from the platform.
 // ERP INTERNAL EMAILS (DARK MODE SUPPORT & NO CLASSGRID BRANDING)
 // =========================================================
 
-const erpBaseTemplateInternal = ({ content, title = "Notification", orgName = "Institution" }) => {
+const erpBaseTemplateInternal = ({ content, title = "Notification", orgName = "Classgrid" }) => {
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -2579,7 +2579,7 @@ const erpBaseTemplateInternal = ({ content, title = "Notification", orgName = "I
         ${content}
       </div>
       <div class="footer">
-        <p>Regards,<br><strong>${orgName}</strong><br>ERP Administration Team</p>
+        <p>Regards,<br><strong>${orgName}</strong><br>Classgrid Team</p>
         <p>This is an automated email. Please do not reply.</p>
       </div>
     </div>
@@ -2694,7 +2694,7 @@ export const getDemoLeadAssignedHtml = ({ assigneeName, institutionName, adminNa
     <div class="box" style="margin-bottom: 16px; border-left: 3px solid #10b981;">
       <p style="margin-bottom: 8px; font-weight: 600; color: #111111;">Lead Details</p>
       <ul style="margin-top: 0; margin-bottom: 0;">
-        <li><strong>Institution:</strong> ${institutionName}</li>
+        <li><strong>Company:</strong> ${institutionName}</li>
         <li><strong>Contact Person:</strong> ${adminName}</li>
         <li><strong>Email:</strong> ${adminEmail}</li>
         ${city ? `<li><strong>Location:</strong> ${city}</li>` : ''}
@@ -2734,7 +2734,7 @@ ${statusLabel}
 You have been assigned to handle this Demo Lead on Classgrid.
 
 Lead Details:
-- Institution: ${institutionName}
+- Company: ${institutionName}
 - Contact Person: ${adminName}
 - Email: ${adminEmail}
 ${city ? `- Location: ${city}` : ''}
@@ -2753,7 +2753,7 @@ export const getVettingApprovalRequestHtml = ({ requesterName, institutionName, 
       
       <h3>Lead Details:</h3>
       <ul>
-        <li><strong>Institution:</strong> ${institutionName}</li>
+        <li><strong>Company:</strong> ${institutionName}</li>
         <li><strong>Admin Name:</strong> ${adminName || 'N/A'}</li>
         <li><strong>Admin Email:</strong> ${adminEmail || 'N/A'}</li>
         <li><strong>City:</strong> ${city || 'N/A'}</li>
@@ -2778,7 +2778,7 @@ export const getVettingApprovedHtml = ({ assigneeName, institutionName, dashboar
   `; 
 };
 
-export const erpBaseTemplate = ({ content, title = "Notification", orgName = "Institution" }) => {
+export const erpBaseTemplate = ({ content, title = "Notification", orgName = "Classgrid" }) => {
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -2877,7 +2877,7 @@ export const erpBaseTemplate = ({ content, title = "Notification", orgName = "In
         ${content}
       </div>
       <div class="footer">
-        <p>Regards,<br><strong>${orgName}</strong><br>ERP Administration Team</p>
+        <p>Regards,<br><strong>${orgName}</strong><br>Classgrid Team</p>
         <p>This is an automated email. Please do not reply.</p>
       </div>
     </div>

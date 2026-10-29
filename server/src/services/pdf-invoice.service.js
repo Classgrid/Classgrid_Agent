@@ -128,7 +128,7 @@ export const generateInvoicePdfBuffer = async (invoice, org) => {
                     <div>
                         <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 15px;">
                             <img src="${logoSrc}" alt="Classgrid Logo" style="height: 48px; width: auto; object-fit: contain;" onerror="this.onerror=null; this.src='https://billing.classgrid.in/logo.png';"/>
-                            <div class="title" style="margin: 0; font-size: 28px;">Classgrid ERP</div>
+                            <div class="title" style="margin: 0; font-size: 28px;">Classgrid</div>
                         </div>
                         <div>Invoice: ${normalizedInvoice.invoiceNumber}</div>
                         <div>Status: ${(normalizedInvoice.status || 'SENT').toUpperCase()}</div>

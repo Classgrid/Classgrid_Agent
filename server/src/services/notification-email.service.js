@@ -831,7 +831,7 @@ export async function sendDemoLeadAssignedNotification({ demoRequest, assignee, 
 
         const templateData = {
             assigneeName: assignee.name || 'Admin',
-            institutionName: demoRequest.institutionName || 'Unknown School',
+            institutionName: demoRequest.institutionName || 'Unknown Company',
             adminName: demoRequest.adminName || 'Admin',
             adminEmail: demoRequest.adminEmail || '',
             city: demoRequest.city || '',
