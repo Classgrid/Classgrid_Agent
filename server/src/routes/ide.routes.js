@@ -33,7 +33,7 @@ import { isAuthenticated, requireRole } from "../middleware/auth.middleware.js";
 import User from "../models/User.js";
 import IdeProject from "../models/IdeProject.js";
 import { githubUser } from "../services/github-token.service.js";
-import { pushProject, revealInEditor, checkpointChanges, rejectCheckpoint, undoToCheckpoint, backupAndRemoveProjectCode } from "../services/ide-project.service.js";
+import { pushProject, openClassgridPrBranch, revealInEditor, checkpointChanges, rejectCheckpoint, undoToCheckpoint, backupAndRemoveProjectCode } from "../services/ide-project.service.js";
 import { repoAppToken } from "../services/github-app.service.js";
 import mongoose from "mongoose";
 import connectDB from "../../config/db.js";
@@ -487,6 +487,17 @@ router.post("/projects/:id/open", isAuthenticated, async (req, res) => {
       if (ok.trim() !== "yes") {
         console.error("[IDE] Clone failed:", (clone.stdout || clone.stderr).replace(auth, "***"));
         return res.status(502).json({ error: "Could not download this repo" });
+      }
+      // One open PR per project: while a Classgrid pull request is open, work starts from its branch, so the
+      // AI sees the changes that are not merged yet and its new commits go to that same pull request
+      const base = (await ssh.execCommand(`git -C ${dir} rev-parse --abbrev-ref HEAD`)).stdout.trim();
+      const openBranch = await openClassgridPrBranch(project.repo, key, base);
+      if (openBranch) {
+        const ref = JSON.stringify(`+refs/heads/${openBranch}:refs/remotes/origin/${openBranch}`);
+        await ssh.execCommand(
+          `GIT_TERMINAL_PROMPT=0 GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=http.https://github.com/.extraheader GIT_CONFIG_VALUE_0="AUTHORIZATION: basic ${auth}" ` +
+          `git -C ${dir} fetch -q --depth 1 origin ${ref} && git -C ${dir} checkout -q -B ${JSON.stringify(openBranch)} ${JSON.stringify(`origin/${openBranch}`)}`
+        );
       }
       if (user.github_name) await ssh.execCommand(`git -C ${dir} config user.name ${JSON.stringify(user.github_name)}`);
       if (user.github_email) await ssh.execCommand(`git -C ${dir} config user.email ${JSON.stringify(user.github_email)}`);

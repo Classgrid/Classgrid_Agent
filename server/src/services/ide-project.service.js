@@ -404,6 +404,23 @@ export async function createRepoForProject(project, ssh, { name, private: isPriv
   return `Created ${gh.private ? "private" : "public"} repo ${gh.full_name} (${gh.html_url}), linked it to this project and pushed the project's files${staged.trim() ? ` (${staged.trim()})` : ""}.`;
 }
 
+// One open PR per project: the branch of the repo's open Classgrid pull request (into base), if there is one.
+// New work goes on top of it and is pushed to it, so a change that is not merged yet is never left out of the next.
+export async function openClassgridPrBranch(repo, key, base) {
+  try {
+    const r = await fetch(`https://api.github.com/repos/${repo}/pulls?state=open&per_page=50${base ? `&base=${encodeURIComponent(base)}` : ""}`, {
+      headers: { Authorization: `Bearer ${key}`, Accept: "application/vnd.github+json", "User-Agent": "Classgrid" },
+    });
+    if (!r.ok) return null;
+    const prs = (await r.json()).filter((p) => String(p?.head?.ref || "").startsWith("classgrid/")
+      && String(p?.head?.repo?.full_name || "").toLowerCase() === String(repo).toLowerCase());
+    prs.sort((a, b) => new Date(b.updated_at) - new Date(a.updated_at));
+    return prs[0]?.head?.ref || null;
+  } catch {
+    return null;
+  }
+}
+
 export async function pushProject(project, ssh, message) {
   if (!project.repo) return "This project has no GitHub repo yet. Create one with create_github_repo_for_project.";
   const msg = String(message || "").trim().slice(0, 500);
@@ -437,20 +454,59 @@ export async function pushProject(project, ssh, message) {
   // Owner's rule: the AI never pushes straight to the repo's main branch. Its work goes on a classgrid/ branch
   // with a pull request, and the repo owner merges it. GITHUB_DIRECT_PUSH=1 in the server .env allows direct pushes.
   const direct = process.env.GITHUB_DIRECT_PUSH === "1";
+  const auth = Buffer.from(`x-access-token:${key}`).toString("base64");
+  const gitAuth = `GIT_TERMINAL_PROMPT=0 GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=http.https://github.com/.extraheader GIT_CONFIG_VALUE_0="AUTHORIZATION: basic ${auth}"`;
   let branch = (await ssh.execCommand(`git -C ${q(dir)} rev-parse --abbrev-ref HEAD`)).stdout.trim() || "main";
   let base = null;
-  if (!direct && !branch.startsWith("classgrid/")) {
+  if (!direct && branch.startsWith("classgrid/")) {
+    // The pull request of this branch was merged (or closed): the new work goes to a new pull request made from
+    // the latest main branch, never to the old branch
+    const r = await fetch(`https://api.github.com/repos/${project.repo}/pulls?state=all&head=${encodeURIComponent(`${project.repo.split("/")[0]}:${branch}`)}`, {
+      headers: { Authorization: `Bearer ${key}`, Accept: "application/vnd.github+json", "User-Agent": "Classgrid" },
+    }).catch(() => null);
+    const prs = r?.ok ? await r.json().catch(() => []) : [];
+    if (Array.isArray(prs) && prs.length && !prs.some((p) => p.state === "open")) {
+      const oldBranch = branch;
+      base = prs[0].base?.ref || "main";
+      const ref = (name) => q(`+refs/heads/${name}:refs/remotes/origin/${name}`);
+      const got = await ssh.execCommand(`${gitAuth} git -C ${q(dir)} fetch -q --depth=200 origin ${ref(base)} ${ref(oldBranch)}`);
+      if (got.code) return `Could not get the latest ${base} branch: ${(got.stderr || got.stdout).split(auth).join("***").slice(0, 300)}`;
+      const { stdout: ahead } = await ssh.execCommand(`git -C ${q(dir)} rev-list --count ${q(`origin/${oldBranch}`)}..HEAD`);
+      if (ahead.trim() === "0") return `Nothing new to push: the pull request of ${oldBranch} is already ${prs[0].merged_at ? "merged" : "closed"} and there are no new changes.`;
+      const stamp = new Date().toISOString().slice(0, 16).replace(/[-:T]/g, "").replace(/^(\d{8})(\d{4})$/, "$1-$2");
+      branch = `classgrid/${stamp}`;
+      const sw = await ssh.execCommand(`git -C ${q(dir)} checkout -q -B ${q(branch)}`);
+      if (sw.code) return `Could not make the pull request branch: ${(sw.stderr || sw.stdout).slice(0, 300)}`;
+      const moved = await ssh.execCommand(`git -C ${q(dir)} ${as} rebase -q --onto ${q(`origin/${base}`)} ${q(`origin/${oldBranch}`)}`);
+      if (moved.code) {
+        await ssh.execCommand(`git -C ${q(dir)} rebase --abort 2>/dev/null; git -C ${q(dir)} checkout -q ${q(oldBranch)}`);
+        return `Push stopped: ${base} has changes to the same lines as this project's new changes, so they could not be joined by themselves. Nothing was lost.`;
+      }
+    }
+  } else if (!direct) {
     const { stdout: ahead } = await ssh.execCommand(`git -C ${q(dir)} rev-list --count ${q(`origin/${branch}`)}..HEAD 2>/dev/null || echo 1`);
     if (ahead.trim() === "0") return `Nothing new to push: ${project.repo} (${branch}) already has all of this project's changes.`;
     base = branch;
+    // A Classgrid pull request that is still open gets these commits too (one open PR per project); else a new one
+    const openBranch = await openClassgridPrBranch(project.repo, key, base);
     const stamp = new Date().toISOString().slice(0, 16).replace(/[-:T]/g, "").replace(/^(\d{8})(\d{4})$/, "$1-$2");
-    const prBranch = `classgrid/${stamp}`;
-    const sw = await ssh.execCommand(`git -C ${q(dir)} checkout -q -b ${q(prBranch)}`);
+    const prBranch = openBranch || `classgrid/${stamp}`;
+    const sw = await ssh.execCommand(`git -C ${q(dir)} checkout -q -B ${q(prBranch)}`);
     if (sw.code) return `Could not make the pull request branch: ${(sw.stderr || sw.stdout).slice(0, 300)}`;
     branch = prBranch;
+    if (openBranch) {
+      // The download keeps only recent history: fetch enough of both branches, then put only the new commits on top of the open PR
+      const ref = (name) => q(`+refs/heads/${name}:refs/remotes/origin/${name}`);
+      const got = await ssh.execCommand(`${gitAuth} git -C ${q(dir)} fetch -q --depth=200 origin ${ref(base)} ${ref(openBranch)}`);
+      if (got.code) return `Could not get the open pull request branch ${openBranch}: ${(got.stderr || got.stdout).split(auth).join("***").slice(0, 300)}`;
+      const moved = await ssh.execCommand(`git -C ${q(dir)} ${as} rebase -q --onto ${q(`origin/${openBranch}`)} ${q(`origin/${base}`)}`);
+      if (moved.code) {
+        await ssh.execCommand(`git -C ${q(dir)} rebase --abort 2>/dev/null; git -C ${q(dir)} checkout -q ${q(base)}`);
+        const { stdout: files } = await ssh.execCommand(`git -C ${q(dir)} diff --name-only ${q(`origin/${openBranch}`)} HEAD 2>/dev/null | head -20 | paste -sd, -`);
+        return `Push stopped: the open pull request (branch ${openBranch}) changes the same lines as this project's new changes, so they could not be joined by themselves. Nothing was lost. Files that differ: ${files.trim() || "unknown"}.`;
+      }
+    }
   }
-  const auth = Buffer.from(`x-access-token:${key}`).toString("base64");
-  const gitAuth = `GIT_TERMINAL_PROMPT=0 GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=http.https://github.com/.extraheader GIT_CONFIG_VALUE_0="AUTHORIZATION: basic ${auth}"`;
   // Someone else may have pushed to the same branch since the project was downloaded: take their commits
   // first and put ours on top, so the push is not rejected. If the same lines were changed, stop and say so.
   const b = q(branch);
