@@ -20,6 +20,7 @@ import { Skeleton } from "@/components/marketing_ui/skeleton";
 import { Button } from "@/components/marketing_ui/button";
 import { BlueSlider } from "@/components/marketing_ui/BlueSlider";
 import { toast } from "sonner";
+import { useCurrentUser } from "@/features/auth/queries/useCurrentUser";
 
 export function AiUpgradePanel() {
   const queryClient = useQueryClient();
@@ -39,12 +40,16 @@ export function AiUpgradePanel() {
 
 
 
+  // Owner's order: this one account can top up from ₹1 (everyone else starts at ₹299). The server checks it too.
+  const { data: currentUser } = useCurrentUser();
+  const minInr = String(currentUser?.email || "").trim().toLowerCase() === "nikhilsubsun123@gmail.com" ? 1 : 299;
+
   const [customAmountStr, setCustomAmountStr] = useState<string>("299");
 
   const customAmount = parseInt(customAmountStr) || 0;
   const creditsPerInr = balance?.credits_per_inr ?? 5000;
   const expectedTokens = customAmount * creditsPerInr;
-  const isValidAmount = customAmount >= 299 && customAmount <= 10000;
+  const isValidAmount = customAmount >= minInr && customAmount <= 10000;
 
   const handleTopUp = async () => {
     if (!isValidAmount) return;
@@ -111,19 +116,19 @@ export function AiUpgradePanel() {
               
               <div className="bg-card border border-border rounded-xl p-6 shadow-sm mb-6">
                 <label className="block text-sm font-medium text-foreground mb-3">
-                  Enter Amount (₹299 - ₹10,000)
+                  Enter Amount (₹{minInr} - ₹10,000)
                 </label>
                 <div className="flex items-center gap-6">
                   <div className="flex-1 px-1">
                     <BlueSlider
-                      min={299}
+                      min={minInr}
                       max={10000}
                       step={1}
                       value={customAmount}
                       onValueChange={(val: number) => setCustomAmountStr(String(val))}
                     />
                     <div className="flex justify-between text-xs text-muted-foreground mt-2 font-medium">
-                      <span>₹299</span>
+                      <span>₹{minInr}</span>
                       <span>₹10,000</span>
                     </div>
                   </div>
@@ -141,7 +146,7 @@ export function AiUpgradePanel() {
                 </div>
                 {!isValidAmount && customAmountStr !== "" && (
                   <p className="text-red-500 text-sm mt-3 flex items-center gap-1.5">
-                    <AlertCircle className="w-4 h-4" /> Amount must be between ₹299 and ₹10,000.
+                    <AlertCircle className="w-4 h-4" /> Amount must be between ₹{minInr} and ₹10,000.
                   </p>
                 )}
               </div>

@@ -46,6 +46,9 @@ import { PAYMENT_ATTEMPT_STAGE } from "../utils/billing.utils.js";
 
 export const TOPUP_MIN_INR = 299;
 export const TOPUP_MAX_INR = 10000;
+// Owner's order: this one account can top up from ₹1 (everyone else starts at ₹299).
+export const TOPUP_LOW_MIN_EMAILS = ["nikhilsubsun123@gmail.com"];
+export const topupMinFor = (email) => TOPUP_LOW_MIN_EMAILS.includes(String(email || "").trim().toLowerCase()) ? 1 : TOPUP_MIN_INR;
 
 /**
  * PHASE 12: Backend AI Top-Up Controller
@@ -69,8 +72,9 @@ export const createTopupOrder = async (req, res) => {
         const { amount_inr } = req.body;
         let organizationId = req.user.organization_id;
 
-        if (!amount_inr || amount_inr < TOPUP_MIN_INR || amount_inr > TOPUP_MAX_INR) {
-            return res.status(400).json({ success: false, error: "Amount must be between ₹299 and ₹10,000" });
+        const minInr = topupMinFor(req.user.email);
+        if (!amount_inr || amount_inr < minInr || amount_inr > TOPUP_MAX_INR) {
+            return res.status(400).json({ success: false, error: `Amount must be between ₹${minInr} and ₹10,000` });
         }
 
         // Fallback for Super Admins who don't have an organization_id attached directly
