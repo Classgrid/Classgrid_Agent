@@ -1117,6 +1117,21 @@ function pickChatModel({ question, fileUrls, scheduleContext }) {
 // the OpenAI-compatible endpoint (the native one returns 404 for it).
 // Second model for Project Mode helpers (its own request limit, separate from DeepSeek)
 const HELPER_GLM_MODEL = "@cf/zai-org/glm-5.3";
+
+// Project Mode helpers of each chat (up to 5 working at once). They live for one answer: when the answer
+// ends, unfinished helpers are stopped so they never run on and use tokens with no one listening.
+const HELPER_BOARDS = new Map();
+const helperBoard = (sessionId) => {
+    const key = String(sessionId || "none");
+    if (!HELPER_BOARDS.has(key)) HELPER_BOARDS.set(key, { helpers: [], nextNo: 1 });
+    return HELPER_BOARDS.get(key);
+};
+const stopHelpers = (sessionId) => {
+    const board = HELPER_BOARDS.get(String(sessionId || "none"));
+    if (!board) return;
+    for (const h of board.helpers) if (h.state === "running") h.abort.abort(new Error("The chat answer ended"));
+    HELPER_BOARDS.delete(String(sessionId || "none"));
+};
 const CF_PICKER_MODELS = new Map([
     [CF_PRO_MODEL, "native"],
     [CF_FLASH_MODEL, "native"],
@@ -2812,78 +2827,164 @@ If they ask whether their college/school uses Classgrid, say you can't see that 
                         toolName,
                         async (args) => (await handleToolCall(toolName, args, { sessionId })).content[0].text,
                     ])),
-                    // Up to 5 read-only helpers explore the project at the same time (cheap Flash model, list/read/search
-                    // only, never change anything) and each returns a full report; their tokens are charged like the chat's
+                    // Up to 5 helpers work on the project at the same time, each on a model the main AI picks. A helper
+                    // reads the project, or (can_edit) also changes files and runs commands. The main AI either waits
+                    // for their reports, or lets them run (wait: false) and talks to them with message_helper /
+                    // check_helpers meanwhile. Their tokens are charged like the chat's.
                     run_project_helpers: async (args) => {
-                        const tasks = (Array.isArray(args?.tasks) ? args.tasks : []).map((t) => String(t || "").trim()).filter(Boolean).slice(0, 5);
-                        if (!tasks.length) return "Error: give 1 to 5 tasks.";
+                        const raw = Array.isArray(args?.helpers) && args.helpers.length ? args.helpers : (Array.isArray(args?.tasks) ? args.tasks : []);
+                        const specs = raw
+                            .map((h) => (typeof h === "string" ? { task: h } : (h || {})))
+                            .map((h) => ({ task: String(h.task || "").trim(), model: String(h.model || "").trim(), canEdit: h.can_edit === true || h.can_edit === "true" }))
+                            .filter((h) => h.task);
+                        if (!specs.length) return "Error: give 1 to 5 helpers.";
+                        const board = helperBoard(sessionId);
+                        board.helpers = board.helpers.filter((h) => h.state === "running" || !h.reportTaken);
+                        const room = Math.max(0, 5 - board.helpers.filter((h) => h.state === "running").length);
+                        if (!room) return "Error: 5 helpers are already working. Use check_helpers to wait for one to finish first.";
+                        if (typeof res.on === "function" && !board.stopHooked) { board.stopHooked = true; res.on("close", () => stopHelpers(sessionId)); }
+
+                        // The model the main AI asked for (its id or its name in the model list); Fable is too costly for helpers
+                        const pickModel = (wanted, i) => {
+                            const allowed = [...CF_PICKER_MODELS.keys(), ...[...CLAUDE_CHAT_MODELS].filter((m) => m !== "claude-fable-5-1")];
+                            const w = wanted.toLowerCase();
+                            const byName = Object.entries(MODEL_DISPLAY_NAMES).find(([, name]) => name.toLowerCase() === w)?.[0];
+                            const id = allowed.find((m) => m.toLowerCase() === w) || (byName && allowed.includes(byName) ? byName : "");
+                            return id || [CF_FLASH_MODEL, "claude-haiku-5-5", "claude-opus-5-5", "claude-sonnet-5-5", HELPER_GLM_MODEL][i] || HELPER_GLM_MODEL;
+                        };
                         const readOnly = ["list_project_files", "view_project_file", "search_project"];
-                        const helperTools = [
-                            { type: "function", function: { name: "list_project_files", description: "List files and folders of the project.", parameters: { type: "object", properties: { path: { type: "string", description: "Folder, relative. Empty = root." }, depth: { type: "number", description: "Levels to show (1-6)." } } } } },
-                            { type: "function", function: { name: "view_project_file", description: "Read a project file with line numbers, or a line range.", parameters: { type: "object", properties: { path: { type: "string" }, start_line: { type: "number" }, end_line: { type: "number" } }, required: ["path"] } } },
-                            { type: "function", function: { name: "search_project", description: "Search the project files for text or a regular expression.", parameters: { type: "object", properties: { query: { type: "string" }, path: { type: "string", description: "Folder to search in, relative. Empty = whole project." } }, required: ["query"] } } },
-                        ];
-                        const helperHandlers = Object.fromEntries(readOnly.map((n) => [n, async (a) => (await handleToolCall(n, a, { sessionId })).content[0].text]));
+                        const editTools = ["write_project_file", "edit_project_file", "start_background_command", "check_background_command", "stop_background_command"];
                         const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
-                        // Live view: each helper's file reads/searches and its report as it writes it
+                        // Live view: each helper's steps and its report as it writes it (shown under this step in the chat)
                         const emitHelper = (data) => { if (!res.writableEnded) res.write(`data: ${JSON.stringify({ type: "helper_progress", ...data })}\n\n`); };
-                        const results = await Promise.all(tasks.map(async (task, i) => {
+
+                        const runHelper = async (h, i) => {
                             let stepNo = 0;
-                            // Each try gets 4 minutes of looking around; after that the tools say "time is up", so the
-                            // helper writes its report from what it already read instead of running on with no answer
+                            // Each try gets a time limit for its steps; after that the tools say "time is up", so the
+                            // helper writes its report from what it already did instead of running on with no answer
                             let deadline = 0;
-                            const liveHandlers = Object.fromEntries(readOnly.map((n) => [n, async (a) => {
-                                if (Date.now() > deadline) return "Time is up: do not call any more tools. Write your full final answer now from what you already found.";
+                            const names = h.canEdit ? [...readOnly, ...editTools] : readOnly;
+                            const defs = (await getMcpTools()).filter((t) => names.includes(t.name))
+                                .map((t) => ({ type: "function", function: { name: t.name, description: t.description, parameters: t.inputSchema } }));
+                            defs.push({ type: "function", function: { name: "tell_main", description: "Send the main AI a short note or question. It reads your notes while you work and may answer with a message.", parameters: { type: "object", properties: { message: { type: "string" } }, required: ["message"] } } });
+                            // A message from the main AI reaches the helper with the result of its next step
+                            const withInbox = (out) => {
+                                if (!h.inbox.length) return out;
+                                const msgs = h.inbox.splice(0).map((m) => `[Message from the main AI]: ${m}`).join("\n");
+                                return `${out}\n\n${msgs}`;
+                            };
+                            const liveHandlers = Object.fromEntries(names.map((n) => [n, async (a) => {
+                                if (Date.now() > deadline) return "Time is up: do not call any more tools. Write your full final answer now from what you already did.";
                                 const id = `h${i}-${stepNo++}`;
                                 emitHelper({ helper: i, id, tool: n, args: a });
-                                playground("tool", { who: `Helper ${i + 1}`, tool: n, detail: JSON.stringify(a ?? {}).slice(0, 200) });
-                                const out = await helperHandlers[n](a);
+                                playground("tool", { who: `Helper ${h.no}`, tool: n, detail: JSON.stringify(a ?? {}).slice(0, 200) });
+                                const out = (await handleToolCall(n, a, { sessionId })).content[0].text;
                                 emitHelper({ helper: i, id, result: String(out).slice(0, 6000) });
-                                return out;
+                                return withInbox(out);
                             }]));
-                            const finish = (state, text) => { emitHelper({ helper: i, state }); return text; };
+                            liveHandlers.tell_main = async (a) => {
+                                const note = String(a?.message || "").trim().slice(0, 4000);
+                                if (note) h.notes.push(note);
+                                const id = `h${i}-${stepNo++}`;
+                                emitHelper({ helper: i, id, tool: "tell_main", args: a });
+                                emitHelper({ helper: i, id, result: "Sent to the main AI." });
+                                return withInbox("Sent to the main AI.");
+                            };
+                            const system = h.canEdit
+                                ? "You are a helper working on a code project together with a main AI and up to 4 other helpers. Do your task by really changing the project: write and edit files, and run commands when needed. Read the files you change first. Only touch the files your task is about, because other helpers may be editing other files at the same time. Never push to GitHub. Follow any message from the main AI. Use tell_main to ask the main AI something or tell it something important. When you are done, report what you changed, file by file, and anything still left to do."
+                                : "You are a helper exploring a code project for another AI. Use the tools to look at the project (you can only read it). Read the actual code, not just file names. Then answer the task in full, with everything you found: what each relevant file and function does, how the parts work together step by step (frontend, API routes, backend, database, config), the important endpoints, data and settings, with file paths and line numbers. For example, if the task is to explore login, explain the whole flow from start to end: the frontend page and components, the form and what it sends, the API calls, the backend routes, controllers and services, checks and errors, tokens or sessions, the database models, and the config it uses. Never answer with only a list of file names. Don't guess; say what you could not find. Use tell_main to send the main AI a short note or question; follow any message it sends you.";
                             await sleep(i * 1500); // start a little apart, so the model service isn't hit all at once
                             emitHelper({ helper: i, state: "running" });
-                            // Each helper has its own model (separate request limits): 1 DeepSeek V4 Flash, 2 Claude Haiku 5.5,
-                            // 3 Claude Opus 5.5, 4 Claude Sonnet 5.5, 5 GLM 5.3. If a model fails, the helper falls back to GLM 5.3
-                            const primary = [CF_FLASH_MODEL, "claude-haiku-5-5", "claude-opus-5-5", "claude-sonnet-5-5", HELPER_GLM_MODEL][i] || HELPER_GLM_MODEL;
-                            const models = primary === HELPER_GLM_MODEL ? [HELPER_GLM_MODEL] : [primary, HELPER_GLM_MODEL];
+                            // The picked model first; if it fails, the helper falls back to GLM 5.3
+                            const models = h.model === HELPER_GLM_MODEL ? [HELPER_GLM_MODEL] : [h.model, HELPER_GLM_MODEL];
                             let lastError = "";
                             for (const model of models) {
                                 for (let attempt = 1; attempt <= 2; attempt++) {
+                                    if (h.abort.signal.aborted) return { state: "failed", text: "stopped because the chat answer ended" };
                                     try {
                                         emitHelper({ helper: i, state: "restart" }); // a retry starts its report again
-                                        deadline = Date.now() + 4 * 60 * 1000;
+                                        deadline = Date.now() + (h.canEdit ? 12 : 4) * 60 * 1000;
                                         const helperArgs = {
-                                            messages: [
-                                                { role: "system", content: "You are a helper exploring a code project for another AI. Use the tools to look at the project (you can only read it). Read the actual code, not just file names. Then answer the task in full, with everything you found: what each relevant file and function does, how the parts work together step by step (frontend, API routes, backend, database, config), the important endpoints, data and settings, with file paths and line numbers. For example, if the task is to explore login, explain the whole flow from start to end: the frontend page and components, the form and what it sends, the API calls, the backend routes, controllers and services, checks and errors, tokens or sessions, the database models, and the config it uses. Never answer with only a list of file names. Don't guess; say what you could not find." },
-                                                { role: "user", content: task }
-                                            ],
-                                            tools: helperTools,
+                                            messages: [{ role: "system", content: system }, { role: "user", content: h.task }],
+                                            tools: defs,
                                             toolHandlers: liveHandlers,
                                             onToken: (piece) => emitHelper({ helper: i, text: piece }),
                                             onThought: (piece) => emitHelper({ helper: i, thought: piece }),
-                                            maxToolDepth: 30, // big repos need more looking around before a full answer
-                                            timeoutMs: 240000
+                                            maxToolDepth: h.canEdit ? 60 : 30, // big repos need more looking around before a full answer
+                                            timeoutMs: 240000,
+                                            signal: h.abort.signal
                                         };
                                         const r = CLAUDE_CHAT_MODELS.has(model)
-                                            // All three read-only tools stay loaded (no tool search needed)
-                                            ? await streamClaudeChat({ ...helperArgs, ...meterHooks(model, `Helper ${i + 1}`), model, loadedToolNames: new Set(readOnly), answerAtDepthLimit: true, maxContinuations: 3 })
-                                            : await streamChat({ ...helperArgs, ...meterHooks(model, `Helper ${i + 1}`), provider: cloudflareStreamProvider(model), maxTokens: 8192, maxContinuations: 6, answerAtDepthLimit: true }); // a long report keeps going instead of being cut
+                                            ? await streamClaudeChat({ ...helperArgs, ...meterHooks(model, `Helper ${h.no}`), model, loadedToolNames: new Set([...names, "tell_main"]), answerAtDepthLimit: true, maxContinuations: 3 })
+                                            : await streamChat({ ...helperArgs, ...meterHooks(model, `Helper ${h.no}`), provider: cloudflareStreamProvider(model), maxTokens: 8192, maxContinuations: 6, answerAtDepthLimit: true }); // a long report keeps going instead of being cut
                                         if (userId && r.usage?.total_tokens) deductTokens(userId, orgId, chargeableTokens(r.usage, model), tokenSource).catch(() => {});
                                         if (!String(r.answer || "").trim()) { lastError = "no answer"; break; } // try the next model
-                                        return finish("done", `Helper ${i + 1} (${task.slice(0, 80)}):\n${String(r.answer).slice(0, 40000)}`);
+                                        h.usedModel = model;
+                                        return { state: "done", text: String(r.answer).slice(0, 40000) };
                                     } catch (e) {
                                         lastError = String(e?.message || e);
+                                        if (h.abort.signal.aborted) return { state: "failed", text: "stopped because the chat answer ended" };
                                         // "Too many requests": wait once and retry this model, then move to the next one
                                         if (/429|rate limit/i.test(lastError) && attempt < 2) { await sleep(4000); continue; }
                                         break;
                                     }
                                 }
                             }
-                            return finish("failed", `Helper ${i + 1} (${task.slice(0, 80)}) failed: ${lastError}`);
-                        }));
-                        return results.join("\n\n");
+                            return { state: "failed", text: lastError };
+                        };
+
+                        const batch = specs.slice(0, room).map((s, i) => {
+                            const h = { no: board.nextNo++, task: s.task, canEdit: s.canEdit, model: pickModel(s.model, i), state: "running", report: "", reportTaken: false, inbox: [], notes: [], notesRead: 0, abort: new AbortController() };
+                            h.promise = runHelper(h, i).then((out) => {
+                                h.state = out.state;
+                                h.report = out.text;
+                                emitHelper({ helper: i, state: out.state });
+                            });
+                            board.helpers.push(h);
+                            return h;
+                        });
+                        const label = (h) => `Helper ${h.no} (${MODEL_DISPLAY_NAMES[h.usedModel || h.model] || h.usedModel || h.model}, ${h.canEdit ? "can edit" : "read only"}): ${h.task.slice(0, 80)}`;
+                        if (args?.wait === false || args?.wait === "false") {
+                            return `Started ${batch.length} helper(s), working in the background:\n${batch.map(label).join("\n")}\nTalk to them with message_helper and read their notes and reports with check_helpers. Before your final answer, wait until every helper has finished (check_helpers).`;
+                        }
+                        await Promise.all(batch.map((h) => h.promise));
+                        return batch.map((h) => {
+                            h.reportTaken = true;
+                            const notes = h.notes.length ? `\nNotes it sent you: ${h.notes.join(" | ")}` : "";
+                            return h.state === "done" ? `${label(h)}:\n${h.report}${notes}` : `${label(h)} failed: ${h.report}${notes}`;
+                        }).join("\n\n");
+                    },
+                    // A message from the main AI to a helper that is still working (it gets it with its next step)
+                    message_helper: async (args) => {
+                        const board = helperBoard(sessionId);
+                        const h = board.helpers.find((x) => x.no === Number(args?.helper));
+                        const text = String(args?.message || "").trim();
+                        if (!h) return `Error: there is no helper ${args?.helper}. Helpers: ${board.helpers.map((x) => x.no).join(", ") || "none"}.`;
+                        if (!text) return "Error: write a message.";
+                        if (h.state !== "running") return `Helper ${h.no} has already finished; read its report with check_helpers.`;
+                        h.inbox.push(text.slice(0, 4000));
+                        return `Message sent. Helper ${h.no} gets it with its next step.`;
+                    },
+                    // Status of the helpers: new notes they sent and the reports of the ones that finished (each shown once)
+                    check_helpers: async (args) => {
+                        const board = helperBoard(sessionId);
+                        if (!board.helpers.length) return "No helpers are working in this chat.";
+                        const waitMs = Math.min(120, Math.max(0, Number(args?.wait_seconds) || 0)) * 1000;
+                        const news = () => board.helpers.some((h) => h.notes.length > h.notesRead || (h.state !== "running" && !h.reportTaken));
+                        const until = Date.now() + waitMs;
+                        while (!news() && Date.now() < until) await new Promise((r) => setTimeout(r, 1000));
+                        const lines = board.helpers.map((h) => {
+                            const name = `Helper ${h.no} (${MODEL_DISPLAY_NAMES[h.usedModel || h.model] || h.model}, ${h.canEdit ? "can edit" : "read only"})`;
+                            const notes = h.notes.slice(h.notesRead);
+                            h.notesRead = h.notes.length;
+                            const noteText = notes.length ? `\n  New notes: ${notes.join(" | ")}` : "";
+                            if (h.state === "running") return `${name}: still working.${noteText}`;
+                            if (h.reportTaken) return `${name}: finished (report already given).${noteText}`;
+                            h.reportTaken = true;
+                            return h.state === "done" ? `${name}: finished.${noteText}\n  Report:\n${h.report}` : `${name}: failed (${h.report}).${noteText}`;
+                        });
+                        const running = board.helpers.filter((h) => h.state === "running").length;
+                        return `${lines.join("\n\n")}\n\n${running ? `${running} helper(s) still working.` : "All helpers have finished."}`;
                     },
                     run_code: async (args) => {
                         const result = await handleToolCall('run_code', args, { sessionId, isStaff: isStaffRole(req.user?.role) });

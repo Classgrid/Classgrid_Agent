@@ -4347,7 +4347,8 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
                 setMessages((prev) => {
                   const lastMsg = prev[prev.length - 1];
                   if (!lastMsg || lastMsg.role !== "assistant" || !lastMsg.steps) return prev;
-                  const idx = lastMsg.steps.map((s) => s.type === 'tool' && s.tool === 'run_project_helpers' && s.status === 'loading').lastIndexOf(true);
+                  // The newest helpers step: helpers started with wait: false keep working after their step is done
+                  const idx = lastMsg.steps.map((s) => s.type === 'tool' && s.tool === 'run_project_helpers').lastIndexOf(true);
                   const step = lastMsg.steps[idx];
                   if (!step || step.type !== 'tool') return prev;
                   const helpers = [...(step.helpers || [])];

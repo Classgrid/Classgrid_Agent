@@ -525,11 +525,43 @@ export const getMcpTools = () => [
   },
   {
     name: 'run_project_helpers',
-    description: 'Send 1 to 5 helper agents to explore the open Project Mode project at the same time. Each helper can only read the project (list, read, search) and returns a full, detailed report of what it found and how it works, with file paths and line numbers. Give each helper one clear task.',
+    description: 'Send 1 to 5 helper agents to work on the open Project Mode project at the same time (at most 5 working at once). For each helper you choose its task, its model, and whether it may change the project. A read-only helper explores (list, read, search) and returns a full report with file paths and line numbers. A helper with can_edit also writes and edits files and runs commands to really do the work; give each one its own files so helpers do not edit the same file. Helpers never push to GitHub. With wait (default true) you get all their reports when they finish. With wait false they work in the background and you stay free: keep talking to the user, send helpers messages with message_helper, and read their notes, questions and reports with check_helpers; wait until every helper has finished before your final answer. Their tokens are charged like the chat.',
     inputSchema: {
       type: 'object',
-      properties: { tasks: { type: 'array', items: { type: 'string' }, description: 'One task per helper (1-5).' } },
-      required: ['tasks']
+      properties: {
+        helpers: {
+          type: 'array',
+          description: 'One entry per helper (1-5).',
+          items: {
+            type: 'object',
+            properties: {
+              task: { type: 'string', description: 'One clear task for this helper, with the files it owns when it edits.' },
+              model: { type: 'string', description: 'Model for this helper, by its name in the model list (e.g. "DeepSeek V4.1 Flash", "Claude Sonnet 5.5", "GLM 5.3", "Kimi K2.7 Code"). Pick a cheap fast model for simple work and a stronger one for hard work. Empty = a default.' },
+              can_edit: { type: 'boolean', description: 'true = it may write and edit files and run commands; false (default) = read only.' }
+            },
+            required: ['task']
+          }
+        },
+        tasks: { type: 'array', items: { type: 'string' }, description: 'Older form: one read-only task per helper. Use helpers instead.' },
+        wait: { type: 'boolean', description: 'true (default) = wait here for all reports. false = they work in the background while you continue.' }
+      }
+    }
+  },
+  {
+    name: 'message_helper',
+    description: 'Send a message to a Project Mode helper that is still working (e.g. new instructions, an answer to its question, a correction). It gets the message with its next step.',
+    inputSchema: {
+      type: 'object',
+      properties: { helper: { type: 'number', description: 'Helper number, as given when it started.' }, message: { type: 'string' } },
+      required: ['helper', 'message']
+    }
+  },
+  {
+    name: 'check_helpers',
+    description: 'See how the Project Mode helpers are doing: which are still working, new notes and questions they sent you, and the full report of each helper that finished (each report is given once). Can wait up to 120 seconds for something new.',
+    inputSchema: {
+      type: 'object',
+      properties: { wait_seconds: { type: 'number', description: 'Wait up to this many seconds (0-120) for a new note or a finished helper. 0 = answer now.' } }
     }
   },
   {
