@@ -618,7 +618,7 @@ export function FilesChangedSummary({ steps, checkpoint, sessionId }: { steps: S
 // opens it in the Project Mode editor at that line. Only in Project Mode; elsewhere it stays normal code.
 const FILE_MENTION = /^((?:[\w.@-]+\/)*[\w@-][\w.@-]*\.(?:tsx?|jsx?|mjs|cjs|json|md|mdx|html?|css|scss|sass|less|py|rb|go|rs|java|kt|php|c|h|cpp|hpp|cs|swift|vue|svelte|ya?ml|toml|ini|env|txt|sh|sql|graphql|xml|svg|prisma|dart|lock|tsbuildinfo|gitignore|config))(?::(\d+)(?:-(\d+))?|#L(\d+)(?:-L?(\d+))?|,?\s*\(?lines?\s*(\d+)(?:\s*[-–]\s*(\d+))?\)?)?$/i;
 
-const inProjectMode = () => typeof window !== 'undefined' && window.location.pathname.split('/').some((p) => p === 'project' || p === 'studio');
+const inProjectMode = () => typeof window !== 'undefined' && window.location.pathname.split('/').includes('project');
 // A folder named in the answer (`src/components/`): needs a "/" so normal words never match
 const FOLDER_MENTION = /^(?:\.\/)?((?:[\w@-][\w.@-]*\/)+(?:[\w@-][\w@-]*)?)\/?$/;
 
