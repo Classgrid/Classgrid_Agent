@@ -1,7 +1,7 @@
 // Studio Mode's live browser: one real Chromium per user, in its own container on the sandbox server
 // (studio-b-<userId>, the classgrid-ai-sandbox image, 1 GB, the user's own saved profile). The API reaches it through
 // an SSH tunnel: the agent's browser tools call its /act, and the Studio Browser tab watches its /live screencast
-// through Socket.IO. A browser nobody used or watched for 10 minutes is switched off.
+// through Socket.IO. A browser nobody used or watched for 30 minutes is switched off.
 import fs from "fs";
 import net from "net";
 import crypto from "crypto";
@@ -15,7 +15,7 @@ const DAEMON_MD5 = crypto.createHash("md5").update(DAEMON).digest("hex");
 const DAEMON_DIR = "/home/ubuntu/studio_branding";
 const USERS = "studio:browser:users";
 const SEEN = (u) => `studio:browser:seen:${u}`;
-const IDLE_MS = 10 * 60 * 1000;
+const IDLE_MS = 30 * 60 * 1000;
 const MIN_FREE_MB = 700;
 const name = (u) => `studio-b-${u}`;
 
@@ -51,15 +51,17 @@ export async function ensureBrowser(userId) {
     try {
       const n = name(userId);
       let port = (await ssh.execCommand(`docker inspect -f '{{.State.Running}}' ${n} 2>/dev/null | grep -q true && docker port ${n} 3000/tcp | head -1 | sed 's/.*://'`)).stdout.trim();
+      // The browser program on the sandbox: uploaded again only when it changed. A browser still running the old
+      // program is started again (it opens the user's last page again)
+      const { stdout: md5 } = await ssh.execCommand(`md5sum ${DAEMON_DIR}/browser-daemon.mjs 2>/dev/null | cut -d' ' -f1`);
+      if (md5.trim() !== DAEMON_MD5) {
+        const up = await ssh.execCommand(`mkdir -p ${DAEMON_DIR} && cat > ${DAEMON_DIR}/browser-daemon.mjs`, { stdin: DAEMON });
+        if (up.code) throw new Error("Could not set up the browser");
+        port = "";
+      }
       if (!/^\d+$/.test(port)) {
         const { stdout: freeMb } = await ssh.execCommand(`awk '/^MemAvailable:/ { print int($2 / 1024) }' /proc/meminfo`);
         if (Number(freeMb) < MIN_FREE_MB) throw new Error("The sandbox server is busy right now. Try the browser again in a few minutes.");
-        // The browser program on the sandbox: uploaded again only when it changed
-        const { stdout: md5 } = await ssh.execCommand(`md5sum ${DAEMON_DIR}/browser-daemon.mjs 2>/dev/null | cut -d' ' -f1`);
-        if (md5.trim() !== DAEMON_MD5) {
-          const up = await ssh.execCommand(`mkdir -p ${DAEMON_DIR} && cat > ${DAEMON_DIR}/browser-daemon.mjs`, { stdin: DAEMON });
-          if (up.code) throw new Error("Could not set up the browser");
-        }
         const dir = `/home/ubuntu/studio_users/${userId}`;
         await ssh.execCommand(`mkdir -p ${dir} && sudo chown 1000:1000 ${dir}`);
         const run = await ssh.execCommand(
@@ -148,14 +150,14 @@ export function registerBrowserSocket(socket) {
   });
   socket.on("studio:browser:input", (m) => {
     if (!ws || ws.readyState !== WebSocket.OPEN || !m || typeof m !== "object") return;
-    if (!["click", "move", "wheel", "key", "text", "act"].includes(m.type)) return;
+    if (!["click", "move", "wheel", "key", "text", "act", "viewport"].includes(m.type)) return;
     try { ws.send(JSON.stringify(m)); } catch { /* closed */ }
   });
   socket.on("studio:browser:unwatch", stop);
   socket.on("disconnect", stop);
 }
 
-// Every minute: a browser nobody used or watched for 10 minutes is switched off (its saved logins stay)
+// Every minute: a browser nobody used or watched for 30 minutes is switched off (its saved logins and last page stay)
 let reaping = false;
 setInterval(async () => {
   if (reaping) return;
