@@ -678,6 +678,40 @@ router.get("/projects/:id/file", isAuthenticated, async (req, res) => {
   }
 });
 
+// Studio Mode's Project tab: the project's commit history on the branch the agent works on (the open Classgrid pull
+// request's branch when there is one), and that pull request.
+router.get("/projects/:id/commits", isAuthenticated, async (req, res) => {
+  const project = await ownProject(req, res);
+  if (!project) return;
+  if (!project.repo) return res.json({ branch: null, pr: null, commits: [] });
+  try {
+    const g = await projectGithub(project, req.user._id);
+    if (!g) return res.status(409).json({ error: "github_not_connected" });
+    if (g.error) return res.status(502).json({ error: g.error });
+    const listRes = await g.gh(`/commits?sha=${encodeURIComponent(g.branch)}&per_page=30`);
+    if (listRes.status === 409) return res.json({ branch: g.branch, pr: null, commits: [] }); // empty repo
+    if (!listRes.ok) return res.status(502).json({ error: `Could not read the history (GitHub said ${listRes.status})` });
+    const commits = (await listRes.json()).map((c) => ({
+      sha: String(c.sha || "").slice(0, 7),
+      message: String(c.commit?.message || "").split("\n")[0].slice(0, 200),
+      author: c.commit?.author?.name || c.author?.login || null,
+      avatar: c.author?.avatar_url || null,
+      date: c.commit?.author?.date || c.commit?.committer?.date || null,
+      url: c.html_url || null,
+    }));
+    let pr = null;
+    if (g.branch.startsWith("classgrid/")) {
+      const prRes = await g.gh(`/pulls?state=open&head=${encodeURIComponent(`${project.repo.split("/")[0]}:${g.branch}`)}`);
+      const open = prRes.ok ? (await prRes.json())[0] : null;
+      if (open) pr = { number: open.number, title: open.title, url: open.html_url };
+    }
+    res.json({ branch: g.branch, pr, commits });
+  } catch (e) {
+    console.error("[IDE] Commit history failed:", e.message);
+    res.status(500).json({ error: "Could not load the history" });
+  }
+});
+
 // Push button: commit everything and push to the project's repo with the owner's GitHub key (only for that command)
 router.post("/projects/:id/push", isAuthenticated, async (req, res) => {
   const project = await ownProject(req, res);
