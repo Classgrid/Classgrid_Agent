@@ -43,6 +43,8 @@ export function StudioBrowserView() {
   const { pathname } = useLocation();
   const chatId = (() => { const parts = pathname.split("/"); const at = parts.indexOf("studio"); return at !== -1 && parts[at + 1] ? parts[at + 1] : null; })();
   const [fullBusy, setFullBusy] = useState(false);
+  // Each chat has its own page in the browser: a new chat starts empty, an old chat opens its last page again
+  useEffect(() => { if (status === "ready") input({ type: "chat", id: chatId }); }, [chatId, status]);
   const fullPage = () => {
     const socket = getSocket();
     if (!socket || fullBusy) return;
