@@ -724,6 +724,25 @@ async function searchByMeaning(project, ssh, query, maxResults) {
 const BG_MAX_RUNNING = 3;
 const bgPrefix = (sessionId) => `ai-bg-${String(sessionId).replace(/[^a-zA-Z0-9]/g, "").slice(0, 12)}-`;
 const bgName = (sessionId, jobId) => `${bgPrefix(sessionId)}${jobId}`;
+const userNet = (userId) => `cg-user-${String(userId).replace(/[^a-f0-9]/gi, "").slice(0, 24)}`;
+
+// Studio's browser: the address on the user's private network of this chat's newest running background job (where
+// its dev server runs), or null
+export async function chatServerAddress(userId, sessionId) {
+  if (!sessionId) return null;
+  const ssh = await sandboxSsh();
+  try {
+    const net = userNet(userId);
+    const { stdout } = await ssh.execCommand(`docker ps -q -f name=^${bgPrefix(sessionId)} | head -1`);
+    const id = stdout.trim();
+    if (!/^[a-f0-9]{6,64}$/.test(id)) return null;
+    await ssh.execCommand(`docker network create --internal ${net} >/dev/null 2>&1; docker network connect ${net} ${id} >/dev/null 2>&1; docker network connect ${net} studio-b-${userId} >/dev/null 2>&1; true`);
+    const { stdout: ip } = await ssh.execCommand(`docker inspect -f '{{with index .NetworkSettings.Networks "${net}"}}{{.IPAddress}}{{end}}' ${id}`);
+    return /^\d+\.\d+\.\d+\.\d+$/.test(ip.trim()) ? ip.trim() : null;
+  } finally {
+    ssh.dispose();
+  }
+}
 
 async function startBackgroundJob(project, ssh, sessionId, command) {
   const cmd = String(command || "").trim();
@@ -747,6 +766,10 @@ async function startBackgroundJob(project, ssh, sessionId, command) {
     `-w /data classgrid-ai-sandbox timeout 1800 bash /cg/bg-${jobId}.sh`
   );
   if (run.code) return `Error: could not start it: ${(run.stderr || run.stdout).slice(0, 300)}`;
+  // Studio: the user's own private network joins this job and their live browser, so the browser can open a server
+  // the job starts (http://localhost:<port> in browser_open). Nobody else's containers are on it.
+  const net = userNet(project.owner);
+  await ssh.execCommand(`docker network create --internal ${net} >/dev/null 2>&1; docker network connect ${net} ${bgName(sessionId, jobId)} >/dev/null 2>&1; docker network connect ${net} studio-b-${project.owner} >/dev/null 2>&1; true`);
   return `Started background command ${jobId}. It keeps running while you work (up to 30 minutes). Check it with check_background_command (job_id "${jobId}"); to test a server it started, pass run_inside, e.g. "curl -s localhost:3000". Stop it with stop_background_command.`;
 }
 

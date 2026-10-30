@@ -554,9 +554,15 @@ export function StudioModePage() {
                   </div>
                 </div>
 
+                {/* The live browser stays connected while another tab is open, so coming back shows it at once */}
+                {tabs.some((t) => t.kind === "browser") && (
+                  <div className={activeTab?.kind === "browser" ? "flex-1 min-h-0 flex flex-col" : "hidden"}>
+                    <StudioBrowserView />
+                  </div>
+                )}
                 {/* Content: each tab fades in */}
                 <AnimatePresence mode="wait" initial={false}>
-                  <motion.div
+                  {activeTab?.kind !== "browser" && <motion.div
                     key={activeTab?.id || "launcher"}
                     className="flex-1 min-h-0 flex flex-col"
                     initial={reduce ? false : { opacity: 0, y: 6 }}
@@ -564,13 +570,12 @@ export function StudioModePage() {
                     exit={reduce ? { opacity: 0 } : { opacity: 0, y: -4 }}
                     transition={quick}
                   >
-                    {activeTab?.kind === "browser" && <StudioBrowserView />}
                     {activeTab?.kind === "files" && <StudioFilesView projectId={studioProject} projectName={studioProjectName} wide={maximized || pane.width >= 720} reloadKey={filesReload} reveal={reveal} />}
                     {activeTab?.kind === "terminal" && <StudioTerminalView entries={terminal.entries} onClear={terminal.clear} />}
                     {activeTab?.kind === "project" && <StudioProjectView projectId={studioProject} reloadKey={filesReload} />}
                     {activeTab?.kind === "shots" && <StudioShotsView />}
                     {!activeTab && <Launcher onOpen={openTab} />}
-                  </motion.div>
+                  </motion.div>}
                 </AnimatePresence>
               </div>
             </div>

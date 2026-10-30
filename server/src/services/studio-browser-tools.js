@@ -6,6 +6,7 @@ import { PutObjectCommand } from "@aws-sdk/client-s3";
 import redis from "../config/redis.js";
 import { awsS3Client } from "../config/awsS3Client.js";
 import { browserAct, ensureBrowser } from "./studio-browser.service.js";
+import { chatServerAddress } from "./ide-project.service.js";
 
 const fn = (name, description, properties = {}, required = []) => ({ type: "function", function: { name, description, parameters: { type: "object", properties, required } } });
 
@@ -23,7 +24,7 @@ const LOOK = [
 ];
 
 const ACT = [
-  fn("browser_open", "Open a website in the user's live browser. A plain search phrase opens a Google search. Returns a screenshot.", {
+  fn("browser_open", "Open a website in the user's live browser. A plain search phrase opens a Google search. A dev server you started with start_background_command in this chat opens at http://localhost:<port> (it must listen on 0.0.0.0). Returns a screenshot.", {
     url: { type: "string", description: "A link (example.com or https://...) or words to search for." },
   }, ["url"]),
   fn("browser_click", "Click at a point on the page, in screenshot pixels (the page size is given with each screenshot). Returns a screenshot.", {
@@ -117,7 +118,14 @@ export function makeBrowserHandlers({ userId, sessionId }) {
     handlers[name] = async (a) => {
       if (!userId) return "Error: the browser needs a signed-in user.";
       try {
-        const r = await browserAct(userId, { ...toStep(a), ...(sessionId && sessionId !== "none" ? { chat: sessionId } : {}) });
+        const step = toStep(a);
+        // localhost = this chat's dev server (it runs in its own container, reached on the user's private network)
+        if (name === "browser_open" && /^(https?:\/\/)?(localhost|127\.0\.0\.1|0\.0\.0\.0)(:\d+)?(\/|$)/i.test(step.url.trim())) {
+          const ip = await chatServerAddress(userId, sessionId).catch(() => null);
+          if (!ip) return "Error: no server is running in this chat. Start it with start_background_command (listening on 0.0.0.0), then open http://localhost:<port>.";
+          step.url = step.url.trim().replace(/^(https?:\/\/)?(localhost|127\.0\.0\.1|0\.0\.0\.0)/i, `http://${ip}`);
+        }
+        const r = await browserAct(userId, { ...step, ...(sessionId && sessionId !== "none" ? { chat: sessionId } : {}) });
         if (!r?.ok) return `Error: ${r?.error || "the browser step failed"}${r?.url ? ` (page: ${r.url})` : ""}`;
         const head = `Page: ${r.title || "(no title)"} — ${r.url}${r.w ? `\nPage size: ${r.w}x${r.h} pixels` : ""}`;
         if (name === "browser_read") {
