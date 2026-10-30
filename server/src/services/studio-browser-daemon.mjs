@@ -144,7 +144,7 @@ async function act(a, byAgent = false) {
   // The viewers see the same picture the agent got, even when the screencast has no new frame
   if (byAgent) {
     const data = out.screenshot || (a.action === "read" ? null : await shot().catch(() => null));
-    if (data) broadcast({ type: "frame", data, w: view.width, h: view.height });
+    if (data) broadcast({ type: "frame", step: true, data, w: view.width, h: view.height });
   }
   return out;
 }
