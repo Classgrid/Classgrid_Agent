@@ -151,6 +151,19 @@ async function act(a, byAgent = false) {
   return out;
 }
 
+// One step at a time: a model that sends several steps at once (or the same one twice) can't mix them up, e.g. two
+// "type" steps at the same moment would mix their letters. The same agent step sent twice at the same moment runs once.
+let queue = Promise.resolve();
+const inFlight = new Map();
+function runAct(a, byAgent) {
+  const key = byAgent ? JSON.stringify(a) : null;
+  if (key && inFlight.has(key)) return inFlight.get(key);
+  const job = queue.then(() => act(a, byAgent));
+  queue = job.catch(() => {});
+  if (key) { inFlight.set(key, job); job.catch(() => {}).finally(() => inFlight.delete(key)); }
+  return job;
+}
+
 const server = http.createServer(async (req, res) => {
   if (req.url === "/health") { res.end(JSON.stringify({ ok: true, url: page.url() })); return; }
   if (req.url === "/act" && req.method === "POST") {
@@ -158,7 +171,7 @@ const server = http.createServer(async (req, res) => {
     req.on("data", (c) => { body += c; if (body.length > 1e6) req.destroy(); });
     req.on("end", async () => {
       res.setHeader("Content-Type", "application/json");
-      try { res.end(JSON.stringify(await act(JSON.parse(body || "{}"), true))); }
+      try { res.end(JSON.stringify(await runAct(JSON.parse(body || "{}"), true))); }
       catch (e) { res.end(JSON.stringify({ ok: false, error: String(e.message || e).slice(0, 500), url: page.url() })); }
     });
     return;
@@ -182,7 +195,7 @@ wss.on("connection", async (ws) => {
       else if (m.type === "wheel") await page.mouse.wheel(0, m.dy || 0);
       else if (m.type === "key") await page.keyboard.press(m.key);
       else if (m.type === "text") await page.keyboard.type(String(m.text || ""));
-      else if (m.type === "act") send(ws, { type: "acted", result: await act({ ...m.act, screenshot: false }) });
+      else if (m.type === "act") send(ws, { type: "acted", result: await runAct({ ...m.act, screenshot: false }, false) });
     } catch (e) { send(ws, { type: "error", error: String(e.message || e).slice(0, 300) }); }
   });
   ws.on("close", () => { watchers.delete(ws); stopCast(ws); });
