@@ -38,8 +38,9 @@ const ACT = [
   fn("browser_back", "Go back one page. Returns a screenshot."),
 ];
 
-// The Planner (main AI in Studio): plans, keeps the scratchpad and checks the page; the worker does the clicking
-export const PLANNER_BROWSER_TOOLS = [...SCRATCHPAD, ...LOOK];
+// The Planner (main AI in Studio): plans, keeps the scratchpad and sends the worker for long jobs; it has the full
+// browser too, so it never has to say it can't open a page
+export const PLANNER_BROWSER_TOOLS = [...SCRATCHPAD, ...LOOK, ...ACT];
 // The Browser worker (a helper started with browser: true)
 export const WORKER_BROWSER_TOOLS = [...SCRATCHPAD, ...LOOK, ...ACT];
 export const BROWSER_TOOL_NAMES = new Set(WORKER_BROWSER_TOOLS.map((t) => t.function.name));
