@@ -2984,7 +2984,9 @@ If they ask whether their college/school uses Classgrid, say you can't see that 
                                 emitHelper({ helper: i, id, result: String(out).slice(0, 6000) });
                                 return withInbox(out);
                             }]));
-                            if (h.browser) {
+                            // In Studio every helper also has the user's live browser, so it never has to say it has none
+                            const hasBrowser = h.browser || body.appMode === "studio";
+                            if (hasBrowser) {
                                 defs.push(...WORKER_BROWSER_TOOLS);
                                 const browserHandlers = makeBrowserHandlers({ userId: userId ? String(userId) : null, sessionId: sessionId || "none" });
                                 for (const t of WORKER_BROWSER_TOOLS) {
@@ -3007,9 +3009,10 @@ If they ask whether their college/school uses Classgrid, say you can't see that 
                                 emitHelper({ helper: i, id, result: "Sent to the main AI." });
                                 return withInbox("Sent to the main AI.");
                             };
-                            const system = h.browser ? BROWSER_WORKER_SYSTEM : h.canEdit
+                            const browserNote = hasBrowser && !h.browser ? "\n\nYou also have the user's live web browser (browser_open, browser_click, browser_type, browser_press, browser_scroll, browser_back, browser_screenshot, browser_read) and the chat's shared scratchpad (scratchpad_read, scratchpad_write). When your task is about a website, use the browser. Never type a password, card number or one-time code, and never pay, buy, send, post or delete anything: tell the main AI (tell_main) that the user must do that step." : "";
+                            const system = (h.browser ? BROWSER_WORKER_SYSTEM : h.canEdit
                                 ? "You are a helper working on a code project together with a main AI and up to 4 other helpers. Do your task by really changing the project: write and edit files, and run commands when needed. Read the files you change first. Only touch the files your task is about, because other helpers may be editing other files at the same time. Never push to GitHub. Follow any message from the main AI. Use tell_main to ask the main AI something or tell it something important. When you are done, report what you changed, file by file, and anything still left to do."
-                                : "You are a helper exploring a code project for another AI. Use the tools to look at the project (you can only read it). Read the actual code, not just file names. Then answer the task in full, with everything you found: what each relevant file and function does, how the parts work together step by step (frontend, API routes, backend, database, config), the important endpoints, data and settings, with file paths and line numbers. For example, if the task is to explore login, explain the whole flow from start to end: the frontend page and components, the form and what it sends, the API calls, the backend routes, controllers and services, checks and errors, tokens or sessions, the database models, and the config it uses. Never answer with only a list of file names. Don't guess; say what you could not find. Use tell_main to send the main AI a short note or question; follow any message it sends you.";
+                                : "You are a helper exploring a code project for another AI. Use the tools to look at the project (you can only read it). Read the actual code, not just file names. Then answer the task in full, with everything you found: what each relevant file and function does, how the parts work together step by step (frontend, API routes, backend, database, config), the important endpoints, data and settings, with file paths and line numbers. For example, if the task is to explore login, explain the whole flow from start to end: the frontend page and components, the form and what it sends, the API calls, the backend routes, controllers and services, checks and errors, tokens or sessions, the database models, and the config it uses. Never answer with only a list of file names. Don't guess; say what you could not find. Use tell_main to send the main AI a short note or question; follow any message it sends you.") + browserNote;
                             await sleep(i * 1500); // start a little apart, so the model service isn't hit all at once
                             emitHelper({ helper: i, state: "running" });
                             // The picked model first; if it fails, Claude Sonnet 5.5 takes over, then GLM 5.3
@@ -3028,19 +3031,19 @@ If they ask whether their college/school uses Classgrid, say you can't see that 
                                     if (h.abort.signal.aborted) return { state: "failed", text: "stopped because the user stopped the chat" };
                                     try {
                                         emitHelper({ helper: i, state: "restart" }); // a retry starts its report again
-                                        deadline = Date.now() + (h.canEdit || h.browser ? 12 : 4) * 60 * 1000;
+                                        deadline = Date.now() + (h.canEdit || hasBrowser ? 12 : 4) * 60 * 1000;
                                         const helperArgs = {
                                             messages: [{ role: "system", content: system }, { role: "user", content: task }],
                                             tools: defs,
                                             toolHandlers: liveHandlers,
                                             onToken: (piece) => emitHelper({ helper: i, text: piece }),
                                             onThought: (piece) => emitHelper({ helper: i, thought: piece }),
-                                            maxToolDepth: h.canEdit || h.browser ? 60 : 30, // big repos need more looking around before a full answer
+                                            maxToolDepth: h.canEdit || hasBrowser ? 60 : 30, // big repos need more looking around before a full answer
                                             timeoutMs: 240000,
                                             signal: h.abort.signal
                                         };
                                         const r = CLAUDE_CHAT_MODELS.has(model)
-                                            ? await streamClaudeChat({ ...helperArgs, ...meterHooks(model, `Helper ${h.no}`), model, loadedToolNames: new Set([...names, "tell_main", ...(h.browser ? WORKER_BROWSER_TOOLS.map((t) => t.function.name) : [])]), answerAtDepthLimit: true, maxContinuations: 3 })
+                                            ? await streamClaudeChat({ ...helperArgs, ...meterHooks(model, `Helper ${h.no}`), model, loadedToolNames: new Set([...names, "tell_main", ...(hasBrowser ? WORKER_BROWSER_TOOLS.map((t) => t.function.name) : [])]), answerAtDepthLimit: true, maxContinuations: 3 })
                                             : await streamChat({ ...helperArgs, ...meterHooks(model, `Helper ${h.no}`), provider: cloudflareStreamProvider(model), seesImages: CF_VISION_MODELS.has(model), maxTokens: 8192, maxContinuations: 6, answerAtDepthLimit: true }); // a long report keeps going instead of being cut
                                         if (userId && r.usage?.total_tokens) deductTokens(userId, orgId, chargeableTokens(r.usage, model), tokenSource).catch(() => {});
                                         if (!String(r.answer || "").trim()) { lastError = "no answer"; break; } // try the next model
