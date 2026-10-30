@@ -11,7 +11,8 @@
  * ─────────────────────────────────────────────────────────
  */
 import React, { useEffect, useRef, useState } from 'react';
-import { ChevronDown, ChevronRight, Folder, FileText, Github } from 'lucide-react';
+import { ChevronDown, ChevronRight, Folder, Github } from 'lucide-react';
+import { themeIcons } from 'seti-icons';
 import { Spinner } from '@/components/marketing_ui/spinner';
 import { CombinedReasoningBlock } from './CombinedReasoningBlock';
 import { cn } from '@/lib/utils';
@@ -29,18 +30,15 @@ const baseName = (p = '') => String(p).replace(/\\/g, '/').replace(/\/+$/, '').s
 const lineCount = (s = '') => (String(s) === '' ? 0 : String(s).split('\n').length);
 const isError = (s?: Step) => !!s?.result && /^(error|no project is open)/i.test(String(s.result).trim());
 
-const EXT_BADGE: Record<string, [string, string]> = {
-  ts: ['TS', 'text-blue-600 dark:text-blue-400'], tsx: ['TS', 'text-blue-600 dark:text-blue-400'],
-  js: ['JS', 'text-yellow-600 dark:text-yellow-400'], jsx: ['JS', 'text-yellow-600 dark:text-yellow-400'],
-  py: ['PY', 'text-sky-600 dark:text-sky-400'], json: ['{}', 'text-amber-600 dark:text-amber-400'],
-  md: ['M↓', 'text-slate-500'], css: ['#', 'text-pink-600 dark:text-pink-400'], html: ['<>', 'text-orange-600 dark:text-orange-400'],
-};
+// File icons: the Seti set with VS Code's own Seti colours (the same icons as Studio's Files tab), for every file type
+const setiIcon = themeIcons({
+  blue: '#519aba', grey: '#4d5a5e', 'grey-light': '#6d8086', green: '#8dc149', orange: '#e37933',
+  pink: '#f55385', purple: '#a074c4', red: '#cc3e44', white: '#d4d7d6', yellow: '#cbcb41', ignore: '#41535b',
+});
 
 function FileBadge({ path }: { path: string }) {
-  const ext = baseName(path).split('.').pop()?.toLowerCase() || '';
-  const badge = EXT_BADGE[ext];
-  if (!badge) return <FileText className="size-3.5 shrink-0 text-muted-foreground" />;
-  return <span className={cn('text-[10px] font-bold leading-none shrink-0', badge[1])}>{badge[0]}</span>;
+  const { svg, color } = setiIcon(baseName(path));
+  return <span aria-hidden className="size-3.5 shrink-0 inline-flex items-center justify-center [&_svg]:size-4 [&_svg]:fill-current" style={{ color }} dangerouslySetInnerHTML={{ __html: svg }} />;
 }
 
 function Row({ children, onClick, open }: { children: React.ReactNode; onClick?: () => void; open?: boolean }) {
@@ -360,7 +358,8 @@ function HelperItem({ task, answer, failed, loading, live }: { task: string; ans
 export function ProjectHelpersStep({ step }: { step: Step }) {
   const loading = step.status === 'loading';
   // Only the first 5 tasks run (the server takes up to 5 helpers)
-  const tasks: string[] = Array.isArray(step.args?.tasks) ? step.args.tasks.map((t: unknown) => String(t)).filter((t: string) => t.trim()).slice(0, 5) : [];
+  const rawTasks: unknown[] = Array.isArray(step.args?.helpers) && step.args.helpers.length ? step.args.helpers : Array.isArray(step.args?.tasks) ? step.args.tasks : [];
+  const tasks: string[] = rawTasks.map((t: any) => String(typeof t === 'string' ? t : t?.task ?? '')).filter((t: string) => t.trim()).slice(0, 5);
   const results = loading ? [] : parseHelpers(step.result);
   const n = loading ? tasks.length : results.length || tasks.length;
   const [open, setOpen] = useState<boolean | null>(null);

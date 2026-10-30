@@ -155,7 +155,8 @@ import { ClockBlock } from "./ClockBlock";
 import { WeatherCard, MarketCard, MapCard, CountdownCard } from "./LiveCards";
 import { FollowUps, ActionCards, ReportCard, Timetable, AttendanceCalendar, StudyPlanner } from "./StudyBlocks";
 import { WidgetBlock } from "./WidgetBlock";
-import { ScrollSpyTOC, MobileTOCButton } from "./TOC";
+import { ScrollSpyTOC, MobileTOCButton, QuestionDots, messageTime } from "./TOC";
+import { StudioChatMenu, OpenInProjectButton } from "./StudioChatMenu";
 import AIThinkingBlock from "./AIThinkingBlock";
 import RichChatInput from "./RichChatInput";
 import ReactMarkdown from "react-markdown";
@@ -381,6 +382,8 @@ type AskAiPanelProps = {
   initialMessages?: ChatMessage[];
   autoFocus?: boolean;
   readOnly?: boolean;
+  inputHeader?: React.ReactNode;
+  studioMenu?: boolean; // Studio Mode with its right pane hidden: the chat's ⋯ menu shows at the top right
 };
 
 type AiAttachment = {
@@ -869,7 +872,7 @@ function renderInlineText(rawText: string) {
   return nodes;
 }
 
-function MessageActions({ content, messageId, onReply }: { content: string; messageId: string, onReply?: () => void }) {
+function MessageActions({ content, messageId, onReply, time }: { content: string; messageId: string, onReply?: () => void, time?: number }) {
   const [copied, setCopied] = useState(false);
   const [feedback, setFeedback] = useState<"up" | "down" | null>(null);
   const [isFeedbackModalOpen, setIsFeedbackModalOpen] = useState(false);
@@ -1034,6 +1037,7 @@ function MessageActions({ content, messageId, onReply }: { content: string; mess
   return (
     <>
       <div className="mt-2 flex items-center gap-1">
+        {time ? <span className="order-last ml-auto pr-1 text-[12px] text-muted-foreground/80 group-hover/answer:text-muted-foreground transition-colors duration-200">{messageTime(time)}</span> : null}
         <button
           type="button"
           onClick={handleCopy}
@@ -1785,7 +1789,11 @@ const AssistantMessageContent = memo(({ content, sources, createdAt, isTyping, o
                 onViewPlan={() => {
                   // Only opens the plan, never sends a message: Project Mode shows the plan/ file in the editor, otherwise the side panel
                   let inProject = false;
-                  try { inProject = window.location.pathname.split("/").includes("project") && !!(sessionStorage.getItem("cg_project_open") || localStorage.getItem("cg_project_open")); } catch { /* storage blocked */ }
+                  try {
+                    const parts = window.location.pathname.split("/");
+                    inProject = (parts.includes("project") && !!(sessionStorage.getItem("cg_project_open") || localStorage.getItem("cg_project_open")))
+                      || (parts.includes("studio") && !!(sessionStorage.getItem("cg_project_open") || localStorage.getItem("cg_project_open"))); // Studio: the plan opens in its Files tab
+                  } catch { /* storage blocked */ }
                   if (inProject) window.dispatchEvent(new CustomEvent("classgrid:open-project-file", { detail: { plan: true, planTitle: parsedProps.planTitle } }));
                   else window.dispatchEvent(new Event("classgrid:open-plan-panel"));
                 }}
@@ -1983,7 +1991,7 @@ export const INTEGRATIONS_LIST: any[] = [
 ];
 
 
-export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow", initialMessages, autoFocus = true, readOnly = false, hideClearChat = false, overlayWidth, onOverlayWidthChange, onOverlayResizingChange }: AskAiPanelProps) {
+export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow", initialMessages, autoFocus = true, readOnly = false, hideClearChat = false, overlayWidth, onOverlayWidthChange, onOverlayResizingChange, inputHeader, studioMenu = false }: AskAiPanelProps) {
   const { data: user } = useCurrentUser();
   const session = user ? { user } : null;
   // No SidebarContext subscription here: this whole panel would re-render (every message) on each sidebar toggle.
@@ -2050,7 +2058,7 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
             label = label.substring(0, 25) + "...";
           }
         }
-        return { id: `msg-${m.id}`, label };
+        return { id: `msg-${m.id}`, label, text: m.content.trim().slice(0, 200), time: m.createdAt };
       });
   }, [messages]);
   const [activeSection, setActiveSection] = useState("");
@@ -2387,7 +2395,7 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
         // Go back to the base agent path to clear the chat view
         const currentPath = window.location.pathname;
         const pathParts = currentPath.split('/');
-        const agentIndex = pathParts.indexOf('agent');
+        const agentIndex = pathParts.indexOf('agent') !== -1 ? pathParts.indexOf('agent') : pathParts.indexOf('studio');
         if (agentIndex !== -1) {
           const baseAgentPath = pathParts.slice(0, agentIndex + 1).join('/');
           if (currentPath !== baseAgentPath) {
@@ -2464,6 +2472,17 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
 
   // Use route parameter if present (dashboard mode), otherwise fallback to local state (website floating mode)
   const sessionId = routeSessionId || localSessionId;
+
+  // Every tool the agent (or one of its helpers) starts and finishes, for Studio Mode's live Files and Terminal tabs
+  const agentToolArgsRef = useRef<Record<string, any[]>>({});
+  const helperToolRef = useRef<Record<string, { tool: string; args: any }>>({});
+  const announceAgentTool = (phase: "start" | "end", tool: string | undefined, args?: any, result?: any) => {
+    if (!tool) return;
+    const started = (agentToolArgsRef.current[tool] ||= []);
+    if (phase === "start") started.push(args);
+    else args = started.shift();
+    window.dispatchEvent(new CustomEvent("agent:tool", { detail: { phase, tool, args, result } }));
+  };
   const setSessionId = setLocalSessionId; // Keep existing setSessionId calls pointing to local state for backward compatibility
 
   // Project mode: a chat started here gets its id in the address, so the code editor next to it opens this chat's
@@ -3210,7 +3229,7 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
     if (variant === "full-page" && typeof window !== "undefined") {
       const currentPath = window.location.pathname;
       const pathParts = currentPath.split('/');
-      const agentIndex = pathParts.indexOf('agent');
+      const agentIndex = pathParts.indexOf('agent') !== -1 ? pathParts.indexOf('agent') : pathParts.indexOf('studio');
 
       if (agentIndex !== -1) {
         const baseAgentPath = pathParts.slice(0, agentIndex + 1).join('/');
@@ -3763,7 +3782,7 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
     const parts = window.location.pathname.split("/");
     // Agent mode (/agent/<chat>) or Project Mode (/project/<chat>): drop the ended chat from the address, so the
     // new chat stays in the same mode (and in the open project)
-    const agentIndex = parts.indexOf("project") !== -1 ? parts.indexOf("project") : parts.indexOf("agent");
+    const agentIndex = parts.indexOf("project") !== -1 ? parts.indexOf("project") : parts.indexOf("studio") !== -1 ? parts.indexOf("studio") : parts.indexOf("agent");
     if (agentIndex !== -1 && parts.length > agentIndex + 1) {
       window.history.pushState({}, "", parts.slice(0, agentIndex + 1).join("/"));
       window.dispatchEvent(new PopStateEvent("popstate"));
@@ -4070,7 +4089,7 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
           
           if (variant === "full-page") {
             const pathParts = window.location.pathname.split('/');
-            const agentIndex = pathParts.indexOf('agent');
+            const agentIndex = pathParts.indexOf('agent') !== -1 ? pathParts.indexOf('agent') : pathParts.indexOf('studio');
             // If we are in superadmin context but 'agent' is not in path, default to /superadmin/agent
             const fallbackPath = window.location.pathname.includes('/superadmin') ? '/superadmin/agent' : '/agent';
             const baseAgentPath = agentIndex !== -1 ? pathParts.slice(0, agentIndex + 1).join('/') : fallbackPath;
@@ -4136,8 +4155,20 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
           userContext: userContext,
           sessionId: (options && options.explicitSessionId !== undefined) ? (options.explicitSessionId ?? undefined) : (sessionId ?? undefined),
           isIncognito: isIncognito,
+          // Which mode the user is in (Agent, Project or Studio), so the AI knows what the user can see and do
+          appMode: (() => {
+            const parts = window.location.pathname.split("/");
+            return parts.includes("studio") ? "studio" : parts.includes("project") ? "project" : "agent";
+          })(),
           // Project Mode: the project open next to the chat (the backend links the chat to it)
-          projectId: (() => { try { return window.location.pathname.split("/").includes("project") ? (sessionStorage.getItem("cg_project_open") || localStorage.getItem("cg_project_open")) || undefined : undefined; } catch { return undefined; } })(),
+          projectId: (() => {
+            try {
+              const parts = window.location.pathname.split("/");
+              if (parts.includes("project")) return (sessionStorage.getItem("cg_project_open") || localStorage.getItem("cg_project_open")) || undefined;
+              if (parts.includes("studio")) return (sessionStorage.getItem("cg_project_open") || localStorage.getItem("cg_project_open")) || undefined; // Studio Mode: the same open project as Project Mode
+              return undefined;
+            } catch { return undefined; }
+          })(),
           fileUrls: uploadedAttachments.length > 0 ? uploadedAttachments.map(a => a.url) : [],
           attachments: uploadedAttachments.length > 0 ? uploadedAttachments.map(a => ({ url: a.url, name: a.name, mimeType: a.mimeType })) : undefined,
           history: messages
@@ -4291,6 +4322,7 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
                   return { ...next, ...(event.stepStatus || {}) };
                 });
               } else if (event.type === "tool_start") {
+                announceAgentTool("start", event.tool, event.args);
                 if (event.tool === "open_integration_panel") {
                   setIsAiHubOpen(true);
                 }
@@ -4319,6 +4351,7 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
                   return [...prev.slice(0, -1), { ...lastMsg, sources: event.sources }];
                 });
               } else if (event.type === "tool_result") {
+                announceAgentTool("end", event.tool, undefined, event.result);
                 setMessages((prev) => {
                   const lastMsg = prev[prev.length - 1];
                   if (!lastMsg || lastMsg.role !== "assistant" || !lastMsg.steps) return prev;
@@ -4347,6 +4380,14 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
                   ];
                 });
               } else if (event.type === "helper_progress" && typeof event.helper === "number") {
+                if (event.tool) {
+                  helperToolRef.current[String(event.id)] = { tool: event.tool, args: event.args };
+                  window.dispatchEvent(new CustomEvent("agent:tool", { detail: { phase: "start", tool: event.tool, args: event.args, helper: event.helper } }));
+                } else if (event.id && typeof event.result === "string" && helperToolRef.current[String(event.id)]) {
+                  const started = helperToolRef.current[String(event.id)];
+                  delete helperToolRef.current[String(event.id)];
+                  window.dispatchEvent(new CustomEvent("agent:tool", { detail: { phase: "end", ...started, result: event.result, helper: event.helper } }));
+                }
                 // Project Mode helpers working: each helper's reads/searches and its report as it is written
                 setMessages((prev) => {
                   const lastMsg = prev[prev.length - 1];
@@ -4638,28 +4679,16 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
             </button>
 
             {/* Three Dot Menu */}
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <button className="flex items-center justify-center h-8 w-8 rounded-md hover:bg-black/5 dark:hover:bg-white/10 transition-colors cursor-pointer">
-                  <MoreHorizontal className="h-4 w-4" />
-                </button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="w-[180px] z-[100] bg-white dark:bg-[#202123] border border-slate-200 dark:border-white/10 shadow-xl rounded-xl">
-                <DropdownMenuItem onClick={() => setShowFilesPanel(true)} className="gap-2 cursor-pointer">
-                  <FileText className="h-4 w-4" />
-                  Files in chat
-                </DropdownMenuItem>
-                <DropdownMenuItem onClick={handlePinToggle} className="gap-2 cursor-pointer">
-                  <Pin className="h-4 w-4" />
-                  {isPinned ? "Unpin chat" : "Pin chat"}
-                </DropdownMenuItem>
-                <DropdownMenuSeparator className="bg-slate-100 dark:bg-white/10" />
-                <DropdownMenuItem onClick={() => setShowDeleteConfirm(true)} className="gap-2 cursor-pointer text-[#ef4444] focus:text-[#ef4444] focus:bg-red-50 dark:focus:bg-red-500/10">
-                  <Trash2 className="h-4 w-4" />
-                  Delete
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
+            {sessionId ? (
+              <StudioChatMenu
+                sessionId={sessionId}
+                isPinned={isPinned}
+                onTogglePin={handlePinToggle}
+                onDelete={() => setShowDeleteConfirm(true)}
+                onFilesInChat={() => setShowFilesPanel(true)}
+                messages={messages.map((m) => ({ role: m.role, content: typeof m.content === "string" ? m.content : "" }))}
+              />
+            ) : null}
             <div className="mx-1 h-4 w-[1px] bg-border" />
           </div>
         )}
@@ -4820,7 +4849,7 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
                             "relative min-w-0 transition-all duration-700 msg-target-glow scroll-mt-12",
                             isUser
                               ? "group rounded-[16px] px-[14px] py-[6px] bg-[#f1f1ef] dark:bg-[#2C2C2C] max-w-full"
-                              : "w-full max-w-full bg-transparent text-foreground"
+                              : "group/answer w-full max-w-full bg-transparent text-foreground"
                           )}
                         >
                           {isUser ? (
@@ -4906,6 +4935,9 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
                                   {/* Hover Actions (Copy / Edit) */}
                                   {typeof message.content === 'string' && message.content.replace(/\[Attached file:.*?\]/g, '').trim().length > 0 && (
                                     <div className="absolute top-full right-0 mt-1 opacity-0 group-hover:opacity-100 transition-opacity flex flex-row items-center gap-1 z-50 before:absolute before:-top-4 before:left-0 before:right-0 before:h-4">
+                                      {pageContext?.path === "/c/studio" && message.createdAt ? (
+                                        <span className="mr-1 whitespace-nowrap text-[12px] text-muted-foreground">{messageTime(message.createdAt)}</span>
+                                      ) : null}
                                       {!(grid.shared && (gridSenderOf(message) !== gridMyEmail || gridBlockedBy)) && (
                                       <TooltipProvider delayDuration={200}>
                                         <Tooltip>
@@ -5517,7 +5549,7 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
                           {!isUser && !message.typing && message.content.length > 0 && !message.content.includes("```approval") && !/^\s*\[IMAGE_GENERATION_[^\]]*\]\s*$/.test(message.content) && !message.content.trim().startsWith("ai_quota_exceeded") && message.content.trim() !== "ai_blocked" && (
                             <div className="pl-1 mt-3">
                               <FilesChangedSummary steps={(message.steps || []) as any} checkpoint={message.checkpoint} sessionId={sessionId || undefined} />
-                              <MessageActions content={message.content} messageId={message.id} onReply={() => setReplyToMessage(message)} />
+                              <MessageActions content={message.content} messageId={message.id} onReply={() => setReplyToMessage(message)} time={pageContext?.path === "/c/studio" ? message.createdAt : undefined} />
                             </div>
                           )}
                         </div>
@@ -6192,7 +6224,7 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
                       // mb-12 (not pb-12): the scrolling text area ends above the buttons, so long text never slides under them
                       "w-full resize-none bg-transparent mb-12 pb-1 pl-4 pr-4 text-[16px] sm:text-sm focus:outline-none overflow-y-auto chat-scrollbar leading-relaxed transition-all duration-300",
                       // The narrow side panel has the buttons below the text, so it keeps normal side spacing
-                      variant === "overlay" ? "" : cn("sm:pl-24", showFilesPanel ? "sm:pr-32" : "sm:pr-60"),
+                      variant === "overlay" ? "" : cn("sm:pl-24", showFilesPanel ? "sm:pr-32" : "sm:pr-60", "@max-[56rem]:!pl-4 @max-[56rem]:!pr-4"),
                       (isRecording || isTranscribing) ? "text-transparent placeholder:text-transparent" : "text-foreground",
                       isExpandedBox ? "min-h-[calc(60vh-3rem)] max-h-[calc(60vh-3rem)]" : "min-h-[40px] max-h-[132px]", // 3rem (mb-12) less than before: same box size
                       (pageContext?.path?.startsWith("/docs") || attachedFiles.length > 0) ? "pt-3" : "pt-4 rounded-2xl"
@@ -6308,15 +6340,27 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
           : "w-full h-[100dvh] !bg-[#fafafa] dark:!bg-[#000000] flex flex-row overflow-hidden"}>
           <div className="flex-1 min-w-0 min-h-0 relative flex flex-col h-full overflow-hidden">
             {/* Sidebar toggle and Top Right Header Actions */}
-            <div className="shrink-0 flex items-center justify-between px-3 sm:px-6 pt-3 h-14">
-              {isIncognito ? <span /> : <SidebarTrigger />}
+            {studioMenu && messages.length > 0 && sessionId && !isIncognito && sessionId !== "schedule" && sessionId !== "library" && (
+              <div className="absolute top-3 right-12 z-20 flex items-center gap-1 animate-in fade-in-0 duration-200">
+                <StudioChatMenu
+                  sessionId={sessionId}
+                  isPinned={isPinned}
+                  onTogglePin={handlePinToggle}
+                  onDelete={() => setShowDeleteConfirm(true)}
+                  messages={messages.map((m) => ({ role: m.role, content: typeof m.content === "string" ? m.content : "" }))}
+                />
+                <OpenInProjectButton sessionId={sessionId} />
+              </div>
+            )}
+            <div className={pageContext?.path === "/c/studio" ? "hidden" : "shrink-0 flex items-center justify-between px-3 sm:px-6 pt-3 h-14"}>
+              {isIncognito || pageContext?.path === "/c/studio" ? <span /> : <SidebarTrigger />}
 
               {/* Ghost button on a new chat: start an incognito chat */}
               {emptyState && !isIncognito && !isLoadingChat && sessionId !== "schedule" && sessionId !== "library" && (
                 <IncognitoButton onClick={startIncognito} />
               )}
 
-              {messages.length > 0 && sessionId && !isIncognito && sessionId !== "schedule" && sessionId !== "library" && (
+              {messages.length > 0 && sessionId && !isIncognito && sessionId !== "schedule" && sessionId !== "library" && pageContext?.path !== "/c/studio" && (
                 <div className="flex items-center gap-1 text-muted-foreground">
                   {/* Questions list (the side list is hidden on smaller screens and phones) */}
                   <MobileTOCButton tocItems={tocItems} activeSection={activeSection} />
@@ -6338,28 +6382,16 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
                   </button>
 
                   {/* Three Dot Menu */}
-                  <DropdownMenu>
-                    <DropdownMenuTrigger asChild>
-                      <button className="flex items-center justify-center h-8 w-8 rounded-md hover:bg-black/5 dark:hover:bg-white/10 transition-colors cursor-pointer">
-                        <MoreHorizontal className="h-4 w-4" />
-                      </button>
-                    </DropdownMenuTrigger>
-                    <DropdownMenuContent align="end" className="w-[180px] z-[100] bg-white dark:bg-[#202123] border border-slate-200 dark:border-white/10 shadow-xl rounded-xl">
-                      <DropdownMenuItem onClick={() => setShowFilesPanel(true)} className="gap-2 cursor-pointer">
-                        <FileText className="h-4 w-4" />
-                        Files in chat
-                      </DropdownMenuItem>
-                      <DropdownMenuItem onClick={handlePinToggle} className="gap-2 cursor-pointer">
-                        <Pin className="h-4 w-4" />
-                        {isPinned ? "Unpin chat" : "Pin chat"}
-                      </DropdownMenuItem>
-                      <DropdownMenuSeparator className="bg-slate-100 dark:bg-white/10" />
-                      <DropdownMenuItem onClick={() => setShowDeleteConfirm(true)} className="gap-2 cursor-pointer text-[#ef4444] focus:text-[#ef4444] focus:bg-red-50 dark:focus:bg-red-500/10">
-                        <Trash2 className="h-4 w-4" />
-                        Delete
-                      </DropdownMenuItem>
-                    </DropdownMenuContent>
-                  </DropdownMenu>
+                  {sessionId ? (
+                    <StudioChatMenu
+                      sessionId={sessionId}
+                      isPinned={isPinned}
+                      onTogglePin={handlePinToggle}
+                      onDelete={() => setShowDeleteConfirm(true)}
+                      onFilesInChat={() => setShowFilesPanel(true)}
+                      messages={messages.map((m) => ({ role: m.role, content: typeof m.content === "string" ? m.content : "" }))}
+                    />
+                  ) : null}
                 </div>
               )}
             </div>
@@ -6417,6 +6449,7 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
                 <div className="max-w-[68rem] w-full flex flex-col items-center gap-6 flex-1 sm:flex-none">
 
                   {/* Logo on the left of the greeting, one line */}
+                  {pageContext?.path !== "/c/studio" && (
                   <div className="flex items-center justify-center gap-3 mt-auto sm:mt-0">
                     <img src="/logo.png" alt="Classgrid" className="h-9 w-9 sm:h-[46px] sm:w-[46px] shrink-0 object-contain" />
                     {/* Fixed height so the input below never moves while the line types; pauses while the user types */}
@@ -6433,9 +6466,11 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
                       ) : <TypingGreeting name={user?.name} paused={input.trim().length > 0} />}
                     </h2>
                   </div>
+                  )}
 
                   {/* Inline input form â€” not using panelInput */}
                   <div className="w-full max-w-[640px] mt-auto sm:mt-0">
+                    {inputHeader && <div className="mb-2 flex">{inputHeader}</div>}
                     {isTerminated ? (
                       <div className="rounded-xl border border-red-500/20 bg-red-500/10 px-4 py-3 text-center text-sm font-medium text-red-500">
                         <p>This conversation has been terminated.</p>
@@ -6837,6 +6872,7 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
                               className={cn(
                                 "w-full resize-none bg-transparent mb-12 pb-1 pl-4 pr-4 sm:pl-24 pt-4 rounded-2xl text-[16px] sm:text-sm focus:outline-none overflow-y-auto chat-scrollbar leading-relaxed transition-all duration-300",
                                 showFilesPanel ? "sm:pr-32" : "sm:pr-60",
+                                "@max-[56rem]:!pl-4 @max-[56rem]:!pr-4", // a narrow chat column (Studio Mode) drops the wide side spaces
                                 (isRecording || isTranscribing) ? "text-transparent placeholder:text-transparent" : "text-foreground",
                                 isExpandedBox ? "min-h-[calc(60vh-3rem)] max-h-[calc(60vh-3rem)]" : "min-h-[40px] max-h-[132px]"
                               )}
@@ -6951,7 +6987,8 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
             )}
           </AnimatePresence>
           {/* Right-side TOC showing user questions */}
-          {tocItems.length > 0 && !showFilesPanel && !showGridPanel && <ScrollSpyTOC tocItems={tocItems} activeSection={activeSection} />}
+          {tocItems.length > 0 && !showFilesPanel && !showGridPanel && pageContext?.path !== "/c/studio" && <ScrollSpyTOC tocItems={tocItems} activeSection={activeSection} />}
+          {pageContext?.path === "/c/studio" && <QuestionDots tocItems={tocItems} activeSection={activeSection} />}
         </div>
         </div>
       ) : null}

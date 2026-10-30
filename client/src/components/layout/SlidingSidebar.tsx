@@ -65,6 +65,7 @@ interface SlidingSidebarProps {
   mainMenu: React.ReactNode;
   nestedMenu: React.ReactNode;
   activeItemId?: string;
+  hideBack?: boolean;
 }
 
 export function SlidingSidebar({
@@ -74,6 +75,7 @@ export function SlidingSidebar({
   mainMenu,
   nestedMenu,
   activeItemId = "active-main-menu-item",
+  hideBack = false,
 }: SlidingSidebarProps) {
   // Scroll active item into view when sliding back to the main menu
   useEffect(() => {
@@ -106,7 +108,7 @@ export function SlidingSidebar({
             PANE 2: NESTED MENU
             ========================================== */}
         <div className="w-1/2 h-full shrink-0 overflow-y-auto pb-10 pt-0 no-scrollbar">
-          <div className="group-data-[collapsible=icon]:hidden px-1 pb-1 -mt-1 mx-1">
+          {!hideBack && <div className="group-data-[collapsible=icon]:hidden px-1 pb-1 -mt-1 mx-1">
             <SidebarMenuButton
               asChild
               className="h-9 text-muted-foreground hover:text-foreground cursor-pointer rounded-md"
@@ -122,7 +124,7 @@ export function SlidingSidebar({
                 <span>{nestedTitle}</span>
               </a>
             </SidebarMenuButton>
-          </div>
+          </div>}
           {nestedMenu}
         </div>
       </div>

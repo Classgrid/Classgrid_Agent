@@ -61,7 +61,9 @@ export default defineConfig({
       // `npm run dev` sets CG_DEV_BACKEND to the local backend; plain `dev:client` keeps the live one
       "/api": {
         target: process.env.CG_DEV_BACKEND || "https://api.classgrid.in",
-        changeOrigin: true
+        changeOrigin: true,
+        // The live server's login cookie is for .classgrid.in: keep it for localhost when testing against it
+        cookieDomainRewrite: { "*": "" }
       },
       "/socket.io": {
         target: process.env.CG_DEV_BACKEND || "https://api.classgrid.in",

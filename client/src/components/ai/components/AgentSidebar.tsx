@@ -95,27 +95,35 @@ export function AgentNestedMenu({ searchQuery = "" }: { searchQuery?: string }) 
     return () => window.removeEventListener("agent:active-session-changed", handleActiveSessionChanged);
   }, []);
 
+  // Which list is shown (agent chats, or one project's chats) and which one was asked for last
+  const shownListRef = React.useRef<string | null>(null);
+  const askedListRef = React.useRef<string | null>(null);
   // silent: refresh in the background without the grey loading bars (used after the first load)
   const fetchSessions = (silent = false) => {
-    if (!silent) setLoading(true);
     const endpoint = typeof import.meta !== "undefined" && import.meta.env
       ? (import.meta.env.VITE_API_URL || "https://api.classgrid.in") + "/api/ai/sessions"
       : "/api/ai/sessions";
 
     // Agent mode and Project mode keep separate chat lists (Project mode: the open project's chats, or all project chats on the Projects page)
     let listQuery = "?mode=agent";
-    if (window.location.pathname.split("/").includes("project")) {
+    if (window.location.pathname.split("/").includes("project") || window.location.pathname.split("/").includes("studio")) { // Studio: the same project chats as Project Mode
       let openProject: string | null = null;
       try { openProject = (sessionStorage.getItem("cg_project_open") || localStorage.getItem("cg_project_open")); } catch { /* storage blocked */ }
       listQuery = `?project=${openProject || "all"}`; // no project open: chats of all projects
     }
+    // Another list than the one on screen (Agent -> a project, or one project -> another): clear it at once, so
+    // the old mode's chats never show while the new list loads
+    if (shownListRef.current !== listQuery) { setSessions([]); silent = false; }
+    if (!silent) setLoading(true);
+    askedListRef.current = listQuery;
     fetchWithRescue(endpoint + listQuery, { credentials: "include" })
       .then(res => res.json())
       .then(data => {
-        if (data.sessions) setSessions(data.sessions);
+        if (askedListRef.current !== listQuery) return; // a newer list was asked for: this answer is too late
+        if (data.sessions) { setSessions(data.sessions); shownListRef.current = listQuery; }
       })
       .catch(err => console.error("Failed to load sessions", err))
-      .finally(() => setLoading(false));
+      .finally(() => { if (askedListRef.current === listQuery) setLoading(false); });
   };
 
   React.useEffect(() => {
@@ -433,12 +441,13 @@ export function AgentNestedMenu({ searchQuery = "" }: { searchQuery?: string }) 
   const navigate = useNavigate();
   const location = useLocation();
   const isProjectMode = location.pathname.split("/").includes("project");
+  const isStudioMode = location.pathname.split("/").includes("studio");
   // Switching between Agent and Project mode shows that mode's own chats
-  React.useEffect(() => { fetchSessions(true); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [isProjectMode]);
+  React.useEffect(() => { fetchSessions(true); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [isProjectMode, isStudioMode]);
 
   // Extract base path robustly by finding the 'agent' segment
   const pathParts = location.pathname.split('/');
-  const agentIndex = pathParts.indexOf('agent') !== -1 ? pathParts.indexOf('agent') : pathParts.indexOf('project');
+  const agentIndex = pathParts.indexOf('agent') !== -1 ? pathParts.indexOf('agent') : pathParts.indexOf('project') !== -1 ? pathParts.indexOf('project') : pathParts.indexOf('studio');
   const baseAgentPath = agentIndex !== -1
     ? pathParts.slice(0, agentIndex + 1).join('/')
     : location.pathname;
@@ -616,7 +625,7 @@ export function AgentNestedMenu({ searchQuery = "" }: { searchQuery?: string }) 
                   {session.pinned ? "Unpin chat" : "Pin chat"}
                 </DropdownMenuItem>
 
-                {!isProjectMode && !(session as any).shared && (
+                {!isProjectMode && !isStudioMode && !(session as any).shared && (
                   <DropdownMenuSub onOpenChange={(open) => { if (open && projects === null) loadProjects(); }}>
                     <DropdownMenuSubTrigger className="gap-3 py-2 px-3 text-[14px] cursor-pointer hover:bg-slate-100 dark:hover:bg-[#343541] focus:bg-slate-100 dark:focus:bg-[#343541] rounded-xl transition-colors data-popup-open:bg-slate-100 dark:data-popup-open:bg-[#343541]">
                       <FolderInput className="w-4 h-4 text-slate-500 dark:text-white/70" strokeWidth={2} />
@@ -697,7 +706,7 @@ export function AgentNestedMenu({ searchQuery = "" }: { searchQuery?: string }) 
               />
             </SidebarMenuItem>
 
-            {!isProjectMode && (
+            {!isProjectMode && !isStudioMode && (
               <SidebarMenuItem>
                 <SidebarMenuButton 
                   tooltip="Schedule"
@@ -712,6 +721,7 @@ export function AgentNestedMenu({ searchQuery = "" }: { searchQuery?: string }) 
               </SidebarMenuItem>
             )}
 
+            {!isStudioMode && (
             <SidebarMenuItem>
               <SidebarMenuButton 
                 tooltip="Library"
@@ -724,6 +734,7 @@ export function AgentNestedMenu({ searchQuery = "" }: { searchQuery?: string }) 
                 }
               />
             </SidebarMenuItem>
+            )}
 
             <SidebarMenuItem>
               <SidebarMenuButton 
@@ -825,7 +836,7 @@ export function AgentNestedMenu({ searchQuery = "" }: { searchQuery?: string }) 
               />
             </SidebarMenuItem>
 
-            {!isProjectMode && (
+            {!isProjectMode && !isStudioMode && (
               <SidebarMenuItem>
                 <SidebarMenuButton 
                   onClick={() => navigate(`${baseAgentPath.replace("/project", "/agent")}/schedule`)}
@@ -839,6 +850,7 @@ export function AgentNestedMenu({ searchQuery = "" }: { searchQuery?: string }) 
               </SidebarMenuItem>
             )}
 
+            {!isStudioMode && (
             <SidebarMenuItem>
               <SidebarMenuButton 
                 onClick={() => navigate(`${baseAgentPath.replace("/project", "/agent")}/library`)}
@@ -850,6 +862,7 @@ export function AgentNestedMenu({ searchQuery = "" }: { searchQuery?: string }) 
                 }
               />
             </SidebarMenuItem>
+            )}
           </SidebarMenu>
         </div>
 

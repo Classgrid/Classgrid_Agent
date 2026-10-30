@@ -214,6 +214,65 @@
     --icon-invert: invert(1) brightness(2);
     --icon-invert-light: none;
   }
+
+  /* Studio Mode: a grey left sidebar (the marketing site's greys), so it stands apart from the black page */
+  html.studio-mode {
+    --sidebar-background: #f5f5f5;
+    --sidebar-accent: #eaeaea;
+  }
+  html.dark.studio-mode {
+    --sidebar-background: #181818;
+    --sidebar-accent: #262626;
+  }
+  /* Studio Mode's chat: grey layers instead of pure black */
+  html.dark.studio-mode .studio-chat {
+    --background: #121212;
+    --color-background: #121212;
+  }
+  html.dark.studio-mode .studio-chat [class*="dark:!bg-[#000000]"] {
+    background-color: #121212 !important;
+  }
+  html.dark.studio-mode .studio-chat [class*="dark:!bg-[#0f0f0f]"] {
+    background-color: #1e1e1e !important;
+  }
+  /* Studio Mode light: a white chat next to the grey sidebar and pane */
+  html.studio-mode:not(.dark) .studio-chat {
+    --background: #ffffff;
+    --color-background: #ffffff;
+  }
+  html.studio-mode:not(.dark) .studio-chat [class*="!bg-[#fafafa]"] {
+    background-color: #ffffff !important;
+  }
+  /* Studio Mode: the sidebar button fades out while the chat scrolls, so it never covers the text */
+  .studio-sidebar-btn,
+  .studio-question-dots {
+    transition: opacity 180ms ease;
+  }
+  html.studio-scrolling .studio-sidebar-btn,
+  html.studio-scrolling .studio-question-dots {
+    opacity: 0;
+    pointer-events: none;
+  }
+  /* Studio Mode: the left sidebar's width follows its drag handle */
+  html.studio-mode [data-slot="sidebar-wrapper"] {
+    --sidebar-width: var(--studio-sidebar-width, 16rem) !important;
+  }
+  /* Studio Mode: the left sidebar slides with the same soft easing as the rest of Studio */
+  html.studio-mode [data-slot="sidebar-gap"],
+  html.studio-mode [data-slot="sidebar-container"] {
+    transition-duration: 320ms !important;
+    transition-timing-function: cubic-bezier(0.22, 1, 0.36, 1) !important;
+  }
+  html.studio-resizing [data-slot="sidebar-wrapper"] * {
+    transition: none !important;
+  }
+  /* Studio Mode: the icon strip dragged away to the left; only the sidebar button stays */
+  html.studio-sidebar-hidden [data-slot="sidebar-gap"] {
+    width: 0 !important;
+  }
+  html.studio-sidebar-hidden [data-slot="sidebar-container"] {
+    left: calc(var(--sidebar-width-icon) * -1 - 1rem) !important;
+  }
 }
 
 @layer base {

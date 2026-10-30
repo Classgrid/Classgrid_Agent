@@ -140,7 +140,7 @@
 
 import React, { useState, useEffect } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
-import { ChevronRight, HardDrive, FileBarChart, Settings, StickyNote } from "lucide-react";
+import { ChevronRight, HardDrive, FileBarChart, Search, Settings, StickyNote } from "lucide-react";
 import { getLoginPathForPath } from "@/features/auth/auth-helpers";
 import {
   Sidebar,
@@ -179,6 +179,7 @@ interface AppSidebarProps {
 export function AppSidebar({ role, user }: AppSidebarProps) {
   const location = useLocation();
   const navigate = useNavigate();
+  const isStudio = location.pathname.split("/").includes("studio");
   const [searchQuery, setSearchQuery] = useState("");
   const config = dashboardConfigs.find(c => c.role === role);
 
@@ -217,7 +218,7 @@ export function AppSidebar({ role, user }: AppSidebarProps) {
   // Auto-open menus based on route changes
   useEffect(() => {
     setShowStorageMenu(location.pathname.includes("/storage"));
-    setShowAgentMenu((location.pathname.includes("/agent") && !location.pathname.includes("/agent-reviews")) || location.pathname.split("/").includes("project"));
+    setShowAgentMenu((location.pathname.includes("/agent") && !location.pathname.includes("/agent-reviews")) || location.pathname.split("/").includes("project") || location.pathname.split("/").includes("studio"));
   }, [location.pathname, agentItem]);
 
   // Auto-open Agent menu when first question is sent
@@ -279,10 +280,17 @@ export function AppSidebar({ role, user }: AppSidebarProps) {
     <Sidebar variant="sidebar" collapsible="icon" className="!bg-background !border-r-0">
       {gridsItem?.to && <ChatMessageToasts chatPath={gridsItem.to} />}
       <SidebarHeader className={showStorageMenu || showAgentMenu ? "gap-1 p-2 pb-0" : ""}>
-        <div className="flex items-center w-full group-data-[collapsible=icon]:justify-center">
+        <div className="relative flex items-center w-full group-data-[collapsible=icon]:justify-center">
           <SidebarSwitcher user={user ?? null} />
+          {isStudio && (
+            <div className="absolute right-9 top-1/2 -translate-y-1/2 flex items-center gap-0.5 group-data-[collapsible=icon]:hidden">
+              <button type="button" onClick={() => window.dispatchEvent(new Event("agent:open-search-palette"))} className="flex items-center justify-center size-7 rounded-md text-muted-foreground hover:text-foreground hover:bg-sidebar-accent" title="Search chats" aria-label="Search chats">
+                <Search className="size-4" />
+              </button>
+            </div>
+          )}
         </div>
-        <div className={showStorageMenu || showAgentMenu ? "group-data-[collapsible=icon]:hidden mb-1" : "group-data-[collapsible=icon]:hidden"}>
+        <div className={isStudio ? "hidden" : showStorageMenu || showAgentMenu ? "group-data-[collapsible=icon]:hidden mb-1" : "group-data-[collapsible=icon]:hidden"}>
           <SidebarSearch 
             searchQuery={searchQuery} 
             setSearchQuery={setSearchQuery} 
@@ -295,6 +303,7 @@ export function AppSidebar({ role, user }: AppSidebarProps) {
         <SlidingSidebar
           showNested={showStorageMenu || showAgentMenu}
           onBack={() => { setShowStorageMenu(false); setShowAgentMenu(false); }}
+          hideBack={location.pathname.split("/").includes("project") || location.pathname.split("/").includes("studio")}
           nestedTitle={showStorageMenu ? "Storage" : showAgentMenu ? "Agent" : ""}
           mainMenu={
             <>

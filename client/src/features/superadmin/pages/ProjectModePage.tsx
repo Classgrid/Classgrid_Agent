@@ -168,9 +168,19 @@ export function ProjectModePage() {
   const isSuperAdmin = !!currentUser; // every logged-in user; each gets their own editor box with only their own projects
   const { sessionId } = useParams<{ sessionId?: string }>();
 
-  const [projects, setProjects] = useState<Project[] | null>(null);
+  // The last project list (shared with Studio Mode) shows at once, so a remembered project opens straight away
+  // instead of waiting on the projects page for the server's list; the fresh list replaces it when it comes
+  const [projects, setProjects] = useState<Project[] | null>(() => {
+    try {
+      const list = JSON.parse(localStorage.getItem("cg_studio_projects") || "null");
+      return Array.isArray(list) && list.length ? (list as Project[]) : null;
+    } catch { return null; }
+  });
   // No project opens by itself: Project Mode starts on the project list until the user opens one
-  const [openId, setOpenId] = useState<string | null>(null);
+  // The project open in this tab (shared with Studio Mode): switching modes opens the same project by itself
+  const [openId, setOpenId] = useState<string | null>(() => {
+    try { return sessionStorage.getItem(OPEN_PROJECT_KEY) || localStorage.getItem(OPEN_PROJECT_KEY); } catch { return null; }
+  });
   const [folder, setFolder] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [newName, setNewName] = useState<string | null>(null);
@@ -230,10 +240,15 @@ export function ProjectModePage() {
     window.dispatchEvent(new Event("agent:refresh-sessions")); // the left list shows this project's chats
   };
 
+  const freshList = useRef(false); // the list came from the server (not the saved one)
   const loadProjects = useCallback(async () => {
     const { res, data } = await api("/projects");
-    if (res.ok) setProjects(data.projects || []);
-    else setProjects([]);
+    freshList.current = true;
+    if (res.ok) {
+      setProjects(data.projects || []);
+      try { localStorage.setItem("cg_studio_projects", JSON.stringify((data.projects || []).map(({ id, name, repo, logo, updatedAt }: Project) => ({ id, name, repo, logo, updatedAt })))); } catch { /* storage blocked */ }
+    }
+    else setProjects((list) => list || []);
   }, []);
   useEffect(() => { if (isSuperAdmin) loadProjects(); }, [isSuperAdmin, loadProjects]);
   // A project without a repo: check now and then, so a repo the AI made for it shows up here
@@ -325,7 +340,7 @@ export function ProjectModePage() {
   // Coming back to the page with a project open: download it fresh again
   useEffect(() => {
     if (openProject && !folder && busyId !== openProject.id) open(openProject, false, true); // refresh: keep the code that is there
-    if (projects && openId && !openProject) rememberOpen(null);
+    if (projects && freshList.current && openId && !openProject) rememberOpen(null); // only once the server's list says it is gone
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projects, openId]);
 

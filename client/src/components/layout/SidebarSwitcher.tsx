@@ -90,7 +90,15 @@ export function SidebarSwitcher({ user }: { user: { role?: string; name?: string
   const isSuperAdminArea = pathname.startsWith("/superadmin");
   const agentPath = isSuperAdminArea ? "/superadmin/agent" : "/c/agent";
   const projectPath = isSuperAdminArea ? "/superadmin/project" : "/c/project";
-  const currentMode = pathname.split("/").includes("project") ? "project" : "agent";
+  const studioPath = isSuperAdminArea ? "/superadmin/studio" : "/c/studio";
+  const currentMode = pathname.split("/").includes("project") ? "project" : pathname.split("/").includes("studio") ? "studio" : "agent";
+  // Project Mode and Studio share the project and its chats: switching between them keeps the open chat
+  const openChat = (() => {
+    if (currentMode === "agent") return "";
+    const parts = pathname.split("/");
+    const chat = parts[parts.indexOf(currentMode) + 1] || "";
+    return /^[0-9a-f-]{36}$/i.test(chat) ? `/${chat}` : "";
+  })();
   const queryClient = useQueryClient();
   const [isSwitching, setIsSwitching] = useState(false);
 
@@ -186,14 +194,15 @@ export function SidebarSwitcher({ user }: { user: { role?: string; name?: string
             </DropdownMenuLabel>
             {[
               { key: "agent", label: "Agent", to: agentPath },
-              { key: "project", label: "Project", to: projectPath },
+              { key: "project", label: "Project", to: projectPath + openChat },
+              { key: "studio", label: "Studio", to: studioPath + openChat },
             ].map((mode) => (
               <DropdownMenuItem
                 key={mode.key}
                 render={<Link to={mode.to} className="flex items-center gap-3 p-2 w-full cursor-pointer rounded-md" />}
                 className="p-0"
               >
-                <ModeIcon kind={mode.key as "agent" | "project"} />
+                <ModeIcon kind={mode.key as "agent" | "project" | "studio"} />
                 <span className={`flex-1 text-sm ${mode.key === currentMode ? "font-medium text-foreground" : "text-muted-foreground"}`}>
                   {mode.label}
                 </span>
@@ -216,7 +225,19 @@ export function SidebarSwitcher({ user }: { user: { role?: string; name?: string
 
 // Icons for the mode switcher: Agent (Classgrid green, a chat bubble with a spark), Project (Classgrid orange,
 // code brackets) and Docs (neutral, a page)
-function ModeIcon({ kind }: { kind: "agent" | "project" | "docs" }) {
+function ModeIcon({ kind }: { kind: "agent" | "project" | "studio" | "docs" }) {
+  if (kind === "studio") {
+    return (
+      <svg viewBox="0 0 24 24" className="size-7 shrink-0" aria-hidden="true">
+        <rect width="24" height="24" rx="6" fill="#3b82f6" />
+        <rect x="5.5" y="6.5" width="13" height="11" rx="2" fill="none" stroke="#ffffff" strokeWidth="1.6" />
+        <path d="M5.5 9.6h13" stroke="#ffffff" strokeWidth="1.6" />
+        <circle cx="7.6" cy="8.05" r=".55" fill="#ffffff" />
+        <circle cx="9.4" cy="8.05" r=".55" fill="#ffffff" />
+        <path d="M10.6 12.2l3.6 1.6-1.5.5-.5 1.5-1.6-3.6z" fill="#ffffff" />
+      </svg>
+    );
+  }
   if (kind === "agent") {
     return (
       <svg viewBox="0 0 24 24" className="size-7 shrink-0" aria-hidden="true">

@@ -78,6 +78,7 @@ function NavigateWithQuery({ to, replace }: { to: string, replace?: boolean }) {
 
 import { DashboardHomePage } from "@/features/superadmin/pages/DashboardHomePage";
 import { ProjectModePage } from "@/features/superadmin/pages/ProjectModePage";
+import { StudioModePage } from "@/features/superadmin/pages/StudioModePage";
 import { LeadsPage } from "@/features/superadmin/pages/LeadsPage";
 import { LeadDetailsPage } from "@/features/superadmin/pages/LeadDetailsPage";
 import { SupportTicketsPage } from "@/features/superadmin/pages/SupportTicketsPage";
@@ -256,6 +257,8 @@ export function AppRouter() {
           <Route path="/superadmin/agent" element={<DashboardHomePage />} />
           <Route path="/superadmin/project" element={<ProjectModePage />} />
           <Route path="/superadmin/project/:sessionId" element={<ProjectModePage />} />
+          <Route path="/superadmin/studio" element={<StudioModePage />} />
+          <Route path="/superadmin/studio/:sessionId" element={<StudioModePage />} />
           <Route path="/superadmin/agent/:sessionId" element={<DashboardHomePage />} />
           <Route path="/superadmin/agent/:sessionId/*" element={<DashboardHomePage />} />
           <Route path="/superadmin/agent-reviews" element={<AgentReviewsPage />} />
@@ -349,6 +352,8 @@ export function AppRouter() {
           <Route path="/c/agent" element={<DashboardHomePage />} />
           <Route path="/c/project" element={<ProjectModePage />} />
           <Route path="/c/project/:sessionId" element={<ProjectModePage />} />
+          <Route path="/c/studio" element={<StudioModePage />} />
+          <Route path="/c/studio/:sessionId" element={<StudioModePage />} />
           <Route path="/c/agent/:sessionId" element={<DashboardHomePage />} />
           <Route path="/c/agent/:sessionId/*" element={<DashboardHomePage />} />
           <Route path="/c" element={<DashboardHomePage />} />

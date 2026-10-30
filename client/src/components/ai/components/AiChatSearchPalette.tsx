@@ -52,7 +52,8 @@ export function AiChatSearchPalette({
   const listRef = useRef<HTMLDivElement>(null);
   const navigate = useNavigate();
   const location = useLocation();
-  const effectiveMode = location.pathname.includes('/agent') ? 'chat' : mode;
+  // Agent mode, Project Mode and Studio search chats (Project Mode and Studio: the open project's chats)
+  const effectiveMode = location.pathname.includes('/agent') || location.pathname.split('/').some((x) => x === 'project' || x === 'studio') ? 'chat' : mode;
   const debounceRef = useRef<ReturnType<typeof setTimeout>>();
 
   // Focus input when opened
@@ -116,7 +117,7 @@ export function AiChatSearchPalette({
         // Same lists as the sidebar: Agent mode leaves out project chats; Project mode shows the open project's
         // chats, or all project chats on the Projects page
         let listQuery = "?mode=agent";
-        if (location.pathname.split("/").includes("project")) {
+        if (location.pathname.split("/").includes("project") || location.pathname.split("/").includes("studio")) {
           let openProject: string | null = null;
           try { openProject = (sessionStorage.getItem("cg_project_open") || localStorage.getItem("cg_project_open")); } catch { /* storage blocked */ }
           listQuery = `?project=${openProject || "all"}`;
