@@ -124,7 +124,7 @@ async function act(a, byAgent = false) {
     case "forward": await page.goForward({ timeout: 20000 }).catch(() => null); break;
     case "reload": await page.reload({ timeout: 30000 }); break;
     case "screenshot":
-      if (byAgent) point("shot");
+      if (byAgent && !a.full) point("shot");
       break;
     case "read": case "tabs": break;
     default: throw new Error(`Unknown action: ${a.action}`);
@@ -140,9 +140,11 @@ async function act(a, byAgent = false) {
     out.links = await page.evaluate(() => [...document.querySelectorAll("a[href]")].slice(0, 80).map((l) => ({ text: (l.innerText || "").trim().slice(0, 80), href: l.href }))).catch(() => []);
   }
   if (a.action === "tabs") out.tabs = context.pages().map((p, i) => ({ i, url: p.url(), active: p === page }));
-  if (a.screenshot !== false && a.action !== "tabs") out.screenshot = await shot().catch(() => null);
+  // full: one tall picture of the whole page, top to bottom (the user's "Full page" button)
+  if (a.full) out.screenshot = (await page.screenshot({ type: "jpeg", quality: 70, fullPage: true }).catch(() => null))?.toString("base64") || null;
+  else if (a.screenshot !== false && a.action !== "tabs") out.screenshot = await shot().catch(() => null);
   // The viewers see the same picture the agent got, even when the screencast has no new frame
-  if (byAgent) {
+  if (byAgent && !a.full) {
     const data = out.screenshot || (a.action === "read" ? null : await shot().catch(() => null));
     if (data) broadcast({ type: "frame", step: true, data, w: view.width, h: view.height });
   }

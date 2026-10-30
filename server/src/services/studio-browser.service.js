@@ -154,6 +154,21 @@ export function registerBrowserSocket(socket) {
     if (!["click", "move", "wheel", "key", "text", "act", "viewport"].includes(m.type)) return;
     try { ws.send(JSON.stringify(m)); } catch { /* closed */ }
   });
+  // The user's "Full page" button: one tall picture of the whole page, saved in the chat's Screenshots
+  socket.on("studio:browser:fullshot", async (m, reply) => {
+    if (typeof reply !== "function") return;
+    if (!socket.userId) return reply({ ok: false, error: "Not signed in" });
+    try {
+      const r = await browserAct(socket.userId, { action: "screenshot", full: true });
+      if (!r?.ok || !r.screenshot) return reply({ ok: false, error: r?.error || "Could not take the picture" });
+      const sessionId = typeof m?.sessionId === "string" && m.sessionId ? m.sessionId.slice(0, 100) : "browser";
+      const { saveShot } = await import("./studio-browser-tools.js");
+      const shot = await saveShot({ userId: String(socket.userId), sessionId, base64: r.screenshot, url: r.url, title: `${r.title || "Page"} (full page)`, tool: "full_page" });
+      reply({ ok: true, url: shot.url });
+    } catch (e) {
+      reply({ ok: false, error: e.message });
+    }
+  });
   socket.on("studio:browser:unwatch", stop);
   socket.on("disconnect", stop);
 }

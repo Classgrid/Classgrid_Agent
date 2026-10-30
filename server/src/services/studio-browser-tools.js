@@ -74,7 +74,7 @@ const ACTIONS = {
 
 // Every screenshot an agent takes is saved (the CDN, a random link) and listed for the chat's Screenshots tab
 const SHOTS = (userId, sessionId) => `studio:shots:${userId}:${sessionId}`;
-async function saveShot({ userId, sessionId, base64, url, title, tool }) {
+export async function saveShot({ userId, sessionId, base64, url, title, tool }) {
   const key = `studio-shots/${userId}/${crypto.randomUUID()}.jpg`;
   await awsS3Client.send(new PutObjectCommand({
     Bucket: process.env.AWS_S3_ERP_BUCKET_NAME || "erp-classgrid",
