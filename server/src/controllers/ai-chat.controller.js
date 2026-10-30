@@ -5408,6 +5408,9 @@ export const getChatSessions = async (req, res) => {
             const shared = await getSharedSessionsFor(email).catch(() => []);
             if (shared.length) sessions = [...shared, ...(sessions || [])].sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)));
         }
+        // Archived chats are left out of the list; ?archived=1 lists only them
+        const archivedIds = new Set((await User.findById(req.user._id).select("archived_chat_ids").lean().catch(() => null))?.archived_chat_ids || []);
+        sessions = (sessions || []).filter((s) => (req.query?.archived === "1" ? archivedIds.has(s.id) : !archivedIds.has(s.id)));
         // Share Grid: mark chats shared with 2+ people (a star in the chat list)
         const gridIds = await sharedChatIdsFor(email).catch(() => new Set());
         if (gridIds.size) sessions = (sessions || []).map((s) => (gridIds.has(s.id) ? { ...s, grid: true } : s));
@@ -5530,6 +5533,23 @@ export const uploadChatImage = async (req, res) => {
     } catch (e) {
         console.error("Error generating presigned URL for AI chat:", e);
         res.status(500).json({ error: "Failed to generate upload URL" });
+    }
+};
+
+// Archive a chat (or bring it back): it leaves the user's chat lists without being deleted. Only for the user's
+// own list, so a Share Grid member can archive a chat shared with them too.
+export const archiveChatSession = async (req, res) => {
+    try {
+        const { id } = req.params;
+        const session = await getSessionById(id);
+        if (!session) return res.status(404).json({ error: "Chat not found" });
+        if (!(await canAccessSession(session, req.user?.email))) return res.status(403).json({ error: "Forbidden" });
+        const archived = req.body?.archived !== false;
+        await User.updateOne({ _id: req.user._id }, archived ? { $addToSet: { archived_chat_ids: id } } : { $pull: { archived_chat_ids: id } });
+        res.json({ success: true, archived });
+    } catch (e) {
+        console.error("Error archiving chat:", e);
+        res.status(500).json({ error: "Could not archive the chat" });
     }
 };
 

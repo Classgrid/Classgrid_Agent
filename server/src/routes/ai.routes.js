@@ -78,7 +78,7 @@ import {
     chatWithSyllabus, 
     getMyPersona 
 } from "../controllers/ai.controller.js";
-import { streamAskAi, clientToolResult, getChatSessions, getChatSession, getChatSessionMessages, uploadChatImage, updateChatSession, deleteChatSession, shareChatSession, reopenChatSession, createPublicShare, getPublicShare, submitAiFeedback, getAgentReviews, updateAgentReviewStatus, processAgentReviewsCron, deleteAgentReview, bulkDeleteAgentReviews, generateImage, getMyGeneratedImages, deleteGeneratedImage, getMyUsage, getOrgUsage, getSkills, createSkill, updateSkill, deleteSkill, getPreferences, updatePreferences } from "../controllers/ai-chat.controller.js";
+import { streamAskAi, clientToolResult, getChatSessions, getChatSession, getChatSessionMessages, uploadChatImage, updateChatSession, archiveChatSession, deleteChatSession, shareChatSession, reopenChatSession, createPublicShare, getPublicShare, submitAiFeedback, getAgentReviews, updateAgentReviewStatus, processAgentReviewsCron, deleteAgentReview, bulkDeleteAgentReviews, generateImage, getMyGeneratedImages, deleteGeneratedImage, getMyUsage, getOrgUsage, getSkills, createSkill, updateSkill, deleteSkill, getPreferences, updatePreferences } from "../controllers/ai-chat.controller.js";
 
 import { getFavicon } from "../controllers/ai-favicon.controller.js";
 import { getMarket } from "../controllers/ai-widgets.controller.js";
@@ -191,6 +191,7 @@ router.get("/sessions", isAuthenticated, getChatSessions);
 router.get("/sessions/:id", isAuthenticated, getChatSession);
 router.get("/sessions/:id/messages", isAuthenticated, getChatSessionMessages);
 router.put("/sessions/:id", isAuthenticated, updateChatSession);
+router.post("/sessions/:id/archive", isAuthenticated, archiveChatSession);
 router.delete("/sessions/:id", isAuthenticated, deleteChatSession);
 router.post("/sessions/:id/share", isAuthenticated, shareChatSession);
 router.post("/sessions/:id/reopen", isAuthenticated, reopenChatSession); // super_admin only (checked in controller)

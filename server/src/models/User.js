@@ -791,6 +791,8 @@ const userSchema = new mongoose.Schema(
     ai_image_free_weekly_used: { type: Number },
     ai_image_reset_date: { type: Date },
     // 🧠 AI Chat Customization & Defaults
+    // Chats this user archived: left out of their chat lists, shown under "Archived chats"
+    archived_chat_ids: { type: [String], default: [] },
     ai_preferences: {
       tone: { type: String, default: 'balanced' },
       verbosity: { type: String, default: 'balanced' },
