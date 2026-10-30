@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import {
-  ArrowLeft, ArrowRight, Camera, ExternalLink, FolderGit2, FolderOpen, Globe, Images, Maximize2, Minimize2,
+  ArrowLeft, ArrowRight, Camera, ExternalLink, FileDiff, FolderGit2, FolderOpen, Globe, Images, Maximize2, Minimize2,
   PanelRightClose, PanelRightOpen, Plus, RotateCw, Search, Terminal, X,
 } from "lucide-react";
 import { AskAiPanel } from "@/components/ai/components/AskAiPanel";
@@ -17,17 +17,19 @@ import { StudioReviewModal } from "../components/StudioReviewModal";
 import { StudioProjectView } from "../components/StudioProjectView";
 import { StudioBrowserView } from "../components/StudioBrowserView";
 import { StudioShotsView } from "../components/StudioShotsView";
+import { StudioReviewView } from "../components/StudioReviewView";
 import { PushToGithubModal } from "../components/PushToGithubModal";
 import { OPEN_PROJECT_FILE_EVENT } from "@/components/ai/components/stepper/ProjectToolSteps";
 import { fetchWithRescue } from "@/lib/rescue";
 import { toast } from "sonner";
 import { useSidebar } from "@/components/marketing_ui/sidebar";
 
-type TabKind = "browser" | "files" | "terminal" | "project" | "shots";
+type TabKind = "browser" | "review" | "files" | "terminal" | "project" | "shots";
 type Tab = { id: string; kind: TabKind };
 
 const TAB_INFO: Record<TabKind, { label: string; Icon: typeof Globe }> = {
   browser: { label: "Browser", Icon: Globe },
+  review: { label: "Review", Icon: FileDiff },
   files: { label: "Files", Icon: FolderOpen },
   terminal: { label: "Terminal", Icon: Terminal },
   project: { label: "Project", Icon: FolderGit2 },
@@ -298,6 +300,31 @@ export function StudioModePage() {
     setTabs((t) => [...t, { id, kind }]);
     setActive(id);
   }, [tabs]);
+
+  // The chat's Overview menu: open the pane on Review, Files or Terminal
+  useEffect(() => {
+    const onOpen = (e: Event) => {
+      const kind = (e as CustomEvent<{ kind: TabKind }>).detail?.kind;
+      if (!kind || !(kind in TAB_INFO)) return;
+      setPane((p) => (p.open ? p : { ...p, open: true }));
+      openTab(kind);
+    };
+    window.addEventListener("studio:open-tab", onOpen);
+    return () => window.removeEventListener("studio:open-tab", onOpen);
+  }, [openTab]);
+  // How many of the agent's background commands are running now (shown in the Overview menu)
+  useEffect(() => {
+    const running = new Set<string>();
+    for (const t of terminal.entries) {
+      const id = t.output.match(/(?:Started|Stopped) background command ([a-f0-9]{8})|Background command ([a-f0-9]{8}): finished/);
+      const job = id?.[1] || id?.[2];
+      if (!job) continue;
+      if (t.tool === "start_background_command") running.add(job);
+      else if (/Stopped background command|: finished/.test(t.output)) running.delete(job);
+    }
+    (window as any).__cgStudioBgCount = running.size;
+    window.dispatchEvent(new CustomEvent("studio:bg-count", { detail: running.size }));
+  }, [terminal.entries]);
 
   const closeTab = (id: string) => {
     setTabs((t) => {
@@ -574,6 +601,7 @@ export function StudioModePage() {
                     {activeTab?.kind === "terminal" && <StudioTerminalView entries={terminal.entries} onClear={terminal.clear} />}
                     {activeTab?.kind === "project" && <StudioProjectView projectId={studioProject} reloadKey={filesReload} />}
                     {activeTab?.kind === "shots" && <StudioShotsView />}
+                    {activeTab?.kind === "review" && <StudioReviewView projectId={studioProject} onChanged={() => setFilesReload((n) => n + 1)} />}
                     {!activeTab && <Launcher onOpen={openTab} />}
                   </motion.div>}
                 </AnimatePresence>

@@ -156,7 +156,7 @@ import { WeatherCard, MarketCard, MapCard, CountdownCard } from "./LiveCards";
 import { FollowUps, ActionCards, ReportCard, Timetable, AttendanceCalendar, StudyPlanner } from "./StudyBlocks";
 import { WidgetBlock } from "./WidgetBlock";
 import { ScrollSpyTOC, MobileTOCButton, QuestionDots, messageTime } from "./TOC";
-import { StudioChatMenu, OpenInProjectButton } from "./StudioChatMenu";
+import { StudioChatMenu, OpenInProjectButton, StudioOverviewButton } from "./StudioChatMenu";
 import AIThinkingBlock from "./AIThinkingBlock";
 import RichChatInput from "./RichChatInput";
 import ReactMarkdown from "react-markdown";
@@ -6354,6 +6354,7 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
                   messages={messages.map((m) => ({ role: m.role, content: typeof m.content === "string" ? m.content : "" }))}
                 />
                 <OpenInProjectButton sessionId={sessionId} />
+                <StudioOverviewButton sessionId={sessionId} />
               </div>
             )}
             <div className={pageContext?.path === "/c/studio" ? "hidden" : "shrink-0 flex items-center justify-between px-3 sm:px-6 pt-3 h-14"}>

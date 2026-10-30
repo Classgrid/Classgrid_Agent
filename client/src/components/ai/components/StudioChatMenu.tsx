@@ -1,7 +1,7 @@
 // The chat's ⋮ menu in every mode (Agent, Project, Studio): Rename, Pin, Archive, Archived chats, Copy and Delete
 // (plus "Files in chat" where the chat has that panel). Same look as the sidebar's chat menu.
 import { useEffect, useState } from "react";
-import { Archive, ArchiveRestore, Copy, Link2, MoreVertical, Pencil, Pin, Trash2, FileText, Hash } from "lucide-react";
+import { Archive, ArchiveRestore, ClipboardList, Copy, FolderOpen, Link2, MoreVertical, Pencil, Pin, Trash2, FileText, Hash, SquareTerminal, FileDiff } from "lucide-react";
 import { toast } from "sonner";
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuSub, DropdownMenuSubContent, DropdownMenuSubTrigger, DropdownMenuTrigger,
@@ -258,5 +258,50 @@ export function OpenInProjectButton({ sessionId }: { sessionId: string }) {
         <TooltipContent side="bottom">Open in Project Mode</TooltipContent>
       </Tooltip>
     </TooltipProvider>
+  );
+}
+
+// Studio's Overview menu (next to "Open"): Review the newest changes, open Files or Terminal, and the agent's running
+// background commands. The Studio page opens the tab (studio:open-tab) and shares the running count (studio:bg-count).
+export function StudioOverviewButton({ sessionId }: { sessionId: string }) {
+  const [bgCount, setBgCount] = useState<number>(() => (window as any).__cgStudioBgCount || 0);
+  useEffect(() => {
+    const onCount = (e: Event) => setBgCount((e as CustomEvent<number>).detail || 0);
+    window.addEventListener("studio:bg-count", onCount);
+    return () => window.removeEventListener("studio:bg-count", onCount);
+  }, []);
+  const openTab = (kind: "review" | "files" | "terminal") => window.dispatchEvent(new CustomEvent("studio:open-tab", { detail: { kind, sessionId } }));
+  return (
+    <DropdownMenu>
+      <TooltipProvider delay={300}>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <DropdownMenuTrigger asChild>
+              <button className="flex items-center justify-center h-8 w-8 rounded-md text-muted-foreground hover:text-foreground hover:bg-black/5 dark:hover:bg-white/10 transition-colors cursor-pointer" aria-label="Overview">
+                <ClipboardList className="h-4 w-4" />
+              </button>
+            </DropdownMenuTrigger>
+          </TooltipTrigger>
+          <TooltipContent side="bottom">Overview</TooltipContent>
+        </Tooltip>
+      </TooltipProvider>
+      <DropdownMenuContent align="end" sideOffset={6} className={`w-[240px] ${card}`}>
+        <div className="px-3 pt-1.5 pb-1 text-[12.5px] font-medium text-slate-400 dark:text-white/45">Overview</div>
+        <DropdownMenuItem className={item} onClick={() => openTab("review")}>
+          <FileDiff className={icon} strokeWidth={2} /> Review
+        </DropdownMenuItem>
+        <DropdownMenuItem className={item} onClick={() => openTab("files")}>
+          <FolderOpen className={icon} strokeWidth={2} /> Files
+        </DropdownMenuItem>
+        <DropdownMenuItem className={item} onClick={() => openTab("terminal")}>
+          <SquareTerminal className={icon} strokeWidth={2} /> Terminal
+        </DropdownMenuItem>
+        <DropdownMenuSeparator className="bg-slate-100 dark:bg-white/10 my-1" />
+        <DropdownMenuItem className={item} onClick={() => openTab("terminal")}>
+          <span className="flex-1 text-slate-500 dark:text-white/60">Background commands</span>
+          <span className="min-w-5 h-5 px-1.5 rounded-full bg-slate-100 dark:bg-white/10 text-[11.5px] font-medium flex items-center justify-center">{bgCount}</span>
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 }

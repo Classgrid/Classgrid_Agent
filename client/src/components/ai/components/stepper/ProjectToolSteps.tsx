@@ -516,6 +516,15 @@ export function ProjectRunChanges({ result }: { result?: string }) {
 export const REVIEW_CHECKPOINT_EVENT = "classgrid:review-checkpoint";
 const reviewCheckpoint = (detail: { sessionId: string; checkpoint: string; mode: 'review' | 'undo' }) =>
   window.dispatchEvent(new CustomEvent(REVIEW_CHECKPOINT_EVENT, { detail }));
+// The newest answer with changes still to review, per chat (Studio's Overview menu opens its Review)
+const latestCheckpoints = new Map<string, string>();
+export const latestCheckpointFor = (sessionId: string) => latestCheckpoints.get(sessionId) || null;
+export function reviewLatestChanges(sessionId: string) {
+  const checkpoint = latestCheckpoints.get(sessionId);
+  if (!checkpoint) return false;
+  reviewCheckpoint({ sessionId, checkpoint, mode: 'review' });
+  return true;
+}
 
 // What the user did with an answer's changes (kept, rejected, undone, or single files rejected). Remembered in this
 // browser so the box under the answer stays right after a refresh; the files themselves are changed on the server.
@@ -536,6 +545,11 @@ export function markCheckpoint(id: string, change: CheckpointState) {
 export function FilesChangedSummary({ steps, checkpoint, sessionId }: { steps: Step[]; checkpoint?: string; sessionId?: string }) {
   const [open, setOpen] = useState(false);
   const [cpState, setCpState] = useState<CheckpointState>(() => readCheckpointState(checkpoint));
+  useEffect(() => {
+    if (!checkpoint || !sessionId) return;
+    if (cpState.status) { if (latestCheckpoints.get(sessionId) === checkpoint) latestCheckpoints.delete(sessionId); }
+    else latestCheckpoints.set(sessionId, checkpoint);
+  }, [checkpoint, sessionId, cpState.status]);
   useEffect(() => {
     setCpState(readCheckpointState(checkpoint));
     const onState = (e: Event) => { const d = (e as CustomEvent).detail; if (d?.id === checkpoint) setCpState(d.state); };
