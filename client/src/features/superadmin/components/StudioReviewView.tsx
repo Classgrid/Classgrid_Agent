@@ -288,7 +288,7 @@ export function StudioReviewView({ projectId, onChanged }: { projectId: string |
   };
 
   const iconBtn = "flex items-center justify-center size-8 rounded-md text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors disabled:opacity-40";
-  const btn = "h-7 px-2.5 rounded-md text-[12.5px] border border-border hover:bg-secondary transition-colors disabled:opacity-40";
+  const btn = "h-7 px-2.5 rounded-md text-[12.5px] whitespace-nowrap border border-border hover:bg-secondary transition-colors disabled:opacity-40";
   const menuItem = "gap-3 py-2 px-3 text-[13.5px] cursor-pointer rounded-xl hover:bg-slate-100 dark:hover:bg-[#2a2a2a] focus:bg-slate-100 dark:focus:bg-[#2a2a2a]";
   const menuCard = "z-[100] bg-white dark:bg-[#202020] text-slate-700 dark:text-[#ececf1] border border-slate-200 dark:border-white/10 rounded-2xl p-1.5 shadow-2xl";
   const optBtn = (on: boolean) => `flex items-center justify-center h-6 min-w-6 px-1 rounded text-[11.5px] font-mono transition-colors ${on ? "bg-sky-500/20 text-foreground" : "text-muted-foreground hover:text-foreground hover:bg-secondary"}`;
@@ -321,17 +321,17 @@ export function StudioReviewView({ projectId, onChanged }: { projectId: string |
   );
 
   return (
-    <div className="flex-1 min-h-0 flex flex-col">
-      {/* Title, totals and actions */}
-      <div className="shrink-0 flex items-center gap-2 h-12 px-4 border-b border-border">
-        <span className="text-[14px] font-medium">Review</span>
+    <div className="@container flex-1 min-h-0 flex flex-col">
+      {/* Title, totals and actions: one line that never wraps; a narrow pane drops the totals and shows icon buttons */}
+      <div className="shrink-0 flex items-center gap-2 h-12 px-4 border-b border-border whitespace-nowrap">
+        <span className="shrink-0 text-[14px] font-medium">Review</span>
         {answers.length > 0 && (
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
-              <button className="flex items-center gap-1 h-7 px-2 rounded-md text-[12.5px] text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors" title="Pick an answer">
-                {checkpoint && answers.indexOf(checkpoint) === answers.length - 1 ? "Newest answer" : `Answer ${answers.indexOf(checkpoint || "") + 1} of ${answers.length}`}
+              <button className="min-w-0 flex items-center gap-1 h-7 px-2 rounded-md text-[12.5px] text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors" title="Pick an answer">
+                <span className="truncate">{checkpoint && answers.indexOf(checkpoint) === answers.length - 1 ? "Newest answer" : `Answer ${answers.indexOf(checkpoint || "") + 1} of ${answers.length}`}</span>
                 {checkpoint && readCheckpointState(checkpoint).status && <span className="ml-1 px-1.5 rounded bg-secondary text-[11px] text-foreground capitalize">{readCheckpointState(checkpoint).status}</span>}
-                <ChevronDown className="size-3.5" />
+                <ChevronDown className="size-3.5 shrink-0" />
               </button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="start" sideOffset={6} className={`w-[240px] max-h-[50vh] overflow-y-auto ${menuCard}`}>
@@ -349,17 +349,21 @@ export function StudioReviewView({ projectId, onChanged }: { projectId: string |
           </DropdownMenu>
         )}
         {!!files?.length && (
-          <span className="text-[12.5px] text-muted-foreground">
+          <span className="shrink-0 text-[12.5px] text-muted-foreground @max-[36rem]:hidden">
             {files.length} file{files.length === 1 ? "" : "s"}
             <span className={`ml-2 ${GREEN}`}>+{totalAdd}</span>
             <span className={`ml-1 ${RED}`}>-{totalDel}</span>
           </span>
         )}
-        <div className="ml-auto flex items-center gap-1">
+        <div className="ml-auto shrink-0 flex items-center gap-1">
           {!!files?.length && (
             <>
-              <button className={btn} disabled={busy} onClick={() => reject()}>Reject all</button>
-              <button className={btn} disabled={busy} onClick={accept}>Accept all</button>
+              <button className={`${btn} @max-[30rem]:px-0 @max-[30rem]:w-7 @max-[30rem]:flex @max-[30rem]:items-center @max-[30rem]:justify-center`} disabled={busy} onClick={() => reject()} title="Reject all" aria-label="Reject all">
+                <span className="@max-[30rem]:hidden">Reject all</span><X className="hidden @max-[30rem]:block size-3.5" />
+              </button>
+              <button className={`${btn} @max-[30rem]:px-0 @max-[30rem]:w-7 @max-[30rem]:flex @max-[30rem]:items-center @max-[30rem]:justify-center`} disabled={busy} onClick={accept} title="Accept all" aria-label="Accept all">
+                <span className="@max-[30rem]:hidden">Accept all</span><Check className="hidden @max-[30rem]:block size-3.5" />
+              </button>
             </>
           )}
           <DropdownMenu>
