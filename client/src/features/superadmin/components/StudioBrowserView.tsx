@@ -3,7 +3,9 @@
 // click, scroll and type in it too (e.g. a password). The page takes the size of this tab.
 import { useEffect, useRef, useState } from "react";
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
-import { ArrowLeft, ArrowRight, Camera, ExternalLink, Globe, RotateCw } from "lucide-react";
+import { ArrowLeft, ArrowRight, Camera, ExternalLink, FileImage, Globe, RotateCw } from "lucide-react";
+import { useLocation } from "react-router-dom";
+import { toast } from "sonner";
 import { getSocket } from "@/lib/socketClient";
 
 const EASE = [0.22, 1, 0.36, 1] as const;
@@ -37,6 +39,21 @@ export function StudioBrowserView() {
   const imgRef = useRef<HTMLImageElement>(null);
   const boxRef = useRef<HTMLDivElement>(null);
   const wheel = useRef<{ dy: number; timer?: ReturnType<typeof setTimeout> }>({ dy: 0 });
+  // The chat open in Studio (/c/studio/<id>): a full page screenshot is saved in its Screenshots
+  const { pathname } = useLocation();
+  const chatId = (() => { const parts = pathname.split("/"); const at = parts.indexOf("studio"); return at !== -1 && parts[at + 1] ? parts[at + 1] : null; })();
+  const [fullBusy, setFullBusy] = useState(false);
+  const fullPage = () => {
+    const socket = getSocket();
+    if (!socket || fullBusy) return;
+    setFullBusy(true);
+    socket.timeout(60000).emit("studio:browser:fullshot", { sessionId: chatId }, (err: unknown, r: { ok: boolean; url?: string; error?: string }) => {
+      setFullBusy(false);
+      if (err || !r?.ok || !r.url) { toast.error(r?.error || "Could not take a full page screenshot"); return; }
+      const url = r.url;
+      toast.success(chatId ? "Full page screenshot saved in Screenshots" : "Full page screenshot ready", { action: { label: "Open", onClick: () => window.open(url, "_blank", "noopener,noreferrer") } });
+    });
+  };
   // While the chat's answer runs and the agent has used the browser in it, the browser is the agent's alone
   const [chatBusy, setChatBusy] = useState(false);
   const [droveThisRun, setDroveThisRun] = useState(false);
@@ -144,6 +161,9 @@ export function StudioBrowserView() {
           title="Save a screenshot"
           aria-label="Save a screenshot"
         ><Camera className="size-4" /></a>
+        <button className={iconBtn} disabled={!live || fullBusy} onClick={fullPage} title="Full page screenshot (the whole page, top to bottom)" aria-label="Full page screenshot">
+          {fullBusy ? <span className="size-3.5 rounded-full border-2 border-muted-foreground/30 border-t-muted-foreground animate-spin" /> : <FileImage className="size-4" />}
+        </button>
         <button className={iconBtn} disabled={!url} onClick={() => url && window.open(url, "_blank", "noopener,noreferrer")} title="Open in a new tab" aria-label="Open in a new tab"><ExternalLink className="size-4" /></button>
       </div>
 
