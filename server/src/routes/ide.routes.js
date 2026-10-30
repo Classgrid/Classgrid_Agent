@@ -576,6 +576,9 @@ router.post("/projects/:id/open", isAuthenticated, async (req, res) => {
 // folder on the sandbox, when it has one.
 const SKIP_DIRS = new Set(["node_modules", ".git", ".next", "dist", "build", ".cache", "__pycache__", ".venv", "venv"]);
 const MAX_FILE_BYTES = 1024 * 1024;
+// Pictures open as pictures in Studio's Files tab (up to 8 MB)
+const MAX_IMAGE_BYTES = 8 * 1024 * 1024;
+const IMAGE_TYPES = { png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", gif: "image/gif", webp: "image/webp", avif: "image/avif", bmp: "image/bmp", ico: "image/x-icon", svg: "image/svg+xml" };
 // A path inside the project: no "..", no empty parts and no control characters. It goes into a shell command only
 // through shellQuote (single quotes), so $(...) or backticks in a file name are never run.
 const safeFilePath = (p) => {
@@ -650,12 +653,14 @@ router.get("/projects/:id/file", isAuthenticated, async (req, res) => {
   touchStudio(req.user._id).catch(() => {});
   const path = safeFilePath(req.query.path);
   if (!path) return res.status(400).json({ error: "Pick a file" });
+  const imageType = IMAGE_TYPES[(path.split(".").pop() || "").toLowerCase()];
+  const limit = imageType ? MAX_IMAGE_BYTES : MAX_FILE_BYTES;
   try {
     let buf = null;
     const ssh = await sandboxSsh().catch((e) => { console.error("[IDE] Sandbox not reached for Files:", e.message); return null; });
     if (ssh) try {
       const full = shellQuote(`${projectDir(project)}/${path}`);
-      const { stdout, code } = await ssh.execCommand(`[ -f ${full} ] && head -c ${MAX_FILE_BYTES + 1} ${full} | base64 -w0`);
+      const { stdout, code } = await ssh.execCommand(`[ -f ${full} ] && head -c ${limit + 1} ${full} | base64 -w0`);
       if (!code) buf = Buffer.from(stdout, "base64");
     } finally {
       ssh.dispose();
@@ -668,6 +673,10 @@ router.get("/projects/:id/file", isAuthenticated, async (req, res) => {
       const fileRes = await g.gh(`/contents/${path.split("/").map(encodeURIComponent).join("/")}?ref=${encodeURIComponent(g.branch)}`, "application/vnd.github.raw");
       if (!fileRes.ok) return res.status(fileRes.status === 404 ? 404 : 502).json({ error: fileRes.status === 404 ? "File not found" : `GitHub said ${fileRes.status}` });
       buf = Buffer.from(await fileRes.arrayBuffer());
+    }
+    if (imageType) {
+      if (buf.length > MAX_IMAGE_BYTES) return res.json({ path, binary: true, size: buf.length });
+      return res.json({ path, binary: true, image: true, mime: imageType, size: buf.length, data: buf.toString("base64") });
     }
     if (buf.includes(0)) return res.json({ path, binary: true, size: buf.length });
     const tooBig = buf.length > MAX_FILE_BYTES;
