@@ -72,6 +72,7 @@ import {
 import { getHistory, getHistoryCount, appendToHistory, invalidateHistoryCache, getChatTranscript } from "../services/ai-chat-history.service.js";
 import { canAccessSession, gridLabelMap, gridProfilesText, getSharedSessionsFor, leaveSharedChat, sharedChatIdsFor } from "../services/ai-chat-grid.service.js";
 import { editorContextFor, rememberProjectSnapshot, sandboxDataDir, startCheckpoint, finishCheckpoint, linkChatToProject, touchStudio } from "../services/ide-project.service.js";
+import { PLANNER_BROWSER_TOOLS, WORKER_BROWSER_TOOLS, makeBrowserHandlers, BROWSER_WORKER_SYSTEM } from "../services/studio-browser-tools.js";
 import { buildEndConversationHandlers, reopenSession } from "../services/ai-end-conversation.service.js";
 import { hasEnoughTokens, deductTokens, getImageGenerationCost, tokenWindowEnd } from "../services/ai-credits.service.js";
 import redis from "../config/redis.js";
@@ -1809,7 +1810,14 @@ Classgrid has three modes. The user switches between them with the mode switcher
 - Project Mode: a project (its code on GitHub) open in a code editor next to the chat. The user can edit the code themselves in the editor, and you can read and change the project's files with the project tools.
 - Studio Mode: the same projects and the same project chats as Project Mode, but agent-first: there is no code editor, so the user cannot edit files by hand. You do all the coding with the project tools while the user watches in the right pane: the Files tab (each file you write or edit shows there live), the Terminal tab (the commands you run, live) and the Project tab (repo, branch, open pull request, Vercel, commit history). A Browser tab is shown but the live browser is not built yet, so do not say you can use it.
 Project Mode and Studio share one open project and its chats: the user can open the same chat in either mode. Changes go to GitHub as one open pull request per project, never straight to the main branch. Connecting GitHub and installing the Classgrid app are done in Project Mode.
-The user is in ${appMode === "agent" ? "Agent mode" : appMode === "project" ? "Project Mode" : "Studio Mode"} now.${appMode === "studio" ? " Make code changes yourself; do not ask the user to edit a file or open an editor. If they want to edit by hand, they can switch to Project Mode." : ""}`;
+The user is in ${appMode === "agent" ? "Agent mode" : appMode === "project" ? "Project Mode" : "Studio Mode"} now.${appMode === "studio" ? ` Make code changes yourself; do not ask the user to edit a file or open an editor. If they want to edit by hand, they can switch to Project Mode.
+
+--- STUDIO BROWSER (two agents) ---
+The user has a real browser in Studio that they watch live in the Browser tab. For a task on the web you are the Planner:
+1. Decide where to go and what to do, and write the plan as numbered steps in the scratchpad (scratchpad_write).
+2. Send the Browser worker to do it: run_project_helpers with one helper { task, browser: true, model }. Pick "Claude Sonnet 5.5" for hard sites (many steps, forms, tricky pages) and "DeepSeek V4.1 Flash" for simple ones (open a page, read, search). Give it one clear goal and say where to start.
+3. While it works you can send it new instructions with message_helper; read its notes and report with check_helpers, and the scratchpad with scratchpad_read. You can look at the page yourself with browser_screenshot or browser_read.
+4. Tell the user what was done and found. Passwords, one-time codes and payments are typed by the user in the browser, never by an agent.` : ""}`;
         }
         // Project Mode: snapshot the project before this answer, so its changes can be reviewed, rejected or undone
         const checkpointId = sessionId && !isIncognito ? await startCheckpoint(sessionId).catch(() => null) : null;
@@ -2919,11 +2927,12 @@ If they ask whether their college/school uses Classgrid, say you can't see that 
                     // reads the project, or (can_edit) also changes files and runs commands. The main AI either waits
                     // for their reports, or lets them run (wait: false) and talks to them with message_helper /
                     // check_helpers meanwhile. Their tokens are charged like the chat's.
+                    ...(body.appMode === "studio" && req.user?._id ? makeBrowserHandlers({ userId: String(req.user._id), sessionId: sessionId || "none" }) : {}),
                     run_project_helpers: async (args) => {
                         const raw = Array.isArray(args?.helpers) && args.helpers.length ? args.helpers : (Array.isArray(args?.tasks) ? args.tasks : []);
                         const specs = raw
                             .map((h) => (typeof h === "string" ? { task: h } : (h || {})))
-                            .map((h) => ({ task: String(h.task || "").trim(), model: String(h.model || "").trim(), canEdit: h.can_edit === true || h.can_edit === "true" }))
+                            .map((h) => ({ task: String(h.task || "").trim(), model: String(h.model || "").trim(), canEdit: h.can_edit === true || h.can_edit === "true", browser: h.browser === true || h.browser === "true" }))
                             .filter((h) => h.task);
                         if (!specs.length) return "Error: give 1 to 5 helpers.";
                         const board = helperBoard(sessionId);
@@ -2953,7 +2962,7 @@ If they ask whether their college/school uses Classgrid, say you can't see that 
                             // Each try gets a time limit for its steps; after that the tools say "time is up", so the
                             // helper writes its report from what it already did instead of running on with no answer
                             let deadline = 0;
-                            const names = h.canEdit ? [...readOnly, ...editTools] : readOnly;
+                            const names = h.browser ? [] : h.canEdit ? [...readOnly, ...editTools] : readOnly; // the Browser worker gets the browser tools below
                             const defs = (await getMcpTools()).filter((t) => names.includes(t.name))
                                 .map((t) => ({ type: "function", function: { name: t.name, description: t.description, parameters: t.inputSchema } }));
                             defs.push({ type: "function", function: { name: "tell_main", description: "Send the main AI a short note or question. It reads your notes while you work and may answer with a message.", parameters: { type: "object", properties: { message: { type: "string" } }, required: ["message"] } } });
@@ -2961,7 +2970,7 @@ If they ask whether their college/school uses Classgrid, say you can't see that 
                             const withInbox = (out) => {
                                 if (!h.inbox.length) return out;
                                 const msgs = h.inbox.splice(0).map((m) => `[Message from the main AI]: ${m}`).join("\n");
-                                return `${out}\n\n${msgs}`;
+                                return out && typeof out === "object" ? { ...out, text: `${out.text}\n\n${msgs}` } : `${out}\n\n${msgs}`;
                             };
                             const liveHandlers = Object.fromEntries(names.map((n) => [n, async (a) => {
                                 if (Date.now() > deadline) return "Time is up: do not call any more tools. Write your full final answer now from what you already did.";
@@ -2972,6 +2981,21 @@ If they ask whether their college/school uses Classgrid, say you can't see that 
                                 emitHelper({ helper: i, id, result: String(out).slice(0, 6000) });
                                 return withInbox(out);
                             }]));
+                            if (h.browser) {
+                                defs.push(...WORKER_BROWSER_TOOLS);
+                                const browserHandlers = makeBrowserHandlers({ userId: userId ? String(userId) : null, sessionId: sessionId || "none" });
+                                for (const t of WORKER_BROWSER_TOOLS) {
+                                    const n = t.function.name;
+                                    liveHandlers[n] = async (a) => {
+                                        if (Date.now() > deadline) return "Time is up: do not call any more tools. Write your full final answer now from what you already did.";
+                                        const id = `h${i}-${stepNo++}`;
+                                        emitHelper({ helper: i, id, tool: n, args: a });
+                                        const out = await browserHandlers[n](a);
+                                        emitHelper({ helper: i, id, result: String(out && typeof out === "object" ? out.text : out).slice(0, 6000) });
+                                        return withInbox(out);
+                                    };
+                                }
+                            }
                             liveHandlers.tell_main = async (a) => {
                                 const note = String(a?.message || "").trim().slice(0, 4000);
                                 if (note) h.notes.push(note);
@@ -2980,7 +3004,7 @@ If they ask whether their college/school uses Classgrid, say you can't see that 
                                 emitHelper({ helper: i, id, result: "Sent to the main AI." });
                                 return withInbox("Sent to the main AI.");
                             };
-                            const system = h.canEdit
+                            const system = h.browser ? BROWSER_WORKER_SYSTEM : h.canEdit
                                 ? "You are a helper working on a code project together with a main AI and up to 4 other helpers. Do your task by really changing the project: write and edit files, and run commands when needed. Read the files you change first. Only touch the files your task is about, because other helpers may be editing other files at the same time. Never push to GitHub. Follow any message from the main AI. Use tell_main to ask the main AI something or tell it something important. When you are done, report what you changed, file by file, and anything still left to do."
                                 : "You are a helper exploring a code project for another AI. Use the tools to look at the project (you can only read it). Read the actual code, not just file names. Then answer the task in full, with everything you found: what each relevant file and function does, how the parts work together step by step (frontend, API routes, backend, database, config), the important endpoints, data and settings, with file paths and line numbers. For example, if the task is to explore login, explain the whole flow from start to end: the frontend page and components, the form and what it sends, the API calls, the backend routes, controllers and services, checks and errors, tokens or sessions, the database models, and the config it uses. Never answer with only a list of file names. Don't guess; say what you could not find. Use tell_main to send the main AI a short note or question; follow any message it sends you.";
                             await sleep(i * 1500); // start a little apart, so the model service isn't hit all at once
@@ -3001,19 +3025,19 @@ If they ask whether their college/school uses Classgrid, say you can't see that 
                                     if (h.abort.signal.aborted) return { state: "failed", text: "stopped because the user stopped the chat" };
                                     try {
                                         emitHelper({ helper: i, state: "restart" }); // a retry starts its report again
-                                        deadline = Date.now() + (h.canEdit ? 12 : 4) * 60 * 1000;
+                                        deadline = Date.now() + (h.canEdit || h.browser ? 12 : 4) * 60 * 1000;
                                         const helperArgs = {
                                             messages: [{ role: "system", content: system }, { role: "user", content: task }],
                                             tools: defs,
                                             toolHandlers: liveHandlers,
                                             onToken: (piece) => emitHelper({ helper: i, text: piece }),
                                             onThought: (piece) => emitHelper({ helper: i, thought: piece }),
-                                            maxToolDepth: h.canEdit ? 60 : 30, // big repos need more looking around before a full answer
+                                            maxToolDepth: h.canEdit || h.browser ? 60 : 30, // big repos need more looking around before a full answer
                                             timeoutMs: 240000,
                                             signal: h.abort.signal
                                         };
                                         const r = CLAUDE_CHAT_MODELS.has(model)
-                                            ? await streamClaudeChat({ ...helperArgs, ...meterHooks(model, `Helper ${h.no}`), model, loadedToolNames: new Set([...names, "tell_main"]), answerAtDepthLimit: true, maxContinuations: 3 })
+                                            ? await streamClaudeChat({ ...helperArgs, ...meterHooks(model, `Helper ${h.no}`), model, loadedToolNames: new Set([...names, "tell_main", ...(h.browser ? WORKER_BROWSER_TOOLS.map((t) => t.function.name) : [])]), answerAtDepthLimit: true, maxContinuations: 3 })
                                             : await streamChat({ ...helperArgs, ...meterHooks(model, `Helper ${h.no}`), provider: cloudflareStreamProvider(model), seesImages: CF_VISION_MODELS.has(model), maxTokens: 8192, maxContinuations: 6, answerAtDepthLimit: true }); // a long report keeps going instead of being cut
                                         if (userId && r.usage?.total_tokens) deductTokens(userId, orgId, chargeableTokens(r.usage, model), tokenSource).catch(() => {});
                                         if (!String(r.answer || "").trim()) { lastError = "no answer"; break; } // try the next model
@@ -4682,7 +4706,7 @@ If they ask whether their college/school uses Classgrid, say you can't see that 
             allTools: llmConfig.tools,
             text: [body.question || "", ...requestAttachments.map(a => a?.name || "")].join(" "),
             attachments: requestAttachments,
-            stickyGroupIds: Object.keys(stickyAged),
+            stickyGroupIds: [...Object.keys(stickyAged), ...(body.appMode === "studio" ? ["code_project"] : [])], // Studio: the project tools (and the Browser worker) are always there
             role: req.user?.role,
             email: req.user?.email,
             hasOrg: !!orgId && String(orgId) !== PUBLIC_CHAT_ORG_ID,
@@ -4973,8 +4997,13 @@ If a tool fails, never show the error message; say only: "Something went wrong o
                         if (messages[0]?.role === "system") messages[0] = { ...messages[0], content: withModelIdentity(messages[0].content, requestedModel, isStaffRole(req.user?.role), { selected: requestedModel, previousModel }) };
                         try {
                             // view_image is Claude-only (native vision); it is loaded whenever the sandbox tools are.
-                            const claudeToolList = toolPlan.allowedToolNames.has("run_code") ? [...fullToolList, VIEW_IMAGE_TOOL] : fullToolList;
-                            const claudeLoadedNames = toolPlan.loadedNames.has("run_code") ? new Set([...toolPlan.loadedNames, "view_image"]) : toolPlan.loadedNames;
+                            let claudeToolList = toolPlan.allowedToolNames.has("run_code") ? [...fullToolList, VIEW_IMAGE_TOOL] : fullToolList;
+                            let claudeLoadedNames = toolPlan.loadedNames.has("run_code") ? new Set([...toolPlan.loadedNames, "view_image"]) : toolPlan.loadedNames;
+                            // Studio: the Planner's browser tools (scratchpad, look at the live page)
+                            if (body.appMode === "studio") {
+                                claudeToolList = [...claudeToolList, ...PLANNER_BROWSER_TOOLS.filter((t) => !claudeToolList.some((x) => x?.function?.name === t.function.name))];
+                                claudeLoadedNames = new Set([...claudeLoadedNames, ...PLANNER_BROWSER_TOOLS.map((t) => t.function.name)]);
+                            }
                             streamed = await streamClaudeChat({
                                 model: requestedModel,
                                 messages,
@@ -5058,6 +5087,8 @@ If a tool fails, never show the error message; say only: "Something went wrong o
                             }
                             // view_image (look at a Sandbox image yourself) goes to a model that sees images, like Claude
                             if (sees && toolPlan.allowedToolNames.has("run_code") && !llmConfig.tools.some((t) => t?.function?.name === "view_image")) llmConfig.tools.push(VIEW_IMAGE_TOOL);
+                            // Studio: the Planner's browser tools (scratchpad, look at the live page)
+                            if (body.appMode === "studio") for (const t of PLANNER_BROWSER_TOOLS) if (!llmConfig.tools.some((x) => x?.function?.name === t.function.name)) llmConfig.tools.push(t);
                             streamed = await streamChat({
                                 provider: cloudflareStreamProvider(model),
                                 messages: modelMessages,

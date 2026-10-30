@@ -165,6 +165,8 @@ export const initSocket = (server, { path } = {}) => {
     });
 
     io.on("connection", (socket) => {
+        // Studio Mode's live browser: the Browser tab watches the user's own browser through this socket
+        import("./studio-browser.service.js").then((m) => m.registerBrowserSocket(socket)).catch((e) => console.error("[Studio browser] socket:", e.message));
         const orgId = socket.orgId;
         const orgStreamKey = `chat:stream:org_${orgId}`;
 

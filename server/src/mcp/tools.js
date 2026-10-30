@@ -537,7 +537,8 @@ export const getMcpTools = () => [
             properties: {
               task: { type: 'string', description: 'One clear task for this helper, with the files it owns when it edits.' },
               model: { type: 'string', description: 'Model for this helper, by its name in the model list (e.g. "DeepSeek V4.1 Flash", "Claude Sonnet 5.5", "GLM 5.3", "Kimi K2.7 Code"). Pick a cheap fast model for simple work and a stronger one for hard work. Empty = a default.' },
-              can_edit: { type: 'boolean', description: 'true = it may write and edit files and run commands; false (default) = read only.' }
+              can_edit: { type: 'boolean', description: 'true = it may write and edit files and run commands; false (default) = read only.' },
+              browser: { type: 'boolean', description: 'Studio Mode: true = this helper is the Browser worker. It drives the user\'s live browser (open, click, type, read pages) instead of working on files.' }
             },
             required: ['task']
           }
