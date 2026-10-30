@@ -1798,6 +1798,19 @@ You are currently talking to Nikhil Shinde (nikhil.shinde@classgrid.in), the CRE
         const projectContext = sessionId && !isIncognito ? await editorContextFor(sessionId).catch(() => "") : "";
         const isProjectChat = !!projectContext; // Project Mode chat: Agent-mode website hosting rules are not sent
         volatilePrompt += projectContext;
+        // The three modes of the app and the one the user is in now, so the AI knows what the user can see and do
+        const appMode = ["agent", "project", "studio"].includes(body.appMode) ? body.appMode : null;
+        if (appMode && body.taskOrigin !== 'whatsapp') {
+            volatilePrompt += `
+
+--- CLASSGRID MODES ---
+Classgrid has three modes. The user switches between them with the mode switcher next to "Classgrid" at the top of the left sidebar.
+- Agent mode: the normal chat for everyday tasks (answers, web search, images, files, emails, schedules, plugins). Its chats do not belong to a project.
+- Project Mode: a project (its code on GitHub) open in a code editor next to the chat. The user can edit the code themselves in the editor, and you can read and change the project's files with the project tools.
+- Studio Mode: the same projects and the same project chats as Project Mode, but agent-first: there is no code editor, so the user cannot edit files by hand. You do all the coding with the project tools while the user watches in the right pane: the Files tab (each file you write or edit shows there live), the Terminal tab (the commands you run, live) and the Project tab (repo, branch, open pull request, Vercel, commit history). A Browser tab is shown but the live browser is not built yet, so do not say you can use it.
+Project Mode and Studio share one open project and its chats: the user can open the same chat in either mode. Changes go to GitHub as one open pull request per project, never straight to the main branch. Connecting GitHub and installing the Classgrid app are done in Project Mode.
+The user is in ${appMode === "agent" ? "Agent mode" : appMode === "project" ? "Project Mode" : "Studio Mode"} now.${appMode === "studio" ? " Make code changes yourself; do not ask the user to edit a file or open an editor. If they want to edit by hand, they can switch to Project Mode." : ""}`;
+        }
         // Project Mode: snapshot the project before this answer, so its changes can be reviewed, rejected or undone
         const checkpointId = sessionId && !isIncognito ? await startCheckpoint(sessionId).catch(() => null) : null;
         if (checkpointId && !res.writableEnded) res.write(`data: ${JSON.stringify({ type: "checkpoint", id: checkpointId })}\n\n`);
