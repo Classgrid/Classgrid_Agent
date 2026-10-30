@@ -37,7 +37,7 @@ jobs:
             cd /var/www/classgrid_platform
             
             # Pull the latest code from GitHub
-            git fetch origin main
+            git fetch origin
             git reset --hard origin/main
             
             # FREE UP RAM & ADD SWAP SPACE TO PREVENT OUT-OF-MEMORY CRASHES DURING NPM INSTALL
