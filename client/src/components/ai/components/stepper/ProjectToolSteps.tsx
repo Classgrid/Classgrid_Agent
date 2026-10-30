@@ -36,7 +36,7 @@ const setiIcon = themeIcons({
   pink: '#f55385', purple: '#a074c4', red: '#cc3e44', white: '#d4d7d6', yellow: '#cbcb41', ignore: '#41535b',
 });
 
-function FileBadge({ path }: { path: string }) {
+export function FileBadge({ path }: { path: string }) {
   const { svg, color } = setiIcon(baseName(path));
   return <span aria-hidden className="size-3.5 shrink-0 inline-flex items-center justify-center [&_svg]:size-4 [&_svg]:fill-current" style={{ color }} dangerouslySetInnerHTML={{ __html: svg }} />;
 }

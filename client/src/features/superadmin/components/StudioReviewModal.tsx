@@ -6,6 +6,7 @@ import { X } from "lucide-react";
 import { toast } from "sonner";
 import { REVIEW_CHECKPOINT_EVENT, markCheckpoint } from "@/components/ai/components/stepper/ProjectToolSteps";
 import { fetchWithRescue } from "@/lib/rescue";
+import { DangerConfirmDialog } from "@/components/marketing_ui/danger-confirm-dialog";
 
 const backendUrl = import.meta.env.VITE_API_URL || "https://api.classgrid.in";
 const EASE = [0.22, 1, 0.36, 1] as const;
@@ -26,6 +27,9 @@ async function api(path: string, init?: RequestInit) {
 export function StudioReviewModal({ projectId, onChanged }: { projectId: string | null; onChanged?: () => void }) {
   const reduce = useReducedMotion();
   const [review, setReview] = useState<Review | null>(null);
+  // Undo and Reject ask first in our own confirm card (the same one as deleting a chat)
+  const [confirm, setConfirm] = useState<{ kind: "undo"; sessionId: string; checkpoint: string } | { kind: "reject"; file?: string } | null>(null);
+  const [confirmBusy, setConfirmBusy] = useState(false);
   const cpPath = (r: { sessionId: string; checkpoint: string }) => `/projects/${projectId}/checkpoints/${r.sessionId}/${r.checkpoint}`;
 
   const loadReview = async (r: { sessionId: string; checkpoint: string }) => {
@@ -38,13 +42,7 @@ export function StudioReviewModal({ projectId, onChanged }: { projectId: string 
     const onReview = async (e: Event) => {
       const d = (e as CustomEvent).detail;
       if (!projectId || !d?.checkpoint) return;
-      if (d.mode === "undo") {
-        if (!window.confirm("Put the project back to how it was before this answer? Changes made after it are undone too.")) return;
-        const { res, data } = await api(`${cpPath(d)}/undo`, { method: "POST", body: "{}" });
-        if (res.ok) { markCheckpoint(d.checkpoint, { status: "undone" }); toast.success(`Undone: ${data.reverted} file${data.reverted === 1 ? "" : "s"} put back`); onChanged?.(); }
-        else toast.error(data.error || "Could not undo");
-        return;
-      }
+      if (d.mode === "undo") { setConfirm({ kind: "undo", sessionId: d.sessionId, checkpoint: d.checkpoint }); return; }
       setReview({ sessionId: d.sessionId, checkpoint: d.checkpoint, files: null, open: null, busy: false });
       loadReview(d);
     };
@@ -53,9 +51,19 @@ export function StudioReviewModal({ projectId, onChanged }: { projectId: string 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId]);
 
-  const rejectChanges = async (file?: string) => {
+  const undo = async (d: { sessionId: string; checkpoint: string }) => {
+    setConfirmBusy(true);
+    const { res, data } = await api(`${cpPath(d)}/undo`, { method: "POST", body: "{}" });
+    setConfirmBusy(false);
+    setConfirm(null);
+    if (res.ok) { markCheckpoint(d.checkpoint, { status: "undone" }); toast.success(`Undone: ${data.reverted} file${data.reverted === 1 ? "" : "s"} put back`); onChanged?.(); }
+    else toast.error(data.error || "Could not undo");
+  };
+
+  const rejectChanges = (file?: string) => { if (review) setConfirm({ kind: "reject", file }); };
+  const doReject = async (file?: string) => {
     if (!review) return;
-    if (!window.confirm(file ? `Throw away the agent's changes to ${file}?` : "Throw away all of this answer's changes?")) return;
+    setConfirm(null);
     setReview({ ...review, busy: true });
     const { res, data } = await api(`${cpPath(review)}/reject`, { method: "POST", body: JSON.stringify({ file }) });
     if (res.ok) {
@@ -70,6 +78,21 @@ export function StudioReviewModal({ projectId, onChanged }: { projectId: string 
   const btn = "h-8 px-3 rounded-md text-[13px] transition-[background-color,opacity,transform] duration-150 active:scale-[0.97] disabled:opacity-40 disabled:active:scale-100";
 
   return (
+    <>
+    <DangerConfirmDialog
+      open={!!confirm}
+      onOpenChange={(o) => { if (!o && !confirmBusy) setConfirm(null); }}
+      title={confirm?.kind === "undo" ? "Undo this answer" : confirm?.file ? "Reject this file's changes" : "Reject all changes"}
+      description={confirm?.kind === "undo"
+        ? "The project goes back to how it was before this answer. Changes made after it are undone too."
+        : confirm?.file
+          ? `The agent's changes to ${confirm.file} will be thrown away and the file put back as it was before this answer.`
+          : "All of this answer's changes will be thrown away and every file put back as it was before this answer."}
+      warningMessage="This can't be undone."
+      actionLabel={confirm?.kind === "undo" ? "Undo" : confirm?.file ? "Reject file" : "Reject all"}
+      isLoading={confirmBusy}
+      onConfirm={() => { if (confirm?.kind === "undo") undo(confirm); else if (confirm) doReject(confirm.file); }}
+    />
     <AnimatePresence>
       {review && (
         <motion.div
@@ -146,5 +169,6 @@ export function StudioReviewModal({ projectId, onChanged }: { projectId: string 
         </motion.div>
       )}
     </AnimatePresence>
+    </>
   );
 }

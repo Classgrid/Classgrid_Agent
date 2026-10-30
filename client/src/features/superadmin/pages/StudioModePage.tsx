@@ -59,6 +59,8 @@ export function StudioModePage() {
   useResumeGridInvite();
   const [pane, setPane] = useState(readPane);
   const [maximized, setMaximized] = useState(false);
+  // A narrow pane shows its tabs as icons only (the name shows on hover)
+  const compactTabs = !maximized && pane.width < 520;
   const [resizing, setResizing] = useState(false);
   const [tabs, setTabs] = useState<Tab[]>([{ id: "browser-1", kind: "browser" }]);
   const [active, setActive] = useState<string | null>("browser-1");
@@ -512,10 +514,11 @@ export function StudioModePage() {
                             transition={quick}
                             className={`group relative shrink-0 flex items-center gap-1.5 h-8 pl-2.5 pr-1 rounded-md text-sm cursor-pointer select-none transition-colors ${on ? "text-foreground" : "text-muted-foreground hover:text-foreground hover:bg-secondary/60"}`}
                             onClick={() => setActive(t.id)}
+                            title={compactTabs ? label : undefined}
                           >
                             {on && <motion.span layoutId="studio-tab-pill" className="absolute inset-0 rounded-md bg-secondary" transition={pill} />}
                             <Icon className="relative size-4 shrink-0" />
-                            <span className="relative">{label}</span>
+                            {!compactTabs && <span className="relative">{label}</span>}
                             <button
                               onClick={(e) => { e.stopPropagation(); closeTab(t.id); }}
                               className={`relative flex items-center justify-center size-5 rounded hover:bg-foreground/10 transition-[opacity,background-color] duration-150 ${on ? "opacity-100" : "opacity-0 group-hover:opacity-100"}`}

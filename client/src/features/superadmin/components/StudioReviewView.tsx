@@ -5,11 +5,12 @@
 // the same checkpoints as Project Mode.
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useLocation } from "react-router-dom";
-import { ChevronDown, ChevronRight, ChevronUp, ChevronsDownUp, ChevronsUpDown, Columns2, FileDiff, FoldVertical, ListTree, MoreVertical, RotateCw, Search, Space, X } from "lucide-react";
+import { Check, ChevronDown, ChevronRight, ChevronUp, ChevronsDownUp, ChevronsUpDown, Columns2, FileDiff, FoldVertical, ListTree, MoreVertical, RotateCw, Search, Space, X } from "lucide-react";
 import { toast } from "sonner";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/marketing_ui/dropdown-menu";
-import { latestCheckpointFor, markCheckpoint } from "@/components/ai/components/stepper/ProjectToolSteps";
+import { FileBadge, latestCheckpointFor, markCheckpoint } from "@/components/ai/components/stepper/ProjectToolSteps";
 import { fetchWithRescue } from "@/lib/rescue";
+import { DangerConfirmDialog } from "@/components/marketing_ui/danger-confirm-dialog";
 
 const backendUrl = import.meta.env.VITE_API_URL || "https://api.classgrid.in";
 const LIST_KEY = "cg_studio_review_list";
@@ -216,15 +217,18 @@ export function StudioReviewView({ projectId, onChanged }: { projectId: string |
     requestAnimationFrame(() => diffRef.current?.querySelector(`[data-file="${CSS.escape(file)}"]`)?.scrollIntoView({ block: "start" }));
   };
 
-  const reject = async (one?: string) => {
+  // Reject asks first in our own confirm card (the same one as deleting a chat)
+  const [confirmReject, setConfirmReject] = useState<{ file?: string } | null>(null);
+  const reject = (one?: string) => { if (checkpoint) setConfirmReject({ file: one }); };
+  const doReject = async (one?: string) => {
     if (!checkpoint) return;
-    if (!window.confirm(one ? `Throw away the agent's changes to ${one}?` : "Throw away all of this answer's changes?")) return;
     setBusy(true);
     const { res, data } = await api(`${cpPath(checkpoint)}/reject`, { method: "POST", body: JSON.stringify({ file: one }) });
     setBusy(false);
     if (!res.ok) { toast.error(data.error || "Could not reject the changes"); return; }
     markCheckpoint(checkpoint, one ? { rejectedFiles: [one] } : { status: "rejected" });
     toast.success(one ? `${one} put back` : `Rejected: ${data.reverted} file${data.reverted === 1 ? "" : "s"} put back`);
+    setConfirmReject(null);
     onChanged?.();
     load();
   };
@@ -297,17 +301,17 @@ export function StudioReviewView({ projectId, onChanged }: { projectId: string |
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" sideOffset={6} className={`w-[250px] ${menuCard}`}>
               <DropdownMenuItem className={menuItem} onClick={() => setOption("split")}>
-                <Columns2 className="size-4 text-muted-foreground" /> {view.split ? "View unified diff" : "View split diff"}
+                <Columns2 className="size-4 text-muted-foreground" /> View split diff {view.split && <Check className="ml-auto size-4" />}
               </DropdownMenuItem>
               <DropdownMenuItem className={menuItem} onClick={() => setOption("hideWs")}>
-                <Space className="size-4 text-muted-foreground" /> {view.hideWs ? "Show whitespace changes" : "Hide whitespace changes"}
+                <Space className="size-4 text-muted-foreground" /> Hide whitespace changes {view.hideWs && <Check className="ml-auto size-4" />}
               </DropdownMenuItem>
               <DropdownMenuItem className={menuItem} onClick={() => setOpen(allOpen ? new Set() : new Set((files || []).map((f) => f.file)))}>
                 {allOpen ? <ChevronsDownUp className="size-4 text-muted-foreground" /> : <ChevronsUpDown className="size-4 text-muted-foreground" />} {allOpen ? "Collapse all" : "Expand all"}
               </DropdownMenuItem>
               <DropdownMenuSeparator className="bg-slate-100 dark:bg-white/10 my-1" />
               <DropdownMenuItem className={menuItem} onClick={() => setOption("fold")}>
-                <FoldVertical className="size-4 text-muted-foreground" /> {view.fold ? "Show all lines" : "Collapse unchanged lines"}
+                <FoldVertical className="size-4 text-muted-foreground" /> Collapse unchanged lines {view.fold && <Check className="ml-auto size-4" />}
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
@@ -367,6 +371,7 @@ export function StudioReviewView({ projectId, onChanged }: { projectId: string |
                 <div key={f.file} data-file={f.file} className="border-b border-border">
                   <div className="sticky top-0 z-10 flex items-center gap-2 h-10 px-3 bg-[#f5f5f5] dark:bg-[#181818] border-b border-border text-[13px]">
                     <button onClick={() => toggle(f.file)} className="flex min-w-0 flex-1 items-center gap-2 text-left">
+                      <FileBadge path={f.file} />
                       <span className="truncate font-medium">{nameOf(f.file)}</span>
                       {dirOf(f.file) && <span className="truncate text-[11.5px] text-muted-foreground">{dirOf(f.file)}</span>}
                       <span className={`ml-auto shrink-0 text-[12px] ${GREEN}`}>+{f.added}</span>
@@ -376,27 +381,31 @@ export function StudioReviewView({ projectId, onChanged }: { projectId: string |
                     {isOpen && <button className={`${btn} shrink-0`} disabled={busy} onClick={() => reject(f.file)}>Reject file</button>}
                   </div>
                   {isOpen && p && (
-                    <div className="bg-white dark:bg-[#1e1e1e] font-mono text-[12.5px] leading-[1.6] overflow-x-auto [scrollbar-width:thin]">
+                    <div className="bg-white dark:bg-[#1e1e1e] font-mono text-[12.5px] leading-[1.6]">
                       {!view.split ? (
-                        <div className="min-w-max py-1">
+                        <div className="py-1">
                           {p.rows.map((r, i) => {
                             const attrs = { "data-hit": `${f.file}|${i}` };
                             if (r.kind === "fold") return foldRow(i, r.hidden, attrs);
                             return (
                               <div key={i} {...attrs} className={`flex ${ROW_BG[tone(r)]} ${isCurrent(f.file, i) ? "outline outline-1 outline-sky-500" : ""}`}>
-                                <span className={`sticky left-0 shrink-0 flex select-none text-[#237893] dark:text-[#6e7681] ${NUMBER_BG[tone(r)]}`}>
-                                  <span className="w-10 pr-2 text-right">{lineNo(r.oldLine)}</span>
-                                  <span className="w-10 pr-2 text-right">{lineNo(r.newLine)}</span>
+                                <span className={`shrink-0 flex select-none text-[#237893] dark:text-[#6e7681] ${NUMBER_BG[tone(r)]}`}>
+                                  <span className="w-9 pr-2 text-right">{lineNo(r.oldLine)}</span>
+                                  <span className="w-9 pr-2 text-right">{lineNo(r.newLine)}</span>
                                 </span>
                                 <span className={`shrink-0 w-4 select-none ${SIGN_COLOR[r.kind] || "text-transparent"}`}>{SIGN[r.kind] || " "}</span>
-                                <span className={`pr-6 whitespace-pre ${r.kind === "hunk" ? "text-muted-foreground" : ""} ${mark(matches(textOf(r)))}`}>{r.text || " "}</span>
+                                <span className={`min-w-0 flex-1 pr-4 whitespace-pre-wrap break-words ${r.kind === "hunk" ? "text-muted-foreground" : ""} ${mark(matches(textOf(r)))}`}>{r.text || " "}</span>
                               </div>
                             );
                           })}
                         </div>
                       ) : (
                         // Old on the left, new on the right
-                        <div className="py-1">
+                        <div className="pb-1">
+                          <div className="grid grid-cols-2 border-b border-border text-[11.5px] font-sans text-muted-foreground">
+                            <div className="px-3 py-1">Before</div>
+                            <div className="px-3 py-1 border-l border-border">After</div>
+                          </div>
                           {p.pairs.map((x, i) => {
                             const attrs = { "data-hit": `${f.file}|${i}` };
                             if (x.full) return x.full.kind === "fold"
@@ -440,6 +449,7 @@ export function StudioReviewView({ projectId, onChanged }: { projectId: string |
                     className={`w-full flex items-center gap-2 px-4 py-1.5 text-left text-[13px] hover:bg-secondary transition-colors ${open.has(f.file) ? "text-foreground" : "text-foreground/80"}`}
                     title={f.file}
                   >
+                    <FileBadge path={f.file} />
                     <span className="truncate">{nameOf(f.file)}</span>
                     <span className="truncate text-[11.5px] text-muted-foreground">{dirOf(f.file)}</span>
                   </button>
@@ -449,6 +459,18 @@ export function StudioReviewView({ projectId, onChanged }: { projectId: string |
           )}
         </div>
       )}
+      <DangerConfirmDialog
+        open={!!confirmReject}
+        onOpenChange={(o) => { if (!o && !busy) setConfirmReject(null); }}
+        title={confirmReject?.file ? "Reject this file's changes" : "Reject all changes"}
+        description={confirmReject?.file
+          ? `The agent's changes to ${confirmReject.file} will be thrown away and the file put back as it was before this answer.`
+          : "All of this answer's changes will be thrown away and every file put back as it was before this answer."}
+        warningMessage="This can't be undone."
+        actionLabel={confirmReject?.file ? "Reject file" : "Reject all"}
+        isLoading={busy}
+        onConfirm={() => doReject(confirmReject?.file)}
+      />
     </div>
   );
 }
