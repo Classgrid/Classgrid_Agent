@@ -72,7 +72,7 @@ import {
 import { getHistory, getHistoryCount, appendToHistory, invalidateHistoryCache, getChatTranscript } from "../services/ai-chat-history.service.js";
 import { canAccessSession, gridLabelMap, gridProfilesText, getSharedSessionsFor, leaveSharedChat, sharedChatIdsFor } from "../services/ai-chat-grid.service.js";
 import { editorContextFor, rememberProjectSnapshot, sandboxDataDir, startCheckpoint, finishCheckpoint, linkChatToProject, touchStudio } from "../services/ide-project.service.js";
-import { PLANNER_BROWSER_TOOLS, WORKER_BROWSER_TOOLS, makeBrowserHandlers, BROWSER_WORKER_SYSTEM } from "../services/studio-browser-tools.js";
+import { PLANNER_BROWSER_TOOLS, PLANNER_BLIND_TOOLS, WORKER_BROWSER_TOOLS, BROWSER_TOOL_NAMES, makeBrowserHandlers, BROWSER_WORKER_SYSTEM } from "../services/studio-browser-tools.js";
 import { ensureBrowser } from "../services/studio-browser.service.js";
 import { buildEndConversationHandlers, reopenSession } from "../services/ai-end-conversation.service.js";
 import { hasEnoughTokens, deductTokens, getImageGenerationCost, tokenWindowEnd } from "../services/ai-credits.service.js";
@@ -1229,6 +1229,28 @@ async function detectVisionModels() {
 setTimeout(() => detectVisionModels(), 20 * 1000);
 setInterval(() => detectVisionModels(), 12 * 60 * 60 * 1000);
 const NO_ANALYZE_IMAGE = new Set(["analyze_image"]);
+// Studio's browser instructions for the main AI. A model that sees images uses the browser itself; a model that can't
+// sends the Browser worker on DeepSeek V4.1 Flash (it sees the page) and guides it.
+const STUDIO_BROWSER_SEES = `--- STUDIO BROWSER ---
+The user has a real web browser in Studio, ready to use; they watch it live in the Browser tab. You have it: browser_open, browser_click, browser_type, browser_press, browser_scroll, browser_back, browser_screenshot, browser_read, plus a shared scratchpad (scratchpad_read, scratchpad_write). Every helper you start in Studio has the same browser. Never say that you or a helper have no browser, and never use terminal commands (curl, wget, scripts) to look at a website: use the browser.
+Do a web task in one answer, without stopping between steps; your answer ends only when the task is done:
+- A short task (open a page, look at it, read it, a few clicks): do it yourself with the browser tools.
+- A long task (many pages or steps), or when the user asks for the Browser worker: write the plan as numbered steps in the scratchpad (scratchpad_write), then right away start the worker with run_project_helpers: one helper { task, browser: true, model }. Use the model the user named; otherwise "Claude Sonnet 5.5" for hard sites (forms, many steps) and "DeepSeek V4.1 Flash" for simple ones. Wait for its report with check_helpers, guide it with message_helper when needed, and look at the page yourself with browser_screenshot or browser_read.
+- Look at the page's design and UI/UX too, not only its text: layout, colours, fonts, spacing, images, buttons, how clear and easy it is to use, and anything broken. If you can see images, look at the screenshots yourself; if you cannot, send the Browser worker on Claude Sonnet 5.5 or DeepSeek V4.1 Flash (both see screenshots) for anything about how a page looks.
+- Each screenshot result has a link, and every screenshot is saved in the chat's Screenshots tab. To show the user a screenshot, put it in your answer as ![short description](link).
+- At the end, tell the user what was done and found. Passwords, one-time codes and payments are typed by the user in the browser, never by an agent.`;
+const STUDIO_BROWSER_BLIND = `--- STUDIO BROWSER ---
+The user has a real web browser in Studio, ready to use; they watch it live in the Browser tab. You cannot see images, so the clicking, typing and scrolling are done by the Browser worker: a helper on DeepSeek V4.1 Flash, which sees the page. You have browser_read (the page's text and links) and the shared scratchpad (scratchpad_read, scratchpad_write).
+Do a web task in one answer, without stopping between steps; your answer ends only when the task is done:
+1. Write the plan as numbered steps in the scratchpad (scratchpad_write).
+2. Right away start the worker with run_project_helpers: one helper { task, browser: true, model: "DeepSeek V4.1 Flash" }. Give it one clear goal, where to start, and every detail it needs (for a form: the value for each field). Ask it to look at the page's design and UI/UX too, not only its text.
+3. Guide it while it works: read its notes and report with check_helpers, send it new instructions with message_helper, and check the page's text yourself with browser_read.
+4. At the end, tell the user what was done and found. The worker's report has links to its screenshots (every screenshot is also saved in the chat's Screenshots tab); to show the user one, put it in your answer as ![short description](link). Passwords, one-time codes and payments are typed by the user in the browser, never by an agent.`;
+const withStudioBrowser = (msgs, sees) => (msgs[0]?.role === "system" && typeof msgs[0].content === "string"
+    ? [{ ...msgs[0], content: `${msgs[0].content}
+
+${sees ? STUDIO_BROWSER_SEES : STUDIO_BROWSER_BLIND}` }, ...msgs.slice(1)]
+    : msgs);
 const CF_NATIVE_VISION_NOTE = "\n\nNATIVE VISION: You can see images yourself, like Claude. Images attached to the user's message are in it: answer from them right away. To look at an image you made in the Sandbox (video frames, charts, screenshots), use view_image. Images from Classgrid links in tool results are shown to you after the tool result, and analyze_image on a Classgrid image link shows you the image itself.";
 
 // Names as the model dropdown shows them (client/.../ModelPicker.tsx), for telling the model which one it is.
@@ -1811,16 +1833,7 @@ Classgrid has three modes. The user switches between them with the mode switcher
 - Project Mode: a project (its code on GitHub) open in a code editor next to the chat. The user can edit the code themselves in the editor, and you can read and change the project's files with the project tools.
 - Studio Mode: the same projects and the same project chats as Project Mode, but agent-first: there is no code editor, so the user cannot edit files by hand. You do all the coding with the project tools while the user watches in the right pane: the Files tab (each file you write or edit shows there live), the Terminal tab (the commands you run, live), the Project tab (repo, branch, open pull request, Vercel, commit history) and the Browser tab (the user's real live browser, which you and your helpers use with the browser tools).
 Project Mode and Studio share one open project and its chats: the user can open the same chat in either mode. Changes go to GitHub as one open pull request per project, never straight to the main branch. Connecting GitHub and installing the Classgrid app are done in Project Mode.
-The user is in ${appMode === "agent" ? "Agent mode" : appMode === "project" ? "Project Mode" : "Studio Mode"} now.${appMode === "studio" ? ` Make code changes yourself; do not ask the user to edit a file or open an editor. If they want to edit by hand, they can switch to Project Mode.
-
---- STUDIO BROWSER ---
-The user has a real web browser in Studio, ready to use; they watch it live in the Browser tab. You have it: browser_open, browser_click, browser_type, browser_press, browser_scroll, browser_back, browser_screenshot, browser_read, plus a shared scratchpad (scratchpad_read, scratchpad_write). Every helper you start in Studio has the same browser. Never say that you or a helper have no browser, and never use terminal commands (curl, wget, scripts) to look at a website: use the browser.
-Do a web task in one answer, without stopping between steps; your answer ends only when the task is done:
-- A short task (open a page, look at it, read it, a few clicks): do it yourself with the browser tools.
-- A long task (many pages or steps), or when the user asks for the Browser worker: write the plan as numbered steps in the scratchpad (scratchpad_write), then right away start the worker with run_project_helpers: one helper { task, browser: true, model }. Use the model the user named; otherwise "Claude Sonnet 5.5" for hard sites (forms, many steps) and "DeepSeek V4.1 Flash" for simple ones. Wait for its report with check_helpers, guide it with message_helper when needed, and look at the page yourself with browser_screenshot or browser_read.
-- Look at the page's design and UI/UX too, not only its text: layout, colours, fonts, spacing, images, buttons, how clear and easy it is to use, and anything broken. If you can see images, look at the screenshots yourself; if you cannot, send the Browser worker on Claude Sonnet 5.5 or DeepSeek V4.1 Flash (both see screenshots) for anything about how a page looks.
-- Each screenshot result has a link, and every screenshot is saved in the chat's Screenshots tab. To show the user a screenshot, put it in your answer as ![short description](link).
-- At the end, tell the user what was done and found. Passwords, one-time codes and payments are typed by the user in the browser, never by an agent.` : ""}`;
+The user is in ${appMode === "agent" ? "Agent mode" : appMode === "project" ? "Project Mode" : "Studio Mode"} now.${appMode === "studio" ? ` Make code changes yourself; do not ask the user to edit a file or open an editor. If they want to edit by hand, they can switch to Project Mode.` : ""}`;
         }
         // Project Mode: snapshot the project before this answer, so its changes can be reviewed, rejected or undone
         const checkpointId = sessionId && !isIncognito ? await startCheckpoint(sessionId).catch(() => null) : null;
@@ -3018,7 +3031,9 @@ If they ask whether their college/school uses Classgrid, say you can't see that 
                             await sleep(i * 1500); // start a little apart, so the model service isn't hit all at once
                             emitHelper({ helper: i, state: "running" });
                             // The picked model first; if it fails, Claude Sonnet 5.5 takes over, then GLM 5.3
-                            const models = [...new Set([h.model, CLAUDE_CHAT_MODELS.has(h.model) ? HELPER_GLM_MODEL : "claude-sonnet-5-5", HELPER_GLM_MODEL])];
+                            // The Browser worker has to see the page: a model that can't see images is swapped for DeepSeek V4.1 Flash
+                            const firstModel = h.browser && !CLAUDE_CHAT_MODELS.has(h.model) && !CF_VISION_MODELS.has(h.model) ? "@cf/deepseek-ai/deepseek-v4.1-flash-1017" : h.model;
+                            const models = [...new Set([firstModel, CLAUDE_CHAT_MODELS.has(firstModel) ? HELPER_GLM_MODEL : "claude-sonnet-5-5", HELPER_GLM_MODEL])];
                             let lastError = "";
                             // When every model failed, the helper restarts by itself (up to 2 more times), carrying on from
                             // the files it already made
@@ -5016,7 +5031,7 @@ If a tool fails, never show the error message; say only: "Something went wrong o
                             }
                             streamed = await streamClaudeChat({
                                 model: requestedModel,
-                                messages,
+                                messages: body.appMode === "studio" && body.taskOrigin !== "whatsapp" ? withStudioBrowser(messages, true) : messages,
                                 // All allowed tools go to Claude; only the loaded ones enter its context, the rest
                                 // are deferred and reachable through tool search or load_tools.
                                 tools: claudeToolList,
@@ -5097,8 +5112,14 @@ If a tool fails, never show the error message; say only: "Something went wrong o
                             }
                             // view_image (look at a Sandbox image yourself) goes to a model that sees images, like Claude
                             if (sees && toolPlan.allowedToolNames.has("run_code") && !llmConfig.tools.some((t) => t?.function?.name === "view_image")) llmConfig.tools.push(VIEW_IMAGE_TOOL);
-                            // Studio: the Planner's browser tools (scratchpad, look at the live page)
-                            if (body.appMode === "studio") for (const t of PLANNER_BROWSER_TOOLS) if (!llmConfig.tools.some((x) => x?.function?.name === t.function.name)) llmConfig.tools.push(t);
+                            // Studio: the main AI's browser tools. A model that can't see images gets no clicking tools: its
+                            // Browser worker on DeepSeek V4.1 Flash does the clicking
+                            if (body.appMode === "studio") {
+                                const studioTools = sees ? PLANNER_BROWSER_TOOLS : PLANNER_BLIND_TOOLS;
+                                llmConfig.tools = llmConfig.tools.filter((t) => !BROWSER_TOOL_NAMES.has(t?.function?.name) || studioTools.includes(t));
+                                for (const t of studioTools) if (!llmConfig.tools.includes(t)) llmConfig.tools.push(t);
+                                if (body.taskOrigin !== "whatsapp") modelMessages = withStudioBrowser(modelMessages, sees);
+                            }
                             streamed = await streamChat({
                                 provider: cloudflareStreamProvider(model),
                                 messages: modelMessages,

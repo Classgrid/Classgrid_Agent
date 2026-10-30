@@ -46,6 +46,8 @@ const ACT = [
 export const PLANNER_BROWSER_TOOLS = [...SCRATCHPAD, ...LOOK, ...ACT];
 // The Browser worker (a helper started with browser: true)
 export const WORKER_BROWSER_TOOLS = [...SCRATCHPAD, ...LOOK, ...ACT];
+// A main AI that can't see images: the scratchpad and the page's text; the Browser worker does the clicking
+export const PLANNER_BLIND_TOOLS = [...SCRATCHPAD, LOOK.find((x) => x.function.name === "browser_read")];
 export const BROWSER_TOOL_NAMES = new Set(WORKER_BROWSER_TOOLS.map((t) => t.function.name));
 
 const memoryPads = new Map(); // when Redis is not there (local runs)
