@@ -1,18 +1,25 @@
-// Studio Mode's Review tab: the changes of this chat's newest answer, file by file. The diff of one file with line
-// numbers, the "Files changed" list beside it (its width follows the drag handle), find in the diff, and Accept /
-// Reject (all, or one file) on the same checkpoints as Project Mode.
+// Studio Mode's Review tab: the changes of this chat's newest answer. Every changed file is a section that opens to its
+// diff (old and new line numbers; one column, or old and new side by side), with the "Files changed" list beside it
+// (its width follows the drag handle). Find across the changes (match case, whole word, regular expression), collapse
+// or expand all files, hide whitespace-only changes, fold unchanged lines, and Accept / Reject (all, or one file) on
+// the same checkpoints as Project Mode.
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useLocation } from "react-router-dom";
-import { ChevronDown, ChevronUp, FileDiff, ListTree, RotateCw, Search, X } from "lucide-react";
+import { ChevronDown, ChevronRight, ChevronUp, ChevronsDownUp, ChevronsUpDown, Columns2, FileDiff, FoldVertical, ListTree, MoreVertical, RotateCw, Search, Space, X } from "lucide-react";
 import { toast } from "sonner";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/marketing_ui/dropdown-menu";
 import { latestCheckpointFor, markCheckpoint } from "@/components/ai/components/stepper/ProjectToolSteps";
 import { fetchWithRescue } from "@/lib/rescue";
 
 const backendUrl = import.meta.env.VITE_API_URL || "https://api.classgrid.in";
 const LIST_KEY = "cg_studio_review_list";
+const VIEW_KEY = "cg_studio_review_view";
+const CONTEXT = 3; // unchanged lines kept around each change when folding
 
 type ReviewFile = { file: string; added: number; removed: number; kind: string; diff: string };
-type Row = { kind: "add" | "del" | "same" | "hunk"; text: string; line: number | null };
+type Row = { kind: "add" | "del" | "same" | "hunk" | "fold"; text: string; oldLine: number | null; newLine: number | null; hidden?: number };
+type Pair = { left: Row | null; right: Row | null; full?: Row };
+type View = { split: boolean; hideWs: boolean; fold: boolean };
 
 async function api(path: string, init?: RequestInit) {
   const res = await fetchWithRescue(`${backendUrl}/api/ide${path}`, {
@@ -24,7 +31,7 @@ async function api(path: string, init?: RequestInit) {
   return { res, data };
 }
 
-// A unified diff as rows with the line number they have in the new file (removed lines: in the old file)
+// A unified diff as rows with their line numbers in the old and the new file
 function diffRows(diff: string): Row[] {
   const rows: Row[] = [];
   let oldLine = 0;
@@ -32,40 +39,115 @@ function diffRows(diff: string): Row[] {
   for (const l of diff.split("\n")) {
     if (/^(diff --git|index |--- |\+\+\+ |new file mode|deleted file mode)/.test(l)) continue;
     const hunk = l.match(/^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@/);
-    if (hunk) { oldLine = Number(hunk[1]); newLine = Number(hunk[2]); rows.push({ kind: "hunk", text: l, line: null }); continue; }
-    if (l.startsWith("+")) rows.push({ kind: "add", text: l.slice(1), line: newLine++ });
-    else if (l.startsWith("-")) rows.push({ kind: "del", text: l.slice(1), line: oldLine++ });
-    else if (l.startsWith("\\")) continue;
-    else { rows.push({ kind: "same", text: l.slice(1), line: newLine++ }); oldLine++; }
+    if (hunk) { oldLine = Number(hunk[1]); newLine = Number(hunk[2]); rows.push({ kind: "hunk", text: l, oldLine: null, newLine: null }); continue; }
+    if (l.startsWith("\\")) continue;
+    if (l.startsWith("+")) rows.push({ kind: "add", text: l.slice(1), oldLine: null, newLine: newLine++ });
+    else if (l.startsWith("-")) rows.push({ kind: "del", text: l.slice(1), oldLine: oldLine++, newLine: null });
+    else rows.push({ kind: "same", text: l.slice(1), oldLine: oldLine++, newLine: newLine++ });
   }
   return rows;
 }
 
+// Runs of removed lines and the added lines right after them
+function runs(rows: Row[], each: (row: Row | null, dels: Row[] | null, adds: Row[] | null) => void) {
+  for (let i = 0; i < rows.length; i++) {
+    const r = rows[i]!;
+    if (r.kind !== "del" && r.kind !== "add") { each(r, null, null); continue; }
+    const dels: Row[] = [];
+    while (i < rows.length && rows[i]!.kind === "del") dels.push(rows[i++]!);
+    const adds: Row[] = [];
+    while (i < rows.length && rows[i]!.kind === "add") adds.push(rows[i++]!);
+    i--;
+    each(null, dels, adds);
+  }
+}
+
+// Whitespace-only changes become unchanged lines, and added or removed blank lines are left out
+function withoutWhitespace(rows: Row[]): Row[] {
+  const squash = (t: string) => t.replace(/\s+/g, "");
+  const out: Row[] = [];
+  runs(rows, (row, dels, adds) => {
+    if (row) { out.push(row); return; }
+    for (let k = 0; k < Math.max(dels!.length, adds!.length); k++) {
+      const d = dels![k], a = adds![k];
+      if (d && a && squash(d.text) === squash(a.text)) out.push({ kind: "same", text: a.text, oldLine: d.oldLine, newLine: a.newLine });
+      else { if (d) out.push(d); if (a) out.push(a); }
+    }
+  });
+  return out.filter((r) => !((r.kind === "add" || r.kind === "del") && !r.text.trim()));
+}
+
+// Unchanged lines far from any change fold into one "N unchanged lines" row
+function folded(rows: Row[]): Row[] {
+  const near = new Array<boolean>(rows.length).fill(false);
+  rows.forEach((r, i) => {
+    if (r.kind === "add" || r.kind === "del") for (let k = Math.max(0, i - CONTEXT); k <= Math.min(rows.length - 1, i + CONTEXT); k++) near[k] = true;
+  });
+  const out: Row[] = [];
+  let skipped = 0;
+  rows.forEach((r, i) => {
+    if (r.kind === "same" && !near[i]) { skipped++; return; }
+    if (skipped) { out.push({ kind: "fold", text: "", oldLine: null, newLine: null, hidden: skipped }); skipped = 0; }
+    out.push(r);
+  });
+  if (skipped) out.push({ kind: "fold", text: "", oldLine: null, newLine: null, hidden: skipped });
+  return out;
+}
+
+// Side by side: unchanged lines on both sides, removed lines on the left beside the added lines on the right
+function pairs(rows: Row[]): Pair[] {
+  const out: Pair[] = [];
+  runs(rows, (row, dels, adds) => {
+    if (row) { out.push(row.kind === "same" ? { left: row, right: row } : { left: null, right: null, full: row }); return; }
+    for (let k = 0; k < Math.max(dels!.length, adds!.length); k++) out.push({ left: dels![k] || null, right: adds![k] || null });
+  });
+  return out;
+}
+
 // The line numbers stay put while the diff scrolls sideways: a solid background with the row's tint on top
-const NUMBER_BG: Record<Row["kind"], string> = {
+const NUMBER_BG: Record<string, string> = {
   add: "[background:linear-gradient(rgba(22,130,93,0.12),rgba(22,130,93,0.12)),#ffffff] dark:[background:linear-gradient(rgba(78,201,176,0.09),rgba(78,201,176,0.09)),#1e1e1e]",
   del: "[background:linear-gradient(rgba(205,49,49,0.10),rgba(205,49,49,0.10)),#ffffff] dark:[background:linear-gradient(rgba(244,135,113,0.09),rgba(244,135,113,0.09)),#1e1e1e]",
-  same: "bg-white dark:bg-[#1e1e1e]",
-  hunk: "bg-white dark:bg-[#1e1e1e]",
+  none: "bg-white dark:bg-[#1e1e1e]",
 };
+const ROW_BG: Record<string, string> = { add: "bg-[#16825d]/12 dark:bg-[#4ec9b0]/[0.09]", del: "bg-[#cd3131]/10 dark:bg-[#f48771]/[0.09]", none: "" };
+const SIGN: Record<string, string> = { add: "+", del: "-" };
+const SIGN_COLOR: Record<string, string> = { add: "text-[#16825d] dark:text-[#4ec9b0]", del: "text-[#cd3131] dark:text-[#f48771]" };
+const GREEN = "text-[#16825d] dark:text-[#4ec9b0]";
+const RED = "text-[#cd3131] dark:text-[#f48771]";
 
 const nameOf = (p: string) => p.split("/").pop() || p;
 const dirOf = (p: string) => p.split("/").slice(0, -1).join("/");
+const tone = (r: Row | null) => (r && (r.kind === "add" || r.kind === "del") ? r.kind : "none");
+const lineNo = (n: number | null | undefined) => (n === null || n === undefined ? "" : n);
+const textOf = (r: Row | null) => (r && r.kind !== "hunk" && r.kind !== "fold" ? r.text : "");
+
+function readView(): View {
+  try { return { split: false, hideWs: false, fold: false, ...JSON.parse(localStorage.getItem(VIEW_KEY) || "{}") }; } catch { return { split: false, hideWs: false, fold: false }; }
+}
 
 export function StudioReviewView({ projectId, onChanged }: { projectId: string | null; onChanged?: () => void }) {
   const { pathname } = useLocation();
   const chatId = (() => { const parts = pathname.split("/"); const at = parts.indexOf("studio"); return at !== -1 && parts[at + 1] ? parts[at + 1] : null; })();
   const [checkpoint, setCheckpoint] = useState<string | null>(null);
   const [files, setFiles] = useState<ReviewFile[] | null>(null);
-  const [current, setCurrent] = useState<string | null>(null);
+  const [open, setOpen] = useState<Set<string>>(new Set()); // the file sections that are open
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [listShown, setListShown] = useState(true);
   const [listWidth, setListWidth] = useState(() => { try { return Number(localStorage.getItem(LIST_KEY)) || 300; } catch { return 300; } });
+  const [view, setView] = useState<View>(readView);
   const [find, setFind] = useState<string | null>(null);
+  const [findOpts, setFindOpts] = useState({ caseSensitive: false, wholeWord: false, regex: false });
   const [hit, setHit] = useState(0);
   const bodyRef = useRef<HTMLDivElement>(null);
   const diffRef = useRef<HTMLDivElement>(null);
+
+  const setOption = (key: keyof View) => setView((v) => {
+    const next = { ...v, [key]: !v[key] };
+    try { localStorage.setItem(VIEW_KEY, JSON.stringify(next)); } catch { /* storage blocked */ }
+    return next;
+  });
 
   const cpPath = (cp: string) => `/projects/${projectId}/checkpoints/${chatId}/${cp}`;
   const load = async () => {
@@ -78,20 +160,61 @@ export function StudioReviewView({ projectId, onChanged }: { projectId: string |
     if (!res.ok) { setError(data.error || "Could not load the changes"); setFiles([]); return; }
     const list: ReviewFile[] = data.files || [];
     setFiles(list);
-    setCurrent((c) => (c && list.some((f) => f.file === c) ? c : list[0]?.file || null));
+    setOpen((o) => new Set([...o].filter((f) => list.some((x) => x.file === f))));
   };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => { load(); }, [projectId, chatId]);
 
-  const file = files?.find((f) => f.file === current) || null;
-  const rows = useMemo(() => (file ? diffRows(file.diff) : []), [file]);
-  const q = (find || "").trim().toLowerCase();
-  const hits = useMemo(() => (q ? rows.map((r, i) => (r.kind !== "hunk" && r.text.toLowerCase().includes(q) ? i : -1)).filter((i) => i >= 0) : []), [rows, q]);
-  useEffect(() => { setHit(0); }, [q, current]);
+  // Each file's rows (and side-by-side pairs) with the view options applied
+  const prepared = useMemo(() => {
+    const map = new Map<string, { rows: Row[]; pairs: Pair[] }>();
+    for (const f of files || []) {
+      let r = diffRows(f.diff);
+      if (view.hideWs) r = withoutWhitespace(r);
+      if (view.fold) r = folded(r);
+      map.set(f.file, { rows: r, pairs: view.split ? pairs(r) : [] });
+    }
+    return map;
+  }, [files, view.hideWs, view.fold, view.split]);
+
+  // Find across all files: match case, whole word, or a regular expression
+  const q = find || "";
+  const matcher = useMemo(() => {
+    if (!q.trim()) return null;
+    try {
+      const flags = findOpts.caseSensitive ? "" : "i";
+      if (findOpts.regex) return new RegExp(q, flags);
+      const escaped = q.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      return new RegExp(findOpts.wholeWord ? `\\b${escaped}\\b` : escaped, flags);
+    } catch { return null; }
+  }, [q, findOpts]);
+  const matches = (t: string) => !!matcher && !!t && matcher.test(t);
+  const hits = useMemo(() => {
+    if (!matcher) return [] as { file: string; idx: number }[];
+    const out: { file: string; idx: number }[] = [];
+    for (const f of files || []) {
+      const p = prepared.get(f.file);
+      if (!p) continue;
+      if (view.split) p.pairs.forEach((x, i) => { if (matches(textOf(x.left)) || matches(textOf(x.right))) out.push({ file: f.file, idx: i }); });
+      else p.rows.forEach((r, i) => { if (matches(textOf(r))) out.push({ file: f.file, idx: i }); });
+    }
+    return out;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [matcher, prepared, files, view.split]);
+  useEffect(() => { setHit(0); }, [matcher, view.split]);
+  const current = hits[hit];
   useEffect(() => {
-    if (!hits.length) return;
-    diffRef.current?.querySelector(`[data-row="${hits[hit]}"]`)?.scrollIntoView({ block: "center" });
-  }, [hit, hits]);
+    if (!current) return;
+    setOpen((o) => (o.has(current.file) ? o : new Set([...o, current.file])));
+    requestAnimationFrame(() => diffRef.current?.querySelector(`[data-hit="${CSS.escape(`${current.file}|${current.idx}`)}"]`)?.scrollIntoView({ block: "center" }));
+  }, [current]);
+  const isCurrent = (file: string, idx: number) => !!current && current.file === file && current.idx === idx;
+
+  const toggle = (file: string) => setOpen((o) => { const n = new Set(o); if (n.has(file)) n.delete(file); else n.add(file); return n; });
+  const showFile = (file: string) => {
+    setOpen((o) => new Set([...o, file]));
+    requestAnimationFrame(() => diffRef.current?.querySelector(`[data-file="${CSS.escape(file)}"]`)?.scrollIntoView({ block: "start" }));
+  };
 
   const reject = async (one?: string) => {
     if (!checkpoint) return;
@@ -136,8 +259,18 @@ export function StudioReviewView({ projectId, onChanged }: { projectId: string |
 
   const iconBtn = "flex items-center justify-center size-8 rounded-md text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors disabled:opacity-40";
   const btn = "h-7 px-2.5 rounded-md text-[12.5px] border border-border hover:bg-secondary transition-colors disabled:opacity-40";
+  const menuItem = "gap-3 py-2 px-3 text-[13.5px] cursor-pointer rounded-xl hover:bg-slate-100 dark:hover:bg-[#2a2a2a] focus:bg-slate-100 dark:focus:bg-[#2a2a2a]";
+  const menuCard = "z-[100] bg-white dark:bg-[#202020] text-slate-700 dark:text-[#ececf1] border border-slate-200 dark:border-white/10 rounded-2xl p-1.5 shadow-2xl";
+  const optBtn = (on: boolean) => `flex items-center justify-center h-6 min-w-6 px-1 rounded text-[11.5px] font-mono transition-colors ${on ? "bg-sky-500/20 text-foreground" : "text-muted-foreground hover:text-foreground hover:bg-secondary"}`;
   const totalAdd = files?.reduce((n, f) => n + f.added, 0) || 0;
   const totalDel = files?.reduce((n, f) => n + f.removed, 0) || 0;
+  const allOpen = !!files?.length && files.every((f) => open.has(f.file));
+  const mark = (on: boolean) => (on ? "bg-amber-300/30" : "");
+  const foldRow = (key: string | number, hidden: number | undefined, attrs: Record<string, string>) => (
+    <button key={key} {...attrs} onClick={() => setOption("fold")} className="w-full text-left px-4 py-0.5 text-[12px] text-muted-foreground bg-black/[0.03] dark:bg-white/[0.03] hover:text-foreground">
+      ⋯ {hidden} unchanged line{hidden === 1 ? "" : "s"}
+    </button>
+  );
 
   return (
     <div className="flex-1 min-h-0 flex flex-col">
@@ -147,8 +280,8 @@ export function StudioReviewView({ projectId, onChanged }: { projectId: string |
         {!!files?.length && (
           <span className="text-[12.5px] text-muted-foreground">
             {files.length} file{files.length === 1 ? "" : "s"}
-            <span className="ml-2 text-[#16825d] dark:text-[#4ec9b0]">+{totalAdd}</span>
-            <span className="ml-1 text-[#cd3131] dark:text-[#f48771]">-{totalDel}</span>
+            <span className={`ml-2 ${GREEN}`}>+{totalAdd}</span>
+            <span className={`ml-1 ${RED}`}>-{totalDel}</span>
           </span>
         )}
         <div className="ml-auto flex items-center gap-1">
@@ -158,8 +291,28 @@ export function StudioReviewView({ projectId, onChanged }: { projectId: string |
               <button className={btn} disabled={busy} onClick={accept}>Accept all</button>
             </>
           )}
-          <button className={iconBtn} onClick={() => setFind(find === null ? "" : null)} title="Find in the changes" aria-label="Find in the changes"><Search className="size-4" /></button>
-          <button className={iconBtn} onClick={() => setListShown((s) => !s)} title={listShown ? "Hide the files list" : "Show the files list"} aria-label="Files list"><ListTree className="size-4" /></button>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <button className={iconBtn} title="View options" aria-label="View options"><MoreVertical className="size-4" /></button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" sideOffset={6} className={`w-[250px] ${menuCard}`}>
+              <DropdownMenuItem className={menuItem} onClick={() => setOption("split")}>
+                <Columns2 className="size-4 text-muted-foreground" /> {view.split ? "View unified diff" : "View split diff"}
+              </DropdownMenuItem>
+              <DropdownMenuItem className={menuItem} onClick={() => setOption("hideWs")}>
+                <Space className="size-4 text-muted-foreground" /> {view.hideWs ? "Show whitespace changes" : "Hide whitespace changes"}
+              </DropdownMenuItem>
+              <DropdownMenuItem className={menuItem} onClick={() => setOpen(allOpen ? new Set() : new Set((files || []).map((f) => f.file)))}>
+                {allOpen ? <ChevronsDownUp className="size-4 text-muted-foreground" /> : <ChevronsUpDown className="size-4 text-muted-foreground" />} {allOpen ? "Collapse all" : "Expand all"}
+              </DropdownMenuItem>
+              <DropdownMenuSeparator className="bg-slate-100 dark:bg-white/10 my-1" />
+              <DropdownMenuItem className={menuItem} onClick={() => setOption("fold")}>
+                <FoldVertical className="size-4 text-muted-foreground" /> {view.fold ? "Show all lines" : "Collapse unchanged lines"}
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+          <button className={`${iconBtn} ${find !== null ? "bg-secondary text-foreground" : ""}`} onClick={() => setFind(find === null ? "" : null)} title="Find in the changes" aria-label="Find in the changes"><Search className="size-4" /></button>
+          <button className={`${iconBtn} ${listShown ? "bg-secondary text-foreground" : ""}`} onClick={() => setListShown((s) => !s)} title={listShown ? "Hide the files list" : "Show the files list"} aria-label="Files list"><ListTree className="size-4" /></button>
           <button className={iconBtn} onClick={load} title="Refresh" aria-label="Refresh"><RotateCw className="size-4" /></button>
         </div>
       </div>
@@ -167,19 +320,24 @@ export function StudioReviewView({ projectId, onChanged }: { projectId: string |
       {/* Find */}
       {find !== null && (
         <div className="shrink-0 flex items-center gap-2 px-3 py-2 border-b border-border">
-          <input
-            autoFocus
-            data-no-ring
-            value={find}
-            onChange={(e) => setFind(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" && hits.length) setHit((h) => (e.shiftKey ? (h - 1 + hits.length) % hits.length : (h + 1) % hits.length));
-              if (e.key === "Escape") setFind(null);
-            }}
-            placeholder="Find"
-            className="flex-1 min-w-0 h-8 px-3 rounded-md border border-border bg-white dark:bg-[#1e1e1e] text-[13px] outline-none focus:border-foreground/30"
-          />
-          <span className="shrink-0 text-[12px] text-muted-foreground w-20 text-center">{q ? (hits.length ? `${hit + 1} of ${hits.length}` : "No results") : ""}</span>
+          <div className="flex-1 min-w-0 flex items-center h-8 pl-3 pr-1 rounded-md border border-border bg-white dark:bg-[#1e1e1e] focus-within:border-foreground/30">
+            <input
+              autoFocus
+              data-no-ring
+              value={find}
+              onChange={(e) => setFind(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && hits.length) setHit((h) => (e.shiftKey ? (h - 1 + hits.length) % hits.length : (h + 1) % hits.length));
+                if (e.key === "Escape") setFind(null);
+              }}
+              placeholder="Find"
+              className="flex-1 min-w-0 bg-transparent text-[13px] outline-none"
+            />
+            <button className={optBtn(findOpts.caseSensitive)} onClick={() => setFindOpts((o) => ({ ...o, caseSensitive: !o.caseSensitive }))} title="Match case">Aa</button>
+            <button className={optBtn(findOpts.wholeWord)} onClick={() => setFindOpts((o) => ({ ...o, wholeWord: !o.wholeWord }))} title="Match whole word"><span className="underline underline-offset-2">ab</span></button>
+            <button className={optBtn(findOpts.regex)} onClick={() => setFindOpts((o) => ({ ...o, regex: !o.regex }))} title="Use regular expression">.*</button>
+          </div>
+          <span className="shrink-0 text-[12px] text-muted-foreground w-20 text-center">{q.trim() ? (hits.length ? `${hit + 1} of ${hits.length}` : "No results") : ""}</span>
           <button className={iconBtn} disabled={!hits.length} onClick={() => setHit((h) => (h - 1 + hits.length) % hits.length)} aria-label="Previous"><ChevronUp className="size-4" /></button>
           <button className={iconBtn} disabled={!hits.length} onClick={() => setHit((h) => (h + 1) % hits.length)} aria-label="Next"><ChevronDown className="size-4" /></button>
           <button className={iconBtn} onClick={() => setFind(null)} aria-label="Close"><X className="size-4" /></button>
@@ -200,32 +358,73 @@ export function StudioReviewView({ projectId, onChanged }: { projectId: string |
         </div>
       ) : (
         <div ref={bodyRef} className="flex-1 min-h-0 flex">
-          {/* The diff of one file */}
-          <div className="flex-1 min-w-0 flex flex-col">
-            {file && (
-              <div className="shrink-0 flex items-center gap-2 h-10 px-4 border-b border-border text-[13px]">
-                <span className="truncate font-medium">{nameOf(file.file)}</span>
-                {dirOf(file.file) && <span className="truncate text-[12px] text-muted-foreground">{dirOf(file.file)}</span>}
-                <span className="shrink-0 text-[12px] text-[#16825d] dark:text-[#4ec9b0]">+{file.added}</span>
-                <span className="shrink-0 text-[12px] text-[#cd3131] dark:text-[#f48771]">-{file.removed}</span>
-                <button className={`${btn} ml-auto shrink-0`} disabled={busy} onClick={() => reject(file.file)}>Reject file</button>
-              </div>
-            )}
-            <div ref={diffRef} className="flex-1 min-h-0 overflow-auto bg-white dark:bg-[#1e1e1e] font-mono text-[12.5px] leading-[1.6] [scrollbar-width:thin]">
-              <div className="min-w-max py-1">
-                {rows.map((r, i) => (
-                  <div
-                    key={i}
-                    data-row={i}
-                    className={`flex ${r.kind === "add" ? "bg-[#16825d]/12 dark:bg-[#4ec9b0]/[0.09]" : r.kind === "del" ? "bg-[#cd3131]/10 dark:bg-[#f48771]/[0.09]" : ""} ${hits[hit] === i ? "outline outline-1 outline-sky-500" : ""}`}
-                  >
-                    <span className={`sticky left-0 shrink-0 w-12 pr-3 text-right select-none text-[#237893] dark:text-[#6e7681] ${NUMBER_BG[r.kind]}`}>{r.line ?? ""}</span>
-                    <span className={`shrink-0 w-4 select-none ${r.kind === "add" ? "text-[#16825d] dark:text-[#4ec9b0]" : r.kind === "del" ? "text-[#cd3131] dark:text-[#f48771]" : "text-transparent"}`}>{r.kind === "add" ? "+" : r.kind === "del" ? "-" : " "}</span>
-                    <span className={`pr-6 whitespace-pre ${r.kind === "hunk" ? "text-muted-foreground" : ""} ${q && r.kind !== "hunk" && r.text.toLowerCase().includes(q) ? "bg-amber-300/30" : ""}`}>{r.text || " "}</span>
+          {/* Every changed file: a section that opens to its diff */}
+          <div ref={diffRef} className="flex-1 min-w-0 overflow-auto [scrollbar-width:thin]">
+            {files.map((f) => {
+              const isOpen = open.has(f.file);
+              const p = prepared.get(f.file);
+              return (
+                <div key={f.file} data-file={f.file} className="border-b border-border">
+                  <div className="sticky top-0 z-10 flex items-center gap-2 h-10 px-3 bg-[#f5f5f5] dark:bg-[#181818] border-b border-border text-[13px]">
+                    <button onClick={() => toggle(f.file)} className="flex min-w-0 flex-1 items-center gap-2 text-left">
+                      <span className="truncate font-medium">{nameOf(f.file)}</span>
+                      {dirOf(f.file) && <span className="truncate text-[11.5px] text-muted-foreground">{dirOf(f.file)}</span>}
+                      <span className={`ml-auto shrink-0 text-[12px] ${GREEN}`}>+{f.added}</span>
+                      <span className={`shrink-0 text-[12px] ${RED}`}>-{f.removed}</span>
+                      {isOpen ? <ChevronDown className="size-4 shrink-0 text-muted-foreground" /> : <ChevronRight className="size-4 shrink-0 text-muted-foreground" />}
+                    </button>
+                    {isOpen && <button className={`${btn} shrink-0`} disabled={busy} onClick={() => reject(f.file)}>Reject file</button>}
                   </div>
-                ))}
-              </div>
-            </div>
+                  {isOpen && p && (
+                    <div className="bg-white dark:bg-[#1e1e1e] font-mono text-[12.5px] leading-[1.6] overflow-x-auto [scrollbar-width:thin]">
+                      {!view.split ? (
+                        <div className="min-w-max py-1">
+                          {p.rows.map((r, i) => {
+                            const attrs = { "data-hit": `${f.file}|${i}` };
+                            if (r.kind === "fold") return foldRow(i, r.hidden, attrs);
+                            return (
+                              <div key={i} {...attrs} className={`flex ${ROW_BG[tone(r)]} ${isCurrent(f.file, i) ? "outline outline-1 outline-sky-500" : ""}`}>
+                                <span className={`sticky left-0 shrink-0 flex select-none text-[#237893] dark:text-[#6e7681] ${NUMBER_BG[tone(r)]}`}>
+                                  <span className="w-10 pr-2 text-right">{lineNo(r.oldLine)}</span>
+                                  <span className="w-10 pr-2 text-right">{lineNo(r.newLine)}</span>
+                                </span>
+                                <span className={`shrink-0 w-4 select-none ${SIGN_COLOR[r.kind] || "text-transparent"}`}>{SIGN[r.kind] || " "}</span>
+                                <span className={`pr-6 whitespace-pre ${r.kind === "hunk" ? "text-muted-foreground" : ""} ${mark(matches(textOf(r)))}`}>{r.text || " "}</span>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      ) : (
+                        // Old on the left, new on the right
+                        <div className="py-1">
+                          {p.pairs.map((x, i) => {
+                            const attrs = { "data-hit": `${f.file}|${i}` };
+                            if (x.full) return x.full.kind === "fold"
+                              ? foldRow(i, x.full.hidden, attrs)
+                              : <div key={i} {...attrs} className="px-4 text-muted-foreground whitespace-pre overflow-hidden text-ellipsis">{x.full.text}</div>;
+                            return (
+                              <div key={i} {...attrs} className={`grid grid-cols-2 ${isCurrent(f.file, i) ? "outline outline-1 outline-sky-500" : ""}`}>
+                                {(["left", "right"] as const).map((side) => {
+                                  const r = x[side];
+                                  const t = r && r.kind !== "same" ? tone(r) : "none";
+                                  return (
+                                    <div key={side} className={`flex min-w-0 ${side === "right" ? "border-l border-border" : ""} ${r ? ROW_BG[t] : "bg-black/[0.02] dark:bg-white/[0.02]"}`}>
+                                      <span className="shrink-0 w-11 pr-2 text-right select-none text-[#237893] dark:text-[#6e7681]">{r ? lineNo(side === "left" ? r.oldLine : r.newLine) : ""}</span>
+                                      <span className={`shrink-0 w-4 select-none ${r && r.kind !== "same" ? SIGN_COLOR[r.kind] : "text-transparent"}`}>{r && r.kind !== "same" ? SIGN[r.kind] : " "}</span>
+                                      <span className={`min-w-0 pr-3 whitespace-pre-wrap break-all ${mark(matches(textOf(r)))}`}>{r ? r.text || " " : ""}</span>
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
           </div>
 
           {/* Drag handle + the files changed */}
@@ -237,14 +436,12 @@ export function StudioReviewView({ projectId, onChanged }: { projectId: string |
                 {files.map((f) => (
                   <button
                     key={f.file}
-                    onClick={() => setCurrent(f.file)}
-                    className={`w-full flex items-center gap-2 px-4 py-1.5 text-left text-[13px] hover:bg-secondary transition-colors ${f.file === current ? "bg-secondary" : ""}`}
+                    onClick={() => showFile(f.file)}
+                    className={`w-full flex items-center gap-2 px-4 py-1.5 text-left text-[13px] hover:bg-secondary transition-colors ${open.has(f.file) ? "text-foreground" : "text-foreground/80"}`}
                     title={f.file}
                   >
                     <span className="truncate">{nameOf(f.file)}</span>
                     <span className="truncate text-[11.5px] text-muted-foreground">{dirOf(f.file)}</span>
-                    <span className="ml-auto shrink-0 text-[11.5px] text-[#16825d] dark:text-[#4ec9b0]">+{f.added}</span>
-                    <span className="shrink-0 text-[11.5px] text-[#cd3131] dark:text-[#f48771]">-{f.removed}</span>
                   </button>
                 ))}
               </div>
