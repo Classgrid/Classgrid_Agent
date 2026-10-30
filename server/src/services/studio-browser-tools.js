@@ -117,7 +117,7 @@ export function makeBrowserHandlers({ userId, sessionId }) {
     handlers[name] = async (a) => {
       if (!userId) return "Error: the browser needs a signed-in user.";
       try {
-        const r = await browserAct(userId, toStep(a));
+        const r = await browserAct(userId, { ...toStep(a), ...(sessionId && sessionId !== "none" ? { chat: sessionId } : {}) });
         if (!r?.ok) return `Error: ${r?.error || "the browser step failed"}${r?.url ? ` (page: ${r.url})` : ""}`;
         const head = `Page: ${r.title || "(no title)"} — ${r.url}${r.w ? `\nPage size: ${r.w}x${r.h} pixels` : ""}`;
         if (name === "browser_read") {

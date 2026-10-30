@@ -151,7 +151,7 @@ export function registerBrowserSocket(socket) {
   });
   socket.on("studio:browser:input", (m) => {
     if (!ws || ws.readyState !== WebSocket.OPEN || !m || typeof m !== "object") return;
-    if (!["click", "move", "wheel", "key", "text", "act", "viewport"].includes(m.type)) return;
+    if (!["click", "move", "wheel", "key", "text", "act", "viewport", "chat"].includes(m.type)) return;
     try { ws.send(JSON.stringify(m)); } catch { /* closed */ }
   });
   // The user's "Full page" button: one tall picture of the whole page, saved in the chat's Screenshots

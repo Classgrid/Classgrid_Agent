@@ -23,10 +23,16 @@ const context = await chromium.launchPersistentContext(PROFILE, {
   args: ["--no-sandbox", "--disable-dev-shm-usage", "--disable-gpu"],
 });
 let page = context.pages()[0] || (await context.newPage());
-// The last page the user was on stays open: after a restart the browser opens it again
-const LAST = `${PROFILE}/../last-url`;
-const lastUrl = (() => { try { return fs.readFileSync(LAST, "utf8").trim(); } catch { return ""; } })();
-if (/^https?:\/\//.test(lastUrl)) await page.goto(lastUrl, { waitUntil: "domcontentloaded", timeout: 30000 }).catch(() => {});
+// Each chat has its own page: back in a chat, its last page opens again (also after a restart); a new chat starts
+// with an empty browser. The logins (the profile) are shared.
+const CHAT_URLS = `${PROFILE}/../chat-urls.json`;
+let chatUrls = (() => { try { return JSON.parse(fs.readFileSync(CHAT_URLS, "utf8")) || {}; } catch { return {}; } })();
+let currentChat; // undefined = not known yet, null = a new chat (no id yet), or the chat's id
+const saveChatUrls = () => {
+  const keys = Object.keys(chatUrls);
+  if (keys.length > 300) for (const k of keys.slice(0, keys.length - 300)) delete chatUrls[k];
+  fs.writeFile(CHAT_URLS, JSON.stringify(chatUrls), () => {});
+};
 const watchers = new Set();
 let pointer = null; // where the agent last pointed: { x, y }
 
@@ -42,7 +48,7 @@ context.on("page", async (p) => { page = p; await p.setViewportSize(view).catch(
 function wire(p) {
   p.on("framenavigated", async (f) => {
     if (f !== p.mainFrame() || p !== page) return;
-    if (/^https?:\/\//.test(p.url())) fs.writeFile(LAST, p.url(), () => {});
+    if (currentChat && /^https?:\/\//.test(p.url())) { chatUrls[currentChat] = p.url(); saveChatUrls(); }
     broadcast(await navInfo());
   });
 }
@@ -89,8 +95,25 @@ const norm = (u) => (/^[a-z][a-z0-9+.-]*:/i.test(u) ? u : /\s/.test(u) || !/\./.
 // The agent's pointer, shown to the viewers: where it clicks, scrolls and types
 const point = (kind, extra = {}) => broadcast({ type: "pointer", kind, x: pointer?.x ?? null, y: pointer?.y ?? null, at: Date.now(), ...extra });
 
+// The browser follows the chat: its own last page, or an empty page for a new chat
+async function useChat(id) {
+  id = id ? String(id).slice(0, 100) : null;
+  if (id === currentChat) return;
+  if (currentChat === null && id) { // the new chat just got its id: it keeps its page
+    currentChat = id;
+    if (/^https?:\/\//.test(page.url())) { chatUrls[id] = page.url(); saveChatUrls(); }
+    return;
+  }
+  currentChat = id;
+  pointer = null;
+  await page.goto((id && chatUrls[id]) || "about:blank", { waitUntil: "domcontentloaded", timeout: 30000 }).catch(() => {});
+  broadcast(await navInfo());
+  for (const ws of watchers) await frameNow(ws);
+}
+
 async function act(a, byAgent = false) {
   await resizing;
+  if (byAgent && a.chat) await useChat(a.chat);
   switch (a.action) {
     case "open":
       if (byAgent) point("open", { url: String(a.url || "") });
@@ -190,6 +213,7 @@ wss.on("connection", async (ws) => {
     let m; try { m = JSON.parse(String(raw)); } catch { return; }
     try {
       if (m.type === "viewport") await resize(m.w, m.h);
+      else if (m.type === "chat") { const id = m.id; queue = queue.then(() => useChat(id)).catch(() => {}); }
       else if (m.type === "click") await page.mouse.click(m.x, m.y);
       else if (m.type === "move") await page.mouse.move(m.x, m.y);
       else if (m.type === "wheel") await page.mouse.wheel(0, m.dy || 0);
