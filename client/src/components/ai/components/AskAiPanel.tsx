@@ -3360,6 +3360,10 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
   const retryCountRef = useRef(0);
 
   const isGenerating = submitting || thinking || (messages[messages.length - 1]?.typing === true);
+  // Studio's Browser tab is locked while the agent works in it
+  useEffect(() => {
+    window.dispatchEvent(new CustomEvent("agent:generating", { detail: { on: isGenerating } }));
+  }, [isGenerating]);
 
   // Live countdown timer for ban expiry
   useEffect(() => {

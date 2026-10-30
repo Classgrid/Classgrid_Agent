@@ -37,6 +37,18 @@ export function StudioBrowserView() {
   const imgRef = useRef<HTMLImageElement>(null);
   const boxRef = useRef<HTMLDivElement>(null);
   const wheel = useRef<{ dy: number; timer?: ReturnType<typeof setTimeout> }>({ dy: 0 });
+  // While the chat's answer runs and the agent has used the browser in it, the browser is the agent's alone
+  const [chatBusy, setChatBusy] = useState(false);
+  const [droveThisRun, setDroveThisRun] = useState(false);
+  useEffect(() => {
+    const onGen = (e: Event) => {
+      const on = !!(e as CustomEvent<{ on: boolean }>).detail?.on;
+      setChatBusy(on);
+      if (!on) setDroveThisRun(false);
+    };
+    window.addEventListener("agent:generating", onGen);
+    return () => window.removeEventListener("agent:generating", onGen);
+  }, []);
 
   useEffect(() => {
     const socket = getSocket();
@@ -50,6 +62,7 @@ export function StudioBrowserView() {
       else if (m.type === "pointer") {
         setPointer(m);
         setNow(Date.now());
+        setDroveThisRun(true);
         if (m.kind === "click" && m.x !== null) setClicks((c) => [...c.slice(-3), { id: m.at, x: m.x, y: m.y }]);
       }
     };
@@ -88,6 +101,7 @@ export function StudioBrowserView() {
     return () => clearTimeout(t);
   }, [pointer]);
   const agentBusy = !!pointer && now - pointer.at < AGENT_BUSY_MS;
+  const locked = agentBusy || (chatBusy && droveThisRun);
 
   // A point on the picture in page pixels
   const pagePoint = (e: React.MouseEvent) => {
@@ -101,15 +115,17 @@ export function StudioBrowserView() {
 
   const iconBtn = "flex items-center justify-center size-8 rounded-md text-muted-foreground hover:text-foreground hover:bg-secondary transition-[color,background-color,transform] duration-150 active:scale-[0.94] disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-muted-foreground disabled:active:scale-100";
   const live = status === "ready" && !!frame;
+  const canUse = live && !locked;
 
   return (
     <>
       <div className="shrink-0 flex items-center gap-1 h-12 px-2 border-b border-border">
-        <button className={iconBtn} disabled={!live} onClick={() => act({ action: "back" })} title="Back" aria-label="Back"><ArrowLeft className="size-4" /></button>
-        <button className={iconBtn} disabled={!live} onClick={() => act({ action: "forward" })} title="Forward" aria-label="Forward"><ArrowRight className="size-4" /></button>
-        <button className={iconBtn} disabled={!live} onClick={() => act({ action: "reload" })} title="Reload" aria-label="Reload"><RotateCw className="size-4" /></button>
+        <button className={iconBtn} disabled={!canUse} onClick={() => act({ action: "back" })} title="Back" aria-label="Back"><ArrowLeft className="size-4" /></button>
+        <button className={iconBtn} disabled={!canUse} onClick={() => act({ action: "forward" })} title="Forward" aria-label="Forward"><ArrowRight className="size-4" /></button>
+        <button className={iconBtn} disabled={!canUse} onClick={() => act({ action: "reload" })} title="Reload" aria-label="Reload"><RotateCw className="size-4" /></button>
         <input
           data-no-ring
+          disabled={locked}
           value={typed ?? url}
           onChange={(e) => setTyped(e.target.value)}
           onFocus={(e) => { setTyped(url); e.currentTarget.select(); }}
@@ -119,7 +135,7 @@ export function StudioBrowserView() {
             if (e.key === "Escape") { setTyped(null); e.currentTarget.blur(); }
           }}
           placeholder="Search or enter a website"
-          className="flex-1 min-w-0 h-8 px-3 rounded-full border border-border bg-white dark:bg-[#1e1e1e] text-sm outline-none placeholder:text-muted-foreground focus:border-foreground/30 transition-colors duration-200"
+          className="flex-1 min-w-0 h-8 px-3 rounded-full border border-border bg-white dark:bg-[#1e1e1e] text-sm outline-none placeholder:text-muted-foreground focus:border-foreground/30 disabled:opacity-60 transition-colors duration-200"
         />
         <a
           className={`${iconBtn} ${frame ? "" : "pointer-events-none opacity-40"}`}
@@ -131,33 +147,12 @@ export function StudioBrowserView() {
         <button className={iconBtn} disabled={!url} onClick={() => url && window.open(url, "_blank", "noopener,noreferrer")} title="Open in a new tab" aria-label="Open in a new tab"><ExternalLink className="size-4" /></button>
       </div>
 
-      {/* Who is using the browser right now */}
-      <AnimatePresence initial={false}>
-        {agentBusy && pointer && (
-          <motion.div
-            key="busy"
-            initial={reduce ? false : { height: 0, opacity: 0 }}
-            animate={{ height: "auto", opacity: 1 }}
-            exit={{ height: 0, opacity: 0 }}
-            transition={{ duration: 0.25, ease: EASE }}
-            className="shrink-0 overflow-hidden border-b border-border"
-          >
-            <div className="flex items-center gap-2 h-8 px-3 text-[12.5px] text-muted-foreground">
-              <span className="relative flex size-2">
-                <span className="absolute inline-flex size-full rounded-full bg-sky-500/60 animate-ping" />
-                <span className="relative inline-flex size-2 rounded-full bg-sky-500" />
-              </span>
-              <span className="truncate">The agent is using the browser · {pointerLabel(pointer)}</span>
-            </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
-
+      <div className="relative flex-1 min-h-0 flex flex-col">
       <div
         ref={boxRef}
         tabIndex={0}
         onKeyDown={(e) => {
-          if (!live || e.metaKey) return;
+          if (!canUse || e.metaKey) return;
           if (e.key.length === 1 && !e.ctrlKey && !e.altKey) { input({ type: "text", text: e.key }); e.preventDefault(); }
           else if (KEYS.has(e.key)) { input({ type: "key", key: e.key }); e.preventDefault(); }
           else if (e.ctrlKey && e.key.length === 1) { input({ type: "key", key: `Control+${e.key}` }); e.preventDefault(); }
@@ -254,21 +249,33 @@ export function StudioBrowserView() {
           </div>
         )}
 
-        {/* The agent scrolls: a small sign at the bottom */}
-        <AnimatePresence>
-          {agentBusy && pointer?.kind === "scroll" && (
-            <motion.div
-              key={pointer.at}
-              initial={reduce ? false : { opacity: 0, y: 6 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0 }}
-              transition={{ duration: 0.25, ease: EASE }}
-              className="pointer-events-none sticky bottom-3 ml-auto mr-3 w-fit rounded-full bg-sky-500 px-2.5 py-1 text-[11.5px] font-medium text-white shadow-sm"
-            >
-              Agent · {pointerLabel(pointer)}
-            </motion.div>
-          )}
-        </AnimatePresence>
+      </div>
+
+      {/* The agent is working in the browser: the page is locked for the user until it is done */}
+      <AnimatePresence>
+        {locked && live && (
+          <motion.div
+            key="lock"
+            initial={reduce ? false : { opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.2, ease: EASE }}
+            className="absolute inset-0 z-20 cursor-not-allowed"
+            onMouseDown={(e) => e.preventDefault()}
+            onWheel={(e) => e.stopPropagation()}
+            title="The agent is using the browser"
+          >
+            <div className="absolute inset-0 ring-2 ring-inset ring-sky-500/70" />
+            <div className="absolute top-3 left-1/2 -translate-x-1/2 flex items-center gap-2 rounded-full bg-[#181818]/90 dark:bg-[#0f0f0f]/90 px-3 py-1.5 text-[12.5px] text-white shadow-md">
+              <span className="relative flex size-2">
+                <span className="absolute inline-flex size-full rounded-full bg-sky-500/60 animate-ping" />
+                <span className="relative inline-flex size-2 rounded-full bg-sky-500" />
+              </span>
+              <span className="whitespace-nowrap">The agent is using the browser{pointer && agentBusy ? ` · ${pointerLabel(pointer)}` : ""}</span>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
       </div>
     </>
   );
