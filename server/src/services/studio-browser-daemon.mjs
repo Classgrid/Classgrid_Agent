@@ -197,11 +197,17 @@ async function act(a, byAgent = false) {
     case "read": case "tabs": break;
     default: throw new Error(`Unknown action: ${a.action}`);
   }
-  if (["open", "click", "press", "back", "forward", "reload"].includes(a.action)) {
+  // Wait for the page to settle before the picture: a new page until its files finished loading, and about a second
+  // after a click or scroll, so entrance animations (that start invisible) are done in the screenshot
+  if (["open", "back", "forward", "reload"].includes(a.action)) {
     await page.waitForLoadState("domcontentloaded", { timeout: 8000 }).catch(() => {});
-    await page.waitForTimeout(600);
+    await page.waitForLoadState("networkidle", { timeout: 5000 }).catch(() => {});
+    await page.waitForTimeout(800);
+  } else if (["click", "press"].includes(a.action)) {
+    await page.waitForLoadState("domcontentloaded", { timeout: 8000 }).catch(() => {});
+    await page.waitForTimeout(900);
   }
-  if (a.action === "scroll") await page.waitForTimeout(300);
+  if (a.action === "scroll") await page.waitForTimeout(1000);
   const out = { ok: true, url: page.url(), title: await page.title().catch(() => ""), w: view.width, h: view.height };
   if (a.action === "read") {
     out.text = (await page.evaluate(() => document.body?.innerText || "").catch(() => "")).slice(0, MAX_TEXT);

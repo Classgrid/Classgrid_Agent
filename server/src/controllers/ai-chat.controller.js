@@ -5039,7 +5039,7 @@ If a tool fails, never show the error message; say only: "Something went wrong o
                                 groupNeedingLoad,
                                 toolHandlers: llmConfig.toolHandlers,
                                 maxTokens: llmConfig.defaultMaxTokens,
-                                maxToolDepth: 100,
+                                maxToolDepth: 800,
                                 // An answer cut off by the length limit (e.g. "draw 40 cards") is continued in the same reply
                                 maxContinuations: 3,
                                 outputBudget: quotaRemaining,
@@ -5131,7 +5131,7 @@ If a tool fails, never show the error message; say only: "Something went wrong o
                                 tools: llmConfig.tools,
                                 toolHandlers: llmConfig.toolHandlers,
                                 maxTokens: llmConfig.defaultMaxTokens,
-                                maxToolDepth: 100,
+                                maxToolDepth: 800,
                                 maxContinuations: 3,
                                 outputBudget: quotaRemaining,
                                 ...meterHooks(model),
@@ -5171,7 +5171,7 @@ If a tool fails, never show the error message; say only: "Something went wrong o
                     ? streamed.answer
                     : await usageStorage.run(usageStore, () => currentClient.generate({
                         messages,
-                        maxToolDepth: 100,
+                        maxToolDepth: 800,
                         timeoutMs: isDiagramRequest && attempt === 1 ? 15000 : 1200000,
                         onStatus,
                         onThought,

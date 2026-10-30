@@ -513,9 +513,13 @@ function PathBar({ path, projectName, tree, onOpen }: { path: string; projectNam
   );
 }
 
+// The colouring files of an older Classgrid version are gone after an update: this tab needs a refresh
+const isOldVersion = (e: unknown) => /dynamically imported module|Importing a module script failed|MIME type|Failed to load module script|Loading chunk/i.test(String((e as Error)?.message || e));
+
 function CodeView({ file }: { file: OpenFile }) {
   // Shiki colours code with VS Code's own rules and its Dark+ / Light+ themes; it loads only when a file opens
   const [html, setHtml] = useState<string | null>(null);
+  const [oldVersion, setOldVersion] = useState(false);
   useEffect(() => {
     setHtml(null);
     if (file.content === undefined || file.content.length > 300_000) return;
@@ -523,9 +527,16 @@ function CodeView({ file }: { file: OpenFile }) {
     const lang = LANG[ext(file.path)] || "text";
     const theme = document.documentElement.classList.contains("dark") ? "dark-plus" : "light-plus";
     import("shiki")
-      .then(({ codeToHtml }) => codeToHtml(file.content!, { lang, theme }).catch(() => codeToHtml(file.content!, { lang: "text", theme })))
+      .then(async ({ codeToHtml }) => {
+        try {
+          return await codeToHtml(file.content!, { lang, theme });
+        } catch (e) {
+          if (isOldVersion(e) && !gone) setOldVersion(true);
+          return codeToHtml(file.content!, { lang: "text", theme });
+        }
+      })
       .then((out) => { if (!gone) setHtml(out); })
-      .catch(() => {});
+      .catch((e) => { if (isOldVersion(e) && !gone) setOldVersion(true); });
     return () => { gone = true; };
   }, [file.content, file.path]);
   const lines = file.content === undefined ? 0 : file.content.split("\n").length;
@@ -539,6 +550,12 @@ function CodeView({ file }: { file: OpenFile }) {
 
   return (
     <div className="flex-1 min-h-0 flex flex-col">
+      {oldVersion && (
+        <div className="shrink-0 flex items-center gap-3 px-4 py-2 border-b border-border text-[12.5px] text-muted-foreground">
+          <span className="flex-1 min-w-0">Classgrid was updated. Refresh to see the code in colour.</span>
+          <button onClick={() => window.location.reload()} className="shrink-0 h-7 px-3 rounded-md border border-border text-foreground hover:bg-secondary transition-colors">Refresh</button>
+        </div>
+      )}
       {file.loading ? (
         <div className="px-4 pt-2 flex flex-col gap-2">
           {[60, 80, 40, 70, 55].map((w, i) => <div key={i} className="h-3.5 rounded bg-black/[0.06] dark:bg-white/[0.06] animate-pulse" style={{ width: `${w}%` }} />)}
