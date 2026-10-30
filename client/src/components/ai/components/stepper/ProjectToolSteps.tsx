@@ -516,11 +516,20 @@ export function ProjectRunChanges({ result }: { result?: string }) {
 export const REVIEW_CHECKPOINT_EVENT = "classgrid:review-checkpoint";
 const reviewCheckpoint = (detail: { sessionId: string; checkpoint: string; mode: 'review' | 'undo' }) =>
   window.dispatchEvent(new CustomEvent(REVIEW_CHECKPOINT_EVENT, { detail }));
-// The newest answer with changes still to review, per chat (Studio's Overview menu opens its Review)
-const latestCheckpoints = new Map<string, string>();
-export const latestCheckpointFor = (sessionId: string) => latestCheckpoints.get(sessionId) || null;
+// Every answer with changes in a chat, oldest first, whatever happened to them (kept, pushed, rejected): Studio's
+// Review tab shows them all
+const chatCheckpoints = new Map<string, string[]>();
+export const checkpointsFor = (sessionId: string) => chatCheckpoints.get(sessionId) || [];
+export const latestCheckpointFor = (sessionId: string) => checkpointsFor(sessionId).at(-1) || null;
+export const CHECKPOINTS_CHANGED_EVENT = "classgrid:checkpoints-changed";
+const addCheckpoint = (sessionId: string, checkpoint: string) => {
+  const list = chatCheckpoints.get(sessionId) || [];
+  if (list.includes(checkpoint)) return;
+  chatCheckpoints.set(sessionId, [...list, checkpoint]);
+  window.dispatchEvent(new CustomEvent(CHECKPOINTS_CHANGED_EVENT, { detail: { sessionId } }));
+};
 export function reviewLatestChanges(sessionId: string) {
-  const checkpoint = latestCheckpoints.get(sessionId);
+  const checkpoint = latestCheckpointFor(sessionId);
   if (!checkpoint) return false;
   reviewCheckpoint({ sessionId, checkpoint, mode: 'review' });
   return true;
@@ -531,7 +540,7 @@ export function reviewLatestChanges(sessionId: string) {
 type CheckpointState = { status?: 'kept' | 'rejected' | 'undone'; rejectedFiles?: string[] };
 const CHECKPOINT_STATE_EVENT = "classgrid:checkpoint-state";
 const cpKey = (id: string) => `cg_cp_${id}`;
-const readCheckpointState = (id?: string): CheckpointState => {
+export const readCheckpointState = (id?: string): CheckpointState => {
   if (!id) return {};
   try { return JSON.parse(localStorage.getItem(cpKey(id)) || "{}"); } catch { return {}; }
 };
@@ -545,11 +554,7 @@ export function markCheckpoint(id: string, change: CheckpointState) {
 export function FilesChangedSummary({ steps, checkpoint, sessionId }: { steps: Step[]; checkpoint?: string; sessionId?: string }) {
   const [open, setOpen] = useState(false);
   const [cpState, setCpState] = useState<CheckpointState>(() => readCheckpointState(checkpoint));
-  useEffect(() => {
-    if (!checkpoint || !sessionId) return;
-    if (cpState.status) { if (latestCheckpoints.get(sessionId) === checkpoint) latestCheckpoints.delete(sessionId); }
-    else latestCheckpoints.set(sessionId, checkpoint);
-  }, [checkpoint, sessionId, cpState.status]);
+  useEffect(() => { if (checkpoint && sessionId) addCheckpoint(sessionId, checkpoint); }, [checkpoint, sessionId]);
   useEffect(() => {
     setCpState(readCheckpointState(checkpoint));
     const onState = (e: Event) => { const d = (e as CustomEvent).detail; if (d?.id === checkpoint) setCpState(d.state); };
@@ -613,7 +618,7 @@ export function FilesChangedSummary({ steps, checkpoint, sessionId }: { steps: S
 // opens it in the Project Mode editor at that line. Only in Project Mode; elsewhere it stays normal code.
 const FILE_MENTION = /^((?:[\w.@-]+\/)*[\w@-][\w.@-]*\.(?:tsx?|jsx?|mjs|cjs|json|md|mdx|html?|css|scss|sass|less|py|rb|go|rs|java|kt|php|c|h|cpp|hpp|cs|swift|vue|svelte|ya?ml|toml|ini|env|txt|sh|sql|graphql|xml|svg|prisma|dart|lock|tsbuildinfo|gitignore|config))(?::(\d+)(?:-(\d+))?|#L(\d+)(?:-L?(\d+))?|,?\s*\(?lines?\s*(\d+)(?:\s*[-–]\s*(\d+))?\)?)?$/i;
 
-const inProjectMode = () => typeof window !== 'undefined' && window.location.pathname.split('/').includes('project');
+const inProjectMode = () => typeof window !== 'undefined' && window.location.pathname.split('/').some((p) => p === 'project' || p === 'studio');
 // A folder named in the answer (`src/components/`): needs a "/" so normal words never match
 const FOLDER_MENTION = /^(?:\.\/)?((?:[\w@-][\w.@-]*\/)+(?:[\w@-][\w@-]*)?)\/?$/;
 

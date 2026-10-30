@@ -8,7 +8,7 @@ import { useLocation } from "react-router-dom";
 import { Check, ChevronDown, ChevronRight, ChevronUp, ChevronsDownUp, ChevronsUpDown, Columns2, FileDiff, FoldVertical, ListTree, MoreVertical, RotateCw, Search, Space, X } from "lucide-react";
 import { toast } from "sonner";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/marketing_ui/dropdown-menu";
-import { FileBadge, latestCheckpointFor, markCheckpoint } from "@/components/ai/components/stepper/ProjectToolSteps";
+import { CHECKPOINTS_CHANGED_EVENT, FileBadge, checkpointsFor, markCheckpoint, readCheckpointState } from "@/components/ai/components/stepper/ProjectToolSteps";
 import { fetchWithRescue } from "@/lib/rescue";
 import { DangerConfirmDialog } from "@/components/marketing_ui/danger-confirm-dialog";
 
@@ -131,6 +131,8 @@ export function StudioReviewView({ projectId, onChanged }: { projectId: string |
   const { pathname } = useLocation();
   const chatId = (() => { const parts = pathname.split("/"); const at = parts.indexOf("studio"); return at !== -1 && parts[at + 1] ? parts[at + 1] : null; })();
   const [checkpoint, setCheckpoint] = useState<string | null>(null);
+  const [answers, setAnswers] = useState<string[]>([]); // this chat's answers with changes, oldest first
+  const [picked, setPicked] = useState<string | null>(null); // null = the newest answer
   const [files, setFiles] = useState<ReviewFile[] | null>(null);
   const [open, setOpen] = useState<Set<string>>(new Set()); // the file sections that are open
   const [busy, setBusy] = useState(false);
@@ -151,9 +153,11 @@ export function StudioReviewView({ projectId, onChanged }: { projectId: string |
   });
 
   const cpPath = (cp: string) => `/projects/${projectId}/checkpoints/${chatId}/${cp}`;
-  const load = async () => {
+  const load = async (want: string | null = picked) => {
     setError("");
-    const cp = chatId ? latestCheckpointFor(chatId) : null;
+    const cps = chatId ? checkpointsFor(chatId) : [];
+    setAnswers(cps);
+    const cp = want && cps.includes(want) ? want : cps.at(-1) || null;
     setCheckpoint(cp);
     if (!projectId || !chatId || !cp) { setFiles([]); return; }
     setFiles(null);
@@ -164,7 +168,29 @@ export function StudioReviewView({ projectId, onChanged }: { projectId: string |
     setOpen((o) => new Set([...o].filter((f) => list.some((x) => x.file === f))));
   };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  useEffect(() => { load(); }, [projectId, chatId]);
+  useEffect(() => { setPicked(null); load(null); }, [projectId, chatId]);
+  // A new answer with changes (or one just kept / rejected) in this chat: show its changes
+  useEffect(() => {
+    const onChange = (e: Event) => { if ((e as CustomEvent<{ sessionId: string }>).detail?.sessionId === chatId) { setPicked(null); load(null); } };
+    window.addEventListener(CHECKPOINTS_CHANGED_EVENT, onChange);
+    return () => window.removeEventListener(CHECKPOINTS_CHANGED_EVENT, onChange);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [chatId, projectId]);
+  // The agent changes a file while this tab is open: the changes refresh by themselves (no page reload needed)
+  const pickedRef = useRef(picked);
+  pickedRef.current = picked;
+  useEffect(() => {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const onTool = (e: Event) => {
+      const d = (e as CustomEvent<{ phase: string; tool: string }>).detail;
+      if (d?.phase !== "end" || !/^(write_project_file|edit_project_file|run_project_helpers|execute_terminal_command|start_background_command)$/.test(d.tool)) return;
+      clearTimeout(timer);
+      timer = setTimeout(() => load(pickedRef.current), 1500);
+    };
+    window.addEventListener("agent:tool", onTool);
+    return () => { clearTimeout(timer); window.removeEventListener("agent:tool", onTool); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [chatId, projectId]);
 
   // Each file's rows (and side-by-side pairs) with the view options applied
   const prepared = useMemo(() => {
@@ -299,6 +325,29 @@ export function StudioReviewView({ projectId, onChanged }: { projectId: string |
       {/* Title, totals and actions */}
       <div className="shrink-0 flex items-center gap-2 h-12 px-4 border-b border-border">
         <span className="text-[14px] font-medium">Review</span>
+        {answers.length > 0 && (
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <button className="flex items-center gap-1 h-7 px-2 rounded-md text-[12.5px] text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors" title="Pick an answer">
+                {checkpoint && answers.indexOf(checkpoint) === answers.length - 1 ? "Newest answer" : `Answer ${answers.indexOf(checkpoint || "") + 1} of ${answers.length}`}
+                {checkpoint && readCheckpointState(checkpoint).status && <span className="ml-1 px-1.5 rounded bg-secondary text-[11px] text-foreground capitalize">{readCheckpointState(checkpoint).status}</span>}
+                <ChevronDown className="size-3.5" />
+              </button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="start" sideOffset={6} className={`w-[240px] max-h-[50vh] overflow-y-auto ${menuCard}`}>
+              {[...answers].reverse().map((cp, k) => {
+                const n = answers.length - k;
+                const st = readCheckpointState(cp).status;
+                return (
+                  <DropdownMenuItem key={cp} className={`${menuItem} ${cp === checkpoint ? "bg-slate-100 dark:bg-[#2a2a2a]" : ""}`} onClick={() => { setPicked(cp); load(cp); }}>
+                    {k === 0 ? "Newest answer" : `Answer ${n}`}
+                    {st && <span className="ml-auto px-1.5 rounded bg-secondary text-[11px] capitalize">{st}</span>}
+                  </DropdownMenuItem>
+                );
+              })}
+            </DropdownMenuContent>
+          </DropdownMenu>
+        )}
         {!!files?.length && (
           <span className="text-[12.5px] text-muted-foreground">
             {files.length} file{files.length === 1 ? "" : "s"}
@@ -335,7 +384,7 @@ export function StudioReviewView({ projectId, onChanged }: { projectId: string |
           </DropdownMenu>
           <button className={`${iconBtn} ${find !== null ? "bg-secondary text-foreground" : ""}`} onClick={() => setFind(find === null ? "" : null)} title="Find in the changes" aria-label="Find in the changes"><Search className="size-4" /></button>
           <button className={`${iconBtn} ${listShown ? "bg-secondary text-foreground" : ""}`} onClick={() => setListShown((s) => !s)} title={listShown ? "Hide the files list" : "Show the files list"} aria-label="Files list"><ListTree className="size-4" /></button>
-          <button className={iconBtn} onClick={load} title="Refresh" aria-label="Refresh"><RotateCw className="size-4" /></button>
+          <button className={iconBtn} onClick={() => load()} title="Refresh" aria-label="Refresh"><RotateCw className="size-4" /></button>
         </div>
       </div>
 
