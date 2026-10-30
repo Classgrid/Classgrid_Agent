@@ -531,7 +531,7 @@ router.post("/projects/:id/open", isAuthenticated, async (req, res) => {
     } else {
       await ssh.execCommand(`mkdir -p ${dir}`);
     }
-    // Studio Mode downloads the code for the agent only: no code editor box and no package install for it
+    // Studio Mode downloads the code for the agent only: no code editor box (packages are still installed, below)
     const noEditor = !!req.body?.noEditor;
     if (noEditor) await touchStudio(req.user._id).catch(() => {});
     if (!noEditor) await ensureBox(ssh, String(req.user._id));
@@ -548,7 +548,7 @@ router.post("/projects/:id/open", isAuthenticated, async (req, res) => {
     // pushes the sandbox over (opening the project again later installs what is missing)
     const { stdout: freeMb } = await ssh.execCommand(`awk '/^MemAvailable:/ { print int($2 / 1024) }' /proc/meminfo`);
     if (folders.length && Number(freeMb) < 1700) console.error(`[IDE] Package install skipped for now: only ${freeMb.trim()} MB free`);
-    if (folders.length && Number(freeMb) >= 1700 && !noEditor) {
+    if (folders.length && Number(freeMb) >= 1700) {
       installing = true;
       const inBox = `/home/workspace/projects/${project._id}`;
       const steps = folders.map((f) => `cd ${inBox}/${f} && npm install --ignore-scripts --no-audit --no-fund >> /home/workspace/.classgrid/npm-install-${project._id}.log 2>&1`).join("; ");
