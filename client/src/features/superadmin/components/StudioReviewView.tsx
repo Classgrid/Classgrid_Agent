@@ -107,9 +107,9 @@ function pairs(rows: Row[]): Pair[] {
 
 // The line numbers stay put while the diff scrolls sideways: a solid background with the row's tint on top
 const NUMBER_BG: Record<string, string> = {
-  add: "[background:linear-gradient(rgba(22,130,93,0.12),rgba(22,130,93,0.12)),#ffffff] dark:[background:linear-gradient(rgba(78,201,176,0.09),rgba(78,201,176,0.09)),#1e1e1e]",
-  del: "[background:linear-gradient(rgba(205,49,49,0.10),rgba(205,49,49,0.10)),#ffffff] dark:[background:linear-gradient(rgba(244,135,113,0.09),rgba(244,135,113,0.09)),#1e1e1e]",
-  none: "bg-white dark:bg-[#1e1e1e]",
+  add: "[background:linear-gradient(rgba(22,130,93,0.12),rgba(22,130,93,0.12)),#ffffff] dark:[background:linear-gradient(rgba(78,201,176,0.09),rgba(78,201,176,0.09)),#000000]",
+  del: "[background:linear-gradient(rgba(205,49,49,0.10),rgba(205,49,49,0.10)),#ffffff] dark:[background:linear-gradient(rgba(244,135,113,0.09),rgba(244,135,113,0.09)),#000000]",
+  none: "bg-white dark:bg-[#000000]",
 };
 const ROW_BG: Record<string, string> = { add: "bg-[#16825d]/12 dark:bg-[#4ec9b0]/[0.09]", del: "bg-[#cd3131]/10 dark:bg-[#f48771]/[0.09]", none: "" };
 const SIGN: Record<string, string> = { add: "+", del: "-" };
@@ -363,13 +363,13 @@ export function StudioReviewView({ projectId, onChanged }: { projectId: string |
       ) : (
         <div ref={bodyRef} className="flex-1 min-h-0 flex">
           {/* Every changed file: a section that opens to its diff */}
-          <div ref={diffRef} className="flex-1 min-w-0 overflow-auto [scrollbar-width:thin]">
+          <div ref={diffRef} className="flex-1 min-w-0 overflow-auto dark:bg-[#000000] [scrollbar-width:thin]">
             {files.map((f) => {
               const isOpen = open.has(f.file);
               const p = prepared.get(f.file);
               return (
                 <div key={f.file} data-file={f.file} className="border-b border-border">
-                  <div className="sticky top-0 z-10 flex items-center gap-2 h-10 px-3 bg-[#f5f5f5] dark:bg-[#181818] border-b border-border text-[13px]">
+                  <div className="sticky top-0 z-10 flex items-center gap-2 h-10 px-3 bg-[#f5f5f5] dark:bg-[#000000] border-b border-border text-[13px]">
                     <button onClick={() => toggle(f.file)} className="flex min-w-0 flex-1 items-center gap-2 text-left">
                       <FileBadge path={f.file} />
                       <span className="truncate font-medium">{nameOf(f.file)}</span>
@@ -381,7 +381,7 @@ export function StudioReviewView({ projectId, onChanged }: { projectId: string |
                     {isOpen && <button className={`${btn} shrink-0`} disabled={busy} onClick={() => reject(f.file)}>Reject file</button>}
                   </div>
                   {isOpen && p && (
-                    <div className="bg-white dark:bg-[#1e1e1e] font-mono text-[12.5px] leading-[1.6]">
+                    <div className="bg-white dark:bg-[#000000] font-mono text-[12.5px] leading-[1.6]">
                       {!view.split ? (
                         <div className="py-1">
                           {p.rows.map((r, i) => {
