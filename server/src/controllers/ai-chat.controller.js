@@ -4849,6 +4849,8 @@ If a tool fails, never show the error message; say only: "Something went wrong o
             return;
         }
 
+        // Studio: the Planner's browser and scratchpad tools are allowed (every user, in Studio Mode)
+        if (body.appMode === "studio") for (const t of PLANNER_BROWSER_TOOLS) toolPlan.allowedToolNames.add(t.function.name);
         // Only the tools this user may use can run, on every path (the SDK fallback runs any handler it is asked for).
         for (const name of Object.keys(llmConfig.toolHandlers)) {
             if (name !== LOAD_TOOLS_NAME && !toolPlan.allowedToolNames.has(name)) delete llmConfig.toolHandlers[name];
