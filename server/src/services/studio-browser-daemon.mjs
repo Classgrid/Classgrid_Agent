@@ -42,8 +42,16 @@ const broadcast = async (msg) => { for (const ws of watchers) send(ws, msg); };
 const shot = async () => (await page.screenshot({ type: "jpeg", quality: 70 })).toString("base64");
 const frameNow = async (ws) => { const data = await shot().catch(() => null); if (data) send(ws, { type: "frame", data, w: view.width, h: view.height }); };
 
-// A new tab (a link with target=_blank, a popup) becomes the page everyone sees, at the same size
-context.on("page", async (p) => { page = p; await p.setViewportSize(view).catch(() => {}); await restartScreencasts(); broadcast(await navInfo()); });
+// A new tab (a link with target=_blank, a popup) becomes the page everyone sees, at the same size. Only it and the
+// tab before it stay open, so old tabs don't pile up.
+context.on("page", async (p) => {
+  const before = page;
+  page = p;
+  await p.setViewportSize(view).catch(() => {});
+  for (const x of context.pages()) if (x !== p && x !== before) await x.close().catch(() => {});
+  await restartScreencasts();
+  broadcast(await navInfo());
+});
 
 function wire(p) {
   p.on("framenavigated", async (f) => {
@@ -65,7 +73,7 @@ async function startCast(ws) {
     if (ws.bufferedAmount < 256 * 1024) send(ws, { type: "frame", data, w: metadata.deviceWidth, h: metadata.deviceHeight });
     cdp.send("Page.screencastFrameAck", { sessionId }).catch(() => {});
   });
-  await cdp.send("Page.startScreencast", { format: "jpeg", quality: 50, maxWidth: view.width, maxHeight: view.height, everyNthFrame: 1 });
+  await cdp.send("Page.startScreencast", { format: "jpeg", quality: 40, maxWidth: Math.min(view.width, 1280), maxHeight: Math.min(view.height, 1280), everyNthFrame: 2 });
 }
 async function stopCast(ws) {
   const c = casts.get(ws);
@@ -106,6 +114,7 @@ async function useChat(id) {
   }
   currentChat = id;
   pointer = null;
+  for (const x of context.pages()) if (x !== page) await x.close().catch(() => {}); // the old chat's extra tabs close
   await page.goto((id && chatUrls[id]) || "about:blank", { waitUntil: "domcontentloaded", timeout: 30000 }).catch(() => {});
   broadcast(await navInfo());
   for (const ws of watchers) await frameNow(ws);
