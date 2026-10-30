@@ -71,7 +71,7 @@ import {
 } from "../services/ai-chat.service.js";
 import { getHistory, getHistoryCount, appendToHistory, invalidateHistoryCache, getChatTranscript } from "../services/ai-chat-history.service.js";
 import { canAccessSession, gridLabelMap, gridProfilesText, getSharedSessionsFor, leaveSharedChat, sharedChatIdsFor } from "../services/ai-chat-grid.service.js";
-import { editorContextFor, rememberProjectSnapshot, sandboxDataDir, startCheckpoint, finishCheckpoint, linkChatToProject } from "../services/ide-project.service.js";
+import { editorContextFor, rememberProjectSnapshot, sandboxDataDir, startCheckpoint, finishCheckpoint, linkChatToProject, touchStudio } from "../services/ide-project.service.js";
 import { buildEndConversationHandlers, reopenSession } from "../services/ai-end-conversation.service.js";
 import { hasEnoughTokens, deductTokens, getImageGenerationCost, tokenWindowEnd } from "../services/ai-credits.service.js";
 import redis from "../config/redis.js";
@@ -2897,7 +2897,10 @@ If they ask whether their college/school uses Classgrid, say you can't see that 
                     },
                     ...Object.fromEntries(["list_project_files", "view_project_file", "search_project", "write_project_file", "edit_project_file", "push_project_to_github", "create_github_repo_for_project", "update_project_github_repo", "start_background_command", "check_background_command", "stop_background_command", "search_project_by_meaning", "rename_project"].map((toolName) => [
                         toolName,
-                        async (args) => (await handleToolCall(toolName, args, { sessionId })).content[0].text,
+                        async (args) => {
+                            touchStudio(req.user?._id).catch(() => {}); // the project's code is in use: not cleaned up while the agent works
+                            return (await handleToolCall(toolName, args, { sessionId })).content[0].text;
+                        },
                     ])),
                     // Up to 5 helpers work on the project at the same time, each on a model the main AI picks. A helper
                     // reads the project, or (can_edit) also changes files and runs commands. The main AI either waits

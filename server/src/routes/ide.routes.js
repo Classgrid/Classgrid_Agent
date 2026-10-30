@@ -33,7 +33,7 @@ import { isAuthenticated, requireRole } from "../middleware/auth.middleware.js";
 import User from "../models/User.js";
 import IdeProject from "../models/IdeProject.js";
 import { githubUser } from "../services/github-token.service.js";
-import { pushProject, openClassgridPrBranch, revealInEditor, checkpointChanges, rejectCheckpoint, undoToCheckpoint, backupAndRemoveProjectCode } from "../services/ide-project.service.js";
+import { pushProject, openClassgridPrBranch, revealInEditor, checkpointChanges, rejectCheckpoint, undoToCheckpoint, backupAndRemoveProjectCode, touchStudio, STUDIO_USERS, STUDIO_SEEN, STUDIO_IDLE_MS } from "../services/ide-project.service.js";
 import { repoAppToken } from "../services/github-app.service.js";
 import mongoose from "mongoose";
 import connectDB from "../../config/db.js";
@@ -107,6 +107,14 @@ setInterval(async () => {
       }
       const seen = Number(await redis.get(BOX_SEEN(userId))) || 0;
       if (Date.now() - seen < BOX_IDLE_MS) continue;
+      if (Date.now() - (Number(await redis.get(STUDIO_SEEN(userId))) || 0) < STUDIO_IDLE_MS) {
+        // Still working in Studio Mode: only the editor box goes; the Studio cleanup removes the code later
+        await ssh.execCommand(`docker rm -f ide-u-${userId}`);
+        await redis.del(BOX_PORT(userId), BOX_SEEN(userId));
+        await redis.srem(BOXES, userId);
+        await redis.sadd(STUDIO_USERS, userId);
+        continue;
+      }
       await connectDB();
       const projects = await IdeProject.find({ owner: userId }).lean();
       let keptAny = false;
@@ -118,6 +126,22 @@ setInterval(async () => {
       await redis.del(BOX_PORT(userId), BOX_SEEN(userId));
       if (!keptAny) await redis.srem(BOXES, userId);
       else await redis.set(BOX_SEEN(userId), String(Date.now()), "EX", 24 * 60 * 60); // try the kept ones again later
+    }
+    // Studio Mode: no editor box, so its own time since last use decides (users with an editor box are done above)
+    for (const userId of await redis.smembers(STUDIO_USERS)) {
+      if (!/^[a-f0-9]{24}$/.test(userId)) { await redis.srem(STUDIO_USERS, userId); continue; }
+      if (await redis.sismember(BOXES, userId)) continue;
+      if (Date.now() - (Number(await redis.get(STUDIO_SEEN(userId))) || 0) < STUDIO_IDLE_MS) continue;
+      ssh = ssh || await sandboxSsh();
+      await connectDB();
+      const projects = await IdeProject.find({ owner: userId }).lean();
+      let keptAny = false;
+      for (const p of projects) {
+        const r = await backupAndRemoveProjectCode(ssh, p).catch((e) => ({ removed: false, reason: e.message }));
+        if (!r.removed) { keptAny = true; console.error(`[IDE] Kept Studio project ${p._id} on the sandbox: ${r.reason}`); }
+      }
+      if (!keptAny) { await redis.srem(STUDIO_USERS, userId); await redis.del(STUDIO_SEEN(userId)); }
+      else await redis.set(STUDIO_SEEN(userId), String(Date.now()), "EX", 24 * 60 * 60); // try the kept ones again later
     }
   } catch (e) {
     console.error("[IDE] Box cleanup failed:", e.message);
@@ -507,7 +531,10 @@ router.post("/projects/:id/open", isAuthenticated, async (req, res) => {
     } else {
       await ssh.execCommand(`mkdir -p ${dir}`);
     }
-    await ensureBox(ssh, String(req.user._id));
+    // Studio Mode downloads the code for the agent only: no code editor box and no package install for it
+    const noEditor = !!req.body?.noEditor;
+    if (noEditor) await touchStudio(req.user._id).catch(() => {});
+    if (!noEditor) await ensureBox(ssh, String(req.user._id));
     // A fresh download has no packages, so the editor's type checker marks every file red. Install them in the
     // background for the project folder and each first-level folder with its own package.json (client/, server/...),
     // with the user's package cache. It runs in a separate short-lived box with its own memory: inside the editor
@@ -521,7 +548,7 @@ router.post("/projects/:id/open", isAuthenticated, async (req, res) => {
     // pushes the sandbox over (opening the project again later installs what is missing)
     const { stdout: freeMb } = await ssh.execCommand(`awk '/^MemAvailable:/ { print int($2 / 1024) }' /proc/meminfo`);
     if (folders.length && Number(freeMb) < 1700) console.error(`[IDE] Package install skipped for now: only ${freeMb.trim()} MB free`);
-    if (folders.length && Number(freeMb) >= 1700) {
+    if (folders.length && Number(freeMb) >= 1700 && !noEditor) {
       installing = true;
       const inBox = `/home/workspace/projects/${project._id}`;
       const steps = folders.map((f) => `cd ${inBox}/${f} && npm install --ignore-scripts --no-audit --no-fund >> /home/workspace/.classgrid/npm-install-${project._id}.log 2>&1`).join("; ");
@@ -541,6 +568,113 @@ router.post("/projects/:id/open", isAuthenticated, async (req, res) => {
     res.status(e.status || 500).json({ error: e.status ? e.message : "Could not open this project" });
   } finally {
     ssh?.dispose();
+  }
+});
+
+// Studio Mode's Files tab: a project's files and one file's text. A project with a repo is read from GitHub (the open
+// Classgrid pull request's branch when there is one, so unmerged work shows too); one without a repo is read from its
+// folder on the sandbox, when it has one.
+const SKIP_DIRS = new Set(["node_modules", ".git", ".next", "dist", "build", ".cache", "__pycache__", ".venv", "venv"]);
+const MAX_FILE_BYTES = 1024 * 1024;
+// A path inside the project: no "..", no empty parts and no control characters. It goes into a shell command only
+// through shellQuote (single quotes), so $(...) or backticks in a file name are never run.
+const safeFilePath = (p) => {
+  const path = String(p || "").replace(/^\/+/, "");
+  if (!path || path.length > 1000 || /[\x00-\x1f\x7f]/.test(path)) return null;
+  return !path.split("/").some((part) => !part || part === "." || part === "..") ? path : null;
+};
+const shellQuote = (s) => `'${String(s).replace(/'/g, `'\\''`)}'`;
+
+async function projectGithub(project, userId) {
+  const key = (await repoAppToken(project.repo).catch(() => null)) || (await githubTokenFor(userId))?.github_access_token;
+  if (!key) return null;
+  const gh = (path, accept = "application/vnd.github+json") => fetch(`https://api.github.com/repos/${project.repo}${path}`, {
+    headers: { Authorization: `Bearer ${key}`, Accept: accept, "User-Agent": "Classgrid" },
+  });
+  const repoRes = await gh("");
+  if (!repoRes.ok) return { gh, error: repoRes.status === 404 ? "The repo was not found, or Classgrid cannot see it" : `GitHub said ${repoRes.status}` };
+  const base = (await repoRes.json()).default_branch || "main";
+  const branch = (await openClassgridPrBranch(project.repo, key, base)) || base;
+  return { gh, branch };
+}
+
+router.get("/projects/:id/files", isAuthenticated, async (req, res) => {
+  const project = await ownProject(req, res);
+  if (!project) return;
+  touchStudio(req.user._id).catch(() => {});
+  try {
+    // The project's code on the sandbox (opened in Studio or Project Mode) shows the agent's newest edits first
+    const ssh = await sandboxSsh().catch((e) => { console.error("[IDE] Sandbox not reached for Files:", e.message); return null; });
+    if (ssh) try {
+      const dir = projectDir(project);
+      const { stdout: has } = await ssh.execCommand(`[ -d ${dir} ] && ls -A ${dir} | head -1`);
+      if (has.trim() || !project.repo) {
+        const prune = [...SKIP_DIRS].map((d) => `-name ${shellQuote(d)}`).join(" -o ");
+        const { stdout } = await ssh.execCommand(
+          `[ -d ${dir} ] && cd ${dir} && find . -mindepth 1 \\( -type d \\( ${prune} \\) -prune \\) -o \\( -type d -printf 'd %P\\n' \\) -o \\( -type f -printf 'f %s %P\\n' \\) 2>/dev/null | head -5000`
+        );
+        const files = stdout.split("\n").filter(Boolean).map((line) => {
+          if (line.startsWith("d ")) return { path: line.slice(2), type: "dir", size: null };
+          const [, size, ...rest] = line.split(" ");
+          return { path: rest.join(" "), type: "file", size: Number(size) || 0 };
+        }).filter((f) => f.path);
+        const { stdout: branch } = await ssh.execCommand(`[ -d ${dir}/.git ] && git -C ${dir} rev-parse --abbrev-ref HEAD 2>/dev/null`);
+        return res.json({ source: "sandbox", repo: project.repo || null, branch: branch.trim() || null, files });
+      }
+    } finally {
+      ssh.dispose();
+    }
+    if (!project.repo) return res.status(503).json({ error: ssh ? "This project has no files yet" : "The sandbox can't be reached right now. Try again in a moment." });
+    // Not downloaded yet (or the sandbox can't be reached): read the repo on GitHub (the open Classgrid pull request's branch when there is one)
+    const g = await projectGithub(project, req.user._id);
+    if (!g) return res.status(409).json({ error: "github_not_connected" });
+    if (g.error) return res.status(502).json({ error: g.error });
+    const treeRes = await g.gh(`/git/trees/${encodeURIComponent(g.branch)}?recursive=1`);
+    if (treeRes.status === 409) return res.json({ source: "github", repo: project.repo, branch: g.branch, files: [] }); // empty repo
+    if (!treeRes.ok) return res.status(502).json({ error: `Could not read the repo's files (GitHub said ${treeRes.status})` });
+    const tree = await treeRes.json();
+    const files = (tree.tree || [])
+      .filter((t) => (t.type === "blob" || t.type === "tree") && !t.path.split("/").some((part) => SKIP_DIRS.has(part)))
+      .slice(0, 5000)
+      .map((t) => ({ path: t.path, type: t.type === "tree" ? "dir" : "file", size: t.size ?? null }));
+    res.json({ source: "github", repo: project.repo, branch: g.branch, files, truncated: !!tree.truncated });
+  } catch (e) {
+    console.error("[IDE] Files list failed:", e.message);
+    res.status(500).json({ error: "Could not load the files" });
+  }
+});
+
+router.get("/projects/:id/file", isAuthenticated, async (req, res) => {
+  const project = await ownProject(req, res);
+  if (!project) return;
+  touchStudio(req.user._id).catch(() => {});
+  const path = safeFilePath(req.query.path);
+  if (!path) return res.status(400).json({ error: "Pick a file" });
+  try {
+    let buf = null;
+    const ssh = await sandboxSsh().catch((e) => { console.error("[IDE] Sandbox not reached for Files:", e.message); return null; });
+    if (ssh) try {
+      const full = shellQuote(`${projectDir(project)}/${path}`);
+      const { stdout, code } = await ssh.execCommand(`[ -f ${full} ] && head -c ${MAX_FILE_BYTES + 1} ${full} | base64 -w0`);
+      if (!code) buf = Buffer.from(stdout, "base64");
+    } finally {
+      ssh.dispose();
+    }
+    if (!buf) {
+      if (!project.repo) return res.status(404).json({ error: "File not found" });
+      const g = await projectGithub(project, req.user._id);
+      if (!g) return res.status(409).json({ error: "github_not_connected" });
+      if (g.error) return res.status(502).json({ error: g.error });
+      const fileRes = await g.gh(`/contents/${path.split("/").map(encodeURIComponent).join("/")}?ref=${encodeURIComponent(g.branch)}`, "application/vnd.github.raw");
+      if (!fileRes.ok) return res.status(fileRes.status === 404 ? 404 : 502).json({ error: fileRes.status === 404 ? "File not found" : `GitHub said ${fileRes.status}` });
+      buf = Buffer.from(await fileRes.arrayBuffer());
+    }
+    if (buf.includes(0)) return res.json({ path, binary: true, size: buf.length });
+    const tooBig = buf.length > MAX_FILE_BYTES;
+    res.json({ path, binary: false, size: buf.length, truncated: tooBig, content: buf.subarray(0, MAX_FILE_BYTES).toString("utf8") });
+  } catch (e) {
+    console.error("[IDE] File read failed:", e.message);
+    res.status(500).json({ error: "Could not open the file" });
   }
 });
 

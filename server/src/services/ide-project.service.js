@@ -987,6 +987,19 @@ export async function undoToCheckpoint(project, ssh, sessionId, id) {
 // When the user's editor has been closed for a while, each downloaded project is removed from the sandbox (it is
 // downloaded fresh on the next open). Unpushed work is first pushed to a new "classgrid-backup-..." branch on GitHub;
 // if that backup fails, the code is kept. Returns what happened per project.
+// Studio Mode has no code editor box, so its use is counted here: picking a project, its Files tab and every code
+// tool the agent runs. 30 minutes with none of that, and the user's downloaded projects leave the sandbox (saved first,
+// like Project Mode's cleanup).
+export const STUDIO_USERS = "ide:studio-users";
+export const STUDIO_SEEN = (userId) => `ide:studio-seen:${userId}`;
+export const STUDIO_IDLE_MS = 30 * 60 * 1000;
+export async function touchStudio(userId) {
+  if (!userId) return;
+  const id = String(userId);
+  await redis.sadd(STUDIO_USERS, id);
+  await redis.set(STUDIO_SEEN(id), String(Date.now()), "EX", 24 * 60 * 60);
+}
+
 export async function backupAndRemoveProjectCode(ssh, project) {
   const dir = projectHostDir(project);
   // Persist the real "last edited" time before the code leaves the sandbox, so the Projects page
