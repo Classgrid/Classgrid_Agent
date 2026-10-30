@@ -1,6 +1,7 @@
 // Studio Mode's Files tab: the picked project's files (from GitHub, or the sandbox for a project without a repo),
 // a folder tree and a code view with line numbers, side by side on a wide pane with a drag line between them.
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { DocsImageViewer } from "@/components/ai/components/DocsImageViewer";
 import { createPortal } from "react-dom";
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import { themeIcons } from "seti-icons";
@@ -13,7 +14,7 @@ const TREE_KEY = "cg_studio_tree_width";
 
 type Entry = { path: string; type: "file" | "dir"; size: number | null };
 type Listing = { source: "github" | "sandbox"; repo: string | null; branch: string | null; files: Entry[]; truncated?: boolean };
-type OpenFile = { path: string; content?: string; binary?: boolean; truncated?: boolean; size?: number; error?: string; loading?: boolean; startLine?: number; endLine?: number };
+type OpenFile = { path: string; content?: string; binary?: boolean; image?: boolean; mime?: string; data?: string; truncated?: boolean; size?: number; error?: string; loading?: boolean; startLine?: number; endLine?: number };
 type Node = { name: string; path: string; dir: boolean; children: Node[] };
 type Reveal = { path: string; startLine?: number; endLine?: number; n: number };
 
@@ -544,8 +545,22 @@ function CodeView({ file }: { file: OpenFile }) {
         </div>
       ) : file.error ? (
         <p className="px-4 py-3 text-[13px] text-muted-foreground">{file.error}</p>
+      ) : file.image && file.data ? (
+        // A picture: shown as it is, on a light checkerboard so see-through parts are visible
+        <div className="flex-1 min-h-0 overflow-auto flex flex-col items-center justify-center gap-3 p-6 bg-white dark:bg-[#1e1e1e]">
+          <div className="max-w-full rounded-md border border-border bg-[length:16px_16px] bg-[linear-gradient(45deg,#0000000d_25%,transparent_25%,transparent_75%,#0000000d_75%),linear-gradient(45deg,#0000000d_25%,transparent_25%,transparent_75%,#0000000d_75%)] [background-position:0_0,8px_8px] dark:bg-[linear-gradient(45deg,#ffffff0d_25%,transparent_25%,transparent_75%,#ffffff0d_75%),linear-gradient(45deg,#ffffff0d_25%,transparent_25%,transparent_75%,#ffffff0d_75%)]">
+            {/* Click it to open the same image viewer as the rest of Classgrid */}
+            <DocsImageViewer
+              images={[{ id: file.path, src: `data:${file.mime};base64,${file.data}`, alt: file.path.split("/").pop() || "Picture" }]}
+              renderThumbnails={(imgs, openImage) => (
+                <img src={imgs[0]!.src} alt={imgs[0]!.alt} onClick={(e) => openImage(imgs[0]!, e)} className="block max-w-full max-h-[70vh] object-contain cursor-zoom-in" />
+              )}
+            />
+          </div>
+          {typeof file.size === "number" && <p className="text-[12px] text-muted-foreground">{file.size < 1024 ? `${file.size} B` : file.size < 1048576 ? `${(file.size / 1024).toFixed(1)} KB` : `${(file.size / 1048576).toFixed(1)} MB`}</p>}
+        </div>
       ) : file.binary ? (
-        <p className="px-4 py-3 text-[13px] text-muted-foreground">This file can't be shown as text.</p>
+        <p className="px-4 py-3 text-[13px] text-muted-foreground">{typeof file.size === "number" && file.size > 8 * 1024 * 1024 ? "This picture is too big to show here." : "This file can't be shown as text."}</p>
       ) : (
         <div ref={scrollRef} className="relative flex-1 min-h-0 overflow-auto bg-white dark:bg-[#1e1e1e] font-mono text-[12.5px] leading-[1.6]">
           {from > 0 && <div aria-hidden className="pointer-events-none absolute left-0 right-0 bg-[#264f78]/25 dark:bg-[#264f78]/40" style={{ top: 8 + (from - 1) * 20, height: (to - from + 1) * 20 }} />}
