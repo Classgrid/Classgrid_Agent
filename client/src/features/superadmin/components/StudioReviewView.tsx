@@ -269,7 +269,25 @@ export function StudioReviewView({ projectId, onChanged }: { projectId: string |
   const totalAdd = files?.reduce((n, f) => n + f.added, 0) || 0;
   const totalDel = files?.reduce((n, f) => n + f.removed, 0) || 0;
   const allOpen = !!files?.length && files.every((f) => open.has(f.file));
-  const mark = (on: boolean) => (on ? "bg-amber-300/30" : "");
+  // The found words themselves are marked inside the line: the current one in orange, the others in yellow
+  const allMatches = useMemo(() => (matcher ? new RegExp(matcher.source, `${matcher.flags}g`) : null), [matcher]);
+  const hl = (text: string, current: boolean) => {
+    if (!allMatches || !text) return text || " ";
+    const parts: React.ReactNode[] = [];
+    let last = 0;
+    allMatches.lastIndex = 0;
+    for (let m = allMatches.exec(text); m; m = allMatches.exec(text)) {
+      if (!m[0]) { allMatches.lastIndex++; continue; }
+      if (m.index > last) parts.push(text.slice(last, m.index));
+      parts.push(
+        <mark key={m.index} className={`rounded-[2px] text-inherit ${current ? "bg-orange-400/70 dark:bg-orange-500/70 ring-1 ring-orange-500" : "bg-amber-300/50 dark:bg-amber-400/35"}`}>{m[0]}</mark>,
+      );
+      last = m.index + m[0].length;
+    }
+    if (!parts.length) return text;
+    if (last < text.length) parts.push(text.slice(last));
+    return parts;
+  };
   const foldRow = (key: string | number, hidden: number | undefined, attrs: Record<string, string>) => (
     <button key={key} {...attrs} onClick={() => setOption("fold")} className="w-full text-left px-4 py-0.5 text-[12px] text-muted-foreground bg-black/[0.03] dark:bg-white/[0.03] hover:text-foreground">
       ⋯ {hidden} unchanged line{hidden === 1 ? "" : "s"}
@@ -394,7 +412,7 @@ export function StudioReviewView({ projectId, onChanged }: { projectId: string |
                                   <span className="w-9 pr-2 text-right">{lineNo(r.newLine)}</span>
                                 </span>
                                 <span className={`shrink-0 w-4 select-none ${SIGN_COLOR[r.kind] || "text-transparent"}`}>{SIGN[r.kind] || " "}</span>
-                                <span className={`min-w-0 flex-1 pr-4 whitespace-pre-wrap break-words ${r.kind === "hunk" ? "text-muted-foreground" : ""} ${mark(matches(textOf(r)))}`}>{r.text || " "}</span>
+                                <span className={`min-w-0 flex-1 pr-4 whitespace-pre-wrap break-words ${r.kind === "hunk" ? "text-muted-foreground" : ""}`}>{r.kind === "hunk" ? r.text : hl(r.text, isCurrent(f.file, i))}</span>
                               </div>
                             );
                           })}
@@ -420,7 +438,7 @@ export function StudioReviewView({ projectId, onChanged }: { projectId: string |
                                     <div key={side} className={`flex min-w-0 ${side === "right" ? "border-l border-border" : ""} ${r ? ROW_BG[t] : "bg-black/[0.02] dark:bg-white/[0.02]"}`}>
                                       <span className="shrink-0 w-11 pr-2 text-right select-none text-[#237893] dark:text-[#6e7681]">{r ? lineNo(side === "left" ? r.oldLine : r.newLine) : ""}</span>
                                       <span className={`shrink-0 w-4 select-none ${r && r.kind !== "same" ? SIGN_COLOR[r.kind] : "text-transparent"}`}>{r && r.kind !== "same" ? SIGN[r.kind] : " "}</span>
-                                      <span className={`min-w-0 pr-3 whitespace-pre-wrap break-all ${mark(matches(textOf(r)))}`}>{r ? r.text || " " : ""}</span>
+                                      <span className="min-w-0 pr-3 whitespace-pre-wrap break-all">{r ? hl(r.text, isCurrent(f.file, i)) : ""}</span>
                                     </div>
                                   );
                                 })}
