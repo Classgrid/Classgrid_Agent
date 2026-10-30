@@ -73,6 +73,7 @@ import { getHistory, getHistoryCount, appendToHistory, invalidateHistoryCache, g
 import { canAccessSession, gridLabelMap, gridProfilesText, getSharedSessionsFor, leaveSharedChat, sharedChatIdsFor } from "../services/ai-chat-grid.service.js";
 import { editorContextFor, rememberProjectSnapshot, sandboxDataDir, startCheckpoint, finishCheckpoint, linkChatToProject, touchStudio } from "../services/ide-project.service.js";
 import { PLANNER_BROWSER_TOOLS, WORKER_BROWSER_TOOLS, makeBrowserHandlers, BROWSER_WORKER_SYSTEM } from "../services/studio-browser-tools.js";
+import { ensureBrowser } from "../services/studio-browser.service.js";
 import { buildEndConversationHandlers, reopenSession } from "../services/ai-end-conversation.service.js";
 import { hasEnoughTokens, deductTokens, getImageGenerationCost, tokenWindowEnd } from "../services/ai-credits.service.js";
 import redis from "../config/redis.js";
@@ -2935,6 +2936,8 @@ If they ask whether their college/school uses Classgrid, say you can't see that 
                             .map((h) => ({ task: String(h.task || "").trim(), model: String(h.model || "").trim(), canEdit: h.can_edit === true || h.can_edit === "true", browser: h.browser === true || h.browser === "true" }))
                             .filter((h) => h.task);
                         if (!specs.length) return "Error: give 1 to 5 helpers.";
+                        // A Browser worker: start the user's browser right away, in the background, while the worker starts
+                        if (specs.some((h) => h.browser) && userId) ensureBrowser(String(userId)).catch(() => {});
                         const board = helperBoard(sessionId);
                         board.helpers = board.helpers.filter((h) => h.state === "running" || !h.reportTaken);
                         const room = Math.max(0, 5 - board.helpers.filter((h) => h.state === "running").length);

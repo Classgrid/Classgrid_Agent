@@ -2,7 +2,7 @@
 // sends a Browser worker (a helper on Claude Sonnet 5.5 or DeepSeek V4.1 Flash) that drives the user's live browser.
 // Every browser step returns a screenshot, so the model sees what happened.
 import redis from "../config/redis.js";
-import { browserAct } from "./studio-browser.service.js";
+import { browserAct, ensureBrowser } from "./studio-browser.service.js";
 
 const fn = (name, description, properties = {}, required = []) => ({ type: "function", function: { name, description, parameters: { type: "object", properties, required } } });
 
@@ -74,6 +74,8 @@ export function makeBrowserHandlers({ userId, sessionId }) {
       const text = String(a?.content ?? "");
       const next = a?.mode === "append" ? `${await readPad(sessionId)}\n${text}`.trim() : text;
       await writePad(sessionId, next.slice(0, 20000));
+      // The plan is written: start the user's browser now, in the background, so it is ready when the worker opens a page
+      if (userId) ensureBrowser(userId).catch(() => {});
       return "Saved to the scratchpad.";
     },
   };
