@@ -55,10 +55,11 @@ async function startCast(ws) {
   const cdp = await context.newCDPSession(page);
   casts.set(ws, { cdp, page });
   cdp.on("Page.screencastFrame", ({ data, sessionId, metadata }) => {
-    send(ws, { type: "frame", data, w: metadata.deviceWidth, h: metadata.deviceHeight });
+    // A slow connection skips frames instead of piling them up (the next frame shows the page as it is now)
+    if (ws.bufferedAmount < 256 * 1024) send(ws, { type: "frame", data, w: metadata.deviceWidth, h: metadata.deviceHeight });
     cdp.send("Page.screencastFrameAck", { sessionId }).catch(() => {});
   });
-  await cdp.send("Page.startScreencast", { format: "jpeg", quality: 60, maxWidth: view.width, maxHeight: view.height, everyNthFrame: 1 });
+  await cdp.send("Page.startScreencast", { format: "jpeg", quality: 50, maxWidth: view.width, maxHeight: view.height, everyNthFrame: 1 });
 }
 async function stopCast(ws) {
   const c = casts.get(ws);

@@ -139,7 +139,8 @@ export function registerBrowserSocket(socket) {
       ws.on("open", () => socket.emit("studio:browser", { type: "status", status: "ready" }));
       ws.on("message", (raw) => {
         let m; try { m = JSON.parse(String(raw)); } catch { return; }
-        socket.emit("studio:browser", m);
+        // Frames are dropped when the viewer's connection is busy, so the picture never lags behind
+        if (m.type === "frame") socket.volatile.emit("studio:browser", m); else socket.emit("studio:browser", m);
         if (Date.now() - lastTouch > 30000) { lastTouch = Date.now(); touchBrowser(socket.userId); }
       });
       ws.on("close", () => { if (ws) { ws = null; watching.set(socket.userId, Math.max(0, (watching.get(socket.userId) || 1) - 1)); socket.emit("studio:browser", { type: "status", status: "closed" }); } });
