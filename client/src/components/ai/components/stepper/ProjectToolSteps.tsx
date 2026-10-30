@@ -619,11 +619,13 @@ export function FilesChangedSummary({ steps, checkpoint, sessionId }: { steps: S
 const FILE_MENTION = /^((?:[\w.@-]+\/)*[\w@-][\w.@-]*\.(?:tsx?|jsx?|mjs|cjs|json|md|mdx|html?|css|scss|sass|less|py|rb|go|rs|java|kt|php|c|h|cpp|hpp|cs|swift|vue|svelte|ya?ml|toml|ini|env|txt|sh|sql|graphql|xml|svg|prisma|dart|lock|tsbuildinfo|gitignore|config))(?::(\d+)(?:-(\d+))?|#L(\d+)(?:-L?(\d+))?|,?\s*\(?lines?\s*(\d+)(?:\s*[-–]\s*(\d+))?\)?)?$/i;
 
 const inProjectMode = () => typeof window !== 'undefined' && window.location.pathname.split('/').includes('project');
+// File and folder chips in answers: Project Mode and Studio (a click opens the file in the Files tab)
+const fileChipsOn = () => typeof window !== 'undefined' && window.location.pathname.split('/').some((p) => p === 'project' || p === 'studio');
 // A folder named in the answer (`src/components/`): needs a "/" so normal words never match
 const FOLDER_MENTION = /^(?:\.\/)?((?:[\w@-][\w.@-]*\/)+(?:[\w@-][\w@-]*)?)\/?$/;
 
 export function parseFileMention(text: string) {
-  if (!inProjectMode()) return null;
+  if (!fileChipsOn()) return null;
   const t = String(text).trim();
   const folder = t.match(FOLDER_MENTION);
   if (folder && folder[1] && !/\.[A-Za-z][A-Za-z0-9]*$/.test(folder[1].replace(/\/$/, ''))) {
@@ -641,7 +643,7 @@ export function parseFileMention(text: string) {
 // A link the AI wrote to a project file or folder ([App.tsx](src/App.tsx), /data/src, the editor path, or this
 // site's own address with a file path): opens in the editor instead of going to a web page.
 export function parseProjectLink(href?: string) {
-  if (!href || !inProjectMode()) return null;
+  if (!href || !fileChipsOn()) return null;
   let p = String(href).trim();
   if (/^(mailto:|tel:|#)/i.test(p)) return null;
   if (/^https?:\/\//i.test(p)) {
@@ -662,6 +664,11 @@ export function parseProjectLink(href?: string) {
 
 export function FileMentionChip({ path, startLine, endLine, label, folder }: { path: string; startLine?: number; endLine?: number; label: React.ReactNode; folder?: boolean }) {
   const go = () => openInEditor({ path, startLine, endLine, folder });
+  // Studio: the chip uses Studio's own greys (light and dark) instead of blue
+  const studio = typeof window !== 'undefined' && window.location.pathname.split('/').includes('studio');
+  const look = studio
+    ? "border border-black/10 dark:border-white/10 bg-black/[0.04] dark:bg-white/[0.06] text-foreground hover:bg-black/[0.08] dark:hover:bg-white/[0.1]"
+    : "border border-blue-500/30 bg-blue-500/10 text-blue-700 dark:text-blue-300 hover:bg-blue-500/20 hover:underline";
   return (
     <span
       role="link"
@@ -669,7 +676,7 @@ export function FileMentionChip({ path, startLine, endLine, label, folder }: { p
       title={folder ? `Show ${path} in the editor` : startLine ? `Open ${path} at line ${startLine}` : `Open ${path}`}
       onClick={go}
       onKeyDown={(e) => { if (e.key === 'Enter') go(); }}
-      className="inline-flex max-w-full items-center gap-1 rounded-md border border-blue-500/30 bg-blue-500/10 px-1.5 py-0.5 align-baseline font-mono text-[0.85em] text-blue-700 dark:text-blue-300 cursor-pointer hover:bg-blue-500/20 hover:underline"
+      className={`inline-flex max-w-full items-center gap-1 rounded-md px-1.5 py-0.5 align-baseline font-mono text-[0.85em] cursor-pointer transition-colors ${look}`}
     >
       {folder ? <Folder className="size-3.5 shrink-0" /> : <FileBadge path={path} />}
       {/* Long paths break onto the next line instead of pushing the chat wider than a narrow panel */}
