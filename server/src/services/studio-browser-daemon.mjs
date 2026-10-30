@@ -17,12 +17,47 @@ const PROFILE = process.env.STUDIO_PROFILE || "/home/agent/studio/profile";
 const MAX_TEXT = 20000;
 let view = { width: 1280, height: 800 };
 
-const context = await chromium.launchPersistentContext(PROFILE, {
+// A normal Chrome to websites: without the "run by a program" switch, and with Chrome's usual name instead of
+// "HeadlessChrome" (sites block browsers that say they are automated)
+const launchOpts = {
   headless: true,
   viewport: view,
-  args: ["--no-sandbox", "--disable-dev-shm-usage", "--disable-gpu"],
-});
+  locale: "en-IN",
+  ignoreDefaultArgs: ["--enable-automation"],
+  args: ["--no-sandbox", "--disable-dev-shm-usage", "--disable-gpu", "--disable-blink-features=AutomationControlled"],
+};
+// The full Chromium (its newer headless mode) is used when it is there: unlike the small headless build, it doesn't
+// call itself "HeadlessChrome" in its brand list either
+let context = await chromium.launchPersistentContext(PROFILE, { ...launchOpts, channel: "chromium" })
+  .catch(() => chromium.launchPersistentContext(PROFILE, launchOpts));
+const firstUa = await (context.pages()[0] || (await context.newPage())).evaluate(() => navigator.userAgent).catch(() => "");
+if (/HeadlessChrome/.test(firstUa)) {
+  await context.close();
+  context = await chromium.launchPersistentContext(PROFILE, { ...launchOpts, userAgent: firstUa.replace(/HeadlessChrome/g, "Chrome") });
+}
+// Chrome also sends its brand list to websites (and pages can read it): it says "Chrome" there too, on every tab
+const NORMAL_UA = firstUa.replace(/HeadlessChrome/g, "Chrome");
+const major = (NORMAL_UA.match(/Chrome\/(\d+)/) || [])[1] || "153";
+const uaOverride = {
+  userAgent: NORMAL_UA,
+  acceptLanguage: "en-IN,en;q=0.9",
+  platform: "Linux x86_64",
+  userAgentMetadata: {
+    brands: [{ brand: "Chromium", version: major }, { brand: "Google Chrome", version: major }, { brand: "Not_A Brand", version: "8" }],
+    fullVersion: `${major}.0.0.0`, platform: "Linux", platformVersion: "", architecture: "x86", model: "", mobile: false,
+  },
+};
+const uaSessions = new WeakMap(); // page -> its CDP session (the override lasts while it stays open)
+async function normalChrome(p) {
+  if (!NORMAL_UA || uaSessions.has(p)) return;
+  try {
+    const cdp = await context.newCDPSession(p);
+    uaSessions.set(p, cdp);
+    await cdp.send("Network.setUserAgentOverride", uaOverride);
+  } catch { /* the tab closed */ }
+}
 let page = context.pages()[0] || (await context.newPage());
+await normalChrome(page);
 // Each chat has its own page: back in a chat, its last page opens again (also after a restart); a new chat starts
 // with an empty browser. The logins (the profile) are shared.
 const CHAT_URLS = `${PROFILE}/../chat-urls.json`;
@@ -47,6 +82,7 @@ const frameNow = async (ws) => { const data = await shot().catch(() => null); if
 context.on("page", async (p) => {
   const before = page;
   page = p;
+  await normalChrome(p);
   await p.setViewportSize(view).catch(() => {});
   for (const x of context.pages()) if (x !== p && x !== before) await x.close().catch(() => {});
   await restartScreencasts();
