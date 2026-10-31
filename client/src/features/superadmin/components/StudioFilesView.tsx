@@ -13,7 +13,7 @@ const dragFile = (e: React.DragEvent, path: string) => {
 import { createPortal } from "react-dom";
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import { themeIcons } from "seti-icons";
-import { Check, ChevronRight, Copy, Folder, FolderOpen, ListTree, RotateCw, Search, X } from "lucide-react";
+import { Check, ChevronRight, Copy, Folder, FolderOpen, FolderTree, ListTree, RotateCw, Search, X } from "lucide-react";
 import { fetchWithRescue } from "@/lib/rescue";
 
 const backendUrl = import.meta.env.VITE_API_URL || "https://api.classgrid.in";
@@ -66,6 +66,15 @@ function buildTree(files: Entry[]): Node[] {
 }
 
 // The search box: files whose name has the search text, as one flat list (best matches first, at most 300)
+// The same results inside their folders (the folder button in the search box): matching files only, folders kept
+function searchTree(nodes: Node[], keep: Set<string>): Node[] {
+  return nodes.flatMap((n) => {
+    if (!n.dir) return keep.has(n.path) ? [n] : [];
+    const kids = searchTree(n.children, keep);
+    return kids.length ? [{ ...n, children: kids }] : [];
+  });
+}
+const dirPaths = (nodes: Node[]): string[] => nodes.flatMap((n) => (n.dir ? [n.path, ...dirPaths(n.children)] : []));
 function searchFiles(files: Entry[], q: string): string[] {
   const score = (name: string) => (name === q ? 0 : name.startsWith(q) ? 1 : 2);
   return files
@@ -146,6 +155,9 @@ export function StudioFilesView({ projectId, projectName, wide, reloadKey = 0, r
   // The tree is filtered just after each key press, so typing itself never waits for it
   const q = useDeferredValue(query.trim().toLowerCase());
   const matches = useMemo(() => (q ? searchFiles(listing?.files || [], q) : []), [listing, q]);
+  const [inFolders, setInFolders] = useState(false);
+  const matchTree = useMemo(() => (q && inFolders ? searchTree(tree, new Set(matches)) : []), [q, inFolders, tree, matches]);
+  const matchDirs = useMemo(() => new Set(dirPaths(matchTree)), [matchTree]);
 
   const openFile = async (path: string, lines?: { startLine?: number; endLine?: number }) => {
     if (!projectId) return;
@@ -355,6 +367,16 @@ export function StudioFilesView({ projectId, projectName, wide, reloadKey = 0, r
                       <X className="size-3" />
                     </button>
                   )}
+                  <button
+                    type="button"
+                    onClick={() => setInFolders((v) => !v)}
+                    className={`shrink-0 flex items-center justify-center size-6 rounded transition-colors ${inFolders ? "text-foreground bg-black/[0.07] dark:bg-white/[0.1]" : "text-muted-foreground hover:text-foreground"}`}
+                    title={inFolders ? "Show results as a list" : "Show results in their folders"}
+                    aria-label={inFolders ? "Show results as a list" : "Show results in their folders"}
+                    aria-pressed={inFolders}
+                  >
+                    <FolderTree className="size-3.5" />
+                  </button>
                 </label>
               </div>
             )}
@@ -372,6 +394,8 @@ export function StudioFilesView({ projectId, projectName, wide, reloadKey = 0, r
             ) : q ? (
               !matches.length ? (
                 <p className="px-4 py-3 text-[13px] text-muted-foreground">No files match “{query.trim()}”.</p>
+              ) : inFolders ? (
+                <Tree nodes={matchTree} depth={0} openDirs={matchDirs} toggleDir={() => {}} openFile={openFile} current={file?.path || null} writing={writing} changed={changed} still />
               ) : (
                 <div className="px-1">
                   {matches.map((path) => {
@@ -405,9 +429,9 @@ export function StudioFilesView({ projectId, projectName, wide, reloadKey = 0, r
   );
 }
 
-function Tree({ nodes, depth, openDirs, toggleDir, openFile, current, writing, changed }: {
+function Tree({ nodes, depth, openDirs, toggleDir, openFile, current, writing, changed, still = false }: {
   nodes: Node[]; depth: number; openDirs: Set<string>; toggleDir: (p: string) => void; openFile: (p: string) => void; current: string | null;
-  writing: Set<string>; changed: Set<string>;
+  writing: Set<string>; changed: Set<string>; still?: boolean; // still: search results, shown at once without the open/close animation
 }) {
   const reduce = useReducedMotion();
   return (
@@ -441,7 +465,9 @@ function Tree({ nodes, depth, openDirs, toggleDir, openFile, current, writing, c
               {!n.dir && writing.has(n.path) && <span className="ml-auto shrink-0 text-[11px] text-sky-400">Writing…</span>}
               {!n.dir && !writing.has(n.path) && changed.has(n.path) && <span className="ml-auto shrink-0 size-1.5 rounded-full bg-sky-400" title="Just changed" />}
             </button>
-            <AnimatePresence initial={false}>
+            {still ? (n.dir && open && (
+              <Tree nodes={n.children} depth={depth + 1} openDirs={openDirs} toggleDir={toggleDir} openFile={openFile} current={current} writing={writing} changed={changed} still />
+            )) : <AnimatePresence initial={false}>
               {n.dir && open && (
                 <motion.div
                   initial={reduce ? false : { height: 0, opacity: 0 }}
@@ -453,7 +479,7 @@ function Tree({ nodes, depth, openDirs, toggleDir, openFile, current, writing, c
                   <Tree nodes={n.children} depth={depth + 1} openDirs={openDirs} toggleDir={toggleDir} openFile={openFile} current={current} writing={writing} changed={changed} />
                 </motion.div>
               )}
-            </AnimatePresence>
+            </AnimatePresence>}
           </div>
         );
       })}
