@@ -32,6 +32,13 @@ import { apiClient } from "@/lib/apiClient";
 
 const backendUrl = import.meta.env.VITE_API_URL || "https://api.classgrid.in";
 const OPEN_PROJECT_KEY = "cg_project_open"; // which project this browser had open (per-viewer convenience)
+// This page was loaded by a refresh while in Project Mode (then the open project stays open)
+let reloadedInProject = (() => {
+  try {
+    const nav = performance.getEntriesByType("navigation")[0] as PerformanceNavigationTiming | undefined;
+    return nav?.type === "reload" && new URL(nav.name).pathname.split("/").includes("project");
+  } catch { return false; }
+})();
 const AI_PANEL_KEY = "cg_project_ai_closed"; // whether the AI panel was closed (per-viewer convenience)
 
 type Project = { id: string; name: string; repo: string | null; logo?: string | null; lastOpenedAt: string | null; createdAt?: string; updatedAt: string };
@@ -177,10 +184,17 @@ export function ProjectModePage() {
     } catch { return null; }
   });
   // No project opens by itself: Project Mode starts on the project list until the user opens one
-  // The project open in this tab (shared with Studio Mode): switching modes opens the same project by itself
+  // The project open in this tab (shared with Studio Mode). It opens by itself only on a refresh of Project Mode or a
+  // link to one of its chats; coming here from Studio or Agent mode starts on the project list.
   const [openId, setOpenId] = useState<string | null>(() => {
+    const parts = window.location.pathname.split("/");
+    if (!reloadedInProject && !parts[parts.indexOf("project") + 1]) {
+      try { localStorage.removeItem(OPEN_PROJECT_KEY); sessionStorage.removeItem(OPEN_PROJECT_KEY); } catch { /* storage blocked */ }
+      return null;
+    }
     try { return sessionStorage.getItem(OPEN_PROJECT_KEY) || localStorage.getItem(OPEN_PROJECT_KEY); } catch { return null; }
   });
+  useEffect(() => { reloadedInProject = false; }, []); // only the first visit after the refresh counts
   const [folder, setFolder] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [newName, setNewName] = useState<string | null>(null);
