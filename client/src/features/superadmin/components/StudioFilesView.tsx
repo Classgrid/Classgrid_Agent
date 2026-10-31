@@ -145,7 +145,25 @@ export function StudioFilesView({ projectId, projectName, wide, reloadKey = 0, r
     }
   }, [projectId]);
 
-  useEffect(() => { setListing(null); setFile(null); setOpenPaths([]); fileCache.current.clear(); activePath.current = null; setOpenDirs(new Set()); load(); }, [load]);
+  useEffect(() => {
+    setListing(null); setFile(null); setOpenPaths([]); fileCache.current.clear(); activePath.current = null; setOpenDirs(new Set()); load();
+    // A refresh brings back this project's open file tabs, the file that was showing and the open folders
+    if (!projectId) return;
+    try {
+      const saved = JSON.parse(localStorage.getItem(`cg_studio_files:${projectId}`) || "null");
+      if (Array.isArray(saved?.dirs)) setOpenDirs(new Set(saved.dirs.filter((d: unknown) => typeof d === "string")));
+      const paths: string[] = Array.isArray(saved?.paths) ? saved.paths.filter((x: unknown) => typeof x === "string") : [];
+      if (paths.length) {
+        setOpenPaths(paths);
+        openFile(paths.includes(saved.active) ? saved.active : paths[paths.length - 1]!);
+      }
+    } catch { /* storage blocked */ }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [load]);
+  useEffect(() => {
+    if (!projectId) return;
+    try { localStorage.setItem(`cg_studio_files:${projectId}`, JSON.stringify({ paths: openPaths, active: file?.path || null, dirs: [...openDirs] })); } catch { /* storage blocked */ }
+  }, [projectId, openPaths, file?.path, openDirs]);
   // The project's code just got ready on the sandbox: load the list again (keeps the open file and folders)
   useEffect(() => { if (reloadKey) load(); }, [reloadKey, load]);
 

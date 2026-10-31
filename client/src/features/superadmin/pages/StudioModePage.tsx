@@ -46,10 +46,22 @@ const MAX_SIDEBAR = 500;
 const MIN_PANE = 320;
 const MIN_CHAT = 320;
 
+// The pane's tabs and the selected one, kept across a refresh
+const TABS_KEY = "cg_studio_tabs";
+const TAB_KINDS = new Set<TabKind>(["browser", "review", "files", "terminal", "project", "shots"]);
+function readTabs(): { tabs: Tab[]; active: string | null } {
+  try {
+    const saved = JSON.parse(localStorage.getItem(TABS_KEY) || "null");
+    const tabs = Array.isArray(saved?.tabs) ? (saved.tabs as Tab[]).filter((t) => t && typeof t.id === "string" && TAB_KINDS.has(t.kind)) : [];
+    if (tabs.length) return { tabs, active: tabs.some((t) => t.id === saved.active) ? saved.active : tabs[0]!.id };
+  } catch { /* storage blocked */ }
+  return { tabs: [{ id: "browser-1", kind: "browser" }], active: "browser-1" };
+}
+
 function readPane(): { open: boolean; width: number } {
   try {
     const saved = JSON.parse(localStorage.getItem(PANE_KEY) || "null");
-    if (saved && typeof saved.width === "number") return { open: false, width: saved.width }; // Studio always opens with the pane closed
+    if (saved && typeof saved.width === "number") return { open: !!saved.open, width: saved.width }; // a refresh keeps the pane open or closed
   } catch { /* storage blocked */ }
   return { open: false, width: Math.round(window.innerWidth * 0.4) };
 }
@@ -62,8 +74,11 @@ export function StudioModePage() {
   // A narrow pane shows its tabs as icons only (the name shows on hover)
   const compactTabs = !maximized && pane.width < 520;
   const [resizing, setResizing] = useState(false);
-  const [tabs, setTabs] = useState<Tab[]>([{ id: "browser-1", kind: "browser" }]);
-  const [active, setActive] = useState<string | null>("browser-1");
+  const [tabs, setTabs] = useState<Tab[]>(() => readTabs().tabs);
+  const [active, setActive] = useState<string | null>(() => readTabs().active);
+  useEffect(() => {
+    try { localStorage.setItem(TABS_KEY, JSON.stringify({ tabs, active })); } catch { /* storage blocked */ }
+  }, [tabs, active]);
   const rowRef = useRef<HTMLDivElement>(null);
   const reduce = useReducedMotion();
   // The agent's commands for the Terminal tab (kept here, so switching tabs keeps them)
