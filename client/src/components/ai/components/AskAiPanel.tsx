@@ -6307,7 +6307,7 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
                       // mb-12 (not pb-12): the scrolling text area ends above the buttons, so long text never slides under them
                       "w-full resize-none bg-transparent mb-12 pb-1 pl-4 pr-4 text-[16px] sm:text-sm focus:outline-none overflow-y-auto chat-scrollbar leading-relaxed transition-all duration-300",
                       // The narrow side panel has the buttons below the text, so it keeps normal side spacing
-                      variant === "overlay" ? "" : cn("sm:pl-24", showFilesPanel ? "sm:pr-32" : "sm:pr-60", "@max-[56rem]:!pl-4 @max-[56rem]:!pr-4"),
+                      variant === "overlay" ? "" : cn(showFilesPanel ? "sm:pr-32" : "sm:pr-60", "@max-[56rem]:!pl-4 @max-[56rem]:!pr-4"),
                       (isRecording || isTranscribing) ? "text-transparent placeholder:text-transparent" : "text-foreground",
                       isExpandedBox ? "min-h-[calc(60vh-3rem)] max-h-[calc(60vh-3rem)]" : "min-h-[40px] max-h-[132px]", // 3rem (mb-12) less than before: same box size
                       (pageContext?.path?.startsWith("/docs") || attachedFiles.length > 0) ? "pt-3" : "pt-4 rounded-2xl"
@@ -6955,7 +6955,7 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
                               }}
                               placeholder="Ask anything, analyse a file, or schedule a task…"
                               className={cn(
-                                "w-full resize-none bg-transparent mb-12 pb-1 pl-4 pr-4 sm:pl-24 pt-4 rounded-2xl text-[16px] sm:text-sm focus:outline-none overflow-y-auto chat-scrollbar leading-relaxed transition-all duration-300",
+                                "w-full resize-none bg-transparent mb-12 pb-1 pl-4 pr-4 pt-4 rounded-2xl text-[16px] sm:text-sm focus:outline-none overflow-y-auto chat-scrollbar leading-relaxed transition-all duration-300",
                                 showFilesPanel ? "sm:pr-32" : "sm:pr-60",
                                 "@max-[56rem]:!pl-4 @max-[56rem]:!pr-4", // a narrow chat column (Studio Mode) drops the wide side spaces
                                 (isRecording || isTranscribing) ? "text-transparent placeholder:text-transparent" : "text-foreground",
