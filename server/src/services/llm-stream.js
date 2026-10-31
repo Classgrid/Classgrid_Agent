@@ -246,7 +246,7 @@ export async function streamChat({
     // `tools` is re-read every round: load_tools can add tools to the same array mid-answer.
     const currentTools = () => tools.filter(t => t?.function?.name !== "internal_thought_process" && !excludeTools?.has(t?.function?.name));
     const conversation = [...messages];
-    const toolImages = seesImages ? (await import("./llm-stream-anthropic.js")).makeToolImageCollector(signal) : null;
+    const toolImages = seesImages ? (await import("./llm-stream-anthropic.js")).makeToolImageCollector(signal, conversation) : null;
     const usage = { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 };
     let depth = 0;
     let toolsRun = 0;

@@ -82,6 +82,7 @@ import { streamAskAi, clientToolResult, getChatSessions, getChatSession, getChat
 
 import { getFavicon } from "../controllers/ai-favicon.controller.js";
 import { listStudioShots } from "../services/studio-browser-tools.js";
+import { answerPermission } from "../services/permission-gate.js";
 import { getMarket } from "../controllers/ai-widgets.controller.js";
 import aiTopUpRoutes from "./ai-credits-topup.routes.js";
 import aiCreditsRoutes from "./ai-credits.routes.js";
@@ -194,6 +195,7 @@ router.get("/sessions/:id/messages", isAuthenticated, getChatSessionMessages);
 router.put("/sessions/:id", isAuthenticated, updateChatSession);
 router.post("/sessions/:id/archive", isAuthenticated, archiveChatSession);
 router.get("/studio/shots/:sessionId", isAuthenticated, listStudioShots);
+router.post("/permission/:id", isAuthenticated, answerPermission);
 router.delete("/sessions/:id", isAuthenticated, deleteChatSession);
 router.post("/sessions/:id/share", isAuthenticated, shareChatSession);
 router.post("/sessions/:id/reopen", isAuthenticated, reopenChatSession); // super_admin only (checked in controller)

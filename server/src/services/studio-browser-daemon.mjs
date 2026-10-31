@@ -120,10 +120,15 @@ async function restartScreencasts() {
   for (const ws of [...casts.keys()]) { await stopCast(ws); await startCast(ws).catch(() => {}); }
 }
 
-// The page takes the size of the viewer's Browser tab (within sensible limits)
+// The page follows the shape of the viewer's Browser tab, but is always at least desktop width (1280px): a narrow
+// tab shows the desktop page shrunk to fit, so websites never switch to their mobile layout
 let resizing = Promise.resolve();
+const DESKTOP_WIDTH = 1280;
 function resize(w, h) {
-  const next = { width: Math.round(Math.min(1920, Math.max(640, Number(w) || 0))), height: Math.round(Math.min(1400, Math.max(400, Number(h) || 0))) };
+  let W = Number(w) || 0;
+  let H = Number(h) || 0;
+  if (W > 0 && W < DESKTOP_WIDTH) { H = (H * DESKTOP_WIDTH) / W; W = DESKTOP_WIDTH; }
+  const next = { width: Math.round(Math.min(1920, Math.max(DESKTOP_WIDTH, W))), height: Math.round(Math.min(1400, Math.max(600, H))) };
   if (next.width === view.width && next.height === view.height) return resizing;
   view = next;
   resizing = resizing.then(async () => {
@@ -194,7 +199,25 @@ async function act(a, byAgent = false) {
     case "screenshot":
       if (byAgent && !a.full) point("shot");
       break;
-    case "read": case "tabs": break;
+    case "read":
+      // Pages that load their content late (as you scroll): go down the page step by step, then back to the top
+      await page.waitForLoadState("networkidle", { timeout: 4000 }).catch(() => {});
+      await page.evaluate(async () => {
+        const step = Math.max(400, Math.round(window.innerHeight * 0.9));
+        const start = window.scrollY;
+        for (let y = 0, n = 0; y < document.body.scrollHeight && n < 40; y += step, n++) {
+          window.scrollTo(0, y);
+          await new Promise((r) => setTimeout(r, 150));
+        }
+        window.scrollTo(0, start);
+      }).catch(() => {});
+      await page.waitForLoadState("networkidle", { timeout: 3000 }).catch(() => {});
+      break;
+    case "wait":
+      await page.waitForLoadState("networkidle", { timeout: 4000 }).catch(() => {});
+      await page.waitForTimeout(Math.min(10000, Math.max(500, Number(a.seconds || 2) * 1000)));
+      break;
+    case "tabs": break;
     default: throw new Error(`Unknown action: ${a.action}`);
   }
   // Wait for the page to settle before the picture: a new page until its files finished loading, and about a second

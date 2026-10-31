@@ -74,6 +74,7 @@ import { canAccessSession, gridLabelMap, gridProfilesText, getSharedSessionsFor,
 import { editorContextFor, rememberProjectSnapshot, sandboxDataDir, startCheckpoint, finishCheckpoint, linkChatToProject, touchStudio } from "../services/ide-project.service.js";
 import { PLANNER_BROWSER_TOOLS, PLANNER_BLIND_TOOLS, WORKER_BROWSER_TOOLS, BROWSER_TOOL_NAMES, makeBrowserHandlers, BROWSER_WORKER_SYSTEM } from "../services/studio-browser-tools.js";
 import { ensureBrowser } from "../services/studio-browser.service.js";
+import { gateHandlers, PERMISSION_MODES } from "../services/permission-gate.js";
 import { buildEndConversationHandlers, reopenSession } from "../services/ai-end-conversation.service.js";
 import { hasEnoughTokens, deductTokens, getImageGenerationCost, tokenWindowEnd } from "../services/ai-credits.service.js";
 import redis from "../config/redis.js";
@@ -3024,6 +3025,8 @@ If they ask whether their college/school uses Classgrid, say you can't see that 
                                 emitHelper({ helper: i, id, result: "Sent to the main AI." });
                                 return withInbox("Sent to the main AI.");
                             };
+                            // A helper's commands and browser actions ask the user too, in the same permission mode
+                            gateHandlers(liveHandlers, permissionCtx);
                             const browserNote = hasBrowser && !h.browser ? "\n\nYou also have the user's live web browser (browser_open, browser_click, browser_type, browser_press, browser_scroll, browser_back, browser_screenshot, browser_read) and the chat's shared scratchpad (scratchpad_read, scratchpad_write). When your task is about a website, use the browser. Look at the screenshots closely, not only the text: report the design and UI/UX too (layout, colours, fonts, spacing, images, buttons, how easy the page is to use, anything broken). Each screenshot result has a link; put the links that show what you found in your report. Never type a password, card number or one-time code, and never pay, buy, send, post or delete anything: tell the main AI (tell_main) that the user must do that step." : "";
                             const system = (h.browser ? BROWSER_WORKER_SYSTEM : h.canEdit
                                 ? "You are a helper working on a code project together with a main AI and up to 4 other helpers. Do your task by really changing the project: write and edit files, and run commands when needed. Read the files you change first. Only touch the files your task is about, because other helpers may be editing other files at the same time. Never push to GitHub. Follow any message from the main AI. Use tell_main to ask the main AI something or tell it something important. When you are done, report what you changed, file by file, and anything still left to do."
@@ -4878,6 +4881,16 @@ If a tool fails, never show the error message; say only: "Something went wrong o
         for (const name of Object.keys(llmConfig.toolHandlers)) {
             if (name !== LOAD_TOOLS_NAME && !toolPlan.allowedToolNames.has(name)) delete llmConfig.toolHandlers[name];
         }
+        // The user's permission mode (the shield in the chat box): commands, pushes and browser actions ask first when
+        // it says so, and the agent waits for the answer. No mode sent (or WhatsApp) = nothing asks, as before.
+        const permissionCtx = {
+            mode: PERMISSION_MODES.has(body.permissionMode) && body.taskOrigin !== "whatsapp" ? body.permissionMode : "turbo",
+            userId: userId ? String(userId) : null,
+            sessionId,
+            emit: (data) => { if (res.writableEnded || res.destroyed) return; try { res.write(`data: ${JSON.stringify(data)}\n\n`); } catch { /* the answer has ended */ } },
+            isAborted: () => requestAborted,
+        };
+        gateHandlers(llmConfig.toolHandlers, permissionCtx);
         // On Claude, a deferred tool found through tool search must be loaded with load_tools first, so its rules arrive with it.
         const groupNeedingLoad = (name) => {
             const g = groupOfTool(name);

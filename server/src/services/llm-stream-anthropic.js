@@ -254,16 +254,32 @@ async function toAttachmentBlocks(attachments, signal) {
 // Tool images for Cloudflare models that see images, the same ones Claude gets (OpenAI-style image parts with
 // data URLs): images a handler returned (view_image), Classgrid image links in the output of image tools, and
 // analyze_image on a Classgrid link shown as the image itself. Same caps as Claude per result and per run.
-export function makeToolImageCollector(signal) {
+export function makeToolImageCollector(signal, conversation = null) {
     let sent = 0;
     let bytes = 0;
     const seen = new Set();
+    // At the per-run cap, the oldest image already in the chat gives way to the new one (as for Claude)
+    const dropOldest = () => {
+        for (const m of conversation || []) {
+            if (m.role !== "user" || !Array.isArray(m.content)) continue;
+            const k = m.content.findIndex((p) => p?.type === "image_url");
+            if (k === -1) continue;
+            const freed = String(m.content[k].image_url?.url || "").length;
+            m.content[k] = { type: "text", text: "(An older screenshot was taken out here to make room for newer ones.)" };
+            sent = Math.max(0, sent - 1);
+            bytes = Math.max(0, bytes - freed);
+            return true;
+        }
+        return false;
+    };
     const take = (out, buf) => {
         if (!buf || buf.length === 0 || buf.length > MAX_IMAGE_BYTES) return;
         const mediaType = sniffImageType(buf);
         if (!mediaType) return;
         const b64 = buf.toString("base64");
-        if (out.length >= MAX_IMAGES_PER_TOOL_RESULT || sent >= MAX_TOOL_IMAGES_PER_RUN || bytes + b64.length > MAX_TOOL_IMAGE_BYTES_PER_RUN) return;
+        if (out.length >= MAX_IMAGES_PER_TOOL_RESULT) return;
+        while ((sent >= MAX_TOOL_IMAGES_PER_RUN || bytes + b64.length > MAX_TOOL_IMAGE_BYTES_PER_RUN) && dropOldest()) { /* made room */ }
+        if (sent >= MAX_TOOL_IMAGES_PER_RUN || bytes + b64.length > MAX_TOOL_IMAGE_BYTES_PER_RUN) return;
         sent++;
         bytes += b64.length;
         out.push({ type: "image_url", image_url: { url: `data:${mediaType};base64,${b64}` } });
@@ -437,12 +453,31 @@ export async function streamClaudeChat({
     let toolImagesSent = 0;
     let toolImageBytesSent = 0;
     const seenImageUrls = new Set();
+    // At the per-run cap, the oldest tool image in the chat so far gives way to the new one (a long browser run keeps
+    // seeing its newest screenshots; the older ones' links stay in the text)
+    const dropOldestToolImage = () => {
+        for (const m of conversation) {
+            if (m.role !== "user" || !Array.isArray(m.content)) continue;
+            for (const part of m.content) {
+                if (part?.type !== "tool_result" || !Array.isArray(part.content)) continue;
+                const k = part.content.findIndex((b) => b?.type === "image");
+                if (k === -1) continue;
+                const freed = part.content[k].source?.data?.length || 0;
+                part.content[k] = { type: "text", text: "(An older screenshot was taken out here to make room for newer ones.)" };
+                toolImagesSent = Math.max(0, toolImagesSent - 1);
+                toolImageBytesSent = Math.max(0, toolImageBytesSent - freed);
+                return true;
+            }
+        }
+        return false;
+    };
     const toolResultImages = async (toolName, result, text) => {
         const blocks = [];
         const take = (block) => {
-            if (!block || blocks.length >= MAX_IMAGES_PER_TOOL_RESULT || toolImagesSent >= MAX_TOOL_IMAGES_PER_RUN) return;
+            if (!block || blocks.length >= MAX_IMAGES_PER_TOOL_RESULT) return;
             const bytes = block.source.data.length;
-            if (toolImageBytesSent + bytes > MAX_TOOL_IMAGE_BYTES_PER_RUN) return;
+            while ((toolImagesSent >= MAX_TOOL_IMAGES_PER_RUN || toolImageBytesSent + bytes > MAX_TOOL_IMAGE_BYTES_PER_RUN) && dropOldestToolImage()) { /* made room */ }
+            if (toolImagesSent >= MAX_TOOL_IMAGES_PER_RUN || toolImageBytesSent + bytes > MAX_TOOL_IMAGE_BYTES_PER_RUN) return;
             toolImagesSent++;
             toolImageBytesSent += bytes;
             blocks.push(block);

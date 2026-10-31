@@ -2,6 +2,14 @@
 // a folder tree and a code view with line numbers, side by side on a wide pane with a drag line between them.
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { DocsImageViewer } from "@/components/ai/components/DocsImageViewer";
+import { FILE_DRAG_TYPE } from "@/components/ai/components/stepper/ProjectToolSteps";
+
+// Drag a file into the chat box to mention it
+const dragFile = (e: React.DragEvent, path: string) => {
+  e.dataTransfer.setData(FILE_DRAG_TYPE, path);
+  e.dataTransfer.setData("text/plain", path);
+  e.dataTransfer.effectAllowed = "copy";
+};
 import { createPortal } from "react-dom";
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import { themeIcons } from "seti-icons";
@@ -349,6 +357,8 @@ function Tree({ nodes, depth, openDirs, toggleDir, openFile, current, writing, c
           <div key={n.path}>
             <button
               onClick={() => (n.dir ? toggleDir(n.path) : openFile(n.path))}
+              draggable={!n.dir}
+              onDragStart={n.dir ? undefined : (e) => dragFile(e, n.path)}
               className={`w-full flex items-center gap-1.5 h-7 pr-2 text-left text-[13px] rounded-md transition-colors duration-500 ${changed.has(n.path) ? "bg-sky-400/10 text-foreground" : current === n.path ? "bg-black/[0.07] dark:bg-white/[0.08] text-foreground" : "text-foreground/80 hover:bg-black/[0.04] dark:hover:bg-white/[0.05] hover:text-foreground"}`}
               style={{ paddingLeft: 8 }}
               title={n.path}
@@ -418,8 +428,10 @@ function FileTabs({ paths, active, onShow, onClose }: { paths: string[]; active:
               className={`group relative shrink-0 flex items-center gap-1.5 pl-3 pr-1.5 text-[12.5px] cursor-pointer select-none border-r border-black/10 dark:border-white/[0.06] transition-colors ${on ? "bg-white dark:bg-[#1e1e1e] text-foreground" : "text-muted-foreground hover:text-foreground hover:bg-black/[0.03] dark:hover:bg-white/[0.03]"}`}
             >
               {on && <motion.span layoutId="studio-file-tab" className="absolute inset-x-0 top-0 h-[2px] bg-foreground/70" transition={{ duration: reduce ? 0 : 0.2, ease: EASE }} />}
-              <FileBadge name={name} />
-              <span className="max-w-[160px] truncate">{name}</span>
+              <span draggable onDragStart={(e) => dragFile(e, p)} className="flex items-center gap-1.5" title={`${p} (drag into the chat to mention it)`}>
+                <FileBadge name={name} />
+                <span className="max-w-[160px] truncate">{name}</span>
+              </span>
               <button
                 type="button"
                 onClick={(e) => { e.stopPropagation(); onClose(p); }}

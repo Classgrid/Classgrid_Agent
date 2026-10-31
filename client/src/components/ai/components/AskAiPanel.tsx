@@ -157,6 +157,7 @@ import { FollowUps, ActionCards, ReportCard, Timetable, AttendanceCalendar, Stud
 import { WidgetBlock } from "./WidgetBlock";
 import { ScrollSpyTOC, MobileTOCButton, QuestionDots, messageTime } from "./TOC";
 import { StudioChatMenu, OpenInProjectButton, StudioOverviewButton } from "./StudioChatMenu";
+import { PermissionCard, PermissionModePicker, PERMISSION_MODE_KEY, readPermissionMode, type PermissionMode, type PermissionRequest } from "./PermissionControls";
 import AIThinkingBlock from "./AIThinkingBlock";
 import RichChatInput from "./RichChatInput";
 import ReactMarkdown from "react-markdown";
@@ -204,7 +205,7 @@ import { specialStepTitle, emailTitle } from "./stepper/tool-results/stepTitles"
 import { StepWorkingContext } from "./stepper/ShimmerText";
 import { ImageReadStep } from "./stepper/tool-results/ImageReadStep";
 import { AudioTranscribeStep } from "./stepper/tool-results/AudioTranscribeStep";
-import { FileMentionChip, parseFileMention, parseProjectLink, FilesChangedSummary, ProjectEditStep, ProjectExploreGroup, ProjectPushStep, ProjectRunChanges, ProjectHelpersStep, TerminalStep, PROJECT_BACKGROUND_TOOLS, PROJECT_EDIT_TOOLS, PROJECT_EXPLORE_TOOLS } from "./stepper/ProjectToolSteps";
+import { FILE_DRAG_TYPE, FileBadge, FileMentionChip, parseFileMention, parseProjectLink, FilesChangedSummary, ProjectEditStep, ProjectExploreGroup, ProjectPushStep, ProjectRunChanges, ProjectHelpersStep, TerminalStep, PROJECT_BACKGROUND_TOOLS, PROJECT_EDIT_TOOLS, PROJECT_EXPLORE_TOOLS } from "./stepper/ProjectToolSteps";
 import { CombinedReasoningBlock } from "./stepper/CombinedReasoningBlock";
 import { AiFeedbackModal } from "./AiFeedbackModal";
 import { ChatEndedCard } from "./ChatEndedCard";
@@ -1267,6 +1268,14 @@ const MarkdownComponents = {
       </blockquote>
     );
   },
+  // GitHub alerts ("> [!TIP]" …) come as a div with the type in its class, not as a blockquote: they get the same
+  // coloured box (note blue, tip green, important purple, warning amber, caution red), without the plain title line
+  div({ className, children, ...props }: any) {
+    if (String(className || "").split(/\s+/).includes("markdown-alert")) {
+      return MarkdownComponents.blockquote({ className, children: React.Children.toArray(children).slice(1), ...props });
+    }
+    return <div className={className} {...props}>{children}</div>;
+  },
   table({ children, ...props }: any) {
     return (
       <div className="w-full pb-2 overflow-x-auto my-4">
@@ -1920,6 +1929,7 @@ const AssistantMessageContent = memo(({ content, sources, createdAt, isTyping, o
         }
         return <blockquote className="border-l-[3px] border-slate-200 dark:border-slate-700 pl-4 my-4 text-slate-500 dark:text-slate-400 italic" {...props}>{children}</blockquote>;
       },
+      div: MarkdownComponents.div,
       hr({ ...props }) {
         return <hr className="my-6 border-slate-100 dark:border-slate-800" {...props} />;
       }
@@ -2579,6 +2589,13 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
 
   // â”€â”€ File attachment state â”€â”€
   const [attachedFiles, setAttachedFiles] = useState<UIFileAttachment[]>([]);
+  // Project files dragged from Studio's Files tab into the chat box (sent as their names, like an @ mention)
+  const [fileMentions, setFileMentions] = useState<string[]>([]);
+  // Studio and Project Mode: the agent's permission mode (the shield) and the action it is waiting to be allowed
+  const [permissionMode, setPermissionModeState] = useState<PermissionMode>(readPermissionMode);
+  const setPermissionMode = (m: PermissionMode) => { setPermissionModeState(m); try { localStorage.setItem(PERMISSION_MODE_KEY, m); } catch { /* storage blocked */ } };
+  const [pendingPermission, setPendingPermission] = useState<PermissionRequest | null>(null);
+  const inCodeMode = typeof window !== "undefined" && window.location.pathname.split("/").some((p) => p === "studio" || p === "project");
   const [pastedTexts, setPastedTexts] = useState<string[]>([]);
   const [editingMode, setEditingMode] = useState<'input' | number | null>(null);
   const [previewFile, setPreviewFile] = useState<FilePreviewSource | null>(null);
@@ -3363,6 +3380,7 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
   // Studio's Browser tab is locked while the agent works in it
   useEffect(() => {
     window.dispatchEvent(new CustomEvent("agent:generating", { detail: { on: isGenerating } }));
+    if (!isGenerating) setPendingPermission(null); // the answer ended: nothing is waiting any more
   }, [isGenerating]);
 
   // Live countdown timer for ban expiry
@@ -3494,7 +3512,28 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
 
   const hasDocsContext = pageContext?.path?.startsWith("/docs") && pageContext.path !== lastSentDocsPath;
   const isAnyFileUploading = attachedFiles.some(f => f.status === "uploading");
-  const canSubmit = (input.trim().length > 0 || hasDocsContext || attachedFiles.length > 0 || pastedTexts.length > 0) && !isAnyFileUploading && !gridBlockedBy;
+  const canSubmit = (input.trim().length > 0 || hasDocsContext || attachedFiles.length > 0 || pastedTexts.length > 0 || fileMentions.length > 0) && !isAnyFileUploading && !gridBlockedBy;
+  // A file dropped on the chat box from the Files tab becomes a chip in it
+  useEffect(() => {
+    const inBox = (t: EventTarget | null) => !!(t as HTMLElement | null)?.closest?.("form")?.querySelector?.("#ask-ai-input");
+    const over = (e: DragEvent) => {
+      if (!e.dataTransfer?.types.includes(FILE_DRAG_TYPE) || !inBox(e.target)) return;
+      e.preventDefault();
+      e.dataTransfer.dropEffect = "copy";
+    };
+    const drop = (e: DragEvent) => {
+      const path = e.dataTransfer?.getData(FILE_DRAG_TYPE);
+      if (!path || !inBox(e.target)) return;
+      e.preventDefault();
+      e.stopPropagation();
+      setFileMentions((list) => (list.includes(path) ? list : [...list, path]));
+      setTimeout(() => (inputRef.current as any)?.focus?.(), 0);
+    };
+    document.addEventListener("dragover", over, true);
+    document.addEventListener("drop", drop, true);
+    return () => { document.removeEventListener("dragover", over, true); document.removeEventListener("drop", drop, true); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const emptyState = useMemo(() => messages.length === 0, [messages.length]);
   const suggestedQuestions = useMemo(() => suggestedQuestionsForPage(pageContext, session?.user?.role), [pageContext, session?.user?.role]);
 
@@ -4164,6 +4203,11 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
             const parts = window.location.pathname.split("/");
             return parts.includes("studio") ? "studio" : parts.includes("project") ? "project" : "agent";
           })(),
+          // Studio and Project Mode: which actions ask the user first (the shield in the chat box)
+          permissionMode: (() => {
+            const parts = window.location.pathname.split("/");
+            return parts.includes("studio") || parts.includes("project") ? permissionMode : undefined;
+          })(),
           // Project Mode: the project open next to the chat (the backend links the chat to it)
           projectId: (() => {
             try {
@@ -4383,6 +4427,11 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
                     { ...lastMsg, steps: updatedSteps }
                   ];
                 });
+              } else if (event.type === "permission_request" && event.id) {
+                // The agent waits for the user to allow an action (the card above the chat box)
+                setPendingPermission({ id: String(event.id), tool: String(event.tool || ""), title: String(event.title || "Allow this?"), detail: event.detail ? String(event.detail) : undefined, label: event.label ? String(event.label) : undefined });
+              } else if (event.type === "permission_resolved" && event.id) {
+                setPendingPermission((p) => (p && p.id === String(event.id) ? null : p));
               } else if (event.type === "helper_progress" && typeof event.helper === "number") {
                 if (event.tool) {
                   helperToolRef.current[String(event.id)] = { tool: event.tool, args: event.args };
@@ -4556,8 +4605,13 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
     if (!canSubmit) return;
 
     let finalInput = input;
+    // Dropped files go first, as file names
+    if (fileMentions.length) {
+      finalInput = `${fileMentions.map((p) => `\`${p}\``).join(" ")} ${finalInput}`.trim();
+      setFileMentions([]);
+    }
     if (replyToMessage) {
-      finalInput = `> ${replyToMessage.content.substring(0, 500).replace(/\n/g, "\n> ")}\n\n${input}`;
+      finalInput = `> ${replyToMessage.content.substring(0, 500).replace(/\n/g, "\n> ")}\n\n${finalInput}`;
       setReplyToMessage(null);
     }
 
@@ -6130,6 +6184,29 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
                     </div>
                   )}
 
+                  {pendingPermission && (
+                    <PermissionCard key={pendingPermission.id} request={pendingPermission} onDone={() => setPendingPermission(null)} />
+                  )}
+
+                  {fileMentions.length > 0 && (
+                    <div className="flex flex-wrap gap-1.5 px-4 pt-3">
+                      {fileMentions.map((p) => (
+                        <span key={p} title={p} className="inline-flex max-w-full items-center gap-1 rounded-md border border-black/10 dark:border-white/10 bg-black/[0.04] dark:bg-white/[0.06] pl-1.5 pr-0.5 py-0.5 font-mono text-[12.5px] text-foreground">
+                          <FileBadge path={p} />
+                          <span className="min-w-0 truncate max-w-[240px]">{p.split("/").pop()}</span>
+                          <button
+                            type="button"
+                            onClick={() => setFileMentions((list) => list.filter((x) => x !== p))}
+                            className="flex items-center justify-center size-5 rounded text-muted-foreground hover:text-foreground hover:bg-black/[0.06] dark:hover:bg-white/[0.08]"
+                            aria-label={`Remove ${p}`}
+                          >
+                            <X className="size-3" />
+                          </button>
+                        </span>
+                      ))}
+                    </div>
+                  )}
+
                   <RichChatInput
                     id="ask-ai-input"
                     name="askAiQuestion"
@@ -6270,6 +6347,7 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
 
                   {/* Bottom Right action bar: send OR stop */}
                   <div className="absolute bottom-3 right-3 flex items-center gap-0.5">
+                    {inCodeMode && <PermissionModePicker value={permissionMode} onChange={setPermissionMode} />}
                     <ModelPicker value={selectedModel} onChange={setSelectedModel} disabled={isGenerating} />
                     <button
                       type="button"

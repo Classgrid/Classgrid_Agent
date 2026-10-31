@@ -20,7 +20,7 @@ const SCRATCHPAD = [
 
 const LOOK = [
   fn("browser_screenshot", "Take a screenshot of the user's live browser (the page you and the user see in the Studio Browser tab). The image is returned to you."),
-  fn("browser_read", "Read the text of the current page and its links (up to 20,000 characters). Use it to find facts and links instead of guessing from a screenshot."),
+  fn("browser_read", "Read the text of the current page and its links (up to 20,000 characters). It first scrolls through the page so content that loads late is included. Use it to find facts and links instead of guessing from a screenshot."),
 ];
 
 const ACT = [
@@ -40,6 +40,9 @@ const ACT = [
     dy: { type: "number" },
   }, ["dy"]),
   fn("browser_back", "Go back one page. Returns a screenshot."),
+  fn("browser_wait", "Wait for a slow page to finish loading (1 to 10 seconds), then take a screenshot.", {
+    seconds: { type: "number", description: "How long to wait, 1 to 10 (default 2)." },
+  }),
 ];
 
 // The Planner (main AI in Studio): plans, keeps the scratchpad and sends the worker for long jobs; it has the full
@@ -69,6 +72,7 @@ const ACTIONS = {
   browser_press: (a) => ({ action: "press", key: String(a?.key || "Enter") }),
   browser_scroll: (a) => ({ action: "scroll", dy: Number(a?.dy ?? 600) }),
   browser_back: () => ({ action: "back" }),
+  browser_wait: (a) => ({ action: "wait", seconds: Number(a?.seconds ?? 2) }),
   browser_screenshot: () => ({ action: "screenshot" }),
   browser_read: () => ({ action: "read", screenshot: false }),
 };
