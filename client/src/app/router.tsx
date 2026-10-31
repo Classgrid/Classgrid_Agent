@@ -166,6 +166,7 @@ import { SuperAdminLayout } from "@/components/layout/SuperAdminLayout";
 import { DynamicRoleLayout } from "@/components/layout/DynamicRoleLayout";
 import { AgentReviewsPage } from "@/features/superadmin/pages/AgentReviewsPage";
 import { AiUsageDashboardPage } from "@/features/superadmin/pages/AiUsageDashboardPage";
+import { AiModelsPage } from "@/features/superadmin/pages/AiModelsPage";
 import { PlaygroundPage } from "@/features/superadmin/pages/PlaygroundPage";
 
 
@@ -263,6 +264,7 @@ export function AppRouter() {
           <Route path="/superadmin/agent/:sessionId/*" element={<DashboardHomePage />} />
           <Route path="/superadmin/agent-reviews" element={<AgentReviewsPage />} />
           <Route path="/superadmin/ai-usage" element={<AiUsageDashboardPage />} />
+          <Route path="/superadmin/ai-usage/models" element={<AiModelsPage />} />
           <Route path="/superadmin/playground" element={<PlaygroundPage />} />
           <Route path="/superadmin/analytics" element={<SuperadminChatAnalyticsPage />} />
           <Route path="/superadmin/audit-logs" element={<AuditLogsPage />} />

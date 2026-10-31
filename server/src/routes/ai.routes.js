@@ -134,8 +134,8 @@ router.put("/preferences", isAuthenticated, updatePreferences);
 // Premium model access (model picker lock for Claude Fable 5.1)
 router.get("/model-access", isAuthenticated, async (req, res) => {
     try {
-        const { fableAccess } = await import("../services/model-access.service.js");
-        res.json({ fable: await fableAccess(req.user) });
+        const { fableAccess, disabledModels } = await import("../services/model-access.service.js");
+        res.json({ fable: await fableAccess(req.user), disabledModels: await disabledModels() });
     } catch (err) {
         res.status(500).json({ error: err.message });
     }

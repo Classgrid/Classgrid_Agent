@@ -1449,6 +1449,11 @@ export const streamAskAi = async (req, res) => {
         const resetDate = user?.ai_tokens?.week_reset_date ? new Date(user.ai_tokens.week_reset_date) : new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
         return { error: check.reason === "Insufficient tokens." ? "ai_quota_exceeded" : "ai_blocked", message: check.reason, resetDate: resetDate.toISOString() };
     };
+    // A model turned off in the super admin Model manager is not used: the message goes to Auto instead
+    if (typeof body.selectedModel === "string" && body.selectedModel !== "auto") {
+        const { disabledModels } = await import("../services/model-access.service.js");
+        if ((await disabledModels().catch(() => [])).includes(body.selectedModel)) body.selectedModel = "auto";
+    }
     let fablePaidOnly = false;
     // Claude Fable 5.1 (most expensive model) is locked until the person has topped up ₹299 in total.
     // 402, not 403: the chat page treats 403 as a ban.
@@ -2979,12 +2984,16 @@ If they ask whether their college/school uses Classgrid, say you can't see that 
                         if (typeof res.on === "function" && board.hookedRes !== res) { board.hookedRes = res; res.on("close", () => { if (requestAborted) stopHelpers(sessionId); }); }
 
                         // The model the main AI asked for (its id or its name in the model list); Fable is too costly for helpers
+                        // Models turned off in the super admin Model manager are never given to a helper
+                        const { disabledModels } = await import("../services/model-access.service.js");
+                        const offModels = await disabledModels().catch(() => []);
                         const pickModel = (wanted, i) => {
-                            const allowed = [...CF_PICKER_MODELS.keys(), ...[...CLAUDE_CHAT_MODELS].filter((m) => m !== "claude-fable-5-1")];
+                            const allowed = [...CF_PICKER_MODELS.keys(), ...[...CLAUDE_CHAT_MODELS].filter((m) => m !== "claude-fable-5-1")].filter((m) => !offModels.includes(m));
                             const w = wanted.toLowerCase();
                             const byName = Object.entries(MODEL_DISPLAY_NAMES).find(([, name]) => name.toLowerCase() === w)?.[0];
                             const id = allowed.find((m) => m.toLowerCase() === w) || (byName && allowed.includes(byName) ? byName : "");
-                            return id || [CF_FLASH_MODEL, "claude-haiku-5-5", "claude-opus-5-5", "claude-sonnet-5-5", HELPER_GLM_MODEL][i] || HELPER_GLM_MODEL;
+                            const defaults = [CF_FLASH_MODEL, "claude-haiku-5-5", "claude-opus-5-5", "claude-sonnet-5-5", HELPER_GLM_MODEL];
+                            return id || [defaults[i], ...defaults].find((m) => m && !offModels.includes(m)) || HELPER_GLM_MODEL;
                         };
                         const readOnly = ["list_project_files", "view_project_file", "search_project"];
                         const editTools = ["write_project_file", "edit_project_file", "start_background_command", "check_background_command", "stop_background_command"];
@@ -3059,7 +3068,7 @@ If they ask whether their college/school uses Classgrid, say you can't see that 
                             // The picked model first; if it fails, Claude Sonnet 5.5 takes over, then GLM 5.3
                             // The Browser worker has to see the page: a model that can't see images is swapped for DeepSeek V4.1 Flash
                             const firstModel = h.browser && !CLAUDE_CHAT_MODELS.has(h.model) && !CF_VISION_MODELS.has(h.model) ? "@cf/deepseek-ai/deepseek-v4.1-flash-1017" : h.model;
-                            const models = [...new Set([firstModel, CLAUDE_CHAT_MODELS.has(firstModel) ? HELPER_GLM_MODEL : "claude-sonnet-5-5", HELPER_GLM_MODEL])];
+                            const models = [...new Set([firstModel, CLAUDE_CHAT_MODELS.has(firstModel) ? HELPER_GLM_MODEL : "claude-sonnet-5-5", HELPER_GLM_MODEL])].filter((m, k) => k === 0 || !offModels.includes(m));
                             let lastError = "";
                             // When every model failed, the helper restarts by itself (up to 2 more times), carrying on from
                             // the files it already made

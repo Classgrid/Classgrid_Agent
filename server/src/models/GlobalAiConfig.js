@@ -81,6 +81,8 @@ const globalAiConfigSchema = new mongoose.Schema(
         classgrid_whatsapp_reset_value: { type: Number },
         classgrid_whatsapp_reset_unit: { type: String },
         // --- Pricing & Cost Config ---
+        // Models turned off in the super admin Model manager: nobody can pick or use them
+        disabled_models: { type: [String], default: [] },
         credits_per_inr: { 
             type: Number,
             default: 3000

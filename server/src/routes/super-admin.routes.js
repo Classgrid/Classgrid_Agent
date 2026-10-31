@@ -129,11 +129,34 @@ const PRIMARY_SUPER_ADMIN_EMAIL = (process.env.SUPER_ADMIN_EMAIL || "support@cla
 router.use(isAuthenticated, requireRole("super_admin"));
 
 import { getGlobalAiConfig, updateGlobalAiConfig } from "../controllers/super-admin/ai-global-config.controller.js";
+import GlobalAiConfig from "../models/GlobalAiConfig.js";
+import { forgetDisabledModels } from "../services/model-access.service.js";
 
 router.use("/notifications-sys", notificationRoutes);
 router.use("/ai-usage", aiUsageRoutes);
 router.get("/ai-global-config", getGlobalAiConfig);
 router.put("/ai-global-config", updateGlobalAiConfig);
+// Model manager: turn chat models on or off for everyone
+router.get("/ai-models", async (req, res) => {
+    try {
+        const config = await GlobalAiConfig.findOne({ key: "singleton" }).select("disabled_models").lean();
+        res.json({ success: true, disabledModels: config?.disabled_models || [] });
+    } catch (err) {
+        res.status(500).json({ success: false, message: err.message });
+    }
+});
+router.put("/ai-models", async (req, res) => {
+    try {
+        const model = String(req.body?.model || "").trim();
+        if (!model) return res.status(400).json({ success: false, message: "Pick a model." });
+        const update = req.body?.enabled === false ? { $addToSet: { disabled_models: model } } : { $pull: { disabled_models: model } };
+        const config = await GlobalAiConfig.findOneAndUpdate({ key: "singleton" }, update, { new: true, upsert: true }).select("disabled_models").lean();
+        forgetDisabledModels();
+        res.json({ success: true, disabledModels: config?.disabled_models || [] });
+    } catch (err) {
+        res.status(500).json({ success: false, message: err.message });
+    }
+});
 
 // Canonical contract. Authentication, billing permission, and validation apply
 // to both canonical routes and the temporary backward-compatible aliases.

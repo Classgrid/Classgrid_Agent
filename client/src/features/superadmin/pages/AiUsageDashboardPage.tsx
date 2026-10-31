@@ -14,6 +14,7 @@
 // Trigger deploy verification - Oct 4 2026
 // Trigger deploy verification - Oct 4 2026
 import React, { useState, useEffect } from "react";
+import { Link } from "react-router-dom";
 import { PageHeader } from "@/components/layout/PageHeader";
 import { Button } from "@/components/marketing_ui/button";
 import { Input } from "@/components/marketing_ui/input";
@@ -1021,7 +1022,12 @@ export function AiUsageDashboardPage() {
         ]}
       />
 
-      <div className="flex justify-end">
+      <div className="flex justify-end gap-2">
+        {!path.orgId && (
+          <Link to="/superadmin/ai-usage/models" className="inline-flex items-center gap-2 rounded-full border border-border px-3 py-1 text-[13px] font-medium text-foreground hover:bg-muted transition-colors">
+            Models
+          </Link>
+        )}
         <span className={`inline-flex items-center gap-2 rounded-full border px-3 py-1 text-[13px] font-medium ${live ? "border-emerald-500/30 text-emerald-700 dark:text-emerald-400" : "border-border text-muted-foreground"}`}>
           <span className={`h-2 w-2 rounded-full ${live ? "bg-emerald-500 animate-pulse" : "bg-muted-foreground/50"}`} />
           {live ? "Live" : "Connecting…"}

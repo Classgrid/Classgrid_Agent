@@ -150,16 +150,19 @@ export function ModelPicker({ value, onChange, disabled }: ModelPickerProps) {
   const selected = ALL_MODELS.find((m) => m.id === value);
   const { data: access } = useQuery({
     queryKey: ["model-access"],
-    queryFn: async () => (await apiClient.get("/api/ai/model-access")).data as { fable: { unlocked: boolean; exempt?: boolean; toppedUpInr: number; requiredInr: number } },
+    queryFn: async () => (await apiClient.get("/api/ai/model-access")).data as { fable: { unlocked: boolean; exempt?: boolean; toppedUpInr: number; requiredInr: number }; disabledModels?: string[] },
     staleTime: 60 * 1000,
   });
   const fableLocked = access ? !access.fable.unlocked : false;
   const fableLeft = access ? Math.max(0, access.fable.requiredInr - access.fable.toppedUpInr) : 0;
+  // Models the super admin turned off (Model manager) are not shown
+  const offModels = new Set(access?.disabledModels || []);
 
   // A locked Fable that is still selected (e.g. saved from before) falls back to Auto
   React.useEffect(() => {
     if (fableLocked && value === FABLE_ID) onChange(AUTO_MODEL_ID);
-  }, [fableLocked, value, onChange]);
+    if (access?.disabledModels?.includes(value)) onChange(AUTO_MODEL_ID);
+  }, [fableLocked, access, value, onChange]);
 
   const openTopUp = () => window.dispatchEvent(new CustomEvent("open-ai-hub", { detail: { tab: "upgrade" } }));
 
@@ -193,7 +196,7 @@ export function ModelPicker({ value, onChange, disabled }: ModelPickerProps) {
           {value === AUTO_MODEL_ID && <Check className="h-4 w-4 mt-0.5" />}
         </DropdownMenuItem>
 
-        {MODEL_GROUPS.map((group) => (
+        {MODEL_GROUPS.map((g) => ({ ...g, models: g.models.filter((m) => !offModels.has(m.id)) })).filter((g) => g.models.length > 0).map((group) => (
           <React.Fragment key={group.label}>
             <DropdownMenuSeparator className="bg-slate-100 dark:bg-white/10 my-1" />
             <DropdownMenuLabel className="px-2 pt-1.5 pb-1">{group.label}</DropdownMenuLabel>

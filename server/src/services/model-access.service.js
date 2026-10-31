@@ -32,6 +32,18 @@
 // (@classgrid.in) can always use it.
 import mongoose from "mongoose";
 import AiCreditTransaction from "../models/AiCreditTransaction.js";
+import GlobalAiConfig from "../models/GlobalAiConfig.js";
+
+// Models the super admin turned off in Model manager (AI Usage & Credits -> Models). Nobody can use them,
+// staff included. Read from the global AI settings and kept for 30 seconds.
+let disabledCache = { list: [], at: 0 };
+export async function disabledModels() {
+    if (Date.now() - disabledCache.at < 30 * 1000) return disabledCache.list;
+    const cfg = await GlobalAiConfig.findOne({ key: "singleton" }).select("disabled_models").lean().catch(() => null);
+    disabledCache = { list: Array.isArray(cfg?.disabled_models) ? cfg.disabled_models : [], at: Date.now() };
+    return disabledCache.list;
+}
+export function forgetDisabledModels() { disabledCache.at = 0; }
 
 export const FABLE_MODEL = "claude-fable-5-1";
 export const FABLE_UNLOCK_INR = 299;
