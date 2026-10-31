@@ -3516,17 +3516,32 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
   // A file dropped on the chat box from the Files tab becomes a chip in it
   useEffect(() => {
     const inBox = (t: EventTarget | null) => !!(t as HTMLElement | null)?.closest?.("form")?.querySelector?.("#ask-ai-input");
+    // Project Mode: files dragged from the code editor's file list come as editor links (/home/workspace/projects/<id>/...)
+    const inProject = () => window.location.pathname.split("/").includes("project");
+    const editorPaths = (dt: DataTransfer) => {
+      let raw: string[] = [];
+      try { raw = JSON.parse(dt.getData("ResourceURLs") || "[]"); } catch { /* not from the editor */ }
+      if (!raw.length) raw = (dt.getData("text/uri-list") || dt.getData("text/plain") || "").split(/\r?\n/);
+      return raw.map((s) => {
+        let p = String(s || "").trim();
+        try { if (/^[a-z][\w+.-]*:\/\//i.test(p)) p = decodeURIComponent(new URL(p).pathname); } catch { /* keep as is */ }
+        return p.match(/^\/home\/workspace\/projects\/[^/]+\/(.+?)\/?$/)?.[1];
+      }).filter((p): p is string => !!p);
+    };
+    const fromEditor = (dt: DataTransfer) => inProject() && ["resourceurls", "text/uri-list", "codefiles"].some((t) => dt.types.map((x) => x.toLowerCase()).includes(t));
     const over = (e: DragEvent) => {
-      if (!e.dataTransfer?.types.includes(FILE_DRAG_TYPE) || !inBox(e.target)) return;
+      if (!e.dataTransfer || !(e.dataTransfer.types.includes(FILE_DRAG_TYPE) || fromEditor(e.dataTransfer)) || !inBox(e.target)) return;
       e.preventDefault();
       e.dataTransfer.dropEffect = "copy";
     };
     const drop = (e: DragEvent) => {
-      const path = e.dataTransfer?.getData(FILE_DRAG_TYPE);
-      if (!path || !inBox(e.target)) return;
+      if (!e.dataTransfer || !inBox(e.target)) return;
+      const dragged = e.dataTransfer.getData(FILE_DRAG_TYPE);
+      const paths = dragged ? [dragged] : inProject() ? editorPaths(e.dataTransfer) : [];
+      if (!paths.length) return;
       e.preventDefault();
       e.stopPropagation();
-      setFileMentions((list) => (list.includes(path) ? list : [...list, path]));
+      setFileMentions((list) => [...list, ...paths.filter((p) => !list.includes(p))]);
       setTimeout(() => (inputRef.current as any)?.focus?.(), 0);
     };
     document.addEventListener("dragover", over, true);
@@ -4802,7 +4817,7 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
             </div>
           </div>
         ) : emptyState ? (
-          <>
+          inCodeMode ? null : <> {/* Project Mode: no greeting, like Studio */}
             {/* PostHog-style centered greeting with logo & suggestion chips */}
             <div className="flex flex-col items-center justify-center py-16 gap-5 select-none">
               {/* Logo on the left of the greeting, one line */}
