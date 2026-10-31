@@ -5795,7 +5795,7 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
   const panelInput = readOnly ? null : (
     <div className={cn(
       variant === "full-page" ? "px-1 sm:px-4 py-4 sm:pt-0 relative" : "px-4 py-4 relative",
-      "flex flex-col gap-2"
+      "flex flex-col gap-2 @max-[18rem]:hidden" // Studio: a chat column squeezed very narrow hides the chat box instead of crushing it
     )}>
 
       <div className={cn(
@@ -6569,7 +6569,7 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
                   )}
 
                   {/* Inline input form â€” not using panelInput */}
-                  <div className="w-full max-w-[640px] mt-auto sm:mt-0">
+                  <div className="w-full max-w-[640px] mt-auto sm:mt-0 @max-[18rem]:hidden">
                     {inputHeader && <div className="mb-2 flex">{inputHeader}</div>}
                     {isTerminated ? (
                       <div className="rounded-xl border border-red-500/20 bg-red-500/10 px-4 py-3 text-center text-sm font-medium text-red-500">
