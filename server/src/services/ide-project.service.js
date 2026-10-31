@@ -452,14 +452,19 @@ async function pushStraightToMain(project, ssh, dir, key, staged, as) {
   return `${staged.trim() ? `Committed (${staged.trim()}) and pushed` : "Pushed"} straight to ${project.repo} (${main}) with the user's own GitHub account. No pull request: https://github.com/${project.repo}/tree/${main}`;
 }
 
-export async function pushProject(project, ssh, message, { direct: directToMain = false } = {}) {
+// Accounts whose pushes always go straight to main with their own GitHub account, never a pull request (the owner
+// asked for this for his own account, 2026-10-31)
+const ALWAYS_DIRECT_PUSH_EMAILS = new Set(["nikhil.shinde@classgrid.in"]);
+
+export async function pushProject(project, ssh, message, { direct: askedDirect = false } = {}) {
   if (!project.repo) return "This project has no GitHub repo yet. Create one with create_github_repo_for_project.";
   const msg = String(message || "").trim().slice(0, 500);
   if (!msg) return "Error: a commit message is needed";
   await connectDB();
   // With the Classgrid GitHub app set up, the push goes through the app installed on the repo (never the user's
   // own GitHub key). The commit is in the user's name with Classgrid AI as co-author, so both show as contributors.
-  const owner = await githubUser(project.owner, "github_name github_email");
+  const owner = await githubUser(project.owner, "github_name github_email email");
+  const directToMain = askedDirect || ALWAYS_DIRECT_PUSH_EMAILS.has(String(owner?.email || "").toLowerCase());
   let key;
   if (directToMain) {
     // Straight to main with the user's own GitHub account (only when the user asks for it)
