@@ -71,12 +71,15 @@ export function PermissionCard({ request, onDone }: { request: PermissionRequest
   const [choice, setChoice] = useState(0);
   const [note, setNote] = useState("");
   const [busy, setBusy] = useState(false);
+  const [hidden, setHidden] = useState(false);
   const noteRef = useRef<HTMLInputElement>(null);
   const label = request.label || "this";
 
+  // The card hides at once on an answer; it comes back only if the answer could not be sent
   const send = async (decision: "once" | "chat" | "always" | "no" | "skip") => {
     if (busy) return;
     setBusy(true);
+    setHidden(true);
     try {
       const res = await fetchWithRescue(`${backendUrl}/api/ai/permission/${request.id}`, {
         method: "POST",
@@ -88,12 +91,14 @@ export function PermissionCard({ request, onDone }: { request: PermissionRequest
         const data = await res.json().catch(() => ({}));
         toast.error(data.error || "Could not send your answer");
         setBusy(false);
+        setHidden(false);
         return;
       }
       onDone();
     } catch {
       toast.error("Could not send your answer");
       setBusy(false);
+      setHidden(false);
     }
   };
   const submit = () => send((["once", "chat", "always", "no"] as const)[choice]!);
@@ -101,6 +106,7 @@ export function PermissionCard({ request, onDone }: { request: PermissionRequest
   // Keys 1–4 pick, Enter sends, Esc skips (not while typing the note)
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      if (hidden) return;
       const typing = document.activeElement === noteRef.current;
       if (!typing && /^[1-4]$/.test(e.key)) { e.preventDefault(); setChoice(Number(e.key) - 1); if (e.key === "4") setTimeout(() => noteRef.current?.focus(), 0); }
       else if (e.key === "Enter" && !e.shiftKey && (typing || !(document.activeElement instanceof HTMLTextAreaElement || (document.activeElement as HTMLElement)?.isContentEditable))) { e.preventDefault(); submit(); }
@@ -117,6 +123,8 @@ export function PermissionCard({ request, onDone }: { request: PermissionRequest
   ];
   const row = (on: boolean) => cn("w-full flex items-start gap-3 rounded-lg px-2.5 py-2 text-left text-[13.5px] transition-colors", on ? "bg-black/[0.06] dark:bg-white/[0.08] text-foreground" : "text-foreground/80 hover:bg-black/[0.03] dark:hover:bg-white/[0.04]");
   const num = "mt-px shrink-0 flex items-center justify-center size-5 rounded bg-black/[0.06] dark:bg-white/[0.08] text-[11.5px] text-muted-foreground";
+
+  if (hidden) return null;
 
   return (
     <motion.div
