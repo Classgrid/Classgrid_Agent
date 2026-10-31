@@ -4649,6 +4649,8 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
 
     const isTyping = messages.length > 0 && messages[messages.length - 1]?.typing === true;
     if (thinking || submitting || isTyping || wordTypingActiveRef.current) {
+      // Only one message can wait while the AI works: a second one is not taken (it stays in the box to send later)
+      if (messageQueue.length > 0 || priorityMessage) return;
       // Linear Approach: Queue the message instead of sending immediately to prevent stream collisions
       setMessageQueue(prev => [
         ...prev,
