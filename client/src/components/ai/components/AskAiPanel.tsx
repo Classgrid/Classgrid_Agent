@@ -2032,6 +2032,12 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
   const [isQueueVisible, setIsQueueVisible] = useState(true);
   const [priorityMessage, setPriorityMessage] = useState<QueuedMessage | null>(null);
   const [input, setInput] = useState("");
+  // A key typed in the chat box changes only the box: the chat above is kept as it was drawn, not drawn again
+  // for every key (in a long chat that made typing slow)
+  const typingRenderRef = useRef(false);
+  const typingOnlyRender = typingRenderRef.current;
+  typingRenderRef.current = false;
+  const chatListRef = useRef<{ deps: unknown[]; node: React.ReactNode } | null>(null);
   // Set when Classgrid AI (or the user) ended this chat: the composer is replaced by a "Chat ended" card.
   const [chatEnded, setChatEnded] = useState<{ reason: string | null; canReopen: boolean } | null>(null);
   const [endedFeedbackOpen, setEndedFeedbackOpen] = useState(false);
@@ -4830,7 +4836,10 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
               </div>
             </div>
           </>
-        ) : (
+        ) : (() => {
+          const listDeps = [messages, thinking, submitting, priorityMessage, gridBlockedBy];
+          if (typingOnlyRender && chatListRef.current && chatListRef.current.deps.every((d, i) => d === listDeps[i])) return chatListRef.current.node;
+          const node = (
           <>
             {messages.map((rawMessage, index) => {
               if (rawMessage.hidden) return null;
@@ -5790,7 +5799,10 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
               </div>
             )}
           </>
-        )}
+          );
+          chatListRef.current = { deps: listDeps, node };
+          return node;
+        })()}
       </div>
     </div>
   );
@@ -6235,6 +6247,7 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
                     value={input}
                     onChange={(event) => {
                       const val = event.target.value;
+                      if (val !== input) typingRenderRef.current = true;
                       setInput(val);
                       const wordCount = val.trim().split(/\s+/).filter(w => w.length > 0).length;
                       if (isExpandedBox && wordCount < 90) {
@@ -6886,6 +6899,7 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
                               value={input}
                               onChange={(event) => {
                                 const val = event.target.value;
+                                if (val !== input) typingRenderRef.current = true;
                                 setInput(val);
                                 const wordCount = val.trim().split(/\s+/).filter(w => w.length > 0).length;
                                 if (isExpandedBox && wordCount < 90) {
