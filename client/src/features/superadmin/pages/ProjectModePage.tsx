@@ -15,6 +15,7 @@ import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import { useParams } from "react-router-dom";
 import { ArrowLeft, FolderGit2, GitBranch, GitCommitHorizontal, ImagePlus, Plus } from "lucide-react";
 import { Button } from "@/components/marketing_ui/button";
+import { useSidebar } from "@/components/marketing_ui/sidebar";
 import { Spinner } from "@/components/marketing_ui/spinner";
 import { Skeleton } from "@/components/marketing_ui/skeleton";
 import { DangerConfirmDialog } from "@/components/marketing_ui/danger-confirm-dialog";
@@ -214,6 +215,17 @@ export function ProjectModePage() {
   // The AI panel starts at its normal 400 px and can be dragged wider; the editor's space follows it at once
   const [aiWidth, setAiWidth] = useState(400);
   const [aiResizing, setAiResizing] = useState(false);
+  // Dragging the AI panel very wide folds the left sidebar, so the page in the middle keeps its room; dragging it
+  // back opens the sidebar again (only when it was folded this way)
+  const { setOpen: setSidebarOpen, isMobile: sidebarMobile } = useSidebar();
+  const sidebarFoldedRef = useRef(false);
+  useEffect(() => {
+    if (sidebarMobile || !wide) return;
+    const left = window.innerWidth - (aiOpen ? aiWidth : 0);
+    if (left < 1000 && !sidebarFoldedRef.current) { sidebarFoldedRef.current = true; setSidebarOpen(false); }
+    else if (left > 1100 && sidebarFoldedRef.current) { sidebarFoldedRef.current = false; setSidebarOpen(true); }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [aiWidth, aiOpen, wide, sidebarMobile]);
   useEffect(() => {
     const mq = window.matchMedia("(min-width: 640px)");
     const onChange = () => setWide(mq.matches);
