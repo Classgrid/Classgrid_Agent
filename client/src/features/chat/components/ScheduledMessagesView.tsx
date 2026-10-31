@@ -65,6 +65,7 @@ import React, { useRef } from "react";
 import RichReplyEditor from "@/app/support/components/RichReplyEditor";
 import type { RichReplyEditorRef } from "@/app/support/components/RichReplyEditor";
 import { DangerConfirmDialog } from "@/components/marketing_ui/danger-confirm-dialog";
+import { toast } from "sonner";
 
 interface ScheduledMessagesViewProps {
   onClose: () => void;
@@ -120,7 +121,7 @@ export function ScheduledMessagesView({ onClose, threadId }: ScheduledMessagesVi
           await cancelScheduledMessage(threadId, msgId);
           setMessages(messages.filter(m => m.id !== msgId));
         } catch (err: any) {
-          alert(err.response?.data?.error || "Failed to cancel message");
+          toast.error(err.response?.data?.error || "Failed to cancel message");
         }
       }
     });
@@ -143,7 +144,7 @@ export function ScheduledMessagesView({ onClose, threadId }: ScheduledMessagesVi
       setMessages(messages.map(m => m.id === msgId ? updated : m));
       setEditingId(null);
     } catch (err: any) {
-      alert(err.response?.data?.error || "Failed to edit message");
+      toast.error(err.response?.data?.error || "Failed to edit message");
     } finally {
       setSavingId(null);
     }

@@ -303,10 +303,10 @@ export function ChatWindow({ thread, currentUserId, orgUsers }: ChatWindowProps)
       try {
         await sendMessage(threadId, text, files, replyTo, options);
         setReplyTo(null);
-        alert("Message scheduled successfully!");
+        toast.success("Message scheduled");
       } catch (error) {
         console.error("Failed to schedule message", error);
-        alert("Failed to schedule message.");
+        toast.error("Failed to schedule message.");
       } finally {
         setIsSending(false);
       }

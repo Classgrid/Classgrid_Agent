@@ -74,7 +74,7 @@ export function useApproveLead() {
     mutationFn: (id: string) => leadsApi.approve(id),
     onSuccess: () => qc.invalidateQueries({ queryKey: LEADS_KEY }),
     onError: (error: any) => {
-      alert(error?.message || "Failed to approve lead. Please try again.");
+      toast.error(error?.message || "Failed to approve lead. Please try again.");
     }
   });
 }

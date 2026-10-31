@@ -1,8 +1,9 @@
-import { forwardRef, useCallback, useImperativeHandle, useLayoutEffect, useRef } from "react";
+import { forwardRef, useCallback, useImperativeHandle, useLayoutEffect, useRef, useState } from "react";
 import TurndownService from "turndown";
 import { Marked } from "marked";
 import DOMPurify from "dompurify";
 import { cn } from "@/lib/utils";
+import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/marketing_ui/dialog";
 
 // The chat box with formatting shown while typing: links, bold, italic, inline code, code blocks, lists.
 // It still works like the old textarea for the panel: `value` is markdown (that is what the AI gets),
@@ -92,6 +93,9 @@ const RichChatInput = forwardRef<any, Props>(function RichChatInput(
 ) {
   const elRef = useRef<HTMLDivElement | null>(null);
   const lastValue = useRef<string | null>(null);
+  // Ctrl+K: the link is asked in our own small dialog; the selected text is kept so the link goes on it
+  const [linkAsk, setLinkAsk] = useState<{ text: string; range: Range | null } | null>(null);
+  const [linkUrl, setLinkUrl] = useState("");
 
   // Markdown length of everything before the caret (used by the @ menu like a textarea's selectionStart)
   const caretOffset = useCallback((): number => {
@@ -234,9 +238,8 @@ const RichChatInput = forwardRef<any, Props>(function RichChatInput(
     if (!sel || !sel.rangeCount) return;
     const text = sel.toString();
     if (tag === "a") {
-      const url = window.prompt("Link", /^https?:\/\//.test(text) ? text : "https://");
-      if (!url || !/^https?:\/\//i.test(url.trim())) return;
-      insertHtml(`<a href="${escapeHtml(url.trim())}">${escapeHtml(text || url.trim())}</a>${ZWSP}`);
+      setLinkUrl(/^https?:\/\//.test(text) ? text : "https://");
+      setLinkAsk({ text, range: sel.getRangeAt(0).cloneRange() });
     } else {
       insertHtml(`<code>${escapeHtml(text || "code")}</code>${ZWSP}`);
     }
@@ -262,6 +265,20 @@ const RichChatInput = forwardRef<any, Props>(function RichChatInput(
     }
   }, [onKeyDown, emit, wrapSelection]);
 
+  const addLink = () => {
+    const url = linkUrl.trim();
+    const ask = linkAsk;
+    setLinkAsk(null);
+    if (!ask || !/^https?:\/\//i.test(url)) return;
+    const el = elRef.current;
+    if (!el) return;
+    el.focus();
+    const sel = window.getSelection();
+    if (sel && ask.range) { sel.removeAllRanges(); sel.addRange(ask.range); }
+    insertHtml(`<a href="${escapeHtml(url)}">${escapeHtml(ask.text || url)}</a>${ZWSP}`);
+    emit();
+  };
+
   const handlePaste = useCallback((e: React.ClipboardEvent<HTMLDivElement>) => {
     // The panel handles long text chips and pasted files first
     onPaste?.(e);
@@ -284,6 +301,34 @@ const RichChatInput = forwardRef<any, Props>(function RichChatInput(
   }, [onPaste, emit]);
 
   return (
+    <>
+    <Dialog open={!!linkAsk} onOpenChange={(o) => { if (!o) { setLinkAsk(null); elRef.current?.focus(); } }}>
+      <DialogContent
+        showCloseButton={false}
+        overlayClassName="bg-black/50 supports-backdrop-filter:backdrop-blur-none"
+        className="sm:max-w-[22rem] gap-0 p-0 overflow-hidden rounded-xl bg-white dark:!bg-[#1e1e1e] ring-black/10 dark:ring-white/10 shadow-2xl"
+      >
+        <div className="px-5 pt-4 pb-3">
+          <DialogTitle className="text-[15px] font-medium">Add a link</DialogTitle>
+          <DialogDescription className="mt-0.5 text-[13px] text-muted-foreground">{linkAsk?.text ? `On “${linkAsk.text.slice(0, 60)}”` : "Paste the web address."}</DialogDescription>
+        </div>
+        <div className="px-5 pb-5">
+          <input
+            autoFocus
+            data-no-ring
+            value={linkUrl}
+            onChange={(e) => setLinkUrl(e.target.value)}
+            onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); addLink(); } }}
+            placeholder="https://"
+            className="w-full h-9 px-3 rounded-md border border-black/10 dark:border-white/[0.08] bg-white dark:bg-[#161616] text-[13px] outline-none focus:border-black/30 dark:focus:border-white/25"
+          />
+        </div>
+        <div className="flex items-center justify-end gap-2 px-5 py-3 border-t border-black/10 dark:border-white/[0.08] bg-black/[0.02] dark:bg-[#1a1a1a]">
+          <button type="button" onClick={() => { setLinkAsk(null); elRef.current?.focus(); }} className="h-8 px-3 rounded-md border border-black/10 dark:border-white/[0.1] text-[13px] hover:bg-black/[0.04] dark:hover:bg-white/[0.05] transition-[background-color,transform] duration-150 active:scale-[0.97]">Cancel</button>
+          <button type="button" onClick={addLink} disabled={!/^https?:\/\/\S+/i.test(linkUrl.trim())} className="h-8 px-3 rounded-md bg-foreground text-background text-[13px] font-medium hover:opacity-90 disabled:opacity-40 transition-[opacity,transform] duration-150 active:scale-[0.97] disabled:active:scale-100">Add link</button>
+        </div>
+      </DialogContent>
+    </Dialog>
     <div
       ref={setNode}
       id={id}
@@ -320,6 +365,7 @@ const RichChatInput = forwardRef<any, Props>(function RichChatInput(
         className
       )}
     />
+    </>
   );
 });
 

@@ -56,6 +56,7 @@
 
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { usersApi } from "../services/superAdminApi";
+import { toast } from "sonner";
 
 export const ALL_USERS_KEY = ["super-admin", "all-users"] as const;
 
@@ -90,7 +91,7 @@ export function useImpersonateUser() {
       window.location.href = "/agent";
     },
     onError: (error: any) => {
-      alert(error?.message || "Failed to impersonate user.");
+      toast.error(error?.message || "Failed to impersonate user.");
     }
   });
 }

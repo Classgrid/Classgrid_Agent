@@ -120,7 +120,7 @@ export function LibraryPage() {
     const file = acceptedFiles[0];
     
     if (quota.used_bytes + file.size > quota.max_bytes) {
-      alert("Storage quota exceeded. Please delete some files first.");
+      toast.error("Storage quota exceeded. Please delete some files first.");
       return;
     }
 
@@ -146,7 +146,7 @@ export function LibraryPage() {
         }, 500);
       } else {
         const err = await res.json();
-        alert(err.error || "Failed to upload file");
+        toast.error(err.error || "Failed to upload file");
         setIsUploading(false);
         setUploadProgress(0);
       }
@@ -154,7 +154,7 @@ export function LibraryPage() {
       console.error("Upload error", err);
       setIsUploading(false);
       setUploadProgress(0);
-      alert("An error occurred during upload.");
+      toast.error("An error occurred during upload.");
     }
   }, [endpointPrefix, quota, fetchLibrary]);
 

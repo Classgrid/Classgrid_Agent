@@ -107,6 +107,7 @@ import type { Lead } from "../services/superAdminApi";
 import { getSocket } from "@/lib/socketClient";
 
 import { LeadTable } from "../components/LeadTable";
+import { toast } from "sonner";
 
 // ── Page ──────────────────────────────────────────────────────────────────────
 
@@ -244,7 +245,7 @@ export function LeadsPage() {
     setAssigningId(id);
     assignMutation.mutate(id, {
       onSettled: () => setAssigningId(null),
-      onError: (err: Error) => alert(err?.message || "Failed to assign lead")
+      onError: (err: Error) => toast.error(err?.message || "Failed to assign lead")
     });
   };
 

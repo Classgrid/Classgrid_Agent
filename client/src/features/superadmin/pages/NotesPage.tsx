@@ -446,6 +446,7 @@ export function NotesPage() {
   const [categoryInput, setCategoryInput] = useState("");
   const [showCategoryPresets, setShowCategoryPresets] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [restoreVersion, setRestoreVersion] = useState<any>(null); // the version waiting in the restore confirm card
 
   const searchInputRef = useRef<HTMLInputElement>(null);
   const [leftWidth, setLeftWidth] = useState(400);
@@ -948,27 +949,7 @@ export function NotesPage() {
               setEditStatus(activeNote.status || "Published");
               setIsEditing(true);
             }}
-            onRestoreVersion={(v) => {
-              if (confirm("Restore this version? This will overwrite the current note content.")) {
-                updateNote.mutate(
-                  {
-                    id: activeNote._id,
-                    title: v.title,
-                    content: v.content,
-                    tags: v.tags,
-                    category: v.category,
-                    icon: v.icon,
-                    visibility: v.visibility,
-                  },
-                  {
-                    onSuccess: (updated) => {
-                      toast.success("Version restored successfully");
-                      setActiveNote(updated);
-                    },
-                  }
-                );
-              }
-            }}
+            onRestoreVersion={(v) => setRestoreVersion(v)}
             onTogglePin={() => {
               togglePin.mutate(activeNote._id, {
                 onSuccess: (updatedNote) => {
@@ -981,6 +962,33 @@ export function NotesPage() {
           />
         )}
       </div>
+
+      {/* Restore a version: asks first in our own confirm card */}
+      {activeNote && (
+        <DangerConfirmDialog
+          open={!!restoreVersion}
+          onOpenChange={(o) => { if (!o && !updateNote.isPending) setRestoreVersion(null); }}
+          title="Restore this version?"
+          description="This version replaces the note's current content."
+          warningMessage="The current content will be overwritten."
+          actionLabel="Restore version"
+          isLoading={updateNote.isPending}
+          onConfirm={() => {
+            const v = restoreVersion;
+            if (!v) return;
+            updateNote.mutate(
+              { id: activeNote._id, title: v.title, content: v.content, tags: v.tags, category: v.category, icon: v.icon, visibility: v.visibility },
+              {
+                onSuccess: (updated) => {
+                  toast.success("Version restored successfully");
+                  setActiveNote(updated);
+                  setRestoreVersion(null);
+                },
+              }
+            );
+          }}
+        />
+      )}
 
       {/* Delete Confirmation Dialog */}
       {activeNote && (

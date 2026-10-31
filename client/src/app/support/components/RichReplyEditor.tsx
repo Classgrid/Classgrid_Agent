@@ -75,6 +75,7 @@ import LinkModal from "@/app/support/components/LinkModal";
 import { storageApi } from "@/features/superadmin/services/storageApi";
 import { Select, SelectTrigger, SelectContent, SelectItem, SelectValue } from "@/components/marketing_ui/select";
 import DOMPurify from "dompurify";
+import { toast } from "sonner";
 
 // ── Toolbar button ──────────────────────────────────────────────
 
@@ -413,14 +414,14 @@ const RichReplyEditor = forwardRef<RichReplyEditorRef, RichReplyEditorProps>(
         if (!file) return;
 
         if (file.size > 5 * 1024 * 1024) {
-          alert("Image size exceeds the 5MB limit. Please upload a smaller image.");
+          toast.error("Image size exceeds the 5MB limit. Please upload a smaller image.");
           e.target.value = "";
           return;
         }
 
         const currentImages = editorRef.current?.querySelectorAll("img").length || 0;
         if (currentImages >= 5) {
-          alert("You can only upload a maximum of 5 inline images.");
+          toast.error("You can only upload a maximum of 5 inline images.");
           e.target.value = "";
           return;
         }
@@ -449,7 +450,7 @@ const RichReplyEditor = forwardRef<RichReplyEditorRef, RichReplyEditorProps>(
           }, 300);
         } else {
           setUploadingImage(false);
-          alert("Image upload failed. Please try again.");
+          toast.error("Image upload failed. Please try again.");
         }
         e.target.value = "";
       },

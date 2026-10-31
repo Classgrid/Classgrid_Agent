@@ -331,9 +331,9 @@ export function ProjectModePage() {
       const { res, data } = await api(`/projects/${project.id}/open`, { method: "POST", body: JSON.stringify({ replace, resume }) });
       if (res.status === 409 && data.error === "unsaved_changes") {
         setBusyId(null);
-        if (window.confirm("This project has changes that are not pushed to GitHub. Download a fresh copy and lose them?")) return open(project, true);
         setProgress(null);
         rememberOpen(wasOpen);
+        setConfirm({ kind: "fresh", project }); // asks in our own confirm card
         return;
       }
       if (res.status === 409) { setProgress(null); rememberOpen(wasOpen); setGithubConnected(false); setLinking(project); loadRepos(); return; }
@@ -505,6 +505,9 @@ export function ProjectModePage() {
   // Review / Reject / Undo an AI answer's changes (from the buttons under each answer)
   type ReviewFile = { file: string; added: number; removed: number; kind: string; diff: string };
   const [review, setReview] = useState<{ sessionId: string; checkpoint: string; files: ReviewFile[] | null; open: string | null; busy: boolean } | null>(null);
+  // Undo, Reject and "download a fresh copy" ask first in our own confirm card (the same one as Studio)
+  const [confirm, setConfirm] = useState<{ kind: "undo"; sessionId: string; checkpoint: string } | { kind: "reject"; file?: string } | { kind: "fresh"; project: Project } | null>(null);
+  const [confirmBusy, setConfirmBusy] = useState(false);
   const cpPath = (r: { sessionId: string; checkpoint: string }) => `/projects/${openProject?.id}/checkpoints/${r.sessionId}/${r.checkpoint}`;
   const loadReview = async (r: { sessionId: string; checkpoint: string }) => {
     const { res, data } = await api(cpPath(r));
@@ -515,13 +518,7 @@ export function ProjectModePage() {
     const onReview = async (e: Event) => {
       const d = (e as CustomEvent).detail;
       if (!openProject || !d?.checkpoint) return;
-      if (d.mode === "undo") {
-        if (!window.confirm("Put the project back to how it was before this answer? Changes made after it, by you or the AI, are undone too.")) return;
-        const { res, data } = await api(`${cpPath(d)}/undo`, { method: "POST", body: "{}" });
-        if (res.ok) { markCheckpoint(d.checkpoint, { status: "undone" }); toast.success(`Undone: ${data.reverted} file${data.reverted === 1 ? "" : "s"} put back`); }
-        else toast.error(data.error || "Could not undo");
-        return;
-      }
+      if (d.mode === "undo") { setConfirm({ kind: "undo", sessionId: d.sessionId, checkpoint: d.checkpoint }); return; }
       setReview({ sessionId: d.sessionId, checkpoint: d.checkpoint, files: null, open: null, busy: false });
       loadReview(d);
     };
@@ -529,9 +526,18 @@ export function ProjectModePage() {
     return () => window.removeEventListener(REVIEW_CHECKPOINT_EVENT, onReview);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [openProject]);
-  const rejectChanges = async (file?: string) => {
+  const undo = async (d: { sessionId: string; checkpoint: string }) => {
+    setConfirmBusy(true);
+    const { res, data } = await api(`${cpPath(d)}/undo`, { method: "POST", body: "{}" });
+    setConfirmBusy(false);
+    setConfirm(null);
+    if (res.ok) { markCheckpoint(d.checkpoint, { status: "undone" }); toast.success(`Undone: ${data.reverted} file${data.reverted === 1 ? "" : "s"} put back`); }
+    else toast.error(data.error || "Could not undo");
+  };
+  const rejectChanges = (file?: string) => { if (review) setConfirm({ kind: "reject", file }); };
+  const doReject = async (file?: string) => {
     if (!review) return;
-    if (!window.confirm(file ? `Throw away the AI's changes to ${file}?` : "Throw away all of this answer's changes?")) return;
+    setConfirm(null);
     setReview({ ...review, busy: true });
     const { res, data } = await api(`${cpPath(review)}/reject`, { method: "POST", body: JSON.stringify({ file }) });
     if (res.ok) {
@@ -911,6 +917,27 @@ export function ProjectModePage() {
         aspectRatio={1}
         title="Crop project logo"
         onCropComplete={saveLogo}
+      />
+
+      <DangerConfirmDialog
+        open={!!confirm}
+        onOpenChange={(o) => { if (!o && !confirmBusy) setConfirm(null); }}
+        title={confirm?.kind === "fresh" ? "Download a fresh copy" : confirm?.kind === "undo" ? "Undo this answer" : confirm?.file ? "Reject this file's changes" : "Reject all changes"}
+        description={confirm?.kind === "fresh"
+          ? "This project has changes that are not pushed to GitHub. A fresh copy from GitHub replaces them."
+          : confirm?.kind === "undo"
+            ? "The project goes back to how it was before this answer. Changes made after it are undone too."
+            : confirm?.file
+              ? `The agent's changes to ${confirm.file} will be thrown away and the file put back as it was before this answer.`
+              : "All of this answer's changes will be thrown away and every file put back as it was before this answer."}
+        warningMessage="This can't be undone."
+        actionLabel={confirm?.kind === "fresh" ? "Download fresh copy" : confirm?.kind === "undo" ? "Undo" : confirm?.file ? "Reject file" : "Reject all"}
+        isLoading={confirmBusy}
+        onConfirm={() => {
+          if (confirm?.kind === "fresh") { const p = confirm.project; setConfirm(null); open(p, true); }
+          else if (confirm?.kind === "undo") undo(confirm);
+          else if (confirm) doReject(confirm.file);
+        }}
       />
 
       <DangerConfirmDialog
