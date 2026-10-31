@@ -1509,6 +1509,9 @@ export const streamAskAi = async (req, res) => {
     res.write(':' + Array(2048).join(' ') + '\n\n');
 
     let keepAliveInterval = null;
+    let replacedCheck = null;
+    let runKey = null;
+    let runId = null;
     let releaseGridLock = null; // Share Grid: unlocks "Agent is responding to …" when this request is fully done (see finally)
     try {
 
@@ -4937,6 +4940,25 @@ If a tool fails, never show the error message; say only: "Something went wrong o
             if (!res.writableEnded) res.end();
         });
 
+        // One answer at a time in a chat: a new message from the same person stops their older answer that is still
+        // running there (one the page lost track of would otherwise go on hidden, waiting on permission prompts and
+        // changing the same files). Redis holds the newest answer's id, so this works across server processes.
+        if (sessionId && userId && !body.taskOrigin) {
+            runKey = `chat:run:${userId}:${sessionId}`;
+            runId = `${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+            await redis.set(runKey, runId, "EX", 6 * 60 * 60).catch(() => {});
+            replacedCheck = setInterval(() => {
+                if (requestAborted || res.writableEnded) return clearInterval(replacedCheck);
+                redis.get(runKey).then((newest) => {
+                    if (!newest || newest === runId || requestAborted) return;
+                    console.log(`[AI-STREAM] a newer message in chat ${sessionId} replaced this answer: stopping it`);
+                    requestAborted = true;
+                    streamAbort.abort();
+                    if (!res.writableEnded) res.end();
+                }).catch(() => {});
+            }, 3000);
+        }
+
         // --- KEEP ALIVE PING FOR NGINX / PROXIES ---
         keepAliveInterval = setInterval(() => {
             if (requestAborted || res.writableEnded) {
@@ -5483,6 +5505,8 @@ If a tool fails, never show the error message; say only: "Something went wrong o
         }
     } finally {
         if (keepAliveInterval) clearInterval(keepAliveInterval);
+        if (replacedCheck) clearInterval(replacedCheck);
+        if (runKey) redis.get(runKey).then((newest) => (newest === runId ? redis.del(runKey) : null)).catch(() => {});
         if (releaseGridLock) releaseGridLock();
         if (!res.writableEnded) {
             res.write('data: [DONE]\n\n');
