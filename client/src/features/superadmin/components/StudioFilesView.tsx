@@ -13,7 +13,7 @@ const dragFile = (e: React.DragEvent, path: string) => {
 import { createPortal } from "react-dom";
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import { themeIcons } from "seti-icons";
-import { Check, ChevronRight, Copy, Folder, FolderOpen, ListTree, RotateCw, X } from "lucide-react";
+import { Check, ChevronRight, Copy, Folder, FolderOpen, ListTree, RotateCw, Search, X } from "lucide-react";
 import { fetchWithRescue } from "@/lib/rescue";
 
 const backendUrl = import.meta.env.VITE_API_URL || "https://api.classgrid.in";
@@ -64,6 +64,16 @@ function buildTree(files: Entry[]): Node[] {
   sort(root);
   return root.children;
 }
+
+// Only the files (and folders) whose path has the search text; their folders stay, so you see where each one is
+function filterTree(nodes: Node[], q: string): Node[] {
+  return nodes.flatMap((n) => {
+    if (!n.dir) return n.path.toLowerCase().includes(q) ? [n] : [];
+    const kids = filterTree(n.children, q);
+    return kids.length || n.name.toLowerCase().includes(q) ? [{ ...n, children: kids.length ? kids : n.children }] : [];
+  });
+}
+const dirPaths = (nodes: Node[]): string[] => nodes.flatMap((n) => (n.dir ? [n.path, ...dirPaths(n.children)] : []));
 
 const LANG: Record<string, string> = {
   js: "javascript", mjs: "javascript", cjs: "javascript", jsx: "jsx", ts: "typescript", tsx: "tsx",
@@ -131,6 +141,11 @@ export function StudioFilesView({ projectId, projectName, wide, reloadKey = 0, r
   useEffect(() => { if (reloadKey) load(); }, [reloadKey, load]);
 
   const tree = useMemo(() => buildTree(listing?.files || []), [listing]);
+  // Search box above the tree: while it has text, the tree shows only matching files, with their folders open
+  const [query, setQuery] = useState("");
+  const q = query.trim().toLowerCase();
+  const shownTree = useMemo(() => (q ? filterTree(tree, q) : tree), [tree, q]);
+  const shownDirs = useMemo(() => (q ? new Set(dirPaths(shownTree)) : openDirs), [q, shownTree, openDirs]);
 
   const openFile = async (path: string, lines?: { startLine?: number; endLine?: number }) => {
     if (!projectId) return;
@@ -138,7 +153,6 @@ export function StudioFilesView({ projectId, projectName, wide, reloadKey = 0, r
     setOpenPaths((list) => (list.includes(path) ? list : [...list, path]));
     const cached = fileCache.current.get(path);
     setFile(cached ? { ...cached, ...lines } : { path, loading: true, ...lines });
-    if (!wide) setTreeShown(false);
     try {
       const { res, data } = await api(`/projects/${projectId}/file?path=${encodeURIComponent(path)}`);
       const next: OpenFile = res.ok ? { path, ...data, loading: false } : { path, error: data.error || "Could not open the file", loading: false };
@@ -249,7 +263,8 @@ export function StudioFilesView({ projectId, projectName, wide, reloadKey = 0, r
   }
 
   const showTree = !file || treeShown;
-  const split = !!file && wide && treeShown;
+  // The folder list stays next to the code on a narrow pane too (it takes at most part of the width there)
+  const split = !!file && treeShown;
 
   return (
     <div className="flex-1 min-h-0 flex flex-col">
@@ -322,7 +337,28 @@ export function StudioFilesView({ projectId, projectName, wide, reloadKey = 0, r
 
         {/* Tree */}
         {showTree && (
-          <div className={`min-h-0 overflow-y-auto py-1.5 ${split ? "shrink-0" : "flex-1"}`} style={split ? { width: treeW } : undefined}>
+          <div className={`min-h-0 flex flex-col ${split ? "shrink-0" : "flex-1"}`} style={split ? { width: treeW, maxWidth: wide ? undefined : "45%" } : undefined}>
+            {listing && tree.length > 0 && (
+              <div className="shrink-0 px-2 pt-2 pb-1">
+                <label className="flex items-center gap-2 h-8 px-2.5 rounded-lg border border-black/10 dark:border-white/[0.08] focus-within:border-black/25 dark:focus-within:border-white/20 transition-colors">
+                  <Search className="size-3.5 shrink-0 text-muted-foreground" />
+                  <input
+                    data-no-ring
+                    value={query}
+                    onChange={(e) => setQuery(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === "Escape") setQuery(""); }}
+                    placeholder="Filter files…"
+                    className="min-w-0 flex-1 bg-transparent text-[13px] outline-none placeholder:text-muted-foreground"
+                  />
+                  {query && (
+                    <button type="button" onClick={() => setQuery("")} className="shrink-0 flex items-center justify-center size-5 rounded text-muted-foreground hover:text-foreground" aria-label="Clear search">
+                      <X className="size-3" />
+                    </button>
+                  )}
+                </label>
+              </div>
+            )}
+          <div className="flex-1 min-h-0 overflow-y-auto py-1.5">
             {error ? (
               <p className="px-4 py-3 text-[13px] text-muted-foreground">{error}</p>
             ) : !listing ? (
@@ -333,10 +369,13 @@ export function StudioFilesView({ projectId, projectName, wide, reloadKey = 0, r
               <p className="px-4 py-3 text-[13px] text-muted-foreground">
                 {listing.source === "sandbox" ? "No files yet. Open the project in Project Mode, or let the agent make some." : "This repo has no files yet."}
               </p>
+            ) : q && !shownTree.length ? (
+              <p className="px-4 py-3 text-[13px] text-muted-foreground">No files match “{query.trim()}”.</p>
             ) : (
-              <Tree nodes={tree} depth={0} openDirs={openDirs} toggleDir={toggleDir} openFile={openFile} current={file?.path || null} writing={writing} changed={changed} />
+              <Tree nodes={shownTree} depth={0} openDirs={shownDirs} toggleDir={toggleDir} openFile={openFile} current={file?.path || null} writing={writing} changed={changed} />
             )}
             {listing?.truncated && <p className="px-4 py-2 text-[12px] text-muted-foreground">Only part of this big repo is shown.</p>}
+          </div>
           </div>
         )}
       </div>
