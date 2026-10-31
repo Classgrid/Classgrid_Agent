@@ -1225,45 +1225,39 @@ const MarkdownCarousel = memo(({ content, components }: { content: string, compo
 
 // We need to define `pre` to just return children because we handle block code fully inside the `code` component.
 // Otherwise, Tailwind's typography plugin will wrap our custom cards in a dark <pre> box and force monospace.
+// The colour of each alert: the bar on the left and the label
+const ALERT_TONES: Record<string, { bar: string; text: string }> = {
+  note: { bar: "border-blue-500", text: "text-blue-600 dark:text-blue-400" },
+  tip: { bar: "border-green-600 dark:border-green-500", text: "text-green-700 dark:text-green-400" },
+  important: { bar: "border-purple-500", text: "text-purple-600 dark:text-purple-400" },
+  warning: { bar: "border-amber-500", text: "text-amber-600 dark:text-amber-400" },
+  caution: { bar: "border-red-500", text: "text-red-600 dark:text-red-400" },
+};
+// A plain quote whose text starts with a label like "NOTE" or "Warning:" gets that alert's bar colour
+function quoteLabel(children: any): string | undefined {
+  const text = (node: any): string => typeof node === "string" ? node : Array.isArray(node) ? node.map(text).join("") : node?.props?.children !== undefined ? text(node.props.children) : "";
+  const m = text(children).trimStart().match(/^(NOTE|TIP|IMPORTANT|WARNING|CAUTION)\b/i);
+  return m ? m[1]!.toLowerCase() : undefined;
+}
+
 const MarkdownComponents = {
   blockquote({ className, children, ...props }: any) {
-    if (className?.includes("markdown-alert")) {
-      const type = className.replace("markdown-alert", "").trim().replace("markdown-alert-", "");
-      let icon = null;
-      let colorClass = "border-slate-300 bg-slate-50 text-slate-700 dark:border-slate-600 dark:bg-slate-800/50 dark:text-slate-300";
-
-      if (type === "note") {
-        icon = <Info className="w-5 h-5 text-blue-500" />;
-        colorClass = "border-blue-500 bg-blue-50/50 text-blue-900 dark:border-blue-500/50 dark:bg-blue-900/20 dark:text-blue-200";
-      } else if (type === "tip") {
-        icon = <Lightbulb className="w-5 h-5 text-emerald-500" />;
-        colorClass = "border-emerald-500 bg-emerald-50/50 text-emerald-900 dark:border-emerald-500/50 dark:bg-emerald-900/20 dark:text-emerald-200";
-      } else if (type === "important") {
-        icon = <MessageSquareWarning className="w-5 h-5 text-purple-500" />;
-        colorClass = "border-purple-500 bg-purple-50/50 text-purple-900 dark:border-purple-500/50 dark:bg-purple-900/20 dark:text-purple-200";
-      } else if (type === "warning") {
-        icon = <AlertTriangle className="w-5 h-5 text-amber-500" />;
-        colorClass = "border-amber-500 bg-amber-50/50 text-amber-900 dark:border-amber-500/50 dark:bg-amber-900/20 dark:text-amber-200";
-      } else if (type === "caution") {
-        icon = <OctagonAlert className="w-5 h-5 text-red-500" />;
-        colorClass = "border-red-500 bg-red-50/50 text-red-900 dark:border-red-500/50 dark:bg-red-900/20 dark:text-red-200";
-      }
-
+    // Alerts keep the normal quote look; only the bar (and the label) take the alert's colour, like GitHub:
+    // "> [!TIP]" alerts, and plain quotes that start with a NOTE / TIP / IMPORTANT / WARNING / CAUTION label
+    const alertType = className?.includes("markdown-alert")
+      ? className.replace("markdown-alert", "").trim().replace("markdown-alert-", "")
+      : quoteLabel(children);
+    const tone = alertType ? ALERT_TONES[alertType] : undefined;
+    if (tone && className?.includes("markdown-alert")) {
       return (
-        <div className={`my-5 border-l-4 rounded-r-lg px-5 py-4 ${colorClass}`} {...props}>
-          <div className="flex items-center gap-2 font-semibold mb-2">
-            {icon}
-            <span className="capitalize">{type}</span>
-          </div>
-          <div className="text-[15px] leading-relaxed [&>p]:m-0 [&>p]:mb-2 [&>p:last-child]:mb-0">
-            {children}
-          </div>
+        <div className={`border-l-[3px] ${tone.bar} pl-4 my-4 text-slate-700 dark:text-[#ececf1]`} {...props}>
+          <div className={`text-[14px] font-semibold uppercase tracking-wide ${tone.text}`}>{alertType}</div>
+          <div className="[&>p]:m-0 [&>p]:mt-1">{children}</div>
         </div>
       );
     }
-
     return (
-      <blockquote className="border-l-[3px] border-slate-300 dark:border-[#4B4B4B] pl-4 my-4 text-slate-700 dark:text-[#ececf1] bg-transparent" {...props}>
+      <blockquote className={`border-l-[3px] ${tone ? tone.bar : "border-slate-300 dark:border-[#4B4B4B]"} pl-4 my-4 text-slate-700 dark:text-[#ececf1] bg-transparent`} {...props}>
         {children}
       </blockquote>
     );
@@ -1272,7 +1266,8 @@ const MarkdownComponents = {
   // coloured box (note blue, tip green, important purple, warning amber, caution red), without the plain title line
   div({ className, children, ...props }: any) {
     if (String(className || "").split(/\s+/).includes("markdown-alert")) {
-      return MarkdownComponents.blockquote({ className, children: React.Children.toArray(children).slice(1), ...props });
+      const body = React.Children.toArray(children).filter((ch: any) => !String(ch?.props?.className || "").includes("markdown-alert-title"));
+      return MarkdownComponents.blockquote({ className, children: body, ...props });
     }
     return <div className={className} {...props}>{children}</div>;
   },
@@ -1518,7 +1513,12 @@ const USER_MD_COMPONENTS: any = {
   a: ({ href, children }: any) => (
     <a href={href} target="_blank" rel="noreferrer" className="underline underline-offset-2 text-blue-600 dark:text-blue-400 break-all">{children}</a>
   ),
-  code: ({ children }: any) => <code className="bg-black/5 dark:bg-white/10 px-1 py-0.5 rounded text-[14px] font-mono break-words">{children}</code>,
+  code: ({ children }: any) => {
+    // A project file the user mentioned (dragged in from the Files tab): the same clickable chip as in answers
+    const mention = typeof children === "string" ? parseFileMention(children) : null;
+    if (mention) return <FileMentionChip {...mention} />;
+    return <code className="bg-black/5 dark:bg-white/10 px-1 py-0.5 rounded text-[14px] font-mono break-words">{children}</code>;
+  },
   pre: ({ children }: any) => <pre className="my-1 p-2 rounded-lg bg-black/5 dark:bg-white/10 overflow-x-auto text-[14px] whitespace-pre">{children}</pre>,
   ul: ({ children }: any) => <ul className="list-disc pl-5 my-1">{children}</ul>,
   ol: ({ children }: any) => <ol className="list-decimal pl-5 my-1">{children}</ol>,
@@ -5899,6 +5899,12 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
                 </>
               )}
               <form onSubmit={handleSubmit} className={cn("space-y-2", endedView && "hidden")}>
+                {/* The agent waits for the user to allow an action: its card sits just above the chat box */}
+                {pendingPermission && (
+                  <div className={cn(variant === "overlay" ? "w-full" : "sm:w-[80%]", "w-full mx-auto")}>
+                    <PermissionCard key={pendingPermission.id} request={pendingPermission} onDone={() => setPendingPermission(null)} />
+                  </div>
+                )}
                 <div className={cn(
                   variant === "overlay" ? "w-full" : "sm:w-[80%]",
                   "group relative w-full mx-auto shadow-sm rounded-2xl border border-border !bg-white dark:!bg-[#0f0f0f] focus-within:border-black/80 dark:focus-within:border-white/50 focus-within:ring-1 focus-within:ring-black/80 dark:focus-within:ring-white/50 transition-all duration-300",
@@ -6182,10 +6188,6 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
                         <X className="h-4 w-4" />
                       </button>
                     </div>
-                  )}
-
-                  {pendingPermission && (
-                    <PermissionCard key={pendingPermission.id} request={pendingPermission} onDone={() => setPendingPermission(null)} />
                   )}
 
                   {fileMentions.length > 0 && (

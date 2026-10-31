@@ -123,7 +123,7 @@ export function PermissionCard({ request, onDone }: { request: PermissionRequest
       initial={reduce ? false : { opacity: 0, y: 8 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: reduce ? 0 : 0.25, ease: EASE }}
-      className="mx-3 mt-3 rounded-2xl border border-black/10 dark:border-white/10 bg-white dark:bg-[#1e1e1e] p-3 shadow-sm"
+      className="rounded-2xl border border-black/10 dark:border-white/10 bg-white dark:bg-[#1e1e1e] p-3 shadow-sm"
     >
       <div className="flex items-start gap-2.5">
         <CircleHelp className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
@@ -142,23 +142,24 @@ export function PermissionCard({ request, onDone }: { request: PermissionRequest
             <span className="min-w-0 break-words">{text}</span>
           </button>
         ))}
-        <div className={row(choice === 3)} onClick={() => { setChoice(3); noteRef.current?.focus(); }}>
-          <span className={num}>4</span>
-          <span className="shrink-0">No</span>
-          <input
-            ref={noteRef}
-            data-no-ring
-            value={note}
-            onChange={(e) => { setNote(e.target.value); setChoice(3); }}
-            onFocus={() => setChoice(3)}
-            placeholder="(tell the agent what to do instead)"
-            className="min-w-0 flex-1 bg-transparent text-[13.5px] outline-none placeholder:text-muted-foreground"
-          />
+        {/* 4 "No" with its note, and Skip / Submit on the same line */}
+        <div className="flex items-center gap-2">
+          <div className={cn(row(choice === 3), "flex-1 min-w-0 items-center")} onClick={() => { setChoice(3); noteRef.current?.focus(); }}>
+            <span className={num}>4</span>
+            <span className="shrink-0">No</span>
+            <input
+              ref={noteRef}
+              data-no-ring
+              value={note}
+              onChange={(e) => { setNote(e.target.value); setChoice(3); }}
+              onFocus={() => setChoice(3)}
+              placeholder="(tell the agent what to do instead)"
+              className="min-w-0 flex-1 bg-transparent text-[13.5px] outline-none placeholder:text-muted-foreground"
+            />
+          </div>
+          <button type="button" disabled={busy} onClick={() => send("skip")} className="shrink-0 h-8 px-3 rounded-md text-[13px] text-muted-foreground hover:text-foreground hover:bg-black/[0.05] dark:hover:bg-white/[0.06] disabled:opacity-50">Skip</button>
+          <button type="button" disabled={busy} onClick={submit} className="shrink-0 h-8 px-3.5 rounded-md bg-foreground text-background text-[13px] font-medium hover:opacity-90 disabled:opacity-50">Submit ↵</button>
         </div>
-      </div>
-      <div className="mt-2 flex items-center justify-end gap-2">
-        <button type="button" disabled={busy} onClick={() => send("skip")} className="h-8 px-3 rounded-md text-[13px] text-muted-foreground hover:text-foreground hover:bg-black/[0.05] dark:hover:bg-white/[0.06] disabled:opacity-50">Skip</button>
-        <button type="button" disabled={busy} onClick={submit} className="h-8 px-3.5 rounded-md bg-foreground text-background text-[13px] font-medium hover:opacity-90 disabled:opacity-50">Submit ↵</button>
       </div>
     </motion.div>
   );
