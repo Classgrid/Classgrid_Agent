@@ -2038,6 +2038,9 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
   const typingOnlyRender = typingRenderRef.current;
   typingRenderRef.current = false;
   const chatListRef = useRef<{ deps: unknown[]; node: React.ReactNode } | null>(null);
+  // Each chat's reply that is still streaming. After leaving a chat its reply keeps running on the server; a new
+  // message in that chat stops it first, so two replies never run at once in one chat
+  const runningRepliesRef = useRef(new Map<string, { controller: AbortController; gen: number }>());
   // Set when Classgrid AI (or the user) ended this chat: the composer is replaced by a "Chat ended" card.
   const [chatEnded, setChatEnded] = useState<{ reason: string | null; canReopen: boolean } | null>(null);
   const [endedFeedbackOpen, setEndedFeedbackOpen] = useState(false);
@@ -4089,6 +4092,12 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
 
     const controller = new AbortController();
     abortControllerRef.current = controller;
+    const replySession = (options && options.explicitSessionId !== undefined) ? options.explicitSessionId : sessionId;
+    if (replySession) {
+      const old = runningRepliesRef.current.get(replySession);
+      if (old && old.gen !== myGen) old.controller.abort(); // a reply the app let go of, still running for this chat
+      runningRepliesRef.current.set(replySession, { controller, gen: myGen });
+    }
 
     // --- INTERCEPT @Create image ---
     if (apiQuestion.trim().startsWith("@Create image")) {
@@ -4619,6 +4628,7 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
         await typeAssistantResponse(fallback);
       }
     } finally {
+      if (replySession && runningRepliesRef.current.get(replySession)?.controller === controller) runningRepliesRef.current.delete(replySession);
       if (!isStale()) setSubmitting(false);
     }
   }
@@ -5895,6 +5905,8 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
                                   <button
                                     type="button"
                                     onClick={() => {
+                                      // One message goes next (the yellow dot); a second one pressed Send waits right after it, never lost
+                                      if (priorityMessage) { setMessageQueue(prev => [msg, ...prev.filter(m => m.id !== msg.id)]); return; }
                                       setMessageQueue(prev => prev.filter(m => m.id !== msg.id));
                                       setPriorityMessage(msg);
                                     }}
@@ -6636,6 +6648,8 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
                                             <button
                                               type="button"
                                               onClick={() => {
+                                                // One message goes next (the yellow dot); a second one pressed Send waits right after it, never lost
+                                                if (priorityMessage) { setMessageQueue(prev => [msg, ...prev.filter(m => m.id !== msg.id)]); return; }
                                                 setMessageQueue(prev => prev.filter(m => m.id !== msg.id));
                                                 setPriorityMessage(msg);
                                               }}

@@ -453,11 +453,12 @@ export const getMcpTools = () => [
   },
   {
     name: 'push_project_to_github',
-    description: 'Commit all changes in the open Project Mode project, push them to a classgrid/ branch of its GitHub repo and open (or update) a pull request for the repo owner to review and merge. It never pushes straight to the main branch. Returns the pull request link.',
+    description: 'Commit all changes in the open Project Mode project, push them to a classgrid/ branch of its GitHub repo and open (or update) a pull request for the repo owner to review and merge. Returns the pull request link. With direct_to_main: true it instead pushes straight to the repo\'s main branch with the user\'s own GitHub account, with no pull request.',
     inputSchema: {
       type: 'object',
       properties: {
-        message: { type: 'string', description: 'Commit message describing the change.' }
+        message: { type: 'string', description: 'Commit message describing the change.' },
+        direct_to_main: { type: 'boolean', description: 'Only when the user asks to push straight to the main branch (or "with my account", "no pull request"): pushes to the main branch with the user\'s own GitHub account. Leave it out otherwise.' }
       },
       required: ['message']
     }

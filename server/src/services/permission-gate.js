@@ -33,7 +33,7 @@ export function describeAction(tool, args = {}) {
     case "run_code":
       return { title: `Run this ${args?.language || "code"}?`, detail: String(args?.code || "").slice(0, 1500), key: `code:${args?.language || "code"}`, label: `running ${args?.language || "code"}`, level: 1 };
     case "push_project_to_github":
-      return { title: "Push the changes to GitHub?", detail: String(args?.message || "Commit and push this project's changes"), key: "push", label: "pushing to GitHub", level: 3 };
+      return { title: args?.direct_to_main === true || args?.direct_to_main === "true" ? "Push the changes straight to main with your GitHub account?" : "Push the changes to GitHub?", detail: String(args?.message || "Commit and push this project's changes"), key: "push", label: "pushing to GitHub", level: 3 };
     case "create_github_repo_for_project":
       return { title: "Create a new GitHub repository?", detail: `${args?.organization ? `${args.organization}/` : ""}${args?.name || ""}${args?.private === false ? "  (public)" : "  (private)"}`, key: "create_repo", label: "creating GitHub repositories", level: 2 };
     case "update_project_github_repo":

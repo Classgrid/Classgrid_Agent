@@ -275,7 +275,7 @@ export const projectTools = {
     return `Edited ${rel} (${done.join(", ")}, +${added} -${removed}).${await problemsAfterWrite(ssh, project, full)}`;
   }),
 
-  push_project_to_github: (sessionId, { message }) => withProject(sessionId, (project, ssh) => pushProject(project, ssh, message)),
+  push_project_to_github: (sessionId, { message, direct_to_main }) => withProject(sessionId, (project, ssh) => pushProject(project, ssh, message, { direct: direct_to_main === true || direct_to_main === "true" })),
 
   create_github_repo_for_project: (sessionId, args) => withProject(sessionId, (project, ssh) => createRepoForProject(project, ssh, args || {})),
 
@@ -421,7 +421,38 @@ export async function openClassgridPrBranch(repo, key, base) {
   }
 }
 
-export async function pushProject(project, ssh, message) {
+// The user asked for it: the changes go straight to the repo's main (default) branch with the user's own GitHub
+// account, with no pull request. GitHub's newest main is taken first and the changes are put on top of it.
+async function pushStraightToMain(project, ssh, dir, key, staged, as) {
+  const auth = Buffer.from(`x-access-token:${key}`).toString("base64");
+  const gitAuth = `GIT_TERMINAL_PROMPT=0 GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=http.https://github.com/.extraheader GIT_CONFIG_VALUE_0="AUTHORIZATION: basic ${auth}"`;
+  const hide = (s) => String(s || "").split(auth).join("***");
+  const r = await fetch(`https://api.github.com/repos/${project.repo}`, {
+    headers: { Authorization: `Bearer ${key}`, Accept: "application/vnd.github+json", "User-Agent": "Classgrid" },
+  }).catch(() => null);
+  if (r?.status === 404) return `The user's GitHub account can't see ${project.repo}, so it can't push there.`;
+  const info = r?.ok ? await r.json().catch(() => ({})) : {};
+  if (info.permissions && !info.permissions.push) return `The user's GitHub account has no write access to ${project.repo}, so it can't push there.`;
+  const main = info.default_branch || "main";
+  // The download keeps only recent history: get all of it, so GitHub's main and these changes can be joined
+  await ssh.execCommand(`${gitAuth} git -C ${q(dir)} fetch -q --unshallow origin 2>/dev/null`);
+  const got = await ssh.execCommand(`${gitAuth} git -C ${q(dir)} fetch -q origin ${q(`+refs/heads/${main}:refs/remotes/origin/${main}`)}`);
+  if (got.code) return `Could not get the latest ${main} branch: ${hide(got.stderr || got.stdout).slice(0, 300)}`;
+  const { stdout: ahead } = await ssh.execCommand(`git -C ${q(dir)} rev-list --count ${q(`origin/${main}`)}..HEAD`);
+  if (ahead.trim() === "0") return `Nothing new to push: ${project.repo} (${main}) already has all of this project's changes.`;
+  const rebase = await ssh.execCommand(`git -C ${q(dir)} ${as} rebase -q ${q(`origin/${main}`)}`);
+  if (rebase.code) {
+    await ssh.execCommand(`git -C ${q(dir)} rebase --abort 2>/dev/null`);
+    const { stdout: files } = await ssh.execCommand(`git -C ${q(dir)} diff --name-only ${q(`origin/${main}`)} HEAD 2>/dev/null | head -20 | paste -sd, -`);
+    return `Push stopped: ${main} on GitHub changes the same lines as this project's changes, so they could not be joined by themselves. Nothing was lost. Files that differ: ${files.trim() || "unknown"}.`;
+  }
+  const push = await ssh.execCommand(`${gitAuth} git -C ${q(dir)} push origin ${q(`HEAD:refs/heads/${main}`)} 2>&1 | tail -5`);
+  const out = hide(push.stdout || push.stderr);
+  if (/rejected|error|fatal/i.test(out)) return `Push failed: ${out.slice(0, 800)}`;
+  return `${staged.trim() ? `Committed (${staged.trim()}) and pushed` : "Pushed"} straight to ${project.repo} (${main}) with the user's own GitHub account. No pull request: https://github.com/${project.repo}/tree/${main}`;
+}
+
+export async function pushProject(project, ssh, message, { direct: directToMain = false } = {}) {
   if (!project.repo) return "This project has no GitHub repo yet. Create one with create_github_repo_for_project.";
   const msg = String(message || "").trim().slice(0, 500);
   if (!msg) return "Error: a commit message is needed";
@@ -430,7 +461,11 @@ export async function pushProject(project, ssh, message) {
   // own GitHub key). The commit is in the user's name with Classgrid AI as co-author, so both show as contributors.
   const owner = await githubUser(project.owner, "github_name github_email");
   let key;
-  if (githubAppReady()) {
+  if (directToMain) {
+    // Straight to main with the user's own GitHub account (only when the user asks for it)
+    if (!owner?.github_access_token) return "GitHub is not connected. The user connects it in AI Hub, then tries again.";
+    key = owner.github_access_token;
+  } else if (githubAppReady()) {
     key = await repoAppToken(project.repo).catch(() => null);
     if (!key) return `The Classgrid app is not installed on ${project.repo}. The user installs it on this repo (${githubAppInstallUrl()}), then tries again.`;
   } else {
@@ -451,6 +486,7 @@ export async function pushProject(project, ssh, message) {
     const commit = await ssh.execCommand(`git -C ${q(dir)} ${as} commit -q -F -`, { stdin: `${msg}${userLine ? `\n\n${userLine}` : ""}\n` });
     if (commit.code) return `Commit failed: ${(commit.stderr || commit.stdout).slice(0, 500)}`;
   }
+  if (directToMain) return pushStraightToMain(project, ssh, dir, key, staged, as);
   // Owner's rule: the AI never pushes straight to the repo's main branch. Its work goes on a classgrid/ branch
   // with a pull request, and the repo owner merges it. GITHUB_DIRECT_PUSH=1 in the server .env allows direct pushes.
   const direct = process.env.GITHUB_DIRECT_PUSH === "1";
