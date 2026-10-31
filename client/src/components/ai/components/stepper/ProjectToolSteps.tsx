@@ -91,7 +91,10 @@ export function ProjectEditStep({ step }: { step: Step }) {
   const [open, setOpen] = useState(false);
   const path = step.args?.path || '';
   const loading = step.status === 'loading';
-  const edits: { old_text?: string; new_text?: string }[] = step.tool === 'edit_project_file' ? (step.args?.edits || []) : [];
+  // A model can send edits as a JSON string (or a single edit) instead of a list
+  let rawEdits = step.tool === 'edit_project_file' ? step.args?.edits : [];
+  if (typeof rawEdits === 'string') { try { rawEdits = JSON.parse(rawEdits); } catch { rawEdits = []; } }
+  const edits: { old_text?: string; new_text?: string }[] = Array.isArray(rawEdits) ? rawEdits : rawEdits && typeof rawEdits === 'object' ? [rawEdits] : [];
   // The real change comes back from the tool ("+208 -0"); until then (or for old chats) it is estimated from the request
   const real = String(step.result || '').match(/\+(\d+) -(\d+)\)\./);
   const added = real ? Number(real[1]) : step.tool === 'write_project_file' ? lineCount(step.args?.content) : edits.reduce((n, e) => n + lineCount(e.new_text), 0);
@@ -271,7 +274,7 @@ export function ProjectExploreGroup({ steps }: { steps: Step[] }) {
 // "Sending 3 helpers" with each helper's task; when done, each helper's answer opens under its task
 type HelperResult = { task: string; answer: string; failed: boolean };
 function parseHelpers(result?: string): HelperResult[] {
-  return String(result || '')
+  return (String(result || '').split('\n\nFILES CHANGED IN PROJECT:')[0] ?? '')
     .split(/\n\n(?=Helper \d+ \()/)
     .map((part) => {
       const m = part.match(/^Helper \d+ \(([\s\S]*?)\)( failed: ([\s\S]*)|:\n([\s\S]*))$/);
@@ -575,7 +578,7 @@ export function FilesChangedSummary({ steps, checkpoint, sessionId }: { steps: S
       const real = String(s.result || '').match(/\+(\d+) -(\d+)\)\./);
       const p = String(s.args?.path || '').replace(/^\/data\/project\//, '').replace(/^\/data\//, '').replace(/^\/home\/workspace\/projects\/[^/]+\//, '');
       if (real && p) add({ path: p, added: Number(real[1]), removed: Number(real[2]) });
-    } else if (s.tool === 'run_code' || s.tool === 'execute_terminal_command') {
+    } else if (s.tool === 'run_code' || s.tool === 'execute_terminal_command' || s.tool === 'run_project_helpers' || s.tool === 'check_helpers') {
       changesFromRun(s.result).forEach(add);
     }
   }

@@ -205,6 +205,7 @@ import { specialStepTitle, emailTitle } from "./stepper/tool-results/stepTitles"
 import { StepWorkingContext } from "./stepper/ShimmerText";
 import { ImageReadStep } from "./stepper/tool-results/ImageReadStep";
 import { AudioTranscribeStep } from "./stepper/tool-results/AudioTranscribeStep";
+import { StepBoundary } from "./stepper/StepBoundary";
 import { FILE_DRAG_TYPE, FileBadge, FileMentionChip, parseFileMention, parseProjectLink, FilesChangedSummary, ProjectEditStep, ProjectExploreGroup, ProjectPushStep, ProjectRunChanges, ProjectHelpersStep, TerminalStep, PROJECT_BACKGROUND_TOOLS, PROJECT_EDIT_TOOLS, PROJECT_EXPLORE_TOOLS } from "./stepper/ProjectToolSteps";
 import { CombinedReasoningBlock } from "./stepper/CombinedReasoningBlock";
 import { AiFeedbackModal } from "./AiFeedbackModal";
@@ -5446,7 +5447,9 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
                                       });
 
                                       flushThoughts();
-                                      return elements;
+                                      return elements.map((el, i) => React.isValidElement(el)
+                                        ? <StepBoundary key={el.key ?? i} tool={(el.props as any)?.step?.tool}>{el}</StepBoundary>
+                                        : el);
                                     })()}
                                   </AgentStepper>
                                     );

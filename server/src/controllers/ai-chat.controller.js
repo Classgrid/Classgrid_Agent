@@ -1147,6 +1147,19 @@ const helperBoard = (sessionId) => {
     if (!HELPER_BOARDS.has(key)) HELPER_BOARDS.set(key, { helpers: [], nextNo: 1 });
     return HELPER_BOARDS.get(key);
 };
+// The files finished helpers changed, in the same "FILES CHANGED IN PROJECT:" list a code run gives, so the
+// chat's "files changed" box counts helpers' work too
+const helperChangesText = (helpers) => {
+    const total = new Map();
+    for (const h of helpers) {
+        for (const [p, c] of h.changes || []) {
+            const prev = total.get(p) || { added: 0, removed: 0 };
+            total.set(p, { added: prev.added + c.added, removed: prev.removed + c.removed });
+        }
+    }
+    if (!total.size) return "";
+    return `\n\nFILES CHANGED IN PROJECT:\n${[...total].map(([p, c]) => `+${c.added} -${c.removed} ${p}`).join("\n")}`;
+};
 const stopHelpers = (sessionId) => {
     const board = HELPER_BOARDS.get(String(sessionId || "none"));
     if (!board) return;
@@ -2998,6 +3011,13 @@ If they ask whether their college/school uses Classgrid, say you can't see that 
                                 playground("tool", { who: `Helper ${h.no}`, tool: n, detail: JSON.stringify(a ?? {}).slice(0, 200) });
                                 const out = (await handleToolCall(n, a, { sessionId })).content[0].text;
                                 emitHelper({ helper: i, id, result: String(out).slice(0, 6000) });
+                                // The files this helper changed, for the chat's "files changed" box
+                                const changed = (n === "write_project_file" || n === "edit_project_file") && a?.path ? String(out).match(/\+(\d+) -(\d+)\)\./) : null;
+                                if (changed) {
+                                    const p = String(a.path).replace(/^\/data\/project\//, "").replace(/^\/data\//, "").replace(/^\/home\/workspace\/projects\/[^/]+\//, "");
+                                    const prev = h.changes.get(p) || { added: 0, removed: 0 };
+                                    h.changes.set(p, { added: prev.added + Number(changed[1]), removed: prev.removed + Number(changed[2]) });
+                                }
                                 return withInbox(out);
                             }]));
                             // In Studio every helper also has the user's live browser, so it never has to say it has none
@@ -3083,7 +3103,7 @@ If they ask whether their college/school uses Classgrid, say you can't see that 
                         };
 
                         const batch = specs.slice(0, room).map((s, i) => {
-                            const h = { no: board.nextNo++, task: s.task, canEdit: s.canEdit, model: pickModel(s.model, i), state: "running", report: "", reportTaken: false, inbox: [], notes: [], notesRead: 0, abort: new AbortController() };
+                            const h = { no: board.nextNo++, task: s.task, canEdit: s.canEdit, model: pickModel(s.model, i), state: "running", report: "", reportTaken: false, inbox: [], notes: [], notesRead: 0, changes: new Map(), abort: new AbortController() };
                             h.promise = runHelper(h, i).catch((e) => ({ state: "failed", text: String(e?.message || e) })).then((out) => {
                                 h.state = out.state;
                                 h.report = out.text;
@@ -3105,7 +3125,7 @@ If they ask whether their college/school uses Classgrid, say you can't see that 
                             h.reportTaken = true;
                             const notes = h.notes.length ? `\nNotes it sent you: ${h.notes.join(" | ")}` : "";
                             return h.state === "done" ? `${label(h)}:\n${h.report}${notes}` : `${label(h)} failed: ${h.report}${notes}`;
-                        }).join("\n\n");
+                        }).join("\n\n") + helperChangesText(batch);
                     },
                     // A message from the main AI to a helper that is still working (it gets it with its next step)
                     message_helper: async (args) => {
@@ -3126,6 +3146,7 @@ If they ask whether their college/school uses Classgrid, say you can't see that 
                         const news = () => board.helpers.some((h) => h.notes.length > h.notesRead || (h.state !== "running" && !h.reportTaken));
                         const until = Date.now() + waitMs;
                         while (!news() && Date.now() < until) await new Promise((r) => setTimeout(r, 1000));
+                        const reported = [];
                         const lines = board.helpers.map((h) => {
                             const name = `Helper ${h.no} (${MODEL_DISPLAY_NAMES[h.usedModel || h.model] || h.model}, ${h.canEdit ? "can edit" : "read only"})`;
                             const notes = h.notes.slice(h.notesRead);
@@ -3134,10 +3155,11 @@ If they ask whether their college/school uses Classgrid, say you can't see that 
                             if (h.state === "running") return `${name}: still working.${noteText}`;
                             if (h.reportTaken) return `${name}: finished (report already given).${noteText}`;
                             h.reportTaken = true;
+                            reported.push(h);
                             return h.state === "done" ? `${name}: finished.${noteText}\n  Report:\n${h.report}` : `${name}: failed (${h.report}).${noteText}`;
                         });
                         const running = board.helpers.filter((h) => h.state === "running").length;
-                        return `${lines.join("\n\n")}\n\n${running ? `${running} helper(s) still working.` : "All helpers have finished."}`;
+                        return `${lines.join("\n\n")}\n\n${running ? `${running} helper(s) still working.` : "All helpers have finished."}${helperChangesText(reported)}`;
                     },
                     run_code: async (args) => {
                         const result = await handleToolCall('run_code', args, { sessionId, isStaff: isStaffRole(req.user?.role) });
@@ -5408,7 +5430,10 @@ If a tool fails, never show the error message; say only: "Something went wrong o
                 appendToHistory(sessionId, "assistant", savedContent).catch(err => console.error("Failed to append assistant reply to Redis:", err));
                 // Project Mode: remember the project's state now, so the next turn can show what the user changed themselves
                 rememberProjectSnapshot(sessionId).catch(() => {});
-                finishCheckpoint(sessionId, checkpointId).catch(() => {});
+                // Helpers still working keep changing files after the answer ends: the "after" picture for Review is
+                // taken once they have all finished
+                const helpersWorking = helperBoard(sessionId).helpers.filter((h) => h.state === "running" && h.promise).map((h) => h.promise);
+                Promise.all(helpersWorking).then(() => finishCheckpoint(sessionId, checkpointId)).catch(() => {});
             }
 
             // Extract AI-created file links (PDFs, Excel, etc.) from the CDN and save to Library
