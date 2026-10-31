@@ -250,7 +250,9 @@ export function StudioModePage() {
     const col = chatColRef.current;
     if (!col) return;
     let timer: ReturnType<typeof setTimeout> | null = null;
-    const onScroll = () => {
+    const onScroll = (e: Event) => {
+      // Scrolling the question list's own card is not the chat scrolling: the card stays open
+      if (e.target instanceof Element && e.target.closest(".studio-question-dots")) return;
       document.documentElement.classList.add("studio-scrolling");
       if (timer) clearTimeout(timer);
       timer = setTimeout(() => document.documentElement.classList.remove("studio-scrolling"), 450);

@@ -188,7 +188,8 @@ export function QuestionDots({ tocItems, activeSection }: { tocItems: QItem[]; a
     setCardTop(box ? r.top - box.top + r.height / 2 : 0);
     setHover(index);
   };
-  const hide = () => { closeTimer.current = setTimeout(() => setHover(null), 160); };
+  // Time to move the mouse from the mark onto the card (and scroll it) before the card closes
+  const hide = () => { closeTimer.current = setTimeout(() => setHover(null), 450); };
   const keep = () => { if (closeTimer.current) clearTimeout(closeTimer.current); };
   const jump = (id: string) => {
     document.getElementById(id)?.scrollIntoView({ behavior: reduce ? "auto" : "smooth", block: "start" });
@@ -247,8 +248,11 @@ export function QuestionDots({ tocItems, activeSection }: { tocItems: QItem[]; a
             exit={reduce ? { opacity: 0 } : { opacity: 0, x: -6, scale: 0.98 }}
             transition={{ duration: reduce ? 0 : 0.18, ease: DOT_EASE }}
             style={{ transformOrigin: "left center", translateY: "-50%" }}
-            className="absolute left-7 w-[300px] max-w-[calc(100vw-6rem)] rounded-lg border border-black/10 dark:border-white/[0.08] bg-white dark:bg-[#1e1e1e] shadow-2xl overflow-hidden"
+            className="absolute left-7 w-[300px] max-w-[calc(100vw-6rem)] rounded-lg border border-black/10 dark:border-white/[0.08] bg-white dark:bg-[#1e1e1e] shadow-2xl"
           >
+            {/* An invisible strip over the gap between the marks and the card, so the card stays open on the way there */}
+            <div aria-hidden className="absolute -left-6 inset-y-0 w-6" />
+            <div className="overflow-hidden rounded-lg">
             {card.length === 1 ? (
               // One question: its text, "13 of 71" and the full date
               <button type="button" onClick={() => { jump(card[0].id); setHover(null); }} className="block w-full text-left px-3 py-2.5 hover:bg-black/[0.02] dark:hover:bg-white/[0.02] transition-colors">
@@ -264,7 +268,7 @@ export function QuestionDots({ tocItems, activeSection }: { tocItems: QItem[]; a
                   <p className="text-[13px] font-medium text-foreground">{rangeOf(card) || "Questions"}</p>
                   <p className="text-[11px] text-muted-foreground tabular-nums">{tocItems.indexOf(card[0]) + 1}–{tocItems.indexOf(card[card.length - 1]) + 1} of {tocItems.length}</p>
                 </div>
-                <div className="max-h-[220px] overflow-y-auto px-1 pb-1 chat-scrollbar">
+                <div className="max-h-[220px] overflow-y-auto overscroll-contain px-1 pb-1 chat-scrollbar">
                   {card.map((item) => (
                     <button
                       key={item.id}
@@ -279,6 +283,7 @@ export function QuestionDots({ tocItems, activeSection }: { tocItems: QItem[]; a
                 </div>
               </>
             )}
+            </div>
           </motion.div>
         )}
       </AnimatePresence>
