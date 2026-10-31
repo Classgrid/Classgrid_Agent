@@ -1,6 +1,6 @@
 // Studio Mode's Files tab: the picked project's files (from GitHub, or the sandbox for a project without a repo),
 // a folder tree and a code view with line numbers, side by side on a wide pane with a drag line between them.
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import { DocsImageViewer } from "@/components/ai/components/DocsImageViewer";
 import { FILE_DRAG_TYPE } from "@/components/ai/components/stepper/ProjectToolSteps";
 
@@ -65,15 +65,15 @@ function buildTree(files: Entry[]): Node[] {
   return root.children;
 }
 
-// Only the files (and folders) whose path has the search text; their folders stay, so you see where each one is
-function filterTree(nodes: Node[], q: string): Node[] {
-  return nodes.flatMap((n) => {
-    if (!n.dir) return n.path.toLowerCase().includes(q) ? [n] : [];
-    const kids = filterTree(n.children, q);
-    return kids.length || n.name.toLowerCase().includes(q) ? [{ ...n, children: kids.length ? kids : n.children }] : [];
-  });
+// The search box: files whose name has the search text, as one flat list (best matches first, at most 300)
+function searchFiles(files: Entry[], q: string): string[] {
+  const score = (name: string) => (name === q ? 0 : name.startsWith(q) ? 1 : 2);
+  return files
+    .filter((f) => f.type === "file" && f.path.slice(f.path.lastIndexOf("/") + 1).toLowerCase().includes(q))
+    .map((f) => f.path)
+    .sort((a, b) => score(a.slice(a.lastIndexOf("/") + 1).toLowerCase()) - score(b.slice(b.lastIndexOf("/") + 1).toLowerCase()) || a.length - b.length)
+    .slice(0, 300);
 }
-const dirPaths = (nodes: Node[]): string[] => nodes.flatMap((n) => (n.dir ? [n.path, ...dirPaths(n.children)] : []));
 
 const LANG: Record<string, string> = {
   js: "javascript", mjs: "javascript", cjs: "javascript", jsx: "jsx", ts: "typescript", tsx: "tsx",
@@ -143,9 +143,9 @@ export function StudioFilesView({ projectId, projectName, wide, reloadKey = 0, r
   const tree = useMemo(() => buildTree(listing?.files || []), [listing]);
   // Search box above the tree: while it has text, the tree shows only matching files, with their folders open
   const [query, setQuery] = useState("");
-  const q = query.trim().toLowerCase();
-  const shownTree = useMemo(() => (q ? filterTree(tree, q) : tree), [tree, q]);
-  const shownDirs = useMemo(() => (q ? new Set(dirPaths(shownTree)) : openDirs), [q, shownTree, openDirs]);
+  // The tree is filtered just after each key press, so typing itself never waits for it
+  const q = useDeferredValue(query.trim().toLowerCase());
+  const matches = useMemo(() => (q ? searchFiles(listing?.files || [], q) : []), [listing, q]);
 
   const openFile = async (path: string, lines?: { startLine?: number; endLine?: number }) => {
     if (!projectId) return;
@@ -369,10 +369,32 @@ export function StudioFilesView({ projectId, projectName, wide, reloadKey = 0, r
               <p className="px-4 py-3 text-[13px] text-muted-foreground">
                 {listing.source === "sandbox" ? "No files yet. Open the project in Project Mode, or let the agent make some." : "This repo has no files yet."}
               </p>
-            ) : q && !shownTree.length ? (
-              <p className="px-4 py-3 text-[13px] text-muted-foreground">No files match “{query.trim()}”.</p>
+            ) : q ? (
+              !matches.length ? (
+                <p className="px-4 py-3 text-[13px] text-muted-foreground">No files match “{query.trim()}”.</p>
+              ) : (
+                <div className="px-1">
+                  {matches.map((path) => {
+                    const slash = path.lastIndexOf("/");
+                    return (
+                      <button
+                        key={path}
+                        onClick={() => openFile(path)}
+                        draggable
+                        onDragStart={(e) => dragFile(e, path)}
+                        title={path}
+                        className={`w-full flex items-center gap-2 h-8 px-2 text-left rounded-md transition-colors ${file?.path === path ? "bg-black/[0.07] dark:bg-white/[0.08] text-foreground" : "text-foreground/85 hover:bg-black/[0.04] dark:hover:bg-white/[0.05] hover:text-foreground"}`}
+                      >
+                        <FileBadge name={path.slice(slash + 1)} />
+                        <span className="shrink-0 text-[13px]">{path.slice(slash + 1)}</span>
+                        {slash > 0 && <span className="min-w-0 truncate text-[12px] text-muted-foreground">{path.slice(0, slash)}</span>}
+                      </button>
+                    );
+                  })}
+                </div>
+              )
             ) : (
-              <Tree nodes={shownTree} depth={0} openDirs={shownDirs} toggleDir={toggleDir} openFile={openFile} current={file?.path || null} writing={writing} changed={changed} />
+              <Tree nodes={tree} depth={0} openDirs={openDirs} toggleDir={toggleDir} openFile={openFile} current={file?.path || null} writing={writing} changed={changed} />
             )}
             {listing?.truncated && <p className="px-4 py-2 text-[12px] text-muted-foreground">Only part of this big repo is shown.</p>}
           </div>
