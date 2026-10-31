@@ -306,11 +306,57 @@ export function makeToolImageCollector(signal, conversation = null) {
     };
 }
 
+// Cloudflare models take pictures, not PDF files, so a PDF's pages are drawn as pictures here (Claude reads
+// the PDF itself). This lets a model that sees images read a scanned PDF, which has no text to pull out.
+const MAX_PDF_PAGE_IMAGES = 10;
+const PDF_PAGE_LONG_SIDE = 1600;
+
+async function pdfPageImages(buf, maxPages) {
+    const pdfjs = await import("pdfjs-dist/legacy/build/pdf.mjs");
+    const doc = await pdfjs.getDocument({ data: new Uint8Array(buf), isEvalSupported: false, verbosity: 0 }).promise;
+    try {
+        const images = [];
+        for (let n = 1; n <= Math.min(doc.numPages, maxPages); n++) {
+            const page = await doc.getPage(n);
+            const base = page.getViewport({ scale: 1 });
+            const viewport = page.getViewport({ scale: Math.min(2, PDF_PAGE_LONG_SIDE / Math.max(base.width, base.height)) });
+            const { canvas, context } = doc.canvasFactory.create(Math.ceil(viewport.width), Math.ceil(viewport.height));
+            await page.render({ canvasContext: context, canvas, viewport }).promise;
+            const jpg = canvas.toBuffer("image/jpeg", 80);
+            page.cleanup();
+            if (jpg.length <= MAX_IMAGE_BYTES) images.push(jpg);
+        }
+        return { images, pages: doc.numPages };
+    } finally {
+        await doc.destroy();
+    }
+}
+
 // The same attached images for Cloudflare models that can see them (OpenAI-style image parts with data URLs).
+// Attached PDFs come as one picture per page, after a line naming the file and the pages shown.
 export async function toImageUrlParts(attachments, signal) {
     const parts = [];
+    let pdfPagesLeft = MAX_PDF_PAGE_IMAGES;
     for (const a of attachments || []) {
-        if (nativeAttachmentKind(a) !== "image") continue;
+        const kind = nativeAttachmentKind(a);
+        if (kind === "pdf") {
+            if (pdfPagesLeft <= 0) continue;
+            try {
+                const buf = await fetchTrustedFile(a.url, signal);
+                if (!buf || buf.length === 0 || buf.length > MAX_PDF_BYTES) continue;
+                const { images, pages } = await pdfPageImages(buf, pdfPagesLeft);
+                if (images.length === 0) continue;
+                pdfPagesLeft -= images.length;
+                const name = a.name || decodeURIComponent(String(a.url).split(/[?#]/)[0].split("/").pop() || "file.pdf");
+                parts.push({ type: "text", text: `PDF "${name}": ${images.length === pages ? `all ${pages} page${pages === 1 ? "" : "s"}` : `pages 1-${images.length} of ${pages}`} shown below as pictures.` });
+                for (const jpg of images) parts.push({ type: "image_url", image_url: { url: `data:image/jpeg;base64,${jpg.toString("base64")}` } });
+            } catch (e) {
+                if (signal?.aborted) throw e;
+                console.warn(`[vision] could not draw PDF pages for native vision (${String(a.url).slice(0, 80)}): ${e.message}`);
+            }
+            continue;
+        }
+        if (kind !== "image") continue;
         try {
             const buf = await fetchTrustedFile(a.url, signal);
             if (!buf || buf.length === 0 || buf.length > MAX_IMAGE_BYTES) continue;
