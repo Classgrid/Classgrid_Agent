@@ -5,6 +5,7 @@ import { Check, ChevronDown, Folder, FolderPlus, FolderX, Link2, Pencil, Search,
 import { toast } from "sonner";
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/marketing_ui/dialog";
+import { DangerConfirmDialog } from "@/components/marketing_ui/danger-confirm-dialog";
 import { fetchWithRescue } from "@/lib/rescue";
 
 const backendUrl = import.meta.env.VITE_API_URL || "https://api.classgrid.in";
@@ -47,9 +48,13 @@ export function StudioProjectPicker() {
   // Same project actions as Project Mode's Projects page
   const [linking, setLinking] = useState<Project | null>(null);
   const [renaming, setRenaming] = useState<Project | null>(null);
+  // Delete asks in the same dialog as Project Mode (type the project name to confirm)
+  const [deleting, setDeleting] = useState<Project | null>(null);
+  const [deleteBusy, setDeleteBusy] = useState(false);
   const removeProject = async (p: Project) => {
-    if (!window.confirm(`Delete the project "${p.name}"? Its code on Classgrid is removed (anything not pushed is lost). The GitHub repo is not touched.`)) return;
-    const { res, data } = await api(`/projects/${p.id}`, { method: "DELETE" });
+    setDeleteBusy(true);
+    const { res, data } = await api(`/projects/${p.id}`, { method: "DELETE" }).finally(() => setDeleteBusy(false));
+    setDeleting(null);
     if (!res.ok) { toast.error(data.error || "Could not delete the project"); return; }
     setProjects((list) => (list || []).filter((x) => x.id !== p.id));
     if (picked === p.id) pick(null);
@@ -190,7 +195,7 @@ export function StudioProjectPicker() {
                   {[
                     { label: "Rename", Icon: Pencil, run: () => { setOpen(false); setRenaming(p); } },
                     { label: p.repo ? "Change repo" : "Link a repo", Icon: Link2, run: () => { setOpen(false); setLinking(p); } },
-                    { label: "Delete", Icon: Trash2, run: () => removeProject(p) },
+                    { label: "Delete", Icon: Trash2, run: () => setDeleting(p) },
                   ].map(({ label, Icon, run }) => (
                     <button key={label} type="button" onClick={run} title={label} aria-label={label} className="flex items-center justify-center size-6 rounded text-muted-foreground hover:text-foreground hover:bg-black/[0.06] dark:hover:bg-white/[0.08] transition-colors">
                       <Icon className="size-3.5" />
@@ -236,6 +241,17 @@ export function StudioProjectPicker() {
         onCreated={(p) => { replaceProject(p); setLinking(null); }}
       />
       <RenameDialog project={renaming} onClose={() => setRenaming(null)} onRenamed={(p) => { replaceProject(p); setRenaming(null); }} />
+      <DangerConfirmDialog
+        open={!!deleting}
+        onOpenChange={(o) => { if (!o && !deleteBusy) setDeleting(null); }}
+        title="Delete project"
+        description={`Delete "${deleting?.name || ""}" from Project Mode.`}
+        confirmationSteps={deleting ? [{ label: "To confirm, type the project name", value: deleting.name }] : []}
+        warningMessage="Its code stays on GitHub. Only the project here is deleted."
+        actionLabel="Delete project"
+        isLoading={deleteBusy}
+        onConfirm={() => deleting && removeProject(deleting)}
+      />
     </div>
   );
 }
