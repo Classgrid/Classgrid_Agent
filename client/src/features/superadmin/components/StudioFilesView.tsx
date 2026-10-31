@@ -13,7 +13,8 @@ const dragFile = (e: React.DragEvent, path: string) => {
 import { createPortal } from "react-dom";
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import { themeIcons } from "seti-icons";
-import { Check, ChevronRight, Copy, Folder, FolderOpen, FolderTree, ListTree, RotateCw, Search, X } from "lucide-react";
+import { Check, ChevronRight, Copy, Download, Folder, FolderOpen, FolderTree, Link2, ListTree, MoreVertical, RotateCw, Search, X } from "lucide-react";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/marketing_ui/dropdown-menu";
 import { fetchWithRescue } from "@/lib/rescue";
 
 const backendUrl = import.meta.env.VITE_API_URL || "https://api.classgrid.in";
@@ -286,6 +287,27 @@ export function StudioFilesView({ projectId, projectName, wide, reloadKey = 0, r
     try { await navigator.clipboard.writeText(file.content); setCopied(true); setTimeout(() => setCopied(false), 1500); } catch { /* clipboard blocked */ }
   };
 
+  // The open file's menu: copy its text or path, download it, or see it on GitHub
+  const copyPath = async () => {
+    if (!file) return;
+    try { await navigator.clipboard.writeText(file.path); } catch { /* clipboard blocked */ }
+  };
+  const download = () => {
+    if (!file) return;
+    const blob = file.data
+      ? new Blob([Uint8Array.from(atob(file.data), (c) => c.charCodeAt(0))], { type: file.mime || "application/octet-stream" })
+      : new Blob([file.content ?? ""], { type: "text/plain;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = file.path.split("/").pop() || "file";
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  };
+  const githubUrl = file && listing?.source === "github" && listing.repo
+    ? `https://github.com/${listing.repo}/blob/${encodeURIComponent(listing.branch || "main").replace(/%2F/g, "/")}/${file.path.split("/").map(encodeURIComponent).join("/")}`
+    : null;
+
   const iconBtn = "flex items-center justify-center size-7 rounded-md text-muted-foreground hover:text-foreground hover:bg-black/[0.05] dark:hover:bg-white/[0.06] transition-[color,background-color,transform] duration-150 active:scale-[0.94]";
 
   if (!projectId) {
@@ -339,6 +361,32 @@ export function StudioFilesView({ projectId, projectName, wide, reloadKey = 0, r
           <button onClick={load} className={iconBtn} title="Refresh" aria-label="Refresh">
             <RotateCw className={`size-3.5 ${loading ? "animate-spin" : ""}`} />
           </button>
+          {file && (
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <button className={iconBtn} title="More" aria-label="More file actions">
+                  <MoreVertical className="size-3.5" />
+                </button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-52 z-[100]">
+                {file.content !== undefined && (
+                  <DropdownMenuItem onClick={copy} className="gap-2.5 cursor-pointer"><Copy className="size-4" /> Copy Content</DropdownMenuItem>
+                )}
+                {(file.content !== undefined || file.data) && (
+                  <DropdownMenuItem onClick={download} className="gap-2.5 cursor-pointer"><Download className="size-4" /> Download File</DropdownMenuItem>
+                )}
+                <DropdownMenuItem onClick={copyPath} className="gap-2.5 cursor-pointer"><Link2 className="size-4" /> Copy Path</DropdownMenuItem>
+                {githubUrl && (
+                  <>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuItem onClick={() => window.open(githubUrl, "_blank", "noopener,noreferrer")} className="gap-2.5 cursor-pointer">
+                      <img src="https://cdn.classgrid.in/classgrid_intgration/github-icon.svg" alt="" aria-hidden className="size-4 dark:invert" /> Show in GitHub
+                    </DropdownMenuItem>
+                  </>
+                )}
+              </DropdownMenuContent>
+            </DropdownMenu>
+          )}
         </div>
       </div>
 
