@@ -28,7 +28,7 @@ async function api(path: string, init?: RequestInit) {
 const LIST_KEY = "cg_studio_projects";
 
 // Classgrid desktop app only: a folder on this computer becomes a project whose tools run here (the local runner)
-const desktopApp = (window as any).classgridDesktop as { isDesktop?: boolean; pickFolder?: () => Promise<string | null> } | undefined;
+const desktopApp = (window as any).classgridDesktop as { isDesktop?: boolean; pickFolder?: () => Promise<string | null>; cloneRepo?: (repo: string) => Promise<{ folder?: string; error?: string } | null> } | undefined;
 export async function openLocalFolder(): Promise<Project | null> {
   const folder = await desktopApp?.pickFolder?.();
   if (!folder) return null;
@@ -285,7 +285,7 @@ export function StudioProjectPicker() {
             {/* Folders on this computer (desktop app) are listed under their own heading, after the other projects */}
             {[...shown.filter((x) => x.location !== "local"), ...shown.filter((x) => x.location === "local")].map((p, i, list) => (
               <Fragment key={p.id}>
-              {p.location === "local" && (i === 0 || list[i - 1].location !== "local") && (
+              {p.location === "local" && (i === 0 || list[i - 1]?.location !== "local") && (
                 <p className="px-2 pt-2 pb-1 text-[12px] text-muted-foreground">This computer</p>
               )}
               <div className="group relative flex items-center rounded-md hover:bg-black/[0.05] dark:hover:bg-white/[0.07] transition-colors duration-150">
@@ -383,6 +383,8 @@ export function NewProjectDialog({ open, onOpenChange, onCreated, linkTo = null 
   const reduce = useReducedMotion();
   const [name, setName] = useState("");
   const [withRepo, setWithRepo] = useState(false);
+  // Desktop app: download the repo's code to a folder on this computer (git clone) instead of a cloud project
+  const [toComputer, setToComputer] = useState(!!desktopApp?.isDesktop);
   const [repos, setRepos] = useState<Repo[] | null>(null);
   const [github, setGithub] = useState<"ok" | "missing" | "expired" | null>(null);
   const [repo, setRepo] = useState<string | null>(null);
@@ -426,6 +428,21 @@ export function NewProjectDialog({ open, onOpenChange, onCreated, linkTo = null 
     const n = name.trim();
     if (!n || busy || (withRepo && !repo)) return;
     setBusy(true);
+    if (desktopApp?.isDesktop && withRepo && repo && toComputer) {
+      try {
+        const cloned = await desktopApp.cloneRepo?.(repo);
+        if (!cloned) return; // the user closed the folder picker
+        if (!cloned.folder) { toast.error(cloned.error || "Could not download the repo"); return; }
+        const made = await api("/projects/local", { method: "POST", body: JSON.stringify({ localPath: cloned.folder, name: n }) });
+        if (!made.res.ok) { toast.error(made.data.error || "Could not create the project"); return; }
+        onCreated({ ...made.data.project, id: String(made.data.project.id) });
+        onOpenChange(false);
+        toast.success(`Downloaded ${repo} to ${cloned.folder}`);
+      } finally {
+        setBusy(false);
+      }
+      return;
+    }
     try {
       const made = await api("/projects", { method: "POST", body: JSON.stringify({ name: n }) });
       if (!made.res.ok) { toast.error(made.data.error || "Could not create the project"); return; }
@@ -563,6 +580,12 @@ export function NewProjectDialog({ open, onOpenChange, onCreated, linkTo = null 
           </AnimatePresence>
         </div>
 
+        {desktopApp?.isDesktop && withRepo && !linkTo && (
+          <label className="flex items-center gap-2 px-5 py-2.5 text-[13px] text-foreground/85 cursor-pointer border-t border-black/10 dark:border-white/[0.08]">
+            <input type="checkbox" checked={toComputer} onChange={(e) => setToComputer(e.target.checked)} className="size-3.5 accent-foreground" />
+            Download the code to this computer (you pick the folder)
+          </label>
+        )}
         <div className="flex items-center justify-end gap-2 px-5 py-3 border-t border-black/10 dark:border-white/[0.08] bg-black/[0.02] dark:bg-[#1a1a1a]">
           <button
             type="button"

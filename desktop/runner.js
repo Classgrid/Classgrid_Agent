@@ -273,5 +273,6 @@ module.exports = {
     connect(token);
   },
   allowFolder,
+  isAllowed: (folder) => isAllowedRoot(folder),
   stopAll() { for (const job of jobs.values()) killTree(job.proc); jobs.clear(); socket?.disconnect(); },
 };

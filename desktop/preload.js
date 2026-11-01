@@ -8,4 +8,7 @@ contextBridge.exposeInMainWorld("classgridDesktop", {
   pickFolder: () => ipcRenderer.invoke("cg:pickFolder"),
   setToken: (token) => ipcRenderer.send("cg:setToken", token),
   retry: () => ipcRenderer.invoke("cg:retry"),
+  openFolder: (folder) => ipcRenderer.invoke("cg:openFolder", folder),
+  cloneRepo: (repo) => ipcRenderer.invoke("cg:cloneRepo", repo),
+  openInEditor: (folder) => ipcRenderer.invoke("cg:openInEditor", folder),
 });

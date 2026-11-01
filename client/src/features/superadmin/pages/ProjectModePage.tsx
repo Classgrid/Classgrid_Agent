@@ -42,7 +42,7 @@ let reloadedInProject = (() => {
 })();
 const AI_PANEL_KEY = "cg_project_ai_closed"; // whether the AI panel was closed (per-viewer convenience)
 
-type Project = { id: string; name: string; repo: string | null; logo?: string | null; lastOpenedAt: string | null; createdAt?: string; updatedAt: string };
+type Project = { id: string; name: string; repo: string | null; logo?: string | null; lastOpenedAt: string | null; createdAt?: string; updatedAt: string; location?: "cloud" | "local"; localPath?: string | null };
 type GithubAccount = { login: string | null; name: string | null; email: string | null; avatar: string | null };
 
 async function api(path: string, init?: RequestInit) {
@@ -197,6 +197,8 @@ export function ProjectModePage() {
   });
   useEffect(() => { reloadedInProject = false; }, []); // only the first visit after the refresh counts
   const [folder, setFolder] = useState<string | null>(null);
+  // Desktop app: the open project is a folder on this computer (no cloud editor; the AI works on it through the app)
+  const [localFolder, setLocalFolder] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [newName, setNewName] = useState<string | null>(null);
   const [renaming, setRenaming] = useState<{ id: string; name: string } | null>(null);
@@ -337,6 +339,7 @@ export function ProjectModePage() {
     }
     rememberOpen(project.id);
     setFolder(null);
+    setLocalFolder(null);
     const newLines = !resume && !project.repo ? NEW_PROJECT_LINES : undefined;
     setProgress({ label: resume ? "Reconnecting to your project" : newLines ? (newLines[0] ?? "") : "Downloading the latest code from GitHub", value: 3, target: 70, lines: newLines });
     try {
@@ -350,6 +353,7 @@ export function ProjectModePage() {
       }
       if (res.status === 409) { setProgress(null); rememberOpen(wasOpen); setGithubConnected(false); setLinking(project); loadRepos(); return; }
       if (!res.ok) throw new Error(data.error || "Could not open this project");
+      if (data.local) { setProgress(null); setLocalFolder(data.localPath || project.localPath || "this computer"); return; }
       setFolder(data.folder);
       setProgress((p) => (p?.lines ? { ...p, value: Math.max(p.value, 70), target: 95 } : { label: "Starting the editor", value: 70, target: 95 }));
       if (data.backup) toast(`Your unsaved work from last time was saved to the GitHub branch "${data.backup}".`, { duration: 12000 });
@@ -691,6 +695,18 @@ export function ProjectModePage() {
               >
                 <GithubIcon className="size-4" /> Install Classgrid app
               </a>
+            </div>
+          )}
+          {localFolder && !folder && (
+            <div className="flex-1 flex flex-col items-center justify-center gap-3 text-center px-8">
+              <FolderGit2 className="size-10 text-muted-foreground" />
+              <h3 className="text-lg font-semibold text-foreground">This project is a folder on your computer</h3>
+              <p className="text-sm text-muted-foreground font-mono break-all max-w-xl">{localFolder}</p>
+              <p className="text-sm text-muted-foreground max-w-md">The AI reads, edits and runs commands in this folder through the Classgrid app. To edit by hand, open it in your own code editor.</p>
+              <div className="flex gap-2 mt-1">
+                <button type="button" onClick={() => (window as any).classgridDesktop?.openInEditor?.(localFolder)} className="h-9 px-4 rounded-full border border-border bg-background text-sm text-foreground hover:bg-secondary">Open in VS Code</button>
+                <button type="button" onClick={() => (window as any).classgridDesktop?.openFolder?.(localFolder)} className="h-9 px-4 rounded-full border border-border bg-background text-sm text-foreground hover:bg-secondary">Show in File Explorer</button>
+              </div>
             </div>
           )}
           {folder && (

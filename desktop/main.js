@@ -93,6 +93,32 @@ function createWindow() {
 ipcMain.on("cg:version", (e) => { e.returnValue = app.getVersion(); });
 ipcMain.handle("cg:openExternal", (_e, url) => { if (/^https?:\/\//.test(String(url))) shell.openExternal(String(url)); });
 ipcMain.handle("cg:retry", () => win?.loadURL(APP_URL));
+// New project from a GitHub repo, downloaded to this computer: the user picks where, then git clone runs with their
+// own Git login on this computer (Git Credential Manager asks GitHub when needed). Returns { folder } or { error }.
+ipcMain.handle("cg:cloneRepo", async (_e, repo) => {
+  if (!/^[\w.-]+\/[\w.-]+$/.test(String(repo || ""))) return { error: "That isn't a GitHub repo name." };
+  const name = String(repo).split("/")[1];
+  const r = await dialog.showOpenDialog(win, { title: `Choose where to download ${repo}`, buttonLabel: "Download here", properties: ["openDirectory", "createDirectory"] });
+  if (r.canceled) return null;
+  const target = path.join(r.filePaths[0], name);
+  if (fs.existsSync(target)) return { error: `A folder called "${name}" is already there. Pick another place, or open that folder instead.` };
+  return new Promise((resolve) => {
+    const { spawn } = require("node:child_process");
+    const git = spawn("git", ["clone", `https://github.com/${repo}.git`, target], { windowsHide: true });
+    let err = "";
+    git.stderr.on("data", (d) => { err += d.toString(); });
+    git.on("error", () => resolve({ error: "Git isn't installed on this computer. Install it from git-scm.com, then try again." }));
+    git.on("close", (code) => {
+      if (code !== 0) return resolve({ error: err.trim().split("\n").pop() || "git clone failed" });
+      runner.allowFolder(target);
+      resolve({ folder: target });
+    });
+  });
+});
+
+// Project Mode, folder projects: open the folder in VS Code or File Explorer (only folders picked in this app)
+ipcMain.handle("cg:openFolder", (_e, folder) => { if (runner.isAllowed(folder)) shell.openPath(String(folder)); });
+ipcMain.handle("cg:openInEditor", (_e, folder) => { if (runner.isAllowed(folder)) shell.openExternal("vscode://file/" + encodeURI(String(folder).split("\\").join("/"))); });
 ipcMain.handle("cg:pickFolder", async () => {
   const r = await dialog.showOpenDialog(win, { properties: ["openDirectory"] });
   if (r.canceled) return null;
@@ -140,7 +166,33 @@ if (!app.requestSingleInstanceLock()) {
     await startScreenServer();
     createWindow();
     handleDeepLink(process.argv.find((a) => a.startsWith("classgrid://")));
+    startUpdates();
   });
   app.on("window-all-closed", () => app.quit());
   app.on("before-quit", () => runner.stopAll());
+}
+
+// Updates: the installed app checks our R2 storage (desktop/latest.yml) on start and every 6 hours, downloads a new
+// version in the background and offers a restart. The screens are packed inside the app, so every website change
+// reaches the app this way (scripts/release.mjs publishes a version).
+function startUpdates() {
+  if (!app.isPackaged) return;
+  const { autoUpdater } = require("electron-updater");
+  autoUpdater.disableDifferentialDownload = true; // R2 public links don't do partial downloads: always the whole file
+  autoUpdater.on("update-downloaded", async (info) => {
+    const { response } = await dialog.showMessageBox(win, {
+      type: "info",
+      title: "Classgrid",
+      message: `A new version of Classgrid (${info.version}) is ready.`,
+      detail: "Restart now to use it, or it will be used the next time you open Classgrid.",
+      buttons: ["Restart now", "Later"],
+      defaultId: 0,
+      cancelId: 1,
+    });
+    if (response === 0) autoUpdater.quitAndInstall();
+  });
+  autoUpdater.on("error", (err) => console.log("[updates]", err.message));
+  const check = () => autoUpdater.checkForUpdates().catch((err) => console.log("[updates]", err.message));
+  check();
+  setInterval(check, 6 * 60 * 60 * 1000);
 }

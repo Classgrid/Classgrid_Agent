@@ -41,7 +41,7 @@ import { fetchWithRescue } from "@/lib/rescue";
 import { getSocket } from "@/lib/socketClient";
 import { cn } from "@/lib/utils";
 import { GroupDialog, groupIcon, groupsApi, openProjectId, useChatGroups, type ChatGroup } from "./chat-groups/chatGroups";
-import { NewProjectDialog, openStudioProject } from "@/features/superadmin/components/StudioProjectPicker";
+import { NewProjectDialog, openStudioProject, openLocalFolder } from "@/features/superadmin/components/StudioProjectPicker";
 
 interface ChatSession {
   id: string;
@@ -1003,7 +1003,18 @@ export function AgentNestedMenu({ searchQuery = "" }: { searchQuery?: string }) 
                       {optionRow("Mark All as Read", false, () => { markRead("all"); toast.success("All chats marked as read"); })}
                     </DropdownMenuContent>
                   </DropdownMenu>
-                  <button type="button" onClick={() => setNewProjectOpen(true)} className="p-0.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted cursor-pointer" aria-label="New project" title="New project">
+                  {/* Desktop app: open a folder from this computer as a project (like Antigravity); website: new cloud project */}
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      if (!(window as any).classgridDesktop?.isDesktop) return setNewProjectOpen(true);
+                      const made = await openLocalFolder();
+                      if (made) { openStudioProject(made.id); window.dispatchEvent(new Event("studio:projects-changed")); }
+                    }}
+                    className="p-0.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted cursor-pointer"
+                    aria-label={(window as any).classgridDesktop?.isDesktop ? "Open folder" : "New project"}
+                    title={(window as any).classgridDesktop?.isDesktop ? "Open folder from this computer" : "New project"}
+                  >
                     <FolderPlus className="w-3.5 h-3.5" />
                   </button>
                 </div>
