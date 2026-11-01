@@ -21,8 +21,8 @@ import { ShimmerText } from './ShimmerText';
 // Steps of the Project Mode file tools, shown like a code editor's agent: "Edited calculator.ts +26 -0",
 // and reading/searching grouped as "Exploring 2 files, 1 search".
 
-export const PROJECT_EXPLORE_TOOLS = new Set(['view_project_file', 'search_project', 'list_project_files', 'search_project_by_meaning']);
-export const PROJECT_EDIT_TOOLS = new Set(['write_project_file', 'edit_project_file']);
+export const PROJECT_EXPLORE_TOOLS = new Set(['view_project_file', 'search_project', 'list_project_files', 'search_project_by_meaning', 'bulk_read_project']);
+export const PROJECT_EDIT_TOOLS = new Set(['write_project_file', 'edit_project_file', 'write_project_file_from_spec']);
 
 type Step = { id: string; tool: string; status?: string; args?: any; result?: string; helpers?: HelperLive[] };
 
@@ -100,11 +100,13 @@ export function ProjectEditStep({ step }: { step: Step }) {
   const added = real ? Number(real[1]) : step.tool === 'write_project_file' ? lineCount(step.args?.content) : edits.reduce((n, e) => n + lineCount(e.new_text), 0);
   const removed = real ? Number(real[2]) : edits.reduce((n, e) => n + lineCount(e.old_text), 0);
   const failed = isError(step);
+  // Written by the file writer: the code isn't in the step, so there is nothing to open here (the file name opens it)
+  const fromSpec = step.tool === 'write_project_file_from_spec';
 
   return (
     <div className="flex flex-col">
-      <Row onClick={loading ? undefined : () => setOpen(!open)} open={open}>
-        <ShimmerText active={loading} className="shrink-0">{loading ? 'Editing' : failed ? 'Could not edit' : step.tool === 'write_project_file' ? 'Created' : 'Edited'}</ShimmerText>
+      <Row onClick={loading || (fromSpec && !failed) ? undefined : () => setOpen(!open)} open={open}>
+        <ShimmerText active={loading} className="shrink-0">{loading ? (fromSpec ? 'Writing' : 'Editing') : failed ? 'Could not edit' : step.tool === 'write_project_file' || fromSpec ? 'Created' : 'Edited'}</ShimmerText>
         <FileBadge path={path} />
         <FileLink path={path} find={edits[0]?.new_text?.split("\n").find((l) => l.trim()) || undefined} />
         {!failed && <span className="shrink-0 text-xs text-green-600 dark:text-green-500">+{added}</span>}
@@ -143,6 +145,32 @@ function ExploreItem({ step }: { step: Step }) {
   const [open, setOpen] = useState(false);
   const loading = step.status === 'loading';
   const result = String(step.result || '');
+
+  if (step.tool === 'bulk_read_project') {
+    const paths: string[] = (Array.isArray(step.args?.paths) ? step.args.paths : step.args?.paths ? [step.args.paths] : []).map(String);
+    const answer = isError(step) ? '' : result.replace(/^File reader \([^)]*\) read \d+ files?:\n/, '');
+    return (
+      <div className="flex flex-col">
+        <div className="flex items-center gap-1.5 py-1 text-[14px] text-slate-500 dark:text-[#8a8a8a]">
+          <button type="button" disabled={!answer} onClick={() => setOpen(!open)} className="flex min-w-0 items-center gap-1.5 hover:text-foreground disabled:hover:text-inherit">
+            <ShimmerText active={loading} className="shrink-0">{loading ? 'Reading' : isError(step) ? 'Could not read' : 'Read'}</ShimmerText>
+            <Name>{paths.length === 1 ? baseName(paths[0]) : `${paths.length} files`}</Name>
+            <span className="shrink-0 rounded-full bg-secondary px-2 text-xs">file reader</span>
+          </button>
+        </div>
+        {open && (
+          <div className="mb-1 ml-1 max-h-[260px] overflow-auto rounded-md border border-border px-3 py-2 text-[12.5px] whitespace-pre-wrap text-foreground/80">
+            {paths.length > 1 && (
+              <div className="mb-2 flex flex-wrap gap-x-3 gap-y-0.5">
+                {paths.map((p) => <span key={p} className="inline-flex items-center gap-1"><FileBadge path={p} /><FileLink path={p} /></span>)}
+              </div>
+            )}
+            {answer}
+          </div>
+        )}
+      </div>
+    );
+  }
 
   if (step.tool === 'search_project_by_meaning') {
     const places = [...result.matchAll(/^\d+\. (.+?):(\d+)-(\d+) \(match ([\d.]+)\)/gm)].map((m) => ({ file: m[1] || '', start: Number(m[2]), end: Number(m[3]) }));
@@ -250,7 +278,7 @@ export function ProjectExploreGroup({ steps }: { steps: Step[] }) {
     return () => clearTimeout(t);
   }, [loading]);
   const isOpen = open ?? busy;
-  const files = steps.filter((s) => s.tool === 'view_project_file').length;
+  const files = steps.reduce((n, s) => n + (s.tool === 'view_project_file' ? 1 : s.tool === 'bulk_read_project' ? (Array.isArray(s.args?.paths) ? s.args.paths.length : 1) : 0), 0);
   const searches = steps.filter((s) => s.tool === 'search_project' || s.tool === 'search_project_by_meaning').length;
   const folders = steps.filter((s) => s.tool === 'list_project_files').length;
   const parts = [

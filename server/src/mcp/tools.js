@@ -492,6 +492,31 @@ export const getMcpTools = () => [
     }
   },
   {
+    name: 'bulk_read_project',
+    description: 'Ask the file reader (a fast, low-cost model) a question about files of the open Project Mode project. It reads the whole files and answers in short bullets with exact names and path:line places, so you get the answer without loading the files yourself. Use it to understand big files (over 350 lines) or several files at once. Its answer is a summary: before editing, read the exact lines with view_project_file start_line and end_line. It does not do hard thinking: debugging, design and safety checks stay with you.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        question: { type: 'string', description: 'What you want to know from these files, as one clear question.' },
+        paths: { type: 'array', items: { type: 'string' }, description: 'The files to read (1-30), relative (e.g. "src/App.tsx") or as /data/... .' }
+      },
+      required: ['question', 'paths']
+    }
+  },
+  {
+    name: 'write_project_file_from_spec',
+    description: 'Create a NEW file in the open Project Mode project without writing its code yourself: the file writer (a fast, low-cost model) writes it from your spec, following the reference files you give, and saves it. You get back only the file name and line count, never the code. Use it for routine files that follow an existing pattern (tests, boilerplate, simple components, config, data files). Write tricky logic yourself with write_project_file. Only for files that do not exist yet.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        path: { type: 'string', description: 'The new file, relative (e.g. "tests/user.test.ts") or as /data/... .' },
+        spec: { type: 'string', description: 'What the file must contain and do, in full detail (names, exports, cases to cover).' },
+        reference_paths: { type: 'array', items: { type: 'string' }, description: 'Existing files (up to 5) whose style and patterns the new file should follow.' }
+      },
+      required: ['path', 'spec']
+    }
+  },
+  {
     name: 'start_background_command',
     description: 'Start a long-running command in the open Project Mode project (a dev server, a build, a test suite) in the background, so you can keep working while it runs (up to 30 minutes, at most 3 at once). Returns a job_id.',
     inputSchema: {

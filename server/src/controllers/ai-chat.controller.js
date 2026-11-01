@@ -50,7 +50,7 @@ import { createLLMClient } from "@classgrid/ai/core";
 import { streamChat } from "../services/llm-stream.js";
 import { streamClaudeChat, CLAUDE_CHAT_MODELS, toImageUrlParts } from "../services/llm-stream-anthropic.js";
 import { planToolsForMessage, buildLoadToolsTool, orderTools, groupOfTool, ageSticky, stickyKey, LOAD_TOOLS_NAME, promptBlock, filterPromptBlocks, promptBlocksForGroups, isStaffRole } from "../services/ai-tool-groups.js";
-import { chargeableTokens } from "../services/ai-token-pricing.js";
+import { chargeableTokens, pricesFor } from "../services/ai-token-pricing.js";
 import { getPresignedUploadUrl, uploadBufferToR2 } from "../config/r2Client.js";
 import { primarySupabaseClient as supabase } from "../config/supabaseClient.js";
 import {
@@ -2964,6 +2964,70 @@ If they ask whether their college/school uses Classgrid, say you can't see that 
             ],
             toolHandlers: (() => {
                 const queriedTables = new Map();
+                // The file reader (like Spotify's Portal "shunt"): reading big or many project files, and writing a new
+                // file from a short spec, go to a low-cost model, so the main model gets only its short answer, never
+                // the whole files. When the main model costs more than the reader, a whole read of a big file (or a
+                // cat of it) is sent to the reader instead.
+                const READER_MODELS = ["@cf/deepseek-ai/deepseek-v4.1-flash-1017", CF_FLASH_MODEL];
+                const READER_MIN_LINES = Number(process.env.READER_MIN_LINES) || 350;
+                const readerOn = pricesFor(typeof body.selectedModel === "string" ? body.selectedModel : "auto").input > pricesFor(READER_MODELS[0]).input;
+                const totalLines = (viewText) => Number(String(viewText).match(/^.+ \(lines \d+-\d+ of (\d+)\)\n/)?.[1]) || 0;
+                const readerBlock = (file, total) => `Not read: ${file} has ${total} lines, too many to read whole. To understand it, ask bulk_read_project a question about it (it reads many files at once and answers with exact names and line numbers). To edit it, find the place with search_project or bulk_read_project, then read only those lines with view_project_file start_line and end_line.`;
+                // A plain cat/less/more of a big project file (or head/tail of more lines than the limit); piped and
+                // chained commands are left alone
+                const bigFileCommand = async (command) => {
+                    if (!readerOn) return "";
+                    const m = String(command || "").trim().match(/^(cat|less|more|head|tail)\s+([^|;&<>`$()\n]+)$/);
+                    if (!m) return "";
+                    if (m[1] === "head" || m[1] === "tail") {
+                        const n = m[2].match(/(?:^|\s)-n\s*(\d+)|(?:^|\s)-(\d+)(?=\s|$)/);
+                        if (Number(n?.[1] || n?.[2] || 10) <= READER_MIN_LINES) return "";
+                    }
+                    const files = m[2].trim().split(/\s+/).map((w) => w.replace(/^['"]|['"]$/g, "")).filter((w) => w && !w.startsWith("-") && !/^\d+$/.test(w));
+                    for (const f of files.slice(0, 10)) {
+                        const total = totalLines((await handleToolCall("view_project_file", { path: f, start_line: 1, end_line: 1 }, { sessionId })).content[0].text);
+                        if (total > READER_MIN_LINES) return readerBlock(f, total);
+                    }
+                    return "";
+                };
+                // Whole files with line numbers, about 100k tokens at most in one go
+                const readWhole = async (paths) => {
+                    const parts = [];
+                    const skipped = [];
+                    let room = 400000;
+                    for (const p of paths) {
+                        if (room <= 0) { skipped.push(p); continue; }
+                        const text = (await handleToolCall("view_project_file", { path: p, start_line: 1, end_line: 1e9 }, { sessionId })).content[0].text;
+                        parts.push(`=== ${p} ===\n${text.length > room ? `${text.slice(0, room)}\n… (the rest of this file was cut: too much text in one read)` : text}`);
+                        room -= text.length;
+                    }
+                    return { text: parts.join("\n\n"), skipped };
+                };
+                const askReader = async (system, input) => {
+                    let lastError = "";
+                    for (const model of READER_MODELS) {
+                        try {
+                            const r = await streamChat({
+                                provider: cloudflareStreamProvider(model),
+                                messages: [{ role: "system", content: system }, { role: "user", content: input }],
+                                tools: [],
+                                maxToolDepth: 0,
+                                temperature: 0.2,
+                                maxTokens: 8192,
+                                maxContinuations: 4,
+                                timeoutMs: 120000,
+                                ...meterHooks(model, "File reader")
+                            });
+                            if (userId && r.usage?.total_tokens) deductTokens(userId, orgId, chargeableTokens(r.usage, model), tokenSource).catch(() => {});
+                            const answer = String(r.answer || "").trim();
+                            if (answer) return { answer, model };
+                            lastError = "no answer";
+                        } catch (e) {
+                            lastError = String(e?.message || e);
+                        }
+                    }
+                    throw new Error(lastError || "no answer");
+                };
                 return Object.fromEntries(Object.entries({
                     internal_thought_process: async (args) => {
                         const title = args?.title || "Thought Process";
@@ -2982,6 +3046,8 @@ If they ask whether their college/school uses Classgrid, say you can't see that 
                         return "Thought logged successfully. Proceed with the next step in your workflow sequence.";
                     },
                     execute_terminal_command: async (args) => {
+                        const blocked = await bigFileCommand(args?.command);
+                        if (blocked) return blocked;
                         const result = await handleToolCall('execute_terminal_command', args, { sessionId, isStaff: isStaffRole(req.user?.role) });
                         return result.isError ? result.content[0].text : result.content[0].text;
                     },
@@ -2994,9 +3060,54 @@ If they ask whether their college/school uses Classgrid, say you can't see that 
                         toolName,
                         async (args) => {
                             touchStudio(req.user?._id).catch(() => {}); // the project's code is in use: not cleaned up while the agent works
-                            return (await handleToolCall(toolName, args, { sessionId })).content[0].text;
+                            const text = (await handleToolCall(toolName, args, { sessionId })).content[0].text;
+                            // A big file asked for whole (no end line) goes to the file reader; Classgrid's own guide is read as before
+                            if (toolName === "view_project_file" && readerOn && !args?.end_line && !String(args?.path || "").includes(".classgrid/")) {
+                                const shown = String(text).match(/^.+ \(lines (\d+)-(\d+) of (\d+)\)\n/);
+                                if (shown && Number(shown[2]) - Number(shown[1]) + 1 > READER_MIN_LINES) return readerBlock(args.path, Number(shown[3]));
+                            }
+                            return text;
                         },
                     ])),
+                    // Ask the file reader about project files: it reads them whole and answers with names and line numbers
+                    bulk_read_project: async (args) => {
+                        touchStudio(req.user?._id).catch(() => {});
+                        const question = String(args?.question || "").trim();
+                        const paths = [...new Set((Array.isArray(args?.paths) ? args.paths : args?.paths ? [args.paths] : []).map((p) => String(p || "").trim()).filter(Boolean))].slice(0, 30);
+                        if (!question) return "Error: give the question.";
+                        if (!paths.length) return "Error: give the files to read in paths.";
+                        const { text, skipped } = await readWhole(paths);
+                        try {
+                            const { answer, model } = await askReader(
+                                "You read code files for another AI that is working on this project. Answer its QUESTION using only the FILES below (each line starts with its line number). Reply in short structured bullets, grouped by file. Always give exact names (functions, components, variables, routes, types, settings) and their place as path:line. Quote a short key line exactly when it helps. If the files do not answer something, say so. Never guess.",
+                                `QUESTION:\n${question}\n\nFILES:\n\n${text}`
+                            );
+                            return `File reader (${MODEL_DISPLAY_NAMES[model] || model}) read ${paths.length - skipped.length} file${paths.length - skipped.length === 1 ? "" : "s"}:\n${answer}${skipped.length ? `\n\nNot read (too much text in one go; ask again for these): ${skipped.join(", ")}` : ""}`;
+                        } catch (e) {
+                            return `Error: the file reader failed (${e.message}). Read the parts you need with view_project_file start_line and end_line.`;
+                        }
+                    },
+                    // A new file written by the file reader from a short spec (and reference files); the main model never sees the code
+                    write_project_file_from_spec: async (args) => {
+                        touchStudio(req.user?._id).catch(() => {});
+                        const target = String(args?.path || "").trim();
+                        const spec = String(args?.spec || "").trim();
+                        if (!target || !spec) return "Error: give path and spec.";
+                        const refs = [...new Set((Array.isArray(args?.reference_paths) ? args.reference_paths : args?.reference_paths ? [args.reference_paths] : []).map((p) => String(p || "").trim()).filter(Boolean))].slice(0, 5);
+                        const ref = refs.length ? (await readWhole(refs)).text : "";
+                        let written;
+                        try {
+                            written = await askReader(
+                                "You write one new code file for another AI from its SPEC. Follow the style, imports and patterns of the REFERENCE FILES when given (their lines start with line numbers: never copy the numbers). Output only the file's full content: no markdown fences, no explanations before or after.",
+                                `FILE TO WRITE: ${target}\n\nSPEC:\n${spec}${ref ? `\n\nREFERENCE FILES:\n\n${ref}` : ""}`
+                            );
+                        } catch (e) {
+                            return `Error: the file writer failed (${e.message}). Write the file yourself with write_project_file.`;
+                        }
+                        const code = written.answer.replace(/^\s*```[\w.+-]*[ \t]*\n/, "").replace(/\n```\s*$/, "").replace(/\n*$/, "\n");
+                        const out = (await handleToolCall("write_project_file", { path: target, content: code }, { sessionId })).content[0].text;
+                        return /^Created /.test(out) ? `${out}\nWritten by the file writer (${MODEL_DISPLAY_NAMES[written.model] || written.model}) from your spec; you have not seen the code. Check the parts that matter with view_project_file start_line/end_line or search_project.` : out;
+                    },
                     // Up to 5 helpers work on the project at the same time, each on a model the main AI picks. A helper
                     // reads the project, or (can_edit) also changes files and runs commands. The main AI either waits
                     // for their reports, or lets them run (wait: false) and talks to them with message_helper /

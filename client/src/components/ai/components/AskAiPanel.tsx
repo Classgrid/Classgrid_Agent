@@ -5242,6 +5242,8 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
                                           thoughtGroup.push(step);
                                         } else if (step.type === 'tool') {
                                           if (PROJECT_EXPLORE_TOOLS.has(step.tool)) {
+                                            // A big file sent to the file reader instead ("Not read: …") is only for the AI
+                                            if (step.tool === 'view_project_file' && /^Not read: /.test(String(step.result || ''))) return;
                                             if (thoughtGroup.length > 0) flushThoughts();
                                             exploreGroup.push(step);
                                             return;
