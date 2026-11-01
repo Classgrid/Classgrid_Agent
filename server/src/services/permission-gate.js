@@ -46,11 +46,36 @@ export function describeAction(tool, args = {}) {
       return { title: "Click on the page?", detail: `At x ${Math.round(Number(args?.x) || 0)}, y ${Math.round(Number(args?.y) || 0)}`, key: "browser_click", label: "clicking in the browser", level: 1 };
     case "browser_press":
       return { title: "Press this key in the page?", detail: String(args?.key || ""), key: "browser_press", label: "pressing keys in the browser", level: 1 };
+    // Custom connectors (MCP apps like n8n, Linear): asks per app tool, like claude.ai. Reading the user's own
+    // connector list never asks; "always allow" covers one tool of one app.
+    case "custom_mcp_connector":
+      return describeConnectorAction(args);
     default:
       return null;
   }
 }
-export const isGatedTool = (tool) => !!describeAction(tool, {});
+// Connector tools by their name: reading = 1, changing = 2, deleting / cancelling / making something live = 3
+const MCP_DESTRUCTIVE = /(^|_|-)(delete|remove|drop|destroy|purge|truncate|revoke|cancel|archive|unpublish|deactivate|reset|wipe|refund|publish|activate|deploy)/i;
+const MCP_CHANGE = /(^|_|-)(create|add|update|edit|set|put|patch|post|send|write|insert|upsert|execute|run|trigger|publish|activate|deploy|invite|move|rename|merge|assign|approve|reply|comment|upload|import|enable|disable|start|stop|restore|charge|pay|transfer|book|schedule|save|commit|push)/i;
+
+function describeConnectorAction(args = {}) {
+  const op = String(args?.operation || "");
+  const server = String(args?.server || args?.app || args?.name || "the app");
+  const app = server; // as the user named it ("n8n" stays n8n)
+  const key = (s) => `mcp:${server.toLowerCase()}:${s}`;
+  if (op === "call_tool") {
+    const tool = String(args?.tool || "");
+    const words = tool.replace(/[_-]+/g, " ");
+    let detail = "";
+    try { detail = JSON.stringify(args?.arguments ?? {}, null, 2).slice(0, 1500); } catch { /* unreadable arguments */ }
+    return { title: `Let ${app} run ${words}?`, detail, key: key(`tool:${tool}`), label: `${words} in ${app}`, level: MCP_DESTRUCTIVE.test(tool) ? 3 : MCP_CHANGE.test(tool) ? 2 : 1 };
+  }
+  if (op === "add_server") return { title: `Connect ${app}?`, detail: String(args?.url || args?.app || ""), key: key("add"), label: `connecting ${app}`, level: 2 };
+  if (op === "remove_server") return { title: `Remove the ${app} connector?`, detail: app, key: key("remove"), label: `removing ${app}`, level: 3 };
+  return null; // list_apps, list_servers, get_tools, login: only read the user's own connectors
+}
+
+export const isGatedTool = (tool) => tool === "custom_mcp_connector" || !!describeAction(tool, {});
 
 // Does this mode ask for this action?
 const asks = (mode, level) => (mode === "review" ? true : mode === "default" ? level >= 2 : mode === "auto" ? level >= 3 : false);

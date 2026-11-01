@@ -57,7 +57,7 @@ function describeCustomMcp(args: any, result: unknown, status: 'loading' | 'succ
   const parsed = parseResult(result);
   const data = parsed.data && typeof parsed.data === 'object' && !Array.isArray(parsed.data) ? parsed.data : {};
   const raw = String(data.card?.name || args?.server || args?.app || args?.name || 'the app');
-  const app = raw.charAt(0).toUpperCase() + raw.slice(1);
+  const app = raw; // as the user named it ("n8n" stays n8n)
   const err = status === 'error' || data.error ? String(data.error || parsed.text || '').split('\n')[0]!.replace(new RegExp(`^${raw.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}:\\s*`, 'i'), '') : '';
   const loading = status === 'loading';
   switch (args?.operation) {

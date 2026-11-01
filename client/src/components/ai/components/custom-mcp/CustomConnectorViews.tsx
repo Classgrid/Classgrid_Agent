@@ -72,7 +72,7 @@ export function CustomConnectorDetail({ server, onBack, onChanged, onRemoved, on
   };
 
   return (
-    <div className="animate-in fade-in slide-in-from-right-4 duration-300 h-full flex flex-col max-w-3xl mx-auto">
+    <div className="animate-in fade-in slide-in-from-right-4 duration-300 flex flex-col max-w-3xl mx-auto pb-8">
       <button onClick={onBack} className="flex items-center text-sm font-medium text-muted-foreground hover:text-foreground mb-6 transition-colors w-fit group">
         <ChevronLeft className="w-4 h-4 mr-1 group-hover:-translate-x-1 transition-transform" />
         Back to plugins
@@ -202,7 +202,7 @@ export function CatalogAppDetail({ app, onBack, onAdded }: { app: McpCatalogApp;
     }
   };
   return (
-    <div className="animate-in fade-in slide-in-from-right-4 duration-300 h-full flex flex-col max-w-3xl mx-auto">
+    <div className="animate-in fade-in slide-in-from-right-4 duration-300 flex flex-col max-w-3xl mx-auto pb-8">
       <button onClick={onBack} className="flex items-center text-sm font-medium text-muted-foreground hover:text-foreground mb-6 transition-colors w-fit group">
         <ChevronLeft className="w-4 h-4 mr-1 group-hover:-translate-x-1 transition-transform" />
         Back to plugins
@@ -234,7 +234,9 @@ export function CatalogAppDetail({ app, onBack, onAdded }: { app: McpCatalogApp;
               placeholder={app.askUrl.placeholder}
               className="w-full h-10 px-3 rounded-lg border border-border bg-background text-sm font-mono text-foreground placeholder:text-muted-foreground outline-none focus:border-foreground/30"
             />
-            <p className="text-xs text-muted-foreground">{app.askUrl.hint}</p>
+            {ownUrl.trim() && !/^https:\/\/\S+$/i.test(ownUrl.trim())
+              ? <p className="text-xs text-destructive">This should be a web address starting with https://, like {app.askUrl.placeholder}</p>
+              : <p className="text-xs text-muted-foreground">{app.askUrl.hint}</p>}
           </div>
           <label className="flex items-center gap-2 text-sm text-muted-foreground cursor-pointer w-fit">
             <input type="checkbox" checked={useToken} onChange={(e) => setUseToken(e.target.checked)} className="w-4 h-4 accent-foreground" />
@@ -251,10 +253,13 @@ export function CatalogAppDetail({ app, onBack, onAdded }: { app: McpCatalogApp;
           )}
         </div>
       )}
-      <Button variant="outline" onClick={connect} disabled={busy || !ready} className={cn(secondaryBtn, "h-10 w-fit px-6")}>
-        {busy ? <Spinner className="w-4 h-4 mr-2" /> : null}
-        {authType === "oauth" ? "Connect and log in" : "Connect"}
-      </Button>
+      {/* Shown only once the form is filled in (apps that need an address), never squashed */}
+      {ready && (
+        <Button variant="outline" onClick={connect} disabled={busy} className={cn(secondaryBtn, "h-10 min-h-10 w-fit px-6 shrink-0")}>
+          {busy ? <Spinner className="w-4 h-4 mr-2" /> : null}
+          {authType === "oauth" ? "Connect and log in" : "Connect"}
+        </Button>
+      )}
     </div>
   );
 }

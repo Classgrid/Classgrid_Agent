@@ -50,7 +50,7 @@ function rowTitle(tool: string, args: any) {
   // Custom connectors: "Used Linear  Create issue"
   if (tool === 'custom_mcp_connector') {
     const name = String(args?.server || args?.app || args?.name || 'Custom connector');
-    return { app: name.charAt(0).toUpperCase() + name.slice(1), action: humanizeKey(String(args?.tool || args?.operation || tool)) };
+    return { app: name, action: humanizeKey(String(args?.tool || args?.operation || tool)) };
   }
   const app = APP_NAMES[tool] ?? 'Classgrid';
   const action = APP_NAMES[tool] && args?.operation ? String(args.operation) : tool;
