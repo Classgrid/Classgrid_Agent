@@ -873,7 +873,9 @@ async function groupsJson(groups, email) {
 
 router.get("/groups", isAuthenticated, async (req, res) => {
   await connectDB();
-  const groups = await ChatGroup.find({ userId: req.user._id, projectId: groupScope(req.query.project) }).sort({ createdAt: 1 }).lean();
+  // ?project=all: every group of every project (Studio shows each project's groups inside its folder)
+  const scope = req.query.project === "all" ? {} : { projectId: groupScope(req.query.project) };
+  const groups = await ChatGroup.find({ userId: req.user._id, ...scope }).sort({ createdAt: 1 }).lean();
   res.json({ groups: await groupsJson(groups, req.user.email) });
 });
 

@@ -333,7 +333,7 @@ export function StudioProjectPicker() {
   );
 }
 
-function NewProjectDialog({ open, onOpenChange, onCreated, linkTo = null }: {
+export function NewProjectDialog({ open, onOpenChange, onCreated, linkTo = null }: {
   open: boolean;
   onOpenChange: (o: boolean) => void;
   onCreated: (p: Project) => void;

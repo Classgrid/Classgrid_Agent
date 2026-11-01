@@ -1362,6 +1362,10 @@ const cloudflareStreamProvider = (model) => ({
 });
 
 // "/" commands from the chat box (Project Mode and Studio): what each one asks for, sent for that message only
+// When each chat last had a message (Studio's list sorts by it and marks unread chats); one Redis hash per user
+const CHAT_TOUCHED = (email) => `ai:chatTouched:${String(email || "").toLowerCase()}`;
+const touchChat = (email, sessionId) => { if (email && sessionId) redis.hset(CHAT_TOUCHED(email), String(sessionId), String(Date.now())).catch(() => {}); };
+
 const SLASH_COMMAND_LINES = {
     "classgrid-guide": `Answer from Classgrid AI's own guide: read .classgrid/classgrid_guide/SKILL.md with view_project_file, then the page in its references/ folder that matches the question, and answer from them.`,
     "studio-guide": `Answer from Classgrid AI's Studio Mode guide: read .classgrid/classgrid_guide/references/studio-mode.md with view_project_file and answer from it.`,
@@ -1539,6 +1543,7 @@ export const streamAskAi = async (req, res) => {
     let replacedCheck = null;
     let runKey = null;
     let runId = null;
+    let touchedChat = null; // this answer's chat: marked as just updated again when the answer ends
     let releaseGridLock = null; // Share Grid: unlocks "Agent is responding to …" when this request is fully done (see finally)
     try {
 
@@ -1867,6 +1872,7 @@ You are currently talking to Nikhil Shinde (nikhil.shinde@classgrid.in), the CRE
 
         // Project Mode: what the user sees in the code editor (open file, cursor, selection, errors) and what they changed
         // A message sent from Project Mode links this chat to the open project first (from the very first message)
+        if (sessionId && !isIncognito) { touchedChat = sessionId; touchChat(req.user?.email, sessionId); }
         if (sessionId && !isIncognito && !gridSender && /^[0-9a-f]{24}$/i.test(String(body.projectId || "")) && req.user?._id) {
             await linkChatToProject(req.user._id, body.projectId, sessionId).catch(() => {});
         } else if (sessionId && !isIncognito && !gridSender && body.appMode === "studio" && body.taskOrigin !== "whatsapp" && req.user?._id) {
@@ -5680,6 +5686,7 @@ If a tool fails, never show the error message; say only: "Something went wrong o
         if (replacedCheck) clearInterval(replacedCheck);
         if (runKey) redis.get(runKey).then((newest) => (newest === runId ? redis.del(runKey) : null)).catch(() => {});
         if (releaseGridLock) releaseGridLock();
+        if (touchedChat) touchChat(req.user?.email, touchedChat);
         if (!res.writableEnded) {
             res.write('data: [DONE]\n\n');
             res.end();
@@ -5727,6 +5734,11 @@ export const getChatSessions = async (req, res) => {
         }
         // Archived chats are left out of the list; ?archived=1 lists only them
         const archivedIds = new Set(me?.archived_chat_ids || []);
+        // Studio: when each chat last had a message (for "Last updated" and unread chats)
+        if (req.query?.studio === "1") {
+            const touched = await redis.hgetall(CHAT_TOUCHED(email)).catch(() => null) || {};
+            sessions = (sessions || []).map((s) => ({ ...s, updated_at: touched[s.id] ? new Date(Number(touched[s.id])).toISOString() : s.created_at }));
+        }
         sessions = (sessions || []).filter((s) => (req.query?.archived === "1" ? archivedIds.has(s.id) : !archivedIds.has(s.id)));
         // Share Grid: mark chats shared with 2+ people (a star in the chat list)
         const gridIds = await sharedChatIdsFor(email).catch(() => new Set());

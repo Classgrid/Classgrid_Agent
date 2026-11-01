@@ -21,7 +21,7 @@
 
 import React from "react";
 import { createPortal } from "react-dom";
-import { MessageSquare, Plus, Search, Pin, PinOff, MoreHorizontal, Pencil, Trash2, Share, Copy, Mail, Check, Link2, FileText, ExternalLink, X, Loader2, SquarePen, Calendar, Library, FolderInput, FolderPlus, Folder, Star, ChevronDown } from "lucide-react";
+import { MessageSquare, Plus, Search, Pin, PinOff, MoreHorizontal, Pencil, Trash2, Share, Copy, Mail, Check, Link2, FileText, ExternalLink, X, Loader2, SquarePen, Calendar, Library, FolderInput, FolderPlus, Folder, Star, ChevronDown, ListFilter } from "lucide-react";
 import { format } from "date-fns";
 import { NikhilDateCalendar } from "@/components/marketing_ui/nikhil_date_calendar";
 import { useNavigate, useLocation } from "react-router-dom";
@@ -41,6 +41,7 @@ import { fetchWithRescue } from "@/lib/rescue";
 import { getSocket } from "@/lib/socketClient";
 import { cn } from "@/lib/utils";
 import { GroupDialog, groupIcon, groupsApi, openProjectId, useChatGroups, type ChatGroup } from "./chat-groups/chatGroups";
+import { NewProjectDialog, openStudioProject } from "@/features/superadmin/components/StudioProjectPicker";
 
 interface ChatSession {
   id: string;
@@ -49,6 +50,22 @@ interface ChatSession {
   pinned?: boolean;
   ended?: boolean;
   project_id?: string; // Studio: the project this chat belongs to
+  updated_at?: string; // Studio: when the chat last had a message
+}
+
+// Studio's list options (the Display Options menu next to "Projects"), kept on this device
+type StudioListOpts = {
+  groupBy: "project" | "none"; sortChats: "updated" | "created" | "title"; sortProjects: "custom" | "recent" | "name";
+  unreadOnly: boolean; hideEmpty: boolean; openOnly: boolean; showTime: boolean; showLogos: boolean; compact: boolean;
+  autoPin: boolean; archivedOnly: boolean;
+};
+const STUDIO_OPTS_KEY = "cg_studio_list_opts";
+const STUDIO_OPTS: StudioListOpts = {
+  groupBy: "project", sortChats: "updated", sortProjects: "recent", unreadOnly: false, hideEmpty: false, openOnly: false,
+  showTime: true, showLogos: true, compact: false, autoPin: false, archivedOnly: false,
+};
+function readStudioOpts(): StudioListOpts {
+  try { return { ...STUDIO_OPTS, ...JSON.parse(localStorage.getItem(STUDIO_OPTS_KEY) || "{}") }; } catch { return STUDIO_OPTS; }
 }
 
 const ChatBubbleIcon = ({ className }: { className?: string }) => (
@@ -114,7 +131,7 @@ export function AgentNestedMenu({ searchQuery = "" }: { searchQuery?: string }) 
       try { openProject = (sessionStorage.getItem("cg_project_open") || localStorage.getItem("cg_project_open")); } catch { /* storage blocked */ }
       listQuery = `?project=${openProject || "all"}`; // no project open: chats of all projects
       // Studio lists every project's chats under its project, and its chats sent with no project
-      if (window.location.pathname.split("/").includes("studio")) listQuery = "?project=all&studio=1";
+      if (window.location.pathname.split("/").includes("studio")) listQuery = `?project=all&studio=1${readStudioOpts().archivedOnly ? "&archived=1" : ""}`;
     }
     // Another list than the one on screen (Agent -> a project, or one project -> another): clear it at once, so
     // the old mode's chats never show while the new list loads
@@ -415,7 +432,8 @@ export function AgentNestedMenu({ searchQuery = "" }: { searchQuery?: string }) 
   // Chat groups (Project and Studio Mode): the open project's groups, or the ones made with no project open
   const inCodeMode = window.location.pathname.split("/").some((x) => x === "studio" || x === "project");
   const openProject = inCodeMode ? openProjectId() : null;
-  const groups = useChatGroups(inCodeMode, openProject);
+  const studioPage = window.location.pathname.split("/").includes("studio");
+  const groups = useChatGroups(inCodeMode, studioPage ? "all" : openProject);
   const [groupDialog, setGroupDialog] = React.useState<{ project: string | null; group?: ChatGroup; sessionId?: string } | null>(null);
   const [deleteGroup, setDeleteGroup] = React.useState<ChatGroup | null>(null);
   const [isDeletingGroup, setIsDeletingGroup] = React.useState(false);
@@ -502,24 +520,108 @@ export function AgentNestedMenu({ searchQuery = "" }: { searchQuery?: string }) 
     return next;
   });
   const [fullFolders, setFullFolders] = React.useState<string[]>([]);
+  const [opts, setOpts] = React.useState<StudioListOpts>(readStudioOpts);
+  const setOpt = (patch: Partial<StudioListOpts>) => setOpts((prev) => {
+    const next = { ...prev, ...patch };
+    try { localStorage.setItem(STUDIO_OPTS_KEY, JSON.stringify(next)); } catch { /* storage blocked */ }
+    return next;
+  });
+  // Archived Only lists the archived chats instead
+  const firstOpts = React.useRef(true);
+  React.useEffect(() => {
+    if (firstOpts.current) { firstOpts.current = false; return; }
+    if (isStudioMode) fetchSessions();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [opts.archivedOnly]);
+
+  // Unread: a chat that had a message after it was last open here (kept on this device)
+  const [readAt, setReadAt] = React.useState<{ since: number; at: Record<string, number> }>(() => {
+    try { const v = JSON.parse(localStorage.getItem("cg_chat_read") || "null"); if (v && typeof v.since === "number" && v.at) return v; } catch { /* storage blocked */ }
+    const v = { since: Date.now(), at: {} };
+    try { localStorage.setItem("cg_chat_read", JSON.stringify(v)); } catch { /* storage blocked */ }
+    return v;
+  });
+  const markRead = (ids: string[] | "all") => setReadAt((prev) => {
+    const now = Date.now();
+    const next = ids === "all" ? { since: now, at: {} } : { ...prev, at: { ...prev.at, ...Object.fromEntries(ids.map((id) => [id, now])) } };
+    try { localStorage.setItem("cg_chat_read", JSON.stringify(next)); } catch { /* storage blocked */ }
+    return next;
+  });
+  const isUnread = (c: ChatSession) => !!c.updated_at && new Date(c.updated_at).getTime() > (readAt.at[c.id] || readAt.since);
+  const lastActive = React.useRef<string | null>(null);
+  React.useEffect(() => {
+    if (!isStudioMode) return;
+    const ids = [lastActive.current, activeSessionId].filter((x): x is string => !!x);
+    lastActive.current = activeSessionId;
+    if (ids.length) markRead(ids);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeSessionId, sessions, isStudioMode]);
+
+  const chatTime = (c: ChatSession) => new Date((opts.sortChats === "updated" && c.updated_at) || c.created_at).getTime();
+  const sortChats = (list: ChatSession[]) => (opts.sortChats === "title"
+    ? [...list].sort((a, b) => (a.title || "").localeCompare(b.title || "", undefined, { sensitivity: "base" }))
+    : [...list].sort((a, b) => chatTime(b) - chatTime(a)));
+  const studioChats = isStudioMode ? sortChats(filteredUnpinnedSessions.filter((c) => !opts.unreadOnly || isUnread(c))) : [];
+
+  // Custom order: drag a project folder onto another to move it there
+  const [folderOrder, setFolderOrder] = React.useState<string[]>(() => {
+    try { return JSON.parse(localStorage.getItem("cg_studio_folder_order") || "[]"); } catch { return []; }
+  });
+  const dragFolder = React.useRef<string | null>(null);
+
   const studioFolders = React.useMemo(() => {
     if (!isStudioMode) return [];
-    const folders = new Map<string, { key: string; id: string | null; name: string; logo: string | null; chats: ChatSession[] }>();
+    type F = { key: string; id: string | null; name: string; logo: string | null; chats: ChatSession[]; groups: ChatGroup[] };
+    const folders = new Map<string, F>();
     const names = new Map((projects || []).map((p) => [p.id, p]));
-    for (const s of filteredUnpinnedSessions) {
-      const key = s.project_id || "none";
+    const folderFor = (id: string | null, c?: ChatSession) => {
+      const key = id || "none";
       if (!folders.has(key)) {
-        const p = s.project_id ? names.get(s.project_id) : null;
-        folders.set(key, { key, id: s.project_id || null, name: s.project_id ? p?.name || (s as any).project_name || "Project" : "No project", logo: p?.logo || (s as any).project_logo || null, chats: [] });
+        const p = id ? names.get(id) : null;
+        folders.set(key, { key, id, name: id ? p?.name || (c as any)?.project_name || "Project" : "No project", logo: p?.logo || (c as any)?.project_logo || null, chats: [], groups: [] });
       }
-      folders.get(key)!.chats.push(s);
+      return folders.get(key)!;
+    };
+    for (const c of studioChats) folderFor(c.project_id || null, c).chats.push(c);
+    // Each project's own groups sit inside its folder (pinned groups first)
+    if (!opts.archivedOnly && !opts.unreadOnly) {
+      for (const g of sortedGroups) if (!g.projectId || names.has(g.projectId) || folders.has(g.projectId)) folderFor(g.projectId || null).groups.push(g);
     }
-    if (!searchQuery) {
-      for (const p of projects || []) if (!folders.has(p.id)) folders.set(p.id, { key: p.id, id: p.id, name: p.name, logo: p.logo || null, chats: [] });
-      if (!folders.has("none")) folders.set("none", { key: "none", id: null, name: "No project", logo: null, chats: [] });
+    if (!searchQuery && !opts.hideEmpty && !opts.unreadOnly && !opts.archivedOnly) {
+      for (const p of projects || []) folderFor(p.id);
+      folderFor(null);
     }
-    return [...folders.values()];
-  }, [isStudioMode, filteredUnpinnedSessions, projects, searchQuery]);
+    let list = [...folders.values()];
+    if (opts.openOnly) list = list.filter((f) => (f.id || null) === (openProject || null));
+    const newest = (f: F) => (f.chats.length ? Math.max(...f.chats.map(chatTime)) : 0);
+    if (opts.sortProjects === "name") list.sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: "base" }));
+    else {
+      list.sort((a, b) => newest(b) - newest(a));
+      if (opts.sortProjects === "custom") {
+        const at = (k: string) => { const i = folderOrder.indexOf(k); return i === -1 ? Number.MAX_SAFE_INTEGER : i; };
+        list.sort((a, b) => at(a.key) - at(b.key));
+      }
+    }
+    // Auto Pin: the open project's folder stays at the top
+    if (opts.autoPin) {
+      const i = list.findIndex((f) => (f.id || null) === (openProject || null));
+      if (i > 0) list = [list[i]!, ...list.slice(0, i), ...list.slice(i + 1)];
+    }
+    return list;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isStudioMode, studioChats, sortedGroups, projects, searchQuery, opts, folderOrder, openProject, readAt]);
+  const dropFolder = (target: string) => {
+    const from = dragFolder.current;
+    dragFolder.current = null;
+    if (!from || from === target) return;
+    const keys = studioFolders.map((f) => f.key).filter((k) => k !== from);
+    keys.splice(Math.max(0, keys.indexOf(target)), 0, from);
+    setFolderOrder(keys);
+    try { localStorage.setItem("cg_studio_folder_order", JSON.stringify(keys)); } catch { /* storage blocked */ }
+    setOpt({ sortProjects: "custom" });
+  };
+  const [newProjectOpen, setNewProjectOpen] = React.useState(false);
+  const [showAllStudio, setShowAllStudio] = React.useState(false);
 
   // A new chat in this folder's project (the project opens, like picking it above the chat input)
   const newChatIn = (projectId: string | null) => {
@@ -634,19 +736,22 @@ export function AgentNestedMenu({ searchQuery = "" }: { searchQuery?: string }) 
             <SidebarMenuButton
               isActive={session.id === activeSessionId}
               onClick={() => handleLoadChat(session.id)}
-              className="h-auto py-1.5 cursor-pointer flex-1 min-w-0"
+              className={cn("h-auto cursor-pointer flex-1 min-w-0", isStudioMode && opts.compact ? "py-1" : "py-1.5")}
               render={
                 <div className="flex items-center gap-2.5 w-full min-w-0 pr-8">
                   {session.pinned && (
                     <ChatBubbleIcon className="w-[15px] h-[15px] shrink-0 text-muted-foreground/80" />
+                  )}
+                  {isStudioMode && session.id !== activeSessionId && isUnread(session) && (
+                    <span className="size-1.5 shrink-0 rounded-full bg-sky-400" aria-label="Unread" />
                   )}
                   <span className="truncate block min-w-0 flex-1">{displayTitle}</span>
                   {/* Share Grid: this chat is shared with other people */}
                   {(session as any).grid && (
                     <Star className="w-3 h-3 shrink-0 fill-current text-foreground" aria-label="Shared chat" />
                   )}
-                  {isStudioMode && !session.pinned && (
-                    <span className="shrink-0 -mr-6 text-xs text-muted-foreground group-hover:opacity-0 transition-opacity">{shortAge(session.created_at)}</span>
+                  {isStudioMode && !session.pinned && opts.showTime && (
+                    <span className="shrink-0 -mr-6 text-xs text-muted-foreground group-hover:opacity-0 transition-opacity">{shortAge((opts.sortChats === "updated" && session.updated_at) || session.created_at)}</span>
                   )}
                 </div>
               }
@@ -772,6 +877,24 @@ export function AgentNestedMenu({ searchQuery = "" }: { searchQuery?: string }) 
 
   const menuItem = "gap-3 py-2 px-3 text-[14px] cursor-pointer hover:bg-slate-100 dark:hover:bg-[#343541] focus:bg-slate-100 dark:focus:bg-[#343541] focus:text-slate-900 dark:focus:text-[#ececf1] rounded-xl transition-colors";
   const menuIcon = "w-4 h-4 text-slate-500 dark:text-white/70";
+  const menuBox = (w: string) => `${w} z-[100] bg-white dark:bg-[#202123] text-slate-700 dark:text-[#ececf1] border border-slate-200 dark:border-white/10 rounded-2xl p-2 shadow-2xl`;
+  // Display Options: a row that turns on / off, and a row that opens its choices
+  const optionRow = (label: string, on: boolean, run: () => void, title?: string) => (
+    <DropdownMenuItem key={label} className={cn(menuItem, "justify-between")} onClick={run} title={title}>
+      {label}{on && <Check className="w-4 h-4" />}
+    </DropdownMenuItem>
+  );
+  const optionSub = (label: string, value: string, choices: [string, boolean, () => void][]) => (
+    <DropdownMenuSub>
+      <DropdownMenuSubTrigger className="gap-3 py-2 px-3 text-[14px] cursor-pointer hover:bg-slate-100 dark:hover:bg-[#343541] focus:bg-slate-100 dark:focus:bg-[#343541] rounded-xl transition-colors data-popup-open:bg-slate-100 dark:data-popup-open:bg-[#343541]">
+        <span className="flex-1">{label}</span>
+        {value && <span className="text-[13px] text-muted-foreground">{value}</span>}
+      </DropdownMenuSubTrigger>
+      <DropdownMenuSubContent sideOffset={8} className={menuBox("w-[210px] z-[101]")}>
+        {choices.map(([l, on, run]) => optionRow(l, on, run))}
+      </DropdownMenuSubContent>
+    </DropdownMenuSub>
+  );
 
   // One group: its row (icon, name, ⋯ menu, open / closed arrow) and its chats under it
   const renderGroup = (g: ChatGroup) => {
@@ -1016,7 +1139,7 @@ export function AgentNestedMenu({ searchQuery = "" }: { searchQuery?: string }) 
         </div>
 
         <SidebarGroupContent>
-          {inCodeMode && (
+          {inCodeMode && !isStudioMode && (
             <div className="mb-3">
               <div className="group/groups flex items-center justify-between px-2 py-1.5">
                 <span className="text-xs font-medium text-muted-foreground/70">Groups</span>
@@ -1149,58 +1272,128 @@ export function AgentNestedMenu({ searchQuery = "" }: { searchQuery?: string }) 
           </Accordion>
           {isStudioMode && (
             <div className="mt-1">
-              <div className="px-2 py-1.5"><span className="text-xs font-medium text-muted-foreground/70">Projects</span></div>
+              <div className="group/projects flex items-center justify-between px-2 py-1.5">
+                <span className="text-xs font-medium text-muted-foreground/70">{opts.archivedOnly ? "Archived" : opts.groupBy === "none" ? "Chats" : "Projects"}</span>
+                <div className="flex items-center gap-0.5">
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <button type="button" className="p-0.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted cursor-pointer" aria-label="Display options" title="Display options">
+                        <ListFilter className="w-3.5 h-3.5" />
+                      </button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent side="bottom" align="end" sideOffset={6} className={menuBox("w-[250px]")}>
+                      {optionSub("Group By", opts.groupBy === "project" ? "Project" : "None", [
+                        ["Project", opts.groupBy === "project", () => setOpt({ groupBy: "project" })],
+                        ["None", opts.groupBy === "none", () => setOpt({ groupBy: "none" })],
+                      ])}
+                      {optionSub("Sort Conversations", { updated: "Last Updated", created: "Created", title: "Name" }[opts.sortChats], [
+                        ["Last Updated", opts.sortChats === "updated", () => setOpt({ sortChats: "updated" })],
+                        ["Created", opts.sortChats === "created", () => setOpt({ sortChats: "created" })],
+                        ["Name", opts.sortChats === "title", () => setOpt({ sortChats: "title" })],
+                      ])}
+                      {optionSub("Sort Projects", { custom: "Custom Order", recent: "Recent", name: "Name" }[opts.sortProjects], [
+                        ["Custom Order", opts.sortProjects === "custom", () => setOpt({ sortProjects: "custom" })],
+                        ["Recent", opts.sortProjects === "recent", () => setOpt({ sortProjects: "recent" })],
+                        ["Name", opts.sortProjects === "name", () => setOpt({ sortProjects: "name" })],
+                      ])}
+                      <DropdownMenuSeparator className="bg-slate-100 dark:bg-white/10 my-1.5 mx-1" />
+                      {optionSub("Filter", "", [
+                        ["Unread only", opts.unreadOnly, () => setOpt({ unreadOnly: !opts.unreadOnly })],
+                        ["Hide empty projects", opts.hideEmpty, () => setOpt({ hideEmpty: !opts.hideEmpty })],
+                        ["Only the open project", opts.openOnly, () => setOpt({ openOnly: !opts.openOnly })],
+                      ])}
+                      {optionSub("Display", "", [
+                        ["Show time", opts.showTime, () => setOpt({ showTime: !opts.showTime })],
+                        ["Show project logos", opts.showLogos, () => setOpt({ showLogos: !opts.showLogos })],
+                        ["Compact", opts.compact, () => setOpt({ compact: !opts.compact })],
+                      ])}
+                      {optionRow("Auto Pin", opts.autoPin, () => setOpt({ autoPin: !opts.autoPin }), "The open project stays at the top")}
+                      {optionRow("Archived Only", opts.archivedOnly, () => setOpt({ archivedOnly: !opts.archivedOnly }))}
+                      <DropdownMenuSeparator className="bg-slate-100 dark:bg-white/10 my-1.5 mx-1" />
+                      {optionRow("Mark All as Read", false, () => { markRead("all"); toast.success("All chats marked as read"); })}
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                  <button type="button" onClick={() => setNewProjectOpen(true)} className="p-0.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted cursor-pointer" aria-label="New project" title="New project">
+                    <FolderPlus className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              </div>
               {loading && !sessions.length ? (
                 <div className="px-2 py-1.5 space-y-3">
                   <div className="h-4 w-[80%] rounded-md bg-muted animate-pulse" />
                   <div className="h-4 w-[60%] rounded-md bg-muted animate-pulse" />
                   <div className="h-4 w-[70%] rounded-md bg-muted animate-pulse" />
                 </div>
+              ) : opts.groupBy === "none" ? (
+                <SidebarMenu>
+                  {!studioChats.length && <div className="px-2 py-1.5 text-xs text-muted-foreground">{opts.archivedOnly ? "No archived chats" : "No chats yet"}</div>}
+                  {(showAllStudio || searchQuery ? studioChats : studioChats.slice(0, PREVIOUS_PAGE)).map(renderSessionItem)}
+                  {!showAllStudio && !searchQuery && studioChats.length > PREVIOUS_PAGE && (
+                    <button type="button" onClick={() => setShowAllStudio(true)} className="w-full px-2 py-1.5 text-left text-xs font-medium text-muted-foreground hover:text-foreground rounded-md hover:bg-muted transition-colors cursor-pointer">
+                      Show {studioChats.length - PREVIOUS_PAGE} more
+                    </button>
+                  )}
+                </SidebarMenu>
               ) : studioFolders.map((f) => {
                 const isOpen = !closedFolders.includes(f.key) || !!searchQuery;
                 const full = fullFolders.includes(f.key);
                 const shown = full || searchQuery ? f.chats : f.chats.slice(0, 5);
                 const isCurrent = (f.id || null) === (openProject || null);
                 return (
-                  <div key={f.key} className="mb-1">
-                    <div className="group/fld relative flex items-center">
+                  <div
+                    key={f.key}
+                    className="mb-1"
+                    onDragOver={(e) => { if (dragFolder.current) e.preventDefault(); }}
+                    onDrop={(e) => { e.preventDefault(); dropFolder(f.key); }}
+                  >
+                    {/* The project's row: same look as a group row (icon, name, + new chat, open / closed arrow) */}
+                    <div className="group/fld relative flex items-center" draggable onDragStart={() => { dragFolder.current = f.key; }} onDragEnd={() => { dragFolder.current = null; }}>
                       <button
                         type="button"
                         onClick={() => toggleFolder(f.key)}
-                        className={cn("flex-1 min-w-0 flex items-center gap-2.5 h-8 pl-2 pr-9 rounded-md text-sm hover:bg-sidebar-accent transition-colors cursor-pointer", isCurrent ? "text-sidebar-foreground" : "text-muted-foreground")}
+                        className={cn("flex-1 min-w-0 flex items-center gap-2.5 h-8 pl-2 pr-16 rounded-md text-sm hover:bg-sidebar-accent transition-colors cursor-pointer", isCurrent ? "text-sidebar-foreground" : "text-muted-foreground")}
                       >
-                        {f.logo
+                        {f.logo && opts.showLogos
                           ? <img src={f.logo} alt="" className="w-4 h-4 shrink-0 rounded object-cover" />
                           : <Folder className="w-4 h-4 shrink-0" strokeWidth={2} />}
                         <span className="truncate">{f.name}</span>
                       </button>
-                      <button
-                        type="button"
-                        onClick={() => newChatIn(f.id)}
-                        className="absolute right-1 p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-black/5 dark:hover:bg-white/10 opacity-0 group-hover/fld:opacity-100 focus-visible:opacity-100 transition-opacity cursor-pointer"
-                        title={f.id ? "New chat in this project" : "New chat with no project"}
-                        aria-label={f.id ? `New chat in ${f.name}` : "New chat with no project"}
-                      >
-                        <Plus className="w-3.5 h-3.5" />
-                      </button>
+                      <div className="absolute right-1 flex items-center">
+                        <button
+                          type="button"
+                          onClick={() => newChatIn(f.id)}
+                          className="opacity-0 group-hover/fld:opacity-100 focus-visible:opacity-100 transition-opacity p-1 rounded hover:bg-black/5 dark:hover:bg-white/10 text-muted-foreground hover:text-foreground cursor-pointer"
+                          title={f.id ? "New chat in this project" : "New chat with no project"}
+                          aria-label={f.id ? `New chat in ${f.name}` : "New chat with no project"}
+                        >
+                          <Plus className="w-3.5 h-3.5" />
+                        </button>
+                        <button type="button" onClick={() => toggleFolder(f.key)} className="p-1 rounded text-muted-foreground hover:text-foreground cursor-pointer" aria-label={isOpen ? "Close project" : "Open project"}>
+                          <ChevronDown className={cn("w-3.5 h-3.5 transition-transform duration-200", !isOpen && "-rotate-90")} />
+                        </button>
+                      </div>
                     </div>
                     {isOpen && (
-                      <SidebarMenu className="pl-4 mt-0.5">
-                        {shown.length ? shown.map(renderSessionItem) : <div className="px-2 py-1.5 text-xs text-muted-foreground">No chats yet</div>}
-                        {!full && !searchQuery && f.chats.length > shown.length && (
-                          <button
-                            type="button"
-                            onClick={() => setFullFolders((prev) => [...prev, f.key])}
-                            className="w-full px-2 py-1.5 text-left text-xs font-medium text-muted-foreground hover:text-foreground rounded-md hover:bg-muted transition-colors cursor-pointer"
-                          >
-                            Show {f.chats.length - shown.length} more
-                          </button>
-                        )}
-                      </SidebarMenu>
+                      <div className="pl-4 mt-0.5">
+                        {f.groups.map(renderGroup)}
+                        <SidebarMenu>
+                          {shown.length ? shown.map(renderSessionItem) : !f.groups.length && <div className="px-2 py-1.5 text-xs text-muted-foreground">No chats yet</div>}
+                          {!full && !searchQuery && f.chats.length > shown.length && (
+                            <button
+                              type="button"
+                              onClick={() => setFullFolders((prev) => [...prev, f.key])}
+                              className="w-full px-2 py-1.5 text-left text-xs font-medium text-muted-foreground hover:text-foreground rounded-md hover:bg-muted transition-colors cursor-pointer"
+                            >
+                              Show {f.chats.length - shown.length} more
+                            </button>
+                          )}
+                        </SidebarMenu>
+                      </div>
                     )}
                   </div>
                 );
               })}
+              <NewProjectDialog open={newProjectOpen} onOpenChange={setNewProjectOpen} onCreated={(p) => openStudioProject(p.id)} />
             </div>
           )}
         </SidebarGroupContent>
