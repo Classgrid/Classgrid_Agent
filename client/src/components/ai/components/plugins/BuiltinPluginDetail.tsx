@@ -1,6 +1,6 @@
 // Detail page of a built-in plugin (Gmail, GitHub, Slack...) in AI Hub > Plugins
 import React, { useState } from "react";
-import { MessageSquare, Plug, Unplug } from "lucide-react";
+import { MessageSquare, Unplug } from "lucide-react";
 import { Spinner } from "@/components/marketing_ui/spinner";
 import { DangerConfirmDialog } from "@/components/marketing_ui/danger-confirm-dialog";
 import { PluginHeader, PluginLogo, StatusLabel, TryPrompts, ToolsSection, InfoSection, FeatureList, solidBtn, type PluginTool } from "./PluginUi";
@@ -57,7 +57,7 @@ export function BuiltinPluginDetail({ plugin, connected, connecting, disconnecti
         status={<StatusLabel tone={connected ? "ok" : "off"} label={connected ? "Connected" : "Not connected"} />}
         action={!connected ? (
           <button onClick={onConnect} disabled={connecting} className={solidBtn}>
-            {connecting ? <Spinner className="w-4 h-4" /> : <Plug className="w-4 h-4" />}
+            {connecting && <Spinner className="w-4 h-4" />}
             {connecting ? "Connecting..." : "Connect"}
           </button>
         ) : onTry ? (

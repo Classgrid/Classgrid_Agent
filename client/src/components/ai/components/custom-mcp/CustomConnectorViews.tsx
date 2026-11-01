@@ -1,6 +1,6 @@
 // Custom connectors in AI Hub > Plugins: logo, list card and the detail pages (log in, tools, turn off, remove)
 import React, { useState } from "react";
-import { ChevronRight, LogIn, LogOut, MessageSquare, Plug, Power, RefreshCw, Unplug } from "lucide-react";
+import { ChevronRight, LogIn, LogOut, MessageSquare, Power, RefreshCw, Unplug } from "lucide-react";
 import { toast } from "sonner";
 import { Spinner } from "@/components/marketing_ui/spinner";
 import { DangerConfirmDialog } from "@/components/marketing_ui/danger-confirm-dialog";
@@ -197,7 +197,7 @@ export function CatalogAppDetail({ app, onBack, onAdded }: { app: McpCatalogApp;
         status={<StatusLabel tone="off" label="Not connected" />}
         action={
           <button onClick={connect} disabled={busy || !ready} className={solidBtn} title={ready ? undefined : "Fill in the details below first"}>
-            {busy ? <Spinner className="w-4 h-4" /> : <Plug className="w-4 h-4" />}
+            {busy && <Spinner className="w-4 h-4" />}
             Connect
           </button>
         }
