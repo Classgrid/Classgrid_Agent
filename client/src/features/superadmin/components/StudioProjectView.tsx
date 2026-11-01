@@ -1,10 +1,13 @@
 // Studio Mode's Project tab: everything about the open project in one place (the same project as Project Mode):
 // its name and logo, GitHub (repo, working branch, open pull request), Vercel, the last commit and the history.
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { motion, useReducedMotion } from "framer-motion";
-import { ArrowLeftRight, ExternalLink, FolderGit2, GitBranch, GitCommitHorizontal, GitPullRequest, RotateCw } from "lucide-react";
+import { ArrowLeftRight, ExternalLink, FolderGit2, GitBranch, GitCommitHorizontal, GitPullRequest, ImagePlus, RotateCw } from "lucide-react";
 import { Link } from "react-router-dom";
+import { toast } from "sonner";
 import { fetchWithRescue } from "@/lib/rescue";
+import { apiClient } from "@/lib/apiClient";
+import { ImageCropperModal } from "@/components/marketing_ui/ImageCropperModal";
 import { StudioProjectChooser } from "./StudioProjectPicker";
 
 const backendUrl = import.meta.env.VITE_API_URL || "https://api.classgrid.in";
@@ -43,6 +46,45 @@ export function StudioProjectView({ projectId, reloadKey = 0 }: { projectId: str
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [switching, setSwitching] = useState(false);
+  // Project logo: pick a picture, crop it (same crop tool as Project Mode), it is saved to R2
+  const [cropSrc, setCropSrc] = useState<string | null>(null);
+  const [logoBusy, setLogoBusy] = useState(false);
+  const logoInputRef = useRef<HTMLInputElement | null>(null);
+  const onLogoFile = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+    if (!file.type.startsWith("image/")) { toast.error("Pick a picture for the logo."); return; }
+    if (file.size > 5 * 1024 * 1024) { toast.error(`Please select an image smaller than 5MB. This file is ${(file.size / (1024 * 1024)).toFixed(1)}MB.`); return; }
+    const reader = new FileReader();
+    reader.onload = (ev) => setCropSrc(ev.target?.result as string);
+    reader.readAsDataURL(file);
+  };
+  const saveLogo = async (blob: Blob) => {
+    if (!projectId) return;
+    setLogoBusy(true);
+    try {
+      const ext = blob.type === "image/png" ? "png" : "jpg";
+      const { data } = await apiClient.post("/api/user/upload-url", { fileName: `project-logo-${Date.now()}.${ext}`, fileType: blob.type });
+      const put = await fetch(data.uploadUrl, { method: "PUT", body: blob, headers: { "Content-Type": blob.type } });
+      if (!put.ok) throw new Error("upload failed");
+      const res = await fetchWithRescue(`${backendUrl}/api/ide/projects/${projectId}`, {
+        method: "PATCH",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ logo: data.publicUrl }),
+      });
+      const saved = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(saved.error || "Could not save the logo");
+      setProject(saved.project);
+      toast.success("Logo updated");
+    } catch (err: any) {
+      toast.error(err?.message && err.message !== "upload failed" ? err.message : "Could not upload the logo");
+      throw err; // the crop window shows it failed
+    } finally {
+      setLogoBusy(false);
+    }
+  };
 
   const load = useCallback(async () => {
     if (!projectId) return;
@@ -98,9 +140,20 @@ export function StudioProjectView({ projectId, reloadKey = 0 }: { projectId: str
       <div className="px-4 py-4 flex flex-col gap-3">
         {/* Name and logo */}
         <motion.div {...rise(0)} className="flex items-center gap-3">
-          {project?.logo
-            ? <img src={project.logo} alt="" className="size-11 shrink-0 rounded-lg border border-black/10 dark:border-white/[0.08] object-cover" />
-            : <span className="size-11 shrink-0 rounded-lg border border-black/10 dark:border-white/[0.08] flex items-center justify-center"><FolderGit2 className="size-5 text-muted-foreground" /></span>}
+          <button
+            onClick={() => logoInputRef.current?.click()}
+            disabled={logoBusy || !project}
+            className="group relative size-11 shrink-0 rounded-lg border border-black/10 dark:border-white/[0.08] overflow-hidden flex items-center justify-center"
+            title={project?.logo ? "Change logo" : "Add a logo"}
+            aria-label={project?.logo ? "Change logo" : "Add a logo"}
+          >
+            {project?.logo
+              ? <img src={project.logo} alt="" className="size-full object-cover" />
+              : <FolderGit2 className="size-5 text-muted-foreground" />}
+            <span className={`absolute inset-0 flex items-center justify-center bg-black/50 text-white transition-opacity ${logoBusy ? "opacity-100" : "opacity-0 group-hover:opacity-100"}`}>
+              {logoBusy ? <span className="size-3.5 rounded-full border-2 border-white/30 border-t-white animate-spin" /> : <ImagePlus className="size-4" />}
+            </span>
+          </button>
           <div className="min-w-0 flex-1">
             <p className="text-[15px] font-medium truncate">{project?.name || (loading ? "Loading…" : "Project")}</p>
             <p className="text-[12px] text-muted-foreground">Shared with Project Mode{project?.updatedAt ? ` · edited ${ago(project.updatedAt)}` : ""}</p>
@@ -234,6 +287,15 @@ export function StudioProjectView({ projectId, reloadKey = 0 }: { projectId: str
           </motion.div>
         )}
       </div>
+      <input ref={logoInputRef} type="file" accept="image/*" className="hidden" onChange={onLogoFile} />
+      <ImageCropperModal
+        isOpen={!!cropSrc}
+        onClose={() => setCropSrc(null)}
+        imageSrc={cropSrc || ""}
+        aspectRatio={1}
+        title="Crop project logo"
+        onCropComplete={saveLogo}
+      />
     </div>
   );
 }
