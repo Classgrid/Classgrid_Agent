@@ -18,13 +18,14 @@ import { StudioSearchPalette } from "./StudioSearchPalette";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/marketing_ui/dropdown-menu";
 import { fetchWithRescue } from "@/lib/rescue";
 import { addCodeNote, CODE_COMMENTS_SAVED_EVENT, lineLabel, removeCodeNote, updateCodeNote, useCodeNotes, type CodeNote } from "./studioCodeNotes";
+import { listLocalFiles, localFolderOf, readLocalFile } from "../utils/localProject";
 
 const backendUrl = import.meta.env.VITE_API_URL || "https://api.classgrid.in";
 const EASE = [0.22, 1, 0.36, 1] as const;
 const TREE_KEY = "cg_studio_tree_width";
 
 type Entry = { path: string; type: "file" | "dir"; size: number | null };
-type Listing = { source: "github" | "sandbox"; repo: string | null; branch: string | null; files: Entry[]; truncated?: boolean };
+type Listing = { source: "github" | "sandbox" | "local"; repo: string | null; branch: string | null; files: Entry[]; truncated?: boolean };
 type OpenFile = { path: string; content?: string; binary?: boolean; image?: boolean; mime?: string; data?: string; truncated?: boolean; size?: number; error?: string; loading?: boolean; startLine?: number; endLine?: number };
 type Node = { name: string; path: string; dir: boolean; children: Node[] };
 type Reveal = { path: string; startLine?: number; endLine?: number; n: number };
@@ -130,6 +131,7 @@ export function StudioFilesView({ projectId, projectName, wide, reloadKey = 0, r
   const boxRef = useRef<HTMLDivElement>(null);
   // Live: files the agent is writing right now, and files it just changed (they flash for a few seconds)
   const [writing, setWriting] = useState<Set<string>>(new Set());
+  const localFolder = useRef<string | null>(null); // set when the project is a folder on this computer (desktop app)
   const [changed, setChanged] = useState<Set<string>>(new Set());
 
   const load = useCallback(async () => {
@@ -137,7 +139,18 @@ export function StudioFilesView({ projectId, projectName, wide, reloadKey = 0, r
     setLoading(true);
     setError(null);
     try {
-      const { res, data } = await api(`/projects/${projectId}/files`);
+      // A folder on this computer (desktop app): the app lists it itself
+      let folder = localFolderOf(projectId);
+      const fromServer = folder ? null : await api(`/projects/${projectId}/files`);
+      if (fromServer?.res.ok && fromServer.data.local) folder = fromServer.data.localPath || null;
+      localFolder.current = folder;
+      if (folder) {
+        const local = await listLocalFiles(folder);
+        if (local.error) setError(local.error);
+        else setListing(local as Listing);
+        return;
+      }
+      const { res, data } = fromServer!;
       if (!res.ok) {
         setError(data.error === "github_not_connected" ? "Connect GitHub in Project Mode to see this project's files." : data.error || "Could not load the files");
         return;
@@ -196,7 +209,9 @@ export function StudioFilesView({ projectId, projectName, wide, reloadKey = 0, r
     const cached = fileCache.current.get(path);
     setFile(cached ? { ...cached, ...lines } : { path, loading: true, ...lines });
     try {
-      const { res, data } = await api(`/projects/${projectId}/file?path=${encodeURIComponent(path)}`);
+      const folder = localFolder.current || localFolderOf(projectId);
+      const fromApp = folder ? await readLocalFile(folder, path) : null;
+      const { res, data } = fromApp ? { res: { ok: !fromApp.error }, data: fromApp } : await api(`/projects/${projectId}/file?path=${encodeURIComponent(path)}`);
       const next: OpenFile = res.ok ? { path, ...data, loading: false } : { path, error: data.error || "Could not open the file", loading: false };
       if (res.ok) fileCache.current.set(path, next);
       if (activePath.current === path) setFile({ ...next, ...lines });
@@ -484,7 +499,7 @@ export function StudioFilesView({ projectId, projectName, wide, reloadKey = 0, r
               </div>
             ) : !tree.length ? (
               <p className="px-4 py-3 text-[13px] text-muted-foreground">
-                {listing.source === "sandbox" ? "No files yet. Open the project in Project Mode, or let the agent make some." : "This repo has no files yet."}
+                {listing.source === "local" ? "This folder is empty." : listing.source === "sandbox" ? "No files yet. Open the project in Project Mode, or let the agent make some." : "This repo has no files yet."}
               </p>
             ) : q ? (
               !matches.length ? (

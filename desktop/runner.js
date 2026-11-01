@@ -259,7 +259,50 @@ function connect(token) {
   });
 }
 
+// The Files tab for a folder project: the same shapes as the server's /projects/:id/files and /file
+const IMAGE_TYPES = { ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".gif": "image/gif", ".webp": "image/webp", ".svg": "image/svg+xml", ".ico": "image/x-icon" };
+function listForFilesTab(root) {
+  if (!isAllowedRoot(root)) return { error: "This folder wasn't opened in the Classgrid app on this computer." };
+  const files = [];
+  const walk = (d, prefix) => {
+    if (files.length >= 5000) return;
+    let entries = [];
+    try { entries = fs.readdirSync(d, { withFileTypes: true }); } catch { return; }
+    for (const e of entries) {
+      if (files.length >= 5000) return;
+      const rel = prefix ? `${prefix}/${e.name}` : e.name;
+      if (e.isDirectory()) {
+        if (SKIP_DIRS.has(e.name)) continue;
+        files.push({ path: rel, type: "dir", size: null });
+        walk(path.join(d, e.name), rel);
+      } else {
+        let size = 0;
+        try { size = fs.statSync(path.join(d, e.name)).size; } catch { /* gone */ }
+        files.push({ path: rel, type: "file", size });
+      }
+    }
+  };
+  walk(path.resolve(root), "");
+  let branch = null;
+  try { const head = fs.readFileSync(path.join(root, ".git", "HEAD"), "utf8").trim(); branch = head.startsWith("ref: refs/heads/") ? head.slice(16) : null; } catch { /* not a git folder */ }
+  return { source: "local", repo: null, branch, files };
+}
+function readForFilesTab(root, rel) {
+  if (!isAllowedRoot(root)) return { error: "This folder wasn't opened in the Classgrid app on this computer." };
+  let full;
+  try { full = resolveIn(root, rel).full; } catch (e) { return { error: e.message }; }
+  if (!fs.existsSync(full) || !fs.statSync(full).isFile()) return { error: "File not found" };
+  const buf = fs.readFileSync(full);
+  const image = IMAGE_TYPES[path.extname(full).toLowerCase()];
+  if (image) return buf.length > 5 * 1024 * 1024 ? { path: rel, binary: true, size: buf.length } : { path: rel, binary: true, image: true, mime: image, size: buf.length, data: buf.toString("base64") };
+  if (buf.includes(0)) return { path: rel, binary: true, size: buf.length };
+  const tooBig = buf.length > MAX_FILE_BYTES;
+  return { path: rel, binary: false, size: buf.length, truncated: tooBig, content: buf.subarray(0, MAX_FILE_BYTES).toString("utf8") };
+}
+
 module.exports = {
+  listForFilesTab,
+  readForFilesTab,
   init(userDataDir) { foldersFile = path.join(userDataDir, "folders.json"); },
   // The screens refresh the token often: only a different person (or logging out) reconnects; otherwise the fresh
   // token is just kept for the next reconnect

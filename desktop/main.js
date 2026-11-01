@@ -116,9 +116,23 @@ ipcMain.handle("cg:cloneRepo", async (_e, repo) => {
   });
 });
 
+// Files tab for folder projects
+ipcMain.handle("cg:listFiles", (_e, folder) => runner.listForFilesTab(String(folder || "")));
+ipcMain.handle("cg:readFile", (_e, folder, rel) => runner.readForFilesTab(String(folder || ""), String(rel || "")));
+
 // Project Mode, folder projects: open the folder in VS Code or File Explorer (only folders picked in this app)
 ipcMain.handle("cg:openFolder", (_e, folder) => { if (runner.isAllowed(folder)) shell.openPath(String(folder)); });
-ipcMain.handle("cg:openInEditor", (_e, folder) => { if (runner.isAllowed(folder)) shell.openExternal("vscode://file/" + encodeURI(String(folder).split("\\").join("/"))); });
+// (a file inside the folder, at a line, when given)
+ipcMain.handle("cg:openInEditor", (_e, folder, file, line) => {
+  if (!runner.isAllowed(folder)) return;
+  let target = path.resolve(String(folder));
+  if (file) {
+    const full = path.resolve(target, String(file));
+    if (!full.toLowerCase().startsWith(target.toLowerCase() + path.sep)) return;
+    target = full + (Number(line) > 0 ? `:${Number(line)}` : "");
+  }
+  shell.openExternal("vscode://file/" + encodeURI(target.split("\\").join("/")));
+});
 ipcMain.handle("cg:pickFolder", async () => {
   const r = await dialog.showOpenDialog(win, { properties: ["openDirectory"] });
   if (r.canceled) return null;

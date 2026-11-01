@@ -10,5 +10,7 @@ contextBridge.exposeInMainWorld("classgridDesktop", {
   retry: () => ipcRenderer.invoke("cg:retry"),
   openFolder: (folder) => ipcRenderer.invoke("cg:openFolder", folder),
   cloneRepo: (repo) => ipcRenderer.invoke("cg:cloneRepo", repo),
-  openInEditor: (folder) => ipcRenderer.invoke("cg:openInEditor", folder),
+  listFiles: (folder) => ipcRenderer.invoke("cg:listFiles", folder),
+  readFile: (folder, rel) => ipcRenderer.invoke("cg:readFile", folder, rel),
+  openInEditor: (folder, file, line) => ipcRenderer.invoke("cg:openInEditor", folder, file, line),
 });

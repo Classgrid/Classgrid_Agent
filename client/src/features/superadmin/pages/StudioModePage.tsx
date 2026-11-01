@@ -23,6 +23,7 @@ import { OPEN_PROJECT_FILE_EVENT } from "@/components/ai/components/stepper/Proj
 import { fetchWithRescue } from "@/lib/rescue";
 import { toast } from "sonner";
 import { useSidebar } from "@/components/marketing_ui/sidebar";
+import { listLocalFiles, localFolderOf } from "../utils/localProject";
 
 type TabKind = "browser" | "review" | "files" | "terminal" | "project" | "shots";
 type Tab = { id: string; kind: TabKind };
@@ -198,8 +199,9 @@ export function StudioModePage() {
         const id = (() => { try { return (sessionStorage.getItem("cg_project_open") || localStorage.getItem("cg_project_open")); } catch { return null; } })();
         if (!id) { toast("The plan file opens in Files once a project is picked"); return; }
         const base = import.meta.env.VITE_API_URL || "https://api.classgrid.in";
-        const res = await fetchWithRescue(`${base}/api/ide/projects/${id}/files`, { credentials: "include" }).catch(() => null);
-        const data = res?.ok ? await res.json().catch(() => null) : null;
+        const folder = localFolderOf(id);
+        const res = folder ? null : await fetchWithRescue(`${base}/api/ide/projects/${id}/files`, { credentials: "include" }).catch(() => null);
+        const data = folder ? await listLocalFiles(folder) : res?.ok ? await res.json().catch(() => null) : null;
         const plans: string[] = (data?.files || []).filter((f: { path: string; type: string }) => f.type === "file" && /^plan\/[^/]+\.md$/i.test(f.path)).map((f: { path: string }) => f.path);
         if (!plans.length) { toast.error("There is no plan file in the plan/ folder yet"); return; }
         const words = String(d.planTitle || "").toLowerCase().split(/[^a-z0-9]+/).filter((w) => w.length > 2);

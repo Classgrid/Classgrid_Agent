@@ -621,6 +621,8 @@ async function projectGithub(project, userId) {
 router.get("/projects/:id/files", isAuthenticated, async (req, res) => {
   const project = await ownProject(req, res);
   if (!project) return;
+  // A folder on the user's computer: the desktop app lists it itself
+  if (project.location === "local") return res.json({ local: true, localPath: project.localPath, files: [] });
   touchStudio(req.user._id).catch(() => {});
   try {
     // The project's code on the sandbox (opened in Studio or Project Mode) shows the agent's newest edits first
@@ -667,6 +669,7 @@ router.get("/projects/:id/files", isAuthenticated, async (req, res) => {
 router.get("/projects/:id/file", isAuthenticated, async (req, res) => {
   const project = await ownProject(req, res);
   if (!project) return;
+  if (project.location === "local") return res.json({ local: true, localPath: project.localPath });
   touchStudio(req.user._id).catch(() => {});
   const path = safeFilePath(req.query.path);
   if (!path) return res.status(400).json({ error: "Pick a file" });

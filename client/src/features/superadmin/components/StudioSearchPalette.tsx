@@ -9,6 +9,7 @@ import { fetchWithRescue } from "@/lib/rescue";
 import { cn } from "@/lib/utils";
 import { openStudioProject } from "./StudioProjectPicker";
 import { OPEN_PROJECT_FILE_EVENT } from "@/components/ai/components/stepper/ProjectToolSteps";
+import { listLocalFiles, localFolderOf } from "../utils/localProject";
 
 const backendUrl = import.meta.env.VITE_API_URL || "https://api.classgrid.in";
 const EASE = [0.22, 1, 0.36, 1] as const;
@@ -56,8 +57,8 @@ export function StudioSearchPalette({ open, onClose, files: givenFiles, recent =
     if (!open || givenFiles || kind !== "files") return;
     const id = openProjectId();
     if (!id) { setLoadedFiles([]); return; }
-    fetchWithRescue(`${backendUrl}/api/ide/projects/${id}/files`, { credentials: "include" })
-      .then((r) => r.json())
+    const folder = localFolderOf(id);
+    (folder ? listLocalFiles(folder) : fetchWithRescue(`${backendUrl}/api/ide/projects/${id}/files`, { credentials: "include" }).then((r) => r.json()))
       .then((d) => setLoadedFiles(Array.isArray(d.files) ? d.files.filter((f: { type: string }) => f.type === "file").map((f: { path: string }) => f.path) : []))
       .catch(() => setLoadedFiles([]));
   }, [open, kind, givenFiles]);

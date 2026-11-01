@@ -30,6 +30,7 @@ import { OPEN_PROJECT_FILE_EVENT, REVIEW_CHECKPOINT_EVENT, markCheckpoint } from
 import { PushToGithubModal } from "../components/PushToGithubModal";
 import { ImageCropperModal } from "@/components/marketing_ui/ImageCropperModal";
 import { apiClient } from "@/lib/apiClient";
+import { localFolderOf } from "../utils/localProject";
 
 const backendUrl = import.meta.env.VITE_API_URL || "https://api.classgrid.in";
 const OPEN_PROJECT_KEY = "cg_project_open"; // which project this browser had open (per-viewer convenience)
@@ -343,6 +344,9 @@ export function ProjectModePage() {
     const newLines = !resume && !project.repo ? NEW_PROJECT_LINES : undefined;
     setProgress({ label: resume ? "Reconnecting to your project" : newLines ? (newLines[0] ?? "") : "Downloading the latest code from GitHub", value: 3, target: 70, lines: newLines });
     try {
+      // A folder on this computer: nothing to download, it is already here
+      const here = project.location === "local" ? project.localPath || localFolderOf(project.id) : localFolderOf(project.id);
+      if (here) { setProgress(null); setLocalFolder(here); return; }
       const { res, data } = await api(`/projects/${project.id}/open`, { method: "POST", body: JSON.stringify({ replace, resume }) });
       if (res.status === 409 && data.error === "unsaved_changes") {
         setBusyId(null);
@@ -510,13 +514,15 @@ export function ProjectModePage() {
   useEffect(() => {
     const onOpenFile = async (e: Event) => {
       const detail = (e as CustomEvent).detail;
+      // A folder on this computer: the file opens in the user's code editor
+      if (openProject && localFolder && !folder && detail?.path) { (window as any).classgridDesktop?.openInEditor?.(localFolder, String(detail.path), detail.startLine); return; }
       if (!openProject || !folder || !(detail?.path || detail?.plan)) return;
       const { res, data } = await api(`/projects/${openProject.id}/reveal`, { method: "POST", body: JSON.stringify(detail) });
       if (!res.ok) toast.error(data.error || "Could not open the file");
     };
     window.addEventListener(OPEN_PROJECT_FILE_EVENT, onOpenFile);
     return () => window.removeEventListener(OPEN_PROJECT_FILE_EVENT, onOpenFile);
-  }, [openProject, folder]);
+  }, [openProject, folder, localFolder]);
 
   // Review / Reject / Undo an AI answer's changes (from the buttons under each answer)
   type ReviewFile = { file: string; added: number; removed: number; kind: string; diff: string };
