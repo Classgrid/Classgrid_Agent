@@ -163,6 +163,8 @@ import { useQuery } from "@tanstack/react-query";
 import { apiClient } from "@/lib/apiClient";
 import { AgentNestedMenu } from "@/components/ai/components/AgentSidebar";
 import { AiChatSearchPalette } from "@/components/ai/components/AiChatSearchPalette";
+import { StudioSearchPalette } from "@/features/superadmin/components/StudioSearchPalette";
+import { FileBadge } from "@/features/superadmin/components/StudioFilesView";
 import { ChatMessageToasts } from "@/components/layout/ChatMessageToasts";
 
 interface AppSidebarProps {
@@ -455,7 +457,10 @@ export function AppSidebar({ role, user }: AppSidebarProps) {
       </SidebarContent>
 
       {user && <SidebarFooterUser role={role} user={user} />}
-      <AiChatSearchPalette open={paletteOpen} onOpenChange={setPaletteOpen} mode={paletteMode} />
+      {/* Studio: the same search as the Files tab's "+", starting on Conversations (by project, with groups and pins) */}
+      {location.pathname.split("/").includes("studio")
+        ? <StudioSearchPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} initialKind="conversations" fileIcon={(name) => <FileBadge name={name} />} />
+        : <AiChatSearchPalette open={paletteOpen} onOpenChange={setPaletteOpen} mode={paletteMode} />}
     </Sidebar>
   );
 }

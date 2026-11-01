@@ -8,6 +8,7 @@ import { groupIcon, openProjectId, type ChatGroup } from "@/components/ai/compon
 import { fetchWithRescue } from "@/lib/rescue";
 import { cn } from "@/lib/utils";
 import { openStudioProject } from "./StudioProjectPicker";
+import { OPEN_PROJECT_FILE_EVENT } from "@/components/ai/components/stepper/ProjectToolSteps";
 
 const backendUrl = import.meta.env.VITE_API_URL || "https://api.classgrid.in";
 const EASE = [0.22, 1, 0.36, 1] as const;
@@ -36,16 +37,30 @@ function shortAge(at: string) {
 
 const cleanTitle = (t: string) => (t || "New Chat").replace(/\*\*Title:\*\*/gi, "").replace(/Title:/gi, "").replace(/["']/g, "").trim();
 
-export function StudioSearchPalette({ open, onClose, files, recent, onOpenFile, fileIcon }: {
+export function StudioSearchPalette({ open, onClose, files: givenFiles, recent = [], onOpenFile, fileIcon, initialKind = "files" }: {
   open: boolean;
   onClose: () => void;
-  files: string[]; // the project's file paths
-  recent: string[]; // open file tabs: shown first
-  onOpenFile: (path: string) => void;
+  files?: string[]; // the project's file paths (left out: the open project's files are loaded here)
+  recent?: string[]; // open file tabs: shown first
+  onOpenFile?: (path: string) => void; // left out: the file opens in the Files tab
   fileIcon: (name: string) => React.ReactNode;
+  initialKind?: Kind; // the left sidebar's search starts on Conversations
 }) {
   const reduce = useReducedMotion();
-  const [kind, setKind] = useState<Kind>("files");
+  const [kind, setKind] = useState<Kind>(initialKind);
+  // Opened from the left sidebar (no Files tab around it): the open project's files are loaded here
+  const [loadedFiles, setLoadedFiles] = useState<string[] | null>(null);
+  const files = givenFiles || loadedFiles || [];
+  const openFile = onOpenFile || ((path: string) => window.dispatchEvent(new CustomEvent(OPEN_PROJECT_FILE_EVENT, { detail: { path } })));
+  useEffect(() => {
+    if (!open || givenFiles || kind !== "files") return;
+    const id = openProjectId();
+    if (!id) { setLoadedFiles([]); return; }
+    fetchWithRescue(`${backendUrl}/api/ide/projects/${id}/files`, { credentials: "include" })
+      .then((r) => r.json())
+      .then((d) => setLoadedFiles(Array.isArray(d.files) ? d.files.filter((f: { type: string }) => f.type === "file").map((f: { path: string }) => f.path) : []))
+      .catch(() => setLoadedFiles([]));
+  }, [open, kind, givenFiles]);
   const [menuOpen, setMenuOpen] = useState(false);
   const [q, setQ] = useState("");
   const [active, setActive] = useState(0);
@@ -59,7 +74,7 @@ export function StudioSearchPalette({ open, onClose, files, recent, onOpenFile, 
   const inputRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
 
-  useEffect(() => { if (open) { setQ(""); setActive(0); setMore(false); setMenuOpen(false); setOpenKeys(new Set([`p:${openProjectId() || "none"}`])); requestAnimationFrame(() => inputRef.current?.focus()); } }, [open]);
+  useEffect(() => { if (open) { setKind(initialKind); setQ(""); setActive(0); setMore(false); setMenuOpen(false); setOpenKeys(new Set([`p:${openProjectId() || "none"}`])); requestAnimationFrame(() => inputRef.current?.focus()); } }, [open]);
   useEffect(() => { setActive(0); setMore(false); }, [q, kind]);
 
   // Chats and projects load when their kind is first shown
@@ -95,7 +110,7 @@ export function StudioSearchPalette({ open, onClose, files, recent, onOpenFile, 
         : [...recent.filter((p) => files.includes(p)).reverse(), ...files.filter((p) => !recent.includes(p))];
       return list.slice(0, 300).map((p) => {
         const dir = p.includes("/") ? p.slice(0, p.lastIndexOf("/")) : "";
-        return { key: p, title: name(p), hint: dir || ".", icon: fileIcon(name(p)), run: () => { onOpenFile(p); close(); } };
+        return { key: p, title: name(p), hint: dir || ".", icon: fileIcon(name(p)), run: () => { openFile(p); close(); } };
       });
     }
     if (kind === "conversations") {
@@ -166,7 +181,7 @@ export function StudioSearchPalette({ open, onClose, files, recent, onOpenFile, 
   }, [kind, q, files, recent, chats, projects, groups, openKeys]);
 
   const shown = more || kind !== "files" ? rows : rows.slice(0, PAGE);
-  const loading = (kind === "conversations" && (chats === null || groups === null)) || (kind === "projects" && projects === null);
+  const loading = (kind === "conversations" && (chats === null || groups === null)) || (kind === "projects" && projects === null) || (kind === "files" && !givenFiles && loadedFiles === null);
 
   useEffect(() => { listRef.current?.querySelector(`[data-index="${active}"]`)?.scrollIntoView({ block: "nearest" }); }, [active]);
 
