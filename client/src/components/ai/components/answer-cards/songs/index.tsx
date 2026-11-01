@@ -104,7 +104,10 @@ function SavedSongRow({ song }: { song: Saved }) {
 
 export function SongsDisplay({ steps }: { steps: any[] }) {
   const { songs, saved, errors } = collectSongs(steps);
-  const [open, setOpen] = useState<string | null>(songs[0]?.videoId ?? null);
+  // The newest list's first song plays; a song the user tapped (or closed) wins until a newer list arrives
+  const listKey = songs[0]?.videoId ?? null;
+  const [pick, setPick] = useState<{ list: string | null; id: string | null } | null>(null);
+  const open = pick && pick.list === listKey ? pick.id : listKey;
   if (!songs.length && !saved.length && !errors.length) return null;
   return (
     <SdBoundary>
@@ -123,7 +126,7 @@ export function SongsDisplay({ steps }: { steps: any[] }) {
                 <SdSectionTitle>Songs</SdSectionTitle>
                 <div className="flex flex-col">
                   {songs.map((s, i) => (
-                    <SongRow key={s.videoId} song={s} n={i + 1} open={open === s.videoId} onToggle={() => setOpen((o) => (o === s.videoId ? null : s.videoId))} />
+                    <SongRow key={s.videoId} song={s} n={i + 1} open={open === s.videoId} onToggle={() => setPick({ list: listKey, id: open === s.videoId ? null : s.videoId })} />
                   ))}
                 </div>
               </>
