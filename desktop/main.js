@@ -6,8 +6,11 @@ const fs = require("node:fs");
 const path = require("node:path");
 
 const runner = require("./runner");
+const editor = require("./editor");
+const browser = require("./browser");
+const chats = require("./chats");
 
-const PORT = 47821;
+const PORT = Number(process.env.CG_PORT) || 47821; // CG_PORT: a second copy while testing
 const APP_URL = `http://localhost:${PORT}`;
 const APP_DIR = path.join(__dirname, "app");
 const OUR_HOSTS = new Set(["localhost", "api.classgrid.in"]);
@@ -20,6 +23,26 @@ const MIME = {
   ".txt": "text/plain; charset=utf-8", ".xml": "application/xml", ".webmanifest": "application/manifest+json",
 };
 
+// index.html with the welcome screen (splash/) at the top of the page. The app's own script waits until the welcome
+// screen has played (window.cgStartApp; it is preloaded meanwhile), and the website's outside styles and payment
+// script no longer hold up the first paint, so the window never shows blank.
+let pageCache = null;
+function appPage() {
+  if (pageCache) return pageCache;
+  let html = fs.readFileSync(path.join(APP_DIR, "index.html"), "utf8");
+  const entry = (html.match(/<script type="module" crossorigin src="([^"]+)"><\/script>/) || [])[1];
+  if (entry && fs.existsSync(path.join(APP_DIR, "cg-splash.js"))) {
+    html = html.replace(/<script type="module" crossorigin src="[^"]+"><\/script>/, `<link rel="modulepreload" crossorigin href="${entry}">`);
+    html = html.replace(/<link\b(?=[^>]*rel="stylesheet")(?=[^>]*href="https:)([^>]*)>/g, `<link$1 media="print" onload="this.media='all'">`);
+    html = html.replace(/<script src="(https:[^"]+)"><\/script>/g, `<script async src="$1"></script>`);
+    const start = `<script>window.cgStartApp=function(){if(window.cgAppStarted)return;window.cgAppStarted=1;var s=document.createElement("script");s.type="module";s.crossOrigin="anonymous";s.src=${JSON.stringify(entry)};document.head.appendChild(s)};`
+      + `setTimeout(function(){if(!window.cgSplashOn){window.cgStartApp();var s=document.getElementById("cg-splash");if(s)s.remove()}},10000)</script>`;
+    const splash = fs.readFileSync(path.join(__dirname, "splash", "splash.html"), "utf8");
+    html = html.replace(/<body([^>]*)>/, `<body$1>\n${splash}${start}<script src="/cg-splash.js?v=${fs.statSync(path.join(APP_DIR, "cg-splash.js")).mtimeMs | 0}"></script>`);
+  }
+  return (pageCache = html);
+}
+
 // Serves ./app; any path that isn't a file gets index.html (the screens do their own routing)
 function startScreenServer() {
   return new Promise((resolve, reject) => {
@@ -29,6 +52,10 @@ function startScreenServer() {
       let file = path.normalize(path.join(APP_DIR, urlPath));
       if (!file.startsWith(APP_DIR)) { res.writeHead(403); return res.end(); }
       if (!fs.existsSync(file) || fs.statSync(file).isDirectory()) file = path.join(APP_DIR, "index.html");
+      if (file === path.join(APP_DIR, "index.html")) {
+        res.writeHead(200, { "Content-Type": MIME[".html"], "Cache-Control": "no-cache" });
+        return res.end(appPage());
+      }
       const type = MIME[path.extname(file).toLowerCase()] || "application/octet-stream";
       res.writeHead(200, { "Content-Type": type, "Cache-Control": file.endsWith("index.html") ? "no-cache" : "public, max-age=31536000, immutable" });
       fs.createReadStream(file).pipe(res);
@@ -48,7 +75,8 @@ function createWindow() {
     minWidth: 900,
     minHeight: 600,
     title: "Classgrid",
-    backgroundColor: "#0a0a0a",
+    backgroundColor: "#000000",
+    show: false, // shown once the welcome screen has painted (no blank window)
     icon: path.join(__dirname, "build", "icon.png"),
     autoHideMenuBar: true,
     webPreferences: { preload: path.join(__dirname, "preload.js"), contextIsolation: true, nodeIntegration: false, sandbox: true },
@@ -79,6 +107,9 @@ function createWindow() {
   // Back / forward / reload keys (the app has no menu bar)
   win.webContents.on("before-input-event", (e, input) => {
     if (input.type !== "keyDown") return;
+    // Typing in the built-in code editor (an inner frame): its own keys win (Ctrl+R there is "Open Recent")
+    const frame = win.webContents.focusedFrame;
+    if (frame && frame !== win.webContents.mainFrame) return;
     const nav = win.webContents.navigationHistory;
     if (input.alt && input.key === "ArrowLeft" && nav.canGoBack()) { nav.goBack(); e.preventDefault(); }
     else if (input.alt && input.key === "ArrowRight" && nav.canGoForward()) { nav.goForward(); e.preventDefault(); }
@@ -87,24 +118,33 @@ function createWindow() {
   win.webContents.on("did-fail-load", (_e, code, _desc, url, isMainFrame) => {
     if (isMainFrame && code !== -3) win.loadFile(path.join(__dirname, "offline.html"));
   });
+  // The welcome screen is at the top of the page, so the window can show as soon as the page is read (the black
+  // background matches it). ready-to-show comes too late here.
+  win.webContents.once("dom-ready", () => win.show());
+  setTimeout(() => { if (win && !win.isDestroyed() && !win.isVisible()) win.show(); }, 4000);
+  browser.attach(win); // the AI's browser (Studio's Browser tab) lives in this window
   win.loadURL(APP_URL);
 }
 
 ipcMain.on("cg:version", (e) => { e.returnValue = app.getVersion(); });
 ipcMain.handle("cg:openExternal", (_e, url) => { if (/^https?:\/\//.test(String(url))) shell.openExternal(String(url)); });
 ipcMain.handle("cg:retry", () => win?.loadURL(APP_URL));
-// New project from a GitHub repo, downloaded to this computer: the user picks where, then git clone runs with their
-// own Git login on this computer (Git Credential Manager asks GitHub when needed). Returns { folder } or { error }.
+// New project from a repo, downloaded to this computer: a GitHub "owner/name" or any Git address (https or git@).
+// The user picks where, then git clone runs with their own Git login on this computer (Git Credential Manager asks
+// when needed). Returns { folder } or { error }.
 ipcMain.handle("cg:cloneRepo", async (_e, repo) => {
-  if (!/^[\w.-]+\/[\w.-]+$/.test(String(repo || ""))) return { error: "That isn't a GitHub repo name." };
-  const name = String(repo).split("/")[1];
-  const r = await dialog.showOpenDialog(win, { title: `Choose where to download ${repo}`, buttonLabel: "Download here", properties: ["openDirectory", "createDirectory"] });
+  const given = String(repo || "").trim();
+  const isUrl = /^(https:\/\/[\w.-]+(:\d+)?\/[\w./~-]+|git@[\w.-]+:[\w./~-]+)$/.test(given);
+  if (!isUrl && !/^[\w.-]+\/[\w.-]+$/.test(given)) return { error: "Paste a repository address (https://… or git@…) or a GitHub owner/name." };
+  const url = isUrl ? given : `https://github.com/${given}.git`;
+  const name = (url.split(/[/:]/).filter(Boolean).pop() || "repo").replace(/\.git$/i, "") || "repo";
+  const r = await dialog.showOpenDialog(win, { title: `Choose where to download ${name}`, buttonLabel: "Download here", properties: ["openDirectory", "createDirectory"] });
   if (r.canceled) return null;
   const target = path.join(r.filePaths[0], name);
   if (fs.existsSync(target)) return { error: `A folder called "${name}" is already there. Pick another place, or open that folder instead.` };
   return new Promise((resolve) => {
     const { spawn } = require("node:child_process");
-    const git = spawn("git", ["clone", `https://github.com/${repo}.git`, target], { windowsHide: true });
+    const git = spawn("git", ["clone", "--", url, target], { windowsHide: true });
     let err = "";
     git.stderr.on("data", (d) => { err += d.toString(); });
     git.on("error", () => resolve({ error: "Git isn't installed on this computer. Install it from git-scm.com, then try again." }));
@@ -133,6 +173,16 @@ ipcMain.handle("cg:openInEditor", (_e, folder, file, line) => {
   }
   shell.openExternal("vscode://file/" + encodeURI(target.split("\\").join("/")));
 });
+// Classgrid Code, the editor built into the app: a folder project opens inside the app ({ url } or { error })
+ipcMain.handle("cg:startEditor", (_e, folder) => {
+  if (!runner.isAllowed(folder)) return { error: "This folder wasn't opened in the Classgrid app on this computer." };
+  return editor.start(String(folder)).catch((err) => ({ error: String(err.message || err) }));
+});
+// (a file clicked in the chat steps, at its lines)
+ipcMain.handle("cg:revealInEditor", (_e, folder, file, startLine, endLine) => {
+  if (!runner.isAllowed(folder)) return { error: "This folder wasn't opened in the Classgrid app on this computer." };
+  return editor.reveal(String(folder), file, startLine, endLine);
+});
 ipcMain.handle("cg:pickFolder", async () => {
   const r = await dialog.showOpenDialog(win, { properties: ["openDirectory"] });
   if (r.canceled) return null;
@@ -140,7 +190,12 @@ ipcMain.handle("cg:pickFolder", async () => {
   return r.filePaths[0];
 });
 // The login token arrives from the screens (client/src/main.tsx); the local runner (Day 2) uses it
-ipcMain.on("cg:setToken", (_e, t) => runner.setToken(t || null));
+ipcMain.on("cg:setToken", (_e, t) => { runner.setToken(t || null); chats.setToken(t || null); });
+// Chats kept on this computer (desktop/chats.js): read when the internet is down
+ipcMain.handle("cg:saveChat", (_e, chat) => chats.saveChat(chat).catch((err) => ({ error: String(err.message || err) })));
+ipcMain.handle("cg:listChats", () => chats.listChats().catch(() => []));
+ipcMain.handle("cg:readChat", (_e, id) => chats.readChat(String(id || "")).catch(() => null));
+ipcMain.handle("cg:removeChat", (_e, id) => chats.removeChat(String(id || "")).catch((err) => ({ error: String(err.message || err) })));
 
 // classgrid:// links open this app (Windows passes them as a launch argument)
 if (process.defaultApp) app.setAsDefaultProtocolClient("classgrid", process.execPath, [path.resolve(process.argv[1])]);
@@ -173,6 +228,7 @@ if (!app.requestSingleInstanceLock()) {
   app.whenReady().then(async () => {
     Menu.setApplicationMenu(null);
     runner.init(app.getPath("userData"));
+    chats.init(app.getPath("userData"));
     if (!fs.existsSync(path.join(APP_DIR, "index.html"))) {
       dialog.showErrorBox("Classgrid", "The app's screens are missing. Run: npm run build:client");
       return app.quit();
@@ -183,7 +239,7 @@ if (!app.requestSingleInstanceLock()) {
     startUpdates();
   });
   app.on("window-all-closed", () => app.quit());
-  app.on("before-quit", () => runner.stopAll());
+  app.on("before-quit", () => { runner.stopAll(); editor.stop(); });
 }
 
 // Updates: the installed app checks our R2 storage (desktop/latest.yml) on start and every 6 hours, downloads a new

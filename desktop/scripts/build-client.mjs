@@ -1,8 +1,9 @@
 // Builds our screens (client/) for the desktop app into desktop/app/: the same Vite build as the website,
-// with VITE_DESKTOP=1 (desktop switches in client/src/main.tsx) and the live API address.
+// with VITE_DESKTOP=1 (desktop switches in client/src/main.tsx) and the live API address. Then the welcome screen's
+// animation (splash/splash.js, GSAP + Framer Motion from client/) is bundled into app/cg-splash.js.
 import { spawnSync } from "node:child_process";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const clientDir = path.resolve(here, "..", "..", "client");
@@ -14,4 +15,17 @@ const res = spawnSync("npx", ["vite", "build", "--outDir", outDir, "--emptyOutDi
   shell: process.platform === "win32",
   env: { ...process.env, VITE_DESKTOP: "1", VITE_API_URL: process.env.CG_API || "https://api.classgrid.in", VITE_API_BASE_URL: process.env.CG_API || "https://api.classgrid.in" }, // CG_API: a local backend when testing
 });
-process.exit(res.status ?? 1);
+if (res.status !== 0) process.exit(res.status ?? 1);
+
+const { build } = await import(pathToFileURL(path.join(clientDir, "node_modules", "esbuild", "lib", "main.js")).href);
+await build({
+  entryPoints: [path.resolve(here, "..", "splash", "splash.js")],
+  outfile: path.join(outDir, "cg-splash.js"),
+  bundle: true,
+  minify: true,
+  format: "iife",
+  target: "chrome130",
+  nodePaths: [path.join(clientDir, "node_modules")],
+  logLevel: "warning",
+});
+console.log("Built the welcome screen (app/cg-splash.js)");

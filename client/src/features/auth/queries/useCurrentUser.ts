@@ -66,6 +66,20 @@ export type CurrentUser = {
   [key: string]: any;
 };
 
+// Desktop app: the signed-in user is also kept here, so with no internet the app still opens and the chats saved on
+// this computer can be read (only for the same person as the saved login token)
+const DESKTOP_USER_KEY = "cg_desktop_user";
+const keepsDesktopUser = () => typeof window !== "undefined" && !!(window as any).classgridDesktop?.saveChat;
+function savedDesktopUser(): CurrentUser | null {
+  try {
+    const token = localStorage.getItem("token");
+    const saved = JSON.parse(localStorage.getItem(DESKTOP_USER_KEY) || "null");
+    if (!token || !saved) return null;
+    const payload = JSON.parse(atob((token.split(".")[1] || "").replace(/-/g, "+").replace(/_/g, "/")));
+    return payload?.id && String(payload.id) === String(saved._id || saved.id) ? saved : null;
+  } catch { return null; }
+}
+
 export function useCurrentUser() {
   return useQuery({
     queryKey: ["current-user"],
@@ -94,10 +108,16 @@ export function useCurrentUser() {
         if (data && !data._id && data.id) {
           data._id = data.id;
         }
+        if (keepsDesktopUser() && data) { try { localStorage.setItem(DESKTOP_USER_KEY, JSON.stringify(data)); } catch { /* storage full */ } }
         return data;
       } catch (err) {
         const code = (err as { code?: string })?.code;
         if (code === "401" || code === "403" || !localStorage.getItem("token")) return null; // Not logged in
+        // Desktop app, server can't be reached: open as the saved user (saved chats are readable offline)
+        if (keepsDesktopUser() && (code === "UNKNOWN" || code === "502" || code === "503" || code === "504")) {
+          const saved = savedDesktopUser();
+          if (saved) return saved;
+        }
         throw err;
       }
     },

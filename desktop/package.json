@@ -1,13 +1,14 @@
 {
   "name": "classgrid-desktop",
   "productName": "Classgrid",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "description": "Classgrid desktop app: Agent, Studio and Project Mode from chat.classgrid.in in a real Windows app",
   "main": "main.js",
   "private": true,
   "author": "Classgrid",
   "scripts": {
     "build:client": "node scripts/build-client.mjs",
+    "get-editor": "node scripts/get-editor.mjs",
     "start": "node scripts/start.mjs",
     "dist": "electron-builder --win --publish never",
     "release": "node scripts/release.mjs"

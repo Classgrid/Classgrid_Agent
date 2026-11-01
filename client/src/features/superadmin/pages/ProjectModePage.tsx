@@ -31,6 +31,7 @@ import { PushToGithubModal } from "../components/PushToGithubModal";
 import { ImageCropperModal } from "@/components/marketing_ui/ImageCropperModal";
 import { apiClient } from "@/lib/apiClient";
 import { localFolderOf } from "../utils/localProject";
+import { DesktopStartPanel, type LocalWorkspace } from "../components/DesktopStartPanel";
 
 const backendUrl = import.meta.env.VITE_API_URL || "https://api.classgrid.in";
 const OPEN_PROJECT_KEY = "cg_project_open"; // which project this browser had open (per-viewer convenience)
@@ -200,6 +201,8 @@ export function ProjectModePage() {
   const [folder, setFolder] = useState<string | null>(null);
   // Desktop app: the open project is a folder on this computer (no cloud editor; the AI works on it through the app)
   const [localFolder, setLocalFolder] = useState<string | null>(null);
+  // ...shown in Classgrid Code, the editor built into the desktop app (url), or why it couldn't start (error)
+  const [localEditor, setLocalEditor] = useState<{ folder: string; url?: string; error?: string } | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [newName, setNewName] = useState<string | null>(null);
   const [renaming, setRenaming] = useState<{ id: string; name: string } | null>(null);
@@ -258,6 +261,24 @@ export function ProjectModePage() {
     const t = window.setTimeout(() => setProgress((p) => p && { ...p, value: Math.min(p.target, p.value + Math.max(0.4, (p.target - p.value) * 0.06)) }), 250);
     return () => window.clearTimeout(t);
   }, [progress]);
+  // A folder project in the desktop app: start the built-in editor on it (older app versions keep the folder card)
+  useEffect(() => {
+    setLocalEditor(null);
+    const startEditor = (window as any).classgridDesktop?.startEditor;
+    if (!localFolder || !startEditor) return;
+    let gone = false;
+    setLocalEditor({ folder: localFolder });
+    setProgress({ label: "Starting the editor", value: 10, target: 90 });
+    Promise.resolve(startEditor(localFolder))
+      .catch((e: any) => ({ error: e?.message || "The code editor didn't start." }))
+      .then((r: { url?: string; error?: string } | null) => {
+        if (gone) return;
+        if (r?.url) { setLocalEditor({ folder: localFolder, url: r.url }); return; }
+        setLocalEditor({ folder: localFolder, error: r?.error || "The code editor didn't start." });
+        setProgress(null);
+      });
+    return () => { gone = true; };
+  }, [localFolder]);
 
   const openProject = projects?.find((p) => p.id === openId) || null;
   const rememberOpen = (id: string | null) => {
@@ -275,7 +296,7 @@ export function ProjectModePage() {
     freshList.current = true;
     if (res.ok) {
       setProjects(data.projects || []);
-      try { localStorage.setItem("cg_studio_projects", JSON.stringify((data.projects || []).map(({ id, name, repo, logo, updatedAt }: Project) => ({ id, name, repo, logo, updatedAt })))); } catch { /* storage blocked */ }
+      try { localStorage.setItem("cg_studio_projects", JSON.stringify((data.projects || []).map(({ id, name, repo, logo, updatedAt, location, localPath }: Project) => ({ id, name, repo, logo, updatedAt, location, localPath })))); } catch { /* storage blocked */ }
     }
     else setProjects((list) => list || []);
   }, []);
@@ -514,7 +535,8 @@ export function ProjectModePage() {
   useEffect(() => {
     const onOpenFile = async (e: Event) => {
       const detail = (e as CustomEvent).detail;
-      // A folder on this computer: the file opens in the user's code editor
+      // A folder on this computer: the file opens in the built-in editor when it is showing, otherwise in the user's code editor
+      if (openProject && localFolder && !folder && detail?.path && localEditor?.url) { (window as any).classgridDesktop?.revealInEditor?.(localFolder, String(detail.path), detail.startLine, detail.endLine); return; }
       if (openProject && localFolder && !folder && detail?.path) { (window as any).classgridDesktop?.openInEditor?.(localFolder, String(detail.path), detail.startLine); return; }
       if (!openProject || !folder || !(detail?.path || detail?.plan)) return;
       const { res, data } = await api(`/projects/${openProject.id}/reveal`, { method: "POST", body: JSON.stringify(detail) });
@@ -522,7 +544,7 @@ export function ProjectModePage() {
     };
     window.addEventListener(OPEN_PROJECT_FILE_EVENT, onOpenFile);
     return () => window.removeEventListener(OPEN_PROJECT_FILE_EVENT, onOpenFile);
-  }, [openProject, folder, localFolder]);
+  }, [openProject, folder, localFolder, localEditor?.url]);
 
   // Review / Reject / Undo an AI answer's changes (from the buttons under each answer)
   type ReviewFile = { file: string; added: number; removed: number; kind: string; diff: string };
@@ -629,7 +651,16 @@ export function ProjectModePage() {
     window.history.replaceState(null, "", url.toString());
   }, []);
 
-  const showEditor = isSuperAdmin && githubConnected !== false && openProject && (folder || progress); // no GitHub: back to the Connect GitHub screen
+  // Desktop app: the start panel (open a folder, clone a repo, folders opened before)
+  const isDesktop = !!(window as { classgridDesktop?: { isDesktop?: boolean } }).classgridDesktop?.isDesktop;
+  const localWorkspaces: LocalWorkspace[] = (projects || []).filter((p) => p.location === "local").map((p) => ({ id: p.id, name: p.name, localPath: p.localPath }));
+  const openWorkspace = (w: LocalWorkspace & Partial<Project>) => {
+    const full = { repo: null, updatedAt: new Date().toISOString(), lastOpenedAt: null, ...w, location: "local" as const } as Project;
+    setProjects((list) => (list && !list.some((x) => x.id === full.id) ? [full, ...list] : list));
+    open(full);
+  };
+  useEffect(() => { if (isDesktop && githubConnected) loadRepos(); }, [isDesktop, githubConnected, loadRepos]);
+  const showEditor = isSuperAdmin && (githubConnected !== false || !!localFolder) && openProject && (folder || progress || localFolder); // no GitHub: back to the Connect GitHub screen (a folder on this computer needs no GitHub)
   const editorLoaded = () => {
     setProgress((p) => p && { ...p, label: "Almost ready", target: 100 });
     window.setTimeout(() => setProgress(null), 1200);
@@ -645,7 +676,7 @@ export function ProjectModePage() {
       <div className="shrink-0 flex items-center gap-3 h-8 box-content py-4 pl-16 pr-4 border-b border-border">{/* same height as the AI panel header, so both lines meet */}
         {showEditor ? (
           <>
-            <button onClick={() => { rememberOpen(null); setFolder(null); setProgress(null); }} className="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground">
+            <button onClick={() => { rememberOpen(null); setFolder(null); setLocalFolder(null); setProgress(null); }} className="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground">
               <ArrowLeft className="size-4" /> Projects
             </button>
             <span className="text-sm font-medium truncate">{openProject.name}</span>
@@ -703,12 +734,16 @@ export function ProjectModePage() {
               </a>
             </div>
           )}
-          {localFolder && !folder && (
+          {localFolder && !folder && localEditor?.url && (
+            <iframe key={localEditor.url} src={localEditor.url} onLoad={editorLoaded} title="Code editor" className="flex-1 w-full border-0 [color-scheme:light] dark:[color-scheme:dark]" allow="clipboard-read; clipboard-write" />
+          )}
+          {localFolder && !folder && !localEditor?.url && (
             <div className="flex-1 flex flex-col items-center justify-center gap-3 text-center px-8">
               <FolderGit2 className="size-10 text-muted-foreground" />
               <h3 className="text-lg font-semibold text-foreground">This project is a folder on your computer</h3>
               <p className="text-sm text-muted-foreground font-mono break-all max-w-xl">{localFolder}</p>
               <p className="text-sm text-muted-foreground max-w-md">The AI reads, edits and runs commands in this folder through the Classgrid app. To edit by hand, open it in your own code editor.</p>
+              {localEditor?.error && <p className="text-sm text-amber-700 dark:text-amber-400 max-w-md">{localEditor.error}</p>}
               <div className="flex gap-2 mt-1">
                 <button type="button" onClick={() => (window as any).classgridDesktop?.openInEditor?.(localFolder)} className="h-9 px-4 rounded-full border border-border bg-background text-sm text-foreground hover:bg-secondary">Open in VS Code</button>
                 <button type="button" onClick={() => (window as any).classgridDesktop?.openFolder?.(localFolder)} className="h-9 px-4 rounded-full border border-border bg-background text-sm text-foreground hover:bg-secondary">Show in File Explorer</button>
@@ -755,6 +790,13 @@ export function ProjectModePage() {
         </div>
       ) : !isSuperAdmin ? (
         <div className="flex-1" />
+      ) : githubConnected === false && isDesktop ? (
+        <div className="flex-1 overflow-y-auto px-6 py-12">
+          <DesktopStartPanel workspaces={localWorkspaces} onOpen={openWorkspace} />
+          <p className="mt-10 text-center text-xs text-muted-foreground">
+            Cloud projects on GitHub: <button onClick={() => setHubOpen(true)} className="underline hover:text-foreground">{githubExpired ? "Reconnect GitHub" : "Connect GitHub"}</button>
+          </p>
+        </div>
       ) : githubConnected === false ? (
         <div className="flex-1 flex items-center justify-center px-6">
           <div className="w-full max-w-md rounded-xl border border-border bg-background p-6 flex flex-col gap-4 text-center">
@@ -768,6 +810,11 @@ export function ProjectModePage() {
         </div>
       ) : (
         <div className="flex-1 overflow-y-auto px-6 py-8">
+          {isDesktop && (
+            <div className="pt-4 pb-10 mb-8 border-b border-border">
+              <DesktopStartPanel workspaces={localWorkspaces} githubRepos={repos?.map((r) => r.fullName)} onOpen={openWorkspace} />
+            </div>
+          )}
           <div className="max-w-5xl mx-auto w-full">
             <div className="flex items-center justify-between gap-4 mb-6">
               <div>
@@ -907,7 +954,7 @@ export function ProjectModePage() {
                         </span>
                       </div>
                       <button
-                        onClick={() => { if (p.repo) open(p); else { setLinking(p); loadRepos(); } }}
+                        onClick={() => { if (p.repo || p.location === "local") open(p); else { setLinking(p); loadRepos(); } }}
                         disabled={busyId === p.id}
                         className="self-start shrink-0 flex items-center gap-2 px-3 py-1.5 rounded-full border border-border text-sm hover:bg-secondary disabled:opacity-50"
                       >

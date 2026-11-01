@@ -1,0 +1,361 @@
+// The AI's browser in the desktop app: a real Chromium page that runs on this computer, so it uses the user's own
+// internet, can open their local dev servers (http://localhost:3000), plays sound and keeps its own logins
+// (persist:cg-browser) between runs. It sits over the Studio Browser tab while that tab is open (the screens send
+// the tab's place on screen); otherwise it keeps working out of sight. The backend sends the AI's browser steps
+// here through the local runner ("browser" tool), with the same answers as the cloud browser.
+const { WebContentsView, ipcMain, app } = require("electron");
+const fs = require("node:fs");
+const path = require("node:path");
+
+const PARTITION = "persist:cg-browser";
+const DESKTOP_WIDTH = 1280; // pages are always at least desktop width; a narrow tab shows them shrunk to fit
+const HIDDEN_SIZE = { width: 1280, height: 800 };
+const MAX_TEXT = 20000;
+const MAX_SHOT_BYTES = 520 * 1024; // the runner's answer (the picture as base64, a third bigger) must stay under the socket's 1 MB
+// Websites may use these without asking; anything else (camera, microphone, location, notifications) is refused
+const ALLOWED_PERMISSIONS = new Set(["fullscreen", "clipboard-sanitized-write", "pointerLock"]);
+
+let win = null;
+let view = null;
+let shownRect = null; // where the Browser tab is (window pixels), or null while it isn't on screen
+let zoom = 1;
+let pointerAt = 0;
+
+const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+const norm = (u) => (/^(localhost|127\.0\.0\.1|0\.0\.0\.0)(:\d+)?(\/|$)/i.test(u) ? `http://${u}` : /^[a-z][a-z0-9+.-]*:/i.test(u) ? u :/\s/.test(u) || !/\./.test(u) ? `https://www.google.com/search?q=${encodeURIComponent(u)}` : `https://${u}`);
+const isLocal = (u) => /^(https?:\/\/)?(localhost|127\.0\.0\.1|0\.0\.0\.0)(:\d+)?(\/|$)/i.test(u);
+
+// Tells the screens what the browser is doing (address bar, the agent's step)
+function tell(msg) {
+  if (win && !win.isDestroyed()) win.webContents.send("cg:browser", msg);
+}
+function navInfo() {
+  const wc = view?.webContents;
+  if (!wc || wc.isDestroyed()) return { type: "nav", url: "", title: "", canGoBack: false, canGoForward: false, loading: false };
+  const url = wc.getURL();
+  return { type: "nav", url: url === "about:blank" ? "" : url, title: wc.getTitle(), canGoBack: wc.navigationHistory.canGoBack(), canGoForward: wc.navigationHistory.canGoForward(), loading: wc.isLoading() };
+}
+
+// ── Each chat has its own page: back in a chat, its last page opens again; a new chat starts empty ─────────────
+let chatFile = null;
+let chatUrls = null;
+let currentChat; // undefined = not known yet, null = a new chat (no id yet), or the chat's id
+function chats() {
+  if (chatUrls) return chatUrls;
+  chatFile = path.join(app.getPath("userData"), "browser-chats.json");
+  try { chatUrls = JSON.parse(fs.readFileSync(chatFile, "utf8")) || {}; } catch { chatUrls = {}; }
+  return chatUrls;
+}
+function saveChats() {
+  const keys = Object.keys(chatUrls);
+  if (keys.length > 300) for (const k of keys.slice(0, keys.length - 300)) delete chatUrls[k];
+  fs.writeFile(chatFile, JSON.stringify(chatUrls), () => {});
+}
+async function useChat(id) {
+  id = id ? String(id).slice(0, 100) : null;
+  if (id === currentChat) return;
+  const wc = ensureView().webContents;
+  const url = wc.getURL();
+  if (currentChat === null && id) { // the new chat just got its id: it keeps its page
+    currentChat = id;
+    if (/^https?:\/\//.test(url)) { chats()[id] = url; saveChats(); }
+    return;
+  }
+  currentChat = id;
+  const next = (id && chats()[id]) || "about:blank";
+  if (next === url || (next === "about:blank" && !url)) return;
+  await Promise.race([wc.loadURL(next).catch(() => {}), wait(30000)]);
+  tell(navInfo());
+}
+
+// ── The view ─────────────────────────────────────────────────────────────────────────────────────────────
+
+function ensureView() {
+  if (view && !view.webContents.isDestroyed()) return view;
+  view = new WebContentsView({ webPreferences: { partition: PARTITION, sandbox: true, contextIsolation: true, nodeIntegration: false, backgroundThrottling: false } });
+  const wc = view.webContents;
+  wc.setAudioMuted(false);
+  wc.session.setPermissionRequestHandler((_wc, permission, done) => done(ALLOWED_PERMISSIONS.has(permission)));
+  wc.session.setPermissionCheckHandler((_wc, permission) => ALLOWED_PERMISSIONS.has(permission));
+  // New tabs and pop-ups open in this same page
+  wc.setWindowOpenHandler(({ url }) => {
+    if (/^https?:\/\//i.test(url)) wc.loadURL(url).catch(() => {});
+    return { action: "deny" };
+  });
+  const onNav = () => {
+    const url = wc.getURL();
+    if (currentChat && /^https?:\/\//.test(url)) { chats()[currentChat] = url; saveChats(); }
+    applyZoom();
+    tell(navInfo());
+  };
+  wc.on("did-navigate", onNav);
+  wc.on("did-navigate-in-page", onNav);
+  wc.on("page-title-updated", () => tell(navInfo()));
+  wc.on("did-start-loading", () => tell(navInfo()));
+  wc.on("did-stop-loading", () => tell(navInfo()));
+  wc.on("dom-ready", applyZoom);
+  // Back / forward / reload keys while the user is in the page
+  wc.on("before-input-event", (e, input) => {
+    if (input.type !== "keyDown") return;
+    const nav = wc.navigationHistory;
+    if (input.alt && input.key === "ArrowLeft" && nav.canGoBack()) { nav.goBack(); e.preventDefault(); }
+    else if (input.alt && input.key === "ArrowRight" && nav.canGoForward()) { nav.goForward(); e.preventDefault(); }
+    else if (input.key === "F5" || (input.control && input.key.toLowerCase() === "r")) { wc.reload(); e.preventDefault(); }
+  });
+  layout();
+  return view;
+}
+
+// Over the Browser tab when it is open. Otherwise it is switched off, and while the AI does a step only one pixel of
+// it is inside the window (a page outside the window or switched off can't take clicks or screenshots)
+let agentSteps = 0;
+function layout() {
+  if (!view || !win || win.isDestroyed() || view.webContents.isDestroyed()) return;
+  if (!win.contentView.children.includes(view)) win.contentView.addChildView(view);
+  if (shownRect) {
+    view.setBounds(shownRect);
+    view.setVisible(true);
+    zoom = Math.min(1, shownRect.width / DESKTOP_WIDTH);
+  } else {
+    view.setBounds({ x: -(HIDDEN_SIZE.width - 1), y: -(HIDDEN_SIZE.height - 1), ...HIDDEN_SIZE });
+    view.setVisible(agentSteps > 0);
+    zoom = 1;
+  }
+  applyZoom();
+}
+// Chromium keeps zoom per website, so it is set again after each new page
+function applyZoom() {
+  const wc = view?.webContents;
+  if (wc && !wc.isDestroyed() && Math.abs(wc.getZoomFactor() - zoom) > 0.001) wc.setZoomFactor(zoom);
+}
+
+// The picture the AI gets is the page in page pixels (at most 1920 x 1400). toView turns its pixels into the view's.
+function geometry() {
+  const b = view.getBounds();
+  const cssW = b.width / zoom;
+  const cssH = b.height / zoom;
+  const k = Math.min(1, 1920 / cssW, 1400 / cssH);
+  return { w: Math.round(cssW * k), h: Math.round(cssH * k), toView: zoom / k, b };
+}
+
+async function shot() {
+  const g = geometry();
+  let img = null;
+  // Right after the tab moved or the page changed the picture can come back empty: try again a moment later
+  for (let n = 0; n < 3 && (!img || img.isEmpty()); n++) {
+    if (n) await wait(300);
+    img = await view.webContents.capturePage().catch(() => null);
+  }
+  if (!img || img.isEmpty()) return null;
+  const small = img.resize({ width: g.w, height: g.h, quality: "good" });
+  let q = 70;
+  let jpg = small.toJPEG(q);
+  while (jpg.length > MAX_SHOT_BYTES && q > 25) { q -= 15; jpg = small.toJPEG(q); }
+  return jpg.toString("base64");
+}
+
+// Waits until the page stops loading (or the time is up)
+function settle(ms) {
+  const wc = view.webContents;
+  if (!wc.isLoading()) return Promise.resolve();
+  return new Promise((resolve) => {
+    const done = () => { clearTimeout(t); wc.off("did-stop-loading", done); resolve(); };
+    const t = setTimeout(done, ms);
+    wc.on("did-stop-loading", done);
+  });
+}
+
+// The agent's step, shown to the user: in the tab's toolbar, and a ring where it clicks
+function point(kind, extra = {}) {
+  pointerAt = Date.now();
+  tell({ type: "pointer", kind, at: pointerAt, ...extra });
+}
+function ring(cssX, cssY) {
+  const code = `(() => { const d = document.createElement("div"); d.style.cssText = "position:fixed;left:${cssX - 18}px;top:${cssY - 18}px;width:36px;height:36px;border:2px solid #0ea5e9;border-radius:50%;pointer-events:none;z-index:2147483647;transition:transform .7s,opacity .7s;transform:scale(.3);opacity:.9"; document.documentElement.appendChild(d); requestAnimationFrame(() => { d.style.transform = "scale(1.4)"; d.style.opacity = "0"; }); setTimeout(() => d.remove(), 800); })()`;
+  view.webContents.executeJavaScriptInIsolatedWorld(1001, [{ code }]).catch(() => {});
+}
+
+// Keys like the cloud browser takes them: Enter, Tab, ArrowDown, Control+A, Shift+Tab
+const KEY_NAMES = { ArrowUp: "Up", ArrowDown: "Down", ArrowLeft: "Left", ArrowRight: "Right", " ": "Space", Spacebar: "Space", Esc: "Escape", Return: "Enter" };
+const MODIFIERS = { control: "control", ctrl: "control", shift: "shift", alt: "alt", meta: "meta", cmd: "meta", command: "meta", controlormeta: "control" };
+function press(combo) {
+  const wc = view.webContents;
+  const parts = String(combo || "Enter").split("+");
+  const key = parts.pop() || "+";
+  const modifiers = parts.map((m) => MODIFIERS[m.trim().toLowerCase()]).filter(Boolean);
+  const keyCode = KEY_NAMES[key] || key;
+  wc.sendInputEvent({ type: "keyDown", keyCode, modifiers });
+  // The typed character itself (Enter sends forms)
+  if (!modifiers.some((m) => m !== "shift")) {
+    const ch = keyCode === "Enter" ? "\r" : keyCode === "Space" ? " " : key.length === 1 ? key : null;
+    if (ch) wc.sendInputEvent({ type: "char", keyCode: ch, modifiers });
+  }
+  wc.sendInputEvent({ type: "keyUp", keyCode, modifiers });
+}
+
+async function act(a, byAgent) {
+  ensureView();
+  const wc = view.webContents;
+  if (byAgent && a.chat) await useChat(a.chat);
+  applyZoom();
+  const g = geometry();
+  switch (a.action) {
+    case "open": {
+      const url = norm(String(a.url || "").trim());
+      if (byAgent) point("open", { url });
+      let failed = null;
+      await Promise.race([wc.loadURL(url).catch((e) => { if (e.code !== "ERR_ABORTED") failed = e; }), wait(45000)]);
+      if (failed) {
+        const why = String(failed.code || failed.message || "the page didn't load");
+        throw new Error(`${why} while opening ${url}${isLocal(url) && /REFUSED/.test(why) ? ". Nothing is running at that address on the user's computer: start the server first" : ""}`);
+      }
+      break;
+    }
+    case "click": {
+      const x = Math.round(Number(a.x) * g.toView);
+      const y = Math.round(Number(a.y) * g.toView);
+      if (!Number.isFinite(x) || !Number.isFinite(y)) throw new Error("x and y must be numbers");
+      if (byAgent) { point("click", { x: Number(a.x), y: Number(a.y) }); ring(x / zoom, y / zoom); }
+      wc.sendInputEvent({ type: "mouseMove", x, y });
+      for (let n = 1; n <= (a.double ? 2 : 1); n++) {
+        wc.sendInputEvent({ type: "mouseDown", x, y, button: "left", clickCount: n });
+        wc.sendInputEvent({ type: "mouseUp", x, y, button: "left", clickCount: n });
+      }
+      break;
+    }
+    case "type":
+      if (byAgent) point("type", { text: String(a.text ?? "").length });
+      if (String(a.text ?? "")) await wc.insertText(String(a.text ?? ""));
+      if (a.submit) { await wait(50); press("Enter"); }
+      break;
+    case "press":
+      if (byAgent) point("key", { key: String(a.key || "Enter") });
+      press(a.key);
+      break;
+    case "scroll": {
+      const dy = Number(a.dy ?? 600) || 0;
+      if (byAgent) point("scroll", { dy });
+      wc.sendInputEvent({ type: "mouseWheel", x: Math.round(g.b.width / 2), y: Math.round(g.b.height / 2), deltaX: 0, deltaY: -dy * zoom, canScroll: true });
+      break;
+    }
+    case "back": if (wc.navigationHistory.canGoBack()) wc.navigationHistory.goBack(); break;
+    case "forward": if (wc.navigationHistory.canGoForward()) wc.navigationHistory.goForward(); break;
+    case "reload": wc.reload(); break;
+    case "screenshot":
+      if (byAgent) point("shot");
+      break;
+    case "read":
+      // Pages that load their content late (as you scroll): go down the page step by step, then back to the top
+      await settle(4000);
+      await wc.executeJavaScript(`(async () => {
+        const step = Math.max(400, Math.round(window.innerHeight * 0.9));
+        const start = window.scrollY;
+        for (let y = 0, n = 0; y < document.body.scrollHeight && n < 40; y += step, n++) {
+          window.scrollTo(0, y);
+          await new Promise((r) => setTimeout(r, 150));
+        }
+        window.scrollTo(0, start);
+      })()`).catch(() => {});
+      await settle(3000);
+      break;
+    case "wait":
+      await settle(4000);
+      await wait(Math.min(10000, Math.max(500, Number(a.seconds || 2) * 1000)));
+      break;
+    case "tabs": break;
+    default: throw new Error(`Unknown action: ${a.action}`);
+  }
+  // Let the page settle before the picture: a new page until it finished loading, and about a second after a click
+  // or scroll, so entrance animations are done in the screenshot
+  if (["open", "back", "forward", "reload"].includes(a.action)) {
+    await wait(150);
+    await settle(10000);
+    await wait(800);
+  } else if (["click", "press"].includes(a.action) || (a.action === "type" && a.submit)) {
+    await wait(300);
+    await settle(8000);
+    await wait(600);
+  } else if (a.action === "scroll") await wait(1000);
+  applyZoom();
+  const out = { ok: true, url: wc.getURL(), title: wc.getTitle(), w: g.w, h: g.h };
+  if (a.action === "read") {
+    out.text = String(await wc.executeJavaScript("document.body ? document.body.innerText : ''").catch(() => "")).slice(0, MAX_TEXT);
+    out.links = await wc.executeJavaScript(`[...document.querySelectorAll("a[href]")].slice(0, 80).map((l) => ({ text: (l.innerText || "").trim().slice(0, 80), href: l.href }))`).catch(() => []);
+  }
+  if (a.action === "tabs") out.tabs = [{ i: 0, url: wc.getURL(), active: true }];
+  if (a.screenshot !== false && a.action !== "tabs") out.screenshot = await shot();
+  return out;
+}
+
+// One step at a time, so two steps sent at once can't mix (two "type" steps would mix their letters). The same
+// agent step sent twice at the same moment runs once.
+let queue = Promise.resolve();
+const inFlight = new Map();
+function runAct(a, byAgent) {
+  const key = byAgent ? JSON.stringify(a) : null;
+  if (key && inFlight.has(key)) return inFlight.get(key);
+  const job = queue.then(async () => {
+    if (!byAgent) return act(a || {}, false);
+    ensureView();
+    agentSteps++;
+    layout();
+    try { return await act(a || {}, true); } finally { agentSteps--; layout(); }
+  });
+  queue = job.catch(() => {});
+  if (key) { inFlight.set(key, job); job.catch(() => {}).finally(() => inFlight.delete(key)); }
+  return job;
+}
+
+// A step from the AI (through the local runner): always an answer, like the cloud browser's /act
+async function agentAct(step) {
+  try {
+    return await runAct(step && typeof step === "object" ? step : {}, true);
+  } catch (e) {
+    return { ok: false, error: String(e.message || e).slice(0, 500), url: view && !view.webContents.isDestroyed() ? view.webContents.getURL() : "" };
+  }
+}
+
+// ── The screens: where the Browser tab is, and the user's own buttons ───────────────────────────────────────
+
+const fromApp = (e) => !!win && !win.isDestroyed() && e.sender === win.webContents;
+ipcMain.on("cg:browserShow", (e, rect) => {
+  if (!fromApp(e) || !rect) return;
+  const z = win.webContents.getZoomFactor() || 1;
+  const r = { x: Math.round(Number(rect.x) * z), y: Math.round(Number(rect.y) * z), width: Math.round(Number(rect.width) * z), height: Math.round(Number(rect.height) * z) };
+  if (!Object.values(r).every(Number.isFinite) || r.width < 20 || r.height < 20) return;
+  shownRect = r;
+  ensureView();
+  layout();
+});
+ipcMain.on("cg:browserHide", (e) => {
+  if (!fromApp(e) || !shownRect) return;
+  shownRect = null;
+  layout();
+});
+ipcMain.on("cg:browserChat", (e, id) => {
+  if (!fromApp(e)) return;
+  queue = queue.then(() => useChat(id)).catch(() => {});
+});
+ipcMain.handle("cg:browserState", (e) => (fromApp(e) ? { ...navInfo(), pointerAt } : null));
+// The toolbar: back, forward, reload, open (no picture needed)
+ipcMain.handle("cg:browserAct", async (e, step) => {
+  if (!fromApp(e) || !step || !["open", "back", "forward", "reload"].includes(step.action)) return { ok: false };
+  try { await runAct({ action: step.action, url: String(step.url || ""), screenshot: false }, false); return { ok: true }; }
+  catch (err) { return { ok: false, error: String(err.message || err) }; }
+});
+// The Camera button: the page as it is now
+ipcMain.handle("cg:browserShot", async (e) => {
+  if (!fromApp(e) || !view || view.webContents.isDestroyed()) return null;
+  const img = await view.webContents.capturePage().catch(() => null);
+  return img && !img.isEmpty() ? `data:image/png;base64,${img.toPNG().toString("base64")}` : null;
+});
+
+module.exports = {
+  // The app window it lives in; the local runner sends the AI's browser steps here
+  attach(window) {
+    win = window;
+    win.on("closed", () => { win = null; view = null; shownRect = null; });
+    require("./runner").setBrowser(agentAct);
+  },
+  act: agentAct,
+};

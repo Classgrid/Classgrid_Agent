@@ -16,6 +16,7 @@ let socket = null;
 let foldersFile = null;
 let currentToken = null;
 const jobs = new Map(); // job id -> { proc, command, log, startedAt, exitCode }
+let browserStep = null; // the app's browser (browser.js), once the window is open
 
 // ── Folders the user picked ──────────────────────────────────────────────────────────────────────────────
 
@@ -224,6 +225,222 @@ const tools = {
   },
 };
 
+// ── Any file on this computer (read_local_file, every chat in the app) ──────────────────────────────────────
+// The backend shows the user a permission card before each read, so this is not limited to picked folders.
+// Pictures and documents go back in pieces: the backend's socket takes at most 1 MB per message.
+
+const LOCAL_IMAGE_TYPES = { ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".gif": "image/gif", ".webp": "image/webp", ".bmp": "image/bmp" };
+const LOCAL_DOC_TYPES = { ".pdf": "application/pdf", ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document", ".doc": "application/msword", ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", ".xls": "application/vnd.ms-excel", ".pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation", ".ppt": "application/vnd.ms-powerpoint" };
+const MAX_IMAGE_FILE_BYTES = 10 * 1024 * 1024;
+const MAX_DOC_FILE_BYTES = 20 * 1024 * 1024;
+const MODEL_IMAGE_BYTES = Math.floor(3.5 * 1024 * 1024); // the AI models take pictures up to 3.75 MB
+const CHUNK_BYTES = 512 * 1024;
+const TEXT_WINDOW_CHARS = 18000;
+let lastBinary = null; // { key, kind, mime, buf }: the file being sent in pieces
+
+function localPath(given) {
+  let p = String(given || "").trim().replace(/^["']+|["']+$/g, "").replace(/^file:\/\/\/?/i, "");
+  p = p.replace(/%([^%]+)%/g, (m, name) => process.env[name] ?? m);
+  if (p === "~" || p.startsWith("~/") || p.startsWith("~\\")) p = path.join(require("node:os").homedir(), p.slice(1));
+  if (!p) throw new Error("path is empty. Give the full path of the file, like C:\\Users\\name\\Downloads\\photo.png");
+  if (!path.isAbsolute(p)) throw new Error(`"${p}" is not a full path. Give the full path, like C:\\Users\\name\\Downloads\\photo.png`);
+  return path.resolve(p);
+}
+
+const sizeText = (n) => (n >= 1048576 ? `${(n / 1048576).toFixed(1)} MB` : n >= 1024 ? `${Math.round(n / 1024)} KB` : `${n} bytes`);
+
+// Big PNG / JPEG pictures (and BMP, which the AI can't take) are made smaller with Electron's image tools
+function imageForModel(buf, ext) {
+  if (buf.length <= MODEL_IMAGE_BYTES && ext !== ".bmp") return { buf, mime: LOCAL_IMAGE_TYPES[ext] };
+  let nativeImage = null;
+  try { nativeImage = require("electron").nativeImage; } catch { /* not inside the app */ }
+  const img = nativeImage?.createFromBuffer ? nativeImage.createFromBuffer(buf) : null;
+  if (!img || img.isEmpty()) {
+    throw new Error(ext === ".bmp" ? "this BMP picture can't be opened here. Save it as PNG or JPG and try again." : `this picture is ${sizeText(buf.length)} and couldn't be made smaller to show it (pictures can be shown up to 3.5 MB, and only PNG and JPG pictures can be made smaller).`);
+  }
+  const { width, height } = img.getSize();
+  const scale = Math.min(1, 2000 / Math.max(width, height));
+  const small = scale < 1 ? img.resize({ width: Math.round(width * scale), height: Math.round(height * scale), quality: "good" }) : img;
+  const png = small.toPNG();
+  if (png.length <= MODEL_IMAGE_BYTES) return { buf: png, mime: "image/png" };
+  const jpg = small.toJPEG(85);
+  if (jpg.length <= MODEL_IMAGE_BYTES) return { buf: jpg, mime: "image/jpeg" };
+  throw new Error(`this picture is too big to show to the AI, even after making it smaller (${sizeText(jpg.length)}).`);
+}
+
+function textWindow(text, label, start_line, end_line) {
+  const lines = text.split(/\r?\n/);
+  const start = Math.min(lines.length, Math.max(1, Number(start_line) || 1));
+  const last = Math.min(lines.length, Number(end_line) || lines.length);
+  const out = [];
+  let chars = 0;
+  for (let n = start; n <= last; n++) {
+    const line = `${n}: ${lines[n - 1]}`;
+    if (out.length && chars + line.length > TEXT_WINDOW_CHARS) break;
+    out.push(line.length > TEXT_WINDOW_CHARS ? line.slice(0, TEXT_WINDOW_CHARS) + " …" : line);
+    chars += line.length + 1;
+  }
+  const end = start + out.length - 1;
+  const more = end < lines.length ? ` To read more, call read_local_file again with start_line ${end + 1}.` : "";
+  return `${label} (lines ${start}-${end} of ${lines.length}).${more}\n${out.join("\n")}`;
+}
+
+function readLocalFile({ path: given, start_line, end_line, chunk = 0 } = {}) {
+  const full = localPath(given);
+  let stat;
+  try { stat = fs.statSync(full); } catch { throw new Error(`there is no file or folder at ${full}`); }
+
+  if (stat.isDirectory()) {
+    let entries = [];
+    try { entries = fs.readdirSync(full, { withFileTypes: true }); } catch (e) { throw new Error(`the folder ${full} can't be opened (${e.code || e.message})`); }
+    entries.sort((a, b) => (b.isDirectory() - a.isDirectory()) || a.name.localeCompare(b.name));
+    const rows = entries.slice(0, 500).map((e) => {
+      if (e.isDirectory()) return `${e.name}\\`;
+      let size = "";
+      try { size = `  (${sizeText(fs.statSync(path.join(full, e.name)).size)})`; } catch { /* locked or gone */ }
+      return `${e.name}${size}`;
+    });
+    return { text: `${full} is a folder with ${entries.length} item${entries.length === 1 ? "" : "s"}${entries.length > 500 ? " (the first 500 are shown)" : ""}. Read a file in it with its full path.\n${rows.join("\n") || "(empty)"}` };
+  }
+  if (!stat.isFile()) throw new Error(`${full} is not a file`);
+
+  const ext = path.extname(full).toLowerCase();
+  const kind = LOCAL_IMAGE_TYPES[ext] ? "image" : LOCAL_DOC_TYPES[ext] ? "document" : null;
+  if (kind) {
+    const max = kind === "image" ? MAX_IMAGE_FILE_BYTES : MAX_DOC_FILE_BYTES;
+    if (stat.size > max) throw new Error(`${full} is ${sizeText(stat.size)}; files like this can be read up to ${sizeText(max)}.`);
+    const key = `${full}|${stat.size}|${stat.mtimeMs}`;
+    if (!lastBinary || lastBinary.key !== key) {
+      const raw = fs.readFileSync(full);
+      if (!raw.length) throw new Error(`${full} is empty`);
+      const ready = kind === "image" ? imageForModel(raw, ext) : { buf: raw, mime: LOCAL_DOC_TYPES[ext] };
+      lastBinary = { key, kind, mime: ready.mime, buf: ready.buf };
+    }
+    const { buf, mime } = lastBinary;
+    const chunks = Math.max(1, Math.ceil(buf.length / CHUNK_BYTES));
+    const n = Math.min(Math.max(0, Number(chunk) || 0), chunks - 1);
+    return {
+      text: `${full} (${sizeText(stat.size)})`,
+      file: { kind, mime, name: path.basename(full), path: full, size: stat.size, bytes: buf.length, chunk: n, chunks, data: buf.subarray(n * CHUNK_BYTES, (n + 1) * CHUNK_BYTES).toString("base64") },
+    };
+  }
+
+  const fd = fs.openSync(full, "r");
+  let buf;
+  try {
+    buf = Buffer.alloc(Math.min(stat.size, MAX_FILE_BYTES));
+    fs.readSync(fd, buf, 0, buf.length, 0);
+  } finally {
+    fs.closeSync(fd);
+  }
+  if (buf.subarray(0, 8192).includes(0)) throw new Error(`${full} is not a text file (it looks like a program, archive or other binary file), so it can't be read as text.`);
+  const cut = stat.size > MAX_FILE_BYTES ? ` Only the first 2 MB of this ${sizeText(stat.size)} file can be read.` : "";
+  return { text: textWindow(buf.toString("utf8").replace(/^\uFEFF/, ""), `${full}${cut ? ` (${sizeText(stat.size)}, cut)` : ""}`, start_line, end_line) + (cut ? `\n[${cut.trim()}]` : "") };
+}
+
+// Windows' own folders, installed programs and this app's own folders are never changed
+function protectedFolders() {
+  const list = [process.env.SystemRoot || "C:\\Windows", "C:\\Windows", process.env.ProgramFiles || "C:\\Program Files", "C:\\Program Files", process.env["ProgramFiles(x86)"] || "C:\\Program Files (x86)", "C:\\Program Files (x86)"];
+  if (foldersFile) list.push(path.dirname(foldersFile)); // the app's userData
+  try {
+    const { app } = require("electron");
+    if (app?.getPath) list.push(app.getPath("userData"));
+    if (app?.isPackaged) list.push(path.dirname(process.execPath));
+  } catch { /* not inside the app */ }
+  return list.filter(Boolean).map((f) => path.resolve(f).toLowerCase());
+}
+function writablePath(given) {
+  const full = localPath(given);
+  const low = full.toLowerCase();
+  const hit = protectedFolders().find((f) => low === f || low.startsWith(f.endsWith(path.sep) ? f : f + path.sep));
+  if (hit) throw new Error(`${full} is inside a protected folder (${hit}: Windows, installed programs or the Classgrid app itself), so it can't be changed.`);
+  if (path.parse(full).root.toLowerCase() === low || path.parse(full).root.toLowerCase() === low + path.sep) throw new Error(`${full} is a whole drive, so it can't be changed.`);
+  return full;
+}
+
+function writeLocalFile({ path: given, content = "", overwrite = false } = {}) {
+  const full = writablePath(given);
+  const replace = overwrite === true || overwrite === "true";
+  const text = String(content ?? "");
+  let before = null;
+  if (fs.existsSync(full)) {
+    if (fs.statSync(full).isDirectory()) throw new Error(`${full} is a folder, not a file.`);
+    if (!replace) throw new Error(`${full} already exists, so it was not changed. To replace it, call write_local_file again with overwrite: true, or change part of it with edit_local_file.`);
+    before = fs.readFileSync(full, "utf8");
+  }
+  fs.mkdirSync(path.dirname(full), { recursive: true });
+  fs.writeFileSync(full, text, "utf8");
+  const total = text.split("\n").length;
+  if (before === null) return { text: `Created ${full} (${total} lines, +${total} -0).` };
+  const { added, removed } = lineChange(before.replace(/\r\n/g, "\n"), text.replace(/\r\n/g, "\n"));
+  return { text: `Replaced ${full} (${total} lines, +${added} -${removed}).` };
+}
+
+function editLocalFile({ path: given, old_text, new_text, replace_all = false } = {}) {
+  const full = writablePath(given);
+  if (!fs.existsSync(full) || !fs.statSync(full).isFile()) throw new Error(`there is no file at ${full}`);
+  const raw = readText(full);
+  const eol = raw.includes("\r\n") ? "\r\n" : "\n";
+  const text = raw.replace(/\r\n/g, "\n");
+  const oldText = String(old_text ?? "").replace(/\r\n/g, "\n");
+  const newText = String(new_text ?? "").replace(/\r\n/g, "\n");
+  if (!oldText) return { text: "Error: old_text is empty" };
+  const count = text.split(oldText).length - 1;
+  if (!count) return { text: `Error: old_text was not found in ${full}. Nothing was changed.` };
+  const all = replace_all === true || replace_all === "true";
+  if (count > 1 && !all) return { text: `Error: old_text was found ${count} times in ${full}. Add more surrounding text, or set replace_all. Nothing was changed.` };
+  const after = text.split(oldText).join(newText);
+  fs.writeFileSync(full, eol === "\n" ? after : after.replace(/\n/g, eol), "utf8");
+  const { added, removed } = lineChange(text, after);
+  return { text: `Edited ${full} (${count} place${count > 1 ? "s" : ""}, +${added} -${removed}).` };
+}
+
+async function manageLocalFiles({ action, path: given, to } = {}) {
+  const full = writablePath(given);
+  const exists = fs.existsSync(full);
+  const what = () => (fs.statSync(full).isDirectory() ? "folder" : "file");
+  switch (action) {
+    case "create_folder":
+      if (exists) return { text: fs.statSync(full).isDirectory() ? `The folder ${full} already exists.` : `Error: ${full} is a file, so a folder can't be made there.` };
+      fs.mkdirSync(full, { recursive: true });
+      return { text: `Created the folder ${full}.` };
+    case "move":
+    case "copy": {
+      if (!exists) throw new Error(`there is no file or folder at ${full}`);
+      if (!to) throw new Error(`"to" is empty. Give the full path to ${action} it to.`);
+      let dest = writablePath(to);
+      if (fs.existsSync(dest) && fs.statSync(dest).isDirectory()) dest = path.join(dest, path.basename(full)); // into an existing folder
+      if (fs.existsSync(dest)) throw new Error(`${dest} already exists, so nothing was ${action === "move" ? "moved" : "copied"}.`);
+      if ((dest.toLowerCase() + path.sep).startsWith(full.toLowerCase() + path.sep)) throw new Error(`a folder can't be ${action === "move" ? "moved" : "copied"} into itself.`);
+      const kind = what();
+      fs.mkdirSync(path.dirname(dest), { recursive: true });
+      if (action === "copy") fs.cpSync(full, dest, { recursive: true, errorOnExist: true, force: false });
+      else {
+        try { fs.renameSync(full, dest); } catch (e) {
+          if (e.code !== "EXDEV") throw e;
+          fs.cpSync(full, dest, { recursive: true, errorOnExist: true, force: false }); // another drive: copy, then remove
+          fs.rmSync(full, { recursive: true, force: true });
+        }
+      }
+      return { text: `${action === "move" ? "Moved" : "Copied"} the ${kind} ${full} to ${dest}.` };
+    }
+    case "delete": {
+      if (!exists) throw new Error(`there is no file or folder at ${full}`);
+      let shell = null;
+      try { shell = require("electron").shell; } catch { /* not inside the app */ }
+      if (!shell?.trashItem) throw new Error("the Recycle Bin can only be used from inside the Classgrid app, so nothing was deleted.");
+      const kind = what();
+      await shell.trashItem(full);
+      return { text: `Moved the ${kind} ${full} to the Recycle Bin (it can be restored from there).` };
+    }
+    default:
+      throw new Error(`action must be create_folder, move, copy or delete (got "${action ?? ""}")`);
+  }
+}
+
+// Tools that may touch any path (each call is allowed by the user on the permission card first)
+const anywhereTools = { read_local_file: readLocalFile, write_local_file: writeLocalFile, edit_local_file: editLocalFile, manage_local_files: manageLocalFiles };
+
 function shellSpawn(command, cwd) {
   return process.platform === "win32"
     ? spawn("powershell.exe", ["-NoLogo", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", command], { cwd, windowsHide: true })
@@ -248,6 +465,15 @@ function connect(token) {
     if (typeof ack !== "function") return;
     try {
       const { tool, args = {}, root } = req || {};
+      // The AI's browser steps go to the app's own browser (browser.js)
+      if (tool === "browser" && browserStep) {
+        console.log("[runner] browser", args.action);
+        return ack({ text: "ok", browser: await browserStep(args) });
+      }
+      if (anywhereTools[tool]) {
+        console.log("[runner] tool", tool, args.path, args.chunk ? `piece ${args.chunk}` : "");
+        return ack(await anywhereTools[tool](args));
+      }
       console.log("[runner] tool", tool, "in", root);
       if (!tools[tool]) return ack({ text: `Error: ${tool} can't run on this computer.` });
       if (!isAllowedRoot(root)) return ack({ text: `Error: the folder ${root || "(none)"} wasn't opened in the Classgrid app on this computer, so it can't be used. Ask the user to open it with "Open folder" in the app.` });
@@ -303,6 +529,10 @@ function readForFilesTab(root, rel) {
 module.exports = {
   listForFilesTab,
   readForFilesTab,
+  readLocalFile,
+  writeLocalFile,
+  editLocalFile,
+  manageLocalFiles,
   init(userDataDir) { foldersFile = path.join(userDataDir, "folders.json"); },
   // The screens refresh the token often: only a different person (or logging out) reconnects; otherwise the fresh
   // token is just kept for the next reconnect
@@ -316,6 +546,7 @@ module.exports = {
     connect(token);
   },
   allowFolder,
+  setBrowser(fn) { browserStep = fn; },
   isAllowed: (folder) => isAllowedRoot(folder),
   stopAll() { for (const job of jobs.values()) killTree(job.proc); jobs.clear(); socket?.disconnect(); },
 };

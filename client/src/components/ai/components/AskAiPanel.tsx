@@ -230,6 +230,7 @@ type PageContext = {
 
 import { usePostHog } from 'posthog-js/react';
 import { fetchWithRescue } from "@/lib/rescue";
+import { OFFLINE_CHAT_NOTE, isUnreachable, keepsChatCopies, readChatCopy, removeChatCopy, saveChatCopy, syncChatCopy } from "@/lib/desktopChats";
 
 // Fetch real presigned URL for R2 uploads
 // Chats known to be ended (id -> end reason), so an ended chat shows its card at once on refresh or open,
@@ -2092,6 +2093,8 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
   }, [messages]);
   const [activeSection, setActiveSection] = useState("");
   const [isLoadingChat, setIsLoadingChat] = useState(false);
+  // Desktop app, no internet: the open chat is the copy saved on this computer
+  const [offlineCopyOf, setOfflineCopyOf] = useState<string | null>(null);
   const [isPinned, setIsPinned] = useState(false);
   const [showFilesPanel, setShowFilesPanel] = useState(false);
   const [showGridPanel, setShowGridPanel] = useState(false);
@@ -2416,6 +2419,7 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
         credentials: "include"
       });
       if (res.ok) {
+        removeChatCopy(sessionId); // desktop app: the copy on this computer goes too
         toast.success("Chat deleted");
         setShowDeleteConfirm(false);
         window.dispatchEvent(new Event("agent:refresh-sessions"));
@@ -2996,6 +3000,16 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
     }
   }, []);
 
+  // Desktop app, no internet: show the chat's copy saved on this computer (false when there is none)
+  const showSavedChatCopy = async (id: string) => {
+    const copy = await readChatCopy(id);
+    if (!copy) return false;
+    setMessages(copy.messages.map(toChatMessage));
+    setIsPinned(!!copy.details?.session?.pinned);
+    setOfflineCopyOf(id);
+    return true;
+  };
+
   // Listen for external commands (like clicking "New Chat" or an old chat in the sidebar)
   useEffect(() => {
     const detachRunningReply = () => {
@@ -3072,6 +3086,8 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
       tokenBufferRef.current = "";
       thoughtBufferRef.current = "";
       wordTypingActiveRef.current = false;
+      setOfflineCopyOf(null);
+      let savedDetails: any = null;
 
       try {
         const endpointPrefix = typeof import.meta !== "undefined" && import.meta.env
@@ -3080,6 +3096,7 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
         const sessionRes = await fetchWithRescue(`${endpointPrefix}/api/ai/sessions/${id}`, { credentials: "include" });
         if (sessionRes.ok) {
           const sData = await sessionRes.json();
+          savedDetails = sData;
           // A project's chat opened from Agent mode (Library, an old link...): open it in Project Mode, in its project
           const parts = window.location.pathname.split("/");
           const agentAt = parts.indexOf("agent");
@@ -3159,9 +3176,15 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
             };
           });
           setMessages(loadedMessages);
+          saveChatCopy(id, savedDetails, data.messages); // desktop app: keep a copy on this computer
+        } else if (res.status === 403 || res.status === 404) {
+          removeChatCopy(id);
+        } else if (isUnreachable({ status: res.status })) {
+          await showSavedChatCopy(id);
         }
       } catch (err) {
         console.error("Failed to load chat", err);
+        if (keepsChatCopies() && isUnreachable(err)) await showSavedChatCopy(id);
       } finally {
         setIsLoadingChat(false);
       }
@@ -3229,6 +3252,7 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
       setSessionId(routeSessionId);
       setIsLoadingChat(true);
       setIsPinned(false);
+      setOfflineCopyOf(null);
       try {
         let data: any = null;
         for (let attempt = 0; attempt < 2 && !data; attempt++) {
@@ -3239,6 +3263,7 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
               getJson(`${endpointPrefix}/api/ai/sessions/${routeSessionId}/messages`),
             ]);
             if (controller.signal.aborted) return;
+            saveChatCopy(routeSessionId, sData, mData?.messages); // desktop app: keep a copy on this computer
             if (sData?.session) setIsPinned(!!sData.session.pinned);
             if (sData?.session) {
               setChatEnded(sData.session.ended
@@ -3304,6 +3329,9 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
       } catch (err: any) {
         if (controller.signal.aborted) return;
         console.error("Failed to load chat from route", err);
+        if (err?.status === 403 || err?.status === 404) removeChatCopy(routeSessionId);
+        // Desktop app, no internet: open the copy saved on this computer instead
+        if (keepsChatCopies() && (isUnreachable(err) || err?.name === "AbortError") && await showSavedChatCopy(routeSessionId)) return;
         toast.error(err?.status === 403 || err?.status === 404 ? "This chat was not found." : "Couldn't load this chat.", {
           action: err?.status === 403 || err?.status === 404 ? undefined : { label: "Retry", onClick: () => setRouteLoadAttempt((n) => n + 1) },
         });
@@ -3314,6 +3342,17 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
     loadRouteSession();
     return () => controller.abort();
   }, [routeSessionId, routeLoadAttempt]);
+
+  // Desktop app: back online while a saved copy is open, load the chat from the server again
+  useEffect(() => {
+    if (!offlineCopyOf) return;
+    const reload = () => {
+      if (routeSessionId === offlineCopyOf) setRouteLoadAttempt((n) => n + 1);
+      else window.dispatchEvent(new CustomEvent("agent:load-chat", { detail: { sessionId: offlineCopyOf } }));
+    };
+    window.addEventListener("online", reload);
+    return () => window.removeEventListener("online", reload);
+  }, [offlineCopyOf, routeSessionId]);
 
   // Save chat history and session ID to local storage whenever they update
   useEffect(() => {
@@ -3366,6 +3405,7 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
       }
       if (!res.ok) return;
       const data = await res.json();
+      saveChatCopy(forChat, null, data.messages); // desktop app: keep the copy on this computer in step
       if (gridOpenChatRef.current === forChat && !gridSubmittingRef.current) setMessages((data.messages || []).map(toChatMessage));
     } catch { /* next update will try again */ }
   }, [gridSessionId]);
@@ -4283,6 +4323,8 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
       return; // Exit early!
     }
 
+    // Desktop app: the chat whose copy on this computer is updated when this answer finishes (never incognito)
+    let keepChatId: string | null = isIncognito ? null : replySession || null;
     try {
       const endpoint = typeof import.meta !== "undefined" && import.meta.env
         ? (import.meta.env.VITE_API_URL || "https://api.classgrid.in") + "/api/ai/ask"
@@ -4407,6 +4449,7 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
                 if (isIncognito) {
                   saveIncognitoChat(messages, event.sessionId); // remembered at once, so closing right away still deletes it
                 } else {
+                  keepChatId = event.sessionId;
                   // An incognito chat never shows up in the sidebar
                   window.dispatchEvent(new CustomEvent("agent:session-created", { detail: { id: event.sessionId, title: question } }));
                   window.dispatchEvent(new Event("agent:refresh-sessions"));
@@ -4541,7 +4584,7 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
                 });
               } else if (event.type === "permission_request" && event.id) {
                 // The agent waits for the user to allow an action (the card above the chat box)
-                setPendingPermission({ id: String(event.id), tool: String(event.tool || ""), title: String(event.title || "Allow this?"), detail: event.detail ? String(event.detail) : undefined, label: event.label ? String(event.label) : undefined });
+                setPendingPermission({ id: String(event.id), tool: String(event.tool || ""), title: String(event.title || "Allow this?"), detail: event.detail ? String(event.detail) : undefined, label: event.label ? String(event.label) : undefined, onceOnly: event.onceOnly === true });
               } else if (event.type === "permission_resolved" && event.id) {
                 setPendingPermission((p) => (p && p.id === String(event.id) ? null : p));
               } else if (event.type === "helper_progress" && typeof event.helper === "number") {
@@ -4710,6 +4753,9 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
       }
     } finally {
       if (replySession && runningRepliesRef.current.get(replySession)?.controller === controller) runningRepliesRef.current.delete(replySession);
+      // Desktop app: keep the finished chat on this computer (a moment later, so the server has saved the answer)
+      const finishedChat = keepChatId;
+      if (finishedChat && keepsChatCopies()) window.setTimeout(() => { void syncChatCopy(finishedChat); }, 1500);
       if (!isStale()) setSubmitting(false);
     }
   }
@@ -4886,6 +4932,9 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
 
 
       <div className={cn("flex flex-col gap-4 px-4 py-4 transition-all duration-300 ease-[cubic-bezier(0.22,1,0.36,1)]", variant === "full-page" && "max-w-[48rem] mx-auto w-full pb-48")}>
+        {offlineCopyOf && offlineCopyOf === sessionId && !isLoadingChat && (
+          <div className="self-center rounded-full border border-border/60 px-3 py-1 text-xs text-muted-foreground">{OFFLINE_CHAT_NOTE}</div>
+        )}
         {isLoadingChat ? (
           <div className="flex flex-col gap-6 py-8 px-2 animate-in fade-in duration-300">
             {/* Skeleton message 1 - user */}

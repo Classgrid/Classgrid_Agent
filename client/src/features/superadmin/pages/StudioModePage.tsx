@@ -16,6 +16,7 @@ import { StudioTerminalView, useAgentTerminal } from "../components/StudioTermin
 import { StudioReviewModal } from "../components/StudioReviewModal";
 import { StudioProjectView } from "../components/StudioProjectView";
 import { StudioBrowserView } from "../components/StudioBrowserView";
+import { StudioLocalBrowserView, hasLocalBrowser } from "../components/StudioLocalBrowserView";
 import { StudioShotsView } from "../components/StudioShotsView";
 import { StudioReviewView } from "../components/StudioReviewView";
 import { PushToGithubModal } from "../components/PushToGithubModal";
@@ -625,7 +626,8 @@ export function StudioModePage() {
                 {/* The live browser stays connected while another tab is open, so coming back shows it at once */}
                 {tabs.some((t) => t.kind === "browser") && (
                   <div className={activeTab?.kind === "browser" ? "flex-1 min-h-0 flex flex-col" : "hidden"}>
-                    <StudioBrowserView />
+                    {/* In the desktop app the browser runs on this computer; on the website it is the cloud browser */}
+                    {hasLocalBrowser() ? <StudioLocalBrowserView paused={resizing || sidebarResizing} /> : <StudioBrowserView />}
                   </div>
                 )}
                 {/* Content: each tab fades in */}

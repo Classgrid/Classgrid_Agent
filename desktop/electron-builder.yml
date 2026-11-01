@@ -9,10 +9,19 @@ files:
   - main.js
   - preload.js
   - runner.js
+  - editor.js
+  - browser.js
+  - chats.js
   - offline.html
+  - splash/splash.html
   - app/**/*
   - build/icon.png
   - package.json
+# Classgrid Code, the built-in editor (scripts/get-editor.mjs puts it in editor/): shipped as resources/editor, outside
+# app.asar, because its own node.exe runs it
+extraResources:
+  - from: editor
+    to: editor
 win:
   target:
     - target: nsis

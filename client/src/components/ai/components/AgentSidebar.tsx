@@ -38,6 +38,7 @@ import { DangerConfirmDialog } from "@/components/marketing_ui/danger-confirm-di
 import { Spinner } from "@/components/marketing_ui/spinner";
 import { toast } from "sonner";
 import { fetchWithRescue } from "@/lib/rescue";
+import { OFFLINE_CHAT_NOTE, isUnreachable, keepsChatCopies, listChatCopies, removeChatCopy } from "@/lib/desktopChats";
 import { getSocket } from "@/lib/socketClient";
 import { cn } from "@/lib/utils";
 import { GroupDialog, groupIcon, groupsApi, openProjectId, useChatGroups, type ChatGroup } from "./chat-groups/chatGroups";
@@ -79,6 +80,8 @@ export function AgentNestedMenu({ searchQuery = "" }: { searchQuery?: string }) 
   const isCollapsed = state === "collapsed";
   const [sessions, setSessions] = React.useState<ChatSession[]>([]);
   const [loading, setLoading] = React.useState(false);
+  // Desktop app, no internet: the list shows the chats saved on this computer
+  const [offlineList, setOfflineList] = React.useState(false);
   const [activeSessionId, setActiveSessionId] = React.useState<string | null>(null);
   const [dateFilter, setDateFilter] = React.useState<{ from?: Date; to?: Date } | undefined>();
 
@@ -139,12 +142,21 @@ export function AgentNestedMenu({ searchQuery = "" }: { searchQuery?: string }) 
     if (!silent) setLoading(true);
     askedListRef.current = listQuery;
     fetchWithRescue(endpoint + listQuery, { credentials: "include" })
-      .then(res => res.json())
+      .then(res => {
+        if (keepsChatCopies() && isUnreachable({ status: res.status })) throw new TypeError(`HTTP ${res.status}`);
+        return res.json();
+      })
       .then(data => {
         if (askedListRef.current !== listQuery) return; // a newer list was asked for: this answer is too late
-        if (data.sessions) { setSessions(data.sessions); shownListRef.current = listQuery; }
+        if (data.sessions) { setSessions(data.sessions); shownListRef.current = listQuery; setOfflineList(false); }
       })
-      .catch(err => console.error("Failed to load sessions", err))
+      .catch(async err => {
+        console.error("Failed to load sessions", err);
+        // Desktop app, no internet: list the chats saved on this computer
+        if (!keepsChatCopies() || !isUnreachable(err)) return;
+        const saved = await listChatCopies(listQuery);
+        if (saved && askedListRef.current === listQuery) { setSessions(saved); shownListRef.current = listQuery; setOfflineList(true); }
+      })
       .finally(() => { if (askedListRef.current === listQuery) setLoading(false); });
   };
 
@@ -173,10 +185,13 @@ export function AgentNestedMenu({ searchQuery = "" }: { searchQuery?: string }) 
 
     window.addEventListener("agent:refresh-sessions", handleRefresh);
     window.addEventListener("agent:session-created", handleCreated);
+    // Desktop app: back online, the list comes from the server again
+    if (keepsChatCopies()) window.addEventListener("online", handleRefresh);
     return () => {
       socket?.off("ai:session_title", handleTitle);
       window.removeEventListener("agent:refresh-sessions", handleRefresh);
       window.removeEventListener("agent:session-created", handleCreated);
+      window.removeEventListener("online", handleRefresh);
     };
   }, []);
 
@@ -245,6 +260,7 @@ export function AgentNestedMenu({ searchQuery = "" }: { searchQuery?: string }) 
         credentials: "include"
       });
       if (res.ok) {
+        removeChatCopy(id); // desktop app: the copy on this computer goes too
         toast.success(leaving ? "You left the chat" : "Chat deleted");
         setDeleteSessionId(null);
         if (activeSessionId === id) window.dispatchEvent(new Event("agent:new-chat"));
@@ -1281,6 +1297,7 @@ export function AgentNestedMenu({ searchQuery = "" }: { searchQuery?: string }) 
         </div>
 
         <SidebarGroupContent>
+          {offlineList && <div className="px-2 pb-2 text-xs text-muted-foreground">{OFFLINE_CHAT_NOTE}</div>}
           {inCodeMode && !isStudioMode && (
             <div className="mb-3">
               <div className="group/groups flex items-center justify-between px-2 py-1.5">
