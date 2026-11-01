@@ -166,6 +166,7 @@ import { AiChatSearchPalette } from "@/components/ai/components/AiChatSearchPale
 import { StudioSearchPalette } from "@/features/superadmin/components/StudioSearchPalette";
 import { FileBadge } from "@/features/superadmin/components/StudioFilesView";
 import { ChatMessageToasts } from "@/components/layout/ChatMessageToasts";
+import { isChatHost } from "@/lib/chatHost";
 
 interface AppSidebarProps {
   role: DashboardRole;
@@ -352,7 +353,7 @@ export function AppSidebar({ role, user }: AppSidebarProps) {
                                     tabIndex={0}
                                     onClick={(e) => {
                                       e.preventDefault();
-                                      const isChatSubdomain = window.location.hostname.startsWith('chat.');
+                                      const isChatSubdomain = isChatHost();
                                       const loginPath = isChatSubdomain ? '/login' : getLoginPathForPath(location.pathname);
                                       navigate(`/logout?redirectTo=${encodeURIComponent(loginPath)}`);
                                     }}

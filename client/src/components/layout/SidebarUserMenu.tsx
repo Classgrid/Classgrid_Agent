@@ -67,6 +67,7 @@ import {
 } from "@/components/marketing_ui/dropdown-menu";
 import { fetchLiveStatus, FooterStatusState, getFooterStatusDotClass, getFooterStatusTextClass } from "@/lib/footer-status";
 import { getLoginPathForPath } from "@/features/auth/auth-helpers";
+import { isChatHost } from "@/lib/chatHost";
 
 export function SidebarUserMenu({ user, customTrigger }: { user: { name: string; email?: string; avatar?: string; profilePicture?: string; photoURL?: string }, customTrigger?: React.ReactNode }) {
   const location = useLocation();
@@ -80,7 +81,7 @@ export function SidebarUserMenu({ user, customTrigger }: { user: { name: string;
       : "";
 
   const handleLogout = () => {
-    const isChatSubdomain = window.location.hostname.startsWith('chat.');
+    const isChatSubdomain = isChatHost();
     const loginPath = isChatSubdomain ? '/login' : getLoginPathForPath(location.pathname);
     navigate(`/logout?redirectTo=${encodeURIComponent(loginPath)}`);
   };

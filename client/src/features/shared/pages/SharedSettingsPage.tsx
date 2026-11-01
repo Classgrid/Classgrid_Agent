@@ -75,9 +75,10 @@ import { SettingsRoleRequestCard } from "../components/settings/SettingsRoleRequ
 import { SettingsIdentityCard } from "../components/settings/SettingsIdentityCard";
 import { SettingsPrivacyCard } from "../components/settings/SettingsPrivacyCard";
 import { SettingsVerifiedDomainCard } from "../components/settings/SettingsVerifiedDomainCard";
+import { isChatHost } from "@/lib/chatHost";
 
 export function SharedSettingsPage() {
-  const isChatApp = typeof window !== 'undefined' && window.location.hostname.startsWith('chat.');
+  const isChatApp = isChatHost();
   const { data: profileData, isLoading: isProfileLoading } = useUserProfile();
   const updateProfile = useUpdateProfile();
   

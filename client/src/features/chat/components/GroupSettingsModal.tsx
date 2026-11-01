@@ -90,6 +90,7 @@ import { DangerConfirmDialog } from "@/components/marketing_ui/danger-confirm-di
 import { Input } from "@/components/marketing_ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/marketing_ui/select";
 import { GROUP_SETTING_LABELS } from "./groupSettingLabels";
+import { isChatHost } from "@/lib/chatHost";
 
 interface GroupSettingsModalProps {
   groupId: string;
@@ -741,7 +742,7 @@ export function GroupSettingsModal({ groupId, onClose, onLeaveGroup, onUserClick
 
 
                   {/* Auto-Grant Admin Roles (ERP school roles: hidden on chat.classgrid.in, where they don't apply) */}
-                  <div className={`flex flex-col gap-2 p-3 bg-muted/30 rounded-lg border border-border md:col-span-2 ${typeof window !== 'undefined' && window.location.hostname.startsWith('chat.') ? 'hidden' : ''}`}>
+                  <div className={`flex flex-col gap-2 p-3 bg-muted/30 rounded-lg border border-border md:col-span-2 ${isChatHost() ? 'hidden' : ''}`}>
                     <span className="text-sm font-medium text-foreground">Auto-Grant Admin by Role</span>
                     <span className="text-xs text-muted-foreground mb-2">Anyone inside this chat group with these roles will automatically be given Group Admin rights.</span>
                     <div className="flex flex-wrap gap-2">
@@ -779,7 +780,7 @@ export function GroupSettingsModal({ groupId, onClose, onLeaveGroup, onUserClick
                         className="flex-1 py-2 rounded bg-secondary text-secondary-foreground text-sm font-medium hover:bg-secondary/80 transition-colors"
                         onClick={() => {
                           onClose();
-                          if (window.location.hostname.startsWith('chat.')) {
+                          if (isChatHost()) {
                             navigate('/audit');
                           } else if (user?.role === 'super_admin') {
                             navigate('/superadmin/audit-logs');
@@ -797,7 +798,7 @@ export function GroupSettingsModal({ groupId, onClose, onLeaveGroup, onUserClick
                         onClick={() => {
                           onClose();
                           // chat.classgrid.in has its requests page at /requests
-                          navigate(window.location.hostname.startsWith('chat.') ? `/requests/${groupId}` : `/join-requests/${groupId}`);
+                          navigate(isChatHost() ? `/requests/${groupId}` : `/join-requests/${groupId}`);
                         }}
                      >
                         Join Requests

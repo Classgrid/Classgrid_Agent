@@ -168,6 +168,7 @@ import { AgentReviewsPage } from "@/features/superadmin/pages/AgentReviewsPage";
 import { AiUsageDashboardPage } from "@/features/superadmin/pages/AiUsageDashboardPage";
 import { AiModelsPage } from "@/features/superadmin/pages/AiModelsPage";
 import { PlaygroundPage } from "@/features/superadmin/pages/PlaygroundPage";
+import { isChatHost } from "@/lib/chatHost";
 
 
 
@@ -402,8 +403,8 @@ export function AppRouter() {
           <Route path="/marketplace" element={<GenericPage title="Marketplace" />} />
           <Route path="/my-requests" element={<JoinRequestPage />} />
             {/* chat.classgrid.in: group audit logs & analytics */}
-            <Route path="/analytics" element={typeof window !== "undefined" && window.location.hostname.startsWith("chat.") ? <ChatAnalyticsPage /> : <Navigate to="/dashboard" />} />
-            <Route path="/audit" element={typeof window !== "undefined" && window.location.hostname.startsWith("chat.") ? <GroupAuditLogsPage /> : <NotFoundPage />} />
+            <Route path="/analytics" element={isChatHost() ? <ChatAnalyticsPage /> : <Navigate to="/dashboard" />} />
+            <Route path="/audit" element={isChatHost() ? <GroupAuditLogsPage /> : <NotFoundPage />} />
           <Route path="profile" element={<SharedProfilePage />} />
           <Route path="settings" element={<SharedSettingsPage />} />
 

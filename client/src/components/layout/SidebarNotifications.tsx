@@ -70,6 +70,7 @@ import {
 import { Switch } from "@/components/marketing_ui/switch";
 import { useCurrentUser } from "@/features/auth/queries/useCurrentUser";
 import { useUserChannel, useRealtimeChannel } from "@/features/chat/hooks/useRealtimeChat";
+import { isChatHost } from "@/lib/chatHost";
 
 function urlBase64ToUint8Array(base64String: string) {
   const padding = '='.repeat((4 - base64String.length % 4) % 4);
@@ -275,7 +276,7 @@ export function SidebarNotifications({ settingsPath = "/settings" }: SidebarNoti
                       if (!n.isRead) markReadMutation.mutate(n._id);
                       if (n.link) {
                         // chat.classgrid.in: chat notifications open the chat right here, in the same tab
-                        if (window.location.hostname.startsWith("chat.") && (n.type === "chat" || n.type === "group_join" || /^\/(platform\/)?chat(\/|\?|$)/.test(n.link))) {
+                        if (isChatHost() && (n.type === "chat" || n.type === "group_join" || /^\/(platform\/)?chat(\/|\?|$)/.test(n.link))) {
                           const q = n.link.includes("?") ? n.link.slice(n.link.indexOf("?")) : "";
                           navigate(`/agent/chat${q}`);
                           return;

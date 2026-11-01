@@ -82,6 +82,7 @@ import { useOnlineUsers } from "@/features/chat/context/PresenceContext";
 import { formatDistanceToNow } from "date-fns";
 import { SharedMediaView } from "../components/SharedMediaView";
 import { TokenActivityHeatmap } from "../components/TokenActivityHeatmap";
+import { isChatHost } from "@/lib/chatHost";
 
 type ProfileData = {
   name: string;
@@ -750,7 +751,7 @@ export function SharedProfilePage({ publicUser, groupData, mode = "user", onClos
             {/* Dynamic Contextual Profile Data - Only shown to the user themselves */}
             {!isReadOnly && !isGroup && (
               <div className="mt-8 mb-6">
-                {(form.role === "super_admin" || form.role === "Super Admin" || form.role === "user" || window.location.hostname.startsWith('chat.')) ? (
+                {(form.role === "super_admin" || form.role === "Super Admin" || form.role === "user" || isChatHost()) ? (
                   <SuperAdminProfileView profileData={profileData?.user || {}} isReadOnly={isReadOnly} />
                 ) : (
                   <ContextualProfile 

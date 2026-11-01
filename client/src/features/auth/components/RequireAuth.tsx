@@ -62,6 +62,7 @@ import { useCurrentUser } from "../queries/useCurrentUser";
 import { PresenceProvider } from "@/features/chat/context/PresenceContext";
 import { apiClient } from "@/lib/apiClient";
 import { OAUTH_CONSENT_PATH, peekOAuthConsentReturn, rememberOAuthConsentReturn } from "@/features/oauth/lib/oauthReturn";
+import { isChatHost } from "@/lib/chatHost";
 
 export function RequireAuth() {
   const location = useLocation();
@@ -124,8 +125,8 @@ export function RequireAuth() {
 
   // chat.classgrid.in: no chat until sign-up is finished (verified WhatsApp number); the login page
   // continues the sign-up at the WhatsApp step.
-  const isChatHost = typeof window !== "undefined" && window.location.hostname.split(".")[0] === "chat";
-  if (isChatHost && user?.needsChatOnboarding) {
+  const onChatHost = isChatHost();
+  if (onChatHost && user?.needsChatOnboarding) {
     return <Navigate to="/login?continue=signup" replace />;
   }
 
