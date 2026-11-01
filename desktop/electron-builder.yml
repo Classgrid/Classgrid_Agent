@@ -22,6 +22,15 @@ files:
 extraResources:
   - from: editor
     to: editor
+  # electron-builder always skips folders named node_modules, so the editor's are listed one by one
+  - from: editor/node_modules
+    to: editor/node_modules
+  - from: editor/extensions/node_modules
+    to: editor/extensions/node_modules
+  - from: editor/extensions/esbenp.prettier-vscode/node_modules
+    to: editor/extensions/esbenp.prettier-vscode/node_modules
+  - from: editor/extensions/formulahendry.code-runner/node_modules
+    to: editor/extensions/formulahendry.code-runner/node_modules
 win:
   target:
     - target: nsis
