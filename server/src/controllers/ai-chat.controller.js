@@ -84,6 +84,7 @@ import mongoose from "mongoose";
 import NotificationLog from "../models/NotificationLog.js";
 import { getMcpTools, handleToolCall, readSandboxFiles } from "../mcp/tools.js";
 import { CUSTOM_MCP_TOOL, runCustomMcpTool, customMcpPromptLine } from "../services/custom-mcp-ai.js";
+import { PLAY_SONG_TOOL, songTools, runPlaySong, runDownloadSong } from "../services/music-ai.js";
 import { parseHTML } from "linkedom";
 import { Readability } from "@mozilla/readability";
 import TurndownService from "turndown";
@@ -2719,6 +2720,8 @@ If they ask whether their college/school uses Classgrid, say you can't see that 
                     })),
                 // Custom connectors (custom MCP servers): off in shared Grid chats, like the other plugins
                 ...(req.user && !gridSender ? [CUSTOM_MCP_TOOL] : []),
+                // Songs: play_song for everyone; download_song only for the owner's accounts, never in shared chats
+                ...(req.user && !gridSender ? songTools(req.user.email) : [PLAY_SONG_TOOL]),
                 {
                     type: "function",
                     function: {
@@ -4877,6 +4880,8 @@ If they ask whether their college/school uses Classgrid, say you can't see that 
                         return "UI action emitted. The integration panel has been opened for the user.";
                     },
                     custom_mcp_connector: async (args) => runCustomMcpTool(req.user?._id || req.user?.id, args),
+                    play_song: async (args) => runPlaySong(args),
+                    download_song: async (args) => (gridSender ? JSON.stringify({ error: "Downloading songs isn't available in shared chats." }) : runDownloadSong(req.user, args)),
                 }).map(([toolName, handler]) => [
                     toolName,
                     async (args) => {

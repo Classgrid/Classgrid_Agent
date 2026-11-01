@@ -128,6 +128,7 @@ import billingCheckoutRoutes from "../src/routes/billing-checkout.routes.js";
 import aiIntegrationsRoutes from "../src/routes/ai-integrations.routes.js";
 import customMcpRoutes from "../src/routes/custom-mcp.routes.js";
 import netCheckRoutes from "../src/routes/net-check.routes.js";
+import musicRoutes from "../src/routes/music.routes.js";
 import whatsappRoutes from "../src/routes/whatsapp.routes.js";
 import buildRoutes from "../src/routes/build.routes.js";
 // import "../src/workers/buildWorker.js"; // Retired build robot (N2): not started anymore, see routes/build.routes.js
@@ -433,6 +434,7 @@ app.use("/api/ai/schedules", aiScheduleRoutes);
 app.use("/api/ai-integrations", aiIntegrationsRoutes);
 app.use("/api/custom-mcp", customMcpRoutes); // custom MCP servers (custom plugins) each user adds
 app.use("/api/net-check", netCheckRoutes); // VPN / proxy check for chat.classgrid.in
+app.use("/api/music", musicRoutes); // songs the owner downloaded with the AI (download_song)
 app.use("/api/whatsapp", whatsappRoutes);
 app.use("/api/voice", voiceRoutes);
 app.use("/api/audit", auditRoutes);
