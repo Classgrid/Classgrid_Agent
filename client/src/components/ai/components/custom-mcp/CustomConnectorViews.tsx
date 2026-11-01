@@ -1,6 +1,6 @@
 // Custom connectors in AI Hub > Plugins: logo, list card and the detail pages (log in, tools, turn off, remove)
 import React, { useState } from "react";
-import { ChevronRight, LogIn, LogOut, MessageSquare, Plug, Power, RefreshCw, Trash2 } from "lucide-react";
+import { ChevronRight, LogIn, LogOut, MessageSquare, Plug, Power, RefreshCw, Unplug } from "lucide-react";
 import { toast } from "sonner";
 import { Spinner } from "@/components/marketing_ui/spinner";
 import { DangerConfirmDialog } from "@/components/marketing_ui/danger-confirm-dialog";
@@ -91,7 +91,7 @@ export function CustomConnectorDetail({ server, onBack, onChanged, onRemoved, on
     { label: busy === "refresh" ? "Refreshing..." : "Refresh tools", icon: RefreshCw, disabled: !!busy, onClick: () => run("refresh", async () => { onChanged(await mcpApi.refresh(server.id)); toast.success("Tools refreshed"); }) },
     { label: server.enabled ? "Turn off" : "Turn on", icon: Power, disabled: !!busy, onClick: () => run("toggle", async () => onChanged(await mcpApi.update(server.id, { enabled: !server.enabled }))) },
     ...(server.authType === "oauth" && connected ? [{ label: "Log out", icon: LogOut, disabled: !!busy, onClick: () => run("logout", async () => onChanged(await mcpApi.logout(server.id))) }] : []),
-    { label: "Remove", icon: Trash2, danger: true, disabled: !!busy, onClick: () => setConfirmRemove(true) },
+    { label: "Disconnect", icon: Unplug, danger: true, disabled: !!busy, onClick: () => setConfirmRemove(true) },
   ];
   const host = hostOf(server.url);
 
@@ -140,12 +140,12 @@ export function CustomConnectorDetail({ server, onBack, onChanged, onRemoved, on
       <DangerConfirmDialog
         open={confirmRemove}
         onOpenChange={(open) => { if (!open && busy !== "remove") setConfirmRemove(false); }}
-        title={`Remove ${server.name}`}
-        description={`Classgrid AI will stop using ${server.name}. You can add it again later.`}
-        warningMessage="Its login and tools are removed from Classgrid."
-        actionLabel="Remove"
+        title={`Disconnect ${server.name}`}
+        description={`Classgrid AI will stop using ${server.name}. You can connect it again any time.`}
+        warningMessage={`Your ${server.name} login is removed from Classgrid.`}
+        actionLabel="Disconnect"
         isLoading={busy === "remove"}
-        onConfirm={() => run("remove", async () => { await mcpApi.remove(server.id); setConfirmRemove(false); onRemoved(server.id); toast.success(`${server.name} removed`); })}
+        onConfirm={() => run("remove", async () => { await mcpApi.remove(server.id); setConfirmRemove(false); onRemoved(server.id); toast.success(`${server.name} disconnected`); })}
       />
     </div>
   );
