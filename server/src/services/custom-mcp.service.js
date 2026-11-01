@@ -208,6 +208,19 @@ export async function refreshTools(doc) {
             cursor = res.nextCursor;
             if (!cursor) break;
         }
+        // Some servers list their tools for any key (Render): a harmless read proves the key really works
+        const check = MCP_CATALOG.find((a) => a.id === doc.catalogId)?.checkTool;
+        if (check && tools.some((t) => t.name === check)) {
+            const res = await client.callTool({ name: check, arguments: {} }, undefined, { timeout: 30000 }).catch((e) => ({ isError: true, content: [{ type: "text", text: e.message }] }));
+            if (res?.isError) {
+                const why = (res.content || []).map((c) => c.text || "").join(" ").trim();
+                doc.tools = tools;
+                doc.status = "error";
+                doc.lastError = /unauthori[sz]ed|forbidden|invalid|401|403/i.test(why) ? "That API key didn't work. Check it and try again." : why.slice(0, 300) || "The server refused the check.";
+                await doc.save();
+                return doc;
+            }
+        }
         doc.tools = tools;
         doc.toolsFetchedAt = new Date();
         doc.status = "connected";

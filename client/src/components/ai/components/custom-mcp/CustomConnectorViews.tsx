@@ -177,7 +177,9 @@ export function CatalogAppDetail({ app, onBack, onAdded }: { app: McpCatalogApp;
   const [useToken, setUseToken] = useState(false);
   const [token, setToken] = useState("");
   const authType = app.askUrl && useToken ? "api_key" : app.auth;
-  const ready = !app.askUrl || (/^https:\/\/\S+$/i.test(ownUrl.trim()) && (!useToken || token.trim()));
+  // Apps that only connect with the user's own API key (Render)
+  const keyOnly = app.auth === "api_key";
+  const ready = (!app.askUrl || (/^https:\/\/\S+$/i.test(ownUrl.trim()) && (!useToken || token.trim()))) && (!keyOnly || !!token.trim());
   const connect = async () => {
     if (!ready) return;
     setBusy(true);
@@ -217,7 +219,7 @@ export function CatalogAppDetail({ app, onBack, onAdded }: { app: McpCatalogApp;
         </div>
       </div>
       <ul className="space-y-3 mb-6">
-        {[`Let Classgrid use ${app.name} for you`, app.auth === "oauth" ? `Log in with your own ${app.name} account` : "No login needed", `Made by ${app.name}, connected through MCP`].map((f) => (
+        {[`Let Classgrid use ${app.name} for you`, app.auth === "oauth" ? `Log in with your own ${app.name} account` : keyOnly ? `Connect with your own ${app.name} API key` : "No login needed", `Made by ${app.name}, connected through MCP`].map((f) => (
           <li key={f} className="flex items-start gap-3 text-muted-foreground text-sm">
             <CheckCircle2 className="w-4 h-4 shrink-0 mt-0.5" />
             <span>{f}</span>
@@ -253,7 +255,20 @@ export function CatalogAppDetail({ app, onBack, onAdded }: { app: McpCatalogApp;
           )}
         </div>
       )}
-      {/* Shown only once the form is filled in (apps that need an address), never squashed */}
+      {keyOnly && (
+        <div className="space-y-1.5 mb-6 max-w-xl">
+          <p className="text-sm font-medium text-foreground">Your {app.name} API key</p>
+          <input
+            type="password"
+            value={token}
+            onChange={(e) => setToken(e.target.value)}
+            placeholder="API key"
+            className="w-full h-10 px-3 rounded-lg border border-border bg-background text-sm font-mono text-foreground placeholder:text-muted-foreground outline-none focus:border-foreground/30"
+          />
+          {app.keyHint && <p className="text-xs text-muted-foreground">{app.keyHint}</p>}
+        </div>
+      )}
+      {/* Shown only once the form is filled in (apps that need an address or a key), never squashed */}
       {ready && (
         <Button variant="outline" onClick={connect} disabled={busy} className={cn(secondaryBtn, "h-10 min-h-10 w-fit px-6 shrink-0")}>
           {busy ? <Spinner className="w-4 h-4 mr-2" /> : null}

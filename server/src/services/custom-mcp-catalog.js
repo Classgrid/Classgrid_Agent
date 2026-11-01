@@ -44,6 +44,8 @@ export const MCP_CATALOG = [
     { id: "amplitude", name: "Amplitude", description: "Product analytics and charts", url: "https://mcp.amplitude.com/mcp", auth: "oauth", logo: fav("amplitude.com") },
     { id: "datadog", name: "Datadog", description: "Logs, metrics and monitors", url: "https://mcp.datadoghq.com/api/unstable/mcp-server/mcp", auth: "oauth", logo: si("datadog") },
     { id: "fireflies", name: "Fireflies", description: "Meeting notes and transcripts", url: "https://api.fireflies.ai/mcp", auth: "oauth", logo: fav("fireflies.ai") },
+    // Render has no login button for outside apps: the user's own Render API key is sent instead
+    { id: "render", name: "Render", description: "Services, deploys, logs and databases", url: "https://mcp.render.com/mcp", auth: "api_key", logo: si("render"), invertInDarkMode: true, keyHint: "Create one in Render under Account Settings → API Keys.", checkTool: "list_workspaces" },
     // Every n8n has its own address, so the user (or the AI, by asking) gives it
     { id: "n8n", name: "n8n", description: "Run your n8n workflows", url: "", auth: "oauth", logo: si("n8n"), askUrl: { placeholder: "https://yourname.app.n8n.cloud/mcp-server/http", hint: "Your n8n's MCP address. Turn on MCP access in your n8n settings and copy the address shown there." } },
     { id: "huggingface", name: "Hugging Face", description: "Models, datasets and Spaces", url: "https://huggingface.co/mcp", auth: "none", logo: si("huggingface") },

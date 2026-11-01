@@ -61,7 +61,7 @@ export async function runCustomMcpTool(userId, args = {}) {
         if (op === "list_apps") {
             const mine = await CustomMcpServer.find({ userId }).select("catalogId").lean();
             const have = new Set(mine.map((m) => m.catalogId).filter(Boolean));
-            return out({ apps: MCP_CATALOG.map((a) => ({ app: a.id, name: a.name, what: a.description, login: a.auth === "oauth" ? "log in with the app" : "no login", ...(a.askUrl ? { needs_url: `ask the user for their address, like ${a.askUrl.placeholder}` } : {}), added: have.has(a.id) })), note: "Any other app with a remote MCP URL can be added with name + url." });
+            return out({ apps: MCP_CATALOG.map((a) => ({ app: a.id, name: a.name, what: a.description, login: a.auth === "oauth" ? "log in with the app" : a.auth === "api_key" ? "the user's API key, pasted in AI Hub > Plugins" : "no login", ...(a.askUrl ? { needs_url: `ask the user for their address, like ${a.askUrl.placeholder}` } : {}), added: have.has(a.id) })), note: "Any other app with a remote MCP URL can be added with name + url." });
         }
 
         if (op === "list_servers") {
@@ -74,6 +74,7 @@ export async function runCustomMcpTool(userId, args = {}) {
             // A known app with its own address per user (n8n) uses the URL the user gave; other known apps their fixed one
             const known = named && (named.askUrl || !args.url) ? named : null;
             if (args.app && !known && !args.url) return out({ error: `"${args.app}" isn't in the known apps list. Ask the user for the app's MCP server URL, then add it with name + url.` });
+            if (known?.auth === "api_key" && !args.api_key) return out({ error: `${known.name} connects with the user's own API key (${known.keyHint || "from their account settings"}). Tell them to open AI Hub > Plugins > ${known.name} and paste the key there; don't ask them to paste it in the chat.` });
             if (known?.askUrl && !args.url) return out({ error: `Every ${known.name} has its own address. Ask the user for it (it looks like ${known.askUrl.placeholder}; ${known.askUrl.hint}), then call add_server again with app and url.` });
             const input = known
                 ? { name: known.name, description: known.description, url: known.askUrl ? args.url : known.url, authType: known.askUrl && args.auth_type ? args.auth_type : known.auth, apiKey: args.api_key, apiKeyHeader: args.api_key_header, catalogId: known.id, iconUrl: known.logo }
