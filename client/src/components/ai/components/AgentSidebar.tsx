@@ -40,7 +40,7 @@ import { toast } from "sonner";
 import { fetchWithRescue } from "@/lib/rescue";
 import { getSocket } from "@/lib/socketClient";
 import { cn } from "@/lib/utils";
-import { AddToGroupSub, GroupDialog, groupIcon, groupsApi, openProjectId, useChatGroups, type ChatGroup } from "./chat-groups/chatGroups";
+import { GroupDialog, groupIcon, groupsApi, openProjectId, useChatGroups, type ChatGroup } from "./chat-groups/chatGroups";
 
 interface ChatSession {
   id: string;
@@ -644,14 +644,6 @@ export function AgentNestedMenu({ searchQuery = "" }: { searchQuery?: string }) 
                   <Pin className="w-4 h-4 text-slate-500 dark:text-white/70" strokeWidth={2} />
                   {session.pinned ? "Unpin chat" : "Pin chat"}
                 </DropdownMenuItem>
-
-                {inCodeMode && !(session as any).shared && (
-                  <AddToGroupSub
-                    sessionId={session.id}
-                    groups={groups}
-                    onNewGroup={() => { setPinnedOpen(false); setRecentOpen(false); setGroupDialog({ project: openProject, sessionId: session.id }); }}
-                  />
-                )}
 
                 {!isProjectMode && !isStudioMode && !(session as any).shared && (
                   <DropdownMenuSub onOpenChange={(open) => { if (open && projects === null) loadProjects(); }}>
