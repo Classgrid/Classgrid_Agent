@@ -5013,6 +5013,9 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
                         return who && who !== gridMyEmail ? <GridSenderTag person={gridPeople[who] || { name: who }} /> : null;
                       })()}
 
+                      {/* Studio: the code comments and quotes sent with it, above the text (its time and buttons show under the text) */}
+                      {isUser && message.codeNotes && message.codeNotes.length > 0 && <CodeNoteChips notes={message.codeNotes} />}
+
                       {/* ── Text Bubble ── */}
                       {(message.content || (message.steps && message.steps.length > 0) || (message.thought && message.thought.trim().length > 0) || (message.attachments && message.attachments.length > 0) || (!isUser && index === messages.length - 1 && thinking)) && (
                         <div
@@ -5737,8 +5740,6 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
                           )}
                         </div>
                       )}
-
-                      {isUser && message.codeNotes && message.codeNotes.length > 0 && <CodeNoteChips notes={message.codeNotes} />}
 
                       {/* â”€â”€ Attachments (Outside Bubble) â”€â”€ */}
                       {isUser && message.attachments && message.attachments.length > 0 && (
