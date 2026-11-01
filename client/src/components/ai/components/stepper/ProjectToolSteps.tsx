@@ -109,7 +109,7 @@ export function ProjectEditStep({ step }: { step: Step }) {
         <ShimmerText active={loading} className="shrink-0">{loading ? (fromSpec ? 'Writing' : 'Editing') : failed ? 'Could not edit' : step.tool === 'write_project_file' || fromSpec ? 'Created' : 'Edited'}</ShimmerText>
         <FileBadge path={path} />
         <FileLink path={path} find={edits[0]?.new_text?.split("\n").find((l) => l.trim()) || undefined} />
-        {!failed && <span className="shrink-0 text-xs text-green-600 dark:text-green-500">+{added}</span>}
+        {!failed && <span className="shrink-0 text-xs text-[#16a34a] dark:text-[#22c55e]">+{added}</span>}
         {!failed && <span className="shrink-0 text-xs text-red-600 dark:text-red-500">-{removed}</span>}
         {loading && <Spinner className="size-3.5 shrink-0" />}
       </Row>
@@ -533,7 +533,7 @@ function ChangeRow({ change, verb }: { change: FileChange; verb?: string }) {
       {verb && <span className="shrink-0">{verb}</span>}
       <FileBadge path={change.path} />
       <FileLink path={change.path} />
-      <span className="shrink-0 text-xs text-green-600 dark:text-green-500">+{change.added}</span>
+      <span className="shrink-0 text-xs text-[#16a34a] dark:text-[#22c55e]">+{change.added}</span>
       <span className="shrink-0 text-xs text-red-600 dark:text-red-500">-{change.removed}</span>
       {dir && !verb && <span className="truncate text-xs opacity-60">{dir}</span>}
     </div>
@@ -625,7 +625,7 @@ export function FilesChangedSummary({ steps, checkpoint, sessionId }: { steps: S
     <div className="mt-3 rounded-xl border border-border bg-secondary/30">
       <button type="button" onClick={() => setOpen(!open)} className="w-full flex items-center gap-2 px-4 py-2.5 text-[14px] text-slate-500 dark:text-[#8a8a8a] hover:text-foreground">
         <span>{title}</span>
-        {!done && <span className="text-green-600 dark:text-green-500">+{added}</span>}
+        {!done && <span className="text-[#16a34a] dark:text-[#22c55e]">+{added}</span>}
         {!done && <span className="text-red-600 dark:text-red-500">-{removed}</span>}
         {open ? <ChevronDown className="size-3.5" /> : <ChevronRight className="size-3.5" />}
         {checkpoint && sessionId && inProjectMode() && !status && (

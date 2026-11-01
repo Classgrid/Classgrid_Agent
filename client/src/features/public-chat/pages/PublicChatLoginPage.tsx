@@ -131,7 +131,7 @@ function CountryCodePicker({ value, onChange }: { value: string; onChange: (valu
 
   return (
     <Popover open={open} onOpenChange={(next) => { setOpen(next); if (!next) setQuery(""); }}>
-      <PopoverTrigger className="flex w-full h-12 items-center justify-between gap-1 rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-900 transition-all outline-none focus:border-emerald-500 focus:shadow-[0_0_18px_rgba(16,185,129,0.2)] dark:border-[#2a2a2a] dark:bg-[#161616] dark:text-[#f1f1f1] dark:focus:border-emerald-500">
+      <PopoverTrigger className="flex w-full h-12 items-center justify-between gap-1 rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-900 transition-all outline-none focus:border-emerald-500 focus:shadow-[0_0_18px_rgba(127,127,127,0.2)] dark:border-[#2a2a2a] dark:bg-[#161616] dark:text-[#f1f1f1] dark:focus:border-emerald-500">
         {selected ? (
           <span className="flex items-center gap-2">
             {SelectedFlag ? <SelectedFlag className="w-4 h-auto rounded-[2px]" /> : null}
@@ -833,7 +833,7 @@ function LoginContent() {
     },
     strong: {
       border: "border-emerald-500/80",
-      glow: "shadow-[0_0_20px_rgba(16,185,129,0.25)]",
+      glow: "shadow-[0_0_20px_rgba(127,127,127,0.25)]",
       text: "text-emerald-400",
       bar: "bg-emerald-500 w-full",
       label: "Strong password",
@@ -845,7 +845,7 @@ function LoginContent() {
   const confirmBorder = !isConfirmTouched
     ? "border-slate-200 dark:border-[#2a2a2a]"
     : isPasswordMatch
-    ? "border-emerald-500/80 shadow-[0_0_18px_rgba(16,185,129,0.22)]"
+    ? "border-emerald-500/80 shadow-[0_0_18px_rgba(127,127,127,0.22)]"
     : "border-red-500/70 shadow-[0_0_18px_rgba(239,68,68,0.20)]";
 
   const handleSetupPassword = async (e: React.FormEvent) => {
@@ -1263,7 +1263,7 @@ function LoginContent() {
                     placeholder="WhatsApp Number"
                     value={whatsappPhone}
                     onChange={(e) => setWhatsappPhone(e.target.value.replace(/\D/g, ""))}
-                    className="w-full h-12 rounded-xl border border-slate-200 bg-white px-4 text-sm text-slate-900 transition-all outline-none placeholder:text-slate-400 focus:border-emerald-500 focus:shadow-[0_0_18px_rgba(16,185,129,0.2)] dark:border-[#2a2a2a] dark:bg-[#161616] dark:text-[#f1f1f1] dark:placeholder:text-[#555] dark:focus:border-emerald-500"
+                    className="w-full h-12 rounded-xl border border-slate-200 bg-white px-4 text-sm text-slate-900 transition-all outline-none placeholder:text-slate-400 focus:border-emerald-500 focus:shadow-[0_0_18px_rgba(127,127,127,0.2)] dark:border-[#2a2a2a] dark:bg-[#161616] dark:text-[#f1f1f1] dark:placeholder:text-[#555] dark:focus:border-emerald-500"
                   />
                 </div>
               </div>
@@ -1375,7 +1375,7 @@ function LoginContent() {
                   placeholder="Enter your age"
                   value={age}
                   onChange={(e) => setAge(e.target.value)}
-                  className="w-full h-12 rounded-xl border border-slate-200 bg-white px-4 text-sm text-slate-900 transition-all outline-none placeholder:text-slate-400 focus:border-emerald-500 focus:shadow-[0_0_18px_rgba(16,185,129,0.2)] dark:border-[#2a2a2a] dark:bg-[#161616] dark:text-[#f1f1f1] dark:placeholder:text-[#555] dark:focus:border-emerald-500"
+                  className="w-full h-12 rounded-xl border border-slate-200 bg-white px-4 text-sm text-slate-900 transition-all outline-none placeholder:text-slate-400 focus:border-emerald-500 focus:shadow-[0_0_18px_rgba(127,127,127,0.2)] dark:border-[#2a2a2a] dark:bg-[#161616] dark:text-[#f1f1f1] dark:placeholder:text-[#555] dark:focus:border-emerald-500"
                 />
               </div>
 
@@ -1397,7 +1397,7 @@ function LoginContent() {
               </div>
               <div className="space-y-1.5">
                 <Select value={role} onValueChange={setRole}>
-                  <SelectTrigger className="w-full !h-12 rounded-xl border border-slate-200 bg-white px-4 text-sm text-slate-900 transition-all outline-none focus:border-emerald-500 focus-visible:ring-0 focus-visible:border-emerald-500 focus:shadow-[0_0_18px_rgba(16,185,129,0.2)] dark:border-[#2a2a2a] dark:bg-[#161616] dark:text-[#f1f1f1] dark:focus:border-emerald-500" size="default">
+                  <SelectTrigger className="w-full !h-12 rounded-xl border border-slate-200 bg-white px-4 text-sm text-slate-900 transition-all outline-none focus:border-emerald-500 focus-visible:ring-0 focus-visible:border-emerald-500 focus:shadow-[0_0_18px_rgba(127,127,127,0.2)] dark:border-[#2a2a2a] dark:bg-[#161616] dark:text-[#f1f1f1] dark:focus:border-emerald-500" size="default">
                     <SelectValue placeholder="Select your role" />
                   </SelectTrigger>
                   <SelectContent>

@@ -63,8 +63,8 @@ function LoadingSmoke() {
   const reduce = useReducedMotion();
   // side, color, size/position, how far it drifts in, timing
   const puffs = [
-    { side: "left", color: "#34d399", top: "28%", h: "55%", w: "70%", from: "-25%", to: "12%", delay: 0, duration: 10 },
-    { side: "left", color: "#34d399", top: "40%", h: "40%", w: "50%", from: "-10%", to: "35%", delay: 0.8, duration: 13 },
+    { side: "left", color: "#a3a3a3", top: "28%", h: "55%", w: "70%", from: "-25%", to: "12%", delay: 0, duration: 10 },
+    { side: "left", color: "#a3a3a3", top: "40%", h: "40%", w: "50%", from: "-10%", to: "35%", delay: 0.8, duration: 13 },
     { side: "right", color: "#f97316", top: "28%", h: "55%", w: "70%", from: "25%", to: "-12%", delay: 0.3, duration: 11 },
     { side: "right", color: "#f97316", top: "40%", h: "40%", w: "50%", from: "10%", to: "-35%", delay: 1.1, duration: 14 },
   ] as const;
@@ -1051,7 +1051,7 @@ export function ProjectModePage() {
               {review.files && (
                 <span className="text-sm text-muted-foreground">
                   {review.files.length} file{review.files.length === 1 ? "" : "s"}
-                  <span className="ml-2 text-green-600 dark:text-green-500">+{review.files.reduce((n, f) => n + f.added, 0)}</span>
+                  <span className="ml-2 text-[#16a34a] dark:text-[#22c55e]">+{review.files.reduce((n, f) => n + f.added, 0)}</span>
                   <span className="ml-1 text-red-600 dark:text-red-500">-{review.files.reduce((n, f) => n + f.removed, 0)}</span>
                 </span>
               )}
@@ -1071,7 +1071,7 @@ export function ProjectModePage() {
                     <button onClick={() => setReview({ ...review, open: review.open === f.file ? null : f.file })} className="flex min-w-0 flex-1 items-center gap-2 text-left text-sm hover:text-foreground">
                       <span className="truncate font-medium">{f.file}</span>
                       <span className="shrink-0 text-xs text-muted-foreground">{f.kind}</span>
-                      <span className="shrink-0 text-xs text-green-600 dark:text-green-500">+{f.added}</span>
+                      <span className="shrink-0 text-xs text-[#16a34a] dark:text-[#22c55e]">+{f.added}</span>
                       <span className="shrink-0 text-xs text-red-600 dark:text-red-500">-{f.removed}</span>
                     </button>
                     <button disabled={review.busy} onClick={() => rejectChanges(f.file)} className="shrink-0 px-2.5 py-1 rounded-md border border-border text-xs hover:bg-secondary disabled:opacity-50">Reject</button>

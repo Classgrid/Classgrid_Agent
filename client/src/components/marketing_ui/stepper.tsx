@@ -116,7 +116,7 @@ export function Stepper({ steps, currentStep, className = "" }: StepperProps) {
                       isCompleted
                         ? "bg-emerald-500 border-emerald-500 text-white shadow-md"
                         : isActive
-                        ? "bg-background border-emerald-500 text-emerald-600 shadow-[0_0_15px_rgba(52,211,153,0.4)] ring-4 ring-emerald-500/20"
+                        ? "bg-background border-emerald-500 text-emerald-600 shadow-[0_0_15px_rgba(127,127,127,0.4)] ring-4 ring-emerald-500/20"
                         : "bg-muted border-muted-foreground/30 text-muted-foreground"
                     }
                   `}

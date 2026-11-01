@@ -467,11 +467,11 @@ export default function RadialOrbitalTimeline({ activeTab, rings, roleDataMap = 
 
               {/* Animated Gradients for Data Flow */}
               <linearGradient id="grad-emerald" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="550" y2="550">
-                <stop offset="0%" stopColor="#10b981" stopOpacity="0.2">
+                <stop offset="0%" stopColor="#a3a3a3" stopOpacity="0.2">
                   <animate attributeName="offset" values="0;1;0" dur="2s" repeatCount="indefinite" />
                 </stop>
-                <stop offset="50%" stopColor="#34d399" stopOpacity="1" />
-                <stop offset="100%" stopColor="#059669" stopOpacity="0.2">
+                <stop offset="50%" stopColor="#d4d4d4" stopOpacity="1" />
+                <stop offset="100%" stopColor="#737373" stopOpacity="0.2">
                   <animate attributeName="offset" values="0;1;0" dur="2s" repeatCount="indefinite" />
                 </stop>
               </linearGradient>

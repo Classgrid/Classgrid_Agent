@@ -117,7 +117,7 @@ export function PillTabs({
             {isActive && (
               <motion.div
                 layoutId={layoutId}
-                className="absolute inset-0 -z-10 rounded-full bg-emerald-500 shadow-[0_0_15px_rgba(16,185,129,0.5)]"
+                className="absolute inset-0 -z-10 rounded-full bg-emerald-500 shadow-[0_0_15px_rgba(127,127,127,0.5)]"
                 transition={{ type: "spring", bounce: 0.2, duration: 0.6 }}
               />
             )}

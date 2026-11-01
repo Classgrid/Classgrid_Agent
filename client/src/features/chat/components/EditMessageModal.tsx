@@ -116,7 +116,7 @@ export function EditMessageModal({ message, onClose, onSave }: EditMessageModalP
         <div className="px-4 py-3 sm:px-6 sm:py-4 flex justify-end items-center bg-card border-t border-border z-10">
           <button 
             onClick={handleSave}
-            className="w-12 h-12 sm:w-14 sm:h-14 bg-[#00a884] hover:bg-[#008f6f] text-white rounded-full flex items-center justify-center shadow-lg hover:shadow-xl hover:scale-105 transition-all"
+            className="w-12 h-12 sm:w-14 sm:h-14 bg-foreground hover:bg-foreground/90 text-background rounded-full flex items-center justify-center shadow-lg hover:shadow-xl hover:scale-105 transition-all"
             aria-label="Save changes"
           >
             <Check className="w-6 h-6 sm:w-7 sm:h-7" strokeWidth={2.5} />

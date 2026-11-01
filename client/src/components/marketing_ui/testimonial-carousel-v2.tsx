@@ -287,7 +287,7 @@ export default function TestimonialCarouselV2({
               className={cn(
                 "rounded-full transition-all duration-300",
                 i === current
-                  ? "h-3 w-3 bg-emerald-600 dark:bg-emerald-400 shadow-[0_0_8px_rgba(16,185,129,0.5)]"
+                  ? "h-3 w-3 bg-emerald-600 dark:bg-emerald-400 shadow-[0_0_8px_rgba(127,127,127,0.5)]"
                   : "h-2.5 w-2.5 bg-slate-300 dark:bg-slate-600 hover:bg-slate-400 dark:hover:bg-slate-500"
               )}
             />

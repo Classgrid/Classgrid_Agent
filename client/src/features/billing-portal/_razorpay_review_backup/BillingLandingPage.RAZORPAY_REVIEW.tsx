@@ -415,7 +415,7 @@ export function BillingLandingPage() {
     <main className="relative min-h-screen overflow-hidden bg-background text-foreground font-sans">
       {/* Background */}
       <div className="pointer-events-none absolute inset-0">
-        <div className="absolute inset-x-0 top-0 h-[28rem] bg-[radial-gradient(ellipse_at_top,rgba(52,211,153,0.12),transparent_65%)]" />
+        <div className="absolute inset-x-0 top-0 h-[28rem] bg-[radial-gradient(ellipse_at_top,rgba(127,127,127,0.12),transparent_65%)]" />
         <div className="absolute inset-0 opacity-[0.025] [background-image:linear-gradient(to_right,rgba(255,255,255,0.15)_1px,transparent_1px),linear-gradient(to_bottom,rgba(255,255,255,0.15)_1px,transparent_1px)] [background-size:32px_32px]" />
       </div>
 

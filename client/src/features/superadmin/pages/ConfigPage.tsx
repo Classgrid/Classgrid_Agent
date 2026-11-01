@@ -210,7 +210,7 @@ export function ConfigPage() {
   const isRamCritical = (healthData?.osMetrics?.ram?.usagePct || 0) > 90;
   const hardwareCardStyle = (isDiskCritical || isRamCritical) 
     ? "border-destructive/50 shadow-[0_0_15px_rgba(239,68,68,0.15)] bg-destructive/5" 
-    : "border-green-500/50 shadow-[0_0_15px_rgba(34,197,94,0.15)] bg-green-500/5";
+    : "border-green-500/50 shadow-[0_0_15px_rgba(127,127,127,0.15)] bg-green-500/5";
 
   return (
     <>

@@ -415,7 +415,7 @@ export function ChatSidebar({
                   {thread.type === "dm" && (thread.otherUserId || thread.id) && onlineUsers?.has(thread.otherUserId || thread.id) && (
                     <span 
                       title="Online"
-                      className="absolute bottom-0 right-0 z-10 block w-3 h-3 rounded-full bg-emerald-500 border-2 border-background animate-pulse shadow-[0_0_8px_rgba(16,185,129,0.5)]" 
+                      className="absolute bottom-0 right-0 z-10 block w-3 h-3 rounded-full bg-emerald-500 border-2 border-background animate-pulse shadow-[0_0_8px_rgba(127,127,127,0.5)]" 
                     />
                   )}
                   {thread.unread > 0 && (

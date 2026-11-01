@@ -39,8 +39,8 @@ const cardMemo = new Map<string, { height: number; shownLen: number }>();
 function themeVars(dark: boolean) {
   // Neutral accent like ChatGPT (white buttons in dark mode, black in light); green/red only for right/wrong
   return dark
-    ? "--cg-bg:transparent;--cg-card:#1A1A19;--cg-card-2:#262625;--cg-text:#F0EFED;--cg-muted:#A6A6A3;--cg-border:rgba(255,255,255,.12);--cg-accent:#F0EFED;--cg-accent-text:#1A1A19;--cg-success:#34D399;--cg-danger:#F87171;--cg-warning:#FBBF24;"
-    : "--cg-bg:transparent;--cg-card:#FFFFFF;--cg-card-2:#F4F4F3;--cg-text:#2C2C2B;--cg-muted:#6B6B69;--cg-border:rgba(0,0,0,.1);--cg-accent:#2C2C2B;--cg-accent-text:#FFFFFF;--cg-success:#059669;--cg-danger:#DC2626;--cg-warning:#D97706;";
+    ? "--cg-bg:transparent;--cg-card:#1A1A19;--cg-card-2:#262625;--cg-text:#F0EFED;--cg-muted:#A6A6A3;--cg-border:rgba(255,255,255,.12);--cg-accent:#F0EFED;--cg-accent-text:#1A1A19;--cg-success:#F0EFED;--cg-danger:#F87171;--cg-warning:#FBBF24;"
+    : "--cg-bg:transparent;--cg-card:#FFFFFF;--cg-card-2:#F4F4F3;--cg-text:#2C2C2B;--cg-muted:#6B6B69;--cg-border:rgba(0,0,0,.1);--cg-accent:#2C2C2B;--cg-accent-text:#FFFFFF;--cg-success:#2C2C2B;--cg-danger:#DC2626;--cg-warning:#D97706;";
 }
 
 // Runs inside the iframe (serialized with toString, so it must not use anything from this module)

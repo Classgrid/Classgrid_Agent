@@ -162,7 +162,7 @@ export function SidebarSwitcher({ user }: { user: { role?: string; name?: string
                 transition={{ duration: reduceMotion || sidebarToggled || collapsed ? 0 : 0.35, ease: [0.22, 1, 0.36, 1] }}
                 className={`${collapsed ? "h-8" : "h-9"} shrink-0 overflow-hidden`}
               >
-                <div className={`flex ${collapsed ? "size-8" : "h-9 w-9"} items-center justify-center rounded-md ${orgLogo ? 'bg-transparent' : 'bg-emerald-500 text-white shadow-sm overflow-hidden'}`}>
+                <div className={`flex ${collapsed ? "size-8" : "h-9 w-9"} items-center justify-center rounded-md ${orgLogo ? 'bg-transparent' : 'bg-[#10b981] text-white shadow-sm overflow-hidden'}`}>
                   {orgLogo ? (
                     <img src={orgLogo} alt={orgName} className="w-full h-full object-contain rounded-md" />
                   ) : (

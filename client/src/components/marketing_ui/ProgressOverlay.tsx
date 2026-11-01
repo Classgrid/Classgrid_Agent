@@ -120,7 +120,7 @@ export function ProgressOverlay({
   
   const getGlowColor = () => {
     if (isError) return "shadow-[0_0_12px_rgba(239,68,68,0.8)]";
-    return "shadow-[0_0_12px_rgba(16,185,129,0.8)]";
+    return "shadow-[0_0_12px_rgba(127,127,127,0.8)]";
   };
 
   const getStatusMessage = () => {

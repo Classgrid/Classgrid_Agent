@@ -5102,7 +5102,7 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
                                                 if (el) {
                                                   el.scrollIntoView({ behavior: 'smooth', block: 'center' });
                                                   el.style.transition = 'background-color 0.3s ease';
-                                                  el.style.backgroundColor = 'rgba(16, 185, 129, 0.2)';
+                                                  el.style.backgroundColor = 'rgba(127,127,127, 0.2)';
                                                   setTimeout(() => el.style.backgroundColor = '', 1000);
                                                 }
                                               }
@@ -6324,7 +6324,7 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
                         if (el) {
                           el.scrollIntoView({ behavior: 'smooth', block: 'center' });
                           el.style.transition = 'background-color 0.3s ease';
-                          el.style.backgroundColor = 'rgba(16, 185, 129, 0.2)';
+                          el.style.backgroundColor = 'rgba(127,127,127, 0.2)';
                           setTimeout(() => el.style.backgroundColor = '', 1000);
                         }
                       }}
@@ -6560,10 +6560,10 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
     <>
       <style>{`
         @keyframes targetGlowPulse {
-          0% { box-shadow: 0 0 0 0px rgba(16, 185, 129, 0); }
-          15% { box-shadow: 0 0 0 4px rgba(16, 185, 129, 0.6); }
-          70% { box-shadow: 0 0 0 4px rgba(16, 185, 129, 0.6); }
-          100% { box-shadow: 0 0 0 0px rgba(16, 185, 129, 0); }
+          0% { box-shadow: 0 0 0 0px rgba(127,127,127, 0); }
+          15% { box-shadow: 0 0 0 4px rgba(127,127,127, 0.6); }
+          70% { box-shadow: 0 0 0 4px rgba(127,127,127, 0.6); }
+          100% { box-shadow: 0 0 0 0px rgba(127,127,127, 0); }
         }
         .msg-target-glow:target {
           animation: targetGlowPulse 2.5s ease-in-out forwards;

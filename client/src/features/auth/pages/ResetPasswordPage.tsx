@@ -163,7 +163,7 @@ export function ResetPasswordPage() {
     },
     strong: {
       border: "border-emerald-500/80",
-      glow: "shadow-[0_0_20px_rgba(16,185,129,0.25)]",
+      glow: "shadow-[0_0_20px_rgba(127,127,127,0.25)]",
       text: "text-emerald-400",
       bar: "bg-emerald-500 w-full",
       label: "Strong password",
@@ -175,7 +175,7 @@ export function ResetPasswordPage() {
   const confirmBorder = !isConfirmTouched
     ? "border-border dark:border-white/10"
     : isPasswordMatch
-      ? "border-emerald-500/80 shadow-[0_0_18px_rgba(16,185,129,0.22)]"
+      ? "border-emerald-500/80 shadow-[0_0_18px_rgba(127,127,127,0.22)]"
       : "border-red-500/70 shadow-[0_0_18px_rgba(239,68,68,0.20)]";
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
@@ -262,13 +262,13 @@ export function ResetPasswordPage() {
           <div
             className="flex h-[100px] w-[100px] items-center justify-center rounded-full"
             style={{
-              background: "linear-gradient(135deg, rgba(16,185,129,0.15) 0%, rgba(16,185,129,0.05) 100%)",
-              border: "2px solid rgba(16,185,129,0.4)",
+              background: "linear-gradient(135deg, rgba(127,127,127,0.15) 0%, rgba(127,127,127,0.05) 100%)",
+              border: "2px solid rgba(127,127,127,0.4)",
               animation: "scaleIn 0.5s cubic-bezier(0.175, 0.885, 0.32, 1.275)",
             }}
           >
             <Check
-              className="h-[48px] w-[48px] text-[#10b981]"
+              className="h-[48px] w-[48px] text-foreground"
               strokeWidth={3}
               style={{ animation: "fadeIn 0.4s ease 0.3s both" }}
             />
@@ -283,7 +283,7 @@ export function ResetPasswordPage() {
 
           <Link
             to={window.location.pathname.includes("activate") ? "/onboard" : "/login"}
-            className="mt-8 flex items-center justify-center h-12 w-full rounded-xl font-bold bg-emerald-500 text-white shadow-[0_0_24px_rgba(16,185,129,0.28)] hover:bg-emerald-400 transition-colors"
+            className="mt-8 flex items-center justify-center h-12 w-full rounded-xl font-bold bg-emerald-500 text-white shadow-[0_0_24px_rgba(127,127,127,0.28)] hover:bg-emerald-400 transition-colors"
             style={{ animation: "fadeIn 0.4s ease 0.7s both" }}
           >
             {window.location.pathname.includes("activate") ? "Complete Profile Setup" : "Back to Login"}
@@ -449,7 +449,7 @@ export function ResetPasswordPage() {
               type="submit"
               disabled={!canSubmit}
               className={`mt-7 h-14 w-full rounded-2xl font-bold transition-all duration-300 ${canSubmit
-                  ? "bg-emerald-500 text-foreground dark:text-white shadow-[0_0_24px_rgba(16,185,129,0.28)] hover:bg-emerald-400"
+                  ? "bg-emerald-500 text-foreground dark:text-white shadow-[0_0_24px_rgba(127,127,127,0.28)] hover:bg-emerald-400"
                   : "cursor-not-allowed bg-emerald-700/60 text-gray-400"
                 }`}
             >

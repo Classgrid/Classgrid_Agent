@@ -598,7 +598,7 @@ export function SharedChatPage() {
 
         /* Links */
         .shared-link {
-          color: #10b981;
+          color: currentColor;
           text-decoration: underline;
           text-underline-offset: 3px;
         }
@@ -615,7 +615,7 @@ export function SharedChatPage() {
           width: 24px;
           height: 24px;
           border: 2px solid rgba(255,255,255,0.1);
-          border-top-color: #10b981;
+          border-top-color: currentColor;
           border-radius: 50%;
           animation: shared-spin 0.8s linear infinite;
         }

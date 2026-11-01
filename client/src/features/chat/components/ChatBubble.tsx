@@ -316,7 +316,7 @@ export function ChatBubble({
                           : message.status === 'rejected'
                             ? "bg-red-50 dark:bg-red-950/50 text-foreground border border-red-200 dark:border-red-800 opacity-70"
                             : isMine
-                              ? "bg-emerald-50 dark:bg-[#005c4b] text-[#111b21] dark:text-white/90 font-medium rounded-tr-sm shadow-sm border border-emerald-100 dark:border-[#00705a]"
+                              ? "bg-emerald-50 dark:bg-[#262626] text-[#111b21] dark:text-white/90 font-medium rounded-tr-sm shadow-sm border border-emerald-100 dark:border-white/10"
                               : "bg-white dark:bg-[#202c33] text-foreground dark:text-[#e9edef] border border-black/5 dark:border-transparent rounded-tl-sm shadow-sm"
                       }
             `}
@@ -483,7 +483,7 @@ export function ChatBubble({
                                   onClick={() => onViewMedia?.(att)}
                                   className={`relative flex items-center gap-3 p-3 rounded-xl border transition-colors cursor-pointer overflow-hidden max-w-[300px]
                             ${isMine
-                                      ? "bg-[#0b6156]/50 dark:bg-[#025144]/60 border-white/10 hover:bg-[#0b6156]/70 dark:hover:bg-[#025144]/80"
+                                      ? "bg-black/20 dark:bg-white/10 border-white/10 hover:bg-black/30 dark:hover:bg-white/15"
                                       : "bg-[#f5f6f6] dark:bg-[#1a2a32] border-black/5 dark:border-white/10 hover:bg-[#ecedef] dark:hover:bg-[#1f3640]"}
                            `}>
                                   <div className={`w-10 h-10 rounded-lg flex items-center justify-center shrink-0 ${isMine ? "bg-white/15" : "bg-primary/10 dark:bg-[#53bdeb]/10"}`}>
@@ -631,9 +631,9 @@ export function ChatBubble({
                                     <div className="flex items-center gap-3">
                                       {/* WhatsApp style Radio/Checkbox */}
                                       <div className={`w-[22px] h-[22px] rounded-full border-2 flex items-center justify-center shrink-0 transition-colors
-                                ${iVoted ? "border-[#00a884] bg-[#00a884]" : "border-border dark:border-white/30 group-hover:border-[#00a884]/50 dark:group-hover:border-white/50"}
+                                ${iVoted ? "border-foreground bg-foreground" : "border-border dark:border-white/30 group-hover:border-foreground/50 dark:group-hover:border-white/50"}
                               `}>
-                                        {iVoted && <Check className="w-3.5 h-3.5 text-black" strokeWidth={3} />}
+                                        {iVoted && <Check className="w-3.5 h-3.5 text-background" strokeWidth={3} />}
                                       </div>
 
                                       <div className="flex-1 flex justify-between items-center min-w-0 gap-2">
@@ -651,7 +651,7 @@ export function ChatBubble({
                                     {/* WhatsApp style thin progress bar */}
                                     <div className="ml-[34px] h-1.5 bg-black/10 dark:bg-white/10 rounded-full overflow-hidden">
                                       <div
-                                        className="h-full bg-[#00a884] rounded-full transition-all duration-500 ease-out"
+                                        className="h-full bg-foreground rounded-full transition-all duration-500 ease-out"
                                         style={{ width: `${percent}%` }}
                                       />
                                     </div>
@@ -664,7 +664,7 @@ export function ChatBubble({
                             <div className="mt-5 pt-3 border-t border-border dark:border-white/10 flex items-center justify-center">
                               <button
                                 onClick={() => onViewVotes?.(poll.id)}
-                                className="text-[13px] font-bold text-[#00a884] hover:underline cursor-pointer"
+                                className="text-[13px] font-bold text-foreground hover:underline cursor-pointer"
                               >
                                 View votes
                               </button>

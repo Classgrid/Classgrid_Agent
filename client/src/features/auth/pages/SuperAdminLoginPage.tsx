@@ -231,7 +231,7 @@ export function SuperAdminLoginPage() {
                     transition: "all 0.3s ease"
                   }}
                   onMouseOver={(e) => {
-                    e.currentTarget.style.borderColor = "#10b981";
+                    e.currentTarget.style.borderColor = "#a3a3a3";
                     e.currentTarget.style.background = "#f9f9f9";
                   }}
                   onMouseOut={(e) => {

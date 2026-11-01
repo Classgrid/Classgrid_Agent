@@ -135,7 +135,7 @@ function TestimonialCard({ testimonial, index }: { testimonial: Testimonial; ind
   return (
     <article
       className={cn(
-        "group w-[290px] rounded-2xl bg-[linear-gradient(180deg,rgba(6,57,45,0.96),rgba(3,31,25,0.98))] p-6 ring-1 ring-emerald-900/45 transition-all duration-200 hover:-translate-y-0.5 hover:shadow-xl hover:bg-[linear-gradient(180deg,rgba(8,70,55,0.98),rgba(4,38,30,0.98))] hover:shadow-[0_16px_36px_rgba(16,185,129,0.12)] sm:w-[330px]",
+        "group w-[290px] rounded-2xl bg-[linear-gradient(180deg,rgba(6,57,45,0.96),rgba(3,31,25,0.98))] p-6 ring-1 ring-emerald-900/45 transition-all duration-200 hover:-translate-y-0.5 hover:shadow-xl hover:bg-[linear-gradient(180deg,rgba(8,70,55,0.98),rgba(4,38,30,0.98))] hover:shadow-[0_16px_36px_rgba(127,127,127,0.12)] sm:w-[330px]",
         cardHeightClasses[index % cardHeightClasses.length]
       )}
     >

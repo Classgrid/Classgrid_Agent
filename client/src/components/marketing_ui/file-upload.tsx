@@ -193,7 +193,7 @@ export function FileUpload({
 
         {/* Glowing border effect when dragging */}
         {isDragging && (
-          <div className="absolute inset-0 border-2 border-emerald-500 rounded-xl shadow-[0_0_20px_rgba(16,185,129,0.2)] pointer-events-none animate-pulse" />
+          <div className="absolute inset-0 border-2 border-emerald-500 rounded-xl shadow-[0_0_20px_rgba(127,127,127,0.2)] pointer-events-none animate-pulse" />
         )}
       </div>
 

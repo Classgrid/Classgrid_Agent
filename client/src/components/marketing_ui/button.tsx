@@ -71,9 +71,9 @@ const buttonVariants = cva(
     variants: {
       variant: {
         default:
-          "bg-zinc-900 text-white hover:bg-emerald-500 hover:text-white dark:bg-white dark:text-zinc-900 dark:hover:bg-emerald-500 dark:hover:text-white border border-zinc-800 dark:border-white/10 hover:border-transparent transition-colors duration-300",
+          "bg-zinc-900 text-white hover:bg-zinc-700 hover:text-white dark:bg-white dark:text-zinc-900 dark:hover:bg-zinc-200 dark:hover:text-zinc-900 border border-zinc-800 dark:border-white/10 hover:border-transparent transition-colors duration-300",
         primary:
-          "bg-emerald-600 text-white hover:bg-emerald-500 dark:bg-emerald-600 dark:hover:bg-emerald-500 border border-emerald-500/20 shadow-[0_0_20px_rgba(16,185,129,0.15)] hover:shadow-[0_0_30px_rgba(16,185,129,0.3)] transition-all duration-300",
+          "bg-foreground text-background hover:bg-foreground/90 border border-border transition-colors duration-300",
         destructive:
           "bg-red-500 text-white hover:bg-red-600",
         danger:
@@ -134,11 +134,11 @@ const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
     // Glow colors based on variant
     const glowColorDark = glowVariant === "neutral" 
       ? "rgba(255, 255, 255, 0.25)" 
-      : "rgba(16, 185, 129, 0.45)"; 
+      : "rgba(127,127,127, 0.45)"; 
       
     const glowColorLight = glowVariant === "neutral" 
       ? "rgba(0, 0, 0, 0.1)" 
-      : "rgba(16, 185, 129, 0.35)";
+      : "rgba(127,127,127, 0.35)";
 
     const renderGlow = () => {
       if (isRainbow) {

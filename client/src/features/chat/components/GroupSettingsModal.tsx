@@ -493,7 +493,7 @@ export function GroupSettingsModal({ groupId, onClose, onLeaveGroup, onUserClick
                                     {onlineUsers?.has(member.userId) && (
                                       <span 
                                         title="Online"
-                                        className="absolute bottom-0 right-0 z-10 block w-2.5 h-2.5 rounded-full bg-emerald-500 border-2 border-background animate-pulse shadow-[0_0_8px_rgba(16,185,129,0.5)]" 
+                                        className="absolute bottom-0 right-0 z-10 block w-2.5 h-2.5 rounded-full bg-emerald-500 border-2 border-background animate-pulse shadow-[0_0_8px_rgba(127,127,127,0.5)]" 
                                       />
                                     )}
                                   </div>

@@ -116,7 +116,7 @@ const BentoCard = ({
   href,
   cta,
   color = "from-emerald-400/20",
-  iconColor = "#34d399",
+  iconColor = "#a3a3a3",
   tag,
   tagVariant = "emerald",
   ...props
@@ -205,7 +205,7 @@ const BentoCard = ({
           background: useMotionTemplate`
             radial-gradient(
               650px circle at ${springX}px ${springY}px,
-              rgba(16, 185, 129, 0.02),
+              rgba(127,127,127, 0.02),
               transparent 80%
             )
           `,
@@ -218,7 +218,7 @@ const BentoCard = ({
           background: useMotionTemplate`
             radial-gradient(
               650px circle at ${springX}px ${springY}px,
-              rgba(16, 185, 129, 0.06),
+              rgba(127,127,127, 0.06),
               transparent 80%
             )
           `,

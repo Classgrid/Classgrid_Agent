@@ -671,7 +671,7 @@ export function LeadDetailsPage() {
                       min-h-14 w-full rounded-xl
                       px-5 text-sm font-bold transition
                       ${lead.isOrganizationVetted
-                        ? 'bg-emerald-500 text-emerald-950 shadow-[0_10px_30px_rgba(16,185,129,0.22)] hover:bg-emerald-400 active:scale-[0.99] cursor-pointer'
+                        ? 'bg-emerald-500 text-emerald-950 shadow-[0_10px_30px_rgba(127,127,127,0.22)] hover:bg-emerald-400 active:scale-[0.99] cursor-pointer'
                         : 'bg-muted text-muted-foreground cursor-not-allowed opacity-70'}
                     `}
                   >

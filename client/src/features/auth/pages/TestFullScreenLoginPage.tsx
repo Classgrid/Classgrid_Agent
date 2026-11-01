@@ -411,8 +411,8 @@ export function TestFullScreenLoginPage({ preferredRole }: { preferredRole?: Aut
 
                   {/* 11. Student / Faculty Toggle */}
                   <div className="mt-6 grid grid-cols-2 gap-3">
-                    <button type="button" aria-pressed={activeRole === "student"} onClick={() => setActiveRole("student")} className={`flex h-[42px] items-center justify-center gap-2 rounded-[12px] border text-[14px] font-medium text-foreground dark:text-white transition-colors ${activeRole === "student" ? "border-[#10b981] bg-[#10b981]/10" : "border-border dark:border-white/[0.14] bg-muted dark:bg-[#111111] hover:bg-zinc-200 dark:hover:bg-[#222222]"}`}>
-                      <GraduationCap className="h-[18px] w-[18px] text-[#10b981]" />
+                    <button type="button" aria-pressed={activeRole === "student"} onClick={() => setActiveRole("student")} className={`flex h-[42px] items-center justify-center gap-2 rounded-[12px] border text-[14px] font-medium text-foreground dark:text-white transition-colors ${activeRole === "student" ? "border-foreground bg-foreground/10" : "border-border dark:border-white/[0.14] bg-muted dark:bg-[#111111] hover:bg-zinc-200 dark:hover:bg-[#222222]"}`}>
+                      <GraduationCap className="h-[18px] w-[18px] text-foreground" />
                       Student
                     </button>
                     <button type="button" aria-pressed={activeRole === "teacher"} onClick={() => setActiveRole("teacher")} className={`flex h-[42px] items-center justify-center gap-2 rounded-[12px] border text-[14px] font-medium text-foreground dark:text-white transition-colors ${activeRole === "teacher" ? "border-[#f97316] bg-[#f97316]/10" : "border-border dark:border-white/[0.14] bg-muted dark:bg-[#111111] hover:bg-zinc-200 dark:hover:bg-[#222222]"}`}>
@@ -451,11 +451,11 @@ export function TestFullScreenLoginPage({ preferredRole }: { preferredRole?: Aut
                   {/* 15. Remember Me & Forgot Password */}
                   <div className="mt-3 flex items-center justify-between">
                     <label className="flex items-center gap-3" htmlFor="test-remember-me">
-                      <input id="test-remember-me" name="rememberMe" type="checkbox" checked={rememberMe} onChange={(event) => setRememberMe(event.target.checked)} className="h-4 w-4 accent-[#10b981]" />
+                      <input id="test-remember-me" name="rememberMe" type="checkbox" checked={rememberMe} onChange={(event) => setRememberMe(event.target.checked)} className="h-4 w-4 accent-[var(--foreground)]" />
                       <span className="text-[13px] text-foreground dark:text-white">Remember me</span>
                     </label>
                     {showForgotPassword && (
-                      <button type="button" onClick={handleForgotPasswordClick} className="text-[13px] font-medium text-[#10b981] hover:underline">
+                      <button type="button" onClick={handleForgotPasswordClick} className="text-[13px] font-medium text-foreground hover:underline">
                         Forgot password?
                       </button>
                     )}
@@ -468,13 +468,13 @@ export function TestFullScreenLoginPage({ preferredRole }: { preferredRole?: Aut
                   )}
 
                   {/* 17. Sign In Button */}
-                  <button type="submit" disabled={isSubmitting || !email || !password} className="mt-4 h-[50px] w-full rounded-[14px] bg-[#10b981] text-[16px] font-bold text-white transition-colors hover:bg-[#059669] disabled:opacity-50 shadow-lg shadow-emerald-900/50">
+                  <button type="submit" disabled={isSubmitting || !email || !password} className="mt-4 h-[50px] w-full rounded-[14px] bg-foreground text-[16px] font-bold text-background transition-colors hover:bg-foreground/90 disabled:opacity-50 shadow-lg shadow-emerald-900/50">
                     {isSubmitting ? "Signing In..." : "Sign In"}
                   </button>
 
                   {/* 18. Terms Text */}
                   <p className="mt-3 text-center text-[12px] text-muted-foreground dark:text-white/55">
-                    By signing in, you agree to our <a href="https://classgrid.in/terms" target="_blank" rel="noopener noreferrer" className="text-[#10b981] hover:underline">Terms</a> &amp; <a href="https://classgrid.in/privacy" target="_blank" rel="noopener noreferrer" className="text-[#10b981] hover:underline">Privacy Policy</a>
+                    By signing in, you agree to our <a href="https://classgrid.in/terms" target="_blank" rel="noopener noreferrer" className="text-foreground hover:underline">Terms</a> &amp; <a href="https://classgrid.in/privacy" target="_blank" rel="noopener noreferrer" className="text-foreground hover:underline">Privacy Policy</a>
                   </p>
                 </form>
               ) : (
@@ -496,7 +496,7 @@ export function TestFullScreenLoginPage({ preferredRole }: { preferredRole?: Aut
                     </div>
                   )}
 
-                  <button type="submit" disabled={isSubmitting || otp.length !== 6} className="mt-4 h-[50px] w-full rounded-[14px] bg-[#10b981] text-[16px] font-bold text-white transition-colors hover:bg-[#059669] disabled:opacity-50 shadow-lg shadow-emerald-900/50">
+                  <button type="submit" disabled={isSubmitting || otp.length !== 6} className="mt-4 h-[50px] w-full rounded-[14px] bg-foreground text-[16px] font-bold text-background transition-colors hover:bg-foreground/90 disabled:opacity-50 shadow-lg shadow-emerald-900/50">
                     {isSubmitting ? "Verifying..." : "Verify Device"}
                   </button>
 

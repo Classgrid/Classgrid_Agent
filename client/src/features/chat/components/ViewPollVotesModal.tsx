@@ -121,7 +121,7 @@ export function ViewPollVotesModal({
         {/* Content */}
         <div className="p-3 flex flex-col gap-2 overflow-y-auto max-h-[70vh] custom-scrollbar">
           {isLoading ? (
-            <div className="flex justify-center py-10"><Spinner className="w-8 h-8 text-[#00a884]" /></div>
+            <div className="flex justify-center py-10"><Spinner className="w-8 h-8 text-foreground" /></div>
           ) : (
             poll.options.map((rawOpt, i) => {
               const opt = typeof rawOpt === 'string' ? { id: String.fromCharCode(97 + i), text: rawOpt } : rawOpt;
@@ -139,13 +139,13 @@ export function ViewPollVotesModal({
                   <div className="flex flex-col gap-2">
                     <div className="flex items-start justify-between gap-4">
                       <span className="text-[15px] font-bold text-gray-900 dark:text-gray-100 leading-snug">{opt.text}</span>
-                      <span className="text-xs font-bold text-[#00a884] shrink-0 bg-[#00a884]/10 dark:bg-[#00a884]/20 px-2.5 py-1 rounded-full uppercase tracking-wide">
+                      <span className="text-xs font-bold text-foreground shrink-0 bg-foreground/10 dark:bg-foreground/20 px-2.5 py-1 rounded-full uppercase tracking-wide">
                         {count} {count === 1 ? 'vote' : 'votes'}
                       </span>
                     </div>
                     {/* Progress bar */}
                     <div className="w-full h-1.5 bg-gray-100 dark:bg-white/5 rounded-full overflow-hidden mt-1">
-                       <div className="h-full bg-[#00a884] rounded-full transition-all duration-500 ease-out" style={{ width: `${percentage}%` }} />
+                       <div className="h-full bg-foreground rounded-full transition-all duration-500 ease-out" style={{ width: `${percentage}%` }} />
                     </div>
                   </div>
 
@@ -158,7 +158,7 @@ export function ViewPollVotesModal({
                           {user?.profilePicture ? (
                             <img src={user.profilePicture} className="w-8 h-8 rounded-full object-cover shrink-0 ring-2 ring-white dark:ring-[#111b21]" alt="avatar" />
                           ) : (
-                            <div className="w-8 h-8 rounded-full bg-emerald-100 dark:bg-[#005c4b]/30 text-[#005c4b] dark:text-[#34d399] flex items-center justify-center text-xs font-bold shrink-0 uppercase ring-2 ring-white dark:ring-[#111b21]">
+                            <div className="w-8 h-8 rounded-full bg-emerald-100 dark:bg-white/10 text-foreground dark:text-foreground flex items-center justify-center text-xs font-bold shrink-0 uppercase ring-2 ring-white dark:ring-[#111b21]">
                               {user?.name?.[0] || '?'}
                             </div>
                           )}

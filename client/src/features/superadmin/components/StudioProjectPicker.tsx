@@ -1,6 +1,6 @@
 // Studio Mode's project picker above the chat input. The projects are the same ones as Project Mode, so a project
 // made in either mode shows in both. A new project can start with a GitHub repo or without one.
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Check, ChevronDown, Folder, FolderPlus, FolderX, Link2, Pencil, Search, Trash2, X } from "lucide-react";
 import { toast } from "sonner";
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
@@ -29,7 +29,7 @@ const LIST_KEY = "cg_studio_projects";
 
 // Classgrid desktop app only: a folder on this computer becomes a project whose tools run here (the local runner)
 const desktopApp = (window as any).classgridDesktop as { isDesktop?: boolean; pickFolder?: () => Promise<string | null> } | undefined;
-async function openLocalFolder(): Promise<Project | null> {
+export async function openLocalFolder(): Promise<Project | null> {
   const folder = await desktopApp?.pickFolder?.();
   if (!folder) return null;
   const { res, data } = await api("/projects/local", { method: "POST", body: JSON.stringify({ localPath: folder }) });
@@ -282,12 +282,17 @@ export function StudioProjectPicker() {
             {projects !== null && !shown.length && (
               <p className="px-2 py-1.5 text-[13px] text-muted-foreground">{q.trim() ? `No project matches “${q}”.` : "No projects yet."}</p>
             )}
-            {shown.map((p) => (
-              <div key={p.id} className="group relative flex items-center rounded-md hover:bg-black/[0.05] dark:hover:bg-white/[0.07] transition-colors duration-150">
+            {/* Folders on this computer (desktop app) are listed under their own heading, after the other projects */}
+            {[...shown.filter((x) => x.location !== "local"), ...shown.filter((x) => x.location === "local")].map((p, i, list) => (
+              <Fragment key={p.id}>
+              {p.location === "local" && (i === 0 || list[i - 1].location !== "local") && (
+                <p className="px-2 pt-2 pb-1 text-[12px] text-muted-foreground">This computer</p>
+              )}
+              <div className="group relative flex items-center rounded-md hover:bg-black/[0.05] dark:hover:bg-white/[0.07] transition-colors duration-150">
                 <button
                   type="button"
                   onClick={() => pick(p.id)}
-                  title={p.repo || "No repo linked"}
+                  title={p.location === "local" ? p.localPath || "A folder on this computer" : p.repo || "No repo linked"}
                   className="flex-1 min-w-0 flex items-center gap-2.5 h-8 px-2 text-left text-[13px] text-foreground/85"
                 >
                   {p.logo ? <img src={p.logo} alt="" className="size-[15px] shrink-0 rounded object-cover" /> : <Folder className="size-[15px] shrink-0 text-muted-foreground" />}
@@ -306,6 +311,7 @@ export function StudioProjectPicker() {
                   ))}
                 </div>
               </div>
+              </Fragment>
             ))}
           </div>
           <div className="shrink-0 border-t border-black/10 dark:border-white/[0.08] p-1">

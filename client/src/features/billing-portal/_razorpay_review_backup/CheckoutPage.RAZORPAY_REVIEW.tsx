@@ -264,12 +264,12 @@ export function CheckoutPage() {
       <div className="relative min-h-screen overflow-hidden bg-background text-foreground flex items-center justify-center p-4">
         {/* Confetti or subtle background */}
         <div className="pointer-events-none absolute inset-0 -z-10">
-          <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_left,rgba(16,185,129,0.14),transparent_55%),radial-gradient(circle_at_bottom_right,rgba(59,130,246,0.12),transparent_45%)]" />
+          <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_left,rgba(127,127,127,0.14),transparent_55%),radial-gradient(circle_at_bottom_right,rgba(59,130,246,0.12),transparent_45%)]" />
           <div className="absolute inset-0 bg-[linear-gradient(to_right,rgba(148,163,184,0.08)_1px,transparent_1px),linear-gradient(to_bottom,rgba(148,163,184,0.08)_1px,transparent_1px)] bg-[size:42px_42px] [mask-image:radial-gradient(ellipse_at_center,black_45%,transparent_95%)]" />
         </div>
 
         <section className="w-full max-w-lg">
-          <div className="rounded-3xl border border-border/70 bg-background/90 p-8 sm:p-10 shadow-[0_20px_70px_-35px_rgba(16,185,129,0.35)] backdrop-blur-md flex flex-col items-center text-center">
+          <div className="rounded-3xl border border-border/70 bg-background/90 p-8 sm:p-10 shadow-[0_20px_70px_-35px_rgba(127,127,127,0.35)] backdrop-blur-md flex flex-col items-center text-center">
             
             <style dangerouslySetInnerHTML={{ __html: `
               .animate-spin-once { animation: spinOnce 0.9s cubic-bezier(0.4, 0, 0.2, 1) forwards; }
@@ -297,7 +297,7 @@ export function CheckoutPage() {
             <div className="relative flex h-24 w-24 items-center justify-center mb-6">
               <div className="animate-spin-once absolute inset-0 box-border rounded-full border-[3px] border-b-emerald-500/20 border-l-emerald-500/10 border-r-emerald-500 border-t-emerald-500"></div>
               <div className="animate-pop-in absolute inset-0 flex items-center justify-center">
-                <div className="flex h-16 w-16 items-center justify-center rounded-full bg-emerald-500 shadow-[0_10px_20px_-5px_rgba(16,185,129,0.4)]">
+                <div className="flex h-16 w-16 items-center justify-center rounded-full bg-emerald-500 shadow-[0_10px_20px_-5px_rgba(127,127,127,0.4)]">
                   <svg className="h-8 w-8 text-white" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
                     <polyline points="20 6 9 17 4 12" />
                   </svg>
