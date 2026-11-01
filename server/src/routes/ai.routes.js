@@ -83,6 +83,7 @@ import { streamAskAi, clientToolResult, getChatSessions, getChatSession, getChat
 import { getFavicon } from "../controllers/ai-favicon.controller.js";
 import { listStudioShots } from "../services/studio-browser-tools.js";
 import { answerPermission } from "../services/permission-gate.js";
+import { readGuidePage } from "../services/classgrid-guide.service.js";
 import { getMarket } from "../controllers/ai-widgets.controller.js";
 import aiTopUpRoutes from "./ai-credits-topup.routes.js";
 import aiCreditsRoutes from "./ai-credits.routes.js";
@@ -196,6 +197,16 @@ router.put("/sessions/:id", isAuthenticated, updateChatSession);
 router.post("/sessions/:id/archive", isAuthenticated, archiveChatSession);
 router.get("/studio/shots/:sessionId", isAuthenticated, listStudioShots);
 router.post("/permission/:id", isAuthenticated, answerPermission);
+// Classgrid AI guide page, read-only (Studio Mode's Guide tab); only the fixed guide pages, never other files
+router.get("/guide/:page", isAuthenticated, async (req, res) => {
+    try {
+        const guide = await readGuidePage(req.params.page);
+        if (!guide) return res.status(404).json({ error: "Guide page not found" });
+        res.json(guide);
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
 router.delete("/sessions/:id", isAuthenticated, deleteChatSession);
 router.post("/sessions/:id/share", isAuthenticated, shareChatSession);
 router.post("/sessions/:id/reopen", isAuthenticated, reopenChatSession); // super_admin only (checked in controller)

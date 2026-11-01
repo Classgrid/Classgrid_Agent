@@ -53,6 +53,7 @@ export const CORE_TOOL_NAMES = [
     "search_web",
     "open_url",
     "search_knowledge_base",
+    "read_classgrid_guide", // the Classgrid AI guide: how to use, set up or change anything in Classgrid AI
     "warn_user",
     "end_conversation",
     "sleep_until",

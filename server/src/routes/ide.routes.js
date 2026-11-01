@@ -687,6 +687,43 @@ router.get("/projects/:id/file", isAuthenticated, async (req, res) => {
   }
 });
 
+// Comments the user makes on code lines in Studio's Files tab are also kept in the project itself, in one record file
+// per repo (made on the first comment, new entries added at the bottom), so the record goes to GitHub with the code.
+const CODE_COMMENTS_FILE = ".classgrid/code-comments.md";
+router.post("/projects/:id/code-comments", isAuthenticated, async (req, res) => {
+  const project = await ownProject(req, res);
+  if (!project) return;
+  const path = safeFilePath(req.body?.path);
+  const action = ["added", "edited", "deleted"].includes(req.body?.action) ? req.body.action : "added";
+  const comment = String(req.body?.comment || "").trim().slice(0, 4000);
+  const startLine = Math.max(1, parseInt(req.body?.startLine, 10) || 1);
+  const endLine = Math.max(startLine, parseInt(req.body?.endLine, 10) || startLine);
+  const code = String(req.body?.code || "").slice(0, 8000);
+  if (!path || (!comment && action !== "deleted")) return res.status(400).json({ error: "A file and a comment are needed" });
+  const when = new Date().toLocaleString("en-IN", { timeZone: "Asia/Kolkata", day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" });
+  const lines = startLine === endLine ? `L${startLine}` : `L${startLine}-${endLine}`;
+  const fence = code.includes("```") ? "````" : "```";
+  const entry = `\n## ${when} IST · ${path} ${lines} · ${action[0].toUpperCase()}${action.slice(1)}\n\n${comment || "(comment deleted)"}\n${code && action !== "deleted" ? `\n${fence}\n${code.replace(/\n+$/, "")}\n${fence}\n` : ""}`;
+  let ssh;
+  try {
+    ssh = await sandboxSsh();
+    const dir = projectDir(project);
+    const { stdout: there } = await ssh.execCommand(`[ -d ${shellQuote(dir)} ] && echo yes`);
+    if (!there.trim()) return res.status(409).json({ error: "The project's code is not open right now, so the comment was kept in the chat only" });
+    const file = shellQuote(`${dir}/${CODE_COMMENTS_FILE}`);
+    const header = "# Code comments\n\nEvery comment made on this code in Classgrid Studio, with the date, time, file and lines. New ones are added at the bottom.\n";
+    const { stdout: exists } = await ssh.execCommand(`[ -f ${file} ] && echo yes`);
+    const { code: failed } = await ssh.execCommand(`mkdir -p ${shellQuote(`${dir}/.classgrid`)} && cat >> ${file}`, { stdin: (exists.trim() ? "" : header) + entry });
+    if (failed) return res.status(500).json({ error: "Could not save the comment in the project" });
+    res.json({ ok: true, file: CODE_COMMENTS_FILE });
+  } catch (e) {
+    console.error("[IDE] Code comment save failed:", e.message);
+    res.status(500).json({ error: "Could not save the comment in the project" });
+  } finally {
+    ssh?.dispose();
+  }
+});
+
 // Studio Mode's Project tab: the project's commit history on the branch the agent works on (the open Classgrid pull
 // request's branch when there is one), and that pull request.
 router.get("/projects/:id/commits", isAuthenticated, async (req, res) => {

@@ -67,7 +67,8 @@ import {
     getSharedSnapshot,
     getUserGeneratedImages,
     memoryCoverage,
-    memoryText
+    memoryText,
+    triggerMemoryAgent
 } from "../services/ai-chat.service.js";
 import { getHistory, getHistoryCount, appendToHistory, invalidateHistoryCache, getChatTranscript } from "../services/ai-chat-history.service.js";
 import { canAccessSession, gridLabelMap, gridProfilesText, getSharedSessionsFor, leaveSharedChat, sharedChatIdsFor } from "../services/ai-chat-grid.service.js";
@@ -208,6 +209,7 @@ CONTEXT & KNOWLEDGE
 - Take your time and do your best work; never hurry. For research, or anything that needs real facts (for example jobs, prices, deadlines, people, news), search the web, open and read the actual pages, check each fact at its source (is it real, still open, current), and use all your tools before you answer. Spend the time it takes to get it right.
 - Your own email inbox: you have your own email address, agent@classgrid.in. When a user wants to email you (for example to send keys, files or details), tell them to send it to agent@classgrid.in. You can read every email there with read_agent_email.
 - Academic hierarchy, org structure, departments, streams, divisions, batches, internal policies, handbooks, PTO: search_knowledge_base first (e.g. "Academic Hierarchy"); never guess. External research or news: search_web. Deep multi-note analysis: search_knowledge_base, then unified_db_query, then run_code, thinking briefly before each step.
+- When the user asks how to use, set up or change something in Classgrid AI, call read_classgrid_guide (page "index" first if unsure which page) and answer from it; for newer details, open its live docs links with open_url.
 
 TOOLS & ERRORS
 - Never repeat a tool call with the same arguments; if looping, change approach.
@@ -1360,9 +1362,26 @@ const cloudflareStreamProvider = (model) => ({
     timeoutMs: 300000
 });
 
+// "/" commands from the chat box (Project Mode and Studio): what each one asks for, sent for that message only
+const SLASH_COMMAND_LINES = {
+    plan: `Plan before changing anything. If something important is unclear, ask with the questions card first (an approval block with "variant": "questions"). Then show the plan card (an approval block with "variant": "plan") and wait for the user to approve it before you change any file.`,
+    goal: `Treat this as a goal to finish, not one reply. Keep working on it until it is done. When you have to wait for something (a deploy, a build, a time), use sleep_until to continue later instead of stopping. When it is done, ask the user to confirm and then use end_task.`,
+    schedule: `The user wants a schedule or reminder. Make it with create_schedule (check list_schedules first, so the same one is not made twice).`,
+    browser: `Use the live browser (the browser tools) for this.`,
+    generative_ui: `Answer with interactive cards: use the Classgrid display blocks that fit, or your own \`widget\` card when no block covers it, instead of plain text.`,
+    "grill-me": `Before you decide or build anything, interview the user: ask your questions with the questions card (an approval block with "variant": "questions"), one card at a time, until you understand exactly what they want. Do not start the work until then.`,
+    teamwork: `Split this job into parts that can run at the same time and give them to helpers with run_project_helpers, then check their work and put it together.`,
+    boost: `Think carefully about this one: check your work twice and look for mistakes before you answer.`,
+    learn: `Save what the user says here as a skill with create_skill, so it is used in their future chats.`,
+    compact: `The chat's earlier messages were just summarised (the long_term_memory above). Continue from that summary.`,
+};
+
 export const streamAskAi = async (req, res) => {
     const requestStartedAt = Date.now();
     const body = req.body || {};
+    // A "/" command from the chat box (Project Mode and Studio only; the live browser is only in Studio)
+    const slashCommand = (body.appMode === "project" || body.appMode === "studio") && Object.hasOwn(SLASH_COMMAND_LINES, String(body.command || "")) && (body.command !== "browser" || body.appMode === "studio") ? body.command : null;
+    let compacted = false;
 
     // Identity comes only from the auth middleware (the route requires a login), never from the body.
     const userId = req.user?.id || null;
@@ -1600,6 +1619,13 @@ export const streamAskAi = async (req, res) => {
                 res.write(`data: ${JSON.stringify({ type: "chat_ended", sessionId: sessionData.id, reason: sessionData.end_reason || null, canReopen: sessionData.end_reason === "user_requested" })}\n\n`);
                 res.end();
                 return;
+            }
+
+            // /compact: the chat's summary is written now (the same writer, models and checks as the background one)
+            if (slashCommand === "compact") {
+                res.write(`data: ${JSON.stringify({ type: "status", label: "Compacting chat memory..." })}\n\n`);
+                compacted = await triggerMemoryAgent(sessionId, { force: true }).catch(() => false);
+                if (compacted) sessionData.long_term_memory = (await getSessionById(sessionId))?.long_term_memory || sessionData.long_term_memory;
             }
 
             // Inject Mistral long_term_memory if available
@@ -1858,6 +1884,7 @@ Classgrid has three modes. The user switches between them with the mode switcher
 Project Mode and Studio share one open project and its chats: the user can open the same chat in either mode. Changes go to GitHub as one open pull request per project; when the user asks to push straight to main, push_project_to_github with direct_to_main: true pushes to the main branch with their own GitHub account (some accounts always push straight to main: the push result says where it went). Connecting GitHub and installing the Classgrid app are done in Project Mode.
 The user is in ${appMode === "agent" ? "Agent mode" : appMode === "project" ? "Project Mode" : "Studio Mode"} now.${appMode === "studio" ? ` Make code changes yourself; do not ask the user to edit a file or open an editor. If they want to edit by hand, they can switch to Project Mode.` : " The live browser is only in Studio Mode: here there is none, so do not try to open or use a browser (no browser tools, and no browser started from code or commands), and do not say that you will try or that you will do it. If the user wants the live browser, tell them to switch to Studio Mode."}`;
         }
+        if (slashCommand && (slashCommand !== "compact" || compacted)) volatilePrompt += `\n\n--- COMMAND ---\nThe user started this message with /${body.command}. ${SLASH_COMMAND_LINES[slashCommand]}`;
         // Project Mode: snapshot the project before this answer, so its changes can be reviewed, rejected or undone
         const checkpointId = sessionId && !isIncognito ? await startCheckpoint(sessionId).catch(() => null) : null;
         if (checkpointId && !res.writableEnded) res.write(`data: ${JSON.stringify({ type: "checkpoint", id: checkpointId })}\n\n`);
@@ -3687,6 +3714,7 @@ If they ask whether their college/school uses Classgrid, say you can't see that 
                             return `Error getting time for ${args.timeZone}. Please ensure it is a valid IANA timezone string like 'Europe/London'.`;
                         }
                     },
+                    read_classgrid_guide: async (args) => (await handleToolCall('read_classgrid_guide', args, {})).content[0].text,
                     open_url: async (args) => {
                         // Read one specific page (the official site or docs) via Tavily Extract
                         let target;
@@ -5116,6 +5144,8 @@ If a tool fails, never show the error message; say only: "Something went wrong o
                                 maxToolDepth: 800,
                                 // An answer cut off by the length limit (e.g. "draw 40 cards") is continued in the same reply
                                 maxContinuations: 3,
+                                // /boost: think harder for this message
+                                ...(slashCommand === "boost" ? { effort: "high" } : {}),
                                 outputBudget: quotaRemaining,
                                 ...meterHooks(requestedModel),
                                 timeoutMs: llmConfig.providers[0].timeoutMs,

@@ -213,8 +213,8 @@ async function summarizeWithMistral(input) {
  * Background worker that keeps each chat's long-term memory: every 8 messages it updates the previous
  * summary with the messages since then (DeepSeek V4 Flash, Mistral Nemo as fallback).
  */
-export async function triggerMemoryAgent(sessionId) {
-    if (!sessionId) return;
+export async function triggerMemoryAgent(sessionId, { force = false } = {}) {
+    if (!sessionId) return false;
     let lockKey = null;
     let redis = null;
     try {
@@ -224,15 +224,16 @@ export async function triggerMemoryAgent(sessionId) {
             .eq('session_id', sessionId)
             .order('created_at', { ascending: true });
 
-        if (error || !messages) return;
+        if (error || !messages) return false;
         const total = messages.length;
-        if (total < MEMORY_EVERY || total % MEMORY_EVERY !== 0) return;
+        // force (the /compact command): now, without waiting for the next 8-message mark
+        if (total < MEMORY_EVERY || (!force && total % MEMORY_EVERY !== 0)) return false;
 
         // One update at a time per chat (two messages saved at once could both reach this point).
         redis = (await import('../config/redis.js')).default;
         lockKey = `ai:memory:lock:${sessionId}`;
         const gotLock = await redis.set(lockKey, "1", "EX", 120, "NX").catch(() => "OK");
-        if (!gotLock) return;
+        if (!gotLock) return false;
 
         const { data: session } = await primarySupabaseClient
             .from('ai_chat_sessions')
@@ -243,7 +244,7 @@ export async function triggerMemoryAgent(sessionId) {
         // An older summary without the header covered everything up to the previous 8-message mark.
         const covered = previous ? (memoryCoverage(previous) ?? Math.max(0, total - MEMORY_EVERY)) : 0;
         const newMessages = messages.slice(Math.min(covered, total));
-        if (newMessages.length === 0) return;
+        if (newMessages.length === 0) return false;
 
         // Share Grid chats: each user message says who sent it ("USER (Rahul)"), so the summary keeps who said what
         // (messages from before the chat was shared are the owner's)
@@ -283,11 +284,13 @@ export async function triggerMemoryAgent(sessionId) {
 
         if (updateErr) {
             console.error("[Memory Agent] Error saving to DB:", updateErr);
-        } else {
-            console.log(`[Memory Agent] Successfully saved condensed memory for session ${sessionId} (1-${total}, ${usedModel})`);
+            return false;
         }
+        console.log(`[Memory Agent] Successfully saved condensed memory for session ${sessionId} (1-${total}, ${usedModel})`);
+        return true;
     } catch (error) {
         console.error("[Memory Agent] Failed:", error);
+        return false;
     } finally {
         if (redis && lockKey) redis.del(lockKey).catch(() => {});
     }

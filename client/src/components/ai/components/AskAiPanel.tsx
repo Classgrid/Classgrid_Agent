@@ -28,6 +28,7 @@ import hljs from "highlight.js";
 import "highlight.js/styles/github-dark.css";
 import { ExpandedInputModal } from './ExpandedInputModal';
 import { AiHubModal } from "./AiHubModal";
+import { SlashCommandMenu, slashCommandsFor, leadingSlashCommand, type SlashCommand } from "./SlashCommandMenu";
 import { InsufficientCreditsCard } from "./InsufficientCreditsCard";
 import { WorkspacePanel } from "./workspace/WorkspacePanel";
 import { SchedulePage } from "./SchedulePage";
@@ -209,6 +210,8 @@ import { AudioTranscribeStep } from "./stepper/tool-results/AudioTranscribeStep"
 import { StepBoundary } from "./stepper/StepBoundary";
 import { FILE_DRAG_TYPE, FileBadge, FileMentionChip, parseFileMention, parseProjectLink, FilesChangedSummary, ProjectEditStep, ProjectExploreGroup, ProjectPushStep, ProjectRunChanges, ProjectHelpersStep, TerminalStep, PROJECT_BACKGROUND_TOOLS, PROJECT_EDIT_TOOLS, PROJECT_EXPLORE_TOOLS } from "./stepper/ProjectToolSteps";
 import { CombinedReasoningBlock } from "./stepper/CombinedReasoningBlock";
+import { CodeNoteChips, StudioCodeNotesBar } from "@/features/superadmin/components/StudioCodeNotesBar";
+import { clearCodeNotes, codeNotesText, getCodeNotes, setCodeNotesChat, splitCodeNotes, toChip, useCodeNotes, type CodeNote, type CodeNoteChip } from "@/features/superadmin/components/studioCodeNotes";
 import { AiFeedbackModal } from "./AiFeedbackModal";
 import { ChatEndedCard } from "./ChatEndedCard";
 
@@ -432,6 +435,8 @@ export type ChatMessage = {
   hidden?: boolean;
   /** Share Grid: who sent this user message (empty for old messages and for the AI) */
   senderEmail?: string;
+  /** Studio: comments and quotes on code sent with this message (shown as chips; the code went to the AI) */
+  codeNotes?: CodeNoteChip[];
 };
 
 export type QueuedMessage = {
@@ -441,6 +446,7 @@ export type QueuedMessage = {
   pastedTexts: string[];
   isEdit?: boolean;
   timestamp?: number;
+  codeNotes?: CodeNote[];
 };
 
 type ListItem = {
@@ -1805,7 +1811,8 @@ const AssistantMessageContent = memo(({ content, sources, createdAt, isTyping, o
                     inProject = (parts.includes("project") && !!(sessionStorage.getItem("cg_project_open") || localStorage.getItem("cg_project_open")))
                       || (parts.includes("studio") && !!(sessionStorage.getItem("cg_project_open") || localStorage.getItem("cg_project_open"))); // Studio: the plan opens in its Files tab
                   } catch { /* storage blocked */ }
-                  if (inProject) window.dispatchEvent(new CustomEvent("classgrid:open-project-file", { detail: { plan: true, planTitle: parsedProps.planTitle } }));
+                  const inStudio = window.location.pathname.split("/").includes("studio");
+                  if (inProject || inStudio) window.dispatchEvent(new CustomEvent("classgrid:open-project-file", { detail: { plan: true, planTitle: parsedProps.planTitle } }));
                   else window.dispatchEvent(new Event("classgrid:open-plan-panel"));
                 }}
               />
@@ -2124,6 +2131,9 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
   const [atMenuOpen, setAtMenuOpen] = useState(false);
   const [atMenuQuery, setAtMenuQuery] = useState("");
   const [atMenuSelectedIndex, setAtMenuSelectedIndex] = useState(0);
+  const [slashMenuOpen, setSlashMenuOpen] = useState(false);
+  const [slashMenuQuery, setSlashMenuQuery] = useState("");
+  const [slashMenuIndex, setSlashMenuIndex] = useState(0);
 
   const handleApprovalAction = useCallback((text: string) => {
     askQuestionRef.current?.(text);
@@ -2223,14 +2233,15 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
   }, [isAssistantTyping]);
 
   useEffect(() => {
-    if (hasPlan) {
+    // Studio shows plans in its own pane (Files tab), never the Agent Mode side panel
+    if (hasPlan && pageContext?.path !== "/c/studio") {
       setShowFilesPanel(true);
     }
   }, [hasPlan]);
 
   // The plan card's "View Plan" button opens the side panel (outside Project Mode)
   useEffect(() => {
-    const open = () => setShowFilesPanel(true);
+    const open = () => { if (window.location.pathname.split("/").includes("studio")) return; setShowFilesPanel(true); };
     window.addEventListener("classgrid:open-plan-panel", open);
     return () => window.removeEventListener("classgrid:open-plan-panel", open);
   }, []);
@@ -2602,11 +2613,51 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
   const [attachedFiles, setAttachedFiles] = useState<UIFileAttachment[]>([]);
   // Project files dragged from Studio's Files tab into the chat box (sent as their names, like an @ mention)
   const [fileMentions, setFileMentions] = useState<string[]>([]);
+  // Studio: comments and quotes on code from the Files tab, sent with the next message (kept per chat)
+  const isStudio = pageContext?.path === "/c/studio";
+  const codeNotes = useCodeNotes();
+  useEffect(() => { if (isStudio) setCodeNotesChat(sessionId); }, [isStudio, sessionId]);
   // Studio and Project Mode: the agent's permission mode (the shield) and the action it is waiting to be allowed
   const [permissionMode, setPermissionModeState] = useState<PermissionMode>(readPermissionMode);
   const setPermissionMode = (m: PermissionMode) => { setPermissionModeState(m); try { localStorage.setItem(PERMISSION_MODE_KEY, m); } catch { /* storage blocked */ } };
   const [pendingPermission, setPendingPermission] = useState<PermissionRequest | null>(null);
   const inCodeMode = typeof window !== "undefined" && window.location.pathname.split("/").some((p) => p === "studio" || p === "project");
+  // "/" commands (Project Mode and Studio only): typed at the very start of the message
+  const slashItems = slashCommandsFor(isStudio, slashMenuQuery);
+  const updateSlashMenu = (val: string, cursor: number) => {
+    const m = inCodeMode ? /^\/(\S*)$/.exec(val.slice(0, cursor)) : null;
+    setSlashMenuOpen(!!m);
+    if (m) { setSlashMenuQuery(m[1] || ""); setSlashMenuIndex(0); }
+  };
+  const pickSlashCommand = (c: SlashCommand) => {
+    const cursor = (inputRef.current as any)?.selectionStart ?? input.length;
+    const rest = input.slice(cursor).trimStart();
+    setSlashMenuOpen(false);
+    if (c.id === "plugin") {
+      setInput(rest);
+      setAiHubInitialTab("plugins");
+      setIsAiHubOpen(true);
+      return;
+    }
+    setInput(`/${c.id} ${rest}`);
+    setTimeout(() => (inputRef.current as any)?.focus(), 0);
+  };
+  // Keys while the "/" menu is open; true when the key was used by the menu
+  const slashMenuKey = (e: React.KeyboardEvent) => {
+    if (!slashMenuOpen) return false;
+    if (e.key === "Escape") { setSlashMenuOpen(false); return true; }
+    if (!slashItems.length) return false;
+    if (e.key === "ArrowDown") { e.preventDefault(); setSlashMenuIndex((i) => (i + 1) % slashItems.length); return true; }
+    if (e.key === "ArrowUp") { e.preventDefault(); setSlashMenuIndex((i) => (i - 1 + slashItems.length) % slashItems.length); return true; }
+    if ((e.key === "Enter" && !e.shiftKey) || e.key === "Tab") {
+      e.preventDefault();
+      const picked = slashItems[slashMenuIndex];
+      if (picked) pickSlashCommand(picked);
+      return true;
+    }
+    return false;
+  };
+  useEffect(() => { if (slashMenuOpen && !input.startsWith("/")) setSlashMenuOpen(false); }, [input, slashMenuOpen]);
   const [pastedTexts, setPastedTexts] = useState<string[]>([]);
   const [editingMode, setEditingMode] = useState<'input' | number | null>(null);
   const [previewFile, setPreviewFile] = useState<FilePreviewSource | null>(null);
@@ -3523,7 +3574,7 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
 
   const hasDocsContext = pageContext?.path?.startsWith("/docs") && pageContext.path !== lastSentDocsPath;
   const isAnyFileUploading = attachedFiles.some(f => f.status === "uploading");
-  const canSubmit = (input.trim().length > 0 || hasDocsContext || attachedFiles.length > 0 || pastedTexts.length > 0 || fileMentions.length > 0) && !isAnyFileUploading && !gridBlockedBy;
+  const canSubmit = (input.trim().length > 0 || hasDocsContext || attachedFiles.length > 0 || pastedTexts.length > 0 || fileMentions.length > 0 || (isStudio && codeNotes.length > 0)) && !isAnyFileUploading && !gridBlockedBy;
   // A file dropped on the chat box from the Files tab becomes a chip in it
   useEffect(() => {
     const inBox = (t: EventTarget | null) => !!(t as HTMLElement | null)?.closest?.("form")?.querySelector?.("#ask-ai-input");
@@ -3908,7 +3959,7 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
     }
   }
 
-  async function askQuestion(question: string, options?: { hidden?: boolean; isEdit?: boolean; explicitSessionId?: string | null }) {
+  async function askQuestion(question: string, options?: { hidden?: boolean; isEdit?: boolean; explicitSessionId?: string | null; codeNotes?: CodeNote[] }) {
     if (chatEnded) { setSubmitting(false); return; } // ended chats take no new messages
     const workStartedAt = Date.now(); // for the "Worked for X sec" summary of this reply
     const myGen = chatGenRef.current;
@@ -3930,6 +3981,12 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
         size: f.size,
       }));
 
+    // Studio: comments and quotes on code go to the AI as plain text; the chat shows them as chips
+    const sentCodeNotes = options?.codeNotes || [];
+    if (sentCodeNotes.length > 0) {
+      apiQuestion = apiQuestion ? `${apiQuestion}\n\n${codeNotesText(sentCodeNotes)}` : codeNotesText(sentCodeNotes);
+    }
+
     if (!apiQuestion && !isDocsContextActive && filesToUpload.length === 0 && pastedTexts.length === 0) return;
 
     if (pastedTexts.length > 0) {
@@ -3948,7 +4005,7 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
     }
 
     // If user only attached files with no text, set a default question
-    if (!displayQuestion && filesToUpload.length > 0) {
+    if (!displayQuestion && filesToUpload.length > 0 && sentCodeNotes.length === 0) {
       displayQuestion = ""; // Leave UI blank so only the image renders
       apiQuestion = "Please analyze the attached file(s).";
     }
@@ -4013,6 +4070,7 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
         contextTitle: sentContextTitle,
         attachments: allAttachments.length > 0 ? allAttachments : undefined,
         hidden: options?.hidden,
+        codeNotes: sentCodeNotes.length > 0 ? sentCodeNotes.map(toChip) : undefined,
       },
       {
         id: createMessageId("assistant"),
@@ -4234,6 +4292,11 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
           appMode: (() => {
             const parts = window.location.pathname.split("/");
             return parts.includes("studio") ? "studio" : parts.includes("project") ? "project" : "agent";
+          })(),
+          // A "/" command at the start of the message (Project Mode and Studio)
+          command: (() => {
+            const parts = window.location.pathname.split("/");
+            return parts.includes("studio") || parts.includes("project") ? leadingSlashCommand(question, parts.includes("studio")) : undefined;
           })(),
           // Studio and Project Mode: which actions ask the user first (the shield in the chat box)
           permissionMode: (() => {
@@ -4647,6 +4710,9 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
       finalInput = `> ${replyToMessage.content.substring(0, 500).replace(/\n/g, "\n> ")}\n\n${finalInput}`;
       setReplyToMessage(null);
     }
+    // Studio: the comments and quotes on code go with this message, and the bar above the input clears
+    const notesToSend = isStudio ? getCodeNotes() : [];
+    if (notesToSend.length) clearCodeNotes();
 
     const isTyping = messages.length > 0 && messages[messages.length - 1]?.typing === true;
     if (thinking || submitting || isTyping || wordTypingActiveRef.current) {
@@ -4658,6 +4724,7 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
           text: finalInput,
           attachedFiles: [...attachedFiles],
           pastedTexts: [...pastedTexts],
+          codeNotes: notesToSend.length ? notesToSend : undefined,
         }
       ]);
       // Clear inputs since it's safely queued
@@ -4670,7 +4737,7 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
       return;
     }
 
-    void askQuestion(finalInput);
+    void askQuestion(finalInput, notesToSend.length ? { codeNotes: notesToSend } : undefined);
   }
 
   function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
@@ -4691,10 +4758,11 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
         setSubmitting(true);
         const textToSend = priorityMessage.text;
         const isEditMsg = priorityMessage.isEdit;
+        const notesToSend = priorityMessage.codeNotes;
         setPriorityMessage(null);
         setTimeout(() => {
           if (askQuestionRef.current) {
-            askQuestionRef.current(textToSend, { isEdit: isEditMsg });
+            askQuestionRef.current(textToSend, { isEdit: isEditMsg, codeNotes: notesToSend });
           }
         }, 50); // fast fire
       }
@@ -4708,7 +4776,7 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
 
         setTimeout(() => {
           if (askQuestionRef.current) {
-            askQuestionRef.current(nextMsg.text, { isEdit: nextMsg.isEdit });
+            askQuestionRef.current(nextMsg.text, { isEdit: nextMsg.isEdit, codeNotes: nextMsg?.codeNotes });
           }
         }, 50); // fast fire
       }
@@ -4890,6 +4958,16 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
                     }
                   });
                   message.attachments = newAttachments;
+                }
+              }
+
+              // Studio: comments and quotes on code sent with the question become chips again after a refresh
+              if (message.role === "user" && !message.codeNotes) {
+                const split = splitCodeNotes(displayContent);
+                if (split) {
+                  displayContent = split.text;
+                  message.content = split.text;
+                  message.codeNotes = split.chips;
                 }
               }
 
@@ -5660,6 +5738,8 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
                         </div>
                       )}
 
+                      {isUser && message.codeNotes && message.codeNotes.length > 0 && <CodeNoteChips notes={message.codeNotes} />}
+
                       {/* â”€â”€ Attachments (Outside Bubble) â”€â”€ */}
                       {isUser && message.attachments && message.attachments.length > 0 && (
                         <div className="flex flex-col gap-2 items-end">
@@ -5972,6 +6052,9 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
                     className="hidden"
                   />
 
+                  {/* Studio: comments and quotes on code, sent with the next message */}
+                  {isStudio && <StudioCodeNotesBar />}
+
                   {pageContext?.path?.startsWith("/docs") && pageContext.path !== lastSentDocsPath && (
                     <div className="px-3 pt-3 pb-0">
                       <div className="group relative inline-flex items-center gap-2.5 rounded-[10px] border border-border/80 bg-muted/40 px-3 py-2 pr-8 shadow-sm max-w-[95%]">
@@ -6207,6 +6290,7 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
                       </motion.div>
                     )}
                   </AnimatePresence>
+                  <SlashCommandMenu open={slashMenuOpen} items={slashItems} selectedIndex={slashMenuIndex} onHover={setSlashMenuIndex} onPick={pickSlashCommand} />
 
                   {replyToMessage && (
                     <div 
@@ -6293,9 +6377,11 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
                       } else {
                         setAtMenuOpen(false);
                       }
+                      updateSlashMenu(val, cursorPosition);
                     }}
                     onPaste={handlePaste}
                     onKeyDown={(e) => {
+                      if (slashMenuKey(e)) return;
                       if (atMenuOpen) {
                         const filteredIntegrations = INTEGRATIONS_LIST.filter(item =>
                           item.name.toLowerCase().includes(atMenuQuery.toLowerCase()) ||
@@ -6706,6 +6792,7 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
                               onChange={handleFileSelect}
                               className="hidden"
                             />
+                            {isStudio && <StudioCodeNotesBar />}
                             {(attachedFiles.length > 0 || pastedTexts.length > 0) && (
                               <div className="px-3 pt-3 pb-0 flex flex-wrap gap-1.5">
                                 {pastedTexts.map((pt, idx) => (
@@ -6914,6 +7001,7 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
                                 </motion.div>
                               )}
                             </AnimatePresence>
+                            <SlashCommandMenu open={slashMenuOpen} items={slashItems} selectedIndex={slashMenuIndex} onHover={setSlashMenuIndex} onPick={pickSlashCommand} below />
 
                             <RichChatInput
                               id="ask-ai-input"
@@ -6947,9 +7035,11 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
                                 } else {
                                   setAtMenuOpen(false);
                                 }
+                                updateSlashMenu(val, cursorPosition);
                               }}
                               onPaste={handlePaste}
                               onKeyDown={(e) => {
+                                if (slashMenuKey(e)) return;
                                 if (atMenuOpen) {
                                   const filteredIntegrations = INTEGRATIONS_LIST.filter(item =>
                                     item.name.toLowerCase().includes(atMenuQuery.toLowerCase()) ||
@@ -7103,7 +7193,7 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
           </div>
           {/* Files / Workspace Panel integrated into page layout */}
           <AnimatePresence>
-            {showFilesPanel && (
+            {showFilesPanel && pageContext?.path !== "/c/studio" && (
               <WorkspacePanel
                 isOpen={showFilesPanel}
                 onClose={() => setShowFilesPanel(false)}

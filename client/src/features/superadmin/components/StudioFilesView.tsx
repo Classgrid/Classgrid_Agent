@@ -1,6 +1,6 @@
 // Studio Mode's Files tab: the picked project's files (from GitHub, or the sandbox for a project without a repo),
 // a folder tree and a code view with line numbers, side by side on a wide pane with a drag line between them.
-import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import { DocsImageViewer } from "@/components/ai/components/DocsImageViewer";
 import { FILE_DRAG_TYPE } from "@/components/ai/components/stepper/ProjectToolSteps";
 
@@ -13,9 +13,10 @@ const dragFile = (e: React.DragEvent, path: string) => {
 import { createPortal } from "react-dom";
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import { themeIcons } from "seti-icons";
-import { Check, ChevronRight, Copy, Download, Folder, FolderOpen, FolderTree, Link2, ListTree, MoreVertical, RotateCw, Search, X } from "lucide-react";
+import { Check, ChevronRight, Copy, Download, Folder, FolderOpen, FolderTree, Link2, ListTree, MessageSquare, MoreVertical, Quote, RotateCw, Search, X } from "lucide-react";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/marketing_ui/dropdown-menu";
 import { fetchWithRescue } from "@/lib/rescue";
+import { addCodeNote, CODE_COMMENTS_SAVED_EVENT, lineLabel, removeCodeNote, updateCodeNote, useCodeNotes, type CodeNote } from "./studioCodeNotes";
 
 const backendUrl = import.meta.env.VITE_API_URL || "https://api.classgrid.in";
 const EASE = [0.22, 1, 0.36, 1] as const;
@@ -167,6 +168,12 @@ export function StudioFilesView({ projectId, projectName, wide, reloadKey = 0, r
   }, [projectId, openPaths, file?.path, openDirs]);
   // The project's code just got ready on the sandbox: load the list again (keeps the open file and folders)
   useEffect(() => { if (reloadKey) load(); }, [reloadKey, load]);
+  // A code comment was saved to the project's .classgrid/code-comments.md: load the list again so it shows
+  useEffect(() => {
+    const onSaved = (e: Event) => { if ((e as CustomEvent).detail?.projectId === projectId) load(); };
+    window.addEventListener(CODE_COMMENTS_SAVED_EVENT, onSaved);
+    return () => window.removeEventListener(CODE_COMMENTS_SAVED_EVENT, onSaved);
+  }, [projectId, load]);
 
   const tree = useMemo(() => buildTree(listing?.files || []), [listing]);
   // Search box above the tree: while it has text, the tree shows only matching files, with their folders open
@@ -401,7 +408,7 @@ export function StudioFilesView({ projectId, projectName, wide, reloadKey = 0, r
           >
             <FileTabs paths={openPaths} active={file.path} onShow={showTab} onClose={closeTab} />
             <PathBar path={file.path} projectName={projectName || "Project"} tree={tree} onOpen={openFile} />
-            <CodeView file={file} />
+            <CodeView file={file} projectId={projectId} />
           </motion.div>
         )}
 
@@ -681,7 +688,8 @@ function PathBar({ path, projectName, tree, onOpen }: { path: string; projectNam
 // The colouring files of an older Classgrid version are gone after an update: this tab needs a refresh
 const isOldVersion = (e: unknown) => /dynamically imported module|Importing a module script failed|MIME type|Failed to load module script|Loading chunk/i.test(String((e as Error)?.message || e));
 
-function CodeView({ file }: { file: OpenFile }) {
+function CodeView({ file, projectId }: { file: OpenFile; projectId: string }) {
+  const reduce = useReducedMotion();
   // Shiki colours code with VS Code's own rules and its Dark+ / Light+ themes; it loads only when a file opens
   const [html, setHtml] = useState<string | null>(null);
   const [oldVersion, setOldVersion] = useState(false);
@@ -704,14 +712,138 @@ function CodeView({ file }: { file: OpenFile }) {
       .catch((e) => { if (isOldVersion(e) && !gone) setOldVersion(true); });
     return () => { gone = true; };
   }, [file.content, file.path]);
-  const lines = file.content === undefined ? 0 : file.content.split("\n").length;
+  const textRows = useMemo(() => (file.content === undefined ? [] : file.content.split("\n")), [file.content]);
+  const lines = textRows.length;
   const scrollRef = useRef<HTMLDivElement>(null);
   const from = file.startLine || 0;
   const to = file.endLine || file.startLine || 0;
   useEffect(() => {
-    if (!from || !scrollRef.current) return;
-    scrollRef.current.scrollTop = Math.max(0, (from - 4) * 20); // 20px a line (12.5px text, 1.6 line height)
+    const box = scrollRef.current;
+    if (!from || !box) return;
+    // 20px a line (12.5px text, 1.6 line height); comment boxes above the line push it down
+    const chunk = [...box.querySelectorAll<HTMLElement>("[data-chunk]")].reverse().find((el) => Number(el.dataset.chunk) <= from);
+    const top = chunk ? chunk.offsetTop + (from - Number(chunk.dataset.chunk)) * 20 : 8 + (from - 1) * 20;
+    box.scrollTop = Math.max(0, top - 68);
   }, [from, html, file.content]);
+
+  // Shiki's code split into its lines, so comment boxes can sit between them
+  const shiki = useMemo(() => {
+    if (!html) return null;
+    try {
+      const pre = new DOMParser().parseFromString(html, "text/html").querySelector("pre");
+      if (!pre) return null;
+      const attr = (name: string) => (pre.getAttribute(name) || "").replace(/"/g, "&quot;");
+      return { open: `<pre class="${attr("class")}" style="${attr("style")}"><code>`, rows: [...pre.querySelectorAll("code > .line")].map((l) => l.outerHTML) };
+    } catch { return null; }
+  }, [html]);
+
+  // Comments and quotes: select lines, then Comment (a box under them) or Quote (a chip above the chat input, also Ctrl+L)
+  const allNotes = useCodeNotes();
+  const comments = useMemo(() => allNotes.filter((n) => n.kind === "comment" && n.path === file.path), [allNotes, file.path]);
+  const [sel, setSel] = useState<{ start: number; end: number; top: number; left: number } | null>(null);
+  const [draft, setDraft] = useState<{ start: number; end: number; text: string } | null>(null);
+  const [editing, setEditing] = useState<{ id: string; text: string } | null>(null);
+  const [viewW, setViewW] = useState(0);
+  useEffect(() => { setSel(null); setDraft(null); setEditing(null); }, [file.path]);
+  useEffect(() => {
+    const box = scrollRef.current;
+    if (!box) return;
+    const ro = new ResizeObserver(() => setViewW(box.clientWidth));
+    ro.observe(box);
+    return () => ro.disconnect();
+  }, [file.loading, file.error, file.binary, file.image]);
+  useEffect(() => {
+    const onChange = () => { const s = window.getSelection(); if (!s || s.isCollapsed) setSel(null); };
+    document.addEventListener("selectionchange", onChange);
+    return () => document.removeEventListener("selectionchange", onChange);
+  }, []);
+  // The line a selection edge is on (counted from the start of its block of lines)
+  const lineAt = (node: globalThis.Node, offset: number, end = false) => {
+    const el = (node.nodeType === 1 ? (node as Element) : node.parentElement)?.closest<HTMLElement>("[data-code-start]");
+    if (!el || !scrollRef.current?.contains(el)) return null;
+    const range = document.createRange();
+    range.setStart(el, 0);
+    range.setEnd(node, offset);
+    const text = range.toString();
+    let n = Number(el.dataset.codeStart) + text.split("\n").length - 1;
+    if (end && (text === "" || text.endsWith("\n"))) n -= 1; // the selection stops at the very start of a line
+    return n;
+  };
+  const readSelection = () => {
+    const s = window.getSelection();
+    const box = scrollRef.current;
+    if (!s || s.isCollapsed || !s.rangeCount || !box) { setSel(null); return; }
+    const range = s.getRangeAt(0);
+    const start = lineAt(range.startContainer, range.startOffset);
+    const end = lineAt(range.endContainer, range.endOffset, true);
+    if (!start || !end) { setSel(null); return; }
+    const r = range.getBoundingClientRect();
+    const b = box.getBoundingClientRect();
+    const above = r.top - b.top + box.scrollTop - 34;
+    setSel({
+      start,
+      end: Math.max(start, end),
+      top: above < box.scrollTop ? r.bottom - b.top + box.scrollTop + 4 : above,
+      left: Math.min(Math.max(r.left - b.left + box.scrollLeft, box.scrollLeft + 8), box.scrollLeft + box.clientWidth - 190),
+    });
+  };
+  const codeOf = (start: number, end: number) => textRows.slice(start - 1, end).join("\n");
+  const startComment = () => {
+    if (!sel) return;
+    setDraft({ start: sel.start, end: sel.end, text: "" });
+    setSel(null);
+    window.getSelection()?.removeAllRanges();
+  };
+  const quote = () => {
+    if (!sel) return;
+    addCodeNote({ kind: "quote", path: file.path, startLine: sel.start, endLine: sel.end, text: "", code: codeOf(sel.start, sel.end), projectId });
+    setSel(null);
+    window.getSelection()?.removeAllRanges();
+  };
+  const quoteRef = useRef(quote);
+  quoteRef.current = quote;
+  useEffect(() => {
+    if (!sel) return;
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey && e.key.toLowerCase() === "l") { e.preventDefault(); quoteRef.current(); }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [sel]);
+  const addComment = () => {
+    if (!draft || !draft.text.trim()) return;
+    addCodeNote({ kind: "comment", path: file.path, startLine: draft.start, endLine: draft.end, text: draft.text.trim(), code: codeOf(draft.start, draft.end), projectId });
+    setDraft(null);
+  };
+  const saveEdit = () => {
+    if (!editing || !editing.text.trim()) return;
+    updateCodeNote(editing.id, editing.text.trim());
+    setEditing(null);
+  };
+
+  // The lines in blocks, with the comment boxes after the last line of the lines they are on
+  const at = (n: number) => Math.min(Math.max(n, 1), Math.max(lines, 1));
+  const zones = new Map<number, { notes: CodeNote[]; draft: boolean }>();
+  for (const n of comments) {
+    const z = zones.get(at(n.endLine)) || { notes: [], draft: false };
+    z.notes.push(n);
+    zones.set(at(n.endLine), z);
+  }
+  if (draft) zones.set(at(draft.end), { notes: zones.get(at(draft.end))?.notes || [], draft: true });
+  const chunks: [number, number][] = [];
+  let next = 1;
+  for (const end of [...zones.keys()].sort((a, b) => a - b)) { chunks.push([next, end]); next = end + 1; }
+  if (next <= lines || !chunks.length) chunks.push([next, lines]);
+  const marks = [
+    ...comments.map((n) => ({ s: n.startLine, e: at(n.endLine), soft: true })),
+    ...(draft ? [{ s: draft.start, e: draft.end, soft: true }] : []),
+    ...(from > 0 ? [{ s: from, e: to, soft: false }] : []),
+  ];
+  const gutterW = `calc(${String(lines).length}ch + 1.75rem)`;
+  const smallBtn = "h-7 px-3 rounded-md border border-border text-[12px] text-foreground hover:bg-secondary transition-colors disabled:opacity-50 disabled:pointer-events-none";
+  const textBtn = "h-7 px-2.5 rounded-md text-[12px] text-muted-foreground hover:text-foreground hover:bg-black/[0.05] dark:hover:bg-white/[0.06] transition-colors";
+  const card = "max-w-[640px] rounded-lg border border-black/10 dark:border-white/[0.08] bg-white dark:bg-[#252526] shadow-sm p-2 font-sans text-[13px] leading-normal flex flex-col gap-2";
+  const textarea = "w-full resize-none rounded-md border border-black/10 dark:border-white/[0.1] bg-transparent px-2 py-1.5 text-[13px] outline-none focus:border-black/25 dark:focus:border-white/20 placeholder:text-muted-foreground";
 
   return (
     <div className="flex-1 min-h-0 flex flex-col">
@@ -744,16 +876,112 @@ function CodeView({ file }: { file: OpenFile }) {
       ) : file.binary ? (
         <p className="px-4 py-3 text-[13px] text-muted-foreground">{typeof file.size === "number" && file.size > 8 * 1024 * 1024 ? "This picture is too big to show here." : "This file can't be shown as text."}</p>
       ) : (
-        <div ref={scrollRef} className="relative flex-1 min-h-0 overflow-auto bg-white dark:bg-[#1e1e1e] font-mono text-[12.5px] leading-[1.6]">
-          {from > 0 && <div aria-hidden className="pointer-events-none absolute left-0 right-0 bg-[#264f78]/25 dark:bg-[#264f78]/40" style={{ top: 8 + (from - 1) * 20, height: (to - from + 1) * 20 }} />}
-          <div className="flex min-w-max py-2">
-            <div className="sticky left-0 shrink-0 pl-3 pr-4 text-right text-[#237893] dark:text-[#6e7681] select-none bg-white dark:bg-[#1e1e1e]">
-              {Array.from({ length: lines }, (_, i) => <div key={i} className={from && i + 1 >= from && i + 1 <= to ? "text-foreground" : undefined}>{i + 1}</div>)}
-            </div>
-            {html === null
-              ? <pre className="pr-6 whitespace-pre text-foreground/90">{file.content}</pre>
-              : <div className="pr-6 [&_pre]:!bg-transparent [&_pre]:!m-0 [&_pre]:!p-0 [&_pre]:whitespace-pre [&_code]:font-mono" dangerouslySetInnerHTML={{ __html: html }} />}
+        <div ref={scrollRef} onMouseUp={readSelection} className="relative flex-1 min-h-0 overflow-auto bg-white dark:bg-[#1e1e1e] font-mono text-[12.5px] leading-[1.6]">
+          <div className="min-w-max py-2">
+            {chunks.map(([s, e]) => {
+              const zone = zones.get(e);
+              return (
+                <Fragment key={s}>
+                  <div data-chunk={s} className="relative flex">
+                    {marks.filter((m) => m.e >= s && m.s <= e).map((m, i) => (
+                      <div key={i} aria-hidden className={`pointer-events-none absolute left-0 right-0 ${m.soft ? "bg-[#264f78]/[0.12] dark:bg-[#264f78]/25" : "bg-[#264f78]/25 dark:bg-[#264f78]/40"}`} style={{ top: (Math.max(m.s, s) - s) * 20, height: (Math.min(m.e, e) - Math.max(m.s, s) + 1) * 20 }} />
+                    ))}
+                    <div className="sticky left-0 shrink-0 pl-3 pr-4 text-right text-[#237893] dark:text-[#6e7681] select-none bg-white dark:bg-[#1e1e1e]" style={{ minWidth: gutterW }}>
+                      {Array.from({ length: Math.max(e - s + 1, 0) }, (_, i) => <div key={i} className={from && s + i >= from && s + i <= to ? "text-foreground" : undefined}>{s + i}</div>)}
+                    </div>
+                    {shiki
+                      ? <div data-code-start={s} className="pr-6 [&_pre]:!bg-transparent [&_pre]:!m-0 [&_pre]:!p-0 [&_pre]:whitespace-pre [&_code]:font-mono" dangerouslySetInnerHTML={{ __html: `${shiki.open}${shiki.rows.slice(s - 1, e).join("\n")}</code></pre>` }} />
+                      : <pre data-code-start={s} className="pr-6 whitespace-pre text-foreground/90">{chunks.length === 1 ? file.content : textRows.slice(s - 1, e).join("\n")}</pre>}
+                  </div>
+                  {zone && (
+                    <div className="sticky left-0 flex flex-col gap-1.5 py-1.5 pr-3" style={{ width: viewW || undefined, paddingLeft: gutterW }}>
+                      {zone.notes.map((n) => (
+                        <div key={n.id} className={card}>
+                          {editing?.id === n.id ? (
+                            <>
+                              <textarea
+                                data-no-ring
+                                autoFocus
+                                rows={3}
+                                value={editing.text}
+                                onChange={(ev) => setEditing({ id: n.id, text: ev.target.value })}
+                                onKeyDown={(ev) => {
+                                  if (ev.key === "Escape") setEditing(null);
+                                  if (ev.key === "Enter" && (ev.ctrlKey || ev.metaKey)) { ev.preventDefault(); saveEdit(); }
+                                }}
+                                className={textarea}
+                              />
+                              <div className="flex justify-end gap-1.5">
+                                <button type="button" onClick={() => setEditing(null)} className={smallBtn}>Cancel</button>
+                                <button type="button" onClick={saveEdit} disabled={!editing.text.trim()} className={smallBtn}>Save Comment</button>
+                              </div>
+                            </>
+                          ) : (
+                            <>
+                              <div className="flex items-start gap-2 px-1 pt-0.5">
+                                <MessageSquare className="size-3.5 mt-[3px] shrink-0 text-muted-foreground" />
+                                <div className="min-w-0 flex-1">
+                                  <span className="block text-[11px] text-muted-foreground font-mono">{lineLabel(n)}</span>
+                                  <p className="text-foreground whitespace-pre-wrap break-words">{n.text}</p>
+                                </div>
+                              </div>
+                              <div className="flex justify-end gap-0.5">
+                                <button type="button" onClick={() => setEditing({ id: n.id, text: n.text })} className={textBtn}>Edit</button>
+                                <button type="button" onClick={() => removeCodeNote(n.id)} className={textBtn}>Delete</button>
+                              </div>
+                            </>
+                          )}
+                        </div>
+                      ))}
+                      {zone.draft && draft && (
+                        <div className={card}>
+                          <textarea
+                            data-no-ring
+                            autoFocus
+                            rows={3}
+                            value={draft.text}
+                            placeholder="Leave a comment"
+                            onChange={(ev) => setDraft({ ...draft, text: ev.target.value })}
+                            onKeyDown={(ev) => {
+                              if (ev.key === "Escape") setDraft(null);
+                              if (ev.key === "Enter" && (ev.ctrlKey || ev.metaKey)) { ev.preventDefault(); addComment(); }
+                            }}
+                            className={textarea}
+                          />
+                          <div className="flex justify-end gap-1.5">
+                            <button type="button" onClick={() => setDraft(null)} className={smallBtn}>Cancel</button>
+                            <button type="button" onClick={addComment} disabled={!draft.text.trim()} className={smallBtn}>Add Comment</button>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </Fragment>
+              );
+            })}
           </div>
+          {/* The small bar over selected lines */}
+          <AnimatePresence>
+            {sel && (
+              <motion.div
+                initial={reduce ? false : { opacity: 0, y: 4 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={reduce ? { opacity: 0 } : { opacity: 0, y: 4 }}
+                transition={{ duration: reduce ? 0 : 0.14, ease: EASE }}
+                onMouseDown={(ev) => ev.preventDefault()}
+                onMouseUp={(ev) => ev.stopPropagation()}
+                className="absolute z-20 flex items-center gap-0.5 p-0.5 rounded-lg border border-black/10 dark:border-white/[0.08] bg-white dark:bg-[#252526] shadow-lg font-sans text-[12px]"
+                style={{ top: sel.top, left: sel.left }}
+              >
+                <button type="button" onClick={startComment} className="flex items-center gap-1.5 h-7 px-2 rounded-md text-foreground hover:bg-black/[0.05] dark:hover:bg-white/[0.08] transition-colors">
+                  <MessageSquare className="size-3.5" /> Comment
+                </button>
+                <button type="button" onClick={quote} title="Quote (Ctrl+L)" className="flex items-center gap-1.5 h-7 px-2 rounded-md text-foreground hover:bg-black/[0.05] dark:hover:bg-white/[0.08] transition-colors">
+                  <Quote className="size-3.5" /> Quote
+                </button>
+              </motion.div>
+            )}
+          </AnimatePresence>
           {file.truncated && <p className="px-4 pb-3 text-[12px] text-muted-foreground">Only the first 1 MB is shown.</p>}
         </div>
       )}

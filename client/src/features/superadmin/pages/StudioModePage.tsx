@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import {
-  ArrowLeft, ArrowRight, Camera, ExternalLink, FileDiff, FolderGit2, FolderOpen, Globe, Images, Maximize2, Minimize2,
+  ArrowLeft, ArrowRight, BookOpen, Camera, ExternalLink, FileDiff, FolderGit2, FolderOpen, Globe, Images, Maximize2, Minimize2,
   PanelRightClose, PanelRightOpen, Plus, RotateCw, Search, Terminal, X,
 } from "lucide-react";
 import { AskAiPanel } from "@/components/ai/components/AskAiPanel";
@@ -18,13 +18,14 @@ import { StudioProjectView } from "../components/StudioProjectView";
 import { StudioBrowserView } from "../components/StudioBrowserView";
 import { StudioShotsView } from "../components/StudioShotsView";
 import { StudioReviewView } from "../components/StudioReviewView";
+import { StudioGuideView, isGuidePage, type GuidePage } from "../components/StudioGuideView";
 import { PushToGithubModal } from "../components/PushToGithubModal";
 import { OPEN_PROJECT_FILE_EVENT } from "@/components/ai/components/stepper/ProjectToolSteps";
 import { fetchWithRescue } from "@/lib/rescue";
 import { toast } from "sonner";
 import { useSidebar } from "@/components/marketing_ui/sidebar";
 
-type TabKind = "browser" | "review" | "files" | "terminal" | "project" | "shots";
+type TabKind = "browser" | "review" | "files" | "terminal" | "project" | "shots" | "guide";
 type Tab = { id: string; kind: TabKind };
 
 const TAB_INFO: Record<TabKind, { label: string; Icon: typeof Globe }> = {
@@ -34,6 +35,7 @@ const TAB_INFO: Record<TabKind, { label: string; Icon: typeof Globe }> = {
   terminal: { label: "Terminal", Icon: Terminal },
   project: { label: "Project", Icon: FolderGit2 },
   shots: { label: "Screenshots", Icon: Images },
+  guide: { label: "Guide", Icon: BookOpen },
 };
 
 // One easing for every slide in Studio: fast start, soft stop
@@ -48,7 +50,7 @@ const MIN_CHAT = 320;
 
 // The pane's tabs and the selected one, kept across a refresh
 const TABS_KEY = "cg_studio_tabs";
-const TAB_KINDS = new Set<TabKind>(["browser", "review", "files", "terminal", "project", "shots"]);
+const TAB_KINDS = new Set<TabKind>(["browser", "review", "files", "terminal", "project", "shots", "guide"]);
 function readTabs(): { tabs: Tab[]; active: string | null } {
   try {
     const saved = JSON.parse(localStorage.getItem(TABS_KEY) || "null");
@@ -170,6 +172,27 @@ export function StudioModePage() {
     return () => window.removeEventListener("agent:tool", onTool);
   }, []);
 
+  // The page shown in the Guide tab; the agent reading the guide opens the tab on the page it reads
+  const [guidePage, setGuidePage] = useState<GuidePage>("index");
+  useEffect(() => {
+    const onTool = (e: Event) => {
+      const d = (e as CustomEvent).detail || {};
+      if (d.tool !== "read_classgrid_guide" || (d.phase !== "start" && d.phase !== "end")) return;
+      const args = typeof d.args === "string" ? (() => { try { return JSON.parse(d.args); } catch { return {}; } })() : d.args || {};
+      if (isGuidePage(args.page)) setGuidePage(args.page);
+      setPane((p) => (p.open ? p : { ...p, open: true }));
+      setTabs((t) => {
+        const g = t.find((x) => x.kind === "guide");
+        if (g) { setActive(g.id); return t; }
+        const id = `guide-${Date.now()}`;
+        setActive(id);
+        return [...t, { id, kind: "guide" }];
+      });
+    };
+    window.addEventListener("agent:tool", onTool);
+    return () => window.removeEventListener("agent:tool", onTool);
+  }, []);
+
   // A file clicked in the agent's steps opens in the Files tab, at those lines
   const [reveal, setReveal] = useState<{ path: string; startLine?: number; endLine?: number; n: number } | null>(null);
   useEffect(() => {
@@ -177,7 +200,7 @@ export function StudioModePage() {
       const d = (e as CustomEvent).detail || {};
       if (d.plan && !d.path) {
         const id = (() => { try { return (sessionStorage.getItem("cg_project_open") || localStorage.getItem("cg_project_open")); } catch { return null; } })();
-        if (!id) return;
+        if (!id) { toast("The plan file opens in Files once a project is picked"); return; }
         const base = import.meta.env.VITE_API_URL || "https://api.classgrid.in";
         const res = await fetchWithRescue(`${base}/api/ide/projects/${id}/files`, { credentials: "include" }).catch(() => null);
         const data = res?.ok ? await res.json().catch(() => null) : null;
@@ -621,6 +644,7 @@ export function StudioModePage() {
                     {activeTab?.kind === "terminal" && <StudioTerminalView entries={terminal.entries} onClear={terminal.clear} />}
                     {activeTab?.kind === "project" && <StudioProjectView projectId={studioProject} reloadKey={filesReload} />}
                     {activeTab?.kind === "shots" && <StudioShotsView />}
+                    {activeTab?.kind === "guide" && <StudioGuideView page={guidePage} onPageChange={setGuidePage} />}
                     {activeTab?.kind === "review" && <StudioReviewView projectId={studioProject} onChanged={() => setFilesReload((n) => n + 1)} />}
                     {!activeTab && <Launcher onOpen={openTab} />}
                   </motion.div>}
@@ -662,7 +686,7 @@ function Launcher({ onOpen }: { onOpen: (kind: TabKind) => void }) {
             value={q}
             onChange={(e) => setQ(e.target.value)}
             onKeyDown={(e) => { if (e.key === "Enter" && items[0]) onOpen(items[0]); }}
-            placeholder="Search tabs: browser, files, terminal, project…"
+            placeholder="Search tabs: browser, files, terminal, project, guide…"
             className="flex-1 min-w-0 bg-transparent outline-none placeholder:text-muted-foreground"
           />
         </label>

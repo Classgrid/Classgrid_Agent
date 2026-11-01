@@ -61,6 +61,7 @@ import IdeProject from '../models/IdeProject.js';
 import { ensureFreshGithubToken } from '../services/github-token.service.js';
 import { repoAppToken, classgridAuthor, userCoAuthorLine } from '../services/github-app.service.js';
 import { projectTools, projectForChat, projectSnapshot, projectChangesBetween, formatProjectChanges, sandboxDataDir } from '../services/ide-project.service.js';
+import { readGuidePage, GUIDE_PAGE_NAMES } from '../services/classgrid-guide.service.js';
 
 // What the sandbox container sees as /data, and where the hidden runner script is.
 // Normal chat: /data is the chat's own folder. Project Mode chat: /data IS the user's project (the same files as
@@ -180,6 +181,17 @@ export const getMcpTools = () => [
         max_results: { type: 'number', description: 'Most matches to return, up to 20 (default 10).' }
       },
       required: ['query']
+    }
+  },
+  {
+    name: 'read_classgrid_guide',
+    description: 'Read a page of the Classgrid AI guide: how to use, set up or change anything in Classgrid AI (Agent Mode, Project Mode, Studio Mode, settings, models, permissions, connections). "index" lists the pages and the live docs links.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        page: { type: 'string', enum: GUIDE_PAGE_NAMES, description: 'The guide page to read. Use "index" first if unsure which page fits.' }
+      },
+      required: ['page']
     }
   },
   {
@@ -1737,6 +1749,12 @@ export const handleToolCall = async (name, args, context = {}) => {
   };
 
   try {
+    if (name === 'read_classgrid_guide') {
+      const guide = await readGuidePage(args?.page);
+      if (!guide) return { content: [{ type: 'text', text: `Unknown guide page. Use one of: ${GUIDE_PAGE_NAMES.join(', ')}.` }], isError: true };
+      return { content: [{ type: 'text', text: guide.markdown }] };
+    }
+
     if (name === 'update_ai_preferences') {
       try {
         const User = (await import('../models/User.js')).default;
