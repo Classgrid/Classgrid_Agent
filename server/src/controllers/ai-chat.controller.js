@@ -1363,6 +1363,9 @@ const cloudflareStreamProvider = (model) => ({
 
 // "/" commands from the chat box (Project Mode and Studio): what each one asks for, sent for that message only
 const SLASH_COMMAND_LINES = {
+    "classgrid-guide": `Answer from Classgrid AI's own guide: read .classgrid/classgrid_guide/SKILL.md with view_project_file, then the page in its references/ folder that matches the question, and answer from them.`,
+    "studio-guide": `Answer from Classgrid AI's Studio Mode guide: read .classgrid/classgrid_guide/references/studio-mode.md with view_project_file and answer from it.`,
+    "project-guide": `Answer from Classgrid AI's Project Mode guide: read .classgrid/classgrid_guide/references/project-mode.md with view_project_file and answer from it.`,
     plan: `Plan before changing anything. If something important is unclear, ask with the questions card first (an approval block with "variant": "questions"). Then show the plan card (an approval block with "variant": "plan") and wait for the user to approve it before you change any file.`,
     goal: `Treat this as a goal to finish, not one reply. Keep working on it until it is done. When you have to wait for something (a deploy, a build, a time), use sleep_until to continue later instead of stopping. When it is done, ask the user to confirm and then use end_task.`,
     schedule: `The user wants a schedule or reminder. Make it with create_schedule (check list_schedules first, so the same one is not made twice).`,

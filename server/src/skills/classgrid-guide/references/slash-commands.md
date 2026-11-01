@@ -34,8 +34,11 @@ You can also type the whole command yourself without the list, for example `/goa
 
 ## 2. All commands
 
-| Command          | What it does                                     | Where             |
-| ---------------- | ------------------------------------------------ | ----------------- |
+| Command            | What it does                                     | Where             |
+| ------------------ | ------------------------------------------------ | ----------------- |
+| `/classgrid-guide` | Answers from the Classgrid AI guide              | Project, Studio   |
+| `/studio-guide`    | Answers from the Studio Mode guide               | Project, Studio   |
+| `/project-guide`   | Answers from the Project Mode guide              | Project, Studio   |
 | `/plan`          | Plans first, builds only after you approve       | Project, Studio   |
 | `/goal`          | Keeps working until the job is fully done        | Project, Studio   |
 | `/schedule`      | Makes a schedule or reminder                     | Project, Studio   |
@@ -51,6 +54,31 @@ You can also type the whole command yourself without the list, for example `/goa
 --------------------------------------------------------------------------------
 
 ## 3. Each command in detail
+
+### `/classgrid-guide`: answer from the Classgrid AI guide
+
+-   **What happens:** the agent reads Classgrid AI's own guide (the files in `.classgrid/classgrid_guide/` in the
+    Files tab: `SKILL.md` first, then the page that matches your question) and answers from it. You see each file it
+    reads as "Analyzed ...md" in the chat, and you can click it to open it in Files.
+-   **Use it when:** you want to know how to use, set up or change something in Classgrid AI.
+-   **Example:** `/classgrid-guide how do permissions work in Studio?`
+-   The guide files are Classgrid's, not your project's: they are never pushed to GitHub.
+
+### `/studio-guide`: answer from the Studio Mode guide
+
+-   **What happens:** the agent reads the Studio Mode page of the guide
+    (`.classgrid/classgrid_guide/references/studio-mode.md`) and answers from it. You see "Analyzed studio-mode.md"
+    in the chat.
+-   **Use it when:** your question is about Studio: the pane and its tabs, the live browser, helpers, permissions.
+-   **Example:** `/studio-guide how do I push my changes?`
+
+### `/project-guide`: answer from the Project Mode guide
+
+-   **What happens:** the agent reads the Project Mode page of the guide
+    (`.classgrid/classgrid_guide/references/project-mode.md`) and answers from it. You see "Analyzed
+    project-mode.md" in the chat.
+-   **Use it when:** your question is about Project Mode: the code editor, GitHub, pull requests, Vercel.
+-   **Example:** `/project-guide how do I connect GitHub?`
 
 ### `/plan`: plan first, then build
 
@@ -146,6 +174,10 @@ You can also type the whole command yourself without the list, for example `/goa
 -   When a message starts with a command, the app adds a **COMMAND** note for that message saying what the user
     wants. Follow it for that message only. It does not change any other rule.
 -   Do what the command asks with the tools you already have:
+    -   `/classgrid-guide`: `view_project_file` on `.classgrid/classgrid_guide/SKILL.md`, then the matching page in
+        its `references/` folder; answer from them.
+    -   `/studio-guide`: `view_project_file` on `.classgrid/classgrid_guide/references/studio-mode.md`; answer from it.
+    -   `/project-guide`: `view_project_file` on `.classgrid/classgrid_guide/references/project-mode.md`; answer from it.
     -   `/plan`: the questions card (approval block, `"variant": "questions"`) if needed, then the plan card
         (approval block, `"variant": "plan"`), and wait for approval before changing files.
     -   `/goal`: keep working; use `sleep_until` when you must wait; ask the user to confirm, then `end_task`.

@@ -101,11 +101,15 @@ export async function runCustomMcpTool(userId, args = {}) {
             if (!doc.enabled) return out({ error: `${doc.name} is turned off in AI Hub > Plugins.` });
             if (!args.tool) return out({ error: "Pass tool (the tool name). Use get_tools to see them." });
             if (doc.tools.length && !doc.tools.some((t) => t.name === args.tool)) return out({ error: `${doc.name} has no tool "${args.tool}". Tools: ${doc.tools.map((t) => t.name).join(", ")}` });
+            // Wrong argument names or types: the tool's real input schema goes back with the error, so the next try is right
+            const badArgs = (msg) => /input validation error|invalid arguments|unrecognized key|invalid input|-32602/i.test(String(msg || ""));
+            const schemaOf = () => doc.tools.find((t) => t.name === args.tool)?.inputSchema;
             try {
                 const text = await callServerTool(doc, args.tool, args.arguments || {});
-                return text;
+                return badArgs(text) && schemaOf() ? out({ error: text, inputSchema: schemaOf(), next: "Call the tool again with arguments that match this inputSchema exactly." }) : text;
             } catch (err) {
                 if (err.loginNeeded) return out({ error: `${doc.name} needs the user to log in again.`, card: card(doc), next: "Tell the user to click Log in on the card, then try again." });
+                if (badArgs(err?.message) && schemaOf()) return out({ error: `${doc.name}: ${err.message}`, inputSchema: schemaOf(), next: "Call the tool again with arguments that match this inputSchema exactly." });
                 return out({ error: `${doc.name}: ${err?.message || err}` });
             }
         }

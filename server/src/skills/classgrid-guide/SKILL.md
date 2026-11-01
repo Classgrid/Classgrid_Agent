@@ -23,7 +23,7 @@ how Classgrid works, read the page below that matches what the user is asking ab
     -   WhatsApp messages and calls, email to the agent, schedules and long tasks, plugins and connected apps,
         GitHub, Vercel and publishing websites.
 -   **"/" commands**: [references/slash-commands.md](references/slash-commands.md)
-    -   The "/" commands in the Project Mode and Studio chat box (/plan, /goal, /schedule, /browser,
+    -   The "/" commands in the Project Mode and Studio chat box (/classgrid-guide, /studio-guide, /project-guide, /plan, /goal, /schedule, /browser,
         /generative_ui, /grill-me, /plugin, /teamwork, /boost, /learn, /compact): what each does and how to use it.
 
 --------------------------------------------------------------------------------
