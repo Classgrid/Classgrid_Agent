@@ -26,7 +26,9 @@ import {
   MessageSquare,
   Wand2,
   Image as ImageIcon,
-  KeyRound
+  KeyRound,
+  Search,
+  Plus
 } from "lucide-react";
 import { Spinner } from "@/components/marketing_ui/spinner";
 import { cn } from "@/lib/utils";
@@ -43,6 +45,9 @@ import { AiCreditsPanel } from "./credits/AiCreditsPanel";
 import { AiUpgradePanel } from "./credits/AiUpgradePanel";
 import { AiSkillsPanel } from "./skills/AiSkillsPanel";
 import { AiConnectedAppsPanel } from "./connected-apps/AiConnectedAppsPanel";
+import { AddConnectorModal } from "./custom-mcp/AddConnectorModal";
+import { ConnectorCard, CustomConnectorDetail, CatalogAppDetail } from "./custom-mcp/CustomConnectorViews";
+import { mcpApi, type CustomMcpServer, type McpCatalogApp } from "./custom-mcp/customMcpApi";
 
 interface AiHubModalProps {
   isOpen: boolean;
@@ -88,6 +93,13 @@ export function AiHubModal({ isOpen, onClose, onSendPrompt, initialTab = "plugin
   const [loadingStatus, setLoadingStatus] = useState(true);
   const [showWhatsappConfig, setShowWhatsappConfig] = useState(false);
   const [showSanityConfig, setShowSanityConfig] = useState(false);
+  // Custom connectors (custom MCP servers) and known MCP apps
+  const [customServers, setCustomServers] = useState<CustomMcpServer[]>([]);
+  const [mcpCatalog, setMcpCatalog] = useState<McpCatalogApp[]>([]);
+  const [selectedCustomId, setSelectedCustomId] = useState<string | null>(null);
+  const [selectedApp, setSelectedApp] = useState<McpCatalogApp | null>(null);
+  const [showAddConnector, setShowAddConnector] = useState(false);
+  const [pluginQuery, setPluginQuery] = useState("");
 
 
   const backendUrl = typeof import.meta !== "undefined" && import.meta.env
@@ -97,7 +109,29 @@ export function AiHubModal({ isOpen, onClose, onSendPrompt, initialTab = "plugin
   // Reset selected plugin if tab changes
   React.useEffect(() => {
      setSelectedPlugin(null);
+     setSelectedCustomId(null);
+     setSelectedApp(null);
   }, [activeTab]);
+
+  const loadCustomServers = () => mcpApi.list().then(setCustomServers).catch(() => {});
+  React.useEffect(() => {
+    if (!isOpen) return;
+    loadCustomServers();
+    mcpApi.catalog().then(setMcpCatalog).catch(() => {});
+    // A login finished in another window: show the new status
+    const onFocus = () => loadCustomServers();
+    window.addEventListener("focus", onFocus);
+    return () => window.removeEventListener("focus", onFocus);
+  }, [isOpen]);
+
+  const upsertServer = (s: CustomMcpServer) => setCustomServers((prev) => prev.some((x) => x.id === s.id) ? prev.map((x) => (x.id === s.id ? s : x)) : [...prev, s]);
+  const q = pluginQuery.trim().toLowerCase();
+  const matches = (...texts: (string | undefined)[]) => !q || texts.some((t) => String(t || "").toLowerCase().includes(q));
+  const selectedCustom = customServers.find((s) => s.id === selectedCustomId) || null;
+  const addedCatalogIds = new Set(customServers.map((s) => s.catalogId).filter(Boolean));
+  const customMatches = customServers.filter((s) => matches(s.name, s.description));
+  const builtinMatches = INTEGRATIONS_LIST.filter((i) => i.type !== "action" && matches(i.name, i.description));
+  const catalogMatches = mcpCatalog.filter((a) => !addedCatalogIds.has(a.id) && matches(a.name, a.description));
 
   // ── REAL backend status check on mount ──
   const fetchStatus = async () => {
@@ -436,7 +470,21 @@ export function AiHubModal({ isOpen, onClose, onSendPrompt, initialTab = "plugin
             <div className="flex-1 flex flex-col bg-background overflow-hidden relative">
               <div className="p-8 flex-1 overflow-y-auto z-10 relative custom-scrollbar">
                 {activeTab === "plugins" ? (
-                  selectedPlugin ? (
+                  selectedCustom ? (
+                    <CustomConnectorDetail
+                      server={selectedCustom}
+                      onBack={() => setSelectedCustomId(null)}
+                      onChanged={upsertServer}
+                      onRemoved={(id) => { setCustomServers((prev) => prev.filter((s) => s.id !== id)); setSelectedCustomId(null); }}
+                      onTry={onSendPrompt ? (msg) => { onSendPrompt(msg); onClose(); } : undefined}
+                    />
+                  ) : selectedApp ? (
+                    <CatalogAppDetail
+                      app={selectedApp}
+                      onBack={() => setSelectedApp(null)}
+                      onAdded={(s) => { upsertServer(s); setSelectedApp(null); setSelectedCustomId(s.id); }}
+                    />
+                  ) : selectedPlugin ? (
                     <div className="animate-in fade-in slide-in-from-right-4 duration-300 h-full flex flex-col max-w-3xl mx-auto">
                       <button 
                         onClick={() => setSelectedPlugin(null)}
@@ -572,10 +620,10 @@ export function AiHubModal({ isOpen, onClose, onSendPrompt, initialTab = "plugin
                                         onClose();
                                       }
                                     }}
-                                    className="text-left px-4 py-3 rounded-lg border border-border bg-muted/30 hover:bg-accent hover:border-emerald-500/30 transition-all duration-200 text-sm text-muted-foreground hover:text-foreground shadow-sm flex items-center justify-between group"
+                                    className="text-left px-4 py-3 rounded-lg border border-border bg-muted/30 hover:bg-accent hover:border-foreground/20 transition-all duration-200 text-sm text-muted-foreground hover:text-foreground shadow-sm flex items-center justify-between group"
                                   >
                                     <span>"{msg}"</span>
-                                    <ChevronRight className="w-4 h-4 opacity-0 group-hover:opacity-100 -translate-x-2 group-hover:translate-x-0 transition-all text-emerald-500" />
+                                    <ChevronRight className="w-4 h-4 opacity-0 group-hover:opacity-100 -translate-x-2 group-hover:translate-x-0 transition-all text-muted-foreground" />
                                   </button>
                                 ))}
                               </div>
@@ -600,17 +648,65 @@ export function AiHubModal({ isOpen, onClose, onSendPrompt, initialTab = "plugin
                     </div>
                   ) : (
                     <div className="animate-in fade-in slide-in-from-bottom-4 duration-500 h-full flex flex-col">
-                      <h3 className="text-2xl font-bold text-foreground mb-2">Plugins & Integrations</h3>
-                      <p className="text-sm text-muted-foreground mb-8 max-w-xl">
+                      <div className="flex flex-wrap items-start justify-between gap-4 mb-2 pr-10">
+                        <h3 className="text-2xl font-bold text-foreground">Plugins & Integrations</h3>
+                        <Button
+                          variant="outline"
+                          onClick={() => setShowAddConnector(true)}
+                          className="h-9 rounded-lg border-border bg-accent px-3 text-sm font-medium text-foreground/90 hover:bg-slate-200 dark:hover:bg-accent/80 hover:text-foreground"
+                        >
+                          <Plus className="w-4 h-4 mr-1.5" />
+                          Add connector
+                        </Button>
+                      </div>
+                      <p className="text-sm text-muted-foreground mb-6 max-w-xl">
                         Connect apps to use in Classgrid. Let Classgrid AI search, sync, and take actions in your workspace tools.
                       </p>
 
-                      <div className="grid grid-cols-1 xl:grid-cols-2 gap-4 pb-12">
-                        {INTEGRATIONS_LIST.filter(i => i.type !== "action").map((integration) => (
+                      <div className="relative mb-6 max-w-xl">
+                        <Search className="w-4 h-4 text-muted-foreground absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+                        <input
+                          value={pluginQuery}
+                          onChange={(e) => setPluginQuery(e.target.value)}
+                          placeholder="Search plugins"
+                          className="w-full h-10 pl-9 pr-3 rounded-lg border border-border bg-background text-sm text-foreground placeholder:text-muted-foreground outline-none focus:border-foreground/30 transition-colors"
+                        />
+                      </div>
+
+                      {customMatches.length > 0 && (
+                        <>
+                          <h4 className="text-sm font-semibold text-muted-foreground mb-3">Your connectors</h4>
+                          <div className="grid grid-cols-1 xl:grid-cols-2 gap-4 mb-8">
+                            {customMatches.map((s) => (
+                              <ConnectorCard
+                                key={s.id}
+                                name={s.name}
+                                description={s.status === "connected" ? (s.enabled ? (s.description || s.tools.length + " tools") : "Turned off") : s.status === "needs_login" ? "Needs login" : "Can't connect"}
+                                logo={s.iconUrl}
+                                invert={s.invertInDarkMode}
+                                badge="MCP"
+                                onClick={() => setSelectedCustomId(s.id)}
+                              />
+                            ))}
+                          </div>
+                        </>
+                      )}
+
+                      {q && customMatches.length === 0 && builtinMatches.length === 0 && catalogMatches.length === 0 && (
+                        <p className="text-sm text-muted-foreground mb-8">
+                          No plugins match "{pluginQuery}". You can add any app that has an MCP server with <span className="text-foreground font-medium">Add connector</span>.
+                        </p>
+                      )}
+
+                      {(customMatches.length > 0 || catalogMatches.length > 0) && builtinMatches.length > 0 && (
+                        <h4 className="text-sm font-semibold text-muted-foreground mb-3">Built-in</h4>
+                      )}
+                      <div className={cn("grid grid-cols-1 xl:grid-cols-2 gap-4", builtinMatches.length > 0 && "pb-8")}>
+                        {builtinMatches.map((integration) => (
                           <div 
                             key={integration.id} 
                             onClick={() => setSelectedPlugin(integration)}
-                            className="group relative bg-background border border-border rounded-xl p-5 hover:border-primary/50 hover:bg-muted/30 transition-all cursor-pointer flex items-center justify-between shadow-sm"
+                            className="group relative bg-background border border-border rounded-xl p-5 hover:border-foreground/20 hover:bg-muted/30 transition-all cursor-pointer flex items-center justify-between shadow-sm"
                           >
                             <div className="flex items-center gap-4 min-w-0 pr-4">
                               <div className="w-12 h-12 rounded-xl border border-border flex items-center justify-center shrink-0 bg-background overflow-hidden shadow-sm relative">
@@ -640,6 +736,17 @@ export function AiHubModal({ isOpen, onClose, onSendPrompt, initialTab = "plugin
                           </div>
                         ))}
                       </div>
+
+                      {catalogMatches.length > 0 && (
+                        <>
+                          <h4 className="text-sm font-semibold text-muted-foreground mb-3">More apps (MCP)</h4>
+                          <div className="grid grid-cols-1 xl:grid-cols-2 gap-4 pb-12">
+                            {catalogMatches.map((a) => (
+                              <ConnectorCard key={a.id} name={a.name} description={a.description} logo={a.logo} invert={a.invertInDarkMode} onClick={() => setSelectedApp(a)} />
+                            ))}
+                          </div>
+                        </>
+                      )}
                     </div>
                   )
                 ) : activeTab === "images" ? (
@@ -712,6 +819,12 @@ export function AiHubModal({ isOpen, onClose, onSendPrompt, initialTab = "plugin
       onSuccess={async () => {
         await fetchStatus();
       }}
+    />
+
+    <AddConnectorModal
+      isOpen={showAddConnector}
+      onClose={() => setShowAddConnector(false)}
+      onAdded={(s) => { upsertServer(s); setSelectedCustomId(s.id); }}
     />
 
     <SanityConfigModal 

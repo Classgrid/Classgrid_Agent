@@ -82,6 +82,7 @@ import { sendEmail } from "../services/aws-ses.service.js";
 import mongoose from "mongoose";
 import NotificationLog from "../models/NotificationLog.js";
 import { getMcpTools, handleToolCall, readSandboxFiles } from "../mcp/tools.js";
+import { CUSTOM_MCP_TOOL, runCustomMcpTool, customMcpPromptLine } from "../services/custom-mcp-ai.js";
 import { parseHTML } from "linkedom";
 import { Readability } from "@mozilla/readability";
 import TurndownService from "turndown";
@@ -2452,6 +2453,10 @@ CRITICAL: If you call ANY integration tool (e.g. Google Classroom, Gmail, Google
                     } else {
                         disconnectedLinks.push(`[Instagram](#) (Connect via AI Hub)`);
                     }
+                    try {
+                        const customLine = await customMcpPromptLine(latestUser._id);
+                        if (customLine) activeDescriptions.push(customLine);
+                    } catch (e) { console.error('[custom-mcp] prompt line failed:', e.message); }
 
                     pluginPrompt = `\n\n--- ÃƒÂ°Ã…Â¸Ã¢â‚¬ÂÃ…â€™ ACTIVE INTEGRATIONS ---`;
 
@@ -2674,6 +2679,8 @@ If they ask whether their college/school uses Classgrid, say you can't see that 
                             parameters: t.inputSchema
                         }
                     })),
+                // Custom connectors (custom MCP servers): off in shared Grid chats, like the other plugins
+                ...(req.user && !gridSender ? [CUSTOM_MCP_TOOL] : []),
                 {
                     type: "function",
                     function: {
@@ -4710,6 +4717,7 @@ If they ask whether their college/school uses Classgrid, say you can't see that 
                     open_integration_panel: async () => {
                         return "UI action emitted. The integration panel has been opened for the user.";
                     },
+                    custom_mcp_connector: async (args) => runCustomMcpTool(req.user?._id || req.user?.id, args),
                 }).map(([toolName, handler]) => [
                     toolName,
                     async (args) => {

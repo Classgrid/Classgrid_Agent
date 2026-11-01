@@ -200,6 +200,7 @@ import { ToolResultStep } from "./stepper/tool-results/ToolResultStep";
 import { IncognitoBar, IncognitoButton, loadIncognitoChat, loadIncognitoSessionId, saveIncognitoChat, clearIncognitoChat } from "./IncognitoMode";
 import { IncognitoTransition, type IncognitoRun } from "./IncognitoTransition";
 import { SpotifyDisplay } from "./answer-cards/spotify";
+import { McpConnectCards } from "./answer-cards/mcp-connect";
 import { describeStep } from "./stepper/tool-results/describeStep";
 import { specialStepTitle, emailTitle } from "./stepper/tool-results/stepTitles";
 import { StepWorkingContext } from "./stepper/ShimmerText";
@@ -5628,6 +5629,15 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
                           {/* Spotify: the finished results (songs, playlists, artists, albums, now playing), only when this answer used Spotify */}
                           {!isUser && !message.typing && (message.steps || []).some((s: any) => s.type === 'tool' && s.tool === 'spotify_connector') && (
                             <div className="pl-1 mt-3 max-w-[640px]"><SpotifyDisplay steps={(message.steps || []) as any[]} /></div>
+                          )}
+                          {/* Custom connector the AI added: app logo + Log in; after the login the AI carries on by itself */}
+                          {!isUser && (message.steps || []).some((s: any) => s.type === 'tool' && s.tool === 'custom_mcp_connector') && (
+                            <div className="pl-1 mt-3 max-w-[520px]">
+                              <McpConnectCards
+                                steps={(message.steps || []) as any[]}
+                                onConnected={(name) => askQuestion(`[SYSTEM: I have logged in to ${name}. Please carry on with my task.]`, { hidden: true })}
+                              />
+                            </div>
                           )}
                           {/* Quiet memory save: shown only when the create_skill tool really ran and worked */}
                           {!isUser && !message.typing && (message.steps || []).some((s: any) => s.type === 'tool' && s.tool === 'create_skill' && s.status === 'success' && (s.args?.quiet === true || s.args?.quiet === 'true')) && (

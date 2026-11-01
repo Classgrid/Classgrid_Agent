@@ -164,7 +164,15 @@ if (hasIntegrationCallback) {
   if (root) {
       root.innerHTML = "<div style='display:flex;justify-content:center;align-items:center;height:100vh;font-family:sans-serif;'>Authenticating... You can close this window.</div>";
   }
+} else if (window.location.hostname === "chat.classgrid.in" || (import.meta.env.DEV && params.has("cgcheck"))) {
+  // VPN / proxy / Tor visitors get a blank page and the app never loads; everyone else first passes the
+  // Cloudflare Turnstile "Verify you are human" check (owner, 2026-11-01). See /api/net-check.
+  netCheckBlocked().then((blocked) => (blocked ? showBlankPage() : humanCheck().then(renderApp)));
 } else {
+  renderApp();
+}
+
+function renderApp() {
   ReactDOM.createRoot(document.getElementById("root")!).render(
     <React.StrictMode>
       <BrowserRouter>
@@ -176,6 +184,90 @@ if (hasIntegrationCallback) {
       </BrowserRouter>
     </React.StrictMode>
   );
+}
+
+async function netCheckBlocked(): Promise<boolean> {
+  const okKey = "cg_net_ok_until";
+  try { if (Number(sessionStorage.getItem(okKey)) > Date.now()) return false; } catch { /* storage blocked */ }
+  try {
+    const res = await fetch((import.meta.env.VITE_API_URL || "https://api.classgrid.in") + "/api/net-check", { signal: AbortSignal.timeout(4000) });
+    const data = await res.json();
+    if (data?.blocked) return true;
+    try { sessionStorage.setItem(okKey, String(Date.now() + 10 * 60 * 1000)); } catch { /* storage blocked */ }
+  } catch { /* check failed: let the visitor in */ }
+  return false;
+}
+
+// Cloudflare Turnstile check, like the "Verify you are human" page on grok.com. Passing it is remembered
+// in this browser for a day.
+function humanCheck(): Promise<void> {
+  const passKey = "cg_human_until";
+  try { if (Number(localStorage.getItem(passKey)) > Date.now()) return Promise.resolve(); } catch { /* storage blocked */ }
+  const siteKey = import.meta.env.VITE_TURNSTILE_SITE_KEY || "0x4AAAAAAELIHhXQqcev5Im7";
+  const api = import.meta.env.VITE_API_URL || "https://api.classgrid.in";
+  const dark = window.matchMedia?.("(prefers-color-scheme: dark)").matches;
+  const fg = dark ? "#ededed" : "#111111";
+  const muted = dark ? "#a1a1a1" : "#555555";
+  const line = dark ? "#2a2a2a" : "#e5e5e5";
+  document.documentElement.style.background = dark ? "#0a0a0a" : "#ffffff";
+  document.body.style.background = dark ? "#0a0a0a" : "#ffffff";
+
+  return new Promise((resolve) => {
+    const root = document.getElementById("root")!;
+    root.innerHTML = `
+      <div style="min-height:100vh;display:flex;flex-direction:column;font-family:system-ui,-apple-system,Segoe UI,sans-serif;color:${fg}">
+        <div style="flex:1;width:100%;max-width:640px;margin:0 auto;padding:18vh 20px 40px;box-sizing:border-box">
+          <h1 style="font-size:40px;font-weight:600;margin:0 0 12px">chat.classgrid.in</h1>
+          <h2 style="font-size:22px;font-weight:500;margin:0 0 12px">Checking that you're human</h2>
+          <p style="font-size:15px;line-height:1.6;color:${muted};margin:0 0 28px">This keeps Classgrid safe from bots. It only takes a moment.</p>
+          <div id="cg-turnstile"></div>
+          <p id="cg-turnstile-msg" style="font-size:14px;color:${muted};margin:16px 0 0"></p>
+        </div>
+        <div style="border-top:1px solid ${line};max-width:640px;width:calc(100% - 40px);margin:0 auto;padding:16px 0 24px;text-align:center;font-size:13px;color:${muted}">Protected by Cloudflare</div>
+      </div>`;
+    const msg = (t: string) => { const el = document.getElementById("cg-turnstile-msg"); if (el) el.textContent = t; };
+
+    const pass = () => {
+      try { localStorage.setItem(passKey, String(Date.now() + 24 * 60 * 60 * 1000)); } catch { /* storage blocked */ }
+      root.innerHTML = "";
+      resolve();
+    };
+
+    const w = window as any;
+    const render = () => {
+      w.turnstile.render("#cg-turnstile", {
+        sitekey: siteKey,
+        theme: dark ? "dark" : "light",
+        callback: async (token: string) => {
+          msg("Checking…");
+          try {
+            const res = await fetch(api + "/api/net-check/human", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ token }) });
+            const data = await res.json();
+            if (data?.ok) return pass();
+            msg("That didn't work. Please try again.");
+            w.turnstile.reset("#cg-turnstile");
+          } catch {
+            pass(); // our server can't be reached: don't lock the visitor out
+          }
+        },
+        "error-callback": () => { msg("The check couldn't load. Please refresh the page."); },
+      });
+    };
+
+    const script = document.createElement("script");
+    script.src = "https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit";
+    script.async = true;
+    script.onload = render;
+    script.onerror = () => pass(); // Cloudflare blocked or down: let the visitor in
+    document.head.appendChild(script);
+  });
+}
+
+function showBlankPage() {
+  const dark = window.matchMedia?.("(prefers-color-scheme: dark)").matches;
+  document.documentElement.style.background = dark ? "#0a0a0a" : "#ffffff";
+  document.body.style.background = dark ? "#0a0a0a" : "#ffffff";
+  document.body.innerHTML = "";
 }
 
 // Vercel trigger// redeploy: code restored to cbb3de8
