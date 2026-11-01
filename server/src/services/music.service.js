@@ -43,11 +43,31 @@ async function ensureBinary() {
     return binReady;
 }
 
+// YouTube asks servers to "confirm you're not a bot". Two ways past it, both from the server's .env:
+// YTDLP_COOKIES: a YouTube login's cookies.txt (Netscape format), base64 on one line; YTDLP_PROXY: a proxy link.
+// yt-dlp writes fresh cookies back to the file, so it gets its own copy here (written once per server start).
+let cookiesFile = null;
+function loginArgs() {
+    const out = [];
+    const b64 = String(process.env.YTDLP_COOKIES || "").trim();
+    if (b64) {
+        if (!cookiesFile) {
+            fs.mkdirSync(BIN_DIR, { recursive: true });
+            cookiesFile = path.join(BIN_DIR, "yt-cookies.txt");
+            fs.writeFileSync(cookiesFile, Buffer.from(b64, "base64"), { mode: 0o600 });
+        }
+        out.push("--cookies", cookiesFile);
+    }
+    const proxy = String(process.env.YTDLP_PROXY || "").trim();
+    if (proxy) out.push("--proxy", proxy);
+    return out;
+}
+
 function runYtDlp(args, timeoutMs) {
     return new Promise(async (resolve, reject) => {
         let bin;
         try { bin = await ensureBinary(); } catch (e) { return reject(e); }
-        execFile(bin, ["--no-warnings", "--no-progress", ...args], { timeout: timeoutMs, maxBuffer: 32 * 1024 * 1024, windowsHide: true }, (err, stdout, stderr) => {
+        execFile(bin, ["--no-warnings", "--no-progress", ...loginArgs(), ...args], { timeout: timeoutMs, maxBuffer: 32 * 1024 * 1024, windowsHide: true }, (err, stdout, stderr) => {
             if (err) {
                 const msg = String(stderr || err.message || "");
                 if (/confirm you.?re not a bot|sign in to confirm/i.test(msg)) return reject(new Error("YouTube is blocking downloads from our server right now (it asks to confirm we're not a bot)."));
