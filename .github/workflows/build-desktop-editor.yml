@@ -1,0 +1,143 @@
+name: Build Classgrid Code for the desktop app (Windows)
+
+# Classgrid Code (our code editor) for the desktop app: the same OpenVSCode Server version as the cloud editor
+# (infra/ide/Dockerfile, 1.105.1), built from its open code for Windows, with the same changes as the cloud
+# (infra/ide/patch-ide.sh, the Classgrid add-on, the safe extensions). The finished editor is saved as a release
+# of this repo; desktop/scripts/release.mjs puts it inside the desktop installer. The cloud editor is not touched.
+# Run it from the Actions tab ("Run workflow"). It takes about 1.5 to 2 hours.
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "OpenVSCode Server version (keep it the same as the cloud editor)"
+        default: "1.105.1"
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-2022
+    timeout-minutes: 340
+    env:
+      VERSION: ${{ inputs.version }}
+      VSCODE_ARCH: x64
+      npm_config_arch: x64
+      DISABLE_V8_COMPILE_CACHE: 1
+      ELECTRON_SKIP_BINARY_DOWNLOAD: 1
+      PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: 1
+    steps:
+      - name: Keep line endings as they are
+        run: git config --global core.autocrlf false
+
+      - name: Our changes (infra/ide) and logos (client/public)
+        uses: actions/checkout@v4
+        with:
+          path: classgrid
+          sparse-checkout: |
+            infra/ide
+            client/public
+
+      - name: The editor's open code, same version as the cloud
+        uses: actions/checkout@v4
+        with:
+          repository: gitpod-io/openvscode-server
+          ref: openvscode-server-v${{ inputs.version }}
+          path: openvscode-server
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: openvscode-server/.nvmrc
+
+      - name: Install
+        working-directory: openvscode-server
+        shell: pwsh
+        env:
+          npm_config_foreground_scripts: "true"
+        run: |
+          for ($i = 1; $i -le 5; $i++) {
+            npm ci
+            if ($LASTEXITCODE -eq 0) { exit 0 }
+            Write-Host "npm ci failed (try $i), trying again..."
+          }
+          exit 1
+
+      - name: Build
+        working-directory: openvscode-server
+        run: |
+          npm run gulp core-ci
+          npm run gulp extensions-ci
+
+      - name: Make the Windows editor
+        working-directory: openvscode-server
+        run: |
+          npm run gulp minify-vscode-reh-web
+          npm run gulp vscode-reh-web-win32-x64-min-ci
+
+      # Saved before our changes, so a change that no longer fits can be fixed without building again
+      - name: Save the plain editor
+        uses: actions/upload-artifact@v4
+        with:
+          name: openvscode-server-win32-x64-plain
+          path: vscode-reh-web-win32-x64
+          retention-days: 7
+
+      - name: Classgrid changes (same as the cloud)
+        shell: bash
+        run: |
+          set -e
+          ROOT="$(cygpath -u "$GITHUB_WORKSPACE")/vscode-reh-web-win32-x64"
+          IDE="$(cygpath -u "$GITHUB_WORKSPACE")/classgrid/infra/ide"
+          PUB="$(cygpath -u "$GITHUB_WORKSPACE")/classgrid/client/public"
+          COMMIT=$(date +%s%N | sha1sum | cut -c1-40)
+
+          # Logos, made the same way as infra/ide/build.sh
+          rm -rf /tmp/cg && mkdir -p /tmp/cg/assets
+          cp "$IDE/files/default-dark-modern.json" "$IDE/files/default-light-modern.json" "$IDE/patch-ide.sh" "$IDE/rm-builtin.js" /tmp/cg/
+          cp "$PUB/favicon.ico" /tmp/cg/assets/favicon.ico
+          cp "$PUB/android-chrome-192x192.png" /tmp/cg/assets/code-192.png
+          cp "$PUB/android-chrome-512x512.png" /tmp/cg/assets/code-512.png
+          B64=$(base64 -w0 "$PUB/android-chrome-512x512.png")
+          svg() { echo "<svg xmlns=\"http://www.w3.org/2000/svg\" xmlns:xlink=\"http://www.w3.org/1999/xlink\" viewBox=\"0 0 512 512\" width=\"512\" height=\"512\"><image width=\"512\" height=\"512\" opacity=\"$1\" xlink:href=\"data:image/png;base64,$B64\"/></svg>"; }
+          svg 0.12 > /tmp/cg/assets/letterpress.svg
+          svg 1 > /tmp/cg/assets/code-icon.svg
+
+          sh /tmp/cg/patch-ide.sh "$ROOT" "$COMMIT"
+
+          # The Classgrid add-on, built in
+          cp -r "$IDE/bridge" "$ROOT/extensions/classgrid-bridge"
+
+          # The same safe extensions the cloud editor gets, built in (latest from Open VSX)
+          while read -r EXT; do
+            EXT=$(echo "$EXT" | tr -d '\r')
+            [ -n "$EXT" ] || continue
+            URL=$(curl -s "https://open-vsx.org/api/$EXT/latest" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>console.log(JSON.parse(s).files.download))')
+            curl -sL -o /tmp/ext.vsix "$URL"
+            rm -rf /tmp/ext && mkdir -p /tmp/ext
+            7z x -y -o"$(cygpath -w /tmp/ext)" "$(cygpath -w /tmp/ext.vsix)" > /dev/null
+            mv /tmp/ext/extension "$ROOT/extensions/$(echo "$EXT" | tr / .)"
+          done < "$IDE/files/extensions.txt"
+
+          # Default settings, same as the cloud
+          cp "$IDE/files/user-machine-settings.json" "$ROOT/classgrid-machine-settings.json"
+          echo "$COMMIT" > "$ROOT/classgrid-build.txt"
+
+      - name: Save as a release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -e
+          FILE="classgrid-code-win32-x64-$VERSION.zip"
+          (cd vscode-reh-web-win32-x64 && 7z a -tzip "../$FILE" . > /dev/null)
+          TAG="desktop-editor-v$VERSION"
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
+            gh release upload "$TAG" "$FILE" --clobber --repo "$GITHUB_REPOSITORY"
+          else
+            gh release create "$TAG" "$FILE" --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \
+              --title "Classgrid Code $VERSION for the desktop app (Windows)" \
+              --notes "Built from OpenVSCode Server $VERSION with the Classgrid changes. Put inside the desktop installer by desktop/scripts/release.mjs."
+          fi
+          ls -la "$FILE"

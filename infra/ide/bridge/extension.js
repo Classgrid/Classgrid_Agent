@@ -18,10 +18,11 @@ const vscode = require("vscode");
 const fs = require("fs");
 const path = require("path");
 
-const DIR = "/home/workspace/.classgrid";
+// The desktop app runs this editor on the user's own computer and sets these two; the cloud box uses the defaults
+const DIR = process.env.CLASSGRID_BRIDGE_DIR || "/home/workspace/.classgrid";
 const OPEN_FILE = path.join(DIR, "open.json");
 const CONTEXT_FILE = path.join(DIR, "context.json");
-const PROJECTS = "/home/workspace/projects/";
+const PROJECTS = process.env.CLASSGRID_PROJECTS_DIR || "/home/workspace/projects/";
 let lastStamp = 0;
 
 async function handleOpen() {
