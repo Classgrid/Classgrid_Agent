@@ -17,6 +17,7 @@ export const GUIDE_PAGES = [
   { page: "studio-mode", label: "Studio Mode" },
   { page: "settings", label: "Settings" },
   { page: "connections", label: "Connections" },
+  { page: "slash-commands", label: "/ Commands" },
 ] as const;
 export type GuidePage = (typeof GUIDE_PAGES)[number]["page"];
 export const isGuidePage = (p: unknown): p is GuidePage => GUIDE_PAGES.some((g) => g.page === p);

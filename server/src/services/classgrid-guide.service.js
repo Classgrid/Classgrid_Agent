@@ -12,6 +12,7 @@ export const GUIDE_PAGES = {
     "studio-mode": { file: "references/studio-mode.md", title: "Studio Mode" },
     settings: { file: "references/settings.md", title: "Settings, Models and Permissions" },
     connections: { file: "references/connections.md", title: "Connections" },
+    "slash-commands": { file: "references/slash-commands.md", title: "\"/\" Commands" },
 };
 
 export const GUIDE_PAGE_NAMES = Object.keys(GUIDE_PAGES);

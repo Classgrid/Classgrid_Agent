@@ -185,7 +185,7 @@ export const getMcpTools = () => [
   },
   {
     name: 'read_classgrid_guide',
-    description: 'Read a page of the Classgrid AI guide: how to use, set up or change anything in Classgrid AI (Agent Mode, Project Mode, Studio Mode, settings, models, permissions, connections). "index" lists the pages and the live docs links.',
+    description: 'Read a page of the Classgrid AI guide: how to use, set up or change anything in Classgrid AI (Agent Mode, Project Mode, Studio Mode, settings, models, permissions, connections, "/" commands). "index" lists the pages and the live docs links.',
     inputSchema: {
       type: 'object',
       properties: {

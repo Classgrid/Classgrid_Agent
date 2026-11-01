@@ -146,19 +146,25 @@ function CommentRow({ group }: { group: CodeNote[] }) {
 // A sent message's comments and quotes, as small chips (the code itself only goes to the AI)
 export function CodeNoteChips({ notes }: { notes: CodeNoteChip[] }) {
   return (
-    <div className="flex flex-wrap justify-end gap-1.5">
+    <div className="flex flex-col items-end gap-1.5 max-w-full">
       {notes.map((n, i) => (
+        // The same size and look as the user's message bubble: the file and lines, and the comment under them
         <button
           key={i}
           type="button"
           onClick={() => openAt(n)}
-          title={n.kind === "comment" ? `${n.path} #${lineLabel(n)}: ${n.text}` : `${n.path} #${lineLabel(n)}`}
-          className="inline-flex max-w-full items-center gap-1 rounded-md border border-black/10 dark:border-white/10 bg-black/[0.04] dark:bg-white/[0.06] px-1.5 py-0.5 font-mono text-[12.5px] text-foreground hover:bg-black/[0.07] dark:hover:bg-white/[0.09] transition-colors"
+          title={`${n.path} #${lineLabel(n)}`}
+          className="flex flex-col items-start gap-0.5 max-w-full rounded-[16px] px-[14px] py-[6px] bg-[#f1f1ef] dark:bg-[#2C2C2C] text-left hover:bg-[#e9e9e6] dark:hover:bg-[#333333] transition-colors"
         >
-          {n.kind === "comment" ? <MessageSquare className="size-3 shrink-0 text-muted-foreground" /> : <Quote className="size-3 shrink-0 text-muted-foreground" />}
-          <FileBadge path={n.path} />
-          <span className="min-w-0 truncate max-w-[200px]">{baseName(n.path)}</span>
-          <span className="shrink-0 text-muted-foreground">#{lineLabel(n)}</span>
+          <span className="flex max-w-full items-center gap-1.5 font-mono text-[13px] leading-[24px] text-muted-foreground">
+            {n.kind === "comment" ? <MessageSquare className="size-3.5 shrink-0" /> : <Quote className="size-3.5 shrink-0" />}
+            <FileBadge path={n.path} />
+            <span className="min-w-0 truncate text-foreground">{baseName(n.path)}</span>
+            <span className="shrink-0">#{lineLabel(n)}</span>
+          </span>
+          {n.kind === "comment" && n.text && (
+            <span className="text-[16px] leading-[24px] text-[#37352f] dark:text-[#F0EFED] whitespace-pre-wrap break-words">{n.text}</span>
+          )}
         </button>
       ))}
     </div>

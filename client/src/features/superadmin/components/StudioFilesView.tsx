@@ -834,9 +834,12 @@ function CodeView({ file, projectId }: { file: OpenFile; projectId: string }) {
   let next = 1;
   for (const end of [...zones.keys()].sort((a, b) => a - b)) { chunks.push([next, end]); next = end + 1; }
   if (next <= lines || !chunks.length) chunks.push([next, lines]);
+  // The selected lines stay marked (while the bar is open, while writing the comment, and quoted lines until sent)
   const marks = [
     ...comments.map((n) => ({ s: n.startLine, e: at(n.endLine), soft: true })),
-    ...(draft ? [{ s: draft.start, e: draft.end, soft: true }] : []),
+    ...allNotes.filter((n) => n.kind === "quote" && n.path === file.path).map((n) => ({ s: n.startLine, e: at(n.endLine), soft: true })),
+    ...(sel ? [{ s: sel.start, e: sel.end, soft: false }] : []),
+    ...(draft ? [{ s: draft.start, e: draft.end, soft: false }] : []),
     ...(from > 0 ? [{ s: from, e: to, soft: false }] : []),
   ];
   const gutterW = `calc(${String(lines).length}ch + 1.75rem)`;
