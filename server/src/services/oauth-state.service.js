@@ -149,7 +149,7 @@ export function oauthStateCookieOptions({ clear = false } = {}) {
     return options;
 }
 
-export async function createOAuthState({ loginTab, host, intent, next }) {
+export async function createOAuthState({ loginTab, host, intent, next, desktop }) {
     const safeLoginTab = LOGIN_TABS.has(loginTab) ? loginTab : "student";
     const safeHost = await resolveAllowedHost(host);
     if (host && !safeHost) throw new Error("This login portal host is not registered or active.");
@@ -162,6 +162,8 @@ export async function createOAuthState({ loginTab, host, intent, next }) {
         i: intent === "signup" ? "signup" : "signin",
         // Started from the consent page: return there after login (signed, consent path only)
         r: safeConsentReturn(next),
+        // Started from the Classgrid desktop app: the login ends with a one-time code for the app (signed)
+        d: desktop ? 1 : 0,
         n: nonce,
         exp: Date.now() + STATE_TTL_MS,
     };
@@ -195,5 +197,6 @@ export async function verifyOAuthState(rawState, expectedNonce) {
         host: safeHost,
         intent: payload.i === "signup" ? "signup" : "signin",
         consentReturn: safeConsentReturn(payload.r),
+        desktop: payload.d === 1,
     };
 }

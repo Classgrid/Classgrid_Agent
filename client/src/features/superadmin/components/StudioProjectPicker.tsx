@@ -12,7 +12,7 @@ const backendUrl = import.meta.env.VITE_API_URL || "https://api.classgrid.in";
 const PICK_KEY = "cg_project_open"; // the same open project as Project Mode: both views always show one project
 const EASE = [0.22, 1, 0.36, 1] as const;
 
-type Project = { id: string; name: string; repo: string | null; logo?: string | null; updatedAt: string };
+type Project = { id: string; name: string; repo: string | null; logo?: string | null; updatedAt: string; location?: "cloud" | "local"; localPath?: string | null };
 type Repo = { fullName: string; private: boolean };
 
 async function api(path: string, init?: RequestInit) {
@@ -26,6 +26,17 @@ async function api(path: string, init?: RequestInit) {
 }
 
 const LIST_KEY = "cg_studio_projects";
+
+// Classgrid desktop app only: a folder on this computer becomes a project whose tools run here (the local runner)
+const desktopApp = (window as any).classgridDesktop as { isDesktop?: boolean; pickFolder?: () => Promise<string | null> } | undefined;
+async function openLocalFolder(): Promise<Project | null> {
+  const folder = await desktopApp?.pickFolder?.();
+  if (!folder) return null;
+  const { res, data } = await api("/projects/local", { method: "POST", body: JSON.stringify({ localPath: folder }) });
+  if (!res.ok || !data?.project) { toast.error(data?.error || "Couldn't open that folder"); return null; }
+  const p = data.project;
+  return { id: String(p.id), name: p.name, repo: p.repo || null, logo: p.logo || null, updatedAt: p.updatedAt, location: "local", localPath: p.localPath };
+}
 
 function readPick(): string | null {
   try { return sessionStorage.getItem(PICK_KEY) || localStorage.getItem(PICK_KEY); } catch { return null; }
@@ -45,7 +56,7 @@ async function fetchProjects(): Promise<Project[] | null> {
     const { res, data } = await api("/projects");
     if (!res.ok) return null;
     const list: Project[] = data.projects || [];
-    try { localStorage.setItem(LIST_KEY, JSON.stringify(list.map(({ id, name, repo, logo, updatedAt }) => ({ id, name, repo, logo, updatedAt })))); } catch { /* storage blocked */ }
+    try { localStorage.setItem(LIST_KEY, JSON.stringify(list.map(({ id, name, repo, logo, updatedAt, location, localPath }) => ({ id, name, repo, logo, updatedAt, location, localPath })))); } catch { /* storage blocked */ }
     return list;
   } catch { return null; }
 }
@@ -97,7 +108,7 @@ export function StudioProjectChooser({ picked, onDone }: { picked: string | null
             >
               {p.logo ? <img src={p.logo} alt="" className="size-[15px] shrink-0 rounded object-cover" /> : <Folder className="size-[15px] shrink-0 text-muted-foreground" />}
               <span className="flex-1 min-w-0 truncate">{p.name}</span>
-              <span className="shrink-0 max-w-[45%] truncate text-[12px] text-muted-foreground">{p.repo || "No repo"}</span>
+              <span className="shrink-0 max-w-[45%] truncate text-[12px] text-muted-foreground">{p.location === "local" ? "This computer" : p.repo || "No repo"}</span>
               {p.id === picked && <Check className="size-3.5 shrink-0" />}
             </button>
           ))}
@@ -110,6 +121,15 @@ export function StudioProjectChooser({ picked, onDone }: { picked: string | null
           >
             <FolderPlus className="size-[15px] text-muted-foreground" /> New project
           </button>
+          {desktopApp?.isDesktop && (
+            <button
+              type="button"
+              onClick={async () => { const made = await openLocalFolder(); if (made) { setProjects((list) => [made, ...(list || []).filter((x) => x.id !== made.id)]); pick(made.id); } }}
+              className="w-full flex items-center gap-2.5 h-8 px-2 rounded-md text-left text-[13px] text-foreground/85 hover:bg-black/[0.05] dark:hover:bg-white/[0.07] transition-colors duration-150"
+            >
+              <Folder className="size-[15px] text-muted-foreground" /> Open folder from this computer
+            </button>
+          )}
         </div>
       </div>
       <NewProjectDialog
@@ -296,6 +316,15 @@ export function StudioProjectPicker() {
             >
               <FolderPlus className="size-[15px] text-muted-foreground" /> New project
             </button>
+            {desktopApp?.isDesktop && (
+              <button
+                type="button"
+                onClick={async () => { setOpen(false); const made = await openLocalFolder(); if (made) pick(made.id, made); }}
+                className="w-full flex items-center gap-2.5 h-8 px-2 rounded-md text-left text-[13px] text-foreground/85 hover:bg-black/[0.05] dark:hover:bg-white/[0.07] transition-colors duration-150"
+              >
+                <Folder className="size-[15px] text-muted-foreground" /> Open folder from this computer
+              </button>
+            )}
           </div>
           <div className="shrink-0 border-t border-black/10 dark:border-white/[0.08] p-1">
             <button

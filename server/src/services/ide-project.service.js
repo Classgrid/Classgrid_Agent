@@ -909,6 +909,13 @@ async function putGuideInProject(ssh, project) {
 export async function editorContextFor(sessionId) {
   const project = await projectForChat(sessionId);
   if (!project) return "";
+  // A folder on the user's own computer: the Classgrid desktop app runs the project tools there (local-runner.service.js)
+  if (project.location === "local") {
+    return `\n\n<project_editor>\n${[
+      PROJECT_MODE_RULES,
+      `Project: ${project.name}. This project is a folder on the user's OWN computer (${project.localPath || "a local folder"}), not on Classgrid's servers. The Classgrid desktop app on that computer runs your project tools there: the file tools read and change the real files on their disk, and terminal commands run in that folder on their computer (Windows, PowerShell), so use PowerShell commands, not Linux-only ones. Paths are relative to the project folder; /data and /home/workspace/... don't exist here. Review/Undo snapshots, search by meaning and push_project_to_github aren't available for this project: use git in the terminal when the user wants to commit or push. run_code still runs on Classgrid's cloud sandbox, not on their computer. If a tool says the desktop app isn't open, tell the user to open the Classgrid app on that computer.`,
+    ].join("\n")}\n</project_editor>`;
+  }
   let ssh;
   try {
     ssh = await sandboxSsh();

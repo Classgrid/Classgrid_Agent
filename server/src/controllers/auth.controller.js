@@ -62,6 +62,7 @@ import Organization from "../models/Organization.js";
 import OnboardingOTP from "../models/OnboardingOTP.js";
 import bcrypt from "bcryptjs";
 import crypto from "crypto";
+import redis from "../config/redis.js";
 import jwt from "jsonwebtoken";
 import { v4 as uuidv4 } from "uuid";
 import { sendEmail } from "../services/aws-ses.service.js";
@@ -2091,6 +2092,14 @@ export const oauthCallback = async (req, res) => {
         } else {
             target = '/';
         }
+    }
+
+    // Started from the Classgrid desktop app: the browser can't hand the login to the app directly, so it gets a
+    // one-time code (60 seconds, single use) that the app swaps for the same in-app page through /desktop-exchange
+    if (req.oauthState?.desktop) {
+        const code = crypto.randomBytes(24).toString("base64url");
+        await redis.set(`desktoplogin:${code}`, `${target}${qs}`, "EX", 60);
+        return res.redirect(`/api/auth/desktop-done?code=${code}`);
     }
 
     res.redirect(`${TARGET_URL}${target}${qs}`);

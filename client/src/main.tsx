@@ -65,21 +65,36 @@ import { App } from "@/app/App";
 import { AppProviders } from "@/app/providers";
 import "@/styles/global.css";
 
-// Local testing only (never in the live build): the API calls also send the saved login token, so localhost stays
-// logged in when it talks to the live server (whose login cookie is made for .classgrid.in, not localhost)
-if (import.meta.env.DEV) {
+// Local testing and the desktop app (never the website build): the API calls also send the saved login token, so the
+// app stays logged in when it talks to the live server (whose login cookie is made for .classgrid.in, not localhost)
+const isDesktopApp = import.meta.env.VITE_DESKTOP === "1";
+if (import.meta.env.DEV || isDesktopApp) {
   const realFetch = window.fetch.bind(window);
   window.fetch = (input: RequestInfo | URL, init: RequestInit = {}) => {
     const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
     let token: string | null = null;
     try { token = localStorage.getItem("token"); } catch { /* storage blocked */ }
-    if (token && token !== "null" && /^(\/api\/|https?:\/\/localhost(:\d+)?\/api\/)/.test(url)) {
+    if (token && token !== "null" && /^(\/api\/|https?:\/\/localhost(:\d+)?\/api\/|https:\/\/api\.classgrid\.in\/api\/)/.test(url)) {
       const headers = new Headers(init.headers || (input instanceof Request ? input.headers : undefined));
       if (!headers.has("Authorization")) headers.set("Authorization", `Bearer ${token}`);
       init = { ...init, headers };
     }
     return realFetch(input, init);
   };
+}
+
+// Desktop app: hand the login token to the app, so it can run this user's project tools on this computer
+if (isDesktopApp) {
+  const desktop = (window as any).classgridDesktop;
+  let lastToken: string | null = null;
+  const sendToken = () => {
+    let token: string | null = null;
+    try { token = localStorage.getItem("token"); } catch { /* storage blocked */ }
+    if (token === "null") token = null;
+    if (token !== lastToken) { lastToken = token; desktop?.setToken?.(token); }
+  };
+  sendToken();
+  setInterval(sendToken, 3000);
 }
 
 // Handle Vite dynamic import errors (usually happens after a new deployment when chunks change hashes)

@@ -145,7 +145,7 @@ router.get(
         const loginTab = req.query.loginTab || req.query.role || 'student';
         const host = req.query.host || '';
         try {
-            const { state, nonce } = await createOAuthState({ loginTab, host, intent: req.query.intent, next: req.query.next });
+            const { state, nonce } = await createOAuthState({ loginTab, host, intent: req.query.intent, next: req.query.next, desktop: req.query.desktop === "1" });
             res.cookie(OAUTH_STATE_COOKIE, nonce, oauthStateCookieOptions());
             passport.authenticate("google-chat", {
                 ...rescueCallback(req, "google"),
@@ -202,7 +202,7 @@ router.get(
         const loginTab = req.query.loginTab || req.query.role || 'student';
         const host = req.query.host || '';
         try {
-            const { state, nonce } = await createOAuthState({ loginTab, host, intent: req.query.intent, next: req.query.next });
+            const { state, nonce } = await createOAuthState({ loginTab, host, intent: req.query.intent, next: req.query.next, desktop: req.query.desktop === "1" });
             res.cookie(OAUTH_STATE_COOKIE, nonce, oauthStateCookieOptions());
             passport.authenticate(githubStrategy(req), {
                 ...rescueCallback(req, "github"),
@@ -270,6 +270,29 @@ router.get(
 
 router.get("/me", isAuthenticated, authController.getCurrentUser);
 
+// Classgrid desktop app sign-in with Google / GitHub: the login runs in the user's browser and ends here with a
+// one-time code; this page hands it to the app (classgrid://), and the app swaps it for its in-app page.
+router.get("/desktop-done", (req, res) => {
+    const code = String(req.query.code || "").replace(/[^A-Za-z0-9_-]/g, "").slice(0, 64);
+    const link = `classgrid://login?code=${code}`;
+    res.set("Content-Type", "text/html").send(`<!doctype html><meta charset="utf-8"><title>Classgrid</title>
+<body style="margin:0;height:100vh;display:flex;align-items:center;justify-content:center;background:#0a0a0a;color:#ededed;font-family:system-ui,sans-serif">
+<div style="text-align:center;max-width:380px;padding:24px"><h1 style="font-size:22px;font-weight:600;margin:0 0 8px">You're signed in</h1>
+<p style="color:#a1a1a1;font-size:14px;line-height:1.6;margin:0 0 20px">Go back to the Classgrid app. If it didn't open, click the button.</p>
+<a href="${link}" style="display:inline-block;background:#ededed;color:#0a0a0a;border-radius:999px;padding:10px 20px;font-size:14px;font-weight:600;text-decoration:none">Open Classgrid</a></div>
+<script>location.href=${JSON.stringify(link)};</script></body>`);
+});
+router.post("/desktop-exchange", loginLimiter, async (req, res) => {
+    const code = String(req.body?.code || "").replace(/[^A-Za-z0-9_-]/g, "").slice(0, 64);
+    if (!code) return res.status(400).json({ message: "Missing code." });
+    const { default: redis } = await import("../config/redis.js");
+    const key = `desktoplogin:${code}`;
+    const path = await redis.get(key).catch(() => null);
+    if (!path) return res.status(400).json({ message: "This sign-in link has expired. Please try again." });
+    await redis.del(key).catch(() => {});
+    res.json({ path });
+});
+
 router.post("/forgot-password", resetPasswordLimiter, authController.forgotPassword);
 router.get("/verify-reset-token/:token", authController.verifyResetToken);
 router.post("/reset-password", resetPasswordLimiter, authController.resetPassword);
@@ -285,7 +308,7 @@ router.get(
         const loginTab = req.query.loginTab || req.query.role || 'student';
         const host = req.query.host || '';
         try {
-            const { state, nonce } = await createOAuthState({ loginTab, host, intent: req.query.intent, next: req.query.next });
+            const { state, nonce } = await createOAuthState({ loginTab, host, intent: req.query.intent, next: req.query.next, desktop: req.query.desktop === "1" });
             res.cookie(OAUTH_STATE_COOKIE, nonce, oauthStateCookieOptions());
             passport.authenticate("google", {
                 ...rescueCallback(req, "google"),

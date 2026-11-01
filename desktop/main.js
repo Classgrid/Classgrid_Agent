@@ -1,0 +1,146 @@
+// Classgrid desktop app. Our screens (client/, built into ./app) are served from this computer at
+// http://localhost:47821 and talk to the live backend (api.classgrid.in). A fixed port keeps the login saved.
+const { app, BrowserWindow, shell, Menu, ipcMain, dialog } = require("electron");
+const http = require("node:http");
+const fs = require("node:fs");
+const path = require("node:path");
+
+const runner = require("./runner");
+
+const PORT = 47821;
+const APP_URL = `http://localhost:${PORT}`;
+const APP_DIR = path.join(__dirname, "app");
+const OUR_HOSTS = new Set(["localhost", "api.classgrid.in"]);
+
+const MIME = {
+  ".html": "text/html; charset=utf-8", ".js": "text/javascript", ".mjs": "text/javascript", ".css": "text/css",
+  ".json": "application/json", ".svg": "image/svg+xml", ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
+  ".gif": "image/gif", ".webp": "image/webp", ".ico": "image/x-icon", ".woff": "font/woff", ".woff2": "font/woff2",
+  ".ttf": "font/ttf", ".mp3": "audio/mpeg", ".mp4": "video/mp4", ".webm": "video/webm", ".wasm": "application/wasm",
+  ".txt": "text/plain; charset=utf-8", ".xml": "application/xml", ".webmanifest": "application/manifest+json",
+};
+
+// Serves ./app; any path that isn't a file gets index.html (the screens do their own routing)
+function startScreenServer() {
+  return new Promise((resolve, reject) => {
+    const server = http.createServer((req, res) => {
+      let urlPath;
+      try { urlPath = decodeURIComponent(new URL(req.url, APP_URL).pathname); } catch { urlPath = "/"; }
+      let file = path.normalize(path.join(APP_DIR, urlPath));
+      if (!file.startsWith(APP_DIR)) { res.writeHead(403); return res.end(); }
+      if (!fs.existsSync(file) || fs.statSync(file).isDirectory()) file = path.join(APP_DIR, "index.html");
+      const type = MIME[path.extname(file).toLowerCase()] || "application/octet-stream";
+      res.writeHead(200, { "Content-Type": type, "Cache-Control": file.endsWith("index.html") ? "no-cache" : "public, max-age=31536000, immutable" });
+      fs.createReadStream(file).pipe(res);
+    });
+    server.once("error", reject);
+    server.listen(PORT, "127.0.0.1", () => resolve(server));
+  });
+}
+
+let win = null;
+const isOurs = (url) => { try { return OUR_HOSTS.has(new URL(url).hostname); } catch { return false; } };
+
+function createWindow() {
+  win = new BrowserWindow({
+    width: 1400,
+    height: 900,
+    minWidth: 900,
+    minHeight: 600,
+    title: "Classgrid",
+    backgroundColor: "#0a0a0a",
+    icon: path.join(__dirname, "build", "icon.png"),
+    autoHideMenuBar: true,
+    webPreferences: { preload: path.join(__dirname, "preload.js"), contextIsolation: true, nodeIntegration: false, sandbox: true },
+  });
+
+  // Our pages stay in the app; other websites open in the user's own browser. Pop-ups (plugin logins) stay as
+  // child windows so they can tell the app when the login is done.
+  win.webContents.setWindowOpenHandler(({ url }) => {
+    if (url === "about:blank" || isOurs(url)) return { action: "allow", overrideBrowserWindowOptions: { width: 600, height: 720, autoHideMenuBar: true } };
+    shell.openExternal(url);
+    return { action: "deny" };
+  });
+  win.webContents.on("will-navigate", (e, url) => {
+    // Google / GitHub sign-in: Google blocks its login inside apps, so it runs in the user's own browser. It is marked
+    // desktop=1 and comes back through a classgrid://login link with a one-time code (see handleDeepLink).
+    if (/^https:\/\/api\.classgrid\.in\/api\/auth\/(chat\/)?(google|github)\b/.test(url)) {
+      e.preventDefault();
+      const u = new URL(url);
+      u.searchParams.set("host", "chat.classgrid.in");
+      u.searchParams.set("desktop", "1");
+      shell.openExternal(u.href);
+      return;
+    }
+    if (!isOurs(url)) { e.preventDefault(); shell.openExternal(url); }
+  });
+  // No floating reCAPTCHA badge in the app window
+  win.webContents.on("dom-ready", () => { win.webContents.insertCSS(".grecaptcha-badge { visibility: hidden !important; }").catch(() => {}); });
+  // Back / forward / reload keys (the app has no menu bar)
+  win.webContents.on("before-input-event", (e, input) => {
+    if (input.type !== "keyDown") return;
+    const nav = win.webContents.navigationHistory;
+    if (input.alt && input.key === "ArrowLeft" && nav.canGoBack()) { nav.goBack(); e.preventDefault(); }
+    else if (input.alt && input.key === "ArrowRight" && nav.canGoForward()) { nav.goForward(); e.preventDefault(); }
+    else if (input.key === "F5" || (input.control && input.key.toLowerCase() === "r")) { win.loadURL(APP_URL); e.preventDefault(); }
+  });
+  win.webContents.on("did-fail-load", (_e, code, _desc, url, isMainFrame) => {
+    if (isMainFrame && code !== -3) win.loadFile(path.join(__dirname, "offline.html"));
+  });
+  win.loadURL(APP_URL);
+}
+
+ipcMain.on("cg:version", (e) => { e.returnValue = app.getVersion(); });
+ipcMain.handle("cg:openExternal", (_e, url) => { if (/^https?:\/\//.test(String(url))) shell.openExternal(String(url)); });
+ipcMain.handle("cg:retry", () => win?.loadURL(APP_URL));
+ipcMain.handle("cg:pickFolder", async () => {
+  const r = await dialog.showOpenDialog(win, { properties: ["openDirectory"] });
+  if (r.canceled) return null;
+  runner.allowFolder(r.filePaths[0]); // only folders picked here can be used by the local runner
+  return r.filePaths[0];
+});
+// The login token arrives from the screens (client/src/main.tsx); the local runner (Day 2) uses it
+ipcMain.on("cg:setToken", (_e, t) => runner.setToken(t || null));
+
+// classgrid:// links open this app (Windows passes them as a launch argument)
+if (process.defaultApp) app.setAsDefaultProtocolClient("classgrid", process.execPath, [path.resolve(process.argv[1])]);
+else app.setAsDefaultProtocolClient("classgrid");
+
+// classgrid://login?code=...: swap the one-time code for the signed-in page (it carries the login token)
+async function handleDeepLink(link) {
+  if (!link || !win) return;
+  let url;
+  try { url = new URL(link); } catch { return; }
+  if (url.hostname !== "login") return;
+  const code = url.searchParams.get("code") || "";
+  try {
+    const res = await fetch("https://api.classgrid.in/api/auth/desktop-exchange", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ code }) });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || typeof data.path !== "string" || !data.path.startsWith("/")) throw new Error(data.message || "Sign-in didn't finish.");
+    win.loadURL(APP_URL + data.path);
+  } catch (err) {
+    dialog.showMessageBox(win, { type: "error", title: "Classgrid", message: "Sign-in didn't finish.", detail: String(err.message || err) });
+  }
+}
+
+if (!app.requestSingleInstanceLock()) {
+  app.quit();
+} else {
+  app.on("second-instance", (_e, argv) => {
+    if (win) { if (win.isMinimized()) win.restore(); win.focus(); }
+    handleDeepLink(argv.find((a) => a.startsWith("classgrid://")));
+  });
+  app.whenReady().then(async () => {
+    Menu.setApplicationMenu(null);
+    runner.init(app.getPath("userData"));
+    if (!fs.existsSync(path.join(APP_DIR, "index.html"))) {
+      dialog.showErrorBox("Classgrid", "The app's screens are missing. Run: npm run build:client");
+      return app.quit();
+    }
+    await startScreenServer();
+    createWindow();
+    handleDeepLink(process.argv.find((a) => a.startsWith("classgrid://")));
+  });
+  app.on("window-all-closed", () => app.quit());
+  app.on("before-quit", () => runner.stopAll());
+}

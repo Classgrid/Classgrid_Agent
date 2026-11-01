@@ -85,6 +85,7 @@ import NotificationLog from "../models/NotificationLog.js";
 import { getMcpTools, handleToolCall, readSandboxFiles } from "../mcp/tools.js";
 import { CUSTOM_MCP_TOOL, runCustomMcpTool, customMcpPromptLine } from "../services/custom-mcp-ai.js";
 import { PLAY_SONG_TOOL, songTools, runPlaySong, runDownloadSong } from "../services/music-ai.js";
+import { localProjectFor, callLocal } from "../services/local-runner.service.js";
 import { parseHTML } from "linkedom";
 import { Readability } from "@mozilla/readability";
 import TurndownService from "turndown";
@@ -1896,6 +1897,9 @@ Classgrid has three modes. The user switches between them with the mode switcher
 Project Mode and Studio share one open project and its chats: the user can open the same chat in either mode. Changes go to GitHub as one open pull request per project; when the user asks to push straight to main, push_project_to_github with direct_to_main: true pushes to the main branch with their own GitHub account (some accounts always push straight to main: the push result says where it went). Connecting GitHub and installing the Classgrid app are done in Project Mode.
 The user is in ${appMode === "agent" ? "Agent mode" : appMode === "project" ? "Project Mode" : "Studio Mode"} now.${appMode === "studio" ? ` Make code changes yourself; do not ask the user to edit a file or open an editor. If they want to edit by hand, they can switch to Project Mode.` : " The live browser is only in Studio Mode: here there is none, so do not try to open or use a browser (no browser tools, and no browser started from code or commands), and do not say that you will try or that you will do it. If the user wants the live browser, tell them to switch to Studio Mode."}`;
         }
+        // Where the user is: the website or the Classgrid desktop app (sent by the app; your own thinking always runs on our servers)
+        if (body.clientApp === "desktop") volatilePrompt += "\n\n--- WHERE THE USER IS ---\nThe user is using the Classgrid desktop app on their own computer (Windows), not the chat.classgrid.in website. The app's screens run on their computer; your thinking runs on Classgrid's servers. Projects opened from a folder on their computer run your file and terminal tools on that computer.";
+        else if (body.clientApp === "web") volatilePrompt += "\n\n--- WHERE THE USER IS ---\nThe user is using Classgrid on the website (chat.classgrid.in) in their browser, not the desktop app.";
         if (slashCommand && (slashCommand !== "compact" || compacted)) volatilePrompt += `\n\n--- COMMAND ---\nThe user started this message with /${body.command}. ${SLASH_COMMAND_LINES[slashCommand]}`;
         // Project Mode: snapshot the project before this answer, so its changes can be reviewed, rejected or undone
         const checkpointId = sessionId && !isIncognito ? await startCheckpoint(sessionId).catch(() => null) : null;
@@ -3343,6 +3347,9 @@ If they ask whether their college/school uses Classgrid, say you can't see that 
                         return `${lines.join("\n\n")}\n\n${running ? `${running} helper(s) still working.` : "All helpers have finished."}${helperChangesText(reported)}`;
                     },
                     run_code: async (args) => {
+                        // A project from a folder on the user's computer: the code runs there, in their desktop app
+                        const localProject = await localProjectFor(sessionId);
+                        if (localProject) return callLocal(localProject, "run_code", args);
                         const result = await handleToolCall('run_code', args, { sessionId, isStaff: isStaffRole(req.user?.role) });
                         const text = result.isError ? result.content[0].text : result.content[0].text;
 

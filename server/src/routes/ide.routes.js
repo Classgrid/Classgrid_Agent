@@ -266,7 +266,7 @@ async function ownProject(req, res) {
   return project;
 }
 
-const projectJson = (p) => ({ id: p._id, name: p.name, repo: p.repo, logo: p.logo || null, lastOpenedAt: p.lastOpenedAt, createdAt: p.createdAt, updatedAt: p.updatedAt });
+const projectJson = (p) => ({ id: p._id, name: p.name, repo: p.repo, logo: p.logo || null, location: p.location || "cloud", localPath: p.localPath || null, lastOpenedAt: p.lastOpenedAt, createdAt: p.createdAt, updatedAt: p.updatedAt });
 
 // A project logo must be a picture this user uploaded to our R2 (same upload as the profile picture).
 // Returns the link, null to remove the logo, or undefined when the link is not allowed.
@@ -360,6 +360,20 @@ router.post("/projects", isAuthenticated, async (req, res) => {
   const logo = req.body?.logo !== undefined ? projectLogo(req.body.logo, req.user._id) : null;
   if (logo === undefined) return res.status(400).json({ error: "Could not use this logo. Upload it again." });
   const project = await IdeProject.create({ owner: req.user._id, name, logo });
+  res.json({ project: projectJson(project) });
+});
+
+// A project from a folder on the user's own computer (Classgrid desktop app): its tools run there, never on our sandbox
+router.post("/projects/local", isAuthenticated, async (req, res) => {
+  const localPath = String(req.body?.localPath || "").trim().slice(0, 500);
+  if (!localPath) return res.status(400).json({ error: "Pick a folder" });
+  const name = String(req.body?.name || localPath.split(/[\/]/).filter(Boolean).pop() || "").trim().slice(0, 80);
+  if (!name) return res.status(400).json({ error: "Give the project a name" });
+  await connectDB();
+  const existing = await IdeProject.findOne({ owner: req.user._id, location: "local", localPath });
+  if (existing) return res.json({ project: projectJson(existing) });
+  if (await nameTaken(req.user._id, name)) return res.status(409).json({ error: `You already have a project called "${name}". Pick another name.` });
+  const project = await IdeProject.create({ owner: req.user._id, name, location: "local", localPath });
   res.json({ project: projectJson(project) });
 });
 
@@ -486,6 +500,8 @@ router.delete("/projects/:id", isAuthenticated, async (req, res) => {
 router.post("/projects/:id/open", isAuthenticated, async (req, res) => {
   const project = await ownProject(req, res);
   if (!project) return;
+  // A folder on the user's computer has nothing to download here: the desktop app works on it directly
+  if (project.location === "local") return res.json({ ok: true, local: true, localPath: project.localPath });
   const dir = projectDir(project);
   let ssh;
   try {

@@ -4313,6 +4313,8 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
             const parts = window.location.pathname.split("/");
             return parts.includes("studio") || parts.includes("project") ? leadingSlashCommand(question, parts.includes("studio")) : undefined;
           })(),
+          // Website or Classgrid desktop app, so the AI knows where the user is
+          clientApp: (window as any).classgridDesktop?.isDesktop ? "desktop" : "web",
           // Studio and Project Mode: which actions ask the user first (the shield in the chat box)
           permissionMode: (() => {
             const parts = window.location.pathname.split("/");

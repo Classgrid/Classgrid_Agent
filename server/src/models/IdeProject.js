@@ -41,6 +41,9 @@ const ideProjectSchema = new mongoose.Schema(
     lastOpenedAt: { type: Date, default: null },
     // Unpushed work pushed to GitHub when the project left the sandbox, shown once on the next open
     lastBackup: { branch: { type: String }, at: { type: Date } },
+    // "local": a folder on the user's own computer, run by the Classgrid desktop app (services/local-runner.service.js)
+    location: { type: String, enum: ["cloud", "local"], default: "cloud" },
+    localPath: { type: String, default: null }, // that folder, as the desktop app reported it (shown only)
   },
   { timestamps: true }
 );

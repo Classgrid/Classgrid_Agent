@@ -167,6 +167,8 @@ export const initSocket = (server, { path } = {}) => {
     io.on("connection", (socket) => {
         // Studio Mode's live browser: the Browser tab watches the user's own browser through this socket
         import("./studio-browser.service.js").then((m) => m.registerBrowserSocket(socket)).catch((e) => console.error("[Studio browser] socket:", e.message));
+        // Classgrid desktop app: runs the user's local-folder project tools on their computer
+        import("./local-runner.service.js").then((m) => m.registerRunnerSocket(socket)).catch((e) => console.error("[Local runner] socket:", e.message));
         const orgId = socket.orgId;
         const orgStreamKey = `chat:stream:org_${orgId}`;
 
