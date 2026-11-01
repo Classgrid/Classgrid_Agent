@@ -172,12 +172,22 @@ export function CustomConnectorDetail({ server, onBack, onChanged, onRemoved, on
 /** Detail page of a known MCP app that isn't added yet */
 export function CatalogAppDetail({ app, onBack, onAdded }: { app: McpCatalogApp; onBack: () => void; onAdded: (s: CustomMcpServer) => void }) {
   const [busy, setBusy] = useState(false);
+  // Apps with their own address per user (n8n): the user types it, and logs in or gives an access token
+  const [ownUrl, setOwnUrl] = useState("");
+  const [useToken, setUseToken] = useState(false);
+  const [token, setToken] = useState("");
+  const authType = app.askUrl && useToken ? "api_key" : app.auth;
+  const ready = !app.askUrl || (/^https:\/\/\S+$/i.test(ownUrl.trim()) && (!useToken || token.trim()));
   const connect = async () => {
+    if (!ready) return;
     setBusy(true);
-    const popup = app.auth === "oauth" ? openLoginPopup() : null;
+    const popup = authType === "oauth" ? openLoginPopup() : null;
     try {
-      const created = await mcpApi.create({ name: app.name, description: app.description, url: app.url, authType: app.auth, catalogId: app.id, iconUrl: app.logo });
-      const final = app.auth === "oauth" ? (await loginToServer(created.id, popup)) || created : created;
+      const created = await mcpApi.create({
+        name: app.name, description: app.description, url: app.askUrl ? ownUrl.trim() : app.url, authType, catalogId: app.id, iconUrl: app.logo,
+        apiKey: authType === "api_key" ? token.trim() : undefined,
+      });
+      const final = authType === "oauth" ? (await loginToServer(created.id, popup)) || created : created;
       // It only counts as added once the login really worked
       if (final.status === "connected") {
         toast.success(`${final.name} connected`);
@@ -214,9 +224,36 @@ export function CatalogAppDetail({ app, onBack, onAdded }: { app: McpCatalogApp;
           </li>
         ))}
       </ul>
-      <Button variant="outline" onClick={connect} disabled={busy} className={cn(secondaryBtn, "h-10 w-fit px-6")}>
+      {app.askUrl && (
+        <div className="space-y-3 mb-6 max-w-xl">
+          <div className="space-y-1.5">
+            <p className="text-sm font-medium text-foreground">Your {app.name} address</p>
+            <input
+              value={ownUrl}
+              onChange={(e) => setOwnUrl(e.target.value)}
+              placeholder={app.askUrl.placeholder}
+              className="w-full h-10 px-3 rounded-lg border border-border bg-background text-sm font-mono text-foreground placeholder:text-muted-foreground outline-none focus:border-foreground/30"
+            />
+            <p className="text-xs text-muted-foreground">{app.askUrl.hint}</p>
+          </div>
+          <label className="flex items-center gap-2 text-sm text-muted-foreground cursor-pointer w-fit">
+            <input type="checkbox" checked={useToken} onChange={(e) => setUseToken(e.target.checked)} className="w-4 h-4 accent-foreground" />
+            Use an access token instead of logging in
+          </label>
+          {useToken && (
+            <input
+              type="password"
+              value={token}
+              onChange={(e) => setToken(e.target.value)}
+              placeholder="Access token"
+              className="w-full h-10 px-3 rounded-lg border border-border bg-background text-sm font-mono text-foreground placeholder:text-muted-foreground outline-none focus:border-foreground/30"
+            />
+          )}
+        </div>
+      )}
+      <Button variant="outline" onClick={connect} disabled={busy || !ready} className={cn(secondaryBtn, "h-10 w-fit px-6")}>
         {busy ? <Spinner className="w-4 h-4 mr-2" /> : null}
-        {app.auth === "oauth" ? "Connect and log in" : "Connect"}
+        {authType === "oauth" ? "Connect and log in" : "Connect"}
       </Button>
     </div>
   );

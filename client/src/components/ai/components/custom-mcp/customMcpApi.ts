@@ -19,7 +19,7 @@ export interface CustomMcpServer {
   tools: McpTool[];
   toolsFetchedAt?: string | null;
 }
-export interface McpCatalogApp { id: string; name: string; description: string; url: string; auth: "oauth" | "none"; logo: string; invertInDarkMode?: boolean }
+export interface McpCatalogApp { id: string; name: string; description: string; url: string; auth: "oauth" | "none"; logo: string; invertInDarkMode?: boolean; askUrl?: { placeholder: string; hint: string } }
 
 export const apiBase = () => (import.meta.env.VITE_API_URL || "https://api.classgrid.in");
 

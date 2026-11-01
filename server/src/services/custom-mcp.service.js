@@ -268,7 +268,7 @@ export function forgetServer(id) {
 export async function findLogo(serverUrl) {
     let url;
     try { url = new URL(serverUrl); } catch { return ""; }
-    const known = MCP_CATALOG.find((a) => new URL(a.url).hostname === url.hostname);
+    const known = MCP_CATALOG.find((a) => a.url && new URL(a.url).hostname === url.hostname);
     if (known) return known.logo;
     const labels = url.hostname.split(".");
     const site = labels.length > 2 && /^(mcp|api|server|www|app)$/i.test(labels[0]) ? labels.slice(1).join(".") : url.hostname;
