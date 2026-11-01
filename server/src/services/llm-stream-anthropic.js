@@ -218,7 +218,7 @@ function imageBlockFromBuffer(buf) {
 const TRUSTED_IMAGE_URL = /https:\/\/[^\s"'<>()\]]+?\.(?:png|jpe?g|gif|webp)(?:\?[^\s"'<>()\]]*)?/gi;
 // Only tools that make or upload an image have their image links shown; database, log, web and other
 // results stay text (their links are just data, and fetching them would cost tokens on every query).
-const IMAGE_LINK_TOOLS = new Set(["upload_sandbox_file_to_cdn", "upload_file_to_cdn", "generate_image", "edit_image"]);
+const IMAGE_LINK_TOOLS = new Set(["upload_sandbox_file_to_cdn", "upload_file_to_cdn", "generate_image", "edit_image", "make_video"]);
 const MAX_IMAGES_PER_TOOL_RESULT = 4;
 const MAX_TOOL_IMAGES_PER_RUN = 16;
 const MAX_TOOL_IMAGE_BYTES_PER_RUN = 18 * 1024 * 1024;

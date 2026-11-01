@@ -2861,6 +2861,25 @@ If they ask whether their college/school uses Classgrid, say you can't see that 
                 {
                     type: "function",
                     function: {
+                        name: "make_video",
+                        description: "Makes an MP4 video (explainer, product or launch promo, animated intro, reel, motion graphics, animated slides) from an animated HTML page you write, like a motion designer. The page is recorded frame by frame in Chromium and joined with ffmpeg, so text is sharp, fonts are real and motion is smooth; no video model is used. Write ONE complete HTML page that plays its whole animation once from page load (time 0), sized exactly to width x height (body margin 0, overflow hidden). Animate with CSS @keyframes and animation-delay, the Web Animations API, GSAP from cdnjs, or requestAnimationFrame with performance.now(). The recorder controls time, so never wait for clicks, hover, scroll or real waiting. Google Fonts and public script/image URLs load. No sound. Plan the scenes on a timeline and keep each text on screen long enough to read. Recording takes about 1 minute per 10 seconds of 1080p video. Returns the video link (put it in your reply; it plays in the chat) and three still frames to check.",
+                        parameters: {
+                            type: "object",
+                            properties: {
+                                html: { type: "string", description: "The full animated HTML page (<!doctype html> ... </html>)." },
+                                seconds: { type: "number", description: "Video length in seconds (1-120). Match it to your animation's timeline." },
+                                fps: { type: "number", description: "Frames per second: 24, 30 (default) or 60." },
+                                width: { type: "number", description: "Width in pixels (default 1920). Use 1080 with height 1920 for a vertical reel or WhatsApp status." },
+                                height: { type: "number", description: "Height in pixels (default 1080)." },
+                                fileName: { type: "string", description: "Short file name, e.g. classgrid-launch.mp4" }
+                            },
+                            required: ["html", "seconds"]
+                        }
+                    }
+                },
+                {
+                    type: "function",
+                    function: {
                         name: "generate_pdf",
                         description: "Generates a beautifully formatted PDF document from HTML content using Puppeteer. Returns a download URL.",
                         parameters: {
@@ -3615,6 +3634,31 @@ If they ask whether their college/school uses Classgrid, say you can't see that 
                             return `SUCCESS: File uploaded and added to the user's AI Library. Public URL: ${url}`;
                         } catch (e) {
                             return `FAILED to upload file: ${e.message}`;
+                        }
+                    },
+                    make_video: async (args) => {
+                        try {
+                            const { renderVideo, uploadToCdn } = await import('../services/video-render.service.js');
+                            const name = `${String(args?.fileName || "video").replace(/\.mp4$/i, "").replace(/[^\w-]+/g, "-").slice(0, 60) || "video"}.mp4`;
+                            const video = await renderVideo(args || {});
+                            const { key, url } = await uploadToCdn(video.mp4, name, "video/mp4");
+                            const stills = [];
+                            for (const c of video.checks) stills.push(`${c.at}s: ${(await uploadToCdn(c.jpg, `frame-${c.at}s.jpg`, "image/jpeg")).url}`);
+                            try {
+                                const AiLibraryFile = (await import('../models/AiLibraryFile.js')).default;
+                                await AiLibraryFile.create({
+                                    user_email: req.user?.email || '', user_id: req.user?._id || null, organization_id: req.user?.organization_id || null,
+                                    original_name: name, file_key: key, cdn_url: url, mime_type: "video/mp4", file_type: "video",
+                                    size_bytes: video.mp4.length, source: "generated",
+                                });
+                                if (req.user?._id) (await import('../services/socket.service.js')).getIO().to(req.user._id.toString()).emit("ai_library_updated");
+                            } catch (libErr) {
+                                console.error("[make_video] Couldn't add the video to the AI Library:", libErr.message);
+                            }
+                            const { width, height, seconds, fps } = video.cfg;
+                            return `SUCCESS: ${name} is ready (${width}x${height}, ${seconds}s, ${fps} fps, ${(video.mp4.length / 1048576).toFixed(1)} MB). Video link: ${url}\nPut this link in your reply; it plays in the chat.\nStill frames: ${stills.join("  ")}${video.errors.length ? `\nProblems on the page: ${video.errors.join(" | ")}` : ""}\nIf you can see the frames, check them: if text overlaps, is cut off, or something is missing, fix the HTML and call make_video again.`;
+                        } catch (e) {
+                            return `FAILED to make the video: ${e.message}`;
                         }
                     },
                     // Claude only (see VIEW_IMAGE_TOOL): returns the sandbox image itself so Claude sees it with its own vision.

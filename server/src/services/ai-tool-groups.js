@@ -133,6 +133,12 @@ export const TOOL_GROUPS = [
         pattern: /\b(run|execute|python|code|script|program|javascript|node(js)?|bash|shell|sandbox|compile|debug|pandas|numpy|matplotlib|plot|graph|chart|csv|excel|xlsx|spreadsheet|calculat\w*|compute|simulat\w*|website|landing\s*page|html|chala\w*|likh\w*)\b|```|कोड|चलाओ/i,
     },
     {
+        id: "video_make",
+        description: "Make an MP4 video (explainer, promo, launch video, animated intro, reel, motion graphics) from an animated HTML page.",
+        tools: ["make_video"],
+        pattern: /\b(videos?|animat\w*|explainer|reels?|motion|promo|intro|teaser|trailer|mp4|clip)\b|वीडियो/i,
+    },
+    {
         id: "code_project",
         description: "List, read, search, create and edit files of the Project Mode project open in this chat, and push it to GitHub.",
         tools: ["list_project_files", "view_project_file", "search_project", "write_project_file", "edit_project_file", "push_project_to_github", "create_github_repo_for_project", "update_project_github_repo", "start_background_command", "check_background_command", "stop_background_command", "search_project_by_meaning", "bulk_read_project", "write_project_file_from_spec", "run_project_helpers", "message_helper", "check_helpers", "rename_project"],
