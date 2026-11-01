@@ -209,7 +209,6 @@ CONTEXT & KNOWLEDGE
 - Take your time and do your best work; never hurry. For research, or anything that needs real facts (for example jobs, prices, deadlines, people, news), search the web, open and read the actual pages, check each fact at its source (is it real, still open, current), and use all your tools before you answer. Spend the time it takes to get it right.
 - Your own email inbox: you have your own email address, agent@classgrid.in. When a user wants to email you (for example to send keys, files or details), tell them to send it to agent@classgrid.in. You can read every email there with read_agent_email.
 - Academic hierarchy, org structure, departments, streams, divisions, batches, internal policies, handbooks, PTO: search_knowledge_base first (e.g. "Academic Hierarchy"); never guess. External research or news: search_web. Deep multi-note analysis: search_knowledge_base, then unified_db_query, then run_code, thinking briefly before each step.
-- When the user asks how to use, set up or change something in Classgrid AI, call read_classgrid_guide (page "index" first if unsure which page) and answer from it; for newer details, open its live docs links with open_url.
 
 TOOLS & ERRORS
 - Never repeat a tool call with the same arguments; if looping, change approach.
@@ -3714,7 +3713,6 @@ If they ask whether their college/school uses Classgrid, say you can't see that 
                             return `Error getting time for ${args.timeZone}. Please ensure it is a valid IANA timezone string like 'Europe/London'.`;
                         }
                     },
-                    read_classgrid_guide: async (args) => (await handleToolCall('read_classgrid_guide', args, {})).content[0].text,
                     open_url: async (args) => {
                         // Read one specific page (the official site or docs) via Tavily Extract
                         let target;

@@ -32,6 +32,7 @@ import { NodeSSH } from "node-ssh";
 import IdeProject from "../models/IdeProject.js";
 import User from "../models/User.js";
 import { githubUser } from "./github-token.service.js";
+import { guideFiles, GUIDE_PROJECT_DIR } from "./classgrid-guide.service.js";
 import { githubAppReady, githubAppInstallUrl, repoAppToken, classgridAuthor, userCoAuthorLine } from "./github-app.service.js";
 import connectDB from "../../config/db.js";
 import redis from "../config/redis.js";
@@ -57,6 +58,8 @@ export async function sandboxSsh() {
 
 export const projectHostDir = (p) => `/home/ubuntu/ide_users/${p.owner}/projects/${p._id}`;
 const q = (s) => `'${String(s).replace(/'/g, `'\\''`)}'`;
+// Shell: keep Classgrid's guide folder out of the repo (its .git/info/exclude), so "git add -A" never commits it
+const excludeGuide = (dir) => `([ ! -d ${q(dir)}/.git ] || grep -qxF ${q(`/${GUIDE_PROJECT_DIR}/`)} ${q(`${dir}/.git/info/exclude`)} 2>/dev/null || (mkdir -p ${q(`${dir}/.git/info`)} && echo ${q(`/${GUIDE_PROJECT_DIR}/`)} >> ${q(`${dir}/.git/info/exclude`)}))`;
 
 // Newest file change on disk (node_modules and .git skipped), as a Date, or null if there is nothing to read.
 // Used to persist the real "last edited" time before the project code leaves the sandbox.
@@ -387,7 +390,7 @@ export async function createRepoForProject(project, ssh, { name, private: isPriv
   // The first push goes through the Classgrid app when the app is installed on the new repo (e.g. installed
   // for all the account's repos), else with the user's key as before
   const appKey = await repoAppToken(gh.full_name).catch(() => null);
-  await ssh.execCommand(`git -C ${q(dir)} add -A`);
+  await ssh.execCommand(`${excludeGuide(dir)}; git -C ${q(dir)} add -A`);
   const { stdout: staged } = await ssh.execCommand(`git -C ${q(dir)} diff --cached --stat | tail -1`);
   const me = classgridAuthor(); // GitHub lists only main authors as contributors: Classgrid AI is the author, the user co-author
   const userLine = userCoAuthorLine(owner);
@@ -485,7 +488,7 @@ export async function pushProject(project, ssh, message, { direct: askedDirect =
   const { stdout: isRepo } = await ssh.execCommand(`[ -d ${q(dir)}/.git ] && echo yes`);
   if (!isRepo.trim()) return "The project code is not downloaded. Open the project in Project Mode first.";
 
-  await ssh.execCommand(`git -C ${q(dir)} add -A`);
+  await ssh.execCommand(`${excludeGuide(dir)}; git -C ${q(dir)} add -A`);
   const { stdout: staged } = await ssh.execCommand(`git -C ${q(dir)} diff --cached --stat | tail -1`);
   if (staged.trim()) {
     const commit = await ssh.execCommand(`git -C ${q(dir)} ${as} commit -q -F -`, { stdin: `${msg}${userLine ? `\n\n${userLine}` : ""}\n` });
@@ -869,6 +872,27 @@ export async function linkChatToProject(userId, projectId, sessionId) {
   await IdeProject.updateOne({ _id: project._id }, { $addToSet: { chatSessionIds: sessionId } });
 }
 
+// Classgrid AI's guide in the open project (.classgrid/classgrid_guide/): written when missing or changed, and kept out
+// of git with the repo's .git/info/exclude, so it shows in the Files tab but is never committed or pushed
+async function putGuideInProject(ssh, project) {
+  const dir = projectHostDir(project);
+  const { files, version } = await guideFiles();
+  const guide = `${dir}/${GUIDE_PROJECT_DIR}`;
+  // Which version is there: kept outside the project, so it never shows in the Files tab
+  const mark = `/home/ubuntu/ide_users/${project.owner}/.classgrid/guide-${project._id}.version`;
+  const { stdout: current } = await ssh.execCommand(
+    `${excludeGuide(dir)}; [ -f ${q(`${guide}/SKILL.md`)} ] && cat ${q(mark)} 2>/dev/null`
+  );
+  if (current.trim() === version) return true;
+  for (const f of files) {
+    const file = `${guide}/${f.rel}`;
+    const { code } = await ssh.execCommand(`mkdir -p ${q(path.posix.dirname(file))} && cat > ${q(file)}`, { stdin: f.text });
+    if (code) return false;
+  }
+  await ssh.execCommand(`mkdir -p ${q(path.posix.dirname(mark))} && cat > ${q(mark)}`, { stdin: version });
+  return true;
+}
+
 export async function editorContextFor(sessionId) {
   const project = await projectForChat(sessionId);
   if (!project) return "";
@@ -886,6 +910,9 @@ export async function editorContextFor(sessionId) {
 ${rulesFile.text}`);
 
     const { stdout: hasCode } = await ssh.execCommand(`[ -n "$(ls -A ${q(projectHostDir(project))} 2>/dev/null)" ] && echo yes`);
+    if (hasCode.trim() && await putGuideInProject(ssh, project).catch(() => false)) {
+      lines.push(`Classgrid AI's own guide is in ${GUIDE_PROJECT_DIR}/ (SKILL.md lists the pages in references/: Agent Mode, Project Mode, Studio Mode, settings, connections and the "/" commands). When the user asks how to use, set up or change something in Classgrid AI, read SKILL.md and the matching page with view_project_file and answer from them. These files are Classgrid's, not the project's: never edit them, and they are never pushed to GitHub.`);
+    }
     if (!hasCode.trim()) lines.push("The project's code is not downloaded right now (it leaves our servers a few minutes after the user closes the editor). The user can open the project in Project Mode to download it again.");
     const { stdout } = await ssh.execCommand(`cat ${q(`/home/ubuntu/ide_users/${project.owner}/.classgrid/context.json`)} 2>/dev/null`);
     let ctx = null;
@@ -1108,7 +1135,7 @@ export async function backupAndRemoveProjectCode(ssh, project) {
     const stamp = new Date().toISOString().slice(0, 16).replace(/[-:T]/g, "").replace(/^(\d{8})(\d{4})$/, "$1-$2");
     backupBranch = `classgrid-backup-${stamp}`;
     const auth = Buffer.from(`x-access-token:${key}`).toString("base64");
-    await ssh.execCommand(`git -C ${q(dir)} checkout -q -b ${backupBranch} && git -C ${q(dir)} add -A && git -C ${q(dir)} -c user.name=${q(classgridAuthor().name)} -c user.email=${q(classgridAuthor().email)} commit -q -m "Classgrid: unsaved work, saved when the project was closed" || true`);
+    await ssh.execCommand(`${excludeGuide(dir)}; git -C ${q(dir)} checkout -q -b ${backupBranch} && git -C ${q(dir)} add -A && git -C ${q(dir)} -c user.name=${q(classgridAuthor().name)} -c user.email=${q(classgridAuthor().email)} commit -q -m "Classgrid: unsaved work, saved when the project was closed" || true`);
     const push = await ssh.execCommand(
       `GIT_TERMINAL_PROMPT=0 GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=http.https://github.com/.extraheader GIT_CONFIG_VALUE_0="AUTHORIZATION: basic ${auth}" ` +
       `git -C ${q(dir)} push -q origin ${backupBranch} 2>&1 | tail -3`
