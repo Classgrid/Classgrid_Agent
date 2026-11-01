@@ -1869,6 +1869,9 @@ You are currently talking to Nikhil Shinde (nikhil.shinde@classgrid.in), the CRE
         // A message sent from Project Mode links this chat to the open project first (from the very first message)
         if (sessionId && !isIncognito && !gridSender && /^[0-9a-f]{24}$/i.test(String(body.projectId || "")) && req.user?._id) {
             await linkChatToProject(req.user._id, body.projectId, sessionId).catch(() => {});
+        } else if (sessionId && !isIncognito && !gridSender && body.appMode === "studio" && body.taskOrigin !== "whatsapp" && req.user?._id) {
+            // Studio with no project open: the chat is kept in Studio's own chat list
+            await User.updateOne({ _id: req.user._id }, { $addToSet: { studio_chat_ids: sessionId } }).catch(() => {});
         }
         const projectContext = sessionId && !isIncognito ? await editorContextFor(sessionId).catch(() => "") : "";
         const isProjectChat = !!projectContext; // Project Mode chat: Agent-mode website hosting rules are not sent
@@ -5693,12 +5696,15 @@ export const getChatSessions = async (req, res) => {
         // Agent mode and Project mode keep separate chat lists: ?mode=agent leaves out chats that belong to a
         // project, ?project=<id> shows only that project's chats (the user's own projects only). No query = all.
         const { mode, project } = req.query || {};
+        // Studio chats sent with no project open (kept out of Agent mode, listed in Studio with ?studio=1)
+        const me = await User.findById(req.user._id).select("archived_chat_ids studio_chat_ids").lean().catch(() => null);
+        const studioIds = me?.studio_chat_ids || [];
         if (mode === "agent" || project) {
             const IdeProject = (await import("../models/IdeProject.js")).default;
             if (project === "all") {
                 // Projects page with no project open: the chats of all the user's projects
                 const ps = await IdeProject.find({ owner: req.user._id }).select("chatSessionIds").lean();
-                const ids = new Set(ps.flatMap((x) => x.chatSessionIds || []));
+                const ids = new Set([...ps.flatMap((x) => x.chatSessionIds || []), ...(req.query?.studio === "1" ? studioIds : [])]);
                 sessions = (sessions || []).filter((s) => ids.has(s.id));
             } else if (project) {
                 const p = /^[0-9a-f]{24}$/i.test(String(project)) ? await IdeProject.findOne({ _id: project, owner: req.user._id }).select("chatSessionIds").lean() : null;
@@ -5706,7 +5712,7 @@ export const getChatSessions = async (req, res) => {
                 sessions = (sessions || []).filter((s) => ids.has(s.id));
             } else {
                 const ps = await IdeProject.find({ owner: req.user._id }).select("chatSessionIds").lean();
-                const ids = new Set(ps.flatMap((x) => x.chatSessionIds || []));
+                const ids = new Set([...ps.flatMap((x) => x.chatSessionIds || []), ...studioIds]);
                 sessions = (sessions || []).filter((s) => !ids.has(s.id));
             }
         }
@@ -5715,7 +5721,7 @@ export const getChatSessions = async (req, res) => {
             if (shared.length) sessions = [...shared, ...(sessions || [])].sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)));
         }
         // Archived chats are left out of the list; ?archived=1 lists only them
-        const archivedIds = new Set((await User.findById(req.user._id).select("archived_chat_ids").lean().catch(() => null))?.archived_chat_ids || []);
+        const archivedIds = new Set(me?.archived_chat_ids || []);
         sessions = (sessions || []).filter((s) => (req.query?.archived === "1" ? archivedIds.has(s.id) : !archivedIds.has(s.id)));
         // Share Grid: mark chats shared with 2+ people (a star in the chat list)
         const gridIds = await sharedChatIdsFor(email).catch(() => new Set());

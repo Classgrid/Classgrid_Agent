@@ -183,7 +183,8 @@ function ArchivedChatsDialog({ open, onClose }: { open: boolean; onClose: () => 
   const load = async () => {
     let project: string | null = null;
     if (inProject()) { try { project = sessionStorage.getItem("cg_project_open") || localStorage.getItem("cg_project_open"); } catch { /* storage blocked */ } }
-    const { res, data } = await call(`/sessions?archived=1${project ? `&project=${project}` : "&mode=agent"}`);
+    const inStudio = window.location.pathname.split("/").includes("studio");
+    const { res, data } = await call(`/sessions?archived=1${project ? `&project=${project}` : inStudio ? "&project=all&studio=1" : "&mode=agent"}`);
     setList(res.ok ? data.sessions || [] : []);
   };
   useEffect(() => { if (open) { setList(null); load(); } }, [open]);

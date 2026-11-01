@@ -793,6 +793,8 @@ const userSchema = new mongoose.Schema(
     // 🧠 AI Chat Customization & Defaults
     // Chats this user archived: left out of their chat lists, shown under "Archived chats"
     archived_chat_ids: { type: [String], default: [] },
+    // Studio chats sent with no project open: listed in Studio, not in Agent mode
+    studio_chat_ids: { type: [String], default: [] },
     ai_preferences: {
       tone: { type: String, default: 'balanced' },
       verbosity: { type: String, default: 'balanced' },

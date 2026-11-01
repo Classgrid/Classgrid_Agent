@@ -88,12 +88,30 @@ export function StudioModePage() {
     try { return (sessionStorage.getItem("cg_project_open") || localStorage.getItem("cg_project_open")); } catch { return null; } // the same open project as Project Mode
   });
   useEffect(() => {
-    const onChange = (e: Event) => {
-      setStudioProject((e as CustomEvent<{ projectId: string | null }>).detail?.projectId ?? null);
-      // The open chat belongs to the old project: start a new chat for the new one (like Project Mode)
+    const onChange = async (e: Event) => {
+      const id = (e as CustomEvent<{ projectId: string | null }>).detail?.projectId ?? null;
+      setStudioProject(id);
       const parts = window.location.pathname.split("/");
       const at = parts.indexOf("studio");
-      if (at !== -1 && parts.length > at + 1 && parts[at + 1]) {
+      const chatId = at !== -1 ? parts[at + 1] : "";
+      if (!chatId) return;
+      // The open chat has no project yet: it joins the picked project and stays open
+      if (id) {
+        const base = import.meta.env.VITE_API_URL || "https://api.classgrid.in";
+        const res = await fetchWithRescue(`${base}/api/ai/sessions/${chatId}`, { credentials: "include" }).catch(() => null);
+        const chat = res?.ok ? await res.json().catch(() => null) : null;
+        if (chat && !chat.projectId) {
+          const linked = await fetchWithRescue(`${base}/api/ide/projects/${id}/chats`, {
+            method: "POST",
+            credentials: "include",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ sessionId: chatId }),
+          }).catch(() => null);
+          if (linked?.ok) { window.dispatchEvent(new Event("agent:refresh-sessions")); return; }
+        }
+      }
+      // The open chat belongs to the old project: start a new chat for the new one (like Project Mode)
+      if (window.location.pathname.split("/")[at + 1] === chatId) {
         window.history.pushState({}, "", parts.slice(0, at + 1).join("/"));
         window.dispatchEvent(new PopStateEvent("popstate"));
         window.dispatchEvent(new Event("agent:new-chat"));

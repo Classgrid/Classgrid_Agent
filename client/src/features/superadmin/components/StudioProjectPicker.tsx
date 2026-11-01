@@ -39,6 +39,88 @@ function readList(): Project[] | null {
   } catch { return null; }
 }
 
+// Loads the projects and keeps the list for the next visit; null when it could not load
+async function fetchProjects(): Promise<Project[] | null> {
+  try {
+    const { res, data } = await api("/projects");
+    if (!res.ok) return null;
+    const list: Project[] = data.projects || [];
+    try { localStorage.setItem(LIST_KEY, JSON.stringify(list.map(({ id, name, repo, logo, updatedAt }) => ({ id, name, repo, logo, updatedAt })))); } catch { /* storage blocked */ }
+    return list;
+  } catch { return null; }
+}
+
+// Opens a project in Studio: every picker, the pane and the left chat list follow it
+function openStudioProject(id: string | null) {
+  try { id ? localStorage.setItem(PICK_KEY, id) : localStorage.removeItem(PICK_KEY); } catch { /* storage blocked */ }
+  try { id ? sessionStorage.setItem(PICK_KEY, id) : sessionStorage.removeItem(PICK_KEY); } catch { /* storage blocked */ }
+  window.dispatchEvent(new Event("agent:refresh-sessions")); // the left list shows this project's chats
+  window.dispatchEvent(new CustomEvent("studio:project-changed", { detail: { projectId: id } }));
+}
+
+// The right pane's Project tab: pick or switch the project, or make a new one (with or without a repo)
+export function StudioProjectChooser({ picked, onDone }: { picked: string | null; onDone?: () => void }) {
+  const [projects, setProjects] = useState<Project[] | null>(readList);
+  const [q, setQ] = useState("");
+  const [creating, setCreating] = useState(false);
+  useEffect(() => { fetchProjects().then((list) => setProjects((old) => list || old || [])); }, []);
+  const shown = useMemo(() => {
+    const t = q.trim().toLowerCase();
+    return (projects || []).filter((p) => !t || p.name.toLowerCase().includes(t) || (p.repo || "").toLowerCase().includes(t));
+  }, [projects, q]);
+  const pick = (id: string) => { if (id !== picked) openStudioProject(id); onDone?.(); };
+
+  return (
+    <div className="flex flex-col gap-2">
+      <div className="rounded-lg border border-black/10 dark:border-white/[0.08] bg-white dark:bg-[#1e1e1e] overflow-hidden">
+        <label className="flex items-center gap-2 h-9 px-3 border-b border-black/10 dark:border-white/[0.08]">
+          <Search className="size-3.5 shrink-0 text-muted-foreground" />
+          <input
+            data-no-ring
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+            placeholder="Search projects"
+            className="flex-1 min-w-0 bg-transparent border-0 p-0 text-[13px] shadow-none outline-none ring-0 focus:outline-none focus:ring-0 focus-visible:outline-none focus-visible:ring-0 placeholder:text-muted-foreground"
+          />
+        </label>
+        <div className="max-h-72 overflow-y-auto p-1">
+          {projects === null && <p className="px-2 py-1.5 text-[13px] text-muted-foreground">Loading…</p>}
+          {projects !== null && !shown.length && (
+            <p className="px-2 py-1.5 text-[13px] text-muted-foreground">{q.trim() ? `No project matches “${q}”.` : "No projects yet."}</p>
+          )}
+          {shown.map((p) => (
+            <button
+              key={p.id}
+              type="button"
+              onClick={() => pick(p.id)}
+              className="w-full flex items-center gap-2.5 h-9 px-2 rounded-md text-left text-[13px] text-foreground/85 hover:bg-black/[0.05] dark:hover:bg-white/[0.07] transition-colors duration-150"
+            >
+              {p.logo ? <img src={p.logo} alt="" className="size-[15px] shrink-0 rounded object-cover" /> : <Folder className="size-[15px] shrink-0 text-muted-foreground" />}
+              <span className="flex-1 min-w-0 truncate">{p.name}</span>
+              <span className="shrink-0 max-w-[45%] truncate text-[12px] text-muted-foreground">{p.repo || "No repo"}</span>
+              {p.id === picked && <Check className="size-3.5 shrink-0" />}
+            </button>
+          ))}
+        </div>
+        <div className="border-t border-black/10 dark:border-white/[0.08] p-1">
+          <button
+            type="button"
+            onClick={() => setCreating(true)}
+            className="w-full flex items-center gap-2.5 h-8 px-2 rounded-md text-left text-[13px] text-foreground/85 hover:bg-black/[0.05] dark:hover:bg-white/[0.07] transition-colors duration-150"
+          >
+            <FolderPlus className="size-[15px] text-muted-foreground" /> New project
+          </button>
+        </div>
+      </div>
+      <NewProjectDialog
+        open={creating}
+        onOpenChange={setCreating}
+        onCreated={(p) => { setProjects((list) => [p, ...(list || []).filter((x) => x.id !== p.id)]); pick(p.id); }}
+      />
+    </div>
+  );
+}
+
 export function StudioProjectPicker() {
   const [projects, setProjects] = useState<Project[] | null>(readList);
   const [picked, setPicked] = useState<string | null>(readPick);
@@ -66,23 +148,21 @@ export function StudioProjectPicker() {
   const reduce = useReducedMotion();
 
   const load = useCallback(async () => {
-    try {
-      const { res, data } = await api("/projects");
-      if (!res.ok) { setProjects((list) => list || []); return; }
-      const list: Project[] = data.projects || [];
-      setProjects(list);
-      try { localStorage.setItem(LIST_KEY, JSON.stringify(list.map(({ id, name, repo, logo, updatedAt }) => ({ id, name, repo, logo, updatedAt })))); } catch { /* storage blocked */ }
-    } catch {
-      setProjects((list) => list || []);
-    }
+    const list = await fetchProjects();
+    setProjects((old) => list || old || []);
   }, []);
 
   // Two pickers (the new-chat screen and an open chat) stay the same: a pick in one shows in the other
   useEffect(() => {
-    const onChange = (e: Event) => setPicked((e as CustomEvent<{ projectId: string | null }>).detail?.projectId ?? null);
+    const onChange = (e: Event) => {
+      const id = (e as CustomEvent<{ projectId: string | null }>).detail?.projectId ?? null;
+      setPicked(id);
+      // A project made in the pane's Project tab is not in this list yet
+      if (id) load();
+    };
     window.addEventListener("studio:project-changed", onChange);
     return () => window.removeEventListener("studio:project-changed", onChange);
-  }, []);
+  }, [load]);
   useEffect(() => { load(); }, [load]);
   // Opening the list loads the projects again, so a repo linked in Project Mode shows here at once
   useEffect(() => { if (open) load(); }, [open, load]);
@@ -90,10 +170,7 @@ export function StudioProjectPicker() {
   const pick = (id: string | null, made?: Project) => {
     if (made) setProjects((list) => [made, ...(list || []).filter((p) => p.id !== made.id)]);
     setPicked(id);
-    try { id ? localStorage.setItem(PICK_KEY, id) : localStorage.removeItem(PICK_KEY); } catch { /* storage blocked */ }
-    try { id ? sessionStorage.setItem(PICK_KEY, id) : sessionStorage.removeItem(PICK_KEY); } catch { /* storage blocked */ }
-    window.dispatchEvent(new Event("agent:refresh-sessions")); // the left list shows this project's chats
-    window.dispatchEvent(new CustomEvent("studio:project-changed", { detail: { projectId: id } }));
+    openStudioProject(id);
     setOpen(false);
     setQ("");
   };

@@ -2,9 +2,10 @@
 // its name and logo, GitHub (repo, working branch, open pull request), Vercel, the last commit and the history.
 import { useCallback, useEffect, useState } from "react";
 import { motion, useReducedMotion } from "framer-motion";
-import { ExternalLink, FolderGit2, GitBranch, GitCommitHorizontal, GitPullRequest, RotateCw } from "lucide-react";
+import { ArrowLeftRight, ExternalLink, FolderGit2, GitBranch, GitCommitHorizontal, GitPullRequest, RotateCw } from "lucide-react";
 import { Link } from "react-router-dom";
 import { fetchWithRescue } from "@/lib/rescue";
+import { StudioProjectChooser } from "./StudioProjectPicker";
 
 const backendUrl = import.meta.env.VITE_API_URL || "https://api.classgrid.in";
 const EASE = [0.22, 1, 0.36, 1] as const;
@@ -41,6 +42,7 @@ export function StudioProjectView({ projectId, reloadKey = 0 }: { projectId: str
   const [githubMissing, setGithubMissing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [switching, setSwitching] = useState(false);
 
   const load = useCallback(async () => {
     if (!projectId) return;
@@ -69,11 +71,14 @@ export function StudioProjectView({ projectId, reloadKey = 0 }: { projectId: str
 
   if (!projectId) {
     return (
-      <div className="flex-1 flex items-center justify-center px-6">
-        <div className="max-w-sm text-center flex flex-col items-center gap-2">
-          <div className="flex items-center justify-center size-12 rounded-full border border-border"><FolderGit2 className="size-5 text-muted-foreground" /></div>
-          <p className="text-base font-medium">No project picked</p>
-          <p className="text-sm text-muted-foreground">Pick a project above the chat input on a new chat to see its details here.</p>
+      <div className="flex-1 min-h-0 overflow-y-auto px-4 py-6">
+        <div className="mx-auto w-full max-w-md flex flex-col gap-4">
+          <div className="text-center flex flex-col items-center gap-2">
+            <div className="flex items-center justify-center size-12 rounded-full border border-border"><FolderGit2 className="size-5 text-muted-foreground" /></div>
+            <p className="text-base font-medium">No project picked</p>
+            <p className="text-sm text-muted-foreground">Pick a project or make a new one, with or without a GitHub repo.</p>
+          </div>
+          <StudioProjectChooser picked={null} />
         </div>
       </div>
     );
@@ -100,6 +105,9 @@ export function StudioProjectView({ projectId, reloadKey = 0 }: { projectId: str
             <p className="text-[15px] font-medium truncate">{project?.name || (loading ? "Loading…" : "Project")}</p>
             <p className="text-[12px] text-muted-foreground">Shared with Project Mode{project?.updatedAt ? ` · edited ${ago(project.updatedAt)}` : ""}</p>
           </div>
+          <button onClick={() => setSwitching((s) => !s)} className={`shrink-0 h-8 px-2.5 inline-flex items-center gap-1.5 rounded-md border border-black/10 dark:border-white/10 text-[12px] hover:text-foreground hover:bg-black/[0.04] dark:hover:bg-white/[0.05] transition-colors ${switching ? "text-foreground bg-black/[0.04] dark:bg-white/[0.05]" : "text-muted-foreground"}`}>
+            <ArrowLeftRight className="size-3.5" /> Switch
+          </button>
           <Link to={window.location.pathname.startsWith("/superadmin") ? "/superadmin/project" : "/c/project"} className="shrink-0 h-8 px-2.5 inline-flex items-center gap-1.5 rounded-md border border-black/10 dark:border-white/10 text-[12px] text-muted-foreground hover:text-foreground hover:bg-black/[0.04] dark:hover:bg-white/[0.05] transition-colors">
             Open in Project Mode
           </Link>
@@ -107,6 +115,13 @@ export function StudioProjectView({ projectId, reloadKey = 0 }: { projectId: str
             <RotateCw className={`size-3.5 ${loading ? "animate-spin" : ""}`} />
           </button>
         </motion.div>
+
+        {/* Switch to another project, or make a new one */}
+        {switching && (
+          <motion.div {...rise(0)}>
+            <StudioProjectChooser picked={projectId} onDone={() => setSwitching(false)} />
+          </motion.div>
+        )}
 
         {/* GitHub */}
         <motion.div {...rise(1)} className={`${card} p-3`}>

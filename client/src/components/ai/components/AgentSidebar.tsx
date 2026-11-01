@@ -112,6 +112,7 @@ export function AgentNestedMenu({ searchQuery = "" }: { searchQuery?: string }) 
       let openProject: string | null = null;
       try { openProject = (sessionStorage.getItem("cg_project_open") || localStorage.getItem("cg_project_open")); } catch { /* storage blocked */ }
       listQuery = `?project=${openProject || "all"}`; // no project open: chats of all projects
+      if (!openProject && window.location.pathname.split("/").includes("studio")) listQuery += "&studio=1"; // and Studio's chats sent with no project
     }
     // Another list than the one on screen (Agent -> a project, or one project -> another): clear it at once, so
     // the old mode's chats never show while the new list loads
