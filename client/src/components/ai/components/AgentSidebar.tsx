@@ -48,6 +48,7 @@ interface ChatSession {
   created_at: string;
   pinned?: boolean;
   ended?: boolean;
+  project_id?: string; // Studio: the project this chat belongs to
 }
 
 const ChatBubbleIcon = ({ className }: { className?: string }) => (
@@ -83,7 +84,7 @@ export function AgentNestedMenu({ searchQuery = "" }: { searchQuery?: string }) 
   const [isLoadingPreview, setIsLoadingPreview] = React.useState(false);
   const [deleteSessionId, setDeleteSessionId] = React.useState<string | null>(null);
   // Move to project: the user's own Project Mode projects, and the "New project" dialog
-  const [projects, setProjects] = React.useState<{ id: string; name: string }[] | null>(null);
+  const [projects, setProjects] = React.useState<{ id: string; name: string; logo?: string | null }[] | null>(null);
   const [newProjectFor, setNewProjectFor] = React.useState<string | null>(null);
   const [newProjectName, setNewProjectName] = React.useState("");
   const [isMovingChat, setIsMovingChat] = React.useState(false);
@@ -112,7 +113,8 @@ export function AgentNestedMenu({ searchQuery = "" }: { searchQuery?: string }) 
       let openProject: string | null = null;
       try { openProject = (sessionStorage.getItem("cg_project_open") || localStorage.getItem("cg_project_open")); } catch { /* storage blocked */ }
       listQuery = `?project=${openProject || "all"}`; // no project open: chats of all projects
-      if (!openProject && window.location.pathname.split("/").includes("studio")) listQuery += "&studio=1"; // and Studio's chats sent with no project
+      // Studio lists every project's chats under its project, and its chats sent with no project
+      if (window.location.pathname.split("/").includes("studio")) listQuery = "?project=all&studio=1";
     }
     // Another list than the one on screen (Agent -> a project, or one project -> another): clear it at once, so
     // the old mode's chats never show while the new list loads
@@ -482,10 +484,69 @@ export function AgentNestedMenu({ searchQuery = "" }: { searchQuery?: string }) 
     navigate(`${baseAgentPath}/${sessionId}`);
   };
 
+  // Studio: the chats sit under their project's folder (every project shows, even with no chats yet)
+  React.useEffect(() => {
+    if (!isStudioMode) return;
+    loadProjects();
+    const again = () => loadProjects();
+    window.addEventListener("studio:project-changed", again);
+    return () => window.removeEventListener("studio:project-changed", again);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isStudioMode]);
+  const [closedFolders, setClosedFolders] = React.useState<string[]>(() => {
+    try { return JSON.parse(localStorage.getItem("cg_studio_folders_closed") || "[]"); } catch { return []; }
+  });
+  const toggleFolder = (key: string) => setClosedFolders((prev) => {
+    const next = prev.includes(key) ? prev.filter((x) => x !== key) : [...prev, key];
+    try { localStorage.setItem("cg_studio_folders_closed", JSON.stringify(next)); } catch { /* storage blocked */ }
+    return next;
+  });
+  const [fullFolders, setFullFolders] = React.useState<string[]>([]);
+  const studioFolders = React.useMemo(() => {
+    if (!isStudioMode) return [];
+    const folders = new Map<string, { key: string; id: string | null; name: string; logo: string | null; chats: ChatSession[] }>();
+    const names = new Map((projects || []).map((p) => [p.id, p]));
+    for (const s of filteredUnpinnedSessions) {
+      const key = s.project_id || "none";
+      if (!folders.has(key)) {
+        const p = s.project_id ? names.get(s.project_id) : null;
+        folders.set(key, { key, id: s.project_id || null, name: s.project_id ? p?.name || (s as any).project_name || "Project" : "No project", logo: p?.logo || (s as any).project_logo || null, chats: [] });
+      }
+      folders.get(key)!.chats.push(s);
+    }
+    if (!searchQuery) {
+      for (const p of projects || []) if (!folders.has(p.id)) folders.set(p.id, { key: p.id, id: p.id, name: p.name, logo: p.logo || null, chats: [] });
+      if (!folders.has("none")) folders.set("none", { key: "none", id: null, name: "No project", logo: null, chats: [] });
+    }
+    return [...folders.values()];
+  }, [isStudioMode, filteredUnpinnedSessions, projects, searchQuery]);
+
+  // A new chat in this folder's project (the project opens, like picking it above the chat input)
+  const newChatIn = (projectId: string | null) => {
+    navigate(baseAgentPath);
+    window.dispatchEvent(new Event("agent:new-chat"));
+    if (projectId === openProjectId()) return;
+    try {
+      if (projectId) { localStorage.setItem("cg_project_open", projectId); sessionStorage.setItem("cg_project_open", projectId); }
+      else { localStorage.removeItem("cg_project_open"); sessionStorage.removeItem("cg_project_open"); }
+    } catch { /* storage blocked */ }
+    window.dispatchEvent(new Event("agent:refresh-sessions"));
+    window.dispatchEvent(new CustomEvent("studio:project-changed", { detail: { projectId } }));
+  };
+
+  const shortAge = (at: string) => {
+    const mins = Math.max(0, Math.round((Date.now() - new Date(at).getTime()) / 60000));
+    if (mins < 60) return `${Math.max(1, mins)}m`;
+    if (mins < 60 * 24) return `${Math.floor(mins / 60)}h`;
+    if (mins < 60 * 24 * 30) return `${Math.floor(mins / (60 * 24))}d`;
+    if (mins < 60 * 24 * 365) return `${Math.floor(mins / (60 * 24 * 30))}mo`;
+    return `${Math.floor(mins / (60 * 24 * 365))}y`;
+  };
+
   const loadProjects = () => {
     fetchWithRescue(`${endpointPrefix}/api/ide/projects`, { credentials: "include" })
       .then((res) => res.json())
-      .then((data) => setProjects(Array.isArray(data.projects) ? data.projects.map((p: any) => ({ id: String(p.id), name: String(p.name || "Untitled") })) : []))
+      .then((data) => setProjects(Array.isArray(data.projects) ? data.projects.map((p: any) => ({ id: String(p.id), name: String(p.name || "Untitled"), logo: p.logo || null })) : []))
       .catch(() => setProjects([]));
   };
 
@@ -583,6 +644,9 @@ export function AgentNestedMenu({ searchQuery = "" }: { searchQuery?: string }) 
                   {/* Share Grid: this chat is shared with other people */}
                   {(session as any).grid && (
                     <Star className="w-3 h-3 shrink-0 fill-current text-foreground" aria-label="Shared chat" />
+                  )}
+                  {isStudioMode && !session.pinned && (
+                    <span className="shrink-0 -mr-6 text-xs text-muted-foreground group-hover:opacity-0 transition-opacity">{shortAge(session.created_at)}</span>
                   )}
                 </div>
               }
@@ -994,7 +1058,7 @@ export function AgentNestedMenu({ searchQuery = "" }: { searchQuery?: string }) 
               </AccordionItem>
             )}
 
-            {(loading || todaySessions.length > 0 || filtering) && (
+            {!isStudioMode && (loading || todaySessions.length > 0 || filtering) && (
             <AccordionItem value="today" className="border-none mb-2">
               <AccordionTrigger className="px-2 py-1.5 hover:no-underline group/acc-trigger [&_[data-slot=accordion-trigger-icon]]:opacity-0 hover:[&_[data-slot=accordion-trigger-icon]]:opacity-100 flex items-center h-auto min-h-0 border-transparent focus-visible:ring-0 cursor-pointer justify-between w-full">
                 <span className="text-xs font-medium text-muted-foreground/70 truncate mr-2">
@@ -1038,7 +1102,7 @@ export function AgentNestedMenu({ searchQuery = "" }: { searchQuery?: string }) 
             </AccordionItem>
             )}
 
-            {(previousSessions.length > 0 || filtering) && (
+            {!isStudioMode && (previousSessions.length > 0 || filtering) && (
             <AccordionItem value="previous" className="border-none">
               <AccordionTrigger className="px-2 py-1.5 hover:no-underline group/acc-trigger [&_[data-slot=accordion-trigger-icon]]:opacity-0 hover:[&_[data-slot=accordion-trigger-icon]]:opacity-100 flex items-center h-auto min-h-0 border-transparent focus-visible:ring-0 cursor-pointer justify-between w-full">
                 <span className="text-xs font-medium text-muted-foreground/70 truncate mr-2">Previous</span>
@@ -1083,6 +1147,62 @@ export function AgentNestedMenu({ searchQuery = "" }: { searchQuery?: string }) 
             </AccordionItem>
             )}
           </Accordion>
+          {isStudioMode && (
+            <div className="mt-1">
+              <div className="px-2 py-1.5"><span className="text-xs font-medium text-muted-foreground/70">Projects</span></div>
+              {loading && !sessions.length ? (
+                <div className="px-2 py-1.5 space-y-3">
+                  <div className="h-4 w-[80%] rounded-md bg-muted animate-pulse" />
+                  <div className="h-4 w-[60%] rounded-md bg-muted animate-pulse" />
+                  <div className="h-4 w-[70%] rounded-md bg-muted animate-pulse" />
+                </div>
+              ) : studioFolders.map((f) => {
+                const isOpen = !closedFolders.includes(f.key) || !!searchQuery;
+                const full = fullFolders.includes(f.key);
+                const shown = full || searchQuery ? f.chats : f.chats.slice(0, 5);
+                const isCurrent = (f.id || null) === (openProject || null);
+                return (
+                  <div key={f.key} className="mb-1">
+                    <div className="group/fld relative flex items-center">
+                      <button
+                        type="button"
+                        onClick={() => toggleFolder(f.key)}
+                        className={cn("flex-1 min-w-0 flex items-center gap-2.5 h-8 pl-2 pr-9 rounded-md text-sm hover:bg-sidebar-accent transition-colors cursor-pointer", isCurrent ? "text-sidebar-foreground" : "text-muted-foreground")}
+                      >
+                        {f.logo
+                          ? <img src={f.logo} alt="" className="w-4 h-4 shrink-0 rounded object-cover" />
+                          : <Folder className="w-4 h-4 shrink-0" strokeWidth={2} />}
+                        <span className="truncate">{f.name}</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => newChatIn(f.id)}
+                        className="absolute right-1 p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-black/5 dark:hover:bg-white/10 opacity-0 group-hover/fld:opacity-100 focus-visible:opacity-100 transition-opacity cursor-pointer"
+                        title={f.id ? "New chat in this project" : "New chat with no project"}
+                        aria-label={f.id ? `New chat in ${f.name}` : "New chat with no project"}
+                      >
+                        <Plus className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                    {isOpen && (
+                      <SidebarMenu className="pl-4 mt-0.5">
+                        {shown.length ? shown.map(renderSessionItem) : <div className="px-2 py-1.5 text-xs text-muted-foreground">No chats yet</div>}
+                        {!full && !searchQuery && f.chats.length > shown.length && (
+                          <button
+                            type="button"
+                            onClick={() => setFullFolders((prev) => [...prev, f.key])}
+                            className="w-full px-2 py-1.5 text-left text-xs font-medium text-muted-foreground hover:text-foreground rounded-md hover:bg-muted transition-colors cursor-pointer"
+                          >
+                            Show {f.chats.length - shown.length} more
+                          </button>
+                        )}
+                      </SidebarMenu>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
         </SidebarGroupContent>
       </SidebarGroup>
       </div>

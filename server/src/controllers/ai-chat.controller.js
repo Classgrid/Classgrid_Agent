@@ -5703,9 +5703,14 @@ export const getChatSessions = async (req, res) => {
             const IdeProject = (await import("../models/IdeProject.js")).default;
             if (project === "all") {
                 // Projects page with no project open: the chats of all the user's projects
-                const ps = await IdeProject.find({ owner: req.user._id }).select("chatSessionIds").lean();
+                const ps = await IdeProject.find({ owner: req.user._id }).select("chatSessionIds name logo").lean();
                 const ids = new Set([...ps.flatMap((x) => x.chatSessionIds || []), ...(req.query?.studio === "1" ? studioIds : [])]);
-                sessions = (sessions || []).filter((s) => ids.has(s.id));
+                // Each chat says its project, so Studio can list the chats under their projects
+                const owner = new Map(ps.flatMap((x) => (x.chatSessionIds || []).map((id) => [id, x])));
+                sessions = (sessions || []).filter((s) => ids.has(s.id)).map((s) => {
+                    const p = owner.get(s.id);
+                    return p ? { ...s, project_id: String(p._id), project_name: p.name, project_logo: p.logo || null } : s;
+                });
             } else if (project) {
                 const p = /^[0-9a-f]{24}$/i.test(String(project)) ? await IdeProject.findOne({ _id: project, owner: req.user._id }).select("chatSessionIds").lean() : null;
                 const ids = new Set(p?.chatSessionIds || []);

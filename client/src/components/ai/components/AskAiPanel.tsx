@@ -3088,6 +3088,20 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
             window.location.assign(parts.slice(0, agentAt + 1).join("/") + `/${id}`);
             return;
           }
+          // Studio: opening a chat opens its project too (or no project, for a chat sent without one)
+          if (parts.includes("studio")) {
+            const want: string | null = sData.projectId || null;
+            let now: string | null = null;
+            try { now = sessionStorage.getItem("cg_project_open") || localStorage.getItem("cg_project_open"); } catch { /* storage blocked */ }
+            if (want !== now) {
+              try {
+                if (want) { localStorage.setItem("cg_project_open", want); sessionStorage.setItem("cg_project_open", want); }
+                else { localStorage.removeItem("cg_project_open"); sessionStorage.removeItem("cg_project_open"); }
+              } catch { /* storage blocked */ }
+              window.dispatchEvent(new Event("agent:refresh-sessions"));
+              window.dispatchEvent(new CustomEvent("studio:project-changed", { detail: { projectId: want } }));
+            }
+          }
           if (sData.session) setIsPinned(!!sData.session.pinned);
           setChatEnded(sData.session?.ended
             ? { reason: sData.session.end_reason ?? null, canReopen: sData.session.end_reason === "user_requested" }

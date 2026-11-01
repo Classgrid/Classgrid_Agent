@@ -51,7 +51,7 @@ async function fetchProjects(): Promise<Project[] | null> {
 }
 
 // Opens a project in Studio: every picker, the pane and the left chat list follow it
-function openStudioProject(id: string | null) {
+export function openStudioProject(id: string | null) {
   try { id ? localStorage.setItem(PICK_KEY, id) : localStorage.removeItem(PICK_KEY); } catch { /* storage blocked */ }
   try { id ? sessionStorage.setItem(PICK_KEY, id) : sessionStorage.removeItem(PICK_KEY); } catch { /* storage blocked */ }
   window.dispatchEvent(new Event("agent:refresh-sessions")); // the left list shows this project's chats

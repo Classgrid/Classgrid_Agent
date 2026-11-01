@@ -13,7 +13,8 @@ const dragFile = (e: React.DragEvent, path: string) => {
 import { createPortal } from "react-dom";
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import { themeIcons } from "seti-icons";
-import { Check, ChevronRight, Copy, Download, Folder, FolderOpen, FolderTree, Link2, ListTree, MessageSquare, MoreVertical, Quote, RotateCw, Search, X } from "lucide-react";
+import { Check, ChevronRight, Copy, Download, Folder, FolderOpen, FolderTree, Link2, ListTree, MessageSquare, MoreVertical, Plus, Quote, RotateCw, Search, X } from "lucide-react";
+import { StudioSearchPalette } from "./StudioSearchPalette";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/marketing_ui/dropdown-menu";
 import { fetchWithRescue } from "@/lib/rescue";
 import { addCodeNote, CODE_COMMENTS_SAVED_EVENT, lineLabel, removeCodeNote, updateCodeNote, useCodeNotes, type CodeNote } from "./studioCodeNotes";
@@ -99,7 +100,7 @@ const setiIcon = themeIcons({
   blue: "#519aba", grey: "#4d5a5e", "grey-light": "#6d8086", green: "#8dc149", orange: "#e37933",
   pink: "#f55385", purple: "#a074c4", red: "#cc3e44", white: "#d4d7d6", yellow: "#cbcb41", ignore: "#41535b",
 });
-function FileBadge({ name }: { name: string }) {
+export function FileBadge({ name }: { name: string }) {
   const { svg, color } = useMemo(() => setiIcon(name), [name]);
   return <span aria-hidden className="size-4 shrink-0 flex items-center justify-center [&_svg]:size-[18px] [&_svg]:fill-current" style={{ color }} dangerouslySetInnerHTML={{ __html: svg }} />;
 }
@@ -118,7 +119,9 @@ export function StudioFilesView({ projectId, projectName, wide, reloadKey = 0, r
   const fileCache = useRef(new Map<string, OpenFile>());
   const activePath = useRef<string | null>(null);
   const [treeShown, setTreeShown] = useState(true);
+  const [filesOnly, setFilesOnly] = useState(false); // the tree was dragged over the whole section: only the files show
   const [copied, setCopied] = useState(false);
+  const [searchOpen, setSearchOpen] = useState(false); // the "+" search: files, chats and projects
   const [treeW, setTreeW] = useState(() => {
     try { const n = Number(localStorage.getItem(TREE_KEY)); if (n >= 200) return n; } catch { /* storage blocked */ }
     return 280;
@@ -188,6 +191,7 @@ export function StudioFilesView({ projectId, projectName, wide, reloadKey = 0, r
   const openFile = async (path: string, lines?: { startLine?: number; endLine?: number }) => {
     if (!projectId) return;
     activePath.current = path;
+    setFilesOnly(false);
     setOpenPaths((list) => (list.includes(path) ? list : [...list, path]));
     const cached = fileCache.current.get(path);
     setFile(cached ? { ...cached, ...lines } : { path, loading: true, ...lines });
@@ -274,7 +278,10 @@ export function StudioFilesView({ projectId, projectName, wide, reloadKey = 0, r
     setDragging(true);
     let last = treeW;
     const move = (ev: PointerEvent) => {
-      last = Math.round(Math.min(Math.max(rect.right - ev.clientX, 200), rect.width - 260));
+      // Dragged almost to the left edge: the tree covers the whole section (only the files show)
+      const want = rect.right - ev.clientX;
+      setFilesOnly(want > rect.width - 120);
+      last = Math.round(Math.min(Math.max(want, 200), rect.width - 260));
       setTreeW(last);
     };
     const up = () => {
@@ -355,13 +362,16 @@ export function StudioFilesView({ projectId, projectName, wide, reloadKey = 0, r
           )}
         </AnimatePresence>
         <div className="ml-auto flex items-center gap-0.5 shrink-0">
+          <button onClick={() => setSearchOpen(true)} className={iconBtn} title="Search files, conversations and projects" aria-label="Search files, conversations and projects">
+            <Plus className="size-3.5" />
+          </button>
           {file?.content !== undefined && (
             <button onClick={copy} className={iconBtn} title="Copy file" aria-label="Copy file">
               {copied ? <Check className="size-3.5" /> : <Copy className="size-3.5" />}
             </button>
           )}
           {file && (
-            <button onClick={() => setTreeShown((t) => !t)} className={`${iconBtn} ${treeShown ? "text-foreground bg-black/[0.05] dark:bg-white/[0.06]" : ""}`} title={treeShown ? "Hide file tree" : "Show file tree"} aria-label="Toggle file tree">
+            <button onClick={() => { setFilesOnly(false); setTreeShown((t) => !t); }} className={`${iconBtn} ${treeShown ? "text-foreground bg-black/[0.05] dark:bg-white/[0.06]" : ""}`} title={treeShown ? "Hide file tree" : "Show file tree"} aria-label="Toggle file tree">
               <ListTree className="size-3.5" />
             </button>
           )}
@@ -397,9 +407,21 @@ export function StudioFilesView({ projectId, projectName, wide, reloadKey = 0, r
         </div>
       </div>
 
+      <StudioSearchPalette
+        open={searchOpen}
+        onClose={() => setSearchOpen(false)}
+        files={(listing?.files || []).filter((f) => f.type === "file").map((f) => f.path)}
+        recent={openPaths}
+        onOpenFile={(path) => {
+          const parts = path.split("/");
+          setOpenDirs((s) => { const next = new Set(s); for (let i = 1; i < parts.length; i++) next.add(parts.slice(0, i).join("/")); return next; });
+          openFile(path);
+        }}
+        fileIcon={(name) => <FileBadge name={name} />}
+      />
       <div ref={boxRef} className="relative flex-1 min-h-0 flex">
         {/* Code */}
-        {file && (!showTree || split) && (
+        {file && (!showTree || split) && !filesOnly && (
           <motion.div
             className="flex-1 min-w-0 flex flex-col"
             initial={reduce ? false : { opacity: 0 }}
@@ -422,7 +444,7 @@ export function StudioFilesView({ projectId, projectName, wide, reloadKey = 0, r
 
         {/* Tree */}
         {showTree && (
-          <div className={`min-h-0 flex flex-col ${split ? "shrink-0" : "flex-1"}`} style={split ? { width: treeW, maxWidth: wide ? undefined : "45%" } : undefined}>
+          <div className={`min-h-0 flex flex-col ${split && !filesOnly ? "shrink-0" : "flex-1"}`} style={split && !filesOnly ? { width: treeW, maxWidth: "calc(100% - 260px)" } : undefined}>
             {listing && tree.length > 0 && (
               <div className="shrink-0 px-2 pt-2 pb-1">
                 <label className="flex items-center gap-2 h-8 px-2.5 rounded-lg border border-black/10 dark:border-white/[0.08] focus-within:border-black/25 dark:focus-within:border-white/20 transition-colors">

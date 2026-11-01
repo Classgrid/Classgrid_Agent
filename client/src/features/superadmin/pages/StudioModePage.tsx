@@ -95,11 +95,12 @@ export function StudioModePage() {
       const at = parts.indexOf("studio");
       const chatId = at !== -1 ? parts[at + 1] : "";
       if (!chatId) return;
+      const base = import.meta.env.VITE_API_URL || "https://api.classgrid.in";
+      const res = await fetchWithRescue(`${base}/api/ai/sessions/${chatId}`, { credentials: "include" }).catch(() => null);
+      const chat = res?.ok ? await res.json().catch(() => null) : null;
+      if (chat && (chat.projectId || null) === id) return; // the open chat is already in this project
       // The open chat has no project yet: it joins the picked project and stays open
       if (id) {
-        const base = import.meta.env.VITE_API_URL || "https://api.classgrid.in";
-        const res = await fetchWithRescue(`${base}/api/ai/sessions/${chatId}`, { credentials: "include" }).catch(() => null);
-        const chat = res?.ok ? await res.json().catch(() => null) : null;
         if (chat && !chat.projectId) {
           const linked = await fetchWithRescue(`${base}/api/ide/projects/${id}/chats`, {
             method: "POST",
