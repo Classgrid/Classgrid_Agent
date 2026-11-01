@@ -958,6 +958,134 @@ export function AgentNestedMenu({ searchQuery = "" }: { searchQuery?: string }) 
     );
   };
 
+  // Studio: the projects list (header with Display Options, then each project). The open sidebar and the icon
+  // strip's chats popover both show it
+  const studioProjects = (
+            <div className="mt-1">
+              <div className="group/projects flex items-center justify-between px-2 py-1.5">
+                <span className="text-xs font-medium text-muted-foreground/70">{opts.archivedOnly ? "Archived" : opts.groupBy === "none" ? "Chats" : "Projects"}</span>
+                <div className="flex items-center gap-0.5">
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <button type="button" className="p-0.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted cursor-pointer" aria-label="Display options" title="Display options">
+                        <ListFilter className="w-3.5 h-3.5" />
+                      </button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent side="bottom" align="end" sideOffset={6} className={menuBox("w-[250px]")}>
+                      {optionSub("Group By", opts.groupBy === "project" ? "Project" : "None", [
+                        ["Project", opts.groupBy === "project", () => setOpt({ groupBy: "project" })],
+                        ["None", opts.groupBy === "none", () => setOpt({ groupBy: "none" })],
+                      ])}
+                      {optionSub("Sort Conversations", { updated: "Last Updated", created: "Created", title: "Name" }[opts.sortChats], [
+                        ["Last Updated", opts.sortChats === "updated", () => setOpt({ sortChats: "updated" })],
+                        ["Created", opts.sortChats === "created", () => setOpt({ sortChats: "created" })],
+                        ["Name", opts.sortChats === "title", () => setOpt({ sortChats: "title" })],
+                      ])}
+                      {optionSub("Sort Projects", { custom: "Custom Order", recent: "Recent", name: "Name" }[opts.sortProjects], [
+                        ["Custom Order", opts.sortProjects === "custom", () => setOpt({ sortProjects: "custom" })],
+                        ["Recent", opts.sortProjects === "recent", () => setOpt({ sortProjects: "recent" })],
+                        ["Name", opts.sortProjects === "name", () => setOpt({ sortProjects: "name" })],
+                      ])}
+                      <DropdownMenuSeparator className="bg-slate-100 dark:bg-white/10 my-1.5 mx-1" />
+                      {optionSub("Filter", "", [
+                        ["Unread only", opts.unreadOnly, () => setOpt({ unreadOnly: !opts.unreadOnly })],
+                        ["Hide empty projects", opts.hideEmpty, () => setOpt({ hideEmpty: !opts.hideEmpty })],
+                        ["Only the open project", opts.openOnly, () => setOpt({ openOnly: !opts.openOnly })],
+                      ])}
+                      {optionSub("Display", "", [
+                        ["Show time", opts.showTime, () => setOpt({ showTime: !opts.showTime })],
+                        ["Show project logos", opts.showLogos, () => setOpt({ showLogos: !opts.showLogos })],
+                        ["Compact", opts.compact, () => setOpt({ compact: !opts.compact })],
+                      ])}
+                      {optionRow("Auto Pin", opts.autoPin, () => setOpt({ autoPin: !opts.autoPin }), "The open project stays at the top")}
+                      {optionRow("Archived Only", opts.archivedOnly, () => setOpt({ archivedOnly: !opts.archivedOnly }))}
+                      <DropdownMenuSeparator className="bg-slate-100 dark:bg-white/10 my-1.5 mx-1" />
+                      {optionRow("Mark All as Read", false, () => { markRead("all"); toast.success("All chats marked as read"); })}
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                  <button type="button" onClick={() => setNewProjectOpen(true)} className="p-0.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted cursor-pointer" aria-label="New project" title="New project">
+                    <FolderPlus className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              </div>
+              {loading && !sessions.length ? (
+                <div className="px-2 py-1.5 space-y-3">
+                  <div className="h-4 w-[80%] rounded-md bg-muted animate-pulse" />
+                  <div className="h-4 w-[60%] rounded-md bg-muted animate-pulse" />
+                  <div className="h-4 w-[70%] rounded-md bg-muted animate-pulse" />
+                </div>
+              ) : opts.groupBy === "none" ? (
+                <SidebarMenu>
+                  {!studioChats.length && <div className="px-2 py-1.5 text-xs text-muted-foreground">{opts.archivedOnly ? "No archived chats" : "No chats yet"}</div>}
+                  {(showAllStudio || searchQuery ? studioChats : studioChats.slice(0, PREVIOUS_PAGE)).map(renderSessionItem)}
+                  {!showAllStudio && !searchQuery && studioChats.length > PREVIOUS_PAGE && (
+                    <button type="button" onClick={() => setShowAllStudio(true)} className="w-full px-2 py-1.5 text-left text-xs font-medium text-muted-foreground hover:text-foreground rounded-md hover:bg-muted transition-colors cursor-pointer">
+                      Show {studioChats.length - PREVIOUS_PAGE} more
+                    </button>
+                  )}
+                </SidebarMenu>
+              ) : studioFolders.map((f) => {
+                const isOpen = !closedFolders.includes(f.key) || !!searchQuery;
+                const full = fullFolders.includes(f.key);
+                const shown = full || searchQuery ? f.chats : f.chats.slice(0, 5);
+                const isCurrent = (f.id || null) === (openProject || null);
+                return (
+                  <div
+                    key={f.key}
+                    className="mb-1"
+                    onDragOver={(e) => { if (dragFolder.current) e.preventDefault(); }}
+                    onDrop={(e) => { e.preventDefault(); dropFolder(f.key); }}
+                  >
+                    {/* The project's row: same look as a group row (icon, name, + new chat, open / closed arrow) */}
+                    <div className="group/fld relative flex items-center" draggable onDragStart={() => { dragFolder.current = f.key; }} onDragEnd={() => { dragFolder.current = null; }}>
+                      <button
+                        type="button"
+                        onClick={() => toggleFolder(f.key)}
+                        className={cn("flex-1 min-w-0 flex items-center gap-2.5 h-8 pl-2 pr-16 rounded-md text-sm hover:bg-sidebar-accent transition-colors cursor-pointer", isCurrent ? "text-sidebar-foreground" : "text-muted-foreground")}
+                      >
+                        {f.logo && opts.showLogos
+                          ? <img src={f.logo} alt="" className="w-4 h-4 shrink-0 rounded object-cover" />
+                          : <Folder className="w-4 h-4 shrink-0" strokeWidth={2} />}
+                        <span className="truncate">{f.name}</span>
+                      </button>
+                      <div className="absolute right-1 flex items-center">
+                        <button
+                          type="button"
+                          onClick={() => newChatIn(f.id)}
+                          className="opacity-0 group-hover/fld:opacity-100 focus-visible:opacity-100 transition-opacity p-1 rounded hover:bg-black/5 dark:hover:bg-white/10 text-muted-foreground hover:text-foreground cursor-pointer"
+                          title={f.id ? "New chat in this project" : "New chat with no project"}
+                          aria-label={f.id ? `New chat in ${f.name}` : "New chat with no project"}
+                        >
+                          <Plus className="w-3.5 h-3.5" />
+                        </button>
+                        <button type="button" onClick={() => toggleFolder(f.key)} className="p-1 rounded text-muted-foreground hover:text-foreground cursor-pointer" aria-label={isOpen ? "Close project" : "Open project"}>
+                          <ChevronDown className={cn("w-3.5 h-3.5 transition-transform duration-200", !isOpen && "-rotate-90")} />
+                        </button>
+                      </div>
+                    </div>
+                    {isOpen && (
+                      <div className="pl-4 mt-0.5">
+                        {f.groups.map(renderGroup)}
+                        <SidebarMenu>
+                          {shown.length ? shown.map(renderSessionItem) : !f.groups.length && <div className="px-2 py-1.5 text-xs text-muted-foreground">No chats yet</div>}
+                          {!full && !searchQuery && f.chats.length > shown.length && (
+                            <button
+                              type="button"
+                              onClick={() => setFullFolders((prev) => [...prev, f.key])}
+                              className="w-full px-2 py-1.5 text-left text-xs font-medium text-muted-foreground hover:text-foreground rounded-md hover:bg-muted transition-colors cursor-pointer"
+                            >
+                              Show {f.chats.length - shown.length} more
+                            </button>
+                          )}
+                        </SidebarMenu>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+  );
+
   return (
     <>
       {/* Both layouts stay mounted and are only shown/hidden, so opening the sidebar never rebuilds the chat list */}
@@ -1055,17 +1183,18 @@ export function AgentNestedMenu({ searchQuery = "" }: { searchQuery?: string }) 
                 <PopoverTrigger asChild>
                   <div className="w-full">
                     <SidebarMenuButton 
-                      tooltip="Recent Chats"
+                      tooltip={isStudioMode ? "Projects" : "Recent Chats"}
                       render={
                         <div className="flex items-center gap-3 w-full cursor-pointer">
                           <ChatBubbleIcon className="w-[20px] h-[20px]" />
-                          <span className="truncate">Recent Chats</span>
+                          <span className="truncate">{isStudioMode ? "Projects" : "Recent Chats"}</span>
                         </div>
                       }
                     />
                   </div>
                 </PopoverTrigger>
-                <PopoverContent side="right" align="start" sideOffset={10} className="w-[280px] p-2 bg-white dark:bg-[#202123] border border-slate-200 dark:border-white/10 rounded-2xl shadow-xl max-h-[70vh] overflow-y-auto">
+                <PopoverContent side="right" align="start" sideOffset={10} className={cn("p-2 bg-white dark:bg-[#202123] border border-slate-200 dark:border-white/10 rounded-2xl shadow-xl max-h-[70vh] overflow-y-auto", isStudioMode ? "w-[300px]" : "w-[280px]")}>
+                  {isStudioMode ? studioProjects : (<>
                   <div className="text-xs font-semibold text-slate-500 dark:text-slate-400 mb-2 px-2">Today</div>
                   <SidebarMenu className="mb-4">
                     {loading && (
@@ -1085,6 +1214,7 @@ export function AgentNestedMenu({ searchQuery = "" }: { searchQuery?: string }) 
                     {!loading && previousSessions.length === 0 && <div className="px-2 text-sm text-slate-400">No previous chats</div>}
                     {visiblePreviousSessions.map(renderSessionItem)}
                   </SidebarMenu>
+                  </>)}
                 </PopoverContent>
               </Popover>
             </SidebarMenuItem>
@@ -1271,132 +1401,7 @@ export function AgentNestedMenu({ searchQuery = "" }: { searchQuery?: string }) 
             </AccordionItem>
             )}
           </Accordion>
-          {isStudioMode && (
-            <div className="mt-1">
-              <div className="group/projects flex items-center justify-between px-2 py-1.5">
-                <span className="text-xs font-medium text-muted-foreground/70">{opts.archivedOnly ? "Archived" : opts.groupBy === "none" ? "Chats" : "Projects"}</span>
-                <div className="flex items-center gap-0.5">
-                  <DropdownMenu>
-                    <DropdownMenuTrigger asChild>
-                      <button type="button" className="p-0.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted cursor-pointer" aria-label="Display options" title="Display options">
-                        <ListFilter className="w-3.5 h-3.5" />
-                      </button>
-                    </DropdownMenuTrigger>
-                    <DropdownMenuContent side="bottom" align="end" sideOffset={6} className={menuBox("w-[250px]")}>
-                      {optionSub("Group By", opts.groupBy === "project" ? "Project" : "None", [
-                        ["Project", opts.groupBy === "project", () => setOpt({ groupBy: "project" })],
-                        ["None", opts.groupBy === "none", () => setOpt({ groupBy: "none" })],
-                      ])}
-                      {optionSub("Sort Conversations", { updated: "Last Updated", created: "Created", title: "Name" }[opts.sortChats], [
-                        ["Last Updated", opts.sortChats === "updated", () => setOpt({ sortChats: "updated" })],
-                        ["Created", opts.sortChats === "created", () => setOpt({ sortChats: "created" })],
-                        ["Name", opts.sortChats === "title", () => setOpt({ sortChats: "title" })],
-                      ])}
-                      {optionSub("Sort Projects", { custom: "Custom Order", recent: "Recent", name: "Name" }[opts.sortProjects], [
-                        ["Custom Order", opts.sortProjects === "custom", () => setOpt({ sortProjects: "custom" })],
-                        ["Recent", opts.sortProjects === "recent", () => setOpt({ sortProjects: "recent" })],
-                        ["Name", opts.sortProjects === "name", () => setOpt({ sortProjects: "name" })],
-                      ])}
-                      <DropdownMenuSeparator className="bg-slate-100 dark:bg-white/10 my-1.5 mx-1" />
-                      {optionSub("Filter", "", [
-                        ["Unread only", opts.unreadOnly, () => setOpt({ unreadOnly: !opts.unreadOnly })],
-                        ["Hide empty projects", opts.hideEmpty, () => setOpt({ hideEmpty: !opts.hideEmpty })],
-                        ["Only the open project", opts.openOnly, () => setOpt({ openOnly: !opts.openOnly })],
-                      ])}
-                      {optionSub("Display", "", [
-                        ["Show time", opts.showTime, () => setOpt({ showTime: !opts.showTime })],
-                        ["Show project logos", opts.showLogos, () => setOpt({ showLogos: !opts.showLogos })],
-                        ["Compact", opts.compact, () => setOpt({ compact: !opts.compact })],
-                      ])}
-                      {optionRow("Auto Pin", opts.autoPin, () => setOpt({ autoPin: !opts.autoPin }), "The open project stays at the top")}
-                      {optionRow("Archived Only", opts.archivedOnly, () => setOpt({ archivedOnly: !opts.archivedOnly }))}
-                      <DropdownMenuSeparator className="bg-slate-100 dark:bg-white/10 my-1.5 mx-1" />
-                      {optionRow("Mark All as Read", false, () => { markRead("all"); toast.success("All chats marked as read"); })}
-                    </DropdownMenuContent>
-                  </DropdownMenu>
-                  <button type="button" onClick={() => setNewProjectOpen(true)} className="p-0.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted cursor-pointer" aria-label="New project" title="New project">
-                    <FolderPlus className="w-3.5 h-3.5" />
-                  </button>
-                </div>
-              </div>
-              {loading && !sessions.length ? (
-                <div className="px-2 py-1.5 space-y-3">
-                  <div className="h-4 w-[80%] rounded-md bg-muted animate-pulse" />
-                  <div className="h-4 w-[60%] rounded-md bg-muted animate-pulse" />
-                  <div className="h-4 w-[70%] rounded-md bg-muted animate-pulse" />
-                </div>
-              ) : opts.groupBy === "none" ? (
-                <SidebarMenu>
-                  {!studioChats.length && <div className="px-2 py-1.5 text-xs text-muted-foreground">{opts.archivedOnly ? "No archived chats" : "No chats yet"}</div>}
-                  {(showAllStudio || searchQuery ? studioChats : studioChats.slice(0, PREVIOUS_PAGE)).map(renderSessionItem)}
-                  {!showAllStudio && !searchQuery && studioChats.length > PREVIOUS_PAGE && (
-                    <button type="button" onClick={() => setShowAllStudio(true)} className="w-full px-2 py-1.5 text-left text-xs font-medium text-muted-foreground hover:text-foreground rounded-md hover:bg-muted transition-colors cursor-pointer">
-                      Show {studioChats.length - PREVIOUS_PAGE} more
-                    </button>
-                  )}
-                </SidebarMenu>
-              ) : studioFolders.map((f) => {
-                const isOpen = !closedFolders.includes(f.key) || !!searchQuery;
-                const full = fullFolders.includes(f.key);
-                const shown = full || searchQuery ? f.chats : f.chats.slice(0, 5);
-                const isCurrent = (f.id || null) === (openProject || null);
-                return (
-                  <div
-                    key={f.key}
-                    className="mb-1"
-                    onDragOver={(e) => { if (dragFolder.current) e.preventDefault(); }}
-                    onDrop={(e) => { e.preventDefault(); dropFolder(f.key); }}
-                  >
-                    {/* The project's row: same look as a group row (icon, name, + new chat, open / closed arrow) */}
-                    <div className="group/fld relative flex items-center" draggable onDragStart={() => { dragFolder.current = f.key; }} onDragEnd={() => { dragFolder.current = null; }}>
-                      <button
-                        type="button"
-                        onClick={() => toggleFolder(f.key)}
-                        className={cn("flex-1 min-w-0 flex items-center gap-2.5 h-8 pl-2 pr-16 rounded-md text-sm hover:bg-sidebar-accent transition-colors cursor-pointer", isCurrent ? "text-sidebar-foreground" : "text-muted-foreground")}
-                      >
-                        {f.logo && opts.showLogos
-                          ? <img src={f.logo} alt="" className="w-4 h-4 shrink-0 rounded object-cover" />
-                          : <Folder className="w-4 h-4 shrink-0" strokeWidth={2} />}
-                        <span className="truncate">{f.name}</span>
-                      </button>
-                      <div className="absolute right-1 flex items-center">
-                        <button
-                          type="button"
-                          onClick={() => newChatIn(f.id)}
-                          className="opacity-0 group-hover/fld:opacity-100 focus-visible:opacity-100 transition-opacity p-1 rounded hover:bg-black/5 dark:hover:bg-white/10 text-muted-foreground hover:text-foreground cursor-pointer"
-                          title={f.id ? "New chat in this project" : "New chat with no project"}
-                          aria-label={f.id ? `New chat in ${f.name}` : "New chat with no project"}
-                        >
-                          <Plus className="w-3.5 h-3.5" />
-                        </button>
-                        <button type="button" onClick={() => toggleFolder(f.key)} className="p-1 rounded text-muted-foreground hover:text-foreground cursor-pointer" aria-label={isOpen ? "Close project" : "Open project"}>
-                          <ChevronDown className={cn("w-3.5 h-3.5 transition-transform duration-200", !isOpen && "-rotate-90")} />
-                        </button>
-                      </div>
-                    </div>
-                    {isOpen && (
-                      <div className="pl-4 mt-0.5">
-                        {f.groups.map(renderGroup)}
-                        <SidebarMenu>
-                          {shown.length ? shown.map(renderSessionItem) : !f.groups.length && <div className="px-2 py-1.5 text-xs text-muted-foreground">No chats yet</div>}
-                          {!full && !searchQuery && f.chats.length > shown.length && (
-                            <button
-                              type="button"
-                              onClick={() => setFullFolders((prev) => [...prev, f.key])}
-                              className="w-full px-2 py-1.5 text-left text-xs font-medium text-muted-foreground hover:text-foreground rounded-md hover:bg-muted transition-colors cursor-pointer"
-                            >
-                              Show {f.chats.length - shown.length} more
-                            </button>
-                          )}
-                        </SidebarMenu>
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
-              <NewProjectDialog open={newProjectOpen} onOpenChange={setNewProjectOpen} onCreated={(p) => openStudioProject(p.id)} />
-            </div>
-          )}
+          {isStudioMode && studioProjects}
         </SidebarGroupContent>
       </SidebarGroup>
       </div>
@@ -1590,6 +1595,7 @@ export function AgentNestedMenu({ searchQuery = "" }: { searchQuery?: string }) 
         isLoading={isDeletingSession}
         onConfirm={() => { if (deleteSessionId) handleDeleteSession(deleteSessionId); }}
       />
+      {isStudioMode && <NewProjectDialog open={newProjectOpen} onOpenChange={setNewProjectOpen} onCreated={(p) => openStudioProject(p.id)} />}
       <GroupDialog
         open={groupDialog !== null}
         project={groupDialog?.project || null}
