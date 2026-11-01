@@ -9,7 +9,7 @@ import { Input } from "../ui/input";
 import { cn } from "@/lib/utils";
 import { mcpApi, loginToServer, openLoginPopup, type CustomMcpServer } from "./customMcpApi";
 
-const MAX_ICON_BYTES = 10 * 1024;
+const MAX_ICON_BYTES = 2 * 1024 * 1024;
 
 const AUTH_OPTIONS = [
   { id: "oauth", label: "OAuth" },
@@ -50,7 +50,7 @@ export function AddConnectorModal({ isOpen, onClose, onAdded }: Props) {
   const pickIcon = (file?: File) => {
     if (!file) return;
     if (file.type !== "image/png") return toast.error("The icon must be a PNG.");
-    if (file.size > MAX_ICON_BYTES) return toast.error("The icon must be 10 KB or less.");
+    if (file.size > MAX_ICON_BYTES) return toast.error("The icon must be 2 MB or less.");
     const reader = new FileReader();
     reader.onload = () => setIcon(String(reader.result || ""));
     reader.readAsDataURL(file);
@@ -117,7 +117,7 @@ export function AddConnectorModal({ isOpen, onClose, onAdded }: Props) {
             </button>
             <div className="min-w-0">
               <p className={label}>Icon <span className="text-muted-foreground font-normal">(optional)</span></p>
-              <p className="text-xs text-muted-foreground">PNG only. Best at 256 × 256 px or larger. Max 10 KB. Leave it empty and we'll use the app's own logo.</p>
+              <p className="text-xs text-muted-foreground">PNG only. Best at 192 × 192 px or larger. Max 2 MB. Leave it empty and we'll use the app's own logo.</p>
               {icon && <button type="button" onClick={() => setIcon("")} className="text-xs text-muted-foreground hover:text-foreground underline mt-0.5">Remove</button>}
             </div>
             <input ref={fileRef} type="file" accept="image/png" className="hidden" onChange={(e) => { pickIcon(e.target.files?.[0]); e.target.value = ""; }} />

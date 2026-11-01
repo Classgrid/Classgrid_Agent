@@ -19,6 +19,7 @@ import { auth, UnauthorizedError } from "@modelcontextprotocol/sdk/client/auth.j
 import CustomMcpServer from "../models/CustomMcpServer.js";
 import { encrypt, decrypt } from "../utils/encryption.js";
 import { MCP_CATALOG } from "./custom-mcp-catalog.js";
+import { uploadBufferToR2 } from "../config/r2Client.js";
 
 export const MAX_SERVERS_PER_USER = 50;
 const CALL_TIMEOUT_MS = 120000;
@@ -305,6 +306,20 @@ export function publicServer(doc) {
     };
 }
 
+export const MAX_ICON_BYTES = 2 * 1024 * 1024;
+
+/** The user's PNG icon (data URL, max 2 MB) is saved to R2; returns its URL. Other values are kept as they are. */
+export async function saveIcon(icon) {
+    const value = String(icon || "");
+    if (!value.startsWith("data:")) return value;
+    const m = value.match(/^data:image\/png;base64,([A-Za-z0-9+/=]+)$/);
+    if (!m) throw new Error("The icon must be a PNG.");
+    const buf = Buffer.from(m[1], "base64");
+    if (buf.length > MAX_ICON_BYTES) throw new Error("The icon must be 2 MB or less.");
+    if (buf.length < 8 || buf.readUInt32BE(0) !== 0x89504e47) throw new Error("The icon must be a PNG.");
+    return uploadBufferToR2(buf, "icon.png", "image/png", `custom-mcp-icons/${crypto.randomUUID()}.png`);
+}
+
 /** Creates a server for a user (from the form or from the AI) and tries it right away. */
 export async function createServer(userId, input) {
     const name = String(input.name || "").trim().slice(0, 60);
@@ -313,8 +328,7 @@ export async function createServer(userId, input) {
     const count = await CustomMcpServer.countDocuments({ userId });
     if (count >= MAX_SERVERS_PER_USER) throw new Error(`You can add up to ${MAX_SERVERS_PER_USER} connectors.`);
     const authType = ["oauth", "api_key", "none"].includes(input.authType) ? input.authType : "oauth";
-    const icon = String(input.iconUrl || "");
-    if (icon.startsWith("data:") && (!/^data:image\/png;base64,/.test(icon) || icon.length > 14000)) throw new Error("The icon must be a PNG of 10 KB or less.");
+    const icon = await saveIcon(input.iconUrl);
     const doc = new CustomMcpServer({
         userId,
         name,

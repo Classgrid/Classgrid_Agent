@@ -6,7 +6,7 @@ import CustomMcpServer from "../models/CustomMcpServer.js";
 import { encrypt } from "../utils/encryption.js";
 import { MCP_CATALOG } from "../services/custom-mcp-catalog.js";
 import {
-    assertSafeUrl, createServer, finishLogin, forgetServer, listServersForUser, publicServer, refreshTools, startLogin,
+    assertSafeUrl, createServer, finishLogin, forgetServer, listServersForUser, publicServer, refreshTools, saveIcon, startLogin,
 } from "../services/custom-mcp.service.js";
 
 const router = express.Router();
@@ -69,10 +69,7 @@ router.patch("/:id", async (req, res) => {
         if (typeof b.name === "string" && b.name.trim()) doc.name = b.name.trim().slice(0, 60);
         if (typeof b.description === "string") doc.description = b.description.trim().slice(0, 300);
         if (typeof b.enabled === "boolean") doc.enabled = b.enabled;
-        if (typeof b.iconUrl === "string") {
-            if (b.iconUrl.startsWith("data:") && (!/^data:image\/png;base64,/.test(b.iconUrl) || b.iconUrl.length > 14000)) throw new Error("The icon must be a PNG of 10 KB or less.");
-            doc.iconUrl = b.iconUrl;
-        }
+        if (typeof b.iconUrl === "string") doc.iconUrl = await saveIcon(b.iconUrl);
         if (typeof b.apiKey === "string" && b.apiKey && doc.authType === "api_key") doc.apiKeyEnc = encrypt(b.apiKey);
         if (typeof b.url === "string" && b.url.trim() && b.url.trim() !== doc.url) {
             doc.url = (await assertSafeUrl(b.url.trim())).href;
