@@ -3,7 +3,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
-import { Check, ChevronDown, Folder } from "lucide-react";
+import { Check, ChevronDown, Folder, Pin } from "lucide-react";
+import { groupIcon, openProjectId, type ChatGroup } from "@/components/ai/components/chat-groups/chatGroups";
 import { fetchWithRescue } from "@/lib/rescue";
 import { cn } from "@/lib/utils";
 import { openStudioProject } from "./StudioProjectPicker";
@@ -19,9 +20,10 @@ const KINDS: { kind: Kind; label: string; placeholder: string }[] = [
   { kind: "projects", label: "Projects", placeholder: "Search for projects..." },
 ];
 
-type Chat = { id: string; title: string; created_at: string; project_id?: string; project_name?: string };
+type Chat = { id: string; title: string; created_at: string; pinned?: boolean; project_id?: string; project_name?: string };
 type Project = { id: string; name: string; repo: string | null; logo?: string | null };
-type Row = { key: string; title: string; hint?: string; age?: string; icon: React.ReactNode; run: () => void };
+// A row: a file, chat or project; or, in Conversations, a project or group heading (head) that opens and closes with ^
+type Row = { key: string; title: string; hint?: string; age?: string; icon: React.ReactNode; run: () => void; head?: boolean; open?: boolean; depth?: number; pin?: boolean };
 
 function shortAge(at: string) {
   const mins = Math.max(0, Math.round((Date.now() - new Date(at).getTime()) / 60000));
@@ -50,10 +52,14 @@ export function StudioSearchPalette({ open, onClose, files, recent, onOpenFile, 
   const [more, setMore] = useState(false);
   const [chats, setChats] = useState<Chat[] | null>(null);
   const [projects, setProjects] = useState<Project[] | null>(null);
+  const [groups, setGroups] = useState<ChatGroup[] | null>(null);
+  // Conversations: which project and group headings are open (the open project starts open)
+  const [openKeys, setOpenKeys] = useState<Set<string>>(() => new Set([`p:${openProjectId() || "none"}`]));
+  const toggleKey = (key: string) => setOpenKeys((prev) => { const next = new Set(prev); if (next.has(key)) next.delete(key); else next.add(key); return next; });
   const inputRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
 
-  useEffect(() => { if (open) { setQ(""); setActive(0); setMore(false); setMenuOpen(false); requestAnimationFrame(() => inputRef.current?.focus()); } }, [open]);
+  useEffect(() => { if (open) { setQ(""); setActive(0); setMore(false); setMenuOpen(false); setOpenKeys(new Set([`p:${openProjectId() || "none"}`])); requestAnimationFrame(() => inputRef.current?.focus()); } }, [open]);
   useEffect(() => { setActive(0); setMore(false); }, [q, kind]);
 
   // Chats and projects load when their kind is first shown
@@ -62,8 +68,10 @@ export function StudioSearchPalette({ open, onClose, files, recent, onOpenFile, 
     if (kind === "conversations") {
       fetchWithRescue(`${backendUrl}/api/ai/sessions?project=all&studio=1`, { credentials: "include" })
         .then((r) => r.json()).then((d) => setChats(Array.isArray(d.sessions) ? d.sessions : [])).catch(() => setChats((c) => c || []));
+      fetchWithRescue(`${backendUrl}/api/ide/groups?project=all`, { credentials: "include" })
+        .then((r) => r.json()).then((d) => setGroups(Array.isArray(d.groups) ? d.groups : [])).catch(() => setGroups((g) => g || []));
     }
-    if (kind === "projects") {
+    if (kind === "projects" || kind === "conversations") {
       fetchWithRescue(`${backendUrl}/api/ide/projects`, { credentials: "include" })
         .then((r) => r.json()).then((d) => setProjects(Array.isArray(d.projects) ? d.projects : [])).catch(() => setProjects((p) => p || []));
     }
@@ -91,9 +99,59 @@ export function StudioSearchPalette({ open, onClose, files, recent, onOpenFile, 
       });
     }
     if (kind === "conversations") {
-      return (chats || [])
-        .filter((c) => !t || cleanTitle(c.title).toLowerCase().includes(t) || (c.project_name || "").toLowerCase().includes(t))
-        .map((c) => ({ key: c.id, title: cleanTitle(c.title), hint: c.project_name, age: shortAge(c.created_at), icon: null, run: () => { goChat(c.id); close(); } }));
+      // Each project with ^: its pinned chats, its groups (each with ^, pinned groups first), then its other chats
+      const match = (c: Chat) => !t || cleanTitle(c.title).toLowerCase().includes(t);
+      const byId = new Map((chats || []).map((c) => [c.id, c]));
+      const inGroup = new Set((groups || []).flatMap((g) => g.chats.map((c) => c.id)));
+      const names = new Map((projects || []).map((p) => [p.id, p]));
+      type F = { key: string; name: string; logo: string | null; pinned: Chat[]; groups: ChatGroup[]; chats: Chat[]; newest: number };
+      const folders = new Map<string, F>();
+      const folder = (id: string | null, name?: string) => {
+        const key = id || "none";
+        if (!folders.has(key)) {
+          const p = id ? names.get(id) : null;
+          folders.set(key, { key, name: id ? p?.name || name || "Project" : "No project", logo: p?.logo || null, pinned: [], groups: [], chats: [], newest: 0 });
+        }
+        return folders.get(key)!;
+      };
+      for (const c of chats || []) {
+        if (inGroup.has(c.id) && !c.pinned) continue;
+        const f = folder(c.project_id || null, c.project_name);
+        (c.pinned ? f.pinned : f.chats).push(c);
+        f.newest = Math.max(f.newest, new Date(c.created_at).getTime());
+      }
+      for (const g of [...(groups || [])].sort((a, b) => Number(b.pinned) - Number(a.pinned))) folder(g.projectId || null).groups.push(g);
+      const chatRow = (c: Chat, depth: number, pin = false): Row => ({
+        key: c.id, title: cleanTitle(c.title), age: shortAge(c.created_at), icon: null, depth, pin, run: () => { goChat(c.id); close(); },
+      });
+      const out: Row[] = [];
+      for (const f of [...folders.values()].sort((a, b) => b.newest - a.newest)) {
+        const pinned = f.pinned.filter(match);
+        const loose = f.chats.filter(match);
+        const grouped = f.groups
+          .map((g) => ({ g, list: g.chats.map((c) => byId.get(c.id) || c).filter((c) => !c.pinned && match(c)) }))
+          .filter((x) => !t || x.list.length);
+        const count = pinned.length + loose.length + grouped.reduce((n, x) => n + x.list.length, 0);
+        if (!count && (t || !f.groups.length)) continue;
+        const pk = `p:${f.key}`;
+        const open = !!t || openKeys.has(pk);
+        out.push({
+          key: pk, head: true, open, depth: 0, title: f.name, hint: String(count),
+          icon: f.logo ? <img src={f.logo} alt="" className="size-4 shrink-0 rounded object-cover" /> : <Folder className="size-4 shrink-0 text-muted-foreground" />,
+          run: () => toggleKey(pk),
+        });
+        if (!open) continue;
+        pinned.forEach((c) => out.push(chatRow(c, 1, true)));
+        for (const { g, list } of grouped) {
+          const gk = `g:${g.id}`;
+          const gOpen = !!t || openKeys.has(gk);
+          const Icon = groupIcon(g.icon);
+          out.push({ key: gk, head: true, open: gOpen, depth: 1, title: g.name, hint: String(list.length), pin: g.pinned, icon: <Icon className="size-4 shrink-0 text-muted-foreground" />, run: () => toggleKey(gk) });
+          if (gOpen) list.forEach((c) => out.push(chatRow(c, 2)));
+        }
+        loose.forEach((c) => out.push(chatRow(c, 1)));
+      }
+      return out;
     }
     return (projects || [])
       .filter((p) => !t || p.name.toLowerCase().includes(t) || (p.repo || "").toLowerCase().includes(t))
@@ -105,10 +163,10 @@ export function StudioSearchPalette({ open, onClose, files, recent, onOpenFile, 
         run: () => { openStudioProject(p.id); close(); },
       }));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [kind, q, files, recent, chats, projects]);
+  }, [kind, q, files, recent, chats, projects, groups, openKeys]);
 
   const shown = more || kind !== "files" ? rows : rows.slice(0, PAGE);
-  const loading = (kind === "conversations" && chats === null) || (kind === "projects" && projects === null);
+  const loading = (kind === "conversations" && (chats === null || groups === null)) || (kind === "projects" && projects === null);
 
   useEffect(() => { listRef.current?.querySelector(`[data-index="${active}"]`)?.scrollIntoView({ block: "nearest" }); }, [active]);
 
@@ -198,17 +256,19 @@ export function StudioSearchPalette({ open, onClose, files, recent, onOpenFile, 
                     data-index={i}
                     onClick={r.run}
                     onMouseEnter={() => setActive(i)}
+                    style={kind === "conversations" ? { paddingLeft: 12 + (r.depth || 0) * 20 } : undefined}
                     className={cn("w-full flex items-center gap-2.5 h-10 px-3 rounded-lg text-left transition-colors duration-100", active === i ? "bg-black/[0.05] dark:bg-white/[0.07]" : "")}
                   >
+                    {kind === "conversations" && (
+                      r.head
+                        ? <ChevronDown className={cn("size-3.5 shrink-0 text-muted-foreground transition-transform duration-200", !r.open && "-rotate-90")} />
+                        : <span className="size-3.5 shrink-0" />
+                    )}
                     {r.icon}
                     <span className="min-w-0 flex items-center gap-2 flex-1">
-                      <span className="truncate text-[14px]">{r.title}</span>
-                      {r.hint && (
-                        <span className="min-w-0 flex items-center gap-1 text-[13px] text-muted-foreground">
-                          {kind === "conversations" && <Folder className="size-3.5 shrink-0" />}
-                          <span className="truncate">{r.hint}</span>
-                        </span>
-                      )}
+                      <span className={cn("truncate text-[14px]", r.head && r.depth === 0 && "font-medium")}>{r.title}</span>
+                      {r.pin && <Pin className="size-3 shrink-0 text-muted-foreground" aria-label="Pinned" />}
+                      {r.hint && <span className="min-w-0 truncate text-[13px] text-muted-foreground">{r.hint}</span>}
                     </span>
                     {r.age && <span className="shrink-0 text-[12px] text-muted-foreground">{r.age}</span>}
                   </button>

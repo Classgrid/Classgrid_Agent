@@ -142,7 +142,10 @@ export function StudioProjectPicker() {
     if (picked === p.id) pick(null);
     toast.success(`Deleted ${p.name}`);
   };
-  const replaceProject = (p: Project) => setProjects((list) => (list || []).map((x) => (x.id === p.id ? p : x)));
+  const replaceProject = (p: Project) => {
+    setProjects((list) => (list || []).map((x) => (x.id === p.id ? p : x)));
+    window.dispatchEvent(new Event("studio:projects-changed"));
+  };
   const [place, setPlace] = useState<{ up: boolean; maxH: number }>({ up: false, maxH: 360 });
   const boxRef = useRef<HTMLDivElement>(null);
   const reduce = useReducedMotion();
@@ -160,8 +163,11 @@ export function StudioProjectPicker() {
       // A project made in the pane's Project tab is not in this list yet
       if (id) load();
     };
+    // A project's name, logo or repo changed somewhere else in Studio: load the list again
+    const onEdited = () => load();
     window.addEventListener("studio:project-changed", onChange);
-    return () => window.removeEventListener("studio:project-changed", onChange);
+    window.addEventListener("studio:projects-changed", onEdited);
+    return () => { window.removeEventListener("studio:project-changed", onChange); window.removeEventListener("studio:projects-changed", onEdited); };
   }, [load]);
   useEffect(() => { load(); }, [load]);
   // Opening the list loads the projects again, so a repo linked in Project Mode shows here at once

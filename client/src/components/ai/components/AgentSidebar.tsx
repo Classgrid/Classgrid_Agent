@@ -508,7 +508,8 @@ export function AgentNestedMenu({ searchQuery = "" }: { searchQuery?: string }) 
     loadProjects();
     const again = () => loadProjects();
     window.addEventListener("studio:project-changed", again);
-    return () => window.removeEventListener("studio:project-changed", again);
+    window.addEventListener("studio:projects-changed", again); // a project's logo, name or repo changed
+    return () => { window.removeEventListener("studio:project-changed", again); window.removeEventListener("studio:projects-changed", again); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isStudioMode]);
   const [closedFolders, setClosedFolders] = React.useState<string[]>(() => {

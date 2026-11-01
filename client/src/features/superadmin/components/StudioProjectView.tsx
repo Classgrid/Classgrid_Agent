@@ -2,7 +2,7 @@
 // its name and logo, GitHub (repo, working branch, open pull request), Vercel, the last commit and the history.
 import { useCallback, useEffect, useRef, useState } from "react";
 import { motion, useReducedMotion } from "framer-motion";
-import { ArrowLeftRight, ExternalLink, FolderGit2, GitBranch, GitCommitHorizontal, GitPullRequest, ImagePlus, RotateCw } from "lucide-react";
+import { ArrowLeftRight, Check, ExternalLink, FolderGit2, GitBranch, GitCommitHorizontal, GitPullRequest, ImagePlus, Pencil, RotateCw, X } from "lucide-react";
 import { Link } from "react-router-dom";
 import { toast } from "sonner";
 import { fetchWithRescue } from "@/lib/rescue";
@@ -46,6 +46,31 @@ export function StudioProjectView({ projectId, reloadKey = 0 }: { projectId: str
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [switching, setSwitching] = useState(false);
+  // Rename the project here (the new name shows in Project Mode and Studio)
+  const [renaming, setRenaming] = useState<string | null>(null);
+  const [renameBusy, setRenameBusy] = useState(false);
+  const saveName = async () => {
+    const name = (renaming || "").trim();
+    if (!projectId || !project || renameBusy) return;
+    if (!name || name === project.name) { setRenaming(null); return; }
+    setRenameBusy(true);
+    try {
+      const res = await fetchWithRescue(`${backendUrl}/api/ide/projects/${projectId}`, {
+        method: "PATCH",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name }),
+      });
+      const saved = await res.json().catch(() => ({}));
+      if (!res.ok) { toast.error(saved.error || "Could not rename the project"); return; }
+      setProject(saved.project);
+      setRenaming(null);
+      window.dispatchEvent(new Event("studio:projects-changed"));
+      toast.success("Renamed");
+    } finally {
+      setRenameBusy(false);
+    }
+  };
   // Project logo: pick a picture, crop it (same crop tool as Project Mode), it is saved to R2
   const [cropSrc, setCropSrc] = useState<string | null>(null);
   const [logoBusy, setLogoBusy] = useState(false);
@@ -77,6 +102,7 @@ export function StudioProjectView({ projectId, reloadKey = 0 }: { projectId: str
       const saved = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(saved.error || "Could not save the logo");
       setProject(saved.project);
+      window.dispatchEvent(new Event("studio:projects-changed")); // the left list and the pickers show the new logo at once
       toast.success("Logo updated");
     } catch (err: any) {
       toast.error(err?.message && err.message !== "upload failed" ? err.message : "Could not upload the logo");
@@ -108,7 +134,7 @@ export function StudioProjectView({ projectId, reloadKey = 0 }: { projectId: str
     }
   }, [projectId]);
 
-  useEffect(() => { setProject(null); setInfo(null); setHistory(null); load(); }, [load]);
+  useEffect(() => { setProject(null); setInfo(null); setHistory(null); setRenaming(null); load(); }, [load]);
   useEffect(() => { if (reloadKey) load(); }, [reloadKey, load]);
 
   if (!projectId) {
@@ -155,7 +181,35 @@ export function StudioProjectView({ projectId, reloadKey = 0 }: { projectId: str
             </span>
           </button>
           <div className="min-w-0 flex-1">
-            <p className="text-[15px] font-medium truncate">{project?.name || (loading ? "Loading…" : "Project")}</p>
+            {renaming !== null ? (
+              <div className="flex items-center gap-1">
+                <input
+                  autoFocus
+                  data-no-ring
+                  value={renaming}
+                  onChange={(e) => setRenaming(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === "Enter") saveName(); if (e.key === "Escape") setRenaming(null); }}
+                  maxLength={80}
+                  disabled={renameBusy}
+                  className="min-w-0 flex-1 h-7 px-2 rounded-md border border-black/15 dark:border-white/15 bg-white dark:bg-[#161616] text-[14px] font-medium outline-none focus:border-black/30 dark:focus:border-white/25"
+                />
+                <button onClick={saveName} disabled={renameBusy} className="shrink-0 flex items-center justify-center size-7 rounded-md text-muted-foreground hover:text-foreground hover:bg-black/[0.05] dark:hover:bg-white/[0.06]" title="Save name" aria-label="Save name">
+                  {renameBusy ? <span className="size-3 rounded-full border-2 border-muted-foreground/30 border-t-muted-foreground animate-spin" /> : <Check className="size-3.5" />}
+                </button>
+                <button onClick={() => setRenaming(null)} disabled={renameBusy} className="shrink-0 flex items-center justify-center size-7 rounded-md text-muted-foreground hover:text-foreground hover:bg-black/[0.05] dark:hover:bg-white/[0.06]" title="Cancel" aria-label="Cancel">
+                  <X className="size-3.5" />
+                </button>
+              </div>
+            ) : (
+              <div className="group/name flex items-center gap-1 min-w-0">
+                <p className="text-[15px] font-medium truncate">{project?.name || (loading ? "Loading…" : "Project")}</p>
+                {project && (
+                  <button onClick={() => setRenaming(project.name)} className="shrink-0 flex items-center justify-center size-6 rounded-md text-muted-foreground opacity-0 group-hover/name:opacity-100 focus-visible:opacity-100 hover:text-foreground hover:bg-black/[0.05] dark:hover:bg-white/[0.06] transition-opacity" title="Rename project" aria-label="Rename project">
+                    <Pencil className="size-3.5" />
+                  </button>
+                )}
+              </div>
+            )}
             <p className="text-[12px] text-muted-foreground">Shared with Project Mode{project?.updatedAt ? ` · edited ${ago(project.updatedAt)}` : ""}</p>
           </div>
           <button onClick={() => setSwitching((s) => !s)} className={`shrink-0 h-8 px-2.5 inline-flex items-center gap-1.5 rounded-md border border-black/10 dark:border-white/10 text-[12px] hover:text-foreground hover:bg-black/[0.04] dark:hover:bg-white/[0.05] transition-colors ${switching ? "text-foreground bg-black/[0.04] dark:bg-white/[0.05]" : "text-muted-foreground"}`}>
