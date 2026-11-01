@@ -1,7 +1,7 @@
 // Custom connectors (custom MCP servers): calls to /api/custom-mcp and the login popup
 import { fetchWithRescue } from "@/lib/rescue";
 
-export interface McpTool { name: string; title?: string; description?: string }
+export interface McpTool { name: string; title?: string; description?: string; annotations?: { readOnlyHint?: boolean; destructiveHint?: boolean } }
 export interface CustomMcpServer {
   id: string;
   name: string;
@@ -18,6 +18,7 @@ export interface CustomMcpServer {
   enabled: boolean;
   tools: McpTool[];
   toolsFetchedAt?: string | null;
+  createdAt?: string;
 }
 export interface McpCatalogApp { id: string; name: string; description: string; url: string; auth: "oauth" | "api_key" | "none"; logo: string; invertInDarkMode?: boolean; askUrl?: { placeholder: string; hint: string }; keyHint?: string }
 

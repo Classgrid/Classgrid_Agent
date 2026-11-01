@@ -204,7 +204,7 @@ export async function refreshTools(doc) {
         let cursor;
         for (let page = 0; page < 20; page++) {
             const res = await client.listTools(cursor ? { cursor } : {}, { timeout: 30000 });
-            for (const t of res.tools || []) tools.push({ name: t.name, title: t.title || t.annotations?.title || "", description: String(t.description || "").slice(0, 1500), inputSchema: t.inputSchema || { type: "object" } });
+            for (const t of res.tools || []) tools.push({ name: t.name, title: t.title || t.annotations?.title || "", description: String(t.description || "").slice(0, 1500), inputSchema: t.inputSchema || { type: "object" }, annotations: t.annotations || {} });
             cursor = res.nextCursor;
             if (!cursor) break;
         }
@@ -313,7 +313,7 @@ export function publicServer(doc) {
         status: doc.status,
         lastError: doc.lastError,
         enabled: doc.enabled,
-        tools: (doc.tools || []).map((t) => ({ name: t.name, title: t.title, description: t.description })),
+        tools: (doc.tools || []).map((t) => ({ name: t.name, title: t.title, description: t.description, annotations: t.annotations })),
         toolsFetchedAt: doc.toolsFetchedAt,
         createdAt: doc.createdAt,
     };

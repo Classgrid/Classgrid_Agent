@@ -32,6 +32,7 @@ import express from "express";
 import { isAuthenticated } from "../middleware/auth.middleware.js";
 import User from "../models/User.js";
 import connectDB from "../../config/db.js";
+import { builtinPluginTools } from "../services/builtin-plugin-tools.js";
 
 const router = express.Router();
 
@@ -134,6 +135,11 @@ router.get("/status", isAuthenticated, async (req, res) => {
         console.error("AI Integration Status Error:", err);
         res.status(500).json({ message: "Failed to fetch integration status" });
     }
+});
+
+// GET /api/ai-integrations/tools: the tools of each built-in plugin, for its page in AI Hub > Plugins
+router.get("/tools", isAuthenticated, (req, res) => {
+    res.json({ plugins: builtinPluginTools() });
 });
 
 // ─────────────────────────────────────────────

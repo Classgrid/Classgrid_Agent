@@ -1,11 +1,15 @@
-// Custom connectors in AI Hub > Plugins: logo, list card and the detail page (log in, tools, turn off, remove)
+// Custom connectors in AI Hub > Plugins: logo, list card and the detail pages (log in, tools, turn off, remove)
 import React, { useState } from "react";
-import { ChevronLeft, ChevronRight, CheckCircle2, AlertCircle, LogIn, RefreshCw, Trash2, Wrench, Zap } from "lucide-react";
+import { ChevronRight, LogIn, LogOut, MessageSquare, Plug, Power, RefreshCw, Trash2 } from "lucide-react";
 import { toast } from "sonner";
-import { Button } from "@/components/marketing_ui/button";
 import { Spinner } from "@/components/marketing_ui/spinner";
+import { DangerConfirmDialog } from "@/components/marketing_ui/danger-confirm-dialog";
 import { cn } from "@/lib/utils";
 import { mcpApi, loginToServer, openLoginPopup, iconFilter, type CustomMcpServer, type McpCatalogApp } from "./customMcpApi";
+import {
+  PluginHeader, PluginLogo, StatusLabel, Notice, TryPrompts, ToolsSection, InfoSection, FeatureList, CopyValue,
+  solidBtn, sectionTitle, formatDate, hostOf, LOGIN_TEXT, type MenuItem, type PluginTool, type StatusTone,
+} from "../plugins/PluginUi";
 
 export function ConnectorLogo({ src, name, invert, className }: { src?: string; name: string; invert?: boolean; className?: string }) {
   const [broken, setBroken] = useState(false);
@@ -16,6 +20,7 @@ export function ConnectorLogo({ src, name, invert, className }: { src?: string; 
 }
 
 const STATUS_TEXT: Record<CustomMcpServer["status"], string> = { connected: "Connected", needs_login: "Needs login", error: "Can't connect" };
+const STATUS_TONE: Record<CustomMcpServer["status"], StatusTone> = { connected: "ok", needs_login: "warn", error: "error" };
 
 /** One card in the plugins grid (custom connector or a known MCP app) */
 export function ConnectorCard({ name, description, logo, invert, badge, onClick }: { name: string; description: string; logo?: string; invert?: boolean; badge?: string; onClick: () => void }) {
@@ -41,7 +46,9 @@ export function ConnectorCard({ name, description, logo, invert, badge, onClick 
   );
 }
 
-const secondaryBtn = "h-9 px-4 rounded-lg border-border bg-accent text-sm font-medium text-foreground/90 hover:bg-slate-200 dark:hover:bg-accent/80 hover:text-foreground";
+/** Status of a custom connector, for its card and page */
+export const connectorStatus = (s: CustomMcpServer): { tone: StatusTone; label: string } =>
+  !s.enabled ? { tone: "off", label: "Turned off" } : { tone: STATUS_TONE[s.status], label: STATUS_TEXT[s.status] };
 
 /** Detail page of a custom connector */
 export function CustomConnectorDetail({ server, onBack, onChanged, onRemoved, onTry }: {
@@ -71,103 +78,80 @@ export function CustomConnectorDetail({ server, onBack, onChanged, onRemoved, on
     });
   };
 
+  const connected = server.status === "connected";
+  const status = connectorStatus(server);
+  const tools: PluginTool[] = server.tools.map((t) => ({
+    name: t.name,
+    label: t.title || undefined,
+    description: t.description,
+    readOnly: typeof t.annotations?.readOnlyHint === "boolean" ? t.annotations.readOnlyHint : undefined,
+    destructive: t.annotations?.destructiveHint === true && t.annotations?.readOnlyHint !== true,
+  }));
+  const menu: MenuItem[] = [
+    { label: busy === "refresh" ? "Refreshing..." : "Refresh tools", icon: RefreshCw, disabled: !!busy, onClick: () => run("refresh", async () => { onChanged(await mcpApi.refresh(server.id)); toast.success("Tools refreshed"); }) },
+    { label: server.enabled ? "Turn off" : "Turn on", icon: Power, disabled: !!busy, onClick: () => run("toggle", async () => onChanged(await mcpApi.update(server.id, { enabled: !server.enabled }))) },
+    ...(server.authType === "oauth" && connected ? [{ label: "Log out", icon: LogOut, disabled: !!busy, onClick: () => run("logout", async () => onChanged(await mcpApi.logout(server.id))) }] : []),
+    { label: "Remove", icon: Trash2, danger: true, disabled: !!busy, onClick: () => setConfirmRemove(true) },
+  ];
+  const host = hostOf(server.url);
+
   return (
     <div className="animate-in fade-in slide-in-from-right-4 duration-300 flex flex-col max-w-3xl mx-auto pb-8">
-      <button onClick={onBack} className="flex items-center text-sm font-medium text-muted-foreground hover:text-foreground mb-6 transition-colors w-fit group">
-        <ChevronLeft className="w-4 h-4 mr-1 group-hover:-translate-x-1 transition-transform" />
-        Back to plugins
-      </button>
-
-      <div className="flex items-center gap-4 mb-6">
-        <div className="w-16 h-16 rounded-2xl border border-border flex items-center justify-center shrink-0 bg-background overflow-hidden shadow-sm">
-          <ConnectorLogo src={server.iconUrl} name={server.name} invert={server.invertInDarkMode} className="w-8 h-8" />
-        </div>
-        <div className="min-w-0">
-          <h2 className="text-3xl font-bold text-foreground truncate">{server.name}</h2>
-          <p className="text-sm text-muted-foreground">{server.description || "Custom connector (MCP)"}</p>
-          <p className="text-xs text-muted-foreground font-mono truncate mt-1">{server.url}</p>
-        </div>
-      </div>
-
-      <div className="flex flex-wrap items-center gap-3 mb-6">
-        <span className={cn(
-          "flex items-center gap-2 text-sm font-medium px-3 py-1.5 rounded-lg",
-          server.status === "connected" ? "text-emerald-600 dark:text-emerald-500 bg-emerald-500/10" : server.status === "error" ? "text-destructive bg-destructive/10" : "text-muted-foreground bg-muted"
-        )}>
-          {server.status === "connected" ? <CheckCircle2 className="w-4 h-4" /> : <AlertCircle className="w-4 h-4" />}
-          {STATUS_TEXT[server.status]}{!server.enabled && " · Off"}
-        </span>
-        {server.status !== "connected" && (
-          <Button variant="outline" onClick={login} disabled={!!busy} className={secondaryBtn}>
-            {busy === "login" ? <Spinner className="w-4 h-4 mr-2" /> : <LogIn className="w-4 h-4 mr-2" />}
+      <PluginHeader
+        onBack={onBack}
+        logo={<PluginLogo src={server.iconUrl} name={server.name} invert={server.invertInDarkMode} size="lg" />}
+        name={server.name}
+        subtitle={server.description || "Custom connector"}
+        status={<StatusLabel tone={status.tone} label={status.label} />}
+        action={!connected ? (
+          <button onClick={login} disabled={!!busy} className={solidBtn}>
+            {busy === "login" ? <Spinner className="w-4 h-4" /> : <LogIn className="w-4 h-4" />}
             {server.authType === "oauth" ? "Log in" : "Try again"}
-          </Button>
-        )}
-        <Button variant="outline" onClick={() => run("refresh", async () => onChanged(await mcpApi.refresh(server.id)))} disabled={!!busy} className={secondaryBtn}>
-          {busy === "refresh" ? <Spinner className="w-4 h-4 mr-2" /> : <RefreshCw className="w-4 h-4 mr-2" />}
-          Refresh tools
-        </Button>
-        <Button variant="outline" onClick={() => run("toggle", async () => onChanged(await mcpApi.update(server.id, { enabled: !server.enabled })))} disabled={!!busy} className={secondaryBtn}>
-          {busy === "toggle" ? <Spinner className="w-4 h-4 mr-2" /> : null}
-          {server.enabled ? "Turn off" : "Turn on"}
-        </Button>
-        {server.authType === "oauth" && server.status === "connected" && (
-          <Button variant="outline" onClick={() => run("logout", async () => onChanged(await mcpApi.logout(server.id)))} disabled={!!busy} className={secondaryBtn}>
-            Log out
-          </Button>
-        )}
-        {confirmRemove ? (
-          <span className="flex items-center gap-2">
-            <Button variant="outline" onClick={() => run("remove", async () => { await mcpApi.remove(server.id); onRemoved(server.id); toast.success(`${server.name} removed`); })} disabled={!!busy} className="h-9 px-3 text-sm text-destructive hover:text-destructive hover:bg-destructive/10 border-destructive/30">
-              {busy === "remove" ? <Spinner className="w-4 h-4 mr-2" /> : null}
-              Yes, remove
-            </Button>
-            <Button variant="ghost" onClick={() => setConfirmRemove(false)} className="h-9 px-3 text-sm">Cancel</Button>
-          </span>
-        ) : (
-          <Button variant="outline" onClick={() => setConfirmRemove(true)} disabled={!!busy} className="h-9 px-3 text-sm text-destructive hover:text-destructive hover:bg-destructive/10 border-destructive/20">
-            <Trash2 className="w-4 h-4 mr-2" />
-            Remove
-          </Button>
-        )}
-      </div>
+          </button>
+        ) : onTry && server.enabled ? (
+          <button onClick={() => onTry(`What can you do with ${server.name}?`)} className={solidBtn}>
+            <MessageSquare className="w-4 h-4" />
+            Try in chat
+          </button>
+        ) : undefined}
+        menu={menu}
+      />
 
-      {server.status === "error" && server.lastError && (
-        <p className="text-sm text-destructive mb-6 break-words">{server.lastError}</p>
+      {server.status === "error" && server.lastError && <Notice tone="error">{server.lastError}</Notice>}
+      {server.status === "needs_login" && <Notice>Log in to {server.name} so Classgrid AI can use it.</Notice>}
+      {connected && !server.enabled && <Notice>{server.name} is turned off. Classgrid AI won't use it until you turn it on from the ⋯ menu.</Notice>}
+
+      {connected && server.enabled && onTry && (
+        <TryPrompts name={server.name} prompts={[`What can you do with ${server.name}?`, `Use ${server.name} to show me my latest items`]} onTry={onTry} />
       )}
 
-      {server.status === "connected" && onTry && (
-        <div className="mb-6">
-          <h3 className="text-sm font-semibold text-foreground mb-3 flex items-center gap-2"><Zap className="w-4 h-4" />Try asking the AI</h3>
-          <div className="flex flex-col gap-2">
-            {[`What can you do with ${server.name}?`, `Use ${server.name} to show me my latest items`].map((msg) => (
-              <button key={msg} onClick={() => onTry(msg)} className="text-left px-4 py-3 rounded-lg border border-border bg-muted/30 hover:bg-accent hover:border-foreground/20 transition-all duration-200 text-sm text-muted-foreground hover:text-foreground shadow-sm flex items-center justify-between group">
-                <span>"{msg}"</span>
-                <ChevronRight className="w-4 h-4 opacity-0 group-hover:opacity-100 -translate-x-2 group-hover:translate-x-0 transition-all text-muted-foreground" />
-              </button>
-            ))}
-          </div>
-        </div>
-      )}
+      <ToolsSection tools={tools} emptyText={connected ? "This server has no tools." : "Log in to see what this connector can do."} />
 
-      <div className="pb-8">
-        <h3 className="text-lg font-semibold text-foreground mb-3 flex items-center gap-2"><Wrench className="w-4 h-4" />Tools ({server.tools.length})</h3>
-        {server.tools.length === 0 ? (
-          <p className="text-sm text-muted-foreground">{server.status === "connected" ? "This server has no tools." : "Log in to see what this connector can do."}</p>
-        ) : (
-          <ul className="divide-y divide-border border border-border rounded-xl overflow-hidden">
-            {server.tools.map((t) => (
-              <li key={t.name} className="px-4 py-3">
-                <p className="text-sm font-medium text-foreground font-mono">{t.name}</p>
-                {t.description && <p className="text-xs text-muted-foreground mt-1 line-clamp-3">{t.description}</p>}
-              </li>
-            ))}
-          </ul>
-        )}
-      </div>
+      <InfoSection rows={[
+        { label: "Developer", value: host },
+        { label: "Server URL", value: <CopyValue value={server.url} /> },
+        { label: "Login", value: LOGIN_TEXT[server.authType] },
+        { label: "Added", value: formatDate(server.createdAt) },
+        { label: "Tools updated", value: formatDate(server.toolsFetchedAt) },
+      ]} />
+
+      <p className="text-xs text-muted-foreground">This connector is run by {host || "another company"}, not Classgrid. Classgrid AI asks you before it sends, deletes or changes anything.</p>
+
+      <DangerConfirmDialog
+        open={confirmRemove}
+        onOpenChange={(open) => { if (!open && busy !== "remove") setConfirmRemove(false); }}
+        title={`Remove ${server.name}`}
+        description={`Classgrid AI will stop using ${server.name}. You can add it again later.`}
+        warningMessage="Its login and tools are removed from Classgrid."
+        actionLabel="Remove"
+        isLoading={busy === "remove"}
+        onConfirm={() => run("remove", async () => { await mcpApi.remove(server.id); setConfirmRemove(false); onRemoved(server.id); toast.success(`${server.name} removed`); })}
+      />
     </div>
   );
 }
+
+const inputCls = "w-full h-10 px-3 rounded-lg border border-border bg-background text-sm font-mono text-foreground placeholder:text-muted-foreground outline-none focus:border-foreground/30 transition-colors";
 
 /** Detail page of a known MCP app that isn't added yet */
 export function CatalogAppDetail({ app, onBack, onAdded }: { app: McpCatalogApp; onBack: () => void; onAdded: (s: CustomMcpServer) => void }) {
@@ -205,76 +189,66 @@ export function CatalogAppDetail({ app, onBack, onAdded }: { app: McpCatalogApp;
   };
   return (
     <div className="animate-in fade-in slide-in-from-right-4 duration-300 flex flex-col max-w-3xl mx-auto pb-8">
-      <button onClick={onBack} className="flex items-center text-sm font-medium text-muted-foreground hover:text-foreground mb-6 transition-colors w-fit group">
-        <ChevronLeft className="w-4 h-4 mr-1 group-hover:-translate-x-1 transition-transform" />
-        Back to plugins
-      </button>
-      <div className="flex items-center gap-4 mb-6">
-        <div className="w-16 h-16 rounded-2xl border border-border flex items-center justify-center shrink-0 bg-background overflow-hidden shadow-sm">
-          <ConnectorLogo src={app.logo} name={app.name} invert={app.invertInDarkMode} className="w-8 h-8" />
-        </div>
-        <div>
-          <h2 className="text-3xl font-bold text-foreground">{app.name}</h2>
-          <p className="text-sm text-muted-foreground">{app.description}</p>
-        </div>
-      </div>
-      <ul className="space-y-3 mb-6">
-        {[`Let Classgrid use ${app.name} for you`, app.auth === "oauth" ? `Log in with your own ${app.name} account` : keyOnly ? `Connect with your own ${app.name} API key` : "No login needed", `Made by ${app.name}, connected through MCP`].map((f) => (
-          <li key={f} className="flex items-start gap-3 text-muted-foreground text-sm">
-            <CheckCircle2 className="w-4 h-4 shrink-0 mt-0.5" />
-            <span>{f}</span>
-          </li>
-        ))}
-      </ul>
-      {app.askUrl && (
-        <div className="space-y-3 mb-6 max-w-xl">
-          <div className="space-y-1.5">
-            <p className="text-sm font-medium text-foreground">Your {app.name} address</p>
-            <input
-              value={ownUrl}
-              onChange={(e) => setOwnUrl(e.target.value)}
-              placeholder={app.askUrl.placeholder}
-              className="w-full h-10 px-3 rounded-lg border border-border bg-background text-sm font-mono text-foreground placeholder:text-muted-foreground outline-none focus:border-foreground/30"
-            />
-            {ownUrl.trim() && !/^https:\/\/\S+$/i.test(ownUrl.trim())
-              ? <p className="text-xs text-destructive">This should be a web address starting with https://, like {app.askUrl.placeholder}</p>
-              : <p className="text-xs text-muted-foreground">{app.askUrl.hint}</p>}
+      <PluginHeader
+        onBack={onBack}
+        logo={<PluginLogo src={app.logo} name={app.name} invert={app.invertInDarkMode} size="lg" />}
+        name={app.name}
+        subtitle={app.description}
+        status={<StatusLabel tone="off" label="Not connected" />}
+        action={
+          <button onClick={connect} disabled={busy || !ready} className={solidBtn} title={ready ? undefined : "Fill in the details below first"}>
+            {busy ? <Spinner className="w-4 h-4" /> : <Plug className="w-4 h-4" />}
+            Connect
+          </button>
+        }
+      />
+
+      {(app.askUrl || keyOnly) && (
+        <section className="mb-8 rounded-xl border border-border p-5 space-y-4">
+          <div>
+            <h3 className={sectionTitle}>Set up</h3>
+            <p className="text-xs text-muted-foreground mt-0.5">Fill this in, then click Connect.</p>
           </div>
-          <label className="flex items-center gap-2 text-sm text-muted-foreground cursor-pointer w-fit">
-            <input type="checkbox" checked={useToken} onChange={(e) => setUseToken(e.target.checked)} className="w-4 h-4 accent-foreground" />
-            Use an access token instead of logging in
-          </label>
-          {useToken && (
-            <input
-              type="password"
-              value={token}
-              onChange={(e) => setToken(e.target.value)}
-              placeholder="Access token"
-              className="w-full h-10 px-3 rounded-lg border border-border bg-background text-sm font-mono text-foreground placeholder:text-muted-foreground outline-none focus:border-foreground/30"
-            />
+          {app.askUrl && (
+            <>
+              <div className="space-y-1.5">
+                <p className="text-sm font-medium text-foreground">Your {app.name} address</p>
+                <input value={ownUrl} onChange={(e) => setOwnUrl(e.target.value)} placeholder={app.askUrl.placeholder} className={inputCls} />
+                {ownUrl.trim() && !/^https:\/\/\S+$/i.test(ownUrl.trim())
+                  ? <p className="text-xs text-destructive">This should be a web address starting with https://, like {app.askUrl.placeholder}</p>
+                  : <p className="text-xs text-muted-foreground">{app.askUrl.hint}</p>}
+              </div>
+              <label className="flex items-center gap-2 text-sm text-muted-foreground cursor-pointer w-fit">
+                <input type="checkbox" checked={useToken} onChange={(e) => setUseToken(e.target.checked)} className="w-4 h-4 accent-foreground" />
+                Use an access token instead of logging in
+              </label>
+              {useToken && <input type="password" value={token} onChange={(e) => setToken(e.target.value)} placeholder="Access token" className={inputCls} />}
+            </>
           )}
-        </div>
+          {keyOnly && (
+            <div className="space-y-1.5">
+              <p className="text-sm font-medium text-foreground">Your {app.name} API key</p>
+              <input type="password" value={token} onChange={(e) => setToken(e.target.value)} placeholder="API key" className={inputCls} />
+              {app.keyHint && <p className="text-xs text-muted-foreground">{app.keyHint}</p>}
+            </div>
+          )}
+        </section>
       )}
-      {keyOnly && (
-        <div className="space-y-1.5 mb-6 max-w-xl">
-          <p className="text-sm font-medium text-foreground">Your {app.name} API key</p>
-          <input
-            type="password"
-            value={token}
-            onChange={(e) => setToken(e.target.value)}
-            placeholder="API key"
-            className="w-full h-10 px-3 rounded-lg border border-border bg-background text-sm font-mono text-foreground placeholder:text-muted-foreground outline-none focus:border-foreground/30"
-          />
-          {app.keyHint && <p className="text-xs text-muted-foreground">{app.keyHint}</p>}
-        </div>
-      )}
-      {/* Shown only once the form is filled in (apps that need an address or a key), never squashed */}
-      {ready && (
-        <Button variant="outline" onClick={connect} disabled={busy} className={cn(secondaryBtn, "h-10 min-h-10 w-fit px-6 shrink-0")}>
-          {busy ? <Spinner className="w-4 h-4 mr-2" /> : null}
-          {authType === "oauth" ? "Connect and log in" : "Connect"}
-        </Button>
-      )}
+
+      <FeatureList items={[
+        `Let Classgrid AI use ${app.name} for you`,
+        app.auth === "oauth" ? `Log in with your own ${app.name} account` : keyOnly ? `Connect with your own ${app.name} API key` : "No login needed",
+        "Classgrid AI asks you before it sends, deletes or changes anything",
+        "Turn it off or remove it any time",
+      ]} />
+
+      <ToolsSection tools={[]} emptyText={`Connect ${app.name} to see its tools.`} />
+
+      <InfoSection rows={[
+        { label: "Developer", value: hostOf(app.url) },
+        { label: "Login", value: LOGIN_TEXT[app.auth] },
+        { label: "Server URL", value: app.url ? <CopyValue value={app.url} /> : "Your own address" },
+      ]} />
     </div>
   );
 }

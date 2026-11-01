@@ -8,6 +8,7 @@ const toolSchema = new mongoose.Schema({
     title: String,
     description: String,
     inputSchema: mongoose.Schema.Types.Mixed,
+    annotations: mongoose.Schema.Types.Mixed,
 }, { _id: false });
 
 const customMcpServerSchema = new mongoose.Schema({
