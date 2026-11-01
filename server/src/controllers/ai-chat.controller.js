@@ -2971,8 +2971,11 @@ If they ask whether their college/school uses Classgrid, say you can't see that 
                 const READER_MODELS = ["@cf/deepseek-ai/deepseek-v4.1-flash-1017", CF_FLASH_MODEL];
                 const READER_MIN_LINES = Number(process.env.READER_MIN_LINES) || 350;
                 const readerOn = pricesFor(typeof body.selectedModel === "string" ? body.selectedModel : "auto").input > pricesFor(READER_MODELS[0]).input;
+                const READER_PIECE_LINES = 150;
+                const READER_FILE_LINES = 500;
+                const readSoFar = new Map(); // lines of each big file the main model has read in this answer
                 const totalLines = (viewText) => Number(String(viewText).match(/^.+ \(lines \d+-\d+ of (\d+)\)\n/)?.[1]) || 0;
-                const readerBlock = (file, total) => `Not read: ${file} has ${total} lines, too many to read whole. To understand it, ask bulk_read_project a question about it (it reads many files at once and answers with exact names and line numbers). To edit it, find the place with search_project or bulk_read_project, then read only those lines with view_project_file start_line and end_line.`;
+                const readerBlock = (file, total, before = 0) => `Not read: ${file} has ${total} lines${before ? ` and you already read ${before} of them` : ""}. In a file this big you read only small pieces yourself (up to ${READER_PIECE_LINES} lines at a time, ${READER_FILE_LINES} in all). To understand it, ask bulk_read_project a question about it (it reads whole files, many at once, and answers with exact names and line numbers). To edit it, find the exact place with search_project or bulk_read_project, then read only those few lines with view_project_file start_line and end_line.`;
                 // A plain cat/less/more of a big project file (or head/tail of more lines than the limit); piped and
                 // chained commands are left alone
                 const bigFileCommand = async (command) => {
@@ -3061,10 +3064,17 @@ If they ask whether their college/school uses Classgrid, say you can't see that 
                         async (args) => {
                             touchStudio(req.user?._id).catch(() => {}); // the project's code is in use: not cleaned up while the agent works
                             const text = (await handleToolCall(toolName, args, { sessionId })).content[0].text;
-                            // A big file asked for whole (no end line) goes to the file reader; Classgrid's own guide is read as before
-                            if (toolName === "view_project_file" && readerOn && !args?.end_line && !String(args?.path || "").includes(".classgrid/")) {
-                                const shown = String(text).match(/^.+ \(lines (\d+)-(\d+) of (\d+)\)\n/);
-                                if (shown && Number(shown[2]) - Number(shown[1]) + 1 > READER_MIN_LINES) return readerBlock(args.path, Number(shown[3]));
+                            // In a big file the main model reads only small pieces (up to READER_PIECE_LINES at a time, and
+                            // READER_FILE_LINES in all per answer); for more it asks the file reader. Classgrid's own guide is read as before.
+                            if (toolName === "view_project_file" && readerOn && !String(args?.path || "").includes(".classgrid/")) {
+                                const shown = String(text).match(/^(.+) \(lines (\d+)-(\d+) of (\d+)\)\n/);
+                                const total = Number(shown?.[4]);
+                                if (shown && total > READER_MIN_LINES) {
+                                    const lines = Number(shown[3]) - Number(shown[2]) + 1;
+                                    const before = readSoFar.get(shown[1]) || 0;
+                                    if (lines > READER_PIECE_LINES || before + lines > READER_FILE_LINES) return readerBlock(args.path, total, before);
+                                    readSoFar.set(shown[1], before + lines);
+                                }
                             }
                             return text;
                         },

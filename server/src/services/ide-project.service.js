@@ -725,7 +725,17 @@ async function embedTexts(texts) {
   return results.flat();
 }
 
-async function searchByMeaning(project, ssh, query, maxResults) {
+// One search at a time per project: two at once (the AI and its helpers) wrote the same index file together and broke it
+const SEM_RUNS = new Map();
+function searchByMeaning(project, ssh, query, maxResults) {
+  const key = String(project._id);
+  const run = (SEM_RUNS.get(key) || Promise.resolve()).catch(() => {}).then(() => searchByMeaningNow(project, ssh, query, maxResults));
+  SEM_RUNS.set(key, run);
+  run.finally(() => { if (SEM_RUNS.get(key) === run) SEM_RUNS.delete(key); }).catch(() => {});
+  return run;
+}
+
+async function searchByMeaningNow(project, ssh, query, maxResults) {
   const question = String(query || "").trim();
   if (!question) return "Error: query is empty";
   const k = Math.min(Math.max(Number(maxResults) || 8, 1), 15);
@@ -736,14 +746,17 @@ async function searchByMeaning(project, ssh, query, maxResults) {
 
   const planned = await ssh.execCommand(`python3 ${SEM_SCRIPT} plan ${q(dir)} ${q(index)}`);
   let plan;
-  try { plan = JSON.parse(planned.stdout); } catch { return `Error: could not read the project (${(planned.stderr || "").slice(0, 200)})`; }
+  try { plan = JSON.parse(planned.stdout); } catch { return `Error: could not read the project (${(planned.stderr || "").trim().slice(-300)})`; }
   const todo = plan.todo || [];
   if (todo.length) {
     const vectors = await embedTexts(todo.map((c) => c.text));
     for (let i = 0; i < todo.length; i += 1000) {
-      const part = todo.slice(i, i + 1000).map((c, j) => ({ file: c.file, start: c.start, end: c.end, sha: c.sha, vec: vectors[i + j] }));
+      // A chunk the embedding service gave no vector for is left out (it would break the index file)
+      const part = todo.slice(i, i + 1000).map((c, j) => ({ file: c.file, start: c.start, end: c.end, sha: c.sha, vec: vectors[i + j] })).filter((c) => Array.isArray(c.vec) && c.vec.length);
+      if (!part.length) continue;
       const added = await ssh.execCommand(`python3 ${SEM_SCRIPT} add ${q(index)}`, { stdin: JSON.stringify(part) });
-      if (added.code) return `Error: could not save the search index (${(added.stderr || "").slice(0, 200)})`;
+      // The real error is the last line of Python's message
+      if (added.code) return `Error: could not save the search index (${(added.stderr || "").trim().slice(-300)})`;
     }
   }
   const [qvec] = await embedTexts([question]);
