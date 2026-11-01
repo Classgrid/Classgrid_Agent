@@ -1,4 +1,4 @@
-// The chat's ⋮ menu in every mode (Agent, Project, Studio): Rename, Pin, Archive, Archived chats, Copy and Delete
+// The chat's ⋮ menu in every mode (Agent, Project, Studio): Rename, Pin, Add to group (Project, Studio), Archive, Archived chats, Copy and Delete
 // (plus "Files in chat" where the chat has that panel). Same look as the sidebar's chat menu.
 import { useEffect, useState } from "react";
 import { Archive, ArchiveRestore, ClipboardList, Copy, FolderOpen, Link2, MoreVertical, Pencil, Pin, Trash2, FileText, Hash, SquareTerminal, FileDiff } from "lucide-react";
@@ -9,6 +9,7 @@ import {
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/marketing_ui/dialog";
 import { fetchWithRescue } from "@/lib/rescue";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/marketing_ui/tooltip";
+import { AddToGroupSub, GroupDialog, openProjectId, useChatGroups } from "./chat-groups/chatGroups";
 
 const backendUrl = import.meta.env.VITE_API_URL || "https://api.classgrid.in";
 const item = "gap-3 py-2 px-3 text-[14px] cursor-pointer hover:bg-slate-100 dark:hover:bg-[#343541] focus:bg-slate-100 dark:focus:bg-[#343541] focus:text-slate-900 dark:focus:text-[#ececf1] rounded-xl transition-colors";
@@ -47,6 +48,9 @@ export function StudioChatMenu({ sessionId, isPinned, onTogglePin, onDelete, mes
 }) {
   const [renaming, setRenaming] = useState(false);
   const [showArchived, setShowArchived] = useState(false);
+  // Chat groups (Project and Studio Mode): the groups shown in the sidebar
+  const groups = useChatGroups(inProject(), openProjectId());
+  const [newGroup, setNewGroup] = useState(false);
 
   const copy = async (text: string, what: string) => {
     try { await navigator.clipboard.writeText(text); toast.success(`${what} copied`); } catch { toast.error("Could not copy"); }
@@ -84,6 +88,7 @@ export function StudioChatMenu({ sessionId, isPinned, onTogglePin, onDelete, mes
           <DropdownMenuItem className={item} onClick={onTogglePin}>
             <Pin className={icon} strokeWidth={2} /> {isPinned ? "Unpin" : "Pin"}
           </DropdownMenuItem>
+          {inProject() && <AddToGroupSub sessionId={sessionId} groups={groups} onNewGroup={() => setNewGroup(true)} />}
           <DropdownMenuItem className={item} onClick={archive}>
             <Archive className={icon} strokeWidth={2} /> Archive
           </DropdownMenuItem>
@@ -115,6 +120,7 @@ export function StudioChatMenu({ sessionId, isPinned, onTogglePin, onDelete, mes
       </DropdownMenu>
       <RenameChatDialog sessionId={sessionId} open={renaming} onClose={() => setRenaming(false)} />
       <ArchivedChatsDialog open={showArchived} onClose={() => setShowArchived(false)} />
+      <GroupDialog open={newGroup} project={openProjectId()} sessionId={sessionId} onClose={() => setNewGroup(false)} />
     </>
   );
 }

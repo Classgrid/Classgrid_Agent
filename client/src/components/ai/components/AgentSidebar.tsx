@@ -21,7 +21,7 @@
 
 import React from "react";
 import { createPortal } from "react-dom";
-import { MessageSquare, Plus, Search, Pin, MoreHorizontal, Pencil, Trash2, Share, Copy, Mail, Check, Link2, FileText, ExternalLink, X, Loader2, SquarePen, Calendar, Library, FolderInput, FolderPlus, Folder, Star } from "lucide-react";
+import { MessageSquare, Plus, Search, Pin, PinOff, MoreHorizontal, Pencil, Trash2, Share, Copy, Mail, Check, Link2, FileText, ExternalLink, X, Loader2, SquarePen, Calendar, Library, FolderInput, FolderPlus, Folder, Star, ChevronDown } from "lucide-react";
 import { format } from "date-fns";
 import { NikhilDateCalendar } from "@/components/marketing_ui/nikhil_date_calendar";
 import { useNavigate, useLocation } from "react-router-dom";
@@ -39,6 +39,8 @@ import { Spinner } from "@/components/marketing_ui/spinner";
 import { toast } from "sonner";
 import { fetchWithRescue } from "@/lib/rescue";
 import { getSocket } from "@/lib/socketClient";
+import { cn } from "@/lib/utils";
+import { AddToGroupSub, GroupDialog, groupIcon, groupsApi, openProjectId, useChatGroups, type ChatGroup } from "./chat-groups/chatGroups";
 
 interface ChatSession {
   id: string;
@@ -407,9 +409,27 @@ export function AgentNestedMenu({ searchQuery = "" }: { searchQuery?: string }) 
     }
   };
 
+  // Chat groups (Project and Studio Mode): the open project's groups, or the ones made with no project open
+  const inCodeMode = window.location.pathname.split("/").some((x) => x === "studio" || x === "project");
+  const openProject = inCodeMode ? openProjectId() : null;
+  const groups = useChatGroups(inCodeMode, openProject);
+  const [groupDialog, setGroupDialog] = React.useState<{ project: string | null; group?: ChatGroup; sessionId?: string } | null>(null);
+  const [deleteGroup, setDeleteGroup] = React.useState<ChatGroup | null>(null);
+  const [isDeletingGroup, setIsDeletingGroup] = React.useState(false);
+  const [collapsedGroups, setCollapsedGroups] = React.useState<string[]>(() => {
+    try { return JSON.parse(localStorage.getItem("cg_groups_collapsed") || "[]"); } catch { return []; }
+  });
+  const toggleGroup = (id: string) => setCollapsedGroups((prev) => {
+    const next = prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id];
+    try { localStorage.setItem("cg_groups_collapsed", JSON.stringify(next)); } catch { /* storage blocked */ }
+    return next;
+  });
+  const groupedIds = new Set(groups.flatMap((g) => g.chats.map((c) => c.id)));
+  const sortedGroups = [...groups].sort((a, b) => Number(b.pinned) - Number(a.pinned));
+
   const filteredSessions = sessions.filter(s => s.title.toLowerCase().includes(searchQuery.toLowerCase()));
   const pinnedSessions = filteredSessions.filter(s => s.pinned);
-  const unpinnedSessions = filteredSessions.filter(s => !s.pinned);
+  const unpinnedSessions = filteredSessions.filter(s => !s.pinned && !groupedIds.has(s.id));
 
   const filteredUnpinnedSessions = React.useMemo(() => {
     if (!dateFilter || (!dateFilter.from && !dateFilter.to)) return unpinnedSessions;
@@ -625,6 +645,14 @@ export function AgentNestedMenu({ searchQuery = "" }: { searchQuery?: string }) 
                   {session.pinned ? "Unpin chat" : "Pin chat"}
                 </DropdownMenuItem>
 
+                {inCodeMode && !(session as any).shared && (
+                  <AddToGroupSub
+                    sessionId={session.id}
+                    groups={groups}
+                    onNewGroup={() => { setPinnedOpen(false); setRecentOpen(false); setGroupDialog({ project: openProject, sessionId: session.id }); }}
+                  />
+                )}
+
                 {!isProjectMode && !isStudioMode && !(session as any).shared && (
                   <DropdownMenuSub onOpenChange={(open) => { if (open && projects === null) loadProjects(); }}>
                     <DropdownMenuSubTrigger className="gap-3 py-2 px-3 text-[14px] cursor-pointer hover:bg-slate-100 dark:hover:bg-[#343541] focus:bg-slate-100 dark:focus:bg-[#343541] rounded-xl transition-colors data-popup-open:bg-slate-100 dark:data-popup-open:bg-[#343541]">
@@ -682,6 +710,70 @@ export function AgentNestedMenu({ searchQuery = "" }: { searchQuery?: string }) 
           )}
         </div>
       </SidebarMenuItem>
+    );
+  };
+
+  const menuItem = "gap-3 py-2 px-3 text-[14px] cursor-pointer hover:bg-slate-100 dark:hover:bg-[#343541] focus:bg-slate-100 dark:focus:bg-[#343541] focus:text-slate-900 dark:focus:text-[#ececf1] rounded-xl transition-colors";
+  const menuIcon = "w-4 h-4 text-slate-500 dark:text-white/70";
+
+  // One group: its row (icon, name, ⋯ menu, open / closed arrow) and its chats under it
+  const renderGroup = (g: ChatGroup) => {
+    const chats: ChatSession[] = g.chats
+      .map((c) => sessions.find((s) => s.id === c.id) || c)
+      .filter((s) => (s.title || "").toLowerCase().includes(searchQuery.toLowerCase()));
+    if (searchQuery && chats.length === 0) return null;
+    const isOpen = !collapsedGroups.includes(g.id);
+    const Icon = groupIcon(g.icon);
+    return (
+      <div key={g.id}>
+        <div className="group/grp relative flex items-center">
+          <button
+            type="button"
+            onClick={() => toggleGroup(g.id)}
+            className="flex-1 min-w-0 flex items-center gap-2.5 h-8 pl-2 pr-16 rounded-md text-sm text-sidebar-foreground hover:bg-sidebar-accent transition-colors cursor-pointer"
+          >
+            <Icon className="w-4 h-4 shrink-0 text-muted-foreground" strokeWidth={2} />
+            <span className="truncate">{g.name}</span>
+            {g.pinned && <Pin className="w-3 h-3 shrink-0 text-muted-foreground/60" />}
+          </button>
+          <div className="absolute right-1 flex items-center">
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <button className="opacity-0 group-hover/grp:opacity-100 data-[state=open]:opacity-100 transition-opacity p-1 rounded hover:bg-black/5 dark:hover:bg-white/10 text-muted-foreground hover:text-foreground cursor-pointer" aria-label="Group options">
+                  <MoreHorizontal className="w-4 h-4" />
+                </button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent side="right" align="start" sideOffset={8} className="w-[190px] z-[100] bg-white dark:bg-[#202123] text-slate-700 dark:text-[#ececf1] border border-slate-200 dark:border-white/10 rounded-2xl p-2 shadow-2xl">
+                <DropdownMenuItem className={menuItem} onClick={() => setGroupDialog({ project: g.projectId, group: g })}>
+                  <Pencil className={menuIcon} strokeWidth={2} /> Rename & icon
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  className={menuItem}
+                  onClick={() => groupsApi.update(g.id, { pinned: !g.pinned }).then(() => toast.success(g.pinned ? "Group unpinned" : "Group pinned")).catch((e) => toast.error(e?.message || "Could not pin the group"))}
+                >
+                  {g.pinned ? <PinOff className={menuIcon} strokeWidth={2} /> : <Pin className={menuIcon} strokeWidth={2} />}
+                  {g.pinned ? "Unpin group" : "Pin group"}
+                </DropdownMenuItem>
+                <DropdownMenuSeparator className="bg-slate-100 dark:bg-white/10 my-1.5 mx-1" />
+                <DropdownMenuItem
+                  className={`${menuItem} text-[#ef4444] hover:bg-red-50 dark:hover:bg-red-500/10 focus:bg-red-50 dark:focus:bg-red-500/10 focus:text-[#ef4444] dark:focus:text-[#ef4444]`}
+                  onClick={() => setDeleteGroup(g)}
+                >
+                  <Trash2 className="w-4 h-4 text-[#ef4444]" strokeWidth={2} /> Delete group
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+            <button type="button" onClick={() => toggleGroup(g.id)} className="p-1 rounded text-muted-foreground hover:text-foreground cursor-pointer" aria-label={isOpen ? "Close group" : "Open group"}>
+              <ChevronDown className={cn("w-3.5 h-3.5 transition-transform duration-200", !isOpen && "-rotate-90")} />
+            </button>
+          </div>
+        </div>
+        {isOpen && (
+          <SidebarMenu className="pl-4 mt-0.5 mb-1">
+            {chats.length ? chats.map(renderSessionItem) : <div className="px-2 py-1.5 text-xs text-muted-foreground">No chats yet. Use a chat's ⋯ menu to add one.</div>}
+          </SidebarMenu>
+        )}
+      </div>
     );
   };
 
@@ -867,6 +959,34 @@ export function AgentNestedMenu({ searchQuery = "" }: { searchQuery?: string }) 
         </div>
 
         <SidebarGroupContent>
+          {inCodeMode && (
+            <div className="mb-3">
+              <div className="group/groups flex items-center justify-between px-2 py-1.5">
+                <span className="text-xs font-medium text-muted-foreground/70">Groups</span>
+                <button
+                  type="button"
+                  onClick={() => setGroupDialog({ project: openProject })}
+                  className="p-0.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted opacity-0 group-hover/groups:opacity-100 transition-opacity cursor-pointer"
+                  aria-label="New group"
+                  title="New group"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                </button>
+              </div>
+              {sortedGroups.length === 0 ? (
+                <button
+                  type="button"
+                  onClick={() => setGroupDialog({ project: openProject })}
+                  className="w-full flex items-center gap-2.5 h-8 px-2 rounded-md text-sm text-muted-foreground hover:text-foreground hover:bg-sidebar-accent transition-colors cursor-pointer"
+                >
+                  <FolderPlus className="w-4 h-4" strokeWidth={2} />
+                  New group
+                </button>
+              ) : (
+                sortedGroups.map(renderGroup)
+              )}
+            </div>
+          )}
           <Accordion defaultValue={["pinned", "today", "previous"]} multiple className="w-full">
             {pinnedSessions.length > 0 && (
               <AccordionItem value="pinned" className="border-none mb-2">
@@ -1162,6 +1282,29 @@ export function AgentNestedMenu({ searchQuery = "" }: { searchQuery?: string }) 
         actionLabel={deleteIsShared ? "Leave chat" : "Delete chat"}
         isLoading={isDeletingSession}
         onConfirm={() => { if (deleteSessionId) handleDeleteSession(deleteSessionId); }}
+      />
+      <GroupDialog
+        open={groupDialog !== null}
+        project={groupDialog?.project || null}
+        group={groupDialog?.group}
+        sessionId={groupDialog?.sessionId}
+        onClose={() => setGroupDialog(null)}
+      />
+      <DangerConfirmDialog
+        open={deleteGroup !== null}
+        onOpenChange={(open) => { if (!open && !isDeletingGroup) setDeleteGroup(null); }}
+        title="Delete group"
+        description={deleteGroup ? `"${deleteGroup.name}" will be deleted. Its chats are kept and go back to your chat list.` : ""}
+        warningMessage="Only the group is deleted, not its chats."
+        actionLabel="Delete group"
+        isLoading={isDeletingGroup}
+        onConfirm={async () => {
+          if (!deleteGroup) return;
+          setIsDeletingGroup(true);
+          try { await groupsApi.remove(deleteGroup.id); toast.success("Group deleted"); setDeleteGroup(null); }
+          catch (e: any) { toast.error(e?.message || "Could not delete the group"); }
+          finally { setIsDeletingGroup(false); }
+        }}
       />
     </>
   );

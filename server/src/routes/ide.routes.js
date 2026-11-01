@@ -32,6 +32,7 @@ import { NodeSSH } from "node-ssh";
 import { isAuthenticated, requireRole } from "../middleware/auth.middleware.js";
 import User from "../models/User.js";
 import IdeProject from "../models/IdeProject.js";
+import ChatGroup from "../models/ChatGroup.js";
 import { githubUser } from "../services/github-token.service.js";
 import { pushProject, openClassgridPrBranch, revealInEditor, checkpointChanges, rejectCheckpoint, undoToCheckpoint, backupAndRemoveProjectCode, touchStudio, STUDIO_USERS, STUDIO_SEEN, STUDIO_IDLE_MS } from "../services/ide-project.service.js";
 import { repoAppToken } from "../services/github-app.service.js";
@@ -829,6 +830,91 @@ router.post("/projects/:id/chats", isAuthenticated, async (req, res) => {
   const other = await IdeProject.findOne({ owner: req.user._id, chatSessionIds: sessionId, _id: { $ne: project._id } }).select("_id").lean();
   if (other) return res.status(409).json({ error: "chat_in_other_project" });
   await IdeProject.updateOne({ _id: project._id }, { $addToSet: { chatSessionIds: sessionId } });
+  res.json({ ok: true });
+});
+
+// Chat groups (left sidebar in Project and Studio Mode). ?project=<id> lists the groups of that open project,
+// ?project=none the groups made with no project open. A chat is in at most one group.
+const GROUP_ICONS = new Set(["folder", "star", "heart", "zap", "rocket", "code", "bug", "book", "briefcase", "flag", "bookmark", "lightbulb", "target", "flame", "coffee", "music", "camera", "globe", "shield", "sparkles"]);
+const groupInput = (body = {}) => {
+  const out = {};
+  if (body.name !== undefined) out.name = String(body.name).trim().slice(0, 60);
+  if (body.icon !== undefined && GROUP_ICONS.has(body.icon)) out.icon = body.icon;
+  if (body.pinned !== undefined) out.pinned = !!body.pinned;
+  return out;
+};
+const groupScope = (v) => (v && v !== "none" && mongoose.isValidObjectId(v) ? String(v) : null);
+const ownChat = async (req, sessionId) => {
+  if (!CHAT_ID.test(sessionId || "")) return false;
+  const { data } = await primarySupabaseClient.from("ai_chat_sessions").select("user_email").eq("id", sessionId).maybeSingle();
+  return !!data && String(data.user_email || "").toLowerCase() === String(req.user.email || "").toLowerCase();
+};
+const ownGroup = async (req, res) => {
+  if (!mongoose.isValidObjectId(req.params.groupId)) { res.status(404).json({ error: "Group not found" }); return null; }
+  await connectDB();
+  const group = await ChatGroup.findOne({ _id: req.params.groupId, userId: req.user._id });
+  if (!group) res.status(404).json({ error: "Group not found" });
+  return group;
+};
+// The group with its chats' titles, so a chat shows in its group even when it isn't in the list below
+async function groupsJson(groups, email) {
+  const ids = [...new Set(groups.flatMap((g) => g.chatIds || []))];
+  let chats = [];
+  if (ids.length) {
+    const { data } = await primarySupabaseClient.from("ai_chat_sessions").select("id, title, created_at, pinned").in("id", ids).eq("user_email", email);
+    chats = data || [];
+  }
+  const byId = new Map(chats.map((c) => [c.id, c]));
+  return groups.map((g) => ({
+    id: String(g._id), projectId: g.projectId || null, name: g.name, icon: g.icon, pinned: !!g.pinned,
+    chats: (g.chatIds || []).map((id) => byId.get(id)).filter(Boolean).sort((a, b) => String(b.created_at).localeCompare(String(a.created_at))),
+  }));
+}
+
+router.get("/groups", isAuthenticated, async (req, res) => {
+  await connectDB();
+  const groups = await ChatGroup.find({ userId: req.user._id, projectId: groupScope(req.query.project) }).sort({ createdAt: 1 }).lean();
+  res.json({ groups: await groupsJson(groups, req.user.email) });
+});
+
+router.post("/groups", isAuthenticated, async (req, res) => {
+  await connectDB();
+  const input = groupInput(req.body);
+  if (!input.name) return res.status(400).json({ error: "Give the group a name" });
+  const projectId = groupScope(req.body?.project);
+  if (projectId && !(await IdeProject.exists({ _id: projectId, owner: req.user._id }))) return res.status(404).json({ error: "Project not found" });
+  const sessionId = (await ownChat(req, req.body?.sessionId)) ? req.body.sessionId : null;
+  if (sessionId) await ChatGroup.updateMany({ userId: req.user._id }, { $pull: { chatIds: sessionId } });
+  const group = await ChatGroup.create({ ...input, userId: req.user._id, projectId, chatIds: sessionId ? [sessionId] : [] });
+  res.json({ group: (await groupsJson([group], req.user.email))[0] });
+});
+
+router.patch("/groups/:groupId", isAuthenticated, async (req, res) => {
+  const group = await ownGroup(req, res);
+  if (!group) return;
+  const input = groupInput(req.body);
+  if (input.name === "") return res.status(400).json({ error: "Give the group a name" });
+  Object.assign(group, input);
+  await group.save();
+  res.json({ ok: true });
+});
+
+// Deleting a group keeps its chats; they go back to the normal list
+router.delete("/groups/:groupId", isAuthenticated, async (req, res) => {
+  const group = await ownGroup(req, res);
+  if (!group) return;
+  await group.deleteOne();
+  res.json({ ok: true });
+});
+
+// Add a chat to a group (it leaves any other group), or take it out with add: false
+router.put("/groups/:groupId/chats", isAuthenticated, async (req, res) => {
+  const group = await ownGroup(req, res);
+  if (!group) return;
+  const sessionId = req.body?.sessionId;
+  if (!(await ownChat(req, sessionId))) return res.status(403).json({ error: "This chat is not yours" });
+  await ChatGroup.updateMany({ userId: req.user._id }, { $pull: { chatIds: sessionId } });
+  if (req.body?.add !== false) await ChatGroup.updateOne({ _id: group._id }, { $addToSet: { chatIds: sessionId } });
   res.json({ ok: true });
 });
 
