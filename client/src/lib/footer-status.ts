@@ -70,21 +70,21 @@ export const DEFAULT_FOOTER_STATUS_STATE: FooterStatusState = "operational";
 const FOOTER_STATUS_STATE_SET = new Set<string>(FOOTER_STATUS_STATES);
 
 const FOOTER_STATUS_DOT_CLASS_MAP: Record<FooterStatusState, string> = {
-  operational: "bg-emerald-500",
+  operational: "bg-[#10b981]",
   degraded: "bg-amber-500",
   partial_outage: "bg-orange-500",
   major_outage: "bg-red-500",
   maintenance: "bg-blue-500",
-  automatic: "bg-emerald-500", // Fallback for automatic while loading
+  automatic: "bg-[#10b981]", // Fallback for automatic while loading
 };
 
 const FOOTER_STATUS_TEXT_CLASS_MAP: Record<FooterStatusState, string> = {
-  operational: "text-emerald-500",
+  operational: "text-[#10b981]",
   degraded: "text-amber-500",
   partial_outage: "text-orange-500",
   major_outage: "text-red-500",
   maintenance: "text-blue-500",
-  automatic: "text-emerald-500",
+  automatic: "text-[#10b981]",
 };
 
 const FOOTER_STATUS_DEFAULT_LABEL_MAP: Record<FooterStatusState, string> = {
