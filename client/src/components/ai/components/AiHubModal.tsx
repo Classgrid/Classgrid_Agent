@@ -128,8 +128,11 @@ export function AiHubModal({ isOpen, onClose, onSendPrompt, initialTab = "plugin
   const q = pluginQuery.trim().toLowerCase();
   const matches = (...texts: (string | undefined)[]) => !q || texts.some((t) => String(t || "").toLowerCase().includes(q));
   const selectedCustom = customServers.find((s) => s.id === selectedCustomId) || null;
-  const addedCatalogIds = new Set(customServers.map((s) => s.catalogId).filter(Boolean));
-  const customMatches = customServers.filter((s) => matches(s.name, s.description));
+  // Only connectors that really got connected (logged in at least once) show under "Your connectors";
+  // one whose login never finished stays in "More apps"
+  const connectedServers = customServers.filter((s) => s.status === "connected" || !!s.toolsFetchedAt);
+  const addedCatalogIds = new Set(connectedServers.map((s) => s.catalogId).filter(Boolean));
+  const customMatches = connectedServers.filter((s) => matches(s.name, s.description));
   const builtinMatches = INTEGRATIONS_LIST.filter((i) => i.type !== "action" && matches(i.name, i.description));
   const catalogMatches = mcpCatalog.filter((a) => !addedCatalogIds.has(a.id) && matches(a.name, a.description));
 

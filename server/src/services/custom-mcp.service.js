@@ -80,7 +80,7 @@ class DbOAuthProvider {
     get redirectUrl() { return oauthRedirectUrl(); }
     get clientMetadata() {
         return {
-            client_name: "Classgrid AI",
+            client_name: "Classgrid",
             client_uri: "https://classgrid.in",
             logo_uri: "https://chat.classgrid.in/logo.png",
             redirect_uris: [oauthRedirectUrl()],
@@ -168,7 +168,7 @@ async function openClient(doc) {
     const order = doc.transport === "sse" ? ["sse", "http"] : ["http", "sse"];
     let lastErr;
     for (const kind of order) {
-        const client = new Client({ name: "Classgrid AI", version: "1.0.0" });
+        const client = new Client({ name: "Classgrid", version: "1.0.0" });
         const transport = kind === "http"
             ? new StreamableHTTPClientTransport(new URL(doc.url), transportOptions(doc))
             : new SSEClientTransport(new URL(doc.url), transportOptions(doc));
@@ -325,6 +325,11 @@ export async function createServer(userId, input) {
     const name = String(input.name || "").trim().slice(0, 60);
     if (!name) throw new Error("Please give the connector a name.");
     const url = (await assertSafeUrl(String(input.url || "").trim())).href;
+    // Same server added before: a connected one is reused; one whose login never finished is replaced
+    const same = await CustomMcpServer.find({ userId, url });
+    const working = same.find((d) => d.status === "connected" || d.toolsFetchedAt);
+    if (working) return working;
+    if (same.length) await CustomMcpServer.deleteMany({ _id: { $in: same.map((d) => d._id) } });
     const count = await CustomMcpServer.countDocuments({ userId });
     if (count >= MAX_SERVERS_PER_USER) throw new Error(`You can add up to ${MAX_SERVERS_PER_USER} connectors.`);
     const authType = ["oauth", "api_key", "none"].includes(input.authType) ? input.authType : "oauth";

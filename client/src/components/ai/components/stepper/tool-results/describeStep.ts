@@ -52,7 +52,50 @@ function splitAction(action: string) {
 /** One item noun from a plural ("assignments" → "assignment") for "1 assignment" */
 const singular = (noun: string) => noun.replace(/ies$/, 'y').replace(/(ss)es$/, '$1').replace(/([^s])s$/, '$1');
 
+/** Custom connectors (custom_mcp_connector): say which app and what it's doing ("Creating issue in Linear: Fix login") */
+function describeCustomMcp(args: any, result: unknown, status: 'loading' | 'success' | 'error'): string {
+  const parsed = parseResult(result);
+  const data = parsed.data && typeof parsed.data === 'object' && !Array.isArray(parsed.data) ? parsed.data : {};
+  const raw = String(data.card?.name || args?.server || args?.app || args?.name || 'the app');
+  const app = raw.charAt(0).toUpperCase() + raw.slice(1);
+  const err = status === 'error' || data.error ? String(data.error || parsed.text || '').split('\n')[0]!.replace(new RegExp(`^${raw.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}:\\s*`, 'i'), '') : '';
+  const loading = status === 'loading';
+  switch (args?.operation) {
+    case 'list_apps':
+      return loading ? 'Looking at apps you can connect...' : `Found ${Array.isArray(data.apps) ? data.apps.length : ''} apps you can connect`.replace('  ', ' ');
+    case 'list_servers': {
+      if (loading) return 'Checking your connected apps...';
+      const names = Array.isArray(data.servers) ? data.servers.map((s: any) => s.name) : [];
+      return names.length ? `Checked your connected apps: ${names.slice(0, 3).join(', ')}${andMore(Math.min(3, names.length), names.length)}` : 'You have no connected apps yet';
+    }
+    case 'add_server':
+      if (loading) return `Connecting ${app}...`;
+      if (err) return `Couldn't connect ${app}: ${err}`;
+      return data.card?.status === 'connected' ? `Connected ${app}${data.card.toolCount ? ` (${data.card.toolCount} tools)` : ''}` : `Added ${app}, waiting for you to log in`;
+    case 'login':
+      return loading ? `Opening the ${app} login...` : err ? `Couldn't open the ${app} login: ${err}` : `Showed the ${app} log in card`;
+    case 'get_tools':
+      return loading ? `Reading what ${app} can do...` : err ? `Couldn't read ${app}'s tools: ${err}` : `Read ${app}'s tools${Array.isArray(data.tools) ? ` (${data.tools.length})` : ''}`;
+    case 'remove_server':
+      return loading ? `Removing ${app}...` : err ? `Couldn't remove ${app}: ${err}` : `Removed ${app}`;
+    case 'call_tool': {
+      const { verb, noun } = splitAction(String(args?.tool || ''));
+      const what = nice(noun || 'item');
+      const a = args?.arguments && typeof args.arguments === 'object' ? args.arguments : {};
+      const target = str(pick(a, TARGET_ARGS)) ?? str(pick(a, ['description', 'text', 'body', 'id', 'issueId', 'issue_id']));
+      const t = target ? `: ${clip(target)}` : '';
+      if (loading) return `${ING[verb] ? `${ING[verb]} ${what}` : `Running ${humanTool(args?.tool)}`} in ${app}${t}...`;
+      if (err || /^error\b/i.test(parsed.text.trim())) return `Couldn't ${PAST[verb] ? `${verb} ${what}` : `run ${humanTool(args?.tool)}`} in ${app}: ${(err || parsed.text).replace(/^error[^:]*:\s*/i, '').split('\n')[0]}`;
+      return `${PAST[verb] ? `${PAST[verb]} ${what}` : `Ran ${humanTool(args?.tool)}`} in ${app}${t}`;
+    }
+    default:
+      return loading ? `Using ${app}...` : `Used ${app}`;
+  }
+}
+const humanTool = (t: any) => String(t || 'a tool').replace(/[_-]+/g, ' ');
+
 export function describeStep(tool: string, args: any, result: unknown, status: 'loading' | 'success' | 'error'): string | null {
+  if (tool === 'custom_mcp_connector') return describeCustomMcp(args, result, status);
   const op = APP[tool] && args?.operation ? String(args.operation) : tool;
   const { verb, noun } = splitAction(op);
   if (!verb || (!PAST[verb] && !ING[verb])) return null;

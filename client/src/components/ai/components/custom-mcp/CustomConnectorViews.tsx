@@ -178,8 +178,12 @@ export function CatalogAppDetail({ app, onBack, onAdded }: { app: McpCatalogApp;
     try {
       const created = await mcpApi.create({ name: app.name, description: app.description, url: app.url, authType: app.auth, catalogId: app.id, iconUrl: app.logo });
       const final = app.auth === "oauth" ? (await loginToServer(created.id, popup)) || created : created;
-      if (final.status === "connected") toast.success(`${final.name} connected`);
-      onAdded(final);
+      // It only counts as added once the login really worked
+      if (final.status === "connected") {
+        toast.success(`${final.name} connected`);
+        onAdded(final);
+      } else if (final.status === "error") toast.error(`${final.name}: ${final.lastError || "couldn't connect"}`);
+      else toast(`${app.name} isn't connected yet. Finish the login to add it.`);
     } catch (err: any) {
       popup?.close();
       toast.error(err?.message || "Couldn't connect.");
@@ -203,7 +207,7 @@ export function CatalogAppDetail({ app, onBack, onAdded }: { app: McpCatalogApp;
         </div>
       </div>
       <ul className="space-y-3 mb-6">
-        {[`Let Classgrid AI use ${app.name} for you`, app.auth === "oauth" ? `Log in with your own ${app.name} account` : "No login needed", `Made by ${app.name}, connected through MCP`].map((f) => (
+        {[`Let Classgrid use ${app.name} for you`, app.auth === "oauth" ? `Log in with your own ${app.name} account` : "No login needed", `Made by ${app.name}, connected through MCP`].map((f) => (
           <li key={f} className="flex items-start gap-3 text-muted-foreground text-sm">
             <CheckCircle2 className="w-4 h-4 shrink-0 mt-0.5" />
             <span>{f}</span>

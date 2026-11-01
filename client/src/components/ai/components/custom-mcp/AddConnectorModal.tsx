@@ -76,10 +76,13 @@ export function AddConnectorModal({ isOpen, onClose, onAdded }: Props) {
       if (server.authType === "oauth") {
         final = (await loginToServer(server.id, popup).catch((e) => { toast.error(e.message); return null; })) || server;
       }
-      if (final.status === "connected") toast.success(`${final.name} connected`);
-      else if (final.status === "error") toast.error(`${final.name}: ${final.lastError || "couldn't connect"}`);
-      onAdded(final);
-      close();
+      // It only counts as added once it really connected; otherwise the form stays open to try again
+      if (final.status === "connected") {
+        toast.success(`${final.name} connected`);
+        onAdded(final);
+        close();
+      } else if (final.status === "error") toast.error(`${final.name}: ${final.lastError || "couldn't connect"}`);
+      else toast(`${final.name} isn't connected yet. Finish the login to add it.`);
     } catch (err: any) {
       popup?.close();
       toast.error(err?.message || "Couldn't add the connector.");

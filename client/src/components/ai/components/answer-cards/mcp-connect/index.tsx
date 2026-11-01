@@ -66,7 +66,7 @@ function ConnectCard({ card, onConnected }: { card: CardData; onConnected?: (nam
         <p className="text-xs text-muted-foreground line-clamp-2">
           {state.status === "connected"
             ? `Connected${state.toolCount ? ` · ${state.toolCount} tools` : ""}`
-            : state.status === "needs_login" ? (state.description || `Log in to let Classgrid AI use ${state.name}`) : (state.lastError || "Couldn't connect")}
+            : state.status === "needs_login" ? (state.description || `Log in to let Classgrid use ${state.name}`) : (state.lastError || "Couldn't connect")}
         </p>
       </div>
       {state.status === "connected" ? (
