@@ -105,8 +105,21 @@ export async function listStudioShots(req, res) {
   res.json({ shots: rows.map((r) => { try { return JSON.parse(r); } catch { return null; } }).filter(Boolean) });
 }
 
-// Handlers for the browser and scratchpad tools of one chat (results: text, or { text, images } with the screenshot)
-export function makeBrowserHandlers({ userId, sessionId }) {
+// The Classgrid desktop app's own browser, on the user's computer (their internet, their localhost servers): the step
+// goes through the app's local runner and comes back like the cloud browser's /act. null = the app isn't open there
+// (or is an older version without a browser), so the cloud browser is used.
+export async function desktopBrowserAct(userId, step) {
+  const { callRunner } = await import("./local-runner.service.js");
+  const reply = await callRunner(userId, "browser", step);
+  if (!reply) return null;
+  if (reply.browser && typeof reply.browser === "object") return reply.browser;
+  if (/can't run on this computer/.test(String(reply.text))) return null;
+  return { ok: false, error: String(reply.text || "The desktop app's browser gave no answer").replace(/^Error: /, "") };
+}
+
+// Handlers for the browser and scratchpad tools of one chat (results: text, or { text, images } with the screenshot).
+// desktop: the chat is in the Classgrid desktop app, so the browser runs there when the app's runner is connected.
+export function makeBrowserHandlers({ userId, sessionId, desktop = false }) {
   const handlers = {
     scratchpad_read: async () => (await readPad(sessionId)) || "The scratchpad is empty.",
     scratchpad_write: async (a) => {
@@ -114,7 +127,7 @@ export function makeBrowserHandlers({ userId, sessionId }) {
       const next = a?.mode === "append" ? `${await readPad(sessionId)}\n${text}`.trim() : text;
       await writePad(sessionId, next.slice(0, 20000));
       // The plan is written: start the user's browser now, in the background, so it is ready when the worker opens a page
-      if (userId) ensureBrowser(userId).catch(() => {});
+      if (userId && !desktop) ensureBrowser(userId).catch(() => {});
       return "Saved to the scratchpad.";
     },
   };
@@ -123,13 +136,18 @@ export function makeBrowserHandlers({ userId, sessionId }) {
       if (!userId) return "Error: the browser needs a signed-in user.";
       try {
         const step = toStep(a);
-        // localhost = this chat's dev server (it runs in its own container, reached on the user's private network)
-        if (name === "browser_open" && /^(https?:\/\/)?(localhost|127\.0\.0\.1|0\.0\.0\.0)(:\d+)?(\/|$)/i.test(step.url.trim())) {
-          const ip = await chatServerAddress(userId, sessionId).catch(() => null);
-          if (!ip) return "Error: no server is running in this chat. Start it with start_background_command (listening on 0.0.0.0), then open http://localhost:<port>.";
-          step.url = step.url.trim().replace(/^(https?:\/\/)?(localhost|127\.0\.0\.1|0\.0\.0\.0)/i, `http://${ip}`);
+        const chat = sessionId && sessionId !== "none" ? { chat: sessionId } : {};
+        // In the desktop app the browser runs on the user's computer, so localhost is their own computer
+        let r = desktop ? await desktopBrowserAct(userId, { ...step, ...chat }) : null;
+        if (!r) {
+          // localhost = this chat's dev server (it runs in its own container, reached on the user's private network)
+          if (name === "browser_open" && /^(https?:\/\/)?(localhost|127\.0\.0\.1|0\.0\.0\.0)(:\d+)?(\/|$)/i.test(step.url.trim())) {
+            const ip = await chatServerAddress(userId, sessionId).catch(() => null);
+            if (!ip) return "Error: no server is running in this chat. Start it with start_background_command (listening on 0.0.0.0), then open http://localhost:<port>.";
+            step.url = step.url.trim().replace(/^(https?:\/\/)?(localhost|127\.0\.0\.1|0\.0\.0\.0)/i, `http://${ip}`);
+          }
+          r = await browserAct(userId, { ...step, ...chat });
         }
-        const r = await browserAct(userId, { ...step, ...(sessionId && sessionId !== "none" ? { chat: sessionId } : {}) });
         if (!r?.ok) return `Error: ${r?.error || "the browser step failed"}${r?.url ? ` (page: ${r.url})` : ""}`;
         const head = `Page: ${r.title || "(no title)"} — ${r.url}${r.w ? `\nPage size: ${r.w}x${r.h} pixels` : ""}`;
         if (name === "browser_read") {

@@ -15,6 +15,7 @@ const DECISION = (id) => `perm:decision:${id}`;
 const CHAT_ALLOW = (sessionId) => `perm:chat:${sessionId}`;
 const USER_ALLOW = (userId) => `perm:user:${userId}`;
 const WAIT_MS = 30 * 60 * 1000;
+const ALWAYS_ASKS = 4; // asks even with no mode or in turbo (reading files on the user's computer)
 
 // Commands that change or remove things for good, or reach outside the project
 const DESTRUCTIVE = /(^|[\s;&|(])(rm\s|rmdir\s|sudo\s|mkfs|dd\s+if=|shred\s|git\s+push|git\s+reset\s+--hard|git\s+clean\s+-[a-z]*f|git\s+branch\s+-D|git\s+checkout\s+--\s|drop\s+(table|database)|truncate\s+table|npm\s+publish)/i;
@@ -50,6 +51,16 @@ export function describeAction(tool, args = {}) {
     // connector list never asks; "always allow" covers one tool of one app.
     case "custom_mcp_connector":
       return describeConnectorAction(args);
+    // A file or folder anywhere on the user's computer (desktop app): asks in every chat and every mode
+    case "read_local_file": {
+      const file = String(args?.path || "").trim().replace(/^["']+|["']+$/g, "");
+      return { title: "Read a file on your computer?", detail: file, key: `localfile:${file.toLowerCase()}`, label: `reading ${file.split(/[\\/]/).filter(Boolean).pop() || "this file"}`, level: ALWAYS_ASKS };
+    }
+    // Changing files and folders on the user's computer: asks every single time (no "always allow")
+    case "write_local_file":
+    case "edit_local_file":
+    case "manage_local_files":
+      return describeLocalChange(tool, args);
     default:
       return null;
   }
@@ -75,10 +86,35 @@ function describeConnectorAction(args = {}) {
   return null; // list_apps, list_servers, get_tools, login: only read the user's own connectors
 }
 
+const cleanPath = (p) => String(p || "").trim().replace(/^["']+|["']+$/g, "");
+const preview = (text, max) => { const s = String(text ?? ""); return s.length > max ? `${s.slice(0, max)}\n… (${s.length - max} more characters)` : s; };
+
+function describeLocalChange(tool, args = {}) {
+  const file = cleanPath(args?.path);
+  const ask = (title, detail) => ({ title, detail, key: `localchange:${tool}`, label: "this", level: ALWAYS_ASKS, once: true });
+  if (tool === "write_local_file") {
+    const replace = args?.overwrite === true || args?.overwrite === "true";
+    return ask(replace ? "Replace this file on your computer?" : "Create this file on your computer?", `${replace ? "Replace" : "Create"} ${file}\n\n${preview(args?.content, 1200)}`);
+  }
+  if (tool === "edit_local_file") {
+    const all = args?.replace_all === true || args?.replace_all === "true";
+    return ask("Change this file on your computer?", `Edit ${file}${all ? " (every place it appears)" : ""}\n\nReplace:\n${preview(args?.old_text, 600)}\n\nWith:\n${preview(args?.new_text, 600)}`);
+  }
+  const to = cleanPath(args?.to);
+  switch (args?.action) {
+    case "create_folder": return ask("Create a folder on your computer?", `Create the folder ${file}`);
+    case "move": return ask("Move this on your computer?", `Move ${file}\nto ${to}`);
+    case "copy": return ask("Copy this on your computer?", `Copy ${file}\nto ${to}`);
+    case "delete": return ask("Delete this on your computer?", `Move ${file} to the Recycle Bin (it can be restored from there)`);
+    default: return ask("Change files on your computer?", `${String(args?.action || "change")} ${file}${to ? `\nto ${to}` : ""}`);
+  }
+}
+
 export const isGatedTool = (tool) => tool === "custom_mcp_connector" || !!describeAction(tool, {});
+const alwaysAsksTool = (tool) => describeAction(tool, {})?.level >= ALWAYS_ASKS;
 
 // Does this mode ask for this action?
-const asks = (mode, level) => (mode === "review" ? true : mode === "default" ? level >= 2 : mode === "auto" ? level >= 3 : false);
+const asks = (mode, level) => (level >= ALWAYS_ASKS ? true : mode === "review" ? true : mode === "default" ? level >= 2 : mode === "auto" ? level >= 3 : false);
 
 async function remembered(userId, sessionId, key) {
   const [inChat, always] = await Promise.all([
@@ -90,14 +126,14 @@ async function remembered(userId, sessionId, key) {
 
 // Ask the user (if the mode says so) and wait for the answer. Returns { allowed: true } or { allowed: false, message }.
 export async function askPermission({ mode, userId, sessionId, tool, args, emit, isAborted }) {
-  if (!PERMISSION_MODES.has(mode) || mode === "turbo") return { allowed: true };
   const a = describeAction(tool, args);
-  if (!a || !asks(mode, a.level)) return { allowed: true };
-  if (await remembered(userId, sessionId, a.key)) return { allowed: true };
+  if (!a || (a.level < ALWAYS_ASKS && (!PERMISSION_MODES.has(mode) || mode === "turbo"))) return { allowed: true };
+  if (!asks(mode, a.level)) return { allowed: true };
+  if (!a.once && await remembered(userId, sessionId, a.key)) return { allowed: true };
 
   const id = crypto.randomUUID();
   await redis.set(REQ(id), JSON.stringify({ userId: String(userId || ""), sessionId: sessionId || "", key: a.key }), "EX", Math.ceil(WAIT_MS / 1000) + 600).catch(() => {});
-  emit({ type: "permission_request", id, tool, title: a.title, detail: a.detail, label: a.label });
+  emit({ type: "permission_request", id, tool, title: a.title, detail: a.detail, label: a.label, ...(a.once ? { onceOnly: true } : {}) });
 
   const end = Date.now() + WAIT_MS;
   while (Date.now() < end) {
@@ -107,8 +143,8 @@ export async function askPermission({ mode, userId, sessionId, tool, args, emit,
       let d = {};
       try { d = JSON.parse(raw); } catch { /* bad answer */ }
       emit({ type: "permission_resolved", id, decision: d.decision });
-      if (d.decision === "chat" && sessionId) await redis.sadd(CHAT_ALLOW(sessionId), a.key).then(() => redis.expire(CHAT_ALLOW(sessionId), 30 * 24 * 60 * 60)).catch(() => {});
-      if (d.decision === "always" && userId) await redis.sadd(USER_ALLOW(userId), a.key).catch(() => {});
+      if (d.decision === "chat" && sessionId && !a.once) await redis.sadd(CHAT_ALLOW(sessionId), a.key).then(() => redis.expire(CHAT_ALLOW(sessionId), 30 * 24 * 60 * 60)).catch(() => {});
+      if (d.decision === "always" && userId && !a.once) await redis.sadd(USER_ALLOW(userId), a.key).catch(() => {});
       if (d.decision === "once" || d.decision === "chat" || d.decision === "always") return { allowed: true };
       const note = String(d.note || "").trim().slice(0, 2000);
       return {
@@ -126,9 +162,9 @@ export async function askPermission({ mode, userId, sessionId, tool, args, emit,
 
 // Wraps a set of tool handlers so the gated ones ask first (the handler object is changed in place)
 export function gateHandlers(handlers, ctx) {
-  if (!PERMISSION_MODES.has(ctx.mode) || ctx.mode === "turbo") return handlers;
+  const modeAsks = PERMISSION_MODES.has(ctx.mode) && ctx.mode !== "turbo";
   for (const [name, fn] of Object.entries(handlers)) {
-    if (typeof fn !== "function" || !isGatedTool(name)) continue;
+    if (typeof fn !== "function" || !isGatedTool(name) || (!modeAsks && !alwaysAsksTool(name))) continue;
     handlers[name] = async (args, ...rest) => {
       const p = await askPermission({ ...ctx, tool: name, args });
       if (!p.allowed) return p.message;

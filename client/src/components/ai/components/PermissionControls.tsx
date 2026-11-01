@@ -63,9 +63,10 @@ export function PermissionModePicker({ value, onChange }: { value: PermissionMod
   );
 }
 
-export type PermissionRequest = { id: string; tool: string; title: string; detail?: string; label?: string };
+export type PermissionRequest = { id: string; tool: string; title: string; detail?: string; label?: string; onceOnly?: boolean };
 
-// The card above the chat box: 1 allow once, 2 always in this chat, 3 always, 4 no (with what to do instead)
+// The card above the chat box: 1 allow once, 2 always in this chat, 3 always, 4 no (with what to do instead).
+// onceOnly (changing files on the user's computer): only 1 allow once and 2 no, since it asks every time.
 export function PermissionCard({ request, onDone }: { request: PermissionRequest; onDone: () => void }) {
   const reduce = useReducedMotion();
   const [choice, setChoice] = useState(0);
@@ -74,6 +75,7 @@ export function PermissionCard({ request, onDone }: { request: PermissionRequest
   const [hidden, setHidden] = useState(false);
   const noteRef = useRef<HTMLInputElement>(null);
   const label = request.label || "this";
+  const yesRows = request.onceOnly ? 1 : 3;
 
   // The card hides at once on an answer; it comes back only if the answer could not be sent
   const send = async (decision: "once" | "chat" | "always" | "no" | "skip") => {
@@ -108,7 +110,12 @@ export function PermissionCard({ request, onDone }: { request: PermissionRequest
     const onKey = (e: KeyboardEvent) => {
       if (hidden) return;
       const typing = document.activeElement === noteRef.current;
-      if (!typing && /^[1-4]$/.test(e.key)) { e.preventDefault(); setChoice(Number(e.key) - 1); if (e.key === "4") setTimeout(() => noteRef.current?.focus(), 0); }
+      if (!typing && /^[1-4]$/.test(e.key) && Number(e.key) <= yesRows + 1) {
+        e.preventDefault();
+        const pick = Number(e.key) - 1 < yesRows ? Number(e.key) - 1 : 3;
+        setChoice(pick);
+        if (pick === 3) setTimeout(() => noteRef.current?.focus(), 0);
+      }
       else if (e.key === "Enter" && !e.shiftKey && (typing || !(document.activeElement instanceof HTMLTextAreaElement || (document.activeElement as HTMLElement)?.isContentEditable))) { e.preventDefault(); submit(); }
       else if (e.key === "Escape" && !typing) { e.preventDefault(); send("skip"); }
     };
@@ -120,7 +127,7 @@ export function PermissionCard({ request, onDone }: { request: PermissionRequest
     "Yes, allow this time",
     `Yes, and always allow ${label} in this chat`,
     `Yes, and always allow ${label}`,
-  ];
+  ].slice(0, yesRows);
   const row = (on: boolean) => cn("w-full flex items-start gap-3 rounded-lg px-2.5 py-2 text-left text-[13.5px] transition-colors", on ? "bg-black/[0.06] dark:bg-white/[0.08] text-foreground" : "text-foreground/80 hover:bg-black/[0.03] dark:hover:bg-white/[0.04]");
   const num = "mt-px shrink-0 flex items-center justify-center size-5 rounded bg-black/[0.06] dark:bg-white/[0.08] text-[11.5px] text-muted-foreground";
 
@@ -153,7 +160,7 @@ export function PermissionCard({ request, onDone }: { request: PermissionRequest
         {/* 4 "No" with its note, and Skip / Submit on the same line */}
         <div className="flex items-center gap-2">
           <div className={cn(row(choice === 3), "flex-1 min-w-0 items-center")} onClick={() => { setChoice(3); noteRef.current?.focus(); }}>
-            <span className={num}>4</span>
+            <span className={num}>{yesRows + 1}</span>
             <span className="shrink-0">No</span>
             <input
               ref={noteRef}
