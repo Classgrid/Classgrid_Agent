@@ -5504,6 +5504,7 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
                                                   command={step.args?.command || step.args?.code || 'Running...'}
                                                   output={step.result || 'Waiting for output...'}
                                                   running={step.status === 'loading'}
+                                                  shell={step.args?.shell}
                                                 />
                                               </AgentStepAccordion>
                                             );

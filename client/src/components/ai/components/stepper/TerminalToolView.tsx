@@ -30,9 +30,11 @@ interface TerminalToolViewProps {
   output: string;
   /** The command is still running: show a spinner next to "Waiting for output..." */
   running?: boolean;
+  /** Desktop app: the shell the command ran in (powershell, bash or cmd) */
+  shell?: string;
 }
 
-export function TerminalToolView({ command, output, running = false }: TerminalToolViewProps) {
+export function TerminalToolView({ command, output, running = false, shell }: TerminalToolViewProps) {
   const [activeTab, setActiveTab] = useState<'command' | 'output'>('output');
 
   // Extremely basic pseudo-syntax highlighting for the Command view
@@ -58,7 +60,7 @@ export function TerminalToolView({ command, output, running = false }: TerminalT
       <ToolOutputContainer
         icon={<Laptop className="text-slate-400 dark:text-[#a3a3a3]" strokeWidth={1.5} />}
         toolName="This computer"
-        actionName="PowerShell"
+        actionName={/^(bash|sh|git-bash)$/i.test(String(shell || '')) ? 'Bash' : /^cmd$/i.test(String(shell || '')) ? 'Command Prompt' : 'PowerShell'}
       >
         <div className="m-2 rounded-lg bg-[#F9F8F7] dark:bg-[#202020] border border-slate-200 dark:border-transparent font-mono text-[13px] overflow-hidden">
           <div className="p-3 leading-relaxed whitespace-pre-wrap break-words">{formatCommand(cmd)}</div>

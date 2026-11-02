@@ -2924,6 +2924,46 @@ Every user is using you as a personal AI assistant and agent (like ChatGPT) to m
 
         // 3. Initialize the real LLM Client from the Classgrid SDK using the fallback hierarchy
         let accSteps = []; // hoisted here so tool wrappers can push to it
+        // Shows a tool's step in the chat (the terminal box, file steps...) while it runs and with its result. A helper
+        // calling the same handler passes { fromHelper: true }: its steps show under the helper, not as the main AI's.
+        const stepWrapped = new WeakMap(); // a shown handler -> the handler it wraps
+        const showStep = (toolName, handler) => {
+            const shown = async (args, ...rest) => {
+                // Thought and plan-progress calls are not shown as tool steps in the chat.
+                const silentTool = toolName === 'internal_thought_process' || toolName === 'update_plan_step' || rest[0]?.fromHelper === true;
+                if (!silentTool) {
+                    accSteps.push({
+                        id: Date.now().toString(),
+                        type: 'tool',
+                        tool: toolName,
+                        title: args?.title || 'Thinking',
+                        details: args?.details || '',
+                        args: args,
+                        status: 'loading'
+                    });
+                    try { if (!res.writableEnded) res.write(`data: ${JSON.stringify({ type: "tool_start", tool: toolName, args })}\n\n`); } catch (e) { }
+                    playground("tool", { who: "Agent", tool: toolName, detail: JSON.stringify(args ?? {}).slice(0, 200) });
+                }
+                let resultStr;
+                try { resultStr = await handler(args, ...rest); } catch (err) { resultStr = "Error: " + (err.message || String(err)); }
+
+                if (!silentTool) {
+                    // Pictures a tool returned (view_image, read_local_file) go to the model only; the chat step keeps the text
+                    const shownResult = resultStr && typeof resultStr === 'object' && Array.isArray(resultStr.images) ? resultStr.text : resultStr;
+                    const step = accSteps.find(s => s.tool === toolName && s.status === 'loading');
+                    if (step) {
+                        const isErr = typeof shownResult === 'string' && (shownResult.startsWith("Error:") || shownResult.startsWith("ERROR:") || shownResult.startsWith("FAILED:"));
+                        step.status = isErr ? 'error' : 'success';
+                        step.result = shownResult;
+                    }
+
+                    try { if (!res.writableEnded) res.write(`data: ${JSON.stringify({ type: "tool_result", tool: toolName, result: shownResult })}\n\n`); } catch (e) { }
+                }
+                return resultStr;
+            };
+            stepWrapped.set(shown, handler);
+            return shown;
+        };
         const generatedImages = []; // images made in this answer: shown by the app, never copied by the model
         // Web pages search_web used in this answer, numbered across searches so [n] in the reply points at
         // one page. Streamed as a "sources" event and saved with the message (the chat shows them as chips).
@@ -3670,7 +3710,7 @@ Every user is using you as a personal AI assistant and agent (like ChatGPT) to m
                                 const step = { tool: n, what: String(what).slice(0, 200), at: Date.now() };
                                 if (h.steps.length < 80) h.steps.push(step);
                                 playground("tool", { who: `Helper ${h.no}`, tool: n, detail: JSON.stringify(a ?? {}).slice(0, 200) });
-                                const out = onComputer ? await computerHandlers[n](a) : outsideProject(n, a) ? (n === "view_project_file" ? await readLocalFile(req.user?._id || req.user?.id, { path: a.path }) : await runOnComputer(req.user?._id || req.user?.id, n, a || {}, sessionId)) : h.wt && LOCAL_TOOLS.has(n) ? await callLocal(h.wt.project, n, a || {}, sessionId) : (await handleToolCall(n, a, { sessionId })).content[0].text;
+                                const out = onComputer ? await computerHandlers[n](a, { fromHelper: true }) : outsideProject(n, a) ? (n === "view_project_file" ? await readLocalFile(req.user?._id || req.user?.id, { path: a.path }) : await runOnComputer(req.user?._id || req.user?.id, n, a || {}, sessionId)) : h.wt && LOCAL_TOOLS.has(n) ? await callLocal(h.wt.project, n, a || {}, sessionId) : (await handleToolCall(n, a, { sessionId })).content[0].text;
                                 emitHelper({ helper: i, id, result: String(out && typeof out === "object" ? out.text : out).slice(0, 6000) });
                                 step.result = String(out && typeof out === "object" ? out.text : out).slice(0, 400);
                                 step.failed = /^(error|tool error|failed)/i.test(step.result.trim());
@@ -5555,42 +5595,7 @@ You work on the user's own Windows computer through their Classgrid desktop app,
                     custom_mcp_connector: async (args) => runCustomMcpTool(req.user?._id || req.user?.id, args),
                     play_song: async (args) => runPlaySong(args),
                     download_song: async (args) => (gridSender ? JSON.stringify({ error: "Downloading songs isn't available in shared chats." }) : runDownloadSong(req.user, args)),
-                }).map(([toolName, handler]) => [
-                    toolName,
-                    async (args) => {
-                        // Thought and plan-progress calls are not shown as tool steps in the chat.
-                        const silentTool = toolName === 'internal_thought_process' || toolName === 'update_plan_step';
-                        if (!silentTool) {
-                            accSteps.push({
-                                id: Date.now().toString(),
-                                type: 'tool',
-                                tool: toolName,
-                                title: args?.title || 'Thinking',
-                                details: args?.details || '',
-                                args: args,
-                                status: 'loading'
-                            });
-                            try { if (!res.writableEnded) res.write(`data: ${JSON.stringify({ type: "tool_start", tool: toolName, args })}\n\n`); } catch (e) { }
-                            playground("tool", { who: "Agent", tool: toolName, detail: JSON.stringify(args ?? {}).slice(0, 200) });
-                        }
-                        let resultStr;
-                        try { resultStr = await handler(args); } catch (err) { resultStr = "Error: " + (err.message || String(err)); }
-
-                        if (!silentTool) {
-                            // Pictures a tool returned (view_image, read_local_file) go to the model only; the chat step keeps the text
-                            const shownResult = resultStr && typeof resultStr === 'object' && Array.isArray(resultStr.images) ? resultStr.text : resultStr;
-                            const step = accSteps.find(s => s.tool === toolName && s.status === 'loading');
-                            if (step) {
-                                const isErr = typeof shownResult === 'string' && (shownResult.startsWith("Error:") || shownResult.startsWith("ERROR:") || shownResult.startsWith("FAILED:"));
-                                step.status = isErr ? 'error' : 'success';
-                                step.result = shownResult;
-                            }
-
-                            try { if (!res.writableEnded) res.write(`data: ${JSON.stringify({ type: "tool_result", tool: toolName, result: shownResult })}\n\n`); } catch (e) { }
-                        }
-                        return resultStr;
-                    }
-                ]))
+                }).map(([toolName, handler]) => [toolName, showStep(toolName, handler)]))
             })()
         };
 
@@ -5924,6 +5929,11 @@ If a tool fails, never show the error message; say only: "Something went wrong o
                 toolPlan.allowedToolNames.add(def.function.name);
                 toolPlan.loadedNames.add(def.function.name);
             }
+        }
+        // The desktop app's commands on the computer (set above) show in the chat's terminal box like a project's
+        for (const name of [...COMPUTER_TERMINAL_TOOLS, "run_code", "computer_terminal"]) {
+            const fn = llmConfig.toolHandlers[name];
+            if (typeof fn === "function" && !stepWrapped.has(fn)) llmConfig.toolHandlers[name] = showStep(name === "computer_terminal" ? "execute_terminal_command" : name, fn);
         }
         console.log(`[AI-TOOLS] groups=[${toolPlan.activeGroupIds.join(",")}] sent=${activeToolList.length}/${fullToolList.length} tools staff=${toolPlan.staff}`);
 
