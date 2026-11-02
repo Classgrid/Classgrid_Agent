@@ -76,6 +76,7 @@
     "country-codes-list": "^3.2.0",
     "country-flag-icons": "^1.6.20",
     "date-fns": "^4.1.0",
+    "docx-preview": "^0.3.5",
     "dompurify": "^3.4.11",
     "embla-carousel-react": "^8.6.0",
     "emoji-picker-react": "^4.19.1",

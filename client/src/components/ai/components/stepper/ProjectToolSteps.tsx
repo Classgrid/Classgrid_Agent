@@ -21,7 +21,7 @@ import { ShimmerText } from './ShimmerText';
 // Steps of the Project Mode file tools, shown like a code editor's agent: "Edited calculator.ts +26 -0",
 // and reading/searching grouped as "Exploring 2 files, 1 search".
 
-export const PROJECT_EXPLORE_TOOLS = new Set(['view_project_file', 'search_project', 'list_project_files', 'search_project_by_meaning', 'bulk_read_project']);
+export const PROJECT_EXPLORE_TOOLS = new Set(['view_project_file', 'search_project', 'list_project_files', 'search_project_by_meaning', 'bulk_read_project', 'read_local_file']);
 export const PROJECT_EDIT_TOOLS = new Set(['write_project_file', 'edit_project_file', 'write_project_file_from_spec']);
 
 type Step = { id: string; tool: string; status?: string; args?: any; result?: string; helpers?: HelperLive[] };
@@ -142,6 +142,37 @@ export function ProjectEditStep({ step }: { step: Step }) {
 }
 
 function ExploreItem({ step }: { step: Step }) {
+  if (step.tool === 'read_local_file') return <LocalFileItem step={step} />;
+  return <ProjectExploreItem step={step} />;
+}
+
+// A file or folder on this computer the AI looked at (desktop app): "Analyzed 🎞 clip.mp4", opened beside the chat
+function LocalFileItem({ step }: { step: Step }) {
+  const loading = step.status === 'loading';
+  const result = String(step.result || '');
+  const file = String(step.args?.path || '').trim().replace(/^["']+|["']+$/g, '');
+  const failed = !loading && (isError(step) || /isn't open on the user's computer|older version/.test(result));
+  const isFolder = / is a folder with /.test(result);
+  const range = result.match(/lines (\d+)-(\d+) of \d+/);
+  const wasLoading = useRef(loading);
+  useEffect(() => {
+    if (wasLoading.current && !loading && !failed && !isFolder && file && !openedSteps.has(step.id)) {
+      openedSteps.add(step.id);
+      openLocalFile(file);
+    }
+    wasLoading.current = loading;
+  }, [loading]); // eslint-disable-line react-hooks/exhaustive-deps
+  return (
+    <div className="flex min-w-0 items-center gap-1.5 py-1 text-[14px] text-slate-500 dark:text-[#8a8a8a]" title={file}>
+      <ShimmerText active={loading} className="shrink-0">{loading ? 'Analyzing' : failed ? 'Could not open' : 'Analyzed'}</ShimmerText>
+      {isFolder ? <Folder className="size-3.5 shrink-0" /> : <FileBadge path={file} />}
+      <button type="button" disabled={isFolder || failed} onClick={() => openLocalFile(file, true)} className="min-w-0 truncate font-medium text-foreground/90 enabled:hover:underline">{baseName(file)}</button>
+      {range && <span className="shrink-0 text-xs opacity-70">#L{range[1]}-{range[2]}</span>}
+    </div>
+  );
+}
+
+function ProjectExploreItem({ step }: { step: Step }) {
   const [open, setOpen] = useState(false);
   const loading = step.status === 'loading';
   const result = String(step.result || '');
@@ -278,7 +309,7 @@ export function ProjectExploreGroup({ steps }: { steps: Step[] }) {
     return () => clearTimeout(t);
   }, [loading]);
   const isOpen = open ?? busy;
-  const files = steps.reduce((n, s) => n + (s.tool === 'view_project_file' ? 1 : s.tool === 'bulk_read_project' ? (Array.isArray(s.args?.paths) ? s.args.paths.length : 1) : 0), 0);
+  const files = steps.reduce((n, s) => n + (s.tool === 'view_project_file' || s.tool === 'read_local_file' ? 1 : s.tool === 'bulk_read_project' ? (Array.isArray(s.args?.paths) ? s.args.paths.length : 1) : 0), 0);
   const searches = steps.filter((s) => s.tool === 'search_project' || s.tool === 'search_project_by_meaning').length;
   const folders = steps.filter((s) => s.tool === 'list_project_files').length;
   const parts = [
@@ -471,6 +502,27 @@ function ClampedBlock({ text, lines = 6 }: { text: string; lines?: number }) {
 // command under it ("$ Get-ChildItem …"); click the title for its output
 export const COMMAND_TOOLS = new Set(['execute_terminal_command', 'start_background_command', 'check_background_command', 'stop_background_command']);
 
+// Files named in a command (full Windows paths), opened in Studio's file tab (desktop app)
+export const OPEN_LOCAL_FILE_EVENT = "classgrid:open-local-file";
+const FILE_IN_COMMAND = /[A-Za-z]:[\\/][^"'`\r\n|<>*?;]*?\.(pdf|docx?|xlsx?|xlsm|csv|pptx?|txt|md|json|log|png|jpe?g|gif|webp|bmp|svg|mp4|webm|mov|mp3|wav|html?|xml|ya?ml|jsx?|tsx?|py|css)(?=$|["'`\s;|,)])/gi;
+const DELETES = /\b(Remove-Item|del|rm|rmdir|erase)\b/i;
+function filesIn(command: string) {
+  const seen = new Set<string>();
+  const found: string[] = [];
+  for (const m of command.matchAll(FILE_IN_COMMAND)) {
+    const file = m[0].replace(/[\\/]+/g, '\\');
+    if (/\\AppData\\Local\\Temp\\/i.test(file) || seen.has(file.toLowerCase())) continue;
+    seen.add(file.toLowerCase());
+    found.push(file);
+  }
+  return found;
+}
+export function openLocalFile(path: string, byUser = false) {
+  if ((window as unknown as { __cgStudioFiles?: boolean }).__cgStudioFiles) window.dispatchEvent(new CustomEvent(OPEN_LOCAL_FILE_EVENT, { detail: { path } }));
+  else if (byUser) (window as unknown as { classgridDesktop?: { openPath?: (p: string) => void } }).classgridDesktop?.openPath?.(path);
+}
+const openedSteps = new Set<string>(); // steps whose file already opened by itself
+
 export function CommandStep({ step }: { step: Step }) {
   const loading = step.status === 'loading';
   const output = String(step.result || '');
@@ -481,6 +533,16 @@ export function CommandStep({ step }: { step: Step }) {
   const what = (String(step.args?.description || '').split('\n')[0] ?? '').trim() || (command.split('\n')[0] ?? '').trim();
   const [open, setOpen] = useState<boolean | null>(null);
   const isOpen = open ?? loading;
+  const files = filesIn(command);
+  // A command the user watched run that read a file: the file opens beside the chat when it is done
+  const wasLoading = useRef(loading);
+  useEffect(() => {
+    if (wasLoading.current && !loading && !failed && files[0] && !DELETES.test(command) && !openedSteps.has(step.id)) {
+      openedSteps.add(step.id);
+      openLocalFile(files[0]);
+    }
+    wasLoading.current = loading;
+  }, [loading]); // eslint-disable-line react-hooks/exhaustive-deps
   return (
     <div className="flex flex-col gap-1.5 py-1">
       <button type="button" onClick={() => setOpen(!isOpen)} className="group flex min-w-0 items-center gap-1.5 text-left text-[14px] text-slate-500 dark:text-[#8a8a8a] hover:text-foreground">
@@ -499,6 +561,16 @@ export function CommandStep({ step }: { step: Step }) {
           </div>
         )}
       </div>
+      {files.length > 0 && !DELETES.test(command) && (
+        <div className="flex flex-wrap gap-x-3 gap-y-1 pl-1">
+          {files.slice(0, 6).map((f) => (
+            <button key={f} type="button" onClick={() => openLocalFile(f, true)} title={f} className="flex min-w-0 items-center gap-1.5 text-[13px] text-slate-500 dark:text-[#8a8a8a] hover:text-foreground">
+              <FileBadge path={f} />
+              <span className="truncate max-w-[260px] hover:underline">{baseName(f)}</span>
+            </button>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import {
-  ArrowLeft, ArrowRight, Camera, ExternalLink, FileDiff, FolderGit2, FolderOpen, Globe, Images, Maximize2, Minimize2,
+  ArrowLeft, ArrowRight, Camera, ExternalLink, FileDiff, FileText, FolderGit2, FolderOpen, Globe, Images, Maximize2, Minimize2,
   PanelRightClose, PanelRightOpen, Plus, RotateCw, Search, Terminal, X,
 } from "lucide-react";
 import { AskAiPanel } from "@/components/ai/components/AskAiPanel";
@@ -18,16 +18,17 @@ import { StudioProjectView } from "../components/StudioProjectView";
 import { StudioBrowserView } from "../components/StudioBrowserView";
 import { StudioLocalBrowserView, hasLocalBrowser } from "../components/StudioLocalBrowserView";
 import { StudioShotsView } from "../components/StudioShotsView";
+import { StudioLocalFileView, baseName } from "../components/StudioLocalFileView";
 import { StudioReviewView } from "../components/StudioReviewView";
 import { PushToGithubModal } from "../components/PushToGithubModal";
-import { OPEN_PROJECT_FILE_EVENT } from "@/components/ai/components/stepper/ProjectToolSteps";
+import { FileBadge, OPEN_LOCAL_FILE_EVENT, OPEN_PROJECT_FILE_EVENT } from "@/components/ai/components/stepper/ProjectToolSteps";
 import { fetchWithRescue } from "@/lib/rescue";
 import { toast } from "sonner";
 import { useSidebar } from "@/components/marketing_ui/sidebar";
 import { listLocalFiles, localFolderOf } from "../utils/localProject";
 
-type TabKind = "browser" | "review" | "files" | "terminal" | "project" | "shots";
-type Tab = { id: string; kind: TabKind };
+type TabKind = "browser" | "review" | "files" | "terminal" | "project" | "shots" | "file";
+type Tab = { id: string; kind: TabKind; path?: string }; // path: a "file" tab's file on this computer (desktop app)
 
 const TAB_INFO: Record<TabKind, { label: string; Icon: typeof Globe }> = {
   browser: { label: "Browser", Icon: Globe },
@@ -36,6 +37,7 @@ const TAB_INFO: Record<TabKind, { label: string; Icon: typeof Globe }> = {
   terminal: { label: "Terminal", Icon: Terminal },
   project: { label: "Project", Icon: FolderGit2 },
   shots: { label: "Screenshots", Icon: Images },
+  file: { label: "File", Icon: FileText },
 };
 
 // One easing for every slide in Studio: fast start, soft stop
@@ -50,11 +52,11 @@ const MIN_CHAT = 320;
 
 // The pane's tabs and the selected one, kept across a refresh
 const TABS_KEY = "cg_studio_tabs";
-const TAB_KINDS = new Set<TabKind>(["browser", "review", "files", "terminal", "project", "shots"]);
+const TAB_KINDS = new Set<TabKind>(["browser", "review", "files", "terminal", "project", "shots", "file"]);
 function readTabs(): { tabs: Tab[]; active: string | null } {
   try {
     const saved = JSON.parse(localStorage.getItem(TABS_KEY) || "null");
-    const tabs = Array.isArray(saved?.tabs) ? (saved.tabs as Tab[]).filter((t) => t && typeof t.id === "string" && TAB_KINDS.has(t.kind)) : [];
+    const tabs = Array.isArray(saved?.tabs) ? (saved.tabs as Tab[]).filter((t) => t && typeof t.id === "string" && TAB_KINDS.has(t.kind) && (t.kind !== "file" || typeof t.path === "string")) : [];
     if (tabs.length) return { tabs, active: tabs.some((t) => t.id === saved.active) ? saved.active : tabs[0]!.id };
   } catch { /* storage blocked */ }
   return { tabs: [{ id: "browser-1", kind: "browser" }], active: "browser-1" };
@@ -217,6 +219,35 @@ export function StudioModePage() {
     };
     window.addEventListener(OPEN_PROJECT_FILE_EVENT, onOpenFile);
     return () => window.removeEventListener(OPEN_PROJECT_FILE_EVENT, onOpenFile);
+  }, []);
+
+  // Desktop app: a file on this computer the agent worked on (or the user clicked) opens in its own tab, like a
+  // code editor's agent; the same file opens in the tab it already has
+  useEffect(() => {
+    (window as unknown as { __cgStudioFiles?: boolean }).__cgStudioFiles = true;
+    const onOpen = (e: Event) => {
+      const path = String((e as CustomEvent<{ path?: string }>).detail?.path || "");
+      if (!path) return;
+      setPane((p) => (p.open ? p : { ...p, open: true }));
+      setTabs((t) => {
+        const same = t.find((x) => x.kind === "file" && x.path?.toLowerCase() === path.toLowerCase());
+        if (same) { setActive(same.id); return t; }
+        const id = `file-${Date.now()}`;
+        setActive(id);
+        return [...t, { id, kind: "file", path }];
+      });
+    };
+    window.addEventListener(OPEN_LOCAL_FILE_EVENT, onOpen);
+    return () => { window.removeEventListener(OPEN_LOCAL_FILE_EVENT, onOpen); (window as unknown as { __cgStudioFiles?: boolean }).__cgStudioFiles = false; };
+  }, []);
+
+  // Desktop app: the browser tab shows the open page's name and icon
+  const [browserPage, setBrowserPage] = useState<{ url: string; title: string }>({ url: "", title: "" });
+  useEffect(() => {
+    const d = (window as unknown as { classgridDesktop?: { browserState?: () => Promise<{ url: string; title: string } | null>; onBrowser?: (fn: (m: any) => void) => () => void } }).classgridDesktop;
+    if (!d?.onBrowser) return;
+    d.browserState?.().then((st) => { if (st) setBrowserPage({ url: st.url || "", title: st.title || "" }); }).catch(() => {});
+    return d.onBrowser((m) => { if (m?.type === "nav") setBrowserPage({ url: m.url || "", title: m.title || "" }); });
   }, []);
 
   const studioProjectInfo = useMemo<{ name: string; repo: string | null } | null>(() => {
@@ -541,7 +572,9 @@ export function StudioModePage() {
                   <div className="flex items-center gap-1 min-w-0 overflow-x-auto [scrollbar-width:none]">
                     <AnimatePresence initial={false}>
                       {tabs.map((t) => {
-                        const { label, Icon } = TAB_INFO[t.kind];
+                        const info = TAB_INFO[t.kind];
+                        const Icon = info.Icon;
+                        const label = t.kind === "file" && t.path ? baseName(t.path) : t.kind === "browser" && browserPage.url ? browserPage.title || hostOf(browserPage.url) : info.label;
                         const on = t.id === active;
                         return (
                           <motion.div
@@ -556,8 +589,10 @@ export function StudioModePage() {
                             title={compactTabs ? label : undefined}
                           >
                             {on && <motion.span layoutId="studio-tab-pill" className="absolute inset-0 rounded-md bg-secondary" transition={pill} />}
-                            <Icon className="relative size-4 shrink-0" />
-                            {!compactTabs && <span className="relative">{label}</span>}
+                            {t.kind === "file" && t.path
+                              ? <span className="relative flex"><FileBadge path={t.path} /></span>
+                              : t.kind === "browser" && browserPage.url ? <SiteIcon url={browserPage.url} /> : <Icon className="relative size-4 shrink-0" />}
+                            {!compactTabs && <span className={`relative ${t.kind === "file" || t.kind === "browser" ? "max-w-[160px] truncate" : ""}`}>{label}</span>}
                             <button
                               onClick={(e) => { e.stopPropagation(); closeTab(t.id); }}
                               className={`relative flex items-center justify-center size-5 rounded hover:bg-foreground/10 transition-[opacity,background-color] duration-150 ${on ? "opacity-100" : "opacity-0 group-hover:opacity-100"}`}
@@ -644,6 +679,7 @@ export function StudioModePage() {
                     {activeTab?.kind === "terminal" && <StudioTerminalView entries={terminal.entries} onClear={terminal.clear} />}
                     {activeTab?.kind === "project" && <StudioProjectView projectId={studioProject} reloadKey={filesReload} />}
                     {activeTab?.kind === "shots" && <StudioShotsView />}
+                    {activeTab?.kind === "file" && activeTab.path && <StudioLocalFileView path={activeTab.path} />}
                     {activeTab?.kind === "review" && <StudioReviewView projectId={studioProject} onChanged={() => setFilesReload((n) => n + 1)} />}
                     {!activeTab && <Launcher onOpen={openTab} />}
                   </motion.div>}
@@ -666,12 +702,23 @@ export function StudioModePage() {
   );
 }
 
+const hostOf = (u: string) => { try { return new URL(u).host; } catch { return u; } };
+
+// A browser tab's site icon (the globe when there is none, or no internet)
+function SiteIcon({ url }: { url: string }) {
+  const [failed, setFailed] = useState(false);
+  const host = hostOf(url);
+  useEffect(() => setFailed(false), [host]);
+  if (failed || !/^https?:/.test(url) || /^(localhost|127\.0\.0\.1)(:|$)/.test(host)) return <Globe className="relative size-4 shrink-0" />;
+  return <img src={`https://www.google.com/s2/favicons?domain=${encodeURIComponent(host)}&sz=32`} alt="" onError={() => setFailed(true)} className="relative size-4 shrink-0 rounded-sm" />;
+}
+
 // The "+" page: search and open a tab
 function Launcher({ onOpen }: { onOpen: (kind: TabKind) => void }) {
   const reduce = useReducedMotion();
   const [q, setQ] = useState("");
   const items = useMemo(
-    () => (Object.keys(TAB_INFO) as TabKind[]).filter((k) => TAB_INFO[k].label.toLowerCase().includes(q.trim().toLowerCase())),
+    () => (Object.keys(TAB_INFO) as TabKind[]).filter((k) => k !== "file" && TAB_INFO[k].label.toLowerCase().includes(q.trim().toLowerCase())),
     [q],
   );
   return (

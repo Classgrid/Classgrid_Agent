@@ -85,7 +85,7 @@ import NotificationLog from "../models/NotificationLog.js";
 import { getMcpTools, handleToolCall, readSandboxFiles } from "../mcp/tools.js";
 import { CUSTOM_MCP_TOOL, runCustomMcpTool, customMcpPromptLine } from "../services/custom-mcp-ai.js";
 import { PLAY_SONG_TOOL, songTools, runPlaySong, runDownloadSong } from "../services/music-ai.js";
-import { localProjectFor, callLocal, runOnComputer, COMPUTER_TERMINAL_TOOLS } from "../services/local-runner.service.js";
+import { localProjectFor, callLocal, readLocalFile, runOnComputer, COMPUTER_TERMINAL_TOOLS } from "../services/local-runner.service.js";
 import { projectForChat } from "../services/ide-project.service.js";
 import { parseHTML } from "linkedom";
 import { Readability } from "@mozilla/readability";
@@ -1313,6 +1313,23 @@ const VIEW_IMAGE_TOOL = {
     }
 };
 
+// Desktop app only: a file or folder anywhere on the user's computer, read by their Classgrid app (each read asks them first)
+const READ_LOCAL_FILE_TOOL = {
+    type: "function",
+    function: {
+        name: "read_local_file",
+        description: "Read a file or folder on the user's own computer (the Classgrid desktop app reads it). Use it when the user gives a path like C:\\Users\\name\\Downloads\\photo.png or asks about a file on their computer. Pictures (.png, .jpg, .gif, .webp, .bmp) are shown to you as the picture itself; videos (.mp4, .webm, .mov) as pictures taken from across the whole video; PDF, Word, Excel and PowerPoint files come back as their text; other files as text with line numbers; a folder as its list of files. The user is asked to allow every read first, so call it straight away instead of asking them yourself. Long files come in parts: call again with start_line to read more.",
+        parameters: {
+            type: "object",
+            properties: {
+                path: { type: "string", description: "The full path on the user's computer, exactly as they gave it, e.g. C:\\Users\\name\\Downloads\\report.pdf" },
+                start_line: { type: "integer", description: "Text files and documents: the first line to read (default 1)" },
+                end_line: { type: "integer", description: "Text files and documents: the last line to read (optional)" }
+            },
+            required: ["path"]
+        }
+    }
+};
 // Desktop app, a chat that isn't a project: the terminal runs on the user's own computer (each command asks them first)
 const terminalDef = (name, description, properties, required) => ({ type: "function", function: { name, description, parameters: { type: "object", properties, required } } });
 const COMPUTER_TERMINAL_DEFS = [
@@ -1918,7 +1935,7 @@ Project Mode and Studio share one open project and its chats: the user can open 
 The user is in ${appMode === "agent" ? "Agent mode" : appMode === "project" ? "Project Mode" : "Studio Mode"} now.${appMode === "studio" ? ` Make code changes yourself; do not ask the user to edit a file or open an editor. If they want to edit by hand, they can switch to Project Mode.` : " The live browser is only in Studio Mode: here there is none, so do not try to open or use a browser (no browser tools, and no browser started from code or commands), and do not say that you will try or that you will do it. If the user wants the live browser, tell them to switch to Studio Mode."}`;
         }
         // Where the user is: the website or the Classgrid desktop app (sent by the app; your own thinking always runs on our servers)
-        if (body.clientApp === "desktop") volatilePrompt += "\n\n--- WHERE THE USER IS ---\nThe user is using the Classgrid desktop app on their own computer (Windows), not the chat.classgrid.in website. The app's screens run on their computer; your thinking runs on Classgrid's servers. Projects opened from a folder on their computer run your file and terminal tools on that computer. In a chat that isn't a project, execute_terminal_command and the background command tools run a real terminal on this computer (PowerShell; Bash through bash -lc '...' when Git Bash is installed), starting in the user's home folder. Do everything on the computer with it, like a developer in their own terminal: list folders (Get-ChildItem), read files (Get-Content), search (Select-String), create, edit, move, copy or delete files and folders, and run programs. When the user gives a path like C:\\Users\\name\\Downloads\\report.pdf, work on it with the terminal. The app asks the user to allow each command first, so just run it; never say you can't open or change files on their computer.\nIn the desktop app your browser (browser_open and the other browser tools) runs on the user's computer, with their internet, so it can open their own local servers like http://localhost:3000.";
+        if (body.clientApp === "desktop") volatilePrompt += "\n\n--- WHERE THE USER IS ---\nThe user is using the Classgrid desktop app on their own computer (Windows), not the chat.classgrid.in website. The app's screens run on their computer; your thinking runs on Classgrid's servers. Projects opened from a folder on their computer run your file and terminal tools on that computer. In any chat, to look at a file or folder on this computer (a path like C:\\Users\\name\\Videos\\clip.mp4, or one they ask about), use read_local_file: pictures and videos are shown to you (a video as pictures from across it), PDF, Word, Excel and PowerPoint files come back as their text (a scanned PDF as pictures of its pages), and a folder shows its files; the file also opens beside the chat for the user. In a chat that isn't a project, execute_terminal_command and the background command tools run a real terminal on this computer (PowerShell; Bash through bash -lc '...' when Git Bash is installed), starting in the user's home folder. Do everything on the computer with it, like a developer in their own terminal: list folders (Get-ChildItem), read files (Get-Content), search (Select-String), create, edit, move, copy or delete files and folders, and run programs. To change files, or when read_local_file isn't enough, use the terminal. To read a document with code, use Python in the terminal: install the readers once with python -m pip install --quiet --disable-pip-version-check pypdf openpyxl python-docx python-pptx (if Python isn't there, install it with winget install -e --id Python.Python.3.12 --accept-package-agreements --accept-source-agreements, then use py), then print its text with a short python -c script. Always write a file's full path in the command: the app then opens that file beside the chat for the user (PDF pages, sheets, Word pages, pictures, text). The app asks the user to allow each command first, so just run it; never say you can't open or change files on their computer.\nIn the desktop app your browser (browser_open and the other browser tools) runs on the user's computer, with their internet, so it can open their own local servers like http://localhost:3000.";
         else if (body.clientApp === "web") volatilePrompt += "\n\n--- WHERE THE USER IS ---\nThe user is using Classgrid on the website (chat.classgrid.in) in their browser, not the desktop app.";
         if (slashCommand && (slashCommand !== "compact" || compacted)) volatilePrompt += `\n\n--- COMMAND ---\nThe user started this message with /${body.command}. ${SLASH_COMMAND_LINES[slashCommand]}`;
         // Project Mode: snapshot the project before this answer, so its changes can be reviewed, rejected or undone
@@ -3385,6 +3402,8 @@ If they ask whether their college/school uses Classgrid, say you can't see that 
                         const running = board.helpers.filter((h) => h.state === "running").length;
                         return `${lines.join("\n\n")}\n\n${running ? `${running} helper(s) still working.` : "All helpers have finished."}${helperChangesText(reported)}`;
                     },
+                    // Desktop app only (see READ_LOCAL_FILE_TOOL): the user's own Classgrid app reads the file
+                    read_local_file: async (args) => readLocalFile(req.user?._id || req.user?.id, args),
                     run_code: async (args) => {
                         // A project from a folder on the user's computer: the code runs there, in their desktop app
                         const localProject = await localProjectFor(sessionId);
@@ -5120,8 +5139,8 @@ If a tool fails, never show the error message; say only: "Something went wrong o
         }
         // The desktop app, a chat that isn't a project: the terminal runs on the user's computer (each command asks them first)
         const onComputer = body.clientApp === "desktop" && !body.taskOrigin && !(await projectForChat(sessionId).catch(() => null));
-        if (onComputer) {
-            for (const def of COMPUTER_TERMINAL_DEFS) {
+        if (body.clientApp === "desktop" && !body.taskOrigin) {
+            for (const def of [READ_LOCAL_FILE_TOOL, ...(onComputer ? COMPUTER_TERMINAL_DEFS : [])]) {
                 // The terminal tools replace the cloud sandbox ones here, so the AI reads the right description
                 for (const list of [fullToolList, activeToolList]) {
                     const at = list.findIndex(t => t.function.name === def.function.name);

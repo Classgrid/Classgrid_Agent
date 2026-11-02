@@ -40,6 +40,7 @@ function navInfo() {
 let chatFile = null;
 let chatUrls = null;
 let currentChat; // undefined = not known yet, null = a new chat (no id yet), or the chat's id
+let agentChat = null; // the chat the AI's steps came from, until the screens show that chat too
 function chats() {
   if (chatUrls) return chatUrls;
   chatFile = path.join(app.getPath("userData"), "browser-chats.json");
@@ -53,7 +54,10 @@ function saveChats() {
 }
 async function useChat(id) {
   id = id ? String(id).slice(0, 100) : null;
+  if (id && id === agentChat) agentChat = null;
   if (id === currentChat) return;
+  // A new chat's screen (no id yet) while the AI works in that chat: the page stays (it's the AI's page)
+  if (id === null && agentChat && agentChat === currentChat) return;
   const wc = ensureView().webContents;
   const url = wc.getURL();
   if (currentChat === null && id) { // the new chat just got its id: it keeps its page
@@ -307,8 +311,20 @@ function runAct(a, byAgent) {
 }
 
 // A step from the AI (through the local runner): always an answer, like the cloud browser's /act
+// The AI's step says which chat it is working in: the page now belongs to that chat (a new chat gets its id only
+// when the answer ends, so the screens may still show it without one)
+function adoptChat(id) {
+  id = String(id).slice(0, 100);
+  agentChat = id;
+  if (currentChat === id) return;
+  currentChat = id;
+  const url = view && !view.webContents.isDestroyed() ? view.webContents.getURL() : "";
+  if (/^https?:\/\//.test(url)) { chats()[id] = url; saveChats(); }
+}
+
 async function agentAct(step) {
   try {
+    if (step && typeof step === "object" && step.chat) { queue = queue.then(() => adoptChat(step.chat)).catch(() => {}); }
     return await runAct(step && typeof step === "object" ? step : {}, true);
   } catch (e) {
     return { ok: false, error: String(e.message || e).slice(0, 500), url: view && !view.webContents.isDestroyed() ? view.webContents.getURL() : "" };

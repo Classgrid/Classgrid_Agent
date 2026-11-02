@@ -5,6 +5,11 @@ contextBridge.exposeInMainWorld("classgridDesktop", {
   isDesktop: true,
   version: ipcRenderer.sendSync("cg:version"),
   openExternal: (url) => ipcRenderer.invoke("cg:openExternal", url),
+  // A file on this computer shown in a Studio tab
+  fileUrl: (file) => ipcRenderer.sendSync("cg:fileUrl", file),
+  fileInfo: (file) => ipcRenderer.invoke("cg:fileInfo", file),
+  openPath: (file) => ipcRenderer.invoke("cg:openPath", file),
+  showInFolder: (file) => ipcRenderer.invoke("cg:showInFolder", file),
   pickFolder: () => ipcRenderer.invoke("cg:pickFolder"),
   setToken: (token) => ipcRenderer.send("cg:setToken", token),
   // Chats kept on this computer, for reading when offline (only the logged-in user's)

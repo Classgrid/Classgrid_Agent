@@ -43,10 +43,25 @@ function appPage() {
   return (pageCache = html);
 }
 
+// Files on this computer shown in Studio's tabs (the PDF viewer, pictures, sheets, text): our screens ask for them at
+// /__file/<secret>/<path>. The secret is new each time the app starts, so other pages can't read files this way.
+const FILE_PREFIX = `/__file/${require("node:crypto").randomBytes(16).toString("hex")}/`;
+const FILE_MIME = { ...MIME, ".pdf": "application/pdf", ".bmp": "image/bmp", ".wav": "audio/wav", ".ogg": "audio/ogg", ".mov": "video/quicktime" };
+function serveLocalFile(req, res) {
+  let full;
+  try { full = path.resolve(decodeURIComponent(new URL(req.url, APP_URL).pathname.slice(FILE_PREFIX.length))); } catch { res.writeHead(400); return res.end(); }
+  fs.stat(full, (err, st) => {
+    if (err || !st.isFile()) { res.writeHead(404); return res.end(); }
+    res.writeHead(200, { "Content-Type": FILE_MIME[path.extname(full).toLowerCase()] || "application/octet-stream", "Content-Length": st.size, "Cache-Control": "no-store" });
+    fs.createReadStream(full).pipe(res);
+  });
+}
+
 // Serves ./app; any path that isn't a file gets index.html (the screens do their own routing)
 function startScreenServer() {
   return new Promise((resolve, reject) => {
     const server = http.createServer((req, res) => {
+      if (req.url.startsWith(FILE_PREFIX)) return serveLocalFile(req, res);
       let urlPath;
       try { urlPath = decodeURIComponent(new URL(req.url, APP_URL).pathname); } catch { urlPath = "/"; }
       let file = path.normalize(path.join(APP_DIR, urlPath));
@@ -127,6 +142,15 @@ function createWindow() {
 }
 
 ipcMain.on("cg:version", (e) => { e.returnValue = app.getVersion(); });
+// A file on this computer shown in a Studio tab: its address for our screens, and its size
+ipcMain.on("cg:fileUrl", (e, file) => { e.returnValue = APP_URL + FILE_PREFIX + encodeURIComponent(path.resolve(String(file || ""))); });
+ipcMain.handle("cg:fileInfo", (_e, file) => {
+  try { const st = fs.statSync(path.resolve(String(file || ""))); return { exists: true, isFile: st.isFile(), size: st.size, modified: st.mtimeMs }; } catch { return { exists: false }; }
+});
+// Open it with the computer's own app (documents, sheets, pictures, media; never programs or scripts), or show it in File Explorer
+const OPENABLE = /\.(pdf|docx?|xlsx?|xlsm|csv|pptx?|odt|ods|odp|rtf|txt|md|png|jpe?g|gif|webp|bmp|svg|mp3|wav|ogg|m4a|mp4|webm|mov|mkv|avi|zip)$/i;
+ipcMain.handle("cg:openPath", (_e, file) => { const full = path.resolve(String(file || "")); if (OPENABLE.test(full) && fs.existsSync(full)) shell.openPath(full); });
+ipcMain.handle("cg:showInFolder", (_e, file) => { const full = path.resolve(String(file || "")); if (fs.existsSync(full)) shell.showItemInFolder(full); });
 ipcMain.handle("cg:openExternal", (_e, url) => { if (/^https?:\/\//.test(String(url))) shell.openExternal(String(url)); });
 ipcMain.handle("cg:retry", () => win?.loadURL(APP_URL));
 // New project from a repo, downloaded to this computer: a GitHub "owner/name" or any Git address (https or git@).

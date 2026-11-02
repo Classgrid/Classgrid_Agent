@@ -10,6 +10,7 @@ const { io } = require("socket.io-client");
 const API = process.env.CG_API || "https://api.classgrid.in"; // CG_API: a local backend when testing
 const MAX_FILE_BYTES = 2 * 1024 * 1024;
 const MAX_OUTPUT = 60000;
+const wait = (ms) => new Promise((r) => setTimeout(r, ms));
 const SKIP_DIRS = new Set(["node_modules", ".git", "dist", "build", ".next", ".turbo", ".cache", "__pycache__", ".venv", "venv"]);
 
 let socket = null;
@@ -225,6 +226,233 @@ const tools = {
   },
 };
 
+// ── Any file on this computer (read_local_file, every chat in the app) ──────────────────────────────────────
+// The backend shows the user a permission card before each read, so this is not limited to picked folders.
+// Pictures and documents go back in pieces: the backend's socket takes at most 1 MB per message.
+
+const LOCAL_IMAGE_TYPES = { ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".gif": "image/gif", ".webp": "image/webp", ".bmp": "image/bmp" };
+const LOCAL_DOC_TYPES = { ".pdf": "application/pdf", ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document", ".doc": "application/msword", ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", ".xls": "application/vnd.ms-excel", ".pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation", ".ppt": "application/vnd.ms-powerpoint" };
+const MAX_IMAGE_FILE_BYTES = 10 * 1024 * 1024;
+const LOCAL_AUDIO_TYPES = { ".mp3": "audio/mpeg", ".wav": "audio/wav", ".m4a": "audio/mp4", ".aac": "audio/aac", ".ogg": "audio/ogg", ".opus": "audio/ogg", ".flac": "audio/flac", ".webm": "audio/webm" };
+const MAX_AUDIO_FILE_BYTES = 25 * 1024 * 1024;
+const MAX_DOC_FILE_BYTES = 20 * 1024 * 1024;
+const MODEL_IMAGE_BYTES = Math.floor(3.5 * 1024 * 1024); // the AI models take pictures up to 3.75 MB
+const CHUNK_BYTES = 512 * 1024;
+const TEXT_WINDOW_CHARS = 18000;
+let lastBinary = null; // { key, kind, mime, buf }: the file being sent in pieces
+
+function localPath(given) {
+  let p = String(given || "").trim().replace(/^["']+|["']+$/g, "").replace(/^file:\/\/\/?/i, "");
+  p = p.replace(/%([^%]+)%/g, (m, name) => process.env[name] ?? m);
+  if (p === "~" || p.startsWith("~/") || p.startsWith("~\\")) p = path.join(require("node:os").homedir(), p.slice(1));
+  if (!p) throw new Error("path is empty. Give the full path of the file, like C:\\Users\\name\\Downloads\\photo.png");
+  if (!path.isAbsolute(p)) throw new Error(`"${p}" is not a full path. Give the full path, like C:\\Users\\name\\Downloads\\photo.png`);
+  return path.resolve(p);
+}
+
+const sizeText = (n) => (n >= 1048576 ? `${(n / 1048576).toFixed(1)} MB` : n >= 1024 ? `${Math.round(n / 1024)} KB` : `${n} bytes`);
+
+// Big PNG / JPEG pictures (and BMP, which the AI can't take) are made smaller with Electron's image tools
+function imageForModel(buf, ext) {
+  if (buf.length <= MODEL_IMAGE_BYTES && ext !== ".bmp") return { buf, mime: LOCAL_IMAGE_TYPES[ext] };
+  let nativeImage = null;
+  try { nativeImage = require("electron").nativeImage; } catch { /* not inside the app */ }
+  const img = nativeImage?.createFromBuffer ? nativeImage.createFromBuffer(buf) : null;
+  if (!img || img.isEmpty()) {
+    throw new Error(ext === ".bmp" ? "this BMP picture can't be opened here. Save it as PNG or JPG and try again." : `this picture is ${sizeText(buf.length)} and couldn't be made smaller to show it (pictures can be shown up to 3.5 MB, and only PNG and JPG pictures can be made smaller).`);
+  }
+  const { width, height } = img.getSize();
+  const scale = Math.min(1, 2000 / Math.max(width, height));
+  const small = scale < 1 ? img.resize({ width: Math.round(width * scale), height: Math.round(height * scale), quality: "good" }) : img;
+  const png = small.toPNG();
+  if (png.length <= MODEL_IMAGE_BYTES) return { buf: png, mime: "image/png" };
+  const jpg = small.toJPEG(85);
+  if (jpg.length <= MODEL_IMAGE_BYTES) return { buf: jpg, mime: "image/jpeg" };
+  throw new Error(`this picture is too big to show to the AI, even after making it smaller (${sizeText(jpg.length)}).`);
+}
+
+// One piece of the file being sent (lastBinary), as the backend asks for them
+function piece(bin, full, stat, chunk) {
+  const chunks = Math.max(1, Math.ceil(bin.buf.length / CHUNK_BYTES));
+  const n = Math.min(Math.max(0, Number(chunk) || 0), chunks - 1);
+  return { kind: bin.kind, mime: bin.mime, name: path.basename(full), path: full, size: stat.size, bytes: bin.buf.length, chunk: n, chunks, data: bin.buf.subarray(n * CHUNK_BYTES, (n + 1) * CHUNK_BYTES).toString("base64") };
+}
+
+function textWindow(text, label, start_line, end_line) {
+  const lines = text.split(/\r?\n/);
+  const start = Math.min(lines.length, Math.max(1, Number(start_line) || 1));
+  const last = Math.min(lines.length, Number(end_line) || lines.length);
+  const out = [];
+  let chars = 0;
+  for (let n = start; n <= last; n++) {
+    const line = `${n}: ${lines[n - 1]}`;
+    if (out.length && chars + line.length > TEXT_WINDOW_CHARS) break;
+    out.push(line.length > TEXT_WINDOW_CHARS ? line.slice(0, TEXT_WINDOW_CHARS) + " …" : line);
+    chars += line.length + 1;
+  }
+  const end = start + out.length - 1;
+  const more = end < lines.length ? ` To read more, call read_local_file again with start_line ${end + 1}.` : "";
+  return `${label} (lines ${start}-${end} of ${lines.length}).${more}\n${out.join("\n")}`;
+}
+
+async function readLocalFile({ path: given, start_line, end_line, chunk = 0 } = {}) {
+  const full = localPath(given);
+  let stat;
+  try { stat = fs.statSync(full); } catch { throw new Error(`there is no file or folder at ${full}`); }
+
+  if (stat.isDirectory()) {
+    let entries = [];
+    try { entries = fs.readdirSync(full, { withFileTypes: true }); } catch (e) { throw new Error(`the folder ${full} can't be opened (${e.code || e.message})`); }
+    entries.sort((a, b) => (b.isDirectory() - a.isDirectory()) || a.name.localeCompare(b.name));
+    const rows = entries.slice(0, 500).map((e) => {
+      if (e.isDirectory()) return `${e.name}\\`;
+      let size = "";
+      try { size = `  (${sizeText(fs.statSync(path.join(full, e.name)).size)})`; } catch { /* locked or gone */ }
+      return `${e.name}${size}`;
+    });
+    return { text: `${full} is a folder with ${entries.length} item${entries.length === 1 ? "" : "s"}${entries.length > 500 ? " (the first 500 are shown)" : ""}. Read a file in it with its full path.\n${rows.join("\n") || "(empty)"}` };
+  }
+  if (!stat.isFile()) throw new Error(`${full} is not a file`);
+
+  const ext = path.extname(full).toLowerCase();
+  if (LOCAL_VIDEO_TYPES.has(ext)) {
+    // The video's sound goes in pieces after its pictures (the pictures are taken once)
+    const key = `${full}|${stat.size}|${stat.mtimeMs}|sound`;
+    if (Number(chunk) > 0 && lastBinary?.key === key) return { text: `${full} (its sound)`, file: piece(lastBinary, full, stat, chunk) };
+    return readLocalVideo(full, stat, key);
+  }
+  const kind = LOCAL_IMAGE_TYPES[ext] ? "image" : LOCAL_DOC_TYPES[ext] ? "document" : LOCAL_AUDIO_TYPES[ext] ? "audio" : null;
+  if (kind) {
+    const max = kind === "image" ? MAX_IMAGE_FILE_BYTES : kind === "audio" ? MAX_AUDIO_FILE_BYTES : MAX_DOC_FILE_BYTES;
+    if (stat.size > max) throw new Error(`${full} is ${sizeText(stat.size)}; files like this can be read up to ${sizeText(max)}.`);
+    const key = `${full}|${stat.size}|${stat.mtimeMs}`;
+    if (!lastBinary || lastBinary.key !== key) {
+      const raw = fs.readFileSync(full);
+      if (!raw.length) throw new Error(`${full} is empty`);
+      const ready = kind === "image" ? imageForModel(raw, ext) : { buf: raw, mime: kind === "audio" ? LOCAL_AUDIO_TYPES[ext] : LOCAL_DOC_TYPES[ext] };
+      lastBinary = { key, kind, mime: ready.mime, buf: ready.buf };
+    }
+    return { text: `${full} (${sizeText(stat.size)})`, file: piece(lastBinary, full, stat, chunk) };
+  }
+
+  const fd = fs.openSync(full, "r");
+  let buf;
+  try {
+    buf = Buffer.alloc(Math.min(stat.size, MAX_FILE_BYTES));
+    fs.readSync(fd, buf, 0, buf.length, 0);
+  } finally {
+    fs.closeSync(fd);
+  }
+  if (buf.subarray(0, 8192).includes(0)) throw new Error(`${full} is not a text file (it looks like a program, archive or other binary file), so it can't be read as text.`);
+  const cut = stat.size > MAX_FILE_BYTES ? ` Only the first 2 MB of this ${sizeText(stat.size)} file can be read.` : "";
+  return { text: textWindow(buf.toString("utf8").replace(/^\uFEFF/, ""), `${full}${cut ? ` (${sizeText(stat.size)}, cut)` : ""}`, start_line, end_line) + (cut ? `\n[${cut.trim()}]` : "") };
+}
+
+// Videos: the app plays the video out of sight and takes pictures (frames) from across it, so the AI can see what
+// happens in it (no extra programs needed). The frames go to the AI one by one, and also as one sheet of all frames.
+const LOCAL_VIDEO_TYPES = new Set([".mp4", ".webm", ".mov", ".m4v", ".mkv", ".ogv"]);
+const VIDEO_FRAMES = 8;
+const SOUND_SECONDS = 600;
+const FRAME_WIDTH = 512;
+
+async function videoFrames(full) {
+  const { BrowserWindow, nativeImage } = require("electron");
+  const { pathToFileURL } = require("node:url");
+  const w = new BrowserWindow({ show: false, width: 960, height: 540, webPreferences: { offscreen: true, sandbox: true, contextIsolation: true, nodeIntegration: false, backgroundThrottling: false, webSecurity: false } });
+  w.webContents.setAudioMuted(true);
+  const timeout = (ms, what) => new Promise((_, no) => setTimeout(() => no(new Error(what)), ms));
+  try {
+    // A small page of our own that holds the video (a video file opened on its own doesn't load in a hidden window)
+    const page = path.join(require("node:os").tmpdir(), `classgrid-video-${process.pid}.html`);
+    fs.writeFileSync(page, `<!doctype html><meta charset="utf-8"><body><video preload="auto" muted src="${pathToFileURL(full).href}"></video></body>`);
+    await Promise.race([w.loadFile(page), timeout(20000, "the video took too long to open")]);
+    const meta = await Promise.race([w.webContents.executeJavaScript(`new Promise((ok) => {
+      const v = document.querySelector("video");
+      if (!v) return ok({ error: "no video" });
+      v.pause(); v.muted = true; v.controls = false;
+      document.body.style.cssText = "margin:0;background:#000;overflow:hidden";
+      v.style.cssText = "position:fixed;inset:0;width:100vw;height:100vh;object-fit:contain;max-width:none;max-height:none;margin:0";
+      const done = () => ok({ duration: v.duration, width: v.videoWidth, height: v.videoHeight });
+      if (v.readyState >= 1) done(); else { v.addEventListener("loadedmetadata", done, { once: true }); v.addEventListener("error", () => ok({ error: "format" }), { once: true }); }
+    })`), timeout(20000, "the video took too long to open")]);
+    if (meta.error || !(meta.duration > 0) || !meta.width) throw new Error("this video's format can't be played here (MP4 and WebM work best). Ask the user to save it as MP4, or describe it.");
+    const ratio = meta.width / meta.height;
+    const h = Math.round(Math.min(720, 1280 / ratio));
+    w.setContentSize(Math.round(h * ratio), h);
+    const times = Array.from({ length: VIDEO_FRAMES }, (_, i) => Math.min(meta.duration - 0.05, (meta.duration * (i + 0.5)) / VIDEO_FRAMES));
+    const frames = [];
+    for (const t of times) {
+      await Promise.race([w.webContents.executeJavaScript(`new Promise((ok) => { const v = document.querySelector("video"); v.addEventListener("seeked", () => requestAnimationFrame(() => requestAnimationFrame(ok)), { once: true }); v.currentTime = ${t}; })`), timeout(10000, "the video couldn't be stepped through")]);
+      await wait(120);
+      const img = await w.webContents.capturePage();
+      if (img.isEmpty()) continue;
+      const small = img.resize({ width: FRAME_WIDTH, quality: "good" });
+      frames.push({ at: t, jpg: small.toJPEG(70) });
+    }
+    if (!frames.length) throw new Error("no pictures could be taken from this video");
+    // All frames on one sheet (for models that look at one picture through a link)
+    const sheet = await w.webContents.executeJavaScript(`new Promise((ok) => {
+      const srcs = ${JSON.stringify(frames.map((f) => "data:image/jpeg;base64," + f.jpg.toString("base64")))};
+      const cols = 4, rows = Math.ceil(srcs.length / cols), cw = 320;
+      const imgs = srcs.map((s) => { const i = new Image(); i.src = s; return i; });
+      Promise.all(imgs.map((i) => i.decode())).then(() => {
+        const ch = Math.round(cw * imgs[0].naturalHeight / imgs[0].naturalWidth);
+        const c = document.createElement("canvas"); c.width = cols * cw; c.height = rows * ch;
+        const x = c.getContext("2d"); x.fillStyle = "#000"; x.fillRect(0, 0, c.width, c.height);
+        imgs.forEach((im, i) => x.drawImage(im, (i % cols) * cw, Math.floor(i / cols) * ch, cw, ch));
+        ok(c.toDataURL("image/jpeg", 0.7).split(",")[1]);
+      }).catch(() => ok(""));
+    })`).catch(() => "");
+    // Its sound, as 16 kHz mono WAV (what speech-to-text wants), up to the first 10 minutes
+    const wav = await Promise.race([w.webContents.executeJavaScript(`new Promise((ok) => {
+      const x = new XMLHttpRequest(); x.open("GET", document.querySelector("video").src); x.responseType = "arraybuffer";
+      x.onerror = () => ok(""); x.onload = async () => {
+        try {
+          const RATE = 16000, MAX = ${SOUND_SECONDS};
+          const ctx = new OfflineAudioContext(1, 1, RATE);
+          const decoded = await ctx.decodeAudioData(x.response);
+          const secs = Math.min(decoded.duration, MAX);
+          const off = new OfflineAudioContext(1, Math.ceil(secs * RATE), RATE);
+          const src = off.createBufferSource(); src.buffer = decoded; src.connect(off.destination); src.start();
+          const pcm = (await off.startRendering()).getChannelData(0);
+          let peak = 0; for (let i = 0; i < pcm.length; i += 50) peak = Math.max(peak, Math.abs(pcm[i]));
+          if (peak < 0.003) return ok("silent");
+          const out = new DataView(new ArrayBuffer(44 + pcm.length * 2));
+          const str = (o, t) => { for (let i = 0; i < t.length; i++) out.setUint8(o + i, t.charCodeAt(i)); };
+          str(0, "RIFF"); out.setUint32(4, 36 + pcm.length * 2, true); str(8, "WAVEfmt "); out.setUint32(16, 16, true);
+          out.setUint16(20, 1, true); out.setUint16(22, 1, true); out.setUint32(24, RATE, true); out.setUint32(28, RATE * 2, true);
+          out.setUint16(32, 2, true); out.setUint16(34, 16, true); str(36, "data"); out.setUint32(40, pcm.length * 2, true);
+          for (let i = 0; i < pcm.length; i++) out.setInt16(44 + i * 2, Math.max(-1, Math.min(1, pcm[i])) * 0x7fff, true);
+          const bytes = new Uint8Array(out.buffer); let bin = "";
+          for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+          ok(btoa(bin));
+        } catch { ok(""); }
+      };
+      x.send();
+    })`), wait(60000).then(() => "")]).catch(() => "");
+    return { meta, frames, sheet, sound: wav === "silent" ? "silent" : wav ? Buffer.from(wav, "base64") : null };
+  } finally {
+    if (!w.isDestroyed()) w.destroy();
+  }
+}
+
+const clock = (s) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, "0")}`;
+async function readLocalVideo(full, stat, key) {
+  const { meta, frames, sheet, sound } = await videoFrames(full);
+  const heard = sound === "silent" ? " It has no sound (or only silence)." : sound ? "" : " Its sound couldn't be taken out.";
+  const out = {
+    text: `Video ${full} (${sizeText(stat.size)}, ${clock(meta.duration)} long, ${meta.width}x${meta.height}). ${frames.length} pictures taken from across the whole video are attached below, in order, at ${frames.map((f) => clock(f.at)).join(", ")}. Look at them yourself and describe what happens.${heard}`,
+    video: { frames: frames.map((f) => f.jpg.toString("base64")), sheet },
+  };
+  if (Buffer.isBuffer(sound)) {
+    lastBinary = { key, kind: "audio", mime: "audio/wav", buf: sound };
+    out.file = piece(lastBinary, full, stat, 0);
+  }
+  return out;
+}
+
+const anywhereTools = { read_local_file: readLocalFile };
+
 // The terminal in a chat that isn't a project: runs on this computer in the user's home folder (each command is allowed
 // by the user first)
 const COMPUTER_TOOLS = new Set(["execute_terminal_command", "start_background_command", "check_background_command", "stop_background_command"]);
@@ -257,6 +485,10 @@ function connect(token) {
       if (tool === "browser" && browserStep) {
         console.log("[runner] browser", args.action);
         return ack({ text: "ok", browser: await browserStep(args) });
+      }
+      if (anywhereTools[tool]) {
+        console.log("[runner] tool", tool, args.path, args.chunk ? `piece ${args.chunk}` : "");
+        return ack(await anywhereTools[tool](args));
       }
       if (!root && COMPUTER_TOOLS.has(tool)) {
         console.log("[runner] computer", tool);
@@ -315,6 +547,7 @@ function readForFilesTab(root, rel) {
 }
 
 module.exports = {
+  readLocalFile,
   listForFilesTab,
   readForFilesTab,
   init(userDataDir) { foldersFile = path.join(userDataDir, "folders.json"); },
