@@ -795,6 +795,8 @@ const userSchema = new mongoose.Schema(
     archived_chat_ids: { type: [String], default: [] },
     // Studio chats sent with no project open: listed in Studio, not in Agent mode
     studio_chat_ids: { type: [String], default: [] },
+    // Chats of work from WhatsApp (calls and messages): listed only in Studio (under their project), not in Agent or Project Mode
+    call_chat_ids: { type: [String], default: [] },
     ai_preferences: {
       tone: { type: String, default: 'balanced' },
       verbosity: { type: String, default: 'balanced' },

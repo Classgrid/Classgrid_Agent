@@ -2113,6 +2113,10 @@ You are currently talking to Nikhil Shinde (nikhil.shinde@classgrid.in), the CRE
             // Studio with no project open: the chat is kept in Studio's own chat list
             await User.updateOne({ _id: req.user._id }, { $addToSet: { studio_chat_ids: sessionId } }).catch(() => {});
         }
+        // Work from WhatsApp (calls and messages): its chat is listed only in Studio (owner, 2026-11-02)
+        if (sessionId && !isIncognito && body.taskOrigin === "whatsapp" && req.user?._id) {
+            await User.updateOne({ _id: req.user._id }, { $addToSet: { call_chat_ids: sessionId } }).catch(() => {});
+        }
         const projectContext = sessionId && !isIncognito ? await editorContextFor(sessionId).catch(() => "") : "";
         const whereProject = sessionId && !isIncognito && body.taskOrigin !== "whatsapp" ? await projectForChat(sessionId).then((p) => inChatWorktree(p, sessionId)).catch(() => null) : null;
         let whereYouWork = whereYouWorkRule({ desktop: body.clientApp === "desktop", project: whereProject, task: !!body.taskOrigin });
@@ -2143,7 +2147,7 @@ The user is in ${appMode === "agent" ? "Agent mode" : appMode === "project" ? "P
         volatilePrompt += "\n\nPUSH MEANS GITHUB: when the user says push (push it, push the code, push to git), push the code to GitHub: push_project_to_github in a project, or git add, commit and push in the terminal. Never deploy to Vercel (or anywhere else) for a push, and never suggest Vercel instead. Deploy to Vercel only when the user clearly asks to deploy, publish a website, or names Vercel.";
         // Where the user is: the website or the Classgrid desktop app (sent by the app; your own thinking always runs on our servers)
         if (body.clientApp === "desktop") volatilePrompt += `\n\n--- TERMINAL GUIDE (how to run commands on the user's computer; follow it exactly) ---\n${await desktopTerminalGuide()}`;
-        if (body.clientApp === "desktop") volatilePrompt += "\n\n--- WHERE THE USER IS ---\nThe user is using the Classgrid desktop app on their own computer (Windows), not the chat.classgrid.in website. The app's screens run on their computer; your thinking runs on Classgrid's servers. Projects opened from a folder on their computer run your file and terminal tools on that computer. In any chat, to look at a file or folder on this computer (a path like C:\\Users\\name\\Videos\\clip.mp4, or one they ask about), use read_local_file: pictures and videos are shown to you (a video as pictures from across it), PDF, Word, Excel and PowerPoint files come back as their text (a scanned PDF as pictures of its pages), and a folder shows its files; the file also opens beside the chat for the user. In a chat that isn't a project, execute_terminal_command and the background command tools run a real terminal on this computer (PowerShell; Bash through bash -lc '...' when Git Bash is installed), starting in the user's home folder. Do everything on the computer with it, like a developer in their own terminal: list folders (Get-ChildItem), read files (Get-Content), search (Select-String), create, edit, move, copy or delete files and folders, and run programs. To create a file use write_project_file, to change one use edit_project_file, to search inside files use search_project, and to list a folder (or find files by name) use list_project_files, all with full paths. For anything else, use the terminal. To read a document with code, use Python in the terminal: install the readers once with python -m pip install --quiet --disable-pip-version-check pypdf openpyxl python-docx python-pptx (if Python isn't there, install it with winget install -e --id Python.Python.3.12 --accept-package-agreements --accept-source-agreements, then use py), then print its text with a short python -c script. Always write a file's full path in the command: the app then opens that file beside the chat for the user (PDF pages, sheets, Word pages, pictures, text). The app asks the user to allow each command first, so just run it; never say you can't open or change files on their computer.\nIn the desktop app your browser (browser_open and the other browser tools) runs on the user's computer, with their internet, so it can open their own local servers like http://localhost:3000.";
+        if (body.clientApp === "desktop") volatilePrompt += "\n\n--- WHERE THE USER IS ---\nThe user is using the Classgrid desktop app on their own computer (Windows), not the chat.classgrid.in website. The app's screens run on their computer; your thinking runs on Classgrid's servers. Projects opened from a folder on their computer run your file and terminal tools on that computer. In any chat, to look at a file or folder on this computer (a path like C:\\Users\\name\\Videos\\clip.mp4, or one they ask about), use read_local_file: pictures and videos are shown to you (a video as pictures from across it), PDF, Word, Excel and PowerPoint files come back as their text (a scanned PDF as pictures of its pages), and a folder shows its files; the file also opens beside the chat for the user. In a chat that isn't a project, execute_terminal_command and the background command tools run a real terminal on this computer (PowerShell; Bash through bash -lc '...' when Git Bash is installed), starting in the user's home folder. Do everything on the computer with it, like a developer in their own terminal: list folders (Get-ChildItem), read files (Get-Content), search (Select-String), create, edit, move, copy or delete files and folders, and run programs. To create a file use write_project_file, to change one use edit_project_file, to search inside files use search_project, and to list a folder (or find files by name) use list_project_files, all with full paths. For anything else, use the terminal. To read a document with code, use Python in the terminal: install the readers once with python -m pip install --quiet --disable-pip-version-check pypdf openpyxl python-docx python-pptx (if Python isn't there, install it with winget install -e --id Python.Python.3.12 --accept-package-agreements --accept-source-agreements, then use py), then print its text with a short python -c script. Always write a file's full path in the command: the app then opens that file beside the chat for the user (PDF pages, sheets, Word pages, pictures, text). The app asks the user to allow each command first, so just run it; never say you can't open or change files on their computer.\nA link to a file or folder on this computer is its full path, written in backticks (like \`C:\\Users\\name\\Desktop\\report.pdf\`): the app shows it as a link the user clicks to open it. When the user asks for links to files on this computer, find them with the terminal or list_project_files and give their full paths. Never upload files on this computer to the CDN: there is no upload tool here, and the CDN upload instructions are only for files made in the cloud sandbox.\nIn the desktop app your browser (browser_open and the other browser tools) runs on the user's computer, with their internet, so it can open their own local servers like http://localhost:3000.";
         else if (body.clientApp === "web") volatilePrompt += "\n\n--- WHERE THE USER IS ---\nThe user is using Classgrid on the website (chat.classgrid.in) in their browser, not the desktop app.";
         if (slashCommand && (slashCommand !== "compact" || compacted)) volatilePrompt += `\n\n--- COMMAND ---\nThe user started this message with /${body.command}. ${SLASH_COMMAND_LINES[slashCommand]}`;
         if (thinking === "low") volatilePrompt += "\n\n--- SPEED ---\nThe user picked Fast: answer quickly and keep it short. Don't plan at length or double-check things that are clearly right; use as few steps as the task needs.";
@@ -5782,9 +5786,10 @@ If a tool fails, never show the error message; say only: "Something went wrong o
             };
         }
         // Desktop app, on the user's computer (no project, or a folder project): the cloud sandbox tools are taken away
-        // and run_code says it runs on their computer, so the AI never reaches for the sandbox
+        // and run_code says it runs on their computer, so the AI never reaches for the sandbox. No CDN upload either:
+        // a link to a file on this computer is its path (owner, 2026-11-02)
         if (onComputer || chatProject?.location === "local") {
-            const SANDBOX_ONLY = new Set(["read_sandbox_file", "upload_sandbox_file_to_cdn", "deploy_to_classgrid_cloud"]);
+            const SANDBOX_ONLY = new Set(["read_sandbox_file", "upload_sandbox_file_to_cdn", "deploy_to_classgrid_cloud", "upload_file_to_cdn"]);
             for (const list of [fullToolList, activeToolList]) {
                 for (let i = list.length - 1; i >= 0; i--) if (SANDBOX_ONLY.has(list[i].function.name)) list.splice(i, 1);
             }
@@ -6657,14 +6662,18 @@ export const getChatSessions = async (req, res) => {
         // project, ?project=<id> shows only that project's chats (the user's own projects only). No query = all.
         const { mode, project } = req.query || {};
         // Studio chats sent with no project open (kept out of Agent mode, listed in Studio with ?studio=1)
-        const me = await User.findById(req.user._id).select("archived_chat_ids studio_chat_ids").lean().catch(() => null);
+        const me = await User.findById(req.user._id).select("archived_chat_ids studio_chat_ids call_chat_ids").lean().catch(() => null);
         const studioIds = me?.studio_chat_ids || [];
+        // Chats of work from WhatsApp calls and messages: only in Studio's list
+        const callIds = new Set(me?.call_chat_ids || []);
         if (mode === "agent" || project) {
             const IdeProject = (await import("../models/IdeProject.js")).default;
             if (project === "all") {
                 // Projects page with no project open: the chats of all the user's projects
                 const ps = await IdeProject.find({ owner: req.user._id }).select("chatSessionIds name logo").lean();
-                const ids = new Set([...ps.flatMap((x) => x.chatSessionIds || []), ...(req.query?.studio === "1" ? studioIds : [])]);
+                const inStudio = req.query?.studio === "1";
+                const ids = new Set([...ps.flatMap((x) => x.chatSessionIds || []), ...(inStudio ? [...studioIds, ...callIds] : [])]);
+                if (!inStudio) for (const id of callIds) ids.delete(id);
                 // Each chat says its project, so Studio can list the chats under their projects
                 const owner = new Map(ps.flatMap((x) => (x.chatSessionIds || []).map((id) => [id, x])));
                 sessions = (sessions || []).filter((s) => ids.has(s.id)).map((s) => {
@@ -6674,10 +6683,10 @@ export const getChatSessions = async (req, res) => {
             } else if (project) {
                 const p = /^[0-9a-f]{24}$/i.test(String(project)) ? await IdeProject.findOne({ _id: project, owner: req.user._id }).select("chatSessionIds").lean() : null;
                 const ids = new Set(p?.chatSessionIds || []);
-                sessions = (sessions || []).filter((s) => ids.has(s.id));
+                sessions = (sessions || []).filter((s) => ids.has(s.id) && !callIds.has(s.id));
             } else {
                 const ps = await IdeProject.find({ owner: req.user._id }).select("chatSessionIds").lean();
-                const ids = new Set([...ps.flatMap((x) => x.chatSessionIds || []), ...studioIds]);
+                const ids = new Set([...ps.flatMap((x) => x.chatSessionIds || []), ...studioIds, ...callIds]);
                 sessions = (sessions || []).filter((s) => !ids.has(s.id));
             }
         }
