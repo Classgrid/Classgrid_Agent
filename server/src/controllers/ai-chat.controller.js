@@ -5342,7 +5342,13 @@ If a tool fails, never show the error message; say only: "Something went wrong o
                 const inProject = llmConfig.toolHandlers[name];
                 if (!inProject) continue;
                 llmConfig.toolHandlers[name] = async (args, ...rest) => {
-                    if (!outside(args?.path)) return inProject(args, ...rest);
+                    if (!outside(args?.path)) {
+                        // A full path inside the project folder becomes the project-relative path the project tools take
+                        const given = String(args?.path || "").trim().replace(/^["']+|["']+$/g, "");
+                        const full = given.replace(/\//g, "\\");
+                        if (/^[a-z]:\\/i.test(full) && full.toLowerCase().startsWith(root)) args = { ...args, path: full.slice(root.length).replace(/^[\\]+/, "").replace(/\\/g, "/") || "." };
+                        return inProject(args, ...rest);
+                    }
                     if (body.permissionMode !== "turbo") {
                         const p = await askPermission({ ...permissionCtx, mode: PERMISSION_MODES.has(body.permissionMode) ? body.permissionMode : "review", tool: askAs, args });
                         if (!p.allowed) return p.message;
