@@ -290,6 +290,14 @@ async function handleDeepLink(link) {
     win.webContents.executeJavaScript(`window.dispatchEvent(new CustomEvent("classgrid:payment", { detail: ${JSON.stringify(status)} }))`).catch(() => {});
     return;
   }
+  // classgrid://github-app: the Classgrid app was installed on GitHub in the browser; bring the app back (Project Mode
+  // checks the install again when the window comes forward)
+  if (url.hostname === "github-app") {
+    if (win.isMinimized()) win.restore();
+    win.show();
+    win.focus();
+    return;
+  }
   if (url.hostname !== "login") return;
   const code = url.searchParams.get("code") || "";
   try {

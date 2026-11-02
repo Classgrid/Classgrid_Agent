@@ -8,12 +8,22 @@ const router = express.Router();
 const REPO_NAME = /^[A-Za-z0-9._-]+\/[A-Za-z0-9._-]+$/;
 
 // Is the Classgrid app installed on this repo? (Project Mode asks before letting the AI push)
+// The desktop app (its screens are served at localhost:47821) asks GitHub to bring the user back to the app after
+// installing: GitHub passes "state" on to /installed
+const fromDesktop = (req) => /^http:\/\/(127\.0\.0\.1|localhost):47821$/.test(String(req.headers.origin || ""));
+const installUrlFor = (req) => (fromDesktop(req) ? `${githubAppInstallUrl()}?state=desktop` : githubAppInstallUrl());
+const DESKTOP_DONE_PAGE = `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Classgrid app installed</title>
+<style>body{margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;font-family:system-ui,-apple-system,Segoe UI,sans-serif;background:#fff;color:#111}@media (prefers-color-scheme:dark){body{background:#121212;color:#eee}a{color:#111;background:#eee}}
+.box{text-align:center;padding:24px;max-width:420px}h1{font-size:20px;margin:0 0 8px}p{margin:0 0 20px;color:#666}a{display:inline-block;padding:10px 18px;border-radius:999px;background:#111;color:#fff;text-decoration:none;font-weight:600}</style></head>
+<body><div class="box"><h1>Classgrid app installed on GitHub</h1><p>You can go back to the Classgrid app and close this tab.</p><a href="classgrid://github-app?installed=1">Open the Classgrid app</a></div>
+<script>setTimeout(function(){location.href="classgrid://github-app?installed=1"},600)</script></body></html>`;
+
 router.get("/status", isAuthenticated, async (req, res) => {
   const repo = String(req.query.repo || "");
   if (!REPO_NAME.test(repo)) return res.status(400).json({ error: "Pick a repo" });
   if (!githubAppReady()) return res.json({ ready: false, installed: false });
   const installed = !!(await repoAppToken(repo).catch(() => null));
-  res.json({ ready: true, installed, installUrl: githubAppInstallUrl() });
+  res.json({ ready: true, installed, installUrl: installUrlFor(req) });
 });
 
 // Has the user's GitHub account installed the Classgrid app at all? (the Projects page card)
@@ -21,7 +31,7 @@ router.get("/info", isAuthenticated, async (req, res) => {
   if (!githubAppReady()) return res.json({ ready: false, installed: false });
   const login = String(req.query.login || "");
   const installed = /^[A-Za-z0-9-]{1,39}$/.test(login) ? await accountHasApp(login).catch(() => false) : false;
-  res.json({ ready: true, installed, installUrl: githubAppInstallUrl() });
+  res.json({ ready: true, installed, installUrl: installUrlFor(req) });
 });
 
 // Push / Actions / check results the app heard for a repo, newest first
@@ -33,6 +43,8 @@ router.get("/events", isAuthenticated, async (req, res) => {
 
 // GitHub's "Setup URL": after installing the app, the user goes straight back into Project Mode
 router.get("/installed", (req, res) => {
+  // Installed from the desktop app: GitHub hands back our "desktop" note, and the browser opens the app again
+  if (req.query.state === "desktop") return res.type("html").send(DESKTOP_DONE_PAGE);
   res.redirect("https://chat.classgrid.in/c/project?github_app=installed");
 });
 
