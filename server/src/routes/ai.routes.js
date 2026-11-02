@@ -81,6 +81,7 @@ import {
 import { streamAskAi, clientToolResult, getWorkingChats, getChatSessions, getChatSession, getChatSessionMessages, uploadChatImage, updateChatSession, archiveChatSession, deleteChatSession, shareChatSession, reopenChatSession, createPublicShare, getPublicShare, submitAiFeedback, getAgentReviews, updateAgentReviewStatus, processAgentReviewsCron, deleteAgentReview, bulkDeleteAgentReviews, generateImage, getMyGeneratedImages, deleteGeneratedImage, getMyUsage, getOrgUsage, getSkills, createSkill, updateSkill, deleteSkill, getPreferences, updatePreferences } from "../controllers/ai-chat.controller.js";
 
 import { getFavicon } from "../controllers/ai-favicon.controller.js";
+import { importChatSession } from "../controllers/ai-chat-import.controller.js";
 import { listStudioShots } from "../services/studio-browser-tools.js";
 import { answerPermission } from "../services/permission-gate.js";
 import { getMarket } from "../controllers/ai-widgets.controller.js";
@@ -190,6 +191,8 @@ router.get("/my-token-activity", isAuthenticated, async (req, res) => {
 
 // Chat History & Sessions
 router.get("/sessions", isAuthenticated, getChatSessions);
+// Desktop app: a chat saved on this computer by another account goes on under this account
+router.post("/sessions/import", isAuthenticated, importChatSession);
 router.get("/working", isAuthenticated, getWorkingChats);
 router.get("/sessions/:id", isAuthenticated, getChatSession);
 router.get("/sessions/:id/messages", isAuthenticated, getChatSessionMessages);

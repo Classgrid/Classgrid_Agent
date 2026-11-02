@@ -44,6 +44,12 @@ const ideProjectSchema = new mongoose.Schema(
     // "local": a folder on the user's own computer, run by the Classgrid desktop app (services/local-runner.service.js)
     location: { type: String, enum: ["cloud", "local"], default: "cloud" },
     localPath: { type: String, default: null }, // that folder, as the desktop app reported it (shown only)
+    // A cloud project's copies on the user's computers (one per desktop app, by its deviceId), kept in step with the
+    // cloud through GitHub. here: the user picked "On this computer" there, so that app's chats run in this copy.
+    localCopies: {
+      type: [{ _id: false, deviceId: { type: String, required: true }, path: { type: String, required: true }, at: { type: Date, default: Date.now }, here: { type: Boolean, default: true } }],
+      default: [],
+    },
   },
   { timestamps: true }
 );

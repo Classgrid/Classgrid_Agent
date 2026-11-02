@@ -42,6 +42,7 @@ import Organization from "../models/Organization.js";
 import GlobalAiConfig from "../models/GlobalAiConfig.js";
 import { enqueueEmail } from "./email-queue.service.js";
 import { resetPeriodMs } from "./ai-feature-limits.js";
+import redis from "../config/redis.js";
 import { getGrantedCreditsLowEmailHtml, getTopUpCreditsLowEmailHtml, getFreeLimitsExhaustedEmailHtml, getGrantedCreditsExhaustedEmailHtml, getTopUpCreditsExhaustedEmailHtml } from "./email-templates.service.js";
 
 
@@ -90,6 +91,36 @@ export function resolveWeeklyLimit(user, org, globalConfig, orgId = org?._id) {
         weeklyLimit = user.ai_tokens.free_weekly_limit;
     }
     return weeklyLimit;
+}
+
+// One computer, one free limit (desktop app): the free tokens used by every account on the same Windows computer
+// count together, so making more accounts doesn't give more free usage. Paid and granted credits are not affected.
+// The app sends the computer's scrambled Windows ID; an account stays tied to its last computer for 90 days.
+const DEVICE_DAYS = 90 * 24 * 3600;
+const deviceOf = (userId) => `aidevice:user:${userId}`;
+const deviceFree = (device) => `aidevice:free:${device}`;
+export async function rememberDevice(userId, device) {
+    if (!userId || !/^[a-f0-9]{64}$/.test(String(device || ""))) return;
+    await redis.multi()
+        .set(deviceOf(userId), device, "EX", DEVICE_DAYS)
+        .sadd(`aidevice:accounts:${device}`, String(userId))
+        .expire(`aidevice:accounts:${device}`, DEVICE_DAYS)
+        .exec().catch(() => {});
+}
+// Free tokens used on this account's computer in the current period (null: no computer known)
+async function deviceFreeUsed(userId) {
+    const device = await redis.get(deviceOf(userId)).catch(() => null);
+    if (!device) return null;
+    const d = await redis.hgetall(deviceFree(device)).catch(() => null);
+    return Number(d?.end) > Date.now() ? Number(d.used) || 0 : 0;
+}
+async function addDeviceFree(userId, tokens, periodMs) {
+    const device = await redis.get(deviceOf(userId)).catch(() => null);
+    if (!device || !(tokens > 0)) return;
+    const key = deviceFree(device);
+    const d = await redis.hgetall(key).catch(() => null);
+    if (!(Number(d?.end) > Date.now())) await redis.multi().hset(key, "used", 0, "end", Date.now() + periodMs).pexpire(key, periodMs + 86400000).exec().catch(() => {});
+    await redis.hincrby(key, "used", Math.round(tokens)).catch(() => {});
 }
 
 export const hasEnoughTokens = async (userId, orgId, requiredTokens = 1, { paidOnly = false } = {}) => {
@@ -173,13 +204,16 @@ export const hasEnoughTokens = async (userId, orgId, requiredTokens = 1, { paidO
             .catch(e => console.error("Reset date update error:", e));
     }
 
-    if (usedThisWeek + requiredTokens <= weeklyLimit) {
+    // The free limit is shared by all accounts on the same computer
+    const usedOnComputer = await deviceFreeUsed(userId);
+    const freeLeft = Math.min(weeklyLimit - usedThisWeek, usedOnComputer === null ? Infinity : weeklyLimit - usedOnComputer);
+    if (requiredTokens <= freeLeft) {
         // spendable: what one answer may use in total. deductTokens spills free-pool overflow into the first
         // credit pool, so that pool's balance counts too (the live token check during an answer stops at this number).
         const spill = pickCreditSource(user);
         const t = user.ai_tokens || {};
         const spillBalance = spill === "promotion" ? (t.promotion_credits_balance || 0) : spill === "personal" ? (t.ai_credits_balance || 0) : 0;
-        return { allowed: true, source: "weekly_free", remaining: weeklyLimit - usedThisWeek, spendable: weeklyLimit - usedThisWeek + spillBalance };
+        return { allowed: true, source: "weekly_free", remaining: freeLeft, spendable: freeLeft + spillBalance };
     }
 
     // 3. FIFO LOGIC: Determine which came FIRST between Top-Up (Paid) and Granted (Promotion)
@@ -216,7 +250,7 @@ export const hasEnoughTokens = async (userId, orgId, requiredTokens = 1, { paidO
 
     // No single pool covers it, but the pools together may: the free pool spills over into the first credit pool
     // when it runs out (see deductTokens), so free headroom + that pool's balance counts.
-    const freeHeadroom = Math.max(0, weeklyLimit - usedThisWeek);
+    const freeHeadroom = Math.max(0, freeLeft);
     const spillSource = pickCreditSource(user);
     const spillBalance = spillSource === "promotion" ? promoBalance : spillSource === "personal" ? paidBalance : 0;
     if (freeHeadroom > 0 && freeHeadroom + spillBalance >= requiredTokens) {
@@ -370,10 +404,12 @@ export const deductTokens = async (userId, orgId, tokenAmount, source) => {
             // Free tier, with the same dashboard limit the pre-request check uses.
             const user = await User.findById(userId).select("ai_tokens");
             const org = orgId ? await Organization.findById(orgId).select("ai_config").lean() : null;
-            const globalConfig = await GlobalAiConfig.findOne({ key: "singleton" }).select("global_user_weekly_limit classgrid_custom_limits_enabled classgrid_user_weekly_limit").lean() || {};
+            const globalConfig = await GlobalAiConfig.findOne({ key: "singleton" }).select("global_user_weekly_limit classgrid_custom_limits_enabled classgrid_user_weekly_limit global_token_reset_value global_token_reset_unit classgrid_token_reset_value classgrid_token_reset_unit").lean() || {};
             const weeklyLimit = resolveWeeklyLimit(user, org, globalConfig, orgId);
             const currentUsed = user?.ai_tokens?.used_this_week || 0;
-            const headroom = Math.max(0, weeklyLimit - currentUsed);
+            // The free limit is shared by all accounts on the same computer
+            const usedOnComputer = await deviceFreeUsed(userId);
+            const headroom = Math.max(0, Math.min(weeklyLimit - currentUsed, usedOnComputer === null ? Infinity : weeklyLimit - usedOnComputer));
             const actualDeduction = Math.min(tokenAmount, headroom);
             const overflow = tokenAmount - actualDeduction;
 
@@ -385,6 +421,7 @@ export const deductTokens = async (userId, orgId, tokenAmount, source) => {
                     }
                 }, { returnDocument: 'after' });
                 result = { success: true, remaining: Math.max(0, weeklyLimit - updatedUser.ai_tokens.used_this_week), limit: weeklyLimit, type: "free" };
+                await addDeviceFree(userId, actualDeduction, resetPeriodMs("tokens", org, globalConfig, orgId));
                 triggerEmailAlerts(userId, orgId, "free", headroom, result.remaining, weeklyLimit);
             } else {
                 result = { success: true, remaining: 0, limit: weeklyLimit, type: "free" };

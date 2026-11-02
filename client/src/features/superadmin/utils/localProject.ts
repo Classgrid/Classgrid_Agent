@@ -11,9 +11,13 @@ const desktop = () => (window as unknown as { classgridDesktop?: DesktopFiles })
 export function localFolderOf(projectId: string | null | undefined): string | null {
   if (!projectId) return null;
   try {
-    const list = JSON.parse(localStorage.getItem("cg_studio_projects") || "[]") as { id: string; location?: string; localPath?: string | null }[];
+    const list = JSON.parse(localStorage.getItem("cg_studio_projects") || "[]") as { id: string; location?: string; localPath?: string | null; localCopies?: { deviceId: string; path: string; here?: boolean }[] }[];
     const p = list.find((x) => x.id === projectId);
-    return p?.location === "local" ? p.localPath || null : null;
+    if (p?.location === "local") return p.localPath || null;
+    // A cloud project set to "On this computer" in this desktop app: its copy here
+    const device = (window as unknown as { classgridDesktop?: { deviceId?: string } }).classgridDesktop?.deviceId;
+    const copy = device ? (p?.localCopies || []).find((c) => c.deviceId === device && c.here) : null;
+    return copy?.path || null;
   } catch {
     return null;
   }

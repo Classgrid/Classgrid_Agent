@@ -36,6 +36,7 @@ import ChatGroup from "../models/ChatGroup.js";
 import { githubUser } from "../services/github-token.service.js";
 import { pushProject, openClassgridPrBranch, revealInEditor, checkpointChanges, rejectCheckpoint, undoToCheckpoint, backupAndRemoveProjectCode, touchStudio, STUDIO_USERS, STUDIO_SEEN, STUDIO_IDLE_MS } from "../services/ide-project.service.js";
 import { repoAppToken } from "../services/github-app.service.js";
+import { callLocal, runnerOnline } from "../services/local-runner.service.js";
 import mongoose from "mongoose";
 import connectDB from "../../config/db.js";
 import redis from "../config/redis.js";
@@ -266,7 +267,7 @@ async function ownProject(req, res) {
   return project;
 }
 
-const projectJson = (p) => ({ id: p._id, name: p.name, repo: p.repo, logo: p.logo || null, location: p.location || "cloud", localPath: p.localPath || null, lastOpenedAt: p.lastOpenedAt, createdAt: p.createdAt, updatedAt: p.updatedAt });
+const projectJson = (p) => ({ id: p._id, name: p.name, repo: p.repo, logo: p.logo || null, location: p.location || "cloud", localPath: p.localPath || null, localCopies: (p.localCopies || []).map((c) => ({ deviceId: c.deviceId, path: c.path, at: c.at, here: !!c.here })), lastOpenedAt: p.lastOpenedAt, createdAt: p.createdAt, updatedAt: p.updatedAt });
 
 // A project logo must be a picture this user uploaded to our R2 (same upload as the profile picture).
 // Returns the link, null to remove the logo, or undefined when the link is not allowed.
@@ -502,6 +503,16 @@ router.post("/projects/:id/open", isAuthenticated, async (req, res) => {
   if (!project) return;
   // A folder on the user's computer has nothing to download here: the desktop app works on it directly
   if (project.location === "local") return res.json({ ok: true, local: true, localPath: project.localPath });
+  // The desktop app on a computer where this project is set to "On this computer": it opens there, with the latest from GitHub
+  const copy = req.body?.deviceId && project.repo ? copyOn(project, String(req.body.deviceId)) : null;
+  if (copy?.here) {
+    const ready = await readyForCopy(req, res);
+    if (!ready) return;
+    return openCopyHere(res, project, copy, ready).catch((e) => {
+      console.error("[IDE] Opening the computer copy failed:", e.message);
+      res.status(500).json({ error: "Could not open this project on this computer" });
+    });
+  }
   const dir = projectDir(project);
   let ssh;
   try {
@@ -793,6 +804,248 @@ router.post("/projects/:id/push", isAuthenticated, async (req, res) => {
     res.status(500).json({ error: "Could not push to GitHub" });
   } finally {
     ssh?.dispose();
+  }
+});
+
+// ── One project in both places: the cloud and a copy on the user's computer ──────────────────────────────────
+// A cloud project can also have a copy on each of the user's computers (localCopies, one per desktop app deviceId).
+// The website always opens it in the cloud; the desktop app can open it "On this computer" (here), and then that
+// app's chats run their tools in the copy (projectForChat). GitHub keeps the two in step: work is pushed when it
+// leaves a place (and after each answer that changed files), and the latest is pulled when the other place opens.
+const DEVICE_ID = /^[A-Za-z0-9_-]{8,128}$/;
+const copyOn = (project, deviceId) => (project.localCopies || []).find((c) => c.deviceId === deviceId) || null;
+// This computer's entry set (or removed with null), keeping the other computers' copies
+function putCopy(project, deviceId, copy) {
+  const others = (project.localCopies || []).filter((c) => c.deviceId !== deviceId).map((c) => (c.toObject ? c.toObject() : c));
+  project.localCopies = copy ? [...others, { deviceId, ...copy }] : others;
+}
+const lastLine = (text) => String(text || "").trim().split("\n").pop();
+const runnerLine = (text, key) => String(text || "").match(new RegExp(`^${key}: (.+)$`, "m"))?.[1]?.trim() || null;
+const ghHeaders = (key) => ({ Authorization: `Bearer ${key}`, Accept: "application/vnd.github+json", "User-Agent": "Classgrid" });
+
+// What every step needs: the user's GitHub login and (when the computer does something) their desktop app connected.
+// Sends the error itself and returns null.
+async function readyForCopy(req, res, { app = true } = {}) {
+  const deviceId = String(req.body?.deviceId || "");
+  if (!DEVICE_ID.test(deviceId)) { res.status(400).json({ error: "This works in the Classgrid desktop app on your computer." }); return null; }
+  const user = await githubTokenFor(req.user._id);
+  if (!user) { res.status(409).json({ error: "github_not_connected" }); return null; }
+  if (app && !(await runnerOnline(req.user._id))) { res.status(409).json({ error: "The Classgrid desktop app isn't connected right now. Check you're logged in to the app, then try again.", code: "app_not_open" }); return null; }
+  return { deviceId, user, key: (project) => repoAppToken(project.repo).catch(() => null).then((k) => k || user.github_access_token) };
+}
+
+// One step done by the desktop app (desktop/runner.js clone_repo / sync_repo): { text } or { error, code } in easy words
+async function onComputer(project, folder, tool, args) {
+  const text = await callLocal({ owner: project.owner, _id: project._id, localPath: folder }, tool, args);
+  if (!/^Error/.test(text)) return { text };
+  if (/can't run on this computer/.test(text)) return { code: "old_app", error: "Update the Classgrid desktop app to use a project in both places (download it again from classgrid.in)." };
+  if (/isn't open there|didn't answer in time/.test(text)) return { code: "app_not_open", error: "The Classgrid desktop app didn't answer. Check it's open and you're logged in, then try again." };
+  if (/wasn't opened in the Classgrid app/.test(text)) return { code: "folder_gone", error: `The folder ${folder} wasn't picked in the Classgrid app on this computer.` };
+  const code = (text.match(/^Error:\s*([A-Z_]{4,})\s/)?.[1] || "").toLowerCase() || null;
+  return { code, error: text.replace(/^Error:\s*(?:[A-Z_]{4,}\s+)?/, "") };
+}
+
+// The branch both places work on, like opening in the cloud: the open Classgrid pull request's branch, else the
+// repo's default branch. Also the repo's size in KB (for the free space check).
+async function projectBranch(repo, key) {
+  const r = await fetch(`https://api.github.com/repos/${repo}`, { headers: ghHeaders(key) }).catch(() => null);
+  if (!r?.ok) return { error: r?.status === 404 ? `GitHub can't find ${repo}, or Classgrid can't see it.` : "GitHub can't be reached right now. Try again in a moment." };
+  const info = await r.json().catch(() => ({}));
+  return { branch: (await openClassgridPrBranch(repo, key, info.default_branch)) || info.default_branch || "main", sizeKb: Number(info.size) || 0 };
+}
+
+// Before the computer copy is used: the cloud copy's work that isn't on GitHub yet is pushed to the project's branch
+// (like the Push button), then the cloud copy is cleared, so the next cloud open downloads it fresh. If that push
+// can't be done, the usual cleanup keeps it safe on a "classgrid-backup-..." branch. Returns a line for the user
+// ("" when there was nothing to save), or { error } when the work couldn't be saved (then nothing is changed).
+async function saveCloudCopy(project) {
+  const ssh = await sandboxSsh().catch((e) => { console.error("[IDE] Sandbox not reached before using the computer copy:", e.message); return null; });
+  if (!ssh) return "";
+  try {
+    const dir = projectDir(project);
+    const { stdout: unsaved } = await ssh.execCommand(`[ -d ${dir}/.git ] && { git -C ${dir} status --porcelain | head -1; git -C ${dir} rev-list --count @{u}..HEAD 2>/dev/null | grep -v '^0$'; }`);
+    let line = "";
+    if (unsaved.trim()) {
+      const result = await pushProject(project.toObject(), ssh, "Saved by Classgrid: work from the cloud");
+      if (/pushed/i.test(result) && !/failed|stopped/i.test(result)) {
+        const { stdout: branch } = await ssh.execCommand(`git -C ${dir} rev-parse --abbrev-ref HEAD`);
+        line = `Your cloud work was saved to GitHub first (branch ${branch.trim() || "main"}).`;
+      }
+    }
+    const r = await backupAndRemoveProjectCode(ssh, project.toObject());
+    if (!r.removed) return { error: `Your cloud work couldn't be saved to GitHub, so nothing was changed (${r.reason}).` };
+    if (r.backupBranch) {
+      await IdeProject.updateOne({ _id: project._id }, { $unset: { lastBackup: 1 } }); // told now, not on the next open
+      line = `Your unsaved cloud work couldn't go to the project's branch, so it was saved to the GitHub branch "${r.backupBranch}". Merge it on GitHub to get it here.`;
+    }
+    return line;
+  } finally {
+    ssh.dispose();
+  }
+}
+
+// Opening the project on this computer: the cloud's work goes to GitHub first, then the copy gets the latest. Unsaved
+// changes in the copy are committed first, never thrown away (desktop/runner.js sync_repo).
+async function openCopyHere(res, project, copy, ready) {
+  const saved = await saveCloudCopy(project);
+  if (saved?.error) return res.status(409).json({ error: saved.error });
+  const key = await ready.key(project);
+  const where = await projectBranch(project.repo, key);
+  if (where.error) return res.status(502).json({ error: where.error });
+  const r = await onComputer(project, copy.path, "sync_repo", { mode: "pull", repo: project.repo, branch: where.branch, token: key, name: ready.user.github_name, email: ready.user.github_email });
+  if (r.code === "folder_gone") {
+    // The copy isn't there any more: forget it, so the user can get a new one
+    putCopy(project, ready.deviceId, null);
+    await project.save();
+    return res.status(409).json({ error: `The copy on this computer wasn't found at ${copy.path}. Get a new copy on this computer.`, code: "copy_missing", project: projectJson(project) });
+  }
+  if (r.error) return res.status(409).json({ error: r.error, code: r.code });
+  putCopy(project, ready.deviceId, { path: copy.path, at: new Date(), here: true });
+  project.lastOpenedAt = new Date();
+  await project.save();
+  res.json({ ok: true, local: true, localPath: copy.path, project: projectJson(project), message: [saved, lastLine(r.text)].filter(Boolean).join(" ") });
+}
+
+// This computer's copy pushed to GitHub (to its branch): { message } or { error, code }
+async function saveComputerCopy(project, copy, ready) {
+  const key = await ready.key(project);
+  const r = await onComputer(project, copy.path, "sync_repo", { mode: "push", repo: project.repo, message: "Saved by Classgrid", token: key, name: ready.user.github_name, email: ready.user.github_email });
+  return r.error ? { error: `Your work on this computer couldn't be saved to GitHub: ${r.error}`, code: r.code } : { message: lastLine(r.text) };
+}
+
+// "Get a copy on this computer": the repo is downloaded into the folder the user picked (any drive), after the cloud's
+// work is saved to GitHub and the drive is checked for room. From then on the project opens on this computer here.
+router.post("/projects/:id/copy", isAuthenticated, async (req, res) => {
+  const project = await ownProject(req, res);
+  if (!project) return;
+  const folder = String(req.body?.folder || "").trim().slice(0, 500);
+  if (!folder) return res.status(400).json({ error: "Pick a folder" });
+  if (project.location === "local") return res.status(409).json({ error: "This project is already a folder on your computer." });
+  if (!project.repo) return res.status(409).json({ error: "This project isn't on GitHub yet. Push it to GitHub first, then get a copy on this computer.", code: "not_on_github" });
+  try {
+    const ready = await readyForCopy(req, res);
+    if (!ready) return;
+    const saved = await saveCloudCopy(project);
+    if (saved?.error) return res.status(409).json({ error: saved.error });
+    const key = await ready.key(project);
+    const where = await projectBranch(project.repo, key);
+    if (where.error) return res.status(502).json({ error: where.error });
+    const r = await onComputer(project, folder, "clone_repo", { repo: project.repo, branch: where.branch, size_kb: where.sizeKb, token: key, name: ready.user.github_name, email: ready.user.github_email });
+    if (r.error) return res.status(409).json({ error: r.code === "folder_gone" ? "This folder wasn't picked in the Classgrid app. Pick it again." : r.error, code: r.code });
+    const path = runnerLine(r.text, "Folder");
+    if (!path) return res.status(502).json({ error: "The download didn't finish. Try again." });
+    putCopy(project, ready.deviceId, { path, at: new Date(), here: true });
+    await project.save();
+    res.json({ ok: true, local: true, localPath: path, project: projectJson(project), message: [saved, lastLine(r.text)].filter(Boolean).join(" ") });
+  } catch (e) {
+    console.error("[IDE] Copy to computer failed:", e.message);
+    res.status(500).json({ error: "Could not get a copy on this computer" });
+  }
+});
+
+// Switch where the project opens in this desktop app: "local" (this computer's copy, with the latest pulled first)
+// or "cloud" (this computer's work pushed first, unless skipSave: the user chose to leave it on this computer).
+router.post("/projects/:id/where", isAuthenticated, async (req, res) => {
+  const project = await ownProject(req, res);
+  if (!project) return;
+  const where = ["local", "cloud"].includes(req.body?.where) ? req.body.where : null;
+  if (!where) return res.status(400).json({ error: "Pick where to open the project" });
+  if (project.location === "local") return res.status(409).json({ error: "This project is only a folder on your computer. Use \"Also use in the cloud\" first." });
+  try {
+    const skipSave = where === "cloud" && !!req.body?.skipSave;
+    const ready = await readyForCopy(req, res, { app: !skipSave });
+    if (!ready) return;
+    const copy = copyOn(project, ready.deviceId);
+    if (!copy) return res.status(409).json({ error: "There's no copy of this project on this computer yet. Get a copy first.", code: "no_copy" });
+    if (where === "local") return await openCopyHere(res, project, copy, ready);
+    let message = "";
+    if (copy.here && !skipSave) {
+      const saved = await saveComputerCopy(project, copy, ready);
+      if (saved.error) return res.status(409).json(saved);
+      message = saved.message;
+    }
+    putCopy(project, ready.deviceId, { path: copy.path, at: new Date(), here: false });
+    await project.save();
+    res.json({ ok: true, project: projectJson(project), message: [message, "This project now opens in the cloud."].filter(Boolean).join(" ") });
+  } catch (e) {
+    console.error("[IDE] Switching where the project opens failed:", e.message);
+    res.status(500).json({ error: "Could not switch where this project opens" });
+  }
+});
+
+// Save this computer's copy to GitHub now (leaving the project in the desktop app)
+router.post("/projects/:id/sync", isAuthenticated, async (req, res) => {
+  const project = await ownProject(req, res);
+  if (!project) return;
+  try {
+    const ready = await readyForCopy(req, res);
+    if (!ready) return;
+    const copy = copyOn(project, ready.deviceId);
+    if (!copy || project.location === "local" || !project.repo) return res.status(409).json({ error: "There's no copy of this project on this computer.", code: "no_copy" });
+    const saved = await saveComputerCopy(project, copy, ready);
+    res.status(saved.error ? 409 : 200).json(saved);
+  } catch (e) {
+    console.error("[IDE] Saving the computer copy failed:", e.message);
+    res.status(500).json({ error: "Could not save to GitHub" });
+  }
+});
+
+// A new private GitHub repo for a folder project, named after it, made with the user's own key (like
+// createRepoForProject: GitHub itself checks the user may make it)
+async function newRepoFor(project, token) {
+  const base = String(project.name || "project").toLowerCase().replace(/[^a-z0-9._-]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 60) || "project";
+  for (const name of [base, `${base}-${String(project._id).slice(-6)}`]) {
+    const r = await fetch("https://api.github.com/user/repos", {
+      method: "POST",
+      headers: { ...ghHeaders(token), "Content-Type": "application/json" },
+      body: JSON.stringify({ name, private: true, description: "Made by Classgrid Project Mode" }),
+    }).catch(() => null);
+    const gh = r ? await r.json().catch(() => ({})) : {};
+    if (r?.ok && gh.full_name) return { repo: gh.full_name };
+    if (r?.status === 401) return { error: "GitHub refused your saved login. Reconnect GitHub in AI Hub, then try again." };
+    if (r?.status !== 422) return { error: `Couldn't make a GitHub repo: ${gh.message || r?.status || "GitHub can't be reached"}` };
+  }
+  return { error: "Couldn't make a GitHub repo: that name is already taken on your GitHub. Rename the project, then try again." };
+}
+
+// "Also use in the cloud" for a folder project: the folder is committed and pushed to GitHub (a new private repo is
+// made when it has none), and the project becomes a cloud project whose copy on this computer is that same folder.
+// Its chats stay with it.
+router.post("/projects/:id/cloud", isAuthenticated, async (req, res) => {
+  const project = await ownProject(req, res);
+  if (!project) return;
+  if (project.location !== "local") return res.status(409).json({ error: "This project already works in the cloud." });
+  try {
+    const ready = await readyForCopy(req, res);
+    if (!ready) return;
+    const { user } = ready;
+    const args = { mode: "push", message: "Saved by Classgrid: first version from this computer", token: user.github_access_token, name: user.github_name, email: user.github_email };
+    let r = await onComputer(project, project.localPath, "sync_repo", { ...args, repo: project.repo || undefined });
+    let made = null;
+    if (r.code === "no_remote") {
+      made = await newRepoFor(project, user.github_access_token);
+      if (made.error) return res.status(502).json({ error: made.error });
+      r = await onComputer(project, project.localPath, "sync_repo", { ...args, repo: made.repo });
+    }
+    if (r.error) return res.status(409).json({ error: r.error, code: r.code });
+    const repo = runnerLine(r.text, "Repo");
+    if (!REPO_NAME.test(repo || "")) return res.status(409).json({ error: "This folder's repo isn't on GitHub. Cloud projects need a GitHub repo." });
+    const other = await IdeProject.findOne({ owner: req.user._id, _id: { $ne: project._id }, repo: new RegExp(`^${escapeRegex(repo)}$`, "i") }).select("name");
+    if (other) return res.status(409).json({ error: `This folder's repo ${repo} is already linked to your project "${other.name}". Open that project instead.` });
+    // The cloud opens the project's branch: say so when this folder's work is on another one
+    const pushed = runnerLine(r.text, "Branch");
+    const where = await projectBranch(repo, user.github_access_token);
+    const otherBranch = pushed && pushed !== "-" && where.branch && pushed !== where.branch ? ` Your work here is on the branch ${pushed}; the cloud opens ${where.branch}.` : "";
+    const folder = project.localPath;
+    project.repo = repo;
+    project.location = "cloud";
+    project.localPath = null;
+    putCopy(project, ready.deviceId, { path: folder, at: new Date(), here: true });
+    await project.save();
+    res.json({ ok: true, project: projectJson(project), message: `${made ? `Made the private GitHub repo ${repo}. ` : ""}${lastLine(r.text)} This project now works in the cloud too.${otherBranch}` });
+  } catch (e) {
+    console.error("[IDE] Also use in the cloud failed:", e.message);
+    res.status(500).json({ error: "Could not put this project in the cloud" });
   }
 });
 

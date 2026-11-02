@@ -9,6 +9,7 @@ const runner = require("./runner");
 const editor = require("./editor");
 const browser = require("./browser");
 const chats = require("./chats");
+const memory = require("./memory");
 
 const PORT = Number(process.env.CG_PORT) || 47821; // CG_PORT: a second copy while testing
 const APP_URL = `http://localhost:${PORT}`;
@@ -163,6 +164,20 @@ function createWindow() {
 }
 
 ipcMain.on("cg:version", (e) => { e.returnValue = app.getVersion(); });
+// This computer's own Windows ID (MachineGuid), scrambled so the real ID never leaves the computer: the free AI
+// limit counts per computer, not per account (more accounts on one PC don't give more free usage)
+let deviceId;
+ipcMain.on("cg:deviceId", (e) => {
+  if (deviceId === undefined) {
+    deviceId = null;
+    try {
+      const out = require("node:child_process").execFileSync("reg", ["query", "HKLM\\SOFTWARE\\Microsoft\\Cryptography", "/v", "MachineGuid", "/reg:64"], { encoding: "utf8", windowsHide: true, timeout: 5000 });
+      const guid = (out.match(/MachineGuid\s+REG_SZ\s+([\w-]+)/i) || [])[1];
+      if (guid) deviceId = require("node:crypto").createHash("sha256").update(`classgrid-device:${guid.toLowerCase()}`).digest("hex");
+    } catch { /* not Windows, or the key can't be read */ }
+  }
+  e.returnValue = deviceId;
+});
 // A file on this computer shown in a Studio tab: its address for our screens, and its size
 ipcMain.on("cg:fileUrl", (e, file) => { e.returnValue = APP_URL + FILE_PREFIX + encodeURIComponent(path.resolve(String(file || ""))); });
 ipcMain.handle("cg:fileInfo", (_e, file) => {
@@ -205,6 +220,8 @@ ipcMain.handle("cg:cloneRepo", async (_e, repo) => {
 
 // Files tab for folder projects
 ipcMain.handle("cg:listFiles", (_e, folder) => runner.listForFilesTab(String(folder || "")));
+// A folder project's GitHub repo ("owner/name"), read from its git settings
+ipcMain.handle("cg:githubRepo", (_e, folder) => runner.githubRepoOf(String(folder || "")));
 ipcMain.handle("cg:readFile", (_e, folder, rel) => runner.readForFilesTab(String(folder || ""), String(rel || "")));
 
 // Project Mode, folder projects: open the folder in VS Code or File Explorer (only folders picked in this app)
@@ -237,12 +254,18 @@ ipcMain.handle("cg:pickFolder", async () => {
   return r.filePaths[0];
 });
 // The login token arrives from the screens (client/src/main.tsx); the local runner (Day 2) uses it
-ipcMain.on("cg:setToken", (_e, t) => { runner.setToken(t || null); chats.setToken(t || null); });
+ipcMain.on("cg:setToken", (_e, t) => { runner.setToken(t || null); chats.setToken(t || null); memory.setToken(t || null); });
+// The AI's memory of each account used on this computer (desktop/memory.js): switching accounts keeps it
+ipcMain.handle("cg:saveMemory", (_e, m) => { try { return memory.saveMine(m); } catch { return false; } });
+ipcMain.handle("cg:otherMemory", () => { try { return memory.others(); } catch { return []; } });
 // Chats kept on this computer (desktop/chats.js): read when the internet is down
 ipcMain.handle("cg:saveChat", (_e, chat) => chats.saveChat(chat).catch((err) => ({ error: String(err.message || err) })));
 ipcMain.handle("cg:listChats", () => chats.listChats().catch(() => []));
 ipcMain.handle("cg:readChat", (_e, id) => chats.readChat(String(id || "")).catch(() => null));
 ipcMain.handle("cg:removeChat", (_e, id) => chats.removeChat(String(id || "")).catch((err) => ({ error: String(err.message || err) })));
+// Chats saved here by the other accounts that logged in on this computer (read only), to go on under this account
+ipcMain.handle("cg:listOtherChats", () => chats.listOtherChats().catch(() => []));
+ipcMain.handle("cg:readOtherChat", (_e, userId, id) => chats.readOtherChat(String(userId || ""), String(id || "")).catch(() => null));
 
 // classgrid:// links open this app (Windows passes them as a launch argument)
 if (process.defaultApp) app.setAsDefaultProtocolClient("classgrid", process.execPath, [path.resolve(process.argv[1])]);
@@ -276,6 +299,7 @@ if (!app.requestSingleInstanceLock()) {
     Menu.setApplicationMenu(null);
     runner.init(app.getPath("userData"));
     chats.init(app.getPath("userData"));
+    memory.init(app.getPath("userData"));
     if (!fs.existsSync(path.join(APP_DIR, "index.html"))) {
       dialog.showErrorBox("Classgrid", "The app's screens are missing. Run: npm run build:client");
       return app.quit();

@@ -233,7 +233,8 @@ type PageContext = {
 
 import { usePostHog } from 'posthog-js/react';
 import { fetchWithRescue } from "@/lib/rescue";
-import { OFFLINE_CHAT_NOTE, isUnreachable, keepsChatCopies, readChatCopy, removeChatCopy, saveChatCopy, syncChatCopy } from "@/lib/desktopChats";
+import { OFFLINE_CHAT_NOTE, continueChatCopy, continuedChatOf, continuedFrom, isUnreachable, keepsChatCopies, readChatCopy, readOtherChatCopy, removeChatCopy, saveChatCopy, syncChatCopy, type OtherChatRef } from "@/lib/desktopChats";
+import { otherAccountsMemory, syncComputerMemory } from "@/lib/desktopMemory";
 
 // Fetch real presigned URL for R2 uploads
 // Chats known to be ended (id -> end reason), so an ended chat shows its card at once on refresh or open,
@@ -2024,6 +2025,8 @@ function notifyDesktop(body: string) {
 export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow", initialMessages, autoFocus = true, readOnly = false, hideClearChat = false, overlayWidth, onOverlayWidthChange, onOverlayResizingChange, inputHeader, studioMenu = false }: AskAiPanelProps) {
   const { data: user } = useCurrentUser();
   const session = user ? { user } : null;
+  // Desktop app: this account's memory is kept on the computer, and the other accounts' memory there is loaded
+  useEffect(() => { if (user?._id && keepsChatCopies()) void syncComputerMemory(user); }, [user?._id]); // eslint-disable-line react-hooks/exhaustive-deps
   // No SidebarContext subscription here: this whole panel would re-render (every message) on each sidebar toggle.
   const prefersReducedMotion = useReducedMotion();
 
@@ -2104,6 +2107,9 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
   const [isLoadingChat, setIsLoadingChat] = useState(false);
   // Desktop app, no internet: the open chat is the copy saved on this computer
   const [offlineCopyOf, setOfflineCopyOf] = useState<string | null>(null);
+  // Desktop app: a chat another account on this computer had, open from its saved copy (the first message sent
+  // makes it a chat of this account)
+  const [otherCopy, setOtherCopy] = useState<(OtherChatRef & { messages: any[] }) | null>(null);
   const [isPinned, setIsPinned] = useState(false);
   const [showFilesPanel, setShowFilesPanel] = useState(false);
   const [showGridPanel, setShowGridPanel] = useState(false);
@@ -3363,6 +3369,45 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
     return () => window.removeEventListener("online", reload);
   }, [offlineCopyOf, routeSessionId]);
 
+  // Desktop app: open a chat another account on this computer had (from the sidebar), from its saved copy
+  useEffect(() => {
+    if (!keepsChatCopies()) return;
+    const openOther = async (e: Event) => {
+      const ref = (e as CustomEvent<OtherChatRef>).detail;
+      if (!ref?.userId || !ref.chatId) return;
+      // This account already went on with it: open that chat
+      const made = continuedChatOf(ref.userId, ref.chatId);
+      if (made) { window.dispatchEvent(new CustomEvent("agent:load-chat", { detail: { sessionId: made } })); return; }
+      const gen = ++chatGenRef.current;
+      typingRunRef.current++;
+      setThinking(false);
+      setSubmitting(false);
+      setMessageQueue([]);
+      setPriorityMessage(null);
+      setChatEnded(null);
+      setSessionId(null);
+      setOfflineCopyOf(null);
+      setIsPinned(false);
+      setOtherCopy(null);
+      setMessages([]);
+      const copy = await readOtherChatCopy(ref.userId, ref.chatId);
+      if (chatGenRef.current !== gen) return; // the user opened something else meanwhile
+      if (!copy) { toast.error("This chat couldn't be opened."); return; }
+      setMessages(copy.messages.map(toChatMessage));
+      setOtherCopy({ ...ref, email: copy.email || ref.email || null, title: ref.title || copy.details?.session?.title || "New chat", messages: copy.messages });
+    };
+    const leaveOther = () => setOtherCopy(null);
+    window.addEventListener("agent:open-other-chat", openOther);
+    window.addEventListener("agent:new-chat", leaveOther);
+    return () => {
+      window.removeEventListener("agent:open-other-chat", openOther);
+      window.removeEventListener("agent:new-chat", leaveOther);
+    };
+  }, []);
+  useEffect(() => { if (sessionId) setOtherCopy(null); }, [sessionId]);
+  // The account this chat was continued from (desktop app), for the note at the top of the chat
+  const continuedFromEmail = useMemo(() => continuedFrom(sessionId), [sessionId]);
+
   // Save chat history and session ID to local storage whenever they update
   useEffect(() => {
     window.dispatchEvent(new CustomEvent("agent:active-session-changed", { detail: { sessionId } }));
@@ -4045,6 +4090,27 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
 
   async function askQuestion(question: string, options?: { hidden?: boolean; isEdit?: boolean; explicitSessionId?: string | null; codeNotes?: CodeNote[] }) {
     if (chatEnded) { setSubmitting(false); return; } // ended chats take no new messages
+    // Desktop app: a chat another account on this computer had goes on under this account. Its messages are
+    // copied into a new chat of this account first, then the message is sent there (the AI has the whole chat)
+    if (otherCopy && !sessionId && !isIncognito && options?.explicitSessionId === undefined) {
+      const from = otherCopy;
+      const gen = chatGenRef.current;
+      setSubmitting(true);
+      let newId: string;
+      try {
+        newId = await continueChatCopy(from, from.messages);
+      } catch (err: any) {
+        if (chatGenRef.current === gen) { setSubmitting(false); toast.error(err?.message || "Couldn't continue this chat. Please try again."); }
+        return;
+      }
+      if (chatGenRef.current !== gen) return; // the user opened another chat meanwhile (the new chat is in the list)
+      setOtherCopy(null);
+      setSessionId(newId);
+      setEndedCheckedFor(newId);
+      window.dispatchEvent(new CustomEvent("agent:session-created", { detail: { id: newId, title: from.title } }));
+      window.dispatchEvent(new Event("agent:refresh-sessions"));
+      return askQuestion(question, { ...options, explicitSessionId: newId });
+    }
     const workStartedAt = Date.now(); // for the "Worked for X sec" summary of this reply
     const myGen = chatGenRef.current;
     const isStale = () => chatGenRef.current !== myGen; // the user moved to another chat
@@ -4386,6 +4452,10 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
           })(),
           // How hard the AI thinks (model menu): Fast, Normal or Deep
           effort: getThinkingLevel() === "normal" ? undefined : getThinkingLevel() === "fast" ? "low" : "high",
+          // Desktop app: what the user saved in their other Classgrid accounts on this computer
+          computerMemory: otherAccountsMemory(),
+          // Desktop app: this computer's scrambled Windows ID (the free limit counts per computer)
+          deviceId: (window as any).classgridDesktop?.deviceId || undefined,
           // Website or Classgrid desktop app, so the AI knows where the user is
           clientApp: (window as any).classgridDesktop?.isDesktop ? "desktop" : "web",
           // Studio and Project Mode: which actions ask the user first (the shield in the chat box)
@@ -4787,6 +4857,7 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
       // Desktop app: keep the finished chat on this computer (a moment later, so the server has saved the answer)
       const finishedChat = keepChatId;
       if (finishedChat && keepsChatCopies()) window.setTimeout(() => { void syncChatCopy(finishedChat); }, 1500);
+      if (keepsChatCopies()) window.setTimeout(() => { void syncComputerMemory(session?.user); }, 2500);
       if (!isStale()) setSubmitting(false);
     }
   }
@@ -4965,6 +5036,12 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
       <div className={cn("flex flex-col gap-4 px-4 py-4 transition-all duration-300 ease-[cubic-bezier(0.22,1,0.36,1)]", variant === "full-page" && "max-w-[48rem] mx-auto w-full pb-48")}>
         {offlineCopyOf && offlineCopyOf === sessionId && !isLoadingChat && (
           <div className="self-center rounded-full border border-border/60 px-3 py-1 text-xs text-muted-foreground">{OFFLINE_CHAT_NOTE}</div>
+        )}
+        {otherCopy && !sessionId && !isLoadingChat && (
+          <div className="self-center rounded-full border border-border/60 px-3 py-1 text-xs text-muted-foreground text-center break-all">From {otherCopy.email || "another account"} · Send a message to continue this chat here</div>
+        )}
+        {continuedFromEmail && !isLoadingChat && (
+          <div className="self-center rounded-full border border-border/60 px-3 py-1 text-xs text-muted-foreground text-center break-all">Continued from {continuedFromEmail}</div>
         )}
         {isLoadingChat ? (
           <div className="flex flex-col gap-6 py-8 px-2 animate-in fade-in duration-300">
@@ -6909,6 +6986,25 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
                               className="hidden"
                             />
                             {isStudio && <StudioCodeNotesBar />}
+                            {/* Files dropped from the Files tab (the same chips as the chat box below a chat) */}
+                            {fileMentions.length > 0 && (
+                              <div className="flex flex-wrap gap-1.5 px-4 pt-3">
+                                {fileMentions.map((p) => (
+                                  <span key={p} title={p} className="inline-flex max-w-full items-center gap-1 rounded-md border border-black/10 dark:border-white/10 bg-black/[0.04] dark:bg-white/[0.06] pl-1.5 pr-0.5 py-0.5 font-mono text-[12.5px] text-foreground">
+                                    <FileBadge path={p} />
+                                    <span className="min-w-0 truncate max-w-[240px]">{p.split("/").pop()}</span>
+                                    <button
+                                      type="button"
+                                      onClick={() => setFileMentions((list) => list.filter((x) => x !== p))}
+                                      className="flex items-center justify-center size-5 rounded text-muted-foreground hover:text-foreground hover:bg-black/[0.06] dark:hover:bg-white/[0.08]"
+                                      aria-label={`Remove ${p}`}
+                                    >
+                                      <X className="size-3" />
+                                    </button>
+                                  </span>
+                                ))}
+                              </div>
+                            )}
                             {(attachedFiles.length > 0 || pastedTexts.length > 0) && (
                               <div className="px-3 pt-3 pb-0 flex flex-wrap gap-1.5">
                                 {pastedTexts.map((pt, idx) => (

@@ -106,6 +106,31 @@ function lineChange(before, after) {
 
 const cap = (text) => (text.length > MAX_OUTPUT ? text.slice(0, MAX_OUTPUT / 2) + `\n… [${text.length - MAX_OUTPUT} characters cut] …\n` + text.slice(-MAX_OUTPUT / 2) : text);
 
+// ── One project in both places (a cloud project's copy on this computer, kept in step through GitHub) ──────────
+
+// Git in a folder. GitHub's key, when the server sends one, only goes with the command (never into the folder);
+// without it the user's own Git login on this computer is used, like push_project_to_github
+function gitIn(dir, token) {
+  const { spawnSync } = require("node:child_process");
+  const env = { ...process.env };
+  if (token) {
+    const auth = Buffer.from(`x-access-token:${token}`).toString("base64");
+    Object.assign(env, { GIT_TERMINAL_PROMPT: "0", GIT_CONFIG_COUNT: "1", GIT_CONFIG_KEY_0: "http.https://github.com/.extraheader", GIT_CONFIG_VALUE_0: `AUTHORIZATION: basic ${auth}` });
+  }
+  return (...args) => spawnSync("git", dir ? ["-C", dir, ...args] : args, { windowsHide: true, encoding: "utf8", env, timeout: 10 * 60 * 1000 });
+}
+const gitLast = (r) => String(r.stderr || r.stdout || "").trim().split("\n").slice(-3).join(" ");
+// "owner/name" of a GitHub address (https or git@), else null
+const repoOfAddress = (url) => String(url || "").trim().match(/github\.com[/:]([\w.-]+\/[\w.-]+?)(?:\.git)?\/?$/i)?.[1] || null;
+// The folder's own repo address as written in it (insteadOf rules not applied)
+const originOf = (git) => String(git("config", "--get", "remote.origin.url").stdout || "").trim();
+// Commits made here use the user's own Git name; only when this computer has none, their GitHub name from Classgrid
+const whoArgs = (git, name, email) => (String(git("config", "user.email").stdout || "").trim() ? [] : ["-c", `user.name=${name || "Classgrid"}`, "-c", `user.email=${email || "code@classgrid.in"}`]);
+function freeBytes(dir) {
+  try { const s = fs.statfsSync(dir); return Number(s.bavail) * Number(s.bsize); } catch { return null; }
+}
+const driveSize = (b) => (b >= 1073741824 ? `${(b / 1073741824).toFixed(1)} GB` : b >= 1048576 ? `${Math.round(b / 1048576)} MB` : `${Math.max(1, Math.round(b / 1024))} KB`);
+
 // ── The tools (same answers as server/src/services/ide-project.service.js projectTools) ────────────────────
 
 const tools = {
@@ -238,6 +263,118 @@ const tools = {
     if (p.status !== 0) return `Error: git push failed (${committed}): ${last(p)}`;
     const url = String(git("remote", "get-url", remote.split("\n")[0]).stdout || "").trim();
     return `Pushed to GitHub: branch ${branch} of ${url} (${committed}). ${last(p)}`;
+  },
+
+  // A cloud project's copy on this computer: its GitHub repo downloaded into the folder the user picked (any drive),
+  // after checking that drive has room. The picked folder is used as it is when it already is that repo, and a copy
+  // already there is just brought up to date. Answers "Folder: ...", "Branch: ..." and one line for the user.
+  clone_repo(root, { repo, branch, size_kb = 0, token, name, email }) {
+    if (!/^[\w.-]+\/[\w.-]+$/.test(String(repo || ""))) return "Error: repo must be a GitHub owner/name.";
+    const parent = path.resolve(root);
+    const isThis = (dir) => fs.existsSync(dir) && (repoOfAddress(originOf(gitIn(dir))) || "").toLowerCase() === String(repo).toLowerCase();
+    const folderName = String(repo).split("/")[1];
+    const target = isThis(parent) ? parent : path.join(parent, folderName);
+    if (fs.existsSync(target)) {
+      if (!isThis(target)) return `Error: FOLDER_TAKEN A folder called "${folderName}" is already in ${parent} with other files in it. Pick another place.`;
+      allowFolder(target);
+      const got = tools.sync_repo(target, { mode: "pull", repo, branch, token, name, email });
+      return got.startsWith("Error") ? got : `Folder: ${target}\n${got}`;
+    }
+    // Room for the download and its files (about twice GitHub's size), plus some to spare
+    const free = freeBytes(parent);
+    const need = Math.round((Number(size_kb) || 0) * 1024 * 2.5) + 50 * 1048576;
+    if (free !== null && free < need) return `Error: NO_SPACE There isn't enough free space on ${path.parse(parent).root}. This project needs about ${driveSize(need)}, and only ${driveSize(free)} is free there. Pick a folder on another drive.`;
+    const args = ["clone", "-q", ...(branch ? ["--branch", String(branch)] : []), "--", `https://github.com/${repo}.git`, target];
+    let c = gitIn(null, token)(...args);
+    if (c.error) return "Error: Git isn't installed on this computer. Install it from git-scm.com, then try again.";
+    if (c.status !== 0 && token) c = gitIn(null)(...args); // the user's own Git login on this computer
+    if (c.status !== 0) return `Error: git clone failed: ${gitLast(c)}`;
+    allowFolder(target);
+    const left = freeBytes(target);
+    const on = String(gitIn(target)("rev-parse", "--abbrev-ref", "HEAD").stdout || "").trim();
+    return `Folder: ${target}\nBranch: ${on}\nDownloaded to ${target}${left !== null ? ` (${driveSize(left)} still free on that drive)` : ""}.`;
+  },
+
+  // Keeps this computer's copy and GitHub in step. mode "pull": unsaved changes here are committed first (never
+  // thrown away), then the latest from GitHub is put under them. mode "push": everything here is committed and pushed
+  // to its branch on GitHub (a folder with no repo yet is linked to `repo` first). Answers "Repo: ...", "Branch: ..."
+  // and one line for the user; "Error: CODE ..." when it can't.
+  sync_repo(root, { mode = "pull", repo, branch, message, token, name, email }) {
+    if (!fs.existsSync(root)) return `Error: FOLDER_GONE The copy on this computer isn't at ${root} any more.`;
+    const git = gitIn(root, token);
+    const inside = git("rev-parse", "--is-inside-work-tree");
+    if (inside.error) return "Error: Git isn't installed on this computer. Install it from git-scm.com, then try again.";
+    const isRepo = String(inside.stdout).trim() === "true";
+    const who = isRepo ? whoArgs(git, name, email) : [];
+    const conflict = (other) => {
+      git("rebase", "--abort");
+      const files = String(git("diff", "--name-only", "HEAD", other).stdout || "").trim().split("\n").filter(Boolean).slice(0, 10).join(", ");
+      return `Error: CONFLICT GitHub has changes to the same lines as the changes on this computer, so they couldn't be joined by themselves. Nothing was lost. Files: ${files || "unknown"}.`;
+    };
+
+    if (mode === "pull") {
+      if (!isRepo || (repo && (repoOfAddress(originOf(git)) || "").toLowerCase() !== String(repo).toLowerCase())) return `Error: FOLDER_GONE The folder ${root} isn't a copy of this project any more.`;
+      let saved = "";
+      git("add", "-A");
+      if (String(git("diff", "--cached", "--name-only").stdout || "").trim()) {
+        const c = git(...who, "commit", "-q", "-m", "Saved by Classgrid: changes on this computer, before getting the latest");
+        if (c.status !== 0) return `Error: your changes on this computer couldn't be saved first, so nothing was pulled: ${gitLast(c)}`;
+        saved = "Your unsaved changes here were saved as a commit first. ";
+      }
+      const f = git("fetch", "-q", "origin");
+      if (f.status !== 0) return `Error: couldn't get the latest from GitHub: ${gitLast(f)}`;
+      let current = String(git("rev-parse", "--abbrev-ref", "HEAD").stdout || "").trim();
+      // The branch the project works on (the cloud opens the same one)
+      if (branch && current !== branch && git("rev-parse", "-q", "--verify", `refs/remotes/origin/${branch}`).status === 0) {
+        const co = git("checkout", "-q", String(branch));
+        if (co.status !== 0) return `Error: couldn't switch to the branch ${branch}: ${gitLast(co)}`;
+        current = String(branch);
+      }
+      if (git("rev-parse", "-q", "--verify", `refs/remotes/origin/${current}`).status !== 0) return `Branch: ${current}\n${saved}Nothing new to get: GitHub has no branch ${current} yet.`;
+      const behind = Number(String(git("rev-list", "--count", `HEAD..origin/${current}`).stdout || "").trim()) || 0;
+      if (!behind) return `Branch: ${current}\n${saved}Already up to date with GitHub.`;
+      if (git(...who, "rebase", "-q", `origin/${current}`).status !== 0) return conflict(`origin/${current}`);
+      git("branch", "-q", `--set-upstream-to=origin/${current}`);
+      return `Branch: ${current}\n${saved}Got ${behind} new change${behind === 1 ? "" : "s"} from GitHub.`;
+    }
+
+    if (!isRepo) {
+      if (!repo) return "Error: NO_REMOTE This folder isn't linked to a GitHub repo yet.";
+      const init = git("init", "-q", "-b", "main");
+      if (init.status !== 0) return `Error: git init failed: ${gitLast(init)}`;
+    }
+    let origin = originOf(git);
+    if (!origin) {
+      if (!repo) return "Error: NO_REMOTE This folder isn't linked to a GitHub repo yet.";
+      git("remote", "add", "origin", `https://github.com/${repo}.git`);
+      origin = originOf(git);
+    } else if (repo && (repoOfAddress(origin) || "").toLowerCase() !== String(repo).toLowerCase()) {
+      return `Error: OTHER_REMOTE This folder is linked to ${origin}, not to ${repo}.`;
+    }
+    const ghRepo = repoOfAddress(origin);
+    if (!ghRepo) return `Error: OTHER_REMOTE This folder is linked to ${origin}, which isn't on GitHub.`;
+    const by = isRepo ? who : whoArgs(git, name, email);
+    git("add", "-A");
+    const changed = String(git("diff", "--cached", "--name-only").stdout || "").trim().split("\n").filter(Boolean);
+    if (changed.length) {
+      const what = `${changed.slice(0, 3).join(", ")}${changed.length > 3 ? ` and ${changed.length - 3} more` : ""}`;
+      const c = git(...by, "commit", "-q", "-m", `${String(message || "Saved by Classgrid").slice(0, 200)}: ${what}`);
+      if (c.status !== 0) return `Error: git commit failed: ${gitLast(c)}`;
+    }
+    if (git("rev-parse", "-q", "--verify", "HEAD").status !== 0) return `Repo: ${ghRepo}\nBranch: -\nNothing to save yet: this folder has no files.`;
+    const current = String(git("rev-parse", "--abbrev-ref", "HEAD").stdout || "").trim() || "main";
+    // Someone may have pushed to the same branch meanwhile (the cloud copy): take theirs first and put ours on top
+    git("fetch", "-q", "origin", current);
+    if (git("rev-parse", "-q", "--verify", `refs/remotes/origin/${current}`).status === 0) {
+      const ahead = Number(String(git("rev-list", "--count", `origin/${current}..HEAD`).stdout || "").trim()) || 0;
+      if (!ahead) return `Repo: ${ghRepo}\nBranch: ${current}\nNothing new to save: GitHub already has all of it.`;
+      if (git(...by, "rebase", "-q", `origin/${current}`).status !== 0) return conflict(`origin/${current}`);
+    }
+    const pushArgs = ["push", "-q", "-u", "origin", `HEAD:refs/heads/${current}`];
+    let p = git(...pushArgs);
+    if (p.status !== 0 && token) p = gitIn(root)(...pushArgs); // the user's own Git login on this computer
+    if (p.status !== 0) return `Error: git push failed: ${gitLast(p)}`;
+    return `Repo: ${ghRepo}\nBranch: ${current}\nSaved to GitHub${changed.length ? ` (${changed.length} file${changed.length === 1 ? "" : "s"} changed)` : ""}, branch ${current}.`;
   },
 
   // What the user is doing in the built-in editor: open file, cursor, selection, errors and their terminal commands
@@ -754,6 +891,16 @@ function connect(token) {
 
 // The Files tab for a folder project: the same shapes as the server's /projects/:id/files and /file
 const IMAGE_TYPES = { ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".gif": "image/gif", ".webp": "image/webp", ".svg": "image/svg+xml", ".ico": "image/x-icon" };
+// The GitHub repo ("owner/name") a folder pushes to, from its .git/config (null when it has none)
+function githubRepoOf(root) {
+  try {
+    const cfg = fs.readFileSync(path.join(String(root), ".git", "config"), "utf8");
+    const url = (cfg.match(/\[remote "origin"\][^[]*?url\s*=\s*(\S+)/) || cfg.match(/\[remote "[^"]+"\][^[]*?url\s*=\s*(\S+)/) || [])[1] || "";
+    const m = url.match(/github\.com[:/]+([\w.-]+\/[\w.-]+?)(?:\.git)?\/?$/i);
+    return m ? m[1] : null;
+  } catch { return null; }
+}
+
 function listForFilesTab(root) {
   if (!isAllowedRoot(root)) return { error: "This folder wasn't opened in the Classgrid app on this computer." };
   const files = [];
@@ -778,7 +925,7 @@ function listForFilesTab(root) {
   walk(path.resolve(root), "");
   let branch = null;
   try { const head = fs.readFileSync(path.join(root, ".git", "HEAD"), "utf8").trim(); branch = head.startsWith("ref: refs/heads/") ? head.slice(16) : null; } catch { /* not a git folder */ }
-  return { source: "local", repo: null, branch, files };
+  return { source: "local", repo: githubRepoOf(root), branch, files };
 }
 function readForFilesTab(root, rel) {
   if (!isAllowedRoot(root)) return { error: "This folder wasn't opened in the Classgrid app on this computer." };
@@ -796,6 +943,7 @@ function readForFilesTab(root, rel) {
 module.exports = {
   readLocalFile,
   listForFilesTab,
+  githubRepoOf,
   readForFilesTab,
   init(userDataDir) { foldersFile = path.join(userDataDir, "folders.json"); },
   // The screens refresh the token often: only a different person (or logging out) reconnects; otherwise the fresh

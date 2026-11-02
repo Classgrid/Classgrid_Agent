@@ -78,11 +78,22 @@ async function newestFileEdit(ssh, project) {
 export async function projectForChat(sessionId) {
   await connectDB();
   const onScreen = await redis.get(UI_PROJECT(sessionId)).catch(() => null);
+  const here = await redis.get(CHAT_HERE(sessionId)).catch(() => null);
   if (onScreen) {
     const p = await IdeProject.findById(onScreen).lean().catch(() => null);
-    if (p) return p;
+    if (p) return onComputerCopy(p, here);
   }
-  return IdeProject.findOne({ chatSessionIds: sessionId }).lean();
+  return onComputerCopy(await IdeProject.findOne({ chatSessionIds: sessionId }).lean(), here);
+}
+
+// One project in both places: a cloud project the user opened "On this computer" in their desktop app has this chat's
+// tools run in that computer's copy, exactly like a folder project (bothPlaces marks it). Set with each message from
+// that app (linkChatToProject); a message from the website or another computer puts the chat back on the cloud.
+const CHAT_HERE = (sessionId) => `ide:chatHere:${sessionId}`;
+function onComputerCopy(project, deviceId) {
+  if (!project || !deviceId || project.location === "local") return project;
+  const copy = (project.localCopies || []).find((c) => c.deviceId === deviceId && c.here);
+  return copy ? { ...project, location: "local", localPath: copy.path, bothPlaces: true } : project;
 }
 
 // Paths may be given relative to the project, or as /data/... or /home/workspace/projects/<id>/...
@@ -875,11 +886,14 @@ const PROJECT_MODE_RULES = `PROJECT MODE RULES (this chat is in Project Mode; th
 // A chat sent from Project Mode belongs to the project that is open there (only the owner's own projects)
 const UI_PROJECT = (sessionId) => `ide:uiProject:${sessionId}`;
 
-export async function linkChatToProject(userId, projectId, sessionId) {
+export async function linkChatToProject(userId, projectId, sessionId, deviceId = null) {
   await connectDB();
-  const project = await IdeProject.findOne({ _id: projectId, owner: userId }).select("_id");
+  const project = await IdeProject.findOne({ _id: projectId, owner: userId }).select("_id localCopies");
   if (!project) return;
   await redis.set(UI_PROJECT(sessionId), String(project._id), "EX", 24 * 60 * 60).catch(() => {}); // the user's own project on screen
+  // Sent from the desktop app on a computer where this project is set to "On this computer": the chat works in that copy
+  const here = deviceId ? (project.localCopies || []).some((c) => c.deviceId === String(deviceId) && c.here) : false;
+  await (here ? redis.set(CHAT_HERE(sessionId), String(deviceId), "EX", 24 * 60 * 60) : redis.del(CHAT_HERE(sessionId))).catch(() => {});
   // A chat stays with the project it started in (chats are kept per project); it is never moved to another one
   const other = await IdeProject.findOne({ owner: userId, chatSessionIds: sessionId, _id: { $ne: project._id } }).select("_id").lean();
   if (other) return;
@@ -1046,7 +1060,7 @@ async function snapshotCommit(ssh, project, label) {
 
 export async function startCheckpoint(sessionId) {
   const project = await projectForChat(sessionId);
-  if (!project) return null;
+  if (!project || project.location === "local") return null; // a folder on the user's computer has no copy here to compare
   let ssh;
   try {
     ssh = await sandboxSsh();
@@ -1063,7 +1077,7 @@ export async function startCheckpoint(sessionId) {
 }
 
 export async function finishCheckpoint(sessionId, id) {
-  if (!id) return;
+  if (!id) return saveBothPlaces(sessionId).catch((e) => console.error("[IDE] Auto-save failed:", e.message));
   const project = await projectForChat(sessionId);
   const cp = JSON.parse((await redis.get(CP_KEY(sessionId, id))) || "null");
   if (!project || !cp) return;
@@ -1072,9 +1086,43 @@ export async function finishCheckpoint(sessionId, id) {
     ssh = await sandboxSsh();
     cp.after = await snapshotCommit(ssh, project, `cp-${id}-after`);
     await redis.set(CP_KEY(sessionId, id), JSON.stringify(cp), "EX", CP_TTL);
+    await saveBothPlaces(sessionId, ssh, cp).catch((e) => console.error("[IDE] Auto-save failed:", e.message));
   } finally {
     ssh?.dispose();
   }
+}
+
+// One project in both places (the cloud and a copy on the user's computer): after an answer that changed files, the
+// work is pushed to GitHub by itself, so either place has the same code the next time it opens. The user is told in
+// one short line ("project-saved" on their socket).
+async function saveBothPlaces(sessionId, ssh = null, cp = null) {
+  if (!sessionId) return;
+  const project = await projectForChat(sessionId);
+  if (!project?.repo) return;
+  let line = "";
+  if (project.bothPlaces) {
+    // This computer's copy: the desktop app commits and pushes, only when something changed
+    const { callLocal } = await import("./local-runner.service.js");
+    const owner = await githubUser(project.owner, "github_name github_email").catch(() => null);
+    const key = (await repoAppToken(project.repo).catch(() => null)) || owner?.github_access_token || undefined;
+    const out = await callLocal(project, "sync_repo", { mode: "push", repo: project.repo, message: "Saved by Classgrid", token: key, name: owner?.github_name, email: owner?.github_email });
+    if (/^Error/.test(out)) line = `Your work on this computer couldn't be saved to GitHub: ${out.replace(/^Error:\s*(?:[A-Z_]{4,}\s+)?/, "").slice(0, 300)}`;
+    else if (/Saved to GitHub/.test(out)) line = out.trim().split("\n").pop();
+  } else if (project.location !== "local" && project.localCopies?.length && ssh && cp?.before && cp?.after) {
+    // The cloud copy of a project that also has a copy on a computer: pushed to the project's branch, like the Push button
+    const dir = projectHostDir(project);
+    const { stdout } = await ssh.execCommand(`git -C ${q(dir)} diff --name-only ${cp.before} ${cp.after} | head -50`);
+    const files = stdout.split("\n").map((f) => f.trim()).filter((f) => f && !f.startsWith(`${GUIDE_PROJECT_DIR}/`));
+    if (!files.length) return;
+    const result = await pushProject(project, ssh, `Saved by Classgrid: ${files.slice(0, 3).join(", ")}${files.length > 3 ? ` and ${files.length - 3} more` : ""}`);
+    const { stdout: branch } = await ssh.execCommand(`git -C ${q(dir)} rev-parse --abbrev-ref HEAD`);
+    line = /pushed/i.test(result) && !/failed|stopped/i.test(result)
+      ? `Saved to GitHub (${files.length} file${files.length === 1 ? "" : "s"} changed), branch ${branch.trim() || "main"}.`
+      : `Your cloud work couldn't be saved to GitHub: ${result.slice(0, 300)}`;
+  }
+  if (!line) return;
+  const { getIO } = await import("./socket.service.js");
+  getIO()?.to(String(project.owner)).emit("project-saved", { projectId: String(project._id), sessionId, message: line });
 }
 
 async function loadCheckpoint(project, sessionId, id, ssh) {

@@ -27,6 +27,7 @@ import { fetchWithRescue } from "@/lib/rescue";
 import { toast } from "sonner";
 import { useSidebar } from "@/components/marketing_ui/sidebar";
 import { listLocalFiles, localFolderOf } from "../utils/localProject";
+import { PROJECT_PLACE_EVENT, listenProjectSaved, thisComputerCopy, thisDeviceId } from "../utils/projectCopies";
 
 type TabKind = "browser" | "review" | "files" | "terminal" | "project" | "shots" | "file" | "agents";
 type Tab = { id: string; kind: TabKind; path?: string }; // path: a "file" tab's file on this computer (desktop app)
@@ -153,7 +154,7 @@ export function StudioModePage() {
         method: "POST",
         credentials: "include",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ resume: true, noEditor: true }),
+        body: JSON.stringify({ resume: true, noEditor: true, deviceId: thisDeviceId() || undefined }),
       }).catch(() => null);
       if (!gone) setPreparing(false);
       if (gone || !res) return;
@@ -161,6 +162,8 @@ export function StudioModePage() {
       if (res.ok) {
         setFilesReload((n) => n + 1);
         if (data.backup) toast.info(`Your unpushed work from last time was saved on GitHub, in the branch ${data.backup}.`, { duration: 10000 });
+        // Opened from this computer's copy: say what came from GitHub (nothing when it was already up to date)
+        if (data.local && data.message && !/^Already up to date/.test(data.message)) toast.success(data.message, { duration: 6000 });
         return;
       }
       if (data.error === "github_not_connected") setGate({ kind: "github" });
@@ -168,6 +171,19 @@ export function StudioModePage() {
     })();
     return () => { gone = true; setPreparing(false); };
   }, [studioProject, openTick]);
+  // Desktop app: the project now opens on this computer (already up to date) or in the cloud (got ready again)
+  useEffect(() => {
+    const onPlace = (e: Event) => {
+      const p = (e as CustomEvent<{ project?: { id: string } }>).detail?.project;
+      if (!p || p.id !== studioProject) return;
+      if (thisComputerCopy(p)?.here) setFilesReload((n) => n + 1);
+      else setOpenTick((n) => n + 1);
+    };
+    window.addEventListener(PROJECT_PLACE_EVENT, onPlace);
+    return () => window.removeEventListener(PROJECT_PLACE_EVENT, onPlace);
+  }, [studioProject]);
+  // Work saved to GitHub by itself after an answer: one short line
+  useEffect(() => listenProjectSaved(), []);
   // Back from GitHub (app installed or GitHub connected): check again
   useEffect(() => {
     if (!gate) return;

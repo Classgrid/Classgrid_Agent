@@ -7,12 +7,14 @@ import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/marketing_ui/dialog";
 import { DangerConfirmDialog } from "@/components/marketing_ui/danger-confirm-dialog";
 import { fetchWithRescue } from "@/lib/rescue";
+import { ProjectPlaceSwitch } from "./ProjectPlaceSwitch";
+import type { LocalCopy } from "../utils/projectCopies";
 
 const backendUrl = import.meta.env.VITE_API_URL || "https://api.classgrid.in";
 const PICK_KEY = "cg_project_open"; // the same open project as Project Mode: both views always show one project
 const EASE = [0.22, 1, 0.36, 1] as const;
 
-type Project = { id: string; name: string; repo: string | null; logo?: string | null; updatedAt: string; location?: "cloud" | "local"; localPath?: string | null };
+type Project = { id: string; name: string; repo: string | null; logo?: string | null; updatedAt: string; location?: "cloud" | "local"; localPath?: string | null; localCopies?: LocalCopy[] };
 type Repo = { fullName: string; private: boolean };
 
 async function api(path: string, init?: RequestInit) {
@@ -56,7 +58,7 @@ async function fetchProjects(): Promise<Project[] | null> {
     const { res, data } = await api("/projects");
     if (!res.ok) return null;
     const list: Project[] = data.projects || [];
-    try { localStorage.setItem(LIST_KEY, JSON.stringify(list.map(({ id, name, repo, logo, updatedAt, location, localPath }) => ({ id, name, repo, logo, updatedAt, location, localPath })))); } catch { /* storage blocked */ }
+    try { localStorage.setItem(LIST_KEY, JSON.stringify(list.map(({ id, name, repo, logo, updatedAt, location, localPath, localCopies }) => ({ id, name, repo, logo, updatedAt, location, localPath, localCopies })))); } catch { /* storage blocked */ }
     return list;
   } catch { return null; }
 }
@@ -212,13 +214,25 @@ export function StudioProjectPicker() {
   }, [open]);
 
   const current = projects?.find((p) => p.id === picked) || null;
+  // A folder project that pushes to GitHub: its repo is read from the folder's git settings and saved on the project
+  useEffect(() => {
+    const getRepo = (window as unknown as { classgridDesktop?: { githubRepo?: (f: string) => Promise<string | null> } }).classgridDesktop?.githubRepo;
+    if (!current || current.location !== "local" || current.repo || !current.localPath || !getRepo) return;
+    let gone = false;
+    getRepo(current.localPath).then(async (repo) => {
+      if (gone || !repo) return;
+      const { res, data } = await api(`/projects/${current.id}`, { method: "PATCH", body: JSON.stringify({ repo }) });
+      if (!gone && res.ok) replaceProject({ ...current, ...(data.project || {}), repo });
+    }).catch(() => {});
+    return () => { gone = true; };
+  }, [current?.id, current?.repo]); // eslint-disable-line react-hooks/exhaustive-deps
   const shown = useMemo(() => {
     const t = q.trim().toLowerCase();
     return (projects || []).filter((p) => !t || p.name.toLowerCase().includes(t) || (p.repo || "").toLowerCase().includes(t));
   }, [projects, q]);
 
   return (
-    <div ref={boxRef} className="relative">
+    <div ref={boxRef} className="relative flex flex-wrap items-center gap-x-2 gap-y-1">
       <button
         type="button"
         onClick={() => {
@@ -253,6 +267,8 @@ export function StudioProjectPicker() {
           <ChevronDown className="size-3.5" />
         </motion.span>
       </button>
+      {/* Desktop app: get a copy on this computer, or switch between this computer and the cloud */}
+      <ProjectPlaceSwitch project={current} compact />
 
       <AnimatePresence>
       {open && (

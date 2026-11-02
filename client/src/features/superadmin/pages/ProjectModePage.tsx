@@ -32,6 +32,8 @@ import { ImageCropperModal } from "@/components/marketing_ui/ImageCropperModal";
 import { apiClient } from "@/lib/apiClient";
 import { localFolderOf } from "../utils/localProject";
 import { DesktopStartPanel, type LocalWorkspace } from "../components/DesktopStartPanel";
+import { ProjectPlaceSwitch } from "../components/ProjectPlaceSwitch";
+import { PROJECT_PLACE_EVENT, listenProjectSaved, saveThisComputerCopy, thisComputerCopy, thisDeviceId, type LocalCopy } from "../utils/projectCopies";
 
 const backendUrl = import.meta.env.VITE_API_URL || "https://api.classgrid.in";
 const OPEN_PROJECT_KEY = "cg_project_open"; // which project this browser had open (per-viewer convenience)
@@ -44,7 +46,7 @@ let reloadedInProject = (() => {
 })();
 const AI_PANEL_KEY = "cg_project_ai_closed"; // whether the AI panel was closed (per-viewer convenience)
 
-type Project = { id: string; name: string; repo: string | null; logo?: string | null; lastOpenedAt: string | null; createdAt?: string; updatedAt: string; location?: "cloud" | "local"; localPath?: string | null };
+type Project = { id: string; name: string; repo: string | null; logo?: string | null; lastOpenedAt: string | null; createdAt?: string; updatedAt: string; location?: "cloud" | "local"; localPath?: string | null; localCopies?: LocalCopy[] };
 type GithubAccount = { login: string | null; name: string | null; email: string | null; avatar: string | null };
 
 async function api(path: string, init?: RequestInit) {
@@ -296,7 +298,7 @@ export function ProjectModePage() {
     freshList.current = true;
     if (res.ok) {
       setProjects(data.projects || []);
-      try { localStorage.setItem("cg_studio_projects", JSON.stringify((data.projects || []).map(({ id, name, repo, logo, updatedAt, location, localPath }: Project) => ({ id, name, repo, logo, updatedAt, location, localPath })))); } catch { /* storage blocked */ }
+      try { localStorage.setItem("cg_studio_projects", JSON.stringify((data.projects || []).map(({ id, name, repo, logo, updatedAt, location, localPath, localCopies }: Project) => ({ id, name, repo, logo, updatedAt, location, localPath, localCopies })))); } catch { /* storage blocked */ }
     }
     else setProjects((list) => list || []);
   }, []);
@@ -366,9 +368,15 @@ export function ProjectModePage() {
     setProgress({ label: resume ? "Reconnecting to your project" : newLines ? (newLines[0] ?? "") : "Downloading the latest code from GitHub", value: 3, target: 70, lines: newLines });
     try {
       // A folder on this computer: nothing to download, it is already here
-      const here = project.location === "local" ? project.localPath || localFolderOf(project.id) : localFolderOf(project.id);
+      // (a cloud project with a copy on this computer asks the server: it gets the latest there first, or opens in the cloud)
+      const here = project.location === "local" ? project.localPath || localFolderOf(project.id) : thisComputerCopy(project) ? null : localFolderOf(project.id);
       if (here) { setProgress(null); setLocalFolder(here); return; }
-      const { res, data } = await api(`/projects/${project.id}/open`, { method: "POST", body: JSON.stringify({ replace, resume }) });
+      const { res, data } = await api(`/projects/${project.id}/open`, { method: "POST", body: JSON.stringify({ replace, resume, deviceId: thisDeviceId() || undefined }) });
+      // This computer's copy couldn't be opened (app not connected, clashing changes, copy deleted): say why
+      if (res.status === 409 && data.code) {
+        if (data.project) setProjects((list) => (list || []).map((p) => (p.id === project.id ? data.project : p)));
+        throw new Error(data.error || "Could not open this project on this computer");
+      }
       if (res.status === 409 && data.error === "unsaved_changes") {
         setBusyId(null);
         setProgress(null);
@@ -378,7 +386,7 @@ export function ProjectModePage() {
       }
       if (res.status === 409) { setProgress(null); rememberOpen(wasOpen); setGithubConnected(false); setLinking(project); loadRepos(); return; }
       if (!res.ok) throw new Error(data.error || "Could not open this project");
-      if (data.local) { setProgress(null); setLocalFolder(data.localPath || project.localPath || "this computer"); return; }
+      if (data.local) { setProgress(null); setLocalFolder(data.localPath || project.localPath || "this computer"); if (data.message) toast.success(data.message, { duration: 6000 }); return; }
       setFolder(data.folder);
       setProgress((p) => (p?.lines ? { ...p, value: Math.max(p.value, 70), target: 95 } : { label: "Starting the editor", value: 70, target: 95 }));
       if (data.backup) toast(`Your unsaved work from last time was saved to the GitHub branch "${data.backup}".`, { duration: 12000 });
@@ -394,10 +402,30 @@ export function ProjectModePage() {
 
   // Coming back to the page with a project open: download it fresh again
   useEffect(() => {
-    if (openProject && !folder && busyId !== openProject.id) open(openProject, false, true); // refresh: keep the code that is there
+    if (openProject && !folder && !localFolder && busyId !== openProject.id) open(openProject, false, true); // refresh: keep the code that is there
     if (projects && freshList.current && openId && !openProject) rememberOpen(null); // only once the server's list says it is gone
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projects, openId]);
+
+  // Desktop app: the project's place changed (a copy here, "On this computer" / "In the cloud", or also in the cloud).
+  // On this computer it is already up to date; in the cloud the effect above downloads it fresh.
+  useEffect(() => {
+    const onPlace = (e: Event) => {
+      const p = (e as CustomEvent<{ project?: Project }>).detail?.project;
+      if (!p) return;
+      if (p.id === openId) {
+        const copy = thisComputerCopy(p);
+        setProgress(null);
+        setFolder(null);
+        setLocalFolder(copy?.here ? copy.path : p.location === "local" ? p.localPath || null : null);
+      }
+      setProjects((list) => (list || []).map((x) => (x.id === p.id ? { ...x, ...p } : x)));
+    };
+    window.addEventListener(PROJECT_PLACE_EVENT, onPlace);
+    return () => window.removeEventListener(PROJECT_PLACE_EVENT, onPlace);
+  }, [openId]);
+  // Work saved to GitHub by itself after an answer: one short line
+  useEffect(() => listenProjectSaved(), []);
 
   // A chat used while a project is open belongs to that project, so the AI there works on the project's code
   // (a chat that already belongs to another project is never moved; the server keeps it there)
@@ -676,11 +704,13 @@ export function ProjectModePage() {
       <div className="shrink-0 flex items-center gap-3 h-8 box-content py-4 pl-16 pr-4 border-b border-border">{/* same height as the AI panel header, so both lines meet */}
         {showEditor ? (
           <>
-            <button onClick={() => { rememberOpen(null); setFolder(null); setLocalFolder(null); setProgress(null); }} className="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground">
+            <button onClick={() => { saveThisComputerCopy(openProject); rememberOpen(null); setFolder(null); setLocalFolder(null); setProgress(null); }} className="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground">
               <ArrowLeft className="size-4" /> Projects
             </button>
             <span className="text-sm font-medium truncate">{openProject.name}</span>
             {openProject.repo && <span className="text-xs text-muted-foreground truncate">{openProject.repo}</span>}
+            {/* Desktop app: get a copy on this computer, or switch between this computer and the cloud */}
+            <ProjectPlaceSwitch project={openProject} />
             {openProject.repo && folder && (
               <button onClick={handleOpenPushModal} disabled={pushing} title="Push to GitHub" aria-label="Push to GitHub" className="ml-auto shrink-0 flex items-center gap-2 h-8 px-3 rounded-full border border-border text-sm hover:bg-secondary disabled:opacity-50">
                 {pushing ? <Spinner className="size-4" /> : <GithubIcon className="size-4" />}

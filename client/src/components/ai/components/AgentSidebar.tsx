@@ -38,11 +38,12 @@ import { DangerConfirmDialog } from "@/components/marketing_ui/danger-confirm-di
 import { Spinner } from "@/components/marketing_ui/spinner";
 import { toast } from "sonner";
 import { fetchWithRescue } from "@/lib/rescue";
-import { OFFLINE_CHAT_NOTE, isUnreachable, keepsChatCopies, listChatCopies, removeChatCopy } from "@/lib/desktopChats";
+import { OFFLINE_CHAT_NOTE, isUnreachable, keepsChatCopies, listChatCopies, listOtherChatCopies, removeChatCopy, type OtherAccountChats } from "@/lib/desktopChats";
 import { getSocket } from "@/lib/socketClient";
 import { cn } from "@/lib/utils";
 import { GroupDialog, groupIcon, groupsApi, openProjectId, useChatGroups, type ChatGroup } from "./chat-groups/chatGroups";
 import { NewProjectDialog, openStudioProject, openLocalFolder } from "@/features/superadmin/components/StudioProjectPicker";
+import { placeActions, savedProject } from "@/features/superadmin/utils/projectCopies";
 
 interface ChatSession {
   id: string;
@@ -82,6 +83,10 @@ export function AgentNestedMenu({ searchQuery = "" }: { searchQuery?: string }) 
   const [loading, setLoading] = React.useState(false);
   // Desktop app, no internet: the list shows the chats saved on this computer
   const [offlineList, setOfflineList] = React.useState(false);
+  // Desktop app: chats saved on this computer by the other accounts that logged in here (to go on with them)
+  const [otherChats, setOtherChats] = React.useState<OtherAccountChats[]>([]);
+  const [activeOther, setActiveOther] = React.useState<string | null>(null); // "<userId>/<chatId>" open now
+  const [fullOther, setFullOther] = React.useState<string[]>([]);
   const [activeSessionId, setActiveSessionId] = React.useState<string | null>(null);
   const [dateFilter, setDateFilter] = React.useState<{ from?: Date; to?: Date } | undefined>();
 
@@ -113,9 +118,15 @@ export function AgentNestedMenu({ searchQuery = "" }: { searchQuery?: string }) 
   React.useEffect(() => {
     const handleActiveSessionChanged = (e: any) => {
       setActiveSessionId(e.detail?.sessionId || null);
+      if (e.detail?.sessionId) setActiveOther(null);
     };
+    const leaveOther = () => setActiveOther(null);
     window.addEventListener("agent:active-session-changed", handleActiveSessionChanged);
-    return () => window.removeEventListener("agent:active-session-changed", handleActiveSessionChanged);
+    window.addEventListener("agent:new-chat", leaveOther);
+    return () => {
+      window.removeEventListener("agent:active-session-changed", handleActiveSessionChanged);
+      window.removeEventListener("agent:new-chat", leaveOther);
+    };
   }, []);
 
   // Which list is shown (agent chats, or one project's chats) and which one was asked for last
@@ -141,6 +152,10 @@ export function AgentNestedMenu({ searchQuery = "" }: { searchQuery?: string }) 
     if (shownListRef.current !== listQuery) { setSessions([]); silent = false; }
     if (!silent) setLoading(true);
     askedListRef.current = listQuery;
+    // Desktop app: the other accounts' chats for the same list, read from this computer
+    if (keepsChatCopies()) {
+      listOtherChatCopies(listQuery).then((list) => { if (askedListRef.current === listQuery) setOtherChats(list); }).catch(() => {});
+    }
     fetchWithRescue(endpoint + listQuery, { credentials: "include" })
       .then(res => {
         if (keepsChatCopies() && isUnreachable({ status: res.status })) throw new TypeError(`HTTP ${res.status}`);
@@ -516,6 +531,14 @@ export function AgentNestedMenu({ searchQuery = "" }: { searchQuery?: string }) 
 
   const handleLoadChat = (sessionId: string) => {
     navigate(`${baseAgentPath}/${sessionId}`);
+  };
+
+  // Desktop app: open another account's chat from this computer (the chat panel shows it; sending a message
+  // continues it under this account)
+  const openOtherChat = (a: OtherAccountChats, c: OtherAccountChats["chats"][number]) => {
+    navigate(baseAgentPath);
+    setActiveOther(`${a.userId}/${c.id}`);
+    window.dispatchEvent(new CustomEvent("agent:open-other-chat", { detail: { userId: a.userId, chatId: c.id, email: a.email, title: c.title } }));
   };
 
   // Studio: the chats sit under their project's folder (every project shows, even with no chats yet)
@@ -1076,6 +1099,21 @@ export function AgentNestedMenu({ searchQuery = "" }: { searchQuery?: string }) 
                         <span className="truncate">{f.name}</span>
                       </button>
                       <div className="absolute right-1 flex items-center">
+                        {/* Desktop app: the project's menu, to get a copy on this computer or switch between it and the cloud */}
+                        {placeActions(savedProject(f.id)).length > 0 && (
+                          <DropdownMenu>
+                            <DropdownMenuTrigger asChild>
+                              <button type="button" className="opacity-0 group-hover/fld:opacity-100 focus-visible:opacity-100 data-[state=open]:opacity-100 transition-opacity p-1 rounded hover:bg-black/5 dark:hover:bg-white/10 text-muted-foreground hover:text-foreground cursor-pointer" title="Project menu" aria-label={`${f.name} menu`}>
+                                <MoreHorizontal className="w-3.5 h-3.5" />
+                              </button>
+                            </DropdownMenuTrigger>
+                            <DropdownMenuContent side="right" align="start" sideOffset={8} className={menuBox("w-[240px]")}>
+                              {placeActions(savedProject(f.id)).map((a) => (
+                                <DropdownMenuItem key={a.label} className={menuItem} onClick={() => { a.run(); }}>{a.label}</DropdownMenuItem>
+                              ))}
+                            </DropdownMenuContent>
+                          </DropdownMenu>
+                        )}
                         <button
                           type="button"
                           onClick={() => newChatIn(f.id)}
@@ -1430,6 +1468,48 @@ export function AgentNestedMenu({ searchQuery = "" }: { searchQuery?: string }) 
             )}
           </Accordion>
           {isStudioMode && studioProjects}
+          {/* Desktop app: chats the other accounts on this computer had; opening one lets this account go on with it */}
+          {otherChats.some((a) => a.chats.some((c) => c.title.toLowerCase().includes(searchQuery.toLowerCase()))) && (
+            <div className="mt-3">
+              <div className="px-2 py-1.5 text-xs font-medium text-muted-foreground/70">From your other accounts on this computer</div>
+              {otherChats.map((a) => {
+                const chats = a.chats.filter((c) => c.title.toLowerCase().includes(searchQuery.toLowerCase()));
+                if (!chats.length) return null;
+                const full = fullOther.includes(a.userId) || !!searchQuery;
+                const shown = full ? chats : chats.slice(0, 5);
+                return (
+                  <div key={a.userId} className="mb-1">
+                    <div className="px-2 pt-1 pb-0.5 text-xs text-muted-foreground break-all">{a.email || "Another account"}</div>
+                    <SidebarMenu>
+                      {shown.map((c) => (
+                        <SidebarMenuItem key={c.id}>
+                          <SidebarMenuButton
+                            isActive={activeOther === `${a.userId}/${c.id}`}
+                            onClick={() => openOtherChat(a, c)}
+                            className="h-auto cursor-pointer flex-1 min-w-0 py-1.5"
+                            render={
+                              <div className="flex items-center gap-2.5 w-full min-w-0">
+                                <span className="truncate block min-w-0 flex-1">{c.title}</span>
+                              </div>
+                            }
+                          />
+                        </SidebarMenuItem>
+                      ))}
+                      {!full && chats.length > shown.length && (
+                        <button
+                          type="button"
+                          onClick={() => setFullOther((prev) => [...prev, a.userId])}
+                          className="w-full px-2 py-1.5 text-left text-xs font-medium text-muted-foreground hover:text-foreground rounded-md hover:bg-muted transition-colors cursor-pointer"
+                        >
+                          Show {chats.length - shown.length} more
+                        </button>
+                      )}
+                    </SidebarMenu>
+                  </div>
+                );
+              })}
+            </div>
+          )}
         </SidebarGroupContent>
       </SidebarGroup>
       </div>

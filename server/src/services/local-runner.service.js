@@ -57,7 +57,7 @@ export function registerRunnerSocket(socket) {
 }
 
 // Commands may run for a while; file tools are quick
-const timeoutFor = (tool) => (tool === "computer" ? 2 * 60 * 1000 : tool === "execute_terminal_command" || tool === "run_code" || tool === "push_project_to_github" || tool === "check_background_command" || tool === "wait_until" ? 11 * 60 * 1000 : tool === "browser" ? 2 * 60 * 1000 : 60 * 1000);
+const timeoutFor = (tool) => (tool === "computer" ? 2 * 60 * 1000 : tool === "execute_terminal_command" || tool === "run_code" || tool === "push_project_to_github" || tool === "clone_repo" || tool === "sync_repo" || tool === "check_background_command" || tool === "wait_until" ? 11 * 60 * 1000 : tool === "browser" ? 2 * 60 * 1000 : 60 * 1000);
 
 // Sends one tool call to the user's desktop app. Returns its whole answer ({ text, ... }), or null when the app isn't open.
 async function askRunner(userId, tool, payload) {
@@ -77,6 +77,19 @@ async function askRunner(userId, tool, payload) {
         return (Array.isArray(replies) ? replies.find((r) => r && typeof r.text === "string") : null) || null;
     } catch (err) {
         return { text: `Error: the Classgrid desktop app didn't answer in time (${err.message}). Ask the user to check the app is open.` };
+    }
+}
+
+/** Whether the user's desktop app is connected right now (on any server process) */
+export async function runnerOnline(userId) {
+    try {
+        const io = getIO();
+        const room = runnerRoom(String(userId));
+        if ((await io.local.in(room).fetchSockets()).length) return true;
+        const anywhere = await Promise.race([io.in(room).fetchSockets(), new Promise((r) => setTimeout(() => r([]), 4000))]).catch(() => []);
+        return anywhere.length > 0;
+    } catch {
+        return false;
     }
 }
 

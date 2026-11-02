@@ -2,7 +2,9 @@
 // Layout: <userData>/chats/<userId>/<chatId>.json (the chat's details and all its messages, as the server sends
 // them: thinking, steps, commands and their output, attachment links, model, times) and
 // <userData>/chats/<userId>/index.json (id, title, project, times) for a fast chat list.
-// Only the logged-in user's folder is ever read or written (user id from the login token).
+// <userData>/chats/<userId>/account.json says whose folder it is ({ userId, email, name }).
+// Only the logged-in user's folder is ever written (user id from the login token). The other accounts' folders on
+// this computer are only read, so a chat can go on under the account that is logged in now.
 const fs = require("node:fs");
 const fsp = require("node:fs/promises");
 const path = require("node:path");
@@ -29,7 +31,7 @@ function userDir() {
 function chatFile(id) {
   const dir = userDir();
   const safe = safeId(id);
-  if (!dir || !safe || safe === "index") return null;
+  if (!dir || !safe || safe === "index" || safe === "account") return null;
   return path.join(dir, `${safe}.json`);
 }
 
@@ -109,7 +111,27 @@ async function readIndex(dir) {
   return chats.sort(byNewest);
 }
 
-// chat: { id, details: GET /api/ai/sessions/:id answer ({ session, projectId }), messages: GET .../messages list }
+const accountFile = (dir) => path.join(dir, "account.json");
+let accountSaved = null; // "<userId> <email> <name>" last written, so it isn't written on every save
+
+// Remember whose folder this is. account: the signed-in user the screens know ({ _id, email, name }); it must be the
+// same person as the login token
+async function saveAccount(dir, account) {
+  if (!account || typeof account !== "object" || String(account._id || account.id || "") !== String(userId)) return;
+  const email = String(account.email || "").trim().slice(0, 320);
+  if (!email) return;
+  const name = String(account.name || "").trim().slice(0, 200);
+  const key = `${userId} ${email} ${name}`;
+  if (accountSaved === key) return;
+  const old = await readJson(accountFile(dir));
+  if (!old || old.userId !== userId || old.email !== email || (old.name || "") !== name) {
+    await writeJson(accountFile(dir), { version: 1, userId, email, name, savedAt: new Date().toISOString() });
+  }
+  accountSaved = key;
+}
+
+// chat: { id, details: GET /api/ai/sessions/:id answer ({ session, projectId }), messages: GET .../messages list,
+// account: the signed-in user (optional) }
 async function saveChat(chat) {
   const file = chatFile(chat && chat.id);
   if (!file) return { error: userDir() ? "Bad chat id." : "Not logged in." };
@@ -139,6 +161,7 @@ async function saveChat(chat) {
     const text = JSON.stringify(saved);
     if (text.length > MAX_FILE) return { error: "This chat is too big to keep on this computer." };
     await fsp.mkdir(dir, { recursive: true });
+    await saveAccount(dir, chat.account).catch(() => {});
     await writeJson(file, saved);
     const chats = (await readIndex(dir)).filter((c) => c.id !== saved.id);
     chats.push(indexEntry(saved));
@@ -179,12 +202,53 @@ async function removeChat(id) {
   });
 }
 
+// The other accounts' folders on this computer (never the logged-in user's)
+async function otherDirs() {
+  const me = safeId(userId);
+  if (!root || !me) return [];
+  let names = [];
+  try { names = await fsp.readdir(root, { withFileTypes: true }); } catch { return []; }
+  return names.filter((d) => d.isDirectory() && safeId(d.name) === d.name && d.name !== me).map((d) => d.name);
+}
+
+// Chats saved here by the other accounts, newest first: [{ userId, email, name, chats: [index entries] }].
+// email is null for a folder saved before account.json was kept.
+async function listOtherChats() {
+  await queue;
+  const out = [];
+  for (const other of await otherDirs()) {
+    const dir = path.join(root, other);
+    const chats = (await readIndex(dir)).filter((c) => c && safeId(c.id));
+    if (!chats.length) continue;
+    const acc = await readJson(accountFile(dir));
+    const mine = acc && acc.userId === other;
+    out.push({ userId: other, email: mine && acc.email ? String(acc.email) : null, name: mine && acc.name ? String(acc.name) : null, chats: chats.sort(byNewest) });
+  }
+  return out.sort((a, b) => byNewest(a.chats[0], b.chats[0]));
+}
+
+// One chat saved here by another account (read only), with that account's email, or null
+async function readOtherChat(otherId, id) {
+  const other = safeId(otherId);
+  const safe = safeId(id);
+  if (!root || !other || !safe || safe === "index" || safe === "account" || other === safeId(userId)) return null;
+  if (!(await otherDirs()).includes(other)) return null;
+  const dir = path.join(root, other);
+  const chat = await readJson(path.join(dir, `${safe}.json`));
+  if (!chat || chat.id !== safe || !Array.isArray(chat.messages)) return null;
+  const acc = await readJson(accountFile(dir));
+  const mine = acc && acc.userId === other;
+  return { ...chat, account: { userId: other, email: mine && acc.email ? String(acc.email) : null, name: mine && acc.name ? String(acc.name) : null } };
+}
+
 module.exports = {
   init(userDataDir) { root = path.join(userDataDir, "chats"); },
   // The login token the screens send (same one the local runner gets)
-  setToken(token) { userId = token ? userOf(token) : null; },
+  setToken(token) { userId = token ? userOf(token) : null; accountSaved = null; },
   saveChat,
   listChats,
   readChat,
   removeChat,
+  listOtherChats,
+  readOtherChat,
 };
