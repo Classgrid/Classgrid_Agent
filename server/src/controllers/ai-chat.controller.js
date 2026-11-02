@@ -1413,6 +1413,13 @@ const COMPUTER_TERMINAL_DEFS = [
         job_id: { type: "string", description: "The job_id from start_background_command (or from a command that moved to the background by itself)" },
         wait_seconds: { type: "number", description: "Wait up to this many seconds (max 120) for the job to finish before answering" },
     }, ["job_id"]),
+    terminalDef("wait_until", "Wait on the user's computer until something is ready, instead of checking again and again: a local port answers (a dev server is up), a web address answers, or a file exists (optionally containing some text). Waits up to timeout_seconds (default 120, max 600).", {
+        port: { type: "number", description: "A port on this computer, e.g. 3000" },
+        url: { type: "string", description: "A web address that should answer, e.g. http://localhost:3000/health" },
+        file: { type: "string", description: "A file path (full, or relative to the project folder)" },
+        contains: { type: "string", description: "With file: text the file must contain" },
+        timeout_seconds: { type: "number", description: "How long to wait at most (default 120, max 600)" },
+    }, []),
     terminalDef("stop_background_command", "Stop a background command on the user's computer.", {
         job_id: { type: "string", description: "The job_id from start_background_command" },
     }, ["job_id"]),
@@ -1508,6 +1515,9 @@ const SLASH_COMMAND_LINES = {
     schedule: `The user wants a schedule or reminder. Make it with create_schedule (check list_schedules first, so the same one is not made twice).`,
     browser: `Use the live browser (the browser tools) for this.`,
     generative_ui: `Answer with interactive cards: use the Classgrid display blocks that fit, or your own \`widget\` card when no block covers it, instead of plain text.`,
+    "security-review": `Do a security review of the code changes (since the last commit, or the files the user names). Look only for real security holes: injection (SQL, NoSQL, command, path), missing login or permission checks, one user reaching another user's data, secrets or keys in the code, unsafe file uploads and downloads, cross-site scripting, open redirects, weak tokens or sessions, and data sent where it shouldn't be. Check each one again before you report it (follow the data from where it comes in to where it is used) and drop anything you can't confirm. List them from most to least serious with the file and line, how someone could misuse it, and the fix. Then fix them unless the user only asked for the list.`,
+    simplify: `Simplify the code that changed (since the last commit, or the files the user names) without changing what it does: remove repeated code by reusing what the project already has, drop code that does nothing, make long or tangled parts clearer, and use the project's own helpers and style. Never change behaviour, public names or outputs. Make the changes, then check the code still works (run its tests or the app's build when there are any), and list what you simplified.`,
+    research: `Do deep research on the user's question: split it into 3 to 5 parts and send read-only helpers (run_project_helpers) to research each part on the web at the same time (search_web and open_url, several good sources each). Wait for their reports, check what they found against each other, then write one full report: a short summary first, then each part with its facts and numbers, where sources disagree, and every source as a link. Say plainly what you couldn't confirm.`,
     review: `Review the code changes: the project's changes since the last commit (git diff and git status; also new files), or the files or part the user names. Look only for real problems: bugs, crashes, wrong logic, security holes, missing error handling, broken edge cases, and code that doesn't match the rest of the project. Read the changed code and enough around it to understand it. Before you report a problem, check it again (read the code that calls it, run it or a quick test when you can) and drop anything you can't confirm; never report style opinions. Then list the problems from most to least serious, each with the file and line, what goes wrong and when, and the fix. Then fix them, unless the user only asked for the list; after fixing, check the fixes work. For a big change, send read-only helpers to review different parts at the same time, then check their findings yourself.`,
     "grill-me": `Before you decide or build anything, interview the user: ask your questions with the questions card (an approval block with "variant": "questions"), one card at a time, until you understand exactly what they want. Do not start the work until then.`,
     teamwork: `Split this job into parts that can run at the same time and give them to helpers with run_project_helpers, then check their work and put it together.`,
@@ -5435,6 +5445,15 @@ If a tool fails, never show the error message; say only: "Something went wrong o
             activeToolList.push(def);
             toolPlan.allowedToolNames.add("execute_terminal_command");
             toolPlan.loadedNames.add("execute_terminal_command");
+            // Wait until a dev server is up, a page answers or a file appears (in the project folder on their computer)
+            const waitDef = COMPUTER_TERMINAL_DEFS.find((d) => d.function.name === "wait_until");
+            if (waitDef && !fullToolList.some((t) => t.function.name === "wait_until")) {
+                fullToolList.push(waitDef);
+                activeToolList.push(waitDef);
+                toolPlan.allowedToolNames.add("wait_until");
+                toolPlan.loadedNames.add("wait_until");
+                llmConfig.toolHandlers.wait_until = async (args) => (await handleToolCall("wait_until", args, { sessionId })).content[0].text;
+            }
             // Files outside the project folder: the same tools with a full path, on the user's computer (asked first,
             // like files in a chat with no project); inside the folder they work as before
             const root = String(chatProject.localPath || "").replace(/[\\/]+$/, "").toLowerCase();

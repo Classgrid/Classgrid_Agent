@@ -218,6 +218,28 @@ const tools = {
     try { return fs.readFileSync(path.join(path.dirname(foldersFile), "editor-bridge", "context.json"), "utf8"); } catch { return "{}"; }
   },
 
+  // Wait until something is true on this computer (up to 10 minutes): a port answers, a web address answers, or a
+  // file exists (or contains some text)
+  async wait_until(root, { port, url, file, contains, timeout_seconds = 120 }) {
+    const net = require("node:net");
+    const until = Date.now() + Math.min(600, Math.max(1, Number(timeout_seconds) || 120)) * 1000;
+    const full = file ? (path.isAbsolute(String(file)) ? String(file) : path.join(root, String(file))) : null;
+    const check = async () => {
+      if (port) return new Promise((ok) => { const s = net.connect(Number(port), "127.0.0.1"); s.once("connect", () => { s.destroy(); ok(true); }); s.once("error", () => ok(false)); setTimeout(() => { s.destroy(); ok(false); }, 1500); });
+      if (url) { try { const r = await fetch(String(url), { signal: AbortSignal.timeout(3000) }); return r.status < 500; } catch { return false; } }
+      if (full) { try { return fs.existsSync(full) && (!contains || fs.readFileSync(full, "utf8").includes(String(contains))); } catch { return false; } }
+      return false;
+    };
+    if (!port && !url && !full) return "Error: give a port, a url or a file to wait for.";
+    const what = port ? `port ${port}` : url ? String(url) : `${full}${contains ? ` containing "${contains}"` : ""}`;
+    const started = Date.now();
+    while (Date.now() < until) {
+      if (await check()) return `Ready after ${Math.round((Date.now() - started) / 1000)} seconds: ${what}.`;
+      await wait(1000);
+    }
+    return `Still not ready after ${Math.round((Date.now() - started) / 1000)} seconds: ${what}.`;
+  },
+
   // A helper's own copy of the project (git worktree) on a new branch next to the project folder, so helpers that edit
   // at the same time never touch each other's files; the main AI merges the branch afterwards
   create_worktree(root, { name = "helper" }) {
@@ -583,7 +605,7 @@ const computerFileTools = {
 
 // The terminal in a chat that isn't a project: runs on this computer in the user's home folder (each command is allowed
 // by the user first)
-const COMPUTER_TOOLS = new Set(["execute_terminal_command", "start_background_command", "check_background_command", "stop_background_command", "run_code"]);
+const COMPUTER_TOOLS = new Set(["execute_terminal_command", "start_background_command", "check_background_command", "stop_background_command", "run_code", "wait_until"]);
 
 function shellSpawn(command, cwd) {
   return process.platform === "win32"

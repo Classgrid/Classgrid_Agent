@@ -46,6 +46,9 @@ You can also type the whole command yourself without the list, for example `/goa
 | `/generative_ui` | Answers with interactive cards                   | Project, Studio   |
 | `/grill-me`      | Asks you questions before starting               | Project, Studio   |
 | `/review`        | Reviews the code changes and fixes the problems  | Project, Studio   |
+| `/security-review` | Looks for security holes in the changes        | Project, Studio   |
+| `/simplify`      | Cleans up and simplifies the changed code        | Project, Studio   |
+| `/research`      | Deep research with helpers and a full report     | Project, Studio   |
 | `/plugin`        | Opens the Plugins page (nothing is sent)         | Project, Studio   |
 | `/teamwork`      | Splits the job across helpers working at once    | Project, Studio   |
 | `/boost`         | Thinks harder for this message                   | Project, Studio   |

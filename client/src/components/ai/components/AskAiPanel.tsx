@@ -2013,6 +2013,12 @@ export const INTEGRATIONS_LIST: any[] = [
 ];
 
 
+
+// Desktop app: a Windows notification when the user isn't looking at the app
+function notifyDesktop(body: string) {
+  if (import.meta.env.VITE_DESKTOP !== "1" || document.hasFocus()) return;
+  try { const n = new Notification("Classgrid", { body }); n.onclick = () => window.focus(); } catch { /* notifications are off */ }
+}
 export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow", initialMessages, autoFocus = true, readOnly = false, hideClearChat = false, overlayWidth, onOverlayWidthChange, onOverlayResizingChange, inputHeader, studioMenu = false }: AskAiPanelProps) {
   const { data: user } = useCurrentUser();
   const session = user ? { user } : null;
@@ -3411,6 +3417,12 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
     } catch { /* next update will try again */ }
   }, [gridSessionId]);
   const grid = useShareGrid(gridSessionId, refreshSharedMessages);
+  // Desktop app: the answer finished while the user was in another window, so Windows shows a notification
+  const wasSubmittingRef = useRef(false);
+  useEffect(() => {
+    if (wasSubmittingRef.current && !submitting) notifyDesktop("The agent finished its answer.");
+    wasSubmittingRef.current = submitting;
+  }, [submitting]);
   // Background work (helpers, a long command) finished after the answer ended: the agent woke up by itself and
   // answered in this chat; show its update
   useEffect(() => {
@@ -3419,7 +3431,7 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
     const on = (d: { sessionId?: string; phase?: string }) => {
       if (d?.sessionId !== gridSessionId) return;
       if (d.phase === "start") toast.message("Background work finished. The agent is writing an update…");
-      else refreshSharedMessages();
+      else { refreshSharedMessages(); notifyDesktop("Background work finished. The agent wrote an update."); }
     };
     const attach = () => { sock = getSocket(); if (sock) sock.on("chat:woke", on); return !!sock; };
     const timer = attach() ? null : setInterval(() => { if (attach() && timer) clearInterval(timer); }, 3000);
