@@ -51,10 +51,10 @@ export function describeAction(tool, args = {}) {
     // connector list never asks; "always allow" covers one tool of one app.
     case "custom_mcp_connector":
       return describeConnectorAction(args);
-    // A file or folder anywhere on the user's computer (desktop app): asks in every chat and every mode
+    // A file or folder anywhere on the user's computer (desktop app): asks in Review and Default; Auto and Turbo don't ask
     case "read_local_file": {
       const file = String(args?.path || "").trim().replace(/^["']+|["']+$/g, "");
-      return { title: "Read a file on your computer?", detail: file, key: `localfile:${file.toLowerCase()}`, label: `reading ${file.split(/[\\/]/).filter(Boolean).pop() || "this file"}`, level: ALWAYS_ASKS };
+      return { title: "Read a file on your computer?", detail: file, key: `localfile:${file.toLowerCase()}`, label: `reading ${file.split(/[\\/]/).filter(Boolean).pop() || "this file"}`, level: 2 };
     }
     // Using apps on the user's computer (the real mouse and keyboard): every step that does something asks
     case "computer": {
