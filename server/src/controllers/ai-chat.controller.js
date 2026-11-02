@@ -85,7 +85,7 @@ import NotificationLog from "../models/NotificationLog.js";
 import { getMcpTools, handleToolCall, readSandboxFiles } from "../mcp/tools.js";
 import { CUSTOM_MCP_TOOL, runCustomMcpTool, customMcpPromptLine } from "../services/custom-mcp-ai.js";
 import { PLAY_SONG_TOOL, songTools, runPlaySong, runDownloadSong } from "../services/music-ai.js";
-import { localProjectFor, callLocal, readLocalFile, runOnComputer, useComputer, COMPUTER_TERMINAL_TOOLS, COMPUTER_FILE_TOOLS, LOCAL_TOOLS } from "../services/local-runner.service.js";
+import { localProjectFor, callLocal, readLocalFile, runOnComputer, useComputer, COMPUTER_TERMINAL_TOOLS, COMPUTER_FILE_TOOLS, LOCAL_TOOLS, chatWorktree, setChatWorktree, inChatWorktree } from "../services/local-runner.service.js";
 import { projectForChat } from "../services/ide-project.service.js";
 import { parseHTML } from "linkedom";
 import { Readability } from "@mozilla/readability";
@@ -98,7 +98,9 @@ import Classroom from "../models/Classroom.js";
 import ClassroomMembership from "../models/ClassroomMembership.js";
 import AiSchedule from "../models/AiSchedule.js";
 import AiUsageLog from "../models/AiUsageLog.js";
+import { LIVE_DOC_TOOLS, LIVE_DOC_PROMPT, buildLiveDocHandlers } from "../services/live-doc-tools.js";
 import { ROLE_DEFINITIONS } from "../utils/roles.js";
+import { SHARE_PAGE_TOOLS, SHARE_PAGE_PROMPT, runPublishPage, runPageComments } from "../services/share-page.service.js";
 import { isPublicChatAccount } from "../utils/chat-onboarding.js";
 
 const uniqueDashboards = [...new Set(Object.values(ROLE_DEFINITIONS).map(r => r.dashboard))];
@@ -1347,6 +1349,7 @@ function whereYouWorkRule({ desktop, project, task }) {
     if (task) return ""; // WhatsApp and background tasks keep their own rules
     const local = project?.location === "local";
     const head = "\n\n=== WHERE YOU WORK (final rule: it overrides anything above about where things run) ===\n";
+    if (desktop && local && project.worktree) return head + `The user is in the Classgrid DESKTOP APP, in a project that is a folder on their own Windows computer (${project.mainPath || "a local folder"}). This chat now works in ITS OWN COPY of that project (a git worktree) at ${project.localPath}, on the branch ${project.worktree.branch}: every file tool, command and run_code works in that copy, and the user's main folder is not touched. When the work is done, commit it there, then call use_worktree with action "finish" to go back to the main folder and merge the branch. EVERYTHING runs on their computer; there is NO cloud sandbox in this chat. Only your thinking happens on Classgrid's servers.`;
     if (desktop && local) return head + `The user is in the Classgrid DESKTOP APP, in a project that is a folder on their own Windows computer (${project.localPath || "a local folder"}). EVERYTHING runs on their computer: the file tools, terminal commands (PowerShell), run_code, installs, git and pushes, helpers and the browser. Paths are relative to the project folder; for a file or folder outside it, give the file tools its full path (like C:\\Users\\name\\Desktop\\notes.txt): the user is asked first. There is NO cloud sandbox in this chat: never use one, never mention one, and never say you can't reach their computer. Only your thinking happens on Classgrid's servers.`;
     if (desktop && project) return head + `The user is in the Classgrid DESKTOP APP, in a CLOUD project (its files live on Classgrid's cloud computer, not on their PC). The project tools, terminal commands and run_code work on that cloud copy, and push_project_to_github pushes it. read_local_file and the browser still work on the user's own computer. If they want the work on their own computer, they open the folder there with Open Folder in Project Mode.`;
     if (desktop) return head + "The user is in the Classgrid DESKTOP APP, in a chat with no project. EVERYTHING runs on their own Windows computer: commands (PowerShell), run_code, installs, reading, creating and editing files (full paths), helpers and the browser. There is NO cloud sandbox in this chat: never use one, never mention one, and never say you can't reach their computer. Only your thinking happens on Classgrid's servers.";
@@ -1575,6 +1578,8 @@ export const streamAskAi = async (req, res) => {
     const body = req.body || {};
     // A "/" command from the chat box (Project Mode and Studio only; the live browser is only in Studio)
     const slashCommand = (body.appMode === "project" || body.appMode === "studio") && Object.hasOwn(SLASH_COMMAND_LINES, String(body.command || "")) && (body.command !== "browser" || body.appMode === "studio") ? body.command : null;
+    // How hard to think, picked in the model menu: Fast, Normal or Deep (/boost is Deep for one message)
+    const thinking = slashCommand === "boost" ? "high" : ["low", "high"].includes(body.effort) ? body.effort : null;
     let compacted = false;
 
     // Identity comes only from the auth middleware (the route requires a login), never from the body.
@@ -2068,7 +2073,7 @@ You are currently talking to Nikhil Shinde (nikhil.shinde@classgrid.in), the CRE
             await User.updateOne({ _id: req.user._id }, { $addToSet: { studio_chat_ids: sessionId } }).catch(() => {});
         }
         const projectContext = sessionId && !isIncognito ? await editorContextFor(sessionId).catch(() => "") : "";
-        const whereProject = sessionId && !isIncognito && body.taskOrigin !== "whatsapp" ? await projectForChat(sessionId).catch(() => null) : null;
+        const whereProject = sessionId && !isIncognito && body.taskOrigin !== "whatsapp" ? await projectForChat(sessionId).then((p) => inChatWorktree(p, sessionId)).catch(() => null) : null;
         const whereYouWork = whereYouWorkRule({ desktop: body.clientApp === "desktop", project: whereProject, task: !!body.taskOrigin });
         const isProjectChat = !!projectContext; // Project Mode chat: Agent-mode website hosting rules are not sent
         volatilePrompt += projectContext;
@@ -2098,6 +2103,8 @@ The user is in ${appMode === "agent" ? "Agent mode" : appMode === "project" ? "P
         if (body.clientApp === "desktop") volatilePrompt += "\n\n--- WHERE THE USER IS ---\nThe user is using the Classgrid desktop app on their own computer (Windows), not the chat.classgrid.in website. The app's screens run on their computer; your thinking runs on Classgrid's servers. Projects opened from a folder on their computer run your file and terminal tools on that computer. In any chat, to look at a file or folder on this computer (a path like C:\\Users\\name\\Videos\\clip.mp4, or one they ask about), use read_local_file: pictures and videos are shown to you (a video as pictures from across it), PDF, Word, Excel and PowerPoint files come back as their text (a scanned PDF as pictures of its pages), and a folder shows its files; the file also opens beside the chat for the user. In a chat that isn't a project, execute_terminal_command and the background command tools run a real terminal on this computer (PowerShell; Bash through bash -lc '...' when Git Bash is installed), starting in the user's home folder. Do everything on the computer with it, like a developer in their own terminal: list folders (Get-ChildItem), read files (Get-Content), search (Select-String), create, edit, move, copy or delete files and folders, and run programs. To create a file use write_project_file, to change one use edit_project_file, to search inside files use search_project, and to list a folder (or find files by name) use list_project_files, all with full paths. For anything else, use the terminal. To read a document with code, use Python in the terminal: install the readers once with python -m pip install --quiet --disable-pip-version-check pypdf openpyxl python-docx python-pptx (if Python isn't there, install it with winget install -e --id Python.Python.3.12 --accept-package-agreements --accept-source-agreements, then use py), then print its text with a short python -c script. Always write a file's full path in the command: the app then opens that file beside the chat for the user (PDF pages, sheets, Word pages, pictures, text). The app asks the user to allow each command first, so just run it; never say you can't open or change files on their computer.\nIn the desktop app your browser (browser_open and the other browser tools) runs on the user's computer, with their internet, so it can open their own local servers like http://localhost:3000.";
         else if (body.clientApp === "web") volatilePrompt += "\n\n--- WHERE THE USER IS ---\nThe user is using Classgrid on the website (chat.classgrid.in) in their browser, not the desktop app.";
         if (slashCommand && (slashCommand !== "compact" || compacted)) volatilePrompt += `\n\n--- COMMAND ---\nThe user started this message with /${body.command}. ${SLASH_COMMAND_LINES[slashCommand]}`;
+        if (thinking === "low") volatilePrompt += "\n\n--- SPEED ---\nThe user picked Fast: answer quickly and keep it short. Don't plan at length or double-check things that are clearly right; use as few steps as the task needs.";
+        if (thinking === "high" && slashCommand !== "boost") volatilePrompt += "\n\n--- SPEED ---\nThe user picked Deep thinking: think carefully, check your work twice and look for mistakes before you answer.";
         // Project Mode: snapshot the project before this answer, so its changes can be reviewed, rejected or undone
         const checkpointId = sessionId && !isIncognito ? await startCheckpoint(sessionId).catch(() => null) : null;
         if (checkpointId && !res.writableEnded) res.write(`data: ${JSON.stringify({ type: "checkpoint", id: checkpointId })}\n\n`);
@@ -2727,8 +2734,10 @@ CRITICAL INSTRUCTION FOR GOOGLE WORKSPACE & CLASSROOM DISAMBIGUATION: If the use
 2. NO DUPLICATE HEADINGS: The \`generate_pdf\` tool automatically renders the \`title\` parameter as an \`<h1>\` at the top of the document. Do NOT manually add a duplicate \`<h1>\` with the title inside your HTML content.
 3. HUMANIZE LABELS: NEVER output raw backend database enum values (like "org_admin", "super_admin") in your chat responses or in PDF reports. Always map them to human-readable labels (e.g., "Organization Admin", "Super Admin") before rendering.
 4. WORD, EXCEL, POWERPOINT: To make a Word, Excel or PowerPoint file, use \`make_office_file\`. Never fake it with HTML or CSV, and never say you can only make PDFs.
-5. EDIT A PDF: To merge, split, rotate, watermark, number pages or fill a PDF form, use \`edit_pdf\`.
-6. EDIT A WORD FILE: To change an existing Word file, use \`edit_office_file\` (set track_changes when the user wants to see the changes).`);
+5. EDIT A PDF: To merge, split, rotate, watermark, number pages or fill a PDF form, use \`edit_pdf\`. A scanned PDF can be made searchable with action make_searchable.
+6. EDIT A WORD, EXCEL OR POWERPOINT FILE: To change an existing Word, Excel or PowerPoint file, use \`edit_office_file\` (set track_changes when the user wants to see the changes in Word).`);
+        dynamicSystemPrompt += promptBlock("live_docs", LIVE_DOC_PROMPT);
+        dynamicSystemPrompt += promptBlock("share_pages", SHARE_PAGE_PROMPT);
 
         // Owner's rules for background tasks (WhatsApp, calls, email), 2026-10-24
         if (body.taskOrigin) dynamicSystemPrompt += `\n\nOWNER'S RULES FOR THIS TASK:
@@ -2912,6 +2921,7 @@ If they ask whether their college/school uses Classgrid, say you can't see that 
             maxToolDepth: 1000,
             defaultMaxTokens: Math.max(1, availableTokensToGenerate),
             tools: [
+                ...SHARE_PAGE_TOOLS,
                 ...getMcpTools()
                     .filter(t => !t.name.endsWith('_connector') || allowedConnectorNames.has(t.name))
                     .map(t => ({
@@ -3079,6 +3089,7 @@ If they ask whether their college/school uses Classgrid, say you can't see that 
                         }
                     }
                 },
+                ...LIVE_DOC_TOOLS,
                 {
                     type: "function",
                     function: {
@@ -3178,14 +3189,14 @@ If they ask whether their college/school uses Classgrid, say you can't see that 
                     type: "function",
                     function: {
                         name: "edit_office_file",
-                        description: "Changes an existing Word (.docx) file and returns a download link of the new version. Its look and layout stay the same. Replaces text (also in tables, headers and footers), can show the changes as Word tracked changes, and can add new text at the end.",
+                        description: "Changes an existing Word (.docx), Excel (.xlsx) or PowerPoint (.pptx) file and returns a download link of the new version. Its look and layout stay the same. Word: replaces text (also in tables, headers and footers), can show the changes as Word tracked changes, and can add new text at the end. Excel: replaces text in cells, and with sheet_edits sets cells and formulas, adds, renames or deletes sheets, adds or deletes rows and columns, and does simple formatting. PowerPoint: replaces text in slides and speaker notes, and with slide_edits changes a slide's title or body, deletes, copies, moves or adds slides.",
                         parameters: {
                             type: "object",
                             properties: {
-                                url: { type: "string", description: "https link of the .docx file." },
+                                url: { type: "string", description: "https link of the .docx, .xlsx or .pptx file." },
                                 edits: {
                                     type: "array",
-                                    description: "Text to replace. Copy the find text exactly as it is in the file.",
+                                    description: "Text to replace (Word text, Excel cells, PowerPoint slides and notes). Copy the find text exactly as it is in the file. Runs before sheet_edits and slide_edits.",
                                     items: {
                                         type: "object",
                                         properties: {
@@ -3196,8 +3207,56 @@ If they ask whether their college/school uses Classgrid, say you can't see that 
                                         required: ["find", "replace"]
                                     }
                                 },
-                                track_changes: { type: "boolean", description: "Show each change as a Word tracked change the user can accept or reject (default false)." },
-                                append: { type: "string", description: "Optional text to add at the end, in markdown: # to ### headings, paragraphs, bullet lists, **bold**, *italic*." },
+                                track_changes: { type: "boolean", description: "Word only. Show each change as a Word tracked change the user can accept or reject (default false)." },
+                                append: { type: "string", description: "Word only. Optional text to add at the end, in markdown: # to ### headings, paragraphs, bullet lists, **bold**, *italic*." },
+                                sheet_edits: {
+                                    type: "array",
+                                    description: "Excel only. Changes done in order. Everything else in the file (formulas, looks, other sheets) stays as it was; formulas that point at moved rows, columns or renamed sheets are fixed.",
+                                    items: {
+                                        type: "object",
+                                        properties: {
+                                            action: {
+                                                type: "string",
+                                                enum: ["set_cells", "append_rows", "insert_rows", "delete_rows", "insert_columns", "delete_columns", "add_sheet", "rename_sheet", "delete_sheet", "format"],
+                                                description: "set_cells: write values starting at cell. append_rows: add rows after the last filled row. insert_rows: add empty rows (or the rows in values) before row. delete_rows: delete rows starting at row. insert_columns: add empty columns before column. delete_columns: delete columns starting at column. add_sheet: new sheet named sheet (values fill it). rename_sheet: rename sheet to new_name. delete_sheet: delete sheet. format: bold, fill_color, number_format and/or column_width on range."
+                                            },
+                                            sheet: { type: "string", description: "Sheet name (default: the first sheet). For add_sheet, the new sheet's name." },
+                                            cell: { type: "string", description: "set_cells: top-left cell to start writing at, like \"B2\"." },
+                                            values: { type: "array", items: { type: "array" }, description: "Rows of cell values, like [[\"Name\", 5], [\"Total\", \"=SUM(B2:B9)\"]]. Send numbers as numbers. Text starting with = is a formula." },
+                                            row: { type: "number", description: "insert_rows / delete_rows: row number, like 5." },
+                                            column: { type: "string", description: "insert_columns / delete_columns: column letter, like \"C\"." },
+                                            count: { type: "number", description: "How many rows or columns to add or delete (default 1)." },
+                                            new_name: { type: "string", description: "rename_sheet: the new name." },
+                                            range: { type: "string", description: "format: cells like \"A1:D1\", whole columns like \"B:D\", or whole rows like \"1:1\"." },
+                                            bold: { type: "boolean", description: "format: make the text bold (true) or not bold (false)." },
+                                            fill_color: { type: "string", description: "format: background colour like \"#FFFF00\" or \"yellow\"; \"none\" removes it." },
+                                            number_format: { type: "string", description: "format: Excel number format, like \"#,##0.00\", \"0%\", \"₹#,##0\" or \"dd-mm-yyyy\"." },
+                                            column_width: { type: "number", description: "format: width of the columns in range, like 18." }
+                                        },
+                                        required: ["action"]
+                                    }
+                                },
+                                slide_edits: {
+                                    type: "array",
+                                    description: "PowerPoint only. Changes done in order. slide always means the slide's number in the file as it was sent (deleting one doesn't change the others' numbers); a slide made by duplicate_slide or add_slide gets the next number after the last slide (11, 12, ... for a 10-slide file).",
+                                    items: {
+                                        type: "object",
+                                        properties: {
+                                            action: {
+                                                type: "string",
+                                                enum: ["set_text", "delete_slide", "duplicate_slide", "move_slide", "reorder_slides", "add_slide"],
+                                                description: "set_text: replace the title and/or body text of slide. delete_slide: delete slide. duplicate_slide: copy slide (placed right after it, or at to; title/body change the copy's text). move_slide: move slide to place to. reorder_slides: the slides in order swap places among themselves (others stay). add_slide: new slide with title and body, using layout (default: \"Title and Content\"), at place to (default: the end)."
+                                            },
+                                            slide: { type: "number", description: "Slide number, like 3. For add_slide, optional: use this slide's layout." },
+                                            title: { type: "string", description: "New title text." },
+                                            body: { type: "string", description: "New body text, one line per bullet; start a line with two spaces to indent it." },
+                                            to: { type: "number", description: "Place in the deck at that moment, 1 = first." },
+                                            order: { type: "array", items: { type: "number" }, description: "reorder_slides: slide numbers in their new order, like [3, 1, 2]." },
+                                            layout: { type: "string", description: "add_slide: layout name from the file, like \"Title and Content\" or \"Title Only\"." }
+                                        },
+                                        required: ["action"]
+                                    }
+                                },
                                 file_name: { type: "string", description: "Name for the new file without extension (default: the old name with -edited)." }
                             },
                             required: ["url"]
@@ -3208,18 +3267,19 @@ If they ask whether their college/school uses Classgrid, say you can't see that 
                     type: "function",
                     function: {
                         name: "edit_pdf",
-                        description: "Changes PDF files and returns download links: merge several PDFs, split one into parts, keep or delete pages, rotate pages, add a watermark, add page numbers, or fill a PDF form. list_form_fields shows a form's field names first (no file).",
+                        description: "Changes PDF files and returns download links: merge several PDFs, split one into parts, keep or delete pages, rotate pages, add a watermark, add page numbers, fill a PDF form, or make a scanned PDF searchable (make_searchable reads the words and also returns them). list_form_fields shows a form's field names first (no file).",
                         parameters: {
                             type: "object",
                             properties: {
-                                action: { type: "string", enum: ["merge", "split", "extract_pages", "delete_pages", "rotate", "watermark", "fill_form", "list_form_fields", "add_page_numbers"], description: "What to do. For fill_form, run list_form_fields first to get the exact field names." },
+                                action: { type: "string", enum: ["merge", "split", "extract_pages", "delete_pages", "rotate", "watermark", "fill_form", "list_form_fields", "add_page_numbers", "make_searchable"], description: "What to do. For fill_form, run list_form_fields first to get the exact field names." },
                                 urls: { type: "array", items: { type: "string" }, description: "https links of the PDFs. merge: 2 or more, in order. Other actions use the first link." },
-                                pages: { type: "string", description: "Page ranges, 1-based, like \"1-3,5,8-\" (8- means 8 to the end). extract_pages: pages to keep. delete_pages: pages to remove. rotate, watermark, add_page_numbers: which pages (empty = all). split: each range becomes its own file (empty = one file per page, max 50)." },
+                                pages: { type: "string", description: "Page ranges, 1-based, like \"1-3,5,8-\" (8- means 8 to the end). extract_pages: pages to keep. delete_pages: pages to remove. rotate, watermark, add_page_numbers, make_searchable: which pages (empty = all; make_searchable reads up to 30 at a time). split: each range becomes its own file (empty = one file per page, max 50)." },
                                 angle: { type: "number", enum: [90, 180, 270], description: "rotate: turn clockwise by this much." },
                                 text: { type: "string", description: "watermark: the words to show, e.g. \"CONFIDENTIAL\"." },
                                 opacity: { type: "number", description: "watermark: 0 to 1, default 0.15." },
                                 fields: { type: "object", description: "fill_form: field name -> value. Text fields take text, checkboxes true/false, dropdowns and radio buttons take one of their option names.", additionalProperties: true },
                                 flatten: { type: "boolean", description: "fill_form: lock the filled values so they can't be changed." },
+                                languages: { type: "string", description: "make_searchable: language of the words, like \"eng\" (default), \"hin\" or \"eng+hin\"." },
                                 file_name: { type: "string", description: "Name for the new file without extension, e.g. \"Signed form\"." }
                             },
                             required: ["action", "urls"]
@@ -3857,6 +3917,7 @@ You work on the user's own Windows computer through their Classgrid desktop app,
                     },
                     // The model reports progress on its own plan steps (any ids). completedSteps is kept for older
                     // clients; stepStatus carries running/done/failed.
+                    ...buildLiveDocHandlers({ user: req.user }),
                     ...buildEndConversationHandlers({ sessionId, isIncognito, messages, question: body.question, res }),
                     update_plan_step: async (args) => {
                         const stepId = typeof args?.step_id === "string" ? args.step_id.trim().slice(0, 100) : "";
@@ -3918,15 +3979,23 @@ You work on the user's own Windows computer through their Classgrid desktop app,
                             return `FAILED to make the file: ${e.message}`;
                         }
                     },
+                    publish_page: async (args) => {
+                        try { return await runPublishPage(req.user, args || {}); }
+                        catch (e) { return `FAILED to publish the page: ${e.message}`; }
+                    },
+                    page_comments: async (args) => {
+                        try { return await runPageComments(req.user, args || {}); }
+                        catch (e) { return `FAILED: ${e.message}`; }
+                    },
                     edit_office_file: async (args) => {
                         try {
-                            const { editWordFile } = await import('../services/office-edit.service.js');
+                            const { editOfficeFile } = await import('../services/office-edit.service.js');
                             const { downloadFile } = await import('../services/pdf-edit.service.js');
                             const a = args || {};
                             const link = String(a.url ?? '').trim();
-                            if (!link) return "FAILED to edit the file: send the Word file link in url.";
-                            const input = await downloadFile(link, { label: 'Word file', fallbackName: 'document.docx' });
-                            const file = await editWordFile(a, input);
+                            if (!link) return "FAILED to edit the file: send the file link in url.";
+                            const input = await downloadFile(link, { label: 'file', fallbackName: 'document.docx' });
+                            const file = await editOfficeFile(a, input);
                             const folder = `ai-generated/office/${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
                             const saved = await uploadBufferToR2(file.buffer, file.fileName, file.mime, `${folder}/${file.fileName}`);
                             const url = `${saved.slice(0, saved.length - file.fileName.length)}${encodeURIComponent(file.fileName)}`;
@@ -3958,7 +4027,8 @@ You work on the user's own Windows computer through their Classgrid desktop app,
                                 })));
                             }
                             const note = result.note ? `\n${result.note}` : '';
-                            if (links.length === 1) return `Made ${links[0].fileName} (${result.summary}). Download: ${links[0].url}${note}\nPut this download link in your reply.`;
+                            const found = result.foundText ? `\n\nText found:\n${result.foundText}` : '';
+                            if (links.length === 1) return `Made ${links[0].fileName} (${result.summary}). Download: ${links[0].url}${note}\nPut this download link in your reply.${found}`;
                             return `Made ${result.summary}:\n${links.map((f) => `- ${f.fileName} (${f.label}). Download: ${f.url}`).join('\n')}${note}\nPut these download links in your reply.`;
                         } catch (e) {
                             return `FAILED to edit the PDF: ${e.message}`;
@@ -5655,6 +5725,35 @@ If a tool fails, never show the error message; say only: "Something went wrong o
                 toolPlan.loadedNames.add(name);
                 llmConfig.toolHandlers[name] = async (args) => (await handleToolCall(name, args, { sessionId })).content[0].text;
             }
+            // The chat itself can move into its own copy of the project (git worktree, own branch) and back
+            const worktreeDef = terminalDef("use_worktree", "Work in your own copy of this project (a git worktree on its own branch), so the user's main folder stays untouched while you work, or go back. action \"start\": makes the copy, and from then on all your file tools and commands in this chat work in it. action \"finish\": goes back to the main folder and says how to merge your branch (commit your work in the copy first). action \"status\": where you work now. Use it when the user asks for a separate copy, branch or worktree, or for big risky changes they want kept apart.", {
+                action: { type: "string", enum: ["start", "finish", "status"], description: "start, finish or status" },
+                name: { type: "string", description: "A short name for the copy and its branch (start only)" },
+            }, ["action"]);
+            if (!fullToolList.some((t) => t.function.name === "use_worktree")) {
+                fullToolList.push(worktreeDef);
+                activeToolList.push(worktreeDef);
+                toolPlan.allowedToolNames.add("use_worktree");
+                toolPlan.loadedNames.add("use_worktree");
+            }
+            llmConfig.toolHandlers.use_worktree = async (args) => {
+                const action = String(args?.action || "status");
+                const wt = await chatWorktree(sessionId);
+                if (action === "start") {
+                    if (wt) return `You already work in your own copy ${wt.dir} on the branch ${wt.branch}.`;
+                    const made = String(await callLocal(chatProject, "create_worktree", { name: String(args?.name || "chat") }, sessionId));
+                    const m = made.match(/^Worktree: (.+)\nBranch: (.+)$/);
+                    if (!m) return made;
+                    await setChatWorktree(sessionId, { dir: m[1].trim(), branch: m[2].trim() });
+                    return `Done. From now on this chat works in its own copy ${m[1].trim()} on the branch ${m[2].trim()} (paths stay relative to the project). The main folder ${chatProject.localPath} is not touched. When you finish: commit there, then use_worktree action "finish".`;
+                }
+                if (action === "finish") {
+                    if (!wt) return "You already work in the main project folder (no copy).";
+                    await setChatWorktree(sessionId, null);
+                    return `Back in the main folder ${chatProject.localPath}. Your work is on the branch ${wt.branch} in the copy ${wt.dir}. To bring it in, run in the main folder: git merge ${wt.branch}  — then remove the copy: git worktree remove --force '${wt.dir}'. Ask the user first if they want it merged.`;
+                }
+                return wt ? `You work in your own copy ${wt.dir} on the branch ${wt.branch}; the main folder is ${chatProject.localPath}.` : `You work in the main project folder ${chatProject.localPath}.`;
+            };
             // Files outside the project folder: the same tools with a full path, on the user's computer (asked first,
             // like files in a chat with no project); inside the folder they work as before
             const root = String(chatProject.localPath || "").replace(/[\\/]+$/, "").toLowerCase();
@@ -5988,8 +6087,8 @@ If a tool fails, never show the error message; say only: "Something went wrong o
                                 maxToolDepth: 800,
                                 // An answer cut off by the length limit (e.g. "draw 40 cards") is continued in the same reply
                                 maxContinuations: 3,
-                                // /boost: think harder for this message
-                                ...(slashCommand === "boost" ? { effort: "high" } : {}),
+                                // /boost or Deep: think harder; Fast: think less
+                                ...(thinking ? { effort: thinking } : {}),
                                 outputBudget: quotaRemaining,
                                 ...meterHooks(requestedModel),
                                 timeoutMs: llmConfig.providers[0].timeoutMs,

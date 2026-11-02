@@ -206,7 +206,7 @@ export async function buildWordFile({ title, content } = {}) {
 
 // ---------------------------------------------------------------- Excel
 
-function cellValue(v) {
+export function cellValue(v) {
     if (v === null || v === undefined || v === "") return null;
     if (typeof v === "number" || typeof v === "boolean") return v;
     if (typeof v === "object") return JSON.stringify(v);
@@ -217,7 +217,7 @@ function cellValue(v) {
     return s;
 }
 
-function sheetName(name, i, used) {
+export function sheetName(name, i, used) {
     let base = String(name || `Sheet${i + 1}`).replace(/[\[\]:*?/\\]/g, " ").replace(/^'+|'+$/g, "").trim().slice(0, 31) || `Sheet${i + 1}`;
     let n = base, k = 2;
     while (used.has(n.toLowerCase())) n = `${base.slice(0, 28)} ${k++}`;

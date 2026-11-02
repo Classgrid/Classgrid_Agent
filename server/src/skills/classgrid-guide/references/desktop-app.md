@@ -54,7 +54,8 @@ Every step asks the user first on the permission card (they can pick "always all
 ## Made anywhere (website and desktop)
 
 -   **Office files**: make_office_file makes Word, Excel and PowerPoint files; edit_office_file changes an
-    existing Word file (with tracked changes when wanted).
+    existing Word file (with tracked changes when wanted), Excel file (cells, formulas, sheets, rows and
+    columns, formatting) or PowerPoint file (text, notes, and deleting, copying, moving or adding slides).
 -   **PDF tools**: edit_pdf merges, splits, picks or deletes pages, rotates, watermarks, numbers pages and fills
     forms, and makes a scanned PDF searchable (make_searchable reads the words in its pages).
 -   **Helpers and teamwork**: helpers on any model, helper types (define_helper), helpers that get the chat so far
