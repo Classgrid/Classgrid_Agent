@@ -76,8 +76,8 @@ const DEFAULT_DEPTH     = 12;    // default messages sent to LLM per request (wa
 const TOOL_NOTE_TURNS   = 2;
 const TOOL_NOTE_CHARS   = 600;
 // The desktop app remembers much more of a long chat (owner, 2026-11-02): its agent works for hours on the computer
-const DESKTOP_TOOL_NOTE_TURNS = 6;
-const DESKTOP_TOOL_NOTE_CHARS = 2000;
+const DESKTOP_TOOL_NOTE_TURNS = 20;
+const DESKTOP_TOOL_NOTE_CHARS = 6000;
 const CACHE_TTL_SECONDS = 86400; // 24 hours
 
 /**
