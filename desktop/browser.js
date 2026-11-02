@@ -130,6 +130,8 @@ function ensureView() {
     tell(navInfo());
   };
   wc.on("did-navigate", onNav);
+  // A new page has no cursor drawn in it: while the agent is working, it shows again once the page has loaded
+  wc.on("did-finish-load", () => { if (Date.now() - pointerAt < 20000) cursor(null, null, "Reading the page"); });
   // Console messages (warnings and errors) and failed requests of the page
   wc.on("console-message", (e, ...old) => {
     const level = String(e?.level ?? old[0] ?? "");
@@ -235,8 +237,14 @@ function ring(cssX, cssY) {
 // stays there for typing, keys and scrolling, and fades a few seconds after the last step.
 let lastCursor = null; // { x, y } in page CSS pixels
 function cursor(cssX, cssY, label) {
+  if (!view || view.webContents.isDestroyed()) return;
   if (Number.isFinite(cssX) && Number.isFinite(cssY)) lastCursor = { x: cssX, y: cssY };
-  if (!lastCursor || !view || view.webContents.isDestroyed()) return;
+  // Before the agent's first click (it only opened, scrolled or looked): the cursor starts in the middle of the page
+  if (!lastCursor) {
+    const b = view.getBounds();
+    const z = view.webContents.getZoomFactor() || 1;
+    lastCursor = { x: b.width / 2 / z, y: b.height / 2 / z };
+  }
   const code = `(() => {
     let c = document.getElementById("__cg_agent_cursor");
     if (!c) {
@@ -318,7 +326,7 @@ async function act(a, byAgent) {
       break;
     case "scroll": {
       const dy = Number(a.dy ?? 600) || 0;
-      if (byAgent) { point("scroll", { dy }); cursor(null, null, dy < 0 ? "Scrolling up" : "Scrolling down"); }
+      if (byAgent) { point("scroll", { dy }); cursor(g.b.width / 2 / zoom, g.b.height / 2 / zoom, dy < 0 ? "Scrolling up" : "Scrolling down"); }
       wc.sendInputEvent({ type: "mouseWheel", x: Math.round(g.b.width / 2), y: Math.round(g.b.height / 2), deltaX: 0, deltaY: -dy * zoom, canScroll: true });
       break;
     }
@@ -326,7 +334,7 @@ async function act(a, byAgent) {
     case "forward": if (wc.navigationHistory.canGoForward()) wc.navigationHistory.goForward(); break;
     case "reload": wc.reload(); break;
     case "screenshot":
-      if (byAgent) point("shot");
+      if (byAgent) { point("shot"); cursor(null, null, "Looking at the page"); }
       break;
     case "read":
       // Pages that load their content late (as you scroll): go down the page step by step, then back to the top
