@@ -131,17 +131,19 @@ Commands run in Windows PowerShell 5.1 (not bash, not cmd).
 
 ## 4. Bash, Ubuntu (WSL) and cmd
 
--   **Bash** (only when Git for Windows is installed; check with `Get-Command bash`): `bash -lc 'ls -la && grep -rn "TODO" src'`.
-    Use it when a task really needs Unix tools.
--   **Ubuntu (WSL)** (only when WSL is installed; check with `wsl --status`): `wsl -- ls -la /home`.
--   **cmd**: `cmd /c "dir /b"`.
+-   **Bash**: give the terminal tools `shell: "bash"` and write the command as plain Bash, for example
+    `ls -la && grep -rn "TODO" src` (Git Bash; WSL's bash when Git Bash isn't installed). Use Bash whenever it suits
+    the task or the user asks for it.
+-   **Ubuntu (WSL)** (when WSL is installed; check with `wsl --status`): `wsl -- ls -la /home`.
+-   **cmd**: give the terminal tools `shell: "cmd"`, for example `dir /b`.
 -   If Bash or WSL isn't installed, do the task in PowerShell; don't ask the user to install them unless it's truly
     needed.
 
-## 5. Never wait for typing
+## 5. Commands that ask questions
 
-The terminal can't answer questions while a command runs. A command that asks something (password, yes/no, "press
-any key", choose an option) hangs until it is stopped. Always use the flags that don't ask:
+A command run with execute_terminal_command can't be answered while it runs, so prefer the flags that don't ask.
+When a program must ask (a yes/no, a choice, a line of input), start it with start_background_command, see what it
+asks with check_background_command, and answer with send_background_input. Flags that don't ask:
 
 -   npm: `npm init -y`, `npx --yes <tool>`, `npm install --no-audit --no-fund`
 -   pip: `python -m pip install --quiet --disable-pip-version-check <pkg>`
@@ -151,7 +153,7 @@ any key", choose an option) hangs until it is stopped. Always use the flags that
     (BatchMode makes it fail at once instead of asking for a password)
 -   Tools that ask in a wizard (create-next-app, create-vite, ...): pass every answer as flags, e.g.
     `npx --yes create-vite@latest app --template react-ts`
--   Never start an editor (vim, nano, notepad) or a program that waits for input.
+-   A full-screen editor (vim, nano) can't be used through these tools: change files with the file tools instead.
 
 ## 6. Git
 
@@ -215,11 +217,9 @@ user didn't clearly ask for.
     tell the user plainly what is wrong and what they can do.
 -   The user allows each command first (unless they chose Turbo). If they don't allow it, don't try the same thing
     another way: ask what they want.
--   **Never run**:
-    -   formatting
-    -   registry changes
-    -   deleting Windows, Program Files or a whole drive
-    -   shutting down the computer
-    -   turning off security
+-   Run whatever the user asks on their computer, in PowerShell, Bash or Command Prompt, with no limits of your own:
+    system settings, the registry, services, installs, other drives, admin work. The permission card (the mode the
+    user picked) is the only check. For a step that can't be undone (formatting a drive, deleting a lot of files,
+    shutting down), say in one line what it will do before you run it.
 -   Never print passwords, keys or tokens in the chat; never put them in commands you show. Read secrets from the
     user's files or environment instead.

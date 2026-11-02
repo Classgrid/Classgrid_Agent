@@ -3635,8 +3635,10 @@ Every user is using you as a personal AI assistant and agent (like ChatGPT) to m
                             // A desktop chat that isn't a project: helpers work on the user's computer with the main AI's computer
                             // tools (full paths; each step asks the user like the main AI's)
                             const computerReadOnly = ["read_local_file", "list_project_files", "search_project"];
-                            const computerEdit = ["write_project_file", "edit_project_file", "execute_terminal_command", "start_background_command", "check_background_command", "stop_background_command"];
-                            const names = h.browser ? [] : onComputer ? (h.canEdit ? [...computerReadOnly, ...computerEdit] : computerReadOnly) : h.canEdit ? [...readOnly, ...editTools, ...(h.wt ? ["execute_terminal_command"] : [])] : readOnly; // the Browser worker gets the browser tools below
+                            const computerEdit = ["write_project_file", "edit_project_file"];
+                            // Every helper has the terminal (owner's rule: no limits on the terminal and Bash, in any chat or helper)
+                            const terminal = ["execute_terminal_command", "start_background_command", "check_background_command", "stop_background_command", ...(onComputer ? ["send_background_input", "wait_until"] : [])];
+                            const names = h.browser ? [] : onComputer ? (h.canEdit ? [...computerReadOnly, ...computerEdit, ...terminal] : [...computerReadOnly, ...terminal]) : h.canEdit ? [...readOnly, ...editTools, ...terminal] : [...readOnly, ...terminal]; // the Browser worker gets the browser tools below
                             const defs = onComputer
                                 ? [READ_LOCAL_FILE_TOOL, ...COMPUTER_TERMINAL_DEFS].filter((d) => names.includes(d.function.name))
                                 : (await getMcpTools()).filter((t) => names.includes(t.name))
