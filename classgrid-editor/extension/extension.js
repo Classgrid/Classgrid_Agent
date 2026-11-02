@@ -66,8 +66,10 @@ function activate(context) {
     holdScreens(panel.webview, "/", () => {});
   }));
 
-  // The Agent is on the right side when the editor opens
-  vscode.commands.executeCommand("classgrid.agent.focus").then(undefined, () => {});
+  // The Agent is on the right side when the editor opens (the right side bar starts open: configurationDefaults in
+  // package.json; this also shows the Agent there once its view is ready)
+  const showAgent = (tries) => vscode.commands.executeCommand("classgrid.agent.focus").then(undefined, () => { if (tries > 0) setTimeout(() => showAgent(tries - 1), 1000); });
+  showAgent(10);
 }
 
 function deactivate() { try { parts?.runner.stopAll(); } catch { /* already stopped */ } }

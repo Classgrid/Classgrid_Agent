@@ -41,4 +41,23 @@ grep -q '"dataFolderName" ".classgrid-code"' "$P" || { echo "brand: data folder 
 # Our logo for the program, its window and its files
 ICON="../icon.ico"
 for f in src/stable/resources/win32/code.ico; do cp "$ICON" "$f"; done
+
+# Our logo inside the editor too (title bar icon, the faded logo in empty editors, the window tiles), made from the
+# website's own icon like the cloud editor's (infra/ide/build.sh)
+PUB="../../client/public"
+if [ -f "$PUB/android-chrome-512x512.png" ]; then
+  B64=$(base64 -w0 "$PUB/android-chrome-512x512.png")
+  svg() { echo "<svg xmlns=\"http://www.w3.org/2000/svg\" xmlns:xlink=\"http://www.w3.org/1999/xlink\" viewBox=\"0 0 512 512\" width=\"512\" height=\"512\"><image width=\"512\" height=\"512\" opacity=\"$1\" xlink:href=\"data:image/png;base64,$B64\"/></svg>"; }
+  svg 1 > src/stable/src/vs/workbench/browser/media/code-icon.svg
+  for v in dark light hcDark hcLight; do svg 0.12 > "src/stable/src/vs/workbench/browser/parts/editor/media/letterpress-$v.svg"; done
+  cp "$PUB/android-chrome-512x512.png" src/stable/resources/win32/code_150x150.png
+  cp "$PUB/android-chrome-192x192.png" src/stable/resources/win32/code_70x70.png
+  cp "$PUB/android-chrome-512x512.png" src/stable/resources/linux/code.png
+  cp "$PUB/android-chrome-192x192.png" src/stable/resources/server/code-192.png
+  cp "$PUB/android-chrome-512x512.png" src/stable/resources/server/code-512.png
+  cp "$PUB/favicon.ico" src/stable/resources/server/favicon.ico
+  grep -q "data:image/png;base64" src/stable/src/vs/workbench/browser/media/code-icon.svg || { echo "brand: logo not set" >&2; exit 1; }
+else
+  echo "brand: client/public isn't here, so only the program icon is ours" >&2
+fi
 echo "Classgrid editor branding applied"
