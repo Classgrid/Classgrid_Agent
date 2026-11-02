@@ -1,6 +1,6 @@
 # Classgrid Code: our editor with the Classgrid AI inside (option B)
 
-Classgrid Code is our own code editor, built from VS Code's open-source code (the newest VS Code release), with the
+Classgrid Code is our own code editor, built from VS Code's open-source code (VS Code 1.143.1, VSCodium's latest supported tag), with the
 Classgrid AI built inside it. Cursor, Windsurf and Antigravity are made the same way: VS Code's code plus their own AI.
 It is a full desktop editor: real extensions from the Open VSX store, the Extensions icon in the left bar, one
 "Installed" list, and no editor server (no "localhost" in the editor).
@@ -9,7 +9,7 @@ It is a full desktop editor: real extensions from the Open VSX store, the Extens
 
 | Part | Where | What it does |
 |---|---|---|
-| The editor | VS Code's open-source code, newest release, built with VSCodium's scripts | Code, files, the editor's own terminal, extensions (Open VSX) |
+| The editor | VS Code's open-source code 1.143.1, built with VSCodium's scripts | Code, files, the editor's own terminal, extensions (Open VSX) |
 | Our name and logo | `brand.sh`, `icon.ico` | "Classgrid Code", our own app ids and data folder (`.classgrid-code`), no VSCodium update server |
 | **The Classgrid AI** | `extension/` (built into the editor, not from a store) | The **Agent chat on the right side** and all of Classgrid (Agent, Studio, Projects) in a tab |
 | Our screens | `client/` (the same desktop build the Classgrid app packs) | The same chat, Studio and Projects screens, unchanged |
@@ -31,7 +31,7 @@ It is a full desktop editor: real extensions from the Open VSX store, the Extens
 `.github/workflows/build-classgrid-editor.yml` runs on GitHub's Windows build computer when this folder changes:
 
 1. Gets this folder, `client/` and `desktop/`.
-2. Gets the newest VSCodium build scripts and the **newest VS Code release** (`VSCODE_LATEST=yes`).
+2. Gets VSCodium's build scripts pinned to **VS Code 1.143.1** (`VSCODE_VERSION`, `VSCODIUM_COMMIT`); bump both when VSCodium patches 1.144.
 3. `brand.sh`: our name, logo and app ids.
 4. Builds our screens (`desktop/scripts/build-client.mjs`), then packs the Classgrid AI part: the extension, the
    screens, the desktop parts and `socket.io-client`.
