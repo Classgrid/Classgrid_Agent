@@ -15,7 +15,7 @@ const DECISION = (id) => `perm:decision:${id}`;
 const CHAT_ALLOW = (sessionId) => `perm:chat:${sessionId}`;
 const USER_ALLOW = (userId) => `perm:user:${userId}`;
 const WAIT_MS = 30 * 60 * 1000;
-const ALWAYS_ASKS = 4; // asks even with no mode or in turbo (reading files on the user's computer)
+const ALWAYS_ASKS = 4; // asks even with no mode or in turbo
 
 // Commands that change or remove things for good, or reach outside the project
 const DESTRUCTIVE = /(^|[\s;&|(])(rm\s|rmdir\s|sudo\s|mkfs|dd\s+if=|shred\s|git\s+push|git\s+reset\s+--hard|git\s+clean\s+-[a-z]*f|git\s+branch\s+-D|git\s+checkout\s+--\s|drop\s+(table|database)|truncate\s+table|npm\s+publish)/i;
@@ -51,16 +51,6 @@ export function describeAction(tool, args = {}) {
     // connector list never asks; "always allow" covers one tool of one app.
     case "custom_mcp_connector":
       return describeConnectorAction(args);
-    // A file or folder anywhere on the user's computer (desktop app): asks in every chat and every mode
-    case "read_local_file": {
-      const file = String(args?.path || "").trim().replace(/^["']+|["']+$/g, "");
-      return { title: "Read a file on your computer?", detail: file, key: `localfile:${file.toLowerCase()}`, label: `reading ${file.split(/[\\/]/).filter(Boolean).pop() || "this file"}`, level: ALWAYS_ASKS };
-    }
-    // Changing files and folders on the user's computer: asks every single time (no "always allow")
-    case "write_local_file":
-    case "edit_local_file":
-    case "manage_local_files":
-      return describeLocalChange(tool, args);
     default:
       return null;
   }
@@ -84,30 +74,6 @@ function describeConnectorAction(args = {}) {
   if (op === "add_server") return { title: `Connect ${app}?`, detail: String(args?.url || args?.app || ""), key: key("add"), label: `connecting ${app}`, level: 2 };
   if (op === "remove_server") return { title: `Remove the ${app} connector?`, detail: app, key: key("remove"), label: `removing ${app}`, level: 3 };
   return null; // list_apps, list_servers, get_tools, login: only read the user's own connectors
-}
-
-const cleanPath = (p) => String(p || "").trim().replace(/^["']+|["']+$/g, "");
-const preview = (text, max) => { const s = String(text ?? ""); return s.length > max ? `${s.slice(0, max)}\n… (${s.length - max} more characters)` : s; };
-
-function describeLocalChange(tool, args = {}) {
-  const file = cleanPath(args?.path);
-  const ask = (title, detail) => ({ title, detail, key: `localchange:${tool}`, label: "this", level: ALWAYS_ASKS, once: true });
-  if (tool === "write_local_file") {
-    const replace = args?.overwrite === true || args?.overwrite === "true";
-    return ask(replace ? "Replace this file on your computer?" : "Create this file on your computer?", `${replace ? "Replace" : "Create"} ${file}\n\n${preview(args?.content, 1200)}`);
-  }
-  if (tool === "edit_local_file") {
-    const all = args?.replace_all === true || args?.replace_all === "true";
-    return ask("Change this file on your computer?", `Edit ${file}${all ? " (every place it appears)" : ""}\n\nReplace:\n${preview(args?.old_text, 600)}\n\nWith:\n${preview(args?.new_text, 600)}`);
-  }
-  const to = cleanPath(args?.to);
-  switch (args?.action) {
-    case "create_folder": return ask("Create a folder on your computer?", `Create the folder ${file}`);
-    case "move": return ask("Move this on your computer?", `Move ${file}\nto ${to}`);
-    case "copy": return ask("Copy this on your computer?", `Copy ${file}\nto ${to}`);
-    case "delete": return ask("Delete this on your computer?", `Move ${file} to the Recycle Bin (it can be restored from there)`);
-    default: return ask("Change files on your computer?", `${String(args?.action || "change")} ${file}${to ? `\nto ${to}` : ""}`);
-  }
 }
 
 export const isGatedTool = (tool) => tool === "custom_mcp_connector" || !!describeAction(tool, {});

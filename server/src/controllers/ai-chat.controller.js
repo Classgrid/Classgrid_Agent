@@ -75,7 +75,7 @@ import { canAccessSession, gridLabelMap, gridProfilesText, getSharedSessionsFor,
 import { editorContextFor, rememberProjectSnapshot, sandboxDataDir, startCheckpoint, finishCheckpoint, linkChatToProject, touchStudio } from "../services/ide-project.service.js";
 import { PLANNER_BROWSER_TOOLS, PLANNER_BLIND_TOOLS, WORKER_BROWSER_TOOLS, BROWSER_TOOL_NAMES, makeBrowserHandlers, BROWSER_WORKER_SYSTEM } from "../services/studio-browser-tools.js";
 import { ensureBrowser } from "../services/studio-browser.service.js";
-import { gateHandlers, PERMISSION_MODES } from "../services/permission-gate.js";
+import { gateHandlers, askPermission, PERMISSION_MODES } from "../services/permission-gate.js";
 import { buildEndConversationHandlers, reopenSession } from "../services/ai-end-conversation.service.js";
 import { hasEnoughTokens, deductTokens, getImageGenerationCost, tokenWindowEnd } from "../services/ai-credits.service.js";
 import redis from "../config/redis.js";
@@ -85,7 +85,8 @@ import NotificationLog from "../models/NotificationLog.js";
 import { getMcpTools, handleToolCall, readSandboxFiles } from "../mcp/tools.js";
 import { CUSTOM_MCP_TOOL, runCustomMcpTool, customMcpPromptLine } from "../services/custom-mcp-ai.js";
 import { PLAY_SONG_TOOL, songTools, runPlaySong, runDownloadSong } from "../services/music-ai.js";
-import { localProjectFor, callLocal, readLocalFile, changeLocalFiles } from "../services/local-runner.service.js";
+import { localProjectFor, callLocal, runOnComputer, COMPUTER_TERMINAL_TOOLS } from "../services/local-runner.service.js";
+import { projectForChat } from "../services/ide-project.service.js";
 import { parseHTML } from "linkedom";
 import { Readability } from "@mozilla/readability";
 import TurndownService from "turndown";
@@ -1312,74 +1313,23 @@ const VIEW_IMAGE_TOOL = {
     }
 };
 
-// Desktop app only: a file or folder anywhere on the user's computer, read by their Classgrid app (each read asks them first)
-const READ_LOCAL_FILE_TOOL = {
-    type: "function",
-    function: {
-        name: "read_local_file",
-        description: "Read a file or folder on the user's own computer (the Classgrid desktop app reads it). Use it when the user gives a path like C:\\Users\\name\\Downloads\\photo.png or asks about a file on their computer. Pictures (.png, .jpg, .gif, .webp, .bmp) are shown to you as the picture itself; PDF, Word, Excel and PowerPoint files come back as their text; other files as text with line numbers; a folder as its list of files. The user is asked to allow every read first, so call it straight away instead of asking them yourself. Long files come in parts: call again with start_line to read more.",
-        parameters: {
-            type: "object",
-            properties: {
-                path: { type: "string", description: "The full path on the user's computer, exactly as they gave it, e.g. C:\\Users\\name\\Downloads\\report.pdf" },
-                start_line: { type: "integer", description: "Text files and documents: the first line to read (default 1)" },
-                end_line: { type: "integer", description: "Text files and documents: the last line to read (optional)" }
-            },
-            required: ["path"]
-        }
-    }
-};
-// Desktop app only: changing files and folders anywhere on the user's computer (each change asks them first, every time)
-const LOCAL_CHANGE_TOOLS = [
-    {
-        type: "function",
-        function: {
-            name: "write_local_file",
-            description: "Create a file on the user's own computer (missing folders are made), or replace a whole existing file when overwrite is true. Without overwrite, an existing file is not changed. Use edit_local_file to change part of a file. Windows, Program Files and the Classgrid app's own folders can't be changed. The user is asked to allow every change first, so call it straight away.",
-            parameters: {
-                type: "object",
-                properties: {
-                    path: { type: "string", description: "The full path of the file, e.g. C:\\Users\\name\\Documents\\notes.txt" },
-                    content: { type: "string", description: "The whole text of the file" },
-                    overwrite: { type: "boolean", description: "true to replace a file that already exists (default false)" }
-                },
-                required: ["path", "content"]
-            }
-        }
-    },
-    {
-        type: "function",
-        function: {
-            name: "edit_local_file",
-            description: "Change part of a text file on the user's own computer: old_text is replaced with new_text. old_text must match the file exactly (read it first with read_local_file) and be found once, unless replace_all is true. The user is asked to allow every change first.",
-            parameters: {
-                type: "object",
-                properties: {
-                    path: { type: "string", description: "The full path of the file" },
-                    old_text: { type: "string", description: "The exact text to replace" },
-                    new_text: { type: "string", description: "The text to put in its place" },
-                    replace_all: { type: "boolean", description: "true to replace every place old_text appears (default false)" }
-                },
-                required: ["path", "old_text", "new_text"]
-            }
-        }
-    },
-    {
-        type: "function",
-        function: {
-            name: "manage_local_files",
-            description: "Folders and files on the user's own computer: create_folder (path), move or copy (path to \"to\"; when \"to\" is an existing folder, it goes inside it; nothing existing is overwritten), or delete (path goes to the Recycle Bin, so it can be restored). Windows, Program Files and the Classgrid app's own folders can't be changed. To see what is in a folder, use read_local_file on it. The user is asked to allow every action first.",
-            parameters: {
-                type: "object",
-                properties: {
-                    action: { type: "string", enum: ["create_folder", "move", "copy", "delete"] },
-                    path: { type: "string", description: "The full path of the file or folder" },
-                    to: { type: "string", description: "move / copy: the full path to move or copy it to" }
-                },
-                required: ["action", "path"]
-            }
-        }
-    }
+// Desktop app, a chat that isn't a project: the terminal runs on the user's own computer (each command asks them first)
+const terminalDef = (name, description, properties, required) => ({ type: "function", function: { name, description, parameters: { type: "object", properties, required } } });
+const COMPUTER_TERMINAL_DEFS = [
+    terminalDef("execute_terminal_command", "Run a command in a terminal on the user's own computer (Windows PowerShell; on a Mac or Linux, bash). It starts in the user's home folder; each command is a new terminal, so use full paths or cd in the same command. For Bash on Windows (when Git Bash is installed) run: bash -lc '<command>'. Up to 10 minutes; use start_background_command for servers and long jobs. The user is asked to allow each command first.", {
+        command: { type: "string", description: "The exact command to run" },
+        description: { type: "string", description: "A few plain words saying what the command does, shown to the user above it (e.g. \"List the Downloads folder\")" },
+    }, ["command"]),
+    terminalDef("start_background_command", "Start a command that keeps running (a server, a watcher, a long build) in a terminal on the user's own computer, in their home folder. Returns a job_id. The user is asked to allow it first.", {
+        command: { type: "string", description: "The exact command to run" },
+        description: { type: "string", description: "A few plain words saying what it does" },
+    }, ["command"]),
+    terminalDef("check_background_command", "See whether a background command on the user's computer is still running, and its latest output.", {
+        job_id: { type: "string", description: "The job_id from start_background_command" },
+    }, ["job_id"]),
+    terminalDef("stop_background_command", "Stop a background command on the user's computer.", {
+        job_id: { type: "string", description: "The job_id from start_background_command" },
+    }, ["job_id"]),
 ];
 
 // Claude sees images natively, but after the turn an image was generated in, the chat history only holds its
@@ -1968,7 +1918,7 @@ Project Mode and Studio share one open project and its chats: the user can open 
 The user is in ${appMode === "agent" ? "Agent mode" : appMode === "project" ? "Project Mode" : "Studio Mode"} now.${appMode === "studio" ? ` Make code changes yourself; do not ask the user to edit a file or open an editor. If they want to edit by hand, they can switch to Project Mode.` : " The live browser is only in Studio Mode: here there is none, so do not try to open or use a browser (no browser tools, and no browser started from code or commands), and do not say that you will try or that you will do it. If the user wants the live browser, tell them to switch to Studio Mode."}`;
         }
         // Where the user is: the website or the Classgrid desktop app (sent by the app; your own thinking always runs on our servers)
-        if (body.clientApp === "desktop") volatilePrompt += "\n\n--- WHERE THE USER IS ---\nThe user is using the Classgrid desktop app on their own computer (Windows), not the chat.classgrid.in website. The app's screens run on their computer; your thinking runs on Classgrid's servers. Projects opened from a folder on their computer run your file and terminal tools on that computer. In any chat, when the user gives a path to a file or folder on this computer (like C:\\Users\\name\\Downloads\\photo.png) or asks about one, read it with read_local_file: pictures are shown to you, documents and other files come back as text, and a folder shows its files. You can also change files anywhere on this computer: write_local_file creates a file (or replaces one with overwrite: true), edit_local_file changes part of a file, and manage_local_files creates folders, moves, copies, or deletes (deleted things go to the Recycle Bin). Windows, Program Files and the Classgrid app's own folders can't be changed. The app asks the user to allow each read and each change first, so just call the tool; never say you can't open or change files on their computer.\nIn the desktop app your browser (browser_open and the other browser tools) runs on the user's computer, with their internet, so it can open their own local servers like http://localhost:3000.";
+        if (body.clientApp === "desktop") volatilePrompt += "\n\n--- WHERE THE USER IS ---\nThe user is using the Classgrid desktop app on their own computer (Windows), not the chat.classgrid.in website. The app's screens run on their computer; your thinking runs on Classgrid's servers. Projects opened from a folder on their computer run your file and terminal tools on that computer. In a chat that isn't a project, execute_terminal_command and the background command tools run a real terminal on this computer (PowerShell; Bash through bash -lc '...' when Git Bash is installed), starting in the user's home folder. Do everything on the computer with it, like a developer in their own terminal: list folders (Get-ChildItem), read files (Get-Content), search (Select-String), create, edit, move, copy or delete files and folders, and run programs. When the user gives a path like C:\\Users\\name\\Downloads\\report.pdf, work on it with the terminal. The app asks the user to allow each command first, so just run it; never say you can't open or change files on their computer.\nIn the desktop app your browser (browser_open and the other browser tools) runs on the user's computer, with their internet, so it can open their own local servers like http://localhost:3000.";
         else if (body.clientApp === "web") volatilePrompt += "\n\n--- WHERE THE USER IS ---\nThe user is using Classgrid on the website (chat.classgrid.in) in their browser, not the desktop app.";
         if (slashCommand && (slashCommand !== "compact" || compacted)) volatilePrompt += `\n\n--- COMMAND ---\nThe user started this message with /${body.command}. ${SLASH_COMMAND_LINES[slashCommand]}`;
         // Project Mode: snapshot the project before this answer, so its changes can be reviewed, rejected or undone
@@ -3435,11 +3385,6 @@ If they ask whether their college/school uses Classgrid, say you can't see that 
                         const running = board.helpers.filter((h) => h.state === "running").length;
                         return `${lines.join("\n\n")}\n\n${running ? `${running} helper(s) still working.` : "All helpers have finished."}${helperChangesText(reported)}`;
                     },
-                    // Desktop app only (see READ_LOCAL_FILE_TOOL): the user's own Classgrid app reads the file
-                    read_local_file: async (args) => readLocalFile(req.user?._id || req.user?.id, args),
-                    write_local_file: async (args) => changeLocalFiles(req.user?._id || req.user?.id, "write_local_file", args),
-                    edit_local_file: async (args) => changeLocalFiles(req.user?._id || req.user?.id, "edit_local_file", args),
-                    manage_local_files: async (args) => changeLocalFiles(req.user?._id || req.user?.id, "manage_local_files", args),
                     run_code: async (args) => {
                         // A project from a folder on the user's computer: the code runs there, in their desktop app
                         const localProject = await localProjectFor(sessionId);
@@ -5173,15 +5118,31 @@ If a tool fails, never show the error message; say only: "Something went wrong o
                 return "ERROR: the caller did not send this tool's result in time.";
             };
         }
-        // The desktop app: files anywhere on the user's computer can be read and changed in every chat (each one asks them first)
-        if (body.clientApp === "desktop" && !body.taskOrigin) {
-            for (const def of [READ_LOCAL_FILE_TOOL, ...LOCAL_CHANGE_TOOLS]) {
-                if (fullToolList.some(t => t.function.name === def.function.name)) continue;
+        // The desktop app, a chat that isn't a project: the terminal runs on the user's computer (each command asks them first)
+        const onComputer = body.clientApp === "desktop" && !body.taskOrigin && !(await projectForChat(sessionId).catch(() => null));
+        if (onComputer) {
+            for (const def of COMPUTER_TERMINAL_DEFS) {
+                // The terminal tools replace the cloud sandbox ones here, so the AI reads the right description
+                for (const list of [fullToolList, activeToolList]) {
+                    const at = list.findIndex(t => t.function.name === def.function.name);
+                    if (at >= 0) list.splice(at, 1);
+                }
                 fullToolList.push(def);
                 activeToolList.push(def);
                 toolPlan.allowedToolNames.add(def.function.name);
                 toolPlan.loadedNames.add(def.function.name);
             }
+        }
+        if (onComputer) {
+            const computerUser = req.user?._id || req.user?.id;
+            for (const name of COMPUTER_TERMINAL_TOOLS) llmConfig.toolHandlers[name] = async (args) => {
+                // A chat with no permission mode chosen: every command on the computer asks first (a chosen mode asks as it says)
+                if (!PERMISSION_MODES.has(body.permissionMode)) {
+                    const p = await askPermission({ ...permissionCtx, mode: "review", tool: name, args });
+                    if (!p.allowed) return p.message;
+                }
+                return runOnComputer(computerUser, name, args);
+            };
         }
         console.log(`[AI-TOOLS] groups=[${toolPlan.activeGroupIds.join(",")}] sent=${activeToolList.length}/${fullToolList.length} tools staff=${toolPlan.staff}`);
 

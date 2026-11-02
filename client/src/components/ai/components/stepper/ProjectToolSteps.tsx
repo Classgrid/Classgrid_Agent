@@ -467,6 +467,42 @@ function ClampedBlock({ text, lines = 6 }: { text: string; lines?: number }) {
   );
 }
 
+// Desktop app: a terminal command shown like a code editor's agent: "Ran List the Downloads folder" with the
+// command under it ("$ Get-ChildItem …"); click the title for its output
+export const COMMAND_TOOLS = new Set(['execute_terminal_command', 'start_background_command', 'check_background_command', 'stop_background_command']);
+
+export function CommandStep({ step }: { step: Step }) {
+  const loading = step.status === 'loading';
+  const output = String(step.result || '');
+  const failed = !loading && (step.status === 'error' || /^(error|tool error)/i.test(output.trim()) || /\[exit code [1-9]\d*\]\s*$/.test(output) || /EXIT CODE: [1-9]/.test(output));
+  const command = step.tool === 'check_background_command'
+    ? `check job ${step.args?.job_id || ''}`
+    : step.tool === 'stop_background_command' ? `stop job ${step.args?.job_id || ''}` : String(step.args?.command || '');
+  const what = (String(step.args?.description || '').split('\n')[0] ?? '').trim() || (command.split('\n')[0] ?? '').trim();
+  const [open, setOpen] = useState<boolean | null>(null);
+  const isOpen = open ?? loading;
+  return (
+    <div className="flex flex-col gap-1.5 py-1">
+      <button type="button" onClick={() => setOpen(!isOpen)} className="group flex min-w-0 items-center gap-1.5 text-left text-[14px] text-slate-500 dark:text-[#8a8a8a] hover:text-foreground">
+        <ShimmerText active={loading} className="shrink-0">{loading ? 'Running' : failed ? 'Errored' : 'Ran'}</ShimmerText>
+        <span className="truncate">{what}</span>
+        {isOpen ? <ChevronDown className="size-3.5 shrink-0" /> : <ChevronRight className="size-3.5 shrink-0" />}
+      </button>
+      <div className="overflow-hidden rounded-lg border border-border bg-muted/40 font-mono text-[12.5px]">
+        <div className="flex gap-2 px-3 py-2">
+          <span className="shrink-0 text-muted-foreground">$</span>
+          <span className="min-w-0 whitespace-pre-wrap break-all text-foreground">{command || '…'}</span>
+        </div>
+        {isOpen && (
+          <div className="max-h-[280px] overflow-auto border-t border-border px-3 py-2 whitespace-pre-wrap break-all text-muted-foreground">
+            {loading && !output ? 'Running…' : output.trim() || '(no output)'}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export function TerminalStep({ name, description, command, output, status }: { name: string; description?: string; command: string; output?: string; status?: string }) {
   const loading = status === 'loading';
   const failed = !loading && (/^(error|tool error)/i.test(String(output || '').trim()) || /EXIT CODE: [1-9]/.test(String(output || '')));

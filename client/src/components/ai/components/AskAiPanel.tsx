@@ -209,7 +209,7 @@ import { StepWorkingContext } from "./stepper/ShimmerText";
 import { ImageReadStep } from "./stepper/tool-results/ImageReadStep";
 import { AudioTranscribeStep } from "./stepper/tool-results/AudioTranscribeStep";
 import { StepBoundary } from "./stepper/StepBoundary";
-import { FILE_DRAG_TYPE, FileBadge, FileMentionChip, parseFileMention, parseProjectLink, FilesChangedSummary, ProjectEditStep, ProjectExploreGroup, ProjectPushStep, ProjectRunChanges, ProjectHelpersStep, TerminalStep, PROJECT_BACKGROUND_TOOLS, PROJECT_EDIT_TOOLS, PROJECT_EXPLORE_TOOLS } from "./stepper/ProjectToolSteps";
+import { FILE_DRAG_TYPE, FileBadge, FileMentionChip, parseFileMention, parseProjectLink, FilesChangedSummary, ProjectEditStep, ProjectExploreGroup, ProjectPushStep, ProjectRunChanges, ProjectHelpersStep, TerminalStep, CommandStep, COMMAND_TOOLS, PROJECT_BACKGROUND_TOOLS, PROJECT_EDIT_TOOLS, PROJECT_EXPLORE_TOOLS } from "./stepper/ProjectToolSteps";
 import { CombinedReasoningBlock } from "./stepper/CombinedReasoningBlock";
 import { CodeNoteChips, StudioCodeNotesBar } from "@/features/superadmin/components/StudioCodeNotesBar";
 import { clearCodeNotes, codeNotesText, getCodeNotes, setCodeNotesChat, splitCodeNotes, toChip, useCodeNotes, type CodeNote, type CodeNoteChip } from "@/features/superadmin/components/studioCodeNotes";
@@ -5331,6 +5331,11 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
                                           }
                                           if (step.tool === 'run_project_helpers') {
                                             elements.push(<ProjectHelpersStep key={step.id} step={step} />);
+                                            return;
+                                          }
+                                          // Desktop app: every terminal command shows the command itself, like a code editor's agent
+                                          if (import.meta.env.VITE_DESKTOP === "1" && COMMAND_TOOLS.has(step.tool ?? '')) {
+                                            elements.push(<CommandStep key={step.id} step={step} />);
                                             return;
                                           }
                                           if (PROJECT_BACKGROUND_TOOLS.has(step.tool ?? '')) {

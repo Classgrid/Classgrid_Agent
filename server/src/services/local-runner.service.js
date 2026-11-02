@@ -32,7 +32,7 @@ export function registerRunnerSocket(socket) {
 }
 
 // Commands may run for a while; file tools are quick
-const timeoutFor = (tool) => (tool === "execute_terminal_command" || tool === "run_code" || tool === "manage_local_files" ? 10 * 60 * 1000 : tool === "browser" ? 2 * 60 * 1000 : 60 * 1000);
+const timeoutFor = (tool) => (tool === "execute_terminal_command" || tool === "run_code" ? 10 * 60 * 1000 : tool === "browser" ? 2 * 60 * 1000 : 60 * 1000);
 
 // Sends one tool call to the user's desktop app. Returns its whole answer ({ text, ... }), or null when the app isn't open.
 async function askRunner(userId, tool, payload) {
@@ -61,87 +61,17 @@ export async function callLocal(project, tool, args = {}) {
     return reply ? reply.text : "Error: this project is a folder on the user's computer, and the Classgrid desktop app isn't open there. Ask the user to open the Classgrid app on that computer, then try again.";
 }
 
-/** Runs one tool in the user's desktop app, not tied to a project (read_local_file). Returns its answer, or null when the app isn't open. */
+/** Runs one tool in the user's desktop app, not tied to a project (the terminal in a chat, the browser). Returns its answer, or null when the app isn't open. */
 export function callRunner(userId, tool, args = {}) {
     return askRunner(userId, tool, { tool, args: args || {} });
 }
 
-const LOCAL_FILE_TEXT_CHARS = 18000;
+export const COMPUTER_TERMINAL_TOOLS = new Set(["execute_terminal_command", "start_background_command", "check_background_command", "stop_background_command"]);
 
-/** write_local_file, edit_local_file, manage_local_files: change files and folders on the user's computer (each asks first). Returns the text. */
-export async function changeLocalFiles(userId, tool, args = {}) {
-    if (!String(args?.path || "").trim()) return "Error: path is empty. Give the full path, like C:\\Users\\name\\Documents\\notes.txt";
+/** The terminal tools in a desktop app chat that isn't a project: the command runs on the user's own computer (asks first). */
+export async function runOnComputer(userId, tool, args = {}) {
     const reply = await callRunner(userId, tool, args);
-    if (!reply) return "The Classgrid desktop app isn't open on the user's computer, so nothing there was changed. Tell the user to open the Classgrid desktop app, then try again.";
-    if (reply.text.includes(`${tool} can't run on this computer`)) return "Error: the user's Classgrid desktop app is an older version that can't change files on their computer. Ask them to update the app (or reinstall it from classgrid.in), then try again.";
+    if (!reply) return "The Classgrid desktop app isn't open on the user's computer, so the command didn't run. Tell the user to open the Classgrid desktop app, then try again.";
+    if (/can't run on this computer|wasn't opened in the Classgrid app/.test(reply.text)) return "Error: the user's Classgrid desktop app is an older version that can't run commands on their computer. Ask them to update the app (or reinstall it from classgrid.in), then try again.";
     return reply.text;
-}
-
-/**
- * read_local_file: any file or folder on the user's computer, read by their Classgrid desktop app (the chat asks the
- * user first on the permission card). Pictures come back as images the AI looks at itself (as view_image), documents
- * (PDF, Word, Excel, PowerPoint) as their text, other files as text.
- */
-export async function readLocalFile(userId, args = {}) {
-    const given = String(args?.path || "").trim();
-    if (!given) return "Error: path is empty. Give the full path of the file, like C:\\Users\\name\\Downloads\\photo.png";
-    const notOpen = "The Classgrid desktop app isn't open on the user's computer, so files there can't be read right now. Tell the user to open the Classgrid desktop app, then try again.";
-    const first = await callRunner(userId, "read_local_file", { path: given, start_line: args?.start_line, end_line: args?.end_line });
-    if (!first) return notOpen;
-    if (/read_local_file can't run on this computer/.test(first.text)) return "Error: the user's Classgrid desktop app is an older version that can't read files on their computer. Ask them to update the app (or reinstall it from classgrid.in), then try again.";
-    const file = first.file;
-    if (!file || typeof file.data !== "string") return first.text;
-
-    const parts = [Buffer.from(file.data, "base64")];
-    for (let n = 1; n < Number(file.chunks || 1); n++) {
-        const next = await callRunner(userId, "read_local_file", { path: file.path, chunk: n });
-        if (!next) return notOpen;
-        if (typeof next.file?.data !== "string" || next.file.chunk !== n || next.file.bytes !== file.bytes) return next.text?.startsWith("Error") ? next.text : `Error: ${file.path} changed while it was being read. Try again.`;
-        parts.push(Buffer.from(next.file.data, "base64"));
-    }
-    const buf = Buffer.concat(parts);
-    const size = buf.length >= 1048576 ? `${(buf.length / 1048576).toFixed(1)} MB` : buf.length >= 1024 ? `${Math.round(buf.length / 1024)} KB` : `${buf.length} bytes`;
-
-    if (file.kind === "image") {
-        // A model that can't see pictures uses analyze_image on a Classgrid link, like an uploaded picture
-        let link = "";
-        try {
-            const { uploadBufferToR2 } = await import("../config/r2Client.js");
-            link = await uploadBufferToR2(buf, file.mime === "image/jpeg" ? "local-file.jpg" : `local-file${String(file.name).match(/\.(png|gif|webp)$/i)?.[0] || ".png"}`, file.mime);
-        } catch (e) {
-            console.warn(`[read_local_file] could not upload the picture for analyze_image: ${e.message}`);
-        }
-        const text = `Picture ${file.path} (${size}${buf.length !== file.size ? ", made smaller to show it" : ""}) is attached below. Look at it yourself; describe only what you actually see.${link ? ` If no picture is shown to you below, use analyze_image with this link: ${link}` : ""}`;
-        return { text, images: [{ data: buf.toString("base64") }] };
-    }
-
-    const { extractDocumentText, DocumentReadError } = await import("./document-text.service.js");
-    try {
-        const doc = await extractDocumentText(buf, { fileName: file.name, contentType: file.mime });
-        const lines = String(doc.text || "").split("\n");
-        const start = Math.min(lines.length, Math.max(1, Number(args?.start_line) || 1));
-        const last = Math.min(lines.length, Number(args?.end_line) || lines.length);
-        const out = [];
-        let chars = 0;
-        for (let n = start; n <= last && (!out.length || chars + lines[n - 1].length <= LOCAL_FILE_TEXT_CHARS); n++) {
-            out.push(lines[n - 1].slice(0, LOCAL_FILE_TEXT_CHARS));
-            chars += lines[n - 1].length + 1;
-        }
-        const end = start + out.length - 1;
-        const more = end < lines.length ? ` To read more, call read_local_file again with start_line ${end + 1}.` : "";
-        return `${file.path} (${doc.kind}${doc.detail ? `, ${doc.detail}` : ""}, lines ${start}-${end} of ${lines.length} of its text).${more}\n${out.join("\n")}`;
-    } catch (e) {
-        if (!(e instanceof DocumentReadError)) return `Error: ${file.path} could not be read (${e.message}).`;
-        // A scanned PDF has no text: its pages are shown as pictures instead
-        if (file.mime === "application/pdf") {
-            try {
-                const { pdfPageImages } = await import("./llm-stream-anthropic.js");
-                const { images, pages } = await pdfPageImages(buf, 4);
-                if (images.length) return { text: `${file.path} is a scanned PDF with no text inside. ${images.length === pages ? `Its ${pages} page${pages === 1 ? " is" : "s are"}` : `Pages 1-${images.length} of ${pages} are`} attached below as ${images.length === 1 ? "a picture; read it" : "pictures; read them"} yourself.`, images: images.map((jpg) => ({ data: jpg.toString("base64") })) };
-            } catch (err) {
-                console.warn(`[read_local_file] could not draw the PDF's pages: ${err.message}`);
-            }
-        }
-        return `Error: ${file.path}: ${e.message.replace(/ Use the analyze_image tool.*$/, "")}`;
-    }
 }
