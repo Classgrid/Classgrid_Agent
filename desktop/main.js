@@ -81,6 +81,25 @@ function startScreenServer() {
 }
 
 let win = null;
+
+// Where the user was when the app closed (Agent, Studio or Project Mode, and the open chat): the app opens there again
+// instead of a new chat. Login, sign-up and other pages that aren't a place to come back to are not kept.
+const lastPlaceFile = () => path.join(app.getPath("userData"), "last-place.json");
+function lastPlace() {
+  try {
+    const p = JSON.parse(fs.readFileSync(lastPlaceFile(), "utf8")).path;
+    return typeof p === "string" && p.startsWith("/") ? p : "/";
+  } catch { return "/"; }
+}
+function rememberPlace(url) {
+  try {
+    const u = new URL(url);
+    if (u.origin !== APP_URL) return;
+    const where = u.pathname + u.search;
+    if (where === "/" || /^\/(login|signin|signup|register|auth|oauth|verify|reset|forgot|logout|offline|public-chat-login|test-full-login|superadmin\/login)/i.test(u.pathname)) return;
+    fs.writeFileSync(lastPlaceFile(), JSON.stringify({ path: where, at: Date.now() }));
+  } catch { /* not a page of ours */ }
+}
 const isOurs = (url) => { try { return OUR_HOSTS.has(new URL(url).hostname); } catch { return false; } };
 
 function createWindow() {
@@ -138,7 +157,9 @@ function createWindow() {
   win.webContents.once("dom-ready", () => win.show());
   setTimeout(() => { if (win && !win.isDestroyed() && !win.isVisible()) win.show(); }, 4000);
   browser.attach(win); // the AI's browser (Studio's Browser tab) lives in this window
-  win.loadURL(APP_URL);
+  win.webContents.on("did-navigate", (_e, url) => rememberPlace(url));
+  win.webContents.on("did-navigate-in-page", (_e, url, isMainFrame) => { if (isMainFrame) rememberPlace(url); });
+  win.loadURL(APP_URL + lastPlace());
 }
 
 ipcMain.on("cg:version", (e) => { e.returnValue = app.getVersion(); });
