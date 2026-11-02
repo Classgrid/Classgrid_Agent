@@ -21,7 +21,7 @@
 
 "use client";
 
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
   ChevronDown,
   ChevronUp,
@@ -40,7 +40,8 @@ export type ApprovalVariant = "questions" | "command" | "plan";
 export interface ApprovalQuestion {
   id: string;
   prompt: string;
-  options: string[];
+  // An option can carry a preview (a small mock-up, code or example shown when it is picked or pointed at)
+  options: (string | { label: string; preview?: string })[];
 }
 
 export interface ApprovalPlanStep {
@@ -190,7 +191,7 @@ export interface ApprovalCardProps {
 
 export function ApprovalCard({
   variant = "questions",
-  questions = [],
+  questions: rawQuestions = [],
   command = "",
   cwd = "~/project",
   plan = [],
@@ -207,6 +208,10 @@ export function ApprovalCard({
   onViewPlan,
   className,
 }: ApprovalCardProps) {
+  // Options as plain labels; their previews kept apart (question id -> label -> preview)
+  const previews = useMemo(() => Object.fromEntries(rawQuestions.map((q) => [q.id, Object.fromEntries((q.options || []).filter((o) => typeof o === "object" && o && o.preview).map((o: any) => [String(o.label), String(o.preview)]))])) as Record<string, Record<string, string>>, [rawQuestions]);
+  const questions = useMemo(() => rawQuestions.map((q) => ({ ...q, options: (q.options || []).map((o) => (typeof o === "object" && o ? String((o as any).label ?? "") : String(o))).filter(Boolean) })), [rawQuestions]);
+  const [pointed, setPointed] = useState<Record<string, string>>({});
   const [answers, setAnswers] = useState<Record<string, string>>({});
   const [otherSelected, setOtherSelected] = useState<Record<string, boolean>>(
     {},
@@ -245,7 +250,7 @@ export function ApprovalCard({
   const isOtherChoice = (q: ApprovalQuestion) => {
     if (otherSelected[q.id]) return true;
     const a = answers[q.id];
-    return Boolean(a) && !q.options.includes(a);
+    return Boolean(a) && !(q.options as string[]).includes(a as string);
   };
 
   const syncQuestionSlide = (animate: boolean) => {
@@ -505,6 +510,10 @@ export function ApprovalCard({
                   aria-hidden={active ? undefined : true}
                 >
                   <div className={styles.qPrompt}>{safeRender(q.prompt)}</div>
+                  {(() => {
+                    const shown = previews[q.id]?.[pointed[q.id] || answers[q.id] || ""] ?? (Object.keys(previews[q.id] || {}).length ? previews[q.id]![(q.options as string[]).find((o) => previews[q.id]?.[o]) || ""] : undefined);
+                    return shown ? <pre className="order-last mt-2 max-h-56 overflow-auto rounded-lg border border-border bg-muted/40 p-3 font-mono text-[12px] leading-5 whitespace-pre text-foreground/85">{shown}</pre> : null;
+                  })()}
                   <div
                     className={styles.options}
                     role="radiogroup"
@@ -523,6 +532,8 @@ export function ApprovalCard({
                           tabIndex={active ? 0 : -1}
                           className={styles.option}
                           data-selected={selected ? "true" : undefined}
+                          onMouseEnter={() => setPointed((p) => ({ ...p, [q.id]: opt }))}
+                          onFocus={() => setPointed((p) => ({ ...p, [q.id]: opt }))}
                           onClick={(e) => {
                             e.preventDefault();
                             if (!active) return;
