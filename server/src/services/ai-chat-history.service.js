@@ -70,11 +70,14 @@ import { senderLabels } from './ai-chat-grid.service.js';
 
 const REDIS_KEY_PREFIX  = 'ai:chat:history:';
 const MAX_HISTORY       = 500;   // absolute cap stored in Redis
-const DEFAULT_DEPTH     = 40;    // default messages sent to LLM per request (owner, 2026-11-02: the AI must remember long chats)
+const DEFAULT_DEPTH     = 12;    // default messages sent to LLM per request (was 25; see docs/AI_TOKEN_ROOT_CAUSE.md)
 // Tool memory notes are restored only for the most recent answers, each cut short, so old tool results
 // don't make every new message heavier. Links in a result are always kept.
-const TOOL_NOTE_TURNS   = 6;
-const TOOL_NOTE_CHARS   = 2000;
+const TOOL_NOTE_TURNS   = 2;
+const TOOL_NOTE_CHARS   = 600;
+// The desktop app remembers much more of a long chat (owner, 2026-11-02): its agent works for hours on the computer
+const DESKTOP_TOOL_NOTE_TURNS = 6;
+const DESKTOP_TOOL_NOTE_CHARS = 2000;
 const CACHE_TTL_SECONDS = 86400; // 24 hours
 
 /**
@@ -105,8 +108,10 @@ function redisKey(sessionId) {
  * @param {number} depth - how many messages to return (default 25, max 500)
  * @returns {Promise<Array<{role: string, content: string}>>}
  */
-export async function getHistory(sessionId, depth = DEFAULT_DEPTH) {
+export async function getHistory(sessionId, depth = DEFAULT_DEPTH, { desktop = false } = {}) {
     if (!sessionId) return [];
+    const noteTurns = desktop ? DESKTOP_TOOL_NOTE_TURNS : TOOL_NOTE_TURNS;
+    const noteChars = desktop ? DESKTOP_TOOL_NOTE_CHARS : TOOL_NOTE_CHARS;
 
     const safeDepth = Math.min(Math.max(1, depth), MAX_HISTORY);
     const key = redisKey(sessionId);
@@ -124,7 +129,7 @@ export async function getHistory(sessionId, depth = DEFAULT_DEPTH) {
         const raw = await redis.lrange(key, -safeDepth, -1);
         // Tool notes are kept only for the last TOOL_NOTE_TURNS assistant messages.
         const assistantPositions = raw.map((item, i) => (/"role"\s*:\s*"assistant"/.test(item) ? i : -1)).filter(i => i >= 0);
-        const notesFrom = assistantPositions.length > TOOL_NOTE_TURNS ? assistantPositions[assistantPositions.length - TOOL_NOTE_TURNS] : 0;
+        const notesFrom = assistantPositions.length > noteTurns ? assistantPositions[assistantPositions.length - noteTurns] : 0;
         return raw.flatMap((item, itemIndex) => {
             try {
                 const parsed = JSON.parse(item);
@@ -145,9 +150,9 @@ export async function getHistory(sessionId, depth = DEFAULT_DEPTH) {
                                     let resExcerpt = "No result recorded";
                                     if (typeof s.result === 'string') {
                                         // Short excerpt, but every link in the result is kept (CDN files, PDFs, meeting links)
-                                        if (s.result.length > TOOL_NOTE_CHARS) {
+                                        if (s.result.length > noteChars) {
                                             const links = [...new Set(s.result.match(/https?:\/\/[^\s"'<>)\]]+/g) || [])].slice(0, 10);
-                                            resExcerpt = s.result.substring(0, TOOL_NOTE_CHARS) + '...[TRUNCATED]' + (links.length ? ` Links: ${links.join(' ')}` : '');
+                                            resExcerpt = s.result.substring(0, noteChars) + '...[TRUNCATED]' + (links.length ? ` Links: ${links.join(' ')}` : '');
                                         } else {
                                             resExcerpt = s.result;
                                         }

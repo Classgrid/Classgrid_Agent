@@ -128,8 +128,11 @@ export async function saveMessage(sessionId, role, content, fileUrls = [], sende
 const MEMORY_HEADER = /^\[Summary of messages 1-(\d+)\]\n/;
 // Every 8 messages DeepSeek V4 Flash rewrites one summary of the whole chat (User facts + Task state).
 const MEMORY_EVERY = 8;
-const MEMORY_MESSAGE_CHARS = 6000;
-const MEMORY_FLASH_MODEL = "@cf/deepseek-ai/deepseek-v4.1-flash-1017"; // the newest DeepSeek Flash
+const MEMORY_MESSAGE_CHARS = 3000;
+const MEMORY_FLASH_MODEL = "@cf/deepseek-ai/deepseek-v4-flash-0731";
+// The desktop app: more of each message read, and the newest DeepSeek Flash writes its longer memory
+const DESKTOP_MEMORY_MESSAGE_CHARS = 6000;
+const DESKTOP_MEMORY_FLASH_MODEL = "@cf/deepseek-ai/deepseek-v4.1-flash-1017";
 
 /** How many chat messages a saved summary covers, or null for an older summary without the header. */
 export function memoryCoverage(summary) {
@@ -142,9 +145,9 @@ export function memoryText(summary) {
     return String(summary || "").replace(MEMORY_HEADER, "");
 }
 
-// Saved assistant messages can be JSON ({ classgrid_ai_message, content, steps }): the text is summarized, plus a
-// short list of the steps it took (tools, files, commands), so long agent work in Studio is remembered too
-function plainMessageText(content) {
+// Saved assistant messages can be JSON ({ classgrid_ai_message, content, steps }): the text is summarized, and in the
+// desktop app a short list of the steps it took (tools, files, commands), so long agent work is remembered too
+function plainMessageText(content, withSteps = false) {
     const text = String(content ?? "");
     if (text.trim().startsWith("{")) {
         try {
@@ -155,7 +158,7 @@ function plainMessageText(content) {
                     const what = a.path || a.file_path || a.command || a.url || a.query || a.name || a.task || "";
                     return `- ${s?.tool || s?.name || "step"}${what ? `: ${String(what).slice(0, 160)}` : ""}${s?.status === "error" ? " (failed)" : ""}`;
                 });
-                return String(inner.content || "") + (steps.length ? `\n[Steps taken]\n${steps.join("\n")}` : "");
+                return String(inner.content || "") + (withSteps && steps.length ? `\n[Steps taken]\n${steps.join("\n")}` : "");
             }
         } catch { /* not JSON */ }
     }
@@ -163,6 +166,28 @@ function plainMessageText(content) {
 }
 
 const MEMORY_INSTRUCTIONS = `You keep the long-term memory of one chat between a user and Classgrid AI.
+You get the PREVIOUS MEMORY (may be empty) and the NEW MESSAGES since it was written. Write the updated memory.
+
+Output exactly these two sections, in Markdown, max 350 words in total:
+
+## User facts
+Stable facts about the user: their name, things they asked the AI to remember (favorite things, numbers, names), stated preferences and standing instructions.
+- Keep every fact from the previous memory unless the user changed or withdrew it.
+- Copy names, numbers, links and file paths exactly.
+
+## Task state
+What the chat is working on now: the goal, decisions made, files and links created (exact paths/URLs), and what is still pending.
+- Drop finished or outdated items.
+
+Rules:
+- Write only what the messages actually say. Never invent facts, instructions or preferences.
+- Something the AI offered or suggested is not a user instruction unless the user agreed to it.
+- Do not record temporary status or guesses (for example "memory is not working yet" or "the agent may have failed").
+- If a section has nothing, write "None yet."
+- Output only the two sections, nothing before or after.`;
+
+// The desktop app's longer memory (owner, 2026-11-02): enough to carry on a chat of many hours
+const DESKTOP_MEMORY_INSTRUCTIONS = `You keep the long-term memory of one chat between a user and Classgrid AI.
 You get the PREVIOUS MEMORY (may be empty) and the NEW MESSAGES since it was written. Write the updated memory.
 
 Output exactly these sections, in Markdown, max 1500 words in total. The AI must be able to carry on a chat of many
@@ -194,22 +219,22 @@ Rules:
 - If a section has nothing, write "None yet."
 - Output only the two sections, nothing before or after.`;
 
-async function summarizeWithFlash(input) {
+async function summarizeWithFlash(input, desktop = false) {
     const { streamChat } = await import('./llm-stream.js');
     const result = await streamChat({
         provider: {
             name: "cloudflare",
-            url: `https://api.cloudflare.com/client/v4/accounts/${process.env.CLOUDFLARE_ACCOUNT_ID}/ai/run/${MEMORY_FLASH_MODEL}`,
+            url: `https://api.cloudflare.com/client/v4/accounts/${process.env.CLOUDFLARE_ACCOUNT_ID}/ai/run/${desktop ? DESKTOP_MEMORY_FLASH_MODEL : MEMORY_FLASH_MODEL}`,
             apiKey: process.env.CLOUDFLARE_WORKERS_AI_TOKEN || "",
-            model: MEMORY_FLASH_MODEL,
+            model: desktop ? DESKTOP_MEMORY_FLASH_MODEL : MEMORY_FLASH_MODEL,
             timeoutMs: 90000
         },
         messages: [
-            { role: "system", content: MEMORY_INSTRUCTIONS },
+            { role: "system", content: desktop ? DESKTOP_MEMORY_INSTRUCTIONS : MEMORY_INSTRUCTIONS },
             { role: "user", content: input }
         ],
         tools: [],
-        maxTokens: 8000, // Flash reasons first; leave room for the memory (up to 1500 words) after the reasoning
+        maxTokens: desktop ? 8000 : 3000, // Flash reasons first; leave room for the memory after the reasoning
         maxToolDepth: 0,
         timeoutMs: 90000
     });
@@ -217,13 +242,13 @@ async function summarizeWithFlash(input) {
 }
 
 // Fallback when DeepSeek V4 Flash is unavailable.
-async function summarizeWithMistral(input) {
+async function summarizeWithMistral(input, desktop = false) {
     const mistralKey = process.env.MISTRAL_API_KEY || process.env.MISTRAL_API_KEY_2;
     if (!mistralKey) throw new Error("MISTRAL_API_KEY is not set");
     const openai = new OpenAI({ apiKey: mistralKey, baseURL: "https://api.mistral.ai/v1" });
     const response = await openai.chat.completions.create({
         model: "open-mistral-nemo",
-        messages: [{ role: "system", content: MEMORY_INSTRUCTIONS }, { role: "user", content: input }]
+        messages: [{ role: "system", content: desktop ? DESKTOP_MEMORY_INSTRUCTIONS : MEMORY_INSTRUCTIONS }, { role: "user", content: input }]
     });
     return String(response.choices?.[0]?.message?.content || "").trim();
 }
@@ -253,6 +278,9 @@ export async function triggerMemoryAgent(sessionId, { force = false } = {}) {
         lockKey = `ai:memory:lock:${sessionId}`;
         const gotLock = await redis.set(lockKey, "1", "EX", 120, "NX").catch(() => "OK");
         if (!gotLock) return false;
+        // A chat in the desktop app gets the longer memory (its last client is kept with the chat's wake-up details)
+        let desktop = false;
+        try { desktop = JSON.parse((await redis.get(`chatwake:meta:${sessionId}`)) || "{}").clientApp === "desktop"; } catch { /* website */ }
 
         const { data: session } = await primarySupabaseClient
             .from('ai_chat_sessions')
@@ -277,7 +305,7 @@ export async function triggerMemoryAgent(sessionId, { force = false } = {}) {
         const input = [
             `PREVIOUS MEMORY:\n${previous ? memoryText(previous) : "(empty)"}`,
             `NEW MESSAGES (${covered + 1} to ${total}):`,
-            ...newMessages.map((m, i) => `[${covered + i + 1}] ${String(m.role).toUpperCase()}${who(m)}: ${plainMessageText(m.content).slice(0, MEMORY_MESSAGE_CHARS)}`),
+            ...newMessages.map((m, i) => `[${covered + i + 1}] ${String(m.role).toUpperCase()}${who(m)}: ${plainMessageText(m.content, desktop).slice(0, desktop ? DESKTOP_MEMORY_MESSAGE_CHARS : MEMORY_MESSAGE_CHARS)}`),
             // Share Grid: several people use this chat, so facts are kept per person
             ...(grid ? [`NOTE: This chat is shared by ${grid.members.length} people: ${Object.values(grid.labels).join(", ")}. Write the User facts separately for each person, under their name, so one person's facts and preferences are never applied to another.`] : [])
         ].join("\n\n");
@@ -286,13 +314,13 @@ export async function triggerMemoryAgent(sessionId, { force = false } = {}) {
         let summary = "";
         let usedModel = MEMORY_FLASH_MODEL;
         try {
-            summary = await summarizeWithFlash(input);
+            summary = await summarizeWithFlash(input, desktop);
         } catch (e) {
             console.warn(`[Memory Agent] DeepSeek V4 Flash failed, using Mistral Nemo: ${e.message}`);
         }
         if (!summary) {
             usedModel = "open-mistral-nemo";
-            summary = await summarizeWithMistral(input);
+            summary = await summarizeWithMistral(input, desktop);
         }
         if (!summary) throw new Error("empty summary");
 
