@@ -44,7 +44,7 @@ export function FileBadge({ path }: { path: string }) {
   return <span aria-hidden className="size-3.5 shrink-0 inline-flex items-center justify-center [&_svg]:size-4 [&_svg]:fill-current" style={{ color }} dangerouslySetInnerHTML={{ __html: svg }} />;
 }
 
-function Row({ children, onClick, open }: { children: React.ReactNode; onClick?: () => void; open?: boolean }) {
+export function Row({ children, onClick, open }: { children: React.ReactNode; onClick?: () => void; open?: boolean }) {
   return (
     <div className="relative z-10 flex items-center gap-3 p-1 pr-3 -ml-1">
       <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full py-1">
@@ -770,8 +770,19 @@ const inProjectMode = () => typeof window !== 'undefined' && window.location.pat
 const fileChipsOn = () => typeof window !== 'undefined' && window.location.pathname.split('/').some((p) => p === 'project' || p === 'studio');
 // A folder named in the answer (`src/components/`): needs a "/" so normal words never match
 const FOLDER_MENTION = /^(?:\.\/)?((?:[\w@-][\w.@-]*\/)+(?:[\w@-][\w@-]*)?)\/?$/;
+// The desktop app: a full path on this computer (`C:\Users\me\Desktop\report.pdf`, `D:\code\app.js:42`, a folder) is a
+// link in every mode: a file opens beside the chat in Studio (else in its Windows app), a folder in File Explorer
+const LOCAL_PATH_MENTION = /^([A-Za-z]:[\\/](?:[^<>:"|?*\r\n]*[^<>:"|?*\r\n\\/ ])?)[\\/]?(?::(\d+)(?:-(\d+))?)?$/;
+const onDesktop = () => typeof window !== 'undefined' && !!(window as unknown as { classgridDesktop?: unknown }).classgridDesktop;
 
 export function parseFileMention(text: string) {
+  if (onDesktop()) {
+    const local = String(text).trim().replace(/^["']+|["']+$/g, '').match(LOCAL_PATH_MENTION);
+    if (local && local[1]) {
+      const isFile = /[^\\/]\.[A-Za-z0-9]{1,8}$/.test(local[1]);
+      return { path: local[1], startLine: Number(local[2]) || undefined, endLine: Number(local[3] || local[2]) || undefined, label: String(text).trim(), folder: !isFile, local: true };
+    }
+  }
   if (!fileChipsOn()) return null;
   const t = String(text).trim();
   const folder = t.match(FOLDER_MENTION);
@@ -809,8 +820,12 @@ export function parseProjectLink(href?: string) {
   return { path, folder: isFolder, startLine: line ? Number(line[1]) : undefined, endLine: line ? Number(line[2] || line[1]) : undefined };
 }
 
-export function FileMentionChip({ path, startLine, endLine, label, folder }: { path: string; startLine?: number; endLine?: number; label: React.ReactNode; folder?: boolean }) {
-  const go = () => openInEditor({ path, startLine, endLine, folder });
+export function FileMentionChip({ path, startLine, endLine, label, folder, local }: { path: string; startLine?: number; endLine?: number; label: React.ReactNode; folder?: boolean; local?: boolean }) {
+  const go = () => {
+    if (!local) return openInEditor({ path, startLine, endLine, folder });
+    if (folder) (window as unknown as { classgridDesktop?: { openPath?: (p: string) => void } }).classgridDesktop?.openPath?.(path);
+    else openLocalFile(path, true);
+  };
   // Studio: the chip uses Studio's own greys (light and dark) instead of blue
   const studio = typeof window !== 'undefined' && window.location.pathname.split('/').includes('studio');
   const look = studio
@@ -820,7 +835,7 @@ export function FileMentionChip({ path, startLine, endLine, label, folder }: { p
     <span
       role="link"
       tabIndex={0}
-      title={folder ? `Show ${path} in the editor` : startLine ? `Open ${path} at line ${startLine}` : `Open ${path}`}
+      title={folder ? (local ? `Open ${path} in File Explorer` : `Show ${path} in the editor`) : startLine ? `Open ${path} at line ${startLine}` : `Open ${path}`}
       onClick={go}
       onKeyDown={(e) => { if (e.key === 'Enter') go(); }}
       className={`inline-flex max-w-full items-center gap-1 rounded-md px-1.5 py-0.5 align-baseline font-mono text-[0.85em] cursor-pointer transition-colors ${look}`}

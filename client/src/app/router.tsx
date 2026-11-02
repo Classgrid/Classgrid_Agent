@@ -125,6 +125,7 @@ import { OrgAdmissionsPage } from "@/features/superadmin/pages/OrgAdmissionsPage
 import { PlatformAnnouncementsPage } from "@/features/superadmin/pages/PlatformAnnouncementsPage";
 import { SharedChatPage } from "@/features/shared/pages/SharedChatPage";
 import { GridJoinPage } from "@/components/ai/components/share-grid/GridJoinPage";
+import { SharePagePage } from "@/features/share-pages/SharePagePage";
 import { SharedProfilePage } from "@/features/shared/pages/SharedProfilePage";
 import { AgentProfilePage } from "@/features/public-chat/pages/AgentProfilePage";
 
@@ -168,6 +169,7 @@ import { AgentReviewsPage } from "@/features/superadmin/pages/AgentReviewsPage";
 import { AiUsageDashboardPage } from "@/features/superadmin/pages/AiUsageDashboardPage";
 import { AiModelsPage } from "@/features/superadmin/pages/AiModelsPage";
 import { PlaygroundPage } from "@/features/superadmin/pages/PlaygroundPage";
+import { LiveDocPage } from "@/features/live-docs/LiveDocPage";
 import { isChatHost } from "@/lib/chatHost";
 
 
@@ -251,6 +253,7 @@ export function AppRouter() {
       <Route element={<RequireAuth />}>
         <Route path="/required-password-reset" element={<RequiredPasswordResetPage />} />
         <Route path="/oauth/authorize" element={<OAuthConsentPage />} />
+        <Route path="/docs/:id" element={<LiveDocPage />} />
 
 
         {/* NEW SUPER ADMIN SHELL */}
@@ -428,6 +431,8 @@ export function AppRouter() {
       <Route path="/shared/:shareId" element={<SharedChatPage />} />
       {/* Share Grid invite (checks login itself, so a signed-out visitor sees the invite first) */}
       <Route path="/grid/join/:token" element={<GridJoinPage />} />
+      {/* Share pages the AI published (checks login itself) */}
+      <Route path="/p/:id" element={<SharePagePage />} />
     </Routes>
   );
 }

@@ -143,7 +143,7 @@ import {
 } from "./ui/accordion";
 import { cn } from "../utils";
 import { CodeBlockClient } from "./CodeBlockClient";
-import { ModelPicker, useSelectedModel, MODEL_GROUPS, AUTO_MODEL_ID } from "./ModelPicker";
+import { ModelPicker, useSelectedModel, MODEL_GROUPS, AUTO_MODEL_ID, getThinkingLevel } from "./ModelPicker";
 import { TypingGreeting } from "./AgentHomeExtras";
 import { toast } from "sonner";
 import { getSocket } from "@/lib/socketClient";
@@ -211,6 +211,8 @@ import { ImageReadStep } from "./stepper/tool-results/ImageReadStep";
 import { AudioTranscribeStep } from "./stepper/tool-results/AudioTranscribeStep";
 import { StepBoundary } from "./stepper/StepBoundary";
 import { FILE_DRAG_TYPE, FileBadge, FileMentionChip, parseFileMention, parseProjectLink, FilesChangedSummary, ProjectEditStep, ProjectExploreGroup, ProjectPushStep, ProjectRunChanges, ProjectHelpersStep, TerminalStep, ComputerStep, PROJECT_BACKGROUND_TOOLS, PROJECT_EDIT_TOOLS, PROJECT_EXPLORE_TOOLS } from "./stepper/ProjectToolSteps";
+import { LiveDocStep, LIVE_DOC_TOOLS } from "@/features/live-docs/LiveDocStep";
+import { PublishedPageStep } from "./stepper/PublishedPageStep";
 import { CombinedReasoningBlock } from "./stepper/CombinedReasoningBlock";
 import { CodeNoteChips, StudioCodeNotesBar } from "@/features/superadmin/components/StudioCodeNotesBar";
 import { clearCodeNotes, codeNotesText, getCodeNotes, setCodeNotesChat, splitCodeNotes, toChip, useCodeNotes, type CodeNote, type CodeNoteChip } from "@/features/superadmin/components/studioCodeNotes";
@@ -4382,6 +4384,8 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
             const parts = window.location.pathname.split("/");
             return parts.includes("studio") || parts.includes("project") ? leadingSlashCommand(question, parts.includes("studio")) : undefined;
           })(),
+          // How hard the AI thinks (model menu): Fast, Normal or Deep
+          effort: getThinkingLevel() === "normal" ? undefined : getThinkingLevel() === "fast" ? "low" : "high",
           // Website or Classgrid desktop app, so the AI knows where the user is
           clientApp: (window as any).classgridDesktop?.isDesktop ? "desktop" : "web",
           // Studio and Project Mode: which actions ask the user first (the shield in the chat box)
@@ -5352,8 +5356,16 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
                                             elements.push(<ProjectEditStep key={step.id} step={step} />);
                                             return;
                                           }
+                                          if (LIVE_DOC_TOOLS.has(step.tool ?? '')) {
+                                            elements.push(<LiveDocStep key={step.id} step={step} />);
+                                            return;
+                                          }
                                           if (step.tool === 'push_project_to_github') {
                                             elements.push(<ProjectPushStep key={step.id} step={step} />);
+                                            return;
+                                          }
+                                          if (step.tool === 'publish_page') {
+                                            elements.push(<PublishedPageStep key={step.id} step={step} />);
                                             return;
                                           }
                                           if (step.tool === 'run_project_helpers') {

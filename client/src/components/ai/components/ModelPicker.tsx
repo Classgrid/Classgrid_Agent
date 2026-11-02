@@ -143,6 +143,23 @@ interface ModelPickerProps {
   disabled?: boolean;
 }
 
+// How hard the AI thinks: Fast (quick, short answers), Normal, or Deep (checks its work twice). Kept across reloads.
+export type ThinkingLevel = "fast" | "normal" | "deep";
+const THINKING_KEY = "cg_thinking_level";
+export function getThinkingLevel(): ThinkingLevel {
+  try {
+    const v = localStorage.getItem(THINKING_KEY);
+    return v === "fast" || v === "deep" ? v : "normal";
+  } catch {
+    return "normal";
+  }
+}
+const THINKING_LEVELS: { id: ThinkingLevel; label: string; hint: string }[] = [
+  { id: "fast", label: "Fast", hint: "Quick, short answers" },
+  { id: "normal", label: "Normal", hint: "The usual" },
+  { id: "deep", label: "Deep", hint: "Thinks longer, checks its work twice" },
+];
+
 // Claude Fable 5.1 is locked until the person has topped up ₹299 in total (server enforces it too)
 const FABLE_ID = "claude-fable-5-1";
 
@@ -165,6 +182,11 @@ export function ModelPicker({ value, onChange, disabled }: ModelPickerProps) {
   }, [fableLocked, access, value, onChange]);
 
   const openTopUp = () => window.dispatchEvent(new CustomEvent("open-ai-hub", { detail: { tab: "upgrade" } }));
+  const [thinking, setThinkingState] = React.useState<ThinkingLevel>(getThinkingLevel);
+  const setThinking = (id: ThinkingLevel) => {
+    setThinkingState(id);
+    try { localStorage.setItem(THINKING_KEY, id); } catch { /* storage blocked: this message only */ }
+  };
 
   return (
     <DropdownMenu>
@@ -179,6 +201,7 @@ export function ModelPicker({ value, onChange, disabled }: ModelPickerProps) {
           {selected ? <ModelLogoImg logo={selected.logo} className="h-3.5 w-3.5 @max-[40rem]:hidden" /> : null}
           <span className="hidden sm:inline @max-[40rem]:hidden">{selected ? selected.name : "Auto"}</span>
           {!selected && <span className="sm:hidden @max-[40rem]:hidden">Auto</span>}
+          {thinking !== "normal" && <span className="hidden sm:inline @max-[40rem]:hidden text-muted-foreground/80">· {thinking === "fast" ? "Fast" : "Deep"}</span>}
           <ChevronDown className="h-3.5 w-3.5 shrink-0 opacity-60" />
         </button>
       </DropdownMenuTrigger>
@@ -188,6 +211,26 @@ export function ModelPicker({ value, onChange, disabled }: ModelPickerProps) {
         sideOffset={8}
         className="w-[300px] max-h-[min(460px,var(--available-height))] z-[100] bg-white dark:bg-[#202123] border border-slate-200 dark:border-white/10 shadow-xl rounded-xl p-1.5"
       >
+        <DropdownMenuLabel className="px-2 pt-1.5 pb-1">Thinking</DropdownMenuLabel>
+        <div className="flex gap-1 px-1 pb-1" role="radiogroup" aria-label="Thinking">
+          {THINKING_LEVELS.map((t) => (
+            <button
+              key={t.id}
+              type="button"
+              role="radio"
+              aria-checked={thinking === t.id}
+              title={t.hint}
+              onClick={() => setThinking(t.id)}
+              className={cn(
+                "flex-1 h-8 rounded-lg text-[13px] font-medium transition-colors cursor-pointer",
+                thinking === t.id ? "bg-slate-100 dark:bg-white/10 text-foreground" : "text-muted-foreground hover:text-foreground hover:bg-slate-50 dark:hover:bg-white/5",
+              )}
+            >
+              {t.label}
+            </button>
+          ))}
+        </div>
+        <DropdownMenuSeparator className="bg-slate-100 dark:bg-white/10 my-1" />
         <DropdownMenuItem onClick={() => onChange(AUTO_MODEL_ID)} className="gap-2.5 cursor-pointer py-2 items-start">
           <div className="flex flex-col flex-1 min-w-0">
             <span className="font-medium">Auto</span>

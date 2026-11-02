@@ -107,7 +107,9 @@ import aiGridRoutes from "../src/routes/ai-grid.routes.js";
 import aiCreditsRoutes from "../src/routes/ai-credits.routes.js";
 import aiCreditsTopupRoutes from "../src/routes/ai-credits-topup.routes.js";
 import aiLibraryRoutes from "../src/routes/ai-library.routes.js";
+import sharePageRoutes from "../src/routes/share-page.routes.js";
 import aiScheduleRoutes from "../src/routes/ai-schedule.routes.js";
+import liveDocRoutes from "../src/routes/live-doc.routes.js";
 import voiceRoutes from "../src/routes/voice.routes.js";
 import auditRoutes from "../src/routes/audit.routes.js";
 import superAdminRoutes from "../src/routes/super-admin.routes.js";
@@ -430,7 +432,9 @@ app.use("/api/ai", aiRoutes);
 app.use("/api/ai/credits", aiCreditsRoutes);
 app.use("/api/ai/topup", aiCreditsTopupRoutes);
 app.use("/api/ai/library", aiLibraryRoutes);
+app.use("/api/pages", sharePageRoutes); // share pages the AI publishes (chat.classgrid.in/p/<id>)
 app.use("/api/ai/schedules", aiScheduleRoutes);
+app.use("/api/docs", liveDocRoutes); // live docs the AI writes (chat.classgrid.in/docs/<id>)
 app.use("/api/ai-integrations", aiIntegrationsRoutes);
 app.use("/api/custom-mcp", customMcpRoutes); // custom MCP servers (custom plugins) each user adds
 app.use("/api/net-check", netCheckRoutes); // VPN / proxy check for chat.classgrid.in

@@ -119,6 +119,12 @@ export const TOOL_GROUPS = [
         onAttachment: true,
     },
     {
+        id: "live_docs",
+        description: "Live docs: write a document the user keeps editing, shares and comments on (plans, reports, essays, notes, drafts); read it, edit it and answer its comments.",
+        tools: ["create_doc", "read_doc", "edit_doc", "doc_comments"],
+        pattern: /\b(docs?|documents?|draft\w*|notes?|essays?|reports?|plans?|comments?|live\s*docs?)\b|chat\.classgrid\.in\/docs\//i,
+    },
+    {
         id: "image_media",
         description: "Generate images and analyze images by URL.",
         tools: ["generate_image", "analyze_image"],
@@ -137,6 +143,12 @@ export const TOOL_GROUPS = [
         description: "Make an MP4 video (explainer, promo, launch video, animated intro, reel, motion graphics) from an animated HTML page.",
         tools: ["make_video"],
         pattern: /\b(videos?|animat\w*|explainer|reels?|motion|promo|intro|teaser|trailer|mp4|clip)\b|वीडियो/i,
+    },
+    {
+        id: "share_pages",
+        description: "Publish a web page (report, dashboard, slides, form, mini app) the user opens and shares at chat.classgrid.in/p/<id>, and read and answer its comments.",
+        tools: ["publish_page", "page_comments"],
+        pattern: /\b(pages?|web\s*page|dashboards?|share\w*|publish\w*|reports?|artifacts?|mini\s*apps?|tracker|comments?|visuali[sz]\w*|interactive)\b|पेज/i,
     },
     {
         id: "code_project",
