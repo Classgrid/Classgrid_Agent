@@ -311,12 +311,13 @@ export function makeToolImageCollector(signal, conversation = null) {
 const MAX_PDF_PAGE_IMAGES = 10;
 const PDF_PAGE_LONG_SIDE = 1600;
 
-export async function pdfPageImages(buf, maxPages) {
+export async function pdfPageImages(buf, maxPages, fromPage = 1) {
     const pdfjs = await import("pdfjs-dist/legacy/build/pdf.mjs");
     const doc = await pdfjs.getDocument({ data: new Uint8Array(buf), isEvalSupported: false, verbosity: 0 }).promise;
     try {
         const images = [];
-        for (let n = 1; n <= Math.min(doc.numPages, maxPages); n++) {
+        const first = Math.min(Math.max(1, Math.floor(Number(fromPage) || 1)), doc.numPages);
+        for (let n = first; n <= Math.min(doc.numPages, first + maxPages - 1); n++) {
             const page = await doc.getPage(n);
             const base = page.getViewport({ scale: 1 });
             const viewport = page.getViewport({ scale: Math.min(2, PDF_PAGE_LONG_SIDE / Math.max(base.width, base.height)) });
@@ -326,7 +327,7 @@ export async function pdfPageImages(buf, maxPages) {
             page.cleanup();
             if (jpg.length <= MAX_IMAGE_BYTES) images.push(jpg);
         }
-        return { images, pages: doc.numPages };
+        return { images, pages: doc.numPages, first };
     } finally {
         await doc.destroy();
     }
