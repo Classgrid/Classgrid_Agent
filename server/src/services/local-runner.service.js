@@ -67,12 +67,14 @@ export function callRunner(userId, tool, args = {}) {
 }
 
 export const COMPUTER_TERMINAL_TOOLS = new Set(["execute_terminal_command", "start_background_command", "check_background_command", "stop_background_command"]);
+// Project Mode's file tools, used on files anywhere on the computer in those chats (full paths)
+export const COMPUTER_FILE_TOOLS = { write_project_file: "computer_write", edit_project_file: "computer_edit", search_project: "computer_search", list_project_files: "computer_list" };
 
 /** The terminal tools in a desktop app chat that isn't a project: the command runs on the user's own computer (asks first). */
 export async function runOnComputer(userId, tool, args = {}) {
     const reply = await callRunner(userId, tool, args);
     if (!reply) return "The Classgrid desktop app isn't open on the user's computer, so the command didn't run. Tell the user to open the Classgrid desktop app, then try again.";
-    if (/can't run on this computer|wasn't opened in the Classgrid app/.test(reply.text)) return "Error: the user's Classgrid desktop app is an older version that can't run commands on their computer. Ask them to update the app (or reinstall it from classgrid.in), then try again.";
+    if (/can't run on this computer|wasn't opened in the Classgrid app/.test(reply.text)) return "Error: the user's Classgrid desktop app is an older version that can't do this on their computer. Ask them to update the app (or reinstall it from classgrid.in), then try again.";
     return reply.text;
 }
 

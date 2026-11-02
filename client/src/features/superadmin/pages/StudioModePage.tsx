@@ -198,6 +198,8 @@ export function StudioModePage() {
   useEffect(() => {
     const onOpenFile = async (e: Event) => {
       const d = (e as CustomEvent).detail || {};
+      // A file anywhere on this computer (desktop app, full path): its own file tab
+      if (/^[A-Za-z]:[\\/]/.test(String(d.path || ""))) { window.dispatchEvent(new CustomEvent(OPEN_LOCAL_FILE_EVENT, { detail: { path: d.path } })); return; }
       if (d.plan && !d.path) {
         const id = (() => { try { return (sessionStorage.getItem("cg_project_open") || localStorage.getItem("cg_project_open")); } catch { return null; } })();
         if (!id) { toast("The plan file opens in Files once a project is picked"); return; }

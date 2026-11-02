@@ -453,6 +453,51 @@ async function readLocalVideo(full, stat, key) {
 
 const anywhereTools = { read_local_file: readLocalFile };
 
+// Project Mode's file tools for files anywhere on this computer (chats that aren't a project): full paths, the same
+// answers and the same steps in the chat ("Edited notes.txt +3 -1"). Each one is allowed by the user first. Windows,
+// installed programs and this app's own folders are never changed.
+function protectedFolders() {
+  const list = [process.env.SystemRoot || "C:\\Windows", "C:\\Windows", process.env.ProgramFiles || "C:\\Program Files", "C:\\Program Files", process.env["ProgramFiles(x86)"] || "C:\\Program Files (x86)", "C:\\Program Files (x86)"];
+  if (foldersFile) list.push(path.dirname(foldersFile)); // the app's userData
+  try {
+    const { app } = require("electron");
+    if (app?.getPath) list.push(app.getPath("userData"));
+    if (app?.isPackaged) list.push(path.dirname(process.execPath));
+  } catch { /* not inside the app */ }
+  return list.filter(Boolean).map((f) => path.resolve(f).toLowerCase());
+}
+function writable(full) {
+  const low = full.toLowerCase();
+  const hit = protectedFolders().find((f) => low === f || low.startsWith(f + path.sep));
+  if (hit) throw new Error(`${full} is inside a protected folder (${hit}: Windows, installed programs or the Classgrid app itself), so it can't be changed.`);
+}
+const withFull = (text, rel, full) => String(text).replace(rel, full);
+const computerFileTools = {
+  write_project_file(args) {
+    const full = localPath(args.path);
+    writable(full);
+    return withFull(tools.write_project_file(path.dirname(full), { ...args, path: path.basename(full) }), path.basename(full), full);
+  },
+  edit_project_file(args) {
+    const full = localPath(args.path);
+    writable(full);
+    return withFull(tools.edit_project_file(path.dirname(full), { ...args, path: path.basename(full) }), path.basename(full), full);
+  },
+  list_project_files(args) {
+    const full = localPath(args.path);
+    if (!fs.existsSync(full) || !fs.statSync(full).isDirectory()) throw new Error(`there is no folder at ${full}`);
+    return tools.list_project_files(full, { ...args, path: "" }).replace(/^Project folder: .*/, `Folder: ${full}`);
+  },
+  search_project(args) {
+    const full = localPath(args.path);
+    if (!fs.existsSync(full) || !fs.statSync(full).isDirectory()) throw new Error(`there is no folder at ${full}`);
+    if (path.parse(full).root.toLowerCase() === full.toLowerCase()) throw new Error(`${full} is a whole drive; search a folder in it instead (like ${path.join(require("node:os").homedir(), "Documents")}).`);
+    const text = tools.search_project(full, { ...args, path: "" });
+    // Each line's file as its full path
+    return text.split("\n").map((l, i) => { const m = l.match(/^([^:]+)(:\d+:[\s\S]*)$/); return i === 0 || !m ? l : path.join(full, m[1]) + m[2]; }).join("\n");
+  },
+};
+
 // The terminal in a chat that isn't a project: runs on this computer in the user's home folder (each command is allowed
 // by the user first)
 const COMPUTER_TOOLS = new Set(["execute_terminal_command", "start_background_command", "check_background_command", "stop_background_command"]);
@@ -489,6 +534,10 @@ function connect(token) {
       if (anywhereTools[tool]) {
         console.log("[runner] tool", tool, args.path, args.chunk ? `piece ${args.chunk}` : "");
         return ack(await anywhereTools[tool](args));
+      }
+      if (!root && computerFileTools[tool]) {
+        console.log("[runner] computer", tool, args.path);
+        return ack({ text: String(computerFileTools[tool](args)) });
       }
       if (!root && COMPUTER_TOOLS.has(tool)) {
         console.log("[runner] computer", tool);

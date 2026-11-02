@@ -56,6 +56,31 @@ export function describeAction(tool, args = {}) {
       const file = String(args?.path || "").trim().replace(/^["']+|["']+$/g, "");
       return { title: "Read a file on your computer?", detail: file, key: `localfile:${file.toLowerCase()}`, label: `reading ${file.split(/[\\/]/).filter(Boolean).pop() || "this file"}`, level: ALWAYS_ASKS };
     }
+    // Project Mode's file tools used on files anywhere on the user's computer (desktop app, chats that aren't a project)
+    case "computer_write": {
+      const file = String(args?.path || "").trim();
+      return { title: "Create this file on your computer?", detail: `${file}
+
+${String(args?.content ?? "").slice(0, 1200)}`, key: `localwrite:${file.toLowerCase()}`, label: `creating ${file.split(/[\\/]/).pop() || "files"}`, level: 2 };
+    }
+    case "computer_edit": {
+      const file = String(args?.path || "").trim();
+      const first = Array.isArray(args?.edits) ? args.edits[0] : null;
+      return { title: "Change this file on your computer?", detail: `${file}${first ? `
+
+Replace:
+${String(first.old_text ?? "").slice(0, 500)}
+
+With:
+${String(first.new_text ?? "").slice(0, 500)}` : ""}${Array.isArray(args?.edits) && args.edits.length > 1 ? `
+
+(+${args.edits.length - 1} more change${args.edits.length > 2 ? "s" : ""})` : ""}`, key: `localedit:${file.toLowerCase()}`, label: `editing ${file.split(/[\\/]/).pop() || "files"}`, level: 2 };
+    }
+    case "computer_search":
+    case "computer_list": {
+      const folder = String(args?.path || "").trim();
+      return { title: tool === "computer_search" ? `Search the files in this folder for "${String(args?.query || "").slice(0, 80)}"?` : "Look at the files in this folder?", detail: folder, key: `localfolder:${folder.toLowerCase()}`, label: `looking in ${folder.split(/[\\/]/).filter(Boolean).pop() || "this folder"}`, level: 1 };
+    }
     default:
       return null;
   }

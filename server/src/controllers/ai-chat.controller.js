@@ -85,7 +85,7 @@ import NotificationLog from "../models/NotificationLog.js";
 import { getMcpTools, handleToolCall, readSandboxFiles } from "../mcp/tools.js";
 import { CUSTOM_MCP_TOOL, runCustomMcpTool, customMcpPromptLine } from "../services/custom-mcp-ai.js";
 import { PLAY_SONG_TOOL, songTools, runPlaySong, runDownloadSong } from "../services/music-ai.js";
-import { localProjectFor, callLocal, readLocalFile, runOnComputer, COMPUTER_TERMINAL_TOOLS } from "../services/local-runner.service.js";
+import { localProjectFor, callLocal, readLocalFile, runOnComputer, COMPUTER_TERMINAL_TOOLS, COMPUTER_FILE_TOOLS } from "../services/local-runner.service.js";
 import { projectForChat } from "../services/ide-project.service.js";
 import { parseHTML } from "linkedom";
 import { Readability } from "@mozilla/readability";
@@ -1347,6 +1347,31 @@ const COMPUTER_TERMINAL_DEFS = [
     terminalDef("stop_background_command", "Stop a background command on the user's computer.", {
         job_id: { type: "string", description: "The job_id from start_background_command" },
     }, ["job_id"]),
+    // The same file tools as Project Mode, for files anywhere on the user's computer (full paths)
+    terminalDef("write_project_file", "Create a new file on the user's own computer (missing folders are made). An existing file is never replaced: change it with edit_project_file. Windows, Program Files and the Classgrid app's own folders can't be changed. The user is asked to allow it first.", {
+        path: { type: "string", description: "The full path of the new file, e.g. C:\\Users\\name\\Documents\\notes.txt" },
+        content: { type: "string", description: "The whole text of the file" },
+    }, ["path", "content"]),
+    terminalDef("edit_project_file", "Change parts of a text file on the user's own computer without rewriting it. Each edit replaces old_text (exact text from the file; read it first with read_local_file) with new_text; several edits in one call. Nothing is changed if any edit doesn't match. The user is asked to allow it first.", {
+        path: { type: "string", description: "The full path of the file" },
+        edits: { type: "array", description: "The changes, applied in order.", items: { type: "object", properties: {
+            old_text: { type: "string", description: "Exact text in the file to replace (include enough lines to be unique)." },
+            new_text: { type: "string", description: "The text that replaces it." },
+            start_line: { type: "number", description: "Optional: first line of the range where old_text is." },
+            end_line: { type: "number", description: "Optional: last line of that range." },
+            allow_multiple: { type: "boolean", description: "Replace every match instead of requiring exactly one." },
+        }, required: ["old_text", "new_text"] } },
+    }, ["path", "edits"]),
+    terminalDef("search_project", "Search inside the files of a folder on the user's own computer (like grep), including its subfolders (node_modules, .git and build folders are skipped). Returns each matching line as full path:line:text. Search a folder, not a whole drive.", {
+        path: { type: "string", description: "The full path of the folder to search in" },
+        query: { type: "string", description: "The text to find" },
+        regex: { type: "boolean", description: "Treat query as a regular expression" },
+        ignore_case: { type: "boolean", description: "Ignore upper and lower case" },
+    }, ["path", "query"]),
+    terminalDef("list_project_files", "List the files and folders in a folder on the user's own computer, with its subfolders down to depth (default 2, up to 6). Use it to find files by name too.", {
+        path: { type: "string", description: "The full path of the folder" },
+        depth: { type: "number", description: "How many folder levels to show (1-6, default 2)" },
+    }, ["path"]),
 ];
 
 // Claude sees images natively, but after the turn an image was generated in, the chat history only holds its
@@ -1935,7 +1960,7 @@ Project Mode and Studio share one open project and its chats: the user can open 
 The user is in ${appMode === "agent" ? "Agent mode" : appMode === "project" ? "Project Mode" : "Studio Mode"} now.${appMode === "studio" ? ` Make code changes yourself; do not ask the user to edit a file or open an editor. If they want to edit by hand, they can switch to Project Mode.` : " The live browser is only in Studio Mode: here there is none, so do not try to open or use a browser (no browser tools, and no browser started from code or commands), and do not say that you will try or that you will do it. If the user wants the live browser, tell them to switch to Studio Mode."}`;
         }
         // Where the user is: the website or the Classgrid desktop app (sent by the app; your own thinking always runs on our servers)
-        if (body.clientApp === "desktop") volatilePrompt += "\n\n--- WHERE THE USER IS ---\nThe user is using the Classgrid desktop app on their own computer (Windows), not the chat.classgrid.in website. The app's screens run on their computer; your thinking runs on Classgrid's servers. Projects opened from a folder on their computer run your file and terminal tools on that computer. In any chat, to look at a file or folder on this computer (a path like C:\\Users\\name\\Videos\\clip.mp4, or one they ask about), use read_local_file: pictures and videos are shown to you (a video as pictures from across it), PDF, Word, Excel and PowerPoint files come back as their text (a scanned PDF as pictures of its pages), and a folder shows its files; the file also opens beside the chat for the user. In a chat that isn't a project, execute_terminal_command and the background command tools run a real terminal on this computer (PowerShell; Bash through bash -lc '...' when Git Bash is installed), starting in the user's home folder. Do everything on the computer with it, like a developer in their own terminal: list folders (Get-ChildItem), read files (Get-Content), search (Select-String), create, edit, move, copy or delete files and folders, and run programs. To change files, or when read_local_file isn't enough, use the terminal. To read a document with code, use Python in the terminal: install the readers once with python -m pip install --quiet --disable-pip-version-check pypdf openpyxl python-docx python-pptx (if Python isn't there, install it with winget install -e --id Python.Python.3.12 --accept-package-agreements --accept-source-agreements, then use py), then print its text with a short python -c script. Always write a file's full path in the command: the app then opens that file beside the chat for the user (PDF pages, sheets, Word pages, pictures, text). The app asks the user to allow each command first, so just run it; never say you can't open or change files on their computer.\nIn the desktop app your browser (browser_open and the other browser tools) runs on the user's computer, with their internet, so it can open their own local servers like http://localhost:3000.";
+        if (body.clientApp === "desktop") volatilePrompt += "\n\n--- WHERE THE USER IS ---\nThe user is using the Classgrid desktop app on their own computer (Windows), not the chat.classgrid.in website. The app's screens run on their computer; your thinking runs on Classgrid's servers. Projects opened from a folder on their computer run your file and terminal tools on that computer. In any chat, to look at a file or folder on this computer (a path like C:\\Users\\name\\Videos\\clip.mp4, or one they ask about), use read_local_file: pictures and videos are shown to you (a video as pictures from across it), PDF, Word, Excel and PowerPoint files come back as their text (a scanned PDF as pictures of its pages), and a folder shows its files; the file also opens beside the chat for the user. In a chat that isn't a project, execute_terminal_command and the background command tools run a real terminal on this computer (PowerShell; Bash through bash -lc '...' when Git Bash is installed), starting in the user's home folder. Do everything on the computer with it, like a developer in their own terminal: list folders (Get-ChildItem), read files (Get-Content), search (Select-String), create, edit, move, copy or delete files and folders, and run programs. To create a file use write_project_file, to change one use edit_project_file, to search inside files use search_project, and to list a folder (or find files by name) use list_project_files, all with full paths. For anything else, use the terminal. To read a document with code, use Python in the terminal: install the readers once with python -m pip install --quiet --disable-pip-version-check pypdf openpyxl python-docx python-pptx (if Python isn't there, install it with winget install -e --id Python.Python.3.12 --accept-package-agreements --accept-source-agreements, then use py), then print its text with a short python -c script. Always write a file's full path in the command: the app then opens that file beside the chat for the user (PDF pages, sheets, Word pages, pictures, text). The app asks the user to allow each command first, so just run it; never say you can't open or change files on their computer.\nIn the desktop app your browser (browser_open and the other browser tools) runs on the user's computer, with their internet, so it can open their own local servers like http://localhost:3000.";
         else if (body.clientApp === "web") volatilePrompt += "\n\n--- WHERE THE USER IS ---\nThe user is using Classgrid on the website (chat.classgrid.in) in their browser, not the desktop app.";
         if (slashCommand && (slashCommand !== "compact" || compacted)) volatilePrompt += `\n\n--- COMMAND ---\nThe user started this message with /${body.command}. ${SLASH_COMMAND_LINES[slashCommand]}`;
         // Project Mode: snapshot the project before this answer, so its changes can be reviewed, rejected or undone
@@ -5158,6 +5183,14 @@ If a tool fails, never show the error message; say only: "Something went wrong o
                 // A chat with no permission mode chosen: every command on the computer asks first (a chosen mode asks as it says)
                 if (!PERMISSION_MODES.has(body.permissionMode)) {
                     const p = await askPermission({ ...permissionCtx, mode: "review", tool: name, args });
+                    if (!p.allowed) return p.message;
+                }
+                return runOnComputer(computerUser, name, args);
+            };
+            // Files anywhere on the computer: asks first unless the user chose Turbo ("always allow" is remembered)
+            for (const [name, askAs] of Object.entries(COMPUTER_FILE_TOOLS)) llmConfig.toolHandlers[name] = async (args) => {
+                if (body.permissionMode !== "turbo") {
+                    const p = await askPermission({ ...permissionCtx, mode: PERMISSION_MODES.has(body.permissionMode) ? body.permissionMode : "review", tool: askAs, args });
                     if (!p.allowed) return p.message;
                 }
                 return runOnComputer(computerUser, name, args);
