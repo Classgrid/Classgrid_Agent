@@ -3,7 +3,7 @@
 // on top of the box below; this tab tells the app where the box is on screen and keeps the toolbar.
 import { useEffect, useRef, useState } from "react";
 import { motion, useReducedMotion } from "framer-motion";
-import { ArrowLeft, ArrowRight, Camera, ExternalLink, Globe, RotateCw } from "lucide-react";
+import { ArrowLeft, ArrowRight, Camera, ExternalLink, Globe, RotateCw, Video } from "lucide-react";
 import { useLocation } from "react-router-dom";
 import { toast } from "sonner";
 
@@ -145,6 +145,9 @@ export function StudioLocalBrowserView({ paused = false }: { paused?: boolean })
           </span>
         )}
         <button className={iconBtn} disabled={!hasPage} onClick={saveShot} title="Save a screenshot" aria-label="Save a screenshot"><Camera className="size-4" /></button>
+        {typeof (window as unknown as { classgridDesktop?: { openRecordings?: () => void } }).classgridDesktop?.openRecordings === "function" && (
+          <button className={iconBtn} onClick={() => (window as unknown as { classgridDesktop?: { openRecordings?: () => void } }).classgridDesktop?.openRecordings?.()} title="Videos of the agent using the browser" aria-label="Videos of the agent using the browser"><Video className="size-4" /></button>
+        )}
         <button className={iconBtn} disabled={!hasPage} onClick={() => nav.url && (window as unknown as { classgridDesktop?: { openExternal?: (u: string) => void } }).classgridDesktop?.openExternal?.(nav.url)} title="Open in your own browser" aria-label="Open in your own browser"><ExternalLink className="size-4" /></button>
       </div>
 

@@ -1147,6 +1147,15 @@ const HELPER_GLM_MODEL = "@cf/zai-org/glm-5.3";
 // Project Mode helpers of each chat (up to 5 working at once). They live for one answer: when the answer
 // ends, unfinished helpers are stopped so they never run on and use tokens with no one listening.
 const HELPER_BOARDS = new Map();
+// The user's chats that are answering right now (Studio's Agents board): sessionId -> when it started
+const WORKING_KEY = (userId) => `ai:working:${userId}`;
+async function markChatWorking(userId, sessionId, on) {
+    if (!userId || !sessionId) return;
+    const key = WORKING_KEY(String(userId));
+    if (on) await redis.multi().hset(key, String(sessionId), String(Date.now())).expire(key, 12 * 60 * 60).exec().catch(() => {});
+    else await redis.hdel(key, String(sessionId)).catch(() => {});
+}
+
 const helperBoard = (sessionId) => {
     const key = String(sessionId || "none");
     if (!HELPER_BOARDS.has(key)) HELPER_BOARDS.set(key, { helpers: [], nextNo: 1 });
@@ -1331,6 +1340,15 @@ const READ_LOCAL_FILE_TOOL = {
         }
     }
 };
+// How to run commands on the user's computer (the guide's desktop-terminal page), in every desktop app chat
+let terminalGuideCache = null;
+async function desktopTerminalGuide() {
+    if (terminalGuideCache !== null) return terminalGuideCache;
+    const fs = await import("fs/promises");
+    terminalGuideCache = await fs.readFile(new URL("../skills/classgrid-guide/references/desktop-terminal.md", import.meta.url), "utf8").catch(() => "");
+    return terminalGuideCache;
+}
+
 // What Classgrid can do (the guide's desktop-app page), for questions about itself or comparisons with other tools
 let desktopFactsCache = null;
 async function classgridDesktopFacts() {
@@ -1998,6 +2016,7 @@ The user is in ${appMode === "agent" ? "Agent mode" : appMode === "project" ? "P
         // "Push" always means GitHub, in every chat (the AI used to deploy to Vercel instead)
         volatilePrompt += "\n\nPUSH MEANS GITHUB: when the user says push (push it, push the code, push to git), push the code to GitHub: push_project_to_github in a project, or git add, commit and push in the terminal. Never deploy to Vercel (or anywhere else) for a push, and never suggest Vercel instead. Deploy to Vercel only when the user clearly asks to deploy, publish a website, or names Vercel.";
         // Where the user is: the website or the Classgrid desktop app (sent by the app; your own thinking always runs on our servers)
+        if (body.clientApp === "desktop") volatilePrompt += `\n\n--- TERMINAL GUIDE (how to run commands on the user's computer; follow it exactly) ---\n${await desktopTerminalGuide()}`;
         if (body.clientApp === "desktop") volatilePrompt += "\n\n--- WHERE THE USER IS ---\nThe user is using the Classgrid desktop app on their own computer (Windows), not the chat.classgrid.in website. The app's screens run on their computer; your thinking runs on Classgrid's servers. Projects opened from a folder on their computer run your file and terminal tools on that computer. In any chat, to look at a file or folder on this computer (a path like C:\\Users\\name\\Videos\\clip.mp4, or one they ask about), use read_local_file: pictures and videos are shown to you (a video as pictures from across it), PDF, Word, Excel and PowerPoint files come back as their text (a scanned PDF as pictures of its pages), and a folder shows its files; the file also opens beside the chat for the user. In a chat that isn't a project, execute_terminal_command and the background command tools run a real terminal on this computer (PowerShell; Bash through bash -lc '...' when Git Bash is installed), starting in the user's home folder. Do everything on the computer with it, like a developer in their own terminal: list folders (Get-ChildItem), read files (Get-Content), search (Select-String), create, edit, move, copy or delete files and folders, and run programs. To create a file use write_project_file, to change one use edit_project_file, to search inside files use search_project, and to list a folder (or find files by name) use list_project_files, all with full paths. For anything else, use the terminal. To read a document with code, use Python in the terminal: install the readers once with python -m pip install --quiet --disable-pip-version-check pypdf openpyxl python-docx python-pptx (if Python isn't there, install it with winget install -e --id Python.Python.3.12 --accept-package-agreements --accept-source-agreements, then use py), then print its text with a short python -c script. Always write a file's full path in the command: the app then opens that file beside the chat for the user (PDF pages, sheets, Word pages, pictures, text). The app asks the user to allow each command first, so just run it; never say you can't open or change files on their computer.\nIn the desktop app your browser (browser_open and the other browser tools) runs on the user's computer, with their internet, so it can open their own local servers like http://localhost:3000.";
         else if (body.clientApp === "web") volatilePrompt += "\n\n--- WHERE THE USER IS ---\nThe user is using Classgrid on the website (chat.classgrid.in) in their browser, not the desktop app.";
         if (slashCommand && (slashCommand !== "compact" || compacted)) volatilePrompt += `\n\n--- COMMAND ---\nThe user started this message with /${body.command}. ${SLASH_COMMAND_LINES[slashCommand]}`;
@@ -3281,6 +3300,7 @@ If they ask whether their college/school uses Classgrid, say you can't see that 
                         // A Browser worker: start the user's browser right away, in the background, while the worker starts
                         if (specs.some((h) => h.browser) && userId && body.clientApp !== "desktop") ensureBrowser(String(userId)).catch(() => {});
                         const board = helperBoard(sessionId);
+                        board.userId = userId ? String(userId) : board.userId; // whose helpers these are (Agents board)
                         board.helpers = board.helpers.filter((h) => h.state === "running" || !h.reportTaken);
                         const room = Math.max(0, 5 - board.helpers.filter((h) => h.state === "running").length);
                         if (!room) return "Error: 5 helpers are already working. Use check_helpers to wait for one to finish first.";
@@ -5263,7 +5283,22 @@ If a tool fails, never show the error message; say only: "Something went wrong o
             };
         }
         // The desktop app, a chat that isn't a project: the terminal runs on the user's computer (each command asks them first)
-        const onComputer = body.clientApp === "desktop" && !body.taskOrigin && !(await projectForChat(sessionId).catch(() => null));
+        const chatProject = body.clientApp === "desktop" && !body.taskOrigin ? await projectForChat(sessionId).catch(() => null) : null;
+        const onComputer = body.clientApp === "desktop" && !body.taskOrigin && !chatProject;
+        if (chatProject?.location === "local") {
+            const def = terminalDef("execute_terminal_command", "Run a command in the project folder on the user's own computer (Windows PowerShell; Bash through bash -lc '...' when Git Bash is installed). It waits for the command to finish and gives you its whole output in one step, up to 10 minutes: use it for every command that ends by itself (git, installs, builds, tests, scripts, ssh). Use start_background_command only for servers and watchers. The user is asked to allow each command first.", {
+                command: { type: "string", description: "The exact command to run" },
+                description: { type: "string", description: "A few plain words saying what the command does, shown to the user above it" },
+            }, ["command"]);
+            for (const list of [fullToolList, activeToolList]) {
+                const at = list.findIndex(t => t.function.name === "execute_terminal_command");
+                if (at >= 0) list.splice(at, 1);
+            }
+            fullToolList.push(def);
+            activeToolList.push(def);
+            toolPlan.allowedToolNames.add("execute_terminal_command");
+            toolPlan.loadedNames.add("execute_terminal_command");
+        }
         if (body.clientApp === "desktop" && !body.taskOrigin) {
             for (const def of [READ_LOCAL_FILE_TOOL, ...(onComputer ? COMPUTER_TERMINAL_DEFS : [])]) {
                 // The terminal tools replace the cloud sandbox ones here, so the AI reads the right description
@@ -5357,6 +5392,11 @@ If a tool fails, never show the error message; say only: "Something went wrong o
         }
         // The user's permission mode (the shield in the chat box): commands, pushes and browser actions ask first when
         // it says so, and the agent waits for the answer. No mode sent (or WhatsApp) = nothing asks, as before.
+        // Studio's Agents board: this chat is working until its answer ends (or the user stops it)
+        if (userId && sessionId && body.taskOrigin !== "whatsapp") {
+            markChatWorking(userId, sessionId, true);
+            res.on("close", () => { markChatWorking(userId, sessionId, false); });
+        }
         const permissionCtx = {
             mode: PERMISSION_MODES.has(body.permissionMode) && body.taskOrigin !== "whatsapp" ? body.permissionMode : "turbo",
             userId: userId ? String(userId) : null,
@@ -5965,6 +6005,24 @@ If a tool fails, never show the error message; say only: "Something went wrong o
             res.end();
         }
     }
+};
+
+// GET /api/ai/working: the user's chats answering right now, and how many helpers each has working
+export const getWorkingChats = async (req, res) => {
+    const userId = req.user?._id || req.user?.id;
+    if (!userId) return res.status(401).json({ error: "Unauthorized" });
+    const all = await redis.hgetall(WORKING_KEY(String(userId))).catch(() => ({}));
+    const now = Date.now();
+    const working = Object.entries(all || {})
+        .map(([sessionId, at]) => ({ sessionId, since: Number(at) || now }))
+        .filter((w) => now - w.since < 3 * 60 * 60 * 1000) // a run older than 3 hours was cut off without its end
+        .map((w) => ({ ...w, helpers: (HELPER_BOARDS.get(w.sessionId)?.helpers || []).filter((h) => h.state === "running").length }));
+    // Chats whose answer has ended but whose helpers still work in the background
+    for (const [sessionId, board] of HELPER_BOARDS) {
+        const running = board.helpers.filter((h) => h.state === "running").length;
+        if (running && !working.some((w) => w.sessionId === sessionId) && board.userId === String(userId)) working.push({ sessionId, since: now, helpers: running, helpersOnly: true });
+    }
+    res.json({ working });
 };
 
 export const getChatSessions = async (req, res) => {

@@ -78,7 +78,7 @@ import {
     chatWithSyllabus, 
     getMyPersona 
 } from "../controllers/ai.controller.js";
-import { streamAskAi, clientToolResult, getChatSessions, getChatSession, getChatSessionMessages, uploadChatImage, updateChatSession, archiveChatSession, deleteChatSession, shareChatSession, reopenChatSession, createPublicShare, getPublicShare, submitAiFeedback, getAgentReviews, updateAgentReviewStatus, processAgentReviewsCron, deleteAgentReview, bulkDeleteAgentReviews, generateImage, getMyGeneratedImages, deleteGeneratedImage, getMyUsage, getOrgUsage, getSkills, createSkill, updateSkill, deleteSkill, getPreferences, updatePreferences } from "../controllers/ai-chat.controller.js";
+import { streamAskAi, clientToolResult, getWorkingChats, getChatSessions, getChatSession, getChatSessionMessages, uploadChatImage, updateChatSession, archiveChatSession, deleteChatSession, shareChatSession, reopenChatSession, createPublicShare, getPublicShare, submitAiFeedback, getAgentReviews, updateAgentReviewStatus, processAgentReviewsCron, deleteAgentReview, bulkDeleteAgentReviews, generateImage, getMyGeneratedImages, deleteGeneratedImage, getMyUsage, getOrgUsage, getSkills, createSkill, updateSkill, deleteSkill, getPreferences, updatePreferences } from "../controllers/ai-chat.controller.js";
 
 import { getFavicon } from "../controllers/ai-favicon.controller.js";
 import { listStudioShots } from "../services/studio-browser-tools.js";
@@ -190,6 +190,7 @@ router.get("/my-token-activity", isAuthenticated, async (req, res) => {
 
 // Chat History & Sessions
 router.get("/sessions", isAuthenticated, getChatSessions);
+router.get("/working", isAuthenticated, getWorkingChats);
 router.get("/sessions/:id", isAuthenticated, getChatSession);
 router.get("/sessions/:id/messages", isAuthenticated, getChatSessionMessages);
 router.put("/sessions/:id", isAuthenticated, updateChatSession);

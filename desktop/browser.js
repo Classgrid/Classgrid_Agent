@@ -325,6 +325,10 @@ function adoptChat(id) {
 async function agentAct(step) {
   try {
     if (step && typeof step === "object" && step.chat) { queue = queue.then(() => adoptChat(step.chat)).catch(() => {}); }
+    // Every time the AI uses the browser it is recorded (Videos\Classgrid recordings)
+    let label = "browser";
+    try { label = new URL(view && !view.webContents.isDestroyed() && view.webContents.getURL().startsWith("http") ? view.webContents.getURL() : norm(String(step?.url || "browser"))).host || label; } catch { /* not a web address */ }
+    require("./recorder").activity(() => view, label).catch(() => {});
     return await runAct(step && typeof step === "object" ? step : {}, true);
   } catch (e) {
     return { ok: false, error: String(e.message || e).slice(0, 500), url: view && !view.webContents.isDestroyed() ? view.webContents.getURL() : "" };

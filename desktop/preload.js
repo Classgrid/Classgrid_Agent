@@ -10,6 +10,7 @@ contextBridge.exposeInMainWorld("classgridDesktop", {
   fileInfo: (file) => ipcRenderer.invoke("cg:fileInfo", file),
   openPath: (file) => ipcRenderer.invoke("cg:openPath", file),
   showInFolder: (file) => ipcRenderer.invoke("cg:showInFolder", file),
+  openRecordings: () => ipcRenderer.invoke("cg:openRecordings"),
   pickFolder: () => ipcRenderer.invoke("cg:pickFolder"),
   setToken: (token) => ipcRenderer.send("cg:setToken", token),
   // Chats kept on this computer, for reading when offline (only the logged-in user's)

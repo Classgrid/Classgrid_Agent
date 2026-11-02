@@ -25,6 +25,8 @@ how Classgrid works, read the page below that matches what the user is asking ab
 -   **The desktop app (Windows)**: [references/desktop-app.md](references/desktop-app.md)
     -   What the agent can do on the user's own computer (files, videos, terminal, folder projects, built-in editor,
         local browser, helpers), and how Classgrid compares with Antigravity, Cursor and Claude Code.
+-   **Terminal guide (desktop app)**: [references/desktop-terminal.md](references/desktop-terminal.md)
+    -   Which command tool to use, PowerShell rules, Bash and WSL, never waiting for typing, git, ssh, Python and Node.
 -   **"/" commands**: [references/slash-commands.md](references/slash-commands.md)
     -   The "/" commands in the Project Mode and Studio chat box (/classgrid-guide, /studio-guide, /project-guide, /plan, /goal, /schedule, /browser,
         /generative_ui, /grill-me, /plugin, /teamwork, /boost, /learn, /compact): what each does and how to use it.

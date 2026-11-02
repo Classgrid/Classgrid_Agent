@@ -12,6 +12,7 @@ files:
   - editor.js
   - browser.js
   - chats.js
+  - recorder.js
   - offline.html
   - splash/splash.html
   - app/**/*

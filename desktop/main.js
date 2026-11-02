@@ -150,6 +150,8 @@ ipcMain.handle("cg:fileInfo", (_e, file) => {
 // Open it with the computer's own app (documents, sheets, pictures, media; never programs or scripts), or show it in File Explorer
 const OPENABLE = /\.(pdf|docx?|xlsx?|xlsm|csv|pptx?|odt|ods|odp|rtf|txt|md|png|jpe?g|gif|webp|bmp|svg|mp3|wav|ogg|m4a|mp4|webm|mov|mkv|avi|zip)$/i;
 ipcMain.handle("cg:openPath", (_e, file) => { const full = path.resolve(String(file || "")); if (OPENABLE.test(full) && fs.existsSync(full)) shell.openPath(full); });
+// The folder with the videos of the AI using the browser
+ipcMain.handle("cg:openRecordings", () => shell.openPath(require("./recorder").folder()));
 ipcMain.handle("cg:showInFolder", (_e, file) => { const full = path.resolve(String(file || "")); if (fs.existsSync(full)) shell.showItemInFolder(full); });
 ipcMain.handle("cg:openExternal", (_e, url) => { if (/^https?:\/\//.test(String(url))) shell.openExternal(String(url)); });
 ipcMain.handle("cg:retry", () => win?.loadURL(APP_URL));
@@ -263,7 +265,7 @@ if (!app.requestSingleInstanceLock()) {
     startUpdates();
   });
   app.on("window-all-closed", () => app.quit());
-  app.on("before-quit", () => { runner.stopAll(); editor.stop(); });
+  app.on("before-quit", () => { runner.stopAll(); editor.stop(); require("./recorder").stop(); });
 }
 
 // Updates: the installed app checks our R2 storage (desktop/latest.yml) on start and every 6 hours, downloads a new

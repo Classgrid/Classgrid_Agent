@@ -17,6 +17,7 @@ const GUIDE_FILES = [
     "references/connections.md",
     "references/slash-commands.md",
     "references/desktop-app.md",
+    "references/desktop-terminal.md",
 ];
 
 let cached = null;

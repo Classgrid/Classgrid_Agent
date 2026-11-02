@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import {
-  ArrowLeft, ArrowRight, Camera, ExternalLink, FileDiff, FileText, FolderGit2, FolderOpen, Globe, Images, Maximize2, Minimize2,
+  ArrowLeft, ArrowRight, Bot, Camera, ExternalLink, FileDiff, FileText, FolderGit2, FolderOpen, Globe, Images, Maximize2, Minimize2,
   PanelRightClose, PanelRightOpen, Plus, RotateCw, Search, Terminal, X,
 } from "lucide-react";
 import { AskAiPanel } from "@/components/ai/components/AskAiPanel";
@@ -19,6 +19,7 @@ import { StudioBrowserView } from "../components/StudioBrowserView";
 import { StudioLocalBrowserView, hasLocalBrowser } from "../components/StudioLocalBrowserView";
 import { StudioShotsView } from "../components/StudioShotsView";
 import { StudioLocalFileView, baseName } from "../components/StudioLocalFileView";
+import { StudioAgentsView } from "../components/StudioAgentsView";
 import { StudioReviewView } from "../components/StudioReviewView";
 import { PushToGithubModal } from "../components/PushToGithubModal";
 import { FileBadge, OPEN_LOCAL_FILE_EVENT, OPEN_PROJECT_FILE_EVENT } from "@/components/ai/components/stepper/ProjectToolSteps";
@@ -27,7 +28,7 @@ import { toast } from "sonner";
 import { useSidebar } from "@/components/marketing_ui/sidebar";
 import { listLocalFiles, localFolderOf } from "../utils/localProject";
 
-type TabKind = "browser" | "review" | "files" | "terminal" | "project" | "shots" | "file";
+type TabKind = "browser" | "review" | "files" | "terminal" | "project" | "shots" | "file" | "agents";
 type Tab = { id: string; kind: TabKind; path?: string }; // path: a "file" tab's file on this computer (desktop app)
 
 const TAB_INFO: Record<TabKind, { label: string; Icon: typeof Globe }> = {
@@ -38,6 +39,7 @@ const TAB_INFO: Record<TabKind, { label: string; Icon: typeof Globe }> = {
   project: { label: "Project", Icon: FolderGit2 },
   shots: { label: "Screenshots", Icon: Images },
   file: { label: "File", Icon: FileText },
+  agents: { label: "Agents", Icon: Bot },
 };
 
 // One easing for every slide in Studio: fast start, soft stop
@@ -52,7 +54,7 @@ const MIN_CHAT = 320;
 
 // The pane's tabs and the selected one, kept across a refresh
 const TABS_KEY = "cg_studio_tabs";
-const TAB_KINDS = new Set<TabKind>(["browser", "review", "files", "terminal", "project", "shots", "file"]);
+const TAB_KINDS = new Set<TabKind>(["browser", "review", "files", "terminal", "project", "shots", "file", "agents"]);
 function readTabs(): { tabs: Tab[]; active: string | null } {
   try {
     const saved = JSON.parse(localStorage.getItem(TABS_KEY) || "null");
@@ -682,6 +684,7 @@ export function StudioModePage() {
                     {activeTab?.kind === "project" && <StudioProjectView projectId={studioProject} reloadKey={filesReload} />}
                     {activeTab?.kind === "shots" && <StudioShotsView />}
                     {activeTab?.kind === "file" && activeTab.path && <StudioLocalFileView path={activeTab.path} />}
+                    {activeTab?.kind === "agents" && <StudioAgentsView />}
                     {activeTab?.kind === "review" && <StudioReviewView projectId={studioProject} onChanged={() => setFilesReload((n) => n + 1)} />}
                     {!activeTab && <Launcher onOpen={openTab} />}
                   </motion.div>}
