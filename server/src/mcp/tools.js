@@ -536,6 +536,7 @@ export const getMcpTools = () => [
       type: 'object',
       properties: {
         job_id: { type: 'string', description: 'The job_id from start_background_command.' },
+        wait_seconds: { type: 'number', description: 'Wait up to this many seconds (max 120) for the job to finish before answering, so you check once instead of again and again.' },
         run_inside: { type: 'string', description: 'Optional short command to run inside the running job.' }
       },
       required: ['job_id']

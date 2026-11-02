@@ -1,6 +1,6 @@
 // The "/" commands of the chat box (Project Mode and Studio): typed at the start of a message, sent as body.command
 import { motion, AnimatePresence } from "framer-motion";
-import { AppWindow, BookOpen, CalendarClock, CodeXml, Globe, GraduationCap, LayoutGrid, ListChecks, MessageCircleQuestion, Minimize2, Puzzle, Target, Users, Zap, type LucideIcon } from "lucide-react";
+import { AppWindow, BookOpen, CalendarClock, CodeXml, Globe, GraduationCap, LayoutGrid, ListChecks, MessageCircleQuestion, Minimize2, Puzzle, Target, Users, Zap, type LucideIcon, ClipboardCheck } from "lucide-react";
 import { cn } from "../utils";
 
 export type SlashCommand = { id: string; description: string; icon: LucideIcon; studioOnly?: boolean };
@@ -15,6 +15,7 @@ export const SLASH_COMMANDS: SlashCommand[] = [
   { id: "browser", description: "Use the live browser", icon: Globe, studioOnly: true },
   { id: "generative_ui", description: "Answer with interactive cards", icon: LayoutGrid },
   { id: "grill-me", description: "Ask me questions before starting", icon: MessageCircleQuestion },
+  { id: "review", description: "Review the code changes and fix the problems", icon: ClipboardCheck },
   { id: "plugin", description: "Open plugins", icon: Puzzle },
   { id: "teamwork", description: "Split the job across helpers", icon: Users },
   { id: "boost", description: "Think harder for this message", icon: Zap },

@@ -113,9 +113,9 @@ export const TOOL_GROUPS = [
     },
     {
         id: "files_docs",
-        description: "Read documents, transcribe audio, generate PDFs and upload files to the CDN.",
-        tools: ["parse_document", "transcribe_audio", "upload_file_to_cdn", "generate_pdf", "generate_pdf_from_db"],
-        pattern: /\b(pdf|docx?|word|pptx?|slides?|presentation|document|files?|attach\w*|upload\w*|download\w*|cdn|transcri\w*|audio|voice|recording|mp3|wav|ocr|scan\w*|certificate|letter|marksheet|report\s*card|question\s*paper|worksheet|notes)\b|पीडीएफ|फ़ाइल|फाइल|दस्तावेज़/i,
+        description: "Read documents, transcribe audio, generate PDFs, make Word, Excel and PowerPoint files, and upload files to the CDN.",
+        tools: ["parse_document", "transcribe_audio", "upload_file_to_cdn", "generate_pdf", "generate_pdf_from_db", "make_office_file"],
+        pattern: /\b(pdf|docx?|word|pptx?|ppt|slides?|presentation|decks?|powerpoint|power\s*point|excel|xlsx?|spreadsheets?|sheets?|document|files?|attach\w*|upload\w*|download\w*|cdn|transcri\w*|audio|voice|recording|mp3|wav|ocr|scan\w*|certificate|letter|marksheet|report\s*card|question\s*paper|worksheet|notes)\b|पीडीएफ|फ़ाइल|फाइल|दस्तावेज़/i,
         onAttachment: true,
     },
     {

@@ -56,6 +56,9 @@ Rules:
 
 -   **Never** use a background command for something quick, and never check a quick command again and again: run it
     with execute_terminal_command and read the answer once.
+-   A command that is still running after 45 seconds keeps running in the background by itself, and you get its
+    job_id. Then wait for it in one step: check_background_command with that job_id and wait_seconds (up to 120). If it
+    is still running after that, do other work and check again later; don't call it in a quick loop.
 -   Don't read or change files with terminal commands (Get-Content, Set-Content, echo >) when the file tools above can
     do it: they are faster, show the user a clean step, and handle every file type.
 -   Several quick commands for one goal can go in one command, joined with `;`.
@@ -169,6 +172,13 @@ any key", choose an option) hangs until it is stopped. Always use the flags that
 -   Put all the checks in one ssh command, so it's one step.
 -   Don't know the key path or the address? Ask the user once; don't guess.
 -   On the server, commands are Linux (bash), so Linux commands are right inside the quotes.
+
+## 7b. Office files
+
+To make a Word, Excel or PowerPoint file, use make_office_file: it gives a download link. To put the file on the
+user's computer, download it to the folder they want (their Desktop or Documents when they don't say):
+`Invoke-WebRequest "<link>" -OutFile "C:\Users\<name>\Documents\Report.docx"`. Then tell them where it is; the file
+opens beside the chat when you look at it with read_local_file.
 
 ## 8. Python and Node
 

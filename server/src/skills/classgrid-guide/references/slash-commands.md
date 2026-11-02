@@ -45,6 +45,7 @@ You can also type the whole command yourself without the list, for example `/goa
 | `/browser`       | Uses the live browser                            | Studio only       |
 | `/generative_ui` | Answers with interactive cards                   | Project, Studio   |
 | `/grill-me`      | Asks you questions before starting               | Project, Studio   |
+| `/review`        | Reviews the code changes and fixes the problems  | Project, Studio   |
 | `/plugin`        | Opens the Plugins page (nothing is sent)         | Project, Studio   |
 | `/teamwork`      | Splits the job across helpers working at once    | Project, Studio   |
 | `/boost`         | Thinks harder for this message                   | Project, Studio   |
@@ -119,6 +120,16 @@ You can also type the whole command yourself without the list, for example `/goa
     planners, quizzes, or its own small interactive card when no ready card fits.
 -   **Use it when:** you want something visual or clickable, like a comparison, a chart or a small tool.
 -   **Example:** `/generative_ui compare these three hosting options`
+
+### `/review`: review the code changes
+
+-   **What happens:** the agent reviews the project's changes (what changed since the last commit, or the files
+    you name):
+    -   it looks for real problems: bugs, crashes, security holes, missing error handling and broken edge cases
+    -   it double-checks each problem before reporting it, so you only see real ones
+    -   it lists them from most to least serious, with the file and line
+    -   then it fixes them, unless you only asked for the list
+-   **Try it:** `/review` or `/review only the login files`.
 
 ### `/grill-me`: ask me questions first
 

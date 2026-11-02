@@ -10,6 +10,7 @@ const { io } = require("socket.io-client");
 const API = process.env.CG_API || "https://api.classgrid.in"; // CG_API: a local backend when testing
 const MAX_FILE_BYTES = 2 * 1024 * 1024;
 const MAX_OUTPUT = 60000;
+const AUTO_BACKGROUND_S = Number(process.env.CG_AUTO_BACKGROUND_S) || 45; // a command still running after this keeps running as a background job
 const wait = (ms) => new Promise((r) => setTimeout(r, ms));
 const SKIP_DIRS = new Set(["node_modules", ".git", "dist", "build", ".next", ".turbo", ".cache", "__pycache__", ".venv", "venv"]);
 
@@ -45,6 +46,17 @@ function resolveIn(root, given = "") {
   if (full !== rootFull && !full.toLowerCase().startsWith(rootFull.toLowerCase() + path.sep)) throw new Error("Path must stay inside the project");
   if (full.split(path.sep).includes(".git")) throw new Error("The .git folder can't be changed directly");
   return { full, rel: path.relative(rootFull, full).replace(/\\/g, "/") || "." };
+}
+
+// "File changed" check: when the AI last read or wrote each file (its time on disk then). If the user (or another
+// program) changes the file after that, the AI's next edit is stopped and it reads the file again first, so it
+// never writes over newer work.
+const seenAt = new Map(); // full path (lower case) -> mtimeMs when the AI last read or wrote it
+const markSeen = (full) => { try { seenAt.set(full.toLowerCase(), fs.statSync(full).mtimeMs); } catch { /* gone */ } };
+function changedSinceSeen(full) {
+  const seen = seenAt.get(full.toLowerCase());
+  if (seen === undefined) return false;
+  try { return fs.statSync(full).mtimeMs > seen + 1; } catch { return false; }
 }
 
 function readText(full) {
@@ -95,6 +107,7 @@ const tools = {
 
   view_project_file(root, { path: file, start_line, end_line }) {
     const { full, rel } = resolveIn(root, file);
+    markSeen(full);
     const lines = readText(full).split(/\r?\n/);
     const start = Math.max(1, Number(start_line) || 1);
     const end = Math.min(lines.length, Number(end_line) || Math.min(lines.length, start + 799));
@@ -133,6 +146,7 @@ const tools = {
     if (fs.existsSync(full)) return `Error: ${rel} already exists, so it was not changed. Change existing files with edit_project_file.`;
     fs.mkdirSync(path.dirname(full), { recursive: true });
     fs.writeFileSync(full, String(content), "utf8");
+    markSeen(full);
     const total = String(content).split("\n").length;
     return `Created ${rel} (${total} lines, +${total} -0).`;
   },
@@ -140,6 +154,7 @@ const tools = {
   edit_project_file(root, { path: file, edits = [] }) {
     const { full, rel } = resolveIn(root, file);
     if (!Array.isArray(edits) || !edits.length) return "Error: edits is empty";
+    if (changedSinceSeen(full)) { seenAt.delete(full.toLowerCase()); return `Error: ${rel} was changed on disk after you last read it (the user or another program edited it). Nothing was changed. Read it again, then make your edit on the new version.`; }
     const raw = readText(full);
     const eol = raw.includes("\r\n") ? "\r\n" : "\n";
     let text = raw.replace(/\r\n/g, "\n");
@@ -166,6 +181,7 @@ const tools = {
       done.push(`edit ${i + 1}: ${count} place${count > 1 ? "s" : ""}`);
     }
     fs.writeFileSync(full, eol === "\n" ? text : text.replace(/\n/g, eol), "utf8");
+    markSeen(full);
     const { added, removed } = lineChange(original, text);
     return `Edited ${rel} (${done.join(", ")}, +${added} -${removed}).`;
   },
@@ -234,17 +250,25 @@ const tools = {
   },
 
   // A command in the project folder (PowerShell on Windows), up to 10 minutes
+  // A command that is still running after AUTO_BACKGROUND_S seconds keeps running as a background job (it isn't
+  // stopped): the AI gets its job_id and waits for it with check_background_command, and can work on meanwhile
   execute_terminal_command(root, { command }) {
     if (!command) return Promise.resolve("Error: command is empty");
     return new Promise((resolve) => {
       const proc = shellSpawn(String(command), root);
-      let out = "";
-      const add = (d) => { out += d.toString(); if (out.length > MAX_OUTPUT * 2) out = out.slice(-MAX_OUTPUT * 2); };
+      const job = { proc, command: String(command), log: "", startedAt: Date.now(), exitCode: null };
+      const add = (d) => { job.log += d.toString(); if (job.log.length > 200000) job.log = job.log.slice(-200000); };
       proc.stdout.on("data", add);
       proc.stderr.on("data", add);
-      const timer = setTimeout(() => { killTree(proc); out += "\n[Stopped: the command ran longer than 10 minutes. Use start_background_command for servers and long jobs.]"; }, 10 * 60 * 1000);
-      proc.on("close", (code) => { clearTimeout(timer); resolve(`${cap(out.trim()) || "(no output)"}\n[exit code ${code}]`); });
-      proc.on("error", (err) => { clearTimeout(timer); resolve(`Error: ${err.message}`); });
+      let moved = false;
+      const toBackground = setTimeout(() => {
+        moved = true;
+        const id = `job${jobs.size + 1}-${Date.now().toString(36).slice(-4)}`;
+        jobs.set(id, job);
+        resolve(`${cap(job.log.trim()) || "(no output yet)"}\n[Still running after ${AUTO_BACKGROUND_S} seconds, so it keeps running in the background as job_id ${id}. Wait for it to finish with check_background_command (job_id "${id}", wait_seconds up to 120), or stop it with stop_background_command.]`);
+      }, AUTO_BACKGROUND_S * 1000);
+      proc.on("close", (code) => { job.exitCode = code; clearTimeout(toBackground); if (!moved) resolve(`${cap(job.log.trim()) || "(no output)"}\n[exit code ${code}]`); });
+      proc.on("error", (err) => { job.exitCode = -1; clearTimeout(toBackground); if (!moved) resolve(`Error: ${err.message}`); });
     });
   },
 
@@ -261,9 +285,12 @@ const tools = {
     return `Started in the background on the user's computer. job_id: ${id}. Check it with check_background_command.`;
   },
 
-  check_background_command(_root, { job_id }) {
+  // wait_seconds: wait here (up to 2 minutes) until the job finishes, so the AI checks once instead of again and again
+  async check_background_command(_root, { job_id, wait_seconds }) {
     const job = jobs.get(String(job_id));
     if (!job) return `Error: no background command ${job_id} (the desktop app may have been restarted).`;
+    const until = Date.now() + Math.min(120, Math.max(0, Number(wait_seconds) || 0)) * 1000;
+    while (job.exitCode === null && Date.now() < until) await wait(500);
     const state = job.exitCode === null ? "still running" : `finished (exit code ${job.exitCode})`;
     return `${job.command}\n${state}, started ${Math.round((Date.now() - job.startedAt) / 1000)}s ago. Last output:\n${cap(job.log.slice(-8000).trim()) || "(no output yet)"}`;
   },
@@ -364,6 +391,7 @@ async function readLocalFile({ path: given, start_line, end_line, chunk = 0 } = 
     return { text: `${full} is a folder with ${entries.length} item${entries.length === 1 ? "" : "s"}${entries.length > 500 ? " (the first 500 are shown)" : ""}. Read a file in it with its full path.\n${rows.join("\n") || "(empty)"}` };
   }
   if (!stat.isFile()) throw new Error(`${full} is not a file`);
+  markSeen(full);
 
   const ext = path.extname(full).toLowerCase();
   if (LOCAL_VIDEO_TYPES.has(ext)) {

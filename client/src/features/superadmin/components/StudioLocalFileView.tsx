@@ -4,6 +4,11 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Document, Page, pdfjs } from "react-pdf";
 import { ChevronLeft, ChevronRight, ExternalLink, FolderOpen, Maximize, RotateCw, ZoomIn, ZoomOut } from "lucide-react";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
+import remarkMath from "remark-math";
+import rehypeKatex from "rehype-katex";
+import "katex/dist/katex.min.css";
 import { Spinner } from "@/components/marketing_ui/spinner";
 import { FileBadge } from "@/components/ai/components/stepper/ProjectToolSteps";
 import pdfWorker from "../../../../node_modules/react-pdf/node_modules/pdfjs-dist/build/pdf.worker.min.mjs?url";
@@ -28,6 +33,7 @@ const VIDEO = new Set(["mp4", "webm", "mov"]);
 const AUDIO = new Set(["mp3", "wav", "ogg", "m4a"]);
 const SHEET = new Set(["xlsx", "xls", "xlsm", "csv", "ods"]);
 const WORD = new Set(["docx"]);
+const MARKDOWN = new Set(["md", "markdown", "mdx"]);
 // Files the viewer shows as a picture of what's inside, not as text
 const BINARY = new Set([...IMAGE, ...VIDEO, ...AUDIO, ...SHEET, ...WORD, "pdf", "doc", "ppt", "pptx", "zip", "rar", "7z", "exe", "dll", "msi", "iso"]);
 const MAX_TEXT_BYTES = 2 * 1024 * 1024;
@@ -72,6 +78,8 @@ export function StudioLocalFileView({ path }: { path: string }) {
           <SheetView key={url} url={url} />
         ) : WORD.has(ext) ? (
           <WordView key={url} url={url} />
+        ) : MARKDOWN.has(ext) && (info.size || 0) <= MAX_TEXT_BYTES ? (
+          <MarkdownView key={url} url={url} />
         ) : BINARY.has(ext) || (info.size || 0) > MAX_TEXT_BYTES ? (
           <OpenOutside path={path} size={info.size} />
         ) : (
@@ -273,6 +281,36 @@ function WordView({ url }: { url: string }) {
       {state === "loading" && <Centered><Spinner className="size-5" /></Centered>}
       {state === "failed" && <Centered><p className="text-sm text-muted-foreground">This document couldn't be shown. Open it with your computer's app instead.</p></Centered>}
       <div ref={boxRef} className="[&_.cg-docx-wrapper]:!bg-transparent [&_.cg-docx-wrapper]:!p-6" />
+    </div>
+  );
+}
+
+// ── Documents (.md) the agent writes: shown as a page, with a Source button for the raw text ─────────────────
+function MarkdownView({ url }: { url: string }) {
+  const [text, setText] = useState<string | null>(null);
+  const [source, setSource] = useState(false);
+  useEffect(() => {
+    let off = false;
+    fetch(url).then((r) => r.text()).then((t) => { if (!off) setText(t.replace(/^\uFEFF/, "")); }).catch(() => { if (!off) setText(""); });
+    return () => { off = true; };
+  }, [url]);
+  if (text === null) return <Centered><Spinner className="size-5" /></Centered>;
+  return (
+    <div className="absolute inset-0 flex flex-col bg-background">
+      <div className="shrink-0 flex justify-end gap-1 px-3 pt-2">
+        {["Page", "Source"].map((label) => (
+          <button key={label} onClick={() => setSource(label === "Source")} className={`h-7 px-3 rounded-md text-[13px] ${source === (label === "Source") ? "bg-secondary text-foreground" : "text-muted-foreground hover:text-foreground"}`}>{label}</button>
+        ))}
+      </div>
+      {source ? (
+        <pre className="flex-1 min-h-0 overflow-auto px-5 py-3 font-mono text-[12.5px] leading-5 whitespace-pre-wrap">{text}</pre>
+      ) : (
+        <div className="flex-1 min-h-0 overflow-auto px-8 py-6">
+          <article className="mx-auto max-w-3xl prose prose-sm dark:prose-invert prose-headings:font-semibold prose-a:text-sky-600 dark:prose-a:text-sky-400 prose-pre:bg-muted prose-pre:text-foreground prose-table:text-sm">
+            <ReactMarkdown remarkPlugins={[remarkGfm, remarkMath]} rehypePlugins={[rehypeKatex]}>{text}</ReactMarkdown>
+          </article>
+        </div>
+      )}
     </div>
   );
 }

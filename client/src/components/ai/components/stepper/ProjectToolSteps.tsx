@@ -100,6 +100,15 @@ export function ProjectEditStep({ step }: { step: Step }) {
   const added = real ? Number(real[1]) : step.tool === 'write_project_file' ? lineCount(step.args?.content) : edits.reduce((n, e) => n + lineCount(e.new_text), 0);
   const removed = real ? Number(real[2]) : edits.reduce((n, e) => n + lineCount(e.old_text), 0);
   const failed = isError(step);
+  // Desktop app: a document (.md) the agent just wrote or changed opens beside the chat, like a side panel
+  const wasLoading = useRef(loading);
+  useEffect(() => {
+    if (wasLoading.current && !loading && !failed && /\.(md|markdown)$/i.test(String(path)) && import.meta.env.VITE_DESKTOP === "1" && !openedSteps.has(step.id)) {
+      openedSteps.add(step.id);
+      openInEditor({ path: String(path) });
+    }
+    wasLoading.current = loading;
+  }, [loading]); // eslint-disable-line react-hooks/exhaustive-deps
   // Written by the file writer: the code isn't in the step, so there is nothing to open here (the file name opens it)
   const fromSpec = step.tool === 'write_project_file_from_spec';
 

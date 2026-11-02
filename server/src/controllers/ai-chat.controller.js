@@ -222,7 +222,7 @@ TOOLS & ERRORS
 - At most 5 searches/page reads per question (web, knowledge base, our site). Then stop, say it isn't available, give your best assessment, never fabricate.
 - Integrations (Zoom, Google Workspace, Notion, Slack, GitHub, etc.): connected means its tool is in your list, it is in the connected-integrations list, or its group is offered by load_tools. If connected, use it now (load it first if needed); never ask to connect or call open_integration_panel. Only if not connected: call open_integration_panel and say "I've opened the AI Hub for you. Please connect your account so I can automate this."
 
-ROUTING (right after brief thinking; load the tool's group first if needed): uploaded image you cannot already see: analyze_image with the URL; uploaded document/PDF you cannot already read: parse_document with the URL; send email: send_email; internal platform data (users, fees, attendance): unified_db_query, never for Google Classroom or Drive; PDF: generate_pdf; run code: run_code.
+ROUTING (right after brief thinking; load the tool's group first if needed): uploaded image you cannot already see: analyze_image with the URL; uploaded document/PDF you cannot already read: parse_document with the URL; send email: send_email; internal platform data (users, fees, attendance): unified_db_query, never for Google Classroom or Drive; PDF: generate_pdf; Word, Excel or PowerPoint file: make_office_file; run code: run_code.
 
 SUPPORT & PLUGINS
 - Asked "What can you do?", never offer "Support": you are an AI assistant, not a support portal. Never pretend to be the support service.
@@ -1406,8 +1406,9 @@ const COMPUTER_TERMINAL_DEFS = [
         command: { type: "string", description: "The exact command to run" },
         description: { type: "string", description: "A few plain words saying what it does" },
     }, ["command"]),
-    terminalDef("check_background_command", "See whether a background command on the user's computer is still running, and its latest output.", {
-        job_id: { type: "string", description: "The job_id from start_background_command" },
+    terminalDef("check_background_command", "See whether a background command on the user's computer is still running, and its latest output. Pass wait_seconds to wait for it to finish in one step instead of checking again and again.", {
+        job_id: { type: "string", description: "The job_id from start_background_command (or from a command that moved to the background by itself)" },
+        wait_seconds: { type: "number", description: "Wait up to this many seconds (max 120) for the job to finish before answering" },
     }, ["job_id"]),
     terminalDef("stop_background_command", "Stop a background command on the user's computer.", {
         job_id: { type: "string", description: "The job_id from start_background_command" },
@@ -1504,6 +1505,7 @@ const SLASH_COMMAND_LINES = {
     schedule: `The user wants a schedule or reminder. Make it with create_schedule (check list_schedules first, so the same one is not made twice).`,
     browser: `Use the live browser (the browser tools) for this.`,
     generative_ui: `Answer with interactive cards: use the Classgrid display blocks that fit, or your own \`widget\` card when no block covers it, instead of plain text.`,
+    review: `Review the code changes: the project's changes since the last commit (git diff and git status; also new files), or the files or part the user names. Look only for real problems: bugs, crashes, wrong logic, security holes, missing error handling, broken edge cases, and code that doesn't match the rest of the project. Read the changed code and enough around it to understand it. Before you report a problem, check it again (read the code that calls it, run it or a quick test when you can) and drop anything you can't confirm; never report style opinions. Then list the problems from most to least serious, each with the file and line, what goes wrong and when, and the fix. Then fix them, unless the user only asked for the list; after fixing, check the fixes work. For a big change, send read-only helpers to review different parts at the same time, then check their findings yourself.`,
     "grill-me": `Before you decide or build anything, interview the user: ask your questions with the questions card (an approval block with "variant": "questions"), one card at a time, until you understand exactly what they want. Do not start the work until then.`,
     teamwork: `Split this job into parts that can run at the same time and give them to helpers with run_project_helpers, then check their work and put it together.`,
     boost: `Think carefully about this one: check your work twice and look for mistakes before you answer.`,
@@ -2030,6 +2032,8 @@ The user is in ${appMode === "agent" ? "Agent mode" : appMode === "project" ? "P
         if (/\b(antigravity|cursor|claude\s*code|windsurf|copilot|codex|what (all )?(can|could) you do|what are you able|your (features|tools|abilities)|compare|comparison|versus|vs\.?|better than|can'?t do)\b/i.test(String(body.question || ""))) {
             volatilePrompt += `\n\nABOUT YOURSELF (facts from Classgrid's own guide; answer only from these, never guess, and never say you can't do something listed here):\n${await classgridDesktopFacts()}`;
         }
+        // A tool the AI needs may not be loaded yet (tools load by the words in the message): it loads it, never says it can't
+        volatilePrompt += "\n\nMISSING TOOL: if the tool you need isn't in your list (for example making a video, a Word or Excel file, an image, a schedule, email or a connector), call load_tools with its group first and use it on your next step. Never tell the user you don't have a tool or can't do something before trying load_tools.";
         // "Push" always means GitHub, in every chat (the AI used to deploy to Vercel instead)
         volatilePrompt += "\n\nPUSH MEANS GITHUB: when the user says push (push it, push the code, push to git), push the code to GitHub: push_project_to_github in a project, or git add, commit and push in the terminal. Never deploy to Vercel (or anywhere else) for a push, and never suggest Vercel instead. Deploy to Vercel only when the user clearly asks to deploy, publish a website, or names Vercel.";
         // Where the user is: the website or the Classgrid desktop app (sent by the app; your own thinking always runs on our servers)
@@ -2664,7 +2668,8 @@ CRITICAL INSTRUCTION FOR GOOGLE WORKSPACE & CLASSROOM DISAMBIGUATION: If the use
         dynamicSystemPrompt += promptBlock("files_docs", `\n\nCRITICAL PDF GENERATION & FORMATTING RULE:
 1. NEVER write custom Python scripts (like using fpdf) in the sandbox to generate PDFs. You MUST ALWAYS use the built-in \`generate_pdf\` or \`generate_pdf_from_db\` tools, which use HTML and Puppeteer and support Unicode out-of-the-box.
 2. NO DUPLICATE HEADINGS: The \`generate_pdf\` tool automatically renders the \`title\` parameter as an \`<h1>\` at the top of the document. Do NOT manually add a duplicate \`<h1>\` with the title inside your HTML content.
-3. HUMANIZE LABELS: NEVER output raw backend database enum values (like "org_admin", "super_admin") in your chat responses or in PDF reports. Always map them to human-readable labels (e.g., "Organization Admin", "Super Admin") before rendering.`);
+3. HUMANIZE LABELS: NEVER output raw backend database enum values (like "org_admin", "super_admin") in your chat responses or in PDF reports. Always map them to human-readable labels (e.g., "Organization Admin", "Super Admin") before rendering.
+4. WORD, EXCEL, POWERPOINT: To make a Word, Excel or PowerPoint file, use \`make_office_file\`. Never fake it with HTML or CSV, and never say you can only make PDFs.`);
 
         // Owner's rules for background tasks (WhatsApp, calls, email), 2026-10-24
         if (body.taskOrigin) dynamicSystemPrompt += `\n\nOWNER'S RULES FOR THIS TASK:
@@ -3040,6 +3045,71 @@ If they ask whether their college/school uses Classgrid, say you can't see that 
                                 rawData: { type: "array", description: "An array of objects (database rows) to render as a table in the PDF" }
                             },
                             required: ["title", "rawData"]
+                        }
+                    }
+                },
+                {
+                    type: "function",
+                    function: {
+                        name: "make_office_file",
+                        description: "Makes a real Word (.docx), Excel (.xlsx) or PowerPoint (.pptx) file and returns its download link. Fill only the part that matches the type: word (markdown text), excel (sheets with rows) or powerpoint (slides).",
+                        parameters: {
+                            type: "object",
+                            properties: {
+                                type: { type: "string", enum: ["word", "excel", "powerpoint"], description: "Which kind of file to make." },
+                                file_name: { type: "string", description: "File name without extension, e.g. \"Monthly report\"." },
+                                word: {
+                                    type: "object",
+                                    description: "For type word.",
+                                    properties: {
+                                        title: { type: "string", description: "Optional big title at the top. Don't repeat it as a # heading in content." },
+                                        content: { type: "string", description: "The document in markdown: # to ### headings, paragraphs, **bold**, *italic*, bullet and numbered lists, | pipe | tables |, ``` code blocks." }
+                                    },
+                                    required: ["content"]
+                                },
+                                excel: {
+                                    type: "object",
+                                    description: "For type excel.",
+                                    properties: {
+                                        sheets: {
+                                            type: "array",
+                                            items: {
+                                                type: "object",
+                                                properties: {
+                                                    name: { type: "string", description: "Sheet name (max 31 characters)." },
+                                                    rows: { type: "array", items: { type: "array" }, description: "Rows of cells; the first row is the header. Send numbers as numbers. A text starting with = is a formula, e.g. \"=SUM(B2:B10)\"." },
+                                                    column_widths: { type: "array", items: { type: "number" }, description: "Optional width of each column in characters." }
+                                                },
+                                                required: ["name", "rows"]
+                                            }
+                                        }
+                                    },
+                                    required: ["sheets"]
+                                },
+                                powerpoint: {
+                                    type: "object",
+                                    description: "For type powerpoint. A title slide is added first.",
+                                    properties: {
+                                        title: { type: "string", description: "Title shown on the first slide." },
+                                        theme: { type: "string", enum: ["light", "dark"], description: "Look of the slides (default light)." },
+                                        slides: {
+                                            type: "array",
+                                            items: {
+                                                type: "object",
+                                                properties: {
+                                                    title: { type: "string" },
+                                                    bullets: { type: "array", items: { type: "string" }, description: "Short points. Start with two spaces for a sub-point. **bold** works." },
+                                                    notes: { type: "string", description: "Speaker notes." },
+                                                    image_url: { type: "string", description: "Optional https picture link (PNG, JPG or GIF), e.g. from generate_image." }
+                                                },
+                                                required: ["title"]
+                                            }
+                                        }
+                                    },
+                                    required: ["slides"]
+                                }
+                            },
+                            required: ["type", "file_name"]
                         }
                     }
                 },
@@ -3665,6 +3735,19 @@ You work on the user's own Windows computer through their Classgrid desktop app,
                     generate_pdf: async (args) => {
                         const result = await handleToolCall('generate_pdf', args, {});
                         return result.isError ? result.content[0].text : result.content[0].text;
+                    },
+                    make_office_file: async (args) => {
+                        try {
+                            const { makeOfficeFile } = await import('../services/office-files.service.js');
+                            const file = await makeOfficeFile(args || {});
+                            const folder = `ai-generated/office/${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+                            const saved = await uploadBufferToR2(file.buffer, file.fileName, file.mime, `${folder}/${file.fileName}`);
+                            // Encode the name so links with Hindi or other letters still work
+                            const url = `${saved.slice(0, saved.length - file.fileName.length)}${encodeURIComponent(file.fileName)}`;
+                            return `Made ${file.fileName} (${file.summary}). Download: ${url}\nPut this download link in your reply.`;
+                        } catch (e) {
+                            return `FAILED to make the file: ${e.message}`;
+                        }
                     },
                     upload_file_to_cdn: async (args) => {
                         try {
