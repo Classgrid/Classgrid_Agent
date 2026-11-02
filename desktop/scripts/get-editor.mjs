@@ -69,6 +69,16 @@ async function getEditor() {
   console.log(`Classgrid Code ${VERSION} is in desktop/editor/`);
 }
 
+// The desktop app's own editor colors (Studio Mode's, desktop/editor-themes), put over the built-in theme every time.
+// The cloud editor keeps infra/ide/files.
+function putThemes() {
+  const themes = path.join(editorDir, "extensions", "theme-defaults", "themes");
+  if (!fs.existsSync(themes)) return;
+  const ours = path.resolve(here, "..", "editor-themes");
+  fs.copyFileSync(path.join(ours, "default-dark-modern.json"), path.join(themes, "dark_modern.json"));
+  fs.copyFileSync(path.join(ours, "default-light-modern.json"), path.join(themes, "light_modern.json"));
+}
+
 if (fs.existsSync(path.join(editorDir, "classgrid-build.txt"))) {
   console.log("Classgrid Code is already in desktop/editor/");
 } else {
@@ -77,3 +87,4 @@ if (fs.existsSync(path.join(editorDir, "classgrid-build.txt"))) {
     process.exitCode = 1;
   });
 }
+putThemes();

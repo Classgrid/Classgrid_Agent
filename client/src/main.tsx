@@ -68,6 +68,8 @@ import "@/styles/global.css";
 // Local testing and the desktop app (never the website build): the API calls also send the saved login token, so the
 // app stays logged in when it talks to the live server (whose login cookie is made for .classgrid.in, not localhost)
 const isDesktopApp = import.meta.env.VITE_DESKTOP === "1";
+// Desktop app only: Studio Mode's colors everywhere (global.css, html.desktop-app)
+if (isDesktopApp) document.documentElement.classList.add("desktop-app");
 if (import.meta.env.DEV || isDesktopApp) {
   const realFetch = window.fetch.bind(window);
   window.fetch = (input: RequestInfo | URL, init: RequestInit = {}) => {
