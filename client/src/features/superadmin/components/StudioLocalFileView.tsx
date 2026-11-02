@@ -10,7 +10,7 @@ import remarkMath from "remark-math";
 import rehypeKatex from "rehype-katex";
 import "katex/dist/katex.min.css";
 import { Spinner } from "@/components/marketing_ui/spinner";
-import { FileBadge } from "@/components/ai/components/stepper/ProjectToolSteps";
+import { FileBadge, OPEN_LOCAL_FILE_EVENT } from "@/components/ai/components/stepper/ProjectToolSteps";
 import pdfWorker from "../../../../node_modules/react-pdf/node_modules/pdfjs-dist/build/pdf.worker.min.mjs?url";
 import "react-pdf/dist/Page/AnnotationLayer.css";
 import "react-pdf/dist/Page/TextLayer.css";
@@ -79,7 +79,7 @@ export function StudioLocalFileView({ path }: { path: string }) {
         ) : WORD.has(ext) ? (
           <WordView key={url} url={url} />
         ) : MARKDOWN.has(ext) && (info.size || 0) <= MAX_TEXT_BYTES ? (
-          <MarkdownView key={url} url={url} />
+          <MarkdownView key={url} url={url} path={path} />
         ) : BINARY.has(ext) || (info.size || 0) > MAX_TEXT_BYTES ? (
           <OpenOutside path={path} size={info.size} />
         ) : (
@@ -286,7 +286,26 @@ function WordView({ url }: { url: string }) {
 }
 
 // ── Documents (.md) the agent writes: shown as a page, with a Source button for the raw text ─────────────────
-function MarkdownView({ url }: { url: string }) {
+// A link in a markdown file: another file next to it (like MEMORY.md's notes) opens in its own tab here, a web address
+// opens in the user's browser; a click never sends the app's own window to that address (that reloaded the app)
+function openMarkdownLink(href: string, fromFile: string) {
+  const h = String(href || "").trim();
+  if (!h || h.startsWith("#")) return;
+  if (/^(https?:|mailto:)/i.test(h)) {
+    const d = (window as unknown as { classgridDesktop?: { openExternal?: (u: string) => void } }).classgridDesktop;
+    if (d?.openExternal) d.openExternal(h); else window.open(h, "_blank", "noopener");
+    return;
+  }
+  let rel = h.split("#")[0] || "";
+  try { rel = decodeURIComponent(rel); } catch { /* keep as is */ }
+  if (!rel) return;
+  const full = /^[A-Za-z]:[\\/]/.test(rel) ? rel : `${fromFile.replace(/[\\/][^\\/]*$/, "")}\\${rel}`;
+  const parts: string[] = [];
+  for (const piece of full.split(/[\\/]+/)) { if (piece === "..") parts.pop(); else if (piece && piece !== ".") parts.push(piece); }
+  window.dispatchEvent(new CustomEvent(OPEN_LOCAL_FILE_EVENT, { detail: { path: parts.join("\\") } }));
+}
+
+function MarkdownView({ url, path }: { url: string; path: string }) {
   const [text, setText] = useState<string | null>(null);
   const [source, setSource] = useState(false);
   useEffect(() => {
@@ -307,7 +326,7 @@ function MarkdownView({ url }: { url: string }) {
       ) : (
         <div className="flex-1 min-h-0 overflow-auto px-8 py-6">
           <article className="mx-auto max-w-3xl prose prose-sm dark:prose-invert prose-headings:font-semibold prose-a:text-sky-600 dark:prose-a:text-sky-400 prose-pre:bg-muted prose-pre:text-foreground prose-table:text-sm">
-            <ReactMarkdown remarkPlugins={[remarkGfm, remarkMath]} rehypePlugins={[rehypeKatex]}>{text}</ReactMarkdown>
+            <ReactMarkdown remarkPlugins={[remarkGfm, remarkMath]} rehypePlugins={[rehypeKatex]} components={{ a: ({ href, children }) => <a href={href} onClick={(e) => { e.preventDefault(); openMarkdownLink(String(href || ""), path); }}>{children}</a> }}>{text}</ReactMarkdown>
           </article>
         </div>
       )}
