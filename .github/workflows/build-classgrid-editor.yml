@@ -1,0 +1,93 @@
+name: Build Classgrid editor (full desktop editor)
+
+# The full desktop code editor for the Classgrid app (like Cursor's): VS Code's open-source code built with the
+# VSCodium scripts, named Classgrid Code, with the Open VSX extension store. No local server (no localhost).
+# Runs when classgrid-editor/ changes; the finished editor is attached to a GitHub release of this repo.
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - 'classgrid-editor/**'
+      - '.github/workflows/build-classgrid-editor.yml'
+
+permissions:
+  contents: write
+
+env:
+  VSCODIUM_COMMIT: ca7f7b44b5e5c3faa663f6cdc043998f71936653
+  APP_NAME: Classgrid
+  BINARY_NAME: classgrid-code
+  GLOBAL_DIRNAME: classgrid-code
+  GH_REPO_PATH: ${{ github.repository }}
+  ASSETS_REPOSITORY: ${{ github.repository }}
+  ORG_NAME: Classgrid
+  OS_NAME: windows
+  VSCODE_QUALITY: stable
+  VSCODE_ARCH: x64
+  DISABLE_UPDATE: 'yes'
+  SHOULD_BUILD: 'yes'
+  SHOULD_BUILD_REH: 'no'
+  SHOULD_BUILD_REH_WEB: 'no'
+
+jobs:
+  build:
+    runs-on: windows-2022
+    timeout-minutes: 360
+    defaults:
+      run:
+        shell: bash
+        working-directory: classgrid-editor
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Get the VSCodium build scripts (pinned)
+        run: |
+          git clone https://github.com/VSCodium/vscodium.git vscodium
+          git -C vscodium checkout "$VSCODIUM_COMMIT"
+
+      - name: Classgrid name and logo
+        run: bash brand.sh
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: classgrid-editor/vscodium/.nvmrc
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Get VS Code's open-source code
+        working-directory: classgrid-editor/vscodium
+        run: ./get_repo.sh
+
+      - name: Build
+        working-directory: classgrid-editor/vscodium
+        run: ./build.sh
+
+      - name: Pack the Windows app
+        working-directory: classgrid-editor/vscodium
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          npm_config_arch: x64
+          npm_config_target_arch: x64
+        run: |
+          find vscode -type f -not -path "*/node_modules/*" -not -path "vscode/.build/node/*" -not -path "vscode/.git/*" > vscode.txt
+          echo "vscode/.build/extensions/node_modules" >> vscode.txt
+          echo "vscode/.git" >> vscode.txt
+          tar -czf vscode.tar.gz -T vscode.txt
+          ./build/windows/package.sh
+
+      - name: Put the editor in a release
+        working-directory: classgrid-editor/vscodium
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          ls
+          7z a -tzip "../Classgrid-Code-win32-x64-${RELEASE_VERSION}.zip" "./VSCode-win32-x64/*"
+          gh release create "editor-${RELEASE_VERSION}" "../Classgrid-Code-win32-x64-${RELEASE_VERSION}.zip" \
+            --repo "${{ github.repository }}" --title "Classgrid Code ${RELEASE_VERSION}" \
+            --notes "The full desktop editor for the Classgrid app (VS Code ${MS_TAG}, built with VSCodium)."
