@@ -146,6 +146,7 @@ import { CodeBlockClient } from "./CodeBlockClient";
 import { ModelPicker, useSelectedModel, MODEL_GROUPS, AUTO_MODEL_ID } from "./ModelPicker";
 import { TypingGreeting } from "./AgentHomeExtras";
 import { toast } from "sonner";
+import { getSocket } from "@/lib/socketClient";
 import FilePreviewModal, { type FilePreviewSource } from "./FilePreviewModal";
 import { DocsImageViewer } from "./DocsImageViewer";
 import { SourceChip, type ChatSource } from "./SourceChip";
@@ -3410,6 +3411,20 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
     } catch { /* next update will try again */ }
   }, [gridSessionId]);
   const grid = useShareGrid(gridSessionId, refreshSharedMessages);
+  // Background work (helpers, a long command) finished after the answer ended: the agent woke up by itself and
+  // answered in this chat; show its update
+  useEffect(() => {
+    if (!gridSessionId) return;
+    let sock: ReturnType<typeof getSocket> = null;
+    const on = (d: { sessionId?: string; phase?: string }) => {
+      if (d?.sessionId !== gridSessionId) return;
+      if (d.phase === "start") toast.message("Background work finished. The agent is writing an update…");
+      else refreshSharedMessages();
+    };
+    const attach = () => { sock = getSocket(); if (sock) sock.on("chat:woke", on); return !!sock; };
+    const timer = attach() ? null : setInterval(() => { if (attach() && timer) clearInterval(timer); }, 3000);
+    return () => { if (timer) clearInterval(timer); sock?.off("chat:woke", on); };
+  }, [gridSessionId, refreshSharedMessages]);
   const gridMyEmail = (session?.user?.email || "").toLowerCase();
   const gridPeople = React.useMemo(() => Object.fromEntries((grid.data?.members || []).map((p) => [p.email, p])), [grid.data]);
   const gridOwner = grid.data?.members?.find((p) => p.role === "owner");

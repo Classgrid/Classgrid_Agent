@@ -553,7 +553,7 @@ export const getMcpTools = () => [
   },
   {
     name: 'run_project_helpers',
-    description: 'Send 1 to 5 helper agents to work on the open Project Mode project at the same time (at most 5 working at once). For each helper you choose its task, its model, and whether it may change the project. A read-only helper explores (list, read, search) and returns a full report with file paths and line numbers. A helper with can_edit also writes and edits files and runs commands to really do the work; give each one its own files so helpers do not edit the same file. Helpers never push to GitHub. With wait (default true) you get all their reports when they finish. With wait false they work in the background and you stay free: keep talking to the user, send helpers messages with message_helper, and read their notes, questions and reports with check_helpers; wait for them before your final answer. A helper that fails restarts by itself and falls back to other models. Never tell the user helpers are working unless this tool answered "Started" in this run (check_helpers shows who is really working). Their tokens are charged like the chat.',
+    description: 'Send 1 to 5 helper agents to work on the open Project Mode project at the same time (at most 5 working at once). For each helper you choose its task, its model, and whether it may change the project. A read-only helper explores (list, read, search) and returns a full report with file paths and line numbers. A helper with can_edit also writes and edits files and runs commands to really do the work; give each one its own files so helpers do not edit the same file. Helpers never push to GitHub. By default (wait false) they work in the background and you stay free: tell the user what the helpers are doing and end your answer; the user can keep talking to you, you can send helpers messages with message_helper and read their notes and reports with check_helpers, and when they all finish you are woken with their reports to tell the user. With wait true you wait here for all reports (only for short jobs whose result you need right now). A helper that fails restarts by itself and falls back to other models. Never tell the user helpers are working unless this tool answered "Started" in this run (check_helpers shows who is really working). Their tokens are charged like the chat.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -1751,7 +1751,7 @@ export const handleToolCall = async (name, args, context = {}) => {
   if (LOCAL_TOOLS.has(name) && context.sessionId) {
     const project = await projectForChat(context.sessionId).catch(() => null);
     if (process.env.CG_LOCAL_DEV) console.log(`[Local runner] ${name} in chat ${context.sessionId}: project ${project?._id || "none"} (${project?.location || "-"})`);
-    if (project?.location === "local") return { content: [{ type: "text", text: await callLocal(project, name, args || {}) }] };
+    if (project?.location === "local") return { content: [{ type: "text", text: await callLocal(project, name, args || {}, context.sessionId) }] };
   }
   // Project Mode file tools (the open project of this chat)
   if (projectTools[name]) {

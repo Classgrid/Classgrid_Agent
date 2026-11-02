@@ -1373,6 +1373,9 @@ async function classgridDesktopFacts() {
     return desktopFactsCache;
 }
 
+// Stop the chat's working helpers (the Stop button stops only the answer; helpers keep working and report later)
+const STOP_HELPERS_TOOL = { type: "function", function: { name: "stop_helpers", description: "Stop all helpers that are still working in this chat. Use it only when the user asks to stop them (the Stop button stops only your answer; helpers keep working and you are woken with their reports).", parameters: { type: "object", properties: {} } } };
+
 // Helper types the AI makes for itself (like Antigravity's define_subagent): a name, a role, and the model and edit
 // rights it starts with. Kept per user, so a type made once can be sent again in any chat.
 const HELPER_TYPES_KEY = (userId) => `helper-types:${userId}`;
@@ -3393,7 +3396,8 @@ If they ask whether their college/school uses Classgrid, say you can't see that 
                         if (!room) return "Error: 5 helpers are already working. Use check_helpers to wait for one to finish first.";
                         // Helpers stop only when the user stops the chat (the request is cut). If the answer itself ends or
                         // breaks, they keep working; when they finish, a waiting background task is woken to read their reports.
-                        if (typeof res.on === "function" && board.hookedRes !== res) { board.hookedRes = res; res.on("close", () => { if (requestAborted) stopHelpers(sessionId); }); }
+                        // Stop only stops the answer: helpers keep working and the chat is woken with their reports
+                        // (the user can ask to stop them: stop_helpers)
 
                         // The model the main AI asked for (its id or its name in the model list); Fable is too costly for helpers
                         // Models turned off in the super admin Model manager are never given to a helper
@@ -3449,7 +3453,7 @@ If they ask whether their college/school uses Classgrid, say you can't see that 
                                 const id = `h${i}-${stepNo++}`;
                                 emitHelper({ helper: i, id, tool: n, args: a });
                                 playground("tool", { who: `Helper ${h.no}`, tool: n, detail: JSON.stringify(a ?? {}).slice(0, 200) });
-                                const out = onComputer ? await computerHandlers[n](a) : h.wt && LOCAL_TOOLS.has(n) ? await callLocal(h.wt.project, n, a || {}) : (await handleToolCall(n, a, { sessionId })).content[0].text;
+                                const out = onComputer ? await computerHandlers[n](a) : h.wt && LOCAL_TOOLS.has(n) ? await callLocal(h.wt.project, n, a || {}, sessionId) : (await handleToolCall(n, a, { sessionId })).content[0].text;
                                 emitHelper({ helper: i, id, result: String(out && typeof out === "object" ? out.text : out).slice(0, 6000) });
                                 // The files this helper changed, for the chat's "files changed" box
                                 const changed = (n === "write_project_file" || n === "edit_project_file") && a?.path ? String(out).match(/\+(\d+) -(\d+)\)\./) : null;
@@ -3562,15 +3566,26 @@ You work on the user's own Windows computer through their Classgrid desktop app,
                                     + (h.wtError ? `\n\n[It worked in the project itself: it couldn't get its own copy (${h.wtError}).]` : "");
                                 emitHelper({ helper: i, state: out.state });
                                 // The answer that started them has ended: wake this chat's background task to read the reports
-                                if ((res.writableEnded || res.destroyed) && !requestAborted && !board.helpers.some((x) => x.state === "running")) {
-                                    import("../services/agent-task.service.js").then((m) => m.wakeTaskForSession(sessionId, "helpers")).catch(() => {});
+                                if ((res.writableEnded || res.destroyed) && !board.helpers.some((x) => x.state === "running")) {
+                                    import("../services/agent-task.service.js").then(async (m) => {
+                                        const { default: AgentTask } = await import("../models/AgentTask.js");
+                                        const task = await AgentTask.findOne({ session_id: sessionId, status: { $in: ["working", "sleeping", "waiting_tokens"] } }).select("_id").lean().catch(() => null);
+                                        if (task) return m.wakeTaskForSession(sessionId, "helpers");
+                                        // A normal chat: wake it with the reports it hasn't read yet
+                                        const unread = board.helpers.filter((x) => x.state !== "running" && !x.reportTaken);
+                                        if (!unread.length) return;
+                                        unread.forEach((x) => { x.reportTaken = true; });
+                                        const notes = unread.map((x) => `Helper ${x.no} (${x.task.slice(0, 120)}) ${x.state === "done" ? "finished" : "failed"}:\n${x.report}${x.notes.length ? `\nNotes it sent: ${x.notes.join(" | ")}` : ""}`);
+                                        const { wakeChat } = await import("../services/chat-wake.service.js");
+                                        await wakeChat(userId, sessionId, `Your helpers finished.\n\n${notes.join("\n\n")}${helperChangesText(unread)}`);
+                                    }).catch(() => {});
                                 }
                             });
                             board.helpers.push(h);
                             return h;
                         });
                         const label = (h) => `Helper ${h.no} (${MODEL_DISPLAY_NAMES[h.usedModel || h.model] || h.usedModel || h.model}, ${h.canEdit ? "can edit" : "read only"}): ${h.task.slice(0, 80)}`;
-                        if (args?.wait === false || args?.wait === "false") {
+                        if (!(args?.wait === true || args?.wait === "true")) {
                             return `Started ${batch.length} helper(s), working in the background:\n${batch.map(label).join("\n")}\nTalk to them with message_helper and read their notes and reports with check_helpers. Wait for them with check_helpers before your final answer; if your answer has to end first, they keep working and you are woken with their reports when they finish.`;
                         }
                         await Promise.all(batch.map((h) => h.promise));
@@ -3599,6 +3614,14 @@ You work on the user's own Windows computer through their Classgrid desktop app,
                         if ((await redis.hlen(key).catch(() => 0)) >= 30 && !(await redis.hexists(key, name).catch(() => 0))) return "Error: there are already 30 helper types; remove one first.";
                         await redis.hset(key, name, JSON.stringify({ role: role.slice(0, 4000), model: String(args?.model || "").trim().slice(0, 80), can_edit: args?.can_edit === true || args?.can_edit === "true" }));
                         return `Helper type "${name}" is ready. Send one with run_project_helpers: { task, type: "${name}" }.`;
+                    },
+                    // Stop working helpers (the Stop button no longer stops them)
+                    stop_helpers: async () => {
+                        const board = helperBoard(sessionId);
+                        const running = board.helpers.filter((h) => h.state === "running").length;
+                        if (!running) return "No helpers are working in this chat.";
+                        stopHelpers(sessionId);
+                        return `Stopped ${running} helper(s).`;
                     },
                     // A message from the main AI to a helper that is still working (it gets it with its next step)
                     message_helper: async (args) => {
@@ -3639,7 +3662,7 @@ You work on the user's own Windows computer through their Classgrid desktop app,
                     run_code: async (args) => {
                         // A project from a folder on the user's computer: the code runs there, in their desktop app
                         const localProject = await localProjectFor(sessionId);
-                        if (localProject) return callLocal(localProject, "run_code", args);
+                        if (localProject) return callLocal(localProject, "run_code", args, sessionId);
                         const result = await handleToolCall('run_code', args, { sessionId, isStaff: isStaffRole(req.user?.role) });
                         const text = result.isError ? result.content[0].text : result.content[0].text;
 
@@ -5436,7 +5459,7 @@ If a tool fails, never show the error message; say only: "Something went wrong o
                         const p = await askPermission({ ...permissionCtx, mode: PERMISSION_MODES.has(body.permissionMode) ? body.permissionMode : "review", tool: askAs, args });
                         if (!p.allowed) return p.message;
                     }
-                    return runOnComputer(projectUser, name, args);
+                    return runOnComputer(projectUser, name, args, sessionId);
                 };
             }
         }
@@ -5471,7 +5494,7 @@ If a tool fails, never show the error message; say only: "Something went wrong o
                     const p = await askPermission({ ...permissionCtx, mode: "review", tool: name, args });
                     if (!p.allowed) return p.message;
                 }
-                return runOnComputer(computerUser, name, args);
+                return runOnComputer(computerUser, name, args, sessionId);
             };
             // Code the AI runs goes to the user's computer too (never the cloud sandbox in the desktop app)
             if (llmConfig.toolHandlers.run_code) llmConfig.toolHandlers.run_code = async (args) => {
@@ -5479,7 +5502,7 @@ If a tool fails, never show the error message; say only: "Something went wrong o
                     const p = await askPermission({ ...permissionCtx, mode: "review", tool: "run_code", args });
                     if (!p.allowed) return p.message;
                 }
-                return runOnComputer(computerUser, "run_code", args);
+                return runOnComputer(computerUser, "run_code", args, sessionId);
             };
             // Files anywhere on the computer: asks first unless the user chose Turbo ("always allow" is remembered)
             for (const [name, askAs] of Object.entries(COMPUTER_FILE_TOOLS)) llmConfig.toolHandlers[name] = async (args) => {
@@ -5487,15 +5510,18 @@ If a tool fails, never show the error message; say only: "Something went wrong o
                     const p = await askPermission({ ...permissionCtx, mode: PERMISSION_MODES.has(body.permissionMode) ? body.permissionMode : "review", tool: askAs, args });
                     if (!p.allowed) return p.message;
                 }
-                return runOnComputer(computerUser, name, args);
+                return runOnComputer(computerUser, name, args, sessionId);
             };
         }
         // Helper types go with the helpers
-        if (activeToolList.some(t => t.function.name === "run_project_helpers") && !fullToolList.some(t => t.function.name === "define_helper")) {
-            fullToolList.push(DEFINE_HELPER_TOOL);
-            activeToolList.push(DEFINE_HELPER_TOOL);
-            toolPlan.allowedToolNames.add("define_helper");
-            toolPlan.loadedNames.add("define_helper");
+        if (activeToolList.some(t => t.function.name === "run_project_helpers")) {
+            for (const def of [DEFINE_HELPER_TOOL, STOP_HELPERS_TOOL]) {
+                if (fullToolList.some(t => t.function.name === def.function.name)) continue;
+                fullToolList.push(def);
+                activeToolList.push(def);
+                toolPlan.allowedToolNames.add(def.function.name);
+                toolPlan.loadedNames.add(def.function.name);
+            }
         }
         console.log(`[AI-TOOLS] groups=[${toolPlan.activeGroupIds.join(",")}] sent=${activeToolList.length}/${fullToolList.length} tools staff=${toolPlan.staff}`);
 
@@ -5544,7 +5570,10 @@ If a tool fails, never show the error message; say only: "Something went wrong o
         // Studio's Agents board: this chat is working until its answer ends (or the user stops it)
         if (userId && sessionId && body.taskOrigin !== "whatsapp") {
             markChatWorking(userId, sessionId, true);
-            res.on("close", () => { markChatWorking(userId, sessionId, false); });
+            res.on("close", () => {
+                markChatWorking(userId, sessionId, false).then(() => import("../services/chat-wake.service.js")).then((m) => m.wakeIfPending(userId, sessionId)).catch(() => {});
+            });
+            import("../services/chat-wake.service.js").then((m) => m.rememberChatMeta(sessionId, { clientApp: body.clientApp || "", appMode: body.appMode || "", permissionMode: body.permissionMode || "" })).catch(() => {});
         }
         const permissionCtx = {
             mode: PERMISSION_MODES.has(body.permissionMode) && body.taskOrigin !== "whatsapp" ? body.permissionMode : "turbo",

@@ -264,10 +264,12 @@ const tools = {
       const toBackground = setTimeout(() => {
         moved = true;
         const id = `job${jobs.size + 1}-${Date.now().toString(36).slice(-4)}`;
+        job.id = id;
+        job.chat = arguments[1] && arguments[1].__chat;
         jobs.set(id, job);
         resolve(`${cap(job.log.trim()) || "(no output yet)"}\n[Still running after ${AUTO_BACKGROUND_S} seconds, so it keeps running in the background as job_id ${id}. Wait for it to finish with check_background_command (job_id "${id}", wait_seconds up to 120), or stop it with stop_background_command.]`);
       }, AUTO_BACKGROUND_S * 1000);
-      proc.on("close", (code) => { job.exitCode = code; clearTimeout(toBackground); if (!moved) resolve(`${cap(job.log.trim()) || "(no output)"}\n[exit code ${code}]`); });
+      proc.on("close", (code) => { job.exitCode = code; clearTimeout(toBackground); if (!moved) resolve(`${cap(job.log.trim()) || "(no output)"}\n[exit code ${code}]`); else jobDone(job); });
       proc.on("error", (err) => { job.exitCode = -1; clearTimeout(toBackground); if (!moved) resolve(`Error: ${err.message}`); });
     });
   },
@@ -276,11 +278,11 @@ const tools = {
     if (!command) return "Error: command is empty";
     const id = `job${jobs.size + 1}-${Date.now().toString(36).slice(-4)}`;
     const proc = shellSpawn(String(command), root);
-    const job = { proc, command: String(command), log: "", startedAt: Date.now(), exitCode: null };
+    const job = { id, proc, command: String(command), log: "", startedAt: Date.now(), exitCode: null, chat: arguments[1] && arguments[1].__chat };
     const add = (d) => { job.log += d.toString(); if (job.log.length > 200000) job.log = job.log.slice(-200000); };
     proc.stdout.on("data", add);
     proc.stderr.on("data", add);
-    proc.on("close", (code) => { job.exitCode = code; });
+    proc.on("close", (code) => { job.exitCode = code; jobDone(job); });
     jobs.set(id, job);
     return `Started in the background on the user's computer. job_id: ${id}. Check it with check_background_command.`;
   },
@@ -291,6 +293,7 @@ const tools = {
     if (!job) return `Error: no background command ${job_id} (the desktop app may have been restarted).`;
     const until = Date.now() + Math.min(120, Math.max(0, Number(wait_seconds) || 0)) * 1000;
     while (job.exitCode === null && Date.now() < until) await wait(500);
+    if (job.exitCode !== null) job.reported = true;
     const state = job.exitCode === null ? "still running" : `finished (exit code ${job.exitCode})`;
     return `${job.command}\n${state}, started ${Math.round((Date.now() - job.startedAt) / 1000)}s ago. Last output:\n${cap(job.log.slice(-8000).trim()) || "(no output yet)"}`;
   },
@@ -298,6 +301,7 @@ const tools = {
   stop_background_command(_root, { job_id }) {
     const job = jobs.get(String(job_id));
     if (!job) return `Error: no background command ${job_id}.`;
+    job.stopped = true; // stopped on purpose: its chat isn't woken
     if (job.exitCode === null) killTree(job.proc);
     jobs.delete(String(job_id));
     return `Stopped ${job_id}.`;
@@ -587,6 +591,17 @@ function shellSpawn(command, cwd) {
     : spawn("/bin/bash", ["-lc", command], { cwd });
 }
 
+// A background job finished: the server wakes the chat that started it (unless it was stopped on purpose)
+function jobDone(job) {
+  if (!job.chat || job.stopped) return;
+  const seconds = Math.round((Date.now() - job.startedAt) / 1000);
+  // A moment later: if the AI already saw the result itself (check_background_command), its chat isn't woken
+  setTimeout(() => {
+    if (job.reported || job.stopped || !socket) return;
+    socket.emit("local-job-done", { jobId: job.id, chat: job.chat, command: job.command.slice(0, 1000), exitCode: job.exitCode, seconds, output: cap(job.log.slice(-6000).trim()) });
+  }, 5000);
+}
+
 function killTree(proc) {
   if (!proc || proc.exitCode !== null) return;
   if (process.platform === "win32") spawn("taskkill", ["/pid", String(proc.pid), "/T", "/F"], { windowsHide: true });
@@ -604,7 +619,8 @@ function connect(token) {
   socket.on("local-tool", async (req, ack) => {
     if (typeof ack !== "function") return;
     try {
-      const { tool, args = {}, root } = req || {};
+      const { tool, args = {}, root, chat } = req || {};
+      if (chat) args.__chat = String(chat); // which chat started it (a finished background job wakes that chat)
       // The AI's browser steps go to the app's own browser (browser.js)
       if (tool === "browser" && browserStep) {
         console.log("[runner] browser", args.action);

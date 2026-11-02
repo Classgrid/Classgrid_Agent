@@ -29,6 +29,9 @@ const runnerRoom = (userId) => `runner:${userId}`;
 export function registerRunnerSocket(socket) {
     if (socket.handshake?.auth?.runner && socket.userId) {
         socket.join(runnerRoom(String(socket.userId)));
+        // A background command finished on the user's computer: its chat is woken with the result
+        const userId = String(socket.userId);
+        socket.on("local-job-done", (d) => { import("./chat-wake.service.js").then((m) => m.onLocalJobDone(userId, d)).catch(() => {}); });
         console.log(`[Local runner] desktop app connected for user ${socket.userId}`);
     }
 }
@@ -58,14 +61,14 @@ async function askRunner(userId, tool, payload) {
 }
 
 /** Runs one tool in the user's desktop app for this local project. Returns the tool's text. */
-export async function callLocal(project, tool, args = {}) {
-    const reply = await askRunner(project.owner, tool, { tool, args: args || {}, projectId: String(project._id), root: project.localPath });
+export async function callLocal(project, tool, args = {}, chat = null) {
+    const reply = await askRunner(project.owner, tool, { tool, args: args || {}, projectId: String(project._id), root: project.localPath, ...(chat ? { chat: String(chat) } : {}) });
     return reply ? reply.text : "Error: this project is a folder on the user's computer, and the Classgrid desktop app isn't open there. Ask the user to open the Classgrid app on that computer, then try again.";
 }
 
 /** Runs one tool in the user's desktop app, not tied to a project (the terminal in a chat, the browser). Returns its answer, or null when the app isn't open. */
-export function callRunner(userId, tool, args = {}) {
-    return askRunner(userId, tool, { tool, args: args || {} });
+export function callRunner(userId, tool, args = {}, chat = null) {
+    return askRunner(userId, tool, { tool, args: args || {}, ...(chat ? { chat: String(chat) } : {}) });
 }
 
 export const COMPUTER_TERMINAL_TOOLS = new Set(["execute_terminal_command", "start_background_command", "check_background_command", "stop_background_command"]);
@@ -73,8 +76,8 @@ export const COMPUTER_TERMINAL_TOOLS = new Set(["execute_terminal_command", "sta
 export const COMPUTER_FILE_TOOLS = { write_project_file: "computer_write", edit_project_file: "computer_edit", search_project: "computer_search", list_project_files: "computer_list" };
 
 /** The terminal tools in a desktop app chat that isn't a project: the command runs on the user's own computer (asks first). */
-export async function runOnComputer(userId, tool, args = {}) {
-    const reply = await callRunner(userId, tool, args);
+export async function runOnComputer(userId, tool, args = {}, chat = null) {
+    const reply = await callRunner(userId, tool, args, chat);
     if (!reply) return "The Classgrid desktop app isn't open on the user's computer, so the command didn't run. Tell the user to open the Classgrid desktop app, then try again.";
     if (/can't run on this computer|wasn't opened in the Classgrid app/.test(reply.text)) return "Error: the user's Classgrid desktop app is an older version that can't do this on their computer. Ask them to update the app (or reinstall it from classgrid.in), then try again.";
     return reply.text;
