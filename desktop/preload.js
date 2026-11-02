@@ -15,6 +15,14 @@ contextBridge.exposeInMainWorld("classgridDesktop", {
   openRecordings: () => ipcRenderer.invoke("cg:openRecordings"),
   pickFolder: () => ipcRenderer.invoke("cg:pickFolder"),
   setToken: (token) => ipcRenderer.send("cg:setToken", token),
+  // The user's own terminals (Studio's Terminal tab): PowerShell, Git Bash or Command Prompt on this computer
+  termShells: () => ipcRenderer.invoke("cg:termShells"),
+  termOpen: (opts) => ipcRenderer.invoke("cg:termOpen", opts),
+  termInput: (id, data) => ipcRenderer.send("cg:termInput", { id, data }),
+  termResize: (id, cols, rows) => ipcRenderer.send("cg:termResize", { id, cols, rows }),
+  termClose: (id) => ipcRenderer.send("cg:termClose", { id }),
+  onTermData: (cb) => { const f = (_e, m) => cb(m); ipcRenderer.on("cg:termData", f); return () => ipcRenderer.removeListener("cg:termData", f); },
+  onTermExit: (cb) => { const f = (_e, m) => cb(m); ipcRenderer.on("cg:termExit", f); return () => ipcRenderer.removeListener("cg:termExit", f); },
   // The AI's memory of each account on this computer (switching accounts keeps it)
   saveMemory: (m) => ipcRenderer.invoke("cg:saveMemory", m),
   otherMemory: () => ipcRenderer.invoke("cg:otherMemory"),

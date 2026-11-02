@@ -65,6 +65,8 @@
     "@tremor/react": "^3.18.7",
     "@types/dompurify": "^3.0.5",
     "@types/turndown": "^5.0.6",
+    "@xterm/addon-fit": "^0.10.0",
+    "@xterm/xterm": "^5.5.0",
     "ai": "^6.0.116",
     "axios": "^1.17.0",
     "browser-image-compression": "^2.0.2",

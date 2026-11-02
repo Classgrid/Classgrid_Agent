@@ -6243,7 +6243,7 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
                   )}
                 </>
               )}
-              <form onSubmit={handleSubmit} className={cn("space-y-2", endedView && "hidden")}>
+              <form onSubmit={handleSubmit} className={cn("@container space-y-2", endedView && "hidden")}>
                 {/* The agent waits for the user to allow an action: its card sits just above the chat box */}
                 {pendingPermission && (
                   <div className={cn(variant === "overlay" ? "w-full" : "sm:w-[80%]", "w-full mx-auto")}>
@@ -6993,7 +6993,7 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
                             )}
                           </>
                         )}
-                        <form onSubmit={handleSubmit} className={cn("space-y-2", endedView && "hidden")}>
+                        <form onSubmit={handleSubmit} className={cn("@container space-y-2", endedView && "hidden")}>
                           <div className={cn(
                             "group relative w-full shadow-sm rounded-2xl border border-border !bg-white dark:!bg-[#0f0f0f] focus-within:border-black/80 dark:focus-within:border-white/50 focus-within:ring-1 focus-within:ring-black/80 dark:focus-within:ring-white/50 transition-all duration-300",
                             isIncognito && "border-dashed border-slate-300 dark:border-[#3a3a3a]"

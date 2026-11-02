@@ -7,6 +7,7 @@ const path = require("node:path");
 
 const runner = require("./runner");
 const editor = require("./editor");
+const terminal = require("./terminal"); // the user's own terminals in Studio's Terminal tab
 const browser = require("./browser");
 const chats = require("./chats");
 const memory = require("./memory");
@@ -325,7 +326,7 @@ if (!app.requestSingleInstanceLock()) {
     startUpdates();
   });
   app.on("window-all-closed", () => app.quit());
-  app.on("before-quit", () => { runner.stopAll(); editor.stop(); require("./recorder").stop(); require("./computer").stop(); });
+  app.on("before-quit", () => { runner.stopAll(); editor.stop(); require("./recorder").stop(); require("./computer").stop(); terminal.stop(); });
 }
 
 // Updates: the installed app checks our R2 storage (desktop/latest.yml) on start and every 6 hours, downloads a new

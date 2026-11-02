@@ -16,6 +16,7 @@ files:
   - aimemory.js
   - recorder.js
   - computer.js
+  - terminal.js
   - offline.html
   - splash/splash.html
   - app/**/*
@@ -24,6 +25,9 @@ files:
 # Classgrid Code, the built-in editor (scripts/get-editor.mjs puts it in editor/): shipped as resources/editor, outside
 # app.asar, because its own node.exe runs it
 extraResources:
+  # The user's terminals run in the editor's node.exe, which can't read app.asar, so this file sits beside it
+  - from: ptyhost.js
+    to: ptyhost.js
   # The newest Classgrid add-on for the built-in editor (copied into it when it starts)
   - from: ../infra/ide/bridge/extension.js
     to: bridge/extension.js

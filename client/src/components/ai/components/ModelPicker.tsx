@@ -198,9 +198,9 @@ export function ModelPicker({ value, onChange, disabled }: ModelPickerProps) {
           title={selected ? selected.name : "Auto: picks the best model for each message"}
         >
           {/* A narrow chat (Studio with the side pane open) shows only the arrow, so the input's buttons don't overlap */}
-          {selected ? <ModelLogoImg logo={selected.logo} className="h-3.5 w-3.5 @max-[40rem]:hidden" /> : null}
-          <span className="hidden sm:inline @max-[40rem]:hidden">{selected ? selected.name : "Auto"}</span>
-          {!selected && <span className="sm:hidden @max-[40rem]:hidden">Auto</span>}
+          {selected ? <ModelLogoImg logo={selected.logo} className="h-3.5 w-3.5 @max-[28rem]:hidden" /> : null}
+          <span className="hidden sm:inline @max-[28rem]:hidden">{selected ? selected.name : "Auto"}</span>
+          {!selected && <span className="sm:hidden @max-[28rem]:hidden">Auto</span>}
           {thinking !== "normal" && <span className="hidden sm:inline @max-[40rem]:hidden text-muted-foreground/80">· {thinking === "fast" ? "Fast" : "Deep"}</span>}
           <ChevronDown className="h-3.5 w-3.5 shrink-0 opacity-60" />
         </button>
