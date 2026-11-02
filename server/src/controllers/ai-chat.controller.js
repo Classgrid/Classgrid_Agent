@@ -5302,6 +5302,20 @@ If a tool fails, never show the error message; say only: "Something went wrong o
         // The desktop app, a chat that isn't a project: the terminal runs on the user's computer (each command asks them first)
         const chatProject = body.clientApp === "desktop" && !body.taskOrigin ? await projectForChat(sessionId).catch(() => null) : null;
         const onComputer = body.clientApp === "desktop" && !body.taskOrigin && !chatProject;
+        // Desktop app, on the user's computer (no project, or a folder project): the cloud sandbox tools are taken away
+        // and run_code says it runs on their computer, so the AI never reaches for the sandbox
+        if (onComputer || chatProject?.location === "local") {
+            const SANDBOX_ONLY = new Set(["read_sandbox_file", "upload_sandbox_file_to_cdn", "deploy_to_classgrid_cloud"]);
+            for (const list of [fullToolList, activeToolList]) {
+                for (let i = list.length - 1; i >= 0; i--) if (SANDBOX_ONLY.has(list[i].function.name)) list.splice(i, 1);
+            }
+            for (const n of SANDBOX_ONLY) { toolPlan.allowedToolNames.delete(n); toolPlan.loadedNames.delete(n); }
+            const localRunCode = "Run Python, JavaScript or PowerShell code on the user's own computer (in the project folder in a project, otherwise in their home folder) and get its output. Files it makes are saved on their computer. The user is asked to allow it first.";
+            for (const list of [fullToolList, activeToolList]) {
+                const t = list.find((x) => x.function.name === "run_code");
+                if (t) list.splice(list.indexOf(t), 1, { ...t, function: { ...t.function, description: localRunCode } });
+            }
+        }
         if (chatProject?.location === "local") {
             const def = terminalDef("execute_terminal_command", "Run a command in the project folder on the user's own computer (Windows PowerShell; Bash through bash -lc '...' when Git Bash is installed). It waits for the command to finish and gives you its whole output in one step, up to 10 minutes: use it for every command that ends by itself (git, installs, builds, tests, scripts, ssh). Use start_background_command only for servers and watchers. The user is asked to allow each command first.", {
                 command: { type: "string", description: "The exact command to run" },
