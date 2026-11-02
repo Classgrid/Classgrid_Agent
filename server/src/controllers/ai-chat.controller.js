@@ -3705,9 +3705,15 @@ If they ask whether their college/school uses Classgrid, say you can't see that 
                                 if (Date.now() > deadline) return "Time is up: do not call any more tools. Write your full final answer now from what you already did.";
                                 const id = `h${i}-${stepNo++}`;
                                 emitHelper({ helper: i, id, tool: n, args: a });
+                                // The step for the Agent map (what it ran, on what)
+                                const what = a?.command || a?.path || a?.query || a?.url || a?.message || "";
+                                const step = { tool: n, what: String(what).slice(0, 200), at: Date.now() };
+                                if (h.steps.length < 80) h.steps.push(step);
                                 playground("tool", { who: `Helper ${h.no}`, tool: n, detail: JSON.stringify(a ?? {}).slice(0, 200) });
                                 const out = onComputer ? await computerHandlers[n](a) : outsideProject(n, a) ? (n === "view_project_file" ? await readLocalFile(req.user?._id || req.user?.id, { path: a.path }) : await runOnComputer(req.user?._id || req.user?.id, n, a || {}, sessionId)) : h.wt && LOCAL_TOOLS.has(n) ? await callLocal(h.wt.project, n, a || {}, sessionId) : (await handleToolCall(n, a, { sessionId })).content[0].text;
                                 emitHelper({ helper: i, id, result: String(out && typeof out === "object" ? out.text : out).slice(0, 6000) });
+                                step.result = String(out && typeof out === "object" ? out.text : out).slice(0, 400);
+                                step.failed = /^(error|tool error|failed)/i.test(step.result.trim());
                                 // The files this helper changed, for the chat's "files changed" box
                                 const changed = (n === "write_project_file" || n === "edit_project_file") && a?.path ? String(out).match(/\+(\d+) -(\d+)\)\./) : null;
                                 if (changed) {
@@ -3728,6 +3734,7 @@ If they ask whether their college/school uses Classgrid, say you can't see that 
                                         if (Date.now() > deadline) return "Time is up: do not call any more tools. Write your full final answer now from what you already did.";
                                         const id = `h${i}-${stepNo++}`;
                                         emitHelper({ helper: i, id, tool: n, args: a });
+                                        if (h.steps.length < 80) h.steps.push({ tool: n, what: String(a?.url || a?.key || "").slice(0, 200), at: Date.now() });
                                         const out = await browserHandlers[n](a);
                                         emitHelper({ helper: i, id, result: String(out && typeof out === "object" ? out.text : out).slice(0, 6000) });
                                         return withInbox(out);
@@ -3815,9 +3822,10 @@ You work on the user's own Windows computer through their Classgrid desktop app,
                         };
 
                         const batch = specs.slice(0, room).map((s, i) => {
-                            const h = { no: board.nextNo++, quiet: args?._quiet === true, task: s.task, canEdit: s.canEdit, type: s.type, role: s.role, worktree: s.worktree && s.canEdit && !s.browser, withChat: s.withChat, model: pickModel(s.model, i), state: "running", report: "", reportTaken: false, inbox: [], notes: [], notesRead: 0, changes: new Map(), abort: new AbortController() };
+                            const h = { startedAt: Date.now(), steps: [], no: board.nextNo++, quiet: args?._quiet === true, task: s.task, canEdit: s.canEdit, type: s.type, role: s.role, worktree: s.worktree && s.canEdit && !s.browser, withChat: s.withChat, model: pickModel(s.model, i), state: "running", report: "", reportTaken: false, inbox: [], notes: [], notesRead: 0, changes: new Map(), abort: new AbortController() };
                             h.promise = runHelper(h, i).catch((e) => ({ state: "failed", text: String(e?.message || e) })).then((out) => {
                                 h.state = out.state;
+                                h.endedAt = Date.now();
                                 h.report = out.text
                                     + (h.wt ? `\n\n[Its work is in its own copy ${h.wt.dir} on the branch ${h.wt.branch}. To bring it into the project: execute_terminal_command "git merge ${h.wt.branch}" in the project, then remove the copy with "git worktree remove --force '${h.wt.dir}'".]` : "")
                                     + (h.wtError ? `\n\n[It worked in the project itself: it couldn't get its own copy (${h.wtError}).]` : "");
@@ -6597,6 +6605,28 @@ If a tool fails, never show the error message; say only: "Something went wrong o
 };
 
 // GET /api/ai/working: the user's chats answering right now, and how many helpers each has working
+// The chat's helpers for the Agent map in the chat box: who is working, what each was asked, its steps and report
+export const getChatHelpers = async (req, res) => {
+    const userId = req.user?._id || req.user?.id;
+    const board = HELPER_BOARDS.get(String(req.params.id || ""));
+    if (!userId || !board || board.userId !== String(userId)) return res.json({ helpers: [] });
+    res.json({
+        helpers: board.helpers.map((h) => ({
+            no: h.no,
+            task: String(h.task || ""),
+            type: h.type || null,
+            model: MODEL_DISPLAY_NAMES[h.model] || h.model || null,
+            canEdit: !!h.canEdit,
+            state: h.state,
+            startedAt: h.startedAt || null,
+            endedAt: h.endedAt || null,
+            steps: (h.steps || []).map((s) => ({ tool: s.tool, what: s.what, at: s.at, failed: !!s.failed, result: s.result || "" })),
+            report: h.state === "running" ? "" : String(h.report || "").slice(0, 6000),
+            notes: h.notes || [],
+        })),
+    });
+};
+
 export const getWorkingChats = async (req, res) => {
     const userId = req.user?._id || req.user?.id;
     if (!userId) return res.status(401).json({ error: "Unauthorized" });

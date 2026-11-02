@@ -235,6 +235,7 @@ import { usePostHog } from 'posthog-js/react';
 import { fetchWithRescue } from "@/lib/rescue";
 import { OFFLINE_CHAT_NOTE, continueChatCopy, continuedChatOf, continuedFrom, isUnreachable, keepsChatCopies, readChatCopy, readOtherChatCopy, removeChatCopy, saveChatCopy, syncChatCopy, type OtherChatRef } from "@/lib/desktopChats";
 import { memoryNotesIndex, otherAccountsMemory, syncComputerMemory } from "@/lib/desktopMemory";
+import { AgentMapButton } from "./AgentMap";
 
 // Fetch real presigned URL for R2 uploads
 // Chats known to be ended (id -> end reason), so an ended chat shows its card at once on refresh or open,
@@ -6690,6 +6691,7 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
 
                   {/* Bottom Right action bar: send OR stop */}
                   <div className="absolute bottom-3 right-3 flex items-center gap-0.5">
+                    <AgentMapButton sessionId={sessionId} busy={isGenerating} />
                     {showsPermissionMode && <PermissionModePicker value={permissionMode} onChange={setPermissionMode} />}
                     <ModelPicker value={selectedModel} onChange={setSelectedModel} disabled={isGenerating} />
                     <button
@@ -6753,7 +6755,7 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
       {variant === "full-page" ? (
         // Incognito: a dark frame with the "Incognito" bar on top and the chat in a rounded panel (like claude.ai)
         // It covers the whole screen, sidebar included (z-45: above the sidebar, below menus and dialogs at z-50)
-        <div className={isIncognito ? "fixed inset-0 z-[45] w-full h-[100dvh] bg-[#ffffff] dark:bg-[#0f0f0f] flex flex-col overflow-hidden" : "contents"}>
+        <div className={isIncognito ? "cg-incognito fixed inset-0 z-[45] w-full h-[100dvh] bg-[#ffffff] dark:bg-[#0f0f0f] flex flex-col overflow-hidden" : "contents"}>
         <IncognitoTransition
           run={incognitoRun}
           onCovered={() => (incognitoRun?.kind === "enter" ? enterIncognitoNow() : leaveIncognitoNow())}
@@ -7363,6 +7365,7 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
 
                             {/* Bottom right: send */}
                             <div className="absolute bottom-3 right-3 flex items-center gap-0.5">
+                              <AgentMapButton sessionId={sessionId} busy={isGenerating} />
                               {showsPermissionMode && <PermissionModePicker value={permissionMode} onChange={setPermissionMode} />}
                               <ModelPicker value={selectedModel} onChange={setSelectedModel} />
                               <button
