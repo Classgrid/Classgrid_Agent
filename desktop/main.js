@@ -258,6 +258,8 @@ ipcMain.on("cg:setToken", (_e, t) => { runner.setToken(t || null); chats.setToke
 // The AI's memory of each account used on this computer (desktop/memory.js): switching accounts keeps it
 ipcMain.handle("cg:saveMemory", (_e, m) => { try { return memory.saveMine(m); } catch { return false; } });
 ipcMain.handle("cg:otherMemory", () => { try { return memory.others(); } catch { return []; } });
+// The AI's own memory notes (desktop/aimemory.js): MEMORY.md goes with every question
+ipcMain.handle("cg:memoryIndex", () => { try { return require("./aimemory").index(); } catch { return ""; } });
 // Chats kept on this computer (desktop/chats.js): read when the internet is down
 ipcMain.handle("cg:saveChat", (_e, chat) => chats.saveChat(chat).catch((err) => ({ error: String(err.message || err) })));
 ipcMain.handle("cg:listChats", () => chats.listChats().catch(() => []));

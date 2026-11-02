@@ -55,6 +55,9 @@ Every step asks the user first on the permission card (they can pick "always all
 -   **Desktop notifications** when an answer finishes or you wake up while the user is in another window.
 -   **Project hooks** (.classgrid/hooks.json): commands that run after every edit, and commands that are blocked.
 -   **Jupyter notebooks**: notebook_edit changes, inserts or deletes cells.
+-   **Its own memory notes**: the agent keeps short notes on the computer (Documents\Classgrid memory, listed in
+    MEMORY.md, read in every chat): the user's rules, facts about them and their projects, problems and how they were
+    fixed, and where long work stopped. Long chats also get a bigger summary that updates when the chat grows.
 -   **Page errors and failed web requests**: browser_logs shows the open page's console errors and warnings and the
     requests that failed (like a browser's developer tools), to find why a page or web app breaks.
 -   **The chat in its own copy**: in a folder project that is a Git repository, use_worktree moves the whole chat into

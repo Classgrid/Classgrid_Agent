@@ -13,6 +13,7 @@ files:
   - browser.js
   - chats.js
   - memory.js
+  - aimemory.js
   - recorder.js
   - computer.js
   - offline.html

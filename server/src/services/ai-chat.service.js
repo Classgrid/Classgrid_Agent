@@ -253,6 +253,18 @@ async function summarizeWithMistral(input, desktop = false) {
     return String(response.choices?.[0]?.message?.content || "").trim();
 }
 
+const DESKTOP_SUMMARY_CHARS = 30000; // this much new text since the last summary is summarized now in the desktop app
+async function grewBig(sessionId, messages) {
+    try {
+        const redis = (await import('../config/redis.js')).default;
+        if (JSON.parse((await redis.get(`chatwake:meta:${sessionId}`)) || "{}").clientApp !== "desktop") return false;
+        const { data: session } = await primarySupabaseClient.from('ai_chat_sessions').select('long_term_memory').eq('id', sessionId).single();
+        const covered = session?.long_term_memory ? (memoryCoverage(session.long_term_memory) ?? 0) : 0;
+        const sinceText = messages.slice(covered).reduce((n, m) => n + plainMessageText(m.content, true).length, 0);
+        return sinceText >= DESKTOP_SUMMARY_CHARS;
+    } catch { return false; }
+}
+
 /**
  * Background worker that keeps each chat's long-term memory: every 8 messages it updates the previous
  * summary with the messages since then (DeepSeek V4 Flash, Mistral Nemo as fallback).
@@ -271,7 +283,10 @@ export async function triggerMemoryAgent(sessionId, { force = false } = {}) {
         if (error || !messages) return false;
         const total = messages.length;
         // force (the /compact command): now, without waiting for the next 8-message mark
-        if (total < MEMORY_EVERY || (!force && total % MEMORY_EVERY !== 0)) return false;
+        if (total < MEMORY_EVERY) return false;
+        // The desktop app also updates the memory when the chat grew big since the last summary: one long agent answer
+        // with many steps is a single message, so waiting for 8 messages would leave the memory far behind
+        if (!force && total % MEMORY_EVERY !== 0 && !(await grewBig(sessionId, messages))) return false;
 
         // One update at a time per chat (two messages saved at once could both reach this point).
         redis = (await import('../config/redis.js')).default;

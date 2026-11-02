@@ -18,6 +18,7 @@ contextBridge.exposeInMainWorld("classgridDesktop", {
   // The AI's memory of each account on this computer (switching accounts keeps it)
   saveMemory: (m) => ipcRenderer.invoke("cg:saveMemory", m),
   otherMemory: () => ipcRenderer.invoke("cg:otherMemory"),
+  memoryIndex: () => ipcRenderer.invoke("cg:memoryIndex"),
   // Chats kept on this computer, for reading when offline (only the logged-in user's)
   saveChat: (chat) => ipcRenderer.invoke("cg:saveChat", chat),
   listChats: () => ipcRenderer.invoke("cg:listChats"),

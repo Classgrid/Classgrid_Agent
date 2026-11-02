@@ -862,6 +862,8 @@ function connect(token) {
         const r = await require("./computer").act(args);
         return ack({ text: r.text, computer: { image: r.image } });
       }
+      // The AI's own memory notes on this computer (aimemory.js)
+      if (tool === "memory") return ack({ text: require("./aimemory").run(args) });
       if (tool === "browser" && browserStep) {
         console.log("[runner] browser", args.action);
         return ack({ text: "ok", browser: await browserStep(args) });

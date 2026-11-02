@@ -234,7 +234,7 @@ type PageContext = {
 import { usePostHog } from 'posthog-js/react';
 import { fetchWithRescue } from "@/lib/rescue";
 import { OFFLINE_CHAT_NOTE, continueChatCopy, continuedChatOf, continuedFrom, isUnreachable, keepsChatCopies, readChatCopy, readOtherChatCopy, removeChatCopy, saveChatCopy, syncChatCopy, type OtherChatRef } from "@/lib/desktopChats";
-import { otherAccountsMemory, syncComputerMemory } from "@/lib/desktopMemory";
+import { memoryNotesIndex, otherAccountsMemory, syncComputerMemory } from "@/lib/desktopMemory";
 
 // Fetch real presigned URL for R2 uploads
 // Chats known to be ended (id -> end reason), so an ended chat shows its card at once on refresh or open,
@@ -4461,6 +4461,8 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
           effort: getThinkingLevel() === "normal" ? undefined : getThinkingLevel() === "fast" ? "low" : "high",
           // Desktop app: what the user saved in their other Classgrid accounts on this computer
           computerMemory: otherAccountsMemory(),
+          // Desktop app: the AI's own memory notes on this computer (MEMORY.md)
+          memoryIndex: memoryNotesIndex(),
           // Desktop app: this computer's scrambled Windows ID (the free limit counts per computer)
           deviceId: (window as any).classgridDesktop?.deviceId || undefined,
           // Website or Classgrid desktop app, so the AI knows where the user is
