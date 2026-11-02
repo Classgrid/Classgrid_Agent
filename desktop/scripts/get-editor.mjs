@@ -87,4 +87,38 @@ if (fs.existsSync(path.join(editorDir, "classgrid-build.txt"))) {
     process.exitCode = 1;
   });
 }
+// The desktop app's editor gets the extension store back (the cloud editor keeps it off): extensions come from Open
+// VSX, the open store that VS Codium and other VS Code-based editors use (Microsoft's own store is only for Microsoft's
+// VS Code). Users can also install an extension file (.vsix) from the Extensions view's "..." menu.
+const OPEN_VSX = {
+  serviceUrl: "https://open-vsx.org/vscode/gallery",
+  itemUrl: "https://open-vsx.org/vscode/item",
+  resourceUrlTemplate: "https://open-vsx.org/vscode/unpkg/{publisher}/{name}/{version}/{path}",
+  controlUrl: "",
+  nlsBaseUrl: "",
+  publisherUrl: "",
+};
+function openExtensionStore() {
+  const product = path.join(editorDir, "product.json");
+  if (!fs.existsSync(product)) return;
+  const p = JSON.parse(fs.readFileSync(product, "utf8"));
+  p.extensionsGallery = OPEN_VSX;
+  fs.writeFileSync(product, JSON.stringify(p, null, "\t"));
+  // The store address the cloud build renamed inside the program files, and the hidden Extensions icon
+  for (const rel of ["out/server-main.js", "out/vs/code/browser/workbench/workbench.js", "out/vs/platform/terminal/node/ptyHostMain.js"]) {
+    const f = path.join(editorDir, rel);
+    if (!fs.existsSync(f)) continue;
+    const text = fs.readFileSync(f, "utf8");
+    if (text.includes("extensionsGalleryOff:{")) fs.writeFileSync(f, text.split("extensionsGalleryOff:{").join("extensionsGallery:{"));
+  }
+  const css = path.join(editorDir, "out/vs/code/browser/workbench/workbench.css");
+  if (fs.existsSync(css)) {
+    const text = fs.readFileSync(css, "utf8");
+    const off = /\n\/\* classgrid-no-extensions:[^\n]*\*\/\n[^\n]*codicon-extensions-view-icon[^\n]*\n/;
+    if (off.test(text)) fs.writeFileSync(css, text.replace(off, "\n"));
+  }
+  console.log("The editor's extension store (Open VSX) is on");
+}
+
 putThemes();
+openExtensionStore();

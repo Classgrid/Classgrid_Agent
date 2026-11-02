@@ -34,7 +34,9 @@ Every step asks the user first on the permission card (they can pick "always all
     it to GitHub (making a private repo when it has none) and it then works in the cloud too, with the same chats.
     The website always opens the cloud copy.
 -   **Built-in code editor**: Classgrid Code, the same VS Code editor as Project Mode in the cloud, is inside the app
-    and works offline on folder projects.
+    and works offline on folder projects. In the desktop app it has an extension store (Open VSX, the open store
+    VS Code-based editors use, with extensions like Claude Code, Prettier and Python), and .vsix files can be installed
+    from the Extensions view's "..." menu.
 -   **The browser runs on the computer**: the Studio Browser tab uses the user's own internet, can open their
     localhost servers, plays sound and keeps its logins.
 -   **Browser recordings**: every time you use the browser, the app records a video of it, saved in the user's
