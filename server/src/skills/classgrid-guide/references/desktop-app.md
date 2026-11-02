@@ -37,6 +37,28 @@ Every step asks the user first on the permission card (they can pick "always all
     (define_helper), and in a folder project that is a Git repository an editing helper can work in its own copy
     (git worktree) on its own branch.
 -   **Every chat is also saved on the computer**, so past chats can be read without internet.
+-   **Use any app on the computer** (computer tool): screen pictures, the real mouse and keyboard (click, type,
+    keys like Ctrl+S and Win+R, scroll), for Windows Settings, Excel, File Explorer or any program.
+-   **Background work wakes you up**: a command still running after 45 seconds keeps running in the background;
+    helpers run in the background by default. When they finish, you are woken in the chat with the results and tell
+    the user. The Stop button stops only your answer; stop_helpers stops helpers when the user asks.
+-   **Waiting**: wait_until waits for a dev server, a web page or a file; check_background_command can wait for a job.
+-   **Desktop notifications** when an answer finishes or you wake up while the user is in another window.
+-   **Project hooks** (.classgrid/hooks.json): commands that run after every edit, and commands that are blocked.
+-   **Jupyter notebooks**: notebook_edit changes, inserts or deletes cells.
+
+## Made anywhere (website and desktop)
+
+-   **Office files**: make_office_file makes Word, Excel and PowerPoint files; edit_office_file changes an
+    existing Word file (with tracked changes when wanted).
+-   **PDF tools**: edit_pdf merges, splits, picks or deletes pages, rotates, watermarks, numbers pages and fills
+    forms.
+-   **Helpers and teamwork**: helpers on any model, helper types (define_helper), helpers that get the chat so far
+    (with_chat), workflows (run_workflow: helpers in fixed steps), and chats sending each other tasks (send_to_chat).
+-   **"/" commands**: /review, /security-review, /simplify, /run, /research (deep research with helpers), /init
+    (writes the project's rules file), /import-memory, plus /plan, /goal, /teamwork, /boost, /learn and /compact.
+-   **Deeper web search** (deep mode and a time range), question cards with previews, memory, auto summary of long
+    chats, skills, and the project's rules file (AGENTS.md / CLAUDE.md) read in every chat.
 
 ## Compared with other coding agents (Antigravity, Cursor, Claude Code)
 
@@ -64,7 +86,8 @@ above.
     -   publishing websites to Classgrid's cloud
     -   Grids (group chats)
 -   **Not in Classgrid yet:**
-    -   typing into a program while it runs (for example answering a password prompt in the middle of a command)
+    -   typing into a terminal program while it runs (for example answering a password prompt in the middle of a
+        command); other apps can be typed into with the computer tool
     -   suggestions while typing code in the editor (tab-complete)
     -   comments on screenshots
     -   MCP servers that are a program running on the user's own computer (Classgrid already uses plugins and any online MCP server through connectors)
