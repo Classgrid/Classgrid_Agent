@@ -1347,7 +1347,7 @@ function whereYouWorkRule({ desktop, project, task }) {
     if (task) return ""; // WhatsApp and background tasks keep their own rules
     const local = project?.location === "local";
     const head = "\n\n=== WHERE YOU WORK (final rule: it overrides anything above about where things run) ===\n";
-    if (desktop && local) return head + `The user is in the Classgrid DESKTOP APP, in a project that is a folder on their own Windows computer (${project.localPath || "a local folder"}). EVERYTHING runs on their computer: the file tools, terminal commands (PowerShell), run_code, installs, git and pushes, helpers and the browser. There is NO cloud sandbox in this chat: never use one, never mention one, and never say you can't reach their computer. Only your thinking happens on Classgrid's servers.`;
+    if (desktop && local) return head + `The user is in the Classgrid DESKTOP APP, in a project that is a folder on their own Windows computer (${project.localPath || "a local folder"}). EVERYTHING runs on their computer: the file tools, terminal commands (PowerShell), run_code, installs, git and pushes, helpers and the browser. Paths are relative to the project folder; for a file or folder outside it, give the file tools its full path (like C:\\Users\\name\\Desktop\\notes.txt): the user is asked first. There is NO cloud sandbox in this chat: never use one, never mention one, and never say you can't reach their computer. Only your thinking happens on Classgrid's servers.`;
     if (desktop && project) return head + `The user is in the Classgrid DESKTOP APP, in a CLOUD project (its files live on Classgrid's cloud computer, not on their PC). The project tools, terminal commands and run_code work on that cloud copy, and push_project_to_github pushes it. read_local_file and the browser still work on the user's own computer. If they want the work on their own computer, they open the folder there with Open Folder in Project Mode.`;
     if (desktop) return head + "The user is in the Classgrid DESKTOP APP, in a chat with no project. EVERYTHING runs on their own Windows computer: commands (PowerShell), run_code, installs, reading, creating and editing files (full paths), helpers and the browser. There is NO cloud sandbox in this chat: never use one, never mention one, and never say you can't reach their computer. Only your thinking happens on Classgrid's servers.";
     if (project && !local) return head + "The user is on the Classgrid WEBSITE (chat.classgrid.in), in a CLOUD project. The project tools, terminal commands and run_code work on the project's copy on Classgrid's cloud computer. You can't reach the user's own computer from the website: never claim to read or change their local files; for that, they use the Classgrid desktop app.";
@@ -5329,6 +5329,27 @@ If a tool fails, never show the error message; say only: "Something went wrong o
             activeToolList.push(def);
             toolPlan.allowedToolNames.add("execute_terminal_command");
             toolPlan.loadedNames.add("execute_terminal_command");
+            // Files outside the project folder: the same tools with a full path, on the user's computer (asked first,
+            // like files in a chat with no project); inside the folder they work as before
+            const root = String(chatProject.localPath || "").replace(/[\\/]+$/, "").toLowerCase();
+            const outside = (p) => {
+                const full = String(p || "").trim().replace(/^["']+|["']+$/g, "").replace(/\//g, "\\");
+                if (!/^[a-z]:\\/i.test(full)) return false;
+                return !(full.toLowerCase() === root || full.toLowerCase().startsWith(root + "\\"));
+            };
+            const projectUser = req.user?._id || req.user?.id;
+            for (const [name, askAs] of Object.entries(COMPUTER_FILE_TOOLS)) {
+                const inProject = llmConfig.toolHandlers[name];
+                if (!inProject) continue;
+                llmConfig.toolHandlers[name] = async (args, ...rest) => {
+                    if (!outside(args?.path)) return inProject(args, ...rest);
+                    if (body.permissionMode !== "turbo") {
+                        const p = await askPermission({ ...permissionCtx, mode: PERMISSION_MODES.has(body.permissionMode) ? body.permissionMode : "review", tool: askAs, args });
+                        if (!p.allowed) return p.message;
+                    }
+                    return runOnComputer(projectUser, name, args);
+                };
+            }
         }
         if (body.clientApp === "desktop" && !body.taskOrigin) {
             for (const def of [READ_LOCAL_FILE_TOOL, ...(onComputer ? COMPUTER_TERMINAL_DEFS : [])]) {
