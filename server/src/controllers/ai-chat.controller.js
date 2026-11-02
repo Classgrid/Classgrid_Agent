@@ -1356,11 +1356,11 @@ const DEFINE_HELPER_TOOL = {
 // Desktop app, a chat that isn't a project: the terminal runs on the user's own computer (each command asks them first)
 const terminalDef = (name, description, properties, required) => ({ type: "function", function: { name, description, parameters: { type: "object", properties, required } } });
 const COMPUTER_TERMINAL_DEFS = [
-    terminalDef("execute_terminal_command", "Run a command in a terminal on the user's own computer (Windows PowerShell; on a Mac or Linux, bash). It starts in the user's home folder; each command is a new terminal, so use full paths or cd in the same command. For Bash on Windows (when Git Bash is installed) run: bash -lc '<command>'. Up to 10 minutes; use start_background_command for servers and long jobs. The user is asked to allow each command first.", {
+    terminalDef("execute_terminal_command", "Run a command in a terminal on the user's own computer (Windows PowerShell; on a Mac or Linux, bash). It starts in the user's home folder; each command is a new terminal, so use full paths or cd in the same command. For Bash on Windows (when Git Bash is installed) run: bash -lc '<command>'. It waits for the command to finish and gives you its whole output in one step, up to 10 minutes: use it for every command that ends by itself, even a slow one (ssh to a server, installs, builds, file work). The user is asked to allow each command first.", {
         command: { type: "string", description: "The exact command to run" },
         description: { type: "string", description: "A few plain words saying what the command does, shown to the user above it (e.g. \"List the Downloads folder\")" },
     }, ["command"]),
-    terminalDef("start_background_command", "Start a command that keeps running (a server, a watcher, a long build) in a terminal on the user's own computer, in their home folder. Returns a job_id. The user is asked to allow it first.", {
+    terminalDef("start_background_command", "Only for a command that never ends by itself (a dev server, a watcher) or one that runs longer than 10 minutes: it starts in the background on the user's own computer, in their home folder, and returns a job_id. Never use it for a command that finishes on its own (ssh checks, installs, file work): use execute_terminal_command, which waits and gives the whole output at once. The user is asked to allow it first.", {
         command: { type: "string", description: "The exact command to run" },
         description: { type: "string", description: "A few plain words saying what it does" },
     }, ["command"]),

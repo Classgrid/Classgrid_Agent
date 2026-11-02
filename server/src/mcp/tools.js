@@ -519,7 +519,7 @@ export const getMcpTools = () => [
   },
   {
     name: 'start_background_command',
-    description: 'Start a long-running command in the open Project Mode project (a dev server, a build, a test suite) in the background, so you can keep working while it runs (up to 30 minutes, at most 3 at once). Returns a job_id.',
+    description: 'Start a long-running command in the open Project Mode project (a dev server, a build, a test suite) in the background, so you can keep working while it runs (up to 30 minutes, at most 3 at once). Returns a job_id. Never use it for a quick command that finishes on its own (a check, an install, ssh): run that with execute_terminal_command, which waits and gives the whole output at once.',
     inputSchema: {
       type: 'object',
       properties: {
