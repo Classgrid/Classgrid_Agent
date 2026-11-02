@@ -568,6 +568,7 @@ export const getMcpTools = () => [
               can_edit: { type: 'boolean', description: 'true = it may write and edit files and run commands; false (default) = read only.' },
               browser: { type: 'boolean', description: 'Studio Mode: true = this helper is the Browser worker. It drives the user\'s live browser (open, click, type, read pages) instead of working on files.' },
               type: { type: 'string', description: 'A helper type made with define_helper (its name): the helper gets that type\'s role and, unless given here, its model and can_edit.' },
+              with_chat: { type: 'boolean', description: 'true = the helper also gets this chat\'s recent conversation (what the user asked and what was done so far), so you don\'t have to explain it all in the task.' },
               worktree: { type: 'boolean', description: 'A project from a folder on the user\'s computer (a Git repository), with can_edit: true = this helper works in its own copy of the project (git worktree) on its own branch, so helpers never edit the same files. Its report says the branch; merge it afterwards with git merge in the terminal.' }
             },
             required: ['task']

@@ -3403,7 +3403,7 @@ If they ask whether their college/school uses Classgrid, say you can't see that 
                         const raw = Array.isArray(args?.helpers) && args.helpers.length ? args.helpers : (Array.isArray(args?.tasks) ? args.tasks : []);
                         const specs = raw
                             .map((h) => (typeof h === "string" ? { task: h } : (h || {})))
-                            .map((h) => ({ task: String(h.task || "").trim(), model: String(h.model || "").trim(), canEdit: h.can_edit === true || h.can_edit === "true", canEditGiven: h.can_edit !== undefined, browser: h.browser === true || h.browser === "true", type: String(h.type || "").trim(), worktree: h.worktree === true || h.worktree === "true" }))
+                            .map((h) => ({ task: String(h.task || "").trim(), model: String(h.model || "").trim(), canEdit: h.can_edit === true || h.can_edit === "true", canEditGiven: h.can_edit !== undefined, browser: h.browser === true || h.browser === "true", type: String(h.type || "").trim(), worktree: h.worktree === true || h.worktree === "true", withChat: h.with_chat === true || h.with_chat === "true" }))
                             .filter((h) => h.task);
                         // Helper types made with define_helper: their role, and their model and edit rights unless given here
                         if (specs.some((h) => h.type) && userId) {
@@ -3552,7 +3552,11 @@ You work on the user's own Windows computer through their Classgrid desktop app,
                                 emitHelper({ helper: i, state: "running" });
                                 await sleep(10000);
                             }
-                            const task = round === 0 ? h.task : `${h.task}\n\n(This is restart ${round} of this job: it stopped with an error before. First check which of your files already exist and what is done, then carry on from there.)`;
+                            // with_chat: the chat's recent conversation comes first, so the helper knows the whole story
+                            const chatSoFar = h.withChat ? (messages || []).filter((m) => (m.role === "user" || m.role === "assistant") && typeof m.content === "string" && !m.content.startsWith("[SYSTEM:")).slice(-12)
+                                .map((m) => `${m.role === "user" ? "User" : "Main AI"}: ${m.content.slice(0, 1500)}`).join("\n\n").slice(-12000) : "";
+                            const withChat = chatSoFar ? `The conversation in this chat so far (for context):\n${chatSoFar}\n\nYour task:\n` : "";
+                            const task = withChat + (round === 0 ? h.task : `${h.task}\n\n(This is restart ${round} of this job: it stopped with an error before. First check which of your files already exist and what is done, then carry on from there.)`);
                             for (const model of models) {
                                 for (let attempt = 1; attempt <= 2; attempt++) {
                                     if (h.abort.signal.aborted) return { state: "failed", text: "stopped because the user stopped the chat" };
@@ -3590,7 +3594,7 @@ You work on the user's own Windows computer through their Classgrid desktop app,
                         };
 
                         const batch = specs.slice(0, room).map((s, i) => {
-                            const h = { no: board.nextNo++, task: s.task, canEdit: s.canEdit, type: s.type, role: s.role, worktree: s.worktree && s.canEdit && !s.browser, model: pickModel(s.model, i), state: "running", report: "", reportTaken: false, inbox: [], notes: [], notesRead: 0, changes: new Map(), abort: new AbortController() };
+                            const h = { no: board.nextNo++, task: s.task, canEdit: s.canEdit, type: s.type, role: s.role, worktree: s.worktree && s.canEdit && !s.browser, withChat: s.withChat, model: pickModel(s.model, i), state: "running", report: "", reportTaken: false, inbox: [], notes: [], notesRead: 0, changes: new Map(), abort: new AbortController() };
                             h.promise = runHelper(h, i).catch((e) => ({ state: "failed", text: String(e?.message || e) })).then((out) => {
                                 h.state = out.state;
                                 h.report = out.text
