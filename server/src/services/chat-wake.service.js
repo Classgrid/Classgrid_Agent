@@ -27,8 +27,7 @@ const tell = (userId, data) => { try { getIO().to(String(userId)).emit("chat:wok
 export async function wakeChat(userId, sessionId, note) {
     if (!userId || !sessionId || !note) return;
     await redis.multi().rpush(PENDING(sessionId), String(note).slice(0, 12000)).expire(PENDING(sessionId), DAY).exec().catch(() => {});
-    const busy = await redis.hexists(WORKING(String(userId)), String(sessionId)).catch(() => 0);
-    if (!busy) runWake(userId, sessionId).catch((e) => console.warn("[chat wake]", e.message));
+    if (!(await answering(userId, sessionId))) runWake(userId, sessionId).catch((e) => console.warn("[chat wake]", e.message));
 }
 
 /** The chat's answer has ended: anything that finished meanwhile wakes it now */
@@ -37,12 +36,21 @@ export async function wakeIfPending(userId, sessionId) {
     if ((await redis.llen(PENDING(sessionId)).catch(() => 0)) > 0) setTimeout(() => runWake(userId, sessionId).catch(() => {}), 1500);
 }
 
+// The chat is answering the user right now (also in the first seconds of an answer, before it's marked working):
+// the results wait and the chat is woken when that answer ends
+async function answering(userId, sessionId) {
+    const working = await redis.hexists(WORKING(String(userId)), String(sessionId)).catch(() => 0);
+    const running = await redis.exists(`chat:run:${userId}:${sessionId}`).catch(() => 0);
+    return !!(working || running);
+}
+
 async function runWake(userId, sessionId) {
     // One woken turn at a time per chat
     const got = await redis.set(LOCK(sessionId), "1", "EX", 15 * 60, "NX").catch(() => null);
     if (!got) return;
     try {
         const notes = [];
+        if (await answering(userId, sessionId)) return; // woken again when that answer ends
         for (let n; (n = await redis.lpop(PENDING(sessionId)).catch(() => null)); ) notes.push(n);
         if (!notes.length) return;
         const user = await User.findById(userId).select("-password -verificationToken");

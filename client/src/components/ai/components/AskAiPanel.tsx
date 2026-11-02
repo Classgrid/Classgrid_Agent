@@ -2063,6 +2063,9 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
   // Each chat's reply that is still streaming. After leaving a chat its reply keeps running on the server; a new
   // message in that chat stops it first, so two replies never run at once in one chat
   const runningRepliesRef = useRef(new Map<string, { controller: AbortController; gen: number }>());
+  // Each message sent gets a number: an older reply still streaming when a newer message is sent (a question card's
+  // answer, a message typed while it worked) stops touching the screen, so it never writes into the newer answer
+  const replySeqRef = useRef(0);
   // Set when Classgrid AI (or the user) ended this chat: the composer is replaced by a "Chat ended" card.
   const [chatEnded, setChatEnded] = useState<{ reason: string | null; canReopen: boolean } | null>(null);
   const [endedFeedbackOpen, setEndedFeedbackOpen] = useState(false);
@@ -4116,6 +4119,8 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
     const workStartedAt = Date.now(); // for the "Worked for X sec" summary of this reply
     const myGen = chatGenRef.current;
     const isStale = () => chatGenRef.current !== myGen; // the user moved to another chat
+    const myReply = ++replySeqRef.current;
+    const superseded = () => replySeqRef.current !== myReply; // a newer message was sent in this chat
     if (!options?.hidden) {
       retryCountRef.current = 0;
     }
@@ -4527,7 +4532,7 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
           buffer += decoder.decode(value, { stream: true });
           const parts = buffer.split("\n\n");
           buffer = parts.pop() || "";
-          if (isStale()) continue; // old chat's reply: received to the end (server saves it), never shown here
+          if (isStale() || superseded()) continue; // old chat's reply, or one a newer message replaced: received to the end (server saves it), never shown here
 
           for (const part of parts) {
             const dataMatch = part.match(/^data:\s*(.+)$/m);
@@ -4740,7 +4745,7 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
           }
         }
 
-        if (isStale()) return;
+        if (isStale() || superseded()) return;
 
         if (chatEndedSeen && !finalPayload) {
           // The chat was already ended: nothing to show except the "Chat ended" card.
@@ -4818,7 +4823,7 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
         await typeAssistantResponse(answer);
       }
     } catch (error: any) {
-      if (isStale()) return;
+      if (isStale() || superseded()) return;
       if (error.name === "AbortError" || error.message?.includes("abort")) {
         // User manually stopped the generation, silently exit
         setSubmitting(false);
@@ -4860,7 +4865,7 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
       const finishedChat = keepChatId;
       if (finishedChat && keepsChatCopies()) window.setTimeout(() => { void syncChatCopy(finishedChat); }, 1500);
       if (keepsChatCopies()) window.setTimeout(() => { void syncComputerMemory(session?.user); }, 2500);
-      if (!isStale()) setSubmitting(false);
+      if (!isStale() && !superseded()) setSubmitting(false);
     }
   }
 

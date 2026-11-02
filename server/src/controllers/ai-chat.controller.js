@@ -3642,12 +3642,21 @@ If they ask whether their college/school uses Classgrid, say you can't see that 
                             };
                             // The main AI's own computer handlers (they already ask the user first), kept apart from the gate below
                             const computerHandlers = onComputer ? Object.fromEntries(names.map((n) => [n, llmConfig.toolHandlers[n]])) : {};
+                            // A folder project on the user's computer: a full path outside the project folder (like the user's
+                            // Desktop) works for the helper's file tools too, like it does for the main AI
+                            const helperLocal = onComputer || h.wt ? null : await localProjectFor(sessionId).catch(() => null);
+                            const helperRoot = helperLocal ? String(helperLocal.localPath || "").replace(/[\\/]+$/, "").replace(/\//g, "\\").toLowerCase() : "";
+                            const outsideProject = (n, a) => {
+                                if (!helperRoot || !COMPUTER_FILE_TOOLS[n]) return false;
+                                const full = String(a?.path || "").trim().replace(/^["']+|["']+$/g, "").replace(/\//g, "\\");
+                                return /^[a-z]:\\/i.test(full) && !(full.toLowerCase() === helperRoot || full.toLowerCase().startsWith(helperRoot + "\\"));
+                            };
                             const liveHandlers = Object.fromEntries(names.map((n) => [n, async (a) => {
                                 if (Date.now() > deadline) return "Time is up: do not call any more tools. Write your full final answer now from what you already did.";
                                 const id = `h${i}-${stepNo++}`;
                                 emitHelper({ helper: i, id, tool: n, args: a });
                                 playground("tool", { who: `Helper ${h.no}`, tool: n, detail: JSON.stringify(a ?? {}).slice(0, 200) });
-                                const out = onComputer ? await computerHandlers[n](a) : h.wt && LOCAL_TOOLS.has(n) ? await callLocal(h.wt.project, n, a || {}, sessionId) : (await handleToolCall(n, a, { sessionId })).content[0].text;
+                                const out = onComputer ? await computerHandlers[n](a) : outsideProject(n, a) ? await runOnComputer(req.user?._id || req.user?.id, n, a || {}, sessionId) : h.wt && LOCAL_TOOLS.has(n) ? await callLocal(h.wt.project, n, a || {}, sessionId) : (await handleToolCall(n, a, { sessionId })).content[0].text;
                                 emitHelper({ helper: i, id, result: String(out && typeof out === "object" ? out.text : out).slice(0, 6000) });
                                 // The files this helper changed, for the chat's "files changed" box
                                 const changed = (n === "write_project_file" || n === "edit_project_file") && a?.path ? String(out).match(/\+(\d+) -(\d+)\)\./) : null;
@@ -5955,7 +5964,7 @@ If a tool fails, never show the error message; say only: "Something went wrong o
         // One answer at a time in a chat: a new message from the same person stops their older answer that is still
         // running there (one the page lost track of would otherwise go on hidden, waiting on permission prompts and
         // changing the same files). Redis holds the newest answer's id, so this works across server processes.
-        if (sessionId && userId && !body.taskOrigin) {
+        if (sessionId && userId && !body.taskOrigin && !body.wakeUp) {
             runKey = `chat:run:${userId}:${sessionId}`;
             runId = `${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2)}`;
             await redis.set(runKey, runId, "EX", 6 * 60 * 60).catch(() => {});
@@ -6520,7 +6529,9 @@ If a tool fails, never show the error message; say only: "Something went wrong o
     } finally {
         if (keepAliveInterval) clearInterval(keepAliveInterval);
         if (replacedCheck) clearInterval(replacedCheck);
-        if (runKey) redis.get(runKey).then((newest) => (newest === runId ? redis.del(runKey) : null)).catch(() => {});
+        // The answer is over: background results that waited for it wake the chat now
+        if (runKey) redis.get(runKey).then((newest) => (newest === runId ? redis.del(runKey) : null))
+            .then(() => import("../services/chat-wake.service.js")).then((m) => m.wakeIfPending(userId, sessionId)).catch(() => {});
         if (releaseGridLock) releaseGridLock();
         if (touchedChat) touchChat(req.user?.email, touchedChat);
         if (!res.writableEnded) {
