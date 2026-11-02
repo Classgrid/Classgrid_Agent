@@ -1340,6 +1340,21 @@ const READ_LOCAL_FILE_TOOL = {
         }
     }
 };
+// WHERE YOU WORK: the one fixed answer to "where am I and where does my work run", sent last in every system prompt so
+// the desktop app's AI and the website's AI never mix them up (the desktop AI used to reach for the cloud sandbox,
+// and the website AI for the user's computer)
+function whereYouWorkRule({ desktop, project, task }) {
+    if (task) return ""; // WhatsApp and background tasks keep their own rules
+    const local = project?.location === "local";
+    const head = "\n\n=== WHERE YOU WORK (final rule: it overrides anything above about where things run) ===\n";
+    if (desktop && local) return head + `The user is in the Classgrid DESKTOP APP, in a project that is a folder on their own Windows computer (${project.localPath || "a local folder"}). EVERYTHING runs on their computer: the file tools, terminal commands (PowerShell), run_code, installs, git and pushes, helpers and the browser. There is NO cloud sandbox in this chat: never use one, never mention one, and never say you can't reach their computer. Only your thinking happens on Classgrid's servers.`;
+    if (desktop && project) return head + `The user is in the Classgrid DESKTOP APP, in a CLOUD project (its files live on Classgrid's cloud computer, not on their PC). The project tools, terminal commands and run_code work on that cloud copy, and push_project_to_github pushes it. read_local_file and the browser still work on the user's own computer. If they want the work on their own computer, they open the folder there with Open Folder in Project Mode.`;
+    if (desktop) return head + "The user is in the Classgrid DESKTOP APP, in a chat with no project. EVERYTHING runs on their own Windows computer: commands (PowerShell), run_code, installs, reading, creating and editing files (full paths), helpers and the browser. There is NO cloud sandbox in this chat: never use one, never mention one, and never say you can't reach their computer. Only your thinking happens on Classgrid's servers.";
+    if (project && !local) return head + "The user is on the Classgrid WEBSITE (chat.classgrid.in), in a CLOUD project. The project tools, terminal commands and run_code work on the project's copy on Classgrid's cloud computer. You can't reach the user's own computer from the website: never claim to read or change their local files; for that, they use the Classgrid desktop app.";
+    if (project && local) return head + "The user is on the Classgrid WEBSITE, but this project is a folder on their own computer: it only works from the Classgrid desktop app. Tell them to open this chat in the desktop app; don't try the project tools here.";
+    return head + "The user is on the Classgrid WEBSITE (chat.classgrid.in), in a chat with no project. Code and commands run on Classgrid's cloud computer for this chat, not on the user's computer. You can't reach their own computer or its files from the website: ask them to attach the file, or to use the Classgrid desktop app for work on their computer.";
+}
+
 // How to run commands on the user's computer (server only: prompts/desktop-terminal.md, never copied anywhere), in every desktop app chat
 let terminalGuideCache = null;
 async function desktopTerminalGuide() {
@@ -1994,6 +2009,8 @@ You are currently talking to Nikhil Shinde (nikhil.shinde@classgrid.in), the CRE
             await User.updateOne({ _id: req.user._id }, { $addToSet: { studio_chat_ids: sessionId } }).catch(() => {});
         }
         const projectContext = sessionId && !isIncognito ? await editorContextFor(sessionId).catch(() => "") : "";
+        const whereProject = sessionId && !isIncognito && body.taskOrigin !== "whatsapp" ? await projectForChat(sessionId).catch(() => null) : null;
+        const whereYouWork = whereYouWorkRule({ desktop: body.clientApp === "desktop", project: whereProject, task: !!body.taskOrigin });
         const isProjectChat = !!projectContext; // Project Mode chat: Agent-mode website hosting rules are not sent
         volatilePrompt += projectContext;
         // The three modes of the app and the one the user is in now, so the AI knows what the user can see and do
@@ -5418,12 +5435,14 @@ If a tool fails, never show the error message; say only: "Something went wrong o
             const g = groupOfTool(name);
             return g && !promptCtx.activeGroups.has(g) ? g : null;
         };
+        // Where you work: the last words of the system prompt (desktop app or website, and where things run)
+        messages[0].content += whereYouWork;
         // Rebuilds the system prompt for a Cloudflare model (OCR / thinking rules, no Claude vision line) when Claude
         // was tried first and failed; groups loaded meanwhile keep their rules.
         const rebuildPromptForCloudflare = () => {
             if (!promptCtx.isClaude) return;
             promptCtx.isClaude = false;
-            messages[0] = { role: "system", content: filterPromptBlocks(dynamicSystemPrompt, promptCtx) + filterPromptBlocks(volatilePrompt, promptCtx) };
+            messages[0] = { role: "system", content: filterPromptBlocks(dynamicSystemPrompt, promptCtx) + filterPromptBlocks(volatilePrompt, promptCtx) + whereYouWork };
         };
 
         const client = createLLMClient(llmConfig);
