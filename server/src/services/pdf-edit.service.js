@@ -1,14 +1,19 @@
-// edit_pdf: merge, split, pick, delete, rotate, watermark, number pages and fill forms in PDF files.
+// edit_pdf: merge, split, pick, delete, rotate, watermark, number pages, fill forms and make scanned PDFs searchable.
 // Downloading and uploading is done by the caller; editPdf only works on file bytes.
 import dns from "node:dns/promises";
 import net from "node:net";
+import os from "node:os";
+import path from "node:path";
+import fs from "node:fs/promises";
 import {
     PDFDocument, StandardFonts, rgb, degrees, EncryptedPDFError,
     PDFTextField, PDFCheckBox, PDFDropdown, PDFOptionList, PDFRadioGroup, PDFButton, PDFSignature,
+    pushGraphicsState, popGraphicsState, beginText, endText, setFontAndSize, setCharacterSqueeze,
+    setTextMatrix, setTextRenderingMode, TextRenderingMode, showText,
 } from "pdf-lib";
 import { safeFileName } from "./office-files.service.js";
 
-export const PDF_ACTIONS = ["merge", "split", "extract_pages", "delete_pages", "rotate", "watermark", "fill_form", "list_form_fields", "add_page_numbers"];
+export const PDF_ACTIONS = ["merge", "split", "extract_pages", "delete_pages", "rotate", "watermark", "fill_form", "list_form_fields", "add_page_numbers", "make_searchable"];
 export const MAX_PDF_BYTES = 50 * 1024 * 1024;
 const MAX_SPLIT_FILES = 50;
 const MAX_MERGE_FILES = 20;
@@ -317,11 +322,168 @@ function fillForm(src, values, flatten) {
     return { doc: src, summary, note: problems.length ? `Not filled: ${problems.join("; ")}.` : "" };
 }
 
+// ---------------------------------------------------------------- Make searchable (OCR)
+
+const OCR_MAX_PAGES = 30;
+const OCR_LONG_SIDE = 2000;
+const OCR_TIME_LIMIT = 5 * 60 * 1000;
+const OCR_TEXT_LIMIT = 15000;
+// Language data is downloaded on first use and kept here
+const OCR_DATA_DIR = path.join(os.tmpdir(), "classgrid-ocr-data");
+
+async function ocrLanguages(raw) {
+    const { languages } = await import("tesseract.js");
+    const known = new Set(Object.values(languages));
+    const list = [...new Set(String(raw || "eng").toLowerCase().split(/[+,\s]+/).filter(Boolean))];
+    if (!list.length) return ["eng"];
+    if (list.length > 4) throw new Error('Use up to 4 languages at a time, like "eng+hin".');
+    for (const l of list) {
+        if (!known.has(l)) throw new Error(`"${l}" is not a language code. Use codes like eng, hin or eng+hin.`);
+    }
+    return list;
+}
+
+function withTimeout(promise, ms, message) {
+    let timer;
+    return Promise.race([promise, new Promise((_, reject) => { timer = setTimeout(() => reject(new Error(message)), ms); })])
+        .finally(() => clearTimeout(timer));
+}
+
+async function startOcr(langs) {
+    const { createWorker } = await import("tesseract.js");
+    await fs.mkdir(OCR_DATA_DIR, { recursive: true }).catch(() => {});
+    // Without errorHandler a failed download throws outside any promise and stops the server
+    let failed;
+    const failure = new Promise((_, reject) => { failed = reject; });
+    try {
+        const start = createWorker(langs, undefined, { cachePath: OCR_DATA_DIR, errorHandler: (e) => failed(e) });
+        return await withTimeout(Promise.race([start, failure]), 120000, "timeout");
+    } catch {
+        throw new Error(`Couldn't get the reading data for "${langs.join("+")}". Check the language code (like eng or hin) and try again.`);
+    }
+}
+
+// A page with real text (not just a picture) is left as it is
+async function pageHasText(page) {
+    const content = await page.getTextContent();
+    const text = content.items.map((i) => i.str || "").join("");
+    return (text.match(/[\p{L}\p{N}]/gu) || []).length >= 20;
+}
+
+// Puts each read word on the page as invisible text, over the same spot in the picture
+function addTextLayer(page, font, viewport, lines, canDraw) {
+    const key = page.node.newFontDictionary(font.name, font.ref);
+    const pt = (x, y) => { const [px, py] = viewport.convertToPdfPoint(x, y); return { x: px, y: py }; };
+    const fontHeight = font.heightAtSize(1);
+    const ops = [];
+    let unshown = 0;
+    for (const line of lines) {
+        const words = (line.words || []).filter((w) => String(w.text || "").trim());
+        const lineH = line.bbox.y1 - line.bbox.y0;
+        if (!words.length || lineH < 2) continue;
+        const size = lineH / viewport.scale / fontHeight;
+        const bl = line.baseline;
+        const baseAt = (x) => {
+            const y = bl && bl.x1 !== bl.x0 ? bl.y0 + ((x - bl.x0) * (bl.y1 - bl.y0)) / (bl.x1 - bl.x0) : NaN;
+            return y >= line.bbox.y0 && y <= line.bbox.y1 + lineH * 0.1 ? y : line.bbox.y1 - lineH * 0.2;
+        };
+        words.forEach((w, n) => {
+            const text = String(w.text).trim();
+            const drawn = [...text].filter(canDraw).join("");
+            if (drawn !== text) unshown++;
+            if (!drawn) return;
+            const by = baseAt(w.bbox.x0);
+            const p0 = pt(w.bbox.x0, by), p1 = pt(w.bbox.x1, by), pu = pt(w.bbox.x0, by - 10);
+            const width = Math.hypot(p1.x - p0.x, p1.y - p0.y);
+            const upLen = Math.hypot(pu.x - p0.x, pu.y - p0.y);
+            const natural = font.widthOfTextAtSize(drawn, size);
+            if (!width || !upLen || !natural) return;
+            const show = n < words.length - 1 ? `${drawn} ` : drawn;
+            ops.push(
+                setFontAndSize(key, size),
+                setCharacterSqueeze((100 * width) / natural),
+                setTextMatrix((p1.x - p0.x) / width, (p1.y - p0.y) / width, (pu.x - p0.x) / upLen, (pu.y - p0.y) / upLen, p0.x, p0.y),
+                showText(font.encodeText(show)),
+            );
+        });
+    }
+    if (ops.length) page.pushOperators(pushGraphicsState(), beginText(), setTextRenderingMode(TextRenderingMode.Invisible), ...ops, endText(), popGraphicsState());
+    return unshown;
+}
+
+// Scanned pages become searchable: the pages look the same, with invisible words on top
+async function makeSearchable(src, buffer, pages, languages) {
+    const langs = await ocrLanguages(languages);
+    const groups = parsePageRanges(pages, src.getPageCount());
+    const which = groups ? [...new Set(groups.flat())] : src.getPageIndices();
+    const font = await src.embedFont(StandardFonts.Helvetica);
+    const okChar = new Map();
+    const canDraw = (ch) => {
+        if (!okChar.has(ch)) {
+            let ok = ch >= " ";
+            try { font.encodeText(ch); } catch { ok = false; }
+            okChar.set(ch, ok);
+        }
+        return okChar.get(ch);
+    };
+
+    const pdfjs = await import("pdfjs-dist/legacy/build/pdf.mjs");
+    const pdf = await pdfjs.getDocument({ data: new Uint8Array(buffer), isEvalSupported: false, verbosity: 0 }).promise;
+    const started = Date.now();
+    const texts = [];
+    let worker, read = 0, hadText = 0, leftOver = 0, unshown = 0, timeUp = false;
+    try {
+        for (const i of which) {
+            const page = await pdf.getPage(i + 1);
+            if (await pageHasText(page)) { hadText++; page.cleanup(); continue; }
+            if (!timeUp && Date.now() - started > OCR_TIME_LIMIT) timeUp = true;
+            if (timeUp || read >= OCR_MAX_PAGES) { leftOver++; page.cleanup(); continue; }
+            worker ||= await startOcr(langs);
+            const base = page.getViewport({ scale: 1 });
+            const viewport = page.getViewport({ scale: OCR_LONG_SIDE / Math.max(base.width, base.height) });
+            const drawing = pdf.canvasFactory.create(Math.ceil(viewport.width), Math.ceil(viewport.height));
+            await page.render({ canvasContext: drawing.context, canvas: drawing.canvas, viewport }).promise;
+            const png = drawing.canvas.toBuffer("image/png");
+            pdf.canvasFactory.destroy(drawing);
+            page.cleanup();
+            let data;
+            try {
+                ({ data } = await withTimeout(worker.recognize(png, {}, { text: true, blocks: true }), Math.max(10000, OCR_TIME_LIMIT - (Date.now() - started)), "timeout"));
+            } catch (e) {
+                if (e.message !== "timeout") throw new Error(`Couldn't read page ${i + 1}: ${e.message}`);
+                timeUp = true; leftOver++;
+                await worker.terminate().catch(() => {});
+                worker = null;
+                continue;
+            }
+            const lines = (data.blocks || []).flatMap((b) => (b.paragraphs || []).flatMap((p) => p.lines || []));
+            unshown += addTextLayer(src.getPage(i), font, viewport, lines, canDraw);
+            texts.push(`--- Page ${i + 1} ---\n${String(data.text || "").trim() || "(no words found)"}`);
+            read++;
+        }
+    } finally {
+        if (worker) await worker.terminate().catch(() => {});
+        await pdf.destroy();
+    }
+
+    if (!read && !leftOver) {
+        return { text: `All ${plural(which.length, "page")} already have text you can search and copy, so no new file was made.` };
+    }
+    if (!read) throw new Error('Reading the pages took too long. Try again with fewer pages, like pages "1-5".');
+    const notes = [];
+    if (leftOver) notes.push(`${plural(leftOver, "page")} not read yet (at most ${OCR_MAX_PAGES} pages at a time${timeUp ? ", and it took too long" : ""}). Run make_searchable again on the new file to read the rest.`);
+    if (unshown) notes.push(`${plural(unshown, "word")} use letters (like Hindi) that can't be searched inside the PDF yet, but they are in the text below.`);
+    let foundText = texts.join("\n\n");
+    if (foundText.length > OCR_TEXT_LIMIT) foundText = `${foundText.slice(0, OCR_TEXT_LIMIT)}\n...(text cut here)`;
+    const summary = `searchable, ${plural(read, "page")} read${hadText ? `, ${hadText} skipped because they already had text` : ""}`;
+    return { doc: src, summary, note: notes.join(" "), foundText };
+}
+
 // ---------------------------------------------------------------- One entry point
 
 const SUFFIX = {
     merge: "merged", split: "part", extract_pages: "pages", delete_pages: "edited", rotate: "rotated",
-    watermark: "watermarked", fill_form: "filled", add_page_numbers: "numbered",
+    watermark: "watermarked", fill_form: "filled", add_page_numbers: "numbered", make_searchable: "searchable",
 };
 
 // inputs: [{ buffer, name }] in the same order as urls.
@@ -356,7 +518,9 @@ export async function editPdf(args = {}, inputs = []) {
     else if (action === "rotate") result = rotate(src, args.pages, args.angle);
     else if (action === "watermark") result = await watermark(src, args.pages, args.text, args.opacity);
     else if (action === "add_page_numbers") result = await addPageNumbers(src, args.pages);
+    else if (action === "make_searchable") result = await makeSearchable(src, first.buffer, args.pages, args.languages);
     else result = fillForm(src, args.fields, !!args.flatten);
+    if (result.text) return { text: result.text };
 
     let buffer;
     try {
@@ -365,5 +529,5 @@ export async function editPdf(args = {}, inputs = []) {
         if (/WinAnsi|cannot encode/i.test(e.message)) throw new Error("Some of the text uses letters this PDF can't show yet. Only English letters, numbers and common signs work for now.");
         throw new Error(`Couldn't save the PDF: ${e.message}`);
     }
-    return { files: [file(buffer)], summary: result.summary, note: result.note || "" };
+    return { files: [file(buffer)], summary: result.summary, note: result.note || "", foundText: result.foundText || "" };
 }

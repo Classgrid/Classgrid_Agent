@@ -101,6 +101,12 @@ function titleHistory(url, title) {
   if (list[0] && list[0].url === url && title && list[0].title !== title) { list[0].title = title; saveHistorySoon(); }
 }
 
+// ── The page's errors and failed web requests (like a browser's console and network tabs), for the agent ─────────
+const pageLog = { console: [], network: [] };
+const MAX_LOG = 200;
+function resetPageLog() { pageLog.console.length = 0; pageLog.network.length = 0; }
+function logPush(list, item) { list.push(item); if (list.length > MAX_LOG) list.shift(); }
+
 // ── The view ─────────────────────────────────────────────────────────────────────────────────────────────
 
 function ensureView() {
@@ -117,12 +123,27 @@ function ensureView() {
   });
   const onNav = () => {
     const url = wc.getURL();
+    resetPageLog();
     addHistory(url, wc.getTitle());
     if (currentChat && /^https?:\/\//.test(url)) { chats()[currentChat] = url; saveChats(); }
     applyZoom();
     tell(navInfo());
   };
   wc.on("did-navigate", onNav);
+  // Console messages (warnings and errors) and failed requests of the page
+  wc.on("console-message", (e, ...old) => {
+    const level = String(e?.level ?? old[0] ?? "");
+    if (!/warn|error|^[23]$/.test(level) || /^Electron Security Warning/.test(String(e?.message ?? old[1] ?? ""))) return;
+    logPush(pageLog.console, { level: /error|^3$/.test(level) ? "error" : "warning", message: String(e?.message ?? old[1] ?? "").slice(0, 1000), source: `${e?.sourceId ?? old[3] ?? ""}${(e?.lineNumber ?? old[2]) ? `:${e?.lineNumber ?? old[2]}` : ""}`, at: Date.now() });
+  });
+  wc.on("render-process-gone", (_e, d) => logPush(pageLog.console, { level: "error", message: `The page crashed (${d?.reason || "unknown"})`, source: "", at: Date.now() }));
+  const fromThisPage = (d) => d.webContentsId === wc.id;
+  wc.session.webRequest.onCompleted({ urls: ["*://*/*"] }, (d) => {
+    if (fromThisPage(d) && d.statusCode >= 400) logPush(pageLog.network, { status: d.statusCode, method: d.method, url: d.url.slice(0, 500), type: d.resourceType, at: Date.now() });
+  });
+  wc.session.webRequest.onErrorOccurred({ urls: ["*://*/*"] }, (d) => {
+    if (fromThisPage(d) && d.error !== "net::ERR_ABORTED") logPush(pageLog.network, { status: 0, error: d.error, method: d.method, url: d.url.slice(0, 500), type: d.resourceType, at: Date.now() });
+  });
   wc.on("did-navigate-in-page", onNav);
   wc.on("page-title-updated", () => { titleHistory(wc.getURL(), wc.getTitle()); tell(navInfo()); });
   wc.on("did-start-loading", () => tell(navInfo()));
@@ -326,6 +347,7 @@ async function act(a, byAgent) {
       await wait(Math.min(10000, Math.max(500, Number(a.seconds || 2) * 1000)));
       break;
     case "tabs": break;
+    case "logs": break;
     default: throw new Error(`Unknown action: ${a.action}`);
   }
   // Let the page settle before the picture: a new page until it finished loading, and about a second after a click
@@ -346,6 +368,7 @@ async function act(a, byAgent) {
     out.links = await wc.executeJavaScript(`[...document.querySelectorAll("a[href]")].slice(0, 80).map((l) => ({ text: (l.innerText || "").trim().slice(0, 80), href: l.href }))`).catch(() => []);
   }
   if (a.action === "tabs") out.tabs = [{ i: 0, url: wc.getURL(), active: true }];
+  if (a.action === "logs") out.logs = { console: pageLog.console.slice(-80), network: pageLog.network.slice(-80) };
   if (a.screenshot !== false && a.action !== "tabs") out.screenshot = await shot();
   return out;
 }

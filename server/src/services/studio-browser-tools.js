@@ -23,6 +23,9 @@ const LOOK = [
   fn("browser_read", "Read the text of the current page and its links (up to 20,000 characters). It first scrolls through the page so content that loads late is included. Use it to find facts and links instead of guessing from a screenshot."),
 ];
 
+// The page's own errors (console) and failed web requests (network), for finding why a page or web app breaks
+LOOK.push(fn("browser_logs", "See the current page's errors and warnings (its console) and the web requests that failed (status 400 and up, or no answer), like a browser's developer tools. Use it when a page or the user's web app doesn't work, to find out why. Only in the desktop app's browser."));
+
 const ACT = [
   fn("browser_open", "Open a website in the user's live browser. A plain search phrase opens a Google search. A dev server you started with start_background_command in this chat opens at http://localhost:<port> (it must listen on 0.0.0.0). Returns a screenshot.", {
     url: { type: "string", description: "A link (example.com or https://...) or words to search for." },
@@ -75,6 +78,7 @@ const ACTIONS = {
   browser_wait: (a) => ({ action: "wait", seconds: Number(a?.seconds ?? 2) }),
   browser_screenshot: () => ({ action: "screenshot" }),
   browser_read: () => ({ action: "read", screenshot: false }),
+  browser_logs: () => ({ action: "logs", screenshot: false }),
 };
 
 // Every screenshot an agent takes is saved (the CDN, a random link) and listed for the chat's Screenshots tab
@@ -150,6 +154,13 @@ export function makeBrowserHandlers({ userId, sessionId, desktop = false }) {
         }
         if (!r?.ok) return `Error: ${r?.error || "the browser step failed"}${r?.url ? ` (page: ${r.url})` : ""}`;
         const head = `Page: ${r.title || "(no title)"} — ${r.url}${r.w ? `\nPage size: ${r.w}x${r.h} pixels` : ""}`;
+        if (name === "browser_logs") {
+          if (!r.logs) return `${head}\n\nThis browser can't show the page's errors (only the desktop app's browser can).`;
+          const ago = (t) => `${Math.max(0, Math.round((Date.now() - t) / 1000))}s ago`;
+          const cons = r.logs.console.map((c) => `- ${c.level}: ${c.message}${c.source ? ` (${c.source})` : ""} · ${ago(c.at)}`).join("\n");
+          const net = r.logs.network.map((n) => `- ${n.status ? n.status : n.error} ${n.method} ${n.url} (${n.type}) · ${ago(n.at)}`).join("\n");
+          return `${head}\n\nConsole errors and warnings since this page opened:\n${cons || "(none)"}\n\nFailed web requests:\n${net || "(none)"}`;
+        }
         if (name === "browser_read") {
           const links = (r.links || []).filter((l) => l.text).slice(0, 60).map((l) => `- ${l.text}: ${l.href}`).join("\n");
           return `${head}\n\n${r.text || "(no text)"}${links ? `\n\nLinks:\n${links}` : ""}`;

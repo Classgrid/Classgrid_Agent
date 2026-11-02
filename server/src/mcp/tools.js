@@ -61,7 +61,7 @@ import IdeProject from '../models/IdeProject.js';
 import { ensureFreshGithubToken } from '../services/github-token.service.js';
 import { repoAppToken, classgridAuthor, userCoAuthorLine } from '../services/github-app.service.js';
 import { projectTools, projectForChat, projectSnapshot, projectChangesBetween, formatProjectChanges, sandboxDataDir } from '../services/ide-project.service.js';
-import { LOCAL_TOOLS, callLocal } from '../services/local-runner.service.js';
+import { LOCAL_TOOLS, callLocal, inChatWorktree } from '../services/local-runner.service.js';
 
 // What the sandbox container sees as /data, and where the hidden runner script is.
 // Normal chat: /data is the chat's own folder. Project Mode chat: /data IS the user's project (the same files as
@@ -1752,7 +1752,7 @@ export const handleToolCall = async (name, args, context = {}) => {
   if (LOCAL_TOOLS.has(name) && context.sessionId) {
     const project = await projectForChat(context.sessionId).catch(() => null);
     if (process.env.CG_LOCAL_DEV) console.log(`[Local runner] ${name} in chat ${context.sessionId}: project ${project?._id || "none"} (${project?.location || "-"})`);
-    if (project?.location === "local") return { content: [{ type: "text", text: await callLocal(project, name, args || {}, context.sessionId) }] };
+    if (project?.location === "local") return { content: [{ type: "text", text: await callLocal(await inChatWorktree(project, context.sessionId), name, args || {}, context.sessionId) }] };
   }
   // Project Mode file tools (the open project of this chat)
   if (projectTools[name]) {

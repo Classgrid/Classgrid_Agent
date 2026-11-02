@@ -46,13 +46,17 @@ Every step asks the user first on the permission card (they can pick "always all
 -   **Desktop notifications** when an answer finishes or you wake up while the user is in another window.
 -   **Project hooks** (.classgrid/hooks.json): commands that run after every edit, and commands that are blocked.
 -   **Jupyter notebooks**: notebook_edit changes, inserts or deletes cells.
+-   **Page errors and failed web requests**: browser_logs shows the open page's console errors and warnings and the
+    requests that failed (like a browser's developer tools), to find why a page or web app breaks.
+-   **The chat in its own copy**: in a folder project that is a Git repository, use_worktree moves the whole chat into
+    its own copy (git worktree) on its own branch, and back when done, so the main folder stays untouched.
 
 ## Made anywhere (website and desktop)
 
 -   **Office files**: make_office_file makes Word, Excel and PowerPoint files; edit_office_file changes an
     existing Word file (with tracked changes when wanted).
 -   **PDF tools**: edit_pdf merges, splits, picks or deletes pages, rotates, watermarks, numbers pages and fills
-    forms.
+    forms, and makes a scanned PDF searchable (make_searchable reads the words in its pages).
 -   **Helpers and teamwork**: helpers on any model, helper types (define_helper), helpers that get the chat so far
     (with_chat), workflows (run_workflow: helpers in fixed steps), and chats sending each other tasks (send_to_chat).
 -   **"/" commands**: /review, /security-review, /simplify, /run, /research (deep research with helpers), /init

@@ -7,6 +7,7 @@
  */
 import { getIO } from "./socket.service.js";
 import { projectForChat } from "./ide-project.service.js";
+import redis from "../config/redis.js";
 
 export const LOCAL_TOOLS = new Set([
     "list_project_files", "view_project_file", "search_project", "write_project_file", "edit_project_file",
@@ -19,11 +20,27 @@ export const LOCAL_TOOLS = new Set([
     "send_background_input", // type into a running background command
 ]);
 
-/** The chat's project when it is a folder on the user's computer, else null */
+/** The chat's project when it is a folder on the user's computer, else null (in its own copy when the chat moved there) */
 export async function localProjectFor(sessionId) {
     if (!sessionId) return null;
     const project = await projectForChat(sessionId).catch(() => null);
-    return project?.location === "local" ? project : null;
+    return project?.location === "local" ? inChatWorktree(project, sessionId) : null;
+}
+
+// The main chat working in its own copy of a folder project (git worktree, on its own branch): use_worktree.
+// While it is set, all the chat's project tools run in that copy; the user's main folder is left alone.
+const WORKTREE = (sessionId) => `chatworktree:${sessionId}`;
+export async function chatWorktree(sessionId) {
+    if (!sessionId) return null;
+    try { return JSON.parse((await redis.get(WORKTREE(sessionId))) || "null"); } catch { return null; }
+}
+export async function setChatWorktree(sessionId, wt) {
+    if (wt) await redis.set(WORKTREE(sessionId), JSON.stringify(wt), "EX", 60 * 24 * 3600);
+    else await redis.del(WORKTREE(sessionId));
+}
+export async function inChatWorktree(project, sessionId) {
+    const wt = project?.location === "local" ? await chatWorktree(sessionId).catch(() => null) : null;
+    return wt ? { owner: project.owner, _id: project._id, name: project.name, location: "local", localPath: wt.dir, mainPath: project.localPath, worktree: wt } : project;
 }
 
 const runnerRoom = (userId) => `runner:${userId}`;
