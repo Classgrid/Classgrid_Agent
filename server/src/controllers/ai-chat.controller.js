@@ -4110,7 +4110,7 @@ You work on the user's own Windows computer through their Classgrid desktop app,
                                   mime_type: args.mimeType,
                                   file_type: getFileType(args.mimeType),
                                   size_bytes: buffer.length,
-                                  source: 'ai_generated'
+                                  source: 'generated'
                                 });
                                 await libraryFile.save();
 
@@ -4213,7 +4213,7 @@ You work on the user's own Windows computer through their Classgrid desktop app,
                                   mime_type: mimeType,
                                   file_type: getFileType(mimeType),
                                   size_bytes: buffer.length,
-                                  source: 'ai_generated'
+                                  source: 'generated'
                                 });
                                 await libraryFile.save();
 

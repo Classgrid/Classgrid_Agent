@@ -35,6 +35,27 @@
 // already streams live, and a thought-tool call costs a whole extra model round before the answer.
 // A call to it is still handled if the model makes one anyway.
 
+// Cloudflare refuses a whole request with too many pictures in it ("too many images in request"), and a long task
+// with screenshots (computer tool, browser) keeps adding them: only the newest ones stay, older ones become a note
+const MAX_CF_IMAGES_PER_REQUEST = 4;
+export function keepNewestImages(conversation, max = MAX_CF_IMAGES_PER_REQUEST) {
+    let seen = 0;
+    for (let i = conversation.length - 1; i >= 0; i--) {
+        const m = conversation[i];
+        if (!Array.isArray(m?.content)) continue;
+        let changed = false;
+        const parts = [];
+        for (let j = m.content.length - 1; j >= 0; j--) {
+            const part = m.content[j];
+            if (part?.type === "image_url" && ++seen > max) {
+                parts.unshift({ type: "text", text: "(an older picture was taken out to save room; take a new one if you need it)" });
+                changed = true;
+            } else parts.unshift(part);
+        }
+        if (changed) conversation[i] = { ...m, content: parts };
+    }
+}
+
 export class StreamChatError extends Error {
     constructor(message, { status, rateLimited = false } = {}) {
         super(message);
@@ -288,6 +309,7 @@ export async function streamChat({
             const roundProviders = [provider, ...fallbackProviders.filter((p) => p?.model && p.model !== provider.model)];
             for (let tryNo = 0, at = 0; ; tryNo++) {
                 let shownText = "";
+                if (String(roundProviders[at]?.model || "").startsWith("@cf/")) keepNewestImages(conversation);
                 try {
                     round = await streamOneRound({
                         provider: roundProviders[at], messages: conversation, tools: roundTools, temperature, maxTokens: roundMax, timeoutMs, signal,
@@ -297,8 +319,11 @@ export async function streamChat({
                     });
                     break;
                 } catch (e) {
-                    if (signal?.aborted || tryNo >= 5) throw e;
-                    console.warn(`[AI-STREAM] ${roundProviders[at].model} round failed (${String(e?.message || e).slice(0, 160)}); trying again (${tryNo + 1}/5)`);
+                    // "Too many requests per minute" (many helpers on one model): wait it out longer instead of giving up
+                    const busy = e?.rateLimited || /HTTP 429|rate limit/i.test(String(e?.message || ""));
+                    const maxTries = busy ? 9 : 5;
+                    if (signal?.aborted || tryNo >= maxTries) throw e;
+                    console.warn(`[AI-STREAM] ${roundProviders[at].model} round failed (${String(e?.message || e).slice(0, 160)}); trying again (${tryNo + 1}/${maxTries})`);
                     if (shownText.trim()) {
                         continuedText += shownText;
                         conversation.push({ role: "assistant", content: shownText });
@@ -306,7 +331,7 @@ export async function streamChat({
                     }
                     if (tryNo % 2 === 1 && at < roundProviders.length - 1) at++;
                     onStatus?.("The model is busy, trying again…");
-                    await new Promise((r) => setTimeout(r, Math.min(3000 * (tryNo + 1), 10000)));
+                    await new Promise((r) => setTimeout(r, busy ? Math.min(10000 * (tryNo + 1), 30000) : Math.min(3000 * (tryNo + 1), 10000)));
                 }
             }
             if (round.reasoning) hadReasoning = true;
