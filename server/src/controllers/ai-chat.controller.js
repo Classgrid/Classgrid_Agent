@@ -1340,12 +1340,12 @@ const READ_LOCAL_FILE_TOOL = {
         }
     }
 };
-// How to run commands on the user's computer (the guide's desktop-terminal page), in every desktop app chat
+// How to run commands on the user's computer (server only: prompts/desktop-terminal.md, never copied anywhere), in every desktop app chat
 let terminalGuideCache = null;
 async function desktopTerminalGuide() {
     if (terminalGuideCache !== null) return terminalGuideCache;
     const fs = await import("fs/promises");
-    terminalGuideCache = await fs.readFile(new URL("../skills/classgrid-guide/references/desktop-terminal.md", import.meta.url), "utf8").catch(() => "");
+    terminalGuideCache = await fs.readFile(new URL("../prompts/desktop-terminal.md", import.meta.url), "utf8").catch(() => "");
     return terminalGuideCache;
 }
 
