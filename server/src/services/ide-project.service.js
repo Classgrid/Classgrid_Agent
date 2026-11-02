@@ -886,6 +886,13 @@ const PROJECT_MODE_RULES = `PROJECT MODE RULES (this chat is in Project Mode; th
 // A chat sent from Project Mode belongs to the project that is open there (only the owner's own projects)
 const UI_PROJECT = (sessionId) => `ide:uiProject:${sessionId}`;
 
+// Studio with "No project" picked: the chat stops being tied to the project that was on screen before, so its
+// tools work on the user's computer (desktop app) instead of that old project
+export async function forgetChatScreenProject(sessionId) {
+  if (!sessionId) return;
+  await redis.del(UI_PROJECT(sessionId), CHAT_HERE(sessionId)).catch(() => {});
+}
+
 export async function linkChatToProject(userId, projectId, sessionId, deviceId = null) {
   await connectDB();
   const project = await IdeProject.findOne({ _id: projectId, owner: userId }).select("_id localCopies");

@@ -72,7 +72,7 @@ import {
 } from "../services/ai-chat.service.js";
 import { getHistory, getHistoryCount, appendToHistory, invalidateHistoryCache, getChatTranscript } from "../services/ai-chat-history.service.js";
 import { canAccessSession, gridLabelMap, gridProfilesText, getSharedSessionsFor, leaveSharedChat, sharedChatIdsFor } from "../services/ai-chat-grid.service.js";
-import { editorContextFor, rememberProjectSnapshot, sandboxDataDir, startCheckpoint, finishCheckpoint, linkChatToProject, touchStudio } from "../services/ide-project.service.js";
+import { editorContextFor, rememberProjectSnapshot, sandboxDataDir, startCheckpoint, finishCheckpoint, linkChatToProject, forgetChatScreenProject, touchStudio } from "../services/ide-project.service.js";
 import { PLANNER_BROWSER_TOOLS, PLANNER_BLIND_TOOLS, WORKER_BROWSER_TOOLS, BROWSER_TOOL_NAMES, makeBrowserHandlers, BROWSER_WORKER_SYSTEM } from "../services/studio-browser-tools.js";
 import { ensureBrowser } from "../services/studio-browser.service.js";
 import { gateHandlers, askPermission, PERMISSION_MODES } from "../services/permission-gate.js";
@@ -2075,6 +2075,7 @@ You are currently talking to Nikhil Shinde (nikhil.shinde@classgrid.in), the CRE
         } else if (sessionId && !isIncognito && !gridSender && body.appMode === "studio" && body.taskOrigin !== "whatsapp" && req.user?._id) {
             // Studio with no project open: the chat is kept in Studio's own chat list
             await User.updateOne({ _id: req.user._id }, { $addToSet: { studio_chat_ids: sessionId } }).catch(() => {});
+            await forgetChatScreenProject(sessionId);
         }
         // Work from WhatsApp (calls and messages): its chat is listed only in Studio (owner, 2026-11-02)
         if (sessionId && !isIncognito && body.taskOrigin === "whatsapp" && req.user?._id) {
