@@ -46,6 +46,33 @@ export function TerminalToolView({ command, output, running = false }: TerminalT
     });
   };
 
+  // Desktop app: the command and its output together in one card (no tabs), on the user's own computer
+  if (import.meta.env.VITE_DESKTOP === "1") {
+    const cmd = typeof command === 'object' ? JSON.stringify(command) : String(command || '');
+    const raw = typeof output === 'object' ? JSON.stringify(output, null, 2) : String(output || '');
+    const exit = raw.match(/\n?\[exit code (-?\d+)\]\s*$/);
+    const shown = raw.replace(/\n?\[exit code -?\d+\]\s*$/, '').trim();
+    const waiting = running && (!shown || shown === 'Waiting for output...');
+    const failed = !running && ((exit && exit[1] !== '0') || /^(error|tool error)/i.test(shown));
+    return (
+      <ToolOutputContainer
+        icon={<Laptop className="text-slate-400 dark:text-[#a3a3a3]" strokeWidth={1.5} />}
+        toolName="This computer"
+        actionName="PowerShell"
+      >
+        <div className="m-2 rounded-lg bg-[#F9F8F7] dark:bg-[#202020] border border-slate-200 dark:border-transparent font-mono text-[13px] overflow-hidden">
+          <div className="p-3 leading-relaxed whitespace-pre-wrap break-words">{formatCommand(cmd)}</div>
+          <div className="border-t border-slate-200 dark:border-[#2e2e2e] p-3 leading-relaxed whitespace-pre-wrap break-words overflow-x-auto max-h-[400px] text-slate-600 dark:text-[#d4d4d4] [scrollbar-color:#D3D1CB_transparent] dark:[scrollbar-color:rgba(255,255,255,0.2)_transparent] [scrollbar-width:thin]">
+            {waiting
+              ? <span className="inline-flex items-center gap-2"><Spinner className="size-3.5 shrink-0" />Waiting for output...</span>
+              : shown || '(no output)'}
+          </div>
+          {failed && exit && <div className="border-t border-slate-200 dark:border-[#2e2e2e] px-3 py-2 text-red-600 dark:text-red-500">Failed (exit code {exit[1]})</div>}
+        </div>
+      </ToolOutputContainer>
+    );
+  }
+
   return (
     <ToolOutputContainer
       icon={<Laptop className="text-slate-400 dark:text-[#a3a3a3]" strokeWidth={1.5} />}

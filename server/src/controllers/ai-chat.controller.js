@@ -1325,7 +1325,7 @@ const READ_LOCAL_FILE_TOOL = {
                 path: { type: "string", description: "The full path on the user's computer, exactly as they gave it, e.g. C:\\Users\\name\\Downloads\\report.pdf" },
                 start_line: { type: "integer", description: "Text files and documents: the first line to read (default 1)" },
                 end_line: { type: "integer", description: "Text files and documents: the last line to read (optional)" },
-                start_page: { type: "integer", description: "A scanned PDF (shown as page pictures, 4 at a time): the first page to show, e.g. 5 for pages 5-8" }
+                start_page: { type: "integer", description: "A scanned PDF (shown as page pictures, 20 at a time): the first page to show, e.g. 21 for pages 21-40" }
             },
             required: ["path"]
         }

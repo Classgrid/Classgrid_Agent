@@ -137,9 +137,8 @@ export async function readLocalFile(userId, args = {}) {
             heard = typeof sound === "string" ? ` Its sound couldn't be fetched (${sound.replace(/^Error: /, "")}).` : await soundToText(sound.buf, "local-video-sound.wav", "audio/wav");
         }
         const frames = first.video.frames;
-        const big = frames.length > 3 ? [frames[1], frames[Math.floor(frames.length / 2)], frames[frames.length - 1]] : frames;
-        const shown = first.video.sheet ? [first.video.sheet, ...big] : frames.slice(0, 4);
-        const order = first.video.sheet ? " The first picture is a sheet with all of them, in order, left to right, top to bottom; the next ones are a few of them bigger." : "";
+        const shown = first.video.sheet ? [first.video.sheet, ...frames] : frames;
+        const order = first.video.sheet ? " The first picture is a sheet with all of them, in order, left to right, top to bottom; then each one bigger, in order." : "";
         return { text: `${first.text}${order}${link ? ` If no pictures are shown to you below, use analyze_image with this link (all the pictures on one sheet, in order, left to right, top to bottom): ${link}` : ""}${heard}`, images: shown.map((data) => ({ data })) };
     }
     const file = first.file;
@@ -185,8 +184,8 @@ export async function readLocalFile(userId, args = {}) {
         if (file.mime === "application/pdf") {
             try {
                 const { pdfPageImages } = await import("./llm-stream-anthropic.js");
-                // 4 pages at a time (the most pictures a model takes from one step); start_page reads the next ones
-                const { images, pages, first } = await pdfPageImages(buf, 4, args?.start_page);
+                // Up to 20 pages in one step; start_page reads the next ones
+                const { images, pages, first } = await pdfPageImages(buf, 20, args?.start_page);
                 if (images.length) {
                     // A model that can't see pictures reads each page with analyze_image on its Classgrid link
                     let links = [];
@@ -198,7 +197,7 @@ export async function readLocalFile(userId, args = {}) {
                     }
                     const last = first + images.length - 1;
                     const linkText = links.length ? ` If no pictures are shown to you below, read each page with analyze_image (ask it to write out all the text and tables on the page): ${links.map((l, n) => `page ${first + n}: ${l}`).join(", ")}` : "";
-                    const more = last < pages ? ` To see pages ${last + 1}-${Math.min(pages, last + 4)}, call read_local_file again with start_page: ${last + 1}. Don't use the terminal for this PDF.` : "";
+                    const more = last < pages ? ` To see pages ${last + 1}-${Math.min(pages, last + 20)}, call read_local_file again with start_page: ${last + 1}. Don't use the terminal for this PDF.` : "";
                     return { text: `${file.path} is a scanned PDF with no text inside (${pages} page${pages === 1 ? "" : "s"}). ${images.length === pages ? `Its ${pages === 1 ? "page is" : `${pages} pages are`}` : `Pages ${first}-${last} of ${pages} are`} attached below as ${images.length === 1 ? "a picture; read it" : "pictures; read them"} yourself.${more}${linkText}`, images: images.map((jpg) => ({ data: jpg.toString("base64") })) };
                 }
             } catch (err) {

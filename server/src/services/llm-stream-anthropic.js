@@ -219,9 +219,10 @@ const TRUSTED_IMAGE_URL = /https:\/\/[^\s"'<>()\]]+?\.(?:png|jpe?g|gif|webp)(?:\
 // Only tools that make or upload an image have their image links shown; database, log, web and other
 // results stay text (their links are just data, and fetching them would cost tokens on every query).
 const IMAGE_LINK_TOOLS = new Set(["upload_sandbox_file_to_cdn", "upload_file_to_cdn", "generate_image", "edit_image", "make_video"]);
-const MAX_IMAGES_PER_TOOL_RESULT = 4;
-const MAX_TOOL_IMAGES_PER_RUN = 16;
-const MAX_TOOL_IMAGE_BYTES_PER_RUN = 18 * 1024 * 1024;
+const MAX_IMAGES_PER_TOOL_RESULT = 20; // a scanned PDF from the user's computer comes as up to 20 page pictures in one step
+const MAX_CF_IMAGES_PER_TOOL_RESULT = 4; // Cloudflare models that see pictures take fewer
+const MAX_TOOL_IMAGES_PER_RUN = 40;
+const MAX_TOOL_IMAGE_BYTES_PER_RUN = 26 * 1024 * 1024; // under Claude's own 32 MB per request, with room for the chat
 
 // Attachments Claude can read natively: images (vision) and PDFs. The server downloads them and sends the
 // bytes (base64), so Claude never has to reach the URL itself. A file that can't be fetched is skipped
@@ -277,7 +278,7 @@ export function makeToolImageCollector(signal, conversation = null) {
         const mediaType = sniffImageType(buf);
         if (!mediaType) return;
         const b64 = buf.toString("base64");
-        if (out.length >= MAX_IMAGES_PER_TOOL_RESULT) return;
+        if (out.length >= MAX_CF_IMAGES_PER_TOOL_RESULT) return;
         while ((sent >= MAX_TOOL_IMAGES_PER_RUN || bytes + b64.length > MAX_TOOL_IMAGE_BYTES_PER_RUN) && dropOldest()) { /* made room */ }
         if (sent >= MAX_TOOL_IMAGES_PER_RUN || bytes + b64.length > MAX_TOOL_IMAGE_BYTES_PER_RUN) return;
         sent++;
