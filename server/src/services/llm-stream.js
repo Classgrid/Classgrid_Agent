@@ -500,7 +500,7 @@ export async function streamChat({
                 }
                 if (toolImages && !String(resultText ?? "").startsWith("FAILED")) roundImages.push(...await toolImages.fromResult(toolName, toolResult && typeof toolResult === "object" ? toolResult : null, resultText));
                 // load_tools carries the full rules of the loaded groups, so it isn't cut like normal tool output.
-                conversation.push({ role: "tool", tool_call_id: call.id, content: String(resultText ?? "").slice(0, toolName === "run_project_helpers" || toolName === "check_helpers" || toolName === "read_whatsapp_messages" || toolName === "wait_for_whatsapp_reply" ? 200000 : toolName === "load_tools" ? 40000 : toolName === "open_url" || toolName === "view_project_file" || toolName === "search_project" || toolName === "read_local_file" ? 20000 : 6000) });
+                conversation.push({ role: "tool", tool_call_id: call.id, content: String(resultText ?? "").slice(0, toolName === "run_project_helpers" || toolName === "check_helpers" || toolName === "read_whatsapp_messages" || toolName === "wait_for_whatsapp_reply" ? 200000 : ["execute_terminal_command", "computer_terminal", "check_background_command", "start_background_command", "send_background_input", "run_code"].includes(toolName) ? 60000 : toolName === "load_tools" ? 40000 : toolName === "open_url" || toolName === "view_project_file" || toolName === "search_project" || toolName === "read_local_file" ? 20000 : 6000) });
             }
 
             // Tool messages hold only text, so the images follow as one message the model looks at

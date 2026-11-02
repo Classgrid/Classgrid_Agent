@@ -1420,12 +1420,14 @@ const MEMORY_NOTE_DEFS = [
 ];
 
 const COMPUTER_TERMINAL_DEFS = [
-    terminalDef("execute_terminal_command", "Run a command in a terminal on the user's own computer (Windows PowerShell; on a Mac or Linux, bash). It starts in the user's home folder; each command is a new terminal, so use full paths or cd in the same command. For Bash on Windows (when Git Bash is installed) run: bash -lc '<command>'. It waits for the command to finish and gives you its whole output in one step, up to 10 minutes: use it for every command that ends by itself, even a slow one (ssh to a server, installs, builds, file work). The user is asked to allow each command first.", {
+    terminalDef("execute_terminal_command", "Run a command in a terminal on the user's own computer (Windows PowerShell; on a Mac or Linux, bash). It starts in the user's home folder; each command is a new terminal, so use full paths or cd in the same command. For Bash, set shell to bash (Git Bash, or WSL); for Command Prompt, set shell to cmd. It waits for the command to finish and gives you its whole output in one step, up to 10 minutes: use it for every command that ends by itself, even a slow one (ssh to a server, installs, builds, file work). The user is asked to allow each command first.", {
         command: { type: "string", description: "The exact command to run" },
+        shell: { type: "string", enum: ["powershell", "bash", "cmd"], description: "Which shell runs it: powershell (default), bash (Git Bash, or WSL when Git Bash isn't there) or cmd" },
         description: { type: "string", description: "A few plain words saying what the command does, shown to the user above it (e.g. \"List the Downloads folder\")" },
     }, ["command"]),
     terminalDef("start_background_command", "Only for a command that never ends by itself (a dev server, a watcher) or one that runs longer than 10 minutes: it starts in the background on the user's own computer, in their home folder, and returns a job_id. Never use it for a command that finishes on its own (ssh checks, installs, file work): use execute_terminal_command, which waits and gives the whole output at once. The user is asked to allow it first.", {
         command: { type: "string", description: "The exact command to run" },
+        shell: { type: "string", enum: ["powershell", "bash", "cmd"], description: "Which shell runs it: powershell (default), bash (Git Bash, or WSL when Git Bash isn't there) or cmd" },
         description: { type: "string", description: "A few plain words saying what it does" },
     }, ["command"]),
     terminalDef("check_background_command", "See whether a background command on the user's computer is still running, and its latest output. Pass wait_seconds to wait for it to finish in one step instead of checking again and again.", {
@@ -5755,8 +5757,9 @@ If a tool fails, never show the error message; say only: "Something went wrong o
             }
         }
         if (chatProject?.location === "local") {
-            const def = terminalDef("execute_terminal_command", "Run a command in the project folder on the user's own computer (Windows PowerShell; Bash through bash -lc '...' when Git Bash is installed). It waits for the command to finish and gives you its whole output in one step, up to 10 minutes: use it for every command that ends by itself (git, installs, builds, tests, scripts, ssh). Use start_background_command only for servers and watchers. The user is asked to allow each command first.", {
+            const def = terminalDef("execute_terminal_command", "Run a command in the project folder on the user's own computer (Windows PowerShell by default; set shell to bash for Bash, or to cmd for Command Prompt). It waits for the command to finish and gives you its whole output in one step, up to 10 minutes: use it for every command that ends by itself (git, installs, builds, tests, scripts, ssh). Use start_background_command only for servers and watchers. The user is asked to allow each command first.", {
                 command: { type: "string", description: "The exact command to run" },
+        shell: { type: "string", enum: ["powershell", "bash", "cmd"], description: "Which shell runs it: powershell (default), bash (Git Bash, or WSL when Git Bash isn't there) or cmd" },
                 description: { type: "string", description: "A few plain words saying what the command does, shown to the user above it" },
             }, ["command"]);
             for (const list of [fullToolList, activeToolList]) {
@@ -5840,6 +5843,27 @@ If a tool fails, never show the error message; say only: "Something went wrong o
             llmConfig.toolHandlers.save_memory = (a) => runOnComputer(memoryUser, "memory", { ...a, action: "save", project: a?.project_only && memoryProject ? memoryProject : "" }, sessionId);
             llmConfig.toolHandlers.read_memory = (a) => runOnComputer(memoryUser, "memory", { ...a, action: "read", project: memoryProject }, sessionId);
             llmConfig.toolHandlers.delete_memory = (a) => runOnComputer(memoryUser, "memory", { ...a, action: "delete", project: memoryProject }, sessionId);
+            // A cloud project chat in the desktop app: the project's own terminal works on the cloud copy, and
+            // computer_terminal runs on the user's computer (PowerShell, Bash or cmd), so the terminal is there in every chat
+            if (!onComputer && chatProject?.location !== "local" && !fullToolList.some((t) => t.function.name === "computer_terminal")) {
+                const computerTerm = terminalDef("computer_terminal", "Run a command in a terminal on the user's own computer (not in the cloud project): PowerShell by default, shell: \"bash\" for Bash, shell: \"cmd\" for Command Prompt. It starts in the user's home folder and gives you the whole output.", {
+                    command: { type: "string", description: "The exact command to run" },
+                    shell: { type: "string", enum: ["powershell", "bash", "cmd"], description: "Which shell runs it: powershell (default), bash (Git Bash, or WSL when Git Bash isn't there) or cmd" },
+                    description: { type: "string", description: "A few plain words saying what the command does" },
+                }, ["command"]);
+                fullToolList.push(computerTerm);
+                activeToolList.push(computerTerm);
+                toolPlan.allowedToolNames.add("computer_terminal");
+                toolPlan.loadedNames.add("computer_terminal");
+                const termUser = req.user?._id || req.user?.id;
+                llmConfig.toolHandlers.computer_terminal = async (args) => {
+                    if (body.permissionMode !== "turbo") {
+                        const p = await askPermission({ ...permissionCtx, mode: PERMISSION_MODES.has(body.permissionMode) ? body.permissionMode : "review", tool: "execute_terminal_command", args });
+                        if (!p.allowed) return p.message;
+                    }
+                    return runOnComputer(termUser, "execute_terminal_command", args, sessionId);
+                };
+            }
             for (const def of [READ_LOCAL_FILE_TOOL, ...MEMORY_NOTE_DEFS, ...(onComputer ? COMPUTER_TERMINAL_DEFS : [])]) {
                 // The terminal tools replace the cloud sandbox ones here, so the AI reads the right description
                 for (const list of [fullToolList, activeToolList]) {

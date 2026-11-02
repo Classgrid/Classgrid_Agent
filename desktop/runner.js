@@ -468,12 +468,12 @@ const tools = {
   // A command in the project folder (PowerShell on Windows), up to 10 minutes
   // A command that is still running after AUTO_BACKGROUND_S seconds keeps running as a background job (it isn't
   // stopped): the AI gets its job_id and waits for it with check_background_command, and can work on meanwhile
-  execute_terminal_command(root, { command }) {
+  execute_terminal_command(root, { command, shell }) {
     if (!command) return Promise.resolve("Error: command is empty");
     const blocked = blockedByHooks(root, command);
     if (blocked) return Promise.resolve(`Error: this project's hooks block commands containing "${blocked}" (.classgrid/hooks.json), so it didn't run.`);
     return new Promise((resolve) => {
-      const proc = shellSpawn(String(command), root);
+      const proc = shellSpawn(String(command), root, shell);
       const job = { proc, command: String(command), log: "", startedAt: Date.now(), exitCode: null };
       const add = (d) => { job.log += d.toString(); if (job.log.length > 200000) job.log = job.log.slice(-200000); };
       proc.stdout.on("data", add);
@@ -492,12 +492,12 @@ const tools = {
     });
   },
 
-  start_background_command(root, { command }) {
+  start_background_command(root, { command, shell }) {
     if (!command) return "Error: command is empty";
     const blocked = blockedByHooks(root, command);
     if (blocked) return `Error: this project's hooks block commands containing "${blocked}" (.classgrid/hooks.json), so it didn't run.`;
     const id = `job${jobs.size + 1}-${Date.now().toString(36).slice(-4)}`;
-    const proc = shellSpawn(String(command), root);
+    const proc = shellSpawn(String(command), root, shell);
     const job = { id, proc, command: String(command), log: "", startedAt: Date.now(), exitCode: null, chat: arguments[1] && arguments[1].__chat };
     const add = (d) => { job.log += d.toString(); if (job.log.length > 200000) job.log = job.log.slice(-200000); };
     proc.stdout.on("data", add);
@@ -821,10 +821,19 @@ const computerFileTools = {
 // by the user first)
 const COMPUTER_TOOLS = new Set(["execute_terminal_command", "start_background_command", "check_background_command", "stop_background_command", "run_code", "wait_until", "send_background_input"]);
 
-function shellSpawn(command, cwd) {
-  return process.platform === "win32"
-    ? spawn("powershell.exe", ["-NoLogo", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", command], { cwd, windowsHide: true })
-    : spawn("/bin/bash", ["-lc", command], { cwd });
+// Git Bash when it is installed (else WSL's bash), for shell: "bash"
+function bashPath() {
+  const os = require("node:os");
+  return ["C:\\Program Files\\Git\\bin\\bash.exe", "C:\\Program Files (x86)\\Git\\bin\\bash.exe", path.join(os.homedir(), "AppData", "Local", "Programs", "Git", "bin", "bash.exe")].find((f) => fs.existsSync(f)) || "bash.exe";
+}
+// A command runs like in the user's own terminal: their PowerShell profile is loaded, a question it asks can be
+// answered (send_background_input), and text is UTF-8. shell: "bash" runs it in Bash, "cmd" in Command Prompt.
+function shellSpawn(command, cwd, shell = "powershell") {
+  if (process.platform !== "win32") return spawn("/bin/bash", ["-lc", command], { cwd });
+  const which = String(shell || "powershell").toLowerCase();
+  if (which === "bash" || which === "sh" || which === "git-bash") return spawn(bashPath(), ["-lc", command], { cwd, windowsHide: true });
+  if (which === "cmd") return spawn("cmd.exe", ["/d", "/s", "/c", command], { cwd, windowsHide: true, windowsVerbatimArguments: true });
+  return spawn("powershell.exe", ["-NoLogo", "-ExecutionPolicy", "Bypass", "-Command", `[Console]::OutputEncoding=[Text.UTF8Encoding]::new($false); $OutputEncoding=[Text.UTF8Encoding]::new($false); ${command}`], { cwd, windowsHide: true });
 }
 
 // A background job finished: the server wakes the chat that started it (unless it was stopped on purpose)
@@ -945,6 +954,7 @@ function readForFilesTab(root, rel) {
 }
 
 module.exports = {
+  tools, // the AI's tools on this computer (also used by the terminal tests)
   readLocalFile,
   listForFilesTab,
   githubRepoOf,
