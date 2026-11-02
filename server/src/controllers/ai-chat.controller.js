@@ -85,7 +85,7 @@ import NotificationLog from "../models/NotificationLog.js";
 import { getMcpTools, handleToolCall, readSandboxFiles } from "../mcp/tools.js";
 import { CUSTOM_MCP_TOOL, runCustomMcpTool, customMcpPromptLine } from "../services/custom-mcp-ai.js";
 import { PLAY_SONG_TOOL, songTools, runPlaySong, runDownloadSong } from "../services/music-ai.js";
-import { localProjectFor, callLocal, readLocalFile, runOnComputer, COMPUTER_TERMINAL_TOOLS, COMPUTER_FILE_TOOLS } from "../services/local-runner.service.js";
+import { localProjectFor, callLocal, readLocalFile, runOnComputer, COMPUTER_TERMINAL_TOOLS, COMPUTER_FILE_TOOLS, LOCAL_TOOLS } from "../services/local-runner.service.js";
 import { projectForChat } from "../services/ide-project.service.js";
 import { parseHTML } from "linkedom";
 import { Readability } from "@mozilla/readability";
@@ -1330,6 +1330,28 @@ const READ_LOCAL_FILE_TOOL = {
         }
     }
 };
+// Helper types the AI makes for itself (like Antigravity's define_subagent): a name, a role, and the model and edit
+// rights it starts with. Kept per user, so a type made once can be sent again in any chat.
+const HELPER_TYPES_KEY = (userId) => `helper-types:${userId}`;
+const DEFINE_HELPER_TOOL = {
+    type: "function",
+    function: {
+        name: "define_helper",
+        description: "Make, list or remove your own helper types (specialised helpers). A type has a name, a role (its instructions: what it is expert at and how it should work and report), and optionally a model and can_edit. Send one later with run_project_helpers: { task, type: \"<name>\" }. Types are kept for this user across chats.",
+        parameters: {
+            type: "object",
+            properties: {
+                action: { type: "string", enum: ["define", "list", "remove"] },
+                name: { type: "string", description: "define / remove: the type's short name, e.g. \"security-reviewer\"" },
+                role: { type: "string", description: "define: the type's instructions (its expertise, how it works, what its report must contain)" },
+                model: { type: "string", description: "define: optional default model by its name in the model list" },
+                can_edit: { type: "boolean", description: "define: optional default; true = it may write and edit files and run commands" },
+            },
+            required: ["action"],
+        },
+    },
+};
+
 // Desktop app, a chat that isn't a project: the terminal runs on the user's own computer (each command asks them first)
 const terminalDef = (name, description, properties, required) => ({ type: "function", function: { name, description, parameters: { type: "object", properties, required } } });
 const COMPUTER_TERMINAL_DEFS = [
@@ -3224,8 +3246,21 @@ If they ask whether their college/school uses Classgrid, say you can't see that 
                         const raw = Array.isArray(args?.helpers) && args.helpers.length ? args.helpers : (Array.isArray(args?.tasks) ? args.tasks : []);
                         const specs = raw
                             .map((h) => (typeof h === "string" ? { task: h } : (h || {})))
-                            .map((h) => ({ task: String(h.task || "").trim(), model: String(h.model || "").trim(), canEdit: h.can_edit === true || h.can_edit === "true", browser: h.browser === true || h.browser === "true" }))
+                            .map((h) => ({ task: String(h.task || "").trim(), model: String(h.model || "").trim(), canEdit: h.can_edit === true || h.can_edit === "true", canEditGiven: h.can_edit !== undefined, browser: h.browser === true || h.browser === "true", type: String(h.type || "").trim(), worktree: h.worktree === true || h.worktree === "true" }))
                             .filter((h) => h.task);
+                        // Helper types made with define_helper: their role, and their model and edit rights unless given here
+                        if (specs.some((h) => h.type) && userId) {
+                            const types = await redis.hgetall(HELPER_TYPES_KEY(String(userId))).catch(() => ({}));
+                            for (const h of specs) {
+                                if (!h.type) continue;
+                                let t = null;
+                                try { t = JSON.parse(types?.[h.type.toLowerCase()] || "null"); } catch { /* bad record */ }
+                                if (!t) return `Error: there is no helper type "${h.type}". Types: ${Object.keys(types || {}).join(", ") || "none yet"} (make one with define_helper).`;
+                                h.role = t.role;
+                                if (!h.model && t.model) h.model = t.model;
+                                if (!h.canEditGiven && t.can_edit) h.canEdit = true;
+                            }
+                        }
                         if (!specs.length) return "Error: give 1 to 5 helpers.";
                         // A Browser worker: start the user's browser right away, in the background, while the worker starts
                         if (specs.some((h) => h.browser) && userId && body.clientApp !== "desktop") ensureBrowser(String(userId)).catch(() => {});
@@ -3257,6 +3292,14 @@ If they ask whether their college/school uses Classgrid, say you can't see that 
 
                         const runHelper = async (h, i) => {
                             let stepNo = 0;
+                            // Its own copy of a folder project on the user's computer (git worktree), on its own branch
+                            if (h.worktree) {
+                                const project = await localProjectFor(sessionId);
+                                const made = project ? await callLocal(project, "create_worktree", { name: `helper-${h.no}` }) : "Error: only a project from a folder on the user's computer can give a helper its own copy.";
+                                const m = String(made).match(/^Worktree: (.+)\nBranch: (.+)$/);
+                                if (m) h.wt = { dir: m[1].trim(), branch: m[2].trim(), project: { owner: project.owner, _id: project._id, localPath: m[1].trim() } };
+                                else h.wtError = String(made).replace(/^Error: /, "");
+                            }
                             // Each try gets a time limit for its steps; after that the tools say "time is up", so the
                             // helper writes its report from what it already did instead of running on with no answer
                             let deadline = 0;
@@ -3264,7 +3307,7 @@ If they ask whether their college/school uses Classgrid, say you can't see that 
                             // tools (full paths; each step asks the user like the main AI's)
                             const computerReadOnly = ["read_local_file", "list_project_files", "search_project"];
                             const computerEdit = ["write_project_file", "edit_project_file", "execute_terminal_command", "start_background_command", "check_background_command", "stop_background_command"];
-                            const names = h.browser ? [] : onComputer ? (h.canEdit ? [...computerReadOnly, ...computerEdit] : computerReadOnly) : h.canEdit ? [...readOnly, ...editTools] : readOnly; // the Browser worker gets the browser tools below
+                            const names = h.browser ? [] : onComputer ? (h.canEdit ? [...computerReadOnly, ...computerEdit] : computerReadOnly) : h.canEdit ? [...readOnly, ...editTools, ...(h.wt ? ["execute_terminal_command"] : [])] : readOnly; // the Browser worker gets the browser tools below
                             const defs = onComputer
                                 ? [READ_LOCAL_FILE_TOOL, ...COMPUTER_TERMINAL_DEFS].filter((d) => names.includes(d.function.name))
                                 : (await getMcpTools()).filter((t) => names.includes(t.name))
@@ -3283,7 +3326,7 @@ If they ask whether their college/school uses Classgrid, say you can't see that 
                                 const id = `h${i}-${stepNo++}`;
                                 emitHelper({ helper: i, id, tool: n, args: a });
                                 playground("tool", { who: `Helper ${h.no}`, tool: n, detail: JSON.stringify(a ?? {}).slice(0, 200) });
-                                const out = onComputer ? await computerHandlers[n](a) : (await handleToolCall(n, a, { sessionId })).content[0].text;
+                                const out = onComputer ? await computerHandlers[n](a) : h.wt && LOCAL_TOOLS.has(n) ? await callLocal(h.wt.project, n, a || {}) : (await handleToolCall(n, a, { sessionId })).content[0].text;
                                 emitHelper({ helper: i, id, result: String(out && typeof out === "object" ? out.text : out).slice(0, 6000) });
                                 // The files this helper changed, for the chat's "files changed" box
                                 const changed = (n === "write_project_file" || n === "edit_project_file") && a?.path ? String(out).match(/\+(\d+) -(\d+)\)\./) : null;
@@ -3331,9 +3374,11 @@ If they ask whether their college/school uses Classgrid, say you can't see that 
                             const computerNote = onComputer && !h.browser ? `
 
 You work on the user's own Windows computer through their Classgrid desktop app, not on a project: always use full paths (like C:\\Users\\name\\Documents\\notes.txt). read_local_file looks at any file (pictures and videos too) or folder; list_project_files lists a folder; search_project searches inside the files of a folder.${h.canEdit ? " write_project_file creates a file, edit_project_file changes one, and execute_terminal_command runs PowerShell commands (start_background_command for servers)." : ""} The user is asked to allow each step.` : "";
-                            const system = (h.browser ? BROWSER_WORKER_SYSTEM : h.canEdit
+                            const typeNote = h.role ? `Your role (helper type "${h.type}"): ${h.role}\n\n` : "";
+                            const worktreeNote = h.wt ? `\n\nYou work in your own copy of the project (a git worktree) on the branch ${h.wt.branch}, so other helpers can't touch your files. When you are done, commit your work there with execute_terminal_command (git add -A; git commit -m "<what you did>") and say the branch in your report.` : "";
+                            const system = typeNote + (h.browser ? BROWSER_WORKER_SYSTEM : h.canEdit
                                 ? "You are a helper working on a code project together with a main AI and up to 4 other helpers. Do your task by really changing the project: write and edit files, and run commands when needed. Read the files you change first. Only touch the files your task is about, because other helpers may be editing other files at the same time. Never push to GitHub. Follow any message from the main AI. Use tell_main to ask the main AI something or tell it something important. When you are done, report what you changed, file by file, and anything still left to do."
-                                : "You are a helper exploring a code project for another AI. Use the tools to look at the project (you can only read it). Read the actual code, not just file names. Then answer the task in full, with everything you found: what each relevant file and function does, how the parts work together step by step (frontend, API routes, backend, database, config), the important endpoints, data and settings, with file paths and line numbers. For example, if the task is to explore login, explain the whole flow from start to end: the frontend page and components, the form and what it sends, the API calls, the backend routes, controllers and services, checks and errors, tokens or sessions, the database models, and the config it uses. Never answer with only a list of file names. Don't guess; say what you could not find. Use tell_main to send the main AI a short note or question; follow any message it sends you.") + browserNote + computerNote;
+                                : "You are a helper exploring a code project for another AI. Use the tools to look at the project (you can only read it). Read the actual code, not just file names. Then answer the task in full, with everything you found: what each relevant file and function does, how the parts work together step by step (frontend, API routes, backend, database, config), the important endpoints, data and settings, with file paths and line numbers. For example, if the task is to explore login, explain the whole flow from start to end: the frontend page and components, the form and what it sends, the API calls, the backend routes, controllers and services, checks and errors, tokens or sessions, the database models, and the config it uses. Never answer with only a list of file names. Don't guess; say what you could not find. Use tell_main to send the main AI a short note or question; follow any message it sends you.") + browserNote + computerNote + worktreeNote;
                             await sleep(i * 1500); // start a little apart, so the model service isn't hit all at once
                             emitHelper({ helper: i, state: "running" });
                             // The picked model first; if it fails, Claude Sonnet 5.5 takes over, then GLM 5.3
@@ -3386,10 +3431,12 @@ You work on the user's own Windows computer through their Classgrid desktop app,
                         };
 
                         const batch = specs.slice(0, room).map((s, i) => {
-                            const h = { no: board.nextNo++, task: s.task, canEdit: s.canEdit, model: pickModel(s.model, i), state: "running", report: "", reportTaken: false, inbox: [], notes: [], notesRead: 0, changes: new Map(), abort: new AbortController() };
+                            const h = { no: board.nextNo++, task: s.task, canEdit: s.canEdit, type: s.type, role: s.role, worktree: s.worktree && s.canEdit && !s.browser, model: pickModel(s.model, i), state: "running", report: "", reportTaken: false, inbox: [], notes: [], notesRead: 0, changes: new Map(), abort: new AbortController() };
                             h.promise = runHelper(h, i).catch((e) => ({ state: "failed", text: String(e?.message || e) })).then((out) => {
                                 h.state = out.state;
-                                h.report = out.text;
+                                h.report = out.text
+                                    + (h.wt ? `\n\n[Its work is in its own copy ${h.wt.dir} on the branch ${h.wt.branch}. To bring it into the project: execute_terminal_command "git merge ${h.wt.branch}" in the project, then remove the copy with "git worktree remove --force '${h.wt.dir}'".]` : "")
+                                    + (h.wtError ? `\n\n[It worked in the project itself: it couldn't get its own copy (${h.wtError}).]` : "");
                                 emitHelper({ helper: i, state: out.state });
                                 // The answer that started them has ended: wake this chat's background task to read the reports
                                 if ((res.writableEnded || res.destroyed) && !requestAborted && !board.helpers.some((x) => x.state === "running")) {
@@ -3409,6 +3456,26 @@ You work on the user's own Windows computer through their Classgrid desktop app,
                             const notes = h.notes.length ? `\nNotes it sent you: ${h.notes.join(" | ")}` : "";
                             return h.state === "done" ? `${label(h)}:\n${h.report}${notes}` : `${label(h)} failed: ${h.report}${notes}`;
                         }).join("\n\n") + helperChangesText(batch);
+                    },
+                    // The user's own helper types (kept per user)
+                    define_helper: async (args) => {
+                        if (!userId) return "Error: helper types need a signed-in user.";
+                        const key = HELPER_TYPES_KEY(String(userId));
+                        const action = String(args?.action || "");
+                        const name = String(args?.name || "").trim().toLowerCase().replace(/[^a-z0-9_-]+/g, "-").slice(0, 40);
+                        if (action === "list") {
+                            const types = await redis.hgetall(key).catch(() => ({}));
+                            const rows = Object.entries(types || {}).map(([n, v]) => { try { const t = JSON.parse(v); return `- ${n}${t.model ? ` (${t.model})` : ""}${t.can_edit ? ", can edit" : ""}: ${String(t.role).slice(0, 200)}`; } catch { return `- ${n}`; } });
+                            return rows.length ? `Your helper types:\n${rows.join("\n")}` : "No helper types yet. Make one with define_helper action define.";
+                        }
+                        if (!name) return "Error: give the type a name.";
+                        if (action === "remove") return (await redis.hdel(key, name).catch(() => 0)) ? `Removed the helper type "${name}".` : `There is no helper type "${name}".`;
+                        if (action !== "define") return "Error: action must be define, list or remove.";
+                        const role = String(args?.role || "").trim();
+                        if (!role) return "Error: write the type's role (its instructions).";
+                        if ((await redis.hlen(key).catch(() => 0)) >= 30 && !(await redis.hexists(key, name).catch(() => 0))) return "Error: there are already 30 helper types; remove one first.";
+                        await redis.hset(key, name, JSON.stringify({ role: role.slice(0, 4000), model: String(args?.model || "").trim().slice(0, 80), can_edit: args?.can_edit === true || args?.can_edit === "true" }));
+                        return `Helper type "${name}" is ready. Send one with run_project_helpers: { task, type: "${name}" }.`;
                     },
                     // A message from the main AI to a helper that is still working (it gets it with its next step)
                     message_helper: async (args) => {
@@ -5222,6 +5289,13 @@ If a tool fails, never show the error message; say only: "Something went wrong o
                 }
                 return runOnComputer(computerUser, name, args);
             };
+        }
+        // Helper types go with the helpers
+        if (activeToolList.some(t => t.function.name === "run_project_helpers") && !fullToolList.some(t => t.function.name === "define_helper")) {
+            fullToolList.push(DEFINE_HELPER_TOOL);
+            activeToolList.push(DEFINE_HELPER_TOOL);
+            toolPlan.allowedToolNames.add("define_helper");
+            toolPlan.loadedNames.add("define_helper");
         }
         console.log(`[AI-TOOLS] groups=[${toolPlan.activeGroupIds.join(",")}] sent=${activeToolList.length}/${fullToolList.length} tools staff=${toolPlan.staff}`);
 

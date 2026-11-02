@@ -170,6 +170,25 @@ const tools = {
     return `Edited ${rel} (${done.join(", ")}, +${added} -${removed}).`;
   },
 
+  // A helper's own copy of the project (git worktree) on a new branch next to the project folder, so helpers that edit
+  // at the same time never touch each other's files; the main AI merges the branch afterwards
+  create_worktree(root, { name = "helper" }) {
+    const { spawnSync } = require("node:child_process");
+    const git = (...args) => spawnSync("git", ["-C", root, ...args], { windowsHide: true, encoding: "utf8" });
+    const inside = git("rev-parse", "--is-inside-work-tree");
+    if (inside.error) return "Error: Git isn't installed on this computer, so the helper can't get its own copy.";
+    if (String(inside.stdout).trim() !== "true") return "Error: this project folder isn't a Git repository, so the helper can't get its own copy.";
+    if (git("rev-parse", "--verify", "HEAD").status !== 0) return "Error: this repository has no commits yet, so the helper can't get its own copy.";
+    const safe = String(name).replace(/[^\w-]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 40) || "helper";
+    const stamp = Date.now().toString(36);
+    const branch = `classgrid/${safe}-${stamp}`;
+    const dir = path.join(path.dirname(path.resolve(root)), `${path.basename(path.resolve(root))}-helpers`, `${safe}-${stamp}`);
+    const made = git("worktree", "add", "-b", branch, dir);
+    if (made.status !== 0) return `Error: git worktree add failed: ${String(made.stderr || made.stdout).trim().split("\n").pop()}`;
+    allowFolder(dir);
+    return `Worktree: ${dir}\nBranch: ${branch}`;
+  },
+
   // Python / JavaScript code, or shell lines, run in the project folder on this computer
   run_code(root, { language = "bash", code = "" }) {
     if (!String(code).trim()) return Promise.resolve("Error: code is empty");
