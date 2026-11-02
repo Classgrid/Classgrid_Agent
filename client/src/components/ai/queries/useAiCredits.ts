@@ -17,7 +17,8 @@ import { apiClient as api } from "@/lib/apiClient";
 export const aiCreditsApi = {
   getMyBalance: () => api.get("/api/ai/credits/balance").then(res => res.data.data),
   getMyHistory: () => api.get("/api/ai/credits/history").then(res => res.data.data),
-  initiateTopUp: (amount_inr: number) => api.post("/api/ai/topup/initiate", { amount_inr }).then(res => res.data.data),
+  // The desktop app says so, so the payment page sends the user back to the app afterwards
+  initiateTopUp: (amount_inr: number) => api.post("/api/ai/topup/initiate", { amount_inr, ...((window as any).classgridDesktop?.isDesktop ? { clientApp: "desktop" } : {}) }).then(res => res.data.data),
 };
 
 export const useMyAiBalance = () => useQuery({

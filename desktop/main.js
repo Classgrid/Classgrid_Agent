@@ -247,6 +247,8 @@ ipcMain.handle("cg:revealInEditor", (_e, folder, file, startLine, endLine) => {
   if (!runner.isAllowed(folder)) return { error: "This folder wasn't opened in the Classgrid app on this computer." };
   return editor.reveal(String(folder), file, startLine, endLine);
 });
+// (the search box and layout buttons in Project Mode's top bar)
+ipcMain.handle("cg:editorCommand", (_e, command) => editor.command(command));
 ipcMain.handle("cg:pickFolder", async () => {
   const r = await dialog.showOpenDialog(win, { properties: ["openDirectory"] });
   if (r.canceled) return null;
@@ -278,6 +280,15 @@ async function handleDeepLink(link) {
   if (!link || !win || win.isDestroyed()) return;
   let url;
   try { url = new URL(link); } catch { return; }
+  // classgrid://payment?ai_payment=success|failed: a top-up paid in the browser; the app comes forward and shows it
+  if (url.hostname === "payment") {
+    if (win.isMinimized()) win.restore();
+    win.show();
+    win.focus();
+    const status = url.searchParams.get("ai_payment") === "failed" ? "failed" : "success";
+    win.webContents.executeJavaScript(`window.dispatchEvent(new CustomEvent("classgrid:payment", { detail: ${JSON.stringify(status)} }))`).catch(() => {});
+    return;
+  }
   if (url.hostname !== "login") return;
   const code = url.searchParams.get("code") || "";
   try {

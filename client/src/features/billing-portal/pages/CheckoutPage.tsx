@@ -458,9 +458,16 @@ export function CheckoutPage() {
                 A confirmation email has been sent.
               </p>
               <p className="text-muted-foreground text-sm leading-relaxed mt-1 animate-pulse text-emerald-600 dark:text-emerald-400">
-                Redirecting automatically...
+                {returnUrl?.startsWith("classgrid://") ? "Opening the Classgrid app…" : "Redirecting automatically..."}
               </p>
-              {returnUrl === "close_window" ? (
+              {returnUrl?.startsWith("classgrid://") ? (
+                <>
+                  <p className="text-muted-foreground text-sm leading-relaxed mt-2">Payment done. You can go back to the Classgrid app and close this tab.</p>
+                  <a href={returnUrl} className="mt-4 flex w-full items-center justify-center rounded-xl bg-emerald-500 py-3 text-sm font-semibold text-white transition-all hover:bg-emerald-600">
+                    Open the Classgrid app
+                  </a>
+                </>
+              ) : returnUrl === "close_window" ? (
                 <button onClick={() => window.close()} className="mt-4 flex w-full items-center justify-center rounded-xl bg-emerald-500 py-3 text-sm font-semibold text-white transition-all hover:bg-emerald-600">
                   Close Window
                 </button>

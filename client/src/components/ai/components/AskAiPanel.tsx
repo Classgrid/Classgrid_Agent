@@ -2147,7 +2147,17 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
       window.history.replaceState({}, '', newUrl);
     }
 
-    return () => window.removeEventListener('open-ai-hub', handleOpenAiHub);
+    // Desktop app: a top-up paid in the browser brings the app back with the result
+    const onDesktopPayment = (e: Event) => {
+      const ok = (e as CustomEvent).detail !== "failed";
+      setAiHubInitialTab(ok ? "credits" : "upgrade");
+      setIsAiHubOpen(true);
+      if (ok) toast.success("Payment successful! AI Credits have been added to your account.");
+      else toast.error("Payment failed or was cancelled.");
+    };
+    window.addEventListener('classgrid:payment', onDesktopPayment);
+
+    return () => { window.removeEventListener('open-ai-hub', handleOpenAiHub); window.removeEventListener('classgrid:payment', onDesktopPayment); };
   }, []);
 
   // @ mention state
@@ -4962,7 +4972,7 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
   const pendingQueueUI = null;
 
   const panelHeader = (
-    <div className={cn("flex items-center justify-between px-4 py-4", variant !== "full-page" && "border-b border-border")}>
+    <div className={cn("flex items-center justify-between px-4", import.meta.env.VITE_DESKTOP === "1" && variant === "overlay" ? "py-1" : "py-4", variant !== "full-page" && "border-b border-border")}>
       <div className="flex items-center gap-2">
       </div>
       <div className="flex items-center gap-1">
