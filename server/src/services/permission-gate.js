@@ -56,6 +56,13 @@ export function describeAction(tool, args = {}) {
       const file = String(args?.path || "").trim().replace(/^["']+|["']+$/g, "");
       return { title: "Read a file on your computer?", detail: file, key: `localfile:${file.toLowerCase()}`, label: `reading ${file.split(/[\\/]/).filter(Boolean).pop() || "this file"}`, level: ALWAYS_ASKS };
     }
+    // Using apps on the user's computer (the real mouse and keyboard): every step that does something asks
+    case "computer": {
+      const a = String(args?.action || "screenshot");
+      if (a === "screenshot" || a === "wait") return { title: "Look at your screen?", detail: "Take a picture of your screen", key: "computer:look", label: "looking at your screen", level: 1 };
+      const what = a === "type" ? `Type: ${String(args?.text ?? "").slice(0, 300)}` : a === "key" ? `Press ${args?.key || "Enter"}` : a === "scroll" ? "Scroll" : `${a.replace("_", " ")} at ${args?.x}, ${args?.y} on the screen picture`;
+      return { title: "Use your computer?", detail: what, key: `computer:${a}`, label: "using apps on your computer", level: 2 };
+    }
     // Project Mode's file tools used on files anywhere on the user's computer (desktop app, chats that aren't a project)
     case "computer_write": {
       const file = String(args?.path || "").trim();

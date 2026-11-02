@@ -265,7 +265,7 @@ if (!app.requestSingleInstanceLock()) {
     startUpdates();
   });
   app.on("window-all-closed", () => app.quit());
-  app.on("before-quit", () => { runner.stopAll(); editor.stop(); require("./recorder").stop(); });
+  app.on("before-quit", () => { runner.stopAll(); editor.stop(); require("./recorder").stop(); require("./computer").stop(); });
 }
 
 // Updates: the installed app checks our R2 storage (desktop/latest.yml) on start and every 6 hours, downloads a new

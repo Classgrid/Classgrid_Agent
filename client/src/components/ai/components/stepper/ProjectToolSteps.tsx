@@ -552,6 +552,34 @@ export function CommandStep({ step }: { step: Step }) {
   return <TerminalStep name="Bash" description={step.args?.description ? String(step.args.description) : undefined} command={command} output={step.result} status={step.status} />;
 }
 
+// The AI using an app on the user's computer: "Clicked on the screen" with the picture of the screen after it
+export function ComputerStep({ step }: { step: Step }) {
+  const loading = step.status === 'loading';
+  const result = String((step.result as any)?.text ?? step.result ?? '');
+  const failed = !loading && /^(error|the user did not|the classgrid desktop app isn't)/i.test(result.trim());
+  const a = step.args || {};
+  const action = String(a.action || 'screenshot');
+  const title = loading
+    ? ({ screenshot: 'Looking at the screen', click: 'Clicking', double_click: 'Double-clicking', right_click: 'Right-clicking', move: 'Moving the mouse', type: 'Typing', key: `Pressing ${a.key || 'Enter'}`, scroll: 'Scrolling', wait: 'Waiting' } as Record<string, string>)[action] || 'Using the computer'
+    : ({ screenshot: 'Looked at the screen', click: 'Clicked on the screen', double_click: 'Double-clicked on the screen', right_click: 'Right-clicked on the screen', move: 'Moved the mouse', type: `Typed "${String(a.text ?? '').slice(0, 40)}${String(a.text ?? '').length > 40 ? '…' : ''}"`, key: `Pressed ${a.key || 'Enter'}`, scroll: 'Scrolled', wait: 'Waited' } as Record<string, string>)[action] || 'Used the computer';
+  const shot = result.match(/Screenshot link: (https:\/\/\S+?\.jpe?g)/)?.[1] || null;
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="flex flex-col">
+      <Row onClick={shot ? () => setOpen(!open) : undefined} open={open}>
+        <ShimmerText active={loading} className="shrink-0">{failed ? 'Could not use the computer' : title}</ShimmerText>
+        {loading && <Spinner className="size-3.5 shrink-0" />}
+      </Row>
+      {shot && open && (
+        <a href={shot} target="_blank" rel="noreferrer" className="ml-10 mr-2 mb-2 block overflow-hidden rounded-lg border border-border">
+          <img src={shot} alt="The screen" className="block w-full h-auto" />
+        </a>
+      )}
+      {failed && <div className="ml-10 -mt-1 mb-1 text-xs text-red-600 dark:text-red-500">{result.slice(0, 300)}</div>}
+    </div>
+  );
+}
+
 export function TerminalStep({ name, description, command, output, status }: { name: string; description?: string; command: string; output?: string; status?: string }) {
   const loading = status === 'loading';
   const failed = !loading && (/^(error|tool error)/i.test(String(output || '').trim()) || /EXIT CODE: [1-9]/.test(String(output || '')) || /\[exit code [1-9]\d*\]\s*$/.test(String(output || '')));

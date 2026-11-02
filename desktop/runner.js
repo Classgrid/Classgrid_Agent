@@ -644,6 +644,12 @@ function connect(token) {
       const { tool, args = {}, root, chat } = req || {};
       if (chat) args.__chat = String(chat); // which chat started it (a finished background job wakes that chat)
       // The AI's browser steps go to the app's own browser (browser.js)
+      // The AI using any app on this computer: screen pictures, the real mouse and keyboard (computer.js)
+      if (tool === "computer") {
+        console.log("[runner] computer", args.action);
+        const r = await require("./computer").act(args);
+        return ack({ text: r.text, computer: { image: r.image } });
+      }
       if (tool === "browser" && browserStep) {
         console.log("[runner] browser", args.action);
         return ack({ text: "ok", browser: await browserStep(args) });

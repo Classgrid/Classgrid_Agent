@@ -85,7 +85,7 @@ import NotificationLog from "../models/NotificationLog.js";
 import { getMcpTools, handleToolCall, readSandboxFiles } from "../mcp/tools.js";
 import { CUSTOM_MCP_TOOL, runCustomMcpTool, customMcpPromptLine } from "../services/custom-mcp-ai.js";
 import { PLAY_SONG_TOOL, songTools, runPlaySong, runDownloadSong } from "../services/music-ai.js";
-import { localProjectFor, callLocal, readLocalFile, runOnComputer, COMPUTER_TERMINAL_TOOLS, COMPUTER_FILE_TOOLS, LOCAL_TOOLS } from "../services/local-runner.service.js";
+import { localProjectFor, callLocal, readLocalFile, runOnComputer, useComputer, COMPUTER_TERMINAL_TOOLS, COMPUTER_FILE_TOOLS, LOCAL_TOOLS } from "../services/local-runner.service.js";
 import { projectForChat } from "../services/ide-project.service.js";
 import { parseHTML } from "linkedom";
 import { Readability } from "@mozilla/readability";
@@ -1372,6 +1372,28 @@ async function classgridDesktopFacts() {
     desktopFactsCache = await fs.readFile(new URL("../skills/classgrid-guide/references/desktop-app.md", import.meta.url), "utf8").catch(() => "");
     return desktopFactsCache;
 }
+
+// Using any app on the user's computer from the desktop app (like a person at the keyboard)
+const COMPUTER_TOOL = {
+    type: "function",
+    function: {
+        name: "computer",
+        description: "Use any app on the user's Windows computer like a person: take a picture of the screen, click, double-click, right-click, move the mouse, type text, press keys (Enter, Ctrl+S, Alt+Tab, Win+R) and scroll. Every step gives you a new picture of the screen; x and y are in that picture's pixels. Use it only when the terminal, file tools and browser can't do the job (for example Windows Settings, Excel, File Explorer or another app). Start with action screenshot. Never type passwords, card numbers or one-time codes, and never buy, pay, send or delete anything the user didn't clearly ask for. The user is asked to allow each step.",
+        parameters: {
+            type: "object",
+            properties: {
+                action: { type: "string", enum: ["screenshot", "click", "double_click", "right_click", "move", "type", "key", "scroll", "wait"] },
+                x: { type: "number", description: "click / double_click / right_click / move / scroll: x in the last screen picture's pixels" },
+                y: { type: "number", description: "y in the last screen picture's pixels" },
+                text: { type: "string", description: "type: the text to type" },
+                key: { type: "string", description: "key: e.g. Enter, Tab, Esc, Ctrl+S, Alt+Tab, Win+R" },
+                dy: { type: "number", description: "scroll: pixels down (negative = up), default 600" },
+                seconds: { type: "number", description: "wait: seconds (max 10)" },
+            },
+            required: ["action"],
+        },
+    },
+};
 
 // Stop the chat's working helpers (the Stop button stops only the answer; helpers keep working and report later)
 const STOP_HELPERS_TOOL = { type: "function", function: { name: "stop_helpers", description: "Stop all helpers that are still working in this chat. Use it only when the user asks to stop them (the Stop button stops only your answer; helpers keep working and you are woken with their reports).", parameters: { type: "object", properties: {} } } };
@@ -5418,6 +5440,23 @@ If a tool fails, never show the error message; say only: "Something went wrong o
         // The desktop app, a chat that isn't a project: the terminal runs on the user's computer (each command asks them first)
         const chatProject = body.clientApp === "desktop" && !body.taskOrigin ? await projectForChat(sessionId).catch(() => null) : null;
         const onComputer = body.clientApp === "desktop" && !body.taskOrigin && !chatProject;
+        // Desktop app, on the user's computer: using any app with the real mouse and keyboard (each step asked first)
+        if (onComputer || chatProject?.location === "local") {
+            if (!fullToolList.some((t) => t.function.name === "computer")) {
+                fullToolList.push(COMPUTER_TOOL);
+                activeToolList.push(COMPUTER_TOOL);
+                toolPlan.allowedToolNames.add("computer");
+                toolPlan.loadedNames.add("computer");
+            }
+            const computerUserId = req.user?._id || req.user?.id;
+            llmConfig.toolHandlers.computer = async (args) => {
+                if (body.permissionMode !== "turbo") {
+                    const p = await askPermission({ ...permissionCtx, mode: PERMISSION_MODES.has(body.permissionMode) ? body.permissionMode : "review", tool: "computer", args });
+                    if (!p.allowed) return p.message;
+                }
+                return useComputer(computerUserId, args, sessionId);
+            };
+        }
         // Desktop app, on the user's computer (no project, or a folder project): the cloud sandbox tools are taken away
         // and run_code says it runs on their computer, so the AI never reaches for the sandbox
         if (onComputer || chatProject?.location === "local") {
