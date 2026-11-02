@@ -2704,7 +2704,8 @@ CRITICAL INSTRUCTION FOR GOOGLE WORKSPACE & CLASSROOM DISAMBIGUATION: If the use
 1. NEVER write custom Python scripts (like using fpdf) in the sandbox to generate PDFs. You MUST ALWAYS use the built-in \`generate_pdf\` or \`generate_pdf_from_db\` tools, which use HTML and Puppeteer and support Unicode out-of-the-box.
 2. NO DUPLICATE HEADINGS: The \`generate_pdf\` tool automatically renders the \`title\` parameter as an \`<h1>\` at the top of the document. Do NOT manually add a duplicate \`<h1>\` with the title inside your HTML content.
 3. HUMANIZE LABELS: NEVER output raw backend database enum values (like "org_admin", "super_admin") in your chat responses or in PDF reports. Always map them to human-readable labels (e.g., "Organization Admin", "Super Admin") before rendering.
-4. WORD, EXCEL, POWERPOINT: To make a Word, Excel or PowerPoint file, use \`make_office_file\`. Never fake it with HTML or CSV, and never say you can only make PDFs.`);
+4. WORD, EXCEL, POWERPOINT: To make a Word, Excel or PowerPoint file, use \`make_office_file\`. Never fake it with HTML or CSV, and never say you can only make PDFs.
+5. EDIT A PDF: To merge, split, rotate, watermark, number pages or fill a PDF form, use \`edit_pdf\`.`);
 
         // Owner's rules for background tasks (WhatsApp, calls, email), 2026-10-24
         if (body.taskOrigin) dynamicSystemPrompt += `\n\nOWNER'S RULES FOR THIS TASK:
@@ -3145,6 +3146,28 @@ If they ask whether their college/school uses Classgrid, say you can't see that 
                                 }
                             },
                             required: ["type", "file_name"]
+                        }
+                    }
+                },
+                {
+                    type: "function",
+                    function: {
+                        name: "edit_pdf",
+                        description: "Changes PDF files and returns download links: merge several PDFs, split one into parts, keep or delete pages, rotate pages, add a watermark, add page numbers, or fill a PDF form. list_form_fields shows a form's field names first (no file).",
+                        parameters: {
+                            type: "object",
+                            properties: {
+                                action: { type: "string", enum: ["merge", "split", "extract_pages", "delete_pages", "rotate", "watermark", "fill_form", "list_form_fields", "add_page_numbers"], description: "What to do. For fill_form, run list_form_fields first to get the exact field names." },
+                                urls: { type: "array", items: { type: "string" }, description: "https links of the PDFs. merge: 2 or more, in order. Other actions use the first link." },
+                                pages: { type: "string", description: "Page ranges, 1-based, like \"1-3,5,8-\" (8- means 8 to the end). extract_pages: pages to keep. delete_pages: pages to remove. rotate, watermark, add_page_numbers: which pages (empty = all). split: each range becomes its own file (empty = one file per page, max 50)." },
+                                angle: { type: "number", enum: [90, 180, 270], description: "rotate: turn clockwise by this much." },
+                                text: { type: "string", description: "watermark: the words to show, e.g. \"CONFIDENTIAL\"." },
+                                opacity: { type: "number", description: "watermark: 0 to 1, default 0.15." },
+                                fields: { type: "object", description: "fill_form: field name -> value. Text fields take text, checkboxes true/false, dropdowns and radio buttons take one of their option names.", additionalProperties: true },
+                                flatten: { type: "boolean", description: "fill_form: lock the filled values so they can't be changed." },
+                                file_name: { type: "string", description: "Name for the new file without extension, e.g. \"Signed form\"." }
+                            },
+                            required: ["action", "urls"]
                         }
                     }
                 },
@@ -3806,6 +3829,34 @@ You work on the user's own Windows computer through their Classgrid desktop app,
                             return `Made ${file.fileName} (${file.summary}). Download: ${url}\nPut this download link in your reply.`;
                         } catch (e) {
                             return `FAILED to make the file: ${e.message}`;
+                        }
+                    },
+                    edit_pdf: async (args) => {
+                        try {
+                            const { editPdf, downloadPdf } = await import('../services/pdf-edit.service.js');
+                            const a = args || {};
+                            const urls = (Array.isArray(a.urls) ? a.urls : [a.urls ?? a.url]).map((u) => String(u ?? '').trim()).filter(Boolean);
+                            if (!urls.length) return "FAILED to edit the PDF: send the PDF link in urls.";
+                            const action = String(a.action || '').toLowerCase();
+                            if (action === 'merge' && urls.length > 20) return "FAILED to edit the PDF: you can merge up to 20 PDFs at a time.";
+                            const inputs = [];
+                            for (const u of action === 'merge' ? urls : urls.slice(0, 1)) inputs.push(await downloadPdf(u));
+                            const result = await editPdf(a, inputs);
+                            if (result.text) return result.text;
+                            const folder = `ai-generated/pdf/${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+                            const links = [];
+                            // Upload a few at a time (split can make up to 50 files)
+                            for (let i = 0; i < result.files.length; i += 5) {
+                                links.push(...await Promise.all(result.files.slice(i, i + 5).map(async (f) => {
+                                    const saved = await uploadBufferToR2(f.buffer, f.fileName, f.mime, `${folder}/${f.fileName}`);
+                                    return { ...f, url: `${saved.slice(0, saved.length - f.fileName.length)}${encodeURIComponent(f.fileName)}` };
+                                })));
+                            }
+                            const note = result.note ? `\n${result.note}` : '';
+                            if (links.length === 1) return `Made ${links[0].fileName} (${result.summary}). Download: ${links[0].url}${note}\nPut this download link in your reply.`;
+                            return `Made ${result.summary}:\n${links.map((f) => `- ${f.fileName} (${f.label}). Download: ${f.url}`).join('\n')}${note}\nPut these download links in your reply.`;
+                        } catch (e) {
+                            return `FAILED to edit the PDF: ${e.message}`;
                         }
                     },
                     upload_file_to_cdn: async (args) => {
