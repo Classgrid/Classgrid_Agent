@@ -8,7 +8,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/m
 import { cn } from "@/lib/utils";
 
 type HelperStep = { tool: string; what: string; at: number; failed: boolean; result: string };
-type Helper = { no: number; task: string; type: string | null; model: string | null; canEdit: boolean; state: "running" | "done" | "failed"; startedAt: number | null; endedAt: number | null; steps: HelperStep[]; report: string; notes: string[] };
+type Helper = { no: number; task: string; type: string | null; model: string | null; tokens?: number; canEdit: boolean; state: "running" | "done" | "failed"; startedAt: number | null; endedAt: number | null; steps: HelperStep[]; report: string; notes: string[] };
 
 const toolName = (t: string) => t.replace(/_/g, " ").replace(/^\w/, (c) => c.toUpperCase());
 const took = (h: Helper, now: number) => {
@@ -16,6 +16,7 @@ const took = (h: Helper, now: number) => {
   const s = Math.max(0, Math.round(((h.endedAt || now) - h.startedAt) / 1000));
   return s < 60 ? `${s}s` : `${Math.floor(s / 60)}m ${s % 60}s`;
 };
+const tokensText = (n?: number) => (!n ? "" : n >= 1000 ? `${(n / 1000).toFixed(1)}k tokens` : `${n} tokens`);
 const title = (h: Helper) => (h.task.split("\n")[0] || "").replace(/\s+/g, " ").trim().slice(0, 70) || `Helper ${h.no}`;
 const stateText = (h: Helper) => (h.state === "running" ? "Working" : h.state === "done" ? "Finished" : "Failed");
 const dot = (h: Helper) => (h.state === "running" ? "bg-green-500" : h.state === "done" ? "bg-muted-foreground/50" : "bg-red-500");
@@ -90,7 +91,7 @@ export function AgentMapButton({ sessionId, busy }: { sessionId: string | null |
                         <span className="text-sm font-medium truncate">{title(h)}</span>
                       </div>
                       <div className="text-xs text-muted-foreground mt-0.5">
-                        {stateText(h)} · {took(h, now)} · {h.steps.length} {h.steps.length === 1 ? "step" : "steps"}{h.model ? ` · ${h.model}` : ""}
+                        {stateText(h)} · {took(h, now)} · {h.steps.length} {h.steps.length === 1 ? "step" : "steps"}{h.tokens ? ` · ${tokensText(h.tokens)}` : ""}{h.model ? ` · ${h.model}` : ""}
                       </div>
                     </button>
                   ))}
@@ -106,8 +107,9 @@ export function AgentMapButton({ sessionId, busy }: { sessionId: string | null |
                   <DialogTitle className="truncate">{title(helper)}</DialogTitle>
                 </div>
                 <p className="text-sm text-muted-foreground">
-                  {stateText(helper)}{helper.type ? ` · ${helper.type}` : ""}{helper.model ? ` · ${helper.model}` : ""} · {helper.canEdit ? "can edit" : "read only"} · background · {took(helper, now)}
+                  {stateText(helper)}{helper.type ? ` · ${helper.type}` : ""}{helper.model ? ` · ${helper.model}` : ""} · {helper.canEdit ? "can edit" : "read only"} · background
                 </p>
+                <p className="text-sm text-muted-foreground">Started by the main agent · {took(helper, now)}{helper.tokens ? ` · ${tokensText(helper.tokens)}` : ""}</p>
               </DialogHeader>
               <details open className="mt-2">
                 <summary className="flex items-center gap-1 text-sm font-medium cursor-pointer list-none"><ChevronDown className="size-4" /> Task</summary>
@@ -118,10 +120,18 @@ export function AgentMapButton({ sessionId, busy }: { sessionId: string | null |
                 <div className="mt-2 flex flex-col gap-1.5">
                   {!helper.steps.length && <p className="text-sm text-muted-foreground">No steps yet.</p>}
                   {helper.steps.map((s, i) => (
-                    <div key={i} className="text-sm min-w-0">
-                      <span className={cn("font-medium", s.failed && "text-red-500")}>{toolName(s.tool)}</span>
-                      {s.what && <span className="text-muted-foreground"> {s.what}</span>}
-                    </div>
+                    <details key={i} className="text-sm min-w-0 rounded-lg border border-border">
+                      <summary className="cursor-pointer list-none px-3 py-2 truncate">
+                        <span className={cn("font-medium", s.failed && "text-red-500")}>{toolName(s.tool)}</span>
+                        {s.what && <span className="text-muted-foreground"> {s.what}</span>}
+                      </summary>
+                      <div className="border-t border-border px-3 py-2 grid grid-cols-[2.5rem_1fr] gap-x-2 gap-y-1.5 font-mono text-[12.5px]">
+                        <span className="text-muted-foreground">IN</span>
+                        <span className="whitespace-pre-wrap break-words">{s.what || "(nothing)"}</span>
+                        <span className="text-muted-foreground">OUT</span>
+                        <span className={cn("whitespace-pre-wrap break-words", s.failed && "text-red-500")}>{s.result || (helper.state === "running" && i === helper.steps.length - 1 ? "Working…" : "(no output)")}</span>
+                      </div>
+                    </details>
                   ))}
                 </div>
               </details>

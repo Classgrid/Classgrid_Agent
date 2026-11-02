@@ -3805,6 +3805,7 @@ You work on the user's own Windows computer through their Classgrid desktop app,
                                             ? await streamClaudeChat({ ...helperArgs, ...meterHooks(model, `Helper ${h.no}`), model, loadedToolNames: new Set([...names, "tell_main", ...(hasBrowser ? WORKER_BROWSER_TOOLS.map((t) => t.function.name) : [])]), answerAtDepthLimit: true, maxContinuations: 3 })
                                             : await streamChat({ ...helperArgs, ...meterHooks(model, `Helper ${h.no}`), provider: cloudflareStreamProvider(model), seesImages: CF_VISION_MODELS.has(model), maxTokens: 8192, maxContinuations: 6, answerAtDepthLimit: true }); // a long report keeps going instead of being cut
                                         if (userId && r.usage?.total_tokens) deductTokens(userId, orgId, chargeableTokens(r.usage, model), tokenSource).catch(() => {});
+                                        h.tokens = (h.tokens || 0) + (r.usage?.total_tokens || 0); // shown in the chat's Agent map
                                         if (!String(r.answer || "").trim()) { lastError = "no answer"; break; } // try the next model
                                         h.usedModel = model;
                                         return { state: "done", text: String(r.answer).slice(0, 40000) };
@@ -6615,7 +6616,8 @@ export const getChatHelpers = async (req, res) => {
             no: h.no,
             task: String(h.task || ""),
             type: h.type || null,
-            model: MODEL_DISPLAY_NAMES[h.model] || h.model || null,
+            model: MODEL_DISPLAY_NAMES[h.usedModel || h.model] || h.usedModel || h.model || null,
+            tokens: h.tokens || 0,
             canEdit: !!h.canEdit,
             state: h.state,
             startedAt: h.startedAt || null,
