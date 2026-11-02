@@ -40,9 +40,15 @@ jobs:
         shell: bash
         working-directory: classgrid-editor
     steps:
-      - uses: actions/checkout@v4
-        with:
-          persist-credentials: false
+      # Only the classgrid-editor folder is fetched (actions/checkout stops on this repo's old .github_org entry)
+      - name: Get classgrid-editor
+        working-directory: .
+        env:
+          TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          git clone --depth 1 --filter=blob:none --sparse --no-recurse-submodules "https://x-access-token:${TOKEN}@github.com/${{ github.repository }}.git" repo
+          git -C repo sparse-checkout set classgrid-editor
+          mv repo/classgrid-editor ./classgrid-editor
 
       - name: Get the VSCodium build scripts (pinned)
         run: |
