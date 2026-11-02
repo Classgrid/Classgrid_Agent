@@ -294,7 +294,9 @@ if (!app.requestSingleInstanceLock()) {
   app.quit();
 } else {
   app.on("second-instance", (_e, argv) => {
-    if (win) { if (win.isMinimized()) win.restore(); win.focus(); }
+    // The app opened again: bring its window forward. The window may already be gone (the app is closing, or it is
+    // installing an update), so it is only touched while it exists.
+    if (win && !win.isDestroyed()) { if (win.isMinimized()) win.restore(); win.focus(); }
     handleDeepLink(argv.find((a) => a.startsWith("classgrid://")));
   });
   app.whenReady().then(async () => {
