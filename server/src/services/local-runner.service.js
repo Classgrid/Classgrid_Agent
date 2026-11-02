@@ -12,6 +12,7 @@ export const LOCAL_TOOLS = new Set([
     "list_project_files", "view_project_file", "search_project", "write_project_file", "edit_project_file",
     "execute_terminal_command", "start_background_command", "check_background_command", "stop_background_command",
     "run_code", // Python / JavaScript / shell code runs in the project folder on their computer too
+    "push_project_to_github", // git commit and push in the folder, with the user's own GitHub login
 ]);
 
 /** The chat's project when it is a folder on the user's computer, else null */
@@ -32,7 +33,7 @@ export function registerRunnerSocket(socket) {
 }
 
 // Commands may run for a while; file tools are quick
-const timeoutFor = (tool) => (tool === "execute_terminal_command" || tool === "run_code" ? 10 * 60 * 1000 : tool === "browser" ? 2 * 60 * 1000 : 60 * 1000);
+const timeoutFor = (tool) => (tool === "execute_terminal_command" || tool === "run_code" || tool === "push_project_to_github" ? 10 * 60 * 1000 : tool === "browser" ? 2 * 60 * 1000 : 60 * 1000);
 
 // Sends one tool call to the user's desktop app. Returns its whole answer ({ text, ... }), or null when the app isn't open.
 async function askRunner(userId, tool, payload) {

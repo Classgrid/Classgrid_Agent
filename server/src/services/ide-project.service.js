@@ -863,6 +863,7 @@ async function projectRulesFile(ssh, project) {
 }
 
 const PROJECT_MODE_RULES = `PROJECT MODE RULES (this chat is in Project Mode; they don't apply to normal Agent chats):
+- "Push" means push the code to GitHub (push_project_to_github, or git push in the terminal). Never deploy to Vercel or anywhere else for "push": deploy only when the user says deploy, publish the site, or names Vercel.
 - The user's project is the work. Create and change files only inside the project (/data is the project, and the user sees it live in their code editor). Every script, page or file you make is saved there.
 - No download links and no uploads: don't upload files to the CDN or the Library, don't make files only to be downloaded, and never offer to save something so the user can download it. To point at a file, write its path in the project (the user can click it to open it in the editor).
 - No extra notes, reports or markdown files unless the user asks for that file in the project; answer in the chat instead.
@@ -913,7 +914,7 @@ export async function editorContextFor(sessionId) {
   if (project.location === "local") {
     return `\n\n<project_editor>\n${[
       PROJECT_MODE_RULES,
-      `Project: ${project.name}. This project is a folder on the user's OWN computer (${project.localPath || "a local folder"}), not on Classgrid's servers. The Classgrid desktop app on that computer runs your project tools there: the file tools read and change the real files on their disk, and terminal commands run in that folder on their computer (Windows, PowerShell), so use PowerShell commands, not Linux-only ones. Paths are relative to the project folder; /data and /home/workspace/... don't exist here. Review/Undo snapshots, search by meaning and push_project_to_github aren't available for this project: use git in the terminal when the user wants to commit or push. run_code still runs on Classgrid's cloud sandbox, not on their computer. If a tool says the desktop app isn't open, tell the user to open the Classgrid app on that computer.`,
+      `Project: ${project.name}. This project is a folder on the user's OWN computer (${project.localPath || "a local folder"}), not on Classgrid's servers. The Classgrid desktop app on that computer runs your project tools there: the file tools read and change the real files on their disk, and terminal commands run in that folder on their computer (Windows, PowerShell), so use PowerShell commands, not Linux-only ones. Paths are relative to the project folder; /data and /home/workspace/... don't exist here. push_project_to_github commits everything and pushes it to the folder's GitHub repository with the user's own GitHub login on that computer. Review/Undo snapshots and search by meaning aren't available for this project. run_code still runs on Classgrid's cloud sandbox, not on their computer. If a tool says the desktop app isn't open, tell the user to open the Classgrid app on that computer.`,
     ].join("\n")}\n</project_editor>`;
   }
   let ssh;

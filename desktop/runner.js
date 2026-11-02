@@ -170,6 +170,32 @@ const tools = {
     return `Edited ${rel} (${done.join(", ")}, +${added} -${removed}).`;
   },
 
+  // Push a folder project to GitHub: commit everything and push with the user's own Git login on this computer
+  push_project_to_github(root, { message }) {
+    const { spawnSync } = require("node:child_process");
+    const git = (...args) => spawnSync("git", ["-C", root, ...args], { windowsHide: true, encoding: "utf8", timeout: 5 * 60 * 1000 });
+    const last = (r) => String(r.stderr || r.stdout || "").trim().split("\n").slice(-3).join(" ");
+    const inside = git("rev-parse", "--is-inside-work-tree");
+    if (inside.error) return "Error: Git isn't installed on this computer. Ask the user to install it from git-scm.com.";
+    if (String(inside.stdout).trim() !== "true") return "Error: this project folder isn't a Git repository yet. Ask the user for their GitHub repository address, then run in the terminal: git init; git remote add origin <address>; and push again.";
+    const remote = String(git("remote").stdout || "").trim();
+    if (!remote) return "Error: this folder has no GitHub repository linked. Ask the user for the repository address, then run in the terminal: git remote add origin <address>; and push again.";
+    const branch = String(git("rev-parse", "--abbrev-ref", "HEAD").stdout || "").trim() || "main";
+    git("add", "-A");
+    const changed = String(git("status", "--porcelain").stdout || "").trim();
+    let committed = "nothing new to commit";
+    if (changed) {
+      const c = git("commit", "-m", String(message || "Update from Classgrid").slice(0, 500));
+      if (c.status !== 0) return `Error: git commit failed: ${last(c)}`;
+      committed = String(c.stdout || "").split("\n")[0].trim();
+    }
+    const up = git("rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}");
+    const p = up.status === 0 ? git("push") : git("push", "-u", remote.split("\n")[0], branch);
+    if (p.status !== 0) return `Error: git push failed (${committed}): ${last(p)}`;
+    const url = String(git("remote", "get-url", remote.split("\n")[0]).stdout || "").trim();
+    return `Pushed to GitHub: branch ${branch} of ${url} (${committed}). ${last(p)}`;
+  },
+
   // A helper's own copy of the project (git worktree) on a new branch next to the project folder, so helpers that edit
   // at the same time never touch each other's files; the main AI merges the branch afterwards
   create_worktree(root, { name = "helper" }) {
