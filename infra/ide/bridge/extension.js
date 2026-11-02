@@ -13,7 +13,8 @@
 // Classgrid bridge (runs in the user's own editor box):
 // 1. Opens a file at the right lines when the Classgrid chat asks (~/.classgrid/open.json).
 // 2. Keeps ~/.classgrid/context.json up to date with what the user is looking at (open file, cursor, selection,
-//    open tabs, errors), so the Classgrid AI knows what "this" means.
+//    open tabs, errors) and the commands they ran in the editor's terminal (with their output), so the Classgrid AI
+//    knows what "this" means and what just failed.
 const vscode = require("vscode");
 const fs = require("fs");
 const path = require("path");
@@ -24,13 +25,20 @@ const OPEN_FILE = path.join(DIR, "open.json");
 const CONTEXT_FILE = path.join(DIR, "context.json");
 const PROJECTS = process.env.CLASSGRID_PROJECTS_DIR || "/home/workspace/projects/";
 let lastStamp = 0;
+// "/" (the desktop app): any file on the computer, also Windows paths like C:\\Users\\...
+const inProjects = (p) => !!p && (PROJECTS === "/" || p.startsWith(PROJECTS));
+// The user's latest terminal commands: { command, cwd, exitCode, output (its end), at }
+const terminalRuns = [];
+const MAX_RUNS = 10;
+const MAX_OUTPUT = 3000;
+const plain = (s) => String(s).replace(/\u001b\][^\u0007]*(\u0007|\u001b\\)/g, "").replace(/\u001b\[[0-9;?]*[ -/]*[@-~]/g, "").replace(/\r/g, "");
 
 async function handleOpen() {
   let req;
   try { req = JSON.parse(fs.readFileSync(OPEN_FILE, "utf8")); } catch { return; }
   if (!req || !req.path || !req.stamp || req.stamp <= lastStamp) return;
   lastStamp = req.stamp;
-  if (!req.path.startsWith(PROJECTS)) return;
+  if (!inProjects(req.path)) return;
   try {
     if (req.folder) {
       // A folder: show it in the Explorer
@@ -72,10 +80,10 @@ function writeContext() {
     const selected = doc && sel && !sel.isEmpty ? doc.getText(sel) : "";
     const tabs = vscode.window.tabGroups.all.flatMap((g) => g.tabs)
       .map((t) => (t.input && t.input.uri ? t.input.uri.fsPath : null))
-      .filter((p) => p && p.startsWith(PROJECTS));
+      .filter((p) => inProjects(p));
     const problems = [];
     for (const [uri, list] of vscode.languages.getDiagnostics()) {
-      if (!uri.fsPath.startsWith(PROJECTS)) continue;
+      if (!inProjects(uri.fsPath)) continue;
       for (const d of list) {
         if (d.severity > vscode.DiagnosticSeverity.Warning) continue;
         problems.push({
@@ -87,7 +95,7 @@ function writeContext() {
         });
       }
     }
-    const active = doc && doc.uri.fsPath.startsWith(PROJECTS) ? doc.uri.fsPath : null;
+    const active = doc && inProjects(doc.uri.fsPath) ? doc.uri.fsPath : null;
     problems.sort((a, b) => (a.file === active ? 0 : 1) - (b.file === active ? 0 : 1) || (a.severity === "error" ? 0 : 1) - (b.severity === "error" ? 0 : 1));
     const context = {
       activeFile: active,
@@ -96,6 +104,7 @@ function writeContext() {
       openTabs: [...new Set(tabs)].slice(0, 20),
       problems: problems.slice(0, 30),
       problemCount: problems.length,
+      terminal: terminalRuns.slice(-MAX_RUNS),
       updatedAt: Date.now(),
     };
     fs.writeFileSync(CONTEXT_FILE + ".tmp", JSON.stringify(context));
@@ -119,6 +128,39 @@ function activate(context) {
     vscode.languages.onDidChangeDiagnostics(soon),
     vscode.workspace.onDidSaveTextDocument(soon)
   );
+  // The commands the user runs in the editor's terminal (needs the terminal's shell integration, on by default)
+  if (vscode.window.onDidStartTerminalShellExecution && vscode.window.onDidEndTerminalShellExecution) {
+    const outputs = new Map(); // execution -> { text }
+    context.subscriptions.push(
+      vscode.window.onDidStartTerminalShellExecution(async (e) => {
+        const buf = { text: "" };
+        outputs.set(e.execution, buf);
+        try {
+          for await (const piece of e.execution.read()) {
+            buf.text = (buf.text + piece).slice(-MAX_OUTPUT * 3);
+          }
+        } catch {}
+      }),
+      vscode.window.onDidEndTerminalShellExecution((e) => {
+        const buf = outputs.get(e.execution);
+        outputs.delete(e.execution);
+        const command = String((e.execution.commandLine && e.execution.commandLine.value) || "").trim();
+        if (!command) return;
+        // The output stream ends a moment after the command; wait for it
+        setTimeout(() => {
+          terminalRuns.push({
+            command: command.slice(0, 1000),
+            cwd: e.execution.cwd ? e.execution.cwd.fsPath : "",
+            exitCode: typeof e.exitCode === "number" ? e.exitCode : null,
+            output: plain(buf ? buf.text : "").trim().slice(-MAX_OUTPUT),
+            at: Date.now(),
+          });
+          while (terminalRuns.length > MAX_RUNS) terminalRuns.shift();
+          writeContext();
+        }, 300);
+      })
+    );
+  }
   writeContext();
 }
 

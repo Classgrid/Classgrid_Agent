@@ -907,6 +907,16 @@ async function putGuideInProject(ssh, project) {
   return true;
 }
 
+// The commands the user ran in the editor's terminal lately (newest last), with their result and the end of the output
+function terminalRunsText(ctx, rel) {
+  const runs = (Array.isArray(ctx?.terminal) ? ctx.terminal : []).filter((r) => r && r.command && Date.now() - (r.at || 0) < 3 * 60 * 60 * 1000);
+  if (!runs.length) return "";
+  const ago = (t) => { const m = Math.round((Date.now() - t) / 60000); return m < 1 ? "just now" : m < 60 ? `${m} min ago` : `${Math.round(m / 60)} h ago`; };
+  return `Commands the user ran in the editor's terminal (newest last). When they say "this error" or "it failed", they usually mean the last one:\n` + runs.map((r) =>
+    `- \`${r.command}\`${r.cwd ? ` in ${rel(r.cwd) || r.cwd}` : ""}, ${ago(r.at)}: ${r.exitCode === 0 ? "worked" : r.exitCode == null ? "finished" : `FAILED (exit code ${r.exitCode})`}` +
+    (r.output ? `\n  Output (its end):\n  \`\`\`\n${String(r.output).slice(-(r.exitCode === 0 ? 800 : 3000))}\n  \`\`\`` : "")).join("\n");
+}
+
 export async function editorContextFor(sessionId) {
   const project = await projectForChat(sessionId);
   if (!project) return "";
@@ -914,7 +924,8 @@ export async function editorContextFor(sessionId) {
   if (project.location === "local") {
     return `\n\n<project_editor>\n${[
       PROJECT_MODE_RULES,
-      `Project: ${project.name}. This project is a folder on the user's OWN computer (${project.localPath || "a local folder"}), not on Classgrid's servers. The Classgrid desktop app on that computer runs your project tools there: the file tools read and change the real files on their disk, and terminal commands run in that folder on their computer (Windows, PowerShell), so use PowerShell commands, not Linux-only ones. Paths are relative to the project folder; /data and /home/workspace/... don't exist here. push_project_to_github commits everything and pushes it to the folder's GitHub repository with the user's own GitHub login on that computer. Review/Undo snapshots and search by meaning aren't available for this project. run_code still runs on Classgrid's cloud sandbox, not on their computer. If a tool says the desktop app isn't open, tell the user to open the Classgrid app on that computer.`,
+      `Project: ${project.name}. This project is a folder on the user's OWN computer (${project.localPath || "a local folder"}), not on Classgrid's servers. The Classgrid desktop app on that computer runs your project tools there: the file tools read and change the real files on their disk, and terminal commands run in that folder on their computer (Windows, PowerShell), so use PowerShell commands, not Linux-only ones. Paths are relative to the project folder; /data and /home/workspace/... don't exist here. push_project_to_github commits everything and pushes it to the folder's GitHub repository with the user's own GitHub login on that computer. Review/Undo snapshots and search by meaning aren't available for this project. Code you run (run_code, Python, Go, Node, anything) runs on their computer too, never somewhere else: there is no sandbox in this project, so never mention one. If a tool says the desktop app isn't open, tell the user to open the Classgrid app on that computer.`,
+      ...(await localEditorLines(project)),
     ].join("\n")}\n</project_editor>`;
   }
   let ssh;
@@ -971,12 +982,39 @@ ${rulesFile.text}`);
       lines.push(`Problems the editor shows (${ctx.problemCount}${ctx.problemCount > ctx.problems.length ? `, first ${ctx.problems.length}` : ""}):\n` +
         ctx.problems.map((p) => `- ${rel(p.file)}:${p.line} ${p.severity}: ${p.message}${p.source ? ` (${p.source})` : ""}${onUserChange(p) ? " (on a line the user just changed)" : ""}`).join("\n"));
     }
+    const runs = ctx && Date.now() - (ctx.updatedAt || 0) < 6 * 60 * 60 * 1000 ? terminalRunsText(ctx, rel) : "";
+    if (runs) lines.push(runs);
     if (userDiff) lines.push(`Changes the user made in the editor since your last answer:\n\`\`\`diff\n${userDiff}\n\`\`\``);
     return `\n\n<project_editor>\n${lines.join("\n")}\n</project_editor>`;
   } catch {
     return "";
   } finally {
     ssh?.dispose();
+  }
+}
+
+// A folder project's editor (the desktop app's built-in editor): open file, cursor, selection, tabs, errors and the
+// user's terminal commands, read by their Classgrid app
+async function localEditorLines(project) {
+  try {
+    const { callLocal } = await import("./local-runner.service.js");
+    let ctx = null;
+    try { ctx = JSON.parse(await callLocal(project, "editor_context", {})); } catch { return []; }
+    if (!ctx || Date.now() - (ctx.updatedAt || 0) > 6 * 60 * 60 * 1000) return [];
+    const root = String(project.localPath || "").replace(/[\\/]+$/, "").toLowerCase();
+    const rel = (p) => { const s = String(p || ""); return root && s.toLowerCase().startsWith(root) ? s.slice(root.length).replace(/^[\\/]+/, "").replace(/\\/g, "/") : s; };
+    const lines = [];
+    if (ctx.activeFile) lines.push(`Open in the editor now: ${rel(ctx.activeFile)}${ctx.cursorLine ? `, cursor on line ${ctx.cursorLine}` : ""}.`);
+    if (ctx.selection?.text) lines.push(`Selected by the user (lines ${ctx.selection.startLine}-${ctx.selection.endLine}):\n\`\`\`\n${ctx.selection.text}\n\`\`\``);
+    const others = (ctx.openTabs || []).filter((t) => t !== ctx.activeFile).map(rel);
+    if (others.length) lines.push(`Other open tabs: ${others.join(", ")}.`);
+    if (ctx.problemCount) lines.push(`Problems the editor shows (${ctx.problemCount}${ctx.problemCount > (ctx.problems || []).length ? `, first ${(ctx.problems || []).length}` : ""}):\n` +
+      (ctx.problems || []).map((p) => `- ${rel(p.file)}:${p.line} ${p.severity}: ${p.message}${p.source ? ` (${p.source})` : ""}`).join("\n"));
+    const runs = terminalRunsText(ctx, rel);
+    if (runs) lines.push(runs);
+    return lines;
+  } catch {
+    return [];
   }
 }
 

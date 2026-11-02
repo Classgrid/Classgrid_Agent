@@ -196,6 +196,12 @@ const tools = {
     return `Pushed to GitHub: branch ${branch} of ${url} (${committed}). ${last(p)}`;
   },
 
+  // What the user is doing in the built-in editor: open file, cursor, selection, errors and their terminal commands
+  editor_context() {
+    if (!foldersFile) return "{}";
+    try { return fs.readFileSync(path.join(path.dirname(foldersFile), "editor-bridge", "context.json"), "utf8"); } catch { return "{}"; }
+  },
+
   // A helper's own copy of the project (git worktree) on a new branch next to the project folder, so helpers that edit
   // at the same time never touch each other's files; the main AI merges the branch afterwards
   create_worktree(root, { name = "helper" }) {
@@ -545,7 +551,7 @@ const computerFileTools = {
 
 // The terminal in a chat that isn't a project: runs on this computer in the user's home folder (each command is allowed
 // by the user first)
-const COMPUTER_TOOLS = new Set(["execute_terminal_command", "start_background_command", "check_background_command", "stop_background_command"]);
+const COMPUTER_TOOLS = new Set(["execute_terminal_command", "start_background_command", "check_background_command", "stop_background_command", "run_code"]);
 
 function shellSpawn(command, cwd) {
   return process.platform === "win32"

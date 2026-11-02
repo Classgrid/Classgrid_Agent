@@ -21,6 +21,9 @@ files:
 # Classgrid Code, the built-in editor (scripts/get-editor.mjs puts it in editor/): shipped as resources/editor, outside
 # app.asar, because its own node.exe runs it
 extraResources:
+  # The newest Classgrid add-on for the built-in editor (copied into it when it starts)
+  - from: ../infra/ide/bridge/extension.js
+    to: bridge/extension.js
   - from: editor
     to: editor
   # electron-builder always skips folders named node_modules, so the editor's are listed one by one

@@ -5332,6 +5332,14 @@ If a tool fails, never show the error message; say only: "Something went wrong o
                 }
                 return runOnComputer(computerUser, name, args);
             };
+            // Code the AI runs goes to the user's computer too (never the cloud sandbox in the desktop app)
+            if (llmConfig.toolHandlers.run_code) llmConfig.toolHandlers.run_code = async (args) => {
+                if (!PERMISSION_MODES.has(body.permissionMode)) {
+                    const p = await askPermission({ ...permissionCtx, mode: "review", tool: "run_code", args });
+                    if (!p.allowed) return p.message;
+                }
+                return runOnComputer(computerUser, "run_code", args);
+            };
             // Files anywhere on the computer: asks first unless the user chose Turbo ("always allow" is remembered)
             for (const [name, askAs] of Object.entries(COMPUTER_FILE_TOOLS)) llmConfig.toolHandlers[name] = async (args) => {
                 if (body.permissionMode !== "turbo") {

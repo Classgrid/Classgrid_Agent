@@ -63,6 +63,13 @@ async function launch() {
     fs.copyFileSync(defaults, machine);
   }
 
+  // The newest Classgrid add-on (open file, cursor, terminal commands) goes into the built-in editor before it starts
+  try {
+    const from = app.isPackaged ? path.join(process.resourcesPath, "bridge", "extension.js") : path.join(__dirname, "..", "infra", "ide", "bridge", "extension.js");
+    const to = path.join(dir, "extensions", "classgrid-bridge", "extension.js");
+    if (fs.existsSync(from) && fs.existsSync(path.dirname(to)) && (!fs.existsSync(to) || fs.readFileSync(from, "utf8") !== fs.readFileSync(to, "utf8"))) fs.copyFileSync(from, to);
+  } catch (e) { console.log("[editor] could not update the Classgrid add-on:", e.message); }
+
   const port = await freePort();
   const token = crypto.randomBytes(16).toString("hex");
   const env = { ...process.env, CLASSGRID_BRIDGE_DIR: bridgeDir(), CLASSGRID_PROJECTS_DIR: "/" }; // "/": the Classgrid add-on may open any folder (only this app writes its open.json)
