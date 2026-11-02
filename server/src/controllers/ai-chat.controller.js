@@ -1395,6 +1395,10 @@ const COMPUTER_TOOL = {
     },
 };
 
+// A workflow: helpers in fixed steps (each step's helpers work at the same time; each step gets the earlier steps'
+// results). It runs in the background and the chat is woken with the final results.
+const RUN_WORKFLOW_TOOL = { type: "function", function: { name: "run_workflow", description: "Run a fixed pipeline of helpers in the background: steps run one after another, the helpers inside a step work at the same time, and every step's helpers get the results of the earlier steps. Use it for big jobs with a clear order (for example: research in parallel, then write, then review). You are woken in this chat with all the results when it finishes; tell the user what is running and end your answer.", parameters: { type: "object", properties: { name: { type: "string", description: "A short name for the workflow" }, steps: { type: "array", description: "The steps, in order (1-6 steps)", items: { type: "object", properties: { name: { type: "string" }, helpers: { type: "array", description: "1-5 helpers that work at the same time in this step", items: { type: "object", properties: { task: { type: "string" }, model: { type: "string" }, can_edit: { type: "boolean" }, type: { type: "string", description: "A helper type made with define_helper" } }, required: ["task"] } } }, required: ["helpers"] } } }, required: ["steps"] } } };
+
 // Send a message to another of the user's chats: that chat wakes up and works on it (like messaging another session)
 const SEND_TO_CHAT_TOOL = { type: "function", function: { name: "send_to_chat", description: "Send a message or a task to another of the user's own chats (find its id with search_recall_chat or recall_chat). That chat wakes up, works on it in its own context (its project, files and history) and answers there. Use it when the user asks you to pass something to another chat or have another chat do a job.", parameters: { type: "object", properties: { chat_id: { type: "string", description: "The other chat's id" }, message: { type: "string", description: "What to tell or ask that chat" } }, required: ["chat_id", "message"] } } };
 
@@ -3632,7 +3636,7 @@ You work on the user's own Windows computer through their Classgrid desktop app,
                         };
 
                         const batch = specs.slice(0, room).map((s, i) => {
-                            const h = { no: board.nextNo++, task: s.task, canEdit: s.canEdit, type: s.type, role: s.role, worktree: s.worktree && s.canEdit && !s.browser, withChat: s.withChat, model: pickModel(s.model, i), state: "running", report: "", reportTaken: false, inbox: [], notes: [], notesRead: 0, changes: new Map(), abort: new AbortController() };
+                            const h = { no: board.nextNo++, quiet: args?._quiet === true, task: s.task, canEdit: s.canEdit, type: s.type, role: s.role, worktree: s.worktree && s.canEdit && !s.browser, withChat: s.withChat, model: pickModel(s.model, i), state: "running", report: "", reportTaken: false, inbox: [], notes: [], notesRead: 0, changes: new Map(), abort: new AbortController() };
                             h.promise = runHelper(h, i).catch((e) => ({ state: "failed", text: String(e?.message || e) })).then((out) => {
                                 h.state = out.state;
                                 h.report = out.text
@@ -3646,7 +3650,7 @@ You work on the user's own Windows computer through their Classgrid desktop app,
                                         const task = await AgentTask.findOne({ session_id: sessionId, status: { $in: ["working", "sleeping", "waiting_tokens"] } }).select("_id").lean().catch(() => null);
                                         if (task) return m.wakeTaskForSession(sessionId, "helpers");
                                         // A normal chat: wake it with the reports it hasn't read yet
-                                        const unread = board.helpers.filter((x) => x.state !== "running" && !x.reportTaken);
+                                        const unread = board.helpers.filter((x) => x.state !== "running" && !x.reportTaken && !x.quiet); // a workflow's helpers report through the workflow
                                         if (!unread.length) return;
                                         unread.forEach((x) => { x.reportTaken = true; });
                                         const notes = unread.map((x) => `Helper ${x.no} (${x.task.slice(0, 120)}) ${x.state === "done" ? "finished" : "failed"}:\n${x.report}${x.notes.length ? `\nNotes it sent: ${x.notes.join(" | ")}` : ""}`);
@@ -3688,6 +3692,25 @@ You work on the user's own Windows computer through their Classgrid desktop app,
                         if ((await redis.hlen(key).catch(() => 0)) >= 30 && !(await redis.hexists(key, name).catch(() => 0))) return "Error: there are already 30 helper types; remove one first.";
                         await redis.hset(key, name, JSON.stringify({ role: role.slice(0, 4000), model: String(args?.model || "").trim().slice(0, 80), can_edit: args?.can_edit === true || args?.can_edit === "true" }));
                         return `Helper type "${name}" is ready. Send one with run_project_helpers: { task, type: "${name}" }.`;
+                    },
+                    // A fixed pipeline of helpers, in the background (each step waits for the one before)
+                    run_workflow: async (args) => {
+                        const steps = (Array.isArray(args?.steps) ? args.steps : []).slice(0, 6).map((st, i) => ({ name: String(st?.name || `Step ${i + 1}`), helpers: (Array.isArray(st?.helpers) ? st.helpers : []).slice(0, 5).filter((h) => h && String(h.task || "").trim()) })).filter((st) => st.helpers.length);
+                        if (!steps.length) return "Error: give at least one step with at least one helper task.";
+                        const name = String(args?.name || "Workflow").slice(0, 80);
+                        const runStep = llmConfig.toolHandlers.run_project_helpers;
+                        if (typeof runStep !== "function") return "Error: helpers aren't available in this chat.";
+                        (async () => {
+                            const results = [];
+                            for (const [i, st] of steps.entries()) {
+                                const earlier = results.length ? `\n\nResults of the earlier steps of the workflow "${name}":\n${results.join("\n\n").slice(-20000)}` : "";
+                                const out = await runStep({ helpers: st.helpers.map((h) => ({ ...h, task: `${h.task}${earlier}` })), wait: true, _quiet: true }).catch((e) => `failed: ${e.message}`);
+                                results.push(`## Step ${i + 1}: ${st.name}\n${String(out).slice(0, 15000)}`);
+                            }
+                            const { wakeChat } = await import("../services/chat-wake.service.js");
+                            await wakeChat(userId, sessionId, `The workflow "${name}" finished (${steps.length} step${steps.length === 1 ? "" : "s"}).\n\n${results.join("\n\n").slice(-30000)}`);
+                        })().catch((e) => console.warn("[workflow]", e.message));
+                        return `Started the workflow "${name}" in the background: ${steps.map((st, i) => `${i + 1}. ${st.name} (${st.helpers.length} helper${st.helpers.length === 1 ? "" : "s"})`).join(", ")}. You'll be woken in this chat with the results when it finishes; tell the user what is running and end your answer.`;
                     },
                     // A message to another of the user's chats: it wakes up and works on it
                     send_to_chat: async (args) => {
@@ -5658,7 +5681,7 @@ If a tool fails, never show the error message; say only: "Something went wrong o
         }
         // Helper types go with the helpers
         if (activeToolList.some(t => t.function.name === "run_project_helpers")) {
-            for (const def of [DEFINE_HELPER_TOOL, STOP_HELPERS_TOOL, SEND_TO_CHAT_TOOL]) {
+            for (const def of [DEFINE_HELPER_TOOL, STOP_HELPERS_TOOL, SEND_TO_CHAT_TOOL, RUN_WORKFLOW_TOOL]) {
                 if (fullToolList.some(t => t.function.name === def.function.name)) continue;
                 fullToolList.push(def);
                 activeToolList.push(def);
