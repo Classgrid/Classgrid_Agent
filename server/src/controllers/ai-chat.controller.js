@@ -3260,9 +3260,15 @@ If they ask whether their college/school uses Classgrid, say you can't see that 
                             // Each try gets a time limit for its steps; after that the tools say "time is up", so the
                             // helper writes its report from what it already did instead of running on with no answer
                             let deadline = 0;
-                            const names = h.browser ? [] : h.canEdit ? [...readOnly, ...editTools] : readOnly; // the Browser worker gets the browser tools below
-                            const defs = (await getMcpTools()).filter((t) => names.includes(t.name))
-                                .map((t) => ({ type: "function", function: { name: t.name, description: t.description, parameters: t.inputSchema } }));
+                            // A desktop chat that isn't a project: helpers work on the user's computer with the main AI's computer
+                            // tools (full paths; each step asks the user like the main AI's)
+                            const computerReadOnly = ["read_local_file", "list_project_files", "search_project"];
+                            const computerEdit = ["write_project_file", "edit_project_file", "execute_terminal_command", "start_background_command", "check_background_command", "stop_background_command"];
+                            const names = h.browser ? [] : onComputer ? (h.canEdit ? [...computerReadOnly, ...computerEdit] : computerReadOnly) : h.canEdit ? [...readOnly, ...editTools] : readOnly; // the Browser worker gets the browser tools below
+                            const defs = onComputer
+                                ? [READ_LOCAL_FILE_TOOL, ...COMPUTER_TERMINAL_DEFS].filter((d) => names.includes(d.function.name))
+                                : (await getMcpTools()).filter((t) => names.includes(t.name))
+                                    .map((t) => ({ type: "function", function: { name: t.name, description: t.description, parameters: t.inputSchema } }));
                             defs.push({ type: "function", function: { name: "tell_main", description: "Send the main AI a short note or question. It reads your notes while you work and may answer with a message.", parameters: { type: "object", properties: { message: { type: "string" } }, required: ["message"] } } });
                             // A message from the main AI reaches the helper with the result of its next step
                             const withInbox = (out) => {
@@ -3270,13 +3276,15 @@ If they ask whether their college/school uses Classgrid, say you can't see that 
                                 const msgs = h.inbox.splice(0).map((m) => `[Message from the main AI]: ${m}`).join("\n");
                                 return out && typeof out === "object" ? { ...out, text: `${out.text}\n\n${msgs}` } : `${out}\n\n${msgs}`;
                             };
+                            // The main AI's own computer handlers (they already ask the user first), kept apart from the gate below
+                            const computerHandlers = onComputer ? Object.fromEntries(names.map((n) => [n, llmConfig.toolHandlers[n]])) : {};
                             const liveHandlers = Object.fromEntries(names.map((n) => [n, async (a) => {
                                 if (Date.now() > deadline) return "Time is up: do not call any more tools. Write your full final answer now from what you already did.";
                                 const id = `h${i}-${stepNo++}`;
                                 emitHelper({ helper: i, id, tool: n, args: a });
                                 playground("tool", { who: `Helper ${h.no}`, tool: n, detail: JSON.stringify(a ?? {}).slice(0, 200) });
-                                const out = (await handleToolCall(n, a, { sessionId })).content[0].text;
-                                emitHelper({ helper: i, id, result: String(out).slice(0, 6000) });
+                                const out = onComputer ? await computerHandlers[n](a) : (await handleToolCall(n, a, { sessionId })).content[0].text;
+                                emitHelper({ helper: i, id, result: String(out && typeof out === "object" ? out.text : out).slice(0, 6000) });
                                 // The files this helper changed, for the chat's "files changed" box
                                 const changed = (n === "write_project_file" || n === "edit_project_file") && a?.path ? String(out).match(/\+(\d+) -(\d+)\)\./) : null;
                                 if (changed) {
@@ -3311,12 +3319,21 @@ If they ask whether their college/school uses Classgrid, say you can't see that 
                                 emitHelper({ helper: i, id, result: "Sent to the main AI." });
                                 return withInbox("Sent to the main AI.");
                             };
-                            // A helper's commands and browser actions ask the user too, in the same permission mode
-                            gateHandlers(liveHandlers, permissionCtx);
+                            // A helper's commands and browser actions ask the user too, in the same permission mode (computer tools
+                            // ask inside their own handlers, so they aren't asked twice)
+                            if (onComputer) {
+                                const own = Object.fromEntries(names.map((n) => [n, liveHandlers[n]]));
+                                for (const n of names) delete liveHandlers[n];
+                                gateHandlers(liveHandlers, permissionCtx);
+                                Object.assign(liveHandlers, own);
+                            } else gateHandlers(liveHandlers, permissionCtx);
                             const browserNote = hasBrowser && !h.browser ? "\n\nYou also have the user's live web browser (browser_open, browser_click, browser_type, browser_press, browser_scroll, browser_back, browser_screenshot, browser_read) and the chat's shared scratchpad (scratchpad_read, scratchpad_write). When your task is about a website, use the browser. Look at the screenshots closely, not only the text: report the design and UI/UX too (layout, colours, fonts, spacing, images, buttons, how easy the page is to use, anything broken). Each screenshot result has a link; put the links that show what you found in your report. Never type a password, card number or one-time code, and never pay, buy, send, post or delete anything: tell the main AI (tell_main) that the user must do that step." : "";
+                            const computerNote = onComputer && !h.browser ? `
+
+You work on the user's own Windows computer through their Classgrid desktop app, not on a project: always use full paths (like C:\\Users\\name\\Documents\\notes.txt). read_local_file looks at any file (pictures and videos too) or folder; list_project_files lists a folder; search_project searches inside the files of a folder.${h.canEdit ? " write_project_file creates a file, edit_project_file changes one, and execute_terminal_command runs PowerShell commands (start_background_command for servers)." : ""} The user is asked to allow each step.` : "";
                             const system = (h.browser ? BROWSER_WORKER_SYSTEM : h.canEdit
                                 ? "You are a helper working on a code project together with a main AI and up to 4 other helpers. Do your task by really changing the project: write and edit files, and run commands when needed. Read the files you change first. Only touch the files your task is about, because other helpers may be editing other files at the same time. Never push to GitHub. Follow any message from the main AI. Use tell_main to ask the main AI something or tell it something important. When you are done, report what you changed, file by file, and anything still left to do."
-                                : "You are a helper exploring a code project for another AI. Use the tools to look at the project (you can only read it). Read the actual code, not just file names. Then answer the task in full, with everything you found: what each relevant file and function does, how the parts work together step by step (frontend, API routes, backend, database, config), the important endpoints, data and settings, with file paths and line numbers. For example, if the task is to explore login, explain the whole flow from start to end: the frontend page and components, the form and what it sends, the API calls, the backend routes, controllers and services, checks and errors, tokens or sessions, the database models, and the config it uses. Never answer with only a list of file names. Don't guess; say what you could not find. Use tell_main to send the main AI a short note or question; follow any message it sends you.") + browserNote;
+                                : "You are a helper exploring a code project for another AI. Use the tools to look at the project (you can only read it). Read the actual code, not just file names. Then answer the task in full, with everything you found: what each relevant file and function does, how the parts work together step by step (frontend, API routes, backend, database, config), the important endpoints, data and settings, with file paths and line numbers. For example, if the task is to explore login, explain the whole flow from start to end: the frontend page and components, the form and what it sends, the API calls, the backend routes, controllers and services, checks and errors, tokens or sessions, the database models, and the config it uses. Never answer with only a list of file names. Don't guess; say what you could not find. Use tell_main to send the main AI a short note or question; follow any message it sends you.") + browserNote + computerNote;
                             await sleep(i * 1500); // start a little apart, so the model service isn't hit all at once
                             emitHelper({ helper: i, state: "running" });
                             // The picked model first; if it fails, Claude Sonnet 5.5 takes over, then GLM 5.3
@@ -5178,6 +5195,16 @@ If a tool fails, never show the error message; say only: "Something went wrong o
             }
         }
         if (onComputer) {
+            // Helpers too (run_project_helpers): they work on the user's computer with the same tools
+            const helperDefs = (await getMcpTools()).filter((t) => ["run_project_helpers", "check_helpers", "message_helper"].includes(t.name))
+                .map((t) => ({ type: "function", function: { name: t.name, description: t.description.replace("on the open Project Mode project", "on the user's computer (or the open project)"), parameters: t.inputSchema } }));
+            for (const def of helperDefs) {
+                if (fullToolList.some(t => t.function.name === def.function.name)) continue;
+                fullToolList.push(def);
+                activeToolList.push(def);
+                toolPlan.allowedToolNames.add(def.function.name);
+                toolPlan.loadedNames.add(def.function.name);
+            }
             const computerUser = req.user?._id || req.user?.id;
             for (const name of COMPUTER_TERMINAL_TOOLS) llmConfig.toolHandlers[name] = async (args) => {
                 // A chat with no permission mode chosen: every command on the computer asks first (a chosen mode asks as it says)
