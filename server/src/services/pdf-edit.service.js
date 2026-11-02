@@ -26,10 +26,10 @@ function isBlockedIp(ip) {
     return v6 === "::" || v6 === "::1" || v6.startsWith("fc") || v6.startsWith("fd") || /^fe[89ab]/.test(v6);
 }
 
-async function checkUrl(raw) {
+async function checkUrl(raw, label = "PDF") {
     let url;
     try { url = new URL(String(raw)); } catch { throw new Error(`"${raw}" is not a valid link.`); }
-    if (url.protocol !== "https:") throw new Error(`The PDF link must start with https:// (${url.href}).`);
+    if (url.protocol !== "https:") throw new Error(`The ${label} link must start with https:// (${url.href}).`);
     const host = url.hostname.replace(/^\[|\]$/g, "");
     if (/^(localhost|.*\.local|.*\.internal)$/i.test(host)) throw new Error("This link points to a private address, so it can't be opened.");
     const addrs = net.isIP(host) ? [{ address: host }] : await dns.lookup(host, { all: true }).catch(() => []);
@@ -40,35 +40,41 @@ async function checkUrl(raw) {
 
 // Only public https links, max 50 MB, 30 seconds
 export async function downloadPdf(raw) {
+    return downloadFile(raw, { label: "PDF", fallbackName: "document.pdf" });
+}
+
+// Same safe download for any file type (label is used in messages, e.g. "Word file")
+export async function downloadFile(raw, { label = "file", fallbackName = "file", maxBytes = MAX_PDF_BYTES } = {}) {
+    const tooBig = `The ${label} is bigger than ${Math.round(maxBytes / 1024 / 1024)} MB.`;
     const ac = new AbortController();
     const timer = setTimeout(() => ac.abort(), 30000);
     try {
         let href = String(raw);
         for (let hops = 0; ; hops++) {
-            await checkUrl(href);
+            await checkUrl(href, label);
             const res = await fetch(href, { redirect: "manual", signal: ac.signal });
             if (res.status >= 300 && res.status < 400 && res.headers.get("location")) {
                 if (hops >= 5) throw new Error("The link redirects too many times.");
                 href = new URL(res.headers.get("location"), href).href;
                 continue;
             }
-            if (!res.ok) throw new Error(`Couldn't download the PDF (error ${res.status}): ${href}`);
-            if (Number(res.headers.get("content-length")) > MAX_PDF_BYTES) throw new Error("The PDF is bigger than 50 MB.");
+            if (!res.ok) throw new Error(`Couldn't download the ${label} (error ${res.status}): ${href}`);
+            if (Number(res.headers.get("content-length")) > maxBytes) throw new Error(tooBig);
             const chunks = [];
             let size = 0;
             for await (const chunk of res.body) {
                 size += chunk.length;
-                if (size > MAX_PDF_BYTES) { ac.abort(); throw new Error("The PDF is bigger than 50 MB."); }
+                if (size > maxBytes) { ac.abort(); throw new Error(tooBig); }
                 chunks.push(chunk);
             }
             const last = new URL(href).pathname.split("/").pop() || "";
             let name;
             try { name = decodeURIComponent(last); } catch { name = last; }
-            name = name || "document.pdf";
+            name = name || fallbackName;
             return { buffer: Buffer.concat(chunks), name };
         }
     } catch (e) {
-        if (e.name === "AbortError") throw new Error("Downloading the PDF took too long.");
+        if (e.name === "AbortError") throw new Error(`Downloading the ${label} took too long.`);
         throw e;
     } finally {
         clearTimeout(timer);

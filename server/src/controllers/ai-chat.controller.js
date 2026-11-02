@@ -2727,7 +2727,8 @@ CRITICAL INSTRUCTION FOR GOOGLE WORKSPACE & CLASSROOM DISAMBIGUATION: If the use
 2. NO DUPLICATE HEADINGS: The \`generate_pdf\` tool automatically renders the \`title\` parameter as an \`<h1>\` at the top of the document. Do NOT manually add a duplicate \`<h1>\` with the title inside your HTML content.
 3. HUMANIZE LABELS: NEVER output raw backend database enum values (like "org_admin", "super_admin") in your chat responses or in PDF reports. Always map them to human-readable labels (e.g., "Organization Admin", "Super Admin") before rendering.
 4. WORD, EXCEL, POWERPOINT: To make a Word, Excel or PowerPoint file, use \`make_office_file\`. Never fake it with HTML or CSV, and never say you can only make PDFs.
-5. EDIT A PDF: To merge, split, rotate, watermark, number pages or fill a PDF form, use \`edit_pdf\`.`);
+5. EDIT A PDF: To merge, split, rotate, watermark, number pages or fill a PDF form, use \`edit_pdf\`.
+6. EDIT A WORD FILE: To change an existing Word file, use \`edit_office_file\` (set track_changes when the user wants to see the changes).`);
 
         // Owner's rules for background tasks (WhatsApp, calls, email), 2026-10-24
         if (body.taskOrigin) dynamicSystemPrompt += `\n\nOWNER'S RULES FOR THIS TASK:
@@ -3170,6 +3171,36 @@ If they ask whether their college/school uses Classgrid, say you can't see that 
                                 }
                             },
                             required: ["type", "file_name"]
+                        }
+                    }
+                },
+                {
+                    type: "function",
+                    function: {
+                        name: "edit_office_file",
+                        description: "Changes an existing Word (.docx) file and returns a download link of the new version. Its look and layout stay the same. Replaces text (also in tables, headers and footers), can show the changes as Word tracked changes, and can add new text at the end.",
+                        parameters: {
+                            type: "object",
+                            properties: {
+                                url: { type: "string", description: "https link of the .docx file." },
+                                edits: {
+                                    type: "array",
+                                    description: "Text to replace. Copy the find text exactly as it is in the file.",
+                                    items: {
+                                        type: "object",
+                                        properties: {
+                                            find: { type: "string", description: "The exact text to find." },
+                                            replace: { type: "string", description: "The new text. Empty to remove the text." },
+                                            all: { type: "boolean", description: "Replace every place it appears (default: only the first)." }
+                                        },
+                                        required: ["find", "replace"]
+                                    }
+                                },
+                                track_changes: { type: "boolean", description: "Show each change as a Word tracked change the user can accept or reject (default false)." },
+                                append: { type: "string", description: "Optional text to add at the end, in markdown: # to ### headings, paragraphs, bullet lists, **bold**, *italic*." },
+                                file_name: { type: "string", description: "Name for the new file without extension (default: the old name with -edited)." }
+                            },
+                            required: ["url"]
                         }
                     }
                 },
@@ -3885,6 +3916,24 @@ You work on the user's own Windows computer through their Classgrid desktop app,
                             return `Made ${file.fileName} (${file.summary}). Download: ${url}\nPut this download link in your reply.`;
                         } catch (e) {
                             return `FAILED to make the file: ${e.message}`;
+                        }
+                    },
+                    edit_office_file: async (args) => {
+                        try {
+                            const { editWordFile } = await import('../services/office-edit.service.js');
+                            const { downloadFile } = await import('../services/pdf-edit.service.js');
+                            const a = args || {};
+                            const link = String(a.url ?? '').trim();
+                            if (!link) return "FAILED to edit the file: send the Word file link in url.";
+                            const input = await downloadFile(link, { label: 'Word file', fallbackName: 'document.docx' });
+                            const file = await editWordFile(a, input);
+                            const folder = `ai-generated/office/${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+                            const saved = await uploadBufferToR2(file.buffer, file.fileName, file.mime, `${folder}/${file.fileName}`);
+                            const url = `${saved.slice(0, saved.length - file.fileName.length)}${encodeURIComponent(file.fileName)}`;
+                            const note = file.note ? `\n${file.note}` : '';
+                            return `Made ${file.fileName} (${file.summary}). Download: ${url}${note}\nPut this download link in your reply.`;
+                        } catch (e) {
+                            return `FAILED to edit the file: ${e.message}`;
                         }
                     },
                     edit_pdf: async (args) => {
