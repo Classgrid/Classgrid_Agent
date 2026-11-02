@@ -73,6 +73,34 @@ async function useChat(id) {
   tell(navInfo());
 }
 
+// ── History, like Chrome's: every page opened in this browser (by the user or the agent), newest first ─────────
+let historyFile = null;
+let history = null; // [{ url, title, at }]
+let historySave = null;
+function historyList() {
+  if (history) return history;
+  historyFile = path.join(app.getPath("userData"), "browser-history.json");
+  try { history = JSON.parse(fs.readFileSync(historyFile, "utf8")) || []; } catch { history = []; }
+  return history;
+}
+function saveHistorySoon() {
+  clearTimeout(historySave);
+  historySave = setTimeout(() => { fs.writeFile(historyFile, JSON.stringify(history.slice(0, 5000)), () => {}); }, 1500);
+}
+function addHistory(url, title) {
+  if (!/^https?:\/\//.test(url)) return;
+  const list = historyList();
+  // The same page again within a minute (a reload, an in-page move): just the newest entry is updated
+  if (list[0] && list[0].url === url && Date.now() - list[0].at < 60000) { list[0].at = Date.now(); if (title) list[0].title = title; }
+  else list.unshift({ url, title: title || "", at: Date.now() });
+  if (list.length > 5000) list.length = 5000;
+  saveHistorySoon();
+}
+function titleHistory(url, title) {
+  const list = historyList();
+  if (list[0] && list[0].url === url && title && list[0].title !== title) { list[0].title = title; saveHistorySoon(); }
+}
+
 // ── The view ─────────────────────────────────────────────────────────────────────────────────────────────
 
 function ensureView() {
@@ -89,13 +117,14 @@ function ensureView() {
   });
   const onNav = () => {
     const url = wc.getURL();
+    addHistory(url, wc.getTitle());
     if (currentChat && /^https?:\/\//.test(url)) { chats()[currentChat] = url; saveChats(); }
     applyZoom();
     tell(navInfo());
   };
   wc.on("did-navigate", onNav);
   wc.on("did-navigate-in-page", onNav);
-  wc.on("page-title-updated", () => tell(navInfo()));
+  wc.on("page-title-updated", () => { titleHistory(wc.getURL(), wc.getTitle()); tell(navInfo()); });
   wc.on("did-start-loading", () => tell(navInfo()));
   wc.on("did-stop-loading", () => tell(navInfo()));
   wc.on("dom-ready", applyZoom);
@@ -395,6 +424,18 @@ ipcMain.handle("cg:browserAct", async (e, step) => {
   if (!fromApp(e) || !step || !["open", "back", "forward", "reload"].includes(step.action)) return { ok: false };
   try { await runAct({ action: step.action, url: String(step.url || ""), screenshot: false }, false); return { ok: true }; }
   catch (err) { return { ok: false, error: String(err.message || err) }; }
+});
+// History: the pages opened in this browser, newest first (q: search in titles and addresses), and clearing it
+ipcMain.handle("cg:browserHistory", (e, q) => {
+  if (!fromApp(e)) return [];
+  const words = String(q || "").toLowerCase().split(/\s+/).filter(Boolean);
+  return historyList().filter((h) => !words.length || words.every((w) => `${h.title} ${h.url}`.toLowerCase().includes(w))).slice(0, 300);
+});
+ipcMain.handle("cg:browserHistoryClear", (e) => {
+  if (!fromApp(e)) return false;
+  historyList().length = 0;
+  saveHistorySoon();
+  return true;
 });
 // The Camera button: the page as it is now
 ipcMain.handle("cg:browserShot", async (e) => {

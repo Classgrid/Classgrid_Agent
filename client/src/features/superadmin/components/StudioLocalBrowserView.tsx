@@ -3,7 +3,7 @@
 // on top of the box below; this tab tells the app where the box is on screen and keeps the toolbar.
 import { useEffect, useRef, useState } from "react";
 import { motion, useReducedMotion } from "framer-motion";
-import { ArrowLeft, ArrowRight, Camera, ExternalLink, Globe, RotateCw, Video } from "lucide-react";
+import { ArrowLeft, ArrowRight, Camera, ExternalLink, Globe, History, RotateCw, Video, X } from "lucide-react";
 import { useLocation } from "react-router-dom";
 import { toast } from "sonner";
 
@@ -20,6 +20,8 @@ type DesktopBrowser = {
   browserState: () => Promise<(Nav & { pointerAt: number }) | null>;
   browserAct: (step: { action: string; url?: string }) => Promise<{ ok: boolean; error?: string }>;
   browserShot: () => Promise<string | null>;
+  browserHistory: (q?: string) => Promise<{ url: string; title: string; at: number }[]>;
+  browserHistoryClear: () => Promise<boolean>;
   onBrowser: (fn: (msg: any) => void) => () => void;
 };
 const desktop = () => (window as unknown as { classgridDesktop?: Partial<DesktopBrowser> }).classgridDesktop;
@@ -116,6 +118,17 @@ export function StudioLocalBrowserView({ paused = false }: { paused?: boolean })
     a.click();
   };
 
+  // History, like Chrome's (the page steps aside while this panel is open: it is a dialog)
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const [historyQ, setHistoryQ] = useState("");
+  const [historyRows, setHistoryRows] = useState<{ url: string; title: string; at: number }[]>([]);
+  useEffect(() => {
+    if (!historyOpen) return;
+    const t = setTimeout(() => { desktop()?.browserHistory?.(historyQ).then((r) => setHistoryRows(r || [])).catch(() => {}); }, 120);
+    return () => clearTimeout(t);
+  }, [historyOpen, historyQ]);
+  const dayOf = (t: number) => new Date(t).toLocaleDateString(undefined, { weekday: "long", day: "numeric", month: "short" });
+
   const iconBtn = "flex items-center justify-center size-8 rounded-md text-muted-foreground hover:text-foreground hover:bg-secondary transition-[color,background-color,transform] duration-150 active:scale-[0.94] disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-muted-foreground disabled:active:scale-100";
 
   return (
@@ -145,6 +158,9 @@ export function StudioLocalBrowserView({ paused = false }: { paused?: boolean })
             <span className="truncate">Agent · {pointerLabel(pointer)}</span>
           </span>
         )}
+        {typeof desktop()?.browserHistory === "function" && (
+          <button className={iconBtn} onClick={() => setHistoryOpen((v) => !v)} title="History" aria-label="History"><History className="size-4" /></button>
+        )}
         <button className={iconBtn} disabled={!hasPage} onClick={saveShot} title="Save a screenshot" aria-label="Save a screenshot"><Camera className="size-4" /></button>
         {typeof (window as unknown as { classgridDesktop?: { openRecordings?: () => void } }).classgridDesktop?.openRecordings === "function" && (
           <button className={iconBtn} onClick={() => (window as unknown as { classgridDesktop?: { openRecordings?: () => void } }).classgridDesktop?.openRecordings?.()} title="Videos of the agent using the browser" aria-label="Videos of the agent using the browser"><Video className="size-4" /></button>
@@ -154,6 +170,30 @@ export function StudioLocalBrowserView({ paused = false }: { paused?: boolean })
 
       {/* The page itself is drawn by the app over this box */}
       <div ref={boxRef} className="relative flex-1 min-h-0 bg-[#f5f5f5] dark:bg-[#141414]">
+        {historyOpen && (
+          <div role="dialog" aria-label="History" className="absolute inset-0 z-20 flex flex-col bg-background">
+            <div className="shrink-0 flex items-center gap-2 px-3 h-12 border-b border-border">
+              <History className="size-4 text-muted-foreground" />
+              <input autoFocus data-no-ring value={historyQ} onChange={(e) => setHistoryQ(e.target.value)} placeholder="Search history" className="flex-1 min-w-0 h-8 px-3 rounded-full border border-border bg-white dark:bg-[#1e1e1e] text-sm outline-none" />
+              <button className="h-8 px-3 rounded-md text-[13px] text-muted-foreground hover:text-foreground hover:bg-secondary" onClick={() => { desktop()?.browserHistoryClear?.().then(() => setHistoryRows([])).catch(() => {}); }}>Clear history</button>
+              <button className={iconBtn} onClick={() => setHistoryOpen(false)} title="Close" aria-label="Close"><X className="size-4" /></button>
+            </div>
+            <div className="flex-1 min-h-0 overflow-y-auto px-2 py-2">
+              {!historyRows.length && <p className="px-3 py-6 text-center text-sm text-muted-foreground">{historyQ ? "Nothing matches." : "No history yet."}</p>}
+              {historyRows.map((h, i) => (
+                <div key={`${h.at}-${i}`}>
+                  {(i === 0 || dayOf(historyRows[i - 1]!.at) !== dayOf(h.at)) && <div className="px-3 pt-3 pb-1 text-xs font-medium text-muted-foreground">{dayOf(h.at)}</div>}
+                  <button onClick={() => { act({ action: "open", url: h.url }); setHistoryOpen(false); }} className="w-full flex items-center gap-3 px-3 h-9 rounded-md text-left text-sm hover:bg-secondary">
+                    <span className="shrink-0 w-12 text-xs text-muted-foreground tabular-nums">{new Date(h.at).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" })}</span>
+                    <img src={`https://www.google.com/s2/favicons?domain=${encodeURIComponent((() => { try { return new URL(h.url).host; } catch { return ""; } })())}&sz=32`} alt="" className="size-4 shrink-0 rounded-sm" onError={(e) => { (e.currentTarget as HTMLImageElement).style.visibility = "hidden"; }} />
+                    <span className="min-w-0 truncate">{h.title || h.url}</span>
+                    <span className="min-w-0 shrink truncate text-xs text-muted-foreground">{(() => { try { return new URL(h.url).host; } catch { return h.url; } })()}</span>
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
         {!hasPage && (
           <div className="h-full flex items-center justify-center px-6">
             <motion.div

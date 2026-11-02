@@ -33,6 +33,8 @@ contextBridge.exposeInMainWorld("classgridDesktop", {
   browserState: () => ipcRenderer.invoke("cg:browserState"),
   browserAct: (step) => ipcRenderer.invoke("cg:browserAct", step),
   browserShot: () => ipcRenderer.invoke("cg:browserShot"),
+  browserHistory: (q) => ipcRenderer.invoke("cg:browserHistory", q),
+  browserHistoryClear: () => ipcRenderer.invoke("cg:browserHistoryClear"),
   onBrowser: (fn) => {
     const listener = (_e, msg) => fn(msg);
     ipcRenderer.on("cg:browser", listener);
