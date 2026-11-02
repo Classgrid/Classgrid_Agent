@@ -128,8 +128,8 @@ export async function saveMessage(sessionId, role, content, fileUrls = [], sende
 const MEMORY_HEADER = /^\[Summary of messages 1-(\d+)\]\n/;
 // Every 8 messages DeepSeek V4 Flash rewrites one summary of the whole chat (User facts + Task state).
 const MEMORY_EVERY = 8;
-const MEMORY_MESSAGE_CHARS = 3000;
-const MEMORY_FLASH_MODEL = "@cf/deepseek-ai/deepseek-v4-flash-0731";
+const MEMORY_MESSAGE_CHARS = 6000;
+const MEMORY_FLASH_MODEL = "@cf/deepseek-ai/deepseek-v4.1-flash-1017"; // the newest DeepSeek Flash
 
 /** How many chat messages a saved summary covers, or null for an older summary without the header. */
 export function memoryCoverage(summary) {
@@ -142,13 +142,21 @@ export function memoryText(summary) {
     return String(summary || "").replace(MEMORY_HEADER, "");
 }
 
-// Saved assistant messages can be JSON ({ classgrid_ai_message, content, steps }); only the text is summarized.
+// Saved assistant messages can be JSON ({ classgrid_ai_message, content, steps }): the text is summarized, plus a
+// short list of the steps it took (tools, files, commands), so long agent work in Studio is remembered too
 function plainMessageText(content) {
     const text = String(content ?? "");
     if (text.trim().startsWith("{")) {
         try {
             const inner = JSON.parse(text);
-            if (inner?.classgrid_ai_message) return String(inner.content || "");
+            if (inner?.classgrid_ai_message) {
+                const steps = (Array.isArray(inner.steps) ? inner.steps : []).slice(-40).map((s) => {
+                    const a = s?.args || {};
+                    const what = a.path || a.file_path || a.command || a.url || a.query || a.name || a.task || "";
+                    return `- ${s?.tool || s?.name || "step"}${what ? `: ${String(what).slice(0, 160)}` : ""}${s?.status === "error" ? " (failed)" : ""}`;
+                });
+                return String(inner.content || "") + (steps.length ? `\n[Steps taken]\n${steps.join("\n")}` : "");
+            }
         } catch { /* not JSON */ }
     }
     return text;
@@ -157,16 +165,27 @@ function plainMessageText(content) {
 const MEMORY_INSTRUCTIONS = `You keep the long-term memory of one chat between a user and Classgrid AI.
 You get the PREVIOUS MEMORY (may be empty) and the NEW MESSAGES since it was written. Write the updated memory.
 
-Output exactly these two sections, in Markdown, max 350 words in total:
+Output exactly these sections, in Markdown, max 1500 words in total. The AI must be able to carry on a chat of many
+hours from this memory alone, so keep the details that matter:
 
 ## User facts
 Stable facts about the user: their name, things they asked the AI to remember (favorite things, numbers, names), stated preferences and standing instructions.
 - Keep every fact from the previous memory unless the user changed or withdrew it.
 - Copy names, numbers, links and file paths exactly.
 
+## What the user asked, in order
+Every request the user made in this chat, one short line each, oldest first, with whether it is done, in progress or still to do.
+- Keep the old requests from the previous memory (shorten them if needed, never drop one).
+
+## Work done
+Files, folders, links and projects created or changed (exact paths/URLs), commands and tools that mattered, and their results.
+
+## Problems and fixes
+Errors that happened (the exact error text when short) and how they were fixed, or that they are still open.
+
 ## Task state
-What the chat is working on now: the goal, decisions made, files and links created (exact paths/URLs), and what is still pending.
-- Drop finished or outdated items.
+What the chat is working on right now, decisions made, and what is still pending.
+- Drop finished or outdated items here (they stay in "What the user asked" as done).
 
 Rules:
 - Write only what the messages actually say. Never invent facts, instructions or preferences.
@@ -190,7 +209,7 @@ async function summarizeWithFlash(input) {
             { role: "user", content: input }
         ],
         tools: [],
-        maxTokens: 3000, // Flash reasons first; leave room for the memory after the reasoning
+        maxTokens: 8000, // Flash reasons first; leave room for the memory (up to 1500 words) after the reasoning
         maxToolDepth: 0,
         timeoutMs: 90000
     });

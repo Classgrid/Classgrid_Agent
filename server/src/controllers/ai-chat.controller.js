@@ -1797,7 +1797,7 @@ export const streamAskAi = async (req, res) => {
         // The frontend no longer controls chat history. The backend owns it entirely.
         // historyDepth: how many messages to give the LLM context (default 25, max 500)
         // Default 12 recent messages (was 25): enough context for follow-ups without resending long chats every turn.
-        let historyDepth = Math.min(parseInt(body.historyDepth, 10) || 12, 500);
+        let historyDepth = Math.min(parseInt(body.historyDepth, 10) || 40, 500);
         let messages = [];
         let dynamicSystemPrompt = "";
         // Per-request / per-user context. Appended AFTER all fixed rules so the long fixed prefix
@@ -1844,7 +1844,7 @@ export const streamAskAi = async (req, res) => {
                 const covered = memoryCoverage(sessionData.long_term_memory);
                 const total = await getHistoryCount(sessionId);
                 const sinceSummary = covered !== null ? total - covered : (total % 8) + 8;
-                historyDepth = Math.min(Math.max(sinceSummary + 2, 4), 30);
+                historyDepth = Math.min(Math.max(sinceSummary + 2, 20), 80);
                 volatilePrompt += `\n\n<long_term_memory>\nA background model's summary of messages 1-${covered ?? "?"} of this chat (not their exact text; for the exact text of an older message call recall_chat or search_recall_chat). The messages after it follow in full.\n${memoryText(sessionData.long_term_memory)}\n</long_term_memory>`;
             }
 

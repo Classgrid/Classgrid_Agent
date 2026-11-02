@@ -70,11 +70,11 @@ import { senderLabels } from './ai-chat-grid.service.js';
 
 const REDIS_KEY_PREFIX  = 'ai:chat:history:';
 const MAX_HISTORY       = 500;   // absolute cap stored in Redis
-const DEFAULT_DEPTH     = 12;    // default messages sent to LLM per request (was 25; see docs/AI_TOKEN_ROOT_CAUSE.md)
+const DEFAULT_DEPTH     = 40;    // default messages sent to LLM per request (owner, 2026-11-02: the AI must remember long chats)
 // Tool memory notes are restored only for the most recent answers, each cut short, so old tool results
 // don't make every new message heavier. Links in a result are always kept.
-const TOOL_NOTE_TURNS   = 2;
-const TOOL_NOTE_CHARS   = 600;
+const TOOL_NOTE_TURNS   = 6;
+const TOOL_NOTE_CHARS   = 2000;
 const CACHE_TTL_SECONDS = 86400; // 24 hours
 
 /**
