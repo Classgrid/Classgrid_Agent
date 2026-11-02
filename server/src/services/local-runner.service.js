@@ -182,7 +182,18 @@ export async function readLocalFile(userId, args = {}) {
             try {
                 const { pdfPageImages } = await import("./llm-stream-anthropic.js");
                 const { images, pages } = await pdfPageImages(buf, 4);
-                if (images.length) return { text: `${file.path} is a scanned PDF with no text inside. ${images.length === pages ? `Its ${pages} page${pages === 1 ? " is" : "s are"}` : `Pages 1-${images.length} of ${pages} are`} attached below as ${images.length === 1 ? "a picture; read it" : "pictures; read them"} yourself.`, images: images.map((jpg) => ({ data: jpg.toString("base64") })) };
+                if (images.length) {
+                    // A model that can't see pictures reads each page with analyze_image on its Classgrid link
+                    let links = [];
+                    try {
+                        const { uploadBufferToR2 } = await import("../config/r2Client.js");
+                        links = await Promise.all(images.map((jpg, n) => uploadBufferToR2(jpg, `local-pdf-page-${n + 1}.jpg`, "image/jpeg")));
+                    } catch (err) {
+                        console.warn(`[read_local_file] could not upload the PDF's pages for analyze_image: ${err.message}`);
+                    }
+                    const linkText = links.length ? ` If no pictures are shown to you below, read each page with analyze_image (ask it to write out all the text and tables on the page): ${links.map((l, n) => `page ${n + 1}: ${l}`).join(", ")}` : "";
+                    return { text: `${file.path} is a scanned PDF with no text inside. ${images.length === pages ? `Its ${pages} page${pages === 1 ? " is" : "s are"}` : `Pages 1-${images.length} of ${pages} are`} attached below as ${images.length === 1 ? "a picture; read it" : "pictures; read them"} yourself.${linkText}`, images: images.map((jpg) => ({ data: jpg.toString("base64") })) };
+                }
             } catch (err) {
                 console.warn(`[read_local_file] could not draw the PDF's pages: ${err.message}`);
             }
