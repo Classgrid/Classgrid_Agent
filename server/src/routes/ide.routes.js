@@ -956,7 +956,8 @@ router.post("/projects/:id/where", isAuthenticated, async (req, res) => {
   if (!where) return res.status(400).json({ error: "Pick where to open the project" });
   if (project.location === "local") return res.status(409).json({ error: "This project is only a folder on your computer. Use \"Also use in the cloud\" first." });
   try {
-    const skipSave = where === "cloud" && !!req.body?.skipSave;
+    // Nothing is pushed by itself: this computer's work goes to GitHub only when the user asks the agent to push
+    const skipSave = where === "cloud";
     const ready = await readyForCopy(req, res, { app: !skipSave });
     if (!ready) return;
     const copy = copyOn(project, ready.deviceId);
@@ -986,8 +987,8 @@ router.post("/projects/:id/sync", isAuthenticated, async (req, res) => {
     if (!ready) return;
     const copy = copyOn(project, ready.deviceId);
     if (!copy || project.location === "local" || !project.repo) return res.status(409).json({ error: "There's no copy of this project on this computer.", code: "no_copy" });
-    const saved = await saveComputerCopy(project, copy, ready);
-    res.status(saved.error ? 409 : 200).json(saved);
+    // Nothing is pushed by itself (owner's rule): the work stays in the folder until the user asks the agent to push
+    res.json({ ok: true, message: "" });
   } catch (e) {
     console.error("[IDE] Saving the computer copy failed:", e.message);
     res.status(500).json({ error: "Could not save to GitHub" });
@@ -1012,9 +1013,9 @@ async function newRepoFor(project, token) {
   return { error: "Couldn't make a GitHub repo: that name is already taken on your GitHub. Rename the project, then try again." };
 }
 
-// "Also use in the cloud" for a folder project: the folder is committed and pushed to GitHub (a new private repo is
-// made when it has none), and the project becomes a cloud project whose copy on this computer is that same folder.
-// Its chats stay with it.
+// A folder project whose folder is on GitHub (the user asked the agent to make a repo and push it): it is linked to that
+// repo and becomes the same project in both places (the cloud, and this folder as this computer's copy), keeping its
+// name, logo and chats. Nothing is pushed, no repo is made and nothing is uploaded here (owner's rule, 2026-11-02).
 router.post("/projects/:id/cloud", isAuthenticated, async (req, res) => {
   const project = await ownProject(req, res);
   if (!project) return;
@@ -1022,34 +1023,22 @@ router.post("/projects/:id/cloud", isAuthenticated, async (req, res) => {
   try {
     const ready = await readyForCopy(req, res);
     if (!ready) return;
-    const { user } = ready;
-    const args = { mode: "push", message: "Saved by Classgrid: first version from this computer", token: user.github_access_token, name: user.github_name, email: user.github_email };
-    let r = await onComputer(project, project.localPath, "sync_repo", { ...args, repo: project.repo || undefined });
-    let made = null;
-    if (r.code === "no_remote") {
-      made = await newRepoFor(project, user.github_access_token);
-      if (made.error) return res.status(502).json({ error: made.error });
-      r = await onComputer(project, project.localPath, "sync_repo", { ...args, repo: made.repo });
-    }
-    if (r.error) return res.status(409).json({ error: r.error, code: r.code });
+    const r = await onComputer(project, project.localPath, "folder_repo", {});
+    if (r.error) return res.status(409).json({ error: r.code === "no_remote" || /NO_REMOTE/.test(r.error) ? "This folder isn't on GitHub yet. Ask the agent to make a GitHub repo for this project and push it." : r.error, code: "not_on_github" });
     const repo = runnerLine(r.text, "Repo");
-    if (!REPO_NAME.test(repo || "")) return res.status(409).json({ error: "This folder's repo isn't on GitHub. Cloud projects need a GitHub repo." });
+    if (!REPO_NAME.test(repo || "")) return res.status(409).json({ error: "This folder isn't on GitHub yet. Ask the agent to make a GitHub repo for this project and push it.", code: "not_on_github" });
     const other = await IdeProject.findOne({ owner: req.user._id, _id: { $ne: project._id }, repo: new RegExp(`^${escapeRegex(repo)}$`, "i") }).select("name");
-    if (other) return res.status(409).json({ error: `This folder's repo ${repo} is already linked to your project "${other.name}". Open that project instead.` });
-    // The cloud opens the project's branch: say so when this folder's work is on another one
-    const pushed = runnerLine(r.text, "Branch");
-    const where = await projectBranch(repo, user.github_access_token);
-    const otherBranch = pushed && pushed !== "-" && where.branch && pushed !== where.branch ? ` Your work here is on the branch ${pushed}; the cloud opens ${where.branch}.` : "";
+    if (other) return res.status(409).json({ error: `This folder's repo ${repo} is already linked to your project "${other.name}". Open that project instead.`, code: "repo_taken" });
     const folder = project.localPath;
     project.repo = repo;
     project.location = "cloud";
     project.localPath = null;
     putCopy(project, ready.deviceId, { path: folder, at: new Date(), here: true });
     await project.save();
-    res.json({ ok: true, project: projectJson(project), message: `${made ? `Made the private GitHub repo ${repo}. ` : ""}${lastLine(r.text)} This project now works in the cloud too.${otherBranch}` });
+    res.json({ ok: true, project: projectJson(project), message: `Linked to ${repo}. This project now works in the cloud too.` });
   } catch (e) {
-    console.error("[IDE] Also use in the cloud failed:", e.message);
-    res.status(500).json({ error: "Could not put this project in the cloud" });
+    console.error("[IDE] Linking the folder's repo failed:", e.message);
+    res.status(500).json({ error: "Could not link this folder's GitHub repo" });
   }
 });
 

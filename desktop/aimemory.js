@@ -111,7 +111,7 @@ module.exports = {
       if (action === "delete") return remove(args);
       if (action === "list") return index(args.project || "") || "No memories saved yet.";
       // For the server, at the start of each answer: the list and the rules in full
-      if (action === "index") return JSON.stringify({ index: index(args.project || ""), rules: rules(args.project || "") });
+      if (action === "index") return JSON.stringify({ index: index(args.project || ""), rules: rules(args.project || ""), folder: folder() });
       return 'Error: action must be "save", "read", "delete" or "list".';
     } catch (e) {
       return `Error: ${e.message}`;

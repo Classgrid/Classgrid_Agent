@@ -299,6 +299,12 @@ const tools = {
   // thrown away), then the latest from GitHub is put under them. mode "push": everything here is committed and pushed
   // to its branch on GitHub (a folder with no repo yet is linked to `repo` first). Answers "Repo: ...", "Branch: ..."
   // and one line for the user; "Error: CODE ..." when it can't.
+  // The GitHub repo a folder pushes to (read only), for linking a folder project once it is on GitHub
+  folder_repo(root) {
+    const repo = githubRepoOf(root);
+    return repo ? `Repo: ${repo}` : "Error: NO_REMOTE This folder isn't on GitHub yet.";
+  },
+
   sync_repo(root, { mode = "pull", repo, branch, message, token, name, email }) {
     if (!fs.existsSync(root)) return `Error: FOLDER_GONE The copy on this computer isn't at ${root} any more.`;
     const git = gitIn(root, token);
@@ -314,13 +320,9 @@ const tools = {
 
     if (mode === "pull") {
       if (!isRepo || (repo && (repoOfAddress(originOf(git)) || "").toLowerCase() !== String(repo).toLowerCase())) return `Error: FOLDER_GONE The folder ${root} isn't a copy of this project any more.`;
-      let saved = "";
-      git("add", "-A");
-      if (String(git("diff", "--cached", "--name-only").stdout || "").trim()) {
-        const c = git(...who, "commit", "-q", "-m", "Saved by Classgrid: changes on this computer, before getting the latest");
-        if (c.status !== 0) return `Error: your changes on this computer couldn't be saved first, so nothing was pulled: ${gitLast(c)}`;
-        saved = "Your unsaved changes here were saved as a commit first. ";
-      }
+      // The user's own changes here are never committed by Classgrid: they are set aside while the latest comes in
+      // (rebase --autostash) and put back after
+      const saved = "";
       const f = git("fetch", "-q", "origin");
       if (f.status !== 0) return `Error: couldn't get the latest from GitHub: ${gitLast(f)}`;
       let current = String(git("rev-parse", "--abbrev-ref", "HEAD").stdout || "").trim();
@@ -333,7 +335,7 @@ const tools = {
       if (git("rev-parse", "-q", "--verify", `refs/remotes/origin/${current}`).status !== 0) return `Branch: ${current}\n${saved}Nothing new to get: GitHub has no branch ${current} yet.`;
       const behind = Number(String(git("rev-list", "--count", `HEAD..origin/${current}`).stdout || "").trim()) || 0;
       if (!behind) return `Branch: ${current}\n${saved}Already up to date with GitHub.`;
-      if (git(...who, "rebase", "-q", `origin/${current}`).status !== 0) return conflict(`origin/${current}`);
+      if (git(...who, "rebase", "-q", "--autostash", `origin/${current}`).status !== 0) return conflict(`origin/${current}`);
       git("branch", "-q", `--set-upstream-to=origin/${current}`);
       return `Branch: ${current}\n${saved}Got ${behind} new change${behind === 1 ? "" : "s"} from GitHub.`;
     }

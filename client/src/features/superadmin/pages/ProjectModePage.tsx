@@ -33,7 +33,7 @@ import { apiClient } from "@/lib/apiClient";
 import { localFolderOf } from "../utils/localProject";
 import { DesktopStartPanel, type LocalWorkspace } from "../components/DesktopStartPanel";
 import { ProjectPlaceSwitch } from "../components/ProjectPlaceSwitch";
-import { PROJECT_PLACE_EVENT, listenProjectSaved, saveThisComputerCopy, thisComputerCopy, thisDeviceId, type LocalCopy } from "../utils/projectCopies";
+import { PROJECT_PLACE_EVENT, getCopyOnThisComputer, linkFolderRepo, listenProjectSaved, saveThisComputerCopy, thisComputerCopy, thisDeviceId, type LocalCopy } from "../utils/projectCopies";
 
 const backendUrl = import.meta.env.VITE_API_URL || "https://api.classgrid.in";
 const OPEN_PROJECT_KEY = "cg_project_open"; // which project this browser had open (per-viewer convenience)
@@ -361,6 +361,27 @@ export function ProjectModePage() {
       if (i !== -1 && parts.length > i + 1) window.history.pushState({}, "", parts.slice(0, i + 1).join("/"));
       window.dispatchEvent(new Event("agent:new-chat"));
     }
+    const onDesktopApp = !!(window as { classgridDesktop?: { isDesktop?: boolean } }).classgridDesktop?.isDesktop;
+    // Desktop app, a folder project: if its folder is on GitHub now (the user asked the agent to make a repo and push),
+    // it is linked to that repo first, so the same project works in the cloud too. Nothing is pushed or uploaded.
+    if (onDesktopApp && project.location === "local" && !resume) {
+      const linked = await linkFolderRepo(project).catch(() => null);
+      if (linked) {
+        const p = linked as unknown as Project;
+        setProjects((list) => (list || []).map((x) => (x.id === p.id ? p : x)));
+        return open(p, replace, resume);
+      }
+    }
+    // Desktop app, a cloud project with no copy on this computer yet: pick a folder and clone the repo there (a real
+    // git clone, connected to the same repo); each later open gets the latest from GitHub into it
+    if (onDesktopApp && project.location !== "local" && project.repo && !thisComputerCopy(project) && !resume) {
+      setBusyId(null);
+      const cloned = await getCopyOnThisComputer(project);
+      if (!cloned) return;
+      const p = cloned as unknown as Project;
+      setProjects((list) => (list || []).map((x) => (x.id === p.id ? p : x)));
+      return open(p, replace, resume);
+    }
     rememberOpen(project.id);
     setFolder(null);
     setLocalFolder(null);
@@ -489,6 +510,24 @@ export function ProjectModePage() {
   const create = async () => {
     const name = (newName || "").trim();
     if (!name) return;
+    // Desktop app: a project is a folder on this computer, so after the name and logo it asks which folder
+    const desktopApp = (window as { classgridDesktop?: { isDesktop?: boolean; pickFolder?: () => Promise<string | null> } }).classgridDesktop;
+    if (desktopApp?.isDesktop && desktopApp.pickFolder) {
+      const folder = await desktopApp.pickFolder();
+      if (!folder) return;
+      const made = await api("/projects/local", { method: "POST", body: JSON.stringify({ name, localPath: folder }) });
+      if (!made.res.ok) return toast.error(made.data.error || "Could not create the project");
+      let project = made.data.project as Project;
+      if (newLogo) {
+        const withLogo = await api(`/projects/${project.id}`, { method: "PATCH", body: JSON.stringify({ logo: newLogo }) });
+        if (withLogo.res.ok) project = withLogo.data.project;
+      }
+      setNewName(null);
+      setNewLogo(null);
+      setProjects((list) => [project, ...(list || []).filter((x) => x.id !== project.id)]);
+      open(project);
+      return;
+    }
     const { res, data } = await api("/projects", { method: "POST", body: JSON.stringify({ name, logo: newLogo }) });
     if (!res.ok) return toast.error(data.error || "Could not create the project");
     setNewName(null);
@@ -985,7 +1024,8 @@ export function ProjectModePage() {
                       </div>
                       <button
                         onClick={() => { if (p.repo || p.location === "local") open(p); else { setLinking(p); loadRepos(); } }}
-                        disabled={busyId === p.id}
+                        disabled={busyId === p.id || (p.location === "local" && !isDesktop)}
+                        title={p.location === "local" && !isDesktop ? "This project is only on a computer. Open it in the Classgrid desktop app." : undefined}
                         className="self-start shrink-0 flex items-center gap-2 px-3 py-1.5 rounded-full border border-border text-sm hover:bg-secondary disabled:opacity-50"
                       >
                         {busyId === p.id ? <Spinner className="size-4" /> : p.repo ? <GithubIcon className="size-4" /> : <FolderGit2 className="size-4" />}
@@ -996,7 +1036,11 @@ export function ProjectModePage() {
                       <div className="flex-1 min-w-0">
                         {p.repo
                           ? <ProjectGitInfo project={p} />
-                          : <span className="text-xs text-muted-foreground">No GitHub repo yet · <button onClick={() => { setLinking(p); loadRepos(); }} className="underline hover:text-foreground">Link one</button></span>}
+                          : p.location === "local"
+                            ? (isDesktop
+                              ? <span className="text-xs text-muted-foreground truncate block" title={p.localPath || undefined}>On this computer · {p.localPath}</span>
+                              : <span className="text-xs text-muted-foreground">Not connected to a repo · only on a computer. To use it here, open the Classgrid desktop app and ask the agent to make a GitHub repo and push it.</span>)
+                            : <span className="text-xs text-muted-foreground">No GitHub repo yet · <button onClick={() => { setLinking(p); loadRepos(); }} className="underline hover:text-foreground">Link one</button></span>}
                       </div>
                       {renaming?.id === p.id ? (
                         <>

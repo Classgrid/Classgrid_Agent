@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { Cloud, HardDriveDownload, Monitor } from "lucide-react";
 import { Spinner } from "@/components/marketing_ui/spinner";
-import { alsoUseInCloud, getCopyOnThisComputer, onDesktop, openProjectIn, thisComputerCopy, type LocalCopy } from "../utils/projectCopies";
+import { getCopyOnThisComputer, onDesktop, openProjectIn, thisComputerCopy, type LocalCopy } from "../utils/projectCopies";
 
 type PlaceProject = { id: string; name?: string; repo?: string | null; location?: "cloud" | "local"; localPath?: string | null; localCopies?: LocalCopy[] };
 
@@ -19,13 +19,9 @@ export function ProjectPlaceSwitch({ project, onChanged, compact = false }: { pr
   const btn = `shrink-0 inline-flex items-center gap-1.5 ${h} px-2.5 rounded-full border border-border bg-background text-foreground hover:bg-secondary disabled:opacity-50 whitespace-nowrap`;
   const icon = compact ? "size-3.5" : "size-4";
 
-  if (project.location === "local") {
-    return (
-      <button type="button" disabled={!!busy} onClick={() => run("cloud", () => alsoUseInCloud(project))} className={btn} title="Put this folder on GitHub so it works in the cloud too">
-        {busy ? <Spinner className={icon} /> : <Cloud className={icon} />} Also use in the cloud
-      </button>
-    );
-  }
+  // A folder project has no button: it goes online only when the user asks the agent to make a repo and push it,
+  // and then it is linked by itself (linkFolderRepo)
+  if (project.location === "local") return null;
   if (!project.repo) return null;
   const copy = thisComputerCopy(project);
   if (!copy) {

@@ -71,7 +71,7 @@ export async function getCopyOnThisComputer(project: PlaceProject): Promise<Plac
 
 // Open the project "On this computer" or "In the cloud" (remembered for this computer)
 export async function openProjectIn(project: PlaceProject, where: "local" | "cloud", skipSave = false): Promise<PlaceProject | null> {
-  const id = toast.loading(where === "local" ? "Getting the latest from GitHub…" : skipSave ? "Switching to the cloud…" : "Saving this computer's work to GitHub…");
+  const id = toast.loading(where === "local" ? "Getting the latest from GitHub…" : "Switching to the cloud…");
   const { res, data } = await api(`/projects/${project.id}/where`, { where, skipSave }).catch(() => ({ res: null, data: {} as Record<string, any> }));
   toast.dismiss(id);
   if (data.project) remember(data.project);
@@ -108,10 +108,11 @@ export function savedProject(id: string | null | undefined): PlaceProject | null
   try { return (JSON.parse(localStorage.getItem(LIST_KEY) || "[]") as PlaceProject[]).find((p) => p.id === id) || null; } catch { return null; }
 }
 
-// The place actions for a project's menu (desktop app only): get a copy here, switch, or also use in the cloud
+// The place actions for a project's menu (desktop app only): get a copy here, or switch where it opens. A folder
+// project has none: it goes online only when the user asks the agent to make a repo and push it (then it is linked)
 export function placeActions(project: PlaceProject | null | undefined): { label: string; run: () => Promise<unknown> }[] {
   if (!project || !onDesktop()) return [];
-  if (project.location === "local") return [{ label: "Also use in the cloud", run: () => alsoUseInCloud(project) }];
+  if (project.location === "local") return [];
   if (!project.repo) return [];
   const copy = thisComputerCopy(project);
   if (!copy) return [{ label: "Get a copy on this computer", run: () => getCopyOnThisComputer(project) }];
@@ -127,13 +128,18 @@ export function listenProjectSaved(): () => void {
   return () => { socket.off("project-saved", on); };
 }
 
-// "Also use in the cloud" for a folder project: pushed to GitHub (a new private repo when it has none)
-export async function alsoUseInCloud(project: PlaceProject): Promise<PlaceProject | null> {
-  const id = toast.loading("Putting this project on GitHub…");
+// A folder project whose folder is on GitHub (the user asked the agent to make a repo and push it): link that repo, so
+// the same project works in the cloud too. Nothing is pushed or uploaded. Quiet when the folder isn't on GitHub yet.
+export async function linkFolderRepo(project: PlaceProject): Promise<PlaceProject | null> {
+  if (project.location !== "local" || !onDesktop()) return null;
   const { res, data } = await api(`/projects/${project.id}/cloud`, {}).catch(() => ({ res: null, data: {} as Record<string, string> }));
-  toast.dismiss(id);
-  if (!res?.ok || !data.project) { toast.error(errorText(data), { duration: 10000 }); return null; }
+  if (!res?.ok || !data.project) {
+    if (data.code === "repo_taken") toast.error(errorText(data), { duration: 10000 });
+    return null;
+  }
   remember(data.project);
   toast.success(data.message || "This project works in the cloud too now.", { duration: 8000 });
   return data.project;
 }
+// Kept for older callers: the same as linking (it never pushes)
+export const alsoUseInCloud = linkFolderRepo;

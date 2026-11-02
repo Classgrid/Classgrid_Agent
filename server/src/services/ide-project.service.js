@@ -1096,6 +1096,9 @@ export async function finishCheckpoint(sessionId, id) {
 // work is pushed to GitHub by itself, so either place has the same code the next time it opens. The user is told in
 // one short line ("project-saved" on their socket).
 async function saveBothPlaces(sessionId, ssh = null, cp = null) {
+  // Owner's rule (2026-11-02): Classgrid never commits or pushes to GitHub by itself; the user asks the agent to push
+  return;
+  // eslint-disable-next-line no-unreachable
   if (!sessionId) return;
   const project = await projectForChat(sessionId);
   if (!project?.repo) return;
