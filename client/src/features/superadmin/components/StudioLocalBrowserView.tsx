@@ -56,7 +56,8 @@ export function StudioLocalBrowserView({ paused = false }: { paused?: boolean })
   useEffect(() => {
     const d = desktop();
     if (!d?.onBrowser) return;
-    d.browserState?.().then((s) => { if (s) setNav(s); }).catch(() => {});
+    // Nothing open yet: Google
+    d.browserState?.().then((s) => { if (s) setNav(s); if (!s?.url) d.browserAct?.({ action: "open", url: "https://www.google.com/" }).catch(() => {}); }).catch(() => {});
     return d.onBrowser((m) => {
       if (!m || typeof m !== "object") return;
       if (m.type === "nav") setNav(m);

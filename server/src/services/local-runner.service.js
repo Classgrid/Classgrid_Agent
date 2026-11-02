@@ -15,6 +15,7 @@ export const LOCAL_TOOLS = new Set([
     "push_project_to_github", // git commit and push in the folder, with the user's own GitHub login
     "editor_context", // what the user is doing in the built-in editor (file, cursor, errors, terminal commands)
     "wait_until", // wait until a server is up, a page answers or a file appears
+    "notebook_edit", // change one cell of a Jupyter notebook
 ]);
 
 /** The chat's project when it is a folder on the user's computer, else null */
@@ -92,7 +93,7 @@ export async function useComputer(userId, args = {}, chat = null) {
 
 export const COMPUTER_TERMINAL_TOOLS = new Set(["execute_terminal_command", "start_background_command", "check_background_command", "stop_background_command", "wait_until"]);
 // Project Mode's file tools, used on files anywhere on the computer in those chats (full paths)
-export const COMPUTER_FILE_TOOLS = { write_project_file: "computer_write", edit_project_file: "computer_edit", search_project: "computer_search", list_project_files: "computer_list" };
+export const COMPUTER_FILE_TOOLS = { write_project_file: "computer_write", edit_project_file: "computer_edit", search_project: "computer_search", list_project_files: "computer_list", notebook_edit: "computer_edit" };
 
 /** The terminal tools in a desktop app chat that isn't a project: the command runs on the user's own computer (asks first). */
 export async function runOnComputer(userId, tool, args = {}, chat = null) {

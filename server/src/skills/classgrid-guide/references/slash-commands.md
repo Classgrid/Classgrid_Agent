@@ -46,6 +46,8 @@ You can also type the whole command yourself without the list, for example `/goa
 | `/generative_ui` | Answers with interactive cards                   | Project, Studio   |
 | `/grill-me`      | Asks you questions before starting               | Project, Studio   |
 | `/init`          | Writes the project's rules file (AGENTS.md)      | Project, Studio   |
+| `/run`           | Starts the app and checks it really works        | Project, Studio   |
+| `/import-memory` | Brings in a memory export from another AI        | Project, Studio   |
 | `/review`        | Reviews the code changes and fixes the problems  | Project, Studio   |
 | `/security-review` | Looks for security holes in the changes        | Project, Studio   |
 | `/simplify`      | Cleans up and simplifies the changed code        | Project, Studio   |

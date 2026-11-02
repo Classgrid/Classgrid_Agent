@@ -59,6 +59,32 @@ function changedSinceSeen(full) {
   try { return fs.statSync(full).mtimeMs > seen + 1; } catch { return false; }
 }
 
+// Hooks: the project's own .classgrid/hooks.json (like Claude Code's hooks), e.g.
+//   { "after_edit": ["npx prettier --write \"{file}\""], "block_commands": ["git push --force", "rm -rf /"] }
+// after_edit commands run after the AI creates or edits a file ({file} = its full path); a command containing a
+// block_commands text is refused.
+function projectHooks(root) {
+  try {
+    const h = JSON.parse(fs.readFileSync(path.join(root, ".classgrid", "hooks.json"), "utf8"));
+    return { afterEdit: [].concat(h.after_edit || []).map(String).filter(Boolean), block: [].concat(h.block_commands || []).map(String).filter(Boolean) };
+  } catch { return { afterEdit: [], block: [] }; }
+}
+function runAfterEdit(root, full) {
+  const { afterEdit } = projectHooks(root);
+  if (!afterEdit.length) return "";
+  const { spawnSync } = require("node:child_process");
+  const notes = afterEdit.map((cmd) => {
+    const line = cmd.split("{file}").join(full);
+    const r = spawnSync("powershell.exe", ["-NoLogo", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", line], { cwd: root, windowsHide: true, encoding: "utf8", timeout: 30000 });
+    return r.status === 0 ? `hook ok: ${cmd}` : `hook failed (${cmd}): ${String(r.stderr || r.stdout || "").trim().split("\n").slice(-2).join(" ").slice(0, 300)}`;
+  });
+  return ` [${notes.join("; ")}]`;
+}
+function blockedByHooks(root, command) {
+  const low = String(command).toLowerCase();
+  return projectHooks(root).block.find((b) => low.includes(b.toLowerCase())) || null;
+}
+
 function readText(full) {
   if (!fs.existsSync(full) || !fs.statSync(full).isFile()) throw new Error("File not found");
   if (fs.statSync(full).size > MAX_FILE_BYTES) throw new Error("File is too big to open here (over 2 MB)");
@@ -146,9 +172,10 @@ const tools = {
     if (fs.existsSync(full)) return `Error: ${rel} already exists, so it was not changed. Change existing files with edit_project_file.`;
     fs.mkdirSync(path.dirname(full), { recursive: true });
     fs.writeFileSync(full, String(content), "utf8");
+    const hooked = runAfterEdit(root, full);
     markSeen(full);
     const total = String(content).split("\n").length;
-    return `Created ${rel} (${total} lines, +${total} -0).`;
+    return `Created ${rel} (${total} lines, +${total} -0).${hooked}`;
   },
 
   edit_project_file(root, { path: file, edits = [] }) {
@@ -181,9 +208,10 @@ const tools = {
       done.push(`edit ${i + 1}: ${count} place${count > 1 ? "s" : ""}`);
     }
     fs.writeFileSync(full, eol === "\n" ? text : text.replace(/\n/g, eol), "utf8");
+    const hooked = runAfterEdit(root, full);
     markSeen(full);
     const { added, removed } = lineChange(original, text);
-    return `Edited ${rel} (${done.join(", ")}, +${added} -${removed}).`;
+    return `Edited ${rel} (${done.join(", ")}, +${added} -${removed}).${hooked}`;
   },
 
   // Push a folder project to GitHub: commit everything and push with the user's own Git login on this computer
@@ -240,6 +268,33 @@ const tools = {
     return `Still not ready after ${Math.round((Date.now() - started) / 1000)} seconds: ${what}.`;
   },
 
+  // Jupyter notebooks (.ipynb): replace, insert or delete one cell, keeping the notebook valid
+  notebook_edit(root, { path: file, cell_index = 0, mode = "replace", source = "", cell_type }) {
+    const full = path.isAbsolute(String(file || "")) ? path.resolve(String(file)) : resolveIn(root, file).full;
+    if (!/\.ipynb$/i.test(full)) return "Error: notebook_edit only works on .ipynb files.";
+    const nb = JSON.parse(readText(full));
+    if (!Array.isArray(nb.cells)) return "Error: this file isn't a valid notebook (no cells).";
+    const i = Math.max(0, Math.floor(Number(cell_index) || 0));
+    const lines = String(source).split("\n").map((l, n, all) => (n < all.length - 1 ? l + "\n" : l));
+    const kind = cell_type === "markdown" ? "markdown" : cell_type === "code" ? "code" : null;
+    if (mode === "delete") {
+      if (i >= nb.cells.length) return `Error: there is no cell ${i} (the notebook has ${nb.cells.length}).`;
+      nb.cells.splice(i, 1);
+    } else if (mode === "insert") {
+      const t = kind || "code";
+      nb.cells.splice(Math.min(i, nb.cells.length), 0, t === "code" ? { cell_type: "code", metadata: {}, execution_count: null, outputs: [], source: lines } : { cell_type: "markdown", metadata: {}, source: lines });
+    } else {
+      if (i >= nb.cells.length) return `Error: there is no cell ${i} (the notebook has ${nb.cells.length}).`;
+      const c = nb.cells[i];
+      c.source = lines;
+      if (kind && kind !== c.cell_type) { c.cell_type = kind; if (kind === "code") { c.outputs = []; c.execution_count = null; } else { delete c.outputs; delete c.execution_count; } }
+      else if (c.cell_type === "code") { c.outputs = []; c.execution_count = null; }
+    }
+    fs.writeFileSync(full, JSON.stringify(nb, null, 1) + "\n", "utf8");
+    markSeen(full);
+    return `${mode === "delete" ? "Deleted" : mode === "insert" ? "Inserted" : "Replaced"} cell ${i} in ${path.basename(full)} (it now has ${nb.cells.length} cells).`;
+  },
+
   // A helper's own copy of the project (git worktree) on a new branch next to the project folder, so helpers that edit
   // at the same time never touch each other's files; the main AI merges the branch afterwards
   create_worktree(root, { name = "helper" }) {
@@ -276,6 +331,8 @@ const tools = {
   // stopped): the AI gets its job_id and waits for it with check_background_command, and can work on meanwhile
   execute_terminal_command(root, { command }) {
     if (!command) return Promise.resolve("Error: command is empty");
+    const blocked = blockedByHooks(root, command);
+    if (blocked) return Promise.resolve(`Error: this project's hooks block commands containing "${blocked}" (.classgrid/hooks.json), so it didn't run.`);
     return new Promise((resolve) => {
       const proc = shellSpawn(String(command), root);
       const job = { proc, command: String(command), log: "", startedAt: Date.now(), exitCode: null };
@@ -298,6 +355,8 @@ const tools = {
 
   start_background_command(root, { command }) {
     if (!command) return "Error: command is empty";
+    const blocked = blockedByHooks(root, command);
+    if (blocked) return `Error: this project's hooks block commands containing "${blocked}" (.classgrid/hooks.json), so it didn't run.`;
     const id = `job${jobs.size + 1}-${Date.now().toString(36).slice(-4)}`;
     const proc = shellSpawn(String(command), root);
     const job = { id, proc, command: String(command), log: "", startedAt: Date.now(), exitCode: null, chat: arguments[1] && arguments[1].__chat };
@@ -578,6 +637,11 @@ function writable(full) {
 }
 const withFull = (text, rel, full) => String(text).replace(rel, full);
 const computerFileTools = {
+  notebook_edit(args) {
+    const full = localPath(args.path);
+    writable(full);
+    return tools.notebook_edit(path.dirname(full), { ...args, path: full });
+  },
   write_project_file(args) {
     const full = localPath(args.path);
     writable(full);

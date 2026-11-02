@@ -8,6 +8,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 
 const PARTITION = "persist:cg-browser";
+const HOME = "https://www.google.com/"; // a chat with no page yet opens Google (owner's choice)
 const DESKTOP_WIDTH = 1280; // pages are always at least desktop width; a narrow tab shows them shrunk to fit
 const HIDDEN_SIZE = { width: 1280, height: 800 };
 const MAX_TEXT = 20000;
@@ -66,8 +67,8 @@ async function useChat(id) {
     return;
   }
   currentChat = id;
-  const next = (id && chats()[id]) || "about:blank";
-  if (next === url || (next === "about:blank" && !url)) return;
+  const next = (id && chats()[id]) || HOME;
+  if (next === url) return;
   await Promise.race([wc.loadURL(next).catch(() => {}), wait(30000)]);
   tell(navInfo());
 }
@@ -369,12 +370,15 @@ async function agentAct(step) {
 const fromApp = (e) => !!win && !win.isDestroyed() && e.sender === win.webContents;
 ipcMain.on("cg:browserShow", (e, rect) => {
   if (!fromApp(e) || !rect) return;
+  // Nothing open yet: Google
+  const fresh = !view || view.webContents.isDestroyed() || !/^https?:/.test(view.webContents.getURL());
   const z = win.webContents.getZoomFactor() || 1;
   const r = { x: Math.round(Number(rect.x) * z), y: Math.round(Number(rect.y) * z), width: Math.round(Number(rect.width) * z), height: Math.round(Number(rect.height) * z) };
   if (!Object.values(r).every(Number.isFinite) || r.width < 20 || r.height < 20) return;
   shownRect = r;
   ensureView();
   layout();
+  if (fresh) view.webContents.loadURL(HOME).catch(() => {});
 });
 ipcMain.on("cg:browserHide", (e) => {
   if (!fromApp(e) || !shownRect) return;
