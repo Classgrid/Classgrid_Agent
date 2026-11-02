@@ -25,6 +25,7 @@ const OPEN_FILE = path.join(DIR, "open.json");
 const CONTEXT_FILE = path.join(DIR, "context.json");
 const PROJECTS = process.env.CLASSGRID_PROJECTS_DIR || "/home/workspace/projects/";
 let lastStamp = 0;
+const BAR_COMMAND = /^[\w.-]{1,120}$/; // a command name only, run without arguments
 // "/" (the desktop app): any file on the computer, also Windows paths like C:\\Users\\...
 const inProjects = (p) => !!p && (PROJECTS === "/" || p.startsWith(PROJECTS));
 // The user's latest terminal commands: { command, cwd, exitCode, output (its end), at }
@@ -36,9 +37,14 @@ const plain = (s) => String(s).replace(/\u001b\][^\u0007]*(\u0007|\u001b\\)/g, "
 async function handleOpen() {
   let req;
   try { req = JSON.parse(fs.readFileSync(OPEN_FILE, "utf8")); } catch { return; }
-  if (!req || !req.path || !req.stamp || req.stamp <= lastStamp) return;
+  if (!req || !req.stamp || req.stamp <= lastStamp) return;
   lastStamp = req.stamp;
-  if (!inProjects(req.path)) return;
+  // The desktop app's top bar: search box, layout buttons and its File / Edit / … menu
+  if (req.command) {
+    if (BAR_COMMAND.test(String(req.command))) await vscode.commands.executeCommand(req.command).then(undefined, () => {});
+    return;
+  }
+  if (!req.path || !inProjects(req.path)) return;
   try {
     if (req.folder) {
       // A folder: show it in the Explorer

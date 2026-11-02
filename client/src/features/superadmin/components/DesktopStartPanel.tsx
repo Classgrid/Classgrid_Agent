@@ -13,7 +13,7 @@ type Made = { id: string; name: string; repo: string | null; logo?: string | nul
 const desktop = () => (window as unknown as { classgridDesktop?: { cloneRepo?: (repo: string) => Promise<{ folder?: string; error?: string } | null> } }).classgridDesktop;
 const SHOWN = 5;
 
-async function makeLocalProject(folder: string, name?: string): Promise<Made | null> {
+export async function makeLocalProject(folder: string, name?: string): Promise<Made | null> {
   const base = import.meta.env.VITE_API_URL || "https://api.classgrid.in";
   const res = await fetchWithRescue(`${base}/api/ide/projects/local`, {
     method: "POST",

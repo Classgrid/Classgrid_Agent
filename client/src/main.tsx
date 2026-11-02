@@ -70,6 +70,21 @@ import "@/styles/global.css";
 const isDesktopApp = import.meta.env.VITE_DESKTOP === "1";
 // Desktop app only: Studio Mode's colors everywhere (global.css, html.desktop-app)
 if (isDesktopApp) document.documentElement.classList.add("desktop-app");
+// Desktop app: our own top bar in the window's title bar row, like Cursor (the window buttons sit on its right; pages
+// such as Project Mode put their bar into #cg-titlebar-slot). The app sits below it (global.css).
+if (isDesktopApp) {
+  const bar = document.createElement("div");
+  bar.id = "cg-titlebar";
+  bar.innerHTML = '<img src="/favicon.ico" alt="" class="cg-titlebar-icon"><div id="cg-titlebar-slot"></div>';
+  document.body.prepend(bar);
+  let dark: boolean | null = null;
+  const sendTheme = () => {
+    const now = document.documentElement.classList.contains("dark");
+    if (now !== dark) { dark = now; (window as any).classgridDesktop?.setTitleBar?.(now); }
+  };
+  sendTheme();
+  new MutationObserver(sendTheme).observe(document.documentElement, { attributes: true, attributeFilter: ["class"] });
+}
 if (import.meta.env.DEV || isDesktopApp) {
   const realFetch = window.fetch.bind(window);
   window.fetch = (input: RequestInfo | URL, init: RequestInit = {}) => {

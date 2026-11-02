@@ -104,23 +104,80 @@ function rememberPlace(url) {
 }
 const isOurs = (url) => { try { return OUR_HOSTS.has(new URL(url).hostname); } catch { return false; } };
 
+// The window buttons' colours, the same as our top bar (Studio's greys)
+const TITLE_BAR = { dark: { color: "#181818", symbolColor: "#ffffff" }, light: { color: "#f5f5f5", symbolColor: "#000000" } };
+
+// A page of the built-in editor (localhost, its own port): the folder it shows as a Windows path, "" for none,
+// undefined when it isn't the editor
+function editorFolder(url) {
+  let u;
+  try { u = new URL(url); } catch { return undefined; }
+  if (u.hostname !== "localhost" || !u.port || Number(u.port) === PORT) return undefined;
+  let f = u.searchParams.get("folder") || "";
+  f = f.replace(/^vscode-remote:\/\/[^/]*/, "");
+  if (/^\/[a-zA-Z]:/.test(f)) f = f.slice(1);
+  return f ? path.resolve(f.split("/").join(path.sep)) : "";
+}
+const appWindowOptions = () => ({
+  minWidth: 900,
+  minHeight: 600,
+  title: "Classgrid",
+  backgroundColor: "#000000",
+  icon: path.join(__dirname, "build", "icon.png"),
+  autoHideMenuBar: true,
+  // No Windows title bar: our own top bar (client/src/main.tsx) sits in that row, with the window buttons on its right
+  titleBarStyle: "hidden",
+  titleBarOverlay: { ...TITLE_BAR.dark, height: 40 },
+  webPreferences: { preload: path.join(__dirname, "preload.js"), contextIsolation: true, nodeIntegration: false, sandbox: true },
+});
+// The built-in editor's "Open Folder" switches its frame to another folder: that folder opens as this window's
+// Project Mode project instead, so the AI works on the folder that is shown
+function editorLinks(w) {
+  w.webContents.on("will-frame-navigate", (details) => {
+    if (details.isMainFrame) return;
+    const next = editorFolder(details.url);
+    const now = editorFolder(details.frame?.url || "");
+    if (next === undefined || now === undefined || !next || next === now) return;
+    details.preventDefault();
+    if (!fs.existsSync(next)) return;
+    runner.allowFolder(next); // picked by the user in the editor's own folder picker
+    w.webContents.send("cg:openFolderProject", next);
+  });
+}
+// The built-in editor's "New Window": a new Classgrid window in Project Mode (with the folder it picked, if any),
+// never a bare editor window
+function openAppWindow(folder) {
+  if (folder && fs.existsSync(folder)) runner.allowFolder(folder);
+  else folder = "";
+  let base = "/c/project";
+  try { if (new URL(win.webContents.getURL()).pathname.startsWith("/superadmin")) base = "/superadmin/project"; } catch { /* no main window */ }
+  const w = new BrowserWindow({ width: 1300, height: 850, ...appWindowOptions() });
+  w.webContents.setWindowOpenHandler(({ url }) => {
+    const fromEditor = editorFolder(url);
+    if (fromEditor !== undefined) { openAppWindow(fromEditor); return { action: "deny" }; }
+    if (url === "about:blank" || isOurs(url)) return { action: "allow", overrideBrowserWindowOptions: { width: 600, height: 720, autoHideMenuBar: true } };
+    shell.openExternal(url);
+    return { action: "deny" };
+  });
+  w.webContents.on("will-navigate", (e, url) => { if (!isOurs(url)) { e.preventDefault(); shell.openExternal(url); } });
+  editorLinks(w);
+  w.loadURL(APP_URL + base + (folder ? `?openFolder=${encodeURIComponent(folder)}` : ""));
+}
+
 function createWindow() {
   win = new BrowserWindow({
     width: 1400,
     height: 900,
-    minWidth: 900,
-    minHeight: 600,
-    title: "Classgrid",
-    backgroundColor: "#000000",
     show: false, // shown once the welcome screen has painted (no blank window)
-    icon: path.join(__dirname, "build", "icon.png"),
-    autoHideMenuBar: true,
-    webPreferences: { preload: path.join(__dirname, "preload.js"), contextIsolation: true, nodeIntegration: false, sandbox: true },
+    ...appWindowOptions(),
   });
 
   // Our pages stay in the app; other websites open in the user's own browser. Pop-ups (plugin logins) stay as
   // child windows so they can tell the app when the login is done.
   win.webContents.setWindowOpenHandler(({ url }) => {
+    // The built-in editor's "New Window": a new Classgrid window in Project Mode, not a bare editor
+    const fromEditor = editorFolder(url);
+    if (fromEditor !== undefined) { openAppWindow(fromEditor); return { action: "deny" }; }
     if (url === "about:blank" || isOurs(url)) return { action: "allow", overrideBrowserWindowOptions: { width: 600, height: 720, autoHideMenuBar: true } };
     shell.openExternal(url);
     return { action: "deny" };
@@ -138,6 +195,7 @@ function createWindow() {
     }
     if (!isOurs(url)) { e.preventDefault(); shell.openExternal(url); }
   });
+  editorLinks(win);
   // No floating reCAPTCHA badge in the app window
   win.webContents.on("dom-ready", () => { win.webContents.insertCSS(".grecaptcha-badge { visibility: hidden !important; }").catch(() => {}); });
   // Back / forward / reload keys (the app has no menu bar)
@@ -186,7 +244,12 @@ ipcMain.handle("cg:fileInfo", (_e, file) => {
 });
 // Open it with the computer's own app (documents, sheets, pictures, media; never programs or scripts), or show it in File Explorer
 const OPENABLE = /\.(pdf|docx?|xlsx?|xlsm|csv|pptx?|odt|ods|odp|rtf|txt|md|png|jpe?g|gif|webp|bmp|svg|mp3|wav|ogg|m4a|mp4|webm|mov|mkv|avi|zip)$/i;
-ipcMain.handle("cg:openPath", (_e, file) => { const full = path.resolve(String(file || "")); if (OPENABLE.test(full) && fs.existsSync(full)) shell.openPath(full); });
+// (a folder opens in File Explorer: a folder link in the AI's answer)
+ipcMain.handle("cg:openPath", (_e, file) => {
+  const full = path.resolve(String(file || ""));
+  if (!fs.existsSync(full)) return;
+  if (OPENABLE.test(full) || fs.statSync(full).isDirectory()) shell.openPath(full);
+});
 // The folder with the videos of the AI using the browser
 ipcMain.handle("cg:openRecordings", () => shell.openPath(require("./recorder").folder()));
 ipcMain.handle("cg:showInFolder", (_e, file) => { const full = path.resolve(String(file || "")); if (fs.existsSync(full)) shell.showItemInFolder(full); });
@@ -250,6 +313,11 @@ ipcMain.handle("cg:revealInEditor", (_e, folder, file, startLine, endLine) => {
 });
 // (the search box and layout buttons in Project Mode's top bar)
 ipcMain.handle("cg:editorCommand", (_e, command) => editor.command(command));
+// Light or dark mode: the window buttons follow our top bar's colour
+// The Edit menu in our top bar (Studio): undo, cut, copy, paste… on what the user was typing in
+const EDIT_ACTIONS = new Set(["undo", "redo", "cut", "copy", "paste", "selectAll"]);
+ipcMain.on("cg:edit", (e, action) => { if (EDIT_ACTIONS.has(action)) e.sender[action](); });
+ipcMain.on("cg:titleBar", (e, dark) => { try { BrowserWindow.fromWebContents(e.sender)?.setTitleBarOverlay(dark ? TITLE_BAR.dark : TITLE_BAR.light); } catch { /* window closing */ } });
 ipcMain.handle("cg:pickFolder", async () => {
   const r = await dialog.showOpenDialog(win, { properties: ["openDirectory"] });
   if (r.canceled) return null;

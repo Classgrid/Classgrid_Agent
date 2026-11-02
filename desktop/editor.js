@@ -10,6 +10,10 @@ const net = require("node:net");
 const path = require("node:path");
 
 const FIRST_PORT = 47830;
+// (the editor's ☰ menu too: its File / Edit / … menu is in Project Mode's top bar)
+const DESKTOP_SETTINGS = { "window.commandCenter": false, "workbench.layoutControl.enabled": false, "window.menuBarVisibility": "hidden" };
+// What Project Mode's top bar (its search box, layout buttons and menu) may ask the editor to do: a command name, no arguments
+const COMMAND_NAME = /^[\w.-]{1,120}$/;
 
 let server = null; // { proc, port, token } once it answers
 let starting = null; // the start in progress (so two clicks start one server)
@@ -62,6 +66,15 @@ async function launch() {
     fs.mkdirSync(path.dirname(machine), { recursive: true });
     fs.copyFileSync(defaults, machine);
   }
+  // One thin top bar like Cursor: the editor's own top bar is hidden (Project Mode's bar has its search box and
+  // layout buttons). Machine settings, so a user's own settings still win.
+  try {
+    fs.mkdirSync(path.dirname(machine), { recursive: true });
+    const settings = fs.existsSync(machine) ? JSON.parse(fs.readFileSync(machine, "utf8")) : {};
+    const before = JSON.stringify(settings);
+    Object.assign(settings, DESKTOP_SETTINGS);
+    if (JSON.stringify(settings) !== before) fs.writeFileSync(machine, JSON.stringify(settings, null, 2));
+  } catch (e) { console.log("[editor] could not set the editor's top bar:", e.message); }
 
   // The newest Classgrid add-on (open file, cursor, terminal commands) goes into the built-in editor before it starts
   try {
@@ -136,6 +149,14 @@ function reveal(folder, file, startLine, endLine) {
   return { ok: true };
 }
 
+// A button or menu item in Project Mode's top bar, run by the Classgrid add-on (open.json)
+function command(name) {
+  if (!COMMAND_NAME.test(String(name))) return { error: "Unknown editor command." };
+  fs.mkdirSync(bridgeDir(), { recursive: true });
+  fs.writeFileSync(path.join(bridgeDir(), "open.json"), JSON.stringify({ command: name, stamp: Date.now() }));
+  return { ok: true };
+}
+
 function killTree(proc) {
   if (!proc || proc.exitCode !== null) return;
   if (process.platform === "win32") spawnSync("taskkill", ["/pid", String(proc.pid), "/T", "/F"], { windowsHide: true });
@@ -148,4 +169,4 @@ function stop() {
   launched = server = null;
 }
 
-module.exports = { start, reveal, stop };
+module.exports = { start, reveal, command, stop };

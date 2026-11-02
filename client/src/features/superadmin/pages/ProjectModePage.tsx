@@ -11,11 +11,12 @@
  * ─────────────────────────────────────────────────────────
  */
 import { useCallback, useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import { useParams } from "react-router-dom";
-import { ArrowLeft, FolderGit2, GitBranch, GitCommitHorizontal, ImagePlus, Plus } from "lucide-react";
+import { ArrowLeft, FolderGit2, GitBranch, GitCommitHorizontal, ImagePlus, PanelBottom, PanelLeft, Plus, Search } from "lucide-react";
 import { Button } from "@/components/marketing_ui/button";
-import { useSidebar } from "@/components/marketing_ui/sidebar";
+import { SidebarTrigger, useSidebar } from "@/components/marketing_ui/sidebar";
 import { Spinner } from "@/components/marketing_ui/spinner";
 import { Skeleton } from "@/components/marketing_ui/skeleton";
 import { DangerConfirmDialog } from "@/components/marketing_ui/danger-confirm-dialog";
@@ -31,12 +32,15 @@ import { PushToGithubModal } from "../components/PushToGithubModal";
 import { ImageCropperModal } from "@/components/marketing_ui/ImageCropperModal";
 import { apiClient } from "@/lib/apiClient";
 import { localFolderOf } from "../utils/localProject";
-import { DesktopStartPanel, type LocalWorkspace } from "../components/DesktopStartPanel";
+import { DesktopStartPanel, makeLocalProject, type LocalWorkspace } from "../components/DesktopStartPanel";
+import { DesktopMenuBar, editorMenus } from "@/components/layout/DesktopMenuBar";
+import { openLocalFolder } from "../components/StudioProjectPicker";
 import { ProjectPlaceSwitch } from "../components/ProjectPlaceSwitch";
 import { PROJECT_PLACE_EVENT, getCopyOnThisComputer, linkFolderRepo, listenProjectSaved, saveThisComputerCopy, thisComputerCopy, thisDeviceId, type LocalCopy } from "../utils/projectCopies";
 
 const backendUrl = import.meta.env.VITE_API_URL || "https://api.classgrid.in";
 const OPEN_PROJECT_KEY = "cg_project_open"; // which project this browser had open (per-viewer convenience)
+const STRIP_HIDDEN_KEY = "cg_project_sidebar_hidden"; // desktop app: the left sidebar was dragged away
 // This page was loaded by a refresh while in Project Mode (then the open project stays open)
 let reloadedInProject = (() => {
   try {
@@ -225,7 +229,7 @@ export function ProjectModePage() {
   const [aiResizing, setAiResizing] = useState(false);
   // Dragging the AI panel very wide folds the left sidebar, so the page in the middle keeps its room; dragging it
   // back opens the sidebar again (only when it was folded this way)
-  const { setOpen: setSidebarOpen, isMobile: sidebarMobile } = useSidebar();
+  const { setOpen: setSidebarOpen, isMobile: sidebarMobile, state: sidebarState } = useSidebar();
   const sidebarFoldedRef = useRef(false);
   useEffect(() => {
     if (sidebarMobile || !wide) return;
@@ -727,6 +731,99 @@ export function ProjectModePage() {
     open(full);
   };
   useEffect(() => { if (isDesktop && githubConnected) loadRepos(); }, [isDesktop, githubConnected, loadRepos]);
+
+  // Desktop app: one thin top bar like Cursor. The built-in editor's own top bar is hidden (desktop/editor.js), so its
+  // search box and layout buttons are here; the editor runs them through the Classgrid add-on
+  const editorFrameRef = useRef<HTMLIFrameElement>(null);
+  const canCommand = !!(window as { classgridDesktop?: { editorCommand?: unknown } }).classgridDesktop?.editorCommand;
+  const editorCommand = (command: string) => {
+    editorFrameRef.current?.contentWindow?.focus(); // the search box needs the keyboard inside the editor
+    (window as any).classgridDesktop?.editorCommand?.(command);
+  };
+
+  // Desktop app: Project Mode's bar goes into the app's own top bar, in the window's title bar row (client/src/main.tsx)
+  const titleSlot = isDesktop ? document.getElementById("cg-titlebar-slot") : null;
+  const inTitleBar = (bar: React.ReactElement) => (titleSlot ? createPortal(bar, titleSlot) : bar);
+
+  // The built-in editor's own "Open Folder" / "New Window" (desktop/main.js): that folder opens here as a project
+  const openProjectRef = useRef(openProject);
+  openProjectRef.current = openProject;
+  const openWorkspaceRef = useRef(openWorkspace);
+  openWorkspaceRef.current = openWorkspace;
+  const rememberOpenRef = useRef(rememberOpen);
+  rememberOpenRef.current = rememberOpen;
+  useEffect(() => {
+    const listen = (window as any).classgridDesktop?.onOpenFolderProject;
+    if (!listen) return;
+    return listen(async (picked: string | null) => {
+      if (!picked) { if (openProjectRef.current) saveThisComputerCopy(openProjectRef.current); rememberOpenRef.current(null); setFolder(null); setLocalFolder(null); setProgress(null); return; }
+      const p = await makeLocalProject(picked);
+      if (p) openWorkspaceRef.current(p);
+    });
+  }, []);
+
+  // The top bar's File → Open Folder: Windows' own folder picker, then that folder opens as a project
+  const pickAndOpenFolder = async () => {
+    const p = await openLocalFolder();
+    if (p) openWorkspace({ ...p, location: "local", localPath: p.localPath || null });
+  };
+
+  // A new Classgrid window from the editor's "New Window" (desktop/main.js): ?openFolder= opens that folder here
+  const openFolderParamDone = useRef(false);
+  useEffect(() => {
+    if (openFolderParamDone.current || !projects) return;
+    const url = new URL(window.location.href);
+    const picked = url.searchParams.get("openFolder");
+    if (!picked) return;
+    openFolderParamDone.current = true;
+    url.searchParams.delete("openFolder");
+    window.history.replaceState(null, "", url.toString());
+    makeLocalProject(picked).then((p) => { if (p) openWorkspaceRef.current(p); });
+  }, [projects]);
+
+  // Desktop app: the left sidebar can be dragged away completely (like Studio Mode); the sidebar button brings it back
+  const [stripHidden, setStripHidden] = useState(() => {
+    try { return localStorage.getItem(STRIP_HIDDEN_KEY) === "1"; } catch { return false; }
+  });
+  const [stripDragging, setStripDragging] = useState(false);
+  const hideStrip = isDesktop && stripHidden && sidebarState === "collapsed" && !sidebarMobile;
+  useEffect(() => {
+    document.documentElement.classList.toggle("studio-sidebar-hidden", hideStrip);
+    try { localStorage.setItem(STRIP_HIDDEN_KEY, stripHidden ? "1" : "0"); } catch { /* storage blocked */ }
+    if (!hideStrip) return;
+    const onTrigger = (e: MouseEvent) => {
+      if (!(e.target as HTMLElement | null)?.closest?.('[data-slot="sidebar-trigger"]')) return;
+      e.stopPropagation();
+      e.preventDefault();
+      setStripHidden(false);
+    };
+    window.addEventListener("click", onTrigger, true);
+    return () => window.removeEventListener("click", onTrigger, true);
+  }, [hideStrip, stripHidden]);
+  useEffect(() => () => { document.documentElement.classList.remove("studio-sidebar-hidden"); }, []);
+  useEffect(() => { if (sidebarState === "expanded") setStripHidden(false); }, [sidebarState]);
+  // Drag the sidebar's edge: far left hides it completely, a little left folds it to icons, right opens it
+  const startStripDrag = (e: React.PointerEvent) => {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    setStripDragging(true);
+    const move = (ev: PointerEvent) => {
+      if (ev.clientX < 36) { setSidebarOpen(false); setStripHidden(true); }
+      else if (ev.clientX < 160) { setSidebarOpen(false); setStripHidden(false); }
+      else { setStripHidden(false); setSidebarOpen(true); }
+    };
+    const up = () => {
+      setStripDragging(false);
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+      window.removeEventListener("pointercancel", up);
+      window.removeEventListener("blur", up);
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+    window.addEventListener("pointercancel", up);
+    window.addEventListener("blur", up);
+  };
   const showEditor = isSuperAdmin && (githubConnected !== false || !!localFolder) && openProject && (folder || progress || localFolder); // no GitHub: back to the Connect GitHub screen (a folder on this computer needs no GitHub)
   const editorLoaded = () => {
     setProgress((p) => p && { ...p, label: "Almost ready", target: 100 });
@@ -735,12 +832,20 @@ export function ProjectModePage() {
 
   return (
     <motion.div
-      className="h-full flex flex-col !bg-[#fafafa] dark:!bg-[#000000] text-foreground"
+      className="relative h-full flex flex-col !bg-[#fafafa] dark:!bg-[#000000] text-foreground"
       initial={false}
       animate={{ paddingRight: aiOpen && wide ? aiWidth : 0 }}
       transition={reduceMotion || aiResizing ? { duration: 0 } : { duration: 0.36, ease: [0.22, 1, 0.36, 1] }}
     >
-      <div className="shrink-0 flex items-center gap-3 h-8 box-content py-4 pl-16 pr-4 border-b border-border">{/* same height as the AI panel header, so both lines meet */}
+      {isDesktop && !sidebarMobile && (
+        <div onPointerDown={startStripDrag} className="group absolute inset-y-0 -left-1 z-20 w-2 cursor-col-resize touch-none" title="Drag to hide or show the sidebar">
+          <div className={`mx-auto h-full transition-all duration-200 ${stripDragging ? "w-[2px] bg-foreground/40" : "w-px bg-transparent group-hover:w-[2px] group-hover:bg-foreground/25"}`} />
+        </div>
+      )}
+      {stripDragging && createPortal(<div className="fixed inset-0 z-[200] cursor-col-resize select-none" />, document.body)}
+      {inTitleBar(<div className={titleSlot ? "flex-1 min-w-0 h-full flex items-center gap-3" : "shrink-0 flex items-center gap-3 h-8 box-content py-4 pl-16 pr-4 border-b border-border"}>{/* same height as the AI panel header, so both lines meet */}
+        {titleSlot && <SidebarTrigger />}
+        {titleSlot && canCommand && localFolder && !folder && localEditor?.url && <DesktopMenuBar menus={editorMenus(editorCommand, pickAndOpenFolder)} />}
         {showEditor ? (
           <>
             <button onClick={() => { saveThisComputerCopy(openProject); rememberOpen(null); setFolder(null); setLocalFolder(null); setProgress(null); }} className="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground">
@@ -749,7 +854,24 @@ export function ProjectModePage() {
             <span className="text-sm font-medium truncate">{openProject.name}</span>
             {openProject.repo && <span className="text-xs text-muted-foreground truncate">{openProject.repo}</span>}
             {/* Desktop app: get a copy on this computer, or switch between this computer and the cloud */}
-            <ProjectPlaceSwitch project={openProject} />
+            {/* (not in the desktop app's top bar: the owner removed "Also use in the cloud" there) */}
+            {!titleSlot && <ProjectPlaceSwitch project={openProject} />}
+            {isDesktop && canCommand && localFolder && !folder && localEditor?.url && (
+              <>
+                <div className="flex-1 min-w-0 flex justify-center">
+                  <button onClick={() => editorCommand("workbench.action.quickOpen")} title="Search files (Ctrl+P)" className="flex items-center justify-center gap-2 h-7 w-full max-w-[420px] min-w-0 px-3 rounded-md border border-border bg-secondary/40 text-[13px] text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors">
+                    <Search className="size-3.5 shrink-0" />
+                    <span className="truncate">{openProject.name.split(/[\\/]/).filter(Boolean).pop() || openProject.name}</span>
+                  </button>
+                </div>
+                <button onClick={() => editorCommand("workbench.action.toggleSidebarVisibility")} title="Show or hide the file list" aria-label="Show or hide the file list" className="shrink-0 flex items-center justify-center size-8 rounded-md text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors">
+                  <PanelLeft className="size-4" />
+                </button>
+                <button onClick={() => editorCommand("workbench.action.togglePanel")} title="Show or hide the terminal" aria-label="Show or hide the terminal" className="shrink-0 flex items-center justify-center size-8 rounded-md text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors">
+                  <PanelBottom className="size-4" />
+                </button>
+              </>
+            )}
             {openProject.repo && folder && (
               <button onClick={handleOpenPushModal} disabled={pushing} title="Push to GitHub" aria-label="Push to GitHub" className="ml-auto shrink-0 flex items-center gap-2 h-8 px-3 rounded-full border border-border text-sm hover:bg-secondary disabled:opacity-50">
                 {pushing ? <Spinner className="size-4" /> : <GithubIcon className="size-4" />}
@@ -770,7 +892,7 @@ export function ProjectModePage() {
             Agent
           </button>
         )}
-      </div>
+      </div>)}
 
       {showEditor ? (
         <div className="relative flex-1 flex flex-col">
@@ -804,7 +926,7 @@ export function ProjectModePage() {
             </div>
           )}
           {localFolder && !folder && localEditor?.url && (
-            <iframe key={localEditor.url} src={localEditor.url} onLoad={editorLoaded} title="Code editor" className="flex-1 w-full border-0 [color-scheme:light] dark:[color-scheme:dark]" allow="clipboard-read; clipboard-write" />
+            <iframe ref={editorFrameRef} key={localEditor.url} src={localEditor.url} onLoad={editorLoaded} title="Code editor" className="flex-1 w-full border-0 [color-scheme:light] dark:[color-scheme:dark]" allow="clipboard-read; clipboard-write" />
           )}
           {localFolder && !folder && !localEditor?.url && (
             <div className="flex-1 flex flex-col items-center justify-center gap-3 text-center px-8">

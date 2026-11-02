@@ -8,7 +8,7 @@ import {
   PanelRightClose, PanelRightOpen, Plus, RotateCw, Search, Terminal, X,
 } from "lucide-react";
 import { AskAiPanel } from "@/components/ai/components/AskAiPanel";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { useResumeGridInvite } from "@/components/ai/components/share-grid/GridJoinPage";
 import { StudioProjectPicker } from "../components/StudioProjectPicker";
 import { StudioFilesView } from "../components/StudioFilesView";
@@ -26,6 +26,7 @@ import { FileBadge, OPEN_LOCAL_FILE_EVENT, OPEN_PROJECT_FILE_EVENT } from "@/com
 import { fetchWithRescue } from "@/lib/rescue";
 import { toast } from "sonner";
 import { useSidebar } from "@/components/marketing_ui/sidebar";
+import { DesktopMenuBar, editAction, type MenuSpec } from "@/components/layout/DesktopMenuBar";
 import { listLocalFiles, localFolderOf } from "../utils/localProject";
 import { PROJECT_PLACE_EVENT, listenProjectSaved, thisComputerCopy, thisDeviceId } from "../utils/projectCopies";
 
@@ -303,7 +304,7 @@ export function StudioModePage() {
       setPushing(false);
     }
   };
-  const { state: sidebarState, isMobile } = useSidebar();
+  const { state: sidebarState, isMobile, toggleSidebar } = useSidebar();
   const [sidebarW, setSidebarW] = useState<number>(() => {
     try { const n = Number(localStorage.getItem(SIDEBAR_KEY)); if (n >= MIN_SIDEBAR) return Math.min(n, MAX_SIDEBAR); } catch { /* storage blocked */ }
     return 256;
@@ -476,6 +477,42 @@ export function StudioModePage() {
     window.addEventListener("blur", up);
   };
 
+  // Desktop app: Studio's File / Edit / View / Help menu in the app's top bar, like Cursor
+  const navigate = useNavigate();
+  const titleSlot = import.meta.env.VITE_DESKTOP === "1" ? document.getElementById("cg-titlebar-slot") : null;
+  const showTab = (kind: TabKind) => { setPane((p) => (p.open ? p : { ...p, open: true })); openTab(kind); };
+  const studioMenus: MenuSpec[] = [
+    { label: "File", items: [
+      { label: "New Chat", run: () => window.dispatchEvent(new CustomEvent("agent:new-chat")) },
+      "-",
+      { label: "New Browser Tab", run: () => showTab("browser") },
+      { label: "New Terminal", run: () => showTab("terminal") },
+      "-",
+      { label: "Open Project Mode", run: () => navigate(window.location.pathname.startsWith("/superadmin") ? "/superadmin/project" : "/c/project") },
+      "-",
+      { label: "Close Window", run: () => window.close() },
+    ] },
+    { label: "Edit", items: [
+      { label: "Undo", keys: "Ctrl+Z", run: () => editAction("undo") },
+      { label: "Redo", keys: "Ctrl+Y", run: () => editAction("redo") },
+      "-",
+      { label: "Cut", keys: "Ctrl+X", run: () => editAction("cut") },
+      { label: "Copy", keys: "Ctrl+C", run: () => editAction("copy") },
+      { label: "Paste", keys: "Ctrl+V", run: () => editAction("paste") },
+      "-",
+      { label: "Select All", keys: "Ctrl+A", run: () => editAction("selectAll") },
+    ] },
+    { label: "View", items: [
+      ...(["browser", "files", "terminal", "review", "project", "shots", "agents"] as TabKind[]).map((kind) => ({ label: TAB_INFO[kind].label, run: () => showTab(kind) })),
+      "-",
+      { label: "Show or Hide Sidebar", run: toggleSidebar },
+      { label: "Show or Hide Pane", run: () => { setMaximized(false); setPane((p) => ({ ...p, open: !p.open })); } },
+    ] },
+    { label: "Help", items: [
+      { label: "Classgrid Website", run: () => (window as any).classgridDesktop?.openExternal?.("https://classgrid.in") },
+    ] },
+  ];
+
   const activeTab = tabs.find((t) => t.id === active) || null;
 
   const quick = reduce ? { duration: 0 } : { duration: 0.2, ease: EASE };
@@ -484,6 +521,7 @@ export function StudioModePage() {
 
   return (
     <div ref={rowRef} className="flex w-full h-full !bg-[#fafafa] dark:!bg-[#121212] text-foreground overflow-hidden">
+      {titleSlot && createPortal(<DesktopMenuBar menus={studioMenus} />, titleSlot)}
       {/* Chat */}
       <div ref={chatColRef} className={`studio-chat @container relative min-w-0 flex-1 flex flex-col ${maximized && pane.open ? "hidden" : ""}`}>
         {!isMobile && !hidden && (

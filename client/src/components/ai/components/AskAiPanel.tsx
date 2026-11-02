@@ -4972,7 +4972,7 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
   const pendingQueueUI = null;
 
   const panelHeader = (
-    <div className={cn("flex items-center justify-between px-4", import.meta.env.VITE_DESKTOP === "1" && variant === "overlay" ? "py-1" : "py-4", variant !== "full-page" && "border-b border-border")}>
+    <div className={cn("flex items-center justify-between px-4", import.meta.env.VITE_DESKTOP === "1" && variant === "overlay" ? "h-[35px] py-0" : "py-4", variant !== "full-page" && "border-b border-border")}>
       <div className="flex items-center gap-2">
       </div>
       <div className="flex items-center gap-1">

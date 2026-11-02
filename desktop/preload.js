@@ -44,6 +44,17 @@ contextBridge.exposeInMainWorld("classgridDesktop", {
   openInEditor: (folder, file, line) => ipcRenderer.invoke("cg:openInEditor", folder, file, line),
   startEditor: (folder) => ipcRenderer.invoke("cg:startEditor", folder),
   revealInEditor: (folder, file, startLine, endLine) => ipcRenderer.invoke("cg:revealInEditor", folder, file, startLine, endLine),
+  editorCommand: (command) => ipcRenderer.invoke("cg:editorCommand", command),
+  // A folder picked in the built-in editor's own "Open Folder" / "New Window" (null: Project Mode's start page)
+  onOpenFolderProject: (fn) => {
+    const listener = (_e, folder) => fn(folder);
+    ipcRenderer.on("cg:openFolderProject", listener);
+    return () => ipcRenderer.removeListener("cg:openFolderProject", listener);
+  },
+  // Our top bar's light or dark colour, for the window buttons next to it
+  setTitleBar: (dark) => ipcRenderer.send("cg:titleBar", !!dark),
+  // The top bar's Edit menu: undo, redo, cut, copy, paste, selectAll
+  edit: (action) => ipcRenderer.send("cg:edit", action),
   // Studio's Browser tab: the AI's browser runs in this app and sits over the tab (rect = the tab's place on screen)
   browserShow: (rect) => ipcRenderer.send("cg:browserShow", rect),
   browserHide: () => ipcRenderer.send("cg:browserHide"),
