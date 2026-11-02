@@ -214,18 +214,17 @@ export function StudioProjectPicker() {
   }, [open]);
 
   const current = projects?.find((p) => p.id === picked) || null;
-  // A folder project that pushes to GitHub: its repo is read from the folder's git settings and saved on the project
+  // A folder project that pushes to GitHub: its repo is read from the folder's git settings and only shown (never
+  // saved as the project's repo: that field is for cloud projects, and saving it there mixed folder and cloud projects)
+  const [folderRepo, setFolderRepo] = useState<{ id: string; repo: string | null } | null>(null);
   useEffect(() => {
     const getRepo = (window as unknown as { classgridDesktop?: { githubRepo?: (f: string) => Promise<string | null> } }).classgridDesktop?.githubRepo;
-    if (!current || current.location !== "local" || current.repo || !current.localPath || !getRepo) return;
+    if (!current || current.location !== "local" || !current.localPath || !getRepo) { setFolderRepo(null); return; }
     let gone = false;
-    getRepo(current.localPath).then(async (repo) => {
-      if (gone || !repo) return;
-      const { res, data } = await api(`/projects/${current.id}`, { method: "PATCH", body: JSON.stringify({ repo }) });
-      if (!gone && res.ok) replaceProject({ ...current, ...(data.project || {}), repo });
-    }).catch(() => {});
+    getRepo(current.localPath).then((repo) => { if (!gone) setFolderRepo({ id: current.id, repo: repo || null }); }).catch(() => {});
     return () => { gone = true; };
-  }, [current?.id, current?.repo]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [current?.id, current?.localPath]); // eslint-disable-line react-hooks/exhaustive-deps
+  const shownRepo = current?.location === "local" ? (folderRepo?.id === current.id ? folderRepo.repo : null) : current?.repo || null;
   const shown = useMemo(() => {
     const t = q.trim().toLowerCase();
     return (projects || []).filter((p) => !t || p.name.toLowerCase().includes(t) || (p.repo || "").toLowerCase().includes(t));
@@ -253,10 +252,10 @@ export function StudioProjectPicker() {
         {current && (
           <>
             <span className="text-muted-foreground/50">·</span>
-            {current.repo ? (
+            {shownRepo ? (
               <span className="flex items-center gap-1 min-w-0">
                 <img src="https://cdn.classgrid.in/classgrid_intgration/github-icon.svg" alt="" aria-hidden className="size-3.5 shrink-0 opacity-70 dark:invert" />
-                <span className="max-w-[16rem] truncate">{current.repo}</span>
+                <span className="max-w-[16rem] truncate">{shownRepo}</span>
               </span>
             ) : (
               <span className="text-muted-foreground/70">No repo</span>

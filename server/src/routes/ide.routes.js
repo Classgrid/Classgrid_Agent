@@ -333,6 +333,10 @@ async function newestFileEdits(allProjects) {
 
 router.get("/projects", isAuthenticated, async (req, res) => {
   await connectDB();
+  // A folder project never has a cloud repo of its own (that comes only with "Also use in the cloud", which makes it a
+  // cloud project). The desktop app once saved a folder's GitHub link there by mistake: clear it, so cloud projects
+  // and repo links work again.
+  await IdeProject.updateMany({ owner: req.user._id, location: "local", repo: { $nin: [null, ""] } }, { $set: { repo: null } }).catch(() => {});
   const projects = await IdeProject.find({ owner: req.user._id }).sort({ updatedAt: -1 }).limit(200);
   const edits = await newestFileEdits(projects);
   const list = projects.map((p) => {
