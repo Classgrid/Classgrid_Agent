@@ -16,6 +16,7 @@ export const LOCAL_TOOLS = new Set([
     "editor_context", // what the user is doing in the built-in editor (file, cursor, errors, terminal commands)
     "wait_until", // wait until a server is up, a page answers or a file appears
     "notebook_edit", // change one cell of a Jupyter notebook
+    "send_background_input", // type into a running background command
 ]);
 
 /** The chat's project when it is a folder on the user's computer, else null */
@@ -91,7 +92,7 @@ export async function useComputer(userId, args = {}, chat = null) {
     return { text: `${reply.text}${link ? ` Screenshot link: ${link}` : ""}`, images: [{ data: image }] };
 }
 
-export const COMPUTER_TERMINAL_TOOLS = new Set(["execute_terminal_command", "start_background_command", "check_background_command", "stop_background_command", "wait_until"]);
+export const COMPUTER_TERMINAL_TOOLS = new Set(["execute_terminal_command", "start_background_command", "check_background_command", "stop_background_command", "wait_until", "send_background_input"]);
 // Project Mode's file tools, used on files anywhere on the computer in those chats (full paths)
 export const COMPUTER_FILE_TOOLS = { write_project_file: "computer_write", edit_project_file: "computer_edit", search_project: "computer_search", list_project_files: "computer_list", notebook_edit: "computer_edit" };
 

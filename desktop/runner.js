@@ -379,6 +379,17 @@ const tools = {
     return `${job.command}\n${state}, started ${Math.round((Date.now() - job.startedAt) / 1000)}s ago. Last output:\n${cap(job.log.slice(-8000).trim()) || "(no output yet)"}`;
   },
 
+  // Type into a running background command (it asked a question, wants a choice or a line of input)
+  async send_background_input(_root, { job_id, text = "", enter = true }) {
+    const job = jobs.get(String(job_id));
+    if (!job) return `Error: no background command ${job_id}.`;
+    if (job.exitCode !== null) return `Error: ${job_id} has already finished (exit code ${job.exitCode}).`;
+    const before = job.log.length;
+    job.proc.stdin.write(String(text) + (enter === false || enter === "false" ? "" : "\r\n"));
+    await wait(1500); // its answer
+    return `Sent to ${job_id}. New output:\n${cap(job.log.slice(before).trim()) || "(nothing yet)"}`;
+  },
+
   stop_background_command(_root, { job_id }) {
     const job = jobs.get(String(job_id));
     if (!job) return `Error: no background command ${job_id}.`;
@@ -669,7 +680,7 @@ const computerFileTools = {
 
 // The terminal in a chat that isn't a project: runs on this computer in the user's home folder (each command is allowed
 // by the user first)
-const COMPUTER_TOOLS = new Set(["execute_terminal_command", "start_background_command", "check_background_command", "stop_background_command", "run_code", "wait_until"]);
+const COMPUTER_TOOLS = new Set(["execute_terminal_command", "start_background_command", "check_background_command", "stop_background_command", "run_code", "wait_until", "send_background_input"]);
 
 function shellSpawn(command, cwd) {
   return process.platform === "win32"

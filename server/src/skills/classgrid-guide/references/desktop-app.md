@@ -86,8 +86,8 @@ above.
     -   publishing websites to Classgrid's cloud
     -   Grids (group chats)
 -   **Not in Classgrid yet:**
-    -   typing into a terminal program while it runs (for example answering a password prompt in the middle of a
-        command); other apps can be typed into with the computer tool
+    -   answering a hidden password prompt inside a terminal program (questions, choices and normal input can be
+        answered with send_background_input, and other apps can be typed into with the computer tool)
     -   suggestions while typing code in the editor (tab-complete)
     -   comments on screenshots
     -   MCP servers that are a program running on the user's own computer (Classgrid already uses plugins and any online MCP server through connectors)

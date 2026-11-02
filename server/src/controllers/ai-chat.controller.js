@@ -1456,6 +1456,11 @@ const COMPUTER_TERMINAL_DEFS = [
         source: { type: "string", description: "replace / insert: the cell's new text" },
         cell_type: { type: "string", enum: ["code", "markdown"] },
     }, ["path", "cell_index", "mode"]),
+    terminalDef("send_background_input", "Type into a background command that is waiting for input on the user's computer (it asked a question, a yes/no, a choice or a line of text): sends the text and Enter, and gives back its new output. Start such programs with start_background_command, check what they ask, then answer with this. Never type passwords or secrets the user didn't give you.", {
+        job_id: { type: "string", description: "The job_id of the running command" },
+        text: { type: "string", description: "What to type" },
+        enter: { type: "boolean", description: "Press Enter after the text (default true)" },
+    }, ["job_id", "text"]),
     terminalDef("stop_background_command", "Stop a background command on the user's computer.", {
         job_id: { type: "string", description: "The job_id from start_background_command" },
     }, ["job_id"]),
@@ -5592,7 +5597,7 @@ If a tool fails, never show the error message; say only: "Something went wrong o
             toolPlan.allowedToolNames.add("execute_terminal_command");
             toolPlan.loadedNames.add("execute_terminal_command");
             // Wait until a dev server is up, a page answers or a file appears, and notebooks (in the project folder)
-            for (const name of ["wait_until", "notebook_edit"]) {
+            for (const name of ["wait_until", "notebook_edit", "send_background_input"]) {
                 const def = COMPUTER_TERMINAL_DEFS.find((d) => d.function.name === name);
                 if (!def || fullToolList.some((t) => t.function.name === name)) continue;
                 fullToolList.push(def);
