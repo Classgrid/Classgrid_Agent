@@ -1331,6 +1331,15 @@ const READ_LOCAL_FILE_TOOL = {
         }
     }
 };
+// What Classgrid can do (the guide's desktop-app page), for questions about itself or comparisons with other tools
+let desktopFactsCache = null;
+async function classgridDesktopFacts() {
+    if (desktopFactsCache) return desktopFactsCache;
+    const fs = await import("fs/promises");
+    desktopFactsCache = await fs.readFile(new URL("../skills/classgrid-guide/references/desktop-app.md", import.meta.url), "utf8").catch(() => "");
+    return desktopFactsCache;
+}
+
 // Helper types the AI makes for itself (like Antigravity's define_subagent): a name, a role, and the model and edit
 // rights it starts with. Kept per user, so a type made once can be sent again in any chat.
 const HELPER_TYPES_KEY = (userId) => `helper-types:${userId}`;
@@ -1981,6 +1990,10 @@ Classgrid has three modes. The user switches between them with the mode switcher
 - Studio Mode: the same projects and the same project chats as Project Mode, but agent-first: there is no code editor, so the user cannot edit files by hand. You do all the coding with the project tools while the user watches in the right pane: the Files tab (each file you write or edit shows there live), the Terminal tab (the commands you run, live), the Project tab (repo, branch, open pull request, Vercel, commit history) and the Browser tab (the user's real live browser, which you and your helpers use with the browser tools).
 Project Mode and Studio share one open project and its chats: the user can open the same chat in either mode. Changes go to GitHub as one open pull request per project; when the user asks to push straight to main, push_project_to_github with direct_to_main: true pushes to the main branch with their own GitHub account (some accounts always push straight to main: the push result says where it went). Connecting GitHub and installing the Classgrid app are done in Project Mode.
 The user is in ${appMode === "agent" ? "Agent mode" : appMode === "project" ? "Project Mode" : "Studio Mode"} now.${appMode === "studio" ? ` Make code changes yourself; do not ask the user to edit a file or open an editor. If they want to edit by hand, they can switch to Project Mode.` : " The live browser is only in Studio Mode: here there is none, so do not try to open or use a browser (no browser tools, and no browser started from code or commands), and do not say that you will try or that you will do it. If the user wants the live browser, tell them to switch to Studio Mode."}`;
+        }
+        // What Classgrid can do, when the user asks or compares it with other tools (the AI used to guess and undersell it)
+        if (/\b(antigravity|cursor|claude\s*code|windsurf|copilot|codex|what (all )?(can|could) you do|what are you able|your (features|tools|abilities)|compare|comparison|versus|vs\.?|better than|can'?t do)\b/i.test(String(body.question || ""))) {
+            volatilePrompt += `\n\nABOUT YOURSELF (facts from Classgrid's own guide; answer only from these, never guess, and never say you can't do something listed here):\n${await classgridDesktopFacts()}`;
         }
         // "Push" always means GitHub, in every chat (the AI used to deploy to Vercel instead)
         volatilePrompt += "\n\nPUSH MEANS GITHUB: when the user says push (push it, push the code, push to git), push the code to GitHub: push_project_to_github in a project, or git add, commit and push in the terminal. Never deploy to Vercel (or anywhere else) for a push, and never suggest Vercel instead. Deploy to Vercel only when the user clearly asks to deploy, publish a website, or names Vercel.";

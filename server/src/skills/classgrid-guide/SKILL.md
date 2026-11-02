@@ -1,6 +1,6 @@
 ---
 name: classgrid-guide
-description: Guide and sitemap for Classgrid AI (chat.classgrid.in): Agent Mode, Project Mode, Studio Mode, settings and permissions, and everything the agent connects to (WhatsApp, email, schedules, plugins, GitHub, Vercel). Use it when the user asks how to use, set up or change anything in Classgrid AI.
+description: Guide and sitemap for Classgrid AI (chat.classgrid.in and the Windows desktop app): Agent Mode, Project Mode, Studio Mode, the desktop app, settings and permissions, and everything the agent connects to (WhatsApp, email, schedules, plugins, GitHub, Vercel). Use it when the user asks how to use, set up or change anything in Classgrid AI, what Classgrid can do, or how it compares with other AI tools.
 ---
 
 # Classgrid AI Guide & Sitemap
@@ -22,6 +22,9 @@ how Classgrid works, read the page below that matches what the user is asking ab
 -   **Connections**: [references/connections.md](references/connections.md)
     -   WhatsApp messages and calls, email to the agent, schedules and long tasks, plugins and connected apps,
         GitHub, Vercel and publishing websites.
+-   **The desktop app (Windows)**: [references/desktop-app.md](references/desktop-app.md)
+    -   What the agent can do on the user's own computer (files, videos, terminal, folder projects, built-in editor,
+        local browser, helpers), and how Classgrid compares with Antigravity, Cursor and Claude Code.
 -   **"/" commands**: [references/slash-commands.md](references/slash-commands.md)
     -   The "/" commands in the Project Mode and Studio chat box (/classgrid-guide, /studio-guide, /project-guide, /plan, /goal, /schedule, /browser,
         /generative_ui, /grill-me, /plugin, /teamwork, /boost, /learn, /compact): what each does and how to use it.
