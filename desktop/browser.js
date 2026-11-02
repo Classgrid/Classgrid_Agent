@@ -179,6 +179,35 @@ function ring(cssX, cssY) {
   view.webContents.executeJavaScriptInIsolatedWorld(1001, [{ code }]).catch(() => {});
 }
 
+// The agent's cursor, drawn inside the page (the page is a real window here, so nothing can be drawn over it from
+// outside): the same blue arrow and "Agent · Clicking" label as the cloud browser. It glides to where the agent clicks,
+// stays there for typing, keys and scrolling, and fades a few seconds after the last step.
+let lastCursor = null; // { x, y } in page CSS pixels
+function cursor(cssX, cssY, label) {
+  if (Number.isFinite(cssX) && Number.isFinite(cssY)) lastCursor = { x: cssX, y: cssY };
+  if (!lastCursor || !view || view.webContents.isDestroyed()) return;
+  const code = `(() => {
+    let c = document.getElementById("__cg_agent_cursor");
+    if (!c) {
+      c = document.createElement("div");
+      c.id = "__cg_agent_cursor";
+      c.style.cssText = "position:fixed;left:0;top:0;z-index:2147483647;pointer-events:none;transition:left .45s cubic-bezier(.22,1,.36,1),top .45s cubic-bezier(.22,1,.36,1),opacity .3s";
+      c.innerHTML = '<svg width="22" height="22" viewBox="0 0 24 24" style="display:block;filter:drop-shadow(0 1px 2px rgba(0,0,0,.45))"><path d="M4 2.5 L4 19 L8.6 14.9 L11.6 21.5 L14.4 20.3 L11.4 13.8 L17.6 13.8 Z" fill="#0ea5e9" stroke="#fff" stroke-width="1.4" stroke-linejoin="round"/></svg>'
+        + '<span style="position:absolute;left:20px;top:16px;white-space:nowrap;border-radius:9999px;background:#0ea5e9;color:#fff;padding:2px 8px;font:500 11px/16px system-ui,-apple-system,Segoe UI,sans-serif;box-shadow:0 1px 2px rgba(0,0,0,.2);transition:opacity .2s"></span>';
+      document.documentElement.appendChild(c);
+    }
+    c.style.left = "${Math.round(lastCursor.x)}px";
+    c.style.top = "${Math.round(lastCursor.y)}px";
+    c.style.opacity = "1";
+    const l = c.querySelector("span");
+    l.textContent = ${JSON.stringify(`Agent · ${label}`)};
+    l.style.opacity = "1";
+    clearTimeout(window.__cgCursorFade);
+    window.__cgCursorFade = setTimeout(() => { c.style.opacity = ".35"; l.style.opacity = "0"; }, 5000);
+  })()`;
+  view.webContents.executeJavaScriptInIsolatedWorld(1001, [{ code }]).catch(() => {});
+}
+
 // Keys like the cloud browser takes them: Enter, Tab, ArrowDown, Control+A, Shift+Tab
 const KEY_NAMES = { ArrowUp: "Up", ArrowDown: "Down", ArrowLeft: "Left", ArrowRight: "Right", " ": "Space", Spacebar: "Space", Esc: "Escape", Return: "Enter" };
 const MODIFIERS = { control: "control", ctrl: "control", shift: "shift", alt: "alt", meta: "meta", cmd: "meta", command: "meta", controlormeta: "control" };
@@ -219,7 +248,7 @@ async function act(a, byAgent) {
       const x = Math.round(Number(a.x) * g.toView);
       const y = Math.round(Number(a.y) * g.toView);
       if (!Number.isFinite(x) || !Number.isFinite(y)) throw new Error("x and y must be numbers");
-      if (byAgent) { point("click", { x: Number(a.x), y: Number(a.y) }); ring(x / zoom, y / zoom); }
+      if (byAgent) { point("click", { x: Number(a.x), y: Number(a.y) }); ring(x / zoom, y / zoom); cursor(x / zoom, y / zoom, "Clicking"); }
       wc.sendInputEvent({ type: "mouseMove", x, y });
       for (let n = 1; n <= (a.double ? 2 : 1); n++) {
         wc.sendInputEvent({ type: "mouseDown", x, y, button: "left", clickCount: n });
@@ -228,17 +257,17 @@ async function act(a, byAgent) {
       break;
     }
     case "type":
-      if (byAgent) point("type", { text: String(a.text ?? "").length });
+      if (byAgent) { point("type", { text: String(a.text ?? "").length }); cursor(null, null, "Typing"); }
       if (String(a.text ?? "")) await wc.insertText(String(a.text ?? ""));
       if (a.submit) { await wait(50); press("Enter"); }
       break;
     case "press":
-      if (byAgent) point("key", { key: String(a.key || "Enter") });
+      if (byAgent) { point("key", { key: String(a.key || "Enter") }); cursor(null, null, `Pressing ${String(a.key || "Enter")}`); }
       press(a.key);
       break;
     case "scroll": {
       const dy = Number(a.dy ?? 600) || 0;
-      if (byAgent) point("scroll", { dy });
+      if (byAgent) { point("scroll", { dy }); cursor(null, null, dy < 0 ? "Scrolling up" : "Scrolling down"); }
       wc.sendInputEvent({ type: "mouseWheel", x: Math.round(g.b.width / 2), y: Math.round(g.b.height / 2), deltaX: 0, deltaY: -dy * zoom, canScroll: true });
       break;
     }
