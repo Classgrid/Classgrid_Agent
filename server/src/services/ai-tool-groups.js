@@ -48,6 +48,13 @@ export const CORE_TOOL_NAMES = [
     "recall_session_context",
     "recall_chat",
     "search_recall_chat",
+    // The terminal is always loaded, in every chat (owner's rule: no limits on the terminal and Bash)
+    "execute_terminal_command",
+    "start_background_command",
+    "check_background_command",
+    "stop_background_command",
+    "send_background_input",
+    "computer_terminal",
     "open_integration_panel",
     "get_timezone_time",
     "search_web",
@@ -179,11 +186,18 @@ export const TOOL_GROUPS = [
     { id: "connector:instagram", description: "Instagram posts, reels and stories.", tools: ["instagram_connector"], pattern: /\b(insta(gram)?|ig|reels?|stor(y|ies))\b/i },
     { id: "connector:whatsapp_business", description: "WhatsApp Business messages.", tools: ["whatsapp_business_connector"], pattern: /\bwhats\s*app\b/i },
     { id: "connector:aws_ses", description: "AWS SES email sending.", tools: ["aws_ses_connector"], pattern: /\b(ses|aws\s*email)\b/i },
+    // The terminal is for everyone, in every chat (owner's rule, 2026-11-02: no limits on the terminal and Bash)
+    {
+        id: "terminal",
+        description: "Run terminal commands: PowerShell, Bash or Command Prompt (on the user's computer in the desktop app), background commands.",
+        tools: ["execute_terminal_command", "start_background_command", "check_background_command", "stop_background_command", "send_background_input", "computer_terminal"],
+        pattern: /(terminal|command|commands|bash|shell|powershell|cmd|run|npm|npx|node|git|pip|python|install|script|ssh|cli)/i,
+    },
     // Staff-only groups (database role super_admin / co_super_admin).
     {
         id: "internal_ops",
-        description: "STAFF: run terminal commands on the sandbox and read server logs.",
-        tools: ["execute_terminal_command", "read_server_logs", "get_server_status"],
+        description: "STAFF: read server logs and server status.",
+        tools: ["read_server_logs", "get_server_status"],
         pattern: /\b(logs?|terminal|ssh|env|ec2|aws|r2|bucket|infra|server|pm2|crash\w*|errors?)\b/i,
         staffOnly: true,
     },
