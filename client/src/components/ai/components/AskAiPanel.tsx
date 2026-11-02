@@ -2642,6 +2642,8 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
   const setPermissionMode = (m: PermissionMode) => { setPermissionModeState(m); try { localStorage.setItem(PERMISSION_MODE_KEY, m); } catch { /* storage blocked */ } };
   const [pendingPermission, setPendingPermission] = useState<PermissionRequest | null>(null);
   const inCodeMode = typeof window !== "undefined" && window.location.pathname.split("/").some((p) => p === "studio" || p === "project");
+  // The shield (Review, Default, Auto, Turbo): Studio and Project Mode, and every chat in the desktop app, where the AI works on the computer
+  const showsPermissionMode = inCodeMode || (typeof window !== "undefined" && !!(window as any).classgridDesktop?.isDesktop);
   // "/" commands (Project Mode and Studio only): typed at the very start of the message
   const slashItems = slashCommandsFor(isStudio, slashMenuQuery);
   const updateSlashMenu = (val: string, cursor: number) => {
@@ -4458,10 +4460,10 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
           deviceId: (window as any).classgridDesktop?.deviceId || undefined,
           // Website or Classgrid desktop app, so the AI knows where the user is
           clientApp: (window as any).classgridDesktop?.isDesktop ? "desktop" : "web",
-          // Studio and Project Mode: which actions ask the user first (the shield in the chat box)
+          // Studio, Project Mode and every desktop app chat: which actions ask the user first (the shield in the chat box)
           permissionMode: (() => {
             const parts = window.location.pathname.split("/");
-            return parts.includes("studio") || parts.includes("project") ? permissionMode : undefined;
+            return parts.includes("studio") || parts.includes("project") || (window as any).classgridDesktop?.isDesktop ? permissionMode : undefined;
           })(),
           // Project Mode: the project open next to the chat (the backend links the chat to it)
           projectId: (() => {
@@ -6681,7 +6683,7 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
 
                   {/* Bottom Right action bar: send OR stop */}
                   <div className="absolute bottom-3 right-3 flex items-center gap-0.5">
-                    {inCodeMode && <PermissionModePicker value={permissionMode} onChange={setPermissionMode} />}
+                    {showsPermissionMode && <PermissionModePicker value={permissionMode} onChange={setPermissionMode} />}
                     <ModelPicker value={selectedModel} onChange={setSelectedModel} disabled={isGenerating} />
                     <button
                       type="button"
@@ -7354,6 +7356,7 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
 
                             {/* Bottom right: send */}
                             <div className="absolute bottom-3 right-3 flex items-center gap-0.5">
+                              {showsPermissionMode && <PermissionModePicker value={permissionMode} onChange={setPermissionMode} />}
                               <ModelPicker value={selectedModel} onChange={setSelectedModel} />
                               <button
                                 type="button"

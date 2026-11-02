@@ -21,6 +21,22 @@ const ALWAYS_ASKS = 4; // asks even with no mode or in turbo
 const DESTRUCTIVE = /(^|[\s;&|(])(rm\s|rmdir\s|sudo\s|mkfs|dd\s+if=|shred\s|git\s+push|git\s+reset\s+--hard|git\s+clean\s+-[a-z]*f|git\s+branch\s+-D|git\s+checkout\s+--\s|drop\s+(table|database)|truncate\s+table|npm\s+publish)/i;
 const SENSITIVE = /(^|[\s;&|(])(rm\s|rmdir\s|mv\s|sudo\s|chmod\s|chown\s|kill\s|pkill\s|killall\s|docker\s|git\s+(push|reset|clean|rebase|merge|checkout|branch\s+-[dD]|commit|tag)|npm\s+(publish|uninstall|install|i)\b|yarn\s+(add|remove)|pnpm\s+(add|remove|install)|pip\s+(install|uninstall)|curl\s|wget\s|ssh\s|scp\s|drop\s+(table|database)|truncate\s|mkfs|dd\s+if=)/i;
 
+// "Always allow" for a command covers the programs it runs (git, npm, python...), like Claude Code's allow rules,
+// not just that exact text: "git status" allowed means every git command is. Commands that remove things for good
+// are only ever allowed exactly as written.
+const programOf = (part) => {
+  const m = part.trim().replace(/^&\s*/, "").match(/^"([^"]+)"|^'([^']+)'|^([^\s"']+)/);
+  const first = m ? m[1] || m[2] || m[3] || "" : "";
+  return first.split(/[\\/]/).pop().replace(/\.(exe|cmd|bat|ps1)$/i, "").toLowerCase();
+};
+const PROGRAM_NAMES = (command) => [...new Set(String(command).split(/;|&&|\|\||\|/).map(programOf).filter(Boolean))].sort();
+const commandAllow = (command) => {
+  if (DESTRUCTIVE.test(command)) return { key: `cmd:${command}`, label: command };
+  const programs = PROGRAM_NAMES(command);
+  return programs.length ? { key: `cmd:${programs.join("+")}`, label: `${programs.join(", ")} commands` } : { key: `cmd:${command}`, label: command };
+};
+const folderOf = (file) => String(file).replace(/[\\/][^\\/]*$/, "") || file;
+
 const host = (u) => { try { return new URL(/^[a-z]+:\/\//i.test(u) ? u : `https://${u}`).host; } catch { return String(u || "").slice(0, 80); } };
 
 // What an action is, for the card and for "always allow" (null = never asked)
@@ -28,9 +44,9 @@ export function describeAction(tool, args = {}) {
   const command = String(args?.command || "").trim();
   switch (tool) {
     case "execute_terminal_command":
-      return { title: "Run this command?", detail: command, key: `cmd:${command}`, label: command, level: DESTRUCTIVE.test(command) ? 3 : SENSITIVE.test(command) ? 2 : 1 };
+      return { title: "Run this command?", detail: command, ...commandAllow(command), level: DESTRUCTIVE.test(command) ? 3 : SENSITIVE.test(command) ? 2 : 1 };
     case "start_background_command":
-      return { title: "Run this command in the background?", detail: command, key: `cmd:${command}`, label: command, level: DESTRUCTIVE.test(command) ? 3 : SENSITIVE.test(command) ? 2 : 1 };
+      return { title: "Run this command in the background?", detail: command, ...commandAllow(command), level: DESTRUCTIVE.test(command) ? 3 : SENSITIVE.test(command) ? 2 : 1 };
     case "run_code":
       return { title: `Run this ${args?.language || "code"}?`, detail: String(args?.code || "").slice(0, 1500), key: `code:${args?.language || "code"}`, label: `running ${args?.language || "code"}`, level: 1 };
     case "push_project_to_github":
@@ -54,7 +70,7 @@ export function describeAction(tool, args = {}) {
     // A file or folder anywhere on the user's computer (desktop app): asks in Review and Default; Auto and Turbo don't ask
     case "read_local_file": {
       const file = String(args?.path || "").trim().replace(/^["']+|["']+$/g, "");
-      return { title: "Read a file on your computer?", detail: file, key: `localfile:${file.toLowerCase()}`, label: `reading ${file.split(/[\\/]/).filter(Boolean).pop() || "this file"}`, level: 2 };
+      return { title: "Read a file on your computer?", detail: file, key: "localfile", label: "reading files on this computer", level: 2 };
     }
     // Using apps on the user's computer (the real mouse and keyboard): every step that does something asks
     case "computer": {
@@ -68,7 +84,7 @@ export function describeAction(tool, args = {}) {
       const file = String(args?.path || "").trim();
       return { title: "Create this file on your computer?", detail: `${file}
 
-${String(args?.content ?? "").slice(0, 1200)}`, key: `localwrite:${file.toLowerCase()}`, label: `creating ${file.split(/[\\/]/).pop() || "files"}`, level: 2 };
+${String(args?.content ?? "").slice(0, 1200)}`, key: `localwrite:${folderOf(file).toLowerCase()}`, label: `creating files in ${folderOf(file).split(/[\\/]/).pop() || "this folder"}`, level: 2 };
     }
     case "computer_edit": {
       const file = String(args?.path || "").trim();
@@ -81,7 +97,7 @@ ${String(first.old_text ?? "").slice(0, 500)}
 With:
 ${String(first.new_text ?? "").slice(0, 500)}` : ""}${Array.isArray(args?.edits) && args.edits.length > 1 ? `
 
-(+${args.edits.length - 1} more change${args.edits.length > 2 ? "s" : ""})` : ""}`, key: `localedit:${file.toLowerCase()}`, label: `editing ${file.split(/[\\/]/).pop() || "files"}`, level: 2 };
+(+${args.edits.length - 1} more change${args.edits.length > 2 ? "s" : ""})` : ""}`, key: `localedit:${folderOf(file).toLowerCase()}`, label: `editing files in ${folderOf(file).split(/[\\/]/).pop() || "this folder"}`, level: 2 };
     }
     case "computer_search":
     case "computer_list": {
