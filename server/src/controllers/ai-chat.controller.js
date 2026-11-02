@@ -6014,7 +6014,7 @@ If a tool fails, never show the error message; say only: "Something went wrong o
         // Answer text already streamed to the user. Once there is some, nothing is retried: a retry would type a
         // second answer below the first one.
         let shownAnswerText = "";
-        const cutOffAnswer = () => `${shownAnswerText.trim()}\n\n_(This answer was cut off by a technical problem. Please ask again if you need the rest.)_`;
+        const cutOffAnswer = () => `${shownAnswerText.trim()}\n\n_(The AI model stopped answering here. Say "continue" and it picks up from this point.)_`;
         while (attempt <= maxAttempts) {
             if (attempt > 1 && shownAnswerText) {
                 console.warn(`[AI-STREAM] Not retrying (attempt ${attempt}): answer text was already shown`);
@@ -6161,7 +6161,7 @@ If a tool fails, never show the error message; say only: "Something went wrong o
                                 if (claudeErr.usage?.total_tokens > 0) usageStore.usage = claudeErr.usage;
                                 console.error(`[AI-STREAM] ${claudeModel} failed after output started (toolsRun=${claudeErr.toolsRun}); not retrying: ${claudeErr.message}`);
                                 usedModel = claudeModel;
-                                streamed = { answer: shownAnswerText ? cutOffAnswer() : "Something went wrong while finishing this answer. The actions above were completed — please ask again if you need a summary." };
+                                streamed = { answer: shownAnswerText ? cutOffAnswer() : "I could not finish this answer: the AI model stopped answering. The steps above were done. Say continue and I will pick up from here." };
                             } else {
                                 console.warn(`[AI-STREAM] ${claudeModel} failed before any output, falling back to Cloudflare: ${claudeErr.message}`);
                             }
@@ -6235,7 +6235,7 @@ If a tool fails, never show the error message; say only: "Something went wrong o
                                 if (streamErr.usage?.total_tokens > 0) usageStore.usage = streamErr.usage;
                                 console.error(`[AI-STREAM] ${model} failed after output started (toolsRun=${streamErr.toolsRun}, answerShown=${!!shownAnswerText}); not retrying: ${streamErr.message}`);
                                 usedModel = model;
-                                streamed = { answer: shownAnswerText ? cutOffAnswer() : "Something went wrong while finishing this answer. The actions above were completed — please ask again if you need a summary." };
+                                streamed = { answer: shownAnswerText ? cutOffAnswer() : "I could not finish this answer: the AI model stopped answering. The steps above were done. Say continue and I will pick up from here." };
                                 break;
                             }
                             // Retried on the next model: this attempt's usage is added to the bill, not overwritten.

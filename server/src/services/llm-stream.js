@@ -56,6 +56,17 @@ export function keepNewestImages(conversation, max = MAX_CF_IMAGES_PER_REQUEST) 
     }
 }
 
+// The model refused the request itself (too many pictures, too much text): the conversation is made smaller and the
+// round is tried again, instead of the answer stopping. Old pictures go, and old tool results are shortened.
+export function shrinkConversation(conversation) {
+    keepNewestImages(conversation, 4);
+    const toolAt = conversation.map((m, i) => (m?.role === "tool" ? i : -1)).filter((i) => i >= 0);
+    for (const i of toolAt.slice(0, -6)) {
+        const text = String(conversation[i].content ?? "");
+        if (text.length > 1500) conversation[i] = { ...conversation[i], content: `${text.slice(0, 1500)}\n...(shortened to save room)` };
+    }
+}
+
 export class StreamChatError extends Error {
     constructor(message, { status, rateLimited = false } = {}) {
         super(message);
@@ -307,6 +318,7 @@ export async function streamChat({
             // already showed is kept and the model is asked to continue from there, so nothing is shown twice.
             let round;
             const roundProviders = [provider, ...fallbackProviders.filter((p) => p?.model && p.model !== provider.model)];
+            let shrunk = false;
             for (let tryNo = 0, at = 0; ; tryNo++) {
                 let shownText = "";
                 if (String(roundProviders[at]?.model || "").startsWith("@cf/")) keepNewestImages(conversation);
@@ -322,6 +334,14 @@ export async function streamChat({
                     // "Too many requests per minute" (many helpers on one model): wait it out longer instead of giving up
                     const busy = e?.rateLimited || /HTTP 429|rate limit/i.test(String(e?.message || ""));
                     const maxTries = busy ? 9 : 5;
+                    // The request itself was too big for the model: shrink it once and try again (the answer keeps going)
+                    if (!signal?.aborted && !shrunk && /HTTP (400|413)|too many images|too long|context length|maximum context|too large/i.test(String(e?.message || ""))) {
+                        shrinkConversation(conversation);
+                        shrunk = true;
+                        console.warn(`[AI-STREAM] ${roundProviders[at].model} refused the request (${String(e?.message || e).slice(0, 160)}); made the conversation smaller, trying again`);
+                        onStatus?.("Making room, trying again…");
+                        continue;
+                    }
                     if (signal?.aborted || tryNo >= maxTries) throw e;
                     console.warn(`[AI-STREAM] ${roundProviders[at].model} round failed (${String(e?.message || e).slice(0, 160)}); trying again (${tryNo + 1}/${maxTries})`);
                     if (shownText.trim()) {
