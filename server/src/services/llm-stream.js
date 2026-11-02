@@ -37,7 +37,7 @@
 
 // Cloudflare refuses a whole request with too many pictures in it ("too many images in request"), and a long task
 // with screenshots (computer tool, browser) keeps adding them: only the newest ones stay, older ones become a note
-const MAX_CF_IMAGES_PER_REQUEST = 4;
+const MAX_CF_IMAGES_PER_REQUEST = 24; // Cloudflare allows 32; some room is left for the pictures of the next step
 export function keepNewestImages(conversation, max = MAX_CF_IMAGES_PER_REQUEST) {
     let seen = 0;
     for (let i = conversation.length - 1; i >= 0; i--) {
