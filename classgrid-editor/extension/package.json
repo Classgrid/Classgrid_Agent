@@ -1,0 +1,46 @@
+{
+  "name": "classgrid",
+  "displayName": "Classgrid",
+  "description": "The Classgrid AI inside Classgrid Code: the Agent chat on the right side, and the AI's terminal, files and memory on this computer.",
+  "publisher": "classgrid",
+  "version": "0.1.0",
+  "private": true,
+  "license": "UNLICENSED",
+  "engines": {
+    "vscode": "^1.98.0"
+  },
+  "main": "./extension.js",
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "contributes": {
+    "viewsContainers": {
+      "secondarySidebar": [
+        {
+          "id": "classgrid",
+          "title": "Classgrid",
+          "icon": "media/classgrid.svg"
+        }
+      ]
+    },
+    "views": {
+      "classgrid": [
+        {
+          "type": "webview",
+          "id": "classgrid.agent",
+          "name": "Agent"
+        }
+      ]
+    },
+    "commands": [
+      {
+        "command": "classgrid.showAgent",
+        "title": "Classgrid: Show the Agent"
+      },
+      {
+        "command": "classgrid.open",
+        "title": "Classgrid: Open Classgrid (Agent, Studio, Projects)"
+      }
+    ]
+  }
+}

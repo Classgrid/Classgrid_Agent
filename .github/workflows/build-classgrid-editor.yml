@@ -1,8 +1,14 @@
-name: Build Classgrid editor (full desktop editor)
+name: Build Classgrid Code (our editor with the Classgrid AI inside)
 
-# The full desktop code editor for the Classgrid app (like Cursor's): VS Code's open-source code built with the
-# VSCodium scripts, named Classgrid Code, with the Open VSX extension store. No local server (no localhost).
-# Runs when classgrid-editor/ changes; the finished editor is attached to a GitHub release of this repo.
+# Option B: our own editor built from VS Code's open-source code (the newest VS Code release), with the Classgrid AI
+# built inside it, like Cursor's AI is inside Cursor:
+# - the Agent chat on the right side, and all of Classgrid (Agent, Studio, Projects) in a tab: our same screens
+#   (client/, the desktop build);
+# - the Classgrid desktop app's own parts (desktop/runner.js...), so the AI's terminal, files and memory work on
+#   this computer;
+# - the Open VSX extension store, and no editor server (no localhost in the editor).
+# The "Proof: it is B" step stops the build if the Classgrid AI isn't inside the finished editor.
+# Runs when classgrid-editor/ changes (or by hand); the finished editor is attached to a GitHub release of this repo.
 on:
   workflow_dispatch:
   push:
@@ -16,7 +22,6 @@ permissions:
   contents: write
 
 env:
-  VSCODIUM_COMMIT: ca7f7b44b5e5c3faa663f6cdc043998f71936653
   APP_NAME: Classgrid
   BINARY_NAME: classgrid-code
   GLOBAL_DIRNAME: classgrid-code
@@ -26,6 +31,7 @@ env:
   OS_NAME: windows
   VSCODE_QUALITY: stable
   VSCODE_ARCH: x64
+  VSCODE_LATEST: 'yes' # the newest VS Code release from Microsoft's update service, not a fixed older one
   DISABLE_UPDATE: 'yes'
   SHOULD_BUILD: 'yes'
   SHOULD_BUILD_REH: 'no'
@@ -38,44 +44,60 @@ jobs:
     defaults:
       run:
         shell: bash
-        working-directory: classgrid-editor
     steps:
-      # Only the classgrid-editor folder is fetched (actions/checkout stops on this repo's old .github_org entry)
-      - name: Get classgrid-editor
-        working-directory: .
+      # Only the folders this needs (actions/checkout stops on this repo's old .github_org entry)
+      - name: Get classgrid-editor, our screens (client) and the desktop app's parts
         env:
           TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           git clone --depth 1 --filter=blob:none --sparse --no-recurse-submodules "https://x-access-token:${TOKEN}@github.com/${{ github.repository }}.git" repo
-          git -C repo sparse-checkout set classgrid-editor
-          mv repo/classgrid-editor ./classgrid-editor
+          git -C repo sparse-checkout set classgrid-editor client desktop
 
-      - name: Get the VSCodium build scripts (pinned)
-        run: |
-          git clone https://github.com/VSCodium/vscodium.git vscodium
-          git -C vscodium checkout "$VSCODIUM_COMMIT"
+      - name: Get the newest VSCodium build scripts
+        run: git clone --depth 1 https://github.com/VSCodium/vscodium.git repo/classgrid-editor/vscodium
 
       - name: Classgrid name and logo
-        run: bash brand.sh
+        run: bash repo/classgrid-editor/brand.sh
 
       - uses: actions/setup-node@v4
         with:
-          node-version-file: classgrid-editor/vscodium/.nvmrc
+          node-version-file: repo/classgrid-editor/vscodium/.nvmrc
 
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
 
-      - name: Get VS Code's open-source code
-        working-directory: classgrid-editor/vscodium
+      # The Classgrid AI part: our screens (the same desktop build the Classgrid app packs), the extension that holds
+      # them, and the desktop app's runner, memory and chats
+      - name: Build our screens (client, desktop build)
+        working-directory: repo/client
+        run: |
+          npm ci --no-audit --no-fund
+          node ../desktop/scripts/build-client.mjs
+          test -f ../desktop/app/index.html
+
+      - name: Pack the Classgrid AI part
+        working-directory: repo
+        run: |
+          EXT=classgrid-editor/out/classgrid
+          rm -rf "$EXT" && mkdir -p "$EXT/desktop"
+          cp -r classgrid-editor/extension/. "$EXT/"
+          cp -r desktop/app "$EXT/app"
+          cp desktop/runner.js desktop/aimemory.js desktop/computer.js desktop/chats.js desktop/memory.js "$EXT/desktop/"
+          SIO=$(node -p "require('./desktop/package.json').dependencies['socket.io-client']")
+          (cd "$EXT/desktop" && echo '{"name":"classgrid-desktop-parts","private":true}' > package.json && npm install --no-audit --no-fund --omit=dev "socket.io-client@${SIO}")
+          ls "$EXT" "$EXT/desktop"
+
+      - name: Get VS Code's open-source code (newest release)
+        working-directory: repo/classgrid-editor/vscodium
         run: ./get_repo.sh
 
-      - name: Build
-        working-directory: classgrid-editor/vscodium
+      - name: Build the editor
+        working-directory: repo/classgrid-editor/vscodium
         run: ./build.sh
 
       - name: Pack the Windows app
-        working-directory: classgrid-editor/vscodium
+        working-directory: repo/classgrid-editor/vscodium
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           npm_config_arch: x64
@@ -87,13 +109,39 @@ jobs:
           tar -czf vscode.tar.gz -T vscode.txt
           ./build/windows/package.sh
 
+      - name: Put the Classgrid AI inside the editor (built-in extension)
+        working-directory: repo/classgrid-editor
+        run: |
+          APPDIR=vscodium/VSCode-win32-x64/resources/app
+          test -d "$APPDIR/extensions"
+          rm -rf "$APPDIR/extensions/classgrid"
+          cp -r out/classgrid "$APPDIR/extensions/classgrid"
+
+      - name: 'Proof: it is B (the Classgrid AI is inside the editor)'
+        working-directory: repo/classgrid-editor
+        run: |
+          APP=vscodium/VSCode-win32-x64
+          EXT=$APP/resources/app/extensions/classgrid
+          fail() { echo "NOT B: $1" >&2; exit 1; }
+          ls "$APP"/*.exe
+          { test -f "$APP/Classgrid Code.exe" || test -f "$APP/classgrid-code.exe"; } || fail "the editor program (Classgrid Code.exe) is missing"
+          node -e "const p=require('./$APP/resources/app/product.json');if(p.nameLong!=='Classgrid Code')process.exit(1)" || fail "the editor isn't named Classgrid Code"
+          node -e "const p=require('./$APP/resources/app/product.json');if(!/open-vsx\.org/.test(p.extensionsGallery&&p.extensionsGallery.serviceUrl||''))process.exit(1)" || fail "the extension store isn't Open VSX"
+          test -f "$EXT/extension.js" || fail "the Classgrid extension isn't inside the editor"
+          node -e "const p=require('./$EXT/package.json');const c=p.contributes.viewsContainers.secondarySidebar.find(x=>x.id==='classgrid');const v=p.contributes.views.classgrid.find(x=>x.id==='classgrid.agent');if(!c||!v)process.exit(1)" || fail "the Agent panel on the right side isn't there"
+          test -f "$EXT/app/index.html" || fail "our Classgrid screens aren't inside the editor"
+          ls "$EXT/app/assets/"*.js > /dev/null || fail "our screens' code isn't inside the editor"
+          for f in runner.js aimemory.js chats.js memory.js; do test -f "$EXT/desktop/$f" || fail "the desktop part $f isn't inside"; done
+          test -d "$EXT/desktop/node_modules/socket.io-client" || fail "the runner's connection to Classgrid isn't inside"
+          grep -q 'window.classgridDesktop' "$EXT/bridge.js" || fail "the bridge for our screens isn't inside"
+          echo "PROOF OK: Classgrid Code $(node -p "require('./$APP/resources/app/product.json').version") with the Classgrid AI inside (Agent on the right, our screens, the AI's runner)."
+
       - name: Put the editor in a release
-        working-directory: classgrid-editor/vscodium
+        working-directory: repo/classgrid-editor/vscodium
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          ls
           7z a -tzip "../Classgrid-Code-win32-x64-${RELEASE_VERSION}.zip" "./VSCode-win32-x64/*"
           gh release create "editor-${RELEASE_VERSION}" "../Classgrid-Code-win32-x64-${RELEASE_VERSION}.zip" \
             --repo "${{ github.repository }}" --title "Classgrid Code ${RELEASE_VERSION}" \
-            --notes "The full desktop editor for the Classgrid app (VS Code ${MS_TAG}, built with VSCodium)."
+            --notes "Classgrid Code: our editor (VS Code ${MS_TAG}, built with VSCodium's scripts) with the Classgrid AI inside: the Agent on the right, our Classgrid screens, the AI's terminal, files and memory on the computer."
