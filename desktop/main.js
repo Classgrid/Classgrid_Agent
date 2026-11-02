@@ -275,7 +275,7 @@ else app.setAsDefaultProtocolClient("classgrid");
 
 // classgrid://login?code=...: swap the one-time code for the signed-in page (it carries the login token)
 async function handleDeepLink(link) {
-  if (!link || !win) return;
+  if (!link || !win || win.isDestroyed()) return;
   let url;
   try { url = new URL(link); } catch { return; }
   if (url.hostname !== "login") return;
