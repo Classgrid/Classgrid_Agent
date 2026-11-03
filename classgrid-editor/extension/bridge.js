@@ -1,4 +1,4 @@
-"C:\Users\nikhi\Videos\Recording 2026-11-03 154535.mp4"// Runs first in our screens inside Classgrid Code's Agent panel (put into the page by extension.js, before the app's
+// Runs first in our screens inside Classgrid Code's Agent panel (put into the page by extension.js, before the app's
 // own script). Our screens are loaded from the editor's own files (no localhost), so this:
 // - gives them window.classgridDesktop, the same thing the Classgrid desktop app's preload.js gives them: each call
 //   goes to the editor's Classgrid extension and its answer comes back;
