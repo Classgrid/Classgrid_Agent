@@ -1,7 +1,7 @@
 // Studio Mode's project picker above the chat input. The projects are the same ones as Project Mode, so a project
 // made in either mode shows in both. A new project can start with a GitHub repo or without one.
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Check, ChevronDown, ChevronRight, Cloud, Folder, FolderPlus, FolderX, Link2, Pencil, Search, Trash2, X } from "lucide-react";
+import { Check, ChevronDown, ChevronRight, Cloud, Folder, FolderPlus, FolderX, HardDrive, Link2, Pencil, Search, Trash2, X } from "lucide-react";
 import { toast } from "sonner";
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/marketing_ui/dialog";
@@ -32,6 +32,12 @@ const LIST_KEY = "cg_studio_projects";
 // Classgrid desktop app only: a folder on this computer becomes a project whose tools run here (the local runner)
 // Desktop app: a project with a folder on this computer (a folder project, or a cloud project downloaded here)
 const onThisPc = (p: NonNullable<Parameters<typeof thisComputerCopy>[0]>) => p.location === "local" || !!thisComputerCopy(p);
+// A long folder path keeps its start and its last folder visible: C:\Users\nikhi\OneDrive\Do…\classgrid_marketting
+const shortPath = (name: string) => {
+  if (name.length <= 44 || !/[\\/]/.test(name)) return name;
+  const last = name.split(/[\\/]/).filter(Boolean).pop() || "";
+  return name.slice(0, Math.max(12, 42 - last.length)) + "…\\" + last;
+};
 const desktopApp = (window as any).classgridDesktop as { isDesktop?: boolean; pickFolder?: () => Promise<string | null>; cloneRepo?: (repo: string) => Promise<{ folder?: string; error?: string } | null> } | undefined;
 export async function openLocalFolder(): Promise<Project | null> {
   const folder = await desktopApp?.pickFolder?.();
@@ -150,6 +156,7 @@ export function StudioProjectPicker() {
   const [picked, setPicked] = useState<string | null>(readPick);
   const [open, setOpen] = useState(false);
   const [q, setQ] = useState("");
+  const [localOpen, setLocalOpen] = useState(false); // desktop app: the "Local projects" list opened
   const [cloudOpen, setCloudOpen] = useState(false); // desktop app: the "Cloud projects" list opened
   const [creating, setCreating] = useState(false);
   // Same project actions as Project Mode's Projects page
@@ -235,6 +242,33 @@ export function StudioProjectPicker() {
     return (projects || []).filter((p) => !t || p.name.toLowerCase().includes(t) || (p.repo || "").toLowerCase().includes(t));
   }, [projects, q]);
 
+  const projectRow = (p: Project, sub: boolean) => (
+          <Fragment key={p.id}>
+          <div className="group relative flex items-center rounded-md hover:bg-black/[0.05] dark:hover:bg-white/[0.07] transition-colors duration-150">
+            <button
+              type="button"
+              onClick={() => pick(p.id)}
+              title={p.location === "local" ? p.localPath || "A folder on this computer" : p.repo || "No repo linked"}
+              className={`flex-1 min-w-0 flex items-center gap-2.5 h-8 ${sub ? "pl-7" : "px-2"} pr-2 text-left text-[13px] text-foreground/85`}
+            >
+              {p.logo ? <img src={p.logo} alt="" className="size-[15px] shrink-0 rounded object-cover" /> : <Folder className="size-[15px] shrink-0 text-muted-foreground" />}
+              <span className="flex-1 min-w-0 truncate">{shortPath(p.name)}</span>
+              {p.id === picked && <Check className="size-3.5 shrink-0 group-hover:hidden" />}
+            </button>
+            <div className="hidden group-hover:flex items-center pr-1">
+              {[
+                { label: "Rename", Icon: Pencil, run: () => { setOpen(false); setRenaming(p); } },
+                { label: p.repo ? "Change repo" : "Link a repo", Icon: Link2, run: () => { setOpen(false); setLinking(p); } },
+                { label: "Delete", Icon: Trash2, run: () => setDeleting(p) },
+              ].map(({ label, Icon, run }) => (
+                <button key={label} type="button" onClick={run} title={label} aria-label={label} className="flex items-center justify-center size-6 rounded text-muted-foreground hover:text-foreground hover:bg-black/[0.06] dark:hover:bg-white/[0.08] transition-colors">
+                  <Icon className="size-3.5" />
+                </button>
+              ))}
+            </div>
+          </div>
+          </Fragment>
+  );
   return (
     <div ref={boxRef} className="relative flex flex-wrap items-center gap-x-2 gap-y-1">
       <button
@@ -285,7 +319,7 @@ export function StudioProjectPicker() {
           exit={reduce ? { opacity: 0 } : { opacity: 0, y: place.up ? 4 : -4, scale: 0.98 }}
           transition={{ duration: reduce ? 0 : 0.18, ease: EASE }}
           style={{ maxHeight: place.maxH, transformOrigin: place.up ? "bottom left" : "top left" }}
-          className={`absolute left-0 ${place.up ? "bottom-full mb-1.5" : "top-full mt-1.5"} flex flex-col z-50 w-[15.5rem] max-w-[calc(100vw-2rem)] rounded-lg border border-black/10 dark:border-white/[0.08] bg-white dark:bg-[#1e1e1e] text-foreground shadow-2xl overflow-hidden`}
+          className={`absolute left-0 ${place.up ? "bottom-full mb-1.5" : "top-full mt-1.5"} flex flex-col z-50 w-[22rem] max-w-[calc(100vw-2rem)] rounded-lg border border-black/10 dark:border-white/[0.08] bg-white dark:bg-[#1e1e1e] text-foreground shadow-2xl overflow-hidden`}
         >
           <label className="shrink-0 flex items-center gap-2 h-9 px-3 border-b border-black/10 dark:border-white/[0.08]">
             <Search className="size-3.5 shrink-0 text-muted-foreground" />
@@ -298,67 +332,32 @@ export function StudioProjectPicker() {
               className="flex-1 min-w-0 bg-transparent border-0 p-0 text-[13px] shadow-none outline-none ring-0 focus:outline-none focus:ring-0 focus-visible:outline-none focus-visible:ring-0 placeholder:text-muted-foreground"
             />
           </label>
-          <div className="flex-1 min-h-0 max-h-56 overflow-y-auto p-1">
+          <div className="flex-1 min-h-0 max-h-80 overflow-y-auto p-1">
             <p className="px-2 pt-1 pb-1 text-[12px] text-muted-foreground">Recent</p>
             {projects === null && <p className="px-2 py-1.5 text-[13px] text-muted-foreground">Loading…</p>}
             {projects !== null && !shown.length && (
               <p className="px-2 py-1.5 text-[13px] text-muted-foreground">{q.trim() ? `No project matches “${q}”.` : "No projects yet."}</p>
             )}
-            {/* Desktop app: Recent is only the folders on this computer; the cloud projects are inside "Cloud projects".
+            {/* Desktop app: Recent (folders on this computer), then "Local projects" and "Cloud projects" lists.
                 The website lists every project (they are all cloud projects there). */}
-            {(desktopApp?.isDesktop ? shown.filter(onThisPc) : shown).map((p) => (
-              <Fragment key={p.id}>
-              <div className="group relative flex items-center rounded-md hover:bg-black/[0.05] dark:hover:bg-white/[0.07] transition-colors duration-150">
+            {(desktopApp?.isDesktop ? shown.filter(onThisPc).slice(0, q.trim() ? undefined : 5) : shown).map((p) => projectRow(p, false))}
+            {desktopApp?.isDesktop && [
+              { key: "local", label: "Local projects", Icon: HardDrive, list: shown.filter(onThisPc), isOpen: localOpen, toggle: () => setLocalOpen((o) => !o) },
+              { key: "cloud", label: "Cloud projects", Icon: Cloud, list: shown.filter((x) => !onThisPc(x)), isOpen: cloudOpen, toggle: () => setCloudOpen((o) => !o) },
+            ].map((g) => g.list.length > 0 && (
+              <Fragment key={g.key}>
                 <button
                   type="button"
-                  onClick={() => pick(p.id)}
-                  title={p.location === "local" ? p.localPath || "A folder on this computer" : p.repo || "No repo linked"}
-                  className="flex-1 min-w-0 flex items-center gap-2.5 h-8 px-2 text-left text-[13px] text-foreground/85"
-                >
-                  {p.logo ? <img src={p.logo} alt="" className="size-[15px] shrink-0 rounded object-cover" /> : <Folder className="size-[15px] shrink-0 text-muted-foreground" />}
-                  <span className="flex-1 min-w-0 truncate">{p.name}</span>
-                  {p.id === picked && <Check className="size-3.5 shrink-0 group-hover:hidden" />}
-                </button>
-                <div className="hidden group-hover:flex items-center pr-1">
-                  {[
-                    { label: "Rename", Icon: Pencil, run: () => { setOpen(false); setRenaming(p); } },
-                    { label: p.repo ? "Change repo" : "Link a repo", Icon: Link2, run: () => { setOpen(false); setLinking(p); } },
-                    { label: "Delete", Icon: Trash2, run: () => setDeleting(p) },
-                  ].map(({ label, Icon, run }) => (
-                    <button key={label} type="button" onClick={run} title={label} aria-label={label} className="flex items-center justify-center size-6 rounded text-muted-foreground hover:text-foreground hover:bg-black/[0.06] dark:hover:bg-white/[0.08] transition-colors">
-                      <Icon className="size-3.5" />
-                    </button>
-                  ))}
-                </div>
-              </div>
-              </Fragment>
-            ))}
-            {desktopApp?.isDesktop && shown.some((x) => !onThisPc(x)) && (
-              <>
-                <button
-                  type="button"
-                  onClick={() => setCloudOpen((o) => !o)}
+                  onClick={g.toggle}
                   className="w-full flex items-center gap-2.5 h-8 px-2 mt-1 rounded-md text-left text-[13px] text-foreground/85 hover:bg-black/[0.05] dark:hover:bg-white/[0.07] transition-colors duration-150"
                 >
-                  <Cloud className="size-[15px] text-muted-foreground" />
-                  <span className="flex-1">Cloud projects</span>
-                  <ChevronRight className={`size-3.5 text-muted-foreground transition-transform ${cloudOpen || q.trim() ? "rotate-90" : ""}`} />
+                  <g.Icon className="size-[15px] text-muted-foreground" />
+                  <span className="flex-1">{g.label}</span>
+                  <ChevronRight className={`size-3.5 text-muted-foreground transition-transform ${g.isOpen ? "rotate-90" : ""}`} />
                 </button>
-                {(cloudOpen || q.trim()) && shown.filter((x) => !onThisPc(x)).map((p) => (
-                  <button
-                    key={p.id}
-                    type="button"
-                    onClick={() => pick(p.id)}
-                    title={p.repo || "No repo linked"}
-                    className="w-full flex items-center gap-2.5 h-8 pl-7 pr-2 rounded-md text-left text-[13px] text-foreground/85 hover:bg-black/[0.05] dark:hover:bg-white/[0.07] transition-colors duration-150"
-                  >
-                    {p.logo ? <img src={p.logo} alt="" className="size-[15px] shrink-0 rounded object-cover" /> : <Folder className="size-[15px] shrink-0 text-muted-foreground" />}
-                    <span className="flex-1 min-w-0 truncate">{p.name}</span>
-                    {p.id === picked && <Check className="size-3.5 shrink-0" />}
-                  </button>
-                ))}
-              </>
-            )}
+                {g.isOpen && g.list.map((p) => projectRow(p, true))}
+              </Fragment>
+            ))}
           </div>
           <div className="shrink-0 border-t border-black/10 dark:border-white/[0.08] p-1">
             <button
