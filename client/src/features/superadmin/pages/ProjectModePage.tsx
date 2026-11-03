@@ -32,7 +32,7 @@ import { PushToGithubModal } from "../components/PushToGithubModal";
 import { ImageCropperModal } from "@/components/marketing_ui/ImageCropperModal";
 import { apiClient } from "@/lib/apiClient";
 import { localFolderOf } from "../utils/localProject";
-import { DesktopStartPanel, makeLocalProject, type LocalWorkspace } from "../components/DesktopStartPanel";
+import { DesktopStartPanel, makeLocalProject, type CloudProject, type LocalWorkspace, type RecentProject } from "../components/DesktopStartPanel";
 import { DesktopMenuBar, editorMenus } from "@/components/layout/DesktopMenuBar";
 import { openLocalFolder } from "../components/StudioProjectPicker";
 import { ProjectPlaceSwitch } from "../components/ProjectPlaceSwitch";
@@ -724,14 +724,23 @@ export function ProjectModePage() {
     window.history.replaceState(null, "", url.toString());
   }, []);
 
-  // Desktop app: the start panel (open a folder, clone a repo, folders opened before)
+  // Desktop app: the start panel (open a folder, clone a repo, the cloud projects to download, the projects on this
+  // computer opened before)
   const isDesktop = !!(window as { classgridDesktop?: { isDesktop?: boolean } }).classgridDesktop?.isDesktop;
-  const localWorkspaces: LocalWorkspace[] = (projects || []).filter((p) => p.location === "local").map((p) => ({ id: p.id, name: p.name, localPath: p.localPath }));
   const openWorkspace = (w: LocalWorkspace & Partial<Project>) => {
     const full = { repo: null, updatedAt: new Date().toISOString(), lastOpenedAt: null, ...w, location: "local" as const } as Project;
     setProjects((list) => (list && !list.some((x) => x.id === full.id) ? [full, ...list] : list));
     open(full);
   };
+  // (a name that is a whole path, like "C:\gridx", shows as its folder's name)
+  const shortName = (name: string) => name.split(/[\\/]/).filter(Boolean).pop() || name;
+  const recentProjects: RecentProject[] = (projects || []).flatMap((p) => {
+    const path = p.location === "local" ? p.localPath : thisComputerCopy(p)?.path;
+    return path ? [{ id: p.id, name: shortName(p.name), path, open: () => (p.location === "local" ? openWorkspace(p) : open(p)) }] : [];
+  });
+  const cloudProjects: CloudProject[] = (projects || []).filter((p) => p.location !== "local").map((p) => ({
+    id: p.id, name: shortName(p.name), logo: p.logo, action: p.repo && !thisComputerCopy(p) ? "Download" : "Open", open: () => open(p),
+  }));
   useEffect(() => { if (isDesktop && githubConnected) loadRepos(); }, [isDesktop, githubConnected, loadRepos]);
 
   // Desktop app: one thin top bar like Cursor. The built-in editor's own top bar is hidden (desktop/editor.js), so its
@@ -997,10 +1006,7 @@ export function ProjectModePage() {
         <div className="flex-1" />
       ) : githubConnected === false && isDesktop ? (
         <div className="flex-1 overflow-y-auto px-6 py-12">
-          <DesktopStartPanel workspaces={localWorkspaces} onOpen={openWorkspace} />
-          <p className="mt-10 text-center text-xs text-muted-foreground">
-            Cloud projects on GitHub: <button onClick={() => setHubOpen(true)} className="underline hover:text-foreground">{githubExpired ? "Reconnect GitHub" : "Connect GitHub"}</button>
-          </p>
+          <DesktopStartPanel recent={recentProjects} cloud={null} onOpen={openWorkspace} onConnectGithub={() => setHubOpen(true)} />
         </div>
       ) : githubConnected === false ? (
         <div className="flex-1 flex items-center justify-center px-6">
@@ -1015,11 +1021,11 @@ export function ProjectModePage() {
         </div>
       ) : (
         <div className="flex-1 overflow-y-auto px-6 py-8">
-          {isDesktop && (
-            <div className="pt-4 pb-10 mb-8 border-b border-border">
-              <DesktopStartPanel workspaces={localWorkspaces} githubRepos={repos?.map((r) => r.fullName)} onOpen={openWorkspace} />
+          {isDesktop ? (
+            <div className="pt-8">
+              <DesktopStartPanel recent={recentProjects} cloud={cloudProjects} githubRepos={repos?.map((r) => r.fullName)} onOpen={openWorkspace} />
             </div>
-          )}
+          ) : (
           <div className="max-w-5xl mx-auto w-full">
             <div className="flex items-center justify-between gap-4 mb-6">
               <div>
@@ -1197,6 +1203,7 @@ export function ProjectModePage() {
               </div>
             )}
           </div>
+          )}
         </div>
       )}
 
