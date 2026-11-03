@@ -287,6 +287,44 @@ export function ProjectModePage() {
       });
     return () => { gone = true; };
   }, [localFolder, editorTry]);
+  // ...and its window sits in the code area (desktop/codeeditor.js): it follows the area's place and size, and hides
+  // while another page or a window of the app (a dialog, a menu, the AI hub) is open over the area
+  const editorAreaRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    const placeEditor = (window as { classgridDesktop?: { placeEditor?: (folder: string | null, rect: { x: number; y: number; width: number; height: number } | null) => void } }).classgridDesktop?.placeEditor;
+    const el = editorAreaRef.current;
+    if (!placeEditor || !localEditor?.opened || !localFolder || !el) return;
+    let last = "";
+    let frame = 0;
+    const send = () => {
+      frame = 0;
+      const covered = Array.from(document.querySelectorAll('[role="dialog"], [role="alertdialog"], [role="menu"], [role="listbox"]')).some((d) => d.getClientRects().length > 0);
+      const r = el.getBoundingClientRect();
+      const rect = covered || document.hidden || r.width < 2 || r.height < 2 ? null : { x: r.left, y: r.top, width: r.width, height: r.height };
+      const key = JSON.stringify(rect);
+      if (key === last) return;
+      last = key;
+      placeEditor(localFolder, rect);
+    };
+    const soon = () => { if (!frame) frame = window.requestAnimationFrame(send); };
+    send();
+    const resized = new ResizeObserver(soon);
+    resized.observe(el);
+    const changed = new MutationObserver(soon);
+    changed.observe(document.body, { childList: true, subtree: true });
+    window.addEventListener("resize", soon);
+    document.addEventListener("visibilitychange", soon);
+    const timer = window.setInterval(soon, 500); // (side panels sliding in or out)
+    return () => {
+      resized.disconnect();
+      changed.disconnect();
+      window.removeEventListener("resize", soon);
+      document.removeEventListener("visibilitychange", soon);
+      window.clearInterval(timer);
+      if (frame) window.cancelAnimationFrame(frame);
+      placeEditor(null, null);
+    };
+  }, [localEditor?.opened, localFolder]);
 
   const openProject = projects?.find((p) => p.id === openId) || null;
   const rememberOpen = (id: string | null) => {
@@ -862,7 +900,7 @@ export function ProjectModePage() {
             <button onClick={() => { saveThisComputerCopy(openProject); rememberOpen(null); setFolder(null); setLocalFolder(null); setProgress(null); }} className="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground">
               <ArrowLeft className="size-4" /> Projects
             </button>
-            <span className="text-sm font-medium truncate">{openProject.name}</span>
+            <span className="text-sm font-medium truncate" title={openProject.name}>{titleSlot ? (openProject.name.split(/[\\/]/).filter(Boolean).pop() || openProject.name) : openProject.name}</span>
             {openProject.repo && <span className="text-xs text-muted-foreground truncate">{openProject.repo}</span>}
             {/* Desktop app: get a copy on this computer, or switch between this computer and the cloud */}
             {/* (not in the desktop app's top bar: the owner removed "Also use in the cloud" there) */}
@@ -940,7 +978,7 @@ export function ProjectModePage() {
             <iframe ref={editorFrameRef} key={localEditor.url} src={localEditor.url} onLoad={editorLoaded} title="Code editor" className="flex-1 w-full border-0 [color-scheme:light] dark:[color-scheme:dark]" allow="clipboard-read; clipboard-write" />
           )}
           {localFolder && !folder && localEditor?.opened && (
-            <div className="flex-1 flex flex-col items-center justify-center gap-3 text-center px-8">
+            <div ref={editorAreaRef} className="flex-1 flex flex-col items-center justify-center gap-3 text-center px-8">
               <FolderGit2 className="size-10 text-muted-foreground" />
               <h3 className="text-lg font-semibold text-foreground">Your project is open in Classgrid Code</h3>
               <p className="text-sm text-muted-foreground font-mono break-all max-w-xl">{localFolder}</p>

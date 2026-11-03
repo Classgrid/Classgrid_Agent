@@ -5051,8 +5051,10 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
     </div>
   );
 
+  // Desktop app, Project Mode side panel with no messages yet: the input sits in the middle (like Antigravity)
+  const centerEmptyInput = import.meta.env.VITE_DESKTOP === "1" && inCodeMode && emptyState && !isLoadingChat && variant === "overlay";
   const panelChat = (
-    <div ref={variant !== "full-page" ? chatScrollRef : undefined} className={cn("relative overscroll-contain chat-scrollbar [scrollbar-gutter:stable]", variant === "full-page" ? "w-full" : "flex-1 min-h-0 overflow-y-auto")}>
+    <div ref={variant !== "full-page" ? chatScrollRef : undefined} className={cn("relative overscroll-contain chat-scrollbar [scrollbar-gutter:stable]", variant === "full-page" ? "w-full" : centerEmptyInput ? "shrink-0" : "flex-1 min-h-0 overflow-y-auto")}>
 
 
       <div className={cn("flex flex-col gap-4 px-4 py-4 transition-all duration-300 ease-[cubic-bezier(0.22,1,0.36,1)]", variant === "full-page" && "max-w-[48rem] mx-auto w-full pb-48")}>
@@ -7499,8 +7501,10 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
             >
               {onOverlayWidthChange && <OverlayDragHandle onChange={onOverlayWidthChange} onResizingChange={onOverlayResizingChange} />}
               {panelHeader}
+              <div className={centerEmptyInput ? "flex-1" : "hidden"} />
               {panelChat}
               {panelInput}
+              <div className={centerEmptyInput ? "flex-1" : "hidden"} />
             </motion.aside>
           )}
         </AnimatePresence>
