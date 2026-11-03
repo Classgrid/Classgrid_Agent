@@ -63,6 +63,8 @@
   // panel still drawn in its place), so the window's dark layer lies over the files and code the same way. Small
   // pop-ups (menus, the model picker) and invisible click-catchers don't count.
   var bigWindowOpen = function () {
+    // (a window that says so itself, like Studio's chat search)
+    if (document.querySelector("[data-cg-big-window]")) return true;
     var dialogs = document.querySelectorAll('[role="dialog"], [role="alertdialog"]');
     for (var i = 0; i < dialogs.length; i++) {
       var d = dialogs[i];

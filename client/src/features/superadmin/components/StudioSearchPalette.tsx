@@ -38,7 +38,10 @@ function shortAge(at: string) {
 
 const cleanTitle = (t: string) => (t || "New Chat").replace(/\*\*Title:\*\*/gi, "").replace(/Title:/gi, "").replace(/["']/g, "").trim();
 
-export function StudioSearchPalette({ open, onClose, files: givenFiles, recent = [], onOpenFile, fileIcon, initialKind = "files" }: {
+// The chats, projects and groups it last loaded (shown at once the next time it opens)
+const lastLists: { chats: Chat[] | null; projects: Project[] | null; groups: ChatGroup[] | null } = { chats: null, projects: null, groups: null };
+
+export function StudioSearchPalette({ open, onClose, files: givenFiles, recent = [], onOpenFile, fileIcon, initialKind = "files", onOpenChat }: {
   open: boolean;
   onClose: () => void;
   files?: string[]; // the project's file paths (left out: the open project's files are loaded here)
@@ -46,6 +49,7 @@ export function StudioSearchPalette({ open, onClose, files: givenFiles, recent =
   onOpenFile?: (path: string) => void; // left out: the file opens in the Files tab
   fileIcon: (name: string) => React.ReactNode;
   initialKind?: Kind; // the left sidebar's search starts on Conversations
+  onOpenChat?: (id: string) => void; // left out: the chat opens in Studio
 }) {
   const reduce = useReducedMotion();
   const [kind, setKind] = useState<Kind>(initialKind);
@@ -66,9 +70,13 @@ export function StudioSearchPalette({ open, onClose, files: givenFiles, recent =
   const [q, setQ] = useState("");
   const [active, setActive] = useState(0);
   const [more, setMore] = useState(false);
-  const [chats, setChats] = useState<Chat[] | null>(null);
-  const [projects, setProjects] = useState<Project[] | null>(null);
-  const [groups, setGroups] = useState<ChatGroup[] | null>(null);
+  // (the last lists show at once when it opens again, and are refreshed behind them)
+  const [chats, setChatsState] = useState<Chat[] | null>(() => lastLists.chats);
+  const [projects, setProjectsState] = useState<Project[] | null>(() => lastLists.projects);
+  const [groups, setGroupsState] = useState<ChatGroup[] | null>(() => lastLists.groups);
+  const setChats = (v: Chat[] | null | ((c: Chat[] | null) => Chat[] | null)) => setChatsState((c) => { const n = typeof v === "function" ? v(c) : v; lastLists.chats = n; return n; });
+  const setProjects = (v: Project[] | null | ((p: Project[] | null) => Project[] | null)) => setProjectsState((p) => { const n = typeof v === "function" ? v(p) : v; lastLists.projects = n; return n; });
+  const setGroups = (v: ChatGroup[] | null | ((g: ChatGroup[] | null) => ChatGroup[] | null)) => setGroupsState((g) => { const n = typeof v === "function" ? v(g) : v; lastLists.groups = n; return n; });
   // Conversations: which project and group headings are open (the open project starts open)
   const [openKeys, setOpenKeys] = useState<Set<string>>(() => new Set([`p:${openProjectId() || "none"}`]));
   const toggleKey = (key: string) => setOpenKeys((prev) => { const next = new Set(prev); if (next.has(key)) next.delete(key); else next.add(key); return next; });
@@ -95,6 +103,7 @@ export function StudioSearchPalette({ open, onClose, files: givenFiles, recent =
 
   const close = () => { setMenuOpen(false); onClose(); };
   const goChat = (id: string) => {
+    if (onOpenChat) return onOpenChat(id);
     const parts = window.location.pathname.split("/");
     const at = parts.indexOf("studio");
     window.history.pushState({}, "", `${at !== -1 ? parts.slice(0, at + 1).join("/") : "/c/studio"}/${id}`);
@@ -199,7 +208,7 @@ export function StudioSearchPalette({ open, onClose, files: givenFiles, recent =
     <AnimatePresence>
       {open && (
         <>
-          <motion.div key="bg" className="fixed inset-0 z-[130]" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={close} />
+          <motion.div key="bg" data-cg-big-window="" className="fixed inset-0 z-[130]" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={close} />
           <motion.div
             key="box"
             initial={reduce ? false : { opacity: 0, y: -8, scale: 0.98 }}

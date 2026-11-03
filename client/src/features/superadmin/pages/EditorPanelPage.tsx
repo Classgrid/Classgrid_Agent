@@ -5,6 +5,8 @@ import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { AskAiPanel } from "@/components/ai";
 import { apiClient } from "@/lib/apiClient";
+import { StudioSearchPalette } from "@/features/superadmin/components/StudioSearchPalette";
+import { FileBadge } from "@/features/superadmin/components/StudioFilesView";
 
 type EditorDesktop = {
   editorFolder?: string | null;
@@ -69,6 +71,14 @@ export function EditorPanelPage() {
     if (!id) window.dispatchEvent(new Event("agent:new-chat"));
   }), [navigate]);
   useEffect(() => { editorDesktop()?.activeChat?.(sessionId || null); }, [sessionId]);
+  // The chat search (the chats sidebar's search box, or Ctrl+K): Studio's search, in the middle of the whole window
+  // like the AI Hub (the left sidebar is too narrow for it)
+  const [searchOpen, setSearchOpen] = useState(false);
+  useEffect(() => {
+    const open = () => setSearchOpen(true);
+    window.addEventListener("agent:open-search-palette", open);
+    return () => window.removeEventListener("agent:open-search-palette", open);
+  }, []);
 
   if (!signedIn) {
     return (
@@ -84,6 +94,13 @@ export function EditorPanelPage() {
   return (
     <div className="cg-editor-panel h-[100dvh] bg-background">
       <AskAiPanel open onOpenChange={() => {}} variant="overlay" hideClearChat overlayWidth={width} />
+      <StudioSearchPalette
+        open={searchOpen}
+        onClose={() => setSearchOpen(false)}
+        initialKind="conversations"
+        fileIcon={(name) => <FileBadge name={name} />}
+        onOpenChat={(id) => navigate(`/editor/project/${id}`)}
+      />
     </div>
   );
 }

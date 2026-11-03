@@ -36,6 +36,13 @@ export function EditorSidebarPage() {
     } catch { /* storage blocked */ }
   }, [open, hidden, stripHidden]);
   useEffect(() => { if (open) setStripHidden(false); }, [open]);
+  // (it shows open only once the editor has made room for it, so it never draws cut off while the editor catches up)
+  const [wide, setWide] = useState(() => window.innerWidth >= OPEN_WIDTH - 8);
+  useEffect(() => {
+    const onResize = () => setWide(window.innerWidth >= OPEN_WIDTH - 8);
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, []);
   // The title bar's sidebar button: a hidden sidebar comes back, otherwise it opens or folds to icons
   const hiddenRef = useRef(hidden);
   hiddenRef.current = hidden;
@@ -102,7 +109,7 @@ export function EditorSidebarPage() {
   if (!signedIn || !ready) return <div className="h-[100dvh] bg-sidebar" />;
   return (
     <TooltipProvider>
-      <SidebarProvider open={open} onOpenChange={setOpen}>
+      <SidebarProvider open={open && wide} onOpenChange={setOpen}>
         <AppSidebar role="super_admin" user={currentUser ?? undefined} />
       </SidebarProvider>
       <div onPointerDown={startStripDrag} className="group fixed inset-y-0 right-0 z-20 w-2 cursor-col-resize touch-none" title="Drag to hide or show the sidebar">

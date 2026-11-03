@@ -77,6 +77,8 @@ import {
 } from "@/components/marketing_ui/dropdown-menu";
 import { SidebarMenu, SidebarMenuItem, SidebarMenuButton, useSidebar } from "@/components/marketing_ui/sidebar";
 
+const IN_EDITOR = import.meta.env.VITE_EDITOR === "1";
+
 export function SidebarSwitcher({ user }: { user: { role?: string; name?: string; sidebar_name?: string; additional_roles?: string[]; organization?: { sidebar_name?: string; name?: string; logo_url?: string; sidebar_logo_url?: string }, metadata?: Record<string, any> } | null }) {
   const { isMobile, state: sidebarState } = useSidebar();
   const collapsed = sidebarState === "collapsed" && !isMobile; // closed sidebar: only the logo shows
@@ -142,7 +144,8 @@ export function SidebarSwitcher({ user }: { user: { role?: string; name?: string
   return (
     <SidebarMenu>
       <SidebarMenuItem onMouseEnter={() => setLogoShown(true)} onMouseLeave={() => setLogoShown(false)}>
-        <DropdownMenu>
+        {/* (Classgrid Code: no mode switcher in its narrow chats sidebar, the logo is only the logo) */}
+        <DropdownMenu open={IN_EDITOR ? false : undefined}>
           <DropdownMenuTrigger render={
             <SidebarMenuButton
               size="lg"
@@ -181,7 +184,7 @@ export function SidebarSwitcher({ user }: { user: { role?: string; name?: string
                   </span>
                 )}
               </div>
-              {!collapsed && <ChevronsUpDown className="ml-auto size-4 text-muted-foreground" />}
+              {!collapsed && !IN_EDITOR && <ChevronsUpDown className="ml-auto size-4 text-muted-foreground" />}
           </DropdownMenuTrigger>
           <DropdownMenuContent
             className="w-[--radix-dropdown-menu-trigger-width] min-w-56 rounded-xl shadow-xl border-border bg-popover text-popover-foreground p-1"

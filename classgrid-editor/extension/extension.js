@@ -104,9 +104,9 @@ async function activate(context) {
   // Ctrl+K (⌘K on a Mac) is ours, anywhere in the editor: the chat history search of the chats sidebar, over the whole
   // window like in Project Mode (package.json keybindings; VS Code's own Ctrl+K shortcuts give way to it)
   context.subscriptions.push(vscode.commands.registerCommand("classgrid.searchChats", async () => {
-    if (!screens.chats) return;
-    await vscode.commands.executeCommand("_classgrid.focusStrip").then(undefined, () => {});
-    screens.chats.postMessage({ cgEvent: "shared", data: { name: "agent:open-search-palette", detail: null } });
+    // (it opens in the Agent panel's page, which covers the whole window for it, like the AI Hub)
+    await vscode.commands.executeCommand("classgrid.agent.focus").then(undefined, () => {});
+    screens.agent?.postMessage({ cgEvent: "shared", data: { name: "agent:open-search-palette", detail: null } });
   }));
   // The sidebar button next to the logo in the title bar (classgrid-left-strip.patch): shows or hides the chats
   // sidebar, like Project Mode's sidebar button

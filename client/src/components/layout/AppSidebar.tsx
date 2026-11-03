@@ -465,7 +465,8 @@ export function AppSidebar({ role, user }: AppSidebarProps) {
 
       {user && <SidebarFooterUser role={role} user={user} />}
       {/* Studio: the same search as the Files tab's "+", starting on Conversations (by project, with groups and pins) */}
-      {location.pathname.split("/").includes("studio")
+      {/* (Classgrid Code: its chats sidebar is narrow, so this search opens in the Agent panel, over the whole window) */}
+      {import.meta.env.VITE_EDITOR === "1" ? null : location.pathname.split("/").includes("studio")
         ? <StudioSearchPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} initialKind="conversations" fileIcon={(name) => <FileBadge name={name} />} />
         : <AiChatSearchPalette open={paletteOpen} onOpenChange={setPaletteOpen} mode={paletteMode} />}
     </Sidebar>

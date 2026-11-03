@@ -116,3 +116,29 @@ body.classgrid-strip-overlay .webview-overlay-content.classgrid-strip iframe {
 	font-family: var(--vscode-font-family) !important;
 	font-size: 13px !important;
 }
+
+/* The chats sidebar (classgrid-left-strip.patch): its place fills its spot in the layout, and its button sits right
+   after the logo in the title bar, like Project Mode's sidebar button (clickable: not part of the window's drag area) */
+.classgrid-strip-host {
+	width: 100% !important;
+	height: 100% !important;
+}
+.monaco-workbench .part.titlebar .titlebar-left .classgrid-strip-toggle {
+	order: 1;
+	-webkit-app-region: no-drag;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	width: 28px;
+	height: 28px;
+	margin: 0 6px 0 2px;
+	border-radius: 6px;
+	font-size: 16px;
+	cursor: pointer;
+	color: var(--vscode-titleBar-activeForeground);
+	opacity: 0.85;
+}
+.monaco-workbench .part.titlebar .titlebar-left .classgrid-strip-toggle:hover {
+	opacity: 1;
+	background-color: var(--vscode-toolbar-hoverBackground, rgba(128, 128, 128, 0.15));
+}

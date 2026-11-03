@@ -383,6 +383,19 @@
   html.cg-editor-sidebar [data-slot="sidebar"] kbd {
     display: flex !important;
   }
+  /* (no hover labels on its icons: this page is only as wide as the icons, so a label has no room beside them and
+     jumps back and forth under the mouse) */
+  html.cg-editor-sidebar [data-slot="tooltip-content"] {
+    display: none !important;
+  }
+  /* (it opens and folds in one step, like VS Code's own side bar: the editor gives it its new width at once, so a
+     sliding width inside would shake against it) */
+  html.cg-editor-sidebar [data-slot="sidebar-gap"],
+  html.cg-editor-sidebar [data-slot="sidebar-container"],
+  html.cg-editor-sidebar [data-slot="sidebar"] * {
+    transition: none !important;
+    animation: none !important;
+  }
   /* (its search or a dialog is open: the page covers the whole editor window, the sidebar stays drawn in its place) */
   html.cg-editor-sidebar.cg-overlay [data-slot="sidebar-container"] {
     top: var(--cg-panel-top) !important;
