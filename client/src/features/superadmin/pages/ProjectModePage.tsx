@@ -275,7 +275,6 @@ export function ProjectModePage() {
     if (!localFolder || !startEditor) return;
     let gone = false;
     setLocalEditor({ folder: localFolder });
-    setProgress({ label: "Opening Classgrid Code", value: 10, target: 90 });
     Promise.resolve(startEditor(localFolder))
       .catch((e: any) => ({ error: e?.message || "The code editor didn't start." }))
       .then((r: { url?: string; opened?: boolean; error?: string } | null) => {
@@ -350,7 +349,9 @@ export function ProjectModePage() {
   // Open = download the project's code fresh from GitHub, then show it in the editor
   const open = async (project: Project, replace = false, resume = false) => {
     // A must, like connecting GitHub: a project with a repo opens only once the Classgrid app is installed on it
-    if (project.repo && !appInstalledRef.current[project.repo]) {
+    // (not in the desktop app for a project that is a folder on this computer: it opens from that folder)
+    const onThisComputer = !!(window as { classgridDesktop?: { isDesktop?: boolean } }).classgridDesktop?.isDesktop && (project.location === "local" || !!thisComputerCopy(project));
+    if (project.repo && !onThisComputer && !appInstalledRef.current[project.repo]) {
       const res = await fetchWithRescue(`${backendUrl}/api/github-app/status?repo=${encodeURIComponent(project.repo)}`, { credentials: "include" }).catch(() => null);
       const data = res?.ok ? await res.json().catch(() => null) : null;
       if (data?.ready && !data.installed) { setAppGate({ project, installUrl: data.installUrl }); return; }
@@ -951,7 +952,7 @@ export function ProjectModePage() {
               </div>
             </div>
           )}
-          {localFolder && !folder && !localEditor?.url && !localEditor?.opened && (
+          {localFolder && !folder && (!localEditor || !!localEditor.error) && (
             <div className="flex-1 flex flex-col items-center justify-center gap-3 text-center px-8">
               <FolderGit2 className="size-10 text-muted-foreground" />
               <h3 className="text-lg font-semibold text-foreground">This project is a folder on your computer</h3>
