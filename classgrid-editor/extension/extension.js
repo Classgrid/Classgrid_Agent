@@ -96,7 +96,9 @@ function holdScreens(webview, startPath) {
   const slash = (u) => String(u).replace(/\/?$/, "/");
   const base = slash(webview.asWebviewUri(vscode.Uri.file(APP_DIR)));
   const fileBases = Object.fromEntries(drives.map((l) => [l.toLowerCase(), slash(webview.asWebviewUri(vscode.Uri.file(`${l}:\\`)))]));
-  const cfg = { version: parts.version, deviceId: computerId(), startPath, base, fileBases, storage };
+  // (folder: the folder open in the editor, the Agent's project)
+  const folder = (vscode.workspace.workspaceFolders || [])[0]?.uri.fsPath || null;
+  const cfg = { version: parts.version, deviceId: computerId(), startPath, base, fileBases, storage, folder };
   const bridge = fs.readFileSync(path.join(__dirname, "bridge.js"), "utf8");
   const src = webview.cspSource;
   const csp = [

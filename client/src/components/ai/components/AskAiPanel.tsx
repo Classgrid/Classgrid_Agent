@@ -3557,7 +3557,8 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
   }, [pageContext?.path, pageContext?.title]);
   const [bannedUntil, setBannedUntil] = useState<Date | null>(null);
   const [countdown, setCountdown] = useState("");
-  const [isMobile, setIsMobile] = useState(false);
+  // (Classgrid Code: its one layout from the first moment, so the scroll watcher and the down arrow stay on it)
+  const [isMobile, setIsMobile] = useState(() => import.meta.env.VITE_EDITOR === "1");
   const [userContext, setUserContext] = useState<any>(null);
 
   // Fetch contextual user data on mount if session exists

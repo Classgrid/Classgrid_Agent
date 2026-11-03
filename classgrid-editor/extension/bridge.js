@@ -222,6 +222,7 @@
     inEditor: true, // inside Classgrid Code (the full editor), not the Classgrid desktop app's own window
     version: cfg.version || "",
     deviceId: cfg.deviceId || null,
+    editorFolder: cfg.folder || null, // the folder open in the editor
     openExternal: bind("openExternal"),
     // A file on this computer, shown in our screens (pictures, PDFs): its address in the editor
     fileUrl: function (file) {
