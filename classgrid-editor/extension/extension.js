@@ -139,8 +139,8 @@ function holdScreens(webview, startPath) {
     if (m?.cgFetch) return proxyFetch(webview, m);
     if (m?.cgFetchAbort) return FETCHES.get(m.cgFetchAbort)?.abort();
     if (m?.cgStore) return keepStorage(m);
-    // (the chats sidebar's own pop-ups stay inside it: only the Agent panel covers the window)
-    if (m?.cgOverlay !== undefined) return webview === screens.chats ? undefined : coverWindow(webview, !!m.cgOverlay);
+    if (m?.cgOverlay !== undefined) return webview === screens.chats ? coverWithStrip(webview, !!m.cgOverlay) : coverWindow(webview, !!m.cgOverlay);
+    if (m?.cgOverlayReady && webview === screens.chats) return vscode.commands.executeCommand("_classgrid.setStripOverlay", true).then(undefined, (err) => log.appendLine(`[${new Date().toISOString()}] cover the window: ${err?.message || err}`));
     // A chat list change in one of our pages (a new chat, a new title...): the other page's list follows
     if (m?.cgShare) {
       for (const other of [screens.agent, screens.chats]) if (other && other !== webview) other.postMessage({ cgEvent: "shared", data: { name: String(m.cgShare), detail: m.detail ?? null } });
@@ -203,6 +203,19 @@ async function coverWindow(webview, on) {
       webview.postMessage({ cgEvent: "overlayOff" });
     }
   } catch (err) { log.appendLine(`[${new Date().toISOString()}] cover the window: ${err?.message || err}`); }
+}
+
+// The same for a big window of the chats sidebar on the left edge (the chat search, a dialog): its page covers the
+// window, the sidebar stays drawn on the left (it is fixed there in the page), and the window opens over everything
+// like the Agent panel's Plugins window (patches/classgrid-left-strip.patch, workbench.css)
+async function coverWithStrip(webview, on) {
+  try {
+    if (on) webview.postMessage({ cgEvent: "overlayRect", data: { top: 0, left: 0, width: 0, height: 0 } });
+    else {
+      await vscode.commands.executeCommand("_classgrid.setStripOverlay", false);
+      webview.postMessage({ cgEvent: "overlayOff" });
+    }
+  } catch (err) { log.appendLine(`[${new Date().toISOString()}] chats sidebar cover: ${err?.message || err}`); }
 }
 
 // Saved settings and login, kept in the editor's secret storage (a moment after the last change)

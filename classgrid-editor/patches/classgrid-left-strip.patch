@@ -17,10 +17,10 @@ index 75f9238..83c7806 100644
  			// Emit as event
 diff --git a/src/vs/workbench/contrib/webviewView/browser/classgridStrip.ts b/src/vs/workbench/contrib/webviewView/browser/classgridStrip.ts
 new file mode 100644
-index 0000000..e97a5b2
+index 0000000..9dba9b1
 --- /dev/null
 +++ b/src/vs/workbench/contrib/webviewView/browser/classgridStrip.ts
-@@ -0,0 +1,93 @@
+@@ -0,0 +1,98 @@
 +/*---------------------------------------------------------------------------------------------
 + *  Classgrid Code: our chats sidebar on the window's left edge, like Project Mode's left side in the Classgrid app.
 + *  It is a page of the Classgrid extension (the webview view "classgrid.chats", classgrid-editor/extension), shown
@@ -113,6 +113,11 @@ index 0000000..e97a5b2
 +
 +CommandsRegistry.registerCommand('_classgrid.setStripWidth', (_accessor, width: number) => {
 +	strip?.setWidth(width);
++});
++// A big window of the chats sidebar (the chat search, a dialog): its page covers the whole window like the Agent
++// panel's Plugins window, with the sidebar drawn in its place (classgrid-editor/workbench.css does the covering)
++CommandsRegistry.registerCommand('_classgrid.setStripOverlay', (_accessor, on: boolean) => {
++	mainWindow.document.body.classList.toggle('classgrid-strip-overlay', !!on);
 +});
 diff --git a/src/vs/workbench/contrib/webviewView/browser/webviewView.contribution.ts b/src/vs/workbench/contrib/webviewView/browser/webviewView.contribution.ts
 index 00a681a..86d36a3 100644

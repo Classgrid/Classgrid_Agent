@@ -73,6 +73,31 @@ body.classgrid-overlay .webview-overlay-content:not(.classgrid-strip):has(iframe
 	background: transparent !important;
 }
 
+/* The same for a big window of the chats sidebar on the left edge (the chat search, a dialog): its page covers the
+   whole window, see-through, with the sidebar still drawn on the left (body.classgrid-strip-overlay is set by
+   patches/classgrid-left-strip.patch) */
+body.classgrid-strip-overlay div:has(> .webview-overlay-content.classgrid-strip) {
+	clip-path: none !important;
+	position: fixed !important;
+	inset: 0 !important;
+	width: auto !important;
+	height: auto !important;
+	z-index: 2551 !important;
+}
+body.classgrid-strip-overlay .webview-overlay-content.classgrid-strip {
+	position: fixed !important;
+	top: 0 !important;
+	left: 0 !important;
+	width: 100vw !important;
+	height: 100vh !important;
+	z-index: 2551 !important;
+	border-radius: 0 !important;
+}
+body.classgrid-strip-overlay .webview-overlay-content.classgrid-strip iframe {
+	color-scheme: normal !important;
+	background: transparent !important;
+}
+
 /* Top right like Project Mode: the left sidebar and bottom panel toggles, then an "Agent" button that shows or hides
    the Agent panel (VS Code's right side bar toggle, as a button with its name) */
 .monaco-workbench .titlebar .action-item:has([class*="codicon-auxiliarybar-"][class*="-layout-icon"]) .action-label {
