@@ -229,6 +229,57 @@
     };
   }
   var bind = function (m) { return function () { return call.apply(null, [m].concat(Array.prototype.slice.call(arguments))); }; };
+
+  // Copy and paste: inside the editor our page can't use the clipboard itself (the editor keeps Ctrl+C / Ctrl+V and
+  // the page's clipboard calls), so copy buttons, Ctrl+C, Ctrl+X and Ctrl+V go through the editor's clipboard
+  var clipWrite = function (text) { return call("clipboardWrite", String(text == null ? "" : text)).then(function () { return undefined; }); };
+  var clipRead = function () { return call("clipboardRead").then(function (t) { return String(t || ""); }); };
+  try {
+    if (navigator.clipboard) {
+      var clipOwn = function (name, fn) { Object.defineProperty(navigator.clipboard, name, { value: fn, configurable: true, writable: true }); };
+      clipOwn("writeText", clipWrite);
+      clipOwn("readText", clipRead);
+      // (a copy with formatting: its plain text)
+      clipOwn("write", function (items) {
+        var item = items && items[0];
+        if (!item || item.types.indexOf("text/plain") === -1) return Promise.resolve();
+        return item.getType("text/plain").then(function (blob) { return blob.text(); }).then(clipWrite);
+      });
+    }
+  } catch (err) { post({ cgLog: "clipboard", text: String(err && err.message) }); }
+  var editable = function (el) {
+    return !!el && (el.tagName === "TEXTAREA" || el.isContentEditable || (el.tagName === "INPUT" && /^(text|search|url|email|password|tel|number|)$/i.test(el.type || "")));
+  };
+  var selectedText = function () {
+    var el = document.activeElement;
+    if (el && (el.tagName === "TEXTAREA" || el.tagName === "INPUT") && typeof el.selectionStart === "number") return el.value.slice(el.selectionStart, el.selectionEnd);
+    return String(window.getSelection ? window.getSelection() : "");
+  };
+  window.addEventListener("keydown", function (e) {
+    if (!(e.ctrlKey || e.metaKey) || e.altKey) return;
+    var key = String(e.key || "").toLowerCase();
+    var el = document.activeElement;
+    if (key === "v") {
+      if (!editable(el)) return;
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      clipRead().then(function (text) {
+        if (!text) return;
+        // the box's own paste handling first (long texts become a chip, formatted text stays formatted)
+        var data = new DataTransfer();
+        data.setData("text/plain", text);
+        var pasted = new ClipboardEvent("paste", { clipboardData: data, bubbles: true, cancelable: true });
+        if (el.dispatchEvent(pasted)) { el.focus(); document.execCommand("insertText", false, text); }
+      });
+    } else if ((key === "c" || key === "x") && !e.shiftKey) {
+      var text = selectedText();
+      if (!text) return;
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      clipWrite(text);
+      if (key === "x" && editable(el)) document.execCommand("delete");
+    }
+  }, true);
   var fileBases = cfg.fileBases || {};
 
   window.classgridDesktop = {

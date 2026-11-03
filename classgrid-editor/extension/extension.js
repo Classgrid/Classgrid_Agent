@@ -248,6 +248,9 @@ async function showFile(full, startLine, endLine) {
   await vscode.window.showTextDocument(doc, { viewColumn: vscode.ViewColumn.One, preview: false, selection: Number(startLine) > 0 ? range : undefined });
 }
 const HANDLERS = {
+  // (copy and paste in our screens: bridge.js)
+  clipboardWrite: (_p, text) => vscode.env.clipboard.writeText(String(text ?? "")).then(() => undefined),
+  clipboardRead: () => vscode.env.clipboard.readText(),
   openExternal: (_p, url) => { if (/^https?:\/\//.test(String(url))) return vscode.env.openExternal(vscode.Uri.parse(String(url))).then(() => undefined); },
   fileInfo: (_p, file) => {
     try { const st = fs.statSync(path.resolve(String(file || ""))); return { exists: true, isFile: st.isFile(), size: st.size, modified: st.mtimeMs }; } catch { return { exists: false }; }
