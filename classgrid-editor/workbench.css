@@ -46,6 +46,28 @@
 	border-bottom: none !important;
 }
 
+/* While a big window of the Agent panel is open (Plugins, settings...), the panel's page covers the whole window, like
+   those windows open over the whole Classgrid app in Project Mode: the page keeps the panel drawn in its place and is
+   see-through everywhere else, so the dark layer of the window lies over the files and code (body.classgrid-overlay is
+   set by our VS Code change, patches/classgrid-agent-overlay.patch) */
+body.classgrid-overlay div:has(> .webview-overlay-content iframe[src*="extensionId=classgrid.classgrid"][src*="purpose=webviewView"]) {
+	clip-path: none !important;
+	position: fixed !important;
+	inset: 0 !important;
+	width: auto !important;
+	height: auto !important;
+	z-index: 2550 !important;
+}
+body.classgrid-overlay .webview-overlay-content:has(iframe[src*="extensionId=classgrid.classgrid"][src*="purpose=webviewView"]) {
+	position: fixed !important;
+	top: 0 !important;
+	left: 0 !important;
+	width: 100vw !important;
+	height: 100vh !important;
+	z-index: 2550 !important;
+	border-radius: 0 !important;
+}
+
 /* Top right like Project Mode: the left sidebar and bottom panel toggles, then an "Agent" button that shows or hides
    the Agent panel (VS Code's right side bar toggle, as a button with its name) */
 .monaco-workbench .titlebar .action-item:has([class*="codicon-auxiliarybar-"][class*="-layout-icon"]) .action-label {

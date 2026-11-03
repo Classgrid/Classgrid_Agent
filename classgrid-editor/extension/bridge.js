@@ -58,6 +58,61 @@
   };
   new MutationObserver(function (list) { list.forEach(function (m) { Array.prototype.forEach.call(m.addedNodes, fixNode); }); }).observe(document.documentElement, { childList: true, subtree: true });
 
+  // Big windows (Plugins, settings, file previews: a dark layer over the whole page, or a dialog) open over the whole
+  // Classgrid app in Project Mode. Here the panel's page then covers the whole editor window (see-through, with the
+  // panel still drawn in its place), so the window's dark layer lies over the files and code the same way. Small
+  // pop-ups (menus, the model picker) and invisible click-catchers don't count.
+  var bigWindowOpen = function () {
+    var dialogs = document.querySelectorAll('[role="dialog"], [role="alertdialog"]');
+    for (var i = 0; i < dialogs.length; i++) {
+      var d = dialogs[i];
+      if (!d.closest("[data-radix-popper-content-wrapper]") && d.getClientRects().length) return true;
+    }
+    var all = document.body ? document.body.querySelectorAll("div") : [];
+    for (var j = 0; j < all.length; j++) {
+      var el = all[j];
+      if (!el.firstElementChild || typeof el.className !== "string" || !/\binset-0\b/.test(el.className)) continue;
+      var s = getComputedStyle(el);
+      if (s.position !== "fixed" || s.display === "none" || s.visibility === "hidden" || (parseInt(s.zIndex, 10) || 0) < 150) continue;
+      // (any color format: rgba(0, 0, 0, 0.5), oklab(0 0 0 / 0.5), color(srgb 0 0 0 / 0.5)...; see-through is alpha 0)
+      var bg = String(s.backgroundColor || "").trim();
+      var alpha = (bg.match(/\/\s*([\d.]+%?)\s*\)$/) || bg.match(/^rgba\([^,]+,[^,]+,[^,]+,\s*([\d.]+%?)\s*\)$/) || [])[1];
+      var a = alpha === undefined ? 1 : /%$/.test(alpha) ? parseFloat(alpha) / 100 : parseFloat(alpha);
+      if (!((bg && bg !== "transparent" && a > 0.05) || (s.backdropFilter && s.backdropFilter !== "none"))) continue;
+      return true;
+    }
+    return false;
+  };
+  // Opening is seen at once (the next frame); closing waits a moment, so the closing animation doesn't flicker
+  var covering = false;
+  var frame = 0;
+  var closeTimer = null;
+  new MutationObserver(function () {
+    if (frame) return;
+    frame = requestAnimationFrame(function () {
+      frame = 0;
+      var now = bigWindowOpen();
+      if (now && !covering) { clearTimeout(closeTimer); closeTimer = null; covering = true; post({ cgOverlay: true }); }
+      else if (!now && covering && !closeTimer) {
+        closeTimer = setTimeout(function () {
+          closeTimer = null;
+          if (!bigWindowOpen()) { covering = false; post({ cgOverlay: false }); }
+        }, 250);
+      } else if (now && closeTimer) { clearTimeout(closeTimer); closeTimer = null; }
+    });
+  }).observe(document.documentElement, { childList: true, subtree: true, attributes: true, attributeFilter: ["class", "style", "data-state"] });
+  // The editor says where the panel is (before the page covers the window), and when the covering ends
+  var coverWindow = function (rect) {
+    var root = document.documentElement.style;
+    root.setProperty("--cg-panel-top", rect.top + "px");
+    root.setProperty("--cg-panel-left", rect.left + "px");
+    root.setProperty("--cg-panel-width", rect.width + "px");
+    root.setProperty("--cg-panel-height", rect.height + "px");
+    document.documentElement.classList.add("cg-overlay");
+    post({ cgOverlayReady: true });
+  };
+  var uncoverWindow = function () { document.documentElement.classList.remove("cg-overlay"); };
+
   // Bytes <-> text for the messages to the extension
   var toB64 = function (buf) {
     var bytes = new Uint8Array(buf), s = "";
@@ -133,9 +188,10 @@
       var w = waiting[m.cgReply];
       delete waiting[m.cgReply];
       if (m.error) w.no(new Error(m.error)); else w.ok(m.result);
-    } else if (m.cgEvent === "agentPrompt") {
-      // something the AI hub tab sends to the chat (a skill or plugin prompt)
-      window.dispatchEvent(new CustomEvent("classgrid:agent-prompt", { detail: m.data }));
+    } else if (m.cgEvent === "overlayRect") {
+      coverWindow(m.data);
+    } else if (m.cgEvent === "overlayOff") {
+      uncoverWindow();
     } else if (m.cgEvent && listeners[m.cgEvent]) {
       listeners[m.cgEvent].forEach(function (fn) { try { fn(m.data); } catch (err2) { /* a screen's handler failed */ } });
     }
@@ -197,9 +253,5 @@
     openInEditor: bind("openInEditor"),
     revealInEditor: bind("revealInEditor"),
     onOpenFolderProject: on("openFolderProject"),
-    // The AI hub (Plugins, Skills, Usage...) as a big tab in the editor, and what it sends to the Agent panel
-    openHub: bind("openHub"),
-    closeHub: bind("closeHub"),
-    sendToAgent: bind("sendToAgent"),
   };
 })();

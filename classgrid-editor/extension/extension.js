@@ -26,8 +26,6 @@ let log = null; // the "Classgrid" output (page errors and what failed)
 let storage = {}; // our screens' saved settings and login (localStorage), kept in the editor's secret storage
 let saveTimer = null;
 const loaders = new Set(); // each open panel's "load our screens again"
-const agentViews = new Set(); // the Agent panels on the right (the AI hub tab sends its prompts to them)
-let hubPanel = null; // the AI hub tab (Plugins, Skills, Usage...), one at a time
 
 async function activate(context) {
   log = vscode.window.createOutputChannel("Classgrid");
@@ -51,7 +49,7 @@ async function activate(context) {
 
   // The right side: only the Agent panel (the same one as Project Mode's right side)
   context.subscriptions.push(vscode.window.registerWebviewViewProvider("classgrid.agent", {
-    resolveWebviewView(view) { const load = holdScreens(view.webview, "/editor/project"); agentViews.add(view.webview); view.onDidDispose(() => { loaders.delete(load); agentViews.delete(view.webview); }); },
+    resolveWebviewView(view) { const load = holdScreens(view.webview, "/editor/project"); view.onDidDispose(() => loaders.delete(load)); },
   }, { webviewOptions: { retainContextWhenHidden: true } }));
 
   // The login comes from the Classgrid app: Project Mode opens the editor with
@@ -122,6 +120,8 @@ function holdScreens(webview, startPath) {
     if (m?.cgFetch) return proxyFetch(webview, m);
     if (m?.cgFetchAbort) return FETCHES.get(m.cgFetchAbort)?.abort();
     if (m?.cgStore) return keepStorage(m);
+    if (m?.cgOverlay !== undefined) return coverWindow(webview, !!m.cgOverlay);
+    if (m?.cgOverlayReady) return vscode.commands.executeCommand("_classgrid.setAgentOverlay", true).then(undefined, (err) => log.appendLine(`[${new Date().toISOString()}] cover the window: ${err?.message || err}`));
     if (m?.cgLog) return log.appendLine(`[${new Date().toISOString()}] page ${m.cgLog}: ${String(m.text).slice(0, 2000)}`);
     if (m?.cgCall !== undefined) return answerCall(webview, m, load);
   });
@@ -162,6 +162,22 @@ async function proxyFetch(webview, m) {
   } finally {
     FETCHES.delete(id);
   }
+}
+
+// A big window of our screens is open (Plugins, settings...): the panel's page covers the whole editor window, like
+// those windows open over the whole Classgrid app in Project Mode. First the page learns where the panel is (it keeps
+// the panel drawn there), then it covers the window (our VS Code change, patches/classgrid-agent-overlay.patch).
+async function coverWindow(webview, on) {
+  log.appendLine(`[${new Date().toISOString()}] big window ${on ? "open: the panel covers the window" : "closed"}`);
+  try {
+    if (on) {
+      const rect = await vscode.commands.executeCommand("_classgrid.agentPanelRect");
+      if (rect) webview.postMessage({ cgEvent: "overlayRect", data: rect });
+    } else {
+      await vscode.commands.executeCommand("_classgrid.setAgentOverlay", false);
+      webview.postMessage({ cgEvent: "overlayOff" });
+    }
+  } catch (err) { log.appendLine(`[${new Date().toISOString()}] cover the window: ${err?.message || err}`); }
 }
 
 // Saved settings and login, kept in the editor's secret storage (a moment after the last change)
@@ -217,19 +233,6 @@ const HANDLERS = {
   listOtherChats: () => parts.chats.listOtherChats().catch(() => []),
   readOtherChat: (_p, userId, id) => parts.chats.readOtherChat(String(userId || ""), String(id || "")).catch(() => null),
   retry: (p) => { p.reload(); },
-  // The AI hub (Plugins, Images, Skills, Connected apps, Usage, AI Credits, Upgrade) as a big tab in the editor, like
-  // Settings in VS Code: the files and the Agent stay in view. Its close button closes the tab.
-  openHub: (_p, tab) => {
-    const page = `/editor/hub?tab=${encodeURIComponent(String(tab || "plugins"))}`;
-    hubPanel?.dispose(); // (open again at the asked part, like Usage or AI Credits)
-    hubPanel = vscode.window.createWebviewPanel("classgrid.hub", "Classgrid", vscode.ViewColumn.Active, { enableScripts: true, retainContextWhenHidden: true });
-    hubPanel.iconPath = vscode.Uri.file(path.join(__dirname, "media", "classgrid.svg"));
-    const load = holdScreens(hubPanel.webview, page);
-    hubPanel.onDidDispose(() => { loaders.delete(load); hubPanel = null; });
-  },
-  closeHub: () => { hubPanel?.dispose(); },
-  // (a skill or plugin prompt from the hub goes to the Agent chat)
-  sendToAgent: (_p, text) => { for (const w of agentViews) w.postMessage({ cgEvent: "agentPrompt", data: String(text || "") }); vscode.commands.executeCommand("classgrid.agent.focus").then(undefined, () => {}); },
   // A folder project opens in this editor itself
   openFolder: (_p, folder) => {
     if (!parts.runner.isAllowed(folder)) return;

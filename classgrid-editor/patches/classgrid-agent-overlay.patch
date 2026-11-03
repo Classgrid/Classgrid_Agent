@@ -1,0 +1,25 @@
+diff --git a/src/vs/workbench/contrib/webviewView/browser/webviewViewPane.ts b/src/vs/workbench/contrib/webviewView/browser/webviewViewPane.ts
+index e0e4456..c5c900e 100644
+--- a/src/vs/workbench/contrib/webviewView/browser/webviewViewPane.ts
++++ b/src/vs/workbench/contrib/webviewView/browser/webviewViewPane.ts
+@@ -29,6 +29,20 @@ import { IWebviewViewService, WebviewView } from './webviewViewService.js';
+ import { IActivityService, NumberBadge } from '../../../services/activity/common/activity.js';
+ import { IExtensionService } from '../../../services/extensions/common/extensions.js';
+ import { IHoverService } from '../../../../platform/hover/browser/hover.js';
++import { CommandsRegistry } from '../../../../platform/commands/common/commands.js';
++import { mainWindow } from '../../../../base/browser/window.js';
++
++// Classgrid Code: while a big window of the Classgrid Agent panel is open (Plugins, settings...), the panel's page covers
++// the whole window, like those windows open over the whole Classgrid app in Project Mode (classgrid-editor/workbench.css
++// does the covering; the Classgrid extension asks for the panel's place first, so the page keeps the panel drawn there)
++const classgridAgentFrame = 'iframe[src*="extensionId=classgrid.classgrid"][src*="purpose=webviewView"]';
++CommandsRegistry.registerCommand('_classgrid.agentPanelRect', () => {
++	const r = mainWindow.document.querySelector(`.webview-overlay-content:has(${classgridAgentFrame})`)?.getBoundingClientRect();
++	return r ? { top: r.top, left: r.left, width: r.width, height: r.height, windowWidth: mainWindow.innerWidth, windowHeight: mainWindow.innerHeight } : undefined;
++});
++CommandsRegistry.registerCommand('_classgrid.setAgentOverlay', (_accessor, on: boolean) => {
++	mainWindow.document.body.classList.toggle('classgrid-overlay', !!on);
++});
+ 
+ const storageKeys = {
+ 	webviewState: 'webviewState',

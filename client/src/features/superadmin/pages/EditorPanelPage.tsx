@@ -25,7 +25,7 @@ export function EditorPanelPage() {
     );
   }
   return (
-    <div className="h-[100dvh] bg-background">
+    <div className="cg-editor-panel h-[100dvh] bg-background">
       <AskAiPanel open onOpenChange={() => {}} variant="overlay" hideClearChat overlayWidth={width} />
     </div>
   );

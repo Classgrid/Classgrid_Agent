@@ -361,6 +361,22 @@
   html.cg-editor #root aside.sm\:hidden {
     display: flex !important;
   }
+  /* (a big window like Plugins is open: the page covers the whole editor window, see-through, with the panel drawn in
+     its own place, so the window's dark layer lies over the files and code like in Project Mode; classgrid-editor) */
+  html.cg-editor.cg-overlay,
+  html.cg-editor.cg-overlay body,
+  html.cg-editor.cg-overlay .cg-editor-panel {
+    background: transparent !important;
+  }
+  html.cg-editor.cg-overlay #root aside.sm\:hidden {
+    top: var(--cg-panel-top) !important;
+    left: var(--cg-panel-left) !important;
+    right: auto !important;
+    bottom: auto !important;
+    width: var(--cg-panel-width) !important;
+    height: var(--cg-panel-height) !important;
+    background: var(--background) !important;
+  }
   html.desktop-app .cg-incognito {
     --background: #fafafa;
     --color-background: #fafafa;
