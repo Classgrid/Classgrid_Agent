@@ -1,4 +1,4 @@
-// Runs first in our screens inside Classgrid Code's Agent panel (put into the page by extension.js, before the app's
+"C:\Users\nikhi\Videos\Recording 2026-11-03 154535.mp4"// Runs first in our screens inside Classgrid Code's Agent panel (put into the page by extension.js, before the app's
 // own script). Our screens are loaded from the editor's own files (no localhost), so this:
 // - gives them window.classgridDesktop, the same thing the Classgrid desktop app's preload.js gives them: each call
 //   goes to the editor's Classgrid extension and its answer comes back;
@@ -57,53 +57,6 @@
     if (el.querySelectorAll) Array.prototype.forEach.call(el.querySelectorAll("[src],[poster],link[href]"), fixNode);
   };
   new MutationObserver(function (list) { list.forEach(function (m) { Array.prototype.forEach.call(m.addedNodes, fixNode); }); }).observe(document.documentElement, { childList: true, subtree: true });
-
-  // Big windows (Plugins, settings, file previews: a dark layer over the whole page, or a dialog) open over the whole
-  // Classgrid app in Project Mode; in the editor the Agent side becomes the full window while one is open, and goes
-  // back after. Small pop-ups (menus, the model picker) and the panel's own background layer don't count.
-  var bigWindowOpen = function () {
-    var dialogs = document.querySelectorAll('[role="dialog"], [role="alertdialog"]');
-    for (var i = 0; i < dialogs.length; i++) {
-      var d = dialogs[i];
-      if (!d.closest("[data-radix-popper-content-wrapper]") && d.getClientRects().length) return true;
-    }
-    var all = document.body ? document.body.querySelectorAll("div") : [];
-    for (var j = 0; j < all.length; j++) {
-      var el = all[j];
-      if (!el.firstElementChild || !/\binset-0\b/.test(el.className && el.className.baseVal === undefined ? el.className : "")) continue;
-      var s = getComputedStyle(el);
-      if (s.position !== "fixed" || s.display === "none" || s.visibility === "hidden" || (parseInt(s.zIndex, 10) || 0) < 150) continue;
-      // only a layer you can see (a dark or blurred background), not the invisible click-catcher of a small menu
-      // (any color format: rgba(0, 0, 0, 0.5), oklab(0 0 0 / 0.5), color(srgb 0 0 0 / 0.5)...; see-through is alpha 0)
-      var bg = String(s.backgroundColor || "").trim();
-      var alpha = (bg.match(/\/\s*([\d.]+%?)\s*\)$/) || bg.match(/^rgba\([^,]+,[^,]+,[^,]+,\s*([\d.]+%?)\s*\)$/) || [])[1];
-      var a = alpha === undefined ? 1 : /%$/.test(alpha) ? parseFloat(alpha) / 100 : parseFloat(alpha);
-      var seen = (bg && bg !== "transparent" && a > 0.05) || (s.backdropFilter && s.backdropFilter !== "none");
-      if (!seen || parseFloat(s.opacity) < 0.05) continue;
-      var r = el.getBoundingClientRect();
-      if (r.width >= window.innerWidth - 2 && r.height >= window.innerHeight - 2) return true;
-    }
-    return false;
-  };
-  // Opening is seen at once (the next frame), so the side widens as the window appears; closing waits a moment, so
-  // the closing animation doesn't make it flicker
-  var wide = false;
-  var frame = 0;
-  var closeTimer = null;
-  new MutationObserver(function () {
-    if (frame) return;
-    frame = requestAnimationFrame(function () {
-      frame = 0;
-      var now = bigWindowOpen();
-      if (now && !wide) { clearTimeout(closeTimer); closeTimer = null; wide = true; post({ cgWide: true }); }
-      else if (!now && wide && !closeTimer) {
-        closeTimer = setTimeout(function () {
-          closeTimer = null;
-          if (!bigWindowOpen()) { wide = false; post({ cgWide: false }); }
-        }, 250);
-      } else if (now && closeTimer) { clearTimeout(closeTimer); closeTimer = null; }
-    });
-  }).observe(document.documentElement, { childList: true, subtree: true, attributes: true, attributeFilter: ["class", "style", "data-state"] });
 
   // Bytes <-> text for the messages to the extension
   var toB64 = function (buf) {
@@ -180,6 +133,9 @@
       var w = waiting[m.cgReply];
       delete waiting[m.cgReply];
       if (m.error) w.no(new Error(m.error)); else w.ok(m.result);
+    } else if (m.cgEvent === "agentPrompt") {
+      // something the AI hub tab sends to the chat (a skill or plugin prompt)
+      window.dispatchEvent(new CustomEvent("classgrid:agent-prompt", { detail: m.data }));
     } else if (m.cgEvent && listeners[m.cgEvent]) {
       listeners[m.cgEvent].forEach(function (fn) { try { fn(m.data); } catch (err2) { /* a screen's handler failed */ } });
     }
@@ -241,5 +197,9 @@
     openInEditor: bind("openInEditor"),
     revealInEditor: bind("revealInEditor"),
     onOpenFolderProject: on("openFolderProject"),
+    // The AI hub (Plugins, Skills, Usage...) as a big tab in the editor, and what it sends to the Agent panel
+    openHub: bind("openHub"),
+    closeHub: bind("closeHub"),
+    sendToAgent: bind("sendToAgent"),
   };
 })();

@@ -79,6 +79,7 @@ function NavigateWithQuery({ to, replace }: { to: string, replace?: boolean }) {
 import { DashboardHomePage } from "@/features/superadmin/pages/DashboardHomePage";
 import { ProjectModePage } from "@/features/superadmin/pages/ProjectModePage";
 import { EditorPanelPage } from "@/features/superadmin/pages/EditorPanelPage";
+import { EditorHubPage } from "@/features/superadmin/pages/EditorHubPage";
 import { StudioModePage } from "@/features/superadmin/pages/StudioModePage";
 import { LeadsPage } from "@/features/superadmin/pages/LeadsPage";
 import { LeadDetailsPage } from "@/features/superadmin/pages/LeadDetailsPage";
@@ -229,6 +230,8 @@ export function AppRouter() {
       {/* Classgrid Code's right side: only the Agent panel (classgrid-editor/extension); its login comes from the
           Classgrid app, so it isn't behind the login page */}
       <Route path="/editor/project" element={<EditorPanelPage />} />
+      {/* (and its AI hub, Plugins and the rest, as a big tab in the editor) */}
+      <Route path="/editor/hub" element={<EditorHubPage />} />
       {/* Local dev only: look at the OAuth consent screen with sample data */}
       {import.meta.env.DEV && <Route path="/oauth/preview" element={<OAuthConsentPage preview />} />}
 

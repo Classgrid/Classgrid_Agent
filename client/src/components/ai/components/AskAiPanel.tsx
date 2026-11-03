@@ -2120,6 +2120,21 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
   const [isAiHubOpen, setIsAiHubOpen] = useState(false);
   const [aiHubInitialTab, setAiHubInitialTab] = useState<string>("plugins");
 
+  // Classgrid Code's Agent panel: the AI hub (Plugins, Skills, Usage...) opens as a big tab in the editor, not inside
+  // the narrow panel; what it sends to the chat comes back from that tab
+  useEffect(() => {
+    if (import.meta.env.VITE_EDITOR !== "1" || !isAiHubOpen) return;
+    (window as any).classgridDesktop?.openHub?.(aiHubInitialTab);
+    setIsAiHubOpen(false);
+  }, [isAiHubOpen, aiHubInitialTab]);
+  useEffect(() => {
+    if (import.meta.env.VITE_EDITOR !== "1") return;
+    const onPrompt = (e: Event) => { const text = String((e as CustomEvent).detail || ""); if (text) askQuestionRef.current?.(text, { hidden: true }); };
+    window.addEventListener("classgrid:agent-prompt", onPrompt);
+    return () => window.removeEventListener("classgrid:agent-prompt", onPrompt);
+  }, []);
+
+
   useEffect(() => {
     const handleOpenAiHub = (e: Event) => {
       const customEvent = e as CustomEvent;
@@ -7601,7 +7616,7 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
         onConfirm={handleDeleteChat}
       />
       <AiHubModal
-        isOpen={isAiHubOpen}
+        isOpen={isAiHubOpen && import.meta.env.VITE_EDITOR !== "1"}
         onClose={() => setIsAiHubOpen(false)}
         initialTab={aiHubInitialTab}
         onSendPrompt={(text) => askQuestion(text, { hidden: true })}
