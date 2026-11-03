@@ -60,4 +60,8 @@ if [ -f "$PUB/android-chrome-512x512.png" ]; then
 else
   echo "brand: client/public isn't here, so only the program icon is ours" >&2
 fi
+# Our own small changes to VS Code's code (classgrid-editor/patches), applied after VSCodium's own
+mkdir -p patches/user
+for f in ../patches/*.patch; do [ -f "$f" ] && cp "$f" patches/user/; done
+
 echo "Classgrid editor branding applied"

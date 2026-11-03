@@ -25,6 +25,7 @@ let deviceId;
 let log = null; // the "Classgrid" output (page errors and what failed)
 let storage = {}; // our screens' saved settings and login (localStorage), kept in the editor's secret storage
 let saveTimer = null;
+const loaders = new Set(); // each open panel's "load our screens again"
 
 async function activate(context) {
   log = vscode.window.createOutputChannel("Classgrid");
@@ -46,9 +47,30 @@ async function activate(context) {
   context.subscriptions.push(vscode.workspace.onDidChangeWorkspaceFolders((e) => { for (const f of e.added) runner.allowFolder(f.uri.fsPath); }));
   context.subscriptions.push({ dispose: () => runner.stopAll() });
 
+  // The right side: only the Agent panel (the same one as Project Mode's right side)
   context.subscriptions.push(vscode.window.registerWebviewViewProvider("classgrid.agent", {
-    resolveWebviewView(view) { holdScreens(view.webview, "/agent"); },
+    resolveWebviewView(view) { const load = holdScreens(view.webview, "/editor/project-panel"); view.onDidDispose(() => loaders.delete(load)); },
   }, { webviewOptions: { retainContextWhenHidden: true } }));
+
+  // The login comes from the Classgrid app: Project Mode opens the editor with
+  // classgrid-code://classgrid.classgrid/login?code=<one-time code from /api/auth/editor-code>, which is swapped for the
+  // user's login (/api/auth/desktop-exchange). The editor never shows a login of its own.
+  context.subscriptions.push(vscode.window.registerUriHandler({
+    async handleUri(uri) {
+      if (uri.path !== "/login") return;
+      const code = new URLSearchParams(uri.query).get("code") || "";
+      let token = null;
+      try {
+        const res = await fetch("https://api.classgrid.in/api/auth/desktop-exchange", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ code }) });
+        const data = await res.json().catch(() => ({}));
+        if (res.ok && typeof data.path === "string") token = new URL(data.path, "https://chat.classgrid.in").searchParams.get("token");
+      } catch (err) { log.appendLine(`[${new Date().toISOString()}] sign-in from the Classgrid app failed: ${err?.message || err}`); }
+      if (!token) return vscode.window.showErrorMessage("Classgrid sign-in didn't finish. Open the project again from Project Mode in the Classgrid app.");
+      keepStorage({ cgStore: "set", key: "token", value: token });
+      for (const load of loaders) load();
+      vscode.commands.executeCommand("classgrid.agent.focus").then(undefined, () => {});
+    },
+  }));
 
   context.subscriptions.push(vscode.commands.registerCommand("classgrid.showAgent", () => vscode.commands.executeCommand("classgrid.agent.focus")));
   context.subscriptions.push(vscode.commands.registerCommand("classgrid.open", () => {
@@ -100,6 +122,8 @@ function holdScreens(webview, startPath) {
     if (m?.cgCall !== undefined) return answerCall(webview, m, load);
   });
   load();
+  loaders.add(load);
+  return load;
 }
 
 async function answerCall(webview, m, reload) {

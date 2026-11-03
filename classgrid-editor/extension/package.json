@@ -15,7 +15,10 @@
   ],
   "contributes": {
     "configurationDefaults": {
-      "workbench.secondarySideBar.defaultVisibility": "visible"
+      "workbench.secondarySideBar.defaultVisibility": "visible",
+      "workbench.colorTheme": "Dark Modern",
+      "workbench.preferredDarkColorTheme": "Dark Modern",
+      "workbench.preferredLightColorTheme": "Light Modern"
     },
     "viewsContainers": {
       "secondarySidebar": [

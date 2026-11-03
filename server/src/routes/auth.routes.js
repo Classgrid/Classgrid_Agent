@@ -282,6 +282,17 @@ router.get("/desktop-done", (req, res) => {
 <a href="${link}" style="display:inline-block;background:#ededed;color:#0a0a0a;border-radius:999px;padding:10px 20px;font-size:14px;font-weight:600;text-decoration:none">Open Classgrid</a></div>
 <script>location.href=${JSON.stringify(link)};</script></body>`);
 });
+// Classgrid Code (the full editor): the Classgrid app hands its login to the editor with a one-time code (60 seconds,
+// single use) that the editor swaps through /desktop-exchange, so the editor never shows a login of its own
+router.post("/editor-code", isAuthenticated, async (req, res) => {
+    const token = String(req.headers.authorization || "").replace(/^Bearer\s+/i, "").trim() || req.cookies?.token;
+    if (!token) return res.status(400).json({ message: "No login to hand over." });
+    const { default: redis } = await import("../config/redis.js");
+    const { randomBytes } = await import("node:crypto");
+    const code = randomBytes(24).toString("base64url");
+    await redis.set(`desktoplogin:${code}`, `/editor/project-panel?token=${encodeURIComponent(token)}`, "EX", 60);
+    res.json({ code });
+});
 router.post("/desktop-exchange", loginLimiter, async (req, res) => {
     const code = String(req.body?.code || "").replace(/[^A-Za-z0-9_-]/g, "").slice(0, 64);
     if (!code) return res.status(400).json({ message: "Missing code." });
