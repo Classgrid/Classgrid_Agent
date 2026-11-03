@@ -68,7 +68,8 @@ export const API_BASE_URL =
 export const apiClient = axios.create({
   baseURL: API_BASE_URL,
   timeout: 30000, // 30 second timeout to prevent infinite hanging while accommodating EC2 cold starts
-  adapter: isMockApiEnabled ? mockApiAdapter : undefined,
+  // Classgrid Code's Agent panel: fetch, which the editor carries to the server (classgrid-editor/extension/bridge.js)
+  adapter: isMockApiEnabled ? mockApiAdapter : import.meta.env.VITE_EDITOR === "1" ? "fetch" : undefined,
   withCredentials: true // required for cookie-based Passport sessions
 });
 

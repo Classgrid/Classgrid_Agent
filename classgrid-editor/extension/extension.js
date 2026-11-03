@@ -1,42 +1,34 @@
 // The Classgrid AI inside Classgrid Code (our own editor, built from VS Code's open-source code), like Cursor's AI is
 // inside Cursor. It is built into the editor (not installed from a store) and:
-// 1. shows our same Classgrid screens (client/, the desktop build) in the editor: the Agent chat on the right side,
-//    and all of Classgrid (Agent, Studio, Projects) in a tab;
-// 2. gives those screens what the Classgrid desktop app gives them (window.classgridDesktop, see bridge.js);
+// 1. shows our same Classgrid screens (client/, the editor build in ./app) in the editor: the Agent chat on the right
+//    side, and all of Classgrid (Agent, Studio, Projects) in a tab. They are loaded from the editor's own files: no
+//    localhost;
+// 2. gives those screens what the Classgrid desktop app gives them (window.classgridDesktop, see bridge.js), carries
+//    their calls to our server, and keeps their login;
 // 3. runs the desktop app's own runner (runner.js), so the AI's terminal, files and memory notes work on this
 //    computer, the same code as in the Classgrid desktop app.
-// The screens are served from this computer at http://localhost:47822 only for these panels; it is internal, it
-// isn't an editor server, and nothing in the editor shows it.
 const vscode = require("vscode");
-const http = require("node:http");
 const fs = require("node:fs");
 const path = require("node:path");
 const crypto = require("node:crypto");
 
-const PORT = Number(process.env.CG_CODE_PORT) || 47822;
-const APP_URL = `http://localhost:${PORT}`;
 // Packed inside the editor: ./app (our screens) and ./desktop (the desktop app's parts). While developing, the same
 // files straight from the repo.
 const firstThere = (...dirs) => dirs.find((d) => fs.existsSync(d)) || dirs[0];
-const APP_DIR = firstThere(path.join(__dirname, "app"), path.join(__dirname, "..", "..", "desktop", "app"));
+const APP_DIR = firstThere(path.join(__dirname, "app"), path.join(__dirname, "..", "..", "desktop", "app-editor"));
 const DESKTOP_DIR = firstThere(path.join(__dirname, "desktop"), path.join(__dirname, "..", "..", "desktop"));
-
-const MIME = {
-  ".html": "text/html; charset=utf-8", ".js": "text/javascript", ".mjs": "text/javascript", ".css": "text/css",
-  ".json": "application/json", ".svg": "image/svg+xml", ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
-  ".gif": "image/gif", ".webp": "image/webp", ".ico": "image/x-icon", ".woff": "font/woff", ".woff2": "font/woff2",
-  ".ttf": "font/ttf", ".mp3": "audio/mpeg", ".mp4": "video/mp4", ".webm": "video/webm", ".wasm": "application/wasm",
-  ".txt": "text/plain; charset=utf-8", ".xml": "application/xml", ".webmanifest": "application/manifest+json",
-  ".pdf": "application/pdf", ".bmp": "image/bmp", ".wav": "audio/wav", ".ogg": "audio/ogg", ".mov": "video/quicktime",
-};
-// Files on this computer shown in our screens (pictures, PDFs...): /__file/<secret>/<path>, a new secret each start
-const FILE_PREFIX = `/__file/${crypto.randomBytes(16).toString("hex")}/`;
+const API = /^https:\/\/api\.classgrid\.in\//;
+const STORAGE_KEY = "classgrid.storage";
 
 let parts = null; // the desktop app's runner, chats and memory (after activate)
 let deviceId;
-const views = new Set(); // the open Classgrid panels (to send events to)
+let log = null; // the "Classgrid" output (page errors and what failed)
+let storage = {}; // our screens' saved settings and login (localStorage), kept in the editor's secret storage
+let saveTimer = null;
 
-function activate(context) {
+async function activate(context) {
+  log = vscode.window.createOutputChannel("Classgrid");
+  context.subscriptions.push(log);
   const userData = context.globalStorageUri.fsPath;
   fs.mkdirSync(userData, { recursive: true });
   const version = context.extension.packageJSON.version;
@@ -47,23 +39,22 @@ function activate(context) {
   runner.init(userData);
   chats.init(userData);
   memory.init(userData);
-  parts = { runner, chats, memory, version };
+  parts = { runner, chats, memory, version, context };
+  try { storage = JSON.parse((await context.secrets.get(STORAGE_KEY)) || "{}"); } catch { storage = {}; }
   // The folder open in this editor can be used by the AI (like a folder picked in the Classgrid app)
   for (const f of vscode.workspace.workspaceFolders || []) runner.allowFolder(f.uri.fsPath);
   context.subscriptions.push(vscode.workspace.onDidChangeWorkspaceFolders((e) => { for (const f of e.added) runner.allowFolder(f.uri.fsPath); }));
-
-  const server = startScreenServer(version);
-  context.subscriptions.push({ dispose: () => { server.close(); runner.stopAll(); } });
+  context.subscriptions.push({ dispose: () => runner.stopAll() });
 
   context.subscriptions.push(vscode.window.registerWebviewViewProvider("classgrid.agent", {
-    resolveWebviewView(view) { holdScreens(view.webview, "/agent", () => views.delete(view)); views.add(view); view.onDidDispose(() => views.delete(view)); },
+    resolveWebviewView(view) { holdScreens(view.webview, "/agent"); },
   }, { webviewOptions: { retainContextWhenHidden: true } }));
 
   context.subscriptions.push(vscode.commands.registerCommand("classgrid.showAgent", () => vscode.commands.executeCommand("classgrid.agent.focus")));
   context.subscriptions.push(vscode.commands.registerCommand("classgrid.open", () => {
     const panel = vscode.window.createWebviewPanel("classgrid.app", "Classgrid", vscode.ViewColumn.Active, { enableScripts: true, retainContextWhenHidden: true });
     panel.iconPath = vscode.Uri.file(path.join(__dirname, "media", "classgrid.svg"));
-    holdScreens(panel.webview, "/", () => {});
+    holdScreens(panel.webview, "/");
   }));
 
   // The Agent is on the right side when the editor opens (the right side bar starts open: configurationDefaults in
@@ -74,33 +65,84 @@ function activate(context) {
 
 function deactivate() { try { parts?.runner.stopAll(); } catch { /* already stopped */ } }
 
-// The page that holds our screens: a frame with them, and the messages between them and this extension
-function holdScreens(webview, startPath, onGone) {
-  webview.options = { enableScripts: true };
-  const nonce = crypto.randomBytes(16).toString("base64");
-  webview.html = `<!DOCTYPE html><html><head><meta charset="utf-8">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; frame-src ${APP_URL}; script-src 'nonce-${nonce}'; style-src 'unsafe-inline';">
-<style>html,body{margin:0;padding:0;height:100%;overflow:hidden;background:#121212}iframe{border:0;width:100%;height:100%;display:block}</style></head>
-<body><iframe id="cg" src="${APP_URL}${startPath}" allow="clipboard-read; clipboard-write; microphone; camera; autoplay; fullscreen"></iframe>
-<script nonce="${nonce}">
-const vscode = acquireVsCodeApi();
-const frame = document.getElementById("cg");
-window.addEventListener("message", (e) => {
-  const m = e.data || {};
-  if (e.source === frame.contentWindow) { if (m.cgCall !== undefined) vscode.postMessage(m); return; }
-  if (m.cgReply !== undefined || m.cgEvent) frame.contentWindow.postMessage(m, ${JSON.stringify(APP_URL)});
-  if (m.cgReload) frame.src = ${JSON.stringify(APP_URL)} + (m.path || ${JSON.stringify(startPath)});
-});
-</script></body></html>`;
-  webview.onDidReceiveMessage(async (m) => {
-    const fn = HANDLERS[m.method];
-    let result, error;
-    try {
-      if (!fn) throw new Error(`${m.method} isn't in Classgrid Code yet`);
-      result = await fn(webview, ...(Array.isArray(m.args) ? m.args : []));
-    } catch (err) { error = String(err?.message || err); }
-    if (m.cgCall) webview.postMessage({ cgReply: m.cgCall, result, error });
+// Our screens in a panel, straight from the editor's files: the page with the bridge first, then the app's own code
+function holdScreens(webview, startPath) {
+  const drives = "ABCDEFGHIJKLMNOPQRSTUVWXYZ".split("").filter((l) => { try { return fs.existsSync(`${l}:\\`); } catch { return false; } });
+  webview.options = { enableScripts: true, localResourceRoots: [vscode.Uri.file(APP_DIR), ...drives.map((l) => vscode.Uri.file(`${l}:\\`))] };
+  const slash = (u) => String(u).replace(/\/?$/, "/");
+  const base = slash(webview.asWebviewUri(vscode.Uri.file(APP_DIR)));
+  const fileBases = Object.fromEntries(drives.map((l) => [l.toLowerCase(), slash(webview.asWebviewUri(vscode.Uri.file(`${l}:\\`)))]));
+  const cfg = { version: parts.version, deviceId: computerId(), startPath, base, fileBases, storage };
+  const bridge = fs.readFileSync(path.join(__dirname, "bridge.js"), "utf8");
+  const src = webview.cspSource;
+  const csp = [
+    `default-src ${src} https: data: blob: 'unsafe-inline' 'unsafe-eval'`,
+    `connect-src ${src} https: wss: data: blob:`,
+    `img-src ${src} https: data: blob:`,
+    `media-src ${src} https: data: blob:`,
+    `font-src ${src} https: data:`,
+    `frame-src ${src} https:`,
+    `worker-src ${src} blob:`,
+  ].join("; ");
+  // The page keeps its own address (so our screens' pages work); only its files point at the editor's copy
+  const load = () => {
+    const html = fs.readFileSync(path.join(APP_DIR, "index.html"), "utf8").replace(/\b(src|href)="\.\//g, `$1="${base}`);
+    webview.html = html.replace(/<head([^>]*)>/, `<head$1>
+<meta http-equiv="Content-Security-Policy" content="${csp}">
+<script>window.__cgBridge=${JSON.stringify({ ...cfg, storage }).replace(/</g, "\\u003c")};</script>
+<script>${bridge}</script>`);
+  };
+  webview.onDidReceiveMessage((m) => {
+    if (m?.cgFetch) return proxyFetch(webview, m);
+    if (m?.cgFetchAbort) return FETCHES.get(m.cgFetchAbort)?.abort();
+    if (m?.cgStore) return keepStorage(m);
+    if (m?.cgLog) return log.appendLine(`[${new Date().toISOString()}] page ${m.cgLog}: ${String(m.text).slice(0, 2000)}`);
+    if (m?.cgCall !== undefined) return answerCall(webview, m, load);
   });
+  load();
+}
+
+async function answerCall(webview, m, reload) {
+  const fn = HANDLERS[m.method];
+  let result, error;
+  try {
+    if (!fn) throw new Error(`${m.method} isn't in Classgrid Code yet`);
+    result = await fn({ webview, reload }, ...(Array.isArray(m.args) ? m.args : []));
+  } catch (err) { error = String(err?.message || err); }
+  if (m.cgCall) webview.postMessage({ cgReply: m.cgCall, result, error });
+}
+
+// Our screens' calls to our server, carried by the editor (a page loaded from the editor's files can't call it
+// itself); a streamed answer comes back piece by piece as it arrives
+const FETCHES = new Map();
+async function proxyFetch(webview, m) {
+  const id = m.cgFetch;
+  if (!API.test(String(m.url))) return webview.postMessage({ cgFetchError: id, error: "only Classgrid's server is carried by the editor" });
+  const ac = new AbortController();
+  FETCHES.set(id, ac);
+  try {
+    const headers = (Array.isArray(m.headers) ? m.headers : []).filter(([k]) => !/^(host|origin|referer|content-length|connection|cookie)$/i.test(String(k)));
+    const res = await fetch(m.url, { method: m.method || "GET", headers, body: m.body ? Buffer.from(m.body, "base64") : undefined, signal: ac.signal, redirect: "follow" });
+    const back = [];
+    res.headers.forEach((v, k) => { if (!/^(content-encoding|content-length|transfer-encoding|set-cookie|connection)$/i.test(k)) back.push([k, v]); });
+    webview.postMessage({ cgFetchHead: id, status: res.status, statusText: res.statusText, headers: back });
+    if (res.body) for await (const chunk of res.body) webview.postMessage({ cgFetchChunk: id, data: Buffer.from(chunk).toString("base64") });
+    webview.postMessage({ cgFetchEnd: id });
+  } catch (err) {
+    if (err?.name !== "AbortError") log.appendLine(`[${new Date().toISOString()}] ${m.method || "GET"} ${String(m.url).replace(/\?.*$/, "")} failed: ${err?.message || err}`);
+    webview.postMessage({ cgFetchError: id, error: String(err?.message || err) });
+  } finally {
+    FETCHES.delete(id);
+  }
+}
+
+// Saved settings and login, kept in the editor's secret storage (a moment after the last change)
+function keepStorage(m) {
+  if (m.cgStore === "set") storage[m.key] = m.value;
+  else if (m.cgStore === "remove") delete storage[m.key];
+  else if (m.cgStore === "clear") storage = {};
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(() => { parts.context.secrets.store(STORAGE_KEY, JSON.stringify(storage)).then(undefined, () => {}); }, 300);
 }
 
 // What our screens can ask for (the same names and answers as the Classgrid desktop app's main.js)
@@ -117,11 +159,11 @@ async function showFile(full, startLine, endLine) {
   await vscode.window.showTextDocument(doc, { viewColumn: vscode.ViewColumn.One, preview: false, selection: Number(startLine) > 0 ? range : undefined });
 }
 const HANDLERS = {
-  openExternal: (_w, url) => { if (/^https?:\/\//.test(String(url))) return vscode.env.openExternal(vscode.Uri.parse(String(url))).then(() => undefined); },
-  fileInfo: (_w, file) => {
+  openExternal: (_p, url) => { if (/^https?:\/\//.test(String(url))) return vscode.env.openExternal(vscode.Uri.parse(String(url))).then(() => undefined); },
+  fileInfo: (_p, file) => {
     try { const st = fs.statSync(path.resolve(String(file || ""))); return { exists: true, isFile: st.isFile(), size: st.size, modified: st.mtimeMs }; } catch { return { exists: false }; }
   },
-  openPath: async (_w, file) => {
+  openPath: async (_p, file) => {
     const full = path.resolve(String(file || ""));
     if (!fs.existsSync(full)) return;
     if (fs.statSync(full).isDirectory()) return vscode.commands.executeCommand("revealFileInOS", vscode.Uri.file(full)).then(() => undefined);
@@ -129,30 +171,30 @@ const HANDLERS = {
     if (/\.(pdf|docx?|xlsx?|xlsm|pptx?|odt|ods|odp|rtf|png|jpe?g|gif|webp|bmp|mp3|wav|ogg|m4a|mp4|webm|mov|mkv|avi|zip)$/i.test(full)) return vscode.env.openExternal(vscode.Uri.file(full)).then(() => undefined);
     return showFile(full);
   },
-  showInFolder: (_w, file) => { const full = path.resolve(String(file || "")); if (fs.existsSync(full)) return vscode.commands.executeCommand("revealFileInOS", vscode.Uri.file(full)).then(() => undefined); },
+  showInFolder: (_p, file) => { const full = path.resolve(String(file || "")); if (fs.existsSync(full)) return vscode.commands.executeCommand("revealFileInOS", vscode.Uri.file(full)).then(() => undefined); },
   pickFolder: async () => {
     const r = await vscode.window.showOpenDialog({ canSelectFolders: true, canSelectFiles: false, canSelectMany: false });
     if (!r?.length) return null;
     parts.runner.allowFolder(r[0].fsPath); // only folders picked here (or open in the editor) are used by the AI's runner
     return r[0].fsPath;
   },
-  setToken: (_w, t) => { parts.runner.setToken(t || null); parts.chats.setToken(t || null); parts.memory.setToken(t || null); },
-  saveMemory: (_w, m) => { try { return parts.memory.saveMine(m); } catch { return false; } },
+  setToken: (_p, t) => { parts.runner.setToken(t || null); parts.chats.setToken(t || null); parts.memory.setToken(t || null); },
+  saveMemory: (_p, m) => { try { return parts.memory.saveMine(m); } catch { return false; } },
   otherMemory: () => { try { return parts.memory.others(); } catch { return []; } },
   memoryIndex: () => { try { return require(path.join(DESKTOP_DIR, "aimemory.js")).index(); } catch { return ""; } },
-  saveChat: (_w, chat) => parts.chats.saveChat(chat).catch((err) => ({ error: String(err.message || err) })),
+  saveChat: (_p, chat) => parts.chats.saveChat(chat).catch((err) => ({ error: String(err.message || err) })),
   listChats: () => parts.chats.listChats().catch(() => []),
-  readChat: (_w, id) => parts.chats.readChat(String(id || "")).catch(() => null),
-  removeChat: (_w, id) => parts.chats.removeChat(String(id || "")).catch((err) => ({ error: String(err.message || err) })),
+  readChat: (_p, id) => parts.chats.readChat(String(id || "")).catch(() => null),
+  removeChat: (_p, id) => parts.chats.removeChat(String(id || "")).catch((err) => ({ error: String(err.message || err) })),
   listOtherChats: () => parts.chats.listOtherChats().catch(() => []),
-  readOtherChat: (_w, userId, id) => parts.chats.readOtherChat(String(userId || ""), String(id || "")).catch(() => null),
-  retry: (w) => { w.postMessage({ cgReload: true }); },
+  readOtherChat: (_p, userId, id) => parts.chats.readOtherChat(String(userId || ""), String(id || "")).catch(() => null),
+  retry: (p) => { p.reload(); },
   // A folder project opens in this editor itself
-  openFolder: (_w, folder) => {
+  openFolder: (_p, folder) => {
     if (!parts.runner.isAllowed(folder)) return;
     return vscode.commands.executeCommand("vscode.openFolder", vscode.Uri.file(String(folder)), { forceNewWindow: false }).then(() => undefined);
   },
-  cloneRepo: async (_w, repo) => {
+  cloneRepo: async (_p, repo) => {
     const given = String(repo || "").trim();
     const isUrl = /^(https:\/\/[\w.-]+(:\d+)?\/[\w./~-]+|git@[\w.-]+:[\w./~-]+)$/.test(given);
     if (!isUrl && !/^[\w.-]+\/[\w.-]+$/.test(given)) return { error: "Paste a repository address (https://… or git@…) or a GitHub owner/name." };
@@ -174,17 +216,17 @@ const HANDLERS = {
       });
     });
   },
-  listFiles: (_w, folder) => parts.runner.listForFilesTab(String(folder || "")),
-  githubRepo: (_w, folder) => parts.runner.githubRepoOf(String(folder || "")),
-  readFile: (_w, folder, rel) => parts.runner.readForFilesTab(String(folder || ""), String(rel || "")),
+  listFiles: (_p, folder) => parts.runner.listForFilesTab(String(folder || "")),
+  githubRepo: (_p, folder) => parts.runner.githubRepoOf(String(folder || "")),
+  readFile: (_p, folder, rel) => parts.runner.readForFilesTab(String(folder || ""), String(rel || "")),
   // A file the AI mentions or changed opens in this editor, at its lines
-  openInEditor: (_w, folder, file, line) => {
+  openInEditor: (_p, folder, file, line) => {
     if (!parts.runner.isAllowed(folder)) return;
     const full = file ? inside(folder, file) : null;
     if (file && !full) return;
     return full ? showFile(full, line, line) : vscode.commands.executeCommand("vscode.openFolder", vscode.Uri.file(String(folder))).then(() => undefined);
   },
-  revealInEditor: async (_w, folder, file, startLine, endLine) => {
+  revealInEditor: async (_p, folder, file, startLine, endLine) => {
     if (!parts.runner.isAllowed(folder)) return { error: "This folder isn't open in Classgrid Code." };
     const full = inside(folder, file);
     if (!full) return { error: "That file isn't in this project." };
@@ -203,47 +245,6 @@ function computerId() {
     if (guid) deviceId = crypto.createHash("sha256").update(`classgrid-device:${guid.toLowerCase()}`).digest("hex");
   } catch { /* not Windows */ }
   return deviceId;
-}
-
-// Our screens, with the bridge first in the page (window.classgridDesktop for them)
-function startScreenServer(version) {
-  const bridge = fs.readFileSync(path.join(__dirname, "bridge.js"), "utf8");
-  let page = null;
-  const appPage = () => {
-    if (page) return page;
-    const cfg = { version, deviceId: computerId(), appUrl: APP_URL, filePrefix: FILE_PREFIX };
-    const html = fs.readFileSync(path.join(APP_DIR, "index.html"), "utf8");
-    return (page = html.replace(/<head([^>]*)>/, `<head$1>\n<script>window.__cgBridge=${JSON.stringify(cfg)};</script><script src="/__classgrid/bridge.js"></script>`));
-  };
-  const server = http.createServer((req, res) => {
-    let urlPath;
-    try { urlPath = decodeURIComponent(new URL(req.url, APP_URL).pathname); } catch { urlPath = "/"; }
-    if (urlPath === "/__classgrid/bridge.js") {
-      res.writeHead(200, { "Content-Type": MIME[".js"], "Cache-Control": "no-cache" });
-      return res.end(bridge);
-    }
-    if (req.url.startsWith(FILE_PREFIX)) {
-      let full;
-      try { full = path.resolve(decodeURIComponent(new URL(req.url, APP_URL).pathname.slice(FILE_PREFIX.length))); } catch { res.writeHead(400); return res.end(); }
-      return fs.stat(full, (err, st) => {
-        if (err || !st.isFile()) { res.writeHead(404); return res.end(); }
-        res.writeHead(200, { "Content-Type": MIME[path.extname(full).toLowerCase()] || "application/octet-stream", "Content-Length": st.size, "Cache-Control": "no-store" });
-        fs.createReadStream(full).pipe(res);
-      });
-    }
-    let file = path.normalize(path.join(APP_DIR, urlPath));
-    if (!file.startsWith(APP_DIR)) { res.writeHead(403); return res.end(); }
-    if (!fs.existsSync(file) || fs.statSync(file).isDirectory()) file = path.join(APP_DIR, "index.html");
-    if (file === path.join(APP_DIR, "index.html")) {
-      res.writeHead(200, { "Content-Type": MIME[".html"], "Cache-Control": "no-cache" });
-      return res.end(appPage());
-    }
-    res.writeHead(200, { "Content-Type": MIME[path.extname(file).toLowerCase()] || "application/octet-stream", "Cache-Control": "public, max-age=31536000, immutable" });
-    fs.createReadStream(file).pipe(res);
-  });
-  server.on("error", (err) => vscode.window.showErrorMessage(`Classgrid couldn't start its screens: ${err.message}`));
-  server.listen(PORT, "127.0.0.1");
-  return server;
 }
 
 module.exports = { activate, deactivate };

@@ -75,14 +75,14 @@ jobs:
         with:
           python-version: '3.11'
 
-      # The Classgrid AI part: our screens (the same desktop build the Classgrid app packs), the extension that holds
-      # them, and the desktop app's runner, memory and chats
-      - name: Build our screens (client, desktop build)
+      # The Classgrid AI part: our screens (the desktop build, made for the editor: loaded from its own files), the
+      # extension that holds them, and the desktop app's runner, memory and chats
+      - name: Build our screens (client, the editor build)
         working-directory: repo/client
         run: |
           npm ci --no-audit --no-fund
-          node ../desktop/scripts/build-client.mjs
-          test -f ../desktop/app/index.html
+          node ../desktop/scripts/build-client.mjs --editor
+          test -f ../desktop/app-editor/index.html
 
       - name: Pack the Classgrid AI part
         working-directory: repo
@@ -90,7 +90,7 @@ jobs:
           EXT=classgrid-editor/out/classgrid
           rm -rf "$EXT" && mkdir -p "$EXT/desktop"
           cp -r classgrid-editor/extension/. "$EXT/"
-          cp -r desktop/app "$EXT/app"
+          cp -r desktop/app-editor "$EXT/app"
           cp desktop/runner.js desktop/aimemory.js desktop/computer.js desktop/chats.js desktop/memory.js "$EXT/desktop/"
           SIO=$(node -p "require('./desktop/package.json').dependencies['socket.io-client']")
           (cd "$EXT/desktop" && echo '{"name":"classgrid-desktop-parts","private":true}' > package.json && npm install --no-audit --no-fund --omit=dev "socket.io-client@${SIO}")
@@ -142,6 +142,8 @@ jobs:
           for f in runner.js aimemory.js chats.js memory.js; do test -f "$EXT/desktop/$f" || fail "the desktop part $f isn't inside"; done
           test -d "$EXT/desktop/node_modules/socket.io-client" || fail "the runner's connection to Classgrid isn't inside"
           grep -q 'window.classgridDesktop' "$EXT/bridge.js" || fail "the bridge for our screens isn't inside"
+          ! grep -qE 'createServer|localhost:[0-9]' "$EXT/extension.js" || fail "the Agent panel uses a localhost server"
+          grep -q 'src="\./assets/' "$EXT/app/index.html" || fail "our screens aren't the editor build (loaded from the editor's own files)"
           echo "PROOF OK: Classgrid Code $(node -p "require('./$APP/resources/app/product.json').version") with the Classgrid AI inside (Agent on the right, our screens, the AI's runner)."
 
       - name: Put the editor in a release

@@ -18,11 +18,14 @@ It is a full desktop editor: real extensions from the Open VSX store, the Extens
 ### `extension/`
 - `package.json`: the Agent panel on the **right side** (`viewsContainers.secondarySidebar`, the view `classgrid.agent`),
   and the commands "Classgrid: Show the Agent" and "Classgrid: Open Classgrid".
-- `extension.js`: serves our screens to the panels only (internal, at http://localhost:47822, the same way the
-  Classgrid app serves them at :47821), answers what the screens ask for, and runs the desktop app's runner, chats
-  and memory. A file the AI mentions opens **in this editor** at its lines. A folder project opens in this editor.
-- `bridge.js`: gives our screens `window.classgridDesktop`, the same thing the Classgrid app's `preload.js` gives
-  them. Each call goes to `extension.js` and its answer comes back.
+- `extension.js`: loads our screens (the editor build, `desktop/scripts/build-client.mjs --editor`) in the panels
+  straight from the editor's own files (no localhost), carries their calls to our server (api.classgrid.in) piece by
+  piece, keeps their login in the editor's secret storage, writes page errors to the "Classgrid" output, answers what
+  the screens ask for, and runs the desktop app's runner, chats and memory. A file the AI mentions opens **in this editor** at its lines. A folder project opens in this editor.
+- `bridge.js`: runs first in our screens. It gives them `window.classgridDesktop`, the same thing the Classgrid app's
+  `preload.js` gives them (each call goes to `extension.js` and its answer comes back), sends their `fetch` calls to
+  our server through the editor (axios uses fetch in the editor build), keeps their localStorage in the editor, and
+  points their root paths ("/logo.png") at the editor's copy of our screens.
 - `electron-shim.js`: the few Electron things the desktop app's parts use (the app's folders, its version, opening
   links and files), because the editor's extension host has no Electron.
 
@@ -33,8 +36,8 @@ It is a full desktop editor: real extensions from the Open VSX store, the Extens
 1. Gets this folder, `client/` and `desktop/`.
 2. Gets VSCodium's build scripts pinned to **VS Code 1.143.1** (`VSCODE_VERSION`, `VSCODIUM_COMMIT`); bump both when VSCodium patches 1.144.
 3. `brand.sh`: our name, logo and app ids.
-4. Builds our screens (`desktop/scripts/build-client.mjs`), then packs the Classgrid AI part: the extension, the
-   screens, the desktop parts and `socket.io-client`.
+4. Builds our screens for the editor (`desktop/scripts/build-client.mjs --editor`: relative paths, `VITE_EDITOR=1`),
+   then packs the Classgrid AI part: the extension, the screens, the desktop parts and `socket.io-client`.
 5. Builds and packs the editor for Windows.
 6. Puts the Classgrid AI part inside the editor as a built-in extension (`resources/app/extensions/classgrid`).
 7. **Proof: it is B.** This stops the build unless the finished editor has all of the following:
@@ -46,6 +49,7 @@ It is a full desktop editor: real extensions from the Open VSX store, the Extens
    - the runner, memory and chats
    - the runner's connection to Classgrid
    - the bridge
+   - no localhost server for the Agent panel, and our screens as the editor build
 8. Puts the finished editor (`Classgrid-Code-win32-x64-<version>.zip`) in a GitHub release of this repo.
 
 ## Not in this first version yet
@@ -60,8 +64,12 @@ Google and GitHub sign-in return to the Classgrid app (classgrid:// links). Emai
 
 ## Tested before the build
 
-- `extension/` with a stand-in for VS Code: 19 of 19 checks passed. It serves our screens with the bridge, the
-  right-side Agent panel shows them, and their calls reach the real desktop parts: files, the user's real memory
-  folder, saved chats, and opening a file in the editor. Paths outside the project are refused.
+- Day 1, in the built editor on the owner's PC: the Agent panel opens our screens at `/agent` straight from the
+  editor's files (`vscode-webview://…/agent`), with no localhost listening for it. With a stand-in panel, a call to
+  api.classgrid.in is carried by the editor and answered (200), other sites aren't carried, and the login is kept
+  in the editor's secret storage.
+- First version, `extension/` with a stand-in for VS Code: 19 of 19 checks passed. The right-side Agent panel shows
+  our screens, and their calls reach the real desktop parts: files, the user's real memory folder, saved chats, and
+  opening a file in the editor. Paths outside the project are refused.
 - The "pack", "put inside" and "Proof: it is B" steps, run on a stand-in editor folder: the proof passes with the AI
   part inside and stops the build without it. The packed extension serves our screens with its own packed runner.
