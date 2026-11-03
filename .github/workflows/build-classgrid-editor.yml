@@ -180,6 +180,10 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           7z a -tzip "../Classgrid-Code-win32-x64-${RELEASE_VERSION}.zip" "./VSCode-win32-x64/*"
-          gh release create "editor-${RELEASE_VERSION}" "../Classgrid-Code-win32-x64-${RELEASE_VERSION}.zip" \
-            --repo "${{ github.repository }}" --title "Classgrid Code ${RELEASE_VERSION}" \
+          # (two builds in the same hour get the same version: the later one adds its run number to its release)
+          TAG="editor-${RELEASE_VERSION}"
+          TITLE="Classgrid Code ${RELEASE_VERSION}"
+          if gh release view "$TAG" --repo "${{ github.repository }}" >/dev/null 2>&1; then TAG="${TAG}-${GITHUB_RUN_NUMBER}"; TITLE="${TITLE} (build ${GITHUB_RUN_NUMBER})"; fi
+          gh release create "$TAG" "../Classgrid-Code-win32-x64-${RELEASE_VERSION}.zip" \
+            --repo "${{ github.repository }}" --title "$TITLE" \
             --notes "Classgrid Code: our editor (VS Code ${MS_TAG}, built with VSCodium's scripts) with the Classgrid AI inside: the Agent on the right, our Classgrid screens, the AI's terminal, files and memory on the computer."
