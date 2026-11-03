@@ -13,6 +13,16 @@
 	display: none !important;
 }
 
+/* Menu items Classgrid Code doesn't need (VS Code profiles, workspace copies, sharing through Microsoft, the debugger
+   store search); the Help menu's Microsoft and VSCodium links are taken out of product.json at build time */
+.monaco-menu .action-item:has(> .action-menu-item:is(
+	[aria-label^="New Window with Profile"],
+	[aria-label^="Duplicate Workspace"],
+	[aria-label="Share"],
+	[aria-label^="Install Additional Debuggers"])) {
+	display: none !important;
+}
+
 /* The right side is only our Agent panel, with one thin top row like Project Mode's: just the close button on the
    right (no "CLASSGRID" name, no maximize). The row keeps its height, so the panel fills the side exactly. */
 .monaco-workbench .part.auxiliarybar > .title .composite-bar-container,

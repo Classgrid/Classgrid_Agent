@@ -136,6 +136,10 @@ jobs:
             const p = JSON.parse(fs.readFileSync(app + '/product.json', 'utf8'));
             if (!p.checksums || !p.checksums[rel]) throw new Error('no check value for ' + rel);
             p.checksums[rel] = crypto.createHash('sha256').update(fs.readFileSync(css)).digest('base64').replace(/=+$/, '');
+            // The Help menu: no links to Microsoft's or VSCodium's sites (VS Code shows a Help link only when its address
+            // is set); Documentation opens Classgrid's docs
+            for (const k of ['introductoryVideosUrl', 'keyboardShortcutsUrlLinux', 'keyboardShortcutsUrlMac', 'keyboardShortcutsUrlWin', 'releaseNotesUrl', 'requestFeatureUrl', 'tipsAndTricksUrl', 'twitterUrl', 'youTubeUrl', 'reportIssueUrl', 'licenseUrl', 'privacyStatementUrl', 'serverLicenseUrl']) delete p[k];
+            p.documentationUrl = 'https://classgrid.in/docs';
             fs.writeFileSync(app + '/product.json', JSON.stringify(p, null, '\t'));
           " "$APPDIR"
 
@@ -162,6 +166,7 @@ jobs:
           grep -q 'registerUriHandler' "$EXT/extension.js" || fail "the login from the Classgrid app isn't there"
           cmp -s ../desktop/editor-themes/default-dark-modern.json "$APP/resources/app/extensions/theme-defaults/themes/dark_modern.json" || fail "our Studio colors aren't the editor's theme"
           grep -q 'content: "Agent"' "$APP/resources/app/out/vs/workbench/workbench.desktop.main.css" || fail "the Agent button (our editor styles) isn't in the editor"
+          node -e "const p=require('./$APP/resources/app/product.json');const bad=['introductoryVideosUrl','releaseNotesUrl','tipsAndTricksUrl','reportIssueUrl','requestFeatureUrl'].filter(k=>p[k]);if(bad.length||p.documentationUrl!=='https://classgrid.in/docs'){console.error(bad);process.exit(1)}" || fail "the Help menu still has Microsoft or VSCodium links"
           node -e "const fs=require('fs'),c=require('crypto');const a='./$APP/resources/app',r='vs/workbench/workbench.desktop.main.css';const p=require(a+'/product.json');if(p.checksums[r]!==c.createHash('sha256').update(fs.readFileSync(a+'/out/'+r)).digest('base64').replace(/=+$/,''))process.exit(1)" || fail "the editor's file check doesn't match our styles (it would say it is corrupt)"
           grep -rqE 'ACCOUNTS_VISIBILITY_PREFERENCE_KEY,[^,]+,\s*!1\)|ACCOUNTS_VISIBILITY_PREFERENCE_KEY, StorageScope.PROFILE, false\)' "$APP/resources/app/out/vs/workbench/" || echo "note: couldn't find the Accounts default in the packed code to check it (it is minified)"
           echo "PROOF OK: Classgrid Code $(node -p "require('./$APP/resources/app/product.json').version") with the Classgrid AI inside (Agent on the right, our screens, the AI's runner)."
