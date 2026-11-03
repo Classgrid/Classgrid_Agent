@@ -73,6 +73,13 @@
       if (!el.firstElementChild || !/\binset-0\b/.test(el.className && el.className.baseVal === undefined ? el.className : "")) continue;
       var s = getComputedStyle(el);
       if (s.position !== "fixed" || s.display === "none" || s.visibility === "hidden" || (parseInt(s.zIndex, 10) || 0) < 150) continue;
+      // only a layer you can see (a dark or blurred background), not the invisible click-catcher of a small menu
+      // (any color format: rgba(0, 0, 0, 0.5), oklab(0 0 0 / 0.5), color(srgb 0 0 0 / 0.5)...; see-through is alpha 0)
+      var bg = String(s.backgroundColor || "").trim();
+      var alpha = (bg.match(/\/\s*([\d.]+%?)\s*\)$/) || bg.match(/^rgba\([^,]+,[^,]+,[^,]+,\s*([\d.]+%?)\s*\)$/) || [])[1];
+      var a = alpha === undefined ? 1 : /%$/.test(alpha) ? parseFloat(alpha) / 100 : parseFloat(alpha);
+      var seen = (bg && bg !== "transparent" && a > 0.05) || (s.backdropFilter && s.backdropFilter !== "none");
+      if (!seen || parseFloat(s.opacity) < 0.05) continue;
       var r = el.getBoundingClientRect();
       if (r.width >= window.innerWidth - 2 && r.height >= window.innerHeight - 2) return true;
     }

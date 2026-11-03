@@ -30,8 +30,20 @@
 .monaco-workbench .part.auxiliarybar > .title .action-item:has(.codicon-auxiliarybar-maximize, .codicon-screen-full, .codicon-screen-normal) {
 	visibility: hidden !important;
 }
+/* The top row and the panel have the Agent panel's own color (Project Mode's: #121212 dark, white light), so they
+   look like one piece */
+.monaco-workbench.vs-dark .part.auxiliarybar,
+.monaco-workbench.vs-dark .part.auxiliarybar > .title,
+.monaco-workbench.vs-dark .part.auxiliarybar > .content {
+	background-color: #121212 !important;
+}
+.monaco-workbench.vs .part.auxiliarybar,
+.monaco-workbench.vs .part.auxiliarybar > .title,
+.monaco-workbench.vs .part.auxiliarybar > .content {
+	background-color: #ffffff !important;
+}
 .monaco-workbench .part.auxiliarybar > .title {
-	border-bottom: 1px solid var(--vscode-sideBarSectionHeader-border, rgba(255, 255, 255, 0.08));
+	border-bottom: none !important;
 }
 
 /* Top right like Project Mode: the left sidebar and bottom panel toggles, then an "Agent" button that shows or hides

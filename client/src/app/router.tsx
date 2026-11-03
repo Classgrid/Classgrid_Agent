@@ -228,7 +228,7 @@ export function AppRouter() {
       <Route path="/public-chat-login" element={<PublicChatLoginPage />} />
       {/* Classgrid Code's right side: only the Agent panel (classgrid-editor/extension); its login comes from the
           Classgrid app, so it isn't behind the login page */}
-      <Route path="/editor/project-panel" element={<EditorPanelPage />} />
+      <Route path="/editor/project" element={<EditorPanelPage />} />
       {/* Local dev only: look at the OAuth consent screen with sample data */}
       {import.meta.env.DEV && <Route path="/oauth/preview" element={<OAuthConsentPage preview />} />}
 

@@ -10,6 +10,12 @@
     "vscode": "^1.98.0"
   },
   "main": "./extension.js",
+  "capabilities": {
+    "untrustedWorkspaces": {
+      "supported": true
+    },
+    "virtualWorkspaces": true
+  },
   "activationEvents": [
     "onStartupFinished"
   ],

@@ -357,6 +357,10 @@
   html.cg-editor #root aside > .border-b:first-child {
     display: none !important;
   }
+  /* (the panel keeps the same layout at every width, also when it is wider than a phone) */
+  html.cg-editor #root aside.sm\:hidden {
+    display: flex !important;
+  }
   html.desktop-app .cg-incognito {
     --background: #fafafa;
     --color-background: #fafafa;

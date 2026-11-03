@@ -162,7 +162,7 @@ jobs:
           grep -q 'window.classgridDesktop' "$EXT/bridge.js" || fail "the bridge for our screens isn't inside"
           ! grep -qE 'createServer|localhost:[0-9]' "$EXT/extension.js" || fail "the Agent panel uses a localhost server"
           grep -q 'src="\./assets/' "$EXT/app/index.html" || fail "our screens aren't the editor build (loaded from the editor's own files)"
-          grep -q '/editor/project-panel' "$EXT/extension.js" || fail "the right side isn't only the Agent panel"
+          grep -q '"/editor/project"' "$EXT/extension.js" || fail "the right side isn't only the Agent panel"
           grep -q 'registerUriHandler' "$EXT/extension.js" || fail "the login from the Classgrid app isn't there"
           cmp -s ../desktop/editor-themes/default-dark-modern.json "$APP/resources/app/extensions/theme-defaults/themes/dark_modern.json" || fail "our Studio colors aren't the editor's theme"
           grep -q 'content: "Agent"' "$APP/resources/app/out/vs/workbench/workbench.desktop.main.css" || fail "the Agent button (our editor styles) isn't in the editor"

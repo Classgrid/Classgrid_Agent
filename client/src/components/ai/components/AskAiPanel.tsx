@@ -3709,7 +3709,8 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
   }
 
   useEffect(() => {
-    const check = () => setIsMobile(window.innerWidth < 768);
+    // Classgrid Code's Agent panel keeps one layout at every width (switching closes open windows like Plugins)
+    const check = () => setIsMobile(import.meta.env.VITE_EDITOR === "1" || window.innerWidth < 768);
     check();
     window.addEventListener("resize", check);
     return () => window.removeEventListener("resize", check);

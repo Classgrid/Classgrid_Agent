@@ -49,7 +49,7 @@ async function activate(context) {
 
   // The right side: only the Agent panel (the same one as Project Mode's right side)
   context.subscriptions.push(vscode.window.registerWebviewViewProvider("classgrid.agent", {
-    resolveWebviewView(view) { const load = holdScreens(view.webview, "/editor/project-panel"); view.onDidDispose(() => loaders.delete(load)); },
+    resolveWebviewView(view) { const load = holdScreens(view.webview, "/editor/project"); view.onDidDispose(() => loaders.delete(load)); },
   }, { webviewOptions: { retainContextWhenHidden: true } }));
 
   // The login comes from the Classgrid app: Project Mode opens the editor with
@@ -83,6 +83,8 @@ async function activate(context) {
   // package.json; this also shows the Agent there once its view is ready)
   const showAgent = (tries) => vscode.commands.executeCommand("classgrid.agent.focus").then(undefined, () => { if (tries > 0) setTimeout(() => showAgent(tries - 1), 1000); });
   showAgent(10);
+  // (at its normal size: a big window like Plugins may have left it full window when the editor last closed)
+  vscode.commands.executeCommand("workbench.action.restoreAuxiliaryBar").then(undefined, () => {});
 }
 
 function deactivate() { try { parts?.runner.stopAll(); } catch { /* already stopped */ } }

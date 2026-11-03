@@ -290,7 +290,7 @@ router.post("/editor-code", isAuthenticated, async (req, res) => {
     const { default: redis } = await import("../config/redis.js");
     const { randomBytes } = await import("node:crypto");
     const code = randomBytes(24).toString("base64url");
-    await redis.set(`desktoplogin:${code}`, `/editor/project-panel?token=${encodeURIComponent(token)}`, "EX", 60);
+    await redis.set(`desktoplogin:${code}`, `/editor/project?token=${encodeURIComponent(token)}`, "EX", 60);
     res.json({ code });
 });
 router.post("/desktop-exchange", loginLimiter, async (req, res) => {
