@@ -85,14 +85,24 @@
     }
     return false;
   };
+  // Opening is seen at once (the next frame), so the side widens as the window appears; closing waits a moment, so
+  // the closing animation doesn't make it flicker
   var wide = false;
-  var wideTimer = null;
+  var frame = 0;
+  var closeTimer = null;
   new MutationObserver(function () {
-    clearTimeout(wideTimer);
-    wideTimer = setTimeout(function () {
+    if (frame) return;
+    frame = requestAnimationFrame(function () {
+      frame = 0;
       var now = bigWindowOpen();
-      if (now !== wide) { wide = now; post({ cgWide: now }); }
-    }, 120);
+      if (now && !wide) { clearTimeout(closeTimer); closeTimer = null; wide = true; post({ cgWide: true }); }
+      else if (!now && wide && !closeTimer) {
+        closeTimer = setTimeout(function () {
+          closeTimer = null;
+          if (!bigWindowOpen()) { wide = false; post({ cgWide: false }); }
+        }, 250);
+      } else if (now && closeTimer) { clearTimeout(closeTimer); closeTimer = null; }
+    });
   }).observe(document.documentElement, { childList: true, subtree: true, attributes: true, attributeFilter: ["class", "style", "data-state"] });
 
   // Bytes <-> text for the messages to the extension
