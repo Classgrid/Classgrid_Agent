@@ -23,6 +23,8 @@ export function ProjectPlaceSwitch({ project, onChanged, compact = false }: { pr
   // and then it is linked by itself (linkFolderRepo)
   if (project.location === "local") return null;
   if (!project.repo) return null;
+  // With a folder on this computer it is a project on this computer: no switch to the cloud and no GitHub download
+  if (thisComputerCopy(project)) return null;
   const copy = thisComputerCopy(project);
   if (!copy) {
     return (

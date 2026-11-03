@@ -71,7 +71,7 @@ export async function getCopyOnThisComputer(project: PlaceProject): Promise<Plac
 
 // Open the project "On this computer" or "In the cloud" (remembered for this computer)
 export async function openProjectIn(project: PlaceProject, where: "local" | "cloud", skipSave = false): Promise<PlaceProject | null> {
-  const id = toast.loading(where === "local" ? "Getting the latest from GitHub…" : "Switching to the cloud…");
+  const id = toast.loading(where === "local" ? "Opening…" : "Switching to the cloud…");
   const { res, data } = await api(`/projects/${project.id}/where`, { where, skipSave }).catch(() => ({ res: null, data: {} as Record<string, any> }));
   toast.dismiss(id);
   if (data.project) remember(data.project);

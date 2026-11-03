@@ -739,7 +739,7 @@ export function ProjectModePage() {
     const path = p.location === "local" ? p.localPath : thisComputerCopy(p)?.path;
     return path ? [{ id: p.id, name: shortName(p.name), path, open: () => (p.location === "local" ? openWorkspace(p) : open(p)) }] : [];
   });
-  const cloudProjects: CloudProject[] = (projects || []).filter((p) => p.location !== "local").map((p) => ({
+  const cloudProjects: CloudProject[] = (projects || []).filter((p) => p.location !== "local" && !thisComputerCopy(p)).map((p) => ({
     id: p.id, name: shortName(p.name), logo: p.logo, action: p.repo && !thisComputerCopy(p) ? "Download" : "Open", open: () => open(p),
   }));
   useEffect(() => { if (isDesktop && githubConnected) loadRepos(); }, [isDesktop, githubConnected, loadRepos]);

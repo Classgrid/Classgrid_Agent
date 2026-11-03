@@ -510,12 +510,10 @@ router.post("/projects/:id/open", isAuthenticated, async (req, res) => {
   if (!project) return;
   // A folder on the user's computer has nothing to download here: the desktop app works on it directly
   if (project.location === "local") return res.json({ ok: true, local: true, localPath: project.localPath });
-  // The desktop app on a computer where this project is set to "On this computer": it opens there, with the latest from GitHub
+  // The desktop app on a computer that has this project's folder: it opens there, as it is (nothing from GitHub)
   const copy = req.body?.deviceId && project.repo ? copyOn(project, String(req.body.deviceId)) : null;
-  if (copy?.here) {
-    const ready = await readyForCopy(req, res);
-    if (!ready) return;
-    return openCopyHere(res, project, copy, ready).catch((e) => {
+  if (copy) {
+    return openCopyHere(res, project, copy, String(req.body.deviceId)).catch((e) => {
       console.error("[IDE] Opening the computer copy failed:", e.message);
       res.status(500).json({ error: "Could not open this project on this computer" });
     });
@@ -891,26 +889,13 @@ async function saveCloudCopy(project) {
   }
 }
 
-// Opening the project on this computer: the cloud's work goes to GitHub first, then the copy gets the latest. Unsaved
-// changes in the copy are committed first, never thrown away (desktop/runner.js sync_repo).
-async function openCopyHere(res, project, copy, ready) {
-  const saved = await saveCloudCopy(project);
-  if (saved?.error) return res.status(409).json({ error: saved.error });
-  const key = await ready.key(project);
-  const where = await projectBranch(project.repo, key);
-  if (where.error) return res.status(502).json({ error: where.error });
-  const r = await onComputer(project, copy.path, "sync_repo", { mode: "pull", repo: project.repo, branch: where.branch, token: key, name: ready.user.github_name, email: ready.user.github_email });
-  if (r.code === "folder_gone") {
-    // The copy isn't there any more: forget it, so the user can get a new one
-    putCopy(project, ready.deviceId, null);
-    await project.save();
-    return res.status(409).json({ error: `The copy on this computer wasn't found at ${copy.path}. Get a new copy on this computer.`, code: "copy_missing", project: projectJson(project) });
-  }
-  if (r.error) return res.status(409).json({ error: r.error, code: r.code });
-  putCopy(project, ready.deviceId, { path: copy.path, at: new Date(), here: true });
+// Opening the project on this computer: it is the user's folder, used as it is. Nothing is downloaded from GitHub and
+// GitHub isn't needed (the folder gets GitHub's changes only when the user asks the agent to pull).
+async function openCopyHere(res, project, copy, deviceId) {
+  putCopy(project, deviceId, { path: copy.path, at: new Date(), here: true });
   project.lastOpenedAt = new Date();
   await project.save();
-  res.json({ ok: true, local: true, localPath: copy.path, project: projectJson(project), message: [saved, lastLine(r.text)].filter(Boolean).join(" ") });
+  res.json({ ok: true, local: true, localPath: copy.path, project: projectJson(project) });
 }
 
 // This computer's copy pushed to GitHub (to its branch): { message } or { error, code }
@@ -959,13 +944,19 @@ router.post("/projects/:id/where", isAuthenticated, async (req, res) => {
   if (!where) return res.status(400).json({ error: "Pick where to open the project" });
   if (project.location === "local") return res.status(409).json({ error: "This project is only a folder on your computer. Use \"Also use in the cloud\" first." });
   try {
+    // On this computer: the folder as it is, no GitHub needed
+    if (where === "local") {
+      const deviceId = String(req.body?.deviceId || "");
+      const here = DEVICE_ID.test(deviceId) ? copyOn(project, deviceId) : null;
+      if (!here) return res.status(409).json({ error: "There's no copy of this project on this computer yet. Get a copy first.", code: "no_copy" });
+      return await openCopyHere(res, project, here, deviceId);
+    }
     // Nothing is pushed by itself: this computer's work goes to GitHub only when the user asks the agent to push
     const skipSave = where === "cloud";
     const ready = await readyForCopy(req, res, { app: !skipSave });
     if (!ready) return;
     const copy = copyOn(project, ready.deviceId);
     if (!copy) return res.status(409).json({ error: "There's no copy of this project on this computer yet. Get a copy first.", code: "no_copy" });
-    if (where === "local") return await openCopyHere(res, project, copy, ready);
     let message = "";
     if (copy.here && !skipSave) {
       const saved = await saveComputerCopy(project, copy, ready);

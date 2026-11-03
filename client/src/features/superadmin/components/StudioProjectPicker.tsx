@@ -8,7 +8,7 @@ import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/compone
 import { DangerConfirmDialog } from "@/components/marketing_ui/danger-confirm-dialog";
 import { fetchWithRescue } from "@/lib/rescue";
 import { ProjectPlaceSwitch } from "./ProjectPlaceSwitch";
-import type { LocalCopy } from "../utils/projectCopies";
+import { thisComputerCopy, type LocalCopy } from "../utils/projectCopies";
 
 const backendUrl = import.meta.env.VITE_API_URL || "https://api.classgrid.in";
 const PICK_KEY = "cg_project_open"; // the same open project as Project Mode: both views always show one project
@@ -30,6 +30,8 @@ async function api(path: string, init?: RequestInit) {
 const LIST_KEY = "cg_studio_projects";
 
 // Classgrid desktop app only: a folder on this computer becomes a project whose tools run here (the local runner)
+// Desktop app: a project with a folder on this computer (a folder project, or a cloud project downloaded here)
+const onThisPc = (p: NonNullable<Parameters<typeof thisComputerCopy>[0]>) => p.location === "local" || !!thisComputerCopy(p);
 const desktopApp = (window as any).classgridDesktop as { isDesktop?: boolean; pickFolder?: () => Promise<string | null>; cloneRepo?: (repo: string) => Promise<{ folder?: string; error?: string } | null> } | undefined;
 export async function openLocalFolder(): Promise<Project | null> {
   const folder = await desktopApp?.pickFolder?.();
@@ -300,7 +302,7 @@ export function StudioProjectPicker() {
             )}
             {/* Desktop app: Recent is only the folders on this computer; the cloud projects are inside "Cloud projects".
                 The website lists every project (they are all cloud projects there). */}
-            {(desktopApp?.isDesktop ? shown.filter((x) => x.location === "local") : shown).map((p) => (
+            {(desktopApp?.isDesktop ? shown.filter(onThisPc) : shown).map((p) => (
               <Fragment key={p.id}>
               <div className="group relative flex items-center rounded-md hover:bg-black/[0.05] dark:hover:bg-white/[0.07] transition-colors duration-150">
                 <button
@@ -327,7 +329,7 @@ export function StudioProjectPicker() {
               </div>
               </Fragment>
             ))}
-            {desktopApp?.isDesktop && shown.some((x) => x.location !== "local") && (
+            {desktopApp?.isDesktop && shown.some((x) => !onThisPc(x)) && (
               <>
                 <button
                   type="button"
@@ -338,7 +340,7 @@ export function StudioProjectPicker() {
                   <span className="flex-1">Cloud projects</span>
                   <ChevronRight className={`size-3.5 text-muted-foreground transition-transform ${cloudOpen || q.trim() ? "rotate-90" : ""}`} />
                 </button>
-                {(cloudOpen || q.trim()) && shown.filter((x) => x.location !== "local").map((p) => (
+                {(cloudOpen || q.trim()) && shown.filter((x) => !onThisPc(x)).map((p) => (
                   <button
                     key={p.id}
                     type="button"
