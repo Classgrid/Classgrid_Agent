@@ -13,6 +13,7 @@ type EditorDesktop = {
   onOpenChat?: (fn: (id: string | null) => void) => () => void;
   onActiveChat?: (fn: (id: string | null) => void) => () => void;
   setStripWidth?: (width: number) => void;
+  onToggleSidebar?: (fn: () => void) => () => void;
 };
 // classgrid-editor/extension/bridge.js
 export const editorDesktop = (): EditorDesktop | undefined => (window as unknown as { classgridDesktop?: EditorDesktop }).classgridDesktop;

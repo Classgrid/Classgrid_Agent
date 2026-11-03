@@ -383,6 +383,12 @@
   html.cg-editor-sidebar [data-slot="sidebar"] kbd {
     display: flex !important;
   }
+  /* (its search or a dialog is open: the page covers the whole editor window, the sidebar stays drawn in its place) */
+  html.cg-editor-sidebar.cg-overlay [data-slot="sidebar-container"] {
+    top: var(--cg-panel-top) !important;
+    left: var(--cg-panel-left) !important;
+    height: var(--cg-panel-height) !important;
+  }
   html.cg-editor.cg-overlay #root aside.sm\:hidden {
     top: var(--cg-panel-top) !important;
     left: var(--cg-panel-left) !important;

@@ -326,5 +326,7 @@
     activeChat: function (id) { send("activeChat", id || null); },
     onOpenChat: on("openChat"),
     onActiveChat: on("activeChat"),
+    // The sidebar button next to the logo in the title bar
+    onToggleSidebar: on("toggleSidebar"),
   };
 })();

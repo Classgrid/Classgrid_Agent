@@ -108,6 +108,11 @@ async function activate(context) {
     await vscode.commands.executeCommand("_classgrid.focusStrip").then(undefined, () => {});
     screens.chats.postMessage({ cgEvent: "shared", data: { name: "agent:open-search-palette", detail: null } });
   }));
+  // The sidebar button next to the logo in the title bar (classgrid-left-strip.patch): shows or hides the chats
+  // sidebar, like Project Mode's sidebar button
+  context.subscriptions.push(vscode.commands.registerCommand("classgrid.toggleChats", () => {
+    screens.chats?.postMessage({ cgEvent: "toggleSidebar" });
+  }));
   context.subscriptions.push(vscode.commands.registerCommand("classgrid.open", () => {
     const panel = vscode.window.createWebviewPanel("classgrid.app", "Classgrid", vscode.ViewColumn.Active, { enableScripts: true, retainContextWhenHidden: true });
     panel.iconPath = vscode.Uri.file(path.join(__dirname, "media", "classgrid.svg"));
@@ -248,7 +253,10 @@ async function coverWindow(webview, on) {
 // like the Agent panel's Plugins window (patches/classgrid-left-strip.patch, workbench.css)
 async function coverWithStrip(webview, on) {
   try {
-    if (on) webview.postMessage({ cgEvent: "overlayRect", data: { top: 0, left: 0, width: 0, height: 0 } });
+    if (on) {
+      const rect = await vscode.commands.executeCommand("_classgrid.stripRect");
+      webview.postMessage({ cgEvent: "overlayRect", data: rect || { top: 0, left: 0, width: 0, height: 0 } });
+    }
     else {
       await vscode.commands.executeCommand("_classgrid.setStripOverlay", false);
       webview.postMessage({ cgEvent: "overlayOff" });

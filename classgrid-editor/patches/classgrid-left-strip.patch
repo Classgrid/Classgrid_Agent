@@ -1,38 +1,77 @@
 diff --git a/src/vs/workbench/browser/layout.ts b/src/vs/workbench/browser/layout.ts
-index 75f9238..83c7806 100644
+index 75f9238..a11058f 100644
 --- a/src/vs/workbench/browser/layout.ts
 +++ b/src/vs/workbench/browser/layout.ts
-@@ -1763,7 +1763,11 @@ export abstract class Layout extends Disposable implements IWorkbenchLayoutServi
- 			size(this.mainContainer, this._mainContainerDimension.width, this._mainContainerDimension.height);
+@@ -290,6 +290,7 @@ export abstract class Layout extends Disposable implements IWorkbenchLayoutServi
+ 	private auxiliaryBarPartView!: ISerializableView;
+ 	private editorPartView!: ISerializableView;
+ 	private statusBarPartView!: ISerializableView;
++	private classgridStripView: ISerializableView | undefined; // Classgrid Code: our chats sidebar on the left edge
  
- 			// Layout the grid widget
--			this.workbenchGrid.layout(this._mainContainerDimension.width, this._mainContainerDimension.height);
-+			// Classgrid Code: our chats sidebar takes the window's left edge (contrib/webviewView/browser/classgridStrip.ts),
-+			// like Project Mode's left side; the editor sits right of it
-+			const classgridStrip = Math.min((mainWindow as unknown as { classgridStripWidth?: number }).classgridStripWidth ?? 0, Math.max(0, this._mainContainerDimension.width - 400));
-+			this.workbenchGrid.element.style.marginLeft = `${classgridStrip}px`;
-+			this.workbenchGrid.layout(this._mainContainerDimension.width - classgridStrip, this._mainContainerDimension.height);
- 			this.initialized = true;
+ 	private environmentService!: IBrowserWorkbenchEnvironmentService;
+ 	private extensionService!: IExtensionService;
+@@ -1684,6 +1685,30 @@ export abstract class Layout extends Disposable implements IWorkbenchLayoutServi
+ 		this.workbenchGrid = workbenchGrid;
+ 		this.workbenchGrid.edgeSnapping = this.state.runtime.mainWindowFullscreen;
  
- 			// Emit as event
++		// Classgrid Code: our chats sidebar, left of the activity bar and below the title bar, like Project Mode's left
++		// side in the Classgrid app (contrib/webviewView/browser/classgridStrip.ts shows its page over this place and
++		// sets its width: the icon strip, open with the chat history, or 0 when it is dragged away)
++		const classgridStripElement = mainWindow.document.createElement('div');
++		classgridStripElement.className = 'classgrid-strip-host';
++		const classgridStripChange = this._register(new Emitter<IViewSize | undefined>());
++		let classgridStripWidth = 72;
++		const classgridStripView: ISerializableView = {
++			element: classgridStripElement,
++			get minimumWidth() { return classgridStripWidth; },
++			get maximumWidth() { return classgridStripWidth; },
++			minimumHeight: 0,
++			maximumHeight: Number.POSITIVE_INFINITY,
++			onDidChange: classgridStripChange.event,
++			layout: () => classgridStripElement.dispatchEvent(new CustomEvent('classgrid-strip-layout')),
++			toJSON: () => ({ type: 'classgridStrip' }),
++		};
++		this.workbenchGrid.addView(classgridStripView, classgridStripWidth, this.activityBarPartView, Direction.Left);
++		this.classgridStripView = classgridStripView;
++		(mainWindow as unknown as { classgridSetStripWidth?: (width: number) => void }).classgridSetStripWidth = width => {
++			classgridStripWidth = width;
++			classgridStripChange.fire({ width, height: classgridStripElement.clientHeight });
++		};
++
+ 		for (const part of [titleBar, editorPart, activityBar, panelPart, sideBar, statusBar, auxiliaryBarPart, bannerPart]) {
+ 			this._register(part.onDidVisibilityChange(visible => {
+ 				if (!this.inMaximizedAuxiliaryBarTransition) {
+@@ -2025,6 +2050,11 @@ export abstract class Layout extends Disposable implements IWorkbenchLayoutServi
+ 			}
+ 		}
+ 
++		// Classgrid Code: our chats sidebar stays on the window's left edge
++		if (this.classgridStripView) {
++			this.workbenchGrid.moveViewTo(this.classgridStripView, [2, 0]);
++		}
++
+ 		// Maintain focus after moving parts
+ 		if (focusedPart) {
+ 			this.focusPart(focusedPart);
 diff --git a/src/vs/workbench/contrib/webviewView/browser/classgridStrip.ts b/src/vs/workbench/contrib/webviewView/browser/classgridStrip.ts
 new file mode 100644
-index 0000000..66b8f0f
+index 0000000..31fbee1
 --- /dev/null
 +++ b/src/vs/workbench/contrib/webviewView/browser/classgridStrip.ts
-@@ -0,0 +1,106 @@
+@@ -0,0 +1,144 @@
 +/*---------------------------------------------------------------------------------------------
 + *  Classgrid Code: our chats sidebar on the window's left edge, like Project Mode's left side in the Classgrid app.
 + *  It is a page of the Classgrid extension (the webview view "classgrid.chats", classgrid-editor/extension), shown
-+ *  left of VS Code's own icons. The page says how wide it is (_classgrid.setStripWidth: the icon strip, or the open
-+ *  sidebar with the chat history) and the workbench lays the editor out right of it (layout.ts).
++ *  over its own place in the workbench (left of VS Code's icons, below the title bar: layout.ts). The page says how
++ *  wide it is (_classgrid.setStripWidth: the icon strip, open with the chat history, or 0 when dragged away), and the
++ *  sidebar button next to the logo in the title bar shows or hides it, like Project Mode's.
 + *--------------------------------------------------------------------------------------------*/
 +
 +import { mainWindow } from '../../../../base/browser/window.js';
 +import { CancellationTokenSource } from '../../../../base/common/cancellation.js';
 +import { Emitter } from '../../../../base/common/event.js';
 +import { Disposable } from '../../../../base/common/lifecycle.js';
-+import { CommandsRegistry } from '../../../../platform/commands/common/commands.js';
++import { CommandsRegistry, ICommandService } from '../../../../platform/commands/common/commands.js';
 +import { ExtensionIdentifier } from '../../../../platform/extensions/common/extensions.js';
 +import { IWorkbenchContribution, registerWorkbenchContribution2, WorkbenchPhase } from '../../../common/contributions.js';
 +import { IExtensionService } from '../../../services/extensions/common/extensions.js';
@@ -41,7 +80,6 @@ index 0000000..66b8f0f
 +import { IWebviewViewService } from './webviewViewService.js';
 +
 +const VIEW_TYPE = 'classgrid.chats';
-+const START_WIDTH = 72; // the icon strip, until the page says its own width
 +
 +let strip: ClassgridStrip | undefined;
 +
@@ -49,26 +87,20 @@ index 0000000..66b8f0f
 +
 +	static readonly ID = 'workbench.contrib.classgridStrip';
 +
-+	private readonly host: HTMLElement;
++	private readonly host: HTMLElement | undefined;
 +	private readonly webview: IOverlayWebview;
 +
 +	constructor(
-+		@IWorkbenchLayoutService private readonly layoutService: IWorkbenchLayoutService,
++		@IWorkbenchLayoutService layoutService: IWorkbenchLayoutService,
 +		@IWebviewService webviewService: IWebviewService,
 +		@IWebviewViewService webviewViewService: IWebviewViewService,
 +		@IExtensionService extensionService: IExtensionService,
++		@ICommandService private readonly commandService: ICommandService,
 +	) {
 +		super();
 +
-+		// The place the page sits over: the window's left edge, full height
-+		this.host = mainWindow.document.createElement('div');
-+		this.host.className = 'classgrid-strip-host';
-+		this.host.style.position = 'fixed';
-+		this.host.style.left = '0';
-+		this.host.style.top = '0';
-+		this.host.style.bottom = '0';
-+		layoutService.getContainer(mainWindow).appendChild(this.host);
-+		this._register({ dispose: () => this.host.remove() });
++		// Its place in the workbench (layout.ts)
++		this.host = mainWindow.document.querySelector<HTMLElement>('.classgrid-strip-host') ?? undefined;
 +
 +		this.webview = this._register(webviewService.createWebviewOverlay({
 +			providedViewType: VIEW_TYPE,
@@ -79,13 +111,27 @@ index 0000000..66b8f0f
 +		}));
 +		// (marked, so the Agent panel's own rules for its big windows leave this page alone: workbench.css)
 +		this.webview.container.classList.add('classgrid-strip');
-+		this.webview.setAnchorElement(this.host);
++		this.place();
 +		this.webview.claim(this, mainWindow, undefined);
 +
 +		strip = this;
 +		this._register({ dispose: () => { if (strip === this) { strip = undefined; } } });
-+		this.setWidth(START_WIDTH);
-+		this._register(layoutService.onDidLayoutMainContainer(() => this.webview.setAnchorElement(this.host)));
++		this._register(layoutService.onDidLayoutMainContainer(() => this.place()));
++		if (this.host) {
++			const host = this.host;
++			const onLayout = () => this.place();
++			host.addEventListener('classgrid-strip-layout', onLayout);
++			this._register({ dispose: () => host.removeEventListener('classgrid-strip-layout', onLayout) });
++		}
++
++		// The sidebar button next to the logo in the title bar (kept there when the title bar redraws)
++		this.addTitleBarButton();
++		const titleBar = mainWindow.document.querySelector('.part.titlebar');
++		if (titleBar) {
++			const observer = new MutationObserver(() => this.addTitleBarButton());
++			observer.observe(titleBar, { childList: true, subtree: true });
++			this._register({ dispose: () => observer.disconnect() });
++		}
 +
 +		// The extension's page for it, like a webview view in a side bar
 +		const visibility = this._register(new Emitter<boolean>());
@@ -95,9 +141,37 @@ index 0000000..66b8f0f
 +			webview: this.webview,
 +			onDidChangeVisibility: visibility.event,
 +			onDispose: disposed.event,
-+			dispose: () => { /* the strip stays for the window's whole life */ },
++			dispose: () => { /* the sidebar stays for the window's whole life */ },
 +			show: () => { /* always shown */ },
 +		}, cancel.token));
++	}
++
++	private place(): void {
++		if (this.host) {
++			this.webview.setAnchorElement(this.host);
++		}
++	}
++
++	private addTitleBarButton(): void {
++		const left = mainWindow.document.querySelector('.part.titlebar .titlebar-left');
++		if (!left || left.querySelector('.classgrid-strip-toggle')) {
++			return;
++		}
++		const button = mainWindow.document.createElement('a');
++		button.className = 'classgrid-strip-toggle codicon codicon-layout-sidebar-left';
++		button.title = 'Show or hide the sidebar';
++		button.setAttribute('role', 'button');
++		button.setAttribute('aria-label', 'Show or hide the sidebar');
++		button.tabIndex = 0;
++		const toggle = () => { this.commandService.executeCommand('classgrid.toggleChats'); };
++		button.addEventListener('click', toggle);
++		button.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggle(); } });
++		const appIcon = left.querySelector('.window-appicon');
++		if (appIcon) {
++			appIcon.after(button);
++		} else {
++			left.prepend(button);
++		}
 +	}
 +
 +	focus(): void {
@@ -106,10 +180,8 @@ index 0000000..66b8f0f
 +
 +	setWidth(width: number): void {
 +		const w = Math.max(0, Math.min(600, Math.round(Number(width) || 0)));
-+		(mainWindow as unknown as { classgridStripWidth?: number }).classgridStripWidth = w;
-+		this.host.style.width = `${w}px`;
-+		this.layoutService.layout();
-+		this.webview.setAnchorElement(this.host);
++		(mainWindow as unknown as { classgridSetStripWidth?: (width: number) => void }).classgridSetStripWidth?.(w);
++		this.place();
 +	}
 +}
 +
@@ -124,6 +196,10 @@ index 0000000..66b8f0f
 +});
 +// A big window of the chats sidebar (the chat search, a dialog): its page covers the whole window like the Agent
 +// panel's Plugins window, with the sidebar drawn in its place (classgrid-editor/workbench.css does the covering)
++CommandsRegistry.registerCommand('_classgrid.stripRect', () => {
++	const r = mainWindow.document.querySelector('.classgrid-strip-host')?.getBoundingClientRect();
++	return r ? { top: r.top, left: r.left, width: r.width, height: r.height } : undefined;
++});
 +CommandsRegistry.registerCommand('_classgrid.setStripOverlay', (_accessor, on: boolean) => {
 +	mainWindow.document.body.classList.toggle('classgrid-strip-overlay', !!on);
 +});

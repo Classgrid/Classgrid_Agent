@@ -31,8 +31,17 @@
       "code-runner.saveFileBeforeRun": true,
       "code-runner.clearPreviousOutput": true,
       "code-runner.showRunCommandInEditorContextMenu": true,
-      "files.watcherExclude": { "**/node_modules/**": true, "**/.git/objects/**": true, "**/dist/**": true, "**/build/**": true },
-      "search.exclude": { "**/node_modules": true, "**/dist": true, "**/build": true }
+      "files.watcherExclude": {
+        "**/node_modules/**": true,
+        "**/.git/objects/**": true,
+        "**/dist/**": true,
+        "**/build/**": true
+      },
+      "search.exclude": {
+        "**/node_modules": true,
+        "**/dist": true,
+        "**/build": true
+      }
     },
     "viewsContainers": {
       "secondarySidebar": [
@@ -64,6 +73,10 @@
       {
         "command": "classgrid.searchChats",
         "title": "Classgrid: Search Chat History"
+      },
+      {
+        "command": "classgrid.toggleChats",
+        "title": "Classgrid: Show or Hide the Sidebar"
       }
     ],
     "keybindings": [
