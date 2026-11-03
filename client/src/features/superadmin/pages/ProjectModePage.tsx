@@ -349,9 +349,9 @@ export function ProjectModePage() {
   // Open = download the project's code fresh from GitHub, then show it in the editor
   const open = async (project: Project, replace = false, resume = false) => {
     // A must, like connecting GitHub: a project with a repo opens only once the Classgrid app is installed on it
-    // (not in the desktop app for a project that is a folder on this computer: it opens from that folder)
-    const onThisComputer = !!(window as { classgridDesktop?: { isDesktop?: boolean } }).classgridDesktop?.isDesktop && (project.location === "local" || !!thisComputerCopy(project));
-    if (project.repo && !onThisComputer && !appInstalledRef.current[project.repo]) {
+    // (only on the website: the desktop app works on folders on this computer)
+    const inDesktopApp = !!(window as { classgridDesktop?: { isDesktop?: boolean } }).classgridDesktop?.isDesktop;
+    if (project.repo && !inDesktopApp && !appInstalledRef.current[project.repo]) {
       const res = await fetchWithRescue(`${backendUrl}/api/github-app/status?repo=${encodeURIComponent(project.repo)}`, { credentials: "include" }).catch(() => null);
       const data = res?.ok ? await res.json().catch(() => null) : null;
       if (data?.ready && !data.installed) { setAppGate({ project, installUrl: data.installUrl }); return; }
