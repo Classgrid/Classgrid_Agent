@@ -1,4 +1,4 @@
-// Publishes a new desktop app version: gets the built-in editor, builds the screens, makes the installer, and uploads
+// Publishes a new desktop app version: gets Classgrid Code (our editor), builds the screens, makes the installer, and uploads
 // it with latest.yml to R2 (desktop/), where installed apps look for updates. Raise "version" in package.json first.
 // Run: npm run release      (R2 keys are read from server/.env)
 import { spawnSync } from "node:child_process";
@@ -16,7 +16,7 @@ const run = (args) => {
   const r = spawnSync("npm", args, { cwd: root, stdio: "inherit", shell: process.platform === "win32" });
   if (r.status !== 0) process.exit(r.status ?? 1);
 };
-run(["run", "get-editor"]); // Classgrid Code, the built-in editor (stops here when its release isn't ready yet)
+run(["run", "get-classgrid-code"]); // Classgrid Code, our editor (the newest editor-* release on GitHub)
 run(["run", "build:client"]);
 run(["run", "dist"]);
 

@@ -2,4 +2,8 @@ node_modules/
 dist/
 app/
 app-editor/
+classgrid-code/
+classgrid-code.zip
+classgrid-code.tag
+classgrid-code.download/
 editor/

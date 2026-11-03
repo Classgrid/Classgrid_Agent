@@ -6,7 +6,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 
 const runner = require("./runner");
-const editor = require("./editor");
+const codeEditor = require("./codeeditor");
 const terminal = require("./terminal"); // the user's own terminals in Studio's Terminal tab
 const browser = require("./browser");
 const chats = require("./chats");
@@ -301,18 +301,19 @@ ipcMain.handle("cg:openInEditor", (_e, folder, file, line) => {
   }
   shell.openExternal("vscode://file/" + encodeURI(target.split("\\").join("/")));
 });
-// Classgrid Code, the editor built into the app: a folder project opens inside the app ({ url } or { error })
+// Classgrid Code, our own editor (codeeditor.js): a folder project opens in its own window, signed in, with the
+// Agent on the right ({ opened: true } or { error })
 ipcMain.handle("cg:startEditor", (_e, folder) => {
   if (!runner.isAllowed(folder)) return { error: "This folder wasn't opened in the Classgrid app on this computer." };
-  return editor.start(String(folder)).catch((err) => ({ error: String(err.message || err) }));
+  return codeEditor.open(String(folder)).catch((err) => ({ error: String(err.message || err) }));
 });
 // (a file clicked in the chat steps, at its lines)
 ipcMain.handle("cg:revealInEditor", (_e, folder, file, startLine, endLine) => {
   if (!runner.isAllowed(folder)) return { error: "This folder wasn't opened in the Classgrid app on this computer." };
-  return editor.reveal(String(folder), file, startLine, endLine);
+  return codeEditor.reveal(String(folder), file, startLine).catch((err) => ({ error: String(err.message || err) }));
 });
-// (the search box and layout buttons in Project Mode's top bar)
-ipcMain.handle("cg:editorCommand", (_e, command) => editor.command(command));
+// (the search box and layout buttons in Project Mode's top bar: they are in Classgrid Code's own window now)
+ipcMain.handle("cg:editorCommand", () => ({ ok: false }));
 // Light or dark mode: the window buttons follow our top bar's colour
 // The Edit menu in our top bar (Studio): undo, cut, copy, paste… on what the user was typing in
 const EDIT_ACTIONS = new Set(["undo", "redo", "cut", "copy", "paste", "selectAll"]);
@@ -325,7 +326,7 @@ ipcMain.handle("cg:pickFolder", async () => {
   return r.filePaths[0];
 });
 // The login token arrives from the screens (client/src/main.tsx); the local runner (Day 2) uses it
-ipcMain.on("cg:setToken", (_e, t) => { runner.setToken(t || null); chats.setToken(t || null); memory.setToken(t || null); });
+ipcMain.on("cg:setToken", (_e, t) => { runner.setToken(t || null); chats.setToken(t || null); memory.setToken(t || null); codeEditor.setToken(t || null); });
 // The AI's memory of each account used on this computer (desktop/memory.js): switching accounts keeps it
 ipcMain.handle("cg:saveMemory", (_e, m) => { try { return memory.saveMine(m); } catch { return false; } });
 ipcMain.handle("cg:otherMemory", () => { try { return memory.others(); } catch { return []; } });
@@ -402,7 +403,7 @@ if (!app.requestSingleInstanceLock()) {
     startUpdates();
   });
   app.on("window-all-closed", () => app.quit());
-  app.on("before-quit", () => { runner.stopAll(); editor.stop(); require("./recorder").stop(); require("./computer").stop(); terminal.stop(); });
+  app.on("before-quit", () => { runner.stopAll(); require("./recorder").stop(); require("./computer").stop(); terminal.stop(); });
 }
 
 // Updates: the installed app checks our R2 storage (desktop/latest.yml) on start and every 6 hours, downloads a new

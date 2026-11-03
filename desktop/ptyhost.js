@@ -1,8 +1,10 @@
-// Real terminals for the user (Studio's Terminal tab), run by the built-in editor's own node.exe, which carries a
+// Real terminals for the user (Studio's Terminal tab), run by Classgrid Code's own program as Node, which carries a
 // ready-built node-pty (the same terminal engine VS Code uses), so the app doesn't need its own copy for Electron.
 // Talks with the app (terminal.js) in JSON lines: open / input / resize / close in, data / exit out.
 const path = require("node:path");
-const pty = require(path.join(process.argv[2], "node_modules", "node-pty"));
+const fs = require("node:fs");
+// (Classgrid Code packs it in node_modules.asar)
+const pty = require(path.join(process.argv[2], fs.existsSync(path.join(process.argv[2], "node_modules", "node-pty")) ? "node_modules" : "node_modules.asar", "node-pty"));
 
 const terms = new Map();
 const send = (msg) => process.stdout.write(JSON.stringify(msg) + "\n");

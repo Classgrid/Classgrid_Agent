@@ -207,8 +207,8 @@ export function ProjectModePage() {
   const [folder, setFolder] = useState<string | null>(null);
   // Desktop app: the open project is a folder on this computer (no cloud editor; the AI works on it through the app)
   const [localFolder, setLocalFolder] = useState<string | null>(null);
-  // ...shown in Classgrid Code, the editor built into the desktop app (url), or why it couldn't start (error)
-  const [localEditor, setLocalEditor] = useState<{ folder: string; url?: string; error?: string } | null>(null);
+  // ...open in Classgrid Code, our editor, in its own window (opened), or why it couldn't start (error)
+  const [localEditor, setLocalEditor] = useState<{ folder: string; url?: string; opened?: boolean; error?: string } | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [newName, setNewName] = useState<string | null>(null);
   const [renaming, setRenaming] = useState<{ id: string; name: string } | null>(null);
@@ -267,24 +267,26 @@ export function ProjectModePage() {
     const t = window.setTimeout(() => setProgress((p) => p && { ...p, value: Math.min(p.target, p.value + Math.max(0.4, (p.target - p.value) * 0.06)) }), 250);
     return () => window.clearTimeout(t);
   }, [progress]);
-  // A folder project in the desktop app: start the built-in editor on it (older app versions keep the folder card)
+  // A folder project in the desktop app: open it in Classgrid Code (older app versions keep the folder card)
+  const [editorTry, setEditorTry] = useState(0);
   useEffect(() => {
     setLocalEditor(null);
     const startEditor = (window as any).classgridDesktop?.startEditor;
     if (!localFolder || !startEditor) return;
     let gone = false;
     setLocalEditor({ folder: localFolder });
-    setProgress({ label: "Starting the editor", value: 10, target: 90 });
+    setProgress({ label: "Opening Classgrid Code", value: 10, target: 90 });
     Promise.resolve(startEditor(localFolder))
       .catch((e: any) => ({ error: e?.message || "The code editor didn't start." }))
-      .then((r: { url?: string; error?: string } | null) => {
+      .then((r: { url?: string; opened?: boolean; error?: string } | null) => {
         if (gone) return;
         if (r?.url) { setLocalEditor({ folder: localFolder, url: r.url }); return; }
+        if (r?.opened) { setLocalEditor({ folder: localFolder, opened: true }); setProgress(null); return; }
         setLocalEditor({ folder: localFolder, error: r?.error || "The code editor didn't start." });
         setProgress(null);
       });
     return () => { gone = true; };
-  }, [localFolder]);
+  }, [localFolder, editorTry]);
 
   const openProject = projects?.find((p) => p.id === openId) || null;
   const rememberOpen = (id: string | null) => {
@@ -606,8 +608,8 @@ export function ProjectModePage() {
   useEffect(() => {
     const onOpenFile = async (e: Event) => {
       const detail = (e as CustomEvent).detail;
-      // A folder on this computer: the file opens in the built-in editor when it is showing, otherwise in the user's code editor
-      if (openProject && localFolder && !folder && detail?.path && localEditor?.url) { (window as any).classgridDesktop?.revealInEditor?.(localFolder, String(detail.path), detail.startLine, detail.endLine); return; }
+      // A folder on this computer: the file opens in Classgrid Code when it is open, otherwise in the user's code editor
+      if (openProject && localFolder && !folder && detail?.path && (localEditor?.url || localEditor?.opened)) { (window as any).classgridDesktop?.revealInEditor?.(localFolder, String(detail.path), detail.startLine, detail.endLine); return; }
       if (openProject && localFolder && !folder && detail?.path) { (window as any).classgridDesktop?.openInEditor?.(localFolder, String(detail.path), detail.startLine); return; }
       if (!openProject || !folder || !(detail?.path || detail?.plan)) return;
       const { res, data } = await api(`/projects/${openProject.id}/reveal`, { method: "POST", body: JSON.stringify(detail) });
@@ -615,7 +617,7 @@ export function ProjectModePage() {
     };
     window.addEventListener(OPEN_PROJECT_FILE_EVENT, onOpenFile);
     return () => window.removeEventListener(OPEN_PROJECT_FILE_EVENT, onOpenFile);
-  }, [openProject, folder, localFolder, localEditor?.url]);
+  }, [openProject, folder, localFolder, localEditor?.url, localEditor?.opened]);
 
   // Review / Reject / Undo an AI answer's changes (from the buttons under each answer)
   type ReviewFile = { file: string; added: number; removed: number; kind: string; diff: string };
@@ -928,7 +930,19 @@ export function ProjectModePage() {
           {localFolder && !folder && localEditor?.url && (
             <iframe ref={editorFrameRef} key={localEditor.url} src={localEditor.url} onLoad={editorLoaded} title="Code editor" className="flex-1 w-full border-0 [color-scheme:light] dark:[color-scheme:dark]" allow="clipboard-read; clipboard-write" />
           )}
-          {localFolder && !folder && !localEditor?.url && (
+          {localFolder && !folder && localEditor?.opened && (
+            <div className="flex-1 flex flex-col items-center justify-center gap-3 text-center px-8">
+              <FolderGit2 className="size-10 text-muted-foreground" />
+              <h3 className="text-lg font-semibold text-foreground">Your project is open in Classgrid Code</h3>
+              <p className="text-sm text-muted-foreground font-mono break-all max-w-xl">{localFolder}</p>
+              <p className="text-sm text-muted-foreground max-w-md">Edit your files and chat with the Agent there. Files the AI mentions open there too.</p>
+              <div className="flex gap-2 mt-1">
+                <button type="button" onClick={() => setEditorTry((n) => n + 1)} className="h-9 px-4 rounded-full border border-border bg-background text-sm text-foreground hover:bg-secondary">Open Classgrid Code</button>
+                <button type="button" onClick={() => (window as any).classgridDesktop?.openFolder?.(localFolder)} className="h-9 px-4 rounded-full border border-border bg-background text-sm text-foreground hover:bg-secondary">Show in File Explorer</button>
+              </div>
+            </div>
+          )}
+          {localFolder && !folder && !localEditor?.url && !localEditor?.opened && (
             <div className="flex-1 flex flex-col items-center justify-center gap-3 text-center px-8">
               <FolderGit2 className="size-10 text-muted-foreground" />
               <h3 className="text-lg font-semibold text-foreground">This project is a folder on your computer</h3>

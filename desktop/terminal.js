@@ -7,23 +7,32 @@ const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
 
-const editorDir = () => (app.isPackaged ? path.join(process.resourcesPath, "editor") : process.env.CG_EDITOR_DIR || path.join(__dirname, "editor"));
+const codeEditor = require("./codeeditor");
 
 let host = null;
+let starting = null;
 let owner = null; // the window's webContents that gets the output
 const open = new Set();
 
-function startHost() {
+// ptyhost.js runs on Classgrid Code's own program as Node (it carries node-pty, built for it)
+async function startHost() {
   if (host) return host;
-  const dir = editorDir();
-  const env = { ...process.env };
-  delete env.ELECTRON_RUN_AS_NODE;
-  // ptyhost.js sits outside app.asar in the installed app (the editor's node.exe can't read inside it)
-  const script = app.isPackaged ? path.join(process.resourcesPath, "ptyhost.js") : path.join(__dirname, "ptyhost.js");
-  host = spawn(path.join(dir, "node.exe"), [script, dir], { cwd: dir, env, windowsHide: true, stdio: ["pipe", "pipe", "ignore"] });
+  if (starting) return starting;
+  starting = codeEditor.unpacked().then((dir) => {
+    const appDir = path.join(dir, "resources", "app");
+    const env = { ...process.env, ELECTRON_RUN_AS_NODE: "1" };
+    // ptyhost.js sits outside app.asar in the installed app
+    const script = app.isPackaged ? path.join(process.resourcesPath, "ptyhost.js") : path.join(__dirname, "ptyhost.js");
+    host = spawn(path.join(dir, "Classgrid Code.exe"), [script, appDir], { cwd: appDir, env, windowsHide: true, stdio: ["pipe", "pipe", "ignore"] });
+    wireHost(host);
+    return host;
+  }).finally(() => { starting = null; });
+  return starting;
+}
+function wireHost(h) {
   let buffer = "";
-  host.stdout.setEncoding("utf8");
-  host.stdout.on("data", (chunk) => {
+  h.stdout.setEncoding("utf8");
+  h.stdout.on("data", (chunk) => {
     buffer += chunk;
     let at;
     while ((at = buffer.indexOf("\n")) >= 0) {
@@ -35,12 +44,11 @@ function startHost() {
       if (owner && !owner.isDestroyed()) owner.send(m.type === "data" ? "cg:termData" : "cg:termExit", m);
     }
   });
-  host.on("exit", () => {
-    host = null;
+  h.on("exit", () => {
+    if (host === h) host = null;
     for (const id of open) if (owner && !owner.isDestroyed()) owner.send("cg:termExit", { id, code: -1 });
     open.clear();
   });
-  return host;
 }
 const tell = (msg) => { if (host && host.stdin.writable) host.stdin.write(JSON.stringify(msg) + "\n"); };
 
@@ -55,11 +63,11 @@ function shells() {
 
 let nextId = 1;
 ipcMain.handle("cg:termShells", () => shells().map(({ id, name }) => ({ id, name })));
-ipcMain.handle("cg:termOpen", (e, { shell, cwd, cols, rows } = {}) => {
+ipcMain.handle("cg:termOpen", async (e, { shell, cwd, cols, rows } = {}) => {
   const pick = shells().find((s) => s.id === shell) || shells()[0];
   const folder = cwd && fs.existsSync(String(cwd)) ? String(cwd) : os.homedir();
   owner = e.sender;
-  startHost();
+  await startHost();
   const id = `t${nextId++}`;
   open.add(id);
   tell({ type: "open", id, shell: pick.file, args: pick.args, cwd: folder, cols, rows });
