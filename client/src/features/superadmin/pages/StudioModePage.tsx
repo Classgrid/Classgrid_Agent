@@ -556,7 +556,8 @@ export function StudioModePage() {
           )}
         </AnimatePresence>
         <AnimatePresence>
-          {preparing && !gate && (
+          {/* Desktop app: no second download message (only "Get a copy on this computer" shows one) */}
+          {preparing && !gate && !(window as { classgridDesktop?: { isDesktop?: boolean } }).classgridDesktop?.isDesktop && (
             <motion.div
               key="preparing"
               initial={reduce ? false : { opacity: 0, y: -6 }}
