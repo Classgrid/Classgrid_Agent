@@ -372,13 +372,16 @@ router.post("/projects", isAuthenticated, async (req, res) => {
 router.post("/projects/local", isAuthenticated, async (req, res) => {
   const localPath = String(req.body?.localPath || "").trim().slice(0, 500);
   if (!localPath) return res.status(400).json({ error: "Pick a folder" });
-  const name = String(req.body?.name || localPath.split(/[\/]/).filter(Boolean).pop() || "").trim().slice(0, 80);
+  const name = String(req.body?.name || localPath.split(/[\\/]/).filter(Boolean).pop() || "").trim().slice(0, 80);
   if (!name) return res.status(400).json({ error: "Give the project a name" });
   await connectDB();
-  const existing = await IdeProject.findOne({ owner: req.user._id, location: "local", localPath });
+  // The same folder opens its project again (Windows paths: any case, with or without a slash at the end)
+  const existing = await IdeProject.findOne({ owner: req.user._id, location: "local", localPath: new RegExp(`^${escapeRegex(localPath.replace(/[\\/]+$/, ""))}[\\\\/]*$`, "i") });
   if (existing) return res.json({ project: projectJson(existing) });
-  if (await nameTaken(req.user._id, name)) return res.status(409).json({ error: `You already have a project called "${name}". Pick another name.` });
-  const project = await IdeProject.create({ owner: req.user._id, name, location: "local", localPath });
+  // A name that is already used gets a number, like "app (2)"
+  let free = name;
+  for (let n = 2; n < 100 && (await nameTaken(req.user._id, free)); n++) free = `${name.slice(0, 74)} (${n})`;
+  const project = await IdeProject.create({ owner: req.user._id, name: free, location: "local", localPath });
   res.json({ project: projectJson(project) });
 });
 
