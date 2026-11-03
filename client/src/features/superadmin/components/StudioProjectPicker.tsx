@@ -1,7 +1,7 @@
 // Studio Mode's project picker above the chat input. The projects are the same ones as Project Mode, so a project
 // made in either mode shows in both. A new project can start with a GitHub repo or without one.
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Check, ChevronDown, Folder, FolderPlus, FolderX, Link2, Pencil, Search, Trash2, X } from "lucide-react";
+import { Check, ChevronDown, ChevronRight, Cloud, Folder, FolderPlus, FolderX, Link2, Pencil, Search, Trash2, X } from "lucide-react";
 import { toast } from "sonner";
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/marketing_ui/dialog";
@@ -148,6 +148,7 @@ export function StudioProjectPicker() {
   const [picked, setPicked] = useState<string | null>(readPick);
   const [open, setOpen] = useState(false);
   const [q, setQ] = useState("");
+  const [cloudOpen, setCloudOpen] = useState(false); // desktop app: the "Cloud projects" list opened
   const [creating, setCreating] = useState(false);
   // Same project actions as Project Mode's Projects page
   const [linking, setLinking] = useState<Project | null>(null);
@@ -297,12 +298,10 @@ export function StudioProjectPicker() {
             {projects !== null && !shown.length && (
               <p className="px-2 py-1.5 text-[13px] text-muted-foreground">{q.trim() ? `No project matches “${q}”.` : "No projects yet."}</p>
             )}
-            {/* Folders on this computer (desktop app) are listed under their own heading, after the other projects */}
-            {[...shown.filter((x) => x.location !== "local"), ...shown.filter((x) => x.location === "local")].map((p, i, list) => (
+            {/* Desktop app: Recent is only the folders on this computer; the cloud projects are inside "Cloud projects".
+                The website lists every project (they are all cloud projects there). */}
+            {(desktopApp?.isDesktop ? shown.filter((x) => x.location === "local") : shown).map((p) => (
               <Fragment key={p.id}>
-              {p.location === "local" && (i === 0 || list[i - 1]?.location !== "local") && (
-                <p className="px-2 pt-2 pb-1 text-[12px] text-muted-foreground">This computer</p>
-              )}
               <div className="group relative flex items-center rounded-md hover:bg-black/[0.05] dark:hover:bg-white/[0.07] transition-colors duration-150">
                 <button
                   type="button"
@@ -328,6 +327,32 @@ export function StudioProjectPicker() {
               </div>
               </Fragment>
             ))}
+            {desktopApp?.isDesktop && shown.some((x) => x.location !== "local") && (
+              <>
+                <button
+                  type="button"
+                  onClick={() => setCloudOpen((o) => !o)}
+                  className="w-full flex items-center gap-2.5 h-8 px-2 mt-1 rounded-md text-left text-[13px] text-foreground/85 hover:bg-black/[0.05] dark:hover:bg-white/[0.07] transition-colors duration-150"
+                >
+                  <Cloud className="size-[15px] text-muted-foreground" />
+                  <span className="flex-1">Cloud projects</span>
+                  <ChevronRight className={`size-3.5 text-muted-foreground transition-transform ${cloudOpen || q.trim() ? "rotate-90" : ""}`} />
+                </button>
+                {(cloudOpen || q.trim()) && shown.filter((x) => x.location !== "local").map((p) => (
+                  <button
+                    key={p.id}
+                    type="button"
+                    onClick={() => pick(p.id)}
+                    title={p.repo || "No repo linked"}
+                    className="w-full flex items-center gap-2.5 h-8 pl-7 pr-2 rounded-md text-left text-[13px] text-foreground/85 hover:bg-black/[0.05] dark:hover:bg-white/[0.07] transition-colors duration-150"
+                  >
+                    {p.logo ? <img src={p.logo} alt="" className="size-[15px] shrink-0 rounded object-cover" /> : <Folder className="size-[15px] shrink-0 text-muted-foreground" />}
+                    <span className="flex-1 min-w-0 truncate">{p.name}</span>
+                    {p.id === picked && <Check className="size-3.5 shrink-0" />}
+                  </button>
+                ))}
+              </>
+            )}
           </div>
           <div className="shrink-0 border-t border-black/10 dark:border-white/[0.08] p-1">
             <button

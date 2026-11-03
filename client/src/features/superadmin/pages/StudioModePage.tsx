@@ -144,7 +144,8 @@ export function StudioModePage() {
       const repo = (() => {
         try { return (JSON.parse(localStorage.getItem("cg_studio_projects") || "[]") as { id: string; repo?: string | null }[]).find((x) => x.id === studioProject)?.repo || null; } catch { return null; }
       })();
-      if (repo) {
+      // (the GitHub app box is for the website only, never in the desktop app)
+      if (repo && !(window as { classgridDesktop?: { isDesktop?: boolean } }).classgridDesktop?.isDesktop) {
         const st = await fetchWithRescue(`${base}/api/github-app/status?repo=${encodeURIComponent(repo)}`, { credentials: "include" }).catch(() => null);
         const app = st?.ok ? await st.json().catch(() => null) : null;
         if (gone) return;
