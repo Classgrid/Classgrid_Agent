@@ -368,6 +368,11 @@
   html.cg-editor.cg-overlay .cg-editor-panel {
     background: transparent !important;
   }
+  /* (and the same color mode as the editor frame around it: a dark page in a frame that isn't dark is painted solid
+     black by the browser, which would hide the files and code) */
+  html.cg-editor.cg-overlay {
+    color-scheme: normal !important;
+  }
   html.cg-editor.cg-overlay #root aside.sm\:hidden {
     top: var(--cg-panel-top) !important;
     left: var(--cg-panel-left) !important;

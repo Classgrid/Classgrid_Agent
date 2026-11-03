@@ -67,6 +67,11 @@ body.classgrid-overlay .webview-overlay-content:has(iframe[src*="extensionId=cla
 	z-index: 2550 !important;
 	border-radius: 0 !important;
 }
+/* (its frames keep the page see-through: the same color mode inside and out, or the browser paints them solid) */
+body.classgrid-overlay .webview-overlay-content:has(iframe[src*="extensionId=classgrid.classgrid"][src*="purpose=webviewView"]) iframe {
+	color-scheme: normal !important;
+	background: transparent !important;
+}
 
 /* Top right like Project Mode: the left sidebar and bottom panel toggles, then an "Agent" button that shows or hides
    the Agent panel (VS Code's right side bar toggle, as a button with its name) */
