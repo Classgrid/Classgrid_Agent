@@ -365,6 +365,7 @@
      its own place, so the window's dark layer lies over the files and code like in Project Mode; classgrid-editor) */
   html.cg-editor.cg-overlay,
   html.cg-editor.cg-overlay body,
+  html.cg-editor.cg-overlay #root > .bg-background,
   html.cg-editor.cg-overlay .cg-editor-panel {
     background: transparent !important;
   }
