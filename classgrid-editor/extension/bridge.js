@@ -104,16 +104,33 @@
     });
   }).observe(document.documentElement, { childList: true, subtree: true, attributes: true, attributeFilter: ["class", "style", "data-state"] });
   // The editor says where the panel is (before the page covers the window), and when the covering ends
+  // (the page switches its look only when the editor has really made it full window, or small again, so it never
+  // draws for the wrong size in between: no flash when a big window opens or closes)
+  var wantCover = false, coverWidth = 0, settle = null;
+  var applyCover = function () {
+    var full = coverWidth > 0 && window.innerWidth >= coverWidth - 4;
+    document.documentElement.classList.toggle("cg-overlay", wantCover ? full : full && document.documentElement.classList.contains("cg-overlay"));
+  };
+  window.addEventListener("resize", applyCover);
   var coverWindow = function (rect) {
     var root = document.documentElement.style;
     root.setProperty("--cg-panel-top", rect.top + "px");
     root.setProperty("--cg-panel-left", rect.left + "px");
     root.setProperty("--cg-panel-width", rect.width + "px");
     root.setProperty("--cg-panel-height", rect.height + "px");
-    document.documentElement.classList.add("cg-overlay");
+    wantCover = true;
+    coverWidth = rect.windowWidth || rect.width || 0;
+    applyCover();
+    clearTimeout(settle);
+    settle = setTimeout(function () { if (wantCover) document.documentElement.classList.add("cg-overlay"); }, 400);
     post({ cgOverlayReady: true });
   };
-  var uncoverWindow = function () { document.documentElement.classList.remove("cg-overlay"); };
+  var uncoverWindow = function () {
+    wantCover = false;
+    applyCover();
+    clearTimeout(settle);
+    settle = setTimeout(function () { if (!wantCover) document.documentElement.classList.remove("cg-overlay"); }, 400);
+  };
 
   // The Agent panel and the chats sidebar on the left edge are two pages: a chat list change in one (a new chat, a
   // refresh after a rename or delete, Ctrl+K for the chat search) is passed on to the other through the extension

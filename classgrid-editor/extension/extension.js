@@ -123,6 +123,10 @@ async function activate(context) {
   // package.json; this also shows the Agent there once its view is ready)
   const showAgent = (tries) => vscode.commands.executeCommand("classgrid.agent.focus").then(undefined, () => { if (tries > 0) setTimeout(() => showAgent(tries - 1), 1000); });
   showAgent(10);
+  // No "Restricted Mode" in Classgrid Code (VS Code's folder trust banner and its links to VS Code's help): it is off
+  // from the next start, like the owner asked
+  const trust = vscode.workspace.getConfiguration("security.workspace.trust");
+  if (trust.inspect("enabled")?.globalValue === undefined) trust.update("enabled", false, vscode.ConfigurationTarget.Global).then(undefined, () => {});
   // (at its normal size: a big window like Plugins may have left it full window when the editor last closed)
   vscode.commands.executeCommand("workbench.action.restoreAuxiliaryBar").then(undefined, () => {});
 }
@@ -235,8 +239,12 @@ async function proxyFetch(webview, m) {
 // A big window of our screens is open (Plugins, settings...): the panel's page covers the whole editor window, like
 // those windows open over the whole Classgrid app in Project Mode. First the page learns where the panel is (it keeps
 // the panel drawn there), then it covers the window (our VS Code change, patches/classgrid-agent-overlay.patch).
+let agentCovering = false; // a big window of the Agent panel (like the AI Hub) is open over the whole window
 async function coverWindow(webview, on) {
   log.appendLine(`[${new Date().toISOString()}] big window ${on ? "open: the panel covers the window" : "closed"}`);
+  agentCovering = on;
+  // (the chats sidebar's own pop-up, like its chat list, closes under it, so it never shows on top of it)
+  if (on && screens.chats) coverWithStrip(screens.chats, false);
   try {
     if (on) {
       const rect = await vscode.commands.executeCommand("_classgrid.agentPanelRect");
@@ -252,10 +260,13 @@ async function coverWindow(webview, on) {
 // window, the sidebar stays drawn on the left (it is fixed there in the page), and the window opens over everything
 // like the Agent panel's Plugins window (patches/classgrid-left-strip.patch, workbench.css)
 async function coverWithStrip(webview, on) {
+  if (on && agentCovering) return; // (the Agent panel's big window stays on top)
   try {
     if (on) {
       const rect = await vscode.commands.executeCommand("_classgrid.stripRect");
-      webview.postMessage({ cgEvent: "overlayRect", data: rect || { top: 0, left: 0, width: 0, height: 0 } });
+      // (with the window's width, so the page waits until it really covers the window: bridge.js)
+      const agent = await vscode.commands.executeCommand("_classgrid.agentPanelRect").then((r) => r, () => undefined);
+      webview.postMessage({ cgEvent: "overlayRect", data: { ...(rect || { top: 0, left: 0, width: 0, height: 0 }), windowWidth: agent?.windowWidth } });
     }
     else {
       await vscode.commands.executeCommand("_classgrid.setStripOverlay", false);
