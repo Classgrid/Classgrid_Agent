@@ -70,9 +70,12 @@ import "@/styles/global.css";
 const isDesktopApp = import.meta.env.VITE_DESKTOP === "1";
 // Desktop app only: Studio Mode's colors everywhere (global.css, html.desktop-app)
 if (isDesktopApp) document.documentElement.classList.add("desktop-app");
+// Classgrid Code's Agent panel (the editor build): inside the editor's own window, so no top bar of ours (global.css)
+const isEditorPanel = import.meta.env.VITE_EDITOR === "1";
+if (isEditorPanel) document.documentElement.classList.add("cg-editor");
 // Desktop app: our own top bar in the window's title bar row, like Cursor (the window buttons sit on its right; pages
 // such as Project Mode put their bar into #cg-titlebar-slot). The app sits below it (global.css).
-if (isDesktopApp) {
+if (isDesktopApp && !isEditorPanel) {
   const bar = document.createElement("div");
   bar.id = "cg-titlebar";
   bar.innerHTML = '<img src="/favicon.ico" alt="" class="cg-titlebar-icon"><div id="cg-titlebar-slot"></div>';

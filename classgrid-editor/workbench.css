@@ -1,0 +1,39 @@
+
+/* ── Classgrid Code (classgrid-editor/workbench.css, added to the editor's own styles at build time) ── */
+
+/* No VS Code Accounts (profile) or Manage (settings gear) icon in the left bar: settings stay in File > Preferences
+   and Ctrl+, */
+.monaco-workbench .activitybar .action-item:has(.codicon-accounts-view-bar-icon),
+.monaco-workbench .activitybar .action-item:has(.codicon-settings-view-bar-icon) {
+	display: none !important;
+}
+
+/* The right side is only our Agent panel, with one thin top row like Project Mode's: just the close button on the
+   right (no "CLASSGRID" name, no maximize). The row keeps its height, so the panel fills the side exactly. */
+.monaco-workbench .part.auxiliarybar > .title .composite-bar-container,
+.monaco-workbench .part.auxiliarybar > .title .title-label,
+.monaco-workbench .part.auxiliarybar > .title .action-item:has(.codicon-auxiliarybar-maximize, .codicon-screen-full, .codicon-screen-normal) {
+	visibility: hidden !important;
+}
+.monaco-workbench .part.auxiliarybar > .title {
+	border-bottom: 1px solid var(--vscode-sideBarSectionHeader-border, rgba(255, 255, 255, 0.08));
+}
+
+/* Top right like Project Mode: the left sidebar and bottom panel toggles, then an "Agent" button that shows or hides
+   the Agent panel (VS Code's right side bar toggle, as a button with its name) */
+.monaco-workbench .titlebar .action-item:has([class*="codicon-auxiliarybar-"][class*="-layout-icon"]) .action-label {
+	width: auto !important;
+	padding: 0 12px !important;
+	margin: 0 4px !important;
+	border-radius: 999px;
+	border: 1px solid var(--vscode-widget-border, rgba(255, 255, 255, 0.12));
+	font-family: var(--vscode-font-family);
+	font-size: 13px;
+	line-height: 24px;
+	height: 26px !important;
+}
+.monaco-workbench .titlebar .action-item:has([class*="codicon-auxiliarybar-"][class*="-layout-icon"]) .action-label::before {
+	content: "Agent" !important;
+	font-family: var(--vscode-font-family) !important;
+	font-size: 13px !important;
+}

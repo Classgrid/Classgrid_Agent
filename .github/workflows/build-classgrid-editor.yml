@@ -127,6 +127,17 @@ jobs:
           # Our Studio colors (the same theme as the Classgrid app's editor, desktop/editor-themes), the editor's default
           cp ../desktop/editor-themes/default-dark-modern.json "$APPDIR/extensions/theme-defaults/themes/dark_modern.json"
           cp ../desktop/editor-themes/default-light-modern.json "$APPDIR/extensions/theme-defaults/themes/light_modern.json"
+          # Our editor styles (workbench.css: no Accounts/settings icons, the Agent button top right, the panel's one
+          # thin top row), added to the editor's own styles; the editor checks its files, so its check value is updated
+          node -e "
+            const fs = require('fs'), crypto = require('crypto');
+            const app = process.argv[1], rel = 'vs/workbench/workbench.desktop.main.css', css = app + '/out/' + rel;
+            fs.appendFileSync(css, '\n' + fs.readFileSync('workbench.css', 'utf8'));
+            const p = JSON.parse(fs.readFileSync(app + '/product.json', 'utf8'));
+            if (!p.checksums || !p.checksums[rel]) throw new Error('no check value for ' + rel);
+            p.checksums[rel] = crypto.createHash('sha256').update(fs.readFileSync(css)).digest('base64').replace(/=+$/, '');
+            fs.writeFileSync(app + '/product.json', JSON.stringify(p, null, '\t'));
+          " "$APPDIR"
 
       - name: 'Proof: it is B (the Classgrid AI is inside the editor)'
         working-directory: repo/classgrid-editor
@@ -150,6 +161,8 @@ jobs:
           grep -q '/editor/project-panel' "$EXT/extension.js" || fail "the right side isn't only the Agent panel"
           grep -q 'registerUriHandler' "$EXT/extension.js" || fail "the login from the Classgrid app isn't there"
           cmp -s ../desktop/editor-themes/default-dark-modern.json "$APP/resources/app/extensions/theme-defaults/themes/dark_modern.json" || fail "our Studio colors aren't the editor's theme"
+          grep -q 'content: "Agent"' "$APP/resources/app/out/vs/workbench/workbench.desktop.main.css" || fail "the Agent button (our editor styles) isn't in the editor"
+          node -e "const fs=require('fs'),c=require('crypto');const a='./$APP/resources/app',r='vs/workbench/workbench.desktop.main.css';const p=require(a+'/product.json');if(p.checksums[r]!==c.createHash('sha256').update(fs.readFileSync(a+'/out/'+r)).digest('base64').replace(/=+$/,''))process.exit(1)" || fail "the editor's file check doesn't match our styles (it would say it is corrupt)"
           grep -rqE 'ACCOUNTS_VISIBILITY_PREFERENCE_KEY,[^,]+,\s*!1\)|ACCOUNTS_VISIBILITY_PREFERENCE_KEY, StorageScope.PROFILE, false\)' "$APP/resources/app/out/vs/workbench/" || echo "note: couldn't find the Accounts default in the packed code to check it (it is minified)"
           echo "PROOF OK: Classgrid Code $(node -p "require('./$APP/resources/app/product.json').version") with the Classgrid AI inside (Agent on the right, our screens, the AI's runner)."
 

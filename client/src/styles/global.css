@@ -343,6 +343,20 @@
   html.desktop-app #root :is(.min-h-screen, .min-h-svh, .min-h-dvh, .min-h-\[100dvh\]) {
     min-height: calc(100vh - 40px) !important;
   }
+  /* Classgrid Code's Agent panel: no top bar of ours (the editor has its own window), the panel fills it */
+  html.desktop-app.cg-editor #root {
+    top: 0;
+  }
+  html.desktop-app.cg-editor #root :is(.h-screen, .h-svh, .h-dvh, .h-\[100dvh\], .h-\[100vh\]) {
+    height: 100vh !important;
+  }
+  html.desktop-app.cg-editor #root :is(.min-h-screen, .min-h-svh, .min-h-dvh, .min-h-\[100dvh\]) {
+    min-height: 100vh !important;
+  }
+  /* (and no close row on top of the panel: the editor's "Agent" button shows and hides it) */
+  html.cg-editor #root aside > .border-b:first-child {
+    display: none !important;
+  }
   html.desktop-app .cg-incognito {
     --background: #fafafa;
     --color-background: #fafafa;
