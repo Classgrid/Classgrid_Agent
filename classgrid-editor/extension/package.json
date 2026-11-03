@@ -53,6 +53,17 @@
       {
         "command": "classgrid.open",
         "title": "Classgrid: Open Classgrid (Agent, Studio, Projects)"
+      },
+      {
+        "command": "classgrid.searchChats",
+        "title": "Classgrid: Search Chat History"
+      }
+    ],
+    "keybindings": [
+      {
+        "command": "classgrid.searchChats",
+        "key": "ctrl+k",
+        "mac": "cmd+k"
       }
     ]
   }

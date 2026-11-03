@@ -17,10 +17,10 @@ index 75f9238..83c7806 100644
  			// Emit as event
 diff --git a/src/vs/workbench/contrib/webviewView/browser/classgridStrip.ts b/src/vs/workbench/contrib/webviewView/browser/classgridStrip.ts
 new file mode 100644
-index 0000000..9dba9b1
+index 0000000..66b8f0f
 --- /dev/null
 +++ b/src/vs/workbench/contrib/webviewView/browser/classgridStrip.ts
-@@ -0,0 +1,98 @@
+@@ -0,0 +1,106 @@
 +/*---------------------------------------------------------------------------------------------
 + *  Classgrid Code: our chats sidebar on the window's left edge, like Project Mode's left side in the Classgrid app.
 + *  It is a page of the Classgrid extension (the webview view "classgrid.chats", classgrid-editor/extension), shown
@@ -100,6 +100,10 @@ index 0000000..9dba9b1
 +		}, cancel.token));
 +	}
 +
++	focus(): void {
++		this.webview.focus();
++	}
++
 +	setWidth(width: number): void {
 +		const w = Math.max(0, Math.min(600, Math.round(Number(width) || 0)));
 +		(mainWindow as unknown as { classgridStripWidth?: number }).classgridStripWidth = w;
@@ -113,6 +117,10 @@ index 0000000..9dba9b1
 +
 +CommandsRegistry.registerCommand('_classgrid.setStripWidth', (_accessor, width: number) => {
 +	strip?.setWidth(width);
++});
++// Typing goes to the chats sidebar (Ctrl+K opens its chat history search there)
++CommandsRegistry.registerCommand('_classgrid.focusStrip', () => {
++	strip?.focus();
 +});
 +// A big window of the chats sidebar (the chat search, a dialog): its page covers the whole window like the Agent
 +// panel's Plugins window, with the sidebar drawn in its place (classgrid-editor/workbench.css does the covering)

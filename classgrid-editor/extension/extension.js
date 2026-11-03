@@ -90,6 +90,13 @@ async function activate(context) {
   }));
 
   context.subscriptions.push(vscode.commands.registerCommand("classgrid.showAgent", () => vscode.commands.executeCommand("classgrid.agent.focus")));
+  // Ctrl+K (⌘K on a Mac) is ours, anywhere in the editor: the chat history search of the chats sidebar, over the whole
+  // window like in Project Mode (package.json keybindings; VS Code's own Ctrl+K shortcuts give way to it)
+  context.subscriptions.push(vscode.commands.registerCommand("classgrid.searchChats", async () => {
+    if (!screens.chats) return;
+    await vscode.commands.executeCommand("_classgrid.focusStrip").then(undefined, () => {});
+    screens.chats.postMessage({ cgEvent: "shared", data: { name: "agent:open-search-palette", detail: null } });
+  }));
   context.subscriptions.push(vscode.commands.registerCommand("classgrid.open", () => {
     const panel = vscode.window.createWebviewPanel("classgrid.app", "Classgrid", vscode.ViewColumn.Active, { enableScripts: true, retainContextWhenHidden: true });
     panel.iconPath = vscode.Uri.file(path.join(__dirname, "media", "classgrid.svg"));

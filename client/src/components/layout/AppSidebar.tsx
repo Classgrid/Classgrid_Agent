@@ -138,7 +138,7 @@
 //
 // 🛑 STOP AND ASK BEFORE MAKING ANY CHANGES HERE.
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { ChevronRight, HardDrive, FileBarChart, Search, Settings, StickyNote } from "lucide-react";
 import { getLoginPathForPath } from "@/features/auth/auth-helpers";
@@ -196,11 +196,17 @@ export function AppSidebar({ role, user }: AppSidebarProps) {
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [paletteMode, setPaletteMode] = useState<"global" | "chat">("global");
 
+  // Ctrl+K (⌘K on a Mac) opens the same search as the sidebar's search box: the chat history in Agent, Project and
+  // Studio mode
+  const chatSearchRef = useRef(false);
+  chatSearchRef.current = showAgentMenu;
   useEffect(() => {
     const down = (e: KeyboardEvent) => {
-      if (e.key === "k" && (e.metaKey || e.ctrlKey)) {
+      // (Classgrid Code: Ctrl+K is the editor's own shortcut for this search, anywhere in its window: classgrid-editor)
+      if (import.meta.env.VITE_EDITOR === "1") return;
+      if (e.key.toLowerCase() === "k" && (e.metaKey || e.ctrlKey) && !e.shiftKey && !e.altKey) {
         e.preventDefault();
-        setPaletteMode("global");
+        setPaletteMode(chatSearchRef.current ? "chat" : "global");
         setPaletteOpen((open) => !open);
       }
     };

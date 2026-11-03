@@ -379,7 +379,8 @@
   html.cg-editor-sidebar [data-slot="sidebar"] {
     display: block !important;
   }
-  html.cg-editor-sidebar [data-slot="sidebar-container"] {
+  html.cg-editor-sidebar [data-slot="sidebar-container"],
+  html.cg-editor-sidebar [data-slot="sidebar"] kbd {
     display: flex !important;
   }
   html.cg-editor.cg-overlay #root aside.sm\:hidden {

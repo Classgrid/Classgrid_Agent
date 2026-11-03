@@ -94,6 +94,9 @@ interface SidebarSearchProps {
   placeholder?: string;
 }
 
+// The search shortcut as this computer's keyboard shows it: ⌘K on a Mac, Ctrl K on Windows and others
+const isMac = typeof navigator !== "undefined" && /Mac|iPhone|iPad/i.test(navigator.platform || navigator.userAgent);
+
 export function SidebarSearch({ searchQuery, setSearchQuery, placeholder = "Search..." }: SidebarSearchProps) {
   return (
     <SidebarGroup className="py-2">
@@ -109,7 +112,7 @@ export function SidebarSearch({ searchQuery, setSearchQuery, placeholder = "Sear
             className="flex h-8 w-full rounded-md border border-border/60 bg-transparent px-3 pl-8 py-1 text-xs shadow-sm transition-colors placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring pr-10 cursor-pointer"
           />
           <kbd className="pointer-events-none absolute right-4 top-1/2 -translate-y-1/2 hidden h-5 select-none items-center gap-1 rounded border bg-muted px-1.5 font-mono text-[10px] font-medium opacity-100 sm:flex text-muted-foreground">
-            <span className="text-xs">⌘</span>K
+            {isMac ? <><span className="text-xs">⌘</span>K</> : "Ctrl K"}
           </kbd>
         </div>
       </SidebarGroupContent>
