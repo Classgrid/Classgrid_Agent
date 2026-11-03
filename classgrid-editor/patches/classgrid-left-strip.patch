@@ -1,0 +1,127 @@
+diff --git a/src/vs/workbench/browser/layout.ts b/src/vs/workbench/browser/layout.ts
+index 75f9238..83c7806 100644
+--- a/src/vs/workbench/browser/layout.ts
++++ b/src/vs/workbench/browser/layout.ts
+@@ -1763,7 +1763,11 @@ export abstract class Layout extends Disposable implements IWorkbenchLayoutServi
+ 			size(this.mainContainer, this._mainContainerDimension.width, this._mainContainerDimension.height);
+ 
+ 			// Layout the grid widget
+-			this.workbenchGrid.layout(this._mainContainerDimension.width, this._mainContainerDimension.height);
++			// Classgrid Code: our chats sidebar takes the window's left edge (contrib/webviewView/browser/classgridStrip.ts),
++			// like Project Mode's left side; the editor sits right of it
++			const classgridStrip = Math.min((mainWindow as unknown as { classgridStripWidth?: number }).classgridStripWidth ?? 0, Math.max(0, this._mainContainerDimension.width - 400));
++			this.workbenchGrid.element.style.marginLeft = `${classgridStrip}px`;
++			this.workbenchGrid.layout(this._mainContainerDimension.width - classgridStrip, this._mainContainerDimension.height);
+ 			this.initialized = true;
+ 
+ 			// Emit as event
+diff --git a/src/vs/workbench/contrib/webviewView/browser/classgridStrip.ts b/src/vs/workbench/contrib/webviewView/browser/classgridStrip.ts
+new file mode 100644
+index 0000000..e97a5b2
+--- /dev/null
++++ b/src/vs/workbench/contrib/webviewView/browser/classgridStrip.ts
+@@ -0,0 +1,93 @@
++/*---------------------------------------------------------------------------------------------
++ *  Classgrid Code: our chats sidebar on the window's left edge, like Project Mode's left side in the Classgrid app.
++ *  It is a page of the Classgrid extension (the webview view "classgrid.chats", classgrid-editor/extension), shown
++ *  left of VS Code's own icons. The page says how wide it is (_classgrid.setStripWidth: the icon strip, or the open
++ *  sidebar with the chat history) and the workbench lays the editor out right of it (layout.ts).
++ *--------------------------------------------------------------------------------------------*/
++
++import { mainWindow } from '../../../../base/browser/window.js';
++import { CancellationTokenSource } from '../../../../base/common/cancellation.js';
++import { Emitter } from '../../../../base/common/event.js';
++import { Disposable } from '../../../../base/common/lifecycle.js';
++import { CommandsRegistry } from '../../../../platform/commands/common/commands.js';
++import { ExtensionIdentifier } from '../../../../platform/extensions/common/extensions.js';
++import { IWorkbenchContribution, registerWorkbenchContribution2, WorkbenchPhase } from '../../../common/contributions.js';
++import { IExtensionService } from '../../../services/extensions/common/extensions.js';
++import { IWorkbenchLayoutService } from '../../../services/layout/browser/layoutService.js';
++import { IOverlayWebview, IWebviewService, WebviewContentPurpose } from '../../webview/browser/webview.js';
++import { IWebviewViewService } from './webviewViewService.js';
++
++const VIEW_TYPE = 'classgrid.chats';
++const START_WIDTH = 72; // the icon strip, until the page says its own width
++
++let strip: ClassgridStrip | undefined;
++
++class ClassgridStrip extends Disposable implements IWorkbenchContribution {
++
++	static readonly ID = 'workbench.contrib.classgridStrip';
++
++	private readonly host: HTMLElement;
++	private readonly webview: IOverlayWebview;
++
++	constructor(
++		@IWorkbenchLayoutService private readonly layoutService: IWorkbenchLayoutService,
++		@IWebviewService webviewService: IWebviewService,
++		@IWebviewViewService webviewViewService: IWebviewViewService,
++		@IExtensionService extensionService: IExtensionService,
++	) {
++		super();
++
++		// The place the page sits over: the window's left edge, full height
++		this.host = mainWindow.document.createElement('div');
++		this.host.className = 'classgrid-strip-host';
++		this.host.style.position = 'fixed';
++		this.host.style.left = '0';
++		this.host.style.top = '0';
++		this.host.style.bottom = '0';
++		layoutService.getContainer(mainWindow).appendChild(this.host);
++		this._register({ dispose: () => this.host.remove() });
++
++		this.webview = this._register(webviewService.createWebviewOverlay({
++			providedViewType: VIEW_TYPE,
++			title: 'Chats',
++			options: { purpose: WebviewContentPurpose.WebviewView, retainContextWhenHidden: true },
++			contentOptions: {},
++			extension: { id: new ExtensionIdentifier('classgrid.classgrid') },
++		}));
++		// (marked, so the Agent panel's own rules for its big windows leave this page alone: workbench.css)
++		this.webview.container.classList.add('classgrid-strip');
++		this.webview.setAnchorElement(this.host);
++		this.webview.claim(this, mainWindow, undefined);
++
++		strip = this;
++		this._register({ dispose: () => { if (strip === this) { strip = undefined; } } });
++		this.setWidth(START_WIDTH);
++		this._register(layoutService.onDidLayoutMainContainer(() => this.webview.setAnchorElement(this.host)));
++
++		// The extension's page for it, like a webview view in a side bar
++		const visibility = this._register(new Emitter<boolean>());
++		const disposed = this._register(new Emitter<void>());
++		const cancel = this._register(new CancellationTokenSource());
++		extensionService.activateByEvent(`onView:${VIEW_TYPE}`).then(() => webviewViewService.resolve(VIEW_TYPE, {
++			webview: this.webview,
++			onDidChangeVisibility: visibility.event,
++			onDispose: disposed.event,
++			dispose: () => { /* the strip stays for the window's whole life */ },
++			show: () => { /* always shown */ },
++		}, cancel.token));
++	}
++
++	setWidth(width: number): void {
++		const w = Math.max(0, Math.min(600, Math.round(Number(width) || 0)));
++		(mainWindow as unknown as { classgridStripWidth?: number }).classgridStripWidth = w;
++		this.host.style.width = `${w}px`;
++		this.layoutService.layout();
++		this.webview.setAnchorElement(this.host);
++	}
++}
++
++registerWorkbenchContribution2(ClassgridStrip.ID, ClassgridStrip, WorkbenchPhase.AfterRestored);
++
++CommandsRegistry.registerCommand('_classgrid.setStripWidth', (_accessor, width: number) => {
++	strip?.setWidth(width);
++});
+diff --git a/src/vs/workbench/contrib/webviewView/browser/webviewView.contribution.ts b/src/vs/workbench/contrib/webviewView/browser/webviewView.contribution.ts
+index 00a681a..86d36a3 100644
+--- a/src/vs/workbench/contrib/webviewView/browser/webviewView.contribution.ts
++++ b/src/vs/workbench/contrib/webviewView/browser/webviewView.contribution.ts
+@@ -5,5 +5,6 @@
+ 
+ import { InstantiationType, registerSingleton } from '../../../../platform/instantiation/common/extensions.js';
+ import { IWebviewViewService, WebviewViewService } from './webviewViewService.js';
++import './classgridStrip.js'; // Classgrid Code: our chats sidebar on the window's left edge
+ 
+ registerSingleton(IWebviewViewService, WebviewViewService, InstantiationType.Delayed);

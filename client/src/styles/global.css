@@ -374,6 +374,14 @@
   html.cg-editor.cg-overlay {
     color-scheme: normal !important;
   }
+  /* (Classgrid Code's chats sidebar on the left edge: a page as narrow as the sidebar itself, which keeps its full
+     layout, not the phone one: EditorSidebarPage) */
+  html.cg-editor-sidebar [data-slot="sidebar"] {
+    display: block !important;
+  }
+  html.cg-editor-sidebar [data-slot="sidebar-container"] {
+    display: flex !important;
+  }
   html.cg-editor.cg-overlay #root aside.sm\:hidden {
     top: var(--cg-panel-top) !important;
     left: var(--cg-panel-left) !important;

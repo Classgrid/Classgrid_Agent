@@ -50,7 +50,7 @@
    those windows open over the whole Classgrid app in Project Mode: the page keeps the panel drawn in its place and is
    see-through everywhere else, so the dark layer of the window lies over the files and code (body.classgrid-overlay is
    set by our VS Code change, patches/classgrid-agent-overlay.patch) */
-body.classgrid-overlay div:has(> .webview-overlay-content iframe[src*="extensionId=classgrid.classgrid"][src*="purpose=webviewView"]) {
+body.classgrid-overlay div:has(> .webview-overlay-content:not(.classgrid-strip) iframe[src*="extensionId=classgrid.classgrid"][src*="purpose=webviewView"]) {
 	clip-path: none !important;
 	position: fixed !important;
 	inset: 0 !important;
@@ -58,7 +58,7 @@ body.classgrid-overlay div:has(> .webview-overlay-content iframe[src*="extension
 	height: auto !important;
 	z-index: 2550 !important;
 }
-body.classgrid-overlay .webview-overlay-content:has(iframe[src*="extensionId=classgrid.classgrid"][src*="purpose=webviewView"]) {
+body.classgrid-overlay .webview-overlay-content:not(.classgrid-strip):has(iframe[src*="extensionId=classgrid.classgrid"][src*="purpose=webviewView"]) {
 	position: fixed !important;
 	top: 0 !important;
 	left: 0 !important;
@@ -68,7 +68,7 @@ body.classgrid-overlay .webview-overlay-content:has(iframe[src*="extensionId=cla
 	border-radius: 0 !important;
 }
 /* (its frames keep the page see-through: the same color mode inside and out, or the browser paints them solid) */
-body.classgrid-overlay .webview-overlay-content:has(iframe[src*="extensionId=classgrid.classgrid"][src*="purpose=webviewView"]) iframe {
+body.classgrid-overlay .webview-overlay-content:not(.classgrid-strip):has(iframe[src*="extensionId=classgrid.classgrid"][src*="purpose=webviewView"]) iframe {
 	color-scheme: normal !important;
 	background: transparent !important;
 }

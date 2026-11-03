@@ -14,7 +14,7 @@ index e0e4456..c5c900e 100644
 +// does the covering; the Classgrid extension asks for the panel's place first, so the page keeps the panel drawn there)
 +const classgridAgentFrame = 'iframe[src*="extensionId=classgrid.classgrid"][src*="purpose=webviewView"]';
 +CommandsRegistry.registerCommand('_classgrid.agentPanelRect', () => {
-+	const r = mainWindow.document.querySelector(`.webview-overlay-content:has(${classgridAgentFrame})`)?.getBoundingClientRect();
++	const r = mainWindow.document.querySelector(`.webview-overlay-content:not(.classgrid-strip):has(${classgridAgentFrame})`)?.getBoundingClientRect();
 +	return r ? { top: r.top, left: r.left, width: r.width, height: r.height, windowWidth: mainWindow.innerWidth, windowHeight: mainWindow.innerHeight } : undefined;
 +});
 +CommandsRegistry.registerCommand('_classgrid.setAgentOverlay', (_accessor, on: boolean) => {

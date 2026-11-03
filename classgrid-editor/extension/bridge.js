@@ -113,6 +113,17 @@
   };
   var uncoverWindow = function () { document.documentElement.classList.remove("cg-overlay"); };
 
+  // The Agent panel and the chats sidebar on the left edge are two pages: a chat list change in one (a new chat, a
+  // refresh after a rename or delete) is passed on to the other through the extension
+  var SHARED = ["agent:refresh-sessions", "agent:session-created"];
+  var passing = false;
+  SHARED.forEach(function (name) {
+    window.addEventListener(name, function (e) {
+      if (passing) return;
+      try { post({ cgShare: name, detail: e.detail === undefined ? null : e.detail }); } catch (err) { post({ cgShare: name, detail: null }); }
+    });
+  });
+
   // Bytes <-> text for the messages to the extension
   var toB64 = function (buf) {
     var bytes = new Uint8Array(buf), s = "";
@@ -192,6 +203,9 @@
       coverWindow(m.data);
     } else if (m.cgEvent === "overlayOff") {
       uncoverWindow();
+    } else if (m.cgEvent === "shared" && m.data && SHARED.indexOf(m.data.name) !== -1) {
+      passing = true;
+      try { window.dispatchEvent(new CustomEvent(m.data.name, { detail: m.data.detail })); } finally { passing = false; }
     } else if (m.cgEvent && listeners[m.cgEvent]) {
       listeners[m.cgEvent].forEach(function (fn) { try { fn(m.data); } catch (err2) { /* a screen's handler failed */ } });
     }
@@ -254,5 +268,12 @@
     openInEditor: bind("openInEditor"),
     revealInEditor: bind("revealInEditor"),
     onOpenFolderProject: on("openFolderProject"),
+    // The chats sidebar on the left edge: its width, the chat picked there (opens in the Agent panel), and the chat
+    // the Agent panel shows (marked in the sidebar)
+    setStripWidth: function (width) { send("stripWidth", width); },
+    openChat: function (id) { send("openChat", id || null); },
+    activeChat: function (id) { send("activeChat", id || null); },
+    onOpenChat: on("openChat"),
+    onActiveChat: on("activeChat"),
   };
 })();

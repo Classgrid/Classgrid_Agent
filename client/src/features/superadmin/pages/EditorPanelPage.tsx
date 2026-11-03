@@ -2,26 +2,30 @@
 // side, filling the editor's panel. The login comes from the Classgrid app (Project Mode opens the editor signed in),
 // so there's no login form here.
 import { useEffect, useState } from "react";
+import { useNavigate, useParams } from "react-router-dom";
 import { AskAiPanel } from "@/components/ai";
 import { apiClient } from "@/lib/apiClient";
 
-// The folder open in the editor (classgrid-editor/extension/bridge.js)
-const editorFolder = (): string | null => (window as unknown as { classgridDesktop?: { editorFolder?: string | null } }).classgridDesktop?.editorFolder || null;
+type EditorDesktop = {
+  editorFolder?: string | null;
+  openChat?: (id: string | null) => void;
+  activeChat?: (id: string | null) => void;
+  onOpenChat?: (fn: (id: string | null) => void) => () => void;
+  onActiveChat?: (fn: (id: string | null) => void) => () => void;
+  setStripWidth?: (width: number) => void;
+};
+// classgrid-editor/extension/bridge.js
+export const editorDesktop = (): EditorDesktop | undefined => (window as unknown as { classgridDesktop?: EditorDesktop }).classgridDesktop;
 
-export function EditorPanelPage() {
-  const [width, setWidth] = useState(() => window.innerWidth);
-  useEffect(() => {
-    const onResize = () => setWidth(window.innerWidth);
-    window.addEventListener("resize", onResize);
-    return () => window.removeEventListener("resize", onResize);
-  }, []);
+export const editorSignedIn = () => {
+  try { const t = localStorage.getItem("token"); return !!t && t !== "null"; } catch { return false; }
+};
 
-  let signedIn = false;
-  try { const t = localStorage.getItem("token"); signedIn = !!t && t !== "null"; } catch { /* storage blocked */ }
-
-  // The editor's folder is the Agent's project, like the open project in Project Mode: its folder project (the same
-  // one the Classgrid app opened, or a new one) is saved as the open project before the Agent shows
-  const folder = editorFolder();
+// The editor's folder is the Agent's project, like the open project in Project Mode: its folder project (the same
+// one the Classgrid app opened, or a new one) is saved as the open project before the page shows. The Agent panel and
+// the chats sidebar both do this, so both list and use the same project.
+export function useEditorProject(signedIn: boolean) {
+  const folder = editorDesktop()?.editorFolder || null;
   const [ready, setReady] = useState(!folder);
   useEffect(() => {
     if (!folder || !signedIn) return;
@@ -38,10 +42,32 @@ export function EditorPanelPage() {
           localStorage.setItem("cg_studio_projects", JSON.stringify([mine, ...list.filter((x) => x.id !== mine.id)]));
         } catch { /* storage blocked */ }
       })
-      .catch(() => { /* the Agent still opens */ })
+      .catch(() => { /* the page still opens */ })
       .finally(() => { if (!gone) setReady(true); });
     return () => { gone = true; };
   }, [folder, signedIn]);
+  return ready;
+}
+
+export function EditorPanelPage() {
+  const [width, setWidth] = useState(() => window.innerWidth);
+  useEffect(() => {
+    const onResize = () => setWidth(window.innerWidth);
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, []);
+
+  const signedIn = editorSignedIn();
+  const ready = useEditorProject(signedIn);
+
+  // A chat picked in the chats sidebar on the left edge opens here, and the chat shown here is marked there
+  const navigate = useNavigate();
+  const { sessionId } = useParams();
+  useEffect(() => editorDesktop()?.onOpenChat?.((id) => {
+    navigate(id ? `/editor/project/${id}` : "/editor/project");
+    if (!id) window.dispatchEvent(new Event("agent:new-chat"));
+  }), [navigate]);
+  useEffect(() => { editorDesktop()?.activeChat?.(sessionId || null); }, [sessionId]);
 
   if (!signedIn) {
     return (

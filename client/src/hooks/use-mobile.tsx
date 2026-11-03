@@ -63,11 +63,13 @@ export function useIsMobile() {
 
   React.useEffect(() => {
     const mql = window.matchMedia(`(max-width: ${MOBILE_BREAKPOINT - 1}px)`)
+    // (Classgrid Code's chats sidebar is a narrow page of its own, but keeps the full layout: EditorSidebarPage)
+    const narrow = () => window.innerWidth < MOBILE_BREAKPOINT && !document.documentElement.classList.contains("cg-editor-sidebar")
     const onChange = () => {
-      setIsMobile(window.innerWidth < MOBILE_BREAKPOINT)
+      setIsMobile(narrow())
     }
     mql.addEventListener("change", onChange)
-    setIsMobile(window.innerWidth < MOBILE_BREAKPOINT)
+    setIsMobile(narrow())
     return () => mql.removeEventListener("change", onChange)
   }, [])
 

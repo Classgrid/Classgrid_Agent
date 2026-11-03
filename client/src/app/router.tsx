@@ -79,6 +79,7 @@ function NavigateWithQuery({ to, replace }: { to: string, replace?: boolean }) {
 import { DashboardHomePage } from "@/features/superadmin/pages/DashboardHomePage";
 import { ProjectModePage } from "@/features/superadmin/pages/ProjectModePage";
 import { EditorPanelPage } from "@/features/superadmin/pages/EditorPanelPage";
+import { EditorSidebarPage } from "@/features/superadmin/pages/EditorSidebarPage";
 import { StudioModePage } from "@/features/superadmin/pages/StudioModePage";
 import { LeadsPage } from "@/features/superadmin/pages/LeadsPage";
 import { LeadDetailsPage } from "@/features/superadmin/pages/LeadDetailsPage";
@@ -230,6 +231,10 @@ export function AppRouter() {
           Classgrid app, so it isn't behind the login page */}
       <Route path="/editor/project" element={<EditorPanelPage />} />
       <Route path="/editor/project/:sessionId" element={<EditorPanelPage />} />
+      {/* Classgrid Code's left edge: the chats sidebar, like Project Mode's left side */}
+      <Route path="/editor/sidebar/project" element={<EditorSidebarPage />} />
+      <Route path="/editor/sidebar/project/:sessionId" element={<EditorSidebarPage />} />
+      <Route path="/editor/sidebar/agent/:section" element={<EditorSidebarPage />} />
       {/* Local dev only: look at the OAuth consent screen with sample data */}
       {import.meta.env.DEV && <Route path="/oauth/preview" element={<OAuthConsentPage preview />} />}
 

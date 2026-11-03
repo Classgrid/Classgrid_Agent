@@ -26,6 +26,8 @@ let log = null; // the "Classgrid" output (page errors and what failed)
 let storage = {}; // our screens' saved settings and login (localStorage), kept in the editor's secret storage
 let saveTimer = null;
 const loaders = new Set(); // each open panel's "load our screens again"
+// The Agent panel (right side) and the chats sidebar (the window's left edge, classgrid-left-strip.patch)
+const screens = { agent: null, chats: null };
 
 async function activate(context) {
   log = vscode.window.createOutputChannel("Classgrid");
@@ -49,7 +51,22 @@ async function activate(context) {
 
   // The right side: only the Agent panel (the same one as Project Mode's right side)
   context.subscriptions.push(vscode.window.registerWebviewViewProvider("classgrid.agent", {
-    resolveWebviewView(view) { const load = holdScreens(view.webview, "/editor/project"); view.onDidDispose(() => loaders.delete(load)); },
+    resolveWebviewView(view) {
+      screens.agent = view.webview;
+      const load = holdScreens(view.webview, "/editor/project");
+      view.onDidDispose(() => { loaders.delete(load); if (screens.agent === view.webview) screens.agent = null; });
+    },
+  }, { webviewOptions: { retainContextWhenHidden: true } }));
+
+  // The left edge: our chats sidebar, the same one as Project Mode's left side (Search, New Chat, Library, the chat
+  // history). VS Code shows it left of its own icons (our VS Code change, patches/classgrid-left-strip.patch); a chat
+  // picked there opens in the Agent panel.
+  context.subscriptions.push(vscode.window.registerWebviewViewProvider("classgrid.chats", {
+    resolveWebviewView(view) {
+      screens.chats = view.webview;
+      const load = holdScreens(view.webview, "/editor/sidebar/project");
+      view.onDidDispose(() => { loaders.delete(load); if (screens.chats === view.webview) screens.chats = null; });
+    },
   }, { webviewOptions: { retainContextWhenHidden: true } }));
 
   // The login comes from the Classgrid app: Project Mode opens the editor with
@@ -122,7 +139,13 @@ function holdScreens(webview, startPath) {
     if (m?.cgFetch) return proxyFetch(webview, m);
     if (m?.cgFetchAbort) return FETCHES.get(m.cgFetchAbort)?.abort();
     if (m?.cgStore) return keepStorage(m);
-    if (m?.cgOverlay !== undefined) return coverWindow(webview, !!m.cgOverlay);
+    // (the chats sidebar's own pop-ups stay inside it: only the Agent panel covers the window)
+    if (m?.cgOverlay !== undefined) return webview === screens.chats ? undefined : coverWindow(webview, !!m.cgOverlay);
+    // A chat list change in one of our pages (a new chat, a new title...): the other page's list follows
+    if (m?.cgShare) {
+      for (const other of [screens.agent, screens.chats]) if (other && other !== webview) other.postMessage({ cgEvent: "shared", data: { name: String(m.cgShare), detail: m.detail ?? null } });
+      return;
+    }
     if (m?.cgOverlayReady) return vscode.commands.executeCommand("_classgrid.setAgentOverlay", true).then(undefined, (err) => log.appendLine(`[${new Date().toISOString()}] cover the window: ${err?.message || err}`));
     if (m?.cgLog) return log.appendLine(`[${new Date().toISOString()}] page ${m.cgLog}: ${String(m.text).slice(0, 2000)}`);
     if (m?.cgCall !== undefined) return answerCall(webview, m, load);
@@ -279,6 +302,14 @@ const HANDLERS = {
     await showFile(full, startLine, endLine);
     return { ok: true };
   },
+  // The chats sidebar: its width (the icon strip, or open with the chat history), the chat picked in it (opens in the
+  // Agent panel), and the chat the Agent panel shows (marked in the sidebar)
+  stripWidth: (_p, width) => vscode.commands.executeCommand("_classgrid.setStripWidth", Number(width) || 0).then(() => undefined, () => undefined),
+  openChat: (_p, id) => {
+    screens.agent?.postMessage({ cgEvent: "openChat", data: id ? String(id) : null });
+    return vscode.commands.executeCommand("classgrid.agent.focus").then(() => undefined, () => undefined);
+  },
+  activeChat: (_p, id) => { screens.chats?.postMessage({ cgEvent: "activeChat", data: id ? String(id) : null }); },
 };
 
 // The device id the free AI limit counts per computer (the same scrambled Windows ID as the Classgrid desktop app)
