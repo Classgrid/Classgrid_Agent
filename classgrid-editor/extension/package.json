@@ -25,7 +25,14 @@
       "workbench.colorTheme": "Dark Modern",
       "workbench.preferredDarkColorTheme": "Dark Modern",
       "workbench.preferredLightColorTheme": "Light Modern",
-      "workbench.layoutControl.type": "toggles"
+      "workbench.layoutControl.type": "toggles",
+      "files.autoSave": "afterDelay",
+      "code-runner.runInTerminal": true,
+      "code-runner.saveFileBeforeRun": true,
+      "code-runner.clearPreviousOutput": true,
+      "code-runner.showRunCommandInEditorContextMenu": true,
+      "files.watcherExclude": { "**/node_modules/**": true, "**/.git/objects/**": true, "**/dist/**": true, "**/build/**": true },
+      "search.exclude": { "**/node_modules": true, "**/dist": true, "**/build": true }
     },
     "viewsContainers": {
       "secondarySidebar": [

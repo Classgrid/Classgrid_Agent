@@ -117,12 +117,14 @@ module.exports = {
     if (code) setTimeout(() => { launch(["--open-url", `classgrid-code://classgrid.classgrid/login?code=${encodeURIComponent(code)}`]).catch(() => {}); }, 2500);
     return { opened: true };
   },
-  // A file the AI mentions: open it in Classgrid Code at its line
-  async reveal(folder, file, line) {
+  // A file the AI mentions: open it in Classgrid Code with its lines selected (the editor's Classgrid extension opens
+  // classgrid-code://classgrid.classgrid/open)
+  async reveal(folder, file, startLine, endLine) {
     const root = path.resolve(folder);
     const full = path.resolve(root, String(file || ""));
     if (!full.toLowerCase().startsWith(root.toLowerCase())) return { error: "That file isn't in this project." };
-    await launch(["-g", `${full}:${Math.max(1, Number(line) || 1)}`]);
+    const q = new URLSearchParams({ file: full, start: String(Math.max(0, Number(startLine) || 0)), end: String(Math.max(0, Number(endLine) || 0)) });
+    await launch(["--open-url", `classgrid-code://classgrid.classgrid/open?${q}`]);
     return { ok: true };
   },
 };

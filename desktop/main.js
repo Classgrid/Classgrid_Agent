@@ -310,7 +310,7 @@ ipcMain.handle("cg:startEditor", (_e, folder) => {
 // (a file clicked in the chat steps, at its lines)
 ipcMain.handle("cg:revealInEditor", (_e, folder, file, startLine, endLine) => {
   if (!runner.isAllowed(folder)) return { error: "This folder wasn't opened in the Classgrid app on this computer." };
-  return codeEditor.reveal(String(folder), file, startLine).catch((err) => ({ error: String(err.message || err) }));
+  return codeEditor.reveal(String(folder), file, startLine, endLine).catch((err) => ({ error: String(err.message || err) }));
 });
 // (the search box and layout buttons in Project Mode's top bar: they are in Classgrid Code's own window now)
 ipcMain.handle("cg:editorCommand", () => ({ ok: false }));

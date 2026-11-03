@@ -42,6 +42,15 @@ async function activate(context) {
   runner.init(userData);
   chats.init(userData);
   memory.init(userData);
+  // What the user is doing in the editor (open file, cursor, selection, errors, terminal commands), for the Agent
+  // (editor-context.js): kept in this editor's data folder and the Classgrid app's, for whichever runner is asked
+  require("./editor-context").start(context, [userData, ...(process.env.APPDATA ? [path.join(process.env.APPDATA, "Classgrid")] : [])]);
+  // Prettier and Code Runner, like the old built-in editor (from Open VSX, once: a user who removes one keeps it removed)
+  for (const id of ["esbenp.prettier-vscode", "formulahendry.code-runner"]) {
+    if (vscode.extensions.getExtension(id) || context.globalState.get(`added:${id}`)) continue;
+    context.globalState.update(`added:${id}`, true);
+    vscode.commands.executeCommand("workbench.extensions.installExtension", id).then(undefined, () => context.globalState.update(`added:${id}`, false));
+  }
   parts = { runner, chats, memory, version, context };
   try { storage = JSON.parse((await context.secrets.get(STORAGE_KEY)) || "{}"); } catch { storage = {}; }
   // The folder open in this editor can be used by the AI (like a folder picked in the Classgrid app)
@@ -74,6 +83,8 @@ async function activate(context) {
   // user's login (/api/auth/desktop-exchange). The editor never shows a login of its own.
   context.subscriptions.push(vscode.window.registerUriHandler({
     async handleUri(uri) {
+      // A file from the Classgrid app's chat: open it with its lines selected
+      if (uri.path === "/open") return openAt(new URLSearchParams(uri.query));
       if (uri.path !== "/login") return;
       const code = new URLSearchParams(uri.query).get("code") || "";
       let token = null;
@@ -109,6 +120,26 @@ async function activate(context) {
   showAgent(10);
   // (at its normal size: a big window like Plugins may have left it full window when the editor last closed)
   vscode.commands.executeCommand("workbench.action.restoreAuxiliaryBar").then(undefined, () => {});
+}
+
+// Opens a file at its lines and selects them (classgrid-code://classgrid.classgrid/open?file=...&start=...&end=...)
+async function openAt(q) {
+  const file = q.get("file");
+  if (!file || !fs.existsSync(file)) return;
+  try {
+    const doc = await vscode.workspace.openTextDocument(vscode.Uri.file(file));
+    const editor = await vscode.window.showTextDocument(doc, { preview: false });
+    const start = Number(q.get("start")) || 0;
+    if (!start) return;
+    const s = Math.max(0, Math.min(doc.lineCount - 1, start - 1));
+    const e = Math.max(s, Math.min(doc.lineCount - 1, (Number(q.get("end")) || start) - 1));
+    const range = new vscode.Range(s, 0, e, doc.lineAt(e).text.length);
+    editor.selection = new vscode.Selection(range.start, range.end);
+    editor.revealRange(range, vscode.TextEditorRevealType.InCenter);
+  } catch {
+    // pictures, PDFs and other files: their own viewer
+    vscode.commands.executeCommand("vscode.open", vscode.Uri.file(file)).then(undefined, () => {});
+  }
 }
 
 function deactivate() { try { parts?.runner.stopAll(); } catch { /* already stopped */ } }
