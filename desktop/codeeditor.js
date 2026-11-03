@@ -55,6 +55,46 @@ async function launch(args) {
   spawn(path.join(dir, EXE), args, { cwd: dir, env, detached: true, stdio: "ignore", windowsHide: false }).unref();
 }
 
+const CODE_TYPES = [".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs", ".json", ".jsonc", ".md", ".mdx", ".txt", ".log", ".csv", ".html", ".htm", ".css", ".scss", ".sass", ".less", ".vue", ".svelte", ".py", ".ipynb", ".java", ".kt", ".c", ".h", ".cpp", ".hpp", ".cc", ".cs", ".go", ".rs", ".php", ".rb", ".swift", ".dart", ".lua", ".r", ".sql", ".sh", ".bash", ".ps1", ".bat", ".cmd", ".yml", ".yaml", ".toml", ".ini", ".cfg", ".conf", ".xml", ".svg", ".env", ".gitignore", ".gitattributes", ".editorconfig", ".prisma", ".graphql", ".dockerfile"];
+
+// Classgrid Code in Windows' menus, like an installed editor: "Open with" on any file, and "Open with Classgrid Code"
+// when right-clicking a file, a folder or inside a folder. Only for this Windows user (no admin needed); written again
+// on every start, because each Classgrid Code version sits in its own folder.
+async function register() {
+  const exe = path.join(await unpacked(), EXE);
+  const run = `"${exe}"`;
+  const C = "HKCU\\Software\\Classes";
+  const keys = [
+    [`${C}\\Applications\\${EXE}`, "FriendlyAppName", "Classgrid Code"],
+    [`${C}\\Applications\\${EXE}\\DefaultIcon`, null, `${exe},0`],
+    [`${C}\\Applications\\${EXE}\\shell\\open\\command`, null, `${run} "%1"`],
+    [`${C}\\ClassgridCode.File`, null, "Classgrid Code"],
+    [`${C}\\ClassgridCode.File\\DefaultIcon`, null, `${exe},0`],
+    [`${C}\\ClassgridCode.File\\shell\\open\\command`, null, `${run} "%1"`],
+    [`${C}\\*\\OpenWithProgids`, "ClassgridCode.File", ""],
+    // (Windows lists an app in "Open with" for code files only when it is named for each file type, like VS Code)
+    ...CODE_TYPES.map((ext) => [`${C}\\${ext}\\OpenWithProgids`, "ClassgridCode.File", ""]),
+    [`${C}\\*\\OpenWithList\\${EXE}`, null, ""],
+    [`${C}\\*\\shell\\ClassgridCode`, null, "Open with Classgrid Code"],
+    [`${C}\\*\\shell\\ClassgridCode`, "Icon", exe],
+    [`${C}\\*\\shell\\ClassgridCode\\command`, null, `${run} "%1"`],
+    [`${C}\\Directory\\shell\\ClassgridCode`, null, "Open with Classgrid Code"],
+    [`${C}\\Directory\\shell\\ClassgridCode`, "Icon", exe],
+    [`${C}\\Directory\\shell\\ClassgridCode\\command`, null, `${run} "%V"`],
+    [`${C}\\Directory\\Background\\shell\\ClassgridCode`, null, "Open with Classgrid Code"],
+    [`${C}\\Directory\\Background\\shell\\ClassgridCode`, "Icon", exe],
+    [`${C}\\Directory\\Background\\shell\\ClassgridCode\\command`, null, `${run} "%V"`],
+  ];
+  for (const [key, name, value] of keys) {
+    await new Promise((resolve) => {
+      const args = ["add", key, ...(name ? ["/v", name] : ["/ve"]), "/t", "REG_SZ", "/d", value, "/f"];
+      const p = spawn("reg.exe", args, { windowsHide: true });
+      p.on("error", resolve);
+      p.on("exit", resolve);
+    });
+  }
+}
+
 // A one-time code (60 seconds) for the user's login, so the editor opens signed in
 async function loginCode() {
   if (!token) return null;
@@ -68,6 +108,7 @@ async function loginCode() {
 module.exports = {
   setToken(t) { token = t || null; },
   unpacked,
+  register,
   // Project Mode: open the folder in Classgrid Code, signed in
   async open(folder) {
     await launch([path.resolve(folder)]);

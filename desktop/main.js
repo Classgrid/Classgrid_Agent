@@ -401,6 +401,8 @@ if (!app.requestSingleInstanceLock()) {
     createWindow();
     handleDeepLink(process.argv.find((a) => a.startsWith("classgrid://")));
     startUpdates();
+    // Classgrid Code in Windows' "Open with" and right-click menus (codeeditor.js), in the background
+    if (app.isPackaged) setTimeout(() => codeEditor.register().catch(() => {}), 5000);
   });
   app.on("window-all-closed", () => app.quit());
   app.on("before-quit", () => { runner.stopAll(); require("./recorder").stop(); require("./computer").stop(); terminal.stop(); });
