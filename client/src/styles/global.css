@@ -363,6 +363,12 @@
   }
   /* (a big window like Plugins is open: the page covers the whole editor window, see-through, with the panel drawn in
      its own place, so the window's dark layer lies over the files and code like in Project Mode; classgrid-editor) */
+  /* (a big window waits hidden for the moment the editor takes to make the page full window, so it never shows
+     squeezed into the panel first: classgrid-editor/extension/bridge.js) */
+  html.cg-editor.cg-cover-pending:not(.cg-overlay) :is(.fixed.inset-0, [role="dialog"], [role="alertdialog"], [data-cg-big-window]),
+  html.cg-editor.cg-cover-pending:not(.cg-overlay) body > :not(#root) {
+    visibility: hidden !important;
+  }
   html.cg-editor.cg-overlay,
   html.cg-editor.cg-overlay body,
   html.cg-editor.cg-overlay #root > .bg-background,

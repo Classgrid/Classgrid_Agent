@@ -75,7 +75,7 @@
       var el = all[j];
       if (!el.firstElementChild || typeof el.className !== "string" || !/\binset-0\b/.test(el.className)) continue;
       var s = getComputedStyle(el);
-      if (s.position !== "fixed" || s.display === "none" || s.visibility === "hidden" || (parseInt(s.zIndex, 10) || 0) < 150) continue;
+      if (s.position !== "fixed" || s.display === "none" || (s.visibility === "hidden" && !root.classList.contains("cg-want-cover")) || (parseInt(s.zIndex, 10) || 0) < 150) continue;
       // (any color format: rgba(0, 0, 0, 0.5), oklab(0 0 0 / 0.5), color(srgb 0 0 0 / 0.5)...; see-through is alpha 0)
       var bg = String(s.backgroundColor || "").trim();
       var alpha = (bg.match(/\/\s*([\d.]+%?)\s*\)$/) || bg.match(/^rgba\([^,]+,[^,]+,[^,]+,\s*([\d.]+%?)\s*\)$/) || [])[1];
@@ -89,12 +89,33 @@
   var covering = false;
   var frame = 0;
   var closeTimer = null;
+  // The look of a page covering the window (the panel drawn in its place, see-through around it) applies only while
+  // the page really is as wide as the window: a CSS width rule, so it switches in the very frame the editor resizes
+  // the page (no flash when a big window opens or closes), and until then the big window waits hidden (it never shows
+  // squeezed into the panel first)
+  var root = document.documentElement;
+  var coverStyle = document.createElement("style");
+  var setCoverWidth = function (w) {
+    var min = Math.max(1, Math.floor(w) - 4);
+    coverStyle.textContent =
+      "@media (min-width: " + min + "px) {" +
+      " html.cg-editor.cg-want-cover, html.cg-editor.cg-want-cover body, html.cg-editor.cg-want-cover #root > .bg-background, html.cg-editor.cg-want-cover .cg-editor-panel { background: transparent !important; }" +
+      " html.cg-editor.cg-want-cover { color-scheme: normal !important; }" +
+      " html.cg-editor.cg-want-cover #root aside.sm\\:hidden { top: var(--cg-panel-top) !important; left: var(--cg-panel-left) !important; right: auto !important; bottom: auto !important; width: var(--cg-panel-width) !important; height: var(--cg-panel-height) !important; background: var(--background) !important; }" +
+      " html.cg-editor-sidebar.cg-want-cover [data-slot=\"sidebar-container\"] { top: var(--cg-panel-top) !important; left: var(--cg-panel-left) !important; height: var(--cg-panel-height) !important; }" +
+      " }" +
+      "@media (max-width: " + (min - 1) + "px) {" +
+      " html.cg-editor.cg-want-cover :is(.fixed.inset-0, [role=\"dialog\"], [role=\"alertdialog\"], [data-cg-big-window]), html.cg-editor.cg-want-cover body > :not(#root) { visibility: hidden !important; }" +
+      " }";
+  };
+  setCoverWidth(100000);
+  (document.head || root).appendChild(coverStyle);
   new MutationObserver(function () {
     if (frame) return;
     frame = requestAnimationFrame(function () {
       frame = 0;
       var now = bigWindowOpen();
-      if (now && !covering) { clearTimeout(closeTimer); closeTimer = null; covering = true; post({ cgOverlay: true }); }
+      if (now && !covering) { clearTimeout(closeTimer); closeTimer = null; covering = true; setCoverWidth(100000); root.classList.add("cg-want-cover"); post({ cgOverlay: true }); }
       else if (!now && covering && !closeTimer) {
         closeTimer = setTimeout(function () {
           closeTimer = null;
@@ -102,35 +123,19 @@
         }, 250);
       } else if (now && closeTimer) { clearTimeout(closeTimer); closeTimer = null; }
     });
-  }).observe(document.documentElement, { childList: true, subtree: true, attributes: true, attributeFilter: ["class", "style", "data-state"] });
-  // The editor says where the panel is (before the page covers the window), and when the covering ends
-  // (the page switches its look only when the editor has really made it full window, or small again, so it never
-  // draws for the wrong size in between: no flash when a big window opens or closes)
-  var wantCover = false, coverWidth = 0, settle = null;
-  var applyCover = function () {
-    var full = coverWidth > 0 && window.innerWidth >= coverWidth - 4;
-    document.documentElement.classList.toggle("cg-overlay", wantCover ? full : full && document.documentElement.classList.contains("cg-overlay"));
-  };
-  window.addEventListener("resize", applyCover);
+  }).observe(root, { childList: true, subtree: true, attributes: true, attributeFilter: ["class", "style", "data-state"] });
+  // The editor says where the panel is and how wide the window is (before it makes the page cover the window), and
+  // when the covering has ended
   var coverWindow = function (rect) {
-    var root = document.documentElement.style;
-    root.setProperty("--cg-panel-top", rect.top + "px");
-    root.setProperty("--cg-panel-left", rect.left + "px");
-    root.setProperty("--cg-panel-width", rect.width + "px");
-    root.setProperty("--cg-panel-height", rect.height + "px");
-    wantCover = true;
-    coverWidth = rect.windowWidth || rect.width || 0;
-    applyCover();
-    clearTimeout(settle);
-    settle = setTimeout(function () { if (wantCover) document.documentElement.classList.add("cg-overlay"); }, 400);
+    root.style.setProperty("--cg-panel-top", rect.top + "px");
+    root.style.setProperty("--cg-panel-left", rect.left + "px");
+    root.style.setProperty("--cg-panel-width", rect.width + "px");
+    root.style.setProperty("--cg-panel-height", rect.height + "px");
+    setCoverWidth(rect.windowWidth || 100000);
+    root.classList.add("cg-want-cover");
     post({ cgOverlayReady: true });
   };
-  var uncoverWindow = function () {
-    wantCover = false;
-    applyCover();
-    clearTimeout(settle);
-    settle = setTimeout(function () { if (!wantCover) document.documentElement.classList.remove("cg-overlay"); }, 400);
-  };
+  var uncoverWindow = function () { root.classList.remove("cg-want-cover"); };
 
   // The Agent panel and the chats sidebar on the left edge are two pages: a chat list change in one (a new chat, a
   // refresh after a rename or delete, Ctrl+K for the chat search) is passed on to the other through the extension
