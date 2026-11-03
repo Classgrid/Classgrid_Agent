@@ -57,10 +57,10 @@ index 75f9238..e548f36 100644
  			this.focusPart(focusedPart);
 diff --git a/src/vs/workbench/contrib/webviewView/browser/classgridStrip.ts b/src/vs/workbench/contrib/webviewView/browser/classgridStrip.ts
 new file mode 100644
-index 0000000..4c57fcc
+index 0000000..233d0c0
 --- /dev/null
 +++ b/src/vs/workbench/contrib/webviewView/browser/classgridStrip.ts
-@@ -0,0 +1,159 @@
+@@ -0,0 +1,167 @@
 +/*---------------------------------------------------------------------------------------------
 + *  Classgrid Code: our chats sidebar on the window's left edge, like Project Mode's left side in the Classgrid app.
 + *  It is a page of the Classgrid extension (the webview view "classgrid.chats", classgrid-editor/extension), shown
@@ -182,7 +182,15 @@ index 0000000..4c57fcc
 +		button.tabIndex = 0;
 +		// (straight to the page, not through the extension: it answers at once)
 +		const toggle = () => { this.webview.postMessage({ cgEvent: 'toggleSidebar' }); };
-+		button.addEventListener('click', toggle);
++		// (on the press, not the click: the title bar takes the mouse over once it is pressed there, so a click never
++		// reaches the button)
++		button.addEventListener('mousedown', e => {
++			if (e.button === 0) {
++				e.preventDefault();
++				e.stopPropagation();
++				toggle();
++			}
++		});
 +		button.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggle(); } });
 +		if (appIcon) {
 +			appIcon.after(button);

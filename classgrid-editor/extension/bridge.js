@@ -65,6 +65,11 @@
   var bigWindowOpen = function () {
     // (a window that says so itself, like Studio's chat search)
     if (document.querySelector("[data-cg-big-window]")) return true;
+    // (the chats sidebar is as narrow as its icons: its menus, like your account menu, need the whole window too)
+    if (document.documentElement.classList.contains("cg-editor-sidebar")) {
+      var menus = document.querySelectorAll('[role="menu"], [role="listbox"]');
+      for (var k = 0; k < menus.length; k++) if (menus[k].getClientRects().length) return true;
+    }
     var dialogs = document.querySelectorAll('[role="dialog"], [role="alertdialog"]');
     for (var i = 0; i < dialogs.length; i++) {
       var d = dialogs[i];

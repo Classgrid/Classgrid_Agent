@@ -77,7 +77,7 @@ const ChatBubbleIcon = ({ className }: { className?: string }) => (
 );
 
 export function AgentNestedMenu({ searchQuery = "" }: { searchQuery?: string }) {
-  const { state } = useSidebar();
+  const { state, setOpen: setSidebarOpen } = useSidebar();
   const isCollapsed = state === "collapsed";
   const [sessions, setSessions] = React.useState<ChatSession[]>([]);
   const [loading, setLoading] = React.useState(false);
@@ -90,8 +90,15 @@ export function AgentNestedMenu({ searchQuery = "" }: { searchQuery?: string }) 
   const [activeSessionId, setActiveSessionId] = React.useState<string | null>(null);
   const [dateFilter, setDateFilter] = React.useState<{ from?: Date; to?: Date } | undefined>();
 
-  const [pinnedOpen, setPinnedOpen] = React.useState(false);
-  const [recentOpen, setRecentOpen] = React.useState(false);
+  const [pinnedOpenState, setPinnedOpenState] = React.useState(false);
+  const [recentOpenState, setRecentOpenState] = React.useState(false);
+  // Classgrid Code: its icon strip is as narrow as the icons, so Pinned and Recent Chats open the sidebar itself
+  // (they show there) instead of a list beside the strip
+  const inEditor = import.meta.env.VITE_EDITOR === "1";
+  const pinnedOpen = inEditor ? false : pinnedOpenState;
+  const recentOpen = inEditor ? false : recentOpenState;
+  const setPinnedOpen = (o: boolean) => { if (inEditor) { if (o) setSidebarOpen(true); } else setPinnedOpenState(o); };
+  const setRecentOpen = (o: boolean) => { if (inEditor) { if (o) setSidebarOpen(true); } else setRecentOpenState(o); };
 
   // State for Three-Dot menu operations
   const [editingSessionId, setEditingSessionId] = React.useState<string | null>(null);

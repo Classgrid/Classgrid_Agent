@@ -377,7 +377,9 @@ const HANDLERS = {
   },
   // The chats sidebar: its width (the icon strip, or open with the chat history), the chat picked in it (opens in the
   // Agent panel), and the chat the Agent panel shows (marked in the sidebar)
-  stripWidth: (_p, width) => vscode.commands.executeCommand("_classgrid.setStripWidth", Number(width) || 0).then(() => undefined, () => undefined),
+  // (the editor reads the width straight from the page, classgrid-left-strip.patch: setting it here too came late
+  // and put back an old width, so the sidebar seemed to ignore its button)
+  stripWidth: () => undefined,
   openChat: (_p, id) => {
     screens.agent?.postMessage({ cgEvent: "openChat", data: id ? String(id) : null });
     return vscode.commands.executeCommand("classgrid.agent.focus").then(() => undefined, () => undefined);
