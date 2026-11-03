@@ -300,7 +300,13 @@ export function ProjectModePage() {
       frame = 0;
       const covered = Array.from(document.querySelectorAll('[role="dialog"], [role="alertdialog"], [role="menu"], [role="listbox"]')).some((d) => d.getClientRects().length > 0);
       const r = el.getBoundingClientRect();
-      const rect = covered || document.hidden || r.width < 2 || r.height < 2 ? null : { x: r.left, y: r.top, width: r.width, height: r.height };
+      // (the Agent panel lying over the area's right side on a narrow window: the editor stops at its edge)
+      let right = r.right;
+      for (const side of Array.from(document.querySelectorAll("aside"))) {
+        const s = side.getBoundingClientRect();
+        if (s.width > 0 && s.left > r.left && s.left < right && s.top < r.bottom && s.bottom > r.top && getComputedStyle(side).position === "fixed") right = s.left;
+      }
+      const rect = covered || document.hidden || right - r.left < 2 || r.height < 2 ? null : { x: r.left, y: r.top, width: right - r.left, height: r.height };
       const key = JSON.stringify(rect);
       if (key === last) return;
       last = key;

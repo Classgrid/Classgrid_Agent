@@ -314,6 +314,12 @@ ipcMain.handle("cg:revealInEditor", (_e, folder, file, startLine, endLine) => {
 });
 // (the search box and layout buttons in Project Mode's top bar: they are in Classgrid Code's own window now)
 ipcMain.handle("cg:editorCommand", () => ({ ok: false }));
+// Classgrid Code inside Project Mode's code area: where it goes on the page ({ x, y, width, height }), or null to hide it
+ipcMain.on("cg:placeEditor", (e, folder, rect) => {
+  const w = BrowserWindow.fromWebContents(e.sender);
+  if (!w || (folder && !runner.isAllowed(folder))) return;
+  codeEditor.place(w, folder || null, rect || null).catch(() => {});
+});
 // Light or dark mode: the window buttons follow our top bar's colour
 // The Edit menu in our top bar (Studio): undo, cut, copy, paste… on what the user was typing in
 const EDIT_ACTIONS = new Set(["undo", "redo", "cut", "copy", "paste", "selectAll"]);
@@ -405,7 +411,7 @@ if (!app.requestSingleInstanceLock()) {
     if (app.isPackaged) setTimeout(() => codeEditor.register().catch(() => {}), 5000);
   });
   app.on("window-all-closed", () => app.quit());
-  app.on("before-quit", () => { runner.stopAll(); require("./recorder").stop(); require("./computer").stop(); terminal.stop(); });
+  app.on("before-quit", () => { runner.stopAll(); codeEditor.closeInside(); require("./recorder").stop(); require("./computer").stop(); terminal.stop(); });
 }
 
 // Updates: the installed app checks our R2 storage (desktop/latest.yml) on start and every 6 hours, downloads a new

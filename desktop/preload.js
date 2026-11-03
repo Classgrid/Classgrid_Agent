@@ -45,6 +45,8 @@ contextBridge.exposeInMainWorld("classgridDesktop", {
   startEditor: (folder) => ipcRenderer.invoke("cg:startEditor", folder),
   revealInEditor: (folder, file, startLine, endLine) => ipcRenderer.invoke("cg:revealInEditor", folder, file, startLine, endLine),
   editorCommand: (command) => ipcRenderer.invoke("cg:editorCommand", command),
+  // Classgrid Code inside Project Mode's code area: the folder and where on the page ({ x, y, width, height }), or null
+  placeEditor: (folder, rect) => ipcRenderer.send("cg:placeEditor", folder || null, rect || null),
   // A folder picked in the built-in editor's own "Open Folder" / "New Window" (null: Project Mode's start page)
   onOpenFolderProject: (fn) => {
     const listener = (_e, folder) => fn(folder);
