@@ -112,7 +112,7 @@ export function StudioProjectChooser({ picked, onDone }: { picked: string | null
             >
               {p.logo ? <img src={p.logo} alt="" className="size-[15px] shrink-0 rounded object-cover" /> : <Folder className="size-[15px] shrink-0 text-muted-foreground" />}
               <span className="flex-1 min-w-0 truncate">{p.name}</span>
-              <span className="shrink-0 max-w-[45%] truncate text-[12px] text-muted-foreground">{p.location === "local" ? "This computer" : p.repo || "No repo"}</span>
+              <span className="shrink-0 max-w-[45%] truncate text-[12px] text-muted-foreground">{p.location === "local" ? "This computer" : desktopApp?.isDesktop && thisComputerCopy(p) ? thisComputerCopy(p)?.path : p.repo || "No repo"}</span>
               {p.id === picked && <Check className="size-3.5 shrink-0" />}
             </button>
           ))}
@@ -227,6 +227,8 @@ export function StudioProjectPicker() {
     getRepo(current.localPath).then((repo) => { if (!gone) setFolderRepo({ id: current.id, repo: repo || null }); }).catch(() => {});
     return () => { gone = true; };
   }, [current?.id, current?.localPath]); // eslint-disable-line react-hooks/exhaustive-deps
+  // On this computer (a folder, or a cloud project downloaded here): its folder is shown, not GitHub
+  const shownPath = desktopApp?.isDesktop && current ? (current.location === "local" ? current.localPath || null : thisComputerCopy(current)?.path || null) : null;
   const shownRepo = current?.location === "local" ? (folderRepo?.id === current.id ? folderRepo.repo : null) : current?.repo || null;
   const shown = useMemo(() => {
     const t = q.trim().toLowerCase();
@@ -255,7 +257,9 @@ export function StudioProjectPicker() {
         {current && (
           <>
             <span className="text-muted-foreground/50">·</span>
-            {shownRepo ? (
+            {shownPath ? (
+              <span className="max-w-[20rem] truncate" title={shownPath}>{shownPath}</span>
+            ) : shownRepo ? (
               <span className="flex items-center gap-1 min-w-0">
                 <img src="https://cdn.classgrid.in/classgrid_intgration/github-icon.svg" alt="" aria-hidden className="size-3.5 shrink-0 opacity-70 dark:invert" />
                 <span className="max-w-[16rem] truncate">{shownRepo}</span>
