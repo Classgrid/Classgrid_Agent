@@ -58,6 +58,36 @@
   };
   new MutationObserver(function (list) { list.forEach(function (m) { Array.prototype.forEach.call(m.addedNodes, fixNode); }); }).observe(document.documentElement, { childList: true, subtree: true });
 
+  // Big windows (Plugins, settings, file previews: a dark layer over the whole page, or a dialog) open over the whole
+  // Classgrid app in Project Mode; in the editor the Agent side becomes the full window while one is open, and goes
+  // back after. Small pop-ups (menus, the model picker) and the panel's own background layer don't count.
+  var bigWindowOpen = function () {
+    var dialogs = document.querySelectorAll('[role="dialog"], [role="alertdialog"]');
+    for (var i = 0; i < dialogs.length; i++) {
+      var d = dialogs[i];
+      if (!d.closest("[data-radix-popper-content-wrapper]") && d.getClientRects().length) return true;
+    }
+    var all = document.body ? document.body.querySelectorAll("div") : [];
+    for (var j = 0; j < all.length; j++) {
+      var el = all[j];
+      if (!el.firstElementChild || !/\binset-0\b/.test(el.className && el.className.baseVal === undefined ? el.className : "")) continue;
+      var s = getComputedStyle(el);
+      if (s.position !== "fixed" || s.display === "none" || s.visibility === "hidden" || (parseInt(s.zIndex, 10) || 0) < 150) continue;
+      var r = el.getBoundingClientRect();
+      if (r.width >= window.innerWidth - 2 && r.height >= window.innerHeight - 2) return true;
+    }
+    return false;
+  };
+  var wide = false;
+  var wideTimer = null;
+  new MutationObserver(function () {
+    clearTimeout(wideTimer);
+    wideTimer = setTimeout(function () {
+      var now = bigWindowOpen();
+      if (now !== wide) { wide = now; post({ cgWide: now }); }
+    }, 120);
+  }).observe(document.documentElement, { childList: true, subtree: true, attributes: true, attributeFilter: ["class", "style", "data-state"] });
+
   // Bytes <-> text for the messages to the extension
   var toB64 = function (buf) {
     var bytes = new Uint8Array(buf), s = "";

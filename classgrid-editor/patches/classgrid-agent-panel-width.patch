@@ -1,0 +1,19 @@
+diff --git a/src/vs/workbench/browser/parts/auxiliarybar/auxiliaryBarPart.ts b/src/vs/workbench/browser/parts/auxiliarybar/auxiliaryBarPart.ts
+index 7f8bd13..ffa43b3 100644
+--- a/src/vs/workbench/browser/parts/auxiliarybar/auxiliaryBarPart.ts
++++ b/src/vs/workbench/browser/parts/auxiliarybar/auxiliaryBarPart.ts
+@@ -51,8 +51,12 @@ export class AuxiliaryBarPart extends AbstractPaneCompositePart {
+ 	static readonly viewContainersWorkspaceStateKey = 'workbench.auxiliarybar.viewContainersWorkspaceState';
+ 
+ 	// Use the side bar dimensions
+-	override readonly minimumWidth: number = 170;
+-	override readonly maximumWidth: number = Number.POSITIVE_INFINITY;
++	// Classgrid Code: the Agent panel keeps Project Mode's width limits, 400px up to 60% of the window (any width while
++	// maximized, which our big windows like Plugins use)
++	override readonly minimumWidth: number = 400;
++	override get maximumWidth(): number {
++		return this.layoutService.isAuxiliaryBarMaximized() ? Number.POSITIVE_INFINITY : Math.max(400, this.layoutService.mainContainerDimension.width * 0.6);
++	}
+ 	override readonly minimumHeight: number = 0;
+ 	override readonly maximumHeight: number = Number.POSITIVE_INFINITY;
+ 

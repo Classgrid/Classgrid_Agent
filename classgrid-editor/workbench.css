@@ -8,6 +8,11 @@
 	display: none !important;
 }
 
+/* No split-editor button or "..." menu at the top right of the code (a file's own buttons, like Run, stay) */
+.monaco-workbench .part.editor :is(.editor-actions, .title-actions) .action-item:has(.codicon-split-horizontal, .codicon-split-vertical, .codicon-toolbar-more) {
+	display: none !important;
+}
+
 /* The right side is only our Agent panel, with one thin top row like Project Mode's: just the close button on the
    right (no "CLASSGRID" name, no maximize). The row keeps its height, so the panel fills the side exactly. */
 .monaco-workbench .part.auxiliarybar > .title .composite-bar-container,

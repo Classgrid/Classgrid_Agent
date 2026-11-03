@@ -118,6 +118,7 @@ function holdScreens(webview, startPath) {
     if (m?.cgFetch) return proxyFetch(webview, m);
     if (m?.cgFetchAbort) return FETCHES.get(m.cgFetchAbort)?.abort();
     if (m?.cgStore) return keepStorage(m);
+    if (m?.cgWide !== undefined) return widen(!!m.cgWide);
     if (m?.cgLog) return log.appendLine(`[${new Date().toISOString()}] page ${m.cgLog}: ${String(m.text).slice(0, 2000)}`);
     if (m?.cgCall !== undefined) return answerCall(webview, m, load);
   });
@@ -157,6 +158,20 @@ async function proxyFetch(webview, m) {
     webview.postMessage({ cgFetchError: id, error: String(err?.message || err) });
   } finally {
     FETCHES.delete(id);
+  }
+}
+
+// A big window of our screens (Plugins, settings...) is open: the Agent side becomes the full window, like those
+// windows open over the whole Classgrid app in Project Mode; it goes back to its size when the window closes
+let widened = false;
+function widen(on) {
+  log.appendLine(`[${new Date().toISOString()}] big window ${on ? "open: Agent side full window" : "closed: Agent side back"}`);
+  if (on && !widened) {
+    widened = true;
+    vscode.commands.executeCommand("workbench.action.maximizeAuxiliaryBar").then(undefined, () => {});
+  } else if (!on && widened) {
+    widened = false;
+    vscode.commands.executeCommand("workbench.action.restoreAuxiliaryBar").then(undefined, () => {});
   }
 }
 
