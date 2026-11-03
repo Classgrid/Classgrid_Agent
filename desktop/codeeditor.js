@@ -2,20 +2,15 @@
 // opens in it, signed in with the user's Classgrid login (a one-time code from /api/auth/editor-code), with the Agent
 // on the right. No editor server, no localhost. It ships in the app as resources/classgrid-code.zip and is unpacked
 // once per version into the app's data folder. Studio's own terminals also run on its program (terminal.js).
-const { app, screen } = require("electron");
+const { app } = require("electron");
 const { spawn } = require("node:child_process");
 const crypto = require("node:crypto");
 const fs = require("node:fs");
 const path = require("node:path");
-const winembed = require("./winembed");
 
 const EXE = "Classgrid Code.exe";
 let token = null;
 let ready = null; // the unpacked folder (a promise, so two opens unpack once)
-// Classgrid Code's window inside a Classgrid window (Project Mode's code area): { hwnd, folder, owner }
-let inside = null;
-let placing = Promise.resolve();
-let wanted = null; // the newest place asked for: { owner, folder, rect } (rect null: hidden)
 
 // The packed editor: in the installed app resources/classgrid-code.zip; while building, desktop/classgrid-code.zip
 // (scripts/get-classgrid-code.mjs) or an unpacked desktop/classgrid-code/
@@ -110,52 +105,8 @@ async function loginCode() {
   } catch { return null; }
 }
 
-// Project Mode's code area: Classgrid Code's window for this folder sits inside the Classgrid window at rect (the
-// page's pixels), or is hidden (rect null: another page, or a window of the app is open over the code area). The
-// editor's own Agent side closes while it is inside (the app's Agent panel is next to it).
-async function placeNow() {
-  const want = wanted;
-  if (!want) return;
-  const { owner, folder, rect } = want;
-  if (!rect) { if (inside) await winembed.hide(inside.hwnd); return; }
-  if (owner.isDestroyed()) return;
-  if (!inside || inside.folder !== folder || inside.owner !== owner) {
-    if (inside && inside.folder !== folder) await winembed.close(inside.hwnd); // the last project's window
-    inside = null;
-    const name = path.basename(path.resolve(folder));
-    let hwnd = 0;
-    for (let i = 0; i < 60 && !hwnd && wanted === want; i++) {
-      hwnd = await winembed.find(name);
-      if (!hwnd) await new Promise((r) => setTimeout(r, 500));
-    }
-    if (!hwnd || wanted !== want || owner.isDestroyed()) return;
-    const parent = Number(owner.getNativeWindowHandle().readBigUInt64LE(0));
-    if (!(await winembed.attach(hwnd, parent))) return;
-    inside = { hwnd, folder, owner };
-    owner.once("closed", () => { if (inside && inside.owner === owner) { winembed.close(inside.hwnd); inside = null; } });
-    launch(["--open-url", "classgrid-code://classgrid.classgrid/inside"]).catch(() => {});
-  }
-  const latest = wanted && wanted.rect ? wanted.rect : rect;
-  const scale = screen.getDisplayMatching(owner.getBounds()).scaleFactor * owner.webContents.getZoomFactor();
-  await winembed.move(inside.hwnd, { x: latest.x * scale, y: latest.y * scale, w: latest.width * scale, h: latest.height * scale });
-}
-function place(owner, folder, rect) {
-  wanted = { owner, folder: folder ? path.resolve(folder) : null, rect: folder && rect && rect.width > 0 && rect.height > 0 ? rect : null };
-  placing = placing.then(placeNow, placeNow);
-  return placing;
-}
-
 module.exports = {
   setToken(t) { token = t || null; },
-  place,
-  // Quitting: Classgrid Code's window inside the app closes with it
-  closeInside() {
-    wanted = null;
-    if (!inside) return winembed.stop();
-    const { hwnd } = inside;
-    inside = null;
-    winembed.close(hwnd).finally(() => winembed.stop());
-  },
   unpacked,
   register,
   // Project Mode: open the folder in Classgrid Code, signed in

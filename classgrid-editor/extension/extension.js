@@ -85,9 +85,6 @@ async function activate(context) {
     async handleUri(uri) {
       // A file from the Classgrid app's chat: open it with its lines selected
       if (uri.path === "/open") return openAt(new URLSearchParams(uri.query));
-      // Inside the Classgrid app's Project Mode: the app's own Agent panel is next to the editor, so this one closes
-      // (the Agent button at the top shows it again)
-      if (uri.path === "/inside") return vscode.commands.executeCommand("workbench.action.closeAuxiliaryBar").then(undefined, () => {});
       if (uri.path !== "/login") return;
       const code = new URLSearchParams(uri.query).get("code") || "";
       let token = null;

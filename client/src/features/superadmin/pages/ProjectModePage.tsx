@@ -287,50 +287,6 @@ export function ProjectModePage() {
       });
     return () => { gone = true; };
   }, [localFolder, editorTry]);
-  // ...and its window sits in the code area (desktop/codeeditor.js): it follows the area's place and size, and hides
-  // while another page or a window of the app (a dialog, a menu, the AI hub) is open over the area
-  const editorAreaRef = useRef<HTMLDivElement | null>(null);
-  useEffect(() => {
-    const placeEditor = (window as { classgridDesktop?: { placeEditor?: (folder: string | null, rect: { x: number; y: number; width: number; height: number } | null) => void } }).classgridDesktop?.placeEditor;
-    const el = editorAreaRef.current;
-    if (!placeEditor || !localEditor?.opened || !localFolder || !el) return;
-    let last = "";
-    let frame = 0;
-    const send = () => {
-      frame = 0;
-      const covered = Array.from(document.querySelectorAll('[role="dialog"], [role="alertdialog"], [role="menu"], [role="listbox"]')).some((d) => d.getClientRects().length > 0);
-      const r = el.getBoundingClientRect();
-      // (the Agent panel lying over the area's right side on a narrow window: the editor stops at its edge)
-      let right = r.right;
-      for (const side of Array.from(document.querySelectorAll("aside"))) {
-        const s = side.getBoundingClientRect();
-        if (s.width > 0 && s.left > r.left && s.left < right && s.top < r.bottom && s.bottom > r.top && getComputedStyle(side).position === "fixed") right = s.left;
-      }
-      const rect = covered || document.hidden || right - r.left < 2 || r.height < 2 ? null : { x: r.left, y: r.top, width: right - r.left, height: r.height };
-      const key = JSON.stringify(rect);
-      if (key === last) return;
-      last = key;
-      placeEditor(localFolder, rect);
-    };
-    const soon = () => { if (!frame) frame = window.requestAnimationFrame(send); };
-    send();
-    const resized = new ResizeObserver(soon);
-    resized.observe(el);
-    const changed = new MutationObserver(soon);
-    changed.observe(document.body, { childList: true, subtree: true });
-    window.addEventListener("resize", soon);
-    document.addEventListener("visibilitychange", soon);
-    const timer = window.setInterval(soon, 500); // (side panels sliding in or out)
-    return () => {
-      resized.disconnect();
-      changed.disconnect();
-      window.removeEventListener("resize", soon);
-      document.removeEventListener("visibilitychange", soon);
-      window.clearInterval(timer);
-      if (frame) window.cancelAnimationFrame(frame);
-      placeEditor(null, null);
-    };
-  }, [localEditor?.opened, localFolder]);
 
   const openProject = projects?.find((p) => p.id === openId) || null;
   const rememberOpen = (id: string | null) => {
@@ -984,7 +940,7 @@ export function ProjectModePage() {
             <iframe ref={editorFrameRef} key={localEditor.url} src={localEditor.url} onLoad={editorLoaded} title="Code editor" className="flex-1 w-full border-0 [color-scheme:light] dark:[color-scheme:dark]" allow="clipboard-read; clipboard-write" />
           )}
           {localFolder && !folder && localEditor?.opened && (
-            <div ref={editorAreaRef} className="flex-1 flex flex-col items-center justify-center gap-3 text-center px-8">
+            <div className="flex-1 flex flex-col items-center justify-center gap-3 text-center px-8">
               <FolderGit2 className="size-10 text-muted-foreground" />
               <h3 className="text-lg font-semibold text-foreground">Your project is open in Classgrid Code</h3>
               <p className="text-sm text-muted-foreground font-mono break-all max-w-xl">{localFolder}</p>
