@@ -3574,6 +3574,15 @@ Every user is using you as a personal AI assistant and agent (like ChatGPT) to m
                                 if (shown && total > READER_MIN_LINES) {
                                     const lines = Number(shown[3]) - Number(shown[2]) + 1;
                                     const before = readSoFar.get(shown[1]) || 0;
+                                    // Asked for more than a piece (a start_line with no end_line reads 800 lines): the first piece of
+                                    // it, and where the next one starts, instead of "Not read" for every start_line it tries
+                                    if (lines > READER_PIECE_LINES && before + READER_PIECE_LINES <= READER_FILE_LINES) {
+                                        const start = Number(shown[2]);
+                                        const end = start + READER_PIECE_LINES - 1;
+                                        readSoFar.set(shown[1], before + READER_PIECE_LINES);
+                                        const piece = String(text).split("\n").slice(1, 1 + READER_PIECE_LINES).join("\n");
+                                        return `${shown[1]} (lines ${start}-${end} of ${total})\n${piece}\n(Only ${READER_PIECE_LINES} lines at a time in a file this big. Next piece: start_line ${end + 1}, end_line ${Math.min(total, end + READER_PIECE_LINES)}. To understand the whole file, ask bulk_read_project.)`;
+                                    }
                                     if (lines > READER_PIECE_LINES || before + lines > READER_FILE_LINES) return readerBlock(args.path, total, before);
                                     readSoFar.set(shown[1], before + lines);
                                 }
