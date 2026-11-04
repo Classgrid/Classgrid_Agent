@@ -70,6 +70,8 @@ const TABS = [
   { id: "upgrade", label: "Upgrade", icon: ArrowUpCircle },
 ];
 
+const KEEP_LISTS = import.meta.env.VITE_DESKTOP === "1";
+
 export function AiHubModal({ isOpen, onClose, onSendPrompt, initialTab = "plugins" }: AiHubModalProps) {
   const [activeTab, setActiveTab] = useState(initialTab);
 
@@ -94,6 +96,7 @@ export function AiHubModal({ isOpen, onClose, onSendPrompt, initialTab = "plugin
   const [isConnecting, setIsConnecting] = useState(false);
   const [isDisconnecting, setIsDisconnecting] = useState(false);
   const [loadingStatus, setLoadingStatus] = useState(true);
+  const statusLoaded = React.useRef(false);
   const [showWhatsappConfig, setShowWhatsappConfig] = useState(false);
   const [showSanityConfig, setShowSanityConfig] = useState(false);
   // Custom connectors (custom MCP servers) and known MCP apps
@@ -121,6 +124,14 @@ export function AiHubModal({ isOpen, onClose, onSendPrompt, initialTab = "plugin
   }, [activeTab]);
 
   const loadCustomServers = () => mcpApi.list().then(setCustomServers).catch(() => {});
+  // The desktop app and Classgrid Code load the plugin lists once in the background and keep them, so Plugins opens
+  // with the list already there (refreshed quietly) instead of grey boxes every time. The website is unchanged.
+  React.useEffect(() => {
+    if (!KEEP_LISTS) return;
+    fetchStatus();
+    loadCustomServers();
+    mcpApi.catalog().then(setMcpCatalog).catch(() => {});
+  }, []);
   React.useEffect(() => {
     if (!isOpen) return;
     loadCustomServers();
@@ -159,6 +170,7 @@ export function AiHubModal({ isOpen, onClose, onSendPrompt, initialTab = "plugin
         if (data.connected && Array.isArray(data.connected)) {
           setConnectedPlugins(data.connected);
         }
+        statusLoaded.current = true;
       }
     } catch (err) {
       console.error("Failed to fetch integration status:", err);
@@ -169,7 +181,7 @@ export function AiHubModal({ isOpen, onClose, onSendPrompt, initialTab = "plugin
 
   React.useEffect(() => {
     if (isOpen) {
-      setLoadingStatus(true);
+      if (!KEEP_LISTS || !statusLoaded.current) setLoadingStatus(true);
       fetchStatus();
     }
   }, [isOpen]);

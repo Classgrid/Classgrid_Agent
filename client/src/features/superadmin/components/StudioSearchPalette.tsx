@@ -51,7 +51,7 @@ const lastLists: { chats: Chat[] | null; projects: Project[] | null; groups: Cha
 // (only in the desktop app and Classgrid Code; the website loads the lists each time, as before)
 const REMEMBER_LISTS = import.meta.env.VITE_DESKTOP === "1";
 
-export function StudioSearchPalette({ open, onClose, files: givenFiles, recent = [], onOpenFile, fileIcon, initialKind = "files", onOpenChat }: {
+export function StudioSearchPalette({ open, onClose, files: givenFiles, recent = [], onOpenFile, fileIcon, initialKind = "files", onOpenChat, inPanel = false }: {
   open: boolean;
   onClose: () => void;
   files?: string[]; // the project's file paths (left out: the open project's files are loaded here)
@@ -60,6 +60,9 @@ export function StudioSearchPalette({ open, onClose, files: givenFiles, recent =
   fileIcon: (name: string) => React.ReactNode;
   initialKind?: Kind; // the left sidebar's search starts on Conversations
   onOpenChat?: (id: string) => void; // left out: the chat opens in Studio
+  // Classgrid Code's AI panel: the search drops down inside the panel, under its top line, instead of over the whole
+  // editor window
+  inPanel?: boolean;
 }) {
   const reduce = useReducedMotion();
   const [kind, setKind] = useState<Kind>(initialKind);
@@ -250,14 +253,14 @@ export function StudioSearchPalette({ open, onClose, files: givenFiles, recent =
     <AnimatePresence>
       {open && (
         <>
-          <motion.div key="bg" data-cg-big-window="" className="fixed inset-0 z-[130]" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={close} />
+          <motion.div key="bg" data-cg-big-window={inPanel ? undefined : ""} className="fixed inset-0 z-[130]" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={close} />
           <motion.div
             key="box"
             initial={reduce ? false : { opacity: 0, y: -8, scale: 0.98 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={reduce ? { opacity: 0 } : { opacity: 0, y: -6, scale: 0.98 }}
             transition={{ duration: reduce ? 0 : 0.18, ease: EASE }}
-            className="fixed inset-x-0 top-[10vh] z-[131] mx-auto w-[min(92vw,640px)]"
+            className={inPanel ? "fixed inset-x-2 top-[41px] z-[131]" : "fixed inset-x-0 top-[10vh] z-[131] mx-auto w-[min(92vw,640px)]"}
             onKeyDown={onKey}
           >
             <div className="rounded-xl border border-black/10 dark:border-white/[0.1] bg-white dark:bg-[#1e1e1e] text-foreground shadow-2xl overflow-hidden">

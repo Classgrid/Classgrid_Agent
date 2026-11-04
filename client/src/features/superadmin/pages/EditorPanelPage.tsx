@@ -102,6 +102,7 @@ export function EditorPanelPage() {
         initialKind="conversations"
         fileIcon={(name) => <FileBadge name={name} />}
         onOpenChat={(id) => navigate(`/editor/project/${id}`)}
+        inPanel
       />
     </div>
   );
