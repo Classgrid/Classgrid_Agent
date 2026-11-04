@@ -440,6 +440,14 @@ const HANDLERS = {
     return vscode.commands.executeCommand("classgrid.agent.focus").then(() => undefined, () => undefined);
   },
   activeChat: (_p, id) => { screens.chats?.postMessage({ cgEvent: "activeChat", data: id ? String(id) : null }); },
+  // Settings → Appearance: the whole editor light, dark, or the same as the computer (our screens follow it: bridge.js)
+  setEditorTheme: async (_p, mode) => {
+    const cfg = vscode.workspace.getConfiguration();
+    const G = vscode.ConfigurationTarget.Global;
+    if (mode === "system") return cfg.update("window.autoDetectColorScheme", true, G);
+    await cfg.update("window.autoDetectColorScheme", false, G);
+    await cfg.update("workbench.colorTheme", mode === "light" ? "Light Modern" : "Dark Modern", G);
+  },
 };
 
 // The device id the free AI limit counts per computer (the same scrambled Windows ID as the Classgrid desktop app)

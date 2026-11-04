@@ -145,6 +145,27 @@
   };
   var uncoverWindow = function () { root.classList.remove("cg-want-cover"); };
 
+  // Our screens follow the editor's light or dark theme (the editor marks its pages vscode-light / vscode-dark), so the
+  // AI panel, the AI Hub and the Settings tab always match the code around them
+  var followEditorTheme = function () {
+    var b = document.body;
+    if (!b) return;
+    var dark = b.classList.contains("vscode-dark") || b.classList.contains("vscode-high-contrast");
+    var light = b.classList.contains("vscode-light") || b.classList.contains("vscode-high-contrast-light");
+    if (!dark && !light) return;
+    var want = dark ? "dark" : "light";
+    var now = null;
+    try { now = localStorage.getItem("theme"); } catch (err) { /* storage blocked */ }
+    if (now === want) return;
+    try { localStorage.setItem("theme", want); } catch (err) { /* storage blocked */ }
+    window.dispatchEvent(new StorageEvent("storage", { key: "theme", newValue: want }));
+  };
+  var watchTheme = function () {
+    followEditorTheme();
+    new MutationObserver(followEditorTheme).observe(document.body, { attributes: true, attributeFilter: ["class"] });
+  };
+  if (document.body) watchTheme(); else document.addEventListener("DOMContentLoaded", watchTheme);
+
   // The Agent panel and the chats sidebar on the left edge are two pages: a chat list change in one (a new chat, a
   // refresh after a rename or delete, Ctrl+K for the chat search) is passed on to the other through the extension
   var SHARED = ["agent:refresh-sessions", "agent:session-created", "agent:open-search-palette"];
@@ -362,6 +383,8 @@
     openInEditor: bind("openInEditor"),
     revealInEditor: bind("revealInEditor"),
     onOpenFolderProject: on("openFolderProject"),
+    // Settings → Appearance: light, dark or the same as the computer, for the whole editor
+    setEditorTheme: bind("setEditorTheme"),
     // The chats sidebar on the left edge: its width, the chat picked there (opens in the Agent panel), and the chat
     // the Agent panel shows (marked in the sidebar)
     setStripWidth: function (width) { send("stripWidth", width); },

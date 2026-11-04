@@ -1,0 +1,129 @@
+// Classgrid Code's Settings tab (the gear in its title bar): its own small settings, not the Classgrid app's page.
+// Profile (your photo, name and email), Appearance (light, dark, or the same as your computer: it changes the whole
+// editor, and our screens follow it) and Docs.
+import { useState } from "react";
+import { BookOpen, Monitor, Moon, Palette, Sun, User } from "lucide-react";
+import { useTheme } from "next-themes";
+import { useUserProfile } from "@/features/shared/queries/useUserProfile";
+
+type Mode = "light" | "dark" | "system";
+type EditorSettingsDesktop = {
+  setEditorTheme?: (mode: Mode) => Promise<unknown>;
+  openExternal?: (url: string) => Promise<unknown>;
+};
+const desk = () => (window as unknown as { classgridDesktop?: EditorSettingsDesktop }).classgridDesktop;
+const MODE_KEY = "cg_editor_theme";
+const DOCS_URL = "https://classgrid.in/docs";
+
+const SECTIONS = [
+  { id: "profile", label: "Profile", icon: User },
+  { id: "appearance", label: "Appearance", icon: Palette },
+] as const;
+type Section = (typeof SECTIONS)[number]["id"];
+
+export function EditorSettingsPage() {
+  const { data: profile } = useUserProfile();
+  const { setTheme } = useTheme();
+  const [section, setSection] = useState<Section>("profile");
+  const [mode, setMode] = useState<Mode>(() => {
+    try { const m = localStorage.getItem(MODE_KEY); return m === "light" || m === "dark" || m === "system" ? m : "system"; } catch { return "system"; }
+  });
+
+  const name = profile?.name || "";
+  const email = profile?.email || "";
+  const photo = profile?.profilePicture || profile?.photoURL || "";
+  const initial = (name || email || "?").trim().charAt(0).toUpperCase();
+
+  const pickMode = (m: Mode) => {
+    setMode(m);
+    try { localStorage.setItem(MODE_KEY, m); } catch { /* storage blocked */ }
+    setTheme(m);
+    desk()?.setEditorTheme?.(m);
+  };
+
+  const avatar = (size: string, text: string) => photo
+    ? <img src={photo} alt="" className={`${size} rounded-full object-cover shrink-0`} />
+    : <div className={`${size} rounded-full bg-muted flex items-center justify-center shrink-0 ${text} font-medium text-foreground`}>{initial}</div>;
+
+  return (
+    <div className="cg-editor-settings h-[100dvh] overflow-y-auto bg-background text-foreground">
+      <div className="max-w-5xl mx-auto flex gap-10 px-8 py-10">
+        {/* Left: who you are, and the sections */}
+        <nav className="w-60 shrink-0">
+          <div className="flex items-center gap-3 px-2 mb-6">
+            {avatar("size-9", "text-sm")}
+            <div className="min-w-0">
+              <div className="text-sm font-medium truncate">{name || email}</div>
+              <div className="text-xs text-muted-foreground truncate">{email}</div>
+            </div>
+          </div>
+          <div className="flex flex-col gap-0.5">
+            {SECTIONS.map(({ id, label, icon: Icon }) => (
+              <button
+                key={id}
+                type="button"
+                onClick={() => setSection(id)}
+                className={`flex items-center gap-2.5 h-9 px-2.5 rounded-lg text-sm text-left transition-colors ${section === id ? "bg-muted text-foreground" : "text-muted-foreground hover:bg-muted/60 hover:text-foreground"}`}
+              >
+                <Icon className="size-4" /> {label}
+              </button>
+            ))}
+          </div>
+          <div className="my-3 h-px bg-border" />
+          <button
+            type="button"
+            onClick={() => (desk()?.openExternal ? desk()!.openExternal!(DOCS_URL) : window.open(DOCS_URL, "_blank"))}
+            className="flex items-center gap-2.5 h-9 px-2.5 rounded-lg text-sm text-muted-foreground hover:bg-muted/60 hover:text-foreground transition-colors w-full text-left"
+          >
+            <BookOpen className="size-4" /> Docs <span className="ml-auto text-xs">↗</span>
+          </button>
+        </nav>
+
+        {/* Right: the chosen section */}
+        <main className="flex-1 min-w-0">
+          {section === "profile" && (
+            <>
+              <h1 className="text-xl font-semibold mb-5">Profile</h1>
+              <div className="rounded-xl border border-border bg-card p-5 flex items-center gap-5">
+                {avatar("size-16", "text-2xl")}
+                <div className="min-w-0 grid gap-3">
+                  <div>
+                    <div className="text-xs text-muted-foreground">Name</div>
+                    <div className="text-sm font-medium truncate">{name || "—"}</div>
+                  </div>
+                  <div>
+                    <div className="text-xs text-muted-foreground">Email</div>
+                    <div className="text-sm font-medium truncate">{email || "—"}</div>
+                  </div>
+                </div>
+              </div>
+            </>
+          )}
+          {section === "appearance" && (
+            <>
+              <h1 className="text-xl font-semibold mb-5">Appearance</h1>
+              <div className="grid grid-cols-3 gap-3 max-w-xl">
+                {([
+                  { m: "light", label: "Light", icon: Sun },
+                  { m: "dark", label: "Dark", icon: Moon },
+                  { m: "system", label: "Same as your PC", icon: Monitor },
+                ] as const).map(({ m, label, icon: Icon }) => (
+                  <button
+                    key={m}
+                    type="button"
+                    onClick={() => pickMode(m)}
+                    className={`flex flex-col items-center gap-2 rounded-xl border p-4 text-sm transition-colors ${mode === m ? "border-foreground bg-muted" : "border-border bg-card hover:bg-muted/60"}`}
+                  >
+                    <Icon className="size-5" />
+                    {label}
+                  </button>
+                ))}
+              </div>
+              <p className="mt-3 text-xs text-muted-foreground">Changes the whole editor: the code, the AI panel and this page.</p>
+            </>
+          )}
+        </main>
+      </div>
+    </div>
+  );
+}

@@ -79,6 +79,7 @@ function NavigateWithQuery({ to, replace }: { to: string, replace?: boolean }) {
 import { DashboardHomePage } from "@/features/superadmin/pages/DashboardHomePage";
 import { ProjectModePage } from "@/features/superadmin/pages/ProjectModePage";
 import { EditorPanelPage } from "@/features/superadmin/pages/EditorPanelPage";
+import { EditorSettingsPage } from "@/features/superadmin/pages/EditorSettingsPage";
 import { EditorSidebarPage } from "@/features/superadmin/pages/EditorSidebarPage";
 import { StudioModePage } from "@/features/superadmin/pages/StudioModePage";
 import { LeadsPage } from "@/features/superadmin/pages/LeadsPage";
@@ -231,8 +232,8 @@ export function AppRouter() {
           Classgrid app, so it isn't behind the login page */}
       <Route path="/editor/project" element={<EditorPanelPage />} />
       <Route path="/editor/project/:sessionId" element={<EditorPanelPage />} />
-      {/* Classgrid Code's Settings tab (the gear in its title bar): the same Settings page as in the app */}
-      <Route path="/editor/settings" element={<div className="cg-editor-settings h-[100dvh] overflow-y-auto bg-background"><SharedSettingsPage /></div>} />
+      {/* Classgrid Code's Settings tab (the gear in its title bar): Profile, Appearance and Docs */}
+      <Route path="/editor/settings" element={<EditorSettingsPage />} />
       {/* Classgrid Code's left edge: the chats sidebar, like Project Mode's left side */}
       <Route path="/editor/sidebar/project" element={<EditorSidebarPage />} />
       <Route path="/editor/sidebar/project/:sessionId" element={<EditorSidebarPage />} />
