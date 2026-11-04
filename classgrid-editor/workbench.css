@@ -73,31 +73,6 @@ body.classgrid-overlay .webview-overlay-content:not(.classgrid-strip):has(iframe
 	background: transparent !important;
 }
 
-/* The same for a big window of the chats sidebar on the left edge (the chat search, a dialog): its page covers the
-   whole window, see-through, with the sidebar still drawn on the left (body.classgrid-strip-overlay is set by
-   patches/classgrid-left-strip.patch) */
-body.classgrid-strip-overlay div:has(> .webview-overlay-content.classgrid-strip) {
-	clip-path: none !important;
-	position: fixed !important;
-	inset: 0 !important;
-	width: auto !important;
-	height: auto !important;
-	z-index: 2551 !important;
-}
-body.classgrid-strip-overlay .webview-overlay-content.classgrid-strip {
-	position: fixed !important;
-	top: 0 !important;
-	left: 0 !important;
-	width: 100vw !important;
-	height: 100vh !important;
-	z-index: 2551 !important;
-	border-radius: 0 !important;
-}
-body.classgrid-strip-overlay .webview-overlay-content.classgrid-strip iframe {
-	color-scheme: normal !important;
-	background: transparent !important;
-}
-
 /* Top right like Project Mode: the left sidebar and bottom panel toggles, then an "Agent" button that shows or hides
    the Agent panel (VS Code's right side bar toggle, as a button with its name) */
 .monaco-workbench .titlebar .action-item:has([class*="codicon-auxiliarybar-"][class*="-layout-icon"]) .action-label {
@@ -115,33 +90,4 @@ body.classgrid-strip-overlay .webview-overlay-content.classgrid-strip iframe {
 	content: "Agent" !important;
 	font-family: var(--vscode-font-family) !important;
 	font-size: 13px !important;
-}
-
-/* The chats sidebar (classgrid-left-strip.patch): its place fills its spot in the layout, and its button sits right
-   after the logo in the title bar, like Project Mode's sidebar button (clickable: not part of the window's drag area) */
-.classgrid-strip-host {
-	width: 100% !important;
-	height: 100% !important;
-	/* (the page inside is placed a frame after the layout gives it its new width, so it is clipped to this spot: a
-	   closing sidebar can never paint over the icons for that one frame) */
-	overflow: hidden !important;
-}
-.monaco-workbench .part.titlebar .titlebar-left .classgrid-strip-toggle {
-	order: 1;
-	-webkit-app-region: no-drag;
-	display: flex;
-	align-items: center;
-	justify-content: center;
-	width: 28px;
-	height: 28px;
-	margin: 0 6px 0 2px;
-	border-radius: 6px;
-	font-size: 16px;
-	cursor: pointer;
-	color: var(--vscode-titleBar-activeForeground);
-	opacity: 0.85;
-}
-.monaco-workbench .part.titlebar .titlebar-left .classgrid-strip-toggle:hover {
-	opacity: 1;
-	background-color: var(--vscode-toolbar-hoverBackground, rgba(128, 128, 128, 0.15));
 }

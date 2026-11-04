@@ -73,10 +73,6 @@
       {
         "command": "classgrid.searchChats",
         "title": "Classgrid: Search Chat History"
-      },
-      {
-        "command": "classgrid.toggleChats",
-        "title": "Classgrid: Show or Hide the Sidebar"
       }
     ],
     "keybindings": [

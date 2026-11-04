@@ -69,16 +69,7 @@ async function activate(context) {
     },
   }, { webviewOptions: { retainContextWhenHidden: true } }));
 
-  // The left edge: our chats sidebar, the same one as Project Mode's left side (Search, New Chat, Library, the chat
-  // history). VS Code shows it left of its own icons (our VS Code change, patches/classgrid-left-strip.patch); a chat
-  // picked there opens in the Agent panel.
-  context.subscriptions.push(vscode.window.registerWebviewViewProvider("classgrid.chats", {
-    resolveWebviewView(view) {
-      screens.chats = view.webview;
-      const load = holdScreens(view.webview, "/editor/sidebar/project");
-      view.onDidDispose(() => { loaders.delete(load); if (screens.chats === view.webview) screens.chats = null; });
-    },
-  }, { webviewOptions: { retainContextWhenHidden: true } }));
+
 
   // The login comes from the Classgrid app: Project Mode opens the editor with
   // classgrid-code://classgrid.classgrid/login?code=<one-time code from /api/auth/editor-code>, which is swapped for the
@@ -110,11 +101,7 @@ async function activate(context) {
     await vscode.commands.executeCommand("classgrid.agent.focus").then(undefined, () => {});
     screens.agent?.postMessage({ cgEvent: "shared", data: { name: "agent:open-search-palette", detail: null } });
   }));
-  // The sidebar button next to the logo in the title bar (classgrid-left-strip.patch): shows or hides the chats
-  // sidebar, like Project Mode's sidebar button
-  context.subscriptions.push(vscode.commands.registerCommand("classgrid.toggleChats", () => {
-    screens.chats?.postMessage({ cgEvent: "toggleSidebar" });
-  }));
+
   context.subscriptions.push(vscode.commands.registerCommand("classgrid.open", () => {
     const panel = vscode.window.createWebviewPanel("classgrid.app", "Classgrid", vscode.ViewColumn.Active, { enableScripts: true, retainContextWhenHidden: true });
     panel.iconPath = vscode.Uri.file(path.join(__dirname, "media", "classgrid.svg"));
