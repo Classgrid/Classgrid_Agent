@@ -2,14 +2,14 @@
 // made in either mode shows in both. A new project can start with a GitHub repo or without one.
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { Check, ChevronDown, ChevronRight, Cloud, Folder, FolderOpen, FolderPlus, FolderX, Laptop, Link2, Pencil, Search, Trash2, X } from "lucide-react";
+import { Check, ChevronDown, ChevronRight, Cloud, Folder, FolderOpen, FolderPlus, HardDriveDownload, Loader2, FolderX, Laptop, Link2, Pencil, Search, Trash2, X } from "lucide-react";
 import { toast } from "sonner";
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/marketing_ui/dialog";
 import { DangerConfirmDialog } from "@/components/marketing_ui/danger-confirm-dialog";
 import { fetchWithRescue } from "@/lib/rescue";
 import { ProjectPlaceSwitch } from "./ProjectPlaceSwitch";
-import { thisComputerCopy, type LocalCopy } from "../utils/projectCopies";
+import { getCopyOnThisComputer, thisComputerCopy, type LocalCopy } from "../utils/projectCopies";
 
 const backendUrl = import.meta.env.VITE_API_URL || "https://api.classgrid.in";
 const PICK_KEY = "cg_project_open"; // the same open project as Project Mode: both views always show one project
@@ -87,6 +87,38 @@ export function openStudioProject(id: string | null) {
 }
 
 // The right pane's Project tab: pick or switch the project, or make a new one (with or without a repo)
+// Desktop app: download a cloud project's repo to a folder on this PC (git clone). It then shows under This PC with
+// that folder's path
+function useDownloadToPc(setProjects: (f: (list: Project[] | null) => Project[] | null) => void) {
+  const [downloading, setDownloading] = useState<string | null>(null);
+  const download = async (p: Project) => {
+    if (downloading) return;
+    setDownloading(p.id);
+    try {
+      const got = await getCopyOnThisComputer(p);
+      if (!got) return;
+      setProjects((list) => (list || []).map((x) => (x.id === p.id ? { ...x, ...(got as Project) } : x)));
+      const path = thisComputerCopy(got)?.path;
+      if (path) toast.success(`Downloaded ${p.repo} to ${path}`);
+    } finally {
+      setDownloading(null);
+    }
+  };
+  return { downloading, download };
+}
+const downloadButton = (p: Project, downloading: string | null, download: (p: Project) => void) => (
+  <button
+    type="button"
+    onClick={() => download(p)}
+    disabled={!!downloading}
+    title={`Download ${p.repo} to a folder on this PC`}
+    aria-label="Download to this PC"
+    className="shrink-0 flex items-center justify-center size-7 mr-1 rounded text-muted-foreground hover:text-foreground hover:bg-black/[0.06] dark:hover:bg-white/[0.08] disabled:opacity-50"
+  >
+    {downloading === p.id ? <Loader2 className="size-3.5 animate-spin" /> : <HardDriveDownload className="size-3.5" />}
+  </button>
+);
+
 export function StudioProjectChooser({ picked, onDone }: { picked: string | null; onDone?: () => void }) {
   const [projects, setProjects] = useState<Project[] | null>(readList);
   const [q, setQ] = useState("");
@@ -97,6 +129,29 @@ export function StudioProjectChooser({ picked, onDone }: { picked: string | null
     return onlineOnly(projects).filter((p) => !t || p.name.toLowerCase().includes(t) || (p.repo || "").toLowerCase().includes(t));
   }, [projects, q]);
   const pick = (id: string) => { if (id !== picked) openStudioProject(id); onDone?.(); };
+  // Desktop app: This PC and Cloud are two lists, never one. A cloud project can be downloaded to a folder here
+  const { downloading, download } = useDownloadToPc(setProjects);
+  const sections = desktopApp?.isDesktop
+    ? [{ key: "pc", label: "This PC", list: shown.filter(onThisPc) }, { key: "cloud", label: "Cloud", list: shown.filter((p) => !onThisPc(p)) }]
+    : [{ key: "cloud", label: "", list: shown }];
+  const row = (p: Project, side: string) => (
+    <div key={p.id} className="group flex items-center rounded-md hover:bg-black/[0.05] dark:hover:bg-white/[0.07] transition-colors duration-150">
+      <button
+        type="button"
+        onClick={() => pick(p.id)}
+        title={side === "pc" ? (p.location === "local" ? p.localPath : thisComputerCopy(p)?.path) || undefined : p.repo || undefined}
+        className="flex-1 min-w-0 flex items-center gap-2.5 h-9 px-2 text-left text-[13px] text-foreground/85"
+      >
+        {p.logo ? <img src={p.logo} alt="" className="size-[15px] shrink-0 rounded object-cover" /> : <Folder className="size-[15px] shrink-0 text-muted-foreground" />}
+        <span className="flex-1 min-w-0 truncate">{folderName(p.name)}</span>
+        <span className="shrink-0 max-w-[55%] truncate text-[12px] text-muted-foreground">
+          {side === "pc" ? shortPath((p.location === "local" ? p.localPath : thisComputerCopy(p)?.path) || p.name) : p.repo || "No repo"}
+        </span>
+        {p.id === picked && <Check className="size-3.5 shrink-0" />}
+      </button>
+      {side === "cloud" && desktopApp?.isDesktop && p.repo && downloadButton(p, downloading, download)}
+    </div>
+  );
 
   return (
     <div className="flex flex-col gap-2">
@@ -116,18 +171,27 @@ export function StudioProjectChooser({ picked, onDone }: { picked: string | null
           {projects !== null && !shown.length && (
             <p className="px-2 py-1.5 text-[13px] text-muted-foreground">{q.trim() ? `No project matches “${q}”.` : "No projects yet."}</p>
           )}
-          {shown.map((p) => (
-            <button
-              key={p.id}
-              type="button"
-              onClick={() => pick(p.id)}
-              className="w-full flex items-center gap-2.5 h-9 px-2 rounded-md text-left text-[13px] text-foreground/85 hover:bg-black/[0.05] dark:hover:bg-white/[0.07] transition-colors duration-150"
-            >
-              {p.logo ? <img src={p.logo} alt="" className="size-[15px] shrink-0 rounded object-cover" /> : <Folder className="size-[15px] shrink-0 text-muted-foreground" />}
-              <span className="flex-1 min-w-0 truncate">{p.name}</span>
-              <span className="shrink-0 max-w-[45%] truncate text-[12px] text-muted-foreground">{p.location === "local" ? "This computer" : desktopApp?.isDesktop && thisComputerCopy(p) ? thisComputerCopy(p)?.path : p.repo || "No repo"}</span>
-              {p.id === picked && <Check className="size-3.5 shrink-0" />}
-            </button>
+          {sections.map((s, i) => (projects === null || (!s.list.length && s.key === "cloud" && !desktopApp?.isDesktop)) ? null : (
+            <div key={s.key} className={i ? "mt-1 pt-1 border-t border-black/10 dark:border-white/[0.08]" : ""}>
+              {s.label && (
+                <p className="flex items-center gap-1.5 px-2 pt-1 pb-1 text-[12px] text-muted-foreground">
+                  {s.key === "pc" ? <Laptop className="size-3.5" /> : <Cloud className="size-3.5" />} {s.label}
+                </p>
+              )}
+              {s.list.map((p) => row(p, s.key))}
+              {s.label && !s.list.length && (
+                <p className="px-2 py-1.5 text-[12px] text-muted-foreground">{s.key === "pc" ? "No folders on this PC yet." : "No cloud projects."}</p>
+              )}
+              {s.key === "pc" && (
+                <button
+                  type="button"
+                  onClick={async () => { const made = await openLocalFolder(); if (made) { setProjects((list) => [made, ...(list || []).filter((x) => x.id !== made.id)]); pick(made.id); } }}
+                  className="w-full flex items-center gap-2.5 h-8 px-2 rounded-md text-left text-[13px] text-foreground/85 hover:bg-black/[0.05] dark:hover:bg-white/[0.07] transition-colors duration-150"
+                >
+                  <FolderOpen className="size-[15px] text-muted-foreground" /> Open Folder
+                </button>
+              )}
+            </div>
           ))}
         </div>
         <div className="border-t border-black/10 dark:border-white/[0.08] p-1">
@@ -138,15 +202,6 @@ export function StudioProjectChooser({ picked, onDone }: { picked: string | null
           >
             <FolderPlus className="size-[15px] text-muted-foreground" /> New project
           </button>
-          {desktopApp?.isDesktop && (
-            <button
-              type="button"
-              onClick={async () => { const made = await openLocalFolder(); if (made) { setProjects((list) => [made, ...(list || []).filter((x) => x.id !== made.id)]); pick(made.id); } }}
-              className="w-full flex items-center gap-2.5 h-8 px-2 rounded-md text-left text-[13px] text-foreground/85 hover:bg-black/[0.05] dark:hover:bg-white/[0.07] transition-colors duration-150"
-            >
-              <Folder className="size-[15px] text-muted-foreground" /> Open folder from this computer
-            </button>
-          )}
         </div>
       </div>
       <NewProjectDialog
@@ -165,6 +220,7 @@ export function StudioProjectPicker() {
   const [q, setQ] = useState("");
   const [side, setSide] = useState<"local" | "cloud" | null>(null); // desktop app: the side box opened from "This PC" / "Cloud"
   const [sideQ, setSideQ] = useState("");
+  const { downloading, download } = useDownloadToPc(setProjects);
   const [creating, setCreating] = useState(false);
   // Same project actions as Project Mode's Projects page
   const [linking, setLinking] = useState<Project | null>(null);
@@ -436,17 +492,19 @@ export function StudioProjectPicker() {
             <div className="flex-1 min-h-0 overflow-y-auto p-1">
               {!list.length && <p className="px-2 py-1.5 text-[13px] text-muted-foreground">{t ? `Nothing matches “${sideQ}”.` : side === "local" ? "No folders on this PC yet." : "No cloud projects."}</p>}
               {list.map((p) => (
-                <button
-                  key={p.id}
-                  type="button"
-                  onClick={() => pick(p.id)}
-                  title={side === "local" ? pathOf(p) : p.repo || p.name}
-                  className="w-full flex items-center gap-2.5 h-8 px-2 rounded-md text-left text-[13px] text-foreground/85 hover:bg-black/[0.05] dark:hover:bg-white/[0.07] transition-colors duration-150"
-                >
-                  {side === "cloud" && p.logo ? <img src={p.logo} alt="" className="size-[15px] shrink-0 rounded object-cover" /> : <Folder className="size-[15px] shrink-0 text-muted-foreground" />}
-                  <span className="flex-1 min-w-0 truncate">{side === "local" ? shortPath(pathOf(p)) : p.name}</span>
-                  {p.id === picked && <Check className="size-3.5 shrink-0" />}
-                </button>
+                <div key={p.id} className="flex items-center rounded-md hover:bg-black/[0.05] dark:hover:bg-white/[0.07] transition-colors duration-150">
+                  <button
+                    type="button"
+                    onClick={() => pick(p.id)}
+                    title={side === "local" ? pathOf(p) : p.repo || p.name}
+                    className="flex-1 min-w-0 flex items-center gap-2.5 h-8 px-2 text-left text-[13px] text-foreground/85"
+                  >
+                    {side === "cloud" && p.logo ? <img src={p.logo} alt="" className="size-[15px] shrink-0 rounded object-cover" /> : <Folder className="size-[15px] shrink-0 text-muted-foreground" />}
+                    <span className="flex-1 min-w-0 truncate">{side === "local" ? shortPath(pathOf(p)) : p.name}</span>
+                    {p.id === picked && <Check className="size-3.5 shrink-0" />}
+                  </button>
+                  {side === "cloud" && desktopApp?.isDesktop && p.repo && downloadButton(p, downloading, download)}
+                </div>
               ))}
             </div>
             {/* Like Cursor: This PC ends with Open Folder */}
@@ -506,7 +564,9 @@ export function NewProjectDialog({ open, onOpenChange, onCreated, linkTo = null 
   const [name, setName] = useState("");
   const [withRepo, setWithRepo] = useState(false);
   // Desktop app: download the repo's code to a folder on this computer (git clone) instead of a cloud project
-  const [toComputer, setToComputer] = useState(!!desktopApp?.isDesktop);
+  // Desktop app: This PC (a folder, or a repo downloaded into one) or Cloud (always with a GitHub repo)
+  const [place, setPlace] = useState<"pc" | "cloud">("pc");
+  const onPc = !!desktopApp?.isDesktop && place === "pc";
   const [repos, setRepos] = useState<Repo[] | null>(null);
   const [github, setGithub] = useState<"ok" | "missing" | "expired" | null>(null);
   const [repo, setRepo] = useState<string | null>(null);
@@ -515,7 +575,7 @@ export function NewProjectDialog({ open, onOpenChange, onCreated, linkTo = null 
 
   useEffect(() => {
     if (!open) return;
-    setName(""); setWithRepo(!!linkTo); setRepo(linkTo?.repo || null); setRepoQ(""); setBusy(false);
+    setName(""); setWithRepo(!!linkTo); setRepo(linkTo?.repo || null); setRepoQ(""); setBusy(false); setPlace("pc");
   }, [open]);
 
   useEffect(() => {
@@ -550,7 +610,21 @@ export function NewProjectDialog({ open, onOpenChange, onCreated, linkTo = null 
     const n = name.trim();
     if (!n || busy || (withRepo && !repo)) return;
     setBusy(true);
-    if (desktopApp?.isDesktop && withRepo && repo && toComputer) {
+    if (onPc && !withRepo) {
+      try {
+        const folder = await desktopApp?.pickFolder?.();
+        if (!folder) return; // the user closed the folder picker
+        const made = await api("/projects/local", { method: "POST", body: JSON.stringify({ localPath: folder, name: n }) });
+        if (!made.res.ok) { toast.error(made.data.error || "Could not create the project"); return; }
+        onCreated({ ...made.data.project, id: String(made.data.project.id) });
+        onOpenChange(false);
+        toast.success(`Created ${n} in ${folder}`);
+      } finally {
+        setBusy(false);
+      }
+      return;
+    }
+    if (onPc && withRepo && repo) {
       try {
         const cloned = await desktopApp.cloneRepo?.(repo);
         if (!cloned) return; // the user closed the folder picker
@@ -582,15 +656,16 @@ export function NewProjectDialog({ open, onOpenChange, onCreated, linkTo = null 
     }
   };
 
-  const option = (on: boolean, title: string, text: string) => (
+  const option = (on: boolean, title: string, text: string) => choice(withRepo === on, () => setWithRepo(on), title, text);
+  const choice = (selected: boolean, onPick: () => void, title: string, text: string) => (
     <button
       type="button"
-      onClick={() => setWithRepo(on)}
-      className={`w-full flex items-start gap-3 px-3 py-2.5 text-left rounded-md border transition-colors ${withRepo === on ? "border-black/25 dark:border-white/25 bg-black/[0.03] dark:bg-white/[0.04]" : "border-black/10 dark:border-white/[0.08] hover:bg-black/[0.02] dark:hover:bg-white/[0.03]"}`}
+      onClick={onPick}
+      className={`w-full flex items-start gap-3 px-3 py-2.5 text-left rounded-md border transition-colors ${selected ? "border-black/25 dark:border-white/25 bg-black/[0.03] dark:bg-white/[0.04]" : "border-black/10 dark:border-white/[0.08] hover:bg-black/[0.02] dark:hover:bg-white/[0.03]"}`}
     >
-      <span className={`mt-0.5 size-3.5 shrink-0 rounded-full border flex items-center justify-center ${withRepo === on ? "border-foreground" : "border-black/30 dark:border-white/30"}`}>
+      <span className={`mt-0.5 size-3.5 shrink-0 rounded-full border flex items-center justify-center ${selected ? "border-foreground" : "border-black/30 dark:border-white/30"}`}>
         <AnimatePresence>
-          {withRepo === on && (
+          {selected && (
             <motion.span
               initial={reduce ? false : { scale: 0 }}
               animate={{ scale: 1 }}
@@ -620,7 +695,7 @@ export function NewProjectDialog({ open, onOpenChange, onCreated, linkTo = null 
         <div className="flex items-start justify-between gap-4 px-5 pt-4 pb-3">
           <div>
             <DialogTitle className="text-[15px] font-medium">{linkTo ? (linkTo.repo ? "Change repo" : "Link a GitHub repo") : "New project"}</DialogTitle>
-            <DialogDescription className="mt-0.5 text-[13px] text-muted-foreground">{linkTo ? linkTo.name : "Shared with Project Mode and Studio Mode."}</DialogDescription>
+            <DialogDescription className="mt-0.5 text-[13px] text-muted-foreground">{linkTo ? linkTo.name : desktopApp?.isDesktop ? "A folder on this PC, or a project in the cloud." : "Shared with Project Mode and Studio Mode."}</DialogDescription>
           </div>
           <button
             type="button"
@@ -647,7 +722,18 @@ export function NewProjectDialog({ open, onOpenChange, onCreated, linkTo = null 
             />
           </label>}
 
-          {!linkTo && <div className="flex flex-col gap-1.5">
+          {!linkTo && desktopApp?.isDesktop && <div className="grid grid-cols-2 gap-1.5">
+            {choice(place === "pc", () => { setPlace("pc"); setWithRepo(false); }, "This PC", "A folder on this computer.")}
+            {choice(place === "cloud", () => { setPlace("cloud"); setWithRepo(true); }, "Cloud", "A GitHub repo, used online.")}
+          </div>}
+
+          {!linkTo && onPc && <div className="flex flex-col gap-1.5">
+            <span className="text-[12px] text-muted-foreground">Code</span>
+            {option(false, "Pick a folder", "Choose the folder on this PC to work in.")}
+            {option(true, "Download a GitHub repo", "Clone one of your repos into a folder you pick.")}
+          </div>}
+
+          {!linkTo && !desktopApp?.isDesktop && <div className="flex flex-col gap-1.5">
             <span className="text-[12px] text-muted-foreground">GitHub</span>
             {option(false, "Start without a repo", "You can link one later.")}
             {option(true, "Link a GitHub repo", "Pick one of your repos.")}
@@ -702,12 +788,6 @@ export function NewProjectDialog({ open, onOpenChange, onCreated, linkTo = null 
           </AnimatePresence>
         </div>
 
-        {desktopApp?.isDesktop && withRepo && !linkTo && (
-          <label className="flex items-center gap-2 px-5 py-2.5 text-[13px] text-foreground/85 cursor-pointer border-t border-black/10 dark:border-white/[0.08]">
-            <input type="checkbox" checked={toComputer} onChange={(e) => setToComputer(e.target.checked)} className="size-3.5 accent-foreground" />
-            Download the code to this computer (you pick the folder)
-          </label>
-        )}
         <div className="flex items-center justify-end gap-2 px-5 py-3 border-t border-black/10 dark:border-white/[0.08] bg-black/[0.02] dark:bg-[#1a1a1a]">
           <button
             type="button"
