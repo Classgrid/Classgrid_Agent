@@ -491,6 +491,15 @@ const HANDLERS = {
     await cfg.update("window.autoDetectColorScheme", false, G);
     await cfg.update("workbench.colorTheme", mode === "light" ? "Light Modern" : "Dark Modern", G);
   },
+  // A Windows notification from the AI panel (Classgrid Code has no Electron, so the toast is shown by PowerShell)
+  notify: (_p, { title, body } = {}) => {
+    if (!title || !body) return;
+    const script = path.join(DESKTOP_DIR, "notify-toast.ps1");
+    if (!fs.existsSync(script)) return;
+    try {
+      require("node:child_process").spawn("powershell.exe", ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", script, "-Title", String(title), "-Body", String(body)], { windowsHide: true, detached: true, stdio: "ignore" }).unref();
+    } catch { /* toasts unavailable */ }
+  },
 };
 
 // The device id the free AI limit counts per computer (the same scrambled Windows ID as the Classgrid desktop app)

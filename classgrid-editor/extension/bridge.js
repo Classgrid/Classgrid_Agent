@@ -413,6 +413,8 @@
       var want = mode === "system" ? (window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light") : mode;
       return call("setEditorTheme", mode, want);
     },
+    // A Windows notification (Classgrid Code has no Electron, so the extension shows a toast)
+    notify: function (title, body) { send("notify", { title: title, body: body }); },
     // The AI panel's chats sidebar → Settings: the same Settings tab as the gear in the title bar
     openSettings: bind("openSettings"),
     // Settings → Log out of Classgrid Code

@@ -75,6 +75,7 @@ import { SettingsRoleRequestCard } from "../components/settings/SettingsRoleRequ
 import { SettingsIdentityCard } from "../components/settings/SettingsIdentityCard";
 import { SettingsPrivacyCard } from "../components/settings/SettingsPrivacyCard";
 import { SettingsVerifiedDomainCard } from "../components/settings/SettingsVerifiedDomainCard";
+import { SettingsDesktopNotificationsCard } from "../components/settings/SettingsDesktopNotificationsCard";
 import { isChatHost } from "@/lib/chatHost";
 
 export function SharedSettingsPage() {
@@ -157,9 +158,12 @@ export function SharedSettingsPage() {
     );
   }
 
+  const isDesktop = import.meta.env.VITE_DESKTOP === "1" || import.meta.env.VITE_EDITOR === "1";
+
   return (
     <div className="flex flex-col gap-6 w-full max-w-4xl mx-auto p-4 sm:p-6 lg:p-8 pb-12">
       <SettingsAppearanceCard />
+      {isDesktop && <SettingsDesktopNotificationsCard />}
       <SettingsPrivacyCard />
       {/* Users only: the super admin dashboard does not verify domains */}
       {!isProfileLoading && profileData?.role !== "super_admin" && <SettingsVerifiedDomainCard />}

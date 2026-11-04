@@ -239,6 +239,7 @@ import { fetchWithRescue } from "@/lib/rescue";
 import { LOCAL_IMAGE_MISSING, keepLocalImage, loadLocalImages, readAsDataUrl, sendsInline, showLocalImages } from "@/lib/desktopImages";
 import { OFFLINE_CHAT_NOTE, continueChatCopy, continuedChatOf, continuedFrom, isUnreachable, keepsChatCopies, readChatCopy, readOtherChatCopy, removeChatCopy, saveChatCopy, syncChatCopy, type OtherChatRef } from "@/lib/desktopChats";
 import { memoryNotesIndex, otherAccountsMemory, syncComputerMemory } from "@/lib/desktopMemory";
+import { readNotificationSettings, playNotificationSound } from "@/lib/desktopNotifications";
 import { AgentMapButton } from "./AgentMap";
 
 // Fetch real presigned URL for R2 uploads
@@ -2023,9 +2024,22 @@ export const INTEGRATIONS_LIST: any[] = [
 
 
 // Desktop app: a Windows notification when the user isn't looking at the app
-function notifyDesktop(body: string) {
-  if (import.meta.env.VITE_DESKTOP !== "1" || document.hasFocus()) return;
-  try { const n = new Notification("Classgrid", { body }); n.onclick = () => window.focus(); } catch { /* notifications are off */ }
+function notifyDesktop(body: string, kind: "aiFinished" | "needsYou" | "gridMessages" = "aiFinished") {
+  const isDesktop = import.meta.env.VITE_DESKTOP === "1";
+  const isEditor = import.meta.env.VITE_EDITOR === "1";
+  if ((!isDesktop && !isEditor) || document.hasFocus()) return;
+  try {
+    const s = readNotificationSettings();
+    if (!s.enabled || !s[kind]) return;
+    if (s.sound) playNotificationSound(s.volume);
+    if (isEditor) {
+      // Classgrid Code has no Electron: the extension shows a Windows toast
+      (window as any).classgridDesktop?.notify?.("Classgrid", body);
+      return;
+    }
+    const n = new Notification("Classgrid", { body });
+    n.onclick = () => window.focus();
+  } catch { /* notifications are off */ }
 }
 export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow", initialMessages, autoFocus = true, readOnly = false, hideClearChat = false, overlayWidth, onOverlayWidthChange, onOverlayResizingChange, inputHeader, studioMenu = false }: AskAiPanelProps) {
   const { data: user } = useCurrentUser();
@@ -3503,6 +3517,10 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
     if (!gridSessionId || gridSubmittingRef.current) return; // my own reply is streaming: it shows already
     // My own message and its reply are already on my screen: reloading them re-draws the chat (the Thought box flashed)
     if (e?.by && e.by.toLowerCase() === gridMyEmailRef.current) return;
+    // Someone else sent a message in this shared chat while I wasn't looking: a Windows notification
+    if (e?.kind === "messages" && e.by && e.by.toLowerCase() !== gridMyEmailRef.current) {
+      notifyDesktop("New message in your shared chat.", "gridMessages");
+    }
     try {
       const prefix = import.meta.env.VITE_API_URL || "https://api.classgrid.in";
       const forChat = gridSessionId;
@@ -3523,7 +3541,7 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
   // Desktop app: the answer finished while the user was in another window, so Windows shows a notification
   const wasSubmittingRef = useRef(false);
   useEffect(() => {
-    if (wasSubmittingRef.current && !submitting) notifyDesktop("The agent finished its answer.");
+    if (wasSubmittingRef.current && !submitting) notifyDesktop("The agent finished its answer.", "aiFinished");
     wasSubmittingRef.current = submitting;
   }, [submitting]);
   // Background work (helpers, a long command) finished after the answer ended: the agent woke up by itself and
@@ -3534,7 +3552,7 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
     const on = (d: { sessionId?: string; phase?: string }) => {
       if (d?.sessionId !== gridSessionId) return;
       if (d.phase === "start") toast.message("Background work finished. The agent is writing an update…");
-      else { refreshSharedMessages(); notifyDesktop("Background work finished. The agent wrote an update."); }
+      else { refreshSharedMessages(); notifyDesktop("Background work finished. The agent wrote an update.", "aiFinished"); }
     };
     const attach = () => { sock = getSocket(); if (sock) sock.on("chat:woke", on); return !!sock; };
     const timer = attach() ? null : setInterval(() => { if (attach() && timer) clearInterval(timer); }, 3000);
@@ -4753,6 +4771,7 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
               } else if (event.type === "permission_request" && event.id) {
                 // The agent waits for the user to allow an action (the card above the chat box)
                 setPendingPermission({ id: String(event.id), tool: String(event.tool || ""), title: String(event.title || "Allow this?"), detail: event.detail ? String(event.detail) : undefined, label: event.label ? String(event.label) : undefined, onceOnly: event.onceOnly === true });
+                notifyDesktop("The agent needs you to approve an action.", "needsYou");
               } else if (event.type === "permission_resolved" && event.id) {
                 setPendingPermission((p) => (p && p.id === String(event.id) ? null : p));
               } else if (event.type === "helper_progress" && typeof event.helper === "number") {
