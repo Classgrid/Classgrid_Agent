@@ -57,7 +57,9 @@ export function registerRunnerSocket(socket) {
 }
 
 // Commands may run for a while; file tools are quick
-const timeoutFor = (tool) => (tool === "computer" ? 2 * 60 * 1000 : tool === "execute_terminal_command" || tool === "run_code" || tool === "push_project_to_github" || tool === "clone_repo" || tool === "sync_repo" || tool === "check_background_command" || tool === "wait_until" ? 11 * 60 * 1000 : tool === "browser" ? 2 * 60 * 1000 : 60 * 1000);
+// (editor_context is asked before every answer, only for extra context: a desktop app that doesn't answer, e.g. while it
+// updates, held each message 60 s before the AI started; 3 s, then the answer goes on without it)
+const timeoutFor = (tool) => (tool === "editor_context" ? 3000 : tool === "computer" ? 2 * 60 * 1000 : tool === "execute_terminal_command" || tool === "run_code" || tool === "push_project_to_github" || tool === "clone_repo" || tool === "sync_repo" || tool === "check_background_command" || tool === "wait_until" ? 11 * 60 * 1000 : tool === "browser" ? 2 * 60 * 1000 : 60 * 1000);
 
 // Sends one tool call to the user's desktop app. Returns its whole answer ({ text, ... }), or null when the app isn't open.
 async function askRunner(userId, tool, payload) {
