@@ -23,7 +23,9 @@ const folderName = (p?: string | null) => (p ? p.split(/[\\/]/).filter(Boolean).
 
 export const editorIconButton = "flex items-center justify-center size-7 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors";
 
-export function EditorChatHeader({ sessionId, menu, side }: { sessionId: string | null; menu?: ReactNode; side?: ReactNode }) {
+// (menu gets the chat and project names shown here, so its Copy items copy exactly what the top line shows)
+export type ChatNames = { title: string; project: string };
+export function EditorChatHeader({ sessionId, menu, side }: { sessionId: string | null; menu?: ReactNode | ((names: ChatNames) => ReactNode); side?: ReactNode }) {
   const navigate = useNavigate();
   const location = useLocation();
   const [open, setOpen] = useState(false);
@@ -74,7 +76,7 @@ export function EditorChatHeader({ sessionId, menu, side }: { sessionId: string 
         <button type="button" onClick={() => window.dispatchEvent(new Event("agent:open-search-palette"))} className={editorIconButton} title="Search chats" aria-label="Search chats">
           <Search className="size-4" />
         </button>
-        {menu}
+        {typeof menu === "function" ? menu({ title: current ? title : "", project }) : menu}
         <button type="button" onClick={newChat} className={editorIconButton} title="New chat" aria-label="New chat">
           <Plus className="size-4" />
         </button>

@@ -63,10 +63,12 @@ async function chatInfo(sessionId: string): Promise<{ title: string; project: st
   return { title, project: name ? lastPart(String(name)) : "" };
 }
 
-export function StudioChatMenu({ sessionId, isPinned, onTogglePin, onDelete, messages, onFilesInChat, noArchive = false, dots = "vertical", buttonClassName }: {
+export function StudioChatMenu({ sessionId, isPinned, onTogglePin, onDelete, messages, onFilesInChat, noArchive = false, dots = "vertical", buttonClassName, names }: {
   sessionId: string; isPinned: boolean; onTogglePin: () => void; onDelete: () => void; messages: Msg[]; onFilesInChat?: () => void;
   // Classgrid Code's AI panel: ⋯ (horizontal) in its top line, and no Archive / Archived chats
   noArchive?: boolean; dots?: "vertical" | "horizontal"; buttonClassName?: string;
+  // Classgrid Code: the chat and project names its top line shows
+  names?: { title: string; project: string };
 }) {
   const [renaming, setRenaming] = useState(false);
   const [showArchived, setShowArchived] = useState(false);
@@ -79,7 +81,8 @@ export function StudioChatMenu({ sessionId, isPinned, onTogglePin, onDelete, mes
   const loadInfo = () => { if (onDesktopApp()) chatInfo(sessionId).then(setInfo).catch(() => {}); };
   useEffect(() => { setInfo(null); }, [sessionId]);
   const copyInfo = async (key: "title" | "project", what: string, missing: string) => {
-    const value = (info || (await chatInfo(sessionId)))[key];
+    // (Classgrid Code: the names its top line shows, copied at once; else the ones loaded from the server)
+    const value = names?.[key] || (info || (await chatInfo(sessionId)))[key];
     if (value) copy(value, what); else toast.error(missing, { id: "chat-copy" });
   };
 

@@ -5027,7 +5027,7 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
   const panelHeader = import.meta.env.VITE_EDITOR === "1" && variant === "overlay" ? (
     <EditorChatHeader
       sessionId={sessionId || null}
-      menu={sessionId ? (
+      menu={sessionId ? (names) => (
         <StudioChatMenu
           sessionId={sessionId}
           isPinned={isPinned}
@@ -5036,6 +5036,7 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
           messages={messages.map((m) => ({ role: m.role, content: typeof m.content === "string" ? m.content : "" }))}
           dots="horizontal"
           buttonClassName={editorIconButton}
+          names={names}
         />
       ) : null}
       side={<EditorChatSidePanel messages={messages} uploads={chatFiles} />}
