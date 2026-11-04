@@ -338,10 +338,10 @@ export function StudioProjectPicker() {
             {projects !== null && !shown.length && (
               <p className="px-2 py-1.5 text-[13px] text-muted-foreground">{q.trim() ? `No project matches “${q}”.` : "No projects yet."}</p>
             )}
-            {/* Desktop app: Recent (folders on this computer), then "Local projects" and "Cloud projects" lists.
-                The website lists every project (they are all cloud projects there). */}
-            {(desktopApp?.isDesktop ? shown.filter(onThisPc).slice(0, q.trim() ? undefined : 5) : shown).map((p) => projectRow(p, false))}
-            {desktopApp?.isDesktop && (
+            {/* Recent (desktop app: projects on this computer; website: cloud projects), then This PC and Cloud apart */}
+            {shown.filter((p) => (desktopApp?.isDesktop ? onThisPc(p) : !onThisPc(p))).slice(0, q.trim() ? undefined : 5).map((p) => projectRow(p, false))}
+            {(
+
               <div className="mt-1 pt-1 border-t border-black/10 dark:border-white/[0.08]">
                 <p className="px-2 pt-1 pb-1 text-[12px] text-muted-foreground">Workspaces</p>
                 {([
@@ -395,7 +395,7 @@ export function StudioProjectPicker() {
         </motion.div>
       )}
       {/* Desktop app: the side box next to the list, like Cursor's "This PC": its own search, then the full paths */}
-      {open && side && desktopApp?.isDesktop && (() => {
+      {open && side && (() => {
         const t = sideQ.trim().toLowerCase();
         const pathOf = (p: Project) => (p.location === "local" ? p.localPath || p.name : thisComputerCopy(p)?.path || p.name);
         const list = (projects || [])
