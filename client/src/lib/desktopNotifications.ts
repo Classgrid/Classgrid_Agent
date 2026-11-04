@@ -1,6 +1,6 @@
-// Desktop notifications (the Classgrid app and Classgrid Code): the user's choices, kept on this computer in one
-// file (%APPDATA%\Classgrid\notification-settings.json), so both programs use the same values. localStorage keeps a
-// copy for this window. The settings page writes here; the AI panel and the Grids popup read here before showing a
+// Desktop notifications (the Classgrid app and Classgrid Code): the user's choices, kept on this computer, each
+// program with its own (the app: %APPDATA%\Classgrid\notification-settings.json; Classgrid Code: its own file next to
+// it). localStorage keeps a copy for this window. Grid messages are the Classgrid app's only (the Grids are there). The settings page writes here; the AI panel and the Grids popup read here before showing a
 // Windows notification.
 
 export type DesktopNotificationSettings = {
@@ -12,7 +12,8 @@ export type DesktopNotificationSettings = {
   volume: number;          // 0..100
 };
 
-const KEY = "cg_desktop_notifications";
+// (each program has its own choices: the Classgrid app and Classgrid Code)
+const KEY = import.meta.env.VITE_EDITOR === "1" ? "cg_editor_notifications" : "cg_desktop_notifications";
 
 export const DEFAULT_NOTIFICATION_SETTINGS: DesktopNotificationSettings = {
   enabled: true,
@@ -37,7 +38,7 @@ export function readNotificationSettings(): DesktopNotificationSettings {
 type SharedDesktop = {
   getNotificationSettings?: () => Promise<Partial<DesktopNotificationSettings> | null>;
   saveNotificationSettings?: (s: DesktopNotificationSettings) => Promise<unknown>;
-  notify?: (title: string, body: string) => Promise<unknown>;
+  notify?: (title: string, body: string, opts?: { sound?: boolean; toast?: boolean }) => Promise<unknown>;
 };
 const desk = () => (typeof window !== "undefined" ? ((window as any).classgridDesktop as SharedDesktop | undefined) : undefined);
 
@@ -73,21 +74,71 @@ export function showDesktopNotification(kind: "aiFinished" | "needsYou" | "gridM
   const isDesktop = import.meta.env.VITE_DESKTOP === "1";
   const isEditor = import.meta.env.VITE_EDITOR === "1";
   if (!isDesktop && !isEditor) return false;
-  if (typeof document !== "undefined" && document.hasFocus()) return false; // the user is already here
   try {
     const s = readNotificationSettings();
-    if (!s.enabled || !s[kind]) return false;
-    if (s.sound) playNotificationSound(s.volume);
-    if (isEditor) {
-      // Classgrid Code has no Electron: its extension shows the toast (notify-toast.ps1)
-      void desk()?.notify?.(title, body);
-      return true;
+    // The agent: "Enable Notifications for Agent" (the Windows notification) and "Enable Sounds for Agent" (its sound)
+    // each on their own. Grid messages have their own switch and are only in the Classgrid app (the Grids are there).
+    const agent = kind !== "gridMessages";
+    if (!agent && isEditor) return false;
+    const wantToast = agent ? s.enabled && s[kind] : s.gridMessages;
+    const wantSound = s.sound && (agent ? s[kind] : s.gridMessages);
+    if (!wantToast && !wantSound) return false;
+    // You're looking at it: only the sound, no Windows notification over what you're reading
+    if (typeof document !== "undefined" && document.hasFocus()) {
+      if (wantSound) playNotificationSound(s.volume);
+      return false;
     }
+    if (isEditor) {
+      // Classgrid Code has no Electron: its extension shows the toast as Classgrid Code with Windows' notification
+      // sound, or only the sound while Classgrid Code is the window in front (the panel's own sound isn't heard then)
+      void desk()?.notify?.(title, body, { sound: wantSound, toast: wantToast });
+      return wantToast;
+    }
+    if (wantSound) playNotificationSound(s.volume);
+    if (!wantToast) return false;
     // The Classgrid app: its main window shows it, so a click brings the app forward
     if (desk()?.notify) { void desk()!.notify!(title, body); return true; }
     const n = new Notification(title, { body });
     n.onclick = () => window.focus();
     return true;
+  } catch { return false; }
+}
+
+// Permission: Windows lets desktop apps notify by default, so in the app / Classgrid Code "asking" means the user
+// agreed in our prompt and a test notification is sent. In a plain browser it is the browser's own prompt.
+export type NotificationPermissionState = "granted" | "denied" | "unknown";
+const PERM_KEY = "classgrid_notification_permission";
+export function getNotificationPermission(): NotificationPermissionState {
+  try {
+    const v = localStorage.getItem(PERM_KEY);
+    if (v === "granted" || v === "denied") return v;
+    if (!desk()?.notify && typeof Notification !== "undefined" && Notification.permission !== "default") {
+      return Notification.permission === "granted" ? "granted" : "denied";
+    }
+  } catch { /* ignore */ }
+  return "unknown";
+}
+export async function requestNotificationPermission(allow: boolean): Promise<NotificationPermissionState> {
+  let state: NotificationPermissionState = allow ? "granted" : "denied";
+  if (allow && !desk()?.notify && typeof Notification !== "undefined") {
+    const r = await Notification.requestPermission();
+    state = r === "granted" ? "granted" : "denied";
+  }
+  try { localStorage.setItem(PERM_KEY, state); } catch { /* ignore */ }
+  if (state === "granted") sendTestNotification();
+  return state;
+}
+
+// A test notification from Settings: shown even while the window is focused and whatever the switches say.
+export function sendTestNotification(): boolean {
+  try {
+    const s = readNotificationSettings();
+    if (s.sound) playNotificationSound(s.volume);
+    const title = "Classgrid";
+    const body = "Test notification: this is how the agent tells you it finished or needs you.";
+    if (desk()?.notify) { void desk()!.notify!(title, body); return true; }
+    if (typeof Notification !== "undefined" && Notification.permission === "granted") { new Notification(title, { body }); return true; }
+    return false;
   } catch { return false; }
 }
 
@@ -98,7 +149,7 @@ export function playNotificationSound(volume: number) {
     if (!AudioCtx) return;
     const ctx = new AudioCtx();
     const gain = ctx.createGain();
-    gain.gain.value = Math.max(0, Math.min(1, volume / 100)) * 0.5;
+    gain.gain.value = Math.max(0, Math.min(1, volume / 100)) * 0.12;
     gain.connect(ctx.destination);
     const now = ctx.currentTime;
     const blip = (freq: number, at: number, dur: number) => {

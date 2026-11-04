@@ -3079,6 +3079,23 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
     return true;
   };
 
+  // Desktop app and Classgrid Code: a chat saved on this computer shows at once (no loading), while the server's
+  // newest version loads quietly and replaces it. isCurrent: this chat is still the one being opened.
+  const showCopyFirst = (id: string, isCurrent: () => boolean) => {
+    let fromServer = false;
+    let shown = false;
+    if (keepsChatCopies()) {
+      readChatCopy(id).then((copy) => {
+        if (!copy || fromServer || !isCurrent()) return;
+        shown = true;
+        setMessages(copy.messages.map(toChatMessage));
+        setIsPinned(!!copy.details?.session?.pinned);
+        setIsLoadingChat(false);
+      }).catch(() => { /* the server's copy comes anyway */ });
+    }
+    return { shown: () => shown, serverArrived: () => { fromServer = true; } };
+  };
+
   // Listen for external commands (like clicking "New Chat" or an old chat in the sidebar)
   useEffect(() => {
     const detachRunningReply = () => {
@@ -3157,6 +3174,8 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
       wordTypingActiveRef.current = false;
       setOfflineCopyOf(null);
       let savedDetails: any = null;
+      const openedGen = chatGenRef.current;
+      const copyFirst = showCopyFirst(id, () => chatGenRef.current === openedGen);
 
       try {
         const endpointPrefix = typeof import.meta !== "undefined" && import.meta.env
@@ -3246,6 +3265,7 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
               createdAt: m.created_at ? new Date(m.created_at).getTime() : Date.now()
             };
           });
+          copyFirst.serverArrived();
           setMessages(loadedMessages);
           saveChatCopy(id, savedDetails, data.messages); // desktop app: keep a copy on this computer
         } else if (res.status === 403 || res.status === 404) {
@@ -3324,6 +3344,7 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
       setIsLoadingChat(true);
       setIsPinned(false);
       setOfflineCopyOf(null);
+      const copyFirst = showCopyFirst(routeSessionId, () => !controller.signal.aborted);
       try {
         let data: any = null;
         for (let attempt = 0; attempt < 2 && !data; attempt++) {
@@ -3396,10 +3417,13 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
               createdAt: m.created_at ? new Date(m.created_at).getTime() : Date.now()
             };
           });
+          copyFirst.serverArrived();
           setMessages(loadedMessages);
       } catch (err: any) {
         if (controller.signal.aborted) return;
         console.error("Failed to load chat from route", err);
+        // (the saved copy is already on screen: keep it, no error, unless the chat is gone)
+        if (copyFirst.shown() && !(err?.status === 403 || err?.status === 404) && !isUnreachable(err)) return;
         if (err?.status === 403 || err?.status === 404) removeChatCopy(routeSessionId);
         // Desktop app, no internet: open the copy saved on this computer instead
         if (keepsChatCopies() && (isUnreachable(err) || err?.name === "AbortError") && await showSavedChatCopy(routeSessionId)) return;
@@ -3527,9 +3551,17 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
   // Desktop app: the answer finished while the user was in another window, so Windows shows a notification
   const wasSubmittingRef = useRef(false);
   useEffect(() => {
-    if (wasSubmittingRef.current && !submitting) notifyDesktop("The agent finished its answer.", "aiFinished");
+    if (wasSubmittingRef.current && !submitting) {
+      // An answer that ends waiting for you (a questions card or a plan to approve) says so, as "Needs you"
+      const last = [...messages].reverse().find((m) => m.role === "assistant");
+      const text = typeof last?.content === "string" ? last.content : "";
+      const card = /```approval[\s\S]*?"variant"\s*:\s*"(questions|plan)"/.exec(text)?.[1];
+      if (card === "questions") notifyDesktop("The agent has questions for you.", "needsYou");
+      else if (card === "plan") notifyDesktop("The agent's plan is ready for you to approve.", "needsYou");
+      else notifyDesktop("The agent finished its answer.", "aiFinished");
+    }
     wasSubmittingRef.current = submitting;
-  }, [submitting]);
+  }, [submitting]); // eslint-disable-line react-hooks/exhaustive-deps
   // Background work (helpers, a long command) finished after the answer ended: the agent woke up by itself and
   // answered in this chat; show its update
   useEffect(() => {

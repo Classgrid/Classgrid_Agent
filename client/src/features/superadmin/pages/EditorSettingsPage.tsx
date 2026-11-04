@@ -200,10 +200,7 @@ export function EditorSettingsPage() {
             <AiHubModal isOpen onClose={() => {}} initialTab={isHubTab(section) ? section : "plugins"} embedded />
           </div>
           {section === "notifications" && (
-            <>
-              <h1 className="text-xl font-semibold mb-5">Notifications</h1>
-              <div className="max-w-xl"><SettingsDesktopNotificationsCard /></div>
-            </>
+            <div className="max-w-2xl"><SettingsDesktopNotificationsCard /></div>
           )}
           {section === "appearance" && (
             <>

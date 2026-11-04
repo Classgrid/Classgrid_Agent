@@ -508,23 +508,28 @@ const HANDLERS = {
     await cfg.update("window.autoDetectColorScheme", false, G);
     await cfg.update("workbench.colorTheme", mode === "light" ? "Light Modern" : "Dark Modern", G);
   },
-  // Notification settings: the same file the Classgrid app uses (%APPDATA%\Classgrid)
-  getNotificationSettings: () => { try { return JSON.parse(fs.readFileSync(path.join(process.env.APPDATA || "", "Classgrid", "notification-settings.json"), "utf8")); } catch { return null; } },
+  // Notification settings: Classgrid Code's own file (the Classgrid app keeps its own, %APPDATA%\Classgrid)
+  getNotificationSettings: () => { try { return JSON.parse(fs.readFileSync(path.join(process.env.APPDATA || "", "Classgrid", "classgrid-code-notification-settings.json"), "utf8")); } catch { return null; } },
   saveNotificationSettings: (_p, s) => {
     try {
-      const file = path.join(process.env.APPDATA || "", "Classgrid", "notification-settings.json");
+      const file = path.join(process.env.APPDATA || "", "Classgrid", "classgrid-code-notification-settings.json");
       fs.mkdirSync(path.dirname(file), { recursive: true });
       fs.writeFileSync(file, JSON.stringify(s && typeof s === "object" ? s : {}));
       return true;
     } catch { return false; }
   },
   // A Windows notification from the AI panel (Classgrid Code has no Electron, so the toast is shown by PowerShell)
-  notify: (_p, { title, body } = {}) => {
+  notify: (_p, { title, body, sound, toast = true } = {}) => {
     if (!title || !body) return;
     const script = path.join(DESKTOP_DIR, "notify-toast.ps1");
     if (!fs.existsSync(script)) return;
+    // While Classgrid Code is the window in front (typing in the code counts as being here too): only the sound
+    const soundOnly = !toast || vscode.window.state.focused;
+    if (soundOnly && !sound) return;
     try {
-      require("node:child_process").spawn("powershell.exe", ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", script, "-Title", String(title), "-Body", String(body)], { windowsHide: true, detached: true, stdio: "ignore" }).unref();
+      // Shown as Classgrid Code, with its name and logo (notify-toast.ps1)
+      const args = soundOnly ? ["-SoundOnly"] : ["-Title", String(title), "-Body", String(body), ...(sound ? ["-Sound"] : [])];
+      require("node:child_process").spawn("powershell.exe", ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", script, ...args], { windowsHide: true, detached: true, stdio: "ignore" }).unref();
     } catch { /* toasts unavailable */ }
   },
 };

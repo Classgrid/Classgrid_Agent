@@ -415,8 +415,8 @@
       return call("setEditorTheme", mode, want);
     },
     // A Windows notification (Classgrid Code has no Electron, so the extension shows a toast)
-    // (sound: Windows plays its notification sound with it)
-    notify: function (title, body, opts) { send("notify", { title: title, body: body, sound: !!(opts && opts.sound) }); },
+    // (sound: Windows plays its notification sound with it; toast false: only the sound)
+    notify: function (title, body, opts) { send("notify", { title: title, body: body, sound: !!(opts && opts.sound), toast: !(opts && opts.toast === false) }); },
     getNotificationSettings: bind("getNotificationSettings"),
     saveNotificationSettings: bind("saveNotificationSettings"),
     // The AI panel's chats sidebar → Settings: the same Settings tab as the gear in the title bar
