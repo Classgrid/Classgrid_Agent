@@ -103,6 +103,10 @@ jobs:
 
       - name: Build the editor
         working-directory: repo/classgrid-editor/vscodium
+        # (signed in to GitHub: the build downloads VS Code's built-in extensions from GitHub, and without a login
+        # GitHub soon refuses with 403 "rate limited")
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: ./build.sh
 
       - name: Pack the Windows app
