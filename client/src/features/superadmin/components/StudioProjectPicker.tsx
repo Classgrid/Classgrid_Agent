@@ -290,7 +290,8 @@ export function StudioProjectPicker() {
     return () => { window.removeEventListener("pointerdown", away); window.removeEventListener("keydown", esc); window.removeEventListener("resize", resized); };
   }, [open]);
 
-  const current = projects?.find((p) => p.id === picked) || null;
+  // Website: a folder project picked in the desktop app is never the shown project here
+  const current = onlineOnly(projects).find((p) => p.id === picked) || null;
   // A folder project that pushes to GitHub: its repo is read from the folder's git settings and only shown (never
   // saved as the project's repo: that field is for cloud projects, and saving it there mixed folder and cloud projects)
   const [folderRepo, setFolderRepo] = useState<{ id: string; repo: string | null } | null>(null);

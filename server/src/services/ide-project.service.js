@@ -893,10 +893,11 @@ export async function forgetChatScreenProject(sessionId) {
   await redis.del(UI_PROJECT(sessionId), CHAT_HERE(sessionId)).catch(() => {});
 }
 
-export async function linkChatToProject(userId, projectId, sessionId, deviceId = null) {
+export async function linkChatToProject(userId, projectId, sessionId, deviceId = null, { website = false } = {}) {
   await connectDB();
-  const project = await IdeProject.findOne({ _id: projectId, owner: userId }).select("_id localCopies");
-  if (!project) return;
+  const project = await IdeProject.findOne({ _id: projectId, owner: userId }).select("_id location localCopies");
+  // A folder project works only in the desktop app: a message from the website never links a chat to it
+  if (!project || (website && project.location === "local")) return;
   await redis.set(UI_PROJECT(sessionId), String(project._id), "EX", 24 * 60 * 60).catch(() => {}); // the user's own project on screen
   // Sent from the desktop app on a computer where this project is set to "On this computer": the chat works in that copy
   const here = deviceId ? (project.localCopies || []).some((c) => c.deviceId === String(deviceId) && c.here) : false;
@@ -938,11 +939,13 @@ function terminalRunsText(ctx, rel) {
     (r.output ? `\n  Output (its end):\n  \`\`\`\n${String(r.output).slice(-(r.exitCode === 0 ? 800 : 3000))}\n  \`\`\`` : "")).join("\n");
 }
 
-export async function editorContextFor(sessionId) {
+export async function editorContextFor(sessionId, { website = false } = {}) {
   const project = await projectForChat(sessionId);
   if (!project) return "";
-  // A folder on the user's own computer: the Classgrid desktop app runs the project tools there (local-runner.service.js)
+  // A folder on the user's own computer: the Classgrid desktop app runs the project tools there (local-runner.service.js).
+  // The website never gets its folder path or editor (the folder project works only in the desktop app).
   if (project.location === "local") {
+    if (website) return "";
     return `\n\n<project_editor>\n${[
       PROJECT_MODE_RULES,
       `Project: ${project.name}. This project is a folder on the user's OWN computer (${project.localPath || "a local folder"}), not on Classgrid's servers. The Classgrid desktop app on that computer runs your project tools there: the file tools read and change the real files on their disk, and terminal commands run in that folder on their computer (Windows, PowerShell), so use PowerShell commands, not Linux-only ones. Paths are relative to the project folder; /data and /home/workspace/... don't exist here. push_project_to_github commits everything and pushes it to the folder's GitHub repository with the user's own GitHub login on that computer. Review/Undo snapshots and search by meaning aren't available for this project. Code you run (run_code, Python, Go, Node, anything) runs on their computer too, never somewhere else: there is no sandbox in this project, so never mention one. If a tool says the desktop app isn't open, tell the user to open the Classgrid app on that computer.`,

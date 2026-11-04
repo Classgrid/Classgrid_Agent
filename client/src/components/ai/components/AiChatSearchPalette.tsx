@@ -21,6 +21,7 @@ import { cn } from "@/lib/utils";
 import { useLocation } from "react-router-dom";
 import { resolveDashboardConfig } from "@/config/sidebar";
 import { fetchWithRescue } from "@/lib/rescue";
+import { onDesktop, savedProject } from "@/features/superadmin/utils/projectCopies";
 
 type SearchResult = {
   id: string;
@@ -125,7 +126,8 @@ export function AiChatSearchPalette({
         const res = await fetchWithRescue(`${endpointPrefix}/api/ai/sessions${listQuery}`, { credentials: "include" });
         const data = await res.json();
         if (data.sessions) {
-          let filtered = data.sessions;
+          // Website: a folder project's chats (This PC) never show; they live only in the desktop app
+          let filtered = onDesktop() ? data.sessions : data.sessions.filter((s: any) => !s.project_id || savedProject(String(s.project_id))?.location !== "local");
           if (q.trim()) {
             filtered = filtered.filter((s: any) => (s.title || "").toLowerCase().includes(q.toLowerCase()));
           } else {

@@ -24,15 +24,17 @@ Every step asks the user first on the permission card (they can pick "always all
 -   **Projects from a folder on the computer** (no GitHub needed): Open Folder, Clone Repository, or pick a recent
     workspace. All project tools run in that folder, and push_project_to_github commits and pushes with the user's
     own GitHub login.
--   **One project in both places** (the cloud and the computer, kept the same through GitHub): on a cloud project,
-    "Get a copy on this computer" (next to the project name at the top of the chat, or in the project's menu in the
-    sidebar) downloads its repo into any folder on any drive the user picks (C:, D:, an external drive), after
-    checking there is enough free space. Then the user picks "On this computer" or "In the cloud" for that project;
-    the app remembers it. Opening it on the computer pulls the latest from GitHub first (unsaved changes there are
-    committed first, never lost); switching to the cloud pushes the computer's work first. After each answer that
-    changed files, Classgrid pushes the work to GitHub by itself. For a folder project, "Also use in the cloud" pushes
-    it to GitHub (making a private repo when it has none) and it then works in the cloud too, with the same chats.
-    The website always opens the cloud copy.
+-   **One project in both places** (the cloud and a folder on the computer, linked only by its GitHub repo; see
+    projects-cloud-and-computer.md): a cloud project can be downloaded to a folder on this PC with "Get a copy on this
+    computer" (next to the project name at the top of the chat, or in the project's menu in the sidebar). It clones
+    the repo into any folder on any drive the user picks (C:, D:, an external drive), after checking there is enough
+    free space. Then the user picks "On this computer" or "In the cloud" for that project; the app remembers it.
+    Nothing is pushed by itself: the computer's work goes to GitHub only when the user asks the agent to commit and
+    push (and GitHub's changes come into the folder only when they ask the agent to pull). A folder project is linked
+    to a repo only after the user asked the agent to make a GitHub repo and push it; "Also use in the cloud" then
+    links that repo, keeping its name, logo and chats. It never makes a repo or uploads the folder by itself.
+-   **What the website shows**: only cloud projects. Folder projects (This PC), their chats, their groups and folder
+    paths are only in the desktop app, and the website always opens the cloud copy of a project.
 -   **Built-in code editor**: Classgrid Code, the same VS Code editor as Project Mode in the cloud, is inside the app
     and works offline on folder projects. In the desktop app it has an extension store (Open VSX, the open store
     VS Code-based editors use, with extensions like Claude Code, Prettier and Python), and .vsix files can be installed

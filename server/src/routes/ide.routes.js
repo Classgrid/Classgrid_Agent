@@ -37,6 +37,7 @@ import { githubUser } from "../services/github-token.service.js";
 import { pushProject, openClassgridPrBranch, revealInEditor, checkpointChanges, rejectCheckpoint, undoToCheckpoint, backupAndRemoveProjectCode, touchStudio, STUDIO_USERS, STUDIO_SEEN, STUDIO_IDLE_MS } from "../services/ide-project.service.js";
 import { repoAppToken } from "../services/github-app.service.js";
 import { callLocal, runnerOnline } from "../services/local-runner.service.js";
+import { isWebsite } from "../utils/client-app.js";
 import mongoose from "mongoose";
 import connectDB from "../../config/db.js";
 import redis from "../config/redis.js";
@@ -263,11 +264,16 @@ async function ownProject(req, res) {
   if (!mongoose.isValidObjectId(req.params.id)) { res.status(404).json({ error: "Project not found" }); return null; }
   await connectDB();
   const project = await IdeProject.findOne({ _id: req.params.id, owner: req.user._id });
-  if (!project) res.status(404).json({ error: "Project not found" });
+  // A folder on the user's computer exists only in the desktop app: the website never finds it
+  if (!project || (project.location === "local" && isWebsite(req))) { res.status(404).json({ error: "Project not found" }); return null; }
   return project;
 }
 
-const projectJson = (p) => ({ id: p._id, name: p.name, repo: p.repo, logo: p.logo || null, location: p.location || "cloud", localPath: p.localPath || null, localCopies: (p.localCopies || []).map((c) => ({ deviceId: c.deviceId, path: c.path, at: c.at, here: !!c.here })), lastOpenedAt: p.lastOpenedAt, createdAt: p.createdAt, updatedAt: p.updatedAt });
+// The website never gets folder paths on the user's computer (utils/client-app.js)
+const projectJson = (p, req) => {
+  const web = isWebsite(req);
+  return { id: p._id, name: p.name, repo: p.repo, logo: p.logo || null, location: p.location || "cloud", localPath: web ? null : p.localPath || null, localCopies: (p.localCopies || []).map((c) => ({ deviceId: c.deviceId, path: web ? null : c.path, at: c.at, here: !!c.here })), lastOpenedAt: p.lastOpenedAt, createdAt: p.createdAt, updatedAt: p.updatedAt };
+};
 
 // A project logo must be a picture this user uploaded to our R2 (same upload as the profile picture).
 // Returns the link, null to remove the logo, or undefined when the link is not allowed.
@@ -337,10 +343,10 @@ router.get("/projects", isAuthenticated, async (req, res) => {
   // cloud project). The desktop app once saved a folder's GitHub link there by mistake: clear it, so cloud projects
   // and repo links work again.
   await IdeProject.updateMany({ owner: req.user._id, location: "local", repo: { $nin: [null, ""] } }, { $set: { repo: null } }).catch(() => {});
-  const projects = await IdeProject.find({ owner: req.user._id }).sort({ updatedAt: -1 }).limit(200);
+  const projects = await IdeProject.find({ owner: req.user._id, ...(isWebsite(req) ? { location: { $ne: "local" } } : {}) }).sort({ updatedAt: -1 }).limit(200);
   const edits = await newestFileEdits(projects);
   const list = projects.map((p) => {
-    const json = projectJson(p);
+    const json = projectJson(p, req);
     const edited = edits[String(p._id)];
     if (edited && (!json.updatedAt || edited > new Date(json.updatedAt))) json.updatedAt = edited;
     return json;
@@ -365,11 +371,12 @@ router.post("/projects", isAuthenticated, async (req, res) => {
   const logo = req.body?.logo !== undefined ? projectLogo(req.body.logo, req.user._id) : null;
   if (logo === undefined) return res.status(400).json({ error: "Could not use this logo. Upload it again." });
   const project = await IdeProject.create({ owner: req.user._id, name, logo });
-  res.json({ project: projectJson(project) });
+  res.json({ project: projectJson(project, req) });
 });
 
 // A project from a folder on the user's own computer (Classgrid desktop app): its tools run there, never on our sandbox
 router.post("/projects/local", isAuthenticated, async (req, res) => {
+  if (isWebsite(req)) return res.status(403).json({ error: "Folder projects only work in the Classgrid desktop app." });
   const localPath = String(req.body?.localPath || "").trim().slice(0, 500);
   if (!localPath) return res.status(400).json({ error: "Pick a folder" });
   const name = String(req.body?.name || localPath.split(/[\\/]/).filter(Boolean).pop() || "").trim().slice(0, 80);
@@ -377,12 +384,12 @@ router.post("/projects/local", isAuthenticated, async (req, res) => {
   await connectDB();
   // The same folder opens its project again (Windows paths: any case, with or without a slash at the end)
   const existing = await IdeProject.findOne({ owner: req.user._id, location: "local", localPath: new RegExp(`^${escapeRegex(localPath.replace(/[\\/]+$/, ""))}[\\\\/]*$`, "i") });
-  if (existing) return res.json({ project: projectJson(existing) });
+  if (existing) return res.json({ project: projectJson(existing, req) });
   // A name that is already used gets a number, like "app (2)"
   let free = name;
   for (let n = 2; n < 100 && (await nameTaken(req.user._id, free)); n++) free = `${name.slice(0, 74)} (${n})`;
   const project = await IdeProject.create({ owner: req.user._id, name: free, location: "local", localPath });
-  res.json({ project: projectJson(project) });
+  res.json({ project: projectJson(project, req) });
 });
 
 router.patch("/projects/:id", isAuthenticated, async (req, res) => {
@@ -421,7 +428,7 @@ router.patch("/projects/:id", isAuthenticated, async (req, res) => {
     project.logo = logo;
   }
   await project.save();
-  res.json({ project: projectJson(project) });
+  res.json({ project: projectJson(project, req) });
 });
 
 // The repo's GitHub details for the project card, like Vercel shows: branch, last commit, repo link.
@@ -523,9 +530,9 @@ router.post("/projects/:id/open", isAuthenticated, async (req, res) => {
   // A folder on the user's computer has nothing to download here: the desktop app works on it directly
   if (project.location === "local") return res.json({ ok: true, local: true, localPath: project.localPath });
   // The desktop app on a computer that has this project's folder: it opens there, as it is (nothing from GitHub)
-  const copy = req.body?.deviceId && project.repo ? copyOn(project, String(req.body.deviceId)) : null;
+  const copy = req.body?.deviceId && project.repo && !isWebsite(req) ? copyOn(project, String(req.body.deviceId)) : null;
   if (copy) {
-    return openCopyHere(res, project, copy, String(req.body.deviceId)).catch((e) => {
+    return openCopyHere(req, res, project, copy, String(req.body.deviceId)).catch((e) => {
       console.error("[IDE] Opening the computer copy failed:", e.message);
       res.status(500).json({ error: "Could not open this project on this computer" });
     });
@@ -607,7 +614,7 @@ router.post("/projects/:id/open", isAuthenticated, async (req, res) => {
     project.lastBackup = undefined;
     project.lastOpenedAt = new Date();
     await project.save();
-    res.json({ project: projectJson(project), folder: `/home/workspace/projects/${project._id}`, installing, backup });
+    res.json({ project: projectJson(project, req), folder: `/home/workspace/projects/${project._id}`, installing, backup });
   } catch (e) {
     console.error("[IDE] Open project failed:", e.message);
     res.status(e.status || 500).json({ error: e.status ? e.message : "Could not open this project" });
@@ -844,7 +851,7 @@ const ghHeaders = (key) => ({ Authorization: `Bearer ${key}`, Accept: "applicati
 // Sends the error itself and returns null.
 async function readyForCopy(req, res, { app = true } = {}) {
   const deviceId = String(req.body?.deviceId || "");
-  if (!DEVICE_ID.test(deviceId)) { res.status(400).json({ error: "This works in the Classgrid desktop app on your computer." }); return null; }
+  if (!DEVICE_ID.test(deviceId) || isWebsite(req)) { res.status(400).json({ error: "This works in the Classgrid desktop app on your computer." }); return null; }
   const user = await githubTokenFor(req.user._id);
   if (!user) { res.status(409).json({ error: "github_not_connected" }); return null; }
   if (app && !(await runnerOnline(req.user._id))) { res.status(409).json({ error: "The Classgrid desktop app isn't connected right now. Check you're logged in to the app, then try again.", code: "app_not_open" }); return null; }
@@ -903,11 +910,11 @@ async function saveCloudCopy(project) {
 
 // Opening the project on this computer: it is the user's folder, used as it is. Nothing is downloaded from GitHub and
 // GitHub isn't needed (the folder gets GitHub's changes only when the user asks the agent to pull).
-async function openCopyHere(res, project, copy, deviceId) {
+async function openCopyHere(req, res, project, copy, deviceId) {
   putCopy(project, deviceId, { path: copy.path, at: new Date(), here: true });
   project.lastOpenedAt = new Date();
   await project.save();
-  res.json({ ok: true, local: true, localPath: copy.path, project: projectJson(project) });
+  res.json({ ok: true, local: true, localPath: copy.path, project: projectJson(project, req) });
 }
 
 // This computer's copy pushed to GitHub (to its branch): { message } or { error, code }
@@ -940,7 +947,7 @@ router.post("/projects/:id/copy", isAuthenticated, async (req, res) => {
     if (!path) return res.status(502).json({ error: "The download didn't finish. Try again." });
     putCopy(project, ready.deviceId, { path, at: new Date(), here: true });
     await project.save();
-    res.json({ ok: true, local: true, localPath: path, project: projectJson(project), message: [saved, lastLine(r.text)].filter(Boolean).join(" ") });
+    res.json({ ok: true, local: true, localPath: path, project: projectJson(project, req), message: [saved, lastLine(r.text)].filter(Boolean).join(" ") });
   } catch (e) {
     console.error("[IDE] Copy to computer failed:", e.message);
     res.status(500).json({ error: "Could not get a copy on this computer" });
@@ -959,9 +966,9 @@ router.post("/projects/:id/where", isAuthenticated, async (req, res) => {
     // On this computer: the folder as it is, no GitHub needed
     if (where === "local") {
       const deviceId = String(req.body?.deviceId || "");
-      const here = DEVICE_ID.test(deviceId) ? copyOn(project, deviceId) : null;
+      const here = DEVICE_ID.test(deviceId) && !isWebsite(req) ? copyOn(project, deviceId) : null;
       if (!here) return res.status(409).json({ error: "There's no copy of this project on this computer yet. Get a copy first.", code: "no_copy" });
-      return await openCopyHere(res, project, here, deviceId);
+      return await openCopyHere(req, res, project, here, deviceId);
     }
     // Nothing is pushed by itself: this computer's work goes to GitHub only when the user asks the agent to push
     const skipSave = where === "cloud";
@@ -977,7 +984,7 @@ router.post("/projects/:id/where", isAuthenticated, async (req, res) => {
     }
     putCopy(project, ready.deviceId, { path: copy.path, at: new Date(), here: false });
     await project.save();
-    res.json({ ok: true, project: projectJson(project), message: [message, "This project now opens in the cloud."].filter(Boolean).join(" ") });
+    res.json({ ok: true, project: projectJson(project, req), message: [message, "This project now opens in the cloud."].filter(Boolean).join(" ") });
   } catch (e) {
     console.error("[IDE] Switching where the project opens failed:", e.message);
     res.status(500).json({ error: "Could not switch where this project opens" });
@@ -1041,7 +1048,7 @@ router.post("/projects/:id/cloud", isAuthenticated, async (req, res) => {
     project.localPath = null;
     putCopy(project, ready.deviceId, { path: folder, at: new Date(), here: true });
     await project.save();
-    res.json({ ok: true, project: projectJson(project), message: `Linked to ${repo}. This project now works in the cloud too.` });
+    res.json({ ok: true, project: projectJson(project, req), message: `Linked to ${repo}. This project now works in the cloud too.` });
   } catch (e) {
     console.error("[IDE] Linking the folder's repo failed:", e.message);
     res.status(500).json({ error: "Could not link this folder's GitHub repo" });
@@ -1146,7 +1153,10 @@ router.get("/groups", isAuthenticated, async (req, res) => {
   await connectDB();
   // ?project=all: every group of every project (Studio shows each project's groups inside its folder)
   const scope = req.query.project === "all" ? {} : { projectId: groupScope(req.query.project) };
-  const groups = await ChatGroup.find({ userId: req.user._id, ...scope }).sort({ createdAt: 1 }).lean();
+  // The website never shows the groups of a folder project (it exists only in the desktop app)
+  const localIds = isWebsite(req) ? (await IdeProject.find({ owner: req.user._id, location: "local" }).select("_id").lean()).map((p) => String(p._id)) : [];
+  if (localIds.includes(scope.projectId)) return res.json({ groups: [] });
+  const groups = await ChatGroup.find({ userId: req.user._id, ...scope, ...(localIds.length && req.query.project === "all" ? { projectId: { $nin: localIds } } : {}) }).sort({ createdAt: 1 }).lean();
   res.json({ groups: await groupsJson(groups, req.user.email) });
 });
 
@@ -1155,7 +1165,7 @@ router.post("/groups", isAuthenticated, async (req, res) => {
   const input = groupInput(req.body);
   if (!input.name) return res.status(400).json({ error: "Give the group a name" });
   const projectId = groupScope(req.body?.project);
-  if (projectId && !(await IdeProject.exists({ _id: projectId, owner: req.user._id }))) return res.status(404).json({ error: "Project not found" });
+  if (projectId && !(await IdeProject.exists({ _id: projectId, owner: req.user._id, ...(isWebsite(req) ? { location: { $ne: "local" } } : {}) }))) return res.status(404).json({ error: "Project not found" });
   const sessionId = (await ownChat(req, req.body?.sessionId)) ? req.body.sessionId : null;
   if (sessionId) await ChatGroup.updateMany({ userId: req.user._id }, { $pull: { chatIds: sessionId } });
   const group = await ChatGroup.create({ ...input, userId: req.user._id, projectId, chatIds: sessionId ? [sessionId] : [] });

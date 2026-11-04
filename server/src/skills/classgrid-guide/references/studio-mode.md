@@ -41,6 +41,7 @@ Studio Mode is Classgrid AI's agent workspace: you chat on the left, and a pane 
   - **Search projects** and pick one under **Recent**, or choose **No project** to chat without one.
   - **New project**: give a **Name**, then **Start without a repo** or **Link a GitHub repo**.
   - Hover a project to **Rename**, **Link a repo** / **Change repo**, or **Delete** it (you type the project name to confirm; its code stays on GitHub).
+- On the website the list has only cloud projects (with a GitHub repo). In the desktop app it is split into two groups: **This PC** (folders on this computer) and **Cloud**. Folder projects, their chats and their groups never show on the website.
 - Picking a project in Studio also makes it the open project in Project Mode. Changing project starts a new chat.
 - Classgrid then gets the code ready: "Downloading [name] from GitHub…" or "Getting [name] ready…".
 - GitHub must be connected (and the Classgrid app installed on the repo) to open a project. Both are set up in Project Mode only; Studio shows a **Go to Project Mode** button when something is missing.

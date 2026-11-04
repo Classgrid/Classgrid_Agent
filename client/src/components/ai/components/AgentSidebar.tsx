@@ -21,7 +21,7 @@
 
 import React from "react";
 import { createPortal } from "react-dom";
-import { MessageSquare, Plus, Search, Pin, PinOff, MoreHorizontal, Pencil, Trash2, Share, Copy, Mail, Check, Link2, FileText, ExternalLink, X, Loader2, SquarePen, Calendar, Library, FolderInput, FolderPlus, Folder, Star, ChevronDown, ListFilter } from "lucide-react";
+import { MessageSquare, Plus, Search, Pin, PinOff, MoreHorizontal, Pencil, Trash2, Share, Copy, Mail, Check, Link2, FileText, ExternalLink, X, Loader2, SquarePen, Calendar, Library, FolderInput, FolderPlus, Folder, Star, ChevronDown, ListFilter, Laptop, Cloud } from "lucide-react";
 import { format } from "date-fns";
 import { NikhilDateCalendar } from "@/components/marketing_ui/nikhil_date_calendar";
 import { useNavigate, useLocation } from "react-router-dom";
@@ -43,7 +43,11 @@ import { getSocket } from "@/lib/socketClient";
 import { cn } from "@/lib/utils";
 import { GroupDialog, groupIcon, groupsApi, openProjectId, useChatGroups, type ChatGroup } from "./chat-groups/chatGroups";
 import { NewProjectDialog, openStudioProject, openLocalFolder } from "@/features/superadmin/components/StudioProjectPicker";
-import { placeActions, savedProject } from "@/features/superadmin/utils/projectCopies";
+import { onDesktop, placeActions, savedProject, thisComputerCopy, type LocalCopy } from "@/features/superadmin/utils/projectCopies";
+
+type SidebarProject = { id: string; name: string; logo?: string | null; location?: "cloud" | "local"; localPath?: string | null; localCopies?: LocalCopy[] };
+// Desktop app: a project with a folder on this computer (a folder project, or a cloud project downloaded here)
+const onThisPc = (p: Parameters<typeof thisComputerCopy>[0]) => !!p && (p.location === "local" || !!thisComputerCopy(p));
 
 interface ChatSession {
   id: string;
@@ -116,7 +120,9 @@ export function AgentNestedMenu({ searchQuery = "" }: { searchQuery?: string }) 
   const [isLoadingPreview, setIsLoadingPreview] = React.useState(false);
   const [deleteSessionId, setDeleteSessionId] = React.useState<string | null>(null);
   // Move to project: the user's own Project Mode projects, and the "New project" dialog
-  const [projects, setProjects] = React.useState<{ id: string; name: string; logo?: string | null }[] | null>(null);
+  const [projects, setProjects] = React.useState<SidebarProject[] | null>(null);
+  // Website: the folder projects (This PC) left out of the list, so their chats are left out too
+  const localProjectIds = React.useRef<Set<string>>(new Set());
   const [newProjectFor, setNewProjectFor] = React.useState<string | null>(null);
   const [newProjectName, setNewProjectName] = React.useState("");
   const [isMovingChat, setIsMovingChat] = React.useState(false);
@@ -486,7 +492,9 @@ export function AgentNestedMenu({ searchQuery = "" }: { searchQuery?: string }) 
   const groupedIds = new Set(groups.flatMap((g) => g.chats.map((c) => c.id)));
   const sortedGroups = [...groups].sort((a, b) => Number(b.pinned) - Number(a.pinned));
 
-  const filteredSessions = sessions.filter(s => s.title.toLowerCase().includes(searchQuery.toLowerCase()));
+  // Website: a chat of a folder project (This PC) never shows; it lives only in the desktop app
+  const hiddenChat = (s: ChatSession) => !onDesktop() && !!s.project_id && (localProjectIds.current.has(s.project_id) || savedProject(s.project_id)?.location === "local");
+  const filteredSessions = sessions.filter(s => !hiddenChat(s) && s.title.toLowerCase().includes(searchQuery.toLowerCase()));
   const pinnedSessions = filteredSessions.filter(s => s.pinned);
   const unpinnedSessions = filteredSessions.filter(s => !s.pinned && !groupedIds.has(s.id));
 
@@ -629,7 +637,8 @@ export function AgentNestedMenu({ searchQuery = "" }: { searchQuery?: string }) 
       }
       return folders.get(key)!;
     };
-    for (const c of studioChats) folderFor(c.project_id || null, c).chats.push(c);
+    // Website: a folder project's chats make no folder (hiddenChat already left them out of studioChats)
+    for (const c of studioChats) if (!hiddenChat(c)) folderFor(c.project_id || null, c).chats.push(c);
     // Each project's own groups sit inside its folder (pinned groups first)
     if (!opts.archivedOnly && !opts.unreadOnly) {
       for (const g of sortedGroups) if (!g.projectId || names.has(g.projectId) || folders.has(g.projectId)) folderFor(g.projectId || null).groups.push(g);
@@ -667,6 +676,18 @@ export function AgentNestedMenu({ searchQuery = "" }: { searchQuery?: string }) 
     try { localStorage.setItem("cg_studio_folder_order", JSON.stringify(keys)); } catch { /* storage blocked */ }
     setOpt({ sortProjects: "custom" });
   };
+  // Desktop app: This PC and Cloud are two lists, never one. Chats with no project keep their own folder after them
+  const studioFolderSections = (() => {
+    if (!onDesktop()) return [{ key: "all", label: "", list: studioFolders }];
+    const projectOf = (id: string) => (projects || []).find((p) => p.id === id) || savedProject(id);
+    const pc = studioFolders.filter((f) => f.id && onThisPc(projectOf(f.id)));
+    const cloud = studioFolders.filter((f) => f.id && !onThisPc(projectOf(f.id)));
+    return [
+      { key: "pc", label: "This PC", list: pc },
+      { key: "cloud", label: "Cloud", list: cloud },
+      { key: "none", label: "", list: studioFolders.filter((f) => !f.id) },
+    ].filter((s) => s.list.length);
+  })();
   const [newProjectOpen, setNewProjectOpen] = React.useState(false);
   const [showAllStudio, setShowAllStudio] = React.useState(false);
 
@@ -695,7 +716,14 @@ export function AgentNestedMenu({ searchQuery = "" }: { searchQuery?: string }) 
   const loadProjects = () => {
     fetchWithRescue(`${endpointPrefix}/api/ide/projects`, { credentials: "include" })
       .then((res) => res.json())
-      .then((data) => setProjects(Array.isArray(data.projects) ? data.projects.map((p: any) => ({ id: String(p.id), name: String(p.name || "Untitled"), logo: p.logo || null })) : []))
+      .then((data) => {
+        const list: SidebarProject[] = Array.isArray(data.projects)
+          ? data.projects.map((p: any) => ({ id: String(p.id), name: String(p.name || "Untitled"), logo: p.logo || null, location: p.location, localPath: p.localPath || null, localCopies: p.localCopies }))
+          : [];
+        // Website: folder projects (This PC) are never listed; they live only in the desktop app
+        localProjectIds.current = new Set(list.filter((p) => p.location === "local").map((p) => p.id));
+        setProjects(onDesktop() ? list : list.filter((p) => p.location !== "local"));
+      })
       .catch(() => setProjects([]));
   };
 
@@ -882,20 +910,31 @@ export function AgentNestedMenu({ searchQuery = "" }: { searchQuery?: string }) 
                       {projects === null ? (
                         <div className="flex items-center gap-2 px-3 py-2 text-[13px] text-slate-400"><Spinner className="size-3.5" />Loading…</div>
                       ) : projects.length > 0 && (
-                        <>
-                          <DropdownMenuSeparator className="bg-slate-100 dark:bg-white/10 my-1.5 mx-1" />
-                          {projects.map((p) => (
-                            <DropdownMenuItem
-                              key={p.id}
-                              disabled={isMovingChat}
-                              className="gap-3 py-2 px-3 text-[14px] cursor-pointer hover:bg-slate-100 dark:hover:bg-[#343541] focus:bg-slate-100 dark:focus:bg-[#343541] rounded-xl transition-colors"
-                              onClick={() => { setPinnedOpen(false); setRecentOpen(false); moveChatToProject(session.id, p); }}
-                            >
-                              <Folder className="w-4 h-4 shrink-0 text-slate-500 dark:text-white/70" strokeWidth={2} />
-                              <span className="break-words min-w-0">{p.name}</span>
-                            </DropdownMenuItem>
-                          ))}
-                        </>
+                        // Desktop app: This PC and Cloud are two lists, never one (the website lists cloud projects only)
+                        (onDesktop()
+                          ? [{ key: "pc", label: "This PC", list: projects.filter(onThisPc) }, { key: "cloud", label: "Cloud", list: projects.filter((p) => !onThisPc(p)) }]
+                          : [{ key: "cloud", label: "", list: projects }]
+                        ).filter((s) => s.list.length).map((s) => (
+                          <React.Fragment key={s.key}>
+                            <DropdownMenuSeparator className="bg-slate-100 dark:bg-white/10 my-1.5 mx-1" />
+                            {s.label && (
+                              <div className="flex items-center gap-1.5 px-3 pt-1 pb-1 text-[12px] text-muted-foreground">
+                                {s.key === "pc" ? <Laptop className="size-3.5" /> : <Cloud className="size-3.5" />} {s.label}
+                              </div>
+                            )}
+                            {s.list.map((p) => (
+                              <DropdownMenuItem
+                                key={p.id}
+                                disabled={isMovingChat}
+                                className="gap-3 py-2 px-3 text-[14px] cursor-pointer hover:bg-slate-100 dark:hover:bg-[#343541] focus:bg-slate-100 dark:focus:bg-[#343541] rounded-xl transition-colors"
+                                onClick={() => { setPinnedOpen(false); setRecentOpen(false); moveChatToProject(session.id, p); }}
+                              >
+                                <Folder className="w-4 h-4 shrink-0 text-slate-500 dark:text-white/70" strokeWidth={2} />
+                                <span className="break-words min-w-0">{p.name}</span>
+                              </DropdownMenuItem>
+                            ))}
+                          </React.Fragment>
+                        ))
                       )}
                     </DropdownMenuSubContent>
                   </DropdownMenuSub>
@@ -947,7 +986,7 @@ export function AgentNestedMenu({ searchQuery = "" }: { searchQuery?: string }) 
   const renderGroup = (g: ChatGroup) => {
     const chats: ChatSession[] = g.chats
       .map((c) => sessions.find((s) => s.id === c.id) || c)
-      .filter((s) => (s.title || "").toLowerCase().includes(searchQuery.toLowerCase()));
+      .filter((s) => !hiddenChat(s) && (s.title || "").toLowerCase().includes(searchQuery.toLowerCase()));
     if (searchQuery && chats.length === 0) return null;
     const isOpen = !collapsedGroups.includes(g.id);
     const Icon = groupIcon(g.icon);
@@ -1081,7 +1120,14 @@ export function AgentNestedMenu({ searchQuery = "" }: { searchQuery?: string }) 
                     </button>
                   )}
                 </SidebarMenu>
-              ) : studioFolders.map((f) => {
+              ) : studioFolderSections.map((s, i) => (
+                <div key={s.key} className={i ? "mt-1 pt-1 border-t border-black/10 dark:border-white/[0.08]" : ""}>
+                  {s.label && (
+                    <p className="flex items-center gap-1.5 px-2 pt-1 pb-1 text-[12px] text-muted-foreground">
+                      {s.key === "pc" ? <Laptop className="size-3.5" /> : <Cloud className="size-3.5" />} {s.label}
+                    </p>
+                  )}
+                  {s.list.map((f) => {
                 const isOpen = !closedFolders.includes(f.key) || !!searchQuery;
                 const full = fullFolders.includes(f.key);
                 const shown = full || searchQuery ? f.chats : f.chats.slice(0, 5);
@@ -1154,7 +1200,9 @@ export function AgentNestedMenu({ searchQuery = "" }: { searchQuery?: string }) 
                     )}
                   </div>
                 );
-              })}
+                  })}
+                </div>
+              ))}
             </div>
   );
 

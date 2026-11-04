@@ -23,6 +23,7 @@ Project Mode only works with GitHub. Code is kept on GitHub, never on Classgrid'
 - Next, **Link a GitHub repo**: pick a repo (private ones are tagged **private**), or click **Enter project without a repo**.
 - Each card shows the logo and name, the last commit message, the repo, and how long ago it was last changed. Card actions: **Open**, **Edit**, **Delete**.
 - **Delete** asks you to type the project name. "Its code stays on GitHub. Only the project here is deleted."
+- The website lists only cloud projects. The desktop app shows two groups, **This PC** (folders on this computer) and **Cloud**.
 
 ## 4. Opening a project and the editor
 

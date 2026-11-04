@@ -23,7 +23,8 @@ export function localFolderOf(projectId: string | null | undefined): string | nu
   }
 }
 
-const NOT_HERE = "This project is a folder on a computer. Open it in the Classgrid desktop app on that computer.";
+// Shown on the website, which never lists folder projects: it says nothing about folders or computers
+const NOT_HERE = "This project isn't available here.";
 
 export async function listLocalFiles(folder: string): Promise<FilesListing> {
   const d = desktop();

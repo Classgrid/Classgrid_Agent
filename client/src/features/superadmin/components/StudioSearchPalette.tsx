@@ -3,13 +3,14 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
-import { Check, ChevronDown, Folder, Pin } from "lucide-react";
+import { Check, ChevronDown, Cloud, Folder, Laptop, Pin } from "lucide-react";
 import { groupIcon, openProjectId, type ChatGroup } from "@/components/ai/components/chat-groups/chatGroups";
 import { fetchWithRescue } from "@/lib/rescue";
 import { cn } from "@/lib/utils";
 import { openStudioProject } from "./StudioProjectPicker";
 import { OPEN_PROJECT_FILE_EVENT } from "@/components/ai/components/stepper/ProjectToolSteps";
 import { listLocalFiles, localFolderOf } from "../utils/localProject";
+import { onDesktop, savedProject, thisComputerCopy, type LocalCopy } from "../utils/projectCopies";
 
 const backendUrl = import.meta.env.VITE_API_URL || "https://api.classgrid.in";
 const EASE = [0.22, 1, 0.36, 1] as const;
@@ -23,9 +24,16 @@ const KINDS: { kind: Kind; label: string; placeholder: string }[] = [
 ];
 
 type Chat = { id: string; title: string; created_at: string; pinned?: boolean; project_id?: string; project_name?: string };
-type Project = { id: string; name: string; repo: string | null; logo?: string | null };
-// A row: a file, chat or project; or, in Conversations, a project or group heading (head) that opens and closes with ^
-type Row = { key: string; title: string; hint?: string; age?: string; icon: React.ReactNode; run: () => void; head?: boolean; open?: boolean; depth?: number; pin?: boolean };
+type Project = { id: string; name: string; repo: string | null; logo?: string | null; location?: "cloud" | "local"; localPath?: string | null; localCopies?: LocalCopy[] };
+// A row: a file, chat or project; or, in Conversations, a project or group heading (head) that opens and closes with ^;
+// or (desktop app) a "This PC" / "Cloud" label over its projects, or the line over "No project" (label: never
+// picked, the arrow keys skip it)
+type Row = { key: string; title: string; hint?: string; age?: string; icon: React.ReactNode; run: () => void; head?: boolean; open?: boolean; depth?: number; pin?: boolean; label?: "pc" | "cloud" | "none" };
+
+// Desktop app: a project with a folder on this computer (a folder project, or a cloud project downloaded here)
+const onThisPc = (p: Project | null | undefined) => !!p && (p.location === "local" || !!thisComputerCopy(p));
+const pcPath = (p: Project) => (p.location === "local" ? p.localPath : thisComputerCopy(p)?.path) || null;
+const labelRow = (side: "pc" | "cloud" | "none"): Row => ({ key: `label:${side}`, title: side === "pc" ? "This PC" : side === "cloud" ? "Cloud" : "", label: side, icon: null, run: () => {} });
 
 function shortAge(at: string) {
   const mins = Math.max(0, Math.round((Date.now() - new Date(at).getTime()) / 60000));
@@ -123,41 +131,44 @@ export function StudioSearchPalette({ open, onClose, files: givenFiles, recent =
         return { key: p, title: name(p), hint: dir || ".", icon: fileIcon(name(p)), run: () => { openFile(p); close(); } };
       });
     }
+    const names = new Map((projects || []).map((p) => [p.id, p]));
+    const projectOf = (id: string) => names.get(id) || (savedProject(id) as Project | null);
+    // Website: folder projects (This PC) and their chats are never listed; they live only in the desktop app
+    const hidden = (id: string | null | undefined) => !onDesktop() && !!id && projectOf(id)?.location === "local";
     if (kind === "conversations") {
       // Each project with ^: its pinned chats, its groups (each with ^, pinned groups first), then its other chats
       const match = (c: Chat) => !t || cleanTitle(c.title).toLowerCase().includes(t);
       const byId = new Map((chats || []).map((c) => [c.id, c]));
       const inGroup = new Set((groups || []).flatMap((g) => g.chats.map((c) => c.id)));
-      const names = new Map((projects || []).map((p) => [p.id, p]));
-      type F = { key: string; name: string; logo: string | null; pinned: Chat[]; groups: ChatGroup[]; chats: Chat[]; newest: number };
+      type F = { key: string; id: string | null; name: string; logo: string | null; pinned: Chat[]; groups: ChatGroup[]; chats: Chat[]; newest: number };
       const folders = new Map<string, F>();
       const folder = (id: string | null, name?: string) => {
         const key = id || "none";
         if (!folders.has(key)) {
           const p = id ? names.get(id) : null;
-          folders.set(key, { key, name: id ? p?.name || name || "Project" : "No project", logo: p?.logo || null, pinned: [], groups: [], chats: [], newest: 0 });
+          folders.set(key, { key, id, name: id ? p?.name || name || "Project" : "No project", logo: p?.logo || null, pinned: [], groups: [], chats: [], newest: 0 });
         }
         return folders.get(key)!;
       };
       for (const c of chats || []) {
         if (inGroup.has(c.id) && !c.pinned) continue;
+        if (hidden(c.project_id)) continue;
         const f = folder(c.project_id || null, c.project_name);
         (c.pinned ? f.pinned : f.chats).push(c);
         f.newest = Math.max(f.newest, new Date(c.created_at).getTime());
       }
-      for (const g of [...(groups || [])].sort((a, b) => Number(b.pinned) - Number(a.pinned))) folder(g.projectId || null).groups.push(g);
+      for (const g of [...(groups || [])].sort((a, b) => Number(b.pinned) - Number(a.pinned))) if (!hidden(g.projectId)) folder(g.projectId || null).groups.push(g);
       const chatRow = (c: Chat, depth: number, pin = false): Row => ({
         key: c.id, title: cleanTitle(c.title), age: shortAge(c.created_at), icon: null, depth, pin, run: () => { goChat(c.id); close(); },
       });
-      const out: Row[] = [];
-      for (const f of [...folders.values()].sort((a, b) => b.newest - a.newest)) {
+      const folderRows = (f: F, out: Row[]) => {
         const pinned = f.pinned.filter(match);
         const loose = f.chats.filter(match);
         const grouped = f.groups
           .map((g) => ({ g, list: g.chats.map((c) => byId.get(c.id) || c).filter((c) => !c.pinned && match(c)) }))
           .filter((x) => !t || x.list.length);
         const count = pinned.length + loose.length + grouped.reduce((n, x) => n + x.list.length, 0);
-        if (!count && (t || !f.groups.length)) continue;
+        if (!count && (t || !f.groups.length)) return;
         const pk = `p:${f.key}`;
         const open = !!t || openKeys.has(pk);
         out.push({
@@ -165,7 +176,7 @@ export function StudioSearchPalette({ open, onClose, files: givenFiles, recent =
           icon: f.logo ? <img src={f.logo} alt="" className="size-4 shrink-0 rounded object-cover" /> : <Folder className="size-4 shrink-0 text-muted-foreground" />,
           run: () => toggleKey(pk),
         });
-        if (!open) continue;
+        if (!open) return;
         pinned.forEach((c) => out.push(chatRow(c, 1, true)));
         for (const { g, list } of grouped) {
           const gk = `g:${g.id}`;
@@ -175,18 +186,37 @@ export function StudioSearchPalette({ open, onClose, files: givenFiles, recent =
           if (gOpen) list.forEach((c) => out.push(chatRow(c, 2)));
         }
         loose.forEach((c) => out.push(chatRow(c, 1)));
-      }
-      return out;
+      };
+      const sorted = [...folders.values()].sort((a, b) => b.newest - a.newest);
+      const rowsOf = (list: F[]) => { const out: Row[] = []; list.forEach((f) => folderRows(f, out)); return out; };
+      if (!onDesktop()) return rowsOf(sorted);
+      // Desktop app: This PC and Cloud are two lists, never one. Chats with no project come after them
+      const pc = rowsOf(sorted.filter((f) => f.id && onThisPc(projectOf(f.id))));
+      const cloud = rowsOf(sorted.filter((f) => f.id && !onThisPc(projectOf(f.id))));
+      const none = rowsOf(sorted.filter((f) => !f.id));
+      return [
+        ...(pc.length ? [labelRow("pc"), ...pc] : []),
+        ...(cloud.length ? [labelRow("cloud"), ...cloud] : []),
+        ...(none.length && (pc.length || cloud.length) ? [labelRow("none")] : []),
+        ...none,
+      ];
     }
-    return (projects || [])
-      .filter((p) => !t || p.name.toLowerCase().includes(t) || (p.repo || "").toLowerCase().includes(t))
-      .map((p) => ({
-        key: p.id,
-        title: p.name,
-        hint: p.repo || "No repo",
-        icon: p.logo ? <img src={p.logo} alt="" className="size-4 shrink-0 rounded object-cover" /> : <Folder className="size-4 shrink-0 text-muted-foreground" />,
-        run: () => { openStudioProject(p.id); close(); },
-      }));
+    const projectRow = (p: Project, side: "pc" | "cloud"): Row => ({
+      key: p.id,
+      title: p.name,
+      // This PC: the folder it is in; Cloud: its GitHub repo
+      hint: side === "pc" ? pcPath(p) || p.name : p.repo || "No repo",
+      icon: p.logo ? <img src={p.logo} alt="" className="size-4 shrink-0 rounded object-cover" /> : <Folder className="size-4 shrink-0 text-muted-foreground" />,
+      run: () => { openStudioProject(p.id); close(); },
+    });
+    const found = (projects || [])
+      .filter((p) => !hidden(p.id))
+      .filter((p) => !t || p.name.toLowerCase().includes(t) || (p.repo || "").toLowerCase().includes(t) || (onDesktop() && (pcPath(p) || "").toLowerCase().includes(t)));
+    if (!onDesktop()) return found.map((p) => projectRow(p, "cloud"));
+    // Desktop app: This PC first, then Cloud, each under its own label
+    const pc = found.filter(onThisPc).map((p) => projectRow(p, "pc"));
+    const cloud = found.filter((p) => !onThisPc(p)).map((p) => projectRow(p, "cloud"));
+    return [...(pc.length ? [labelRow("pc"), ...pc] : []), ...(cloud.length ? [labelRow("cloud"), ...cloud] : [])];
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [kind, q, files, recent, chats, projects, groups, openKeys]);
 
@@ -194,11 +224,18 @@ export function StudioSearchPalette({ open, onClose, files: givenFiles, recent =
   const loading = (kind === "conversations" && (chats === null || groups === null)) || (kind === "projects" && projects === null) || (kind === "files" && !givenFiles && loadedFiles === null);
 
   useEffect(() => { listRef.current?.querySelector(`[data-index="${active}"]`)?.scrollIntoView({ block: "nearest" }); }, [active]);
+  // A "This PC" / "Cloud" label is never the picked row: the pick moves to the row under it
+  useEffect(() => { if (shown[active]?.label) setActive(active + 1); }, [rows, active]); // eslint-disable-line react-hooks/exhaustive-deps
+  const step = (i: number, by: 1 | -1) => {
+    let n = i + by;
+    while (shown[n]?.label) n += by;
+    return n < 0 || n >= shown.length ? i : n;
+  };
 
   const onKey = (e: React.KeyboardEvent) => {
     if (e.key === "Escape") { e.preventDefault(); if (menuOpen) setMenuOpen(false); else close(); }
-    else if (e.key === "ArrowDown") { e.preventDefault(); setActive((i) => Math.min(i + 1, shown.length - 1)); }
-    else if (e.key === "ArrowUp") { e.preventDefault(); setActive((i) => Math.max(i - 1, 0)); }
+    else if (e.key === "ArrowDown") { e.preventDefault(); setActive((i) => step(i, 1)); }
+    else if (e.key === "ArrowUp") { e.preventDefault(); setActive((i) => step(i, -1)); }
     else if (e.key === "Enter" && shown[active]) { e.preventDefault(); shown[active].run(); }
   };
 
@@ -274,7 +311,13 @@ export function StudioSearchPalette({ open, onClose, files: givenFiles, recent =
                     {q.trim() ? `Nothing matches “${q}”.` : kind === "files" ? "No files yet." : kind === "conversations" ? "No conversations yet." : "No projects yet."}
                   </p>
                 )}
-                {!loading && shown.map((r, i) => (
+                {!loading && shown.map((r, i) => r.label === "none" ? (
+                  <div key={r.key} className="my-1 border-t border-black/10 dark:border-white/[0.08]" />
+                ) : r.label ? (
+                  <p key={r.key} className={cn("flex items-center gap-1.5 px-3 pt-1 pb-1 text-[12px] text-muted-foreground", i > 0 && "mt-1 pt-2 border-t border-black/10 dark:border-white/[0.08]")}>
+                    {r.label === "pc" ? <Laptop className="size-3.5" /> : <Cloud className="size-3.5" />} {r.title}
+                  </p>
+                ) : (
                   <button
                     key={r.key}
                     type="button"

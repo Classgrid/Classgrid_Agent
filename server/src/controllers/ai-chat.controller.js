@@ -102,6 +102,7 @@ import { LIVE_DOC_TOOLS, LIVE_DOC_PROMPT, buildLiveDocHandlers } from "../servic
 import { ROLE_DEFINITIONS } from "../utils/roles.js";
 import { SHARE_PAGE_TOOLS, SHARE_PAGE_PROMPT, runPublishPage, runPageComments } from "../services/share-page.service.js";
 import { isPublicChatAccount } from "../utils/chat-onboarding.js";
+import { isWebsite } from "../utils/client-app.js";
 
 const uniqueDashboards = [...new Set(Object.values(ROLE_DEFINITIONS).map(r => r.dashboard))];
 const dashboardList = uniqueDashboards.map(d => `- ${d}`).join('\n');
@@ -1312,7 +1313,7 @@ const READ_LOCAL_FILE_TOOL = {
 function whereYouWorkRule(args) {
     const rule = whereYouWorkPlace(args);
     const p = args.project;
-    const both = rule && p?.repo && (p.bothPlaces || p.localCopies?.length);
+    const both = rule && args.desktop && p?.repo && (p.bothPlaces || p.localCopies?.length); // the desktop app only
     return both ? rule + ` This project lives in BOTH places, the cloud and a copy on the user's computer (this chat works in the ${p.bothPlaces ? "computer" : "cloud"} copy), linked by its GitHub repo ${p.repo}. Nothing is saved to GitHub by itself: commit and push only when the user asks, and then say in one short line what you pushed and to which branch. Pushes go only to GitHub, never to Vercel.` : rule;
 }
 function whereYouWorkPlace({ desktop, project, task }) {
@@ -1565,6 +1566,9 @@ const SLASH_COMMAND_LINES = {
 export const streamAskAi = async (req, res) => {
     const requestStartedAt = Date.now();
     const body = req.body || {};
+    // Sent from the website (chat.classgrid.in): folder projects (a folder on the user's computer) work only in the
+    // desktop app, so they are never linked, described or reached from here (utils/client-app.js)
+    const fromWebsite = isWebsite(req);
     // A "/" command from the chat box (Project Mode and Studio only; the live browser is only in Studio)
     const slashCommand = (body.appMode === "project" || body.appMode === "studio") && Object.hasOwn(SLASH_COMMAND_LINES, String(body.command || "")) && (body.command !== "browser" || body.appMode === "studio") ? body.command : null;
     // How hard to think, picked in the model menu: Fast, Normal or Deep (/boost is Deep for one message)
@@ -2073,7 +2077,7 @@ You are currently talking to Nikhil Shinde (nikhil.shinde@classgrid.in), the CRE
         // A message sent from Project Mode links this chat to the open project first (from the very first message)
         if (sessionId && !isIncognito) { touchedChat = sessionId; touchChat(req.user?.email, sessionId); }
         if (sessionId && !isIncognito && !gridSender && /^[0-9a-f]{24}$/i.test(String(body.projectId || "")) && req.user?._id) {
-            await linkChatToProject(req.user._id, body.projectId, sessionId, body.clientApp === "desktop" ? body.deviceId : null).catch(() => {});
+            await linkChatToProject(req.user._id, body.projectId, sessionId, body.clientApp === "desktop" ? body.deviceId : null, { website: fromWebsite }).catch(() => {});
         } else if (sessionId && !isIncognito && !gridSender && body.appMode === "studio" && body.taskOrigin !== "whatsapp" && req.user?._id) {
             // Studio with no project open: the chat is kept in Studio's own chat list
             await User.updateOne({ _id: req.user._id }, { $addToSet: { studio_chat_ids: sessionId } }).catch(() => {});
@@ -2083,7 +2087,7 @@ You are currently talking to Nikhil Shinde (nikhil.shinde@classgrid.in), the CRE
         if (sessionId && !isIncognito && body.taskOrigin === "whatsapp" && req.user?._id) {
             await User.updateOne({ _id: req.user._id }, { $addToSet: { call_chat_ids: sessionId } }).catch(() => {});
         }
-        const projectContext = sessionId && !isIncognito ? await editorContextFor(sessionId).catch(() => "") : "";
+        const projectContext = sessionId && !isIncognito ? await editorContextFor(sessionId, { website: fromWebsite }).catch(() => "") : "";
         const whereProject = sessionId && !isIncognito && body.taskOrigin !== "whatsapp" ? await projectForChat(sessionId).then((p) => inChatWorktree(p, sessionId)).catch(() => null) : null;
         let whereYouWork = whereYouWorkRule({ desktop: body.clientApp === "desktop", project: whereProject, task: !!body.taskOrigin });
         // The desktop app's memory notes: one folder for everything, plus one per project (named after the chat's project)
@@ -3474,7 +3478,7 @@ Every user is using you as a personal AI assistant and agent (like ChatGPT) to m
                     }
                     const files = m[2].trim().split(/\s+/).map((w) => w.replace(/^['"]|['"]$/g, "")).filter((w) => w && !w.startsWith("-") && !/^\d+$/.test(w));
                     for (const f of files.slice(0, 10)) {
-                        const total = totalLines((await handleToolCall("view_project_file", { path: f, start_line: 1, end_line: 1 }, { sessionId })).content[0].text);
+                        const total = totalLines((await handleToolCall("view_project_file", { path: f, start_line: 1, end_line: 1 }, { sessionId, desktop: !fromWebsite })).content[0].text);
                         if (total > READER_MIN_LINES) return readerBlock(f, total);
                     }
                     return "";
@@ -3486,7 +3490,7 @@ Every user is using you as a personal AI assistant and agent (like ChatGPT) to m
                     let room = 400000;
                     for (const p of paths) {
                         if (room <= 0) { skipped.push(p); continue; }
-                        const text = (await handleToolCall("view_project_file", { path: p, start_line: 1, end_line: 1e9 }, { sessionId })).content[0].text;
+                        const text = (await handleToolCall("view_project_file", { path: p, start_line: 1, end_line: 1e9 }, { sessionId, desktop: !fromWebsite })).content[0].text;
                         parts.push(`=== ${p} ===\n${text.length > room ? `${text.slice(0, room)}\n… (the rest of this file was cut: too much text in one read)` : text}`);
                         room -= text.length;
                     }
@@ -3537,7 +3541,7 @@ Every user is using you as a personal AI assistant and agent (like ChatGPT) to m
                     execute_terminal_command: async (args) => {
                         const blocked = await bigFileCommand(args?.command);
                         if (blocked) return blocked;
-                        const result = await handleToolCall('execute_terminal_command', args, { sessionId, isStaff: isStaffRole(req.user?.role) });
+                        const result = await handleToolCall('execute_terminal_command', args, { sessionId, isStaff: isStaffRole(req.user?.role), desktop: !fromWebsite });
                         return result.isError ? result.content[0].text : result.content[0].text;
                     },
                     deploy_to_classgrid_cloud: async (args) => (await handleToolCall('deploy_to_classgrid_cloud', args, { sessionId, userEmail })).content[0].text,
@@ -3549,7 +3553,7 @@ Every user is using you as a personal AI assistant and agent (like ChatGPT) to m
                         toolName,
                         async (args) => {
                             touchStudio(req.user?._id).catch(() => {}); // the project's code is in use: not cleaned up while the agent works
-                            const text = (await handleToolCall(toolName, args, { sessionId })).content[0].text;
+                            const text = (await handleToolCall(toolName, args, { sessionId, desktop: !fromWebsite })).content[0].text;
                             // In a big file the main model reads only small pieces (up to READER_PIECE_LINES at a time, and
                             // READER_FILE_LINES in all per answer); for more it asks the file reader. Classgrid's own guide is read as before.
                             if (toolName === "view_project_file" && readerOn && !String(args?.path || "").includes(".classgrid/")) {
@@ -3601,7 +3605,7 @@ Every user is using you as a personal AI assistant and agent (like ChatGPT) to m
                             return `Error: the file writer failed (${e.message}). Write the file yourself with write_project_file.`;
                         }
                         const code = written.answer.replace(/^\s*```[\w.+-]*[ \t]*\n/, "").replace(/\n```\s*$/, "").replace(/\n*$/, "\n");
-                        const out = (await handleToolCall("write_project_file", { path: target, content: code }, { sessionId })).content[0].text;
+                        const out = (await handleToolCall("write_project_file", { path: target, content: code }, { sessionId, desktop: !fromWebsite })).content[0].text;
                         return /^Created /.test(out) ? `${out}\nWritten by the file writer (${MODEL_DISPLAY_NAMES[written.model] || written.model}) from your spec; you have not seen the code. Check the parts that matter with view_project_file start_line/end_line or search_project.` : out;
                     },
                     // Up to 5 helpers work on the project at the same time, each on a model the main AI picks. A helper
@@ -3663,7 +3667,7 @@ Every user is using you as a personal AI assistant and agent (like ChatGPT) to m
                             let stepNo = 0;
                             // Its own copy of a folder project on the user's computer (git worktree), on its own branch
                             if (h.worktree) {
-                                const project = await localProjectFor(sessionId);
+                                const project = fromWebsite ? null : await localProjectFor(sessionId);
                                 const made = project ? await callLocal(project, "create_worktree", { name: `helper-${h.no}` }) : "Error: only a project from a folder on the user's computer can give a helper its own copy.";
                                 const m = String(made).match(/^Worktree: (.+)\nBranch: (.+)$/);
                                 if (m) h.wt = { dir: m[1].trim(), branch: m[2].trim(), project: { owner: project.owner, _id: project._id, localPath: m[1].trim() } };
@@ -3694,7 +3698,7 @@ Every user is using you as a personal AI assistant and agent (like ChatGPT) to m
                             const computerHandlers = onComputer ? Object.fromEntries(names.map((n) => [n, llmConfig.toolHandlers[n]])) : {};
                             // A folder project on the user's computer: a full path outside the project folder (like the user's
                             // Desktop) works for the helper's file tools too, like it does for the main AI
-                            const helperLocal = onComputer || h.wt ? null : await localProjectFor(sessionId).catch(() => null);
+                            const helperLocal = onComputer || h.wt || fromWebsite ? null : await localProjectFor(sessionId).catch(() => null);
                             const helperRoot = helperLocal ? String(helperLocal.localPath || "").replace(/[\\/]+$/, "").replace(/\//g, "\\").toLowerCase() : "";
                             const outsideProject = (n, a) => {
                                 if (!helperRoot || !(COMPUTER_FILE_TOOLS[n] || n === "view_project_file")) return false;
@@ -3710,7 +3714,7 @@ Every user is using you as a personal AI assistant and agent (like ChatGPT) to m
                                 const step = { tool: n, what: String(what).slice(0, 200), at: Date.now() };
                                 if (h.steps.length < 80) h.steps.push(step);
                                 playground("tool", { who: `Helper ${h.no}`, tool: n, detail: JSON.stringify(a ?? {}).slice(0, 200) });
-                                const out = onComputer ? await computerHandlers[n](a, { fromHelper: true }) : outsideProject(n, a) ? (n === "view_project_file" ? await readLocalFile(req.user?._id || req.user?.id, { path: a.path }) : await runOnComputer(req.user?._id || req.user?.id, n, a || {}, sessionId)) : h.wt && LOCAL_TOOLS.has(n) ? await callLocal(h.wt.project, n, a || {}, sessionId) : (await handleToolCall(n, a, { sessionId })).content[0].text;
+                                const out = onComputer ? await computerHandlers[n](a, { fromHelper: true }) : outsideProject(n, a) ? (n === "view_project_file" ? await readLocalFile(req.user?._id || req.user?.id, { path: a.path }) : await runOnComputer(req.user?._id || req.user?.id, n, a || {}, sessionId)) : h.wt && LOCAL_TOOLS.has(n) ? await callLocal(h.wt.project, n, a || {}, sessionId) : (await handleToolCall(n, a, { sessionId, desktop: !fromWebsite })).content[0].text;
                                 emitHelper({ helper: i, id, result: String(out && typeof out === "object" ? out.text : out).slice(0, 6000) });
                                 step.result = String(out && typeof out === "object" ? out.text : out).slice(0, 400);
                                 step.failed = /^(error|tool error|failed)/i.test(step.result.trim());
@@ -3959,9 +3963,9 @@ You work on the user's own Windows computer through their Classgrid desktop app,
                     read_local_file: async (args) => readLocalFile(req.user?._id || req.user?.id, args),
                     run_code: async (args) => {
                         // A project from a folder on the user's computer: the code runs there, in their desktop app
-                        const localProject = await localProjectFor(sessionId);
+                        const localProject = fromWebsite ? null : await localProjectFor(sessionId);
                         if (localProject) return callLocal(localProject, "run_code", args, sessionId);
-                        const result = await handleToolCall('run_code', args, { sessionId, isStaff: isStaffRole(req.user?.role) });
+                        const result = await handleToolCall('run_code', args, { sessionId, isStaff: isStaffRole(req.user?.role), desktop: !fromWebsite });
                         const text = result.isError ? result.content[0].text : result.content[0].text;
 
                         // After execution, read back any website files the sandbox wrote
@@ -4976,7 +4980,7 @@ You work on the user's own Windows computer through their Classgrid desktop app,
                                 for (const att of args.attachments) {
                                     if (att.path && att.path.startsWith('/data/')) {
                                         console.log(`[send_email] Fetching sandbox file: ${att.path}`);
-                                        const result = await handleToolCall('execute_terminal_command', { command: `cat ${att.path} | base64 -w 0` }, { sessionId });
+                                        const result = await handleToolCall('execute_terminal_command', { command: `cat ${att.path} | base64 -w 0` }, { sessionId, desktop: !fromWebsite });
                                         if (result && result.content && result.content[0] && result.content[0].text && !result.isError) {
                                             processedAttachments.push({
                                                 filename: att.filename,
@@ -5785,7 +5789,7 @@ If a tool fails, never show the error message; say only: "Something went wrong o
                 activeToolList.push(def);
                 toolPlan.allowedToolNames.add(name);
                 toolPlan.loadedNames.add(name);
-                llmConfig.toolHandlers[name] = async (args) => (await handleToolCall(name, args, { sessionId })).content[0].text;
+                llmConfig.toolHandlers[name] = async (args) => (await handleToolCall(name, args, { sessionId, desktop: !fromWebsite })).content[0].text;
             }
             // The chat itself can move into its own copy of the project (git worktree, own branch) and back
             const worktreeDef = terminalDef("use_worktree", "Work in your own copy of this project (a git worktree on its own branch), so the user's main folder stays untouched while you work, or go back. action \"start\": makes the copy, and from then on all your file tools and commands in this chat work in it. action \"finish\": goes back to the main folder and says how to merge your branch (commit your work in the copy first). action \"status\": where you work now. Use it when the user asks for a separate copy, branch or worktree, or for big risky changes they want kept apart.", {
@@ -6650,6 +6654,12 @@ export const getChatSessions = async (req, res) => {
         if (!email) return res.status(401).json({ error: "Unauthorized" });
 
         let sessions = await getSessions(email);
+        // Chats of a folder project (a folder on the user's computer) are only in the desktop app, never on the website
+        if (isWebsite(req) && req.user?._id) {
+            const IdeProject = (await import("../models/IdeProject.js")).default;
+            const local = new Set((await IdeProject.find({ owner: req.user._id, location: "local" }).select("chatSessionIds").lean()).flatMap((x) => x.chatSessionIds || []));
+            if (local.size) sessions = (sessions || []).filter((s) => !local.has(s.id));
+        }
         // Agent mode and Project mode keep separate chat lists: ?mode=agent leaves out chats that belong to a
         // project, ?project=<id> shows only that project's chats (the user's own projects only). No query = all.
         const { mode, project } = req.query || {};
@@ -6662,7 +6672,7 @@ export const getChatSessions = async (req, res) => {
             const IdeProject = (await import("../models/IdeProject.js")).default;
             if (project === "all") {
                 // Projects page with no project open: the chats of all the user's projects
-                const ps = await IdeProject.find({ owner: req.user._id }).select("chatSessionIds name logo").lean();
+                const ps = await IdeProject.find({ owner: req.user._id }).select("chatSessionIds name logo location").lean();
                 const inStudio = req.query?.studio === "1";
                 const ids = new Set([...ps.flatMap((x) => x.chatSessionIds || []), ...(inStudio ? [...studioIds, ...callIds] : [])]);
                 if (!inStudio) for (const id of callIds) ids.delete(id);
@@ -6670,7 +6680,7 @@ export const getChatSessions = async (req, res) => {
                 const owner = new Map(ps.flatMap((x) => (x.chatSessionIds || []).map((id) => [id, x])));
                 sessions = (sessions || []).filter((s) => ids.has(s.id)).map((s) => {
                     const p = owner.get(s.id);
-                    return p ? { ...s, project_id: String(p._id), project_name: p.name, project_logo: p.logo || null } : s;
+                    return p ? { ...s, project_id: String(p._id), project_name: p.name, project_logo: p.logo || null, ...(isWebsite(req) ? {} : { project_location: p.location || "cloud" }) } : s;
                 });
             } else if (project) {
                 const p = /^[0-9a-f]{24}$/i.test(String(project)) ? await IdeProject.findOne({ _id: project, owner: req.user._id }).select("chatSessionIds").lean() : null;
@@ -6718,14 +6728,19 @@ export const getChatSession = async (req, res) => {
         }
 
         // A Project Mode chat says which project it belongs to, so it always opens in Project Mode
+        // (a folder project's chat opens as a normal chat on the website: the folder is only in the desktop app)
         let projectId = null;
+        let projectLocation = null;
         if (req.user?._id) {
             const IdeProject = (await import("../models/IdeProject.js")).default;
-            const p = await IdeProject.findOne({ owner: req.user._id, chatSessionIds: id }).select("_id").lean();
-            projectId = p ? String(p._id) : null;
+            const p = await IdeProject.findOne({ owner: req.user._id, chatSessionIds: id }).select("_id location").lean();
+            if (p && !(p.location === "local" && isWebsite(req))) {
+                projectId = String(p._id);
+                projectLocation = p.location || "cloud";
+            }
         }
 
-        res.json({ session, projectId });
+        res.json({ session, projectId, ...(isWebsite(req) ? {} : { projectLocation }) });
     } catch (e) {
         console.error("Error getting session:", e);
         res.status(500).json({ error: "Failed to load session" });
@@ -7038,6 +7053,12 @@ import crypto from 'crypto';
 export const createPublicShare = async (req, res) => {
     try {
         const { id } = req.params;
+
+        // A chat of a folder project (a folder on the user's computer) is never put online
+        const IdeProject = (await import("../models/IdeProject.js")).default;
+        if (await IdeProject.exists({ chatSessionIds: id, location: "local" })) {
+            return res.status(400).json({ error: "Chats of a folder on your computer can't be shared online." });
+        }
 
         // INSTANT RESPONSE: Pre-generate the share ID and URL
         const shareId = crypto.randomBytes(8).toString('base64url').slice(0, 10);

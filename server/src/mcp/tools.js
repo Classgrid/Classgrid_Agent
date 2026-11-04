@@ -1752,7 +1752,11 @@ export const handleToolCall = async (name, args, context = {}) => {
   if (LOCAL_TOOLS.has(name) && context.sessionId) {
     const project = await projectForChat(context.sessionId).catch(() => null);
     if (process.env.CG_LOCAL_DEV) console.log(`[Local runner] ${name} in chat ${context.sessionId}: project ${project?._id || "none"} (${project?.location || "-"})`);
-    if (project?.location === "local") return { content: [{ type: "text", text: await callLocal(await inChatWorktree(project, context.sessionId), name, args || {}, context.sessionId) }] };
+    if (project?.location === "local") {
+      // Only the desktop app reaches the user's computer (desktop: false = sent from the website, ai-chat.controller.js)
+      if (context.desktop === false) return { content: [{ type: "text", text: "This folder project only works in the Classgrid desktop app." }] };
+      return { content: [{ type: "text", text: await callLocal(await inChatWorktree(project, context.sessionId), name, args || {}, context.sessionId) }] };
+    }
   }
   // Project Mode file tools (the open project of this chat)
   if (projectTools[name]) {

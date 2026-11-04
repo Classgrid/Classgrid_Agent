@@ -286,31 +286,35 @@ const escapeRegex = (text) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 // Names said on a call come through speech to text, so spaces, capitals and dashes are ignored ("ghost bot" = "GhostBot")
 const looseName = (n) => String(n || "").toLowerCase().replace(/[^a-z0-9]/g, "");
 
-async function findProject(user, name) {
+// The WhatsApp agent works online, so a folder project (a folder on the user's computer, desktop app only) is left out;
+// withLocal: true only to keep new project names unique
+const ONLINE_PROJECT = { location: { $ne: "local" } };
+async function findProject(user, name, { withLocal = false } = {}) {
     const { default: IdeProject } = await import("../models/IdeProject.js");
-    const exact = await IdeProject.findOne({ owner: user._id, name: new RegExp(`^${escapeRegex(String(name || "").trim())}$`, "i") });
+    const where = { owner: user._id, ...(withLocal ? {} : ONLINE_PROJECT) };
+    const exact = await IdeProject.findOne({ ...where, name: new RegExp(`^${escapeRegex(String(name || "").trim())}$`, "i") });
     if (exact || !looseName(name)) return exact;
-    const all = await IdeProject.find({ owner: user._id }).select("name").limit(100);
+    const all = await IdeProject.find(where).select("name").limit(100);
     return all.find((p) => looseName(p.name) === looseName(name)) || null;
 }
 
 // For "not found" answers: the caller's real project names, so the AI can pick the right one or ask
 async function projectNames(user) {
     const { default: IdeProject } = await import("../models/IdeProject.js");
-    const list = await IdeProject.find({ owner: user._id }).select("name").sort({ updatedAt: -1 }).limit(20).lean().catch(() => []);
+    const list = await IdeProject.find({ owner: user._id, ...ONLINE_PROJECT }).select("name").sort({ updatedAt: -1 }).limit(20).lean().catch(() => []);
     return list.length ? `The caller's projects are: ${list.map((p) => p.name).join(", ")}.` : "The caller has no projects.";
 }
 
 async function runProjectTool(call, tool) {
     const { default: IdeProject } = await import("../models/IdeProject.js");
     if (tool.name === "list_projects") {
-        const list = await IdeProject.find({ owner: call.user._id }).select("name repo").sort({ updatedAt: -1 }).limit(20).lean();
+        const list = await IdeProject.find({ owner: call.user._id, ...ONLINE_PROJECT }).select("name repo").sort({ updatedAt: -1 }).limit(20).lean();
         return list.length ? list.map((p) => `${p.name}${p.repo ? ` (GitHub: ${p.repo})` : " (no GitHub repo yet)"}`).join("\n") : "No projects yet.";
     }
     if (tool.name === "make_project") {
         const name = String(tool.input?.name || "").trim().slice(0, 80);
         if (!name) return "No name was given.";
-        if (await findProject(call.user, name)) return `A project called "${name}" already exists.`;
+        if (await findProject(call.user, name, { withLocal: true })) return `A project called "${name}" already exists.`;
         await IdeProject.create({ owner: call.user._id, name });
         return `Project "${name}" was created.`;
     }
@@ -580,7 +584,7 @@ async function afterCall(call, why) {
         const words = String(call.tasks[0]?.task || "Call task").replace(/[^a-zA-Z0-9 ]/g, " ").split(/\s+/).filter((w) => w.length > 2).slice(0, 4);
         const base = (words.map((w) => w[0].toUpperCase() + w.slice(1).toLowerCase()).join(" ") || "Call Task").slice(0, 60);
         let name = base;
-        for (let i = 2; await findProject(call.user, name).catch(() => null); i++) name = `${base} ${i}`;
+        for (let i = 2; await findProject(call.user, name, { withLocal: true }).catch(() => null); i++) name = `${base} ${i}`;
         project = await IdeProject.create({ owner: call.user._id, name }).catch((e) => { console.error("[WA call] project could not be made:", e.message); return null; });
         if (project) console.log(`[WA call] ${call.id}: no project named, made "${name}" (Project Mode only)`);
     }

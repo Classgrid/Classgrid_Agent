@@ -216,6 +216,7 @@ import { PublishedPageStep } from "./stepper/PublishedPageStep";
 import { CombinedReasoningBlock } from "./stepper/CombinedReasoningBlock";
 import { CodeNoteChips, StudioCodeNotesBar } from "@/features/superadmin/components/StudioCodeNotesBar";
 import { clearCodeNotes, codeNotesText, getCodeNotes, setCodeNotesChat, splitCodeNotes, toChip, useCodeNotes, type CodeNote, type CodeNoteChip } from "@/features/superadmin/components/studioCodeNotes";
+import { onDesktop, savedProject } from "@/features/superadmin/utils/projectCopies";
 import { AiFeedbackModal } from "./AiFeedbackModal";
 import { ChatEndedCard } from "./ChatEndedCard";
 
@@ -3128,18 +3129,20 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
         if (sessionRes.ok) {
           const sData = await sessionRes.json();
           savedDetails = sData;
+          // Website: a folder project's chat (This PC) opens as a plain chat; that project is never opened here
+          const chatProject: string | null = sData.projectId && (onDesktop() || (sData.projectLocation || savedProject(sData.projectId)?.location) !== "local") ? sData.projectId : null;
           // A project's chat opened from Agent mode (Library, an old link...): open it in Project Mode, in its project
           const parts = window.location.pathname.split("/");
           const agentAt = parts.indexOf("agent");
-          if (sData.projectId && agentAt !== -1) {
-            try { localStorage.setItem("cg_project_open", sData.projectId); sessionStorage.setItem("cg_project_open", sData.projectId); } catch { /* storage blocked */ }
+          if (chatProject && agentAt !== -1) {
+            try { localStorage.setItem("cg_project_open", chatProject); sessionStorage.setItem("cg_project_open", chatProject); } catch { /* storage blocked */ }
             parts[agentAt] = "project";
             window.location.assign(parts.slice(0, agentAt + 1).join("/") + `/${id}`);
             return;
           }
           // Studio: opening a chat opens its project too (or no project, for a chat sent without one)
           if (parts.includes("studio")) {
-            const want: string | null = sData.projectId || null;
+            const want: string | null = chatProject;
             let now: string | null = null;
             try { now = sessionStorage.getItem("cg_project_open") || localStorage.getItem("cg_project_open"); } catch { /* storage blocked */ }
             if (want !== now) {

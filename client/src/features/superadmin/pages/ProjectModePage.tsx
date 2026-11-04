@@ -36,7 +36,7 @@ import { DesktopStartPanel, makeLocalProject, type CloudProject, type LocalWorks
 import { DesktopMenuBar, editorMenus } from "@/components/layout/DesktopMenuBar";
 import { openLocalFolder } from "../components/StudioProjectPicker";
 import { ProjectPlaceSwitch } from "../components/ProjectPlaceSwitch";
-import { PROJECT_PLACE_EVENT, getCopyOnThisComputer, linkFolderRepo, listenProjectSaved, saveThisComputerCopy, thisComputerCopy, thisDeviceId, type LocalCopy } from "../utils/projectCopies";
+import { PROJECT_PLACE_EVENT, getCopyOnThisComputer, linkFolderRepo, listenProjectSaved, onDesktop, saveThisComputerCopy, thisComputerCopy, thisDeviceId, type LocalCopy } from "../utils/projectCopies";
 
 const backendUrl = import.meta.env.VITE_API_URL || "https://api.classgrid.in";
 const OPEN_PROJECT_KEY = "cg_project_open"; // which project this browser had open (per-viewer convenience)
@@ -287,7 +287,8 @@ export function ProjectModePage() {
     return () => { gone = true; };
   }, [localFolder, editorTry]);
 
-  const openProject = projects?.find((p) => p.id === openId) || null;
+  // Website: a folder project (This PC) is never the open project; it lives only in the desktop app
+  const openProject = projects?.find((p) => p.id === openId && (onDesktop() || p.location !== "local")) || null;
   const rememberOpen = (id: string | null) => {
     setOpenId(id);
     // sessionStorage is per tab: with projects open in two tabs, each tab's AI works on its own project

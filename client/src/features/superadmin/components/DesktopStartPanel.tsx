@@ -169,7 +169,7 @@ export function DesktopStartPanel({ recent, cloud, githubRepos, onOpen, onConnec
       {recent.length > 0 && (
         <div className="mt-10">
           <div className="flex items-center justify-between mb-2 text-sm text-muted-foreground">
-            <span>Recent projects</span>
+            <span>This PC</span>
             {recent.length > SHOWN && (
               <button onClick={() => setAll((v) => !v)} className="hover:text-foreground">{all ? "Show less" : `View all (${recent.length})`}</button>
             )}
