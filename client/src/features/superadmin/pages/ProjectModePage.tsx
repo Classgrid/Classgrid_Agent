@@ -742,6 +742,8 @@ export function ProjectModePage() {
   const cloudProjects: CloudProject[] = (projects || []).filter((p) => p.location !== "local" && !thisComputerCopy(p)).map((p) => ({
     id: p.id, name: shortName(p.name), logo: p.logo, action: p.repo && !thisComputerCopy(p) ? "Download" : "Open", open: () => open(p),
   }));
+  // Website: only cloud projects. Folder projects stay in the desktop app and are never listed online
+  const websiteProjects = (projects || []).filter((p) => p.location !== "local");
   useEffect(() => { if (isDesktop && githubConnected) loadRepos(); }, [isDesktop, githubConnected, loadRepos]);
 
   // Desktop app: one thin top bar like Cursor. The built-in editor's own top bar is hidden (desktop/editor.js), so its
@@ -1046,7 +1048,7 @@ export function ProjectModePage() {
                   </div>
                 )}
               </div>
-              {projects && projects.length > 0 && newName === null && (
+              {websiteProjects.length > 0 && newName === null && (
                 <button onClick={() => setNewName("")} className="flex items-center gap-2 bg-foreground text-background px-4 py-2 rounded-full font-medium text-sm hover:opacity-90 transition-opacity whitespace-nowrap">
                   <Plus className="size-4" /> New project
                 </button>
@@ -1089,7 +1091,7 @@ export function ProjectModePage() {
               </div>
             ) : (
               <div className="flex flex-col gap-4 max-w-3xl">
-                {(newName !== null || projects.length === 0) && (
+                {(newName !== null || websiteProjects.length === 0) && (
                   <div className="rounded-xl border border-dashed border-border p-4 flex flex-col gap-3 min-h-[140px]">
                     {newName === null ? (
                       <button onClick={() => setNewName("")} className="flex-1 flex flex-col items-center justify-center gap-2 text-sm text-muted-foreground hover:text-foreground">
@@ -1126,7 +1128,7 @@ export function ProjectModePage() {
                   </div>
                 )}
 
-                {projects.map((p) => (
+                {websiteProjects.map((p) => (
                   <div key={p.id} className="group rounded-xl border border-border bg-background p-5 flex flex-col gap-3 hover:bg-secondary/60 transition-colors">
                     <div className="flex items-center gap-4 min-w-0">
                       {renaming?.id === p.id ? (

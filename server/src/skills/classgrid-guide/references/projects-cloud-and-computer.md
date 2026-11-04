@@ -54,11 +54,10 @@ If the folder was already on GitHub before you opened it, Classgrid links its re
 
 ## What the website shows
 
--   **Cloud projects** (with a repo) open in the cloud as usual.
--   **Computer-only projects** (no repo) show **only their name and logo**, marked **"Not connected to a repo"**. Their
-    files are never shown or stored online, and the cloud can't download them: there is nothing to download until a
-    repo exists. To use one online, open the desktop app and ask the agent to make a GitHub repo and push the project.
-    Classgrid then sees the repo, links it, and the cloud downloads the code from GitHub like any cloud project.
+-   **Only cloud projects** (with a repo). They open in the cloud as usual.
+-   **Computer-only projects** (no repo) are **never listed on the website**, not even their name. They show only in the
+    desktop app, under **This PC**. To use one online, open the desktop app and ask the agent to make a GitHub repo and
+    push the project. Classgrid then sees the repo, links it, and the project shows on the website like any cloud project.
 
 ## What Classgrid never does
 

@@ -1,7 +1,8 @@
 // Studio Mode's project picker above the chat input. The projects are the same ones as Project Mode, so a project
 // made in either mode shows in both. A new project can start with a GitHub repo or without one.
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Check, ChevronDown, ChevronRight, Cloud, Folder, FolderPlus, FolderX, Laptop, Link2, Pencil, Search, Trash2, X } from "lucide-react";
+import { createPortal } from "react-dom";
+import { Check, ChevronDown, ChevronRight, Cloud, Folder, FolderOpen, FolderPlus, FolderX, Laptop, Link2, Pencil, Search, Trash2, X } from "lucide-react";
 import { toast } from "sonner";
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/marketing_ui/dialog";
@@ -38,6 +39,10 @@ const shortPath = (name: string) => {
   const last = name.split(/[\\/]/).filter(Boolean).pop() || "";
   return name.slice(0, Math.max(12, 42 - last.length)) + "…\\" + last;
 };
+// The list shows only the folder's name (C:\gridx is "gridx"); the This PC box shows the whole path
+const folderName = (name: string) => name.split(/[\\/]/).filter(Boolean).pop() || name;
+const LIST_W = 288;
+const SIDE_W = 320;
 const desktopApp = (window as any).classgridDesktop as { isDesktop?: boolean; pickFolder?: () => Promise<string | null>; cloneRepo?: (repo: string) => Promise<{ folder?: string; error?: string } | null> } | undefined;
 export async function openLocalFolder(): Promise<Project | null> {
   const folder = await desktopApp?.pickFolder?.();
@@ -178,8 +183,10 @@ export function StudioProjectPicker() {
     setProjects((list) => (list || []).map((x) => (x.id === p.id ? p : x)));
     window.dispatchEvent(new Event("studio:projects-changed"));
   };
-  const [place, setPlace] = useState<{ up: boolean; maxH: number }>({ up: false, maxH: 360 });
+  // The list and the This PC / Cloud box float above the whole window (a portal), so a narrow chat pane never cuts them
+  const [place, setPlace] = useState({ up: false, maxH: 360, left: 0, y: 0, sideLeft: 0 });
   const boxRef = useRef<HTMLDivElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
   const reduce = useReducedMotion();
 
   const load = useCallback(async () => {
@@ -216,11 +223,13 @@ export function StudioProjectPicker() {
   // Close the list on a click outside it or on Escape
   useEffect(() => {
     if (!open) return;
-    const away = (e: PointerEvent) => { if (!boxRef.current?.contains(e.target as Node)) setOpen(false); };
+    const away = (e: PointerEvent) => { if (!boxRef.current?.contains(e.target as Node) && !menuRef.current?.contains(e.target as Node)) setOpen(false); };
     const esc = (e: KeyboardEvent) => { if (e.key === "Escape") setOpen(false); };
+    const resized = () => setOpen(false);
     window.addEventListener("pointerdown", away);
     window.addEventListener("keydown", esc);
-    return () => { window.removeEventListener("pointerdown", away); window.removeEventListener("keydown", esc); };
+    window.addEventListener("resize", resized);
+    return () => { window.removeEventListener("pointerdown", away); window.removeEventListener("keydown", esc); window.removeEventListener("resize", resized); };
   }, [open]);
 
   const current = projects?.find((p) => p.id === picked) || null;
@@ -252,7 +261,7 @@ export function StudioProjectPicker() {
               className={`flex-1 min-w-0 flex items-center gap-2.5 h-8 ${sub ? "pl-7" : "px-2"} pr-2 text-left text-[13px] text-foreground/85`}
             >
               {p.logo ? <img src={p.logo} alt="" className="size-[15px] shrink-0 rounded object-cover" /> : <Folder className="size-[15px] shrink-0 text-muted-foreground" />}
-              <span className="flex-1 min-w-0 truncate">{shortPath(p.name)}</span>
+              <span className="flex-1 min-w-0 truncate">{folderName(p.name)}</span>
               {p.id === picked && <Check className="size-3.5 shrink-0 group-hover:hidden" />}
             </button>
             <div className="hidden group-hover:flex items-center pr-1">
@@ -280,7 +289,12 @@ export function StudioProjectPicker() {
             const below = window.innerHeight - r.bottom - 12;
             const above = r.top - 12;
             const up = below < 300 && above > below;
-            setPlace({ up, maxH: Math.max(160, Math.min(up ? above : below, 420)) });
+            // Kept inside the window; the side box goes right of the list, else left of it, else over its edge
+            const left = Math.max(8, Math.min(r.left, window.innerWidth - LIST_W - 8));
+            const sideLeft = left + LIST_W + 6 + SIDE_W <= window.innerWidth - 8 ? left + LIST_W + 6
+              : left - 6 - SIDE_W >= 8 ? left - 6 - SIDE_W
+              : Math.max(8, window.innerWidth - SIDE_W - 8);
+            setPlace({ up, maxH: Math.max(160, Math.min(up ? above : below, 420)), left, y: up ? window.innerHeight - r.top + 6 : r.bottom + 6, sideLeft });
           }
           setOpen((o) => !o);
         }}
@@ -310,6 +324,8 @@ export function StudioProjectPicker() {
       {/* Desktop app: get a copy on this computer, or switch between this computer and the cloud */}
       <ProjectPlaceSwitch project={current} compact />
 
+      {createPortal(
+      <div ref={menuRef}>
       <AnimatePresence>
       {open && (
         <motion.div
@@ -318,8 +334,8 @@ export function StudioProjectPicker() {
           animate={{ opacity: 1, y: 0, scale: 1 }}
           exit={reduce ? { opacity: 0 } : { opacity: 0, y: place.up ? 4 : -4, scale: 0.98 }}
           transition={{ duration: reduce ? 0 : 0.18, ease: EASE }}
-          style={{ maxHeight: place.maxH, transformOrigin: place.up ? "bottom left" : "top left" }}
-          className={`absolute left-0 ${place.up ? "bottom-full mb-1.5" : "top-full mt-1.5"} flex flex-col z-50 w-[22rem] max-w-[calc(100vw-2rem)] rounded-lg border border-black/10 dark:border-white/[0.08] bg-white dark:bg-[#1e1e1e] text-foreground shadow-2xl overflow-hidden`}
+          style={{ maxHeight: place.maxH, width: LIST_W, left: place.left, ...(place.up ? { bottom: place.y } : { top: place.y }), transformOrigin: place.up ? "bottom left" : "top left" }}
+          className={`fixed flex flex-col z-[100] max-w-[calc(100vw-1rem)] rounded-lg border border-black/10 dark:border-white/[0.08] bg-white dark:bg-[#1e1e1e] text-foreground shadow-2xl overflow-hidden`}
         >
           <label className="shrink-0 flex items-center gap-2 h-9 px-3 border-b border-black/10 dark:border-white/[0.08]">
             <Search className="size-3.5 shrink-0 text-muted-foreground" />
@@ -371,15 +387,6 @@ export function StudioProjectPicker() {
             >
               <FolderPlus className="size-[15px] text-muted-foreground" /> New project
             </button>
-            {desktopApp?.isDesktop && (
-              <button
-                type="button"
-                onClick={async () => { setOpen(false); const made = await openLocalFolder(); if (made) pick(made.id, made); }}
-                className="w-full flex items-center gap-2.5 h-8 px-2 rounded-md text-left text-[13px] text-foreground/85 hover:bg-black/[0.05] dark:hover:bg-white/[0.07] transition-colors duration-150"
-              >
-                <Folder className="size-[15px] text-muted-foreground" /> Open folder from this computer
-              </button>
-            )}
           </div>
           <div className="shrink-0 border-t border-black/10 dark:border-white/[0.08] p-1">
             <button
@@ -400,7 +407,9 @@ export function StudioProjectPicker() {
         const pathOf = (p: Project) => (p.location === "local" ? p.localPath || p.name : thisComputerCopy(p)?.path || p.name);
         const list = (projects || [])
           .filter((p) => (side === "local" ? onThisPc(p) : !onThisPc(p)))
-          .filter((p) => !t || pathOf(p).toLowerCase().includes(t) || p.name.toLowerCase().includes(t) || (p.repo || "").toLowerCase().includes(t));
+          .filter((p) => !t || pathOf(p).toLowerCase().includes(t) || p.name.toLowerCase().includes(t) || (p.repo || "").toLowerCase().includes(t))
+          // The same folder once only (c:\gridx and C:\gridx are one folder)
+          .filter((p, i, all) => all.findIndex((o) => pathOf(o).toLowerCase() === pathOf(p).toLowerCase()) === i);
         return (
           <motion.div
             key="side"
@@ -408,8 +417,8 @@ export function StudioProjectPicker() {
             animate={{ opacity: 1, x: 0 }}
             exit={reduce ? { opacity: 0 } : { opacity: 0, x: -4 }}
             transition={{ duration: reduce ? 0 : 0.15, ease: EASE }}
-            style={{ maxHeight: place.maxH }}
-            className={`absolute left-[calc(22rem+0.375rem)] ${place.up ? "bottom-full mb-1.5" : "top-full mt-1.5"} flex flex-col z-50 w-[24rem] max-w-[calc(100vw-2rem)] rounded-lg border border-black/10 dark:border-white/[0.08] bg-white dark:bg-[#1e1e1e] text-foreground shadow-2xl overflow-hidden`}
+            style={{ maxHeight: Math.min(place.maxH, 340), width: SIDE_W, left: place.sideLeft, ...(place.up ? { bottom: place.y } : { top: place.y }) }}
+            className={`fixed flex flex-col z-[101] max-w-[calc(100vw-1rem)] rounded-lg border border-black/10 dark:border-white/[0.08] bg-white dark:bg-[#1e1e1e] text-foreground shadow-2xl overflow-hidden`}
           >
             <label className="shrink-0 flex items-center gap-2 h-9 px-3 border-b border-black/10 dark:border-white/[0.08]">
               <Search className="size-3.5 shrink-0 text-muted-foreground" />
@@ -438,10 +447,25 @@ export function StudioProjectPicker() {
                 </button>
               ))}
             </div>
+            {/* Like Cursor: This PC ends with Open Folder */}
+            {side === "local" && desktopApp?.isDesktop && (
+              <div className="shrink-0 border-t border-black/10 dark:border-white/[0.08] p-1">
+                <button
+                  type="button"
+                  onClick={async () => { setOpen(false); const made = await openLocalFolder(); if (made) pick(made.id, made); }}
+                  className="w-full flex items-center gap-2.5 h-8 px-2 rounded-md text-left text-[13px] text-foreground/85 hover:bg-black/[0.05] dark:hover:bg-white/[0.07] transition-colors duration-150"
+                >
+                  <FolderOpen className="size-[15px] text-muted-foreground" /> Open Folder
+                </button>
+              </div>
+            )}
           </motion.div>
         );
       })()}
       </AnimatePresence>
+      </div>,
+      document.body,
+      )}
 
       <NewProjectDialog
         open={creating}
