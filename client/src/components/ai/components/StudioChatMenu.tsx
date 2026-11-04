@@ -15,7 +15,9 @@ import { savedProject } from "@/features/superadmin/utils/projectCopies";
 const backendUrl = import.meta.env.VITE_API_URL || "https://api.classgrid.in";
 const item = "gap-3 py-2 px-3 text-[14px] cursor-pointer hover:bg-slate-100 dark:hover:bg-[#343541] focus:bg-slate-100 dark:focus:bg-[#343541] focus:text-slate-900 dark:focus:text-[#ececf1] rounded-xl transition-colors";
 const icon = "w-4 h-4 text-slate-500 dark:text-white/70";
-const card = "z-[100] bg-white dark:bg-[#202123] text-slate-700 dark:text-[#ececf1] border border-slate-200 dark:border-white/10 rounded-2xl p-2 shadow-2xl";
+// (data-closed:animate-none: a picked item closes the menu at once; its fade-out showed the chat through it, and the Copy
+// submenu shrinking on its own looked like a moving flash)
+const card = "z-[100] bg-white dark:bg-[#202123] text-slate-700 dark:text-[#ececf1] border border-slate-200 dark:border-white/10 rounded-2xl p-2 shadow-2xl data-closed:animate-none";
 
 type Msg = { role: string; content: string };
 
@@ -67,7 +69,8 @@ export function StudioChatMenu({ sessionId, isPinned, onTogglePin, onDelete, mes
   const [newGroup, setNewGroup] = useState(false);
 
   const copy = async (text: string, what: string) => {
-    try { await navigator.clipboard.writeText(text); toast.success(`${what} copied`); } catch { toast.error("Could not copy"); }
+    // (one message that changes in place: copying again doesn't stack a second one sliding over the first)
+    try { await navigator.clipboard.writeText(text); toast.success(`${what} copied`, { id: "chat-copy" }); } catch { toast.error("Could not copy", { id: "chat-copy" }); }
   };
   const chatText = () => messages
     .filter((m) => m.content?.trim())
