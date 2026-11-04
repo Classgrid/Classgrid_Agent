@@ -187,7 +187,13 @@ export const winstonMiddleware = (req, res, next) => {
         // Safely capture and redact request body
         let safeBody = undefined;
         if (req.body && Object.keys(req.body).length > 0) {
-            safeBody = { ...req.body };
+            // A full copy, so redacting never changes the request itself. A file sent inside the request as a data
+            // URL (e.g. a desktop app chat picture) is never written to the logs.
+            try {
+                safeBody = JSON.parse(JSON.stringify(req.body, (k, v) => (typeof v === "string" && v.length > 1000 && /^\s*data:/i.test(v) ? `[data URL, ${Math.round(v.length / 1024)} KB, not logged]` : v)));
+            } catch {
+                safeBody = { ...req.body };
+            }
             const sensitiveKeys = ["password", "token", "secret", "key", "authorization", "credit_card"];
             
             const redact = (obj) => {

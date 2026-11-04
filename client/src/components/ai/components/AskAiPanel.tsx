@@ -234,6 +234,7 @@ type PageContext = {
 
 import { usePostHog } from 'posthog-js/react';
 import { fetchWithRescue } from "@/lib/rescue";
+import { LOCAL_IMAGE_MISSING, keepLocalImage, loadLocalImages, readAsDataUrl, sendsInline, showLocalImages } from "@/lib/desktopImages";
 import { OFFLINE_CHAT_NOTE, continueChatCopy, continuedChatOf, continuedFrom, isUnreachable, keepsChatCopies, readChatCopy, readOtherChatCopy, removeChatCopy, saveChatCopy, syncChatCopy, type OtherChatRef } from "@/lib/desktopChats";
 import { memoryNotesIndex, otherAccountsMemory, syncComputerMemory } from "@/lib/desktopMemory";
 import { AgentMapButton } from "./AgentMap";
@@ -2048,6 +2049,13 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
   const wordTypingActiveRef = useRef(false);
 
   const [messages, setMessages] = useState<ChatMessage[]>(initialMessages ?? []);
+  // Desktop app: pictures sent inline come back from the server as placeholders and are shown from this computer
+  // (lib/desktopImages.ts); the chat is drawn again when one is found
+  const [localImagesFound, setLocalImagesFound] = useState(0);
+  useEffect(() => {
+    const urls = messages.flatMap(m => (m.attachments || []).map(a => a.url));
+    loadLocalImages(urls).then(found => { if (found) setLocalImagesFound(n => n + 1); }).catch(() => { /* shown as a chip */ });
+  }, [messages]);
   const [replyToMessage, setReplyToMessage] = useState<ChatMessage | null>(null);
   const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
   const [editContent, setEditContent] = useState<string>("");
@@ -2485,13 +2493,14 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
     const files: { url: string; name: string; mimeType: string }[] = [];
     messages.forEach(m => {
       if (m.attachments) {
-        m.attachments.forEach(a => {
-          files.push(a);
+        // Desktop app pictures sent inline: listed only when the picture is on this computer
+        showLocalImages(m.attachments).forEach(a => {
+          if (a.mimeType !== LOCAL_IMAGE_MISSING) files.push(a);
         });
       }
     });
     return files;
-  }, [messages]);
+  }, [messages, localImagesFound]);
 
   useEffect(() => {
     if (tocItems.length === 0) return;
@@ -2740,7 +2749,8 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
       localStorage.setItem("askAiDraftInput", input);
 
       const filesToSave = attachedFiles
-        .filter(f => f.status === "done" && f.url)
+        // Desktop app pictures sent inline (data: URLs, up to 5 MB each) don't fit in the saved draft
+        .filter(f => f.status === "done" && f.url && !f.url.startsWith("data:"))
         .map(f => ({
           id: f.id,
           name: f.name,
@@ -2837,10 +2847,23 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
       // Fail open so we don't break the app if DB is down
     }
 
+    // Desktop app: a picture (PNG, JPEG, GIF, WebP up to 5 MB) is read on this computer and goes to the AI inside
+    // the chat request, like Claude Code; it is never uploaded or stored. Other files are uploaded as before.
+    const sentInline = new Set<string>();
+    await Promise.all(accepted.filter(f => f.file && sendsInline(f)).map(async (f) => {
+      try {
+        const dataUrl = await readAsDataUrl(f.file!);
+        if (!dataUrl.startsWith("data:image/")) return;
+        sentInline.add(f.id);
+        setAttachedFiles(prev => prev.map(x => x.id === f.id ? { ...x, status: "done", url: dataUrl } : x));
+      } catch { /* not readable here: uploaded below like any other file */ }
+    }));
+    const toUpload = accepted.filter(f => !sentInline.has(f.id));
+
     let rateLimitToastShown = false;
 
     // Upload accepted files immediately in the background
-    for (const newFile of accepted) {
+    for (const newFile of toUpload) {
       try {
         const result = await getPresignedUrlForAskAiFile(newFile.name, newFile.type, newFile.size);
         if ("error" in result) {
@@ -2851,7 +2874,7 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
 
           if (result.error.includes("maximum limit")) {
             // If it's a rate limit, remove this file and all remaining unprocessed files from the UI
-            const remainingIds = accepted.slice(accepted.indexOf(newFile)).map(f => f.id);
+            const remainingIds = toUpload.slice(toUpload.indexOf(newFile)).map(f => f.id);
             setAttachedFiles(prev => prev.filter(f => !remainingIds.includes(f.id)));
             break; // Abort the rest of the batch
           } else {
@@ -4156,6 +4179,9 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
         mimeType: f.type,
         size: f.size,
       }));
+    // Desktop app pictures sent inline: kept on this computer, so the chat still shows them once the server's copy
+    // (which has only a placeholder) comes back
+    filesToUpload.forEach(f => { if (f.url.startsWith("data:image/")) void keepLocalImage(f.url); });
 
     // Studio: comments and quotes on code go to the AI as plain text; the chat shows them as chips
     const sentCodeNotes = options?.codeNotes || [];
@@ -4500,7 +4526,9 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
               return undefined;
             } catch { return undefined; }
           })(),
-          fileUrls: uploadedAttachments.length > 0 ? uploadedAttachments.map(a => a.url) : [],
+          // Desktop app pictures sent inline go only in attachments (the server lists them in fileUrls itself), so
+          // the request carries each picture once: 6 pictures of 5 MB stay under the server's 50 MB limit
+          fileUrls: uploadedAttachments.length > 0 ? uploadedAttachments.filter(a => !a.url.startsWith("data:")).map(a => a.url) : [],
           attachments: uploadedAttachments.length > 0 ? uploadedAttachments.map(a => ({ url: a.url, name: a.name, mimeType: a.mimeType })) : undefined,
           history: messages
             .filter((m) => m.role === "user" || m.role === "assistant")
@@ -5120,7 +5148,7 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
             </div>
           </>
         ) : (() => {
-          const listDeps = [messages, thinking, submitting, priorityMessage, gridBlockedBy];
+          const listDeps = [messages, thinking, submitting, priorityMessage, gridBlockedBy, localImagesFound];
           if (typingOnlyRender && chatListRef.current && chatListRef.current.deps.every((d, i) => d === listDeps[i])) return chatListRef.current.node;
           const node = (
           <>
@@ -5130,6 +5158,8 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
 
               // Parse pasted text out of the content dynamically to reconstruct chips on page refresh
               const message = { ...rawMessage };
+              // Desktop app pictures sent inline: the picture kept on this computer, or an "image (only on this PC)" chip
+              if (message.attachments) message.attachments = showLocalImages(message.attachments);
               let displayContent = typeof message.content === 'object' && message.content !== null
                 ? (message.content as any).content || JSON.stringify(message.content)
                 : String(message.content || '');
@@ -6039,6 +6069,25 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
                                   iconBgClass = "bg-purple-100/50 dark:bg-purple-900/20";
                                   iconColorClass = "text-purple-600 dark:text-purple-400";
                                   fileTypeLabel = "AUDIO";
+                                }
+
+                                // A desktop app picture that was sent inline and isn't kept on this computer
+                                if (att.mimeType === LOCAL_IMAGE_MISSING) {
+                                  return (
+                                    <div
+                                      key={`${att.name}-${i}`}
+                                      title="This picture went to the AI from the Classgrid desktop app and was not stored online"
+                                      className="inline-flex items-center gap-3 rounded-xl border border-border bg-muted/40 px-3 py-2.5 shadow-sm min-w-[220px] max-w-[400px]"
+                                    >
+                                      <div className="h-8 w-8 rounded-lg bg-muted flex items-center justify-center shrink-0">
+                                        <FileImage className="h-4 w-4 text-muted-foreground" />
+                                      </div>
+                                      <div className="flex flex-col min-w-0 overflow-hidden text-left gap-0.5">
+                                        <span className="text-[13px] font-medium text-foreground truncate leading-tight">{att.name}</span>
+                                        <span className="text-[12px] text-muted-foreground truncate leading-tight">image (only on this PC)</span>
+                                      </div>
+                                    </div>
+                                  );
                                 }
 
                                 if (att.name.startsWith("Pasted text")) {

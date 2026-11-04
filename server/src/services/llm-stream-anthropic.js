@@ -176,8 +176,20 @@ function isTrustedAttachmentUrl(url) {
     }
 }
 
+// A picture sent inside the chat request by the desktop app (utils/inline-images.js): already here, nothing to fetch
+const DATA_IMAGE_URL = /^data:image\/[a-z0-9.+-]+;base64,/i;
+const isDataImageUrl = (url) => typeof url === "string" && DATA_IMAGE_URL.test(url);
+// The attachment's bytes: decoded from a data URL, or downloaded from trusted Classgrid storage
+async function attachmentBytes(url, signal) {
+    if (isDataImageUrl(url)) return Buffer.from(url.slice(url.indexOf(",") + 1), "base64");
+    return fetchTrustedFile(url, signal);
+}
+// For logs: never the base64 itself
+const urlForLog = (url) => (isDataImageUrl(url) ? "inline picture from the desktop app" : String(url).slice(0, 80));
+
 function nativeAttachmentKind(a) {
     const type = String(a?.mimeType || "").toLowerCase();
+    if (isDataImageUrl(a?.url)) return "image"; // the bytes are checked (sniffImageType) before use
     if (!isTrustedAttachmentUrl(typeof a?.url === "string" ? a.url : "")) return null;
     if (IMAGE_TYPES.has(type)) return "image";
     if (type === "application/pdf") return "pdf";
@@ -233,7 +245,7 @@ async function toAttachmentBlocks(attachments, signal) {
         const kind = nativeAttachmentKind(a);
         if (!kind) continue;
         try {
-            const buf = await fetchTrustedFile(a.url, signal);
+            const buf = await attachmentBytes(a.url, signal);
             if (!buf) continue;
             if (buf.length === 0 || buf.length > (kind === "image" ? MAX_IMAGE_BYTES : MAX_PDF_BYTES)) continue;
             const data = buf.toString("base64");
@@ -246,7 +258,7 @@ async function toAttachmentBlocks(attachments, signal) {
             }
         } catch (e) {
             if (signal?.aborted) throw e;
-            console.warn(`[claude] could not load attachment for native vision (${String(a.url).slice(0, 80)}): ${e.message}`);
+            console.warn(`[claude] could not load attachment for native vision (${urlForLog(a.url)}): ${e.message}`);
         }
     }
     return blocks;
@@ -360,14 +372,14 @@ export async function toImageUrlParts(attachments, signal) {
         }
         if (kind !== "image") continue;
         try {
-            const buf = await fetchTrustedFile(a.url, signal);
+            const buf = await attachmentBytes(a.url, signal);
             if (!buf || buf.length === 0 || buf.length > MAX_IMAGE_BYTES) continue;
             const mediaType = sniffImageType(buf);
             if (!mediaType) continue;
             parts.push({ type: "image_url", image_url: { url: `data:${mediaType};base64,${buf.toString("base64")}` } });
         } catch (e) {
             if (signal?.aborted) throw e;
-            console.warn(`[vision] could not load attachment for native vision (${String(a.url).slice(0, 80)}): ${e.message}`);
+            console.warn(`[vision] could not load attachment for native vision (${urlForLog(a.url)}): ${e.message}`);
         }
     }
     return parts;

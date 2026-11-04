@@ -103,6 +103,7 @@ import { ROLE_DEFINITIONS } from "../utils/roles.js";
 import { SHARE_PAGE_TOOLS, SHARE_PAGE_PROMPT, runPublishPage, runPageComments } from "../services/share-page.service.js";
 import { isPublicChatAccount } from "../utils/chat-onboarding.js";
 import { isWebsite } from "../utils/client-app.js";
+import { takeInlineImages, findInlineImage, withInlineImages, INLINE_IMAGE_PREFIX, INLINE_IMAGE_NOTE } from "../utils/inline-images.js";
 
 const uniqueDashboards = [...new Set(Object.values(ROLE_DEFINITIONS).map(r => r.dashboard))];
 const dashboardList = uniqueDashboards.map(d => `- ${d}`).join('\n');
@@ -1569,6 +1570,10 @@ export const streamAskAi = async (req, res) => {
     // Sent from the website (chat.classgrid.in): folder projects (a folder on the user's computer) work only in the
     // desktop app, so they are never linked, described or reached from here (utils/client-app.js)
     const fromWebsite = isWebsite(req);
+    // Desktop app: pictures sent inside this request (data: URLs) are taken out of body.fileUrls / body.attachments
+    // here and replaced by a short placeholder, so they are never stored (messages, history, logs) and no tool gets
+    // the base64. They go only to the AI for this answer. Website requests can't send them (removed).
+    const inlineImages = takeInlineImages(body, { allowed: !fromWebsite });
     // A "/" command from the chat box (Project Mode and Studio only; the live browser is only in Studio)
     const slashCommand = (body.appMode === "project" || body.appMode === "studio") && Object.hasOwn(SLASH_COMMAND_LINES, String(body.command || "")) && (body.command !== "browser" || body.appMode === "studio") ? body.command : null;
     // How hard to think, picked in the model menu: Fast, Normal or Deep (/boost is Deep for one message)
@@ -1947,7 +1952,7 @@ export const streamAskAi = async (req, res) => {
                 if (!skipAutoTitle && !hideFromUser) {
                     // A file sent without text arrives as "Please analyze the attached file(s)." — give the titler the
                     // file names too, or it titles the chat "No Files Provided"
-                    const fileNames = (body.fileUrls || []).map((u) => String(u).split(/[?#]/)[0].split('/').pop().replace(/^\d{10,}-/, '')).filter(Boolean);
+                    const fileNames = (body.fileUrls || []).map((u) => String(u).split(/[?#]/)[0].split('/').pop().replace(/^\d{10,}-/, '').replace(` ${INLINE_IMAGE_NOTE}`, '')).filter(Boolean);
                     const titleInput = fileNames.length ? `${body.question}\nAttached files: ${fileNames.join(', ')}` : body.question;
                     setTimeout(() => generateSessionTitle(sessionId, titleInput, req.user?._id).catch(console.error), 5000);
                 }
@@ -1989,6 +1994,8 @@ export const streamAskAi = async (req, res) => {
             let content = gridSender ? `${gridSender.name}: ${body.question}` : body.question;
             if (body.fileUrls && body.fileUrls.length > 0) {
                 content += "\n\nAttached Files:\n" + body.fileUrls.join('\n');
+                // Only in the AI's copy of this message (not saved): how to look at a desktop app picture
+                if (inlineImages.length > 0) content += `\n(The ${INLINE_IMAGE_PREFIX} pictures above are in this message. If you can't see them yourself, call analyze_image with that ${INLINE_IMAGE_PREFIX} link as the url. They are not stored: no other tool, link or later message can open them.)`;
             }
 
             // Short replies like "okay" or "thanks" go to the AI like any other message: "okay" often means
@@ -4409,14 +4416,22 @@ You work on the user's own Windows computer through their Classgrid desktop app,
                             const { url, question } = args;
                             if (!url) return "ERROR: No url provided in tool arguments.";
 
-                            try { await redis.rpush(`ai:chat:files:${sessionId}`, url); await redis.expire(`ai:chat:files:${sessionId}`, 86400); } catch (e) { console.error("Redis error", e); }
+                            // A picture sent from the desktop app with this message: read from the request, never fetched
+                            const inline = findInlineImage(inlineImages, url);
+                            if (!inline && String(url).includes(INLINE_IMAGE_PREFIX)) return "This picture was sent from the desktop app with an earlier message and is not stored, so it can't be opened again. Ask the user to paste it again if you need it.";
 
-                            console.log(`[analyze_image] Fetching Image URL: ${url}`);
-                            const response = await fetch(url, { headers: { 'User-Agent': 'Mozilla/5.0' } });
-                            if (!response.ok) throw new Error(`Failed to fetch Image URL: ${response.statusText}`);
+                            if (!inline) { try { await redis.rpush(`ai:chat:files:${sessionId}`, url); await redis.expire(`ai:chat:files:${sessionId}`, 86400); } catch (e) { console.error("Redis error", e); } }
 
-                            const arrayBuffer = await response.arrayBuffer();
-                            const buffer = Buffer.from(arrayBuffer);
+                            let buffer;
+                            if (inline) {
+                                buffer = Buffer.from(inline.dataUrl.slice(inline.dataUrl.indexOf(",") + 1), "base64");
+                                console.log(`[analyze_image] Desktop app picture ${inline.name} (${buffer.length} bytes)`);
+                            } else {
+                                console.log(`[analyze_image] Fetching Image URL: ${url}`);
+                                const response = await fetch(url, { headers: { 'User-Agent': 'Mozilla/5.0' } });
+                                if (!response.ok) throw new Error(`Failed to fetch Image URL: ${response.statusText}`);
+                                buffer = Buffer.from(await response.arrayBuffer());
+                            }
 
                             console.log(`[analyze_image] Using Cloudflare Vision AI. Question: ${question}`);
                             const cfToken = process.env.CLOUDFLARE_WORKERS_AI_TOKEN;
@@ -6194,7 +6209,7 @@ If a tool fails, never show the error message; say only: "Something went wrong o
                                 systemCacheBoundary,
                                 // Images and PDFs attached to this message are sent to Claude directly (native vision),
                                 // plus the last images Claude generated in this chat, so it can look at its own images
-                                attachments: [...(Array.isArray(body.attachments) ? body.attachments : []), ...recentGeneratedImageAttachments(messages)],
+                                attachments: [...withInlineImages(body.attachments, inlineImages), ...recentGeneratedImageAttachments(messages)],
                                 signal: streamAbort.signal,
                                 onStatus,
                                 onThought,
@@ -6249,7 +6264,7 @@ If a tool fails, never show the error message; say only: "Something went wrong o
                             if (sees) {
                                 modelMessages = [...messages];
                                 if (modelMessages[0]?.role === "system") modelMessages[0] = { ...modelMessages[0], content: modelMessages[0].content + CF_NATIVE_VISION_NOTE };
-                                imageParts = await toImageUrlParts([...(Array.isArray(body.attachments) ? body.attachments : []), ...recentGeneratedImageAttachments(messages)], streamAbort.signal);
+                                imageParts = await toImageUrlParts([...withInlineImages(body.attachments, inlineImages), ...recentGeneratedImageAttachments(messages)], streamAbort.signal);
                                 const lastUser = modelMessages.map((m) => m.role).lastIndexOf("user");
                                 if (imageParts.length > 0 && lastUser > 0) {
                                     const m = modelMessages[lastUser];
