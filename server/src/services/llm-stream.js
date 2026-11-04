@@ -128,6 +128,13 @@ export const BUDGET_STOP_NOTE = "_(Stopped here: your AI tokens ran out while I 
 export const budgetStopAnswer = (text) => `${String(text || "").trim()}\n\n${BUDGET_STOP_NOTE}`.trim();
 export const CONTINUE_PROMPT ="Your previous reply was cut off by the length limit. Continue EXACTLY where it stopped, even mid-word, mid-sentence or mid-code, without repeating anything and without any preamble, apology or comment. If you were inside a code block, keep writing inside it (do not open a new ```). Finish everything that was asked.";
 
+// The terminal rule, sent with every message where the AI can use a terminal (cloud and desktop app; owner's rule,
+// 2026-11-04): a missing or failed tool is never a reason to stop and think, the terminal does the job
+export const TERMINAL_RULE = "--- USE THE TERMINAL (every message) ---\nYou don't need a special tool for anything the terminal can do. When a tool is missing, not loaded or fails, don't stop to think it over and don't call it again the same way: do the same job right away with the terminal (execute_terminal_command): git add / commit / push to push code, gh repo create (or git remote add origin and git push -u) for a new GitHub repo, and normal shell commands for files, installs, builds and checks.";
+// A tool result that says the tool is missing or failed
+export const toolFailed = (text) => /^\s*(error\b|tool error|failed\b|not run\b|not created\b|this folder project only works)/i.test(String(text ?? ""))
+    || /\b(is not loaded|unknown tool|can't run on this computer|isn't open on the user's computer|is an older version that can't)\b/i.test(String(text ?? "").slice(0, 400));
+
 // The request option that switches a model's thinking off (tested on Cloudflare, 2026-11-04: DeepSeek V4 Pro 15.7 s ->
 // 2.1 s, V4.1 Flash 2.7 -> 1.1 s, Kimi K2.6 6.1 -> 3.1 s, GLM 5.3 3.3 -> 1.1 s). Other models: nothing is changed.
 export function noThinkingFor(model) {
@@ -298,6 +305,7 @@ export async function streamChat({
     const usage = { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 };
     let depth = 0;
     let toolsRun = 0;
+    let lastToolFailed = false; // a tool in the last round was missing or failed: the next round doesn't think
     let hadReasoning = false;
     let continuedText = ""; // earlier parts of an answer that was cut off and continued
     let continuations = 0;
@@ -344,7 +352,8 @@ export async function streamChat({
                         onToken: (piece) => { shownText += piece; onToken?.(piece); },
                         onThought: separateThought,
                         inputTooBig,
-                        quick: thinking === "none" || (thinking === "first" && conversation[conversation.length - 1]?.role === "tool")
+                        // (after a failed tool, never: the rule says to go straight to the terminal)
+                        quick: thinking === "none" || lastToolFailed || (thinking === "first" && conversation[conversation.length - 1]?.role === "tool")
                     });
                     break;
                 } catch (e) {
@@ -447,6 +456,7 @@ export async function streamChat({
             // Including the current assistant message would make every parallel call after the first match itself.
             const earlierCalls = conversation.flatMap((m) => m.tool_calls || []);
             const callsThisRound = [];
+            let toolFailedThisRound = false;
             const wasCalled = (name, args) =>
                 [...earlierCalls, ...callsThisRound].some((tc) => tc.function.name === name && (args === undefined || tc.function.arguments === args));
 
@@ -524,6 +534,9 @@ export async function streamChat({
                     stopAnswer = said && !toolResult.stopAnswer.includes(said) ? `${said}\n\n${toolResult.stopAnswer}` : toolResult.stopAnswer;
                 }
                 if (toolImages && !String(resultText ?? "").startsWith("FAILED")) roundImages.push(...await toolImages.fromResult(toolName, toolResult && typeof toolResult === "object" ? toolResult : null, resultText));
+                // A tool that is missing or failed: the next step doesn't stop to think it over (it goes straight to the
+                // terminal, TERMINAL_RULE in every message's instructions; owner's rule, 2026-11-04)
+                if (toolFailed(resultText)) toolFailedThisRound = true;
                 // load_tools carries the full rules of the loaded groups, so it isn't cut like normal tool output.
                 conversation.push({ role: "tool", tool_call_id: call.id, content: String(resultText ?? "").slice(0, toolName === "run_project_helpers" || toolName === "check_helpers" || toolName === "read_whatsapp_messages" || toolName === "wait_for_whatsapp_reply" ? 200000 : ["execute_terminal_command", "computer_terminal", "check_background_command", "start_background_command", "send_background_input", "run_code"].includes(toolName) ? 60000 : toolName === "load_tools" ? 40000 : toolName === "open_url" || toolName === "view_project_file" || toolName === "search_project" || toolName === "read_local_file" ? 20000 : 6000) });
             }
@@ -532,6 +545,7 @@ export async function streamChat({
             if (roundImages.length) conversation.push({ role: "user", content: [{ type: "text", text: "The images from the tool results above. Look at them yourself:" }, ...roundImages] });
             if (stopAnswer) return { answer: stopAnswer, usage, toolsRun };
             if (countsTowardDepth) depth++;
+            lastToolFailed = toolFailedThisRound;
         }
     } catch (err) {
         const wrapped = err instanceof StreamChatError ? err : new StreamChatError(err?.message || String(err));
