@@ -131,6 +131,45 @@ function freeBytes(dir) {
 }
 const driveSize = (b) => (b >= 1073741824 ? `${(b / 1073741824).toFixed(1)} GB` : b >= 1048576 ? `${Math.round(b / 1048576)} MB` : `${Math.max(1, Math.round(b / 1024))} KB`);
 
+// ripgrep, the search VS Code uses, from Classgrid Code's own files: searches in parallel and skips what .gitignore
+// skips, so a big folder answers in about a second instead of reading every file one by one
+const RG_INSIDE = [
+  "resources/app/node_modules.asar.unpacked/@vscode/ripgrep-universal/bin/win32-x64/rg.exe",
+  "resources/app/node_modules.asar.unpacked/@vscode/ripgrep/bin/rg.exe",
+  "resources/app/node_modules/@vscode/ripgrep/bin/rg.exe",
+];
+let rgPath;
+function ripgrep() {
+  if (rgPath !== undefined) return rgPath;
+  // Inside Classgrid Code this runs on the editor's own program; in the Classgrid app, in the editor it unpacked
+  const roots = [path.dirname(process.execPath)];
+  try {
+    const base = path.join(path.dirname(foldersFile || ""), "classgrid-code");
+    roots.push(...fs.readdirSync(base).map((n) => path.join(base, n)).filter((d) => fs.existsSync(path.join(d, ".unpacked")))
+      .sort((a, b) => fs.statSync(b).mtimeMs - fs.statSync(a).mtimeMs));
+  } catch { /* no editor unpacked yet */ }
+  for (const root of roots) for (const rel of RG_INSIDE) if (fs.existsSync(path.join(root, rel))) return (rgPath = path.join(root, rel));
+  return (rgPath = null);
+}
+// The same answer as search_project, or null when ripgrep isn't there (then the slow search runs)
+function searchWithRipgrep(root, full, { query, regex, ignore_case }) {
+  const rg = ripgrep();
+  if (!rg) return null;
+  const { spawnSync } = require("node:child_process");
+  const args = ["--line-number", "--no-heading", "--color", "never", "--path-separator", "/", "--max-columns", "300", "--max-columns-preview",
+    "--max-filesize", "2M", "--no-require-git", ...[...SKIP_DIRS].flatMap((d) => ["-g", `!${d}`]),
+    ...(ignore_case ? ["-i"] : []), ...(regex ? [] : ["-F"]), "-e", String(query), "--", "."];
+  const r = spawnSync(rg, args, { cwd: full, windowsHide: true, encoding: "utf8", maxBuffer: 64 * 1024 * 1024, timeout: 60000 });
+  if (r.error || (r.status !== 0 && r.status !== 1)) {
+    if (r.status === 2 && r.stdout) { /* some files couldn't be read: keep the matches */ } else return null;
+  }
+  const prefix = path.relative(root, full).replace(/\\/g, "/");
+  const lines = String(r.stdout || "").split("\n").filter(Boolean).map((l) => (prefix ? `${prefix}/` : "") + l.replace(/^\.\//, ""));
+  if (!lines.length) return "No matches.";
+  const files = new Set(lines.map((l) => l.slice(0, l.indexOf(":"))));
+  return `Found in ${files.size} file${files.size === 1 ? "" : "s"} (${lines.length} matching line${lines.length === 1 ? "" : "s"})${lines.length > 200 ? "; showing the first 200 lines" : ""}.\n${lines.slice(0, 200).join("\n")}`;
+}
+
 // ── The tools (same answers as server/src/services/ide-project.service.js projectTools) ────────────────────
 
 const tools = {
@@ -168,6 +207,8 @@ const tools = {
   search_project(root, { query, path: dir = "", regex = false, ignore_case = false }) {
     if (!query) return "Error: query is empty";
     const { full } = resolveIn(root, dir);
+    const fast = searchWithRipgrep(root, full, { query, regex, ignore_case });
+    if (fast !== null) return fast;
     const re = regex ? new RegExp(String(query), ignore_case ? "i" : "") : null;
     const needle = ignore_case ? String(query).toLowerCase() : String(query);
     const hits = [];
