@@ -165,6 +165,12 @@
     new MutationObserver(followEditorTheme).observe(document.body, { attributes: true, attributeFilter: ["class"] });
   };
   if (document.body) watchTheme(); else document.addEventListener("DOMContentLoaded", watchTheme);
+  // The theme just picked in Settings, sent here at once (the editor's own switch reaches this page a moment later)
+  var setTheme = function (want) {
+    if (want !== "dark" && want !== "light") return;
+    try { localStorage.setItem("theme", want); } catch (err) { /* storage blocked */ }
+    window.dispatchEvent(new StorageEvent("storage", { key: "theme", newValue: want }));
+  };
 
   // The Agent panel and the chats sidebar on the left edge are two pages: a chat list change in one (a new chat, a
   // refresh after a rename or delete, Ctrl+K for the chat search) is passed on to the other through the extension
@@ -258,6 +264,8 @@
       coverWindow(m.data);
     } else if (m.cgEvent === "overlayOff") {
       uncoverWindow();
+    } else if (m.cgEvent === "editorTheme") {
+      setTheme(m.data);
     } else if (m.cgEvent === "shared" && m.data && SHARED.indexOf(m.data.name) !== -1) {
       passing = true;
       try { window.dispatchEvent(new CustomEvent(m.data.name, { detail: m.data.detail })); } finally { passing = false; }
@@ -383,8 +391,12 @@
     openInEditor: bind("openInEditor"),
     revealInEditor: bind("revealInEditor"),
     onOpenFolderProject: on("openFolderProject"),
-    // Settings → Appearance: light, dark or the same as the computer, for the whole editor
-    setEditorTheme: bind("setEditorTheme"),
+    // Settings → Appearance: light, dark or the same as the computer, for the whole editor. It also says which one that
+    // is now (the computer's own for "same as your PC"), so the AI panel switches at once, not after the editor does
+    setEditorTheme: function (mode) {
+      var want = mode === "system" ? (window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light") : mode;
+      return call("setEditorTheme", mode, want);
+    },
     // The AI panel's chats sidebar → Settings: the same Settings tab as the gear in the title bar
     openSettings: bind("openSettings"),
     // The X on the AI panel's top line: closes the right side

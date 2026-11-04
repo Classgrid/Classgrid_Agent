@@ -444,7 +444,9 @@ const HANDLERS = {
   // The X on the AI panel's top line: closes the right side (the Agent button in the title bar opens it again)
   closePanel: () => vscode.commands.executeCommand("workbench.action.closeAuxiliaryBar").then(() => undefined),
   // Settings → Appearance: the whole editor light, dark, or the same as the computer (our screens follow it: bridge.js)
-  setEditorTheme: async (_p, mode) => {
+  setEditorTheme: async (_p, mode, want) => {
+    // our other screens switch at once; the editor's own switch takes a moment
+    for (const w of [screens.agent, screens.chats]) w?.postMessage({ cgEvent: "editorTheme", data: want });
     const cfg = vscode.workspace.getConfiguration();
     const G = vscode.ConfigurationTarget.Global;
     if (mode === "system") return cfg.update("window.autoDetectColorScheme", true, G);
