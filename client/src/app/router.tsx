@@ -80,7 +80,6 @@ import { DashboardHomePage } from "@/features/superadmin/pages/DashboardHomePage
 import { ProjectModePage } from "@/features/superadmin/pages/ProjectModePage";
 import { EditorPanelPage } from "@/features/superadmin/pages/EditorPanelPage";
 import { EditorSettingsPage } from "@/features/superadmin/pages/EditorSettingsPage";
-import { EditorSidebarPage } from "@/features/superadmin/pages/EditorSidebarPage";
 import { StudioModePage } from "@/features/superadmin/pages/StudioModePage";
 import { LeadsPage } from "@/features/superadmin/pages/LeadsPage";
 import { LeadDetailsPage } from "@/features/superadmin/pages/LeadDetailsPage";
@@ -233,11 +232,7 @@ export function AppRouter() {
       <Route path="/editor/project" element={<EditorPanelPage />} />
       <Route path="/editor/project/:sessionId" element={<EditorPanelPage />} />
       {/* Classgrid Code's Settings tab (the gear in its title bar): Profile, Appearance and Docs */}
-      <Route path="/editor/settings" element={<EditorSettingsPage />} />
-      {/* Classgrid Code's left edge: the chats sidebar, like Project Mode's left side */}
-      <Route path="/editor/sidebar/project" element={<EditorSidebarPage />} />
-      <Route path="/editor/sidebar/project/:sessionId" element={<EditorSidebarPage />} />
-      <Route path="/editor/sidebar/agent/:section" element={<EditorSidebarPage />} />
+      {import.meta.env.VITE_EDITOR === "1" && <Route path="/editor/settings" element={<EditorSettingsPage />} />}
       {/* Local dev only: look at the OAuth consent screen with sample data */}
       {import.meta.env.DEV && <Route path="/oauth/preview" element={<OAuthConsentPage preview />} />}
 

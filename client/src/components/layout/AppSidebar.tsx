@@ -198,15 +198,18 @@ export function AppSidebar({ role, user }: AppSidebarProps) {
 
   // Ctrl+K (⌘K on a Mac) opens the same search as the sidebar's search box: the chat history in Agent, Project and
   // Studio mode
+  const DESKTOP = import.meta.env.VITE_DESKTOP === "1";
   const chatSearchRef = useRef(false);
   chatSearchRef.current = showAgentMenu;
   useEffect(() => {
     const down = (e: KeyboardEvent) => {
       // (Classgrid Code: Ctrl+K is the editor's own shortcut for this search, anywhere in its window: classgrid-editor)
       if (import.meta.env.VITE_EDITOR === "1") return;
-      if (e.key.toLowerCase() === "k" && (e.metaKey || e.ctrlKey) && !e.shiftKey && !e.altKey) {
+      // (the website keeps its own Ctrl+K: the page search, as before)
+      const desktopKey = e.key.toLowerCase() === "k" && !e.shiftKey && !e.altKey;
+      if ((DESKTOP ? desktopKey : e.key === "k") && (e.metaKey || e.ctrlKey)) {
         e.preventDefault();
-        setPaletteMode(chatSearchRef.current ? "chat" : "global");
+        setPaletteMode(DESKTOP && chatSearchRef.current ? "chat" : "global");
         setPaletteOpen((open) => !open);
       }
     };

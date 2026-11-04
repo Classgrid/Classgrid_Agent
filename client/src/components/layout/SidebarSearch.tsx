@@ -94,8 +94,9 @@ interface SidebarSearchProps {
   placeholder?: string;
 }
 
-// The search shortcut as this computer's keyboard shows it: ⌘K on a Mac, Ctrl K on Windows and others
-const isMac = typeof navigator !== "undefined" && /Mac|iPhone|iPad/i.test(navigator.platform || navigator.userAgent);
+// The search shortcut: ⌘K on the website (as before); the desktop app and Classgrid Code show this computer's key,
+// Ctrl K on Windows
+const isMac = import.meta.env.VITE_DESKTOP !== "1" || (typeof navigator !== "undefined" && /Mac|iPhone|iPad/i.test(navigator.platform || navigator.userAgent));
 
 export function SidebarSearch({ searchQuery, setSearchQuery, placeholder = "Search..." }: SidebarSearchProps) {
   return (

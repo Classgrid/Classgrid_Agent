@@ -48,6 +48,8 @@ const cleanTitle = (t: string) => (t || "New Chat").replace(/\*\*Title:\*\*/gi, 
 
 // The chats, projects and groups it last loaded (shown at once the next time it opens)
 const lastLists: { chats: Chat[] | null; projects: Project[] | null; groups: ChatGroup[] | null } = { chats: null, projects: null, groups: null };
+// (only in the desktop app and Classgrid Code; the website loads the lists each time, as before)
+const REMEMBER_LISTS = import.meta.env.VITE_DESKTOP === "1";
 
 export function StudioSearchPalette({ open, onClose, files: givenFiles, recent = [], onOpenFile, fileIcon, initialKind = "files", onOpenChat }: {
   open: boolean;
@@ -79,9 +81,9 @@ export function StudioSearchPalette({ open, onClose, files: givenFiles, recent =
   const [active, setActive] = useState(0);
   const [more, setMore] = useState(false);
   // (the last lists show at once when it opens again, and are refreshed behind them)
-  const [chats, setChatsState] = useState<Chat[] | null>(() => lastLists.chats);
-  const [projects, setProjectsState] = useState<Project[] | null>(() => lastLists.projects);
-  const [groups, setGroupsState] = useState<ChatGroup[] | null>(() => lastLists.groups);
+  const [chats, setChatsState] = useState<Chat[] | null>(() => (REMEMBER_LISTS ? lastLists.chats : null));
+  const [projects, setProjectsState] = useState<Project[] | null>(() => (REMEMBER_LISTS ? lastLists.projects : null));
+  const [groups, setGroupsState] = useState<ChatGroup[] | null>(() => (REMEMBER_LISTS ? lastLists.groups : null));
   const setChats = (v: Chat[] | null | ((c: Chat[] | null) => Chat[] | null)) => setChatsState((c) => { const n = typeof v === "function" ? v(c) : v; lastLists.chats = n; return n; });
   const setProjects = (v: Project[] | null | ((p: Project[] | null) => Project[] | null)) => setProjectsState((p) => { const n = typeof v === "function" ? v(p) : v; lastLists.projects = n; return n; });
   const setGroups = (v: ChatGroup[] | null | ((g: ChatGroup[] | null) => ChatGroup[] | null)) => setGroupsState((g) => { const n = typeof v === "function" ? v(g) : v; lastLists.groups = n; return n; });
