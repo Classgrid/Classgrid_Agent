@@ -57,9 +57,11 @@ interface AiHubModalProps {
   onClose: () => void;
   onSendPrompt?: (prompt: string) => void;
   initialTab?: string;
+  // Classgrid Code's Settings tab: only the tab's page, in place (its own menu is the Settings menu)
+  embedded?: boolean;
 }
 
-const TABS = [
+export const AI_HUB_TABS = [
   { id: "plugins", label: "Plugins", icon: Plug },
   { id: "images", label: "Images", icon: ImageIcon },
   { id: "skills", label: "Skills", icon: Zap },
@@ -72,7 +74,7 @@ const TABS = [
 
 const KEEP_LISTS = import.meta.env.VITE_DESKTOP === "1";
 
-export function AiHubModal({ isOpen, onClose, onSendPrompt, initialTab = "plugins" }: AiHubModalProps) {
+export function AiHubModal({ isOpen, onClose, onSendPrompt, initialTab = "plugins", embedded = false }: AiHubModalProps) {
   const [activeTab, setActiveTab] = useState(initialTab);
 
   React.useEffect(() => {
@@ -452,58 +454,9 @@ export function AiHubModal({ isOpen, onClose, onSendPrompt, initialTab = "plugin
     }
   };
 
-  return (
-    <>
-    <AnimatePresence>
-      {isOpen && (
-        <motion.div
-          key="ai-hub-backdrop"
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          exit={{ opacity: 0 }}
-          transition={{ duration: 0.2 }}
-          className="fixed inset-0 z-[300] flex items-center justify-center p-4 sm:p-6 bg-black/50"
-          onClick={onClose}
-        >
-          <motion.div
-            initial={{ opacity: 0, scale: 0.95, y: 10 }}
-            animate={{ opacity: 1, scale: 1, y: 0 }}
-            exit={{ opacity: 0, scale: 0.95, y: 10 }}
-            transition={{ type: "spring", stiffness: 300, damping: 25 }}
-            onClick={(e) => e.stopPropagation()}
-            className="w-full max-w-5xl h-[80vh] flex flex-col md:flex-row bg-background border border-border rounded-2xl shadow-xl overflow-hidden relative"
-          >
-
-            {/* ── Left Sidebar ── */}
-            <div className="w-full md:w-[240px] shrink-0 border-r border-border bg-sidebar flex flex-col pt-4">
-
-              {/* Tabs */}
-              <div className="flex-1 overflow-y-auto px-3 py-2 space-y-1 custom-scrollbar">
-                {TABS.map((tab) => {
-                  const isActive = activeTab === tab.id;
-                  const Icon = tab.icon;
-                  return (
-                    <button
-                      key={tab.id}
-                      onClick={() => setActiveTab(tab.id)}
-                      className={cn(
-                        "w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all duration-200",
-                        isActive 
-                          ? "bg-muted text-foreground shadow-sm" 
-                          : "text-muted-foreground hover:text-foreground hover:bg-muted/50"
-                      )}
-                    >
-                      <Icon className="w-4 h-4" />
-                      <span className="flex-1 text-left">{tab.label}</span>
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-
-            {/* ── Right Content Area ── */}
-            <div className="flex-1 flex flex-col bg-background overflow-hidden relative">
-              <div className="p-8 flex-1 overflow-y-auto z-10 relative custom-scrollbar">
+  // The chosen tab's page: inside the AI Hub window, or (embedded) right inside Classgrid Code's Settings tab
+  const hubContent = (
+              <div className={cn("p-8 z-10 relative custom-scrollbar", !embedded && "flex-1 overflow-y-auto")}>
                 {activeTab === "plugins" ? (
                   selectedCustom ? (
                     <CustomConnectorDetail
@@ -666,9 +619,9 @@ export function AiHubModal({ isOpen, onClose, onSendPrompt, initialTab = "plugin
                   <AiConnectedAppsPanel backendUrl={backendUrl} />
                 ) : (
                   <>
-                    <h3 className="text-2xl font-bold text-foreground mb-2">{TABS.find(t => t.id === activeTab)?.label}</h3>
+                    <h3 className="text-2xl font-bold text-foreground mb-2">{AI_HUB_TABS.find(t => t.id === activeTab)?.label}</h3>
                     <p className="text-sm text-muted-foreground mb-8 max-w-xl">
-                      Manage your {TABS.find(t => t.id === activeTab)?.label.toLowerCase()} configuration here.
+                      Manage your {AI_HUB_TABS.find(t => t.id === activeTab)?.label.toLowerCase()} configuration here.
                     </p>
                     
                     {/* Empty Placeholder Area */}
@@ -678,6 +631,61 @@ export function AiHubModal({ isOpen, onClose, onSendPrompt, initialTab = "plugin
                   </>
                 )}
               </div>
+  );
+
+  return (
+    <>
+    {embedded && hubContent}
+    <AnimatePresence>
+      {isOpen && !embedded && (
+        <motion.div
+          key="ai-hub-backdrop"
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          transition={{ duration: 0.2 }}
+          className="fixed inset-0 z-[300] flex items-center justify-center p-4 sm:p-6 bg-black/50"
+          onClick={onClose}
+        >
+          <motion.div
+            initial={{ opacity: 0, scale: 0.95, y: 10 }}
+            animate={{ opacity: 1, scale: 1, y: 0 }}
+            exit={{ opacity: 0, scale: 0.95, y: 10 }}
+            transition={{ type: "spring", stiffness: 300, damping: 25 }}
+            onClick={(e) => e.stopPropagation()}
+            className="w-full max-w-5xl h-[80vh] flex flex-col md:flex-row bg-background border border-border rounded-2xl shadow-xl overflow-hidden relative"
+          >
+
+            {/* ── Left Sidebar ── */}
+            <div className="w-full md:w-[240px] shrink-0 border-r border-border bg-sidebar flex flex-col pt-4">
+
+              {/* Tabs */}
+              <div className="flex-1 overflow-y-auto px-3 py-2 space-y-1 custom-scrollbar">
+                {AI_HUB_TABS.map((tab) => {
+                  const isActive = activeTab === tab.id;
+                  const Icon = tab.icon;
+                  return (
+                    <button
+                      key={tab.id}
+                      onClick={() => setActiveTab(tab.id)}
+                      className={cn(
+                        "w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all duration-200",
+                        isActive 
+                          ? "bg-muted text-foreground shadow-sm" 
+                          : "text-muted-foreground hover:text-foreground hover:bg-muted/50"
+                      )}
+                    >
+                      <Icon className="w-4 h-4" />
+                      <span className="flex-1 text-left">{tab.label}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* ── Right Content Area ── */}
+            <div className="flex-1 flex flex-col bg-background overflow-hidden relative">
+              {hubContent}
             </div>
 
             {/* Close Button (placed at the end so it renders on top) */}

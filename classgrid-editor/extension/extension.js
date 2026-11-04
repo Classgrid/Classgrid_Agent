@@ -98,11 +98,17 @@ async function activate(context) {
   // window like in Project Mode (package.json keybindings; VS Code's own Ctrl+K shortcuts give way to it)
   // The gear in the title bar (classgrid-settings-button.patch): your Classgrid Settings, as a tab in the editor
   let settingsPanel = null;
-  context.subscriptions.push(vscode.commands.registerCommand("classgrid.openSettings", () => {
-    if (settingsPanel) return settingsPanel.reveal(vscode.ViewColumn.Active);
+  // (section: one of its pages, like "plugins" when the AI panel opens the AI Hub)
+  context.subscriptions.push(vscode.commands.registerCommand("classgrid.openSettings", (section) => {
+    const page = typeof section === "string" && /^[a-z-]+$/.test(section) ? section : null;
+    if (settingsPanel) {
+      settingsPanel.reveal(vscode.ViewColumn.Active);
+      if (page) settingsPanel.webview.postMessage({ cgEvent: "settingsSection", data: page });
+      return;
+    }
     settingsPanel = vscode.window.createWebviewPanel("classgrid.settings", "Classgrid Settings", vscode.ViewColumn.Active, { enableScripts: true, retainContextWhenHidden: true });
     settingsPanel.iconPath = vscode.Uri.file(path.join(__dirname, "media", "classgrid.svg"));
-    const load = holdScreens(settingsPanel.webview, "/editor/settings");
+    const load = holdScreens(settingsPanel.webview, page ? `/editor/settings?section=${page}` : "/editor/settings");
     settingsPanel.onDidDispose(() => { loaders.delete(load); settingsPanel = null; });
   }));
   context.subscriptions.push(vscode.commands.registerCommand("classgrid.searchChats", async () => {
@@ -440,7 +446,7 @@ const HANDLERS = {
     return vscode.commands.executeCommand("classgrid.agent.focus").then(() => undefined, () => undefined);
   },
   activeChat: (_p, id) => { screens.chats?.postMessage({ cgEvent: "activeChat", data: id ? String(id) : null }); },
-  openSettings: () => vscode.commands.executeCommand("classgrid.openSettings").then(() => undefined),
+  openSettings: (_p, section) => vscode.commands.executeCommand("classgrid.openSettings", section).then(() => undefined),
   // The X on the AI panel's top line: closes the right side (the Agent button in the title bar opens it again)
   closePanel: () => vscode.commands.executeCommand("workbench.action.closeAuxiliaryBar").then(() => undefined),
   // Settings → Appearance: the whole editor light, dark, or the same as the computer (our screens follow it: bridge.js)

@@ -2170,6 +2170,15 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
     return () => { window.removeEventListener('open-ai-hub', handleOpenAiHub); window.removeEventListener('classgrid:payment', onDesktopPayment); };
   }, []);
 
+  // Classgrid Code: the AI Hub's pages (Plugins, Skills, AI Credits...) are in its Settings tab, not a window over the
+  // editor, so every way of opening the AI Hub opens that tab on the same page
+  useEffect(() => {
+    if (import.meta.env.VITE_EDITOR !== "1" || !isAiHubOpen) return;
+    setIsAiHubOpen(false);
+    (window as unknown as { classgridDesktop?: { openSettings?: (section?: string) => Promise<unknown> } }).classgridDesktop?.openSettings?.(aiHubInitialTab);
+    setAiHubInitialTab("plugins");
+  }, [isAiHubOpen, aiHubInitialTab]);
+
   // @ mention state
   const [atMenuOpen, setAtMenuOpen] = useState(false);
   const [atMenuQuery, setAtMenuQuery] = useState("");
@@ -6751,14 +6760,17 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
                         <Paperclip className={cn("h-4 w-4 -rotate-45", isAnyFileUploading && "opacity-50")} />
                       </button>
                     )}
-                    <button
-                      type="button"
-                      onClick={() => setIsAiHubOpen(true)}
-                      className="h-8 w-8 shrink-0 rounded-full flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-muted/80 transition-all cursor-pointer"
-                      title="AI Hub"
-                    >
-                      <CustomSlidersIcon className="h-4 w-4" />
-                    </button>
+                    {/* (Classgrid Code: the AI Hub is in its Settings tab, the gear in the title bar) */}
+                    {import.meta.env.VITE_EDITOR !== "1" && (
+                      <button
+                        type="button"
+                        onClick={() => setIsAiHubOpen(true)}
+                        className="h-8 w-8 shrink-0 rounded-full flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-muted/80 transition-all cursor-pointer"
+                        title="AI Hub"
+                      >
+                        <CustomSlidersIcon className="h-4 w-4" />
+                      </button>
+                    )}
                   </div>
 
                   {/* Bottom Right action bar: send OR stop */}
@@ -7425,14 +7437,17 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
                               >
                                 <Paperclip className="h-4 w-4 -rotate-45" />
                               </button>
-                              <button
-                                type="button"
-                                onClick={() => setIsAiHubOpen(true)}
-                                className="h-8 w-8 shrink-0 rounded-full flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-muted/80 transition-all cursor-pointer"
-                                title="AI Hub"
-                              >
-                                <CustomSlidersIcon className="h-4 w-4" />
-                              </button>
+                              {/* (Classgrid Code: the AI Hub is in its Settings tab, the gear in the title bar) */}
+                              {import.meta.env.VITE_EDITOR !== "1" && (
+                                <button
+                                  type="button"
+                                  onClick={() => setIsAiHubOpen(true)}
+                                  className="h-8 w-8 shrink-0 rounded-full flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-muted/80 transition-all cursor-pointer"
+                                  title="AI Hub"
+                                >
+                                  <CustomSlidersIcon className="h-4 w-4" />
+                                </button>
+                              )}
                             </div>
 
                             {/* Bottom right: send */}

@@ -1,15 +1,18 @@
 // Classgrid Code's Settings tab (the gear in its title bar): its own small settings, not the Classgrid app's page.
 // Profile (your photo, name and email), Appearance (light, dark, or the same as your computer: it changes the whole
-// editor, and our screens follow it) and Docs.
-import { useState } from "react";
+// editor, and our screens follow it), the AI Hub's pages (Plugins, Images, Skills, Connected apps, Usage, AI Credits,
+// Upgrade: here instead of a window over the editor) and Docs.
+import { useEffect, useState } from "react";
 import { BookOpen, Monitor, Moon, Palette, Sun, User } from "lucide-react";
 import { useTheme } from "next-themes";
 import { useUserProfile } from "@/features/shared/queries/useUserProfile";
+import { AI_HUB_TABS, AiHubModal } from "@/components/ai/components/AiHubModal";
 
 type Mode = "light" | "dark" | "system";
 type EditorSettingsDesktop = {
   setEditorTheme?: (mode: Mode) => Promise<unknown>;
   openExternal?: (url: string) => Promise<unknown>;
+  onSettingsSection?: (fn: (section: string) => void) => () => void;
 };
 const desk = () => (window as unknown as { classgridDesktop?: EditorSettingsDesktop }).classgridDesktop;
 const MODE_KEY = "cg_editor_theme";
@@ -19,12 +22,18 @@ const SECTIONS = [
   { id: "profile", label: "Profile", icon: User },
   { id: "appearance", label: "Appearance", icon: Palette },
 ] as const;
-type Section = (typeof SECTIONS)[number]["id"];
+type Section = string;
+const known = (s: string | null): s is Section => !!s && [...SECTIONS, ...AI_HUB_TABS].some((x) => x.id === s);
 
 export function EditorSettingsPage() {
   const { data: profile } = useUserProfile();
   const { setTheme } = useTheme();
-  const [section, setSection] = useState<Section>("profile");
+  // (the AI panel opens this tab on an AI Hub page, like Plugins: ?section=plugins, or a message while it's open)
+  const [section, setSection] = useState<Section>(() => {
+    const s = new URLSearchParams(window.location.search).get("section");
+    return known(s) ? s : "profile";
+  });
+  useEffect(() => desk()?.onSettingsSection?.((s) => { if (known(s)) setSection(s); }), []);
   const [mode, setMode] = useState<Mode>(() => {
     try { const m = localStorage.getItem(MODE_KEY); return m === "light" || m === "dark" || m === "system" ? m : "system"; } catch { return "system"; }
   });
@@ -72,6 +81,20 @@ export function EditorSettingsPage() {
             ))}
           </div>
           <div className="my-3 h-px bg-border" />
+          <div className="flex flex-col gap-0.5">
+            {AI_HUB_TABS.map(({ id, label, icon: Icon }) => (
+              <button
+                key={id}
+                type="button"
+                onClick={() => setSection(id)}
+                title={label}
+                className={`flex items-center justify-center md:justify-start gap-2.5 h-9 px-2.5 rounded-lg text-sm text-left transition-colors ${section === id ? "bg-muted text-foreground" : "text-muted-foreground hover:bg-muted/60 hover:text-foreground"}`}
+              >
+                <Icon className="size-4 shrink-0" /> <span className="hidden md:inline">{label}</span>
+              </button>
+            ))}
+          </div>
+          <div className="my-3 h-px bg-border" />
           <button
             type="button"
             onClick={() => (desk()?.openExternal ? desk()!.openExternal!(DOCS_URL) : window.open(DOCS_URL, "_blank"))}
@@ -101,6 +124,11 @@ export function EditorSettingsPage() {
                 </div>
               </div>
             </>
+          )}
+          {AI_HUB_TABS.some((t) => t.id === section) && (
+            <div className="-mt-8 -mx-3 md:-mx-8">
+              <AiHubModal isOpen onClose={() => {}} initialTab={section} embedded />
+            </div>
           )}
           {section === "appearance" && (
             <>

@@ -399,6 +399,8 @@
     },
     // The AI panel's chats sidebar → Settings: the same Settings tab as the gear in the title bar
     openSettings: bind("openSettings"),
+    // (the Settings tab: the AI panel asks it to show one of its pages, like Plugins)
+    onSettingsSection: on("settingsSection"),
     // The X on the AI panel's top line: closes the right side
     closePanel: bind("closePanel"),
     // The chats sidebar on the left edge: its width, the chat picked there (opens in the Agent panel), and the chat
