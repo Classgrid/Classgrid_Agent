@@ -67,9 +67,9 @@ async function askRunner(userId, tool, payload) {
     const room = runnerRoom(String(userId));
     try {
         // The app's socket on this server process: ask it directly (no Redis round trip)
-        // The newest connection first: an older one can be a window that froze or closed without saying so, and asking
-        // it held every message 60 s and every command up to 11 min (2026-11-04: six connections, the oldest silent)
-        const here = (await io.local.in(room).fetchSockets()).reverse();
+        // (oldest connection first, as before 2026-11-04: newest first sent Studio's browser steps to Classgrid Code's
+        // connection whenever it was opened after the app; owner asked to undo only that change, 2026-11-05)
+        const here = await io.local.in(room).fetchSockets();
         if (here.length) {
             // (only the editor state goes to all of them, being read-only: the first answer is used)
             if (tool === "editor_context" && here.length > 1) {
