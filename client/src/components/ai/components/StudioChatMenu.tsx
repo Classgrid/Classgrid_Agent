@@ -1,7 +1,7 @@
 // The chat's ⋮ menu in every mode (Agent, Project, Studio): Rename, Pin, Add to group (Project, Studio), Archive, Archived chats, Copy and Delete
 // (plus "Files in chat" where the chat has that panel). Same look as the sidebar's chat menu.
 import { useEffect, useState } from "react";
-import { Archive, ArchiveRestore, ClipboardList, Copy, FolderOpen, Link2, MoreHorizontal, MoreVertical, Pencil, Pin, Trash2, FileText, Hash, SquareTerminal, FileDiff } from "lucide-react";
+import { Archive, ArchiveRestore, ClipboardList, Copy, FolderOpen, Link2, MoreHorizontal, MoreVertical, Pencil, Pin, Trash2, FileText, Hash, SquareTerminal, FileDiff, Type } from "lucide-react";
 import { toast } from "sonner";
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuSub, DropdownMenuSubContent, DropdownMenuSubTrigger, DropdownMenuTrigger,
@@ -10,6 +10,7 @@ import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/compone
 import { fetchWithRescue } from "@/lib/rescue";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/marketing_ui/tooltip";
 import { AddToGroupSub, GroupDialog, openProjectId, useChatGroups } from "./chat-groups/chatGroups";
+import { savedProject } from "@/features/superadmin/utils/projectCopies";
 
 const backendUrl = import.meta.env.VITE_API_URL || "https://api.classgrid.in";
 const item = "gap-3 py-2 px-3 text-[14px] cursor-pointer hover:bg-slate-100 dark:hover:bg-[#343541] focus:bg-slate-100 dark:focus:bg-[#343541] focus:text-slate-900 dark:focus:text-[#ececf1] rounded-xl transition-colors";
@@ -35,12 +36,23 @@ function modeBase() {
   return at !== undefined ? parts.slice(0, at + 1).join("/") : "/c/agent";
 }
 const inProject = () => window.location.pathname.split("/").some((x) => x === "studio" || x === "project");
+// The desktop app and Classgrid Code: a chat's link there is a local address, so Copy offers its name, ID and project
+const onDesktopApp = () => !!(window as unknown as { classgridDesktop?: { isDesktop?: boolean } }).classgridDesktop?.isDesktop;
+const lastPart = (p: string) => p.split(/[\\/]/).filter(Boolean).pop() || p;
 
 // Back to a new chat in the same mode (after archiving the open chat)
 function goToNewChat() {
   window.history.pushState({}, "", modeBase());
   window.dispatchEvent(new PopStateEvent("popstate"));
   window.dispatchEvent(new Event("agent:new-chat"));
+}
+
+// A chat's name and its project's name (the folder name, like CLASSGRIDPLATFORM), for Copy in the desktop app
+async function chatInfo(sessionId: string): Promise<{ title: string; project: string }> {
+  const { data } = await call(`/sessions/${sessionId}`).catch(() => ({ data: {} as Record<string, any> }));
+  const title = String(data?.session?.title || "").replace(/\*\*Title:\*\*/gi, "").replace(/Title:/gi, "").replace(/["']/g, "").trim();
+  const name = data?.projectId ? savedProject(String(data.projectId))?.name || "" : "";
+  return { title, project: name ? lastPart(name) : "" };
 }
 
 export function StudioChatMenu({ sessionId, isPinned, onTogglePin, onDelete, messages, onFilesInChat, noArchive = false, dots = "vertical", buttonClassName }: {
@@ -107,15 +119,34 @@ export function StudioChatMenu({ sessionId, isPinned, onTogglePin, onDelete, mes
               <Copy className={icon} strokeWidth={2} /> Copy
             </DropdownMenuSubTrigger>
             <DropdownMenuSubContent className={`w-[190px] ${card}`}>
-              <DropdownMenuItem className={item} onClick={() => copy(window.location.href, "Link")}>
-                <Link2 className={icon} strokeWidth={2} /> Copy link
-              </DropdownMenuItem>
-              <DropdownMenuItem className={item} onClick={() => copy(chatText(), "Chat")}>
-                <FileText className={icon} strokeWidth={2} /> Copy chat
-              </DropdownMenuItem>
-              <DropdownMenuItem className={item} onClick={() => copy(sessionId, "Chat ID")}>
-                <Hash className={icon} strokeWidth={2} /> Copy chat ID
-              </DropdownMenuItem>
+              {onDesktopApp() ? (
+                <>
+                  <DropdownMenuItem className={item} onClick={async () => { const t = (await chatInfo(sessionId)).title; if (t) copy(t, "Conversation name"); else toast.error("This chat has no name yet"); }}>
+                    <Type className={icon} strokeWidth={2} /> Conversation name
+                  </DropdownMenuItem>
+                  <DropdownMenuItem className={item} onClick={() => copy(sessionId, "Conversation ID")}>
+                    <Hash className={icon} strokeWidth={2} /> Conversation ID
+                  </DropdownMenuItem>
+                  <DropdownMenuItem className={item} onClick={async () => { const p = (await chatInfo(sessionId)).project; if (p) copy(p, "Project name"); else toast.error("This chat is not in a project"); }}>
+                    <FolderOpen className={icon} strokeWidth={2} /> Project name
+                  </DropdownMenuItem>
+                  <DropdownMenuItem className={item} onClick={() => copy(chatText(), "Chat")}>
+                    <FileText className={icon} strokeWidth={2} /> Copy chat
+                  </DropdownMenuItem>
+                </>
+              ) : (
+                <>
+                  <DropdownMenuItem className={item} onClick={() => copy(window.location.href, "Link")}>
+                    <Link2 className={icon} strokeWidth={2} /> Copy link
+                  </DropdownMenuItem>
+                  <DropdownMenuItem className={item} onClick={() => copy(chatText(), "Chat")}>
+                    <FileText className={icon} strokeWidth={2} /> Copy chat
+                  </DropdownMenuItem>
+                  <DropdownMenuItem className={item} onClick={() => copy(sessionId, "Chat ID")}>
+                    <Hash className={icon} strokeWidth={2} /> Copy chat ID
+                  </DropdownMenuItem>
+                </>
+              )}
             </DropdownMenuSubContent>
           </DropdownMenuSub>
           <DropdownMenuSeparator className="bg-slate-100 dark:bg-white/10 my-1" />

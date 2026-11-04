@@ -5029,7 +5029,6 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
           onTogglePin={handlePinToggle}
           onDelete={() => setShowDeleteConfirm(true)}
           messages={messages.map((m) => ({ role: m.role, content: typeof m.content === "string" ? m.content : "" }))}
-          noArchive
           dots="horizontal"
           buttonClassName={editorIconButton}
         />

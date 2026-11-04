@@ -1,9 +1,9 @@
 // Classgrid Code's AI panel top line (classgrid-editor): the chats sidebar button, the project / chat name, the chat
-// search, ⋯ (the chat's menu: Rename, Pin, Add to group, Copy, Delete), + for a new chat, X to close the panel, and the
+// search, ⋯ (the chat's menu: Rename, Pin, Add to group, Archive, Copy, Delete), + for a new chat, X to close the panel, and the
 // switch for the right side box (Files Changed, Uploads). It sits at the very top of the right side, level with the
 // editor tabs (the side has no title row of its own).
 // The chats sidebar opens inside the AI panel itself: the same chat list as Studio's left sidebar (pinned chats, projects
-// with their groups, each chat's menu), showing only this computer's chats, plus Settings (the same Settings tab as
+// with their groups, each chat's menu, archived chats), showing only this computer's chats, plus Settings (the same Settings tab as
 // the gear in the title bar).
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { useLocation, useNavigate } from "react-router-dom";

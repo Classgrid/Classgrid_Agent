@@ -73,8 +73,7 @@ const STUDIO_OPTS: StudioListOpts = {
   showTime: true, showLogos: true, compact: false, autoPin: false, archivedOnly: false,
 };
 function readStudioOpts(): StudioListOpts {
-  // (Classgrid Code has no archive view)
-  try { return { ...STUDIO_OPTS, ...JSON.parse(localStorage.getItem(STUDIO_OPTS_KEY) || "{}"), ...(IN_EDITOR ? { archivedOnly: false } : {}) }; } catch { return STUDIO_OPTS; }
+  try { return { ...STUDIO_OPTS, ...JSON.parse(localStorage.getItem(STUDIO_OPTS_KEY) || "{}") }; } catch { return STUDIO_OPTS; }
 }
 
 const ChatBubbleIcon = ({ className }: { className?: string }) => (
@@ -1090,7 +1089,7 @@ export function AgentNestedMenu({ searchQuery = "" }: { searchQuery?: string }) 
                         ["Compact", opts.compact, () => setOpt({ compact: !opts.compact })],
                       ])}
                       {optionRow("Auto Pin", opts.autoPin, () => setOpt({ autoPin: !opts.autoPin }), "The open project stays at the top")}
-                      {!IN_EDITOR && optionRow("Archived Only", opts.archivedOnly, () => setOpt({ archivedOnly: !opts.archivedOnly }))}
+                      {optionRow("Archived Only", opts.archivedOnly, () => setOpt({ archivedOnly: !opts.archivedOnly }))}
                       <DropdownMenuSeparator className="bg-slate-100 dark:bg-white/10 my-1.5 mx-1" />
                       {optionRow("Mark All as Read", false, () => { markRead("all"); toast.success("All chats marked as read"); })}
                     </DropdownMenuContent>
