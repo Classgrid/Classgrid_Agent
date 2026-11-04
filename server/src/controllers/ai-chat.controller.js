@@ -1805,7 +1805,9 @@ export const streamAskAi = async (req, res) => {
         // Default 12 recent messages (was 25): enough context for follow-ups without resending long chats every turn.
         // The desktop app remembers much more of a long chat than the website (owner, 2026-11-02)
         const desktopChat = body.clientApp === "desktop";
-        let historyDepth = Math.min(parseInt(body.historyDepth, 10) || (desktopChat ? 200 : 12), 500);
+        // (desktop: 40, was 200 from 2026-11-02: the models re-read the whole history every message, 137k-443k tokens per
+        // answer, and replies went from ~5 s to 10-15 s; older messages are in the chat's summary and recall_chat; owner, 2026-11-04)
+        let historyDepth = Math.min(parseInt(body.historyDepth, 10) || (desktopChat ? 40 : 12), 500);
         let messages = [];
         let dynamicSystemPrompt = "";
         // Per-request / per-user context. Appended AFTER all fixed rules so the long fixed prefix
@@ -1852,7 +1854,7 @@ export const streamAskAi = async (req, res) => {
                 const covered = memoryCoverage(sessionData.long_term_memory);
                 const total = await getHistoryCount(sessionId);
                 const sinceSummary = covered !== null ? total - covered : (total % 8) + 8;
-                historyDepth = desktopChat ? Math.min(Math.max(sinceSummary + 2, 40), 200) : Math.min(Math.max(sinceSummary + 2, 4), 30);
+                historyDepth = desktopChat ? Math.min(Math.max(sinceSummary + 2, 20), 60) : Math.min(Math.max(sinceSummary + 2, 4), 30);
                 volatilePrompt += `\n\n<long_term_memory>\nA background model's summary of messages 1-${covered ?? "?"} of this chat (not their exact text; for the exact text of an older message call recall_chat or search_recall_chat). The messages after it follow in full.\n${memoryText(sessionData.long_term_memory)}\n</long_term_memory>`;
             }
 
@@ -2114,8 +2116,13 @@ You are currently talking to Nikhil Shinde (nikhil.shinde@classgrid.in), the CRE
         if (sessionId && !isIncognito && body.taskOrigin === "whatsapp" && req.user?._id) {
             await User.updateOne({ _id: req.user._id }, { $addToSet: { call_chat_ids: sessionId } }).catch(() => {});
         }
-        const projectContext = sessionId && !isIncognito ? await editorContextFor(sessionId, { website: fromWebsite }).catch(() => "") : "";
-        const whereProject = sessionId && !isIncognito && body.taskOrigin !== "whatsapp" ? await projectForChat(sessionId).then((p) => inChatWorktree(p, sessionId)).catch(() => null) : null;
+        // The three steps that may ask the user's computer (what's open in the editor, the project's folder, and the
+        // snapshot that lets this answer be undone) run at the same time: one after another they took seconds
+        const checkpointP = sessionId && !isIncognito ? startCheckpoint(sessionId).catch(() => null) : Promise.resolve(null);
+        const [projectContext, whereProject] = await Promise.all([
+            sessionId && !isIncognito ? editorContextFor(sessionId, { website: fromWebsite }).catch(() => "") : "",
+            sessionId && !isIncognito && body.taskOrigin !== "whatsapp" ? projectForChat(sessionId).then((p) => inChatWorktree(p, sessionId)).catch(() => null) : null,
+        ]);
         let whereYouWork = whereYouWorkRule({ desktop: body.clientApp === "desktop", project: whereProject, task: !!body.taskOrigin });
         // The desktop app's memory notes: one folder for everything, plus one per project (named after the chat's project)
         const memoryProject = body.clientApp === "desktop" && whereProject ? `${whereProject.name || "project"}-${String(whereProject._id).slice(-6)}` : "";
@@ -2153,7 +2160,7 @@ The user is in ${appMode === "agent" ? "Agent mode" : appMode === "project" ? "P
         if (thinking === "low") volatilePrompt += "\n\n--- SPEED ---\nThe user picked Fast: answer quickly and keep it short. Don't plan at length or double-check things that are clearly right; use as few steps as the task needs.";
         if (thinking === "high" && slashCommand !== "boost") volatilePrompt += "\n\n--- SPEED ---\nThe user picked Deep thinking: think carefully, check your work twice and look for mistakes before you answer.";
         // Project Mode: snapshot the project before this answer, so its changes can be reviewed, rejected or undone
-        const checkpointId = sessionId && !isIncognito ? await startCheckpoint(sessionId).catch(() => null) : null;
+        const checkpointId = await checkpointP;
         if (checkpointId && !res.writableEnded) res.write(`data: ${JSON.stringify({ type: "checkpoint", id: checkpointId })}\n\n`);
         dynamicSystemPrompt += promptBlock("connector:zoom|connector:google|connector:microsoft|schedules", `\nCRITICAL TIMEZONE RULE FOR MEETINGS: When scheduling a Zoom meeting or Google Calendar event, the APIs EXPECT the 'startTime' parameter to be in UTC format (with a 'Z' at the end). To ensure accuracy, YOU MUST ALWAYS USE the \`get_timezone_time\` tool to check the current time and UTC offset for the user's location BEFORE scheduling any future meetings. Use the offset returned by the tool (e.g. GMT+05:30) to calculate the correct UTC time for the meeting.`);
 
