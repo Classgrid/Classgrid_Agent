@@ -1,6 +1,7 @@
 // Publishes a new desktop app version: gets Classgrid Code (our editor), builds the screens, makes the installer, and uploads
 // it with latest.yml to R2 (desktop/), where installed apps look for updates. Raise "version" in package.json first.
 // Run: npm run release      (R2 keys are read from server/.env)
+//      npm run release -- --upload-only   (only uploads the installer already in dist/, e.g. after an upload failed)
 import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
@@ -16,9 +17,11 @@ const run = (args) => {
   const r = spawnSync("npm", args, { cwd: root, stdio: "inherit", shell: process.platform === "win32" });
   if (r.status !== 0) process.exit(r.status ?? 1);
 };
-run(["run", "get-classgrid-code"]); // Classgrid Code, our editor (the newest editor-* release on GitHub)
-run(["run", "build:client"]);
-run(["run", "dist"]);
+if (!process.argv.includes("--upload-only")) {
+  run(["run", "get-classgrid-code"]); // Classgrid Code, our editor (the newest editor-* release on GitHub)
+  run(["run", "build:client"]);
+  run(["run", "dist"]);
+}
 
 const { version } = JSON.parse(fs.readFileSync(path.join(root, "package.json"), "utf8"));
 const dist = path.join(root, "dist");
@@ -40,7 +43,9 @@ for (const [name, type] of files) {
   await s3.send(new PutObjectCommand({
     Bucket: process.env.R2_BUCKET_NAME,
     Key: `desktop/${name}`,
-    Body: fs.readFileSync(full),
+    // streamed: the installer is hundreds of MB, and sending it from memory in one write could fail (ENOBUFS)
+    Body: fs.createReadStream(full),
+    ContentLength: fs.statSync(full).size,
     ContentType: type,
     CacheControl: name === "latest.yml" ? "no-cache" : "public, max-age=31536000, immutable",
   }));

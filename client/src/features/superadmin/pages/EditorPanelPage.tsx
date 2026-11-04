@@ -7,6 +7,7 @@ import { AskAiPanel } from "@/components/ai";
 import { apiClient } from "@/lib/apiClient";
 import { StudioSearchPalette } from "@/features/superadmin/components/StudioSearchPalette";
 import { FileBadge } from "@/features/superadmin/components/StudioFilesView";
+import { OPEN_PROJECT_FILE_EVENT } from "@/components/ai/components/stepper/ProjectToolSteps";
 
 type EditorDesktop = {
   editorFolder?: string | null;
@@ -16,6 +17,8 @@ type EditorDesktop = {
   onActiveChat?: (fn: (id: string | null) => void) => () => void;
   setStripWidth?: (width: number) => void;
   onToggleSidebar?: (fn: () => void) => () => void;
+  openInEditor?: (folder: string, file?: string, line?: number) => Promise<unknown>;
+  openPath?: (path: string) => Promise<unknown>;
 };
 // classgrid-editor/extension/bridge.js
 export const editorDesktop = (): EditorDesktop | undefined => (window as unknown as { classgridDesktop?: EditorDesktop }).classgridDesktop;
@@ -73,6 +76,24 @@ export function EditorPanelPage() {
     if (!id) window.dispatchEvent(new Event("agent:new-chat"));
   }), [navigate]);
   useEffect(() => { editorDesktop()?.activeChat?.(sessionId || null); }, [sessionId]);
+  // A file name clicked in the chat (a step, a link, Files Changed) opens in this editor at its line; a folder or a
+  // full path outside the project opens where it is
+  useEffect(() => {
+    const onOpenFile = (e: Event) => {
+      const detail = (e as CustomEvent<{ path?: string; startLine?: number; folder?: boolean }>).detail;
+      const d = editorDesktop();
+      const path = String(detail?.path || "").trim();
+      if (!d || !path) return;
+      // (a full path, like C:\\x\\y.ts, opens as it is; a project path opens from the folder open in the editor)
+      const full = /^[a-z]:[\\/]/i.test(path);
+      const folder = d.editorFolder || "";
+      if (full || !folder) { d.openPath?.(path); return; }
+      if (detail?.folder) { d.openPath?.(`${folder.replace(/[\\/]+$/, "")}/${path}`); return; }
+      d.openInEditor?.(folder, path, detail?.startLine);
+    };
+    window.addEventListener(OPEN_PROJECT_FILE_EVENT, onOpenFile);
+    return () => window.removeEventListener(OPEN_PROJECT_FILE_EVENT, onOpenFile);
+  }, []);
   // The chat search (the chats sidebar's search box, or Ctrl+K): Studio's search, in the middle of the whole window
   // like the AI Hub (the left sidebar is too narrow for it)
   const [searchOpen, setSearchOpen] = useState(false);
