@@ -28,7 +28,8 @@ export function EditorSidebarPage() {
   // bar brings it back
   const [stripHidden, setStripHidden] = useState(() => { try { return localStorage.getItem(HIDDEN_KEY) === "1"; } catch { return false; } });
   const hidden = stripHidden && !open;
-  useEffect(() => {
+  // (before the paint, so the editor has already made room when the new look is drawn: no frame of a cut-off sidebar)
+  useLayoutEffect(() => {
     editorDesktop()?.setStripWidth?.(hidden ? 0 : open ? OPEN_WIDTH : STRIP_WIDTH);
     try {
       localStorage.setItem(OPEN_KEY, open ? "1" : "0");
@@ -36,18 +37,11 @@ export function EditorSidebarPage() {
     } catch { /* storage blocked */ }
   }, [open, hidden, stripHidden]);
   useEffect(() => { if (open) setStripHidden(false); }, [open]);
-  // (it opens once the editor has made room for it, and folds once the editor has made it narrow, so it never shows
-  // cut off or with an empty gap while the editor catches up; the size is seen before the next paint)
-  const [pageWidth, setPageWidth] = useState(() => window.innerWidth);
-  useEffect(() => {
-    const onResize = () => setPageWidth(window.innerWidth);
-    const ro = new ResizeObserver(onResize);
-    ro.observe(document.documentElement);
-    window.addEventListener("resize", onResize);
-    return () => { ro.disconnect(); window.removeEventListener("resize", onResize); };
-  }, []);
-  const wide = pageWidth >= OPEN_WIDTH - 8;
-  const shownOpen = open ? wide : pageWidth > STRIP_WIDTH + 8;
+  // The look follows the click, not the page's width. It used to be read from the width, and that was the flash on
+  // every click: closing kept the open look while the page was still 256 wide (a clipped sidebar in a 72 frame, then
+  // the icons), and opening showed the icons in a 256 frame until the page caught up. The editor gives the sidebar its
+  // new width at once, so the click's own look is the right one.
+  const shownOpen = open;
   // The title bar's sidebar button: a hidden sidebar comes back, otherwise it opens or folds to icons
   const hiddenRef = useRef(hidden);
   hiddenRef.current = hidden;

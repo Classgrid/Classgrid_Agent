@@ -122,6 +122,9 @@ body.classgrid-strip-overlay .webview-overlay-content.classgrid-strip iframe {
 .classgrid-strip-host {
 	width: 100% !important;
 	height: 100% !important;
+	/* (the page inside is placed a frame after the layout gives it its new width, so it is clipped to this spot: a
+	   closing sidebar can never paint over the icons for that one frame) */
+	overflow: hidden !important;
 }
 .monaco-workbench .part.titlebar .titlebar-left .classgrid-strip-toggle {
 	order: 1;
