@@ -1123,6 +1123,12 @@ async function markChatWorking(userId, sessionId, on) {
     else await redis.hdel(key, String(sessionId)).catch(() => {});
 }
 
+// Helpers working right now in every chat (server.js reports it, so a new version waits until they finish)
+export const runningHelperCount = () => {
+    let n = 0;
+    for (const board of HELPER_BOARDS.values()) n += board.helpers.filter((h) => h.state === "running").length;
+    return n;
+};
 const helperBoard = (sessionId) => {
     const key = String(sessionId || "none");
     if (!HELPER_BOARDS.has(key)) HELPER_BOARDS.set(key, { helpers: [], nextNo: 1 });

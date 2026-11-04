@@ -93,6 +93,35 @@ const PORT = process.env.PORT || 3000;
 const server = http.createServer(app);
 
 // ─────────────────────────────────────────────────────────
+// ⏳ A new version goes live only when nobody is using the server (scripts/deploy-when-idle.sh waits for it): every
+//    few seconds this process writes how busy it is to ~/.classgrid-busy/<pid>.json. Busy = requests being answered
+//    right now (an AI answer is one long request) + helpers still working after their answer. The live chat socket
+//    (/socket.io) isn't counted: it stays open while a page is open, and it reconnects by itself after a restart.
+// ─────────────────────────────────────────────────────────
+import os from "os";
+import fs from "fs";
+import path from "path";
+let requestsNow = 0;
+server.on("request", (req, res) => {
+  if ((req.url || "").startsWith("/socket.io")) return;
+  requestsNow++;
+  let ended = false;
+  const end = () => { if (!ended) { ended = true; requestsNow--; } };
+  res.on("finish", end);
+  res.on("close", end);
+});
+const busyDir = path.join(os.homedir(), ".classgrid-busy");
+const busyFile = path.join(busyDir, `${process.pid}.json`);
+setInterval(async () => {
+  let helpers = 0;
+  try { helpers = (await import("./src/controllers/ai-chat.controller.js")).runningHelperCount(); } catch { /* not loaded yet */ }
+  try {
+    fs.mkdirSync(busyDir, { recursive: true });
+    fs.writeFileSync(busyFile, JSON.stringify({ requests: requestsNow, helpers, at: Date.now() }));
+  } catch { /* the deploy waits for a fresh report */ }
+}, 5000).unref();
+
+// ─────────────────────────────────────────────────────────
 // 🛡️  Global crash guards — prevent one bad request from
 //     killing the entire Node.js process.
 //     Logs errors but keeps the server alive.
