@@ -121,6 +121,8 @@ function createThinkSplitter(emitText, emitThought) {
 
 // Sent when an answer was cut off by the length limit, so the model picks up exactly where it stopped
 export const THINKING_CUT_PROMPT = "You ran out of room while thinking and wrote no answer yet. Stop planning now and write the final answer directly, without drafting it again in your thinking. Finish everything that was asked.";
+// A round that ended with neither text nor a tool call (some models stop after thinking): ask for the reply itself
+export const EMPTY_ANSWER_PROMPT = "You stopped without writing anything to the user. Write your reply to the user now, directly (not in your thinking): what you found or did, and what is still left. If you still need a tool to finish what was asked, call it.";
 // Added to what was written so far when the user's tokens run out during an answer
 export const BUDGET_STOP_NOTE = "_(Stopped here: your AI tokens ran out while I was working. Top up AI credits or wait for your token reset, then ask me to continue.)_";
 export const budgetStopAnswer = (text) => `${String(text || "").trim()}\n\n${BUDGET_STOP_NOTE}`.trim();
@@ -381,6 +383,14 @@ export async function streamChat({
                     console.log(`[AI-STREAM] cut off while thinking, asking for the answer (${continuations}/${maxContinuations})`);
                     conversation.push({ role: "assistant", content: "(I ran out of room while planning.)" });
                     conversation.push({ role: "user", content: THINKING_CUT_PROMPT });
+                    continue;
+                }
+                // Stopped with no text at all (not cut off): ask once more for the reply, so the user never gets silence
+                if (!(continuedText + round.rawText).trim() && continuations < maxContinuations && roomLeft) {
+                    continuations++;
+                    console.log(`[AI-STREAM] stopped with no answer (finish=${round.finishReason}, toolsRun=${toolsRun}), asking for it (${continuations}/${maxContinuations})`);
+                    conversation.push({ role: "assistant", content: "(No reply written yet.)" });
+                    conversation.push({ role: "user", content: EMPTY_ANSWER_PROMPT });
                     continue;
                 }
                 return { answer: (continuedText + round.rawText).trim() || null, usage, toolsRun };

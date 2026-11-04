@@ -6333,8 +6333,9 @@ If a tool fails, never show the error message; say only: "Something went wrong o
 
                 if (!answer) {
                     if (accSteps.length > 0) {
-                        console.log(`[AI-DEBUG] Answer was null but ${accSteps.length} steps completed. Keeping answer silent.`);
-                        answer = "";
+                        console.log(`[AI-DEBUG] Answer was null but ${accSteps.length} steps completed. Answering with a short note.`);
+                        // Never silence after work was done: the app would show its generic greeting instead
+                        answer = "_(I finished the steps above but stopped before writing my reply. Say **continue** and I'll pick up from there.)_";
                     } else {
                         console.error(`[AI-DEBUG] ===== CRITICAL FAILURE ===== No answer AND no steps after ${generateDuration}s. requestAborted=${requestAborted}`);
                         throw new Error("AI generation returned null. All providers timed out or failed.");
