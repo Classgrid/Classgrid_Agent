@@ -61,8 +61,31 @@ export function registerRunnerSocket(socket) {
 // updates, held each message 60 s before the AI started; 3 s, then the answer goes on without it)
 const timeoutFor = (tool) => (tool === "editor_context" ? 3000 : tool === "computer" ? 2 * 60 * 1000 : tool === "execute_terminal_command" || tool === "run_code" || tool === "push_project_to_github" || tool === "clone_repo" || tool === "sync_repo" || tool === "check_background_command" || tool === "wait_until" ? 11 * 60 * 1000 : tool === "browser" ? 2 * 60 * 1000 : 60 * 1000);
 
+// A command still running in the background: the AI is told it will be woken with the result (chat-wake.service.js
+// onLocalJobDone), so it ends its answer instead of calling check_background_command again and again, up to 2 minutes
+// each (a slow download held answers 3-35 minutes that way; 2026-11-05). The desktop app's own text said to wait.
+const WAKE_NOTE = (id) => `It keeps running in the background as job_id ${id}. Don't wait for it and don't check it again and again: you are woken automatically with its result and exit code when it finishes. Tell the user briefly that it is running and end your answer now (or go on with other work that doesn't need its result). Only use check_background_command for its output so far if the user asks, and stop_background_command to stop it.`;
+function withWakeNote(reply) {
+    if (typeof reply?.text !== "string") return reply;
+    const text = reply.text
+        .replace(/so it keeps running in the background as job_id (\S+?)\. Wait for it to finish with check_background_command \([^)]*\), or stop it with stop_background_command\./, (_m, id) => `so: ${WAKE_NOTE(id)}`)
+        .replace(/^Started in the background on the user's computer\. job_id: (\S+?)\. Check it with check_background_command\.$/, (_m, id) => `Started on the user's computer. ${WAKE_NOTE(id)}`);
+    return text === reply.text ? reply : { ...reply, text };
+}
+
 // Sends one tool call to the user's desktop app. Returns its whole answer ({ text, ... }), or null when the app isn't open.
 async function askRunner(userId, tool, payload) {
+    return withWakeNote(await askRunnerOnce(userId, tool, withQuietProgress(tool, payload)));
+}
+// Windows PowerShell draws a progress bar for every piece of a download (Invoke-WebRequest, Expand-Archive...), even in a
+// hidden window, which makes them many times slower: it is switched off for the AI's PowerShell commands
+function withQuietProgress(tool, payload) {
+    const a = payload?.args;
+    if (!["execute_terminal_command", "start_background_command"].includes(tool) || !a?.command) return payload;
+    if (["bash", "sh", "git-bash", "cmd"].includes(String(a.shell || "powershell").toLowerCase())) return payload;
+    return { ...payload, args: { ...a, command: `$ProgressPreference='SilentlyContinue'; ${a.command}` } };
+}
+async function askRunnerOnce(userId, tool, payload) {
     const io = getIO();
     const room = runnerRoom(String(userId));
     try {

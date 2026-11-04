@@ -1438,7 +1438,7 @@ const COMPUTER_TERMINAL_DEFS = [
         shell: { type: "string", enum: ["powershell", "bash", "cmd"], description: "Which shell runs it: powershell (default), bash (Git Bash, or WSL when Git Bash isn't there) or cmd" },
         description: { type: "string", description: "A few plain words saying what it does" },
     }, ["command"]),
-    terminalDef("check_background_command", "See whether a background command on the user's computer is still running, and its latest output. Pass wait_seconds to wait for it to finish in one step instead of checking again and again.", {
+    terminalDef("check_background_command", "See a background command's output so far on the user's computer. You don't need it to learn when a command finishes: you are woken automatically with its result. Use it only when you need its output before it ends (or the user asks), never again and again.", {
         job_id: { type: "string", description: "The job_id from start_background_command (or from a command that moved to the background by itself)" },
         wait_seconds: { type: "number", description: "Wait up to this many seconds (max 120) for the job to finish before answering" },
     }, ["job_id"]),
