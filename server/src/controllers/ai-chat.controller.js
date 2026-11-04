@@ -6312,6 +6312,9 @@ If a tool fails, never show the error message; say only: "Something went wrong o
                                 excludeTools: sees && imageParts.length > 0 ? NO_ANALYZE_IMAGE : undefined,
                                 // The answer must not stop: a round that keeps failing moves on to these models
                                 fallbackProviders: ["@cf/deepseek-ai/deepseek-v4.1-flash-1017", HELPER_GLM_MODEL, "@cf/moonshotai/kimi-k2.6"].filter((m) => m !== model).map(cloudflareStreamProvider),
+                                // The thinking picker: Deep thinks every step; Normal plans on the first step and goes
+                                // straight on after each tool result (those steps were 8-23 s of thinking each); Fast never thinks
+                                thinking: thinking === "high" ? "all" : thinking === "low" ? "none" : "first",
                                 tools: llmConfig.tools,
                                 toolHandlers: llmConfig.toolHandlers,
                                 maxTokens: llmConfig.defaultMaxTokens,

@@ -128,7 +128,16 @@ export const BUDGET_STOP_NOTE = "_(Stopped here: your AI tokens ran out while I 
 export const budgetStopAnswer = (text) => `${String(text || "").trim()}\n\n${BUDGET_STOP_NOTE}`.trim();
 export const CONTINUE_PROMPT ="Your previous reply was cut off by the length limit. Continue EXACTLY where it stopped, even mid-word, mid-sentence or mid-code, without repeating anything and without any preamble, apology or comment. If you were inside a code block, keep writing inside it (do not open a new ```). Finish everything that was asked.";
 
-async function streamOneRound({ provider, messages, tools, temperature, maxTokens, timeoutMs, signal, onToken, onThought, inputTooBig }) {
+// The request option that switches a model's thinking off (tested on Cloudflare, 2026-11-04: DeepSeek V4 Pro 15.7 s ->
+// 2.1 s, V4.1 Flash 2.7 -> 1.1 s, Kimi K2.6 6.1 -> 3.1 s, GLM 5.3 3.3 -> 1.1 s). Other models: nothing is changed.
+export function noThinkingFor(model) {
+    const m = String(model || "");
+    if (/deepseek|kimi|moonshot/i.test(m)) return { chat_template_kwargs: { thinking: false } };
+    if (/glm/i.test(m)) return { reasoning_effort: "low" };
+    return {};
+}
+
+async function streamOneRound({ provider, messages, tools, temperature, maxTokens, timeoutMs, signal, onToken, onThought, inputTooBig, quick = false }) {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(new Error(`Timeout after ${timeoutMs}ms`)), timeoutMs);
     const onOuterAbort = () => controller.abort(signal.reason);
@@ -146,7 +155,9 @@ async function streamOneRound({ provider, messages, tools, temperature, maxToken
                 max_tokens: maxTokens,
                 tools: tools.length > 0 ? tools : undefined,
                 stream: true,
-                stream_options: { include_usage: true }
+                stream_options: { include_usage: true },
+                // A quick round: the model's thinking is switched off (each model has its own switch, noThinkingFor)
+                ...(quick ? noThinkingFor(provider.model) : {})
             })
         });
 
@@ -275,7 +286,10 @@ export async function streamChat({
     // Other models a failed round moves to (same API), so the answer keeps going when one model is down
     fallbackProviders = [],
     // The model sees images (like Claude): images from tool results are shown to it, not just their links
-    seesImages = false
+    seesImages = false,
+    // How much the model thinks: "all" (every round, Deep), "first" (plans on the first round, then each round after a
+    // tool result goes straight to the next step: those rounds were 8-23 s of thinking each, Normal), "none" (Fast)
+    thinking = "all"
 }) {
     // `tools` is re-read every round: load_tools can add tools to the same array mid-answer.
     const currentTools = () => tools.filter(t => t?.function?.name !== "internal_thought_process" && !excludeTools?.has(t?.function?.name));
@@ -329,7 +343,8 @@ export async function streamChat({
                         provider: roundProviders[at], messages: conversation, tools: roundTools, temperature, maxTokens: roundMax, timeoutMs, signal,
                         onToken: (piece) => { shownText += piece; onToken?.(piece); },
                         onThought: separateThought,
-                        inputTooBig
+                        inputTooBig,
+                        quick: thinking === "none" || (thinking === "first" && conversation[conversation.length - 1]?.role === "tool")
                     });
                     break;
                 } catch (e) {
