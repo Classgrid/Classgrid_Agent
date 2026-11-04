@@ -1473,12 +1473,21 @@ const COMPUTER_TERMINAL_DEFS = [
             allow_multiple: { type: "boolean", description: "Replace every match instead of requiring exactly one." },
         }, required: ["old_text", "new_text"] } },
     }, ["path", "edits"]),
-    terminalDef("search_project", "Search inside the files of a folder on the user's own computer (like grep), including its subfolders (node_modules, .git and build folders are skipped). Returns each matching line as full path:line:text. Search a folder, not a whole drive.", {
-        path: { type: "string", description: "The full path of the folder to search in" },
+    terminalDef("search_project", "Search inside the files of a folder (or one file) on the user's own computer, fast even in huge folders (ripgrep; node_modules, .git, dist, build and what .gitignore skips are skipped). Returns each matching line as full path:line:text. Search a folder, not a whole drive. Use this, never a terminal command, to search files.", {
+        path: { type: "string", description: "The full path of the folder (or file) to search in" },
         query: { type: "string", description: "The text to find" },
         regex: { type: "boolean", description: "Treat query as a regular expression" },
         ignore_case: { type: "boolean", description: "Ignore upper and lower case" },
+        glob: { type: "string", description: "Only files matching these patterns, comma separated, e.g. \"*.tsx\", \"src/**\"; !pattern leaves files out" },
+        context: { type: "number", description: "Lines shown before and after each match (0-20)" },
+        files_only: { type: "boolean", description: "Only the names of the files that contain it" },
+        max_results: { type: "number", description: "Most lines (or files) returned, 1-2000 (default 200)" },
     }, ["path", "query"]),
+    terminalDef("find_project_files", "Find files by name in a folder on the user's own computer, fast even in huge folders (like Glob): \"Settings\" finds every file with Settings in its name, \"**/*.pdf\" every PDF. Newest first. Look in a folder, not a whole drive.", {
+        path: { type: "string", description: "The full path of the folder to look in" },
+        pattern: { type: "string", description: "A name or part of one, or glob patterns (comma separated), e.g. \"report\", \"*.pdf\", \"src/**/*.tsx\"" },
+        max_results: { type: "number", description: "Most files returned, 1-2000 (default 200)" },
+    }, ["path", "pattern"]),
     terminalDef("list_project_files", "List the files and folders in a folder on the user's own computer, with its subfolders down to depth (default 2, up to 6). Use it to find files by name too.", {
         path: { type: "string", description: "The full path of the folder" },
         depth: { type: "number", description: "How many folder levels to show (1-6, default 2)" },
@@ -3561,7 +3570,7 @@ Every user is using you as a personal AI assistant and agent (like ChatGPT) to m
                         const result = await handleToolCall('read_sandbox_file', args, { sessionId });
                         return result.isError ? result.content[0].text : result.content[0].text;
                     },
-                    ...Object.fromEntries(["list_project_files", "view_project_file", "search_project", "write_project_file", "edit_project_file", "push_project_to_github", "create_github_repo_for_project", "update_project_github_repo", "start_background_command", "check_background_command", "stop_background_command", "search_project_by_meaning", "rename_project"].map((toolName) => [
+                    ...Object.fromEntries(["list_project_files", "view_project_file", "search_project", "find_project_files", "write_project_file", "edit_project_file", "push_project_to_github", "create_github_repo_for_project", "update_project_github_repo", "start_background_command", "check_background_command", "stop_background_command", "search_project_by_meaning", "rename_project"].map((toolName) => [
                         toolName,
                         async (args) => {
                             touchStudio(req.user?._id).catch(() => {}); // the project's code is in use: not cleaned up while the agent works
@@ -3678,7 +3687,7 @@ Every user is using you as a personal AI assistant and agent (like ChatGPT) to m
                             const defaults = [CF_FLASH_MODEL, "claude-haiku-5-5", "claude-opus-5-5", "claude-sonnet-5-5", HELPER_GLM_MODEL];
                             return id || [defaults[i], ...defaults].find((m) => m && !offModels.includes(m)) || HELPER_GLM_MODEL;
                         };
-                        const readOnly = ["list_project_files", "view_project_file", "search_project"];
+                        const readOnly = ["list_project_files", "view_project_file", "search_project", "find_project_files"];
                         const editTools = ["write_project_file", "edit_project_file", "start_background_command", "check_background_command", "stop_background_command"];
                         const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
                         // Live view: each helper's steps and its report as it writes it (shown under this step in the chat)
@@ -3699,7 +3708,7 @@ Every user is using you as a personal AI assistant and agent (like ChatGPT) to m
                             let deadline = 0;
                             // A desktop chat that isn't a project: helpers work on the user's computer with the main AI's computer
                             // tools (full paths; each step asks the user like the main AI's)
-                            const computerReadOnly = ["read_local_file", "list_project_files", "search_project"];
+                            const computerReadOnly = ["read_local_file", "list_project_files", "search_project", "find_project_files"];
                             const computerEdit = ["write_project_file", "edit_project_file"];
                             // Every helper has the terminal (owner's rule: no limits on the terminal and Bash, in any chat or helper)
                             const terminal = ["execute_terminal_command", "start_background_command", "check_background_command", "stop_background_command", ...(onComputer ? ["send_background_input", "wait_until"] : [])];

@@ -402,16 +402,33 @@ export const getMcpTools = () => [
   },
   {
     name: 'search_project',
-    description: 'Search the text of all files in the open Project Mode project (like grep). Returns file:line: text for each match.',
+    description: 'Search the text of the files in the open project, fast even in huge repos (ripgrep on the user\'s computer; skips node_modules, .git, dist, build and what .gitignore skips). Returns file:line:text for each match, at most max_results lines (default 200). Search one folder or one file with path, only some files with glob (like "*.tsx" or "src/**"), see lines around each match with context, or get only the names of the files with files_only. Use this (never a terminal command) to search code.',
     inputSchema: {
       type: 'object',
       properties: {
         ignore_case: { type: 'boolean', description: 'Match upper and lower case the same (default false).' },
         query: { type: 'string', description: 'Text to find (or a regular expression when regex is true).' },
         path: { type: 'string', description: 'Folder or file inside the project to search in. Empty = whole project.' },
-        regex: { type: 'boolean', description: 'Treat query as a regular expression.' }
+        regex: { type: 'boolean', description: 'Treat query as a regular expression (for several words at once: "a|b|c").' },
+        glob: { type: 'string', description: 'Only files matching these patterns, comma separated, e.g. "*.tsx", "src/**/*.ts", "*.{js,jsx}". A pattern starting with ! leaves files out, e.g. "!*.test.ts".' },
+        context: { type: 'number', description: 'Lines shown before and after each match (0-20, default 0).' },
+        files_only: { type: 'boolean', description: 'Only the names of the files that contain it (good for a first, wide search).' },
+        max_results: { type: 'number', description: 'Most lines (or files) returned, 1-2000 (default 200).' }
       },
       required: ['query']
+    }
+  },
+  {
+    name: 'find_project_files',
+    description: 'Find files in the open project by name, fast even in huge repos (like Glob): "Settings" finds every file with Settings in its name, "**/*.yml" every YAML file, "src/**/use*.ts" hooks under src. Newest first; skips node_modules, .git, dist, build and what .gitignore skips.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        pattern: { type: 'string', description: 'A name or part of one, or glob patterns (comma separated), e.g. "Settings", "*.md", "src/**/*.tsx".' },
+        path: { type: 'string', description: 'Folder inside the project to look in. Empty = whole project.' },
+        max_results: { type: 'number', description: 'Most files returned, 1-2000 (default 200).' }
+      },
+      required: ['pattern']
     }
   },
   {

@@ -151,23 +151,73 @@ function ripgrep() {
   for (const root of roots) for (const rel of RG_INSIDE) if (fs.existsSync(path.join(root, rel))) return (rgPath = path.join(root, rel));
   return (rgPath = null);
 }
-// The same answer as search_project, or null when ripgrep isn't there (then the slow search runs)
-function searchWithRipgrep(root, full, { query, regex, ignore_case }) {
+// Searching with ripgrep, like Claude Code's Grep: a folder or one file, only some files (glob), lines around each
+// match (context) or only the files' names. Results stream in and it stops at the limit, so even a repo of millions of
+// lines answers in about a second. null when ripgrep isn't there (then the slower search runs).
+const SEARCH_LIMIT = 200;
+const globList = (glob) => (Array.isArray(glob) ? glob : String(glob || "").split(/[,\s]+/)).map((g) => String(g).trim()).filter(Boolean);
+function runRipgrep(cwd, args, limit) {
   const rg = ripgrep();
-  if (!rg) return null;
-  const { spawnSync } = require("node:child_process");
-  const args = ["--line-number", "--no-heading", "--color", "never", "--path-separator", "/", "--max-columns", "300", "--max-columns-preview",
-    "--max-filesize", "2M", "--no-require-git", ...[...SKIP_DIRS].flatMap((d) => ["-g", `!${d}`]),
-    ...(ignore_case ? ["-i"] : []), ...(regex ? [] : ["-F"]), "-e", String(query), "--", "."];
-  const r = spawnSync(rg, args, { cwd: full, windowsHide: true, encoding: "utf8", maxBuffer: 64 * 1024 * 1024, timeout: 60000 });
-  if (r.error || (r.status !== 0 && r.status !== 1)) {
-    if (r.status === 2 && r.stdout) { /* some files couldn't be read: keep the matches */ } else return null;
-  }
-  const prefix = path.relative(root, full).replace(/\\/g, "/");
-  const lines = String(r.stdout || "").split("\n").filter(Boolean).map((l) => (prefix ? `${prefix}/` : "") + l.replace(/^\.\//, ""));
+  if (!rg) return Promise.resolve(null);
+  return new Promise((resolve) => {
+    let p;
+    try { p = spawn(rg, args, { cwd, windowsHide: true }); } catch { resolve(null); return; }
+    const lines = [];
+    let buf = "", more = false, done = false;
+    const finish = (out) => { if (done) return; done = true; clearTimeout(timer); resolve(out); };
+    const timer = setTimeout(() => { more = true; try { p.kill(); } catch { /* gone */ } finish({ lines, more }); }, 60000);
+    p.stdout.setEncoding("utf8");
+    p.stdout.on("data", (d) => {
+      buf += d;
+      let at;
+      while ((at = buf.indexOf("\n")) !== -1) {
+        const line = buf.slice(0, at).replace(/\r$/, "");
+        buf = buf.slice(at + 1);
+        if (lines.length >= limit) { more = true; try { p.kill(); } catch { /* gone */ } finish({ lines, more }); return; }
+        lines.push(line);
+      }
+    });
+    p.on("error", () => finish(null));
+    p.on("close", (code) => {
+      if (buf && lines.length < limit) lines.push(buf.replace(/\r$/, ""));
+      finish(code === 0 || code === 1 || lines.length ? { lines, more } : null);
+    });
+  });
+}
+async function searchWithRipgrep(root, full, { query, regex, ignore_case, glob, context, files_only, max_results }) {
+  let isFile = false;
+  try { isFile = fs.statSync(full).isFile(); } catch { return "Error: there is no such file or folder."; }
+  const cwd = isFile ? path.dirname(full) : full;
+  const limit = Math.min(Math.max(Number(max_results) || SEARCH_LIMIT, 1), 2000);
+  const around = Math.min(Math.max(Number(context) || 0, 0), 20);
+  const args = [
+    ...(files_only ? ["-l"] : ["--line-number", "--no-heading", "--with-filename", ...(around ? ["-C", String(around)] : [])]),
+    "--color", "never", "--path-separator", "/", "--max-columns", "400", "--max-columns-preview", "--max-filesize", "4M",
+    "--no-require-git", "--hidden", ...[...SKIP_DIRS].flatMap((d) => ["-g", `!${d}`]), ...globList(glob).flatMap((g) => ["-g", g]),
+    ...(ignore_case ? ["-i"] : ["-s"]), ...(regex ? [] : ["-F"]), "-e", String(query), "--", isFile ? path.basename(full) : ".",
+  ];
+  const out = await runRipgrep(cwd, args, limit);
+  if (!out) return null;
+  const prefix = path.relative(root, cwd).replace(/\\/g, "/");
+  const lines = out.lines.map((l) => (l === "--" ? l : (prefix ? `${prefix}/` : "") + l.replace(/^\.\//, "")));
   if (!lines.length) return "No matches.";
-  const files = new Set(lines.map((l) => l.slice(0, l.indexOf(":"))));
-  return `Found in ${files.size} file${files.size === 1 ? "" : "s"} (${lines.length} matching line${lines.length === 1 ? "" : "s"})${lines.length > 200 ? "; showing the first 200 lines" : ""}.\n${lines.slice(0, 200).join("\n")}`;
+  if (files_only) return `Found in ${lines.length}${out.more ? "+" : ""} file${lines.length === 1 ? "" : "s"}${out.more ? ` (first ${limit}; narrow it with path or glob)` : ""}.\n${lines.join("\n")}`;
+  const hits = lines.filter((l) => /^[^:]+:\d+:/.test(l));
+  const files = new Set(hits.map((l) => l.slice(0, l.indexOf(":"))));
+  return `Found in ${files.size}${out.more ? "+" : ""} file${files.size === 1 ? "" : "s"} (${hits.length}${out.more ? "+" : ""} matching line${hits.length === 1 ? "" : "s"})${out.more ? `; showing the first ${limit} lines, there are more: narrow it with path or glob, or use files_only` : ""}.\n${lines.join("\n")}`;
+}
+// Files by name, like Claude Code's Glob ("**/*Settings*.tsx", "*.md", "src/**/use*.ts"), newest first
+async function findWithRipgrep(root, full, { pattern, max_results }) {
+  const limit = Math.min(Math.max(Number(max_results) || SEARCH_LIMIT, 1), 2000);
+  const pats = globList(pattern).map((g) => (/[/*?[]/.test(g) ? g : `**/*${g}*`)); // a bare word finds names containing it
+  const args = ["--files", "--path-separator", "/", "--no-require-git", "--hidden", "--sortr", "modified",
+    ...[...SKIP_DIRS].flatMap((d) => ["-g", `!${d}`]), ...pats.flatMap((g) => ["--iglob", g])];
+  const out = await runRipgrep(full, args, limit);
+  if (!out) return null;
+  const prefix = path.relative(root, full).replace(/\\/g, "/");
+  const lines = out.lines.map((l) => (prefix ? `${prefix}/` : "") + l.replace(/^\.\//, ""));
+  if (!lines.length) return `No file matches ${pats.join(", ")}.`;
+  return `Found ${lines.length}${out.more ? "+" : ""} file${lines.length === 1 ? "" : "s"}${out.more ? ` (first ${limit}; narrow the pattern)` : ""}, newest first:\n${lines.join("\n")}`;
 }
 
 // ── The tools (same answers as server/src/services/ide-project.service.js projectTools) ────────────────────
@@ -204,10 +254,10 @@ const tools = {
     return `${rel} (lines ${start}-${end} of ${lines.length})\n${lines.slice(start - 1, end).map((l, i) => `${start + i}: ${l}`).join("\n")}`;
   },
 
-  search_project(root, { query, path: dir = "", regex = false, ignore_case = false }) {
+  async search_project(root, { query, path: dir = "", regex = false, ignore_case = false, glob, context, files_only, max_results }) {
     if (!query) return "Error: query is empty";
     const { full } = resolveIn(root, dir);
-    const fast = searchWithRipgrep(root, full, { query, regex, ignore_case });
+    const fast = await searchWithRipgrep(root, full, { query, regex, ignore_case, glob, context, files_only, max_results });
     if (fast !== null) return fast;
     const re = regex ? new RegExp(String(query), ignore_case ? "i" : "") : null;
     const needle = ignore_case ? String(query).toLowerCase() : String(query);
@@ -228,9 +278,44 @@ const tools = {
         });
       }
     };
-    walk(full);
+    // (one file is searched by itself; walking it as a folder found nothing)
+    let isFile = false;
+    try { isFile = fs.statSync(full).isFile(); } catch { return "Error: there is no such file or folder."; }
+    if (isFile) {
+      try {
+        fs.readFileSync(full, "utf8").split(/\r?\n/).forEach((line, i) => {
+          const ok = re ? re.test(line) : (ignore_case ? line.toLowerCase() : line).includes(needle);
+          if (ok) { files.add(full); hits.push(`${path.relative(root, full).replace(/\\/g, "/")}:${i + 1}:${line.slice(0, 300)}`); }
+        });
+      } catch { /* unreadable */ }
+    } else walk(full);
     if (!hits.length) return "No matches.";
     return `Found in ${files.size} file${files.size === 1 ? "" : "s"} (${hits.length} matching line${hits.length === 1 ? "" : "s"})${hits.length > 200 ? "; showing the first 200 lines" : ""}.\n${hits.slice(0, 200).join("\n")}`;
+  },
+
+  async find_project_files(root, { pattern, path: dir = "", max_results }) {
+    if (!pattern) return "Error: pattern is empty";
+    const { full } = resolveIn(root, dir);
+    const fast = await findWithRipgrep(root, full, { pattern, max_results });
+    if (fast !== null) return fast;
+    // Without ripgrep: the names, walked (a bare word finds names containing it)
+    const toRe = (g) => new RegExp("^" + (/[/*?]/.test(g) ? g : `**/*${g}*`)
+      .replace(/[.+^${}()|\\]/g, "\\$&").replace(/\*\*\//g, "(?:.*/)?").replace(/\*\*/g, ".*").replace(/\*/g, "[^/]*").replace(/\?/g, "[^/]") + "$", "i");
+    const res = String(pattern).split(/[,\s]+/).filter(Boolean).map(toRe);
+    const found = [];
+    const walk = (d) => {
+      if (found.length >= SEARCH_LIMIT) return;
+      let entries = [];
+      try { entries = fs.readdirSync(d, { withFileTypes: true }); } catch { return; }
+      for (const e of entries) {
+        const p = path.join(d, e.name);
+        if (e.isDirectory()) { if (!SKIP_DIRS.has(e.name)) walk(p); continue; }
+        if (res.some((r) => r.test(path.relative(full, p).replace(/\\/g, "/")))) found.push(path.relative(root, p).replace(/\\/g, "/"));
+        if (found.length >= SEARCH_LIMIT) return;
+      }
+    };
+    walk(full);
+    return found.length ? `Found ${found.length} file${found.length === 1 ? "" : "s"}:\n${found.join("\n")}` : `No file matches ${pattern}.`;
   },
 
   write_project_file(root, { path: file, content = "" }) {
@@ -886,13 +971,27 @@ const computerFileTools = {
     if (!fs.existsSync(full) || !fs.statSync(full).isDirectory()) throw new Error(`there is no folder at ${full}`);
     return tools.list_project_files(full, { ...args, path: "" }).replace(/^Project folder: .*/, `Folder: ${full}`);
   },
-  search_project(args) {
+  async search_project(args) {
+    const full = localPath(args.path);
+    if (!fs.existsSync(full)) throw new Error(`there is no file or folder at ${full}`);
+    if (path.parse(full).root.toLowerCase() === full.toLowerCase()) throw new Error(`${full} is a whole drive; search a folder in it instead (like ${path.join(require("node:os").homedir(), "Documents")}).`);
+    // (one file: searched from its folder)
+    const isFile = fs.statSync(full).isFile();
+    const base = isFile ? path.dirname(full) : full;
+    const text = await tools.search_project(base, { ...args, path: isFile ? path.basename(full) : "" });
+    // Each line's file as its full path (matches "file:12:", lines around them "file-12-", files_only lists names)
+    return text.split("\n").map((l, i) => {
+      if (i === 0 || l === "--") return l;
+      const m = l.match(/^(.+?)([:-]\d+[:-][\s\S]*)$/);
+      return m ? path.join(base, m[1]) + m[2] : args.files_only ? path.join(base, l) : l;
+    }).join("\n");
+  },
+  async find_project_files(args) {
     const full = localPath(args.path);
     if (!fs.existsSync(full) || !fs.statSync(full).isDirectory()) throw new Error(`there is no folder at ${full}`);
-    if (path.parse(full).root.toLowerCase() === full.toLowerCase()) throw new Error(`${full} is a whole drive; search a folder in it instead (like ${path.join(require("node:os").homedir(), "Documents")}).`);
-    const text = tools.search_project(full, { ...args, path: "" });
-    // Each line's file as its full path
-    return text.split("\n").map((l, i) => { const m = l.match(/^([^:]+)(:\d+:[\s\S]*)$/); return i === 0 || !m ? l : path.join(full, m[1]) + m[2]; }).join("\n");
+    if (path.parse(full).root.toLowerCase() === full.toLowerCase()) throw new Error(`${full} is a whole drive; look in a folder in it instead (like ${path.join(require("node:os").homedir(), "Documents")}).`);
+    const text = await tools.find_project_files(full, { ...args, path: "" });
+    return text.split("\n").map((l, i) => (i === 0 || !l ? l : path.join(full, l))).join("\n");
   },
 };
 
@@ -964,7 +1063,7 @@ function connect(token) {
       }
       if (!root && computerFileTools[tool]) {
         console.log("[runner] computer", tool, args.path);
-        return ack({ text: String(computerFileTools[tool](args)) });
+        return ack({ text: String(await computerFileTools[tool](args)) });
       }
       if (!root && COMPUTER_TOOLS.has(tool)) {
         console.log("[runner] computer", tool);

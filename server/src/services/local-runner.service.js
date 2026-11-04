@@ -10,7 +10,7 @@ import { projectForChat } from "./ide-project.service.js";
 import redis from "../config/redis.js";
 
 export const LOCAL_TOOLS = new Set([
-    "list_project_files", "view_project_file", "search_project", "write_project_file", "edit_project_file",
+    "list_project_files", "view_project_file", "search_project", "find_project_files", "write_project_file", "edit_project_file",
     "execute_terminal_command", "start_background_command", "check_background_command", "stop_background_command",
     "run_code", // Python / JavaScript / shell code runs in the project folder on their computer too
     "push_project_to_github", // git commit and push in the folder, with the user's own GitHub login
@@ -124,7 +124,7 @@ export async function useComputer(userId, args = {}, chat = null) {
 
 export const COMPUTER_TERMINAL_TOOLS = new Set(["execute_terminal_command", "start_background_command", "check_background_command", "stop_background_command", "wait_until", "send_background_input"]);
 // Project Mode's file tools, used on files anywhere on the computer in those chats (full paths)
-export const COMPUTER_FILE_TOOLS = { write_project_file: "computer_write", edit_project_file: "computer_edit", search_project: "computer_search", list_project_files: "computer_list", notebook_edit: "computer_edit" };
+export const COMPUTER_FILE_TOOLS = { write_project_file: "computer_write", edit_project_file: "computer_edit", search_project: "computer_search", find_project_files: "computer_list", list_project_files: "computer_list", notebook_edit: "computer_edit" };
 
 /** The terminal tools in a desktop app chat that isn't a project: the command runs on the user's own computer (asks first). */
 export async function runOnComputer(userId, tool, args = {}, chat = null) {

@@ -198,6 +198,8 @@ async function problemsAfterWrite(ssh, project, full) {
   return "";
 }
 
+// Folders the searches skip (like the desktop app's)
+const SEARCH_SKIP = ["node_modules", ".git", "dist", "build", ".next", ".turbo", ".cache", "__pycache__", ".venv", "venv"];
 export const projectTools = {
   list_project_files: (sessionId, { path: dir = "", depth = 2 }) => withProject(sessionId, async (project, ssh) => {
     const { full, rel } = resolveInProject(project, dir);
@@ -218,22 +220,54 @@ export const projectTools = {
     return `${rel} (lines ${start}-${end} of ${lines.length})\n${body}`;
   }),
 
-  search_project: (sessionId, { query, path: dir = "", regex = false, ignore_case = false }) => withProject(sessionId, async (project, ssh) => {
+  // Like Claude Code's Grep: ripgrep when the cloud computer has it (it also skips what .gitignore skips), else grep.
+  // A folder or one file (path), only some files (glob), lines around each match (context), or only the file names
+  search_project: (sessionId, { query, path: dir = "", regex = false, ignore_case = false, glob, context, files_only, max_results }) => withProject(sessionId, async (project, ssh) => {
     if (!query) return "Error: query is empty";
     const { full } = resolveInProject(project, dir);
     const where = q(path.posix.relative(projectHostDir(project), full) || ".");
-    const grep = `grep -rnI ${regex ? "-E" : "-F"}${ignore_case ? " -i" : ""} --exclude-dir=node_modules --exclude-dir=.git -f -`;
-    // The full list goes to a temp file: the real totals are counted from it, the first 200 lines are shown
+    const limit = Math.min(Math.max(Number(max_results) || 200, 1), 2000);
+    const around = files_only ? 0 : Math.min(Math.max(Number(context) || 0, 0), 20);
+    const globs = String(Array.isArray(glob) ? glob.join(",") : glob || "").split(/[,\s]+/).filter(Boolean);
+    const rg = `rg ${files_only ? "-l" : `-nH --no-heading${around ? ` -C ${around}` : ""}`} --color never --no-require-git --hidden --max-columns 400 --max-columns-preview ` +
+      `${SEARCH_SKIP.map((d) => `-g ${q(`!${d}`)}`).join(" ")} ${globs.map((g) => `-g ${q(g)}`).join(" ")} ${ignore_case ? "-i" : "-s"} ${regex ? "" : "-F"} -f -`;
+    const grep = `grep -rI${files_only ? "l" : "nH"}${around ? ` -C ${around}` : ""} ${regex ? "-E" : "-F"}${ignore_case ? " -i" : ""} ` +
+      `${SEARCH_SKIP.map((d) => `--exclude-dir=${q(d)}`).join(" ")} ` +
+      `${globs.map((g) => (g.startsWith("!") ? `--exclude=${q(g.slice(1).split("/").pop())}` : `--include=${q(g.split("/").pop())}`)).join(" ")} -f -`;
+    // The full list goes to a temp file: the real totals are counted from it, the first lines are shown
     const { stdout } = await ssh.execCommand(
-      `cd ${q(projectHostDir(project))} && t=$(mktemp) && ${grep} -- ${where} > $t; ` +
-      `echo "TOTAL $(wc -l < $t) $(cut -d: -f1 $t | sort -u | wc -l)"; head -200 $t | cut -c1-300; rm -f $t`,
+      `cd ${q(projectHostDir(project))} && t=$(mktemp) && { if command -v rg >/dev/null 2>&1; then ${rg} -- ${where}; else ${grep} -- ${where}; fi; } | sed 's#^\\./##' > $t; ` +
+      `echo "TOTAL $(grep -cE '^[^:]+:[0-9]+:' $t) $(grep -oE '^[^:]+:[0-9]+:' $t | cut -d: -f1 | sort -u | wc -l) $(grep -c '' $t)"; head -${limit} $t | cut -c1-400; rm -f $t`,
       { stdin: String(query) }
     );
     const [first, ...rest] = stdout.split("\n");
-    const [, lines = "0", files = "0"] = (first || "").split(" ");
-    if (Number(lines) === 0) return "No matches.";
+    const [, lines = "0", files = "0", all = "0"] = (first || "").split(" ");
     const shown = rest.join("\n").trim();
-    return `Found in ${files} file${files === "1" ? "" : "s"} (${lines} matching line${lines === "1" ? "" : "s"})${Number(lines) > 200 ? "; showing the first 200 lines" : ""}.\n${shown}`;
+    if (files_only) {
+      if (Number(all) === 0) return "No matches.";
+      return `Found in ${all} file${all === "1" ? "" : "s"}${Number(all) > limit ? ` (first ${limit}; narrow it with path or glob)` : ""}.\n${shown}`;
+    }
+    if (Number(lines) === 0) return "No matches.";
+    return `Found in ${files} file${files === "1" ? "" : "s"} (${lines} matching line${lines === "1" ? "" : "s"})${Number(all) > limit ? `; showing the first ${limit} lines, there are more: narrow it with path or glob, or use files_only` : ""}.\n${shown}`;
+  }),
+
+  // Like Claude Code's Glob: files by name ("Settings", "**/*.yml", "src/**/use*.ts"), newest first
+  find_project_files: (sessionId, { pattern, path: dir = "", max_results }) => withProject(sessionId, async (project, ssh) => {
+    if (!pattern) return "Error: pattern is empty";
+    const { full } = resolveInProject(project, dir);
+    const where = q(path.posix.relative(projectHostDir(project), full) || ".");
+    const limit = Math.min(Math.max(Number(max_results) || 200, 1), 2000);
+    const pats = String(pattern).split(/[,\s]+/).filter(Boolean).map((g) => (/[/*?[]/.test(g) ? g : `**/*${g}*`)); // a bare word finds names containing it
+    const rg = `rg --files --no-require-git --hidden --sortr modified ${SEARCH_SKIP.map((d) => `-g ${q(`!${d}`)}`).join(" ")} ${pats.map((g) => `--iglob ${q(g)}`).join(" ")} ${where}`;
+    const find = `find ${where} \\( ${SEARCH_SKIP.map((d) => `-name ${q(d)}`).join(" -o ")} \\) -prune -o -type f \\( ${pats.map((g) => `-iname ${q(g.split("/").pop())}`).join(" -o ")} \\) -print`;
+    const { stdout } = await ssh.execCommand(
+      `cd ${q(projectHostDir(project))} && t=$(mktemp) && { if command -v rg >/dev/null 2>&1; then ${rg}; else ${find}; fi; } 2>/dev/null | sed 's#^\\./##' > $t; ` +
+      `echo "TOTAL $(grep -c '' $t)"; head -${limit} $t; rm -f $t`
+    );
+    const [first, ...rest] = stdout.split("\n");
+    const total = Number((first || "").split(" ")[1]) || 0;
+    if (!total) return `No file matches ${pats.join(", ")}.`;
+    return `Found ${total} file${total === 1 ? "" : "s"}${total > limit ? ` (first ${limit}; narrow the pattern)` : ""}:\n${rest.join("\n").trim()}`;
   }),
 
   // New files only. A file that already exists is always changed with edit_project_file, never replaced whole.

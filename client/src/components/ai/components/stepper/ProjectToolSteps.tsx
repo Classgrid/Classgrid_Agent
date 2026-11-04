@@ -21,7 +21,7 @@ import { ShimmerText } from './ShimmerText';
 // Steps of the Project Mode file tools, shown like a code editor's agent: "Edited calculator.ts +26 -0",
 // and reading/searching grouped as "Exploring 2 files, 1 search".
 
-export const PROJECT_EXPLORE_TOOLS = new Set(['view_project_file', 'search_project', 'list_project_files', 'search_project_by_meaning', 'bulk_read_project', 'read_local_file']);
+export const PROJECT_EXPLORE_TOOLS = new Set(['view_project_file', 'search_project', 'find_project_files', 'list_project_files', 'search_project_by_meaning', 'bulk_read_project', 'read_local_file']);
 export const PROJECT_EDIT_TOOLS = new Set(['write_project_file', 'edit_project_file', 'write_project_file_from_spec']);
 
 type Step = { id: string; tool: string; status?: string; args?: any; result?: string; helpers?: HelperLive[] };
@@ -236,9 +236,35 @@ function ProjectExploreItem({ step }: { step: Step }) {
     );
   }
 
+  // find_project_files: "Found Settings 29 files"; each file opens in the editor
+  if (step.tool === 'find_project_files') {
+    const total = result.match(/^Found (\d+)\+? files?/);
+    const found = !total || isError(step) ? [] : result.trim().split('\n').slice(1).filter(Boolean);
+    return (
+      <div className="flex flex-col">
+        <div className="flex items-center gap-1.5 py-1 text-[14px] text-slate-500 dark:text-[#8a8a8a]">
+          <button type="button" disabled={!found.length} onClick={() => setOpen(!open)} className="flex min-w-0 items-center gap-1.5 hover:text-foreground disabled:hover:text-inherit">
+            <span className="shrink-0">{loading ? 'Finding' : 'Found'}</span>
+            <Name>{step.args?.pattern}</Name>
+            {!loading && <span className="shrink-0 rounded-full bg-secondary px-2 text-xs">{total ? `${total[1]} file${total[1] === '1' ? '' : 's'}` : '0 files'}</span>}
+          </button>
+        </div>
+        {open && (
+          <div className="mb-1 ml-1 max-h-[220px] overflow-auto rounded-md border border-border font-mono text-[12px]">
+            {found.slice(0, 100).map((f, i) => (
+              <div key={i} onClick={() => openInEditor({ path: f })} className="px-2 py-0.5 truncate cursor-pointer hover:bg-secondary">{f}</div>
+            ))}
+          </div>
+        )}
+        <ErrorLine step={step} />
+      </div>
+    );
+  }
+
   if (step.tool === 'search_project') {
-    // The first line is the real total ("Found in 487 files (912 matching lines)…"); the rest are the shown lines
-    const total = result.match(/^Found in (\d+) files? \((\d+) matching/);
+    // The first line is the real total ("Found in 487 files (912 matching lines)…", "Found in 4+ files", or with
+    // files_only "Found in 120 files."); the rest are the shown lines
+    const total = result.match(/^Found in (\d+)\+? files?/);
     const matches = !result || /^no matches/i.test(result.trim()) || isError(step) ? [] : result.trim().split('\n').filter((l) => !/^Found in \d+ file/.test(l));
     return (
       <div className="flex flex-col">
@@ -319,7 +345,7 @@ export function ProjectExploreGroup({ steps }: { steps: Step[] }) {
   }, [loading]);
   const isOpen = open ?? busy;
   const files = steps.reduce((n, s) => n + (s.tool === 'view_project_file' || s.tool === 'read_local_file' ? 1 : s.tool === 'bulk_read_project' ? (Array.isArray(s.args?.paths) ? s.args.paths.length : 1) : 0), 0);
-  const searches = steps.filter((s) => s.tool === 'search_project' || s.tool === 'search_project_by_meaning').length;
+  const searches = steps.filter((s) => s.tool === 'search_project' || s.tool === 'find_project_files' || s.tool === 'search_project_by_meaning').length;
   const folders = steps.filter((s) => s.tool === 'list_project_files').length;
   const parts = [
     files && `${files} file${files > 1 ? 's' : ''}`,
