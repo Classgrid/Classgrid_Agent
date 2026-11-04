@@ -91,7 +91,8 @@ jobs:
           rm -rf "$EXT" && mkdir -p "$EXT/desktop"
           cp -r classgrid-editor/extension/. "$EXT/"
           cp -r desktop/app-editor "$EXT/app"
-          cp desktop/runner.js desktop/aimemory.js desktop/computer.js desktop/chats.js desktop/memory.js "$EXT/desktop/"
+          cp desktop/runner.js desktop/aimemory.js desktop/computer.js desktop/chats.js desktop/memory.js desktop/notify-toast.ps1 "$EXT/desktop/"
+          test -f "$EXT/desktop/notify-toast.ps1" || { echo "notify-toast.ps1 is missing from the editor build" >&2; exit 1; }
           SIO=$(node -p "require('./desktop/package.json').dependencies['socket.io-client']")
           (cd "$EXT/desktop" && echo '{"name":"classgrid-desktop-parts","private":true}' > package.json && npm install --no-audit --no-fund --omit=dev "socket.io-client@${SIO}")
           ls "$EXT" "$EXT/desktop"

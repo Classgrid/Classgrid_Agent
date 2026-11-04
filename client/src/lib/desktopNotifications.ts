@@ -33,10 +33,36 @@ export function readNotificationSettings(): DesktopNotificationSettings {
   }
 }
 
+type SharedDesktop = {
+  getNotificationSettings?: () => Promise<Partial<DesktopNotificationSettings> | null>;
+  saveNotificationSettings?: (s: DesktopNotificationSettings) => Promise<unknown>;
+};
+const desk = () => (typeof window !== "undefined" ? ((window as any).classgridDesktop as SharedDesktop | undefined) : undefined);
+
 export function saveNotificationSettings(settings: DesktopNotificationSettings) {
   try {
     localStorage.setItem(KEY, JSON.stringify(settings));
   } catch { /* storage blocked */ }
+  // One file on this computer (%APPDATA%\Classgrid), read by the app and by Classgrid Code
+  try { void desk()?.saveNotificationSettings?.(settings); } catch { /* not in the desktop app */ }
+}
+
+// Reads the shared file into this window's copy, so a change made in the other window (app or Classgrid Code) is used here
+export async function refreshNotificationSettings(): Promise<DesktopNotificationSettings> {
+  try {
+    const shared = await desk()?.getNotificationSettings?.();
+    if (shared) {
+      const merged = { ...DEFAULT_NOTIFICATION_SETTINGS, ...shared };
+      try { localStorage.setItem(KEY, JSON.stringify(merged)); } catch { /* storage blocked */ }
+      return merged;
+    }
+  } catch { /* keep this window's copy */ }
+  return readNotificationSettings();
+}
+
+if (typeof window !== "undefined") {
+  void refreshNotificationSettings();
+  window.addEventListener("blur", () => { void refreshNotificationSettings(); });
 }
 
 // A tiny "ding" (a short sine blip) at the chosen volume, so a notification can be heard without a sound file.

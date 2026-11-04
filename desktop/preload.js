@@ -7,6 +7,9 @@ contextBridge.exposeInMainWorld("classgridDesktop", {
   // This computer's scrambled Windows ID (the free AI limit counts per computer)
   deviceId: ipcRenderer.sendSync("cg:deviceId"),
   openExternal: (url) => ipcRenderer.invoke("cg:openExternal", url),
+  // Notification settings shared with Classgrid Code (one file on this computer)
+  getNotificationSettings: () => ipcRenderer.invoke("cg:getNotificationSettings"),
+  saveNotificationSettings: (s) => ipcRenderer.invoke("cg:saveNotificationSettings", s),
   // A file on this computer shown in a Studio tab
   fileUrl: (file) => ipcRenderer.sendSync("cg:fileUrl", file),
   fileInfo: (file) => ipcRenderer.invoke("cg:fileInfo", file),

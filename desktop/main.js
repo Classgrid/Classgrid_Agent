@@ -223,6 +223,10 @@ function createWindow() {
 }
 
 ipcMain.on("cg:version", (e) => { e.returnValue = app.getVersion(); });
+// Notification settings: one file on this computer, shared with Classgrid Code (%APPDATA%\Classgrid)
+const NOTIFY_FILE = path.join(process.env.APPDATA || app.getPath("appData"), "Classgrid", "notification-settings.json");
+ipcMain.handle("cg:getNotificationSettings", () => { try { return JSON.parse(fs.readFileSync(NOTIFY_FILE, "utf8")); } catch { return null; } });
+ipcMain.handle("cg:saveNotificationSettings", (_e, s) => { try { fs.mkdirSync(path.dirname(NOTIFY_FILE), { recursive: true }); fs.writeFileSync(NOTIFY_FILE, JSON.stringify(s && typeof s === "object" ? s : {})); return true; } catch { return false; } });
 // This computer's own Windows ID (MachineGuid), scrambled so the real ID never leaves the computer: the free AI
 // limit counts per computer, not per account (more accounts on one PC don't give more free usage)
 let deviceId;

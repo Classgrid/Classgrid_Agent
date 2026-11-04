@@ -491,6 +491,16 @@ const HANDLERS = {
     await cfg.update("window.autoDetectColorScheme", false, G);
     await cfg.update("workbench.colorTheme", mode === "light" ? "Light Modern" : "Dark Modern", G);
   },
+  // Notification settings: the same file the Classgrid app uses (%APPDATA%\Classgrid)
+  getNotificationSettings: () => { try { return JSON.parse(fs.readFileSync(path.join(process.env.APPDATA || "", "Classgrid", "notification-settings.json"), "utf8")); } catch { return null; } },
+  saveNotificationSettings: (_p, s) => {
+    try {
+      const file = path.join(process.env.APPDATA || "", "Classgrid", "notification-settings.json");
+      fs.mkdirSync(path.dirname(file), { recursive: true });
+      fs.writeFileSync(file, JSON.stringify(s && typeof s === "object" ? s : {}));
+      return true;
+    } catch { return false; }
+  },
   // A Windows notification from the AI panel (Classgrid Code has no Electron, so the toast is shown by PowerShell)
   notify: (_p, { title, body } = {}) => {
     if (!title || !body) return;

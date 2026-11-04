@@ -415,6 +415,8 @@
     },
     // A Windows notification (Classgrid Code has no Electron, so the extension shows a toast)
     notify: function (title, body) { send("notify", { title: title, body: body }); },
+    getNotificationSettings: bind("getNotificationSettings"),
+    saveNotificationSettings: bind("saveNotificationSettings"),
     // The AI panel's chats sidebar → Settings: the same Settings tab as the gear in the title bar
     openSettings: bind("openSettings"),
     // Settings → Log out of Classgrid Code

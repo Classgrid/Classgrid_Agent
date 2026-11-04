@@ -4,6 +4,7 @@ import { Switch } from "@/components/marketing_ui/switch";
 import { Slider } from "@/components/marketing_ui/slider";
 import {
   readNotificationSettings,
+  refreshNotificationSettings,
   saveNotificationSettings,
   playNotificationSound,
   type DesktopNotificationSettings,
@@ -13,10 +14,16 @@ import {
 // Classgrid Code, where the settings are kept on this computer.
 export function SettingsDesktopNotificationsCard() {
   const [settings, setSettings] = useState<DesktopNotificationSettings>(readNotificationSettings);
+  const [loaded, setLoaded] = useState(false);
+
+  // Start from the file shared with the other window (app or Classgrid Code)
+  useEffect(() => {
+    refreshNotificationSettings().then((s) => { setSettings(s); setLoaded(true); });
+  }, []);
 
   useEffect(() => {
-    saveNotificationSettings(settings);
-  }, [settings]);
+    if (loaded) saveNotificationSettings(settings);
+  }, [settings, loaded]);
 
   const set = (patch: Partial<DesktopNotificationSettings>) => setSettings((s) => ({ ...s, ...patch }));
 

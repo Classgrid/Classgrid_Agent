@@ -3,7 +3,8 @@
 // editor, and our screens follow it), the AI Hub's pages (Plugins, Images, Skills, Connected apps, Usage, AI Credits,
 // Upgrade: here instead of a window over the editor) and Docs.
 import { useEffect, useState } from "react";
-import { BookOpen, LogOut, Monitor, Moon, Palette, Sun, User } from "lucide-react";
+import { BookOpen, Bell, LogOut, Monitor, Moon, Palette, Sun, User } from "lucide-react";
+import { SettingsDesktopNotificationsCard } from "@/features/shared/components/settings/SettingsDesktopNotificationsCard";
 import { useTheme } from "next-themes";
 import { useUserProfile } from "@/features/shared/queries/useUserProfile";
 import { AnimatePresence } from "framer-motion";
@@ -24,6 +25,7 @@ const DOCS_URL = "https://classgrid.in/docs";
 const SECTIONS = [
   { id: "profile", label: "Profile", icon: User },
   { id: "appearance", label: "Appearance", icon: Palette },
+  { id: "notifications", label: "Notifications", icon: Bell },
 ] as const;
 type Section = string;
 const known = (s: string | null): s is Section => !!s && [...SECTIONS, ...AI_HUB_TABS].some((x) => x.id === s);
@@ -197,6 +199,12 @@ export function EditorSettingsPage() {
           <div className={isHubTab(section) ? "-mt-8 -mx-3 md:-mx-8" : "hidden"}>
             <AiHubModal isOpen onClose={() => {}} initialTab={isHubTab(section) ? section : "plugins"} embedded />
           </div>
+          {section === "notifications" && (
+            <>
+              <h1 className="text-xl font-semibold mb-5">Notifications</h1>
+              <div className="max-w-xl"><SettingsDesktopNotificationsCard /></div>
+            </>
+          )}
           {section === "appearance" && (
             <>
               <h1 className="text-xl font-semibold mb-5">Appearance</h1>
