@@ -400,6 +400,11 @@ router.patch("/projects/:id", isAuthenticated, async (req, res) => {
       // One project per repo, so the same code never shows up twice
       const other = await IdeProject.findOne({ owner: req.user._id, _id: { $ne: project._id }, repo: new RegExp(`^${req.body.repo.replace(/\./g, "\\.")}$`, "i") }).select("name"); // repo names are only letters, digits, - _ . /
       if (other) return res.status(409).json({ error: `This repo is already linked to your project "${other.name}". Open that project instead.` });
+      // A folder on the user's computer: the folder itself is linked to the repo there (desktop/runner.js link_repo)
+      if (project.location === "local" && project.localPath) {
+        const r = await onComputer(project, project.localPath, "link_repo", { repo: req.body.repo }).catch((e) => ({ error: e.message }));
+        if (r.error) return res.status(409).json({ error: r.error, code: r.code });
+      }
     }
     project.repo = req.body.repo;
   }

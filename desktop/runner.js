@@ -305,6 +305,24 @@ const tools = {
     return repo ? `Repo: ${repo}` : "Error: NO_REMOTE This folder isn't on GitHub yet.";
   },
 
+  // Link a folder on this computer to a GitHub repo the user picked: the folder becomes a Git folder if it isn't one,
+  // and its "origin" points at the repo. Nothing is pushed or downloaded.
+  link_repo(root, { repo }) {
+    if (!fs.existsSync(root)) return `Error: FOLDER_GONE The folder ${root} isn't on this computer any more.`;
+    if (!/^[\w.-]+\/[\w.-]+$/.test(String(repo || ""))) return "Error: Pick a repo.";
+    const git = gitIn(root);
+    const inside = git("rev-parse", "--is-inside-work-tree");
+    if (inside.error) return "Error: Git isn't installed on this computer. Install it from git-scm.com, then try again.";
+    if (String(inside.stdout).trim() !== "true") {
+      const made = git("init");
+      if (made.status !== 0) return `Error: Could not make this folder a Git folder: ${gitLast(made)}`;
+    }
+    const url = `https://github.com/${repo}.git`;
+    const set = originOf(git) ? git("remote", "set-url", "origin", url) : git("remote", "add", "origin", url);
+    if (set.status !== 0) return `Error: Could not link the folder to ${repo}: ${gitLast(set)}`;
+    return `Repo: ${repo}\nLinked ${root} to ${repo}.`;
+  },
+
   sync_repo(root, { mode = "pull", repo, branch, message, token, name, email }) {
     if (!fs.existsSync(root)) return `Error: FOLDER_GONE The copy on this computer isn't at ${root} any more.`;
     const git = gitIn(root, token);
