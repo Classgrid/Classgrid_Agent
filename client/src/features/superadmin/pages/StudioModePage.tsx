@@ -216,24 +216,38 @@ export function StudioModePage() {
   // A file clicked in the agent's steps opens in the Files tab, at those lines
   const [reveal, setReveal] = useState<{ path: string; startLine?: number; endLine?: number; n: number } | null>(null);
   useEffect(() => {
+    // The open project's files (paths from its root), or null when no project is open or they can't be listed
+    const projectFiles = async (): Promise<string[] | null> => {
+      const id = (() => { try { return (sessionStorage.getItem("cg_project_open") || localStorage.getItem("cg_project_open")); } catch { return null; } })();
+      if (!id) return null;
+      const base = import.meta.env.VITE_API_URL || "https://api.classgrid.in";
+      const folder = localFolderOf(id);
+      const res = folder ? null : await fetchWithRescue(`${base}/api/ide/projects/${id}/files`, { credentials: "include" }).catch(() => null);
+      const data = folder ? await listLocalFiles(folder) : res?.ok ? await res.json().catch(() => null) : null;
+      return Array.isArray(data?.files) ? data.files.filter((f: { path: string; type: string }) => f.type === "file").map((f: { path: string }) => f.path) : null;
+    };
     const onOpenFile = async (e: Event) => {
       const d = (e as CustomEvent).detail || {};
       // A file anywhere on this computer (desktop app, full path): its own file tab
       if (/^[A-Za-z]:[\\/]/.test(String(d.path || ""))) { window.dispatchEvent(new CustomEvent(OPEN_LOCAL_FILE_EVENT, { detail: { path: d.path } })); return; }
       if (d.plan && !d.path) {
-        const id = (() => { try { return (sessionStorage.getItem("cg_project_open") || localStorage.getItem("cg_project_open")); } catch { return null; } })();
-        if (!id) { toast("The plan file opens in Files once a project is picked"); return; }
-        const base = import.meta.env.VITE_API_URL || "https://api.classgrid.in";
-        const folder = localFolderOf(id);
-        const res = folder ? null : await fetchWithRescue(`${base}/api/ide/projects/${id}/files`, { credentials: "include" }).catch(() => null);
-        const data = folder ? await listLocalFiles(folder) : res?.ok ? await res.json().catch(() => null) : null;
-        const plans: string[] = (data?.files || []).filter((f: { path: string; type: string }) => f.type === "file" && /^plan\/[^/]+\.md$/i.test(f.path)).map((f: { path: string }) => f.path);
+        const files = await projectFiles();
+        if (!files) { toast("The plan file opens in Files once a project is picked"); return; }
+        const plans = files.filter((f) => /^plan\/[^/]+\.md$/i.test(f));
         if (!plans.length) { toast.error("There is no plan file in the plan/ folder yet"); return; }
         const words = String(d.planTitle || "").toLowerCase().split(/[^a-z0-9]+/).filter((w) => w.length > 2);
-        const best = plans.reduce((a, b) => (words.filter((w) => b.toLowerCase().includes(w)).length > words.filter((w) => a.toLowerCase().includes(w)).length ? b : a), plans[plans.length - 1]);
+        const best = plans.reduce((a, b) => (words.filter((w) => b.toLowerCase().includes(w)).length > words.filter((w) => a.toLowerCase().includes(w)).length ? b : a), plans[plans.length - 1] as string);
         d.path = best;
       }
       if (!d.path || d.folder) return;
+      // The AI named the file without all its folders ("extension.js", "desktop/main.js"): the project's file whose path
+      // ends that way (the shortest path when there are several), instead of "File not found"
+      const want = String(d.path).replace(/\\/g, "/").replace(/^\.?\/+/, "");
+      const files = await projectFiles();
+      if (files && !files.includes(want)) {
+        const hits = files.filter((f) => f.toLowerCase() === want.toLowerCase() || f.toLowerCase().endsWith(`/${want.toLowerCase()}`)).sort((a, b) => a.length - b.length);
+        if (hits.length) d.path = hits[0];
+      }
       setPane((p) => ({ ...p, open: true }));
       setTabs((t) => (t.some((x) => x.kind === "files") ? t : [...t, { id: `files-${Date.now()}`, kind: "files" }]));
       setTabs((t) => { const f = t.find((x) => x.kind === "files"); if (f) setActive(f.id); return t; });
