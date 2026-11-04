@@ -20,6 +20,7 @@ const DESKTOP_DIR = firstThere(path.join(__dirname, "desktop"), path.join(__dirn
 const API = /^https:\/\/api\.classgrid\.in\//;
 const UPLOAD = /^https:\/\/[a-z0-9]+\.r2\.cloudflarestorage\.com\//; // a chat file going to our storage (a signed link)
 const STORAGE_KEY = "classgrid.storage";
+const LAST_CHAT_KEY = "classgrid.lastChat"; // the chat open in the Agent panel, per folder
 
 let parts = null; // the desktop app's runner, chats and memory (after activate)
 let deviceId;
@@ -70,7 +71,11 @@ async function activate(context) {
   context.subscriptions.push(vscode.window.registerWebviewViewProvider("classgrid.agent", {
     resolveWebviewView(view) {
       screens.agent = view.webview;
-      const load = holdScreens(view.webview, "/editor/project");
+      // (it opens on the chat that was open last time in this folder, like the editor brings back your files)
+      const load = holdScreens(view.webview, () => {
+        const last = context.workspaceState.get(LAST_CHAT_KEY);
+        return typeof last === "string" && /^[\w-]+$/.test(last) ? `/editor/project/${last}` : "/editor/project";
+      });
       view.onDidDispose(() => { loaders.delete(load); if (screens.agent === view.webview) screens.agent = null; });
     },
   }, { webviewOptions: { retainContextWhenHidden: true } }));
@@ -193,7 +198,7 @@ function holdScreens(webview, startPath) {
     const html = fs.readFileSync(path.join(APP_DIR, "index.html"), "utf8").replace(/\b(src|href)="\.\//g, `$1="${base}`);
     webview.html = html.replace(/<head([^>]*)>/, `<head$1>
 <meta http-equiv="Content-Security-Policy" content="${csp}">
-<script>window.__cgBridge=${JSON.stringify({ ...cfg, storage }).replace(/</g, "\\u003c")};</script>
+<script>window.__cgBridge=${JSON.stringify({ ...cfg, startPath: typeof startPath === "function" ? startPath() : startPath, storage }).replace(/</g, "\\u003c")};</script>
 <script>${bridge}</script>`);
   };
   webview.onDidReceiveMessage((m) => {
@@ -479,7 +484,11 @@ const HANDLERS = {
     screens.agent?.postMessage({ cgEvent: "openChat", data: id ? String(id) : null });
     return vscode.commands.executeCommand("classgrid.agent.focus").then(() => undefined, () => undefined);
   },
-  activeChat: (_p, id) => { screens.chats?.postMessage({ cgEvent: "activeChat", data: id ? String(id) : null }); },
+  activeChat: (_p, id) => {
+    screens.chats?.postMessage({ cgEvent: "activeChat", data: id ? String(id) : null });
+    // (remembered for this folder: Classgrid Code opens on it next time)
+    parts?.context.workspaceState.update(LAST_CHAT_KEY, id ? String(id) : undefined).then(undefined, () => {});
+  },
   // Settings → Log out: one login for Classgrid Code and the Classgrid app, so both log out (the website stays signed in)
   signOut: async () => {
     await forgetLogin();

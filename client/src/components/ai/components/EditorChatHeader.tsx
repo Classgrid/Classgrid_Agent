@@ -88,11 +88,12 @@ export function EditorChatHeader({ sessionId, menu, side }: { sessionId: string 
         )}
       </div>
 
-      {/* The chats sidebar, inside the AI panel (below its top line): Studio's own chat list */}
-      {open && (
+      {/* The chats sidebar, inside the AI panel (below its top line): Studio's own chat list. It stays loaded while
+          closed (only hidden), so opening it again shows the chats at once instead of loading them again */}
+      {(
         <>
-          <div className="absolute inset-x-0 bottom-0 top-[35px] z-40 bg-black/20" onClick={() => setOpen(false)} />
-          <div className="absolute left-0 bottom-0 top-[35px] z-50 w-[300px] max-w-[88%] flex flex-col bg-background border-r border-border shadow-xl">
+          <div className={cn("absolute inset-x-0 bottom-0 top-[35px] z-40 bg-black/20", !open && "hidden")} onClick={() => setOpen(false)} />
+          <div className={cn("absolute left-0 bottom-0 top-[35px] z-50 w-[300px] max-w-[88%] flex flex-col bg-background border-r border-border shadow-xl", !open && "hidden")}>
             <div className="flex-1 min-h-0 overflow-y-auto">
               <SidebarProvider defaultOpen className="!min-h-0 h-auto">
                 <div className="w-full">
