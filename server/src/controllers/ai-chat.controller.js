@@ -6824,17 +6824,19 @@ export const getChatSession = async (req, res) => {
         // A Project Mode chat says which project it belongs to, so it always opens in Project Mode
         // (a folder project's chat opens as a normal chat on the website: the folder is only in the desktop app)
         let projectId = null;
+        let projectName = null;
         let projectLocation = null;
         if (req.user?._id) {
             const IdeProject = (await import("../models/IdeProject.js")).default;
             const p = await IdeProject.findOne({ owner: req.user._id, chatSessionIds: id }).select("_id name location chatSessionIds pcChatSessionIds").lean();
             if (p && !(isWebsite(req) && pcChatIds(p).includes(id))) {
                 projectId = String(p._id);
+                projectName = p.name || null;
                 projectLocation = p.location || "cloud";
             }
         }
 
-        res.json({ session, projectId, ...(isWebsite(req) ? {} : { projectLocation }) });
+        res.json({ session, projectId, projectName, ...(isWebsite(req) ? {} : { projectLocation }) });
     } catch (e) {
         console.error("Error getting session:", e);
         res.status(500).json({ error: "Failed to load session" });

@@ -49,8 +49,9 @@ function goToNewChat() {
   window.dispatchEvent(new Event("agent:new-chat"));
 }
 
-// A chat's name and its project's name (the folder name, like CLASSGRIDPLATFORM), for Copy in the desktop app
-// (from the chat list, the same one the panel's top line shows: Classgrid Code has no saved project list to look in)
+// A chat's name and its project's name (the folder name, like CLASSGRIDPLATFORM), for Copy in the desktop app.
+// The chat list is the same one the panel's top line shows, so both always agree. The project is the one the chat is
+// open in (the open project, which opening a chat sets), else the one the server names for the chat.
 const cleanTitle = (t: unknown) => String(t || "").replace(/\*\*Title:\*\*/gi, "").replace(/Title:/gi, "").replace(/["']/g, "").trim();
 async function chatInfo(sessionId: string): Promise<{ title: string; project: string }> {
   const [one, list] = await Promise.all([
@@ -59,7 +60,10 @@ async function chatInfo(sessionId: string): Promise<{ title: string; project: st
   ]);
   const inList = (Array.isArray(list.data?.sessions) ? list.data.sessions : []).find((s: { id?: string }) => s?.id === sessionId);
   const title = cleanTitle(one.data?.session?.title) || cleanTitle(inList?.title);
-  const name = (one.data?.projectId ? savedProject(String(one.data.projectId))?.name : "") || inList?.project_name || "";
+  const open = openProjectId();
+  const name = (open ? savedProject(open)?.name : "")
+    || (one.data?.projectId ? savedProject(String(one.data.projectId))?.name : "")
+    || one.data?.projectName || inList?.project_name || "";
   return { title, project: name ? lastPart(String(name)) : "" };
 }
 
@@ -80,10 +84,30 @@ export function StudioChatMenu({ sessionId, isPinned, onTogglePin, onDelete, mes
   const [info, setInfo] = useState<{ title: string; project: string } | null>(null);
   const loadInfo = () => { if (onDesktopApp()) chatInfo(sessionId).then(setInfo).catch(() => {}); };
   useEffect(() => { setInfo(null); }, [sessionId]);
+  // The project's name is known here at once (the open project, or the one the chat list names), so Copy never waits
+  // for the server: a slow answer used to land 1-3 s late, and pasting right away gave the previous copy
+  const knownProject = () => {
+    const open = openProjectId();
+    return (open ? savedProject(open)?.name : "") || "";
+  };
   const copyInfo = async (key: "title" | "project", what: string, missing: string) => {
     // (Classgrid Code: the names its top line shows, copied at once; else the ones loaded from the server)
     const value = names?.[key] || (info || (await chatInfo(sessionId)))[key];
     if (value) copy(value, what); else toast.error(missing, { id: "chat-copy" });
+  };
+  // Project name: the open project's name is here already, so it copies at once (the server is only asked when the
+  // chat is in a project that is not open, and its answer is used only if the click is still waiting for it)
+  const copyProject = () => {
+    const known = names?.project || knownProject();
+    if (known) { copy(lastPart(known), "Project name"); return; }
+    if (info?.project) { copy(info.project, "Project name"); return; }
+    copyInfo("project", "Project name", "This chat is not in a project");
+  };
+  // Conversation name: the chat list's name is here already; the server is asked only when it has none yet
+  const copyTitle = () => {
+    const known = names?.title || info?.title;
+    if (known) { copy(known, "Conversation name"); return; }
+    copyInfo("title", "Conversation name", "This chat has no name yet");
   };
 
   const copy = async (text: string, what: string) => {
@@ -142,13 +166,13 @@ export function StudioChatMenu({ sessionId, isPinned, onTogglePin, onDelete, mes
             <DropdownMenuSubContent className={`w-[190px] ${card}`}>
               {onDesktopApp() ? (
                 <>
-                  <DropdownMenuItem className={item} onClick={() => copyInfo("title", "Conversation name", "This chat has no name yet")}>
+                  <DropdownMenuItem className={item} onClick={copyTitle}>
                     <Type className={icon} strokeWidth={2} /> Conversation name
                   </DropdownMenuItem>
                   <DropdownMenuItem className={item} onClick={() => copy(sessionId, "Conversation ID")}>
                     <Hash className={icon} strokeWidth={2} /> Conversation ID
                   </DropdownMenuItem>
-                  <DropdownMenuItem className={item} onClick={() => copyInfo("project", "Project name", "This chat is not in a project")}>
+                  <DropdownMenuItem className={item} onClick={copyProject}>
                     <FolderOpen className={icon} strokeWidth={2} /> Project name
                   </DropdownMenuItem>
                   <DropdownMenuItem className={item} onClick={() => copy(chatText(), "Chat")}>
