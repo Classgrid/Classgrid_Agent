@@ -67,9 +67,14 @@ async function askRunner(userId, tool, payload) {
     const room = runnerRoom(String(userId));
     try {
         // The app's socket on this server process: ask it directly (no Redis round trip)
-        const here = await io.local.in(room).fetchSockets();
+        // The newest connection first: an older one can be a window that froze or closed without saying so, and asking
+        // it held every message 60 s and every command up to 11 min (2026-11-04: six connections, the oldest silent)
+        const here = (await io.local.in(room).fetchSockets()).reverse();
         if (here.length) {
-            const reply = await here[0].timeout(timeoutFor(tool)).emitWithAck("local-tool", payload);
+            // (only the editor state goes to all of them, being read-only: the first answer is used)
+            const reply = tool === "editor_context" && here.length > 1
+                ? await Promise.any(here.map((s) => s.timeout(timeoutFor(tool)).emitWithAck("local-tool", payload))).catch(() => null)
+                : await here[0].timeout(timeoutFor(tool)).emitWithAck("local-tool", payload);
             return typeof reply?.text === "string" ? reply : null;
         }
         // Connected to another server process: reach it through the Redis adapter (a few seconds to find it)
