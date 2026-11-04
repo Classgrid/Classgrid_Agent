@@ -106,6 +106,9 @@
       "@media (min-width: " + min + "px) {" +
       " html.cg-editor.cg-want-cover, html.cg-editor.cg-want-cover body, html.cg-editor.cg-want-cover #root > .bg-background, html.cg-editor.cg-want-cover .cg-editor-panel { background: transparent !important; }" +
       " html.cg-editor.cg-want-cover { color-scheme: normal !important; }" +
+      // (no scrolling of the page while it covers the window: a scrolled page put the AI Hub too high, cut off,
+      // with an undarkened strip and a scrollbar at the bottom)
+      " html.cg-editor.cg-want-cover #root { overflow: clip !important; }" +
       " html.cg-editor.cg-want-cover #root aside.sm\\:hidden { top: var(--cg-panel-top) !important; left: var(--cg-panel-left) !important; right: auto !important; bottom: auto !important; width: var(--cg-panel-width) !important; height: var(--cg-panel-height) !important; background: var(--background) !important; }" +
       " html.cg-editor-sidebar.cg-want-cover [data-slot=\"sidebar-container\"] { top: var(--cg-panel-top) !important; left: var(--cg-panel-left) !important; height: var(--cg-panel-height) !important; }" +
       " }" +

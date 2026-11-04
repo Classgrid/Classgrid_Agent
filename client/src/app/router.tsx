@@ -231,6 +231,8 @@ export function AppRouter() {
           Classgrid app, so it isn't behind the login page */}
       <Route path="/editor/project" element={<EditorPanelPage />} />
       <Route path="/editor/project/:sessionId" element={<EditorPanelPage />} />
+      {/* Classgrid Code's Settings tab (the gear in its title bar): the same Settings page as in the app */}
+      <Route path="/editor/settings" element={<div className="cg-editor-settings h-[100dvh] overflow-y-auto bg-background"><SharedSettingsPage /></div>} />
       {/* Classgrid Code's left edge: the chats sidebar, like Project Mode's left side */}
       <Route path="/editor/sidebar/project" element={<EditorSidebarPage />} />
       <Route path="/editor/sidebar/project/:sessionId" element={<EditorSidebarPage />} />

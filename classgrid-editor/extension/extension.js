@@ -96,6 +96,15 @@ async function activate(context) {
   context.subscriptions.push(vscode.commands.registerCommand("classgrid.showAgent", () => vscode.commands.executeCommand("classgrid.agent.focus")));
   // Ctrl+K (⌘K on a Mac) is ours, anywhere in the editor: the chat history search of the chats sidebar, over the whole
   // window like in Project Mode (package.json keybindings; VS Code's own Ctrl+K shortcuts give way to it)
+  // The gear in the title bar (classgrid-settings-button.patch): your Classgrid Settings, as a tab in the editor
+  let settingsPanel = null;
+  context.subscriptions.push(vscode.commands.registerCommand("classgrid.openSettings", () => {
+    if (settingsPanel) return settingsPanel.reveal(vscode.ViewColumn.Active);
+    settingsPanel = vscode.window.createWebviewPanel("classgrid.settings", "Classgrid Settings", vscode.ViewColumn.Active, { enableScripts: true, retainContextWhenHidden: true });
+    settingsPanel.iconPath = vscode.Uri.file(path.join(__dirname, "media", "classgrid.svg"));
+    const load = holdScreens(settingsPanel.webview, "/editor/settings");
+    settingsPanel.onDidDispose(() => { loaders.delete(load); settingsPanel = null; });
+  }));
   context.subscriptions.push(vscode.commands.registerCommand("classgrid.searchChats", async () => {
     // (it opens in the Agent panel's page, which covers the whole window for it, like the AI Hub)
     await vscode.commands.executeCommand("classgrid.agent.focus").then(undefined, () => {});

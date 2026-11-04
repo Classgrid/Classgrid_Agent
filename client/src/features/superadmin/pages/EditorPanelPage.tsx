@@ -55,7 +55,9 @@ export function useEditorProject(signedIn: boolean) {
 export function EditorPanelPage() {
   const [width, setWidth] = useState(() => window.innerWidth);
   useEffect(() => {
-    const onResize = () => setWidth(window.innerWidth);
+    // (not while a big window like the AI Hub has the page cover the whole window: the panel keeps its own width, so
+    // the chat behind the AI Hub stays as it is instead of being laid out window-wide and cut off)
+    const onResize = () => { if (!document.documentElement.classList.contains("cg-want-cover")) setWidth(window.innerWidth); };
     window.addEventListener("resize", onResize);
     return () => window.removeEventListener("resize", onResize);
   }, []);

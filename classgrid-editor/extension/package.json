@@ -73,6 +73,10 @@
       {
         "command": "classgrid.searchChats",
         "title": "Classgrid: Search Chat History"
+      },
+      {
+        "command": "classgrid.openSettings",
+        "title": "Classgrid: Settings"
       }
     ],
     "keybindings": [

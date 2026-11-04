@@ -277,6 +277,19 @@
     --background: #ffffff;
     --color-background: #ffffff;
   }
+  /* Classgrid Code's light mode: soft greys, not bright white (the AI panel and its windows) */
+  html.desktop-app.cg-editor:not(.dark) {
+    --background: #f3f3f3;
+    --color-background: #f3f3f3;
+    --card: #f8f8f8;
+    --popover: #fafafa;
+    --muted: #ebebeb;
+    --border: #e3e3e3;
+    --input: #e3e3e3;
+  }
+  html.desktop-app.cg-editor:not(.dark) .bg-white {
+    background-color: #f8f8f8 !important;
+  }
   html.dark.desktop-app {
     --sidebar-background: #181818;
     --sidebar-accent: #262626;
@@ -337,7 +350,7 @@
     transform: translateZ(0); /* the app's fixed parts (sidebar, AI panel) start below our top bar */
     overflow: auto;
   }
-  html.desktop-app #root :is(.h-screen, .h-svh, .h-dvh, .h-\[100dvh\], .h-\[100vh\]) {
+  html.desktop-app:not(.cg-want-cover) #root :is(.h-screen, .h-svh, .h-dvh, .h-\[100dvh\], .h-\[100vh\]) {
     height: calc(100vh - 40px) !important;
   }
   html.desktop-app #root :is(.min-h-screen, .min-h-svh, .min-h-dvh, .min-h-\[100dvh\]) {
@@ -347,7 +360,7 @@
   html.desktop-app.cg-editor #root {
     top: 0;
   }
-  html.desktop-app.cg-editor #root :is(.h-screen, .h-svh, .h-dvh, .h-\[100dvh\], .h-\[100vh\]) {
+  html.desktop-app.cg-editor:not(.cg-want-cover) #root :is(.h-screen, .h-svh, .h-dvh, .h-\[100dvh\], .h-\[100vh\]) {
     height: 100vh !important;
   }
   html.desktop-app.cg-editor #root :is(.min-h-screen, .min-h-svh, .min-h-dvh, .min-h-\[100dvh\]) {
