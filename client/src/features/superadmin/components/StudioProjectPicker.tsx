@@ -41,6 +41,8 @@ const shortPath = (name: string) => {
 };
 // The list shows only the folder's name (C:\gridx is "gridx"); the This PC box shows the whole path
 const folderName = (name: string) => name.split(/[\\/]/).filter(Boolean).pop() || name;
+// Website: folder projects (This PC) are never listed; they live only in the desktop app
+const onlineOnly = <T extends { location?: "cloud" | "local" }>(list: T[] | null) => (list || []).filter((p) => desktopApp?.isDesktop || p.location !== "local");
 const LIST_W = 288;
 const SIDE_W = 320;
 const desktopApp = (window as any).classgridDesktop as { isDesktop?: boolean; pickFolder?: () => Promise<string | null>; cloneRepo?: (repo: string) => Promise<{ folder?: string; error?: string } | null> } | undefined;
@@ -92,7 +94,7 @@ export function StudioProjectChooser({ picked, onDone }: { picked: string | null
   useEffect(() => { fetchProjects().then((list) => setProjects((old) => list || old || [])); }, []);
   const shown = useMemo(() => {
     const t = q.trim().toLowerCase();
-    return (projects || []).filter((p) => !t || p.name.toLowerCase().includes(t) || (p.repo || "").toLowerCase().includes(t));
+    return onlineOnly(projects).filter((p) => !t || p.name.toLowerCase().includes(t) || (p.repo || "").toLowerCase().includes(t));
   }, [projects, q]);
   const pick = (id: string) => { if (id !== picked) openStudioProject(id); onDone?.(); };
 
@@ -248,7 +250,7 @@ export function StudioProjectPicker() {
   const shownRepo = current?.location === "local" ? (folderRepo?.id === current.id ? folderRepo.repo : null) : current?.repo || null;
   const shown = useMemo(() => {
     const t = q.trim().toLowerCase();
-    return (projects || []).filter((p) => !t || p.name.toLowerCase().includes(t) || (p.repo || "").toLowerCase().includes(t));
+    return onlineOnly(projects).filter((p) => !t || p.name.toLowerCase().includes(t) || (p.repo || "").toLowerCase().includes(t));
   }, [projects, q]);
 
   const projectRow = (p: Project, sub: boolean) => (
@@ -363,7 +365,7 @@ export function StudioProjectPicker() {
                 {([
                   { key: "local", label: "This PC", Icon: Laptop },
                   { key: "cloud", label: "Cloud", Icon: Cloud },
-                ] as const).map((g) => (
+                ] as const).filter((g) => desktopApp?.isDesktop || g.key === "cloud").map((g) => (
                   <button
                     key={g.key}
                     type="button"
@@ -405,7 +407,7 @@ export function StudioProjectPicker() {
       {open && side && (() => {
         const t = sideQ.trim().toLowerCase();
         const pathOf = (p: Project) => (p.location === "local" ? p.localPath || p.name : thisComputerCopy(p)?.path || p.name);
-        const list = (projects || [])
+        const list = onlineOnly(projects)
           .filter((p) => (side === "local" ? onThisPc(p) : !onThisPc(p)))
           .filter((p) => !t || pathOf(p).toLowerCase().includes(t) || p.name.toLowerCase().includes(t) || (p.repo || "").toLowerCase().includes(t))
           // The same folder once only (c:\gridx and C:\gridx are one folder)
