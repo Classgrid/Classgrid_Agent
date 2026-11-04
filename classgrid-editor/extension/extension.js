@@ -55,6 +55,12 @@ async function activate(context) {
   }
   parts = { runner, chats, memory, version, context };
   try { storage = JSON.parse((await context.secrets.get(STORAGE_KEY)) || "{}"); } catch { storage = {}; }
+  // (the Classgrid app logged out: Classgrid Code too, now and whenever it happens while the editor is open)
+  if (process.env.APPDATA) {
+    followAppSignOut();
+    fs.watchFile(SIGNED_OUT_NOTE, { interval: 2000 }, followAppSignOut);
+    context.subscriptions.push({ dispose: () => fs.unwatchFile(SIGNED_OUT_NOTE, followAppSignOut) });
+  }
   // The folder open in this editor can be used by the AI (like a folder picked in the Classgrid app)
   for (const f of vscode.workspace.workspaceFolders || []) runner.allowFolder(f.uri.fsPath);
   context.subscriptions.push(vscode.workspace.onDidChangeWorkspaceFolders((e) => { for (const f of e.added) runner.allowFolder(f.uri.fsPath); }));
@@ -88,6 +94,7 @@ async function activate(context) {
       } catch (err) { log.appendLine(`[${new Date().toISOString()}] sign-in from the Classgrid app failed: ${err?.message || err}`); }
       if (!token) return vscode.window.showErrorMessage("Classgrid sign-in didn't finish. Open the project again from Project Mode in the Classgrid app.");
       keepStorage({ cgStore: "set", key: "token", value: token });
+      keepStorage({ cgStore: "set", key: "cg_signed_in_at", value: String(Date.now()) });
       for (const load of loaders) load();
       vscode.commands.executeCommand("classgrid.agent.focus").then(undefined, () => {});
     },
@@ -337,6 +344,23 @@ async function coverWithStrip(webview, on) {
   } catch (err) { log.appendLine(`[${new Date().toISOString()}] chats sidebar cover: ${err?.message || err}`); }
 }
 
+// One login for Classgrid Code and the Classgrid app: Classgrid Code forgets its login (the light / dark choice stays)
+// and our screens show the sign-in note. When the Classgrid app logs out it leaves a note in its data folder
+// (desktop/codeeditor.js), and Classgrid Code logs out too if it signed in before that.
+const SIGNED_OUT_NOTE = path.join(process.env.APPDATA || "", "Classgrid", "signed-out.json");
+async function forgetLogin() {
+  const keep = {};
+  for (const k of ["theme", "cg_editor_theme"]) if (k in storage) keep[k] = storage[k];
+  storage = keep;
+  await parts.context.secrets.store(STORAGE_KEY, JSON.stringify(storage)).then(undefined, () => {});
+  for (const load of loaders) load();
+}
+function followAppSignOut() {
+  let at = 0;
+  try { at = Number(JSON.parse(fs.readFileSync(SIGNED_OUT_NOTE, "utf8")).at) || 0; } catch { return; }
+  if (storage.token && at > (Number(storage.cg_signed_in_at) || 0)) forgetLogin();
+}
+
 // Saved settings and login, kept in the editor's secret storage (a moment after the last change)
 function keepStorage(m) {
   if (m.cgStore === "set") storage[m.key] = m.value;
@@ -448,6 +472,12 @@ const HANDLERS = {
     return vscode.commands.executeCommand("classgrid.agent.focus").then(() => undefined, () => undefined);
   },
   activeChat: (_p, id) => { screens.chats?.postMessage({ cgEvent: "activeChat", data: id ? String(id) : null }); },
+  // Settings → Log out: one login for Classgrid Code and the Classgrid app, so both log out (the website stays signed in)
+  signOut: async () => {
+    await forgetLogin();
+    try { fs.writeFileSync(SIGNED_OUT_NOTE, JSON.stringify({ at: Date.now() })); } catch { /* the app is told below too */ }
+    await vscode.env.openExternal(vscode.Uri.parse("classgrid://logout")).then(undefined, () => {});
+  },
   openSettings: (_p, section) => vscode.commands.executeCommand("classgrid.openSettings", section).then(() => undefined),
   // The X on the AI panel's top line: closes the right side (the Agent button in the title bar opens it again)
   closePanel: () => vscode.commands.executeCommand("workbench.action.closeAuxiliaryBar").then(() => undefined),

@@ -3,7 +3,7 @@
 // editor, and our screens follow it), the AI Hub's pages (Plugins, Images, Skills, Connected apps, Usage, AI Credits,
 // Upgrade: here instead of a window over the editor) and Docs.
 import { useEffect, useState } from "react";
-import { BookOpen, Monitor, Moon, Palette, Sun, User } from "lucide-react";
+import { BookOpen, LogOut, Monitor, Moon, Palette, Sun, User } from "lucide-react";
 import { useTheme } from "next-themes";
 import { useUserProfile } from "@/features/shared/queries/useUserProfile";
 import { AI_HUB_TABS, AiHubModal } from "@/components/ai/components/AiHubModal";
@@ -13,6 +13,7 @@ type EditorSettingsDesktop = {
   setEditorTheme?: (mode: Mode) => Promise<unknown>;
   openExternal?: (url: string) => Promise<unknown>;
   onSettingsSection?: (fn: (section: string) => void) => () => void;
+  signOut?: () => Promise<unknown>;
 };
 const desk = () => (window as unknown as { classgridDesktop?: EditorSettingsDesktop }).classgridDesktop;
 const MODE_KEY = "cg_editor_theme";
@@ -102,6 +103,16 @@ export function EditorSettingsPage() {
             className="flex items-center justify-center md:justify-start gap-2.5 h-9 px-2.5 rounded-lg text-sm text-muted-foreground hover:bg-muted/60 hover:text-foreground transition-colors w-full text-left"
           >
             <BookOpen className="size-4 shrink-0" /> <span className="hidden md:inline">Docs</span> <span className="ml-auto text-xs hidden md:inline">↗</span>
+          </button>
+          {/* Log out of Classgrid Code only (the Classgrid app and the website stay signed in); opening a project from
+              the Classgrid app signs it in again */}
+          <button
+            type="button"
+            onClick={() => desk()?.signOut?.()}
+            title="Log out"
+            className="flex items-center justify-center md:justify-start gap-2.5 h-9 px-2.5 rounded-lg text-sm text-muted-foreground hover:bg-muted/60 hover:text-foreground transition-colors w-full text-left"
+          >
+            <LogOut className="size-4 shrink-0" /> <span className="hidden md:inline">Log out</span>
           </button>
         </nav>
 

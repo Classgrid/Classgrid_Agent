@@ -106,7 +106,12 @@ async function loginCode() {
 }
 
 module.exports = {
-  setToken(t) { token = t || null; },
+  // One login for the Classgrid app and Classgrid Code: when the app logs out (it had a login, now it has none), a note
+  // in the app's data folder tells Classgrid Code to log out too (classgrid-editor/extension/extension.js reads it)
+  setToken(t) {
+    if (token && !t) { try { fs.writeFileSync(path.join(app.getPath("userData"), "signed-out.json"), JSON.stringify({ at: Date.now() })); } catch { /* the editor checks again later */ } }
+    token = t || null;
+  },
   unpacked,
   register,
   // Project Mode: open the folder in Classgrid Code, signed in

@@ -19,6 +19,8 @@
   // Saved settings and login: put back what the editor kept, and keep every change there
   try {
     var saved = cfg.storage || {};
+    // (exactly what the editor kept: a login it forgot, after Log out, doesn't come back from the page's own copy)
+    Object.keys(localStorage).forEach(function (k) { if (!Object.prototype.hasOwnProperty.call(saved, k)) localStorage.removeItem(k); });
     Object.keys(saved).forEach(function (k) { localStorage.setItem(k, saved[k]); });
   } catch (err) { /* storage blocked */ }
   var S = Storage.prototype, setItem = S.setItem, removeItem = S.removeItem, clear = S.clear;
@@ -413,6 +415,8 @@
     },
     // The AI panel's chats sidebar → Settings: the same Settings tab as the gear in the title bar
     openSettings: bind("openSettings"),
+    // Settings → Log out of Classgrid Code
+    signOut: bind("signOut"),
     // (the Settings tab: the AI panel asks it to show one of its pages, like Plugins)
     onSettingsSection: on("settingsSection"),
     // The X on the AI panel's top line: closes the right side

@@ -367,6 +367,11 @@ async function handleDeepLink(link) {
     win.focus();
     return;
   }
+  // classgrid://logout: Classgrid Code logged out (Settings → Log out); one login for both, so the app logs out too
+  if (url.hostname === "logout") {
+    win.loadURL(APP_URL + "/logout");
+    return;
+  }
   if (url.hostname !== "login") return;
   const code = url.searchParams.get("code") || "";
   try {
