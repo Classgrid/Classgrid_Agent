@@ -298,10 +298,10 @@
         if (!text) {
           // No text: a picture (a screenshot, a copied image) is read by the editor and pasted as a file, so the
           // chat attaches it like a paste in the browser
-          return call("clipboardImage").then(function (b64) {
-            if (!b64) return;
+          return call("clipboardImage").then(function (img) {
+            if (!img || !img.data) return;
             var image = new DataTransfer();
-            image.items.add(new File([fromB64(b64)], "pasted-image-" + Date.now() + ".png", { type: "image/png" }));
+            image.items.add(new File([fromB64(img.data)], img.name, { type: img.type }));
             el.dispatchEvent(new ClipboardEvent("paste", { clipboardData: image, bubbles: true, cancelable: true }));
           });
         }

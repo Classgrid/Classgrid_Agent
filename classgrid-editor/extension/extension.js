@@ -42,6 +42,7 @@ async function activate(context) {
   const memory = require(path.join(DESKTOP_DIR, "memory.js"));
   runner.init(userData);
   chats.init(userData);
+  if (process.platform === "win32") clipboardHost(); // ready before the first image paste
   memory.init(userData);
   // What the user is doing in the editor (open file, cursor, selection, errors, terminal commands), for the Agent
   // (editor-context.js): kept in this editor's data folder and the Classgrid app's, for whichever runner is asked
@@ -152,7 +153,10 @@ async function openAt(q) {
   }
 }
 
-function deactivate() { try { parts?.runner.stopAll(); } catch { /* already stopped */ } }
+function deactivate() {
+  try { parts?.runner.stopAll(); } catch { /* already stopped */ }
+  try { clipHost?.proc.kill(); } catch { /* already gone */ }
+}
 
 // Our screens in a panel, straight from the editor's files: the page with the bridge first, then the app's own code
 function holdScreens(webview, startPath) {
@@ -213,16 +217,56 @@ async function answerCall(webview, m, reload) {
   if (m.cgCall) webview.postMessage({ cgReply: m.cgCall, result, error });
 }
 
-// A picture on the clipboard as PNG (base64), or null. The editor's clipboard has text only, so Windows' own
-// clipboard is read
+// A picture on the clipboard as { name, type, data (base64) }, or null. The editor's clipboard has text only, so
+// Windows' own clipboard is read: an image file copied in File Explorer, else the PNG a browser or app copies (it
+// keeps transparency), else the plain bitmap (a screenshot)
+const IMAGE_TYPES = { ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".gif": "image/gif", ".webp": "image/webp", ".bmp": "image/bmp", ".svg": "image/svg+xml", ".ico": "image/x-icon", ".avif": "image/avif", ".tif": "image/tiff", ".tiff": "image/tiff" };
+// One PowerShell stays open (started with the editor), so a paste doesn't wait for PowerShell to start each time
+const CLIP_END = "__cg_clip_end__";
+const CLIP_SETUP = [
+  "Add-Type -AssemblyName System.Windows.Forms,System.Drawing",
+  "function CgClip { $c=[System.Windows.Forms.Clipboard]; "
+    + "if($c::ContainsFileDropList()){$f=@($c::GetFileDropList()|?{$_ -match '\\.(png|jpe?g|gif|webp|bmp|svg|ico|avif|tiff?)$'})[0];if($f){return 'file|'+$f}}; "
+    + "$p=$c::GetData('PNG');if($p -is [System.IO.MemoryStream]){return 'png|'+[Convert]::ToBase64String($p.ToArray())}; "
+    + "$i=$c::GetImage();if($i){$m=New-Object System.IO.MemoryStream;$i.Save($m,[System.Drawing.Imaging.ImageFormat]::Png);return 'png|'+[Convert]::ToBase64String($m.ToArray())}; '' }",
+].join("\n") + "\n";
+let clipHost = null;
+function clipboardHost() {
+  if (clipHost) return clipHost;
+  const proc = require("node:child_process").spawn("powershell.exe", ["-NoProfile", "-NonInteractive", "-STA", "-Command", "-"], { windowsHide: true });
+  const host = { proc, waiting: [], out: "" };
+  proc.stdout.setEncoding("utf8");
+  proc.stdout.on("data", (d) => {
+    host.out += d;
+    let at;
+    while ((at = host.out.indexOf(CLIP_END)) !== -1) {
+      const answer = host.out.slice(0, at);
+      host.out = host.out.slice(at + CLIP_END.length);
+      host.waiting.shift()?.(answer);
+    }
+  });
+  const gone = () => { if (clipHost === host) clipHost = null; host.waiting.splice(0).forEach((done) => done("")); };
+  proc.on("exit", gone);
+  proc.on("error", gone);
+  proc.stdin.on("error", gone);
+  proc.stdin.write(CLIP_SETUP);
+  return (clipHost = host);
+}
 function clipboardImage() {
   if (process.platform !== "win32") return Promise.resolve(null);
-  const script = "Add-Type -AssemblyName System.Windows.Forms,System.Drawing;$i=[System.Windows.Forms.Clipboard]::GetImage();"
-    + "if($i){$m=New-Object System.IO.MemoryStream;$i.Save($m,[System.Drawing.Imaging.ImageFormat]::Png);[Convert]::ToBase64String($m.ToArray())}";
   return new Promise((resolve) => {
-    require("node:child_process").execFile("powershell.exe", ["-NoProfile", "-NonInteractive", "-STA", "-Command", script],
-      { windowsHide: true, timeout: 15000, maxBuffer: 200 * 1024 * 1024 },
-      (err, out) => resolve(err ? null : String(out).trim() || null));
+    const host = clipboardHost();
+    const timer = setTimeout(() => { try { host.proc.kill(); } catch { /* already gone */ } }, 15000); // a stuck PowerShell is started again next time
+    host.waiting.push((out) => {
+      clearTimeout(timer);
+      const [kind, value] = String(out || "").trim().split(/\|(.*)/s);
+      if (!value) return resolve(null);
+      if (kind === "png") return resolve({ name: `pasted-image-${Date.now()}.png`, type: "image/png", data: value.trim() });
+      try {
+        resolve({ name: path.basename(value), type: IMAGE_TYPES[path.extname(value).toLowerCase()] || "image/png", data: fs.readFileSync(value.trim()).toString("base64") });
+      } catch { resolve(null); }
+    });
+    host.proc.stdin.write(`CgClip; '${CLIP_END}'\n`);
   });
 }
 
