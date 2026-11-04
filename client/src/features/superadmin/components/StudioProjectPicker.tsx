@@ -389,6 +389,7 @@ export function StudioProjectPicker() {
       {open && (
         <motion.div
           key="list"
+          role="listbox" // the app's browser panel (a native view above the page) steps aside for it
           initial={reduce ? false : { opacity: 0, y: place.up ? 6 : -6, scale: 0.97 }}
           animate={{ opacity: 1, y: 0, scale: 1 }}
           exit={reduce ? { opacity: 0 } : { opacity: 0, y: place.up ? 4 : -4, scale: 0.98 }}
@@ -472,6 +473,7 @@ export function StudioProjectPicker() {
         return (
           <motion.div
             key="side"
+            role="listbox"
             initial={reduce ? false : { opacity: 0, x: -4 }}
             animate={{ opacity: 1, x: 0 }}
             exit={reduce ? { opacity: 0 } : { opacity: 0, x: -4 }}
