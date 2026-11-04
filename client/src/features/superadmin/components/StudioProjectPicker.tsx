@@ -1,7 +1,7 @@
 // Studio Mode's project picker above the chat input. The projects are the same ones as Project Mode, so a project
 // made in either mode shows in both. A new project can start with a GitHub repo or without one.
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Check, ChevronDown, ChevronRight, Cloud, Folder, FolderPlus, FolderX, HardDrive, Link2, Pencil, Search, Trash2, X } from "lucide-react";
+import { Check, ChevronDown, ChevronRight, Cloud, Folder, FolderPlus, FolderX, Laptop, Link2, Pencil, Search, Trash2, X } from "lucide-react";
 import { toast } from "sonner";
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/marketing_ui/dialog";
@@ -156,8 +156,8 @@ export function StudioProjectPicker() {
   const [picked, setPicked] = useState<string | null>(readPick);
   const [open, setOpen] = useState(false);
   const [q, setQ] = useState("");
-  const [localOpen, setLocalOpen] = useState(false); // desktop app: the "Local projects" list opened
-  const [cloudOpen, setCloudOpen] = useState(false); // desktop app: the "Cloud projects" list opened
+  const [side, setSide] = useState<"local" | "cloud" | null>(null); // desktop app: the side box opened from "This PC" / "Cloud"
+  const [sideQ, setSideQ] = useState("");
   const [creating, setCreating] = useState(false);
   // Same project actions as Project Mode's Projects page
   const [linking, setLinking] = useState<Project | null>(null);
@@ -341,23 +341,27 @@ export function StudioProjectPicker() {
             {/* Desktop app: Recent (folders on this computer), then "Local projects" and "Cloud projects" lists.
                 The website lists every project (they are all cloud projects there). */}
             {(desktopApp?.isDesktop ? shown.filter(onThisPc).slice(0, q.trim() ? undefined : 5) : shown).map((p) => projectRow(p, false))}
-            {desktopApp?.isDesktop && [
-              { key: "local", label: "Local projects", Icon: HardDrive, list: shown.filter(onThisPc), isOpen: localOpen, toggle: () => setLocalOpen((o) => !o) },
-              { key: "cloud", label: "Cloud projects", Icon: Cloud, list: shown.filter((x) => !onThisPc(x)), isOpen: cloudOpen, toggle: () => setCloudOpen((o) => !o) },
-            ].map((g) => g.list.length > 0 && (
-              <Fragment key={g.key}>
-                <button
-                  type="button"
-                  onClick={g.toggle}
-                  className="w-full flex items-center gap-2.5 h-8 px-2 mt-1 rounded-md text-left text-[13px] text-foreground/85 hover:bg-black/[0.05] dark:hover:bg-white/[0.07] transition-colors duration-150"
-                >
-                  <g.Icon className="size-[15px] text-muted-foreground" />
-                  <span className="flex-1">{g.label}</span>
-                  <ChevronRight className={`size-3.5 text-muted-foreground transition-transform ${g.isOpen ? "rotate-90" : ""}`} />
-                </button>
-                {g.isOpen && g.list.map((p) => projectRow(p, true))}
-              </Fragment>
-            ))}
+            {desktopApp?.isDesktop && (
+              <div className="mt-1 pt-1 border-t border-black/10 dark:border-white/[0.08]">
+                <p className="px-2 pt-1 pb-1 text-[12px] text-muted-foreground">Workspaces</p>
+                {([
+                  { key: "local", label: "This PC", Icon: Laptop },
+                  { key: "cloud", label: "Cloud", Icon: Cloud },
+                ] as const).map((g) => (
+                  <button
+                    key={g.key}
+                    type="button"
+                    onMouseEnter={() => { if (side !== g.key) { setSide(g.key); setSideQ(""); } }}
+                    onClick={() => { setSide(g.key); setSideQ(""); }}
+                    className={`w-full flex items-center gap-2.5 h-8 px-2 rounded-md text-left text-[13px] text-foreground/85 transition-colors duration-150 ${side === g.key ? "bg-black/[0.05] dark:bg-white/[0.07]" : "hover:bg-black/[0.05] dark:hover:bg-white/[0.07]"}`}
+                  >
+                    <g.Icon className="size-[15px] text-muted-foreground" />
+                    <span className="flex-1">{g.label}</span>
+                    <ChevronRight className="size-3.5 text-muted-foreground" />
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
           <div className="shrink-0 border-t border-black/10 dark:border-white/[0.08] p-1">
             <button
@@ -390,6 +394,53 @@ export function StudioProjectPicker() {
           </div>
         </motion.div>
       )}
+      {/* Desktop app: the side box next to the list, like Cursor's "This PC": its own search, then the full paths */}
+      {open && side && desktopApp?.isDesktop && (() => {
+        const t = sideQ.trim().toLowerCase();
+        const pathOf = (p: Project) => (p.location === "local" ? p.localPath || p.name : thisComputerCopy(p)?.path || p.name);
+        const list = (projects || [])
+          .filter((p) => (side === "local" ? onThisPc(p) : !onThisPc(p)))
+          .filter((p) => !t || pathOf(p).toLowerCase().includes(t) || p.name.toLowerCase().includes(t) || (p.repo || "").toLowerCase().includes(t));
+        return (
+          <motion.div
+            key="side"
+            initial={reduce ? false : { opacity: 0, x: -4 }}
+            animate={{ opacity: 1, x: 0 }}
+            exit={reduce ? { opacity: 0 } : { opacity: 0, x: -4 }}
+            transition={{ duration: reduce ? 0 : 0.15, ease: EASE }}
+            style={{ maxHeight: place.maxH }}
+            className={`absolute left-[calc(22rem+0.375rem)] ${place.up ? "bottom-full mb-1.5" : "top-full mt-1.5"} flex flex-col z-50 w-[24rem] max-w-[calc(100vw-2rem)] rounded-lg border border-black/10 dark:border-white/[0.08] bg-white dark:bg-[#1e1e1e] text-foreground shadow-2xl overflow-hidden`}
+          >
+            <label className="shrink-0 flex items-center gap-2 h-9 px-3 border-b border-black/10 dark:border-white/[0.08]">
+              <Search className="size-3.5 shrink-0 text-muted-foreground" />
+              <input
+                autoFocus
+                data-no-ring
+                value={sideQ}
+                onChange={(e) => setSideQ(e.target.value)}
+                placeholder={side === "local" ? "Search This PC…" : "Search Cloud…"}
+                className="flex-1 min-w-0 bg-transparent border-0 p-0 text-[13px] shadow-none outline-none ring-0 focus:outline-none focus:ring-0 focus-visible:outline-none focus-visible:ring-0 placeholder:text-muted-foreground"
+              />
+            </label>
+            <div className="flex-1 min-h-0 overflow-y-auto p-1">
+              {!list.length && <p className="px-2 py-1.5 text-[13px] text-muted-foreground">{t ? `Nothing matches “${sideQ}”.` : side === "local" ? "No folders on this PC yet." : "No cloud projects."}</p>}
+              {list.map((p) => (
+                <button
+                  key={p.id}
+                  type="button"
+                  onClick={() => pick(p.id)}
+                  title={side === "local" ? pathOf(p) : p.repo || p.name}
+                  className="w-full flex items-center gap-2.5 h-8 px-2 rounded-md text-left text-[13px] text-foreground/85 hover:bg-black/[0.05] dark:hover:bg-white/[0.07] transition-colors duration-150"
+                >
+                  {side === "cloud" && p.logo ? <img src={p.logo} alt="" className="size-[15px] shrink-0 rounded object-cover" /> : <Folder className="size-[15px] shrink-0 text-muted-foreground" />}
+                  <span className="flex-1 min-w-0 truncate">{side === "local" ? shortPath(pathOf(p)) : p.name}</span>
+                  {p.id === picked && <Check className="size-3.5 shrink-0" />}
+                </button>
+              ))}
+            </div>
+          </motion.div>
+        );
+      })()}
       </AnimatePresence>
 
       <NewProjectDialog
