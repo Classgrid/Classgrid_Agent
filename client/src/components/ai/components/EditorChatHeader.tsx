@@ -1,16 +1,17 @@
 // Classgrid Code's AI panel top line (classgrid-editor): the project / chat name, the chats sidebar button, the chat
-// search (our same search, in the middle of the window) and + for a new chat. The chats sidebar opens inside the AI
+// search (our same search, in the middle of the window), + for a new chat and X to close the panel. It sits at the very
+// top of the right side, level with the editor tabs (the side has no title row of its own). The chats sidebar opens inside the AI
 // panel itself, not in the editor's own sidebar: New Conversation, your conversations with their project, and
 // Settings (the same Settings tab as the gear in the title bar).
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Folder, PanelLeft, Pin, Plus, Search, Settings } from "lucide-react";
+import { Folder, PanelLeft, Pin, Plus, Search, Settings, X } from "lucide-react";
 import { fetchWithRescue } from "@/lib/rescue";
 import { cn } from "@/lib/utils";
 
 const backendUrl = import.meta.env.VITE_API_URL || "https://api.classgrid.in";
 type Chat = { id: string; title: string; created_at: string; pinned?: boolean; project_id?: string; project_name?: string };
-type EditorDesktop = { editorFolder?: string | null; openSettings?: () => Promise<unknown> };
+type EditorDesktop = { editorFolder?: string | null; openSettings?: () => Promise<unknown>; closePanel?: () => Promise<unknown> };
 const desk = () => (window as unknown as { classgridDesktop?: EditorDesktop }).classgridDesktop;
 
 const cleanTitle = (t: string) => (t || "New Chat").replace(/\*\*Title:\*\*/gi, "").replace(/Title:/gi, "").replace(/["']/g, "").trim();
@@ -72,7 +73,7 @@ export function EditorChatHeader({ sessionId }: { sessionId: string | null }) {
 
   return (
     <>
-      <div className="flex items-center gap-1 h-9 px-2 shrink-0 shadow-[inset_0_-1px_0_var(--border)]">
+      <div className="flex items-center gap-1 h-[35px] px-2 shrink-0 shadow-[inset_0_-1px_0_var(--border)]">
         <button type="button" onClick={() => setOpen((o) => !o)} className={iconButton} title="Chats" aria-label="Chats">
           <PanelLeft className="size-4" />
         </button>
@@ -86,13 +87,16 @@ export function EditorChatHeader({ sessionId }: { sessionId: string | null }) {
         <button type="button" onClick={newChat} className={iconButton} title="New chat" aria-label="New chat">
           <Plus className="size-4" />
         </button>
+        <button type="button" onClick={() => desk()?.closePanel?.()} className={iconButton} title="Close" aria-label="Close">
+          <X className="size-4" />
+        </button>
       </div>
 
       {/* The chats sidebar, inside the AI panel (below its top line) */}
       {open && (
         <>
-          <div className="absolute inset-x-0 bottom-0 top-9 z-40 bg-black/20" onClick={() => setOpen(false)} />
-          <div className="absolute left-0 bottom-0 top-9 z-50 w-[280px] max-w-[85%] flex flex-col bg-background border-r border-border shadow-xl">
+          <div className="absolute inset-x-0 bottom-0 top-[35px] z-40 bg-black/20" onClick={() => setOpen(false)} />
+          <div className="absolute left-0 bottom-0 top-[35px] z-50 w-[280px] max-w-[85%] flex flex-col bg-background border-r border-border shadow-xl">
             <div className="p-2.5">
               <button type="button" onClick={newChat} className="flex items-center gap-2 w-full h-9 px-3 rounded-lg border border-border text-sm hover:bg-muted transition-colors">
                 <Plus className="size-4" /> New Conversation

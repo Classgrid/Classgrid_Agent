@@ -47,13 +47,13 @@ export function EditorSettingsPage() {
 
   return (
     <div className="cg-editor-settings h-[100dvh] overflow-y-auto bg-background text-foreground">
-      {/* A narrow tab (the editor split in two) puts the sections above the page instead of beside it */}
-      <div className="max-w-5xl mx-auto flex flex-col md:flex-row gap-6 md:gap-10 px-5 md:px-8 py-8 md:py-10">
+      {/* A narrow tab (the editor split in two, or dragged smaller) keeps the sections on the left as icons only */}
+      <div className="max-w-5xl mx-auto flex gap-4 md:gap-10 px-3 md:px-8 py-8 md:py-10">
         {/* Left: who you are, and the sections */}
-        <nav className="w-full md:w-60 shrink-0">
-          <div className="flex items-center gap-3 px-2 mb-6">
+        <nav className="w-9 md:w-60 shrink-0">
+          <div className="flex items-center gap-3 md:px-2 mb-6" title={name || email}>
             {avatar("size-9", "text-sm")}
-            <div className="min-w-0">
+            <div className="min-w-0 hidden md:block">
               <div className="text-sm font-medium truncate">{name || email}</div>
               <div className="text-xs text-muted-foreground truncate">{email}</div>
             </div>
@@ -64,9 +64,10 @@ export function EditorSettingsPage() {
                 key={id}
                 type="button"
                 onClick={() => setSection(id)}
-                className={`flex items-center gap-2.5 h-9 px-2.5 rounded-lg text-sm text-left transition-colors ${section === id ? "bg-muted text-foreground" : "text-muted-foreground hover:bg-muted/60 hover:text-foreground"}`}
+                title={label}
+                className={`flex items-center justify-center md:justify-start gap-2.5 h-9 px-2.5 rounded-lg text-sm text-left transition-colors ${section === id ? "bg-muted text-foreground" : "text-muted-foreground hover:bg-muted/60 hover:text-foreground"}`}
               >
-                <Icon className="size-4" /> {label}
+                <Icon className="size-4 shrink-0" /> <span className="hidden md:inline">{label}</span>
               </button>
             ))}
           </div>
@@ -74,9 +75,10 @@ export function EditorSettingsPage() {
           <button
             type="button"
             onClick={() => (desk()?.openExternal ? desk()!.openExternal!(DOCS_URL) : window.open(DOCS_URL, "_blank"))}
-            className="flex items-center gap-2.5 h-9 px-2.5 rounded-lg text-sm text-muted-foreground hover:bg-muted/60 hover:text-foreground transition-colors w-full text-left"
+            title="Docs"
+            className="flex items-center justify-center md:justify-start gap-2.5 h-9 px-2.5 rounded-lg text-sm text-muted-foreground hover:bg-muted/60 hover:text-foreground transition-colors w-full text-left"
           >
-            <BookOpen className="size-4" /> Docs <span className="ml-auto text-xs">↗</span>
+            <BookOpen className="size-4 shrink-0" /> <span className="hidden md:inline">Docs</span> <span className="ml-auto text-xs hidden md:inline">↗</span>
           </button>
         </nav>
 

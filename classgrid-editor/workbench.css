@@ -23,12 +23,11 @@
 	display: none !important;
 }
 
-/* The right side is only our Agent panel, with one thin top row like Project Mode's: just the close button on the
-   right (no "CLASSGRID" name, no maximize). The row keeps its height, so the panel fills the side exactly. */
-.monaco-workbench .part.auxiliarybar > .title .composite-bar-container,
-.monaco-workbench .part.auxiliarybar > .title .title-label,
-.monaco-workbench .part.auxiliarybar > .title .action-item:has(.codicon-auxiliarybar-maximize, .codicon-screen-full, .codicon-screen-normal) {
-	visibility: hidden !important;
+/* The right side is only our Agent panel, with no title row of its own: the panel starts at the top, level with the
+   editor tabs, and its own top line (project / chat name, chats, search, new chat, close) sits there. The row's height
+   is 0 in our VS Code change (classgrid-agent-panel-width.patch), so the panel fills the side exactly. */
+.monaco-workbench .part.auxiliarybar > .title {
+	display: none !important;
 }
 /* The top row and the panel have the Agent panel's own color (Project Mode's: #121212 dark, white light), so they
    look like one piece */

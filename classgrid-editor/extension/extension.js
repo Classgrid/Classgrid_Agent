@@ -441,6 +441,8 @@ const HANDLERS = {
   },
   activeChat: (_p, id) => { screens.chats?.postMessage({ cgEvent: "activeChat", data: id ? String(id) : null }); },
   openSettings: () => vscode.commands.executeCommand("classgrid.openSettings").then(() => undefined),
+  // The X on the AI panel's top line: closes the right side (the Agent button in the title bar opens it again)
+  closePanel: () => vscode.commands.executeCommand("workbench.action.closeAuxiliaryBar").then(() => undefined),
   // Settings → Appearance: the whole editor light, dark, or the same as the computer (our screens follow it: bridge.js)
   setEditorTheme: async (_p, mode) => {
     const cfg = vscode.workspace.getConfiguration();
