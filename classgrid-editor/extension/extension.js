@@ -18,6 +18,7 @@ const firstThere = (...dirs) => dirs.find((d) => fs.existsSync(d)) || dirs[0];
 const APP_DIR = firstThere(path.join(__dirname, "app"), path.join(__dirname, "..", "..", "desktop", "app-editor"));
 const DESKTOP_DIR = firstThere(path.join(__dirname, "desktop"), path.join(__dirname, "..", "..", "desktop"));
 const API = /^https:\/\/api\.classgrid\.in\//;
+const UPLOAD = /^https:\/\/[a-z0-9]+\.r2\.cloudflarestorage\.com\//; // a chat file going to our storage (a signed link)
 const STORAGE_KEY = "classgrid.storage";
 
 let parts = null; // the desktop app's runner, chats and memory (after activate)
@@ -212,12 +213,25 @@ async function answerCall(webview, m, reload) {
   if (m.cgCall) webview.postMessage({ cgReply: m.cgCall, result, error });
 }
 
+// A picture on the clipboard as PNG (base64), or null. The editor's clipboard has text only, so Windows' own
+// clipboard is read
+function clipboardImage() {
+  if (process.platform !== "win32") return Promise.resolve(null);
+  const script = "Add-Type -AssemblyName System.Windows.Forms,System.Drawing;$i=[System.Windows.Forms.Clipboard]::GetImage();"
+    + "if($i){$m=New-Object System.IO.MemoryStream;$i.Save($m,[System.Drawing.Imaging.ImageFormat]::Png);[Convert]::ToBase64String($m.ToArray())}";
+  return new Promise((resolve) => {
+    require("node:child_process").execFile("powershell.exe", ["-NoProfile", "-NonInteractive", "-STA", "-Command", script],
+      { windowsHide: true, timeout: 15000, maxBuffer: 200 * 1024 * 1024 },
+      (err, out) => resolve(err ? null : String(out).trim() || null));
+  });
+}
+
 // Our screens' calls to our server, carried by the editor (a page loaded from the editor's files can't call it
 // itself); a streamed answer comes back piece by piece as it arrives
 const FETCHES = new Map();
 async function proxyFetch(webview, m) {
   const id = m.cgFetch;
-  if (!API.test(String(m.url))) return webview.postMessage({ cgFetchError: id, error: "only Classgrid's server is carried by the editor" });
+  if (!API.test(String(m.url)) && !UPLOAD.test(String(m.url))) return webview.postMessage({ cgFetchError: id, error: "only Classgrid's server is carried by the editor" });
   const ac = new AbortController();
   FETCHES.set(id, ac);
   try {
@@ -301,6 +315,7 @@ const HANDLERS = {
   // (copy and paste in our screens: bridge.js)
   clipboardWrite: (_p, text) => vscode.env.clipboard.writeText(String(text ?? "")).then(() => undefined),
   clipboardRead: () => vscode.env.clipboard.readText(),
+  clipboardImage: () => clipboardImage(),
   openExternal: (_p, url) => { if (/^https?:\/\//.test(String(url))) return vscode.env.openExternal(vscode.Uri.parse(String(url))).then(() => undefined); },
   fileInfo: (_p, file) => {
     try { const st = fs.statSync(path.resolve(String(file || ""))); return { exists: true, isFile: st.isFile(), size: st.size, modified: st.mtimeMs }; } catch { return { exists: false }; }

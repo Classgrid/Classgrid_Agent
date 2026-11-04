@@ -168,6 +168,8 @@
   // Calls to our server go through the editor (a page loaded from the editor's files can't call it itself)
   var realFetch = window.fetch.bind(window);
   var API = /^https:\/\/api\.classgrid\.in\//;
+  // (and a file upload to our storage: the editor's page can't send it there itself)
+  var UPLOAD = /^https:\/\/[a-z0-9]+\.r2\.cloudflarestorage\.com\//;
   var fetches = {};
   var nextFetch = 1;
   window.fetch = function (input, init) {
@@ -175,7 +177,7 @@
     try { req = new Request(input, init); } catch (err) { return realFetch(input, init); }
     var url = req.url;
     if (url.indexOf(location.origin + "/") === 0) return realFetch(base + url.slice(location.origin.length + 1), init); // our own files
-    if (!API.test(url)) return realFetch(input, init);
+    if (!API.test(url) && !UPLOAD.test(url)) return realFetch(input, init);
     var id = nextFetch++;
     var signal = (init && init.signal) || req.signal;
     var body = req.method === "GET" || req.method === "HEAD" ? Promise.resolve(null) : req.arrayBuffer();
@@ -293,7 +295,16 @@
       e.preventDefault();
       e.stopImmediatePropagation();
       clipRead().then(function (text) {
-        if (!text) return;
+        if (!text) {
+          // No text: a picture (a screenshot, a copied image) is read by the editor and pasted as a file, so the
+          // chat attaches it like a paste in the browser
+          return call("clipboardImage").then(function (b64) {
+            if (!b64) return;
+            var image = new DataTransfer();
+            image.items.add(new File([fromB64(b64)], "pasted-image-" + Date.now() + ".png", { type: "image/png" }));
+            el.dispatchEvent(new ClipboardEvent("paste", { clipboardData: image, bubbles: true, cancelable: true }));
+          });
+        }
         // the box's own paste handling first (long texts become a chip, formatted text stays formatted)
         var data = new DataTransfer();
         data.setData("text/plain", text);

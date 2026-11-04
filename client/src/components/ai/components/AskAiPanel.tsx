@@ -2868,11 +2868,14 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
           // Simulate a network upload delay for the mock
           await new Promise(resolve => setTimeout(resolve, 2000));
         } else {
-          await fetch(result.uploadUrl, {
+          // A stuck upload fails after 2 minutes instead of loading forever
+          const put = await fetch(result.uploadUrl, {
             method: "PUT",
             body: newFile.file,
             headers: { "Content-Type": newFile.type },
+            signal: AbortSignal.timeout(120_000),
           });
+          if (!put.ok) throw new Error(`Upload failed (${put.status})`);
         }
 
         // Mark as done and save URL
