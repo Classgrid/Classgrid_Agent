@@ -1,5 +1,5 @@
 diff --git a/src/vs/workbench/browser/parts/auxiliarybar/auxiliaryBarPart.ts b/src/vs/workbench/browser/parts/auxiliarybar/auxiliaryBarPart.ts
-index 7f8bd13..ffa43b3 100644
+index 7f8bd13..6c59341 100644
 --- a/src/vs/workbench/browser/parts/auxiliarybar/auxiliaryBarPart.ts
 +++ b/src/vs/workbench/browser/parts/auxiliarybar/auxiliaryBarPart.ts
 @@ -51,8 +51,12 @@ export class AuxiliaryBarPart extends AbstractPaneCompositePart {
@@ -17,3 +17,13 @@ index 7f8bd13..ffa43b3 100644
  	override readonly minimumHeight: number = 0;
  	override readonly maximumHeight: number = Number.POSITIVE_INFINITY;
  
+@@ -102,6 +106,9 @@ export class AuxiliaryBarPart extends AbstractPaneCompositePart {
+ 			Parts.AUXILIARYBAR_PART,
+ 			{
+ 				hasTitle: true,
++				// Classgrid Code: no title row, so the Agent panel starts at the top, level with the editor tabs (its own top line,
++				// the project / chat name with the chats, search and new chat buttons, sits there)
++				titleHeight: () => 0,
+ 				trailingSeparator: true,
+ 				borderWidth: () => (this.getColor(SIDE_BAR_BORDER) || this.getColor(contrastBorder)) ? 1 : 0,
+ 			},

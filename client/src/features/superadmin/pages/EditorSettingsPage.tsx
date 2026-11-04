@@ -47,9 +47,10 @@ export function EditorSettingsPage() {
 
   return (
     <div className="cg-editor-settings h-[100dvh] overflow-y-auto bg-background text-foreground">
-      <div className="max-w-5xl mx-auto flex gap-10 px-8 py-10">
+      {/* A narrow tab (the editor split in two) puts the sections above the page instead of beside it */}
+      <div className="max-w-5xl mx-auto flex flex-col md:flex-row gap-6 md:gap-10 px-5 md:px-8 py-8 md:py-10">
         {/* Left: who you are, and the sections */}
-        <nav className="w-60 shrink-0">
+        <nav className="w-full md:w-60 shrink-0">
           <div className="flex items-center gap-3 px-2 mb-6">
             {avatar("size-9", "text-sm")}
             <div className="min-w-0">
@@ -102,7 +103,7 @@ export function EditorSettingsPage() {
           {section === "appearance" && (
             <>
               <h1 className="text-xl font-semibold mb-5">Appearance</h1>
-              <div className="grid grid-cols-3 gap-3 max-w-xl">
+              <div className="grid grid-cols-[repeat(auto-fill,minmax(8.5rem,1fr))] gap-3 max-w-xl">
                 {([
                   { m: "light", label: "Light", icon: Sun },
                   { m: "dark", label: "Dark", icon: Moon },
@@ -112,7 +113,7 @@ export function EditorSettingsPage() {
                     key={m}
                     type="button"
                     onClick={() => pickMode(m)}
-                    className={`flex flex-col items-center gap-2 rounded-xl border p-4 text-sm transition-colors ${mode === m ? "border-foreground bg-muted" : "border-border bg-card hover:bg-muted/60"}`}
+                    className={`flex flex-col items-center gap-2 rounded-xl border p-4 text-sm text-center whitespace-nowrap transition-colors ${mode === m ? "border-foreground bg-muted" : "border-border bg-card hover:bg-muted/60"}`}
                   >
                     <Icon className="size-5" />
                     {label}
