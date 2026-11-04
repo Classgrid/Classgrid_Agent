@@ -1,7 +1,7 @@
 // The chat's ⋮ menu in every mode (Agent, Project, Studio): Rename, Pin, Add to group (Project, Studio), Archive, Archived chats, Copy and Delete
 // (plus "Files in chat" where the chat has that panel). Same look as the sidebar's chat menu.
 import { useEffect, useState } from "react";
-import { Archive, ArchiveRestore, ClipboardList, Copy, FolderOpen, Link2, MoreVertical, Pencil, Pin, Trash2, FileText, Hash, SquareTerminal, FileDiff } from "lucide-react";
+import { Archive, ArchiveRestore, ClipboardList, Copy, FolderOpen, Link2, MoreHorizontal, MoreVertical, Pencil, Pin, Trash2, FileText, Hash, SquareTerminal, FileDiff } from "lucide-react";
 import { toast } from "sonner";
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuSub, DropdownMenuSubContent, DropdownMenuSubTrigger, DropdownMenuTrigger,
@@ -43,8 +43,10 @@ function goToNewChat() {
   window.dispatchEvent(new Event("agent:new-chat"));
 }
 
-export function StudioChatMenu({ sessionId, isPinned, onTogglePin, onDelete, messages, onFilesInChat }: {
+export function StudioChatMenu({ sessionId, isPinned, onTogglePin, onDelete, messages, onFilesInChat, noArchive = false, dots = "vertical", buttonClassName }: {
   sessionId: string; isPinned: boolean; onTogglePin: () => void; onDelete: () => void; messages: Msg[]; onFilesInChat?: () => void;
+  // Classgrid Code's AI panel: ⋯ (horizontal) in its top line, and no Archive / Archived chats
+  noArchive?: boolean; dots?: "vertical" | "horizontal"; buttonClassName?: string;
 }) {
   const [renaming, setRenaming] = useState(false);
   const [showArchived, setShowArchived] = useState(false);
@@ -72,8 +74,8 @@ export function StudioChatMenu({ sessionId, isPinned, onTogglePin, onDelete, mes
     <>
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
-          <button className="flex items-center justify-center h-8 w-8 rounded-md text-muted-foreground hover:text-foreground hover:bg-black/5 dark:hover:bg-white/10 transition-colors cursor-pointer" aria-label="Chat options">
-            <MoreVertical className="h-4 w-4" />
+          <button className={buttonClassName || "flex items-center justify-center h-8 w-8 rounded-md text-muted-foreground hover:text-foreground hover:bg-black/5 dark:hover:bg-white/10 transition-colors cursor-pointer"} aria-label="Chat options" title="Chat options">
+            {dots === "horizontal" ? <MoreHorizontal className="h-4 w-4" /> : <MoreVertical className="h-4 w-4" />}
           </button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end" sideOffset={6} className={`w-[200px] ${card}`}>
@@ -89,12 +91,16 @@ export function StudioChatMenu({ sessionId, isPinned, onTogglePin, onDelete, mes
             <Pin className={icon} strokeWidth={2} /> {isPinned ? "Unpin" : "Pin"}
           </DropdownMenuItem>
           {inProject() && <AddToGroupSub sessionId={sessionId} groups={groups} onNewGroup={() => setNewGroup(true)} />}
-          <DropdownMenuItem className={item} onClick={archive}>
-            <Archive className={icon} strokeWidth={2} /> Archive
-          </DropdownMenuItem>
-          <DropdownMenuItem className={item} onClick={() => setShowArchived(true)}>
-            <ArchiveRestore className={icon} strokeWidth={2} /> Archived chats
-          </DropdownMenuItem>
+          {!noArchive && (
+            <>
+              <DropdownMenuItem className={item} onClick={archive}>
+                <Archive className={icon} strokeWidth={2} /> Archive
+              </DropdownMenuItem>
+              <DropdownMenuItem className={item} onClick={() => setShowArchived(true)}>
+                <ArchiveRestore className={icon} strokeWidth={2} /> Archived chats
+              </DropdownMenuItem>
+            </>
+          )}
           <DropdownMenuSeparator className="bg-slate-100 dark:bg-white/10 my-1" />
           <DropdownMenuSub>
             <DropdownMenuSubTrigger className={item}>

@@ -159,7 +159,8 @@ import { FollowUps, ActionCards, ReportCard, Timetable, AttendanceCalendar, Stud
 import { WidgetBlock } from "./WidgetBlock";
 import { ScrollSpyTOC, MobileTOCButton, QuestionDots, messageTime } from "./TOC";
 import { StudioChatMenu, OpenInProjectButton, StudioOverviewButton } from "./StudioChatMenu";
-import { EditorChatHeader } from "./EditorChatHeader";
+import { EditorChatHeader, editorIconButton } from "./EditorChatHeader";
+import { EditorChatSidePanel } from "./EditorChatSidePanel";
 import { PermissionCard, PermissionModePicker, PERMISSION_MODE_KEY, readPermissionMode, type PermissionMode, type PermissionRequest } from "./PermissionControls";
 import AIThinkingBlock from "./AIThinkingBlock";
 import RichChatInput from "./RichChatInput";
@@ -5018,7 +5019,24 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
   const pendingQueueUI = null;
 
   // (Classgrid Code: its own top line, with the project / chat name, the chats sidebar, search and new chat)
-  const panelHeader = import.meta.env.VITE_EDITOR === "1" && variant === "overlay" ? <EditorChatHeader sessionId={sessionId || null} /> : (
+  const panelHeader = import.meta.env.VITE_EDITOR === "1" && variant === "overlay" ? (
+    <EditorChatHeader
+      sessionId={sessionId || null}
+      menu={sessionId ? (
+        <StudioChatMenu
+          sessionId={sessionId}
+          isPinned={isPinned}
+          onTogglePin={handlePinToggle}
+          onDelete={() => setShowDeleteConfirm(true)}
+          messages={messages.map((m) => ({ role: m.role, content: typeof m.content === "string" ? m.content : "" }))}
+          noArchive
+          dots="horizontal"
+          buttonClassName={editorIconButton}
+        />
+      ) : null}
+      side={<EditorChatSidePanel messages={messages} uploads={chatFiles} />}
+    />
+  ) : (
     <div className={cn("flex items-center justify-between px-4", import.meta.env.VITE_DESKTOP === "1" && variant === "overlay" ? "h-[35px] py-0" : "py-4", variant !== "full-page" && "border-b border-border")}>
       <div className="flex items-center gap-2">
       </div>

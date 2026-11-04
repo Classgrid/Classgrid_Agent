@@ -65,13 +65,16 @@ type StudioListOpts = {
   unreadOnly: boolean; hideEmpty: boolean; openOnly: boolean; showTime: boolean; showLogos: boolean; compact: boolean;
   autoPin: boolean; archivedOnly: boolean;
 };
+// Classgrid Code's AI panel (/editor/project/...): its chats sidebar is this same list, working like Studio's
+const IN_EDITOR = import.meta.env.VITE_EDITOR === "1";
 const STUDIO_OPTS_KEY = "cg_studio_list_opts";
 const STUDIO_OPTS: StudioListOpts = {
   groupBy: "project", sortChats: "updated", sortProjects: "recent", unreadOnly: false, hideEmpty: false, openOnly: false,
   showTime: true, showLogos: true, compact: false, autoPin: false, archivedOnly: false,
 };
 function readStudioOpts(): StudioListOpts {
-  try { return { ...STUDIO_OPTS, ...JSON.parse(localStorage.getItem(STUDIO_OPTS_KEY) || "{}") }; } catch { return STUDIO_OPTS; }
+  // (Classgrid Code has no archive view)
+  try { return { ...STUDIO_OPTS, ...JSON.parse(localStorage.getItem(STUDIO_OPTS_KEY) || "{}"), ...(IN_EDITOR ? { archivedOnly: false } : {}) }; } catch { return STUDIO_OPTS; }
 }
 
 const ChatBubbleIcon = ({ className }: { className?: string }) => (
@@ -158,7 +161,7 @@ export function AgentNestedMenu({ searchQuery = "" }: { searchQuery?: string }) 
       try { openProject = (sessionStorage.getItem("cg_project_open") || localStorage.getItem("cg_project_open")); } catch { /* storage blocked */ }
       listQuery = `?project=${openProject || "all"}`; // no project open: chats of all projects
       // Studio lists every project's chats under its project, and its chats sent with no project
-      if (window.location.pathname.split("/").includes("studio")) listQuery = `?project=all&studio=1${readStudioOpts().archivedOnly ? "&archived=1" : ""}`;
+      if (IN_EDITOR || window.location.pathname.split("/").includes("studio")) listQuery = `?project=all&studio=1${readStudioOpts().archivedOnly ? "&archived=1" : ""}`;
     }
     // Another list than the one on screen (Agent -> a project, or one project -> another): clear it at once, so
     // the old mode's chats never show while the new list loads
@@ -476,7 +479,7 @@ export function AgentNestedMenu({ searchQuery = "" }: { searchQuery?: string }) 
   // Chat groups (Project and Studio Mode): the open project's groups, or the ones made with no project open
   const inCodeMode = window.location.pathname.split("/").some((x) => x === "studio" || x === "project");
   const openProject = inCodeMode ? openProjectId() : null;
-  const studioPage = window.location.pathname.split("/").includes("studio");
+  const studioPage = IN_EDITOR || window.location.pathname.split("/").includes("studio");
   const groups = useChatGroups(inCodeMode, studioPage ? "all" : openProject);
   const [groupDialog, setGroupDialog] = React.useState<{ project: string | null; group?: ChatGroup; sessionId?: string } | null>(null);
   const [deleteGroup, setDeleteGroup] = React.useState<ChatGroup | null>(null);
@@ -528,7 +531,7 @@ export function AgentNestedMenu({ searchQuery = "" }: { searchQuery?: string }) 
   const navigate = useNavigate();
   const location = useLocation();
   const isProjectMode = location.pathname.split("/").includes("project");
-  const isStudioMode = location.pathname.split("/").includes("studio");
+  const isStudioMode = IN_EDITOR || location.pathname.split("/").includes("studio");
   // Switching between Agent and Project mode shows that mode's own chats
   React.useEffect(() => { fetchSessions(true); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [isProjectMode, isStudioMode]);
 
@@ -1087,7 +1090,7 @@ export function AgentNestedMenu({ searchQuery = "" }: { searchQuery?: string }) 
                         ["Compact", opts.compact, () => setOpt({ compact: !opts.compact })],
                       ])}
                       {optionRow("Auto Pin", opts.autoPin, () => setOpt({ autoPin: !opts.autoPin }), "The open project stays at the top")}
-                      {optionRow("Archived Only", opts.archivedOnly, () => setOpt({ archivedOnly: !opts.archivedOnly }))}
+                      {!IN_EDITOR && optionRow("Archived Only", opts.archivedOnly, () => setOpt({ archivedOnly: !opts.archivedOnly }))}
                       <DropdownMenuSeparator className="bg-slate-100 dark:bg-white/10 my-1.5 mx-1" />
                       {optionRow("Mark All as Read", false, () => { markRead("all"); toast.success("All chats marked as read"); })}
                     </DropdownMenuContent>
