@@ -60,8 +60,8 @@ export function StudioSearchPalette({ open, onClose, files: givenFiles, recent =
   fileIcon: (name: string) => React.ReactNode;
   initialKind?: Kind; // the left sidebar's search starts on Conversations
   onOpenChat?: (id: string) => void; // left out: the chat opens in Studio
-  // Classgrid Code's AI panel: the search drops down inside the panel, under its top line, instead of over the whole
-  // editor window
+  // Classgrid Code's AI panel: the search opens in the middle of the panel, over the dimmed chat, instead of over the
+  // whole editor window
   inPanel?: boolean;
 }) {
   const reduce = useReducedMotion();
@@ -253,14 +253,16 @@ export function StudioSearchPalette({ open, onClose, files: givenFiles, recent =
     <AnimatePresence>
       {open && (
         <>
-          <motion.div key="bg" data-cg-big-window={inPanel ? undefined : ""} className="fixed inset-0 z-[130]" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={close} />
+          <motion.div key="bg" data-cg-big-window={inPanel ? undefined : ""} className={inPanel ? "fixed inset-0 z-[130] bg-black/40" : "fixed inset-0 z-[130]"} initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={close} />
           <motion.div
             key="box"
             initial={reduce ? false : { opacity: 0, y: -8, scale: 0.98 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={reduce ? { opacity: 0 } : { opacity: 0, y: -6, scale: 0.98 }}
             transition={{ duration: reduce ? 0 : 0.18, ease: EASE }}
-            className={inPanel ? "fixed inset-x-2 top-[41px] z-[131]" : "fixed inset-x-0 top-[10vh] z-[131] mx-auto w-[min(92vw,640px)]"}
+            className={inPanel ? "fixed inset-x-3 top-1/2 z-[131]" : "fixed inset-x-0 top-[10vh] z-[131] mx-auto w-[min(92vw,640px)]"}
+            // (in the AI panel: in the middle of the panel, over a dimmed chat)
+            transformTemplate={inPanel ? (_, generated) => `translateY(-50%) ${generated}` : undefined}
             onKeyDown={onKey}
           >
             <div className="rounded-xl border border-black/10 dark:border-white/[0.1] bg-white dark:bg-[#1e1e1e] text-foreground shadow-2xl overflow-hidden">
