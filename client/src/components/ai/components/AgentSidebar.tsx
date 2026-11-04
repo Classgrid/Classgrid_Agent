@@ -648,7 +648,8 @@ export function AgentNestedMenu({ searchQuery = "" }: { searchQuery?: string }) 
       for (const g of sortedGroups) if (!g.projectId || names.has(g.projectId) || folders.has(g.projectId)) folderFor(g.projectId || null).groups.push(g);
     }
     if (!searchQuery && !opts.hideEmpty && !opts.unreadOnly && !opts.archivedOnly) {
-      for (const p of projects || []) folderFor(p.id);
+      // (desktop app: only the projects on this computer; its cloud projects' chats are on the website)
+      for (const p of projects || []) if (!onDesktop() || onThisPc(p)) folderFor(p.id);
       folderFor(null);
     }
     let list = [...folders.values()];

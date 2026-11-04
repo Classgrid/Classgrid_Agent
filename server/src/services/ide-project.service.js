@@ -904,7 +904,7 @@ export function pcChatIds(p) {
   return FOLDER_NAME.test(String(p.name || "")) ? p.chatSessionIds || [] : [];
 }
 
-export async function linkChatToProject(userId, projectId, sessionId, deviceId = null, { website = false } = {}) {
+export async function linkChatToProject(userId, projectId, sessionId, deviceId = null, { website = false, desktop = false } = {}) {
   await connectDB();
   const project = await IdeProject.findOne({ _id: projectId, owner: userId }).select("_id location localCopies");
   // A folder project works only in the desktop app: a message from the website never links a chat to it
@@ -918,7 +918,7 @@ export async function linkChatToProject(userId, projectId, sessionId, deviceId =
   if (other) return;
   // Where a chat happened is set when it starts: in the desktop app on this computer (a folder, or a copy "On this
   // computer") it is a computer chat for good, so the website never lists it
-  const onPc = !website && (project.location === "local" || here);
+  const onPc = !website && (desktop || project.location === "local" || here); // desktop: any chat started in the app
   if (onPc && !(await IdeProject.exists({ _id: project._id, chatSessionIds: sessionId }))) {
     const full = await IdeProject.findById(project._id).select("name location chatSessionIds pcChatSessionIds").lean();
     await IdeProject.updateOne({ _id: project._id }, { $set: { pcChatSessionIds: [...new Set([...pcChatIds(full), sessionId])] } });

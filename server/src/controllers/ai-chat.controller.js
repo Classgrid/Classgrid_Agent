@@ -2083,8 +2083,13 @@ You are currently talking to Nikhil Shinde (nikhil.shinde@classgrid.in), the CRE
         // Project Mode: what the user sees in the code editor (open file, cursor, selection, errors) and what they changed
         // A message sent from Project Mode links this chat to the open project first (from the very first message)
         if (sessionId && !isIncognito) { touchedChat = sessionId; touchChat(req.user?.email, sessionId); }
+        // Where this chat started (first message wins): the desktop app's chats and the website's chats are separate lists
+        if (sessionId && !isIncognito && !gridSender && !body.taskOrigin && req.user?._id) {
+            const placeField = fromWebsite ? "web_chat_ids" : body.clientApp === "desktop" ? "desktop_chat_ids" : null;
+            if (placeField) await User.updateOne({ _id: req.user._id, desktop_chat_ids: { $ne: sessionId }, web_chat_ids: { $ne: sessionId } }, { $addToSet: { [placeField]: sessionId } }).catch(() => {});
+        }
         if (sessionId && !isIncognito && !gridSender && /^[0-9a-f]{24}$/i.test(String(body.projectId || "")) && req.user?._id) {
-            await linkChatToProject(req.user._id, body.projectId, sessionId, body.clientApp === "desktop" ? body.deviceId : null, { website: fromWebsite }).catch(() => {});
+            await linkChatToProject(req.user._id, body.projectId, sessionId, body.clientApp === "desktop" ? body.deviceId : null, { website: fromWebsite, desktop: !fromWebsite && body.clientApp === "desktop" }).catch(() => {});
         } else if (sessionId && !isIncognito && !gridSender && body.appMode === "studio" && body.taskOrigin !== "whatsapp" && req.user?._id) {
             // Studio with no project open: the chat is kept in Studio's own chat list
             await User.updateOne({ _id: req.user._id }, { $addToSet: { studio_chat_ids: sessionId } }).catch(() => {});
@@ -6670,12 +6675,30 @@ export const getChatSessions = async (req, res) => {
         if (!email) return res.status(401).json({ error: "Unauthorized" });
 
         let sessions = await getSessions(email);
-        // Chats that happened on a computer (a folder project's, or a cloud project's chats in its copy "On this
-        // computer") are only in the desktop app, never on the website
-        if (isWebsite(req) && req.user?._id) {
+        // A Studio or Project Mode chat is listed only where it started: the desktop app (and Classgrid Code) shows its
+        // own, the website its own, never each other's. Agent mode chats (no project) show in both (owner, 2026-11-04). Where: the chat's first message (desktop_chat_ids /
+        // web_chat_ids), else its project (a computer chat or a cloud chat, pcChatIds), else which app last used it this
+        // week (chatwake meta); anything older counts as the website's. No chat is in both lists.
+        let chatPlace = () => null;
+        if (req.user?._id) {
             const IdeProject = (await import("../models/IdeProject.js")).default;
-            const local = new Set((await IdeProject.find({ owner: req.user._id }).select("name location chatSessionIds pcChatSessionIds").lean()).flatMap(pcChatIds));
-            if (local.size) sessions = (sessions || []).filter((s) => !local.has(s.id));
+            const [mine, owned] = await Promise.all([
+                User.findById(req.user._id).select("desktop_chat_ids web_chat_ids studio_chat_ids call_chat_ids").lean().catch(() => null),
+                IdeProject.find({ owner: req.user._id }).select("name location chatSessionIds pcChatSessionIds").lean().catch(() => []),
+            ]);
+            const desk = new Set(mine?.desktop_chat_ids || []);
+            const web = new Set(mine?.web_chat_ids || []);
+            const pcProject = new Set(owned.flatMap(pcChatIds));
+            const inProject = new Set(owned.flatMap((p) => p.chatSessionIds || []));
+            const unknown = (sessions || []).map((s) => s.id).filter((id) => !desk.has(id) && !web.has(id) && !inProject.has(id) && (mine?.studio_chat_ids || []).includes(id));
+            const metas = unknown.length ? await redis.mget(unknown.map((id) => `chatwake:meta:${id}`)).catch(() => []) : [];
+            const lastApp = new Map(unknown.map((id, i) => { try { return [id, JSON.parse(metas?.[i] || "null")?.clientApp || null]; } catch { return [id, null]; } }));
+            chatPlace = (id) => (desk.has(id) ? "pc" : web.has(id) ? "cloud" : pcProject.has(id) ? "pc" : inProject.has(id) ? "cloud" : lastApp.get(id) === "desktop" ? "pc" : "cloud");
+            const studioChats = new Set(mine?.studio_chat_ids || []);
+            const callChats = new Set(mine?.call_chat_ids || []); // WhatsApp work: not started in either app
+            const kept = (id) => (inProject.has(id) || studioChats.has(id)) && !callChats.has(id);
+            const hide = isWebsite(req) ? "pc" : "cloud";
+            sessions = (sessions || []).filter((s) => !kept(s.id) || chatPlace(s.id) !== hide);
         }
         // Agent mode and Project mode keep separate chat lists: ?mode=agent leaves out chats that belong to a
         // project, ?project=<id> shows only that project's chats (the user's own projects only). No query = all.
@@ -6690,7 +6713,6 @@ export const getChatSessions = async (req, res) => {
             if (project === "all") {
                 // Projects page with no project open: the chats of all the user's projects
                 const ps = await IdeProject.find({ owner: req.user._id }).select("chatSessionIds pcChatSessionIds name logo location").lean();
-                const onPc = new Set(ps.flatMap(pcChatIds));
                 const inStudio = req.query?.studio === "1";
                 const ids = new Set([...ps.flatMap((x) => x.chatSessionIds || []), ...(inStudio ? [...studioIds, ...callIds] : [])]);
                 if (!inStudio) for (const id of callIds) ids.delete(id);
@@ -6698,7 +6720,7 @@ export const getChatSessions = async (req, res) => {
                 const owner = new Map(ps.flatMap((x) => (x.chatSessionIds || []).map((id) => [id, x])));
                 sessions = (sessions || []).filter((s) => ids.has(s.id)).map((s) => {
                     const p = owner.get(s.id);
-                    return p ? { ...s, project_id: String(p._id), project_name: p.name, project_logo: p.logo || null, ...(isWebsite(req) ? {} : { project_location: p.location || "cloud", chat_place: onPc.has(s.id) ? "pc" : "cloud" }) } : s;
+                    return p ? { ...s, project_id: String(p._id), project_name: p.name, project_logo: p.logo || null, ...(isWebsite(req) ? {} : { project_location: p.location || "cloud", chat_place: chatPlace(s.id) || "pc" }) } : s;
                 });
             } else if (project) {
                 const p = /^[0-9a-f]{24}$/i.test(String(project)) ? await IdeProject.findOne({ _id: project, owner: req.user._id }).select("chatSessionIds").lean() : null;

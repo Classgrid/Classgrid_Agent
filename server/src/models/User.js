@@ -795,6 +795,10 @@ const userSchema = new mongoose.Schema(
     archived_chat_ids: { type: [String], default: [] },
     // Studio chats sent with no project open: listed in Studio, not in Agent mode
     studio_chat_ids: { type: [String], default: [] },
+    // Where each chat started: in the desktop app (or Classgrid Code), or on the website. A chat is listed only where it
+    // started; the two never show each other's chats (owner, 2026-11-04)
+    desktop_chat_ids: { type: [String], default: [] },
+    web_chat_ids: { type: [String], default: [] },
     // Chats of work from WhatsApp (calls and messages): listed only in Studio (under their project), not in Agent or Project Mode
     call_chat_ids: { type: [String], default: [] },
     ai_preferences: {
