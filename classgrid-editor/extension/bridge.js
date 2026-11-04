@@ -27,6 +27,18 @@
   S.removeItem = function (k) { removeItem.call(this, k); if (isLocal(this)) post({ cgStore: "remove", key: String(k) }); };
   S.clear = function () { clear.call(this); if (isLocal(this)) post({ cgStore: "clear" }); };
 
+  // Pop-ups (an app's login, a payment) open in the computer's browser: the page gets a stand-in window, so its "if
+  // the pop-up was blocked" checks pass, and a page that opens a blank pop-up first and sets its address later works too
+  window.open = function (url) {
+    var go = function (u) { var s = String(u || ""); if (/^https?:\/\//i.test(s)) call("openExternal", s); };
+    var stand = { closed: false, opener: null, close: function () { stand.closed = true; }, focus: function () {}, blur: function () {}, postMessage: function () {}, document: { write: function () {}, close: function () {}, title: "" } };
+    var loc = { assign: go, replace: go };
+    Object.defineProperty(loc, "href", { get: function () { return "about:blank"; }, set: go });
+    Object.defineProperty(stand, "location", { get: function () { return loc; }, set: go });
+    if (url && String(url) !== "about:blank") go(url);
+    return stand;
+  };
+
   // The page our screens open at (the Agent chat)
   try { if (cfg.startPath && location.pathname !== cfg.startPath) history.replaceState(null, "", cfg.startPath); } catch (err) { post({ cgLog: "route", text: "couldn't open " + cfg.startPath + ": " + err.message }); }
   post({ cgLog: "start", text: "page at " + location.href.slice(0, 200) });
@@ -118,7 +130,9 @@
   };
   setCoverWidth(100000);
   (document.head || root).appendChild(coverStyle);
-  new MutationObserver(function () {
+  // (only the Agent panel and the chats sidebar cover the window; the Settings tab shows its windows in the tab)
+  var coversWindow = /^\/editor\/(project|sidebar)/.test(String(cfg.startPath || ""));
+  if (coversWindow) new MutationObserver(function () {
     if (frame) return;
     frame = requestAnimationFrame(function () {
       frame = 0;

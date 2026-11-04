@@ -1,62 +1,30 @@
 diff --git a/src/vs/workbench/contrib/webviewView/browser/classgridSettingsButton.ts b/src/vs/workbench/contrib/webviewView/browser/classgridSettingsButton.ts
 new file mode 100644
-index 0000000..f7a8d38
+index 0000000..7d3c132
 --- /dev/null
 +++ b/src/vs/workbench/contrib/webviewView/browser/classgridSettingsButton.ts
-@@ -0,0 +1,53 @@
+@@ -0,0 +1,21 @@
 +/*---------------------------------------------------------------------------------------------
-+ *  Classgrid Code: a gear in the title bar, next to the layout buttons, that opens your Settings in the Classgrid app
-+ *  (the Classgrid extension's command "classgrid.openSettings", classgrid-editor/extension).
++ *  Classgrid Code: a gear in the title bar, next to the layout buttons, that opens Classgrid Code's Settings tab
++ *  (the Classgrid extension's command "classgrid.openSettings", classgrid-editor/extension). It is one of the title
++ *  bar's own buttons, drawn and clicked like the layout buttons beside it.
 + *--------------------------------------------------------------------------------------------*/
 +
-+import { mainWindow } from '../../../../base/browser/window.js';
-+import { Disposable } from '../../../../base/common/lifecycle.js';
-+import { ICommandService } from '../../../../platform/commands/common/commands.js';
-+import { IWorkbenchContribution, registerWorkbenchContribution2, WorkbenchPhase } from '../../../common/contributions.js';
++import { Codicon } from '../../../../base/common/codicons.js';
++import { localize } from '../../../../nls.js';
++import { MenuId, MenuRegistry } from '../../../../platform/actions/common/actions.js';
++import { IsAuxiliaryWindowContext } from '../../../common/contextkeys.js';
 +
-+class ClassgridSettingsButton extends Disposable implements IWorkbenchContribution {
-+
-+	static readonly ID = 'workbench.contrib.classgridSettingsButton';
-+
-+	constructor(
-+		@ICommandService private readonly commandService: ICommandService,
-+	) {
-+		super();
-+		this.addButton();
-+		// (kept there when the title bar redraws)
-+		const titleBar = mainWindow.document.querySelector('.part.titlebar');
-+		if (titleBar) {
-+			const observer = new MutationObserver(() => this.addButton());
-+			observer.observe(titleBar, { childList: true, subtree: true });
-+			this._register({ dispose: () => observer.disconnect() });
-+		}
-+	}
-+
-+	private addButton(): void {
-+		const right = mainWindow.document.querySelector('.part.titlebar .titlebar-right');
-+		if (!right || right.querySelector('.classgrid-settings-button')) {
-+			return;
-+		}
-+		const button = mainWindow.document.createElement('a');
-+		button.className = 'classgrid-settings-button codicon codicon-settings-gear';
-+		button.setAttribute('role', 'button');
-+		button.setAttribute('aria-label', 'Settings');
-+		button.tabIndex = 0;
-+		const open = () => { this.commandService.executeCommand('classgrid.openSettings'); };
-+		// (on the press, not the click: the title bar takes the mouse over once it is pressed there)
-+		button.addEventListener('mousedown', e => {
-+			if (e.button === 0) {
-+				e.preventDefault();
-+				e.stopPropagation();
-+				open();
-+			}
-+		});
-+		button.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); open(); } });
-+		right.prepend(button);
-+	}
-+}
-+
-+registerWorkbenchContribution2(ClassgridSettingsButton.ID, ClassgridSettingsButton, WorkbenchPhase.AfterRestored);
++MenuRegistry.appendMenuItem(MenuId.LayoutControlMenu, {
++	group: 'navigation',
++	order: -1,
++	command: {
++		id: 'classgrid.openSettings',
++		title: localize('classgridSettings', "Settings"),
++		icon: Codicon.settingsGear,
++	},
++	when: IsAuxiliaryWindowContext.toNegated(),
++});
 diff --git a/src/vs/workbench/contrib/webviewView/browser/webviewView.contribution.ts b/src/vs/workbench/contrib/webviewView/browser/webviewView.contribution.ts
 index 00a681a..b521038 100644
 --- a/src/vs/workbench/contrib/webviewView/browser/webviewView.contribution.ts

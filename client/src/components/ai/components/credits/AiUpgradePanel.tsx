@@ -56,6 +56,14 @@ export function AiUpgradePanel() {
     try {
       const response = await topUpMutation.mutateAsync(customAmount);
       if (response && response.checkout_url) {
+        // Classgrid Code: the payment page opens in the computer's browser (the editor's tab can't show it)
+        const editorDesk = import.meta.env.VITE_EDITOR === "1" ? (window as unknown as { classgridDesktop?: { openExternal?: (url: string) => Promise<unknown> } }).classgridDesktop : undefined;
+        if (editorDesk?.openExternal) {
+          const urlObj = new URL(response.checkout_url);
+          urlObj.searchParams.set("theme", document.documentElement.classList.contains("dark") ? "dark" : "light");
+          await editorDesk.openExternal(urlObj.toString());
+          return;
+        }
         try {
           const urlObj = new URL(response.checkout_url);
           const theme = document.documentElement.classList.contains("dark") ? "dark" : "light";

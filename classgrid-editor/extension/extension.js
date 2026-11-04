@@ -193,14 +193,16 @@ function holdScreens(webview, startPath) {
     if (m?.cgFetch) return proxyFetch(webview, m);
     if (m?.cgFetchAbort) return FETCHES.get(m.cgFetchAbort)?.abort();
     if (m?.cgStore) return keepStorage(m);
-    if (m?.cgOverlay !== undefined) return webview === screens.chats ? coverWithStrip(webview, !!m.cgOverlay) : coverWindow(webview, !!m.cgOverlay);
+    // (only the Agent panel and the chats sidebar cover the window for their big windows; a tab like Settings shows its
+    // own windows inside the tab)
+    if (m?.cgOverlay !== undefined) return webview === screens.chats ? coverWithStrip(webview, !!m.cgOverlay) : webview === screens.agent ? coverWindow(webview, !!m.cgOverlay) : undefined;
     if (m?.cgOverlayReady && webview === screens.chats) return vscode.commands.executeCommand("_classgrid.setStripOverlay", true).then(undefined, (err) => log.appendLine(`[${new Date().toISOString()}] cover the window: ${err?.message || err}`));
     // A chat list change in one of our pages (a new chat, a new title...): the other page's list follows
     if (m?.cgShare) {
       for (const other of [screens.agent, screens.chats]) if (other && other !== webview) other.postMessage({ cgEvent: "shared", data: { name: String(m.cgShare), detail: m.detail ?? null } });
       return;
     }
-    if (m?.cgOverlayReady) return vscode.commands.executeCommand("_classgrid.setAgentOverlay", true).then(undefined, (err) => log.appendLine(`[${new Date().toISOString()}] cover the window: ${err?.message || err}`));
+    if (m?.cgOverlayReady && webview === screens.agent) return vscode.commands.executeCommand("_classgrid.setAgentOverlay", true).then(undefined, (err) => log.appendLine(`[${new Date().toISOString()}] cover the window: ${err?.message || err}`));
     if (m?.cgLog) return log.appendLine(`[${new Date().toISOString()}] page ${m.cgLog}: ${String(m.text).slice(0, 2000)}`);
     if (m?.cgCall !== undefined) return answerCall(webview, m, load);
   });

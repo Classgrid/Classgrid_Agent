@@ -90,24 +90,3 @@ body.classgrid-overlay .webview-overlay-content:not(.classgrid-strip):has(iframe
 	font-family: var(--vscode-font-family) !important;
 	font-size: 13px !important;
 }
-
-/* The Settings gear in the title bar, next to the layout buttons (classgrid-settings-button.patch): opens your
-   Settings in the Classgrid app. Clickable (not part of the window's drag area), with a hand cursor. */
-.monaco-workbench .part.titlebar .titlebar-right .classgrid-settings-button {
-	-webkit-app-region: no-drag;
-	display: flex;
-	align-items: center;
-	justify-content: center;
-	width: 28px;
-	height: 28px;
-	margin: 0 2px;
-	border-radius: 6px;
-	font-size: 16px;
-	cursor: pointer;
-	color: var(--vscode-titleBar-activeForeground);
-	opacity: 0.85;
-}
-.monaco-workbench .part.titlebar .titlebar-right .classgrid-settings-button:hover {
-	opacity: 1;
-	background-color: var(--vscode-toolbar-hoverBackground, rgba(128, 128, 128, 0.15));
-}
