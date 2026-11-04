@@ -1465,9 +1465,10 @@ const COMPUTER_TERMINAL_DEFS = [
         job_id: { type: "string", description: "The job_id from start_background_command" },
     }, ["job_id"]),
     // The same file tools as Project Mode, for files anywhere on the user's computer (full paths)
-    terminalDef("write_project_file", "Create a new file on the user's own computer (missing folders are made). An existing file is never replaced: change it with edit_project_file. Windows, Program Files and the Classgrid app's own folders can't be changed. The user is asked to allow it first.", {
+    terminalDef("write_project_file", "Create a new file on the user's own computer (missing folders are made), or replace a whole existing file with overwrite: true (only one you read with read_local_file in this chat and nobody changed since; for a few changes use edit_project_file). Windows, Program Files and the Classgrid app's own folders can't be changed. The user is asked to allow it first.", {
         path: { type: "string", description: "The full path of the new file, e.g. C:\\Users\\name\\Documents\\notes.txt" },
         content: { type: "string", description: "The whole text of the file" },
+        overwrite: { type: "boolean", description: "Replace the whole existing file (read it first). Default false" },
     }, ["path", "content"]),
     terminalDef("edit_project_file", "Change parts of a text file on the user's own computer without rewriting it. Each edit replaces old_text (exact text from the file; read it first with read_local_file) with new_text; several edits in one call. Nothing is changed if any edit doesn't match. The user is asked to allow it first.", {
         path: { type: "string", description: "The full path of the file" },
@@ -1481,13 +1482,19 @@ const COMPUTER_TERMINAL_DEFS = [
     }, ["path", "edits"]),
     terminalDef("search_project", "Search inside the files of a folder (or one file) on the user's own computer, fast even in huge folders (ripgrep; node_modules, .git, dist, build and what .gitignore skips are skipped). Returns each matching line as full path:line:text. Search a folder, not a whole drive. Use this, never a terminal command, to search files.", {
         path: { type: "string", description: "The full path of the folder (or file) to search in" },
-        query: { type: "string", description: "The text to find" },
-        regex: { type: "boolean", description: "Treat query as a regular expression" },
+        query: { type: "string", description: "A regular expression (ripgrep syntax), e.g. \"log.*Error\", \"a|b|c\" for any of several words. Escape ( ) [ ] . * + ? | to find them as text, or set regex false." },
+        regex: { type: "boolean", description: "false = search query as plain text (default true: a regular expression)" },
         ignore_case: { type: "boolean", description: "Ignore upper and lower case" },
         glob: { type: "string", description: "Only files matching these patterns, comma separated, e.g. \"*.tsx\", \"src/**\"; !pattern leaves files out" },
-        context: { type: "number", description: "Lines shown before and after each match (0-20)" },
-        files_only: { type: "boolean", description: "Only the names of the files that contain it" },
+        type: { type: "string", description: "Only files of these languages (ripgrep types, comma separated), e.g. \"py\", \"ts\", \"js\", \"md\"" },
+        output_mode: { type: "string", enum: ["content", "files", "count"], description: "\"content\" (default) = matching lines; \"files\" = only the files' names; \"count\" = matches in each file" },
+        context: { type: "number", description: "Lines shown before and after each match (0-50)" },
+        before: { type: "number", description: "Lines shown before each match (0-50); overrides context" },
+        after: { type: "number", description: "Lines shown after each match (0-50); overrides context" },
+        multiline: { type: "boolean", description: "Let a match span lines (. matches newlines, \\n matches a line break)" },
+        files_only: { type: "boolean", description: "Same as output_mode \"files\"" },
         max_results: { type: "number", description: "Most lines (or files) returned, 1-2000 (default 200)" },
+        offset: { type: "number", description: "Skip this many results first, for the next page" },
     }, ["path", "query"]),
     terminalDef("find_project_files", "Find files by name in a folder on the user's own computer, fast even in huge folders (like Glob): \"Settings\" finds every file with Settings in its name, \"**/*.pdf\" every PDF. Newest first. Look in a folder, not a whole drive.", {
         path: { type: "string", description: "The full path of the folder to look in" },

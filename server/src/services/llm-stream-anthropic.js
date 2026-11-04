@@ -321,7 +321,7 @@ export function makeToolImageCollector(signal, conversation = null) {
 
 // Cloudflare models take pictures, not PDF files, so a PDF's pages are drawn as pictures here (Claude reads
 // the PDF itself). This lets a model that sees images read a scanned PDF, which has no text to pull out.
-const MAX_PDF_PAGE_IMAGES = 10;
+const MAX_PDF_PAGE_IMAGES = 20;
 const PDF_PAGE_LONG_SIDE = 1600;
 
 export async function pdfPageImages(buf, maxPages, fromPage = 1) {
@@ -818,7 +818,7 @@ export async function streamClaudeChat({
                 const refs = isObjectResult && Array.isArray(content.toolReferences)
                     ? content.toolReferences.filter((n) => deferredToolNames.has(n))
                     : [];
-                const resultText = String((isObjectResult ? content.text : content) ?? "").slice(0, call.name === "run_project_helpers" || call.name === "check_helpers" || call.name === "read_whatsapp_messages" || call.name === "wait_for_whatsapp_reply" ? 200000 : ["execute_terminal_command", "computer_terminal", "check_background_command", "start_background_command", "send_background_input", "run_code"].includes(call.name) ? 60000 : call.name === "open_url" || call.name === "view_project_file" || call.name === "search_project" || call.name === "read_local_file" ? 20000 : 6000);
+                const resultText = String((isObjectResult ? content.text : content) ?? "").slice(0, call.name === "run_project_helpers" || call.name === "check_helpers" || call.name === "read_whatsapp_messages" || call.name === "wait_for_whatsapp_reply" ? 200000 : ["execute_terminal_command", "computer_terminal", "check_background_command", "start_background_command", "send_background_input", "run_code"].includes(call.name) ? 60000 : call.name === "view_project_file" || call.name === "search_project" ? 100000 : call.name === "open_url" || call.name === "read_local_file" ? 20000 : 6000);
                 // The tool_result can only hold the references, so a loaded group's rules follow as a text block.
                 if (refs.length > 0 && content.instructions) extraTexts.push(String(content.instructions));
                 const images = refs.length > 0 || isError ? [] : await toolResultImages(call.name, isObjectResult ? content : null, resultText);

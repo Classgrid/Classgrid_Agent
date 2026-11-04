@@ -41,7 +41,10 @@ import redis from "../config/redis.js";
 // the normal user, inside the project folder only. Pushing adds the owner's GitHub key just for that one command,
 // so the key never ends up in the sandbox.
 
-const MAX_FILE_BYTES = 2 * 1024 * 1024;
+// Editing loads the whole file into the server's memory, so it stops at 50 MB (more could crash the live server);
+// reading streams any part of a file up to 300 MB
+const MAX_FILE_BYTES = 50 * 1024 * 1024;
+const VIEW_MAX_BYTES = 300 * 1024 * 1024;
 
 export async function sandboxSsh() {
   const ssh = new NodeSSH();
@@ -128,7 +131,7 @@ async function withProject(sessionId, fn) {
 async function readText(ssh, full) {
   const { stdout: size } = await ssh.execCommand(`[ -f ${q(full)} ] && stat -c %s ${q(full)}`);
   if (!size.trim()) throw new Error("File not found");
-  if (Number(size) > MAX_FILE_BYTES) throw new Error("File is too big to open here (over 2 MB)");
+  if (Number(size) > MAX_FILE_BYTES) throw new Error("File is too big to change here (over 50 MB); read parts of it with view_project_file start_line / end_line");
   const { stdout, code } = await ssh.execCommand(`base64 -w0 ${q(full)}`);
   if (code) throw new Error("Could not read the file");
   return Buffer.from(stdout, "base64").toString("utf8");
@@ -211,44 +214,73 @@ export const projectTools = {
     return `Project folder: ${rel === "." ? "/" : rel} (also /data${rel === "." ? "" : "/" + rel})\n${lines.join("\n") || "(empty)"}${lines.length >= 500 ? "\n… (first 500 entries)" : ""}`;
   }),
 
+  // Up to 2000 lines at a time (like the desktop app's); a file up to 300 MB is read in pieces, streamed by awk on the
+  // cloud computer (never loaded whole), and a very long line is cut at 2000 characters
   view_project_file: (sessionId, { path: file, start_line, end_line }) => withProject(sessionId, async (project, ssh) => {
     const { full, rel } = resolveInProject(project, file);
-    const lines = (await readText(ssh, full)).split("\n");
+    const { stdout: size } = await ssh.execCommand(`[ -f ${q(full)} ] && stat -c %s ${q(full)}`);
+    if (!size.trim()) throw new Error("File not found");
+    if (Number(size) > VIEW_MAX_BYTES) throw new Error("File is too big to open here (over 300 MB)");
     const start = Math.max(1, Number(start_line) || 1);
-    const end = Math.min(lines.length, Number(end_line) || Math.min(lines.length, start + 799));
-    const body = lines.slice(start - 1, end).map((l, i) => `${start + i}: ${l}`).join("\n");
-    return `${rel} (lines ${start}-${end} of ${lines.length})\n${body}`;
+    const last = Number(end_line) || start + 1999;
+    const { stdout } = await ssh.execCommand(
+      `awk -v s=${start} -v e=${last} 'NR>=s && NR<=e { l=$0; sub(/\\r$/, "", l); if (length(l) > 2000) l = substr(l, 1, 2000) "… (line cut)"; print NR ": " l } END { print "TOTAL " NR }' ${q(full)}`
+    );
+    const out = stdout.split("\n");
+    const total = Number(out.pop()?.replace("TOTAL ", "")) || 0;
+    const end = Math.min(total, last);
+    const more = end < total ? `\n… ${total - end} more lines: read on with start_line ${end + 1}` : "";
+    return `${rel} (lines ${start}-${end} of ${total})\n${out.join("\n")}${more}`;
   }),
 
   // Like Claude Code's Grep: ripgrep when the cloud computer has it (it also skips what .gitignore skips), else grep.
   // A folder or one file (path), only some files (glob), lines around each match (context), or only the file names
-  search_project: (sessionId, { query, path: dir = "", regex = false, ignore_case = false, glob, context, files_only, max_results }) => withProject(sessionId, async (project, ssh) => {
+  // The same options as the desktop app's search: query is a regular expression by default (a bad one is searched as
+  // plain text); output_mode "content" / "files" / "count"; before / after / context; multiline; type; offset pages
+  search_project: (sessionId, { query, path: dir = "", regex = true, ignore_case = false, glob, context, before, after, files_only, output_mode, multiline, type, offset, max_results }) => withProject(sessionId, async (project, ssh) => {
     if (!query) return "Error: query is empty";
+    // "getChatSession|copyInfo|chatInfo" with regex false: still any of those words, not the whole text with the bars
+    const words = regex ? [] : String(query).split("|");
+    if (words.length > 1 && words.every((w) => /^[\w.$-]+$/.test(w.trim()))) {
+      query = words.map((w) => w.trim().replace(/[.$]/g, "\\$&")).join("|");
+      regex = true;
+    }
+    let note = "";
+    if (regex) { try { new RegExp(String(query)); } catch { regex = false; note = " (not a valid regular expression, so it was searched as plain text)"; } }
     const { full } = resolveInProject(project, dir);
     const where = q(path.posix.relative(projectHostDir(project), full) || ".");
+    const mode = files_only || output_mode === "files" || output_mode === "files_with_matches" ? "files" : output_mode === "count" ? "count" : "content";
     const limit = Math.min(Math.max(Number(max_results) || 200, 1), 2000);
-    const around = files_only ? 0 : Math.min(Math.max(Number(context) || 0, 0), 20);
+    const skip = Math.max(Number(offset) || 0, 0);
+    const upTo50 = (n) => (mode === "content" ? Math.min(Math.max(Number(n) || 0, 0), 50) : 0);
+    const [b, a] = [upTo50(before ?? context), upTo50(after ?? context)];
     const globs = String(Array.isArray(glob) ? glob.join(",") : glob || "").split(/[,\s]+/).filter(Boolean);
-    const rg = `rg ${files_only ? "-l" : `-nH --no-heading${around ? ` -C ${around}` : ""}`} --color never --no-require-git --hidden --max-columns 400 --max-columns-preview ` +
-      `${SEARCH_SKIP.map((d) => `-g ${q(`!${d}`)}`).join(" ")} ${globs.map((g) => `-g ${q(g)}`).join(" ")} ${ignore_case ? "-i" : "-s"} ${regex ? "" : "-F"} -f -`;
-    const grep = `grep -rI${files_only ? "l" : "nH"}${around ? ` -C ${around}` : ""} ${regex ? "-E" : "-F"}${ignore_case ? " -i" : ""} ` +
+    const types = String(Array.isArray(type) ? type.join(",") : type || "").split(/[,\s]+/).filter((t) => /^[\w+-]+$/.test(t));
+    const around = `${b ? ` -B ${b}` : ""}${a ? ` -A ${a}` : ""}`;
+    const rg = `rg ${mode === "files" ? "-l" : mode === "count" ? "--count-matches -H" : `-nH --no-heading${around}`} --color never --no-require-git --hidden --max-columns 2000 --max-columns-preview --max-filesize 300M ` +
+      `${SEARCH_SKIP.map((d) => `-g ${q(`!${d}`)}`).join(" ")} ${globs.map((g) => `-g ${q(g)}`).join(" ")} ${types.map((t) => `-t ${q(t)}`).join(" ")} ` +
+      `${multiline ? "-U --multiline-dotall" : ""} ${ignore_case ? "-i" : "-s"} ${regex ? "" : "-F"} -f -`;
+    // (no ripgrep: grep, without multiline and type)
+    const grep = `grep -rI${mode === "files" ? "l" : mode === "count" ? "c" : "nH"}${around} ${regex ? "-E" : "-F"}${ignore_case ? " -i" : ""} ` +
       `${SEARCH_SKIP.map((d) => `--exclude-dir=${q(d)}`).join(" ")} ` +
       `${globs.map((g) => (g.startsWith("!") ? `--exclude=${q(g.slice(1).split("/").pop())}` : `--include=${q(g.split("/").pop())}`)).join(" ")} -f -`;
-    // The full list goes to a temp file: the real totals are counted from it, the first lines are shown
+    // The full list goes to a temp file: the real totals are counted from it, and the page asked for is shown
     const { stdout } = await ssh.execCommand(
-      `cd ${q(projectHostDir(project))} && t=$(mktemp) && { if command -v rg >/dev/null 2>&1; then ${rg} -- ${where}; else ${grep} -- ${where}; fi; } | sed 's#^\\./##' > $t; ` +
-      `echo "TOTAL $(grep -cE '^[^:]+:[0-9]+:' $t) $(grep -oE '^[^:]+:[0-9]+:' $t | cut -d: -f1 | sort -u | wc -l) $(grep -c '' $t)"; head -${limit} $t | cut -c1-400; rm -f $t`,
+      `cd ${q(projectHostDir(project))} && t=$(mktemp) && { if command -v rg >/dev/null 2>&1; then ${rg} -- ${where}; else ${grep} -- ${where}${mode === "count" ? " | grep -v ':0$'" : ""}; fi; } | sed 's#^\\./##' > $t; ` +
+      `echo "TOTAL $(grep -cE '^[^:]+:[0-9]+:' $t) $(grep -oE '^[^:]+:[0-9]+:' $t | cut -d: -f1 | sort -u | wc -l) $(grep -c '' $t) $(awk -F: '{s+=$NF} END{print s+0}' $t)"; ` +
+      `tail -n +${skip + 1} $t | head -${limit} | cut -c1-2000; rm -f $t`,
       { stdin: String(query) }
     );
     const [first, ...rest] = stdout.split("\n");
-    const [, lines = "0", files = "0", all = "0"] = (first || "").split(" ");
+    const [, lines = "0", files = "0", all = "0", sum = "0"] = (first || "").split(" ");
     const shown = rest.join("\n").trim();
-    if (files_only) {
-      if (Number(all) === 0) return "No matches.";
-      return `Found in ${all} file${all === "1" ? "" : "s"}${Number(all) > limit ? ` (first ${limit}; narrow it with path or glob)` : ""}.\n${shown}`;
-    }
-    if (Number(lines) === 0) return "No matches.";
-    return `Found in ${files} file${files === "1" ? "" : "s"} (${lines} matching line${lines === "1" ? "" : "s"})${Number(all) > limit ? `; showing the first ${limit} lines, there are more: narrow it with path or glob, or use files_only` : ""}.\n${shown}`;
+    const page = skip ? ` (from result ${skip + 1})` : "";
+    const next = Number(all) > skip + limit ? `; there are more: use offset ${skip + limit} for the next ${limit}, or narrow it with path, glob or type` : "";
+    if (Number(all) === 0) return `No matches.${note}`;
+    if (!shown) return `No more results after ${skip} (there were ${all}).${note}`;
+    if (mode === "files") return `Found in ${all} file${all === "1" ? "" : "s"}${page}${next}.${note}\n${shown}`;
+    if (mode === "count") return `Found in ${all} file${all === "1" ? "" : "s"} (${sum} matches)${page}${next}.${note}\n${shown}`;
+    return `Found in ${files} file${files === "1" ? "" : "s"} (${lines} matching line${lines === "1" ? "" : "s"})${page}${next}.${note}\n${shown}`;
   }),
 
   // Like Claude Code's Glob: files by name ("Settings", "**/*.yml", "src/**/use*.ts"), newest first
@@ -271,13 +303,15 @@ export const projectTools = {
   }),
 
   // New files only. A file that already exists is always changed with edit_project_file, never replaced whole.
-  write_project_file: (sessionId, { path: file, content = "" }) => withProject(sessionId, async (project, ssh) => {
+  // A new file, or with overwrite a whole existing file replaced (like Claude Code's Write)
+  write_project_file: (sessionId, { path: file, content = "", overwrite = false }) => withProject(sessionId, async (project, ssh) => {
     const { full, rel } = resolveInProject(project, file);
-    const { stdout: exists } = await ssh.execCommand(`[ -e ${q(full)} ] && echo yes`);
-    if (exists.trim()) return `Error: ${rel} already exists, so it was not changed. Change existing files with edit_project_file.`;
+    const { stdout: exists } = await ssh.execCommand(`[ -d ${q(full)} ] && echo dir || { [ -e ${q(full)} ] && echo yes; }`);
+    if (exists.trim() === "dir") return `Error: ${rel} is a folder.`;
+    if (exists.trim() && !overwrite) return `Error: ${rel} already exists, so it was not changed. Change it with edit_project_file, or replace the whole file with overwrite: true (after reading it).`;
     await writeText(ssh, full, String(content));
     const total = String(content).split("\n").length;
-    return `Created ${rel} (${total} lines, +${total} -0).${await problemsAfterWrite(ssh, project, full)}`;
+    return `${exists.trim() ? "Replaced" : "Created"} ${rel} (${total} lines${exists.trim() ? "" : `, +${total} -0`}).${await problemsAfterWrite(ssh, project, full)}`;
   }),
 
   // One or more edits in one file. Each edit replaces old_text (which must be found exactly, once unless

@@ -389,7 +389,7 @@ export const getMcpTools = () => [
   },
   {
     name: 'view_project_file',
-    description: 'Read a file of the open Project Mode project, with line numbers. Can read only a line range.',
+    description: 'Read a file of the open Project Mode project, with line numbers: up to 2000 lines at a time (a very long line is cut at 2000 characters). A file of any size (up to 300 MB) can be read in pieces: start_line jumps anywhere, e.g. line 500000. Read the part you need; for a big file, find the place with search_project first.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -407,13 +407,19 @@ export const getMcpTools = () => [
       type: 'object',
       properties: {
         ignore_case: { type: 'boolean', description: 'Match upper and lower case the same (default false).' },
-        query: { type: 'string', description: 'Text to find (or a regular expression when regex is true).' },
+        query: { type: 'string', description: 'A regular expression (ripgrep syntax), e.g. "log.*Error", "function\\s+\\w+", "a|b|c" for any of several words. Escape ( ) [ ] { } . * + ? | to find them as text, or set regex false.' },
         path: { type: 'string', description: 'Folder or file inside the project to search in. Empty = whole project.' },
-        regex: { type: 'boolean', description: 'Treat query as a regular expression (for several words at once: "a|b|c").' },
+        regex: { type: 'boolean', description: 'false = search query as plain text (default true: a regular expression).' },
         glob: { type: 'string', description: 'Only files matching these patterns, comma separated, e.g. "*.tsx", "src/**/*.ts", "*.{js,jsx}". A pattern starting with ! leaves files out, e.g. "!*.test.ts".' },
-        context: { type: 'number', description: 'Lines shown before and after each match (0-20, default 0).' },
-        files_only: { type: 'boolean', description: 'Only the names of the files that contain it (good for a first, wide search).' },
-        max_results: { type: 'number', description: 'Most lines (or files) returned, 1-2000 (default 200).' }
+        type: { type: 'string', description: 'Only files of these languages (ripgrep types, comma separated), e.g. "py", "ts", "js", "rust", "go", "java", "css", "md". Faster than glob for a language.' },
+        output_mode: { type: 'string', enum: ['content', 'files', 'count'], description: '"content" (default) = the matching lines; "files" = only the names of the files that contain it (good for a first, wide search); "count" = how many matches in each file.' },
+        context: { type: 'number', description: 'Lines shown before and after each match (0-50, default 0).' },
+        before: { type: 'number', description: 'Lines shown before each match (0-50); overrides context for before.' },
+        after: { type: 'number', description: 'Lines shown after each match (0-50); overrides context for after.' },
+        multiline: { type: 'boolean', description: 'Let a match span lines: . matches newlines too, and \\n in the pattern matches a line break (e.g. "interface Props \\{[\\s\\S]*?\\}").' },
+        files_only: { type: 'boolean', description: 'Same as output_mode "files".' },
+        max_results: { type: 'number', description: 'Most lines (or files) returned, 1-2000 (default 200).' },
+        offset: { type: 'number', description: 'Skip this many results first, to get the next page (e.g. 200 after a first search of 200).' }
       },
       required: ['query']
     }
@@ -433,12 +439,13 @@ export const getMcpTools = () => [
   },
   {
     name: 'write_project_file',
-    description: 'Create a new file in the open Project Mode project. Folders are created as needed. The user sees it in the code editor right away. Only for files that do not exist yet: an existing file is changed with edit_project_file and is never replaced.',
+    description: 'Create a new file in the open Project Mode project, or replace a whole existing file with overwrite: true (only a file you read in this chat and nobody changed since). Folders are created as needed. The user sees it in the code editor right away. For a few changes in an existing file use edit_project_file instead; overwrite is for rewriting most of a file.',
     inputSchema: {
       type: 'object',
       properties: {
         path: { type: 'string', description: 'File inside the project, relative (e.g. "src/utils/date.ts") or as /data/... .' },
-        content: { type: 'string', description: 'The full file content.' }
+        content: { type: 'string', description: 'The full file content.' },
+        overwrite: { type: 'boolean', description: 'Replace the whole existing file (read it first). Default false: an existing file is not changed.' }
       },
       required: ['path', 'content']
     }
