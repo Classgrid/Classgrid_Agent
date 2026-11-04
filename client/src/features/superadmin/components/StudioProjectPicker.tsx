@@ -732,7 +732,7 @@ function RenameDialog({ project, onClose, onRenamed }: { project: Project | null
           <DialogTitle className="text-[15px] font-medium">Rename project</DialogTitle>
           <DialogDescription className="mt-0.5 text-[13px] text-muted-foreground">
             {project?.location === "local" && project.localPath
-              ? `Only the name in Classgrid changes. The folder ${project.localPath} on your computer keeps its name.`
+              ? `The folder ${project.localPath} on your computer gets this new name too.`
               : "The new name shows in Project Mode and Studio Mode."}
           </DialogDescription>
         </div>

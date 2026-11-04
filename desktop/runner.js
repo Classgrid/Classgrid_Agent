@@ -305,6 +305,26 @@ const tools = {
     return repo ? `Repo: ${repo}` : "Error: NO_REMOTE This folder isn't on GitHub yet.";
   },
 
+  // Rename a folder on this computer (Rename in the project list): the folder keeps its place, only its name changes
+  rename_folder(root, { name }) {
+    if (!fs.existsSync(root)) return `Error: FOLDER_GONE The folder ${root} isn't on this computer any more.`;
+    const folderName = String(name || "").trim().split(/[\\/]/).filter(Boolean).pop() || "";
+    if (!folderName || /[<>:"|?*]/.test(folderName) || /^\.+$/.test(folderName)) return "Error: A folder name can't have these: < > : \" | ? *";
+    const target = path.join(path.dirname(path.resolve(root)), folderName);
+    if (sameFolder(target, root)) return `Folder: ${path.resolve(root)}`;
+    if (fs.existsSync(target)) return `Error: There's already a folder called ${folderName} next to it. Pick another name.`;
+    try {
+      fs.renameSync(root, target);
+    } catch (e) {
+      return /EBUSY|EPERM|EACCES/.test(e.code || "")
+        ? "Error: The folder is open in another app (an editor or a terminal). Close it there, then try again."
+        : `Error: Could not rename the folder: ${e.message}`;
+    }
+    const list = readFolders();
+    fs.writeFileSync(foldersFile, JSON.stringify([...list.filter((f) => !sameFolder(f, root)), target], null, 2));
+    return `Folder: ${target}`;
+  },
+
   // Link a folder on this computer to a GitHub repo the user picked: the folder becomes a Git folder if it isn't one,
   // and its "origin" points at the repo. Nothing is pushed or downloaded.
   link_repo(root, { repo }) {

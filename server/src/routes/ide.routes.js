@@ -392,6 +392,13 @@ router.patch("/projects/:id", isAuthenticated, async (req, res) => {
     const name = String(req.body.name).trim().slice(0, 80);
     if (!name) return res.status(400).json({ error: "Give the project a name" });
     if (await nameTaken(req.user._id, name, project._id)) return res.status(409).json({ error: `You already have a project called "${name}". Pick another name.` });
+    // A folder on the user's computer: the real folder is renamed there too (desktop/runner.js rename_folder)
+    if (project.location === "local" && project.localPath && name !== project.name) {
+      const r = await onComputer(project, project.localPath, "rename_folder", { name }).catch((e) => ({ error: e.message }));
+      if (r.error) return res.status(409).json({ error: r.error, code: r.code });
+      const folder = runnerLine(r.text, "Folder");
+      if (folder) project.localPath = folder;
+    }
     project.name = name;
   }
   if (req.body?.repo !== undefined) {
