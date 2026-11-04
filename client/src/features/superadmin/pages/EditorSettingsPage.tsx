@@ -6,7 +6,9 @@ import { useEffect, useState } from "react";
 import { BookOpen, LogOut, Monitor, Moon, Palette, Sun, User } from "lucide-react";
 import { useTheme } from "next-themes";
 import { useUserProfile } from "@/features/shared/queries/useUserProfile";
+import { AnimatePresence } from "framer-motion";
 import { AI_HUB_TABS, AiHubModal } from "@/components/ai/components/AiHubModal";
+import { ClassgridLoading } from "@/features/superadmin/components/ClassgridLoading";
 
 type Mode = "light" | "dark" | "system";
 type EditorSettingsDesktop = {
@@ -25,9 +27,64 @@ const SECTIONS = [
 ] as const;
 type Section = string;
 const known = (s: string | null): s is Section => !!s && [...SECTIONS, ...AI_HUB_TABS].some((x) => x.id === s);
+const isHubTab = (s: string) => AI_HUB_TABS.some((t) => t.id === s);
+
+// Every request this tab makes (fetch and XHR), so the loading screen stays until all its pages have their data
+let pending = 0;
+const waiters = new Set<() => void>();
+const bump = (d: number) => { pending = Math.max(0, pending + d); waiters.forEach((f) => f()); };
+function countRequests() {
+  const w = window as unknown as { __cgCounted?: boolean };
+  if (w.__cgCounted) return;
+  w.__cgCounted = true;
+  // (live connections that stay open, like the chat socket or a stream, aren't loading)
+  const live = (url: unknown) => /socket\.io|\/stream|\/events|\/sse\b/i.test(String(url || ""));
+  const realFetch = window.fetch.bind(window);
+  window.fetch = (...args: Parameters<typeof fetch>) => {
+    const req = args[0];
+    if (live(typeof req === "string" || req instanceof URL ? req : req.url)) return realFetch(...args);
+    bump(1);
+    return realFetch(...args).finally(() => bump(-1));
+  };
+  const open = XMLHttpRequest.prototype.open;
+  XMLHttpRequest.prototype.open = function (this: XMLHttpRequest & { __cgUrl?: string }, ...args: unknown[]) {
+    this.__cgUrl = String(args[1] || "");
+    return (open as (...a: unknown[]) => void).apply(this, args);
+  };
+  const send = XMLHttpRequest.prototype.send;
+  XMLHttpRequest.prototype.send = function (this: XMLHttpRequest & { __cgUrl?: string }, ...args: Parameters<XMLHttpRequest["send"]>) {
+    if (!live(this.__cgUrl)) {
+      bump(1);
+      this.addEventListener("loadend", () => bump(-1), { once: true });
+    }
+    return send.apply(this, args);
+  };
+}
+
+// The loading screen: until the profile is there and nothing has loaded for a moment (at most 12 s), then never again
+function useEverythingLoaded(profileReady: boolean) {
+  const [ready, setReady] = useState(false);
+  useEffect(() => {
+    if (ready) return;
+    const started = Date.now();
+    let quiet: ReturnType<typeof setTimeout> | undefined;
+    const check = () => {
+      clearTimeout(quiet);
+      if (Date.now() - started > 12000) return setReady(true);
+      if (profileReady && pending === 0) quiet = setTimeout(() => { if (pending === 0) setReady(true); }, 400);
+    };
+    waiters.add(check);
+    const cap = setTimeout(() => setReady(true), 12000);
+    check();
+    return () => { waiters.delete(check); clearTimeout(quiet); clearTimeout(cap); };
+  }, [profileReady, ready]);
+  return ready;
+}
 
 export function EditorSettingsPage() {
+  useState(countRequests); // (before the pages below start loading)
   const { data: profile } = useUserProfile();
+  const loaded = useEverythingLoaded(!!profile);
   const { setTheme } = useTheme();
   // (the AI panel opens this tab on an AI Hub page, like Plugins: ?section=plugins, or a message while it's open)
   const [section, setSection] = useState<Section>(() => {
@@ -136,11 +193,10 @@ export function EditorSettingsPage() {
               </div>
             </>
           )}
-          {AI_HUB_TABS.some((t) => t.id === section) && (
-            <div className="-mt-8 -mx-3 md:-mx-8">
-              <AiHubModal isOpen onClose={() => {}} initialTab={section} embedded />
-            </div>
-          )}
+          {/* (all the AI Hub's pages load at once, behind the loading screen, and stay loaded) */}
+          <div className={isHubTab(section) ? "-mt-8 -mx-3 md:-mx-8" : "hidden"}>
+            <AiHubModal isOpen onClose={() => {}} initialTab={isHubTab(section) ? section : "plugins"} embedded />
+          </div>
           {section === "appearance" && (
             <>
               <h1 className="text-xl font-semibold mb-5">Appearance</h1>
@@ -166,6 +222,7 @@ export function EditorSettingsPage() {
           )}
         </main>
       </div>
+      <AnimatePresence>{!loaded && <ClassgridLoading />}</AnimatePresence>
     </div>
   );
 }

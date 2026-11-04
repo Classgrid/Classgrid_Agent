@@ -455,9 +455,9 @@ export function AiHubModal({ isOpen, onClose, onSendPrompt, initialTab = "plugin
   };
 
   // The chosen tab's page: inside the AI Hub window, or (embedded) right inside Classgrid Code's Settings tab
-  const hubContent = (
+  const tabContent = (tab: string) => (
               <div className={cn("p-8 z-10 relative custom-scrollbar", !embedded && "flex-1 overflow-y-auto")}>
-                {activeTab === "plugins" ? (
+                {tab === "plugins" ? (
                   selectedCustom ? (
                     <CustomConnectorDetail
                       server={selectedCustom}
@@ -583,7 +583,7 @@ export function AiHubModal({ isOpen, onClose, onSendPrompt, initialTab = "plugin
                       )}
                     </div>
                   )
-                ) : activeTab === "images" ? (
+                ) : tab === "images" ? (
                   <div className="animate-in fade-in slide-in-from-bottom-4 duration-500 h-full flex flex-col">
                     <h3 className="text-2xl font-bold text-foreground mb-2">My Generated Images</h3>
                     <p className="text-sm text-muted-foreground mb-8 max-w-xl">
@@ -593,7 +593,7 @@ export function AiHubModal({ isOpen, onClose, onSendPrompt, initialTab = "plugin
                       <AiImagesGallery backendUrl={backendUrl} />
                     </div>
                   </div>
-                ) : activeTab === "usage" ? (
+                ) : tab === "usage" ? (
                   <div className="animate-in fade-in slide-in-from-bottom-4 duration-500 h-full flex flex-col">
                     <h3 className="text-2xl font-bold text-foreground mb-2">AI Usage</h3>
                     <p className="text-sm text-muted-foreground mb-8 max-w-xl">
@@ -603,35 +603,39 @@ export function AiHubModal({ isOpen, onClose, onSendPrompt, initialTab = "plugin
                         <AiUsageBar showExactTokens={false} />
                     </div>
                   </div>
-                ) : activeTab === "credits" ? (
+                ) : tab === "credits" ? (
                   <div className="h-full flex-1 -m-8">
                     <AiCreditsPanel />
                   </div>
-                ) : activeTab === "upgrade" ? (
+                ) : tab === "upgrade" ? (
                   <div className="h-full flex-1 -m-8">
                     <AiUpgradePanel />
                   </div>
-                ) : activeTab === "skills" ? (
+                ) : tab === "skills" ? (
                   <div className="h-full flex-1">
                     <AiSkillsPanel backendUrl={backendUrl} />
                   </div>
-                ) : activeTab === "connected-apps" ? (
+                ) : tab === "connected-apps" ? (
                   <AiConnectedAppsPanel backendUrl={backendUrl} />
                 ) : (
                   <>
-                    <h3 className="text-2xl font-bold text-foreground mb-2">{AI_HUB_TABS.find(t => t.id === activeTab)?.label}</h3>
+                    <h3 className="text-2xl font-bold text-foreground mb-2">{AI_HUB_TABS.find(t => t.id === tab)?.label}</h3>
                     <p className="text-sm text-muted-foreground mb-8 max-w-xl">
-                      Manage your {AI_HUB_TABS.find(t => t.id === activeTab)?.label.toLowerCase()} configuration here.
+                      Manage your {AI_HUB_TABS.find(t => t.id === tab)?.label.toLowerCase()} configuration here.
                     </p>
                     
                     {/* Empty Placeholder Area */}
                     <div className="flex flex-col items-center justify-center h-64 border-2 border-dashed border-border rounded-xl">
-                       <p className="text-muted-foreground text-sm">Content for {activeTab} will go here</p>
+                       <p className="text-muted-foreground text-sm">Content for {tab} will go here</p>
                     </div>
                   </>
                 )}
               </div>
   );
+  // (embedded in Classgrid Code's Settings: every page stays loaded, so moving between them never shows loading again)
+  const hubContent = embedded
+    ? <>{AI_HUB_TABS.map((t) => <div key={t.id} className={t.id === activeTab ? undefined : "hidden"}>{tabContent(t.id)}</div>)}</>
+    : tabContent(activeTab);
 
   return (
     <>
