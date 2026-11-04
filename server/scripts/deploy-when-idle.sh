@@ -2,7 +2,7 @@
 # Puts a new server version live only when nobody is using the server (.github/workflows/deploy-backend.yml starts it
 # on EC2 after each push). It waits until the server has been quiet for a full minute: no requests being answered
 # (an AI answer is one long request) and no helpers working, as the running server reports in ~/.classgrid-busy
-# (server.js). A server too old to report waits for the night instead (00:00-05:00 India time). Then it takes the
+# (server.js). A server too old to report is judged by its own log instead (log_quiet). Then it takes the
 # newest code from GitHub, installs packages only if they changed, and restarts. A newer push replaces this wait.
 set -u
 
@@ -33,14 +33,36 @@ busy_now() {
   ' "$BUSY_DIR"
 }
 
+# (a server too old to report) its own log says whether an AI answer is running: 1 when no AI line was written for 3
+# minutes and every answer that started in the last 30 minutes has ended, else 0
+log_quiet() {
+  LOG=$(pm2 jlist 2>/dev/null | node -e "let d='';process.stdin.on('data',c=>d+=c).on('end',()=>{try{const p=JSON.parse(d).find(x=>x.name==='classgrid');console.log(p?p.pm2_env.pm_out_log_path:'')}catch{console.log('')}})")
+  if [ -z "$LOG" ] || [ ! -f "$LOG" ]; then echo 0; return; fi
+  tail -n 6000 "$LOG" | node -e '
+    let d = "";
+    process.stdin.on("data", (c) => (d += c)).on("end", () => {
+      const now = Date.now();
+      let lastAi = 0, started = 0, ended = 0;
+      for (const l of d.split("\n")) {
+        const m = l.match(/(\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(?:\.\d+)?Z)\s.*\[AI-/);
+        if (!m) continue;
+        const at = Date.parse(m[1]);
+        lastAi = Math.max(lastAi, at);
+        if (now - at > 30 * 60 * 1000) continue;
+        if (/GENERATE START/.test(l)) started++;
+        else if (/GENERATE END|ATTEMPT \d+ ERROR|replaced this answer|Request aborted/.test(l)) ended++;
+      }
+      console.log(now - lastAi > 3 * 60 * 1000 && ended >= started ? 1 : 0);
+    });'
+}
+
 quiet=0
 last_note=0
 while true; do
   busy=$(busy_now)
   if [ "$busy" = "-1" ]; then
-    # (no reports: the running server is older than this script) only at night, India time
-    hour=$(TZ=Asia/Kolkata date +%H)
-    if [ "$hour" -lt 5 ]; then quiet=$((quiet + 1)); else quiet=0; fi
+    # (no reports: the running server is older than this script) quiet when its log shows no AI answer running
+    if [ "$(log_quiet)" = "1" ]; then quiet=$((quiet + 1)); else quiet=0; fi
   elif [ "$busy" = "0" ]; then
     quiet=$((quiet + 1))
   else
