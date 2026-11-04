@@ -6690,10 +6690,13 @@ export const getChatSessions = async (req, res) => {
             const web = new Set(mine?.web_chat_ids || []);
             const pcProject = new Set(owned.flatMap(pcChatIds));
             const inProject = new Set(owned.flatMap((p) => p.chatSessionIds || []));
-            const unknown = (sessions || []).map((s) => s.id).filter((id) => !desk.has(id) && !web.has(id) && !inProject.has(id) && (mine?.studio_chat_ids || []).includes(id));
+            const unknown = (sessions || []).map((s) => s.id).filter((id) => !desk.has(id) && !web.has(id) && (inProject.has(id) || (mine?.studio_chat_ids || []).includes(id)));
             const metas = unknown.length ? await redis.mget(unknown.map((id) => `chatwake:meta:${id}`)).catch(() => []) : [];
             const lastApp = new Map(unknown.map((id, i) => { try { return [id, JSON.parse(metas?.[i] || "null")?.clientApp || null]; } catch { return [id, null]; } }));
-            chatPlace = (id) => (desk.has(id) ? "pc" : web.has(id) ? "cloud" : pcProject.has(id) ? "pc" : inProject.has(id) ? "cloud" : lastApp.get(id) === "desktop" ? "pc" : "cloud");
+            // (an older chat: the app that used it this week comes before its project, so a desktop app chat in a cloud
+            // project stays in the desktop app)
+            const fromApp = (id) => (lastApp.get(id) === "desktop" ? "pc" : lastApp.get(id) === "web" ? "cloud" : null);
+            chatPlace = (id) => (desk.has(id) ? "pc" : web.has(id) ? "cloud" : fromApp(id) || (pcProject.has(id) ? "pc" : "cloud"));
             const studioChats = new Set(mine?.studio_chat_ids || []);
             const callChats = new Set(mine?.call_chat_ids || []); // WhatsApp work: not started in either app
             const kept = (id) => (inProject.has(id) || studioChats.has(id)) && !callChats.has(id);
