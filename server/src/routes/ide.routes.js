@@ -34,7 +34,7 @@ import User from "../models/User.js";
 import IdeProject from "../models/IdeProject.js";
 import ChatGroup from "../models/ChatGroup.js";
 import { githubUser } from "../services/github-token.service.js";
-import { pushProject, openClassgridPrBranch, revealInEditor, checkpointChanges, rejectCheckpoint, undoToCheckpoint, backupAndRemoveProjectCode, touchStudio, STUDIO_USERS, STUDIO_SEEN, STUDIO_IDLE_MS } from "../services/ide-project.service.js";
+import { pushProject, openClassgridPrBranch, revealInEditor, checkpointChanges, rejectCheckpoint, undoToCheckpoint, backupAndRemoveProjectCode, touchStudio, pcChatIds, STUDIO_USERS, STUDIO_SEEN, STUDIO_IDLE_MS } from "../services/ide-project.service.js";
 import { repoAppToken } from "../services/github-app.service.js";
 import { callLocal, runnerOnline } from "../services/local-runner.service.js";
 import { isWebsite } from "../utils/client-app.js";
@@ -1043,6 +1043,8 @@ router.post("/projects/:id/cloud", isAuthenticated, async (req, res) => {
     const other = await IdeProject.findOne({ owner: req.user._id, _id: { $ne: project._id }, repo: new RegExp(`^${escapeRegex(repo)}$`, "i") }).select("name");
     if (other) return res.status(409).json({ error: `This folder's repo ${repo} is already linked to your project "${other.name}". Open that project instead.`, code: "repo_taken" });
     const folder = project.localPath;
+    // Its chats so far happened on this computer: they stay there and never show on the website
+    project.pcChatSessionIds = [...new Set([...pcChatIds(project), ...(project.chatSessionIds || [])])];
     project.repo = repo;
     project.location = "cloud";
     project.localPath = null;

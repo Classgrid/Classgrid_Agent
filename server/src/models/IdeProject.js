@@ -38,6 +38,10 @@ const ideProjectSchema = new mongoose.Schema(
     repo: { type: String, default: null }, // "owner/name" on GitHub
     logo: { type: String, default: null }, // the project's picture (R2 link), picked and cropped by the user
     chatSessionIds: { type: [String], default: [], index: true },
+    // The chats of this project that happened on a computer (the desktop app, in a folder or a copy "On this
+    // computer"). They stay on that computer's side: the website never lists them, even after the project gets a repo.
+    // Not set on projects made before this existed (see pcChatIds in services/ide-project.service.js).
+    pcChatSessionIds: { type: [String], default: undefined },
     lastOpenedAt: { type: Date, default: null },
     // Unpushed work pushed to GitHub when the project left the sandbox, shown once on the next open
     lastBackup: { branch: { type: String }, at: { type: Date } },

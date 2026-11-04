@@ -72,7 +72,7 @@ import {
 } from "../services/ai-chat.service.js";
 import { getHistory, getHistoryCount, appendToHistory, invalidateHistoryCache, getChatTranscript } from "../services/ai-chat-history.service.js";
 import { canAccessSession, gridLabelMap, gridProfilesText, getSharedSessionsFor, leaveSharedChat, sharedChatIdsFor } from "../services/ai-chat-grid.service.js";
-import { editorContextFor, rememberProjectSnapshot, sandboxDataDir, startCheckpoint, finishCheckpoint, linkChatToProject, forgetChatScreenProject, touchStudio } from "../services/ide-project.service.js";
+import { editorContextFor, rememberProjectSnapshot, sandboxDataDir, startCheckpoint, finishCheckpoint, linkChatToProject, forgetChatScreenProject, touchStudio, pcChatIds } from "../services/ide-project.service.js";
 import { PLANNER_BROWSER_TOOLS, PLANNER_BLIND_TOOLS, WORKER_BROWSER_TOOLS, BROWSER_TOOL_NAMES, makeBrowserHandlers, BROWSER_WORKER_SYSTEM } from "../services/studio-browser-tools.js";
 import { ensureBrowser } from "../services/studio-browser.service.js";
 import { gateHandlers, askPermission, PERMISSION_MODES } from "../services/permission-gate.js";
@@ -6670,10 +6670,11 @@ export const getChatSessions = async (req, res) => {
         if (!email) return res.status(401).json({ error: "Unauthorized" });
 
         let sessions = await getSessions(email);
-        // Chats of a folder project (a folder on the user's computer) are only in the desktop app, never on the website
+        // Chats that happened on a computer (a folder project's, or a cloud project's chats in its copy "On this
+        // computer") are only in the desktop app, never on the website
         if (isWebsite(req) && req.user?._id) {
             const IdeProject = (await import("../models/IdeProject.js")).default;
-            const local = new Set((await IdeProject.find({ owner: req.user._id, location: "local" }).select("chatSessionIds").lean()).flatMap((x) => x.chatSessionIds || []));
+            const local = new Set((await IdeProject.find({ owner: req.user._id }).select("name location chatSessionIds pcChatSessionIds").lean()).flatMap(pcChatIds));
             if (local.size) sessions = (sessions || []).filter((s) => !local.has(s.id));
         }
         // Agent mode and Project mode keep separate chat lists: ?mode=agent leaves out chats that belong to a
@@ -6688,7 +6689,8 @@ export const getChatSessions = async (req, res) => {
             const IdeProject = (await import("../models/IdeProject.js")).default;
             if (project === "all") {
                 // Projects page with no project open: the chats of all the user's projects
-                const ps = await IdeProject.find({ owner: req.user._id }).select("chatSessionIds name logo location").lean();
+                const ps = await IdeProject.find({ owner: req.user._id }).select("chatSessionIds pcChatSessionIds name logo location").lean();
+                const onPc = new Set(ps.flatMap(pcChatIds));
                 const inStudio = req.query?.studio === "1";
                 const ids = new Set([...ps.flatMap((x) => x.chatSessionIds || []), ...(inStudio ? [...studioIds, ...callIds] : [])]);
                 if (!inStudio) for (const id of callIds) ids.delete(id);
@@ -6696,7 +6698,7 @@ export const getChatSessions = async (req, res) => {
                 const owner = new Map(ps.flatMap((x) => (x.chatSessionIds || []).map((id) => [id, x])));
                 sessions = (sessions || []).filter((s) => ids.has(s.id)).map((s) => {
                     const p = owner.get(s.id);
-                    return p ? { ...s, project_id: String(p._id), project_name: p.name, project_logo: p.logo || null, ...(isWebsite(req) ? {} : { project_location: p.location || "cloud" }) } : s;
+                    return p ? { ...s, project_id: String(p._id), project_name: p.name, project_logo: p.logo || null, ...(isWebsite(req) ? {} : { project_location: p.location || "cloud", chat_place: onPc.has(s.id) ? "pc" : "cloud" }) } : s;
                 });
             } else if (project) {
                 const p = /^[0-9a-f]{24}$/i.test(String(project)) ? await IdeProject.findOne({ _id: project, owner: req.user._id }).select("chatSessionIds").lean() : null;
@@ -6749,8 +6751,8 @@ export const getChatSession = async (req, res) => {
         let projectLocation = null;
         if (req.user?._id) {
             const IdeProject = (await import("../models/IdeProject.js")).default;
-            const p = await IdeProject.findOne({ owner: req.user._id, chatSessionIds: id }).select("_id location").lean();
-            if (p && !(p.location === "local" && isWebsite(req))) {
+            const p = await IdeProject.findOne({ owner: req.user._id, chatSessionIds: id }).select("_id name location chatSessionIds pcChatSessionIds").lean();
+            if (p && !(isWebsite(req) && pcChatIds(p).includes(id))) {
                 projectId = String(p._id);
                 projectLocation = p.location || "cloud";
             }

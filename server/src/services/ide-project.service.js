@@ -893,6 +893,17 @@ export async function forgetChatScreenProject(sessionId) {
   await redis.del(UI_PROJECT(sessionId), CHAT_HERE(sessionId)).catch(() => {});
 }
 
+// The chats of a project that happened on a computer (needs name, location, chatSessionIds, pcChatSessionIds).
+// A folder project's chats all did. A project from before pcChatSessionIds existed that was made from a folder (its
+// name is still the folder's path, like C:\gridx) had all its chats on that computer too.
+const FOLDER_NAME = /^[a-z]:[\\/]/i;
+export function pcChatIds(p) {
+  if (!p) return [];
+  if (p.location === "local") return p.chatSessionIds || [];
+  if (Array.isArray(p.pcChatSessionIds)) return p.pcChatSessionIds;
+  return FOLDER_NAME.test(String(p.name || "")) ? p.chatSessionIds || [] : [];
+}
+
 export async function linkChatToProject(userId, projectId, sessionId, deviceId = null, { website = false } = {}) {
   await connectDB();
   const project = await IdeProject.findOne({ _id: projectId, owner: userId }).select("_id location localCopies");
@@ -905,6 +916,13 @@ export async function linkChatToProject(userId, projectId, sessionId, deviceId =
   // A chat stays with the project it started in (chats are kept per project); it is never moved to another one
   const other = await IdeProject.findOne({ owner: userId, chatSessionIds: sessionId, _id: { $ne: project._id } }).select("_id").lean();
   if (other) return;
+  // Where a chat happened is set when it starts: in the desktop app on this computer (a folder, or a copy "On this
+  // computer") it is a computer chat for good, so the website never lists it
+  const onPc = !website && (project.location === "local" || here);
+  if (onPc && !(await IdeProject.exists({ _id: project._id, chatSessionIds: sessionId }))) {
+    const full = await IdeProject.findById(project._id).select("name location chatSessionIds pcChatSessionIds").lean();
+    await IdeProject.updateOne({ _id: project._id }, { $set: { pcChatSessionIds: [...new Set([...pcChatIds(full), sessionId])] } });
+  }
   await IdeProject.updateOne({ _id: project._id }, { $addToSet: { chatSessionIds: sessionId } });
 }
 
