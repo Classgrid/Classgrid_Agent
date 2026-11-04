@@ -256,6 +256,13 @@ const tools = {
 
   async search_project(root, { query, path: dir = "", regex = false, ignore_case = false, glob, context, files_only, max_results }) {
     if (!query) return "Error: query is empty";
+    // "getChatSession|copyInfo|chatInfo" without regex: any of those words (as Claude Code's Grep reads it), not the
+    // whole text with the bars (that found nothing)
+    const words = regex ? [] : String(query).split("|");
+    if (words.length > 1 && words.every((w) => /^[\w.$-]+$/.test(w.trim()))) {
+      query = words.map((w) => w.trim().replace(/[.$]/g, "\\$&")).join("|");
+      regex = true;
+    }
     const { full } = resolveIn(root, dir);
     const fast = await searchWithRipgrep(root, full, { query, regex, ignore_case, glob, context, files_only, max_results });
     if (fast !== null) return fast;
