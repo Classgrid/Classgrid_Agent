@@ -8,8 +8,12 @@ const { spawn } = require("node:child_process");
 const { io } = require("socket.io-client");
 
 const API = process.env.CG_API || "https://api.classgrid.in"; // CG_API: a local backend when testing
-const MAX_FILE_BYTES = 2 * 1024 * 1024;
+const MAX_FILE_BYTES = 300 * 1024 * 1024; // the biggest file the AI reads, edits or searches (owner, 2026-11-04)
+const FILES_TAB_BYTES = 2 * 1024 * 1024;
+const STREAM_FROM_BYTES = 8 * 1024 * 1024; // view_project_file streams a file bigger than this instead of loading it whole
 const MAX_OUTPUT = 60000;
+const VIEW_LINES = 2000; // lines view_project_file shows when no end_line is given
+const REPLY_CHARS = 300000; // most text in one tool answer sent to the server (its socket messages are 1 MB at most)
 const AUTO_BACKGROUND_S = Number(process.env.CG_AUTO_BACKGROUND_S) || 45; // a command still running after this keeps running as a background job
 const wait = (ms) => new Promise((r) => setTimeout(r, ms));
 const SKIP_DIRS = new Set(["node_modules", ".git", "dist", "build", ".next", ".turbo", ".cache", "__pycache__", ".venv", "venv"]);
@@ -87,7 +91,7 @@ function blockedByHooks(root, command) {
 
 function readText(full) {
   if (!fs.existsSync(full) || !fs.statSync(full).isFile()) throw new Error("File not found");
-  if (fs.statSync(full).size > MAX_FILE_BYTES) throw new Error("File is too big to open here (over 2 MB)");
+  if (fs.statSync(full).size > MAX_FILE_BYTES) throw new Error("File is too big to open here (over 300 MB)");
   return fs.readFileSync(full, "utf8");
 }
 
@@ -177,34 +181,59 @@ function runRipgrep(cwd, args, limit) {
         lines.push(line);
       }
     });
+    let errText = "";
+    p.stderr.setEncoding("utf8");
+    p.stderr.on("data", (d) => { if (errText.length < 4000) errText += d; });
     p.on("error", () => finish(null));
     p.on("close", (code) => {
       if (buf && lines.length < limit) lines.push(buf.replace(/\r$/, ""));
-      finish(code === 0 || code === 1 || lines.length ? { lines, more } : null);
+      // (code 2 with nothing found: a bad pattern, glob or type, said in error)
+      finish(code === 0 || code === 1 || lines.length ? { lines, more } : errText.trim() ? { lines, more, error: errText.trim() } : null);
     });
   });
 }
-async function searchWithRipgrep(root, full, { query, regex, ignore_case, glob, context, files_only, max_results }) {
+// The search's options, like Claude Code's Grep: output_mode "content" (matching lines), "files" (only the files' names)
+// or "count" (matches in each file); before / after / context lines; multiline (a match across lines); type (a
+// language, like "py" or "ts"); offset to page through a big result
+async function searchWithRipgrep(root, full, { query, regex, ignore_case, glob, context, before, after, files_only, output_mode, multiline, type, offset, max_results }) {
   let isFile = false;
   try { isFile = fs.statSync(full).isFile(); } catch { return "Error: there is no such file or folder."; }
   const cwd = isFile ? path.dirname(full) : full;
+  const mode = files_only || output_mode === "files" || output_mode === "files_with_matches" ? "files" : output_mode === "count" ? "count" : "content";
   const limit = Math.min(Math.max(Number(max_results) || SEARCH_LIMIT, 1), 2000);
-  const around = Math.min(Math.max(Number(context) || 0, 0), 20);
-  const args = [
-    ...(files_only ? ["-l"] : ["--line-number", "--no-heading", "--with-filename", ...(around ? ["-C", String(around)] : [])]),
-    "--color", "never", "--path-separator", "/", "--max-columns", "400", "--max-columns-preview", "--max-filesize", "4M",
+  const skip = Math.max(Number(offset) || 0, 0);
+  const lines20 = (n) => Math.min(Math.max(Number(n) || 0, 0), 50);
+  const [b, a] = [lines20(before ?? context), lines20(after ?? context)];
+  const run = (asRegex) => runRipgrep(cwd, [
+    ...(mode === "files" ? ["-l"] : mode === "count" ? ["--count-matches", "--with-filename"]
+      : ["--line-number", "--no-heading", "--with-filename", ...(b ? ["-B", String(b)] : []), ...(a ? ["-A", String(a)] : [])]),
+    "--color", "never", "--path-separator", "/", "--max-columns", "2000", "--max-columns-preview", "--max-filesize", "300M",
     "--no-require-git", "--hidden", ...[...SKIP_DIRS].flatMap((d) => ["-g", `!${d}`]), ...globList(glob).flatMap((g) => ["-g", g]),
-    ...(ignore_case ? ["-i"] : ["-s"]), ...(regex ? [] : ["-F"]), "-e", String(query), "--", isFile ? path.basename(full) : ".",
-  ];
-  const out = await runRipgrep(cwd, args, limit);
+    ...(type ? globList(type).flatMap((t) => ["-t", t]) : []), ...(multiline ? ["-U", "--multiline-dotall"] : []),
+    ...(ignore_case ? ["-i"] : ["-s"]), ...(asRegex ? [] : ["-F"]), "-e", String(query), "--", isFile ? path.basename(full) : ".",
+  ], skip + limit);
+  let out = await run(regex);
+  // (not a valid pattern, like "foo(": searched as plain text instead)
+  let note = "";
+  if (out?.error && regex) { out = await run(false); note = " (not a valid regular expression, so it was searched as plain text)"; }
   if (!out) return null;
+  if (out.error) return `Error: ${out.error.split("\n")[0]}`;
   const prefix = path.relative(root, cwd).replace(/\\/g, "/");
-  const lines = out.lines.map((l) => (l === "--" ? l : (prefix ? `${prefix}/` : "") + l.replace(/^\.\//, "")));
-  if (!lines.length) return "No matches.";
-  if (files_only) return `Found in ${lines.length}${out.more ? "+" : ""} file${lines.length === 1 ? "" : "s"}${out.more ? ` (first ${limit}; narrow it with path or glob)` : ""}.\n${lines.join("\n")}`;
+  const all = out.lines.map((l) => (l === "--" ? l : (prefix ? `${prefix}/` : "") + l.replace(/^\.\//, "")));
+  const lines = all.slice(skip);
+  const more = out.more ? "+" : "";
+  const page = skip ? ` (from result ${skip + 1})` : "";
+  const next = out.more ? `; there are more: use offset ${skip + limit} for the next ${limit}, or narrow it with path, glob or type` : "";
+  if (!all.length) return `No matches.${note}`;
+  if (!lines.length) return `No more results after ${skip} (there were ${all.length}).${note}`;
+  if (mode === "files") return `Found in ${all.length}${more} file${all.length === 1 ? "" : "s"}${page}${next}.${note}\n${lines.join("\n")}`;
+  if (mode === "count") {
+    const sum = lines.reduce((n, l) => n + (Number(l.slice(l.lastIndexOf(":") + 1)) || 0), 0);
+    return `Found in ${all.length}${more} file${all.length === 1 ? "" : "s"} (${sum}${more} matches)${page}${next}.${note}\n${lines.join("\n")}`;
+  }
   const hits = lines.filter((l) => /^[^:]+:\d+:/.test(l));
   const files = new Set(hits.map((l) => l.slice(0, l.indexOf(":"))));
-  return `Found in ${files.size}${out.more ? "+" : ""} file${files.size === 1 ? "" : "s"} (${hits.length}${out.more ? "+" : ""} matching line${hits.length === 1 ? "" : "s"})${out.more ? `; showing the first ${limit} lines, there are more: narrow it with path or glob, or use files_only` : ""}.\n${lines.join("\n")}`;
+  return `Found in ${files.size}${more} file${files.size === 1 ? "" : "s"} (${hits.length}${more} matching line${hits.length === 1 ? "" : "s"})${page}${next}.${note}\n${lines.join("\n")}`;
 }
 // Files by name, like Claude Code's Glob ("**/*Settings*.tsx", "*.md", "src/**/use*.ts"), newest first
 async function findWithRipgrep(root, full, { pattern, max_results }) {
@@ -213,7 +242,7 @@ async function findWithRipgrep(root, full, { pattern, max_results }) {
   const args = ["--files", "--path-separator", "/", "--no-require-git", "--hidden", "--sortr", "modified",
     ...[...SKIP_DIRS].flatMap((d) => ["-g", `!${d}`]), ...pats.flatMap((g) => ["--iglob", g])];
   const out = await runRipgrep(full, args, limit);
-  if (!out) return null;
+  if (!out || out.error) return null;
   const prefix = path.relative(root, full).replace(/\\/g, "/");
   const lines = out.lines.map((l) => (prefix ? `${prefix}/` : "") + l.replace(/^\.\//, ""));
   if (!lines.length) return `No file matches ${pats.join(", ")}.`;
@@ -245,28 +274,43 @@ const tools = {
     return `Project folder: ${rel === "." ? "/" : rel}\n${out.join("\n") || "(empty)"}${out.length >= 500 ? "\n… (first 500 entries)" : ""}`;
   },
 
-  view_project_file(root, { path: file, start_line, end_line }) {
+  // Up to 2000 lines at a time (like Claude Code's Read); a file of any size is read in pieces with start_line and
+  // end_line (a big one is streamed, never loaded whole), and a very long line is cut at 2000 characters
+  async view_project_file(root, { path: file, start_line, end_line }) {
     const { full, rel } = resolveIn(root, file);
+    if (!fs.existsSync(full) || !fs.statSync(full).isFile()) throw new Error("File not found");
     markSeen(full);
-    const lines = readText(full).split(/\r?\n/);
     const start = Math.max(1, Number(start_line) || 1);
-    const end = Math.min(lines.length, Number(end_line) || Math.min(lines.length, start + 799));
-    return `${rel} (lines ${start}-${end} of ${lines.length})\n${lines.slice(start - 1, end).map((l, i) => `${start + i}: ${l}`).join("\n")}`;
+    const last = Number(end_line) || start + VIEW_LINES - 1;
+    const shown = [];
+    let total = 0;
+    const take = (l) => { total++; if (total >= start && total <= last) shown.push(`${total}: ${l.length > 2000 ? `${l.slice(0, 2000)}… (line cut: ${l.length} characters)` : l}`); };
+    if (fs.statSync(full).size <= STREAM_FROM_BYTES) fs.readFileSync(full, "utf8").split(/\r?\n/).forEach(take);
+    else {
+      const lines = require("node:readline").createInterface({ input: fs.createReadStream(full, { encoding: "utf8" }), crlfDelay: Infinity });
+      for await (const l of lines) take(l);
+    }
+    const end = Math.min(total, last);
+    const more = end < total ? `\n… ${total - end} more lines: read on with start_line ${end + 1}` : "";
+    return `${rel} (lines ${start}-${end} of ${total})\n${shown.join("\n")}${more}`;
   },
 
-  async search_project(root, { query, path: dir = "", regex = false, ignore_case = false, glob, context, files_only, max_results }) {
+  // query is a regular expression by default, like Claude Code's Grep (a bad one is searched as plain text)
+  async search_project(root, { query, path: dir = "", regex = true, ignore_case = false, glob, context, before, after, files_only, output_mode, multiline, type, offset, max_results }) {
     if (!query) return "Error: query is empty";
-    // "getChatSession|copyInfo|chatInfo" without regex: any of those words (as Claude Code's Grep reads it), not the
-    // whole text with the bars (that found nothing)
+    // "getChatSession|copyInfo|chatInfo" with regex false: still any of those words, not the whole text with the bars
+    // (that found nothing)
     const words = regex ? [] : String(query).split("|");
     if (words.length > 1 && words.every((w) => /^[\w.$-]+$/.test(w.trim()))) {
       query = words.map((w) => w.trim().replace(/[.$]/g, "\\$&")).join("|");
       regex = true;
     }
     const { full } = resolveIn(root, dir);
-    const fast = await searchWithRipgrep(root, full, { query, regex, ignore_case, glob, context, files_only, max_results });
+    const fast = await searchWithRipgrep(root, full, { query, regex, ignore_case, glob, context, before, after, files_only, output_mode, multiline, type, offset, max_results });
     if (fast !== null) return fast;
-    const re = regex ? new RegExp(String(query), ignore_case ? "i" : "") : null;
+    // (no ripgrep: the slow search below, one line at a time)
+    let re = null;
+    try { re = regex ? new RegExp(String(query), ignore_case ? "i" : "") : null; } catch { re = null; }
     const needle = ignore_case ? String(query).toLowerCase() : String(query);
     const hits = [];
     const files = new Set();
@@ -325,15 +369,26 @@ const tools = {
     return found.length ? `Found ${found.length} file${found.length === 1 ? "" : "s"}:\n${found.join("\n")}` : `No file matches ${pattern}.`;
   },
 
-  write_project_file(root, { path: file, content = "" }) {
+  // A new file, or (with overwrite, like Claude Code's Write) a whole existing file replaced: only one the AI has read
+  // in this session and nobody changed since, so it never writes over work it hasn't seen
+  write_project_file(root, { path: file, content = "", overwrite = false }) {
     const { full, rel } = resolveIn(root, file);
-    if (fs.existsSync(full)) return `Error: ${rel} already exists, so it was not changed. Change existing files with edit_project_file.`;
+    let before = null;
+    if (fs.existsSync(full)) {
+      if (!overwrite) return `Error: ${rel} already exists, so it was not changed. Change it with edit_project_file, or replace the whole file with overwrite: true (after reading it).`;
+      if (!fs.statSync(full).isFile()) return `Error: ${rel} is a folder.`;
+      if (!seenAt.has(full.toLowerCase())) return `Error: read ${rel} first (view_project_file, or read_local_file for a file outside a project), then replace it. Nothing was changed.`;
+      if (changedSinceSeen(full)) { seenAt.delete(full.toLowerCase()); return `Error: ${rel} was changed on disk after you last read it (the user or another program edited it). Nothing was changed. Read it again first.`; }
+      before = fs.statSync(full).size <= MAX_FILE_BYTES ? readText(full).replace(/\r\n/g, "\n") : "";
+    }
     fs.mkdirSync(path.dirname(full), { recursive: true });
     fs.writeFileSync(full, String(content), "utf8");
     const hooked = runAfterEdit(root, full);
     markSeen(full);
     const total = String(content).split("\n").length;
-    return `Created ${rel} (${total} lines, +${total} -0).${hooked}`;
+    if (before === null) return `Created ${rel} (${total} lines, +${total} -0).${hooked}`;
+    const { added, removed } = lineChange(before, String(content).replace(/\r\n/g, "\n"));
+    return `Replaced ${rel} (${total} lines, +${added} -${removed}).${hooked}`;
   },
 
   edit_project_file(root, { path: file, edits = [] }) {
@@ -828,8 +883,9 @@ async function readLocalFile({ path: given, start_line, end_line, chunk = 0 } = 
   } finally {
     fs.closeSync(fd);
   }
+  markSeen(full); // (so write_project_file overwrite and edit_project_file know the AI has read it)
   if (buf.subarray(0, 8192).includes(0)) throw new Error(`${full} is not a text file (it looks like a program, archive or other binary file), so it can't be read as text.`);
-  const cut = stat.size > MAX_FILE_BYTES ? ` Only the first 2 MB of this ${sizeText(stat.size)} file can be read.` : "";
+  const cut = stat.size > MAX_FILE_BYTES ? ` Only the first 300 MB of this ${sizeText(stat.size)} file can be read.` : "";
   return { text: textWindow(buf.toString("utf8").replace(/^\uFEFF/, ""), `${full}${cut ? ` (${sizeText(stat.size)}, cut)` : ""}`, start_line, end_line) + (cut ? `\n[${cut.trim()}]` : "") };
 }
 
@@ -986,11 +1042,13 @@ const computerFileTools = {
     const isFile = fs.statSync(full).isFile();
     const base = isFile ? path.dirname(full) : full;
     const text = await tools.search_project(base, { ...args, path: isFile ? path.basename(full) : "" });
-    // Each line's file as its full path (matches "file:12:", lines around them "file-12-", files_only lists names)
+    // Each line's file as its full path (matches "file:12:", lines around them "file-12-", counts "file:3", and the
+    // files mode lists names)
+    const filesMode = args.files_only || args.output_mode === "files" || args.output_mode === "files_with_matches";
     return text.split("\n").map((l, i) => {
       if (i === 0 || l === "--") return l;
-      const m = l.match(/^(.+?)([:-]\d+[:-][\s\S]*)$/);
-      return m ? path.join(base, m[1]) + m[2] : args.files_only ? path.join(base, l) : l;
+      const m = l.match(/^(.+?)([:-]\d+[:-][\s\S]*)$/) || (args.output_mode === "count" ? l.match(/^(.+)(:\d+)$/) : null);
+      return m ? path.join(base, m[1]) + m[2] : filesMode ? path.join(base, l) : l;
     }).join("\n");
   },
   async find_project_files(args) {
@@ -1048,6 +1106,10 @@ function connect(token) {
   socket.on("connect_error", (err) => console.log("[runner] could not connect:", err.message));
   socket.on("local-tool", async (req, ack) => {
     if (typeof ack !== "function") return;
+    // One reply stays under the server's 1 MB socket message limit (a bigger one would drop the connection); the AI
+    // only ever sees 100 KB of a tool's answer anyway
+    const send = ack;
+    ack = (r) => send(r && typeof r.text === "string" && r.text.length > REPLY_CHARS ? { ...r, text: `${r.text.slice(0, REPLY_CHARS)}\n… (cut: the answer was too long; read or search a smaller part)` } : r);
     try {
       const { tool, args = {}, root, chat } = req || {};
       if (chat) args.__chat = String(chat); // which chat started it (a finished background job wakes that chat)
@@ -1134,8 +1196,9 @@ function readForFilesTab(root, rel) {
   const image = IMAGE_TYPES[path.extname(full).toLowerCase()];
   if (image) return buf.length > 5 * 1024 * 1024 ? { path: rel, binary: true, size: buf.length } : { path: rel, binary: true, image: true, mime: image, size: buf.length, data: buf.toString("base64") };
   if (buf.includes(0)) return { path: rel, binary: true, size: buf.length };
-  const tooBig = buf.length > MAX_FILE_BYTES;
-  return { path: rel, binary: false, size: buf.length, truncated: tooBig, content: buf.subarray(0, MAX_FILE_BYTES).toString("utf8") };
+  // (the Files tab shows at most 2 MB: more would freeze the screen; the AI's own tools read up to 300 MB)
+  const tooBig = buf.length > FILES_TAB_BYTES;
+  return { path: rel, binary: false, size: buf.length, truncated: tooBig, content: buf.subarray(0, FILES_TAB_BYTES).toString("utf8") };
 }
 
 module.exports = {
