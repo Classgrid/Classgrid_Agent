@@ -6117,6 +6117,20 @@ If a tool fails, never show the error message; say only: "Something went wrong o
         // second answer below the first one.
         let shownAnswerText = "";
         const cutOffAnswer = () => `${shownAnswerText.trim()}\n\n_(The AI model stopped answering here. Say "continue" and it picks up from this point.)_`;
+        // A stopped or failed answer stays in the chat: its steps, thinking and the text so far are saved like a finished
+        // answer, so it never disappears after a reload or when the chat syncs (website, desktop app and Classgrid Code)
+        const STOPPED_NOTE = "_(Stopped.)_";
+        const FAILED_NOTE = "_(This answer stopped because of an error. Say \"continue\" and it picks up from here.)_";
+        let unfinishedKept = false;
+        const keepUnfinishedAnswer = (note) => {
+            if (unfinishedKept || isIncognito || !sessionId) return;
+            if (!accSteps.length && !accThought && !shownAnswerText.trim()) return;
+            unfinishedKept = true;
+            const text = shownAnswerText.trim();
+            const saved = JSON.stringify({ classgrid_ai_message: true, content: `${text}${text ? "\n\n" : ""}${note}`, thought: accThought, steps: accSteps, worked_ms: Date.now() - requestStartedAt });
+            saveMessage(sessionId, "assistant", saved, []).catch((err) => console.error("Failed to save the unfinished answer:", err));
+            appendToHistory(sessionId, "assistant", saved).catch(() => {});
+        };
         while (attempt <= maxAttempts) {
             if (attempt > 1 && shownAnswerText) {
                 console.warn(`[AI-STREAM] Not retrying (attempt ${attempt}): answer text was already shown`);
@@ -6260,7 +6274,7 @@ If a tool fails, never show the error message; say only: "Something went wrong o
                             const claudeModel = claudeErr.servedModel || requestedModel;
                             const outputStarted = claudeErr.toolsRun > 0 || loggedFirstToken || loggedFirstThought;
                             if (requestAborted || !outputStarted) chargeDetachedClaudeUsage(claudeErr.usage, claudeModel, claudeErr.message);
-                            if (requestAborted) return;
+                            if (requestAborted) return keepUnfinishedAnswer(STOPPED_NOTE);
                             if (outputStarted) {
                                 if (claudeErr.usage?.total_tokens > 0) usageStore.usage = claudeErr.usage;
                                 console.error(`[AI-STREAM] ${claudeModel} failed after output started (toolsRun=${claudeErr.toolsRun}); not retrying: ${claudeErr.message}`);
@@ -6335,7 +6349,7 @@ If a tool fails, never show the error message; say only: "Something went wrong o
                             console.log(`[AI-STREAM] ${model} streamed answer in ${((Date.now() - generateStartTime) / 1000).toFixed(1)}s, toolsRun=${streamed.toolsRun}`);
                             break;
                         } catch (streamErr) {
-                            if (requestAborted) return;
+                            if (requestAborted) return keepUnfinishedAnswer(STOPPED_NOTE);
                             // Not retried when a tool already ran (it could repeat side effects) or answer text was
                             // already shown (the retry would add a second answer below it).
                             if (streamErr.toolsRun > 0 || shownAnswerText) {
@@ -6372,7 +6386,7 @@ If a tool fails, never show the error message; say only: "Something went wrong o
                 console.log(`[AI-DEBUG] accSteps tools called: ${accSteps.map(s => s.tool).join(', ') || 'NONE'}`);                
 
 
-                if (requestAborted) return;
+                if (requestAborted) return keepUnfinishedAnswer(STOPPED_NOTE);
 
                 if (!answer) {
                     if (accSteps.length > 0) {
@@ -6410,7 +6424,7 @@ If a tool fails, never show the error message; say only: "Something went wrong o
             }
         }
 
-        if (requestAborted) return;
+        if (requestAborted) return keepUnfinishedAnswer(STOPPED_NOTE);
 
         // Remember this turn's tool groups (matched, loaded, or used) so follow-ups in the same chat keep them.
         if (sessionId && !isIncognito) {
@@ -6560,6 +6574,7 @@ If a tool fails, never show the error message; say only: "Something went wrong o
         }
 
         if (answer == null && !res.writableEnded) {
+            keepUnfinishedAnswer(FAILED_NOTE);
             res.write(`data: ${JSON.stringify({ type: "answer", answer: "Failed to get an answer from the AI." })}\n\n`);
         } else if (answer === "[RATE_LIMITED]" && !res.writableEnded) {
             res.write(`data: ${JSON.stringify({ type: "answer", answer: "I'm currently experiencing high traffic and cannot process your request right now." })}\n\n`);

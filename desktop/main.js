@@ -227,6 +227,17 @@ ipcMain.on("cg:version", (e) => { e.returnValue = app.getVersion(); });
 const NOTIFY_FILE = path.join(process.env.APPDATA || app.getPath("appData"), "Classgrid", "notification-settings.json");
 ipcMain.handle("cg:getNotificationSettings", () => { try { return JSON.parse(fs.readFileSync(NOTIFY_FILE, "utf8")); } catch { return null; } });
 ipcMain.handle("cg:saveNotificationSettings", (_e, s) => { try { fs.mkdirSync(path.dirname(NOTIFY_FILE), { recursive: true }); fs.writeFileSync(NOTIFY_FILE, JSON.stringify(s && typeof s === "object" ? s : {})); return true; } catch { return false; } });
+// A Windows notification from our screens (a Grids message while the window is in the background). The window comes
+// forward when the notification is clicked.
+ipcMain.handle("cg:notify", (_e, { title, body } = {}) => {
+  if (!title || !body) return false;
+  try {
+    const n = new Notification({ title: String(title), body: String(body) });
+    n.on("click", () => { if (win && !win.isDestroyed()) { if (win.isMinimized()) win.restore(); win.show(); win.focus(); } });
+    n.show();
+    return true;
+  } catch { return false; }
+});
 // This computer's own Windows ID (MachineGuid), scrambled so the real ID never leaves the computer: the free AI
 // limit counts per computer, not per account (more accounts on one PC don't give more free usage)
 let deviceId;

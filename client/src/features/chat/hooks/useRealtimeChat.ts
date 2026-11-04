@@ -68,7 +68,9 @@ type RealtimeHandler = (payload: any) => void;
  */
 export function useRealtimeChannel(
   channelName: string | null,
-  handlers: Record<string, RealtimeHandler>
+  handlers: Record<string, RealtimeHandler>,
+  // (a room that is already open elsewhere, like the chat on screen: the server keeps it open for the other part)
+  options?: { leaveOnUnmount?: boolean }
 ) {
   const handlersRef = useRef(handlers);
   handlersRef.current = handlers;
@@ -121,7 +123,7 @@ export function useRealtimeChannel(
       if (socket) {
         listeners.forEach(({ event, fn }) => socket.off(event, fn));
         socket.off("connect", setup);
-        if (channelType === "thread") {
+        if (channelType === "thread" && options?.leaveOnUnmount !== false) {
           socket.emit("leave_thread", channelId);
         }
       }

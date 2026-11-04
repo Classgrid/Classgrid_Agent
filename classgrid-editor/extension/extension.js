@@ -449,11 +449,19 @@ const HANDLERS = {
   githubRepo: (_p, folder) => parts.runner.githubRepoOf(String(folder || "")),
   readFile: (_p, folder, rel) => parts.runner.readForFilesTab(String(folder || ""), String(rel || "")),
   // A file the AI mentions or changed opens in this editor, at its lines
-  openInEditor: (_p, folder, file, line) => {
+  openInEditor: async (_p, folder, file, line) => {
     if (!parts.runner.isAllowed(folder)) return;
     const full = file ? inside(folder, file) : null;
     if (file && !full) return;
-    return full ? showFile(full, line, line) : vscode.commands.executeCommand("vscode.openFolder", vscode.Uri.file(String(folder))).then(() => undefined);
+    if (!full) return vscode.commands.executeCommand("vscode.openFolder", vscode.Uri.file(String(folder))).then(() => undefined);
+    if (fs.existsSync(full)) return showFile(full, line, line);
+    // The AI named the file without its folders ("extension.js", "desktop/main.js"): the file of that name in the folder
+    // (the one whose path ends the same way, the shortest path when there are several)
+    const rel = String(file).replace(/\\/g, "/").replace(/^\.?\//, "");
+    const found = await vscode.workspace.findFiles(new vscode.RelativePattern(String(folder), `**/${rel}`), "**/{node_modules,.git,dist,build}/**", 20);
+    if (!found.length) { vscode.window.showWarningMessage(`Classgrid: ${rel} isn't in this folder.`); return; }
+    found.sort((a, b) => a.fsPath.length - b.fsPath.length);
+    return showFile(found[0].fsPath, line, line);
   },
   revealInEditor: async (_p, folder, file, startLine, endLine) => {
     if (!parts.runner.isAllowed(folder)) return { error: "This folder isn't open in Classgrid Code." };

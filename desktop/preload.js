@@ -10,6 +10,10 @@ contextBridge.exposeInMainWorld("classgridDesktop", {
   // Notification settings shared with Classgrid Code (one file on this computer)
   getNotificationSettings: () => ipcRenderer.invoke("cg:getNotificationSettings"),
   saveNotificationSettings: (s) => ipcRenderer.invoke("cg:saveNotificationSettings", s),
+  // A Windows notification (a Grids message while the window is in the background)
+  notify: (title, body) => ipcRenderer.invoke("cg:notify", { title, body }),
+  // A Windows notification (a Grids message while the window is in the background)
+  notify: (title, body) => ipcRenderer.invoke("cg:notify", { title, body }),
   // A file on this computer shown in a Studio tab
   fileUrl: (file) => ipcRenderer.sendSync("cg:fileUrl", file),
   fileInfo: (file) => ipcRenderer.invoke("cg:fileInfo", file),

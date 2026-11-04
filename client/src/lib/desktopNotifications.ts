@@ -1,6 +1,7 @@
-// Desktop notifications (the Classgrid app and Classgrid Code): the user's choices, kept on this computer
-// (localStorage, so both the app and the editor's AI panel read the same settings). The settings page writes
-// here; AskAiPanel reads here before showing a Windows notification.
+// Desktop notifications (the Classgrid app and Classgrid Code): the user's choices, kept on this computer in one
+// file (%APPDATA%\Classgrid\notification-settings.json), so both programs use the same values. localStorage keeps a
+// copy for this window. The settings page writes here; the AI panel and the Grids popup read here before showing a
+// Windows notification.
 
 export type DesktopNotificationSettings = {
   enabled: boolean;        // master switch: any Windows notification at all
@@ -36,6 +37,7 @@ export function readNotificationSettings(): DesktopNotificationSettings {
 type SharedDesktop = {
   getNotificationSettings?: () => Promise<Partial<DesktopNotificationSettings> | null>;
   saveNotificationSettings?: (s: DesktopNotificationSettings) => Promise<unknown>;
+  notify?: (title: string, body: string) => Promise<unknown>;
 };
 const desk = () => (typeof window !== "undefined" ? ((window as any).classgridDesktop as SharedDesktop | undefined) : undefined);
 
@@ -63,6 +65,30 @@ export async function refreshNotificationSettings(): Promise<DesktopNotification
 if (typeof window !== "undefined") {
   void refreshNotificationSettings();
   window.addEventListener("blur", () => { void refreshNotificationSettings(); });
+}
+
+// One Windows notification, if the user wants this kind and isn't looking at the window it belongs to.
+// kind: what it is about (the switches in Settings). Returns true when it was shown.
+export function showDesktopNotification(kind: "aiFinished" | "needsYou" | "gridMessages", body: string, title = "Classgrid"): boolean {
+  const isDesktop = import.meta.env.VITE_DESKTOP === "1";
+  const isEditor = import.meta.env.VITE_EDITOR === "1";
+  if (!isDesktop && !isEditor) return false;
+  if (typeof document !== "undefined" && document.hasFocus()) return false; // the user is already here
+  try {
+    const s = readNotificationSettings();
+    if (!s.enabled || !s[kind]) return false;
+    if (s.sound) playNotificationSound(s.volume);
+    if (isEditor) {
+      // Classgrid Code has no Electron: its extension shows the toast (notify-toast.ps1)
+      void desk()?.notify?.(title, body);
+      return true;
+    }
+    // The Classgrid app: its main window shows it, so a click brings the app forward
+    if (desk()?.notify) { void desk()!.notify!(title, body); return true; }
+    const n = new Notification(title, { body });
+    n.onclick = () => window.focus();
+    return true;
+  } catch { return false; }
 }
 
 // A tiny "ding" (a short sine blip) at the chosen volume, so a notification can be heard without a sound file.

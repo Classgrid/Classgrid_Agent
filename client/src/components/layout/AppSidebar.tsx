@@ -282,6 +282,8 @@ export function AppSidebar({ role, user }: AppSidebarProps) {
 
   // Where Grids lives in this dashboard (for the new-message popup)
   const gridsItem = gridsDashboard ? (config?.sections ?? []).flatMap((s) => s.items).find(isGridsItem) : undefined;
+  // (the popup is in the sidebar, so it works on every page; the Grids page's own address is where it opens a chat)
+  const gridsPath = gridsItem?.to || (location.pathname.startsWith("/superadmin") ? "/superadmin/chat" : "/chat");
 
   // No sidebar for this role (only after every hook above, so the hook order never changes between renders)
   if (!config) {
@@ -290,7 +292,7 @@ export function AppSidebar({ role, user }: AppSidebarProps) {
 
   return (
     <Sidebar variant="sidebar" collapsible="icon" className="!bg-background !border-r-0">
-      {gridsItem?.to && <ChatMessageToasts chatPath={gridsItem.to} />}
+      {gridsDashboard && <ChatMessageToasts chatPath={gridsPath} />}
       <SidebarHeader className={showStorageMenu || showAgentMenu ? "gap-1 p-2 pb-0" : ""}>
         <div className="relative flex items-center w-full group-data-[collapsible=icon]:justify-center">
           <SidebarSwitcher user={user ?? null} />

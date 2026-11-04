@@ -239,7 +239,7 @@ import { fetchWithRescue } from "@/lib/rescue";
 import { LOCAL_IMAGE_MISSING, keepLocalImage, loadLocalImages, readAsDataUrl, sendsInline, showLocalImages } from "@/lib/desktopImages";
 import { OFFLINE_CHAT_NOTE, continueChatCopy, continuedChatOf, continuedFrom, isUnreachable, keepsChatCopies, readChatCopy, readOtherChatCopy, removeChatCopy, saveChatCopy, syncChatCopy, type OtherChatRef } from "@/lib/desktopChats";
 import { memoryNotesIndex, otherAccountsMemory, syncComputerMemory } from "@/lib/desktopMemory";
-import { readNotificationSettings, playNotificationSound } from "@/lib/desktopNotifications";
+import { showDesktopNotification } from "@/lib/desktopNotifications";
 import { AgentMapButton } from "./AgentMap";
 
 // Fetch real presigned URL for R2 uploads
@@ -2025,21 +2025,7 @@ export const INTEGRATIONS_LIST: any[] = [
 
 // Desktop app: a Windows notification when the user isn't looking at the app
 function notifyDesktop(body: string, kind: "aiFinished" | "needsYou" | "gridMessages" = "aiFinished") {
-  const isDesktop = import.meta.env.VITE_DESKTOP === "1";
-  const isEditor = import.meta.env.VITE_EDITOR === "1";
-  if ((!isDesktop && !isEditor) || document.hasFocus()) return;
-  try {
-    const s = readNotificationSettings();
-    if (!s.enabled || !s[kind]) return;
-    if (s.sound) playNotificationSound(s.volume);
-    if (isEditor) {
-      // Classgrid Code has no Electron: the extension shows a Windows toast
-      (window as any).classgridDesktop?.notify?.("Classgrid", body);
-      return;
-    }
-    const n = new Notification("Classgrid", { body });
-    n.onclick = () => window.focus();
-  } catch { /* notifications are off */ }
+  showDesktopNotification(kind, body);
 }
 export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow", initialMessages, autoFocus = true, readOnly = false, hideClearChat = false, overlayWidth, onOverlayWidthChange, onOverlayResizingChange, inputHeader, studioMenu = false }: AskAiPanelProps) {
   const { data: user } = useCurrentUser();
