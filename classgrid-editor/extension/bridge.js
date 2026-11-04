@@ -132,8 +132,9 @@
   };
   setCoverWidth(100000);
   (document.head || root).appendChild(coverStyle);
-  // (only the Agent panel and the chats sidebar cover the window; the Settings tab shows its windows in the tab)
-  var coversWindow = /^\/editor\/(project|sidebar)/.test(String(cfg.startPath || ""));
+  // Nothing covers the whole editor window any more: dialogs and big windows show inside the AI panel (owner,
+  // 2026-11-04: switching the page to window size and back made the panel flash). The covering code stays for now.
+  var coversWindow = false;
   if (coversWindow) new MutationObserver(function () {
     if (frame) return;
     frame = requestAnimationFrame(function () {
@@ -414,7 +415,8 @@
       return call("setEditorTheme", mode, want);
     },
     // A Windows notification (Classgrid Code has no Electron, so the extension shows a toast)
-    notify: function (title, body) { send("notify", { title: title, body: body }); },
+    // (sound: Windows plays its notification sound with it)
+    notify: function (title, body, opts) { send("notify", { title: title, body: body, sound: !!(opts && opts.sound) }); },
     getNotificationSettings: bind("getNotificationSettings"),
     saveNotificationSettings: bind("saveNotificationSettings"),
     // The AI panel's chats sidebar → Settings: the same Settings tab as the gear in the title bar

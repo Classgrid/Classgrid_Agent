@@ -63,7 +63,8 @@ export function App() {
     <GlobalErrorBoundary>
       <div className="bg-background text-foreground min-h-screen w-full">
         <AppRouter />
-        <Toaster />
+        {/* (none in Classgrid Code: its pop-up messages made the AI panel flash; owner, 2026-11-04) */}
+        {import.meta.env.VITE_EDITOR !== "1" && <Toaster />}
       </div>
     </GlobalErrorBoundary>
   );
