@@ -440,6 +440,7 @@ const HANDLERS = {
     return vscode.commands.executeCommand("classgrid.agent.focus").then(() => undefined, () => undefined);
   },
   activeChat: (_p, id) => { screens.chats?.postMessage({ cgEvent: "activeChat", data: id ? String(id) : null }); },
+  openSettings: () => vscode.commands.executeCommand("classgrid.openSettings").then(() => undefined),
   // Settings → Appearance: the whole editor light, dark, or the same as the computer (our screens follow it: bridge.js)
   setEditorTheme: async (_p, mode) => {
     const cfg = vscode.workspace.getConfiguration();

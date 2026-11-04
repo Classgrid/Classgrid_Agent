@@ -385,6 +385,8 @@
     onOpenFolderProject: on("openFolderProject"),
     // Settings → Appearance: light, dark or the same as the computer, for the whole editor
     setEditorTheme: bind("setEditorTheme"),
+    // The AI panel's chats sidebar → Settings: the same Settings tab as the gear in the title bar
+    openSettings: bind("openSettings"),
     // The chats sidebar on the left edge: its width, the chat picked there (opens in the Agent panel), and the chat
     // the Agent panel shows (marked in the sidebar)
     setStripWidth: function (width) { send("stripWidth", width); },
