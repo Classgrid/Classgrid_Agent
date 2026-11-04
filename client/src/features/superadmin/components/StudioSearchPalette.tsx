@@ -23,7 +23,7 @@ const KINDS: { kind: Kind; label: string; placeholder: string }[] = [
   { kind: "projects", label: "Projects", placeholder: "Search for projects..." },
 ];
 
-type Chat = { id: string; title: string; created_at: string; pinned?: boolean; project_id?: string; project_name?: string };
+type Chat = { id: string; title: string; created_at: string; pinned?: boolean; project_id?: string; project_name?: string; chat_place?: "pc" | "cloud" };
 type Project = { id: string; name: string; repo: string | null; logo?: string | null; location?: "cloud" | "local"; localPath?: string | null; localCopies?: LocalCopy[] };
 // A row: a file, chat or project; or, in Conversations, a project or group heading (head) that opens and closes with ^;
 // or (desktop app) a "This PC" / "Cloud" label over its projects, or the line over "No project" (label: never
@@ -142,20 +142,23 @@ export function StudioSearchPalette({ open, onClose, files: givenFiles, recent =
       const match = (c: Chat) => !t || cleanTitle(c.title).toLowerCase().includes(t);
       const byId = new Map((chats || []).map((c) => [c.id, c]));
       const inGroup = new Set((groups || []).flatMap((g) => g.chats.map((c) => c.id)));
-      type F = { key: string; id: string | null; name: string; logo: string | null; pinned: Chat[]; groups: ChatGroup[]; chats: Chat[]; newest: number };
+      type F = { key: string; id: string | null; place: "pc" | "cloud"; name: string; logo: string | null; pinned: Chat[]; groups: ChatGroup[]; chats: Chat[]; newest: number };
       const folders = new Map<string, F>();
-      const folder = (id: string | null, name?: string) => {
-        const key = id || "none";
+      // Desktop app: a chat is under This PC or Cloud by where it happened (the server's chat_place), so one project can
+      // show in both: its chats on this computer under This PC, its chats in the cloud under Cloud
+      const placeOf = (id: string | null, c?: Chat): "pc" | "cloud" => c?.chat_place || (id && onThisPc(projectOf(id)) ? "pc" : "cloud");
+      const folder = (id: string | null, name?: string, place: "pc" | "cloud" = placeOf(id)) => {
+        const key = id ? (onDesktop() ? `${place}:${id}` : id) : "none";
         if (!folders.has(key)) {
           const p = id ? names.get(id) : null;
-          folders.set(key, { key, id, name: id ? p?.name || name || "Project" : "No project", logo: p?.logo || null, pinned: [], groups: [], chats: [], newest: 0 });
+          folders.set(key, { key, id, place, name: id ? p?.name || name || "Project" : "No project", logo: p?.logo || null, pinned: [], groups: [], chats: [], newest: 0 });
         }
         return folders.get(key)!;
       };
       for (const c of chats || []) {
         if (inGroup.has(c.id) && !c.pinned) continue;
         if (hidden(c.project_id)) continue;
-        const f = folder(c.project_id || null, c.project_name);
+        const f = folder(c.project_id || null, c.project_name, placeOf(c.project_id || null, c));
         (c.pinned ? f.pinned : f.chats).push(c);
         f.newest = Math.max(f.newest, new Date(c.created_at).getTime());
       }
@@ -193,8 +196,8 @@ export function StudioSearchPalette({ open, onClose, files: givenFiles, recent =
       const rowsOf = (list: F[]) => { const out: Row[] = []; list.forEach((f) => folderRows(f, out)); return out; };
       if (!onDesktop()) return rowsOf(sorted);
       // Desktop app: This PC and Cloud are two lists, never one. Chats with no project come after them
-      const pc = rowsOf(sorted.filter((f) => f.id && onThisPc(projectOf(f.id))));
-      const cloud = rowsOf(sorted.filter((f) => f.id && !onThisPc(projectOf(f.id))));
+      const pc = rowsOf(sorted.filter((f) => f.id && f.place === "pc"));
+      const cloud = rowsOf(sorted.filter((f) => f.id && f.place === "cloud"));
       const none = rowsOf(sorted.filter((f) => !f.id));
       return [
         ...(pc.length ? [labelRow("pc"), ...pc] : []),

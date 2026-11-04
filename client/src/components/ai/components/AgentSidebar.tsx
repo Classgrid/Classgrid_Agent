@@ -626,14 +626,18 @@ export function AgentNestedMenu({ searchQuery = "" }: { searchQuery?: string }) 
 
   const studioFolders = React.useMemo(() => {
     if (!isStudioMode) return [];
-    type F = { key: string; id: string | null; name: string; logo: string | null; chats: ChatSession[]; groups: ChatGroup[] };
+    type F = { key: string; id: string | null; place: "pc" | "cloud"; name: string; logo: string | null; chats: ChatSession[]; groups: ChatGroup[] };
     const folders = new Map<string, F>();
     const names = new Map((projects || []).map((p) => [p.id, p]));
+    // Desktop app: a chat sits under This PC or Cloud by where it happened (the server's chat_place), so one project can
+    // have a folder in each: its chats on this computer, and its chats in the cloud
+    const placeOf = (id: string | null, c?: ChatSession): "pc" | "cloud" => (c as any)?.chat_place || (id && onThisPc(names.get(id) || savedProject(id)) ? "pc" : "cloud");
     const folderFor = (id: string | null, c?: ChatSession) => {
-      const key = id || "none";
+      const place = placeOf(id, c);
+      const key = id ? (onDesktop() ? `${place}:${id}` : id) : "none";
       if (!folders.has(key)) {
         const p = id ? names.get(id) : null;
-        folders.set(key, { key, id, name: id ? p?.name || (c as any)?.project_name || "Project" : "No project", logo: p?.logo || (c as any)?.project_logo || null, chats: [], groups: [] });
+        folders.set(key, { key, id, place, name: id ? p?.name || (c as any)?.project_name || "Project" : "No project", logo: p?.logo || (c as any)?.project_logo || null, chats: [], groups: [] });
       }
       return folders.get(key)!;
     };
@@ -679,9 +683,8 @@ export function AgentNestedMenu({ searchQuery = "" }: { searchQuery?: string }) 
   // Desktop app: This PC and Cloud are two lists, never one. Chats with no project keep their own folder after them
   const studioFolderSections = (() => {
     if (!onDesktop()) return [{ key: "all", label: "", list: studioFolders }];
-    const projectOf = (id: string) => (projects || []).find((p) => p.id === id) || savedProject(id);
-    const pc = studioFolders.filter((f) => f.id && onThisPc(projectOf(f.id)));
-    const cloud = studioFolders.filter((f) => f.id && !onThisPc(projectOf(f.id)));
+    const pc = studioFolders.filter((f) => f.id && f.place === "pc");
+    const cloud = studioFolders.filter((f) => f.id && f.place === "cloud");
     return [
       { key: "pc", label: "This PC", list: pc },
       { key: "cloud", label: "Cloud", list: cloud },
