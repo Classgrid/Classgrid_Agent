@@ -398,6 +398,10 @@
     openExternal: bind("openExternal"),
     // A file from the internet as { type, data (base64) }: the panel can't load it itself (a chat's PDF)
     fetchFile: bind("fetchFile"),
+    // The mic button: the editor gives the panel no microphone, so the editor records it (a WAV as { type, data })
+    micStart: bind("micStart"),
+    micStop: bind("micStop"),
+    micCancel: bind("micCancel"),
     // A file on this computer, shown in our screens (pictures, PDFs): its address in the editor
     fileUrl: function (file) {
       var f = String(file || "");

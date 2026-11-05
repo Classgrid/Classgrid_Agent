@@ -233,6 +233,64 @@ async function answerCall(webview, m, reload) {
   if (m.cgCall) webview.postMessage({ cgReply: m.cgCall, result, error });
 }
 
+// The mic button (dictation): the editor gives its panels no microphone, so Windows' own recorder (winmm) records
+// it, in a PowerShell that waits for "stop" (keep the recording) or "cancel". The WAV goes back to the panel, which
+// sends it for transcription like the website's recording
+let micRec = null;
+const MIC_SCRIPT = (file) => [
+  "Add-Type -Namespace CgMic -Name W -MemberDefinition '[DllImport(\"winmm.dll\", CharSet = CharSet.Unicode)] public static extern int mciSendString(string c, System.Text.StringBuilder r, int l, System.IntPtr h);'",
+  "function Mci($c) { [CgMic.W]::mciSendString($c, $null, 0, [IntPtr]::Zero) }",
+  "Mci 'open new type waveaudio alias cgrec' | Out-Null",
+  "Mci 'set cgrec time format ms bitspersample 16 channels 1 samplespersec 16000 bytespersec 32000 alignment 2' | Out-Null",
+  "$rc = Mci 'record cgrec'",
+  "[Console]::Out.WriteLine(\"REC $rc\"); [Console]::Out.Flush()",
+  "$line = [Console]::In.ReadLine()",
+  "Mci 'stop cgrec' | Out-Null",
+  `if ($line -eq 'stop') { Mci 'save cgrec "${file.replace(/'/g, "''")}"' | Out-Null }`,
+  "Mci 'close cgrec' | Out-Null",
+  "[Console]::Out.WriteLine('DONE')",
+].join("\n");
+function micStart() {
+  micCancel();
+  const file = path.join(require("node:os").tmpdir(), `classgrid-dictation-${Date.now()}.wav`);
+  const proc = require("node:child_process").spawn("powershell.exe", ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-EncodedCommand", Buffer.from(MIC_SCRIPT(file), "utf16le").toString("base64")], { windowsHide: true });
+  return new Promise((resolve, reject) => {
+    let out = "";
+    proc.stdout.setEncoding("utf8");
+    proc.stdout.on("data", (d) => {
+      out += d;
+      const m = out.match(/REC (\d+)/);
+      if (!m || micRec?.proc === proc) return;
+      if (m[1] !== "0") { try { proc.kill(); } catch { /* gone */ } return reject(new Error(`the microphone couldn't start (Windows error ${m[1]}): check that a microphone is connected and allowed for desktop apps`)); }
+      micRec = { proc, file };
+      resolve(true);
+    });
+    proc.on("error", reject);
+    proc.on("exit", () => { if (micRec?.proc === proc) micRec = null; reject(new Error("the microphone couldn't start")); });
+  });
+}
+function micStop() {
+  const rec = micRec;
+  if (!rec) return Promise.resolve(null);
+  micRec = null;
+  return new Promise((resolve) => {
+    const done = () => {
+      try { resolve({ type: "audio/wav", data: fs.readFileSync(rec.file).toString("base64") }); } catch { resolve(null); }
+      fs.rm(rec.file, { force: true }, () => {});
+    };
+    rec.proc.on("exit", done);
+    setTimeout(() => { try { rec.proc.kill(); } catch { /* gone */ } }, 10000);
+    rec.proc.stdin.write("stop\n");
+  });
+}
+function micCancel() {
+  const rec = micRec;
+  micRec = null;
+  if (!rec) return;
+  try { rec.proc.stdin.write("cancel\n"); } catch { /* gone */ }
+  setTimeout(() => { try { rec.proc.kill(); } catch { /* gone */ } fs.rm(rec.file, { force: true }, () => {}); }, 3000);
+}
+
 // A picture on the clipboard as { name, type, data (base64) }, or null. The editor's clipboard has text only, so
 // Windows' own clipboard is read: an image file copied in File Explorer, else the PNG a browser or app copies (it
 // keeps transparency), else the plain bitmap (a screenshot)
@@ -393,6 +451,10 @@ const HANDLERS = {
   clipboardWrite: (_p, text) => vscode.env.clipboard.writeText(String(text ?? "")).then(() => undefined),
   clipboardRead: () => vscode.env.clipboard.readText(),
   clipboardImage: () => clipboardImage(),
+  // (the mic button: see micStart)
+  micStart: () => micStart(),
+  micStop: () => micStop(),
+  micCancel: () => micCancel(),
   openExternal: (_p, url) => { if (/^https?:\/\//.test(String(url))) return vscode.env.openExternal(vscode.Uri.parse(String(url))).then(() => undefined); },
   // A file from the internet (a chat's PDF), for our screens to show: the panel can't load it itself
   fetchFile: async (_p, url) => {

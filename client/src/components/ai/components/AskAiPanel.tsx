@@ -2306,6 +2306,7 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
   };
 
   const startRecording = async () => {
+    if (await startEditorRecording()) return;
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       setMicStream(stream);
@@ -2329,11 +2330,27 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
           setRecordingTime(0);
           return;
         }
+        await transcribeRecording(blob, recordedMimeType);
+      };
 
+      mediaRecorder.start(1000);
+      setIsRecording(true);
+      setRecordingTime(0);
+      recordingTimerRef.current = setInterval(() => {
+        setRecordingTime(prev => prev + 1);
+      }, 1000);
+    } catch (err) {
+      console.error("Error accessing mic", err);
+      toast.error("Microphone access denied");
+    }
+  };
+
+  // The recording turned into text in the chat box (the browser's recording, or Classgrid Code's)
+  const transcribeRecording = async (blob: Blob, recordedMimeType: string) => {
         setIsTranscribing(true);
         try {
           const formData = new FormData();
-          const ext = recordedMimeType.includes('mp4') ? 'mp4' : recordedMimeType.includes('ogg') ? 'ogg' : 'webm';
+          const ext = recordedMimeType.includes('wav') ? 'wav' : recordedMimeType.includes('mp4') ? 'mp4' : recordedMimeType.includes('ogg') ? 'ogg' : 'webm';
           formData.append('audio', new window.File([blob], `dictation.${ext}`, { type: recordedMimeType }));
 
           const endpoint = typeof import.meta !== "undefined" && import.meta.env
@@ -2373,21 +2390,40 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
           setIsTranscribing(false);
           setRecordingTime(0);
         }
-      };
+  };
 
-      mediaRecorder.start(1000);
-      setIsRecording(true);
-      setRecordingTime(0);
-      recordingTimerRef.current = setInterval(() => {
-        setRecordingTime(prev => prev + 1);
-      }, 1000);
-    } catch (err) {
-      console.error("Error accessing mic", err);
-      toast.error("Microphone access denied");
-    }
+  // Classgrid Code: the editor gives its panel no microphone (the button did nothing there), so the editor records
+  // it with Windows' own recorder and hands back the WAV
+  const editorMic = () => {
+    const d = (window as unknown as { classgridDesktop?: { inEditor?: boolean; micStart?: () => Promise<boolean>; micStop?: () => Promise<{ type: string; data: string } | null> } }).classgridDesktop;
+    return import.meta.env.VITE_EDITOR === "1" && d?.inEditor && d.micStart && d.micStop ? d : null;
+  };
+  const editorRecordingRef = useRef(false);
+  const startEditorRecording = async () => {
+    const mic = editorMic();
+    if (!mic) return false;
+    try { await mic.micStart!(); } catch (err) { console.error("Error starting the microphone", err); return true; }
+    editorRecordingRef.current = true;
+    setIsRecording(true);
+    setRecordingTime(0);
+    recordingTimerRef.current = setInterval(() => setRecordingTime(prev => prev + 1), 1000);
+    return true;
+  };
+  const stopEditorRecording = async () => {
+    editorRecordingRef.current = false;
+    setIsRecording(false);
+    if (recordingTimerRef.current) { clearInterval(recordingTimerRef.current); recordingTimerRef.current = null; }
+    const got = await editorMic()?.micStop!().catch(() => null);
+    if (!got?.data) { setRecordingTime(0); return; }
+    const raw = atob(got.data);
+    const bytes = new Uint8Array(raw.length);
+    for (let i = 0; i < raw.length; i++) bytes[i] = raw.charCodeAt(i);
+    if (bytes.length < 16000) { setRecordingTime(0); return; } // (under half a second: nothing said)
+    await transcribeRecording(new Blob([bytes], { type: got.type || "audio/wav" }), got.type || "audio/wav");
   };
 
   const stopRecording = () => {
+    if (editorRecordingRef.current) { void stopEditorRecording(); return; }
     if (mediaRecorderRef.current && isRecording) {
       if (mediaRecorderRef.current.state === "recording") {
         try { mediaRecorderRef.current.requestData(); } catch (e) { }
