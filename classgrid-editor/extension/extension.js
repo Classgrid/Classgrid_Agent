@@ -394,6 +394,34 @@ const HANDLERS = {
   clipboardRead: () => vscode.env.clipboard.readText(),
   clipboardImage: () => clipboardImage(),
   openExternal: (_p, url) => { if (/^https?:\/\//.test(String(url))) return vscode.env.openExternal(vscode.Uri.parse(String(url))).then(() => undefined); },
+  // A file from the internet (a chat's PDF), for our screens to show: the panel can't load it itself
+  fetchFile: async (_p, url) => {
+    if (!/^https:\/\//.test(String(url))) return null;
+    const res = await fetch(String(url), { redirect: "follow" });
+    if (!res.ok) return null;
+    const buf = Buffer.from(await res.arrayBuffer());
+    return { type: res.headers.get("content-type") || "", data: buf.toString("base64") };
+  },
+  // A Download button in our screens: a "Save as" box (in Downloads), then the file is written there. Following the
+  // link in the panel itself replaced the whole panel with a blank page
+  downloadFile: async (_p, { url, name, data } = {}) => {
+    const fileName = String(name || "download").replace(/[\\/:*?"<>|]+/g, "_").slice(0, 200) || "download";
+    const where = await vscode.window.showSaveDialog({ defaultUri: vscode.Uri.file(path.join(require("node:os").homedir(), "Downloads", fileName)), saveLabel: "Download" });
+    if (!where) return false;
+    let bytes = data ? Buffer.from(String(data), "base64") : null;
+    if (!bytes && /^https:\/\//.test(String(url))) {
+      const res = await fetch(String(url), { redirect: "follow" });
+      if (!res.ok) throw new Error(`the file couldn't be downloaded (${res.status})`);
+      bytes = Buffer.from(await res.arrayBuffer());
+    }
+    if (!bytes) return false;
+    fs.writeFileSync(where.fsPath, bytes);
+    vscode.window.showInformationMessage(`Downloaded ${path.basename(where.fsPath)}`, "Open", "Show in folder").then((pick) => {
+      if (pick === "Open") vscode.env.openExternal(where);
+      else if (pick === "Show in folder") vscode.commands.executeCommand("revealFileInOS", where);
+    });
+    return true;
+  },
   fileInfo: (_p, file) => {
     try { const st = fs.statSync(path.resolve(String(file || ""))); return { exists: true, isFile: st.isFile(), size: st.size, modified: st.mtimeMs }; } catch { return { exists: false }; }
   },

@@ -310,6 +310,24 @@
   }
   var bind = function (m) { return function () { return call.apply(null, [m].concat(Array.prototype.slice.call(arguments))); }; };
 
+  // Download buttons and links: the file is saved with the editor's "Save as" box. Following the link in the panel
+  // replaced the whole panel with a blank page (a button's link is often made in code and clicked, never put on the page)
+  var isDownload = function (a) { return !!(a && a.hasAttribute && a.hasAttribute("download") && a.href && !/^javascript:/i.test(a.href)); };
+  var saveLink = function (a) {
+    var href = a.href;
+    var name = a.getAttribute("download") || decodeURIComponent(href.split(/[?#]/)[0].split("/").pop() || "") || "download";
+    var done = /^(blob|data):/i.test(href)
+      ? realFetch(href).then(function (r) { return r.arrayBuffer(); }).then(function (buf) { return call("downloadFile", { name: name, data: toB64(buf) }); })
+      : call("downloadFile", { url: href, name: name });
+    done.catch(function (err) { post({ cgLog: "download", text: String(err && err.message) }); });
+  };
+  var realClick = HTMLAnchorElement.prototype.click;
+  HTMLAnchorElement.prototype.click = function () { if (isDownload(this)) return saveLink(this); return realClick.apply(this, arguments); };
+  document.addEventListener("click", function (e) {
+    var a = e.target && e.target.closest ? e.target.closest("a") : null;
+    if (isDownload(a)) { e.preventDefault(); e.stopPropagation(); saveLink(a); }
+  }, true);
+
   // Copy and paste: inside the editor our page can't use the clipboard itself (the editor keeps Ctrl+C / Ctrl+V and
   // the page's clipboard calls), so copy buttons, Ctrl+C, Ctrl+X and Ctrl+V go through the editor's clipboard
   var clipWrite = function (text) { return call("clipboardWrite", String(text == null ? "" : text)).then(function () { return undefined; }); };
@@ -378,6 +396,8 @@
     deviceId: cfg.deviceId || null,
     editorFolder: cfg.folder || null, // the folder open in the editor
     openExternal: bind("openExternal"),
+    // A file from the internet as { type, data (base64) }: the panel can't load it itself (a chat's PDF)
+    fetchFile: bind("fetchFile"),
     // A file on this computer, shown in our screens (pictures, PDFs): its address in the editor
     fileUrl: function (file) {
       var f = String(file || "");

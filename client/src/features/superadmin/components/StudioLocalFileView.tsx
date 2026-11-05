@@ -12,6 +12,7 @@ import "katex/dist/katex.min.css";
 import { Spinner } from "@/components/marketing_ui/spinner";
 import { FileBadge, OPEN_LOCAL_FILE_EVENT } from "@/components/ai/components/stepper/ProjectToolSteps";
 import pdfWorker from "../../../../node_modules/react-pdf/node_modules/pdfjs-dist/build/pdf.worker.min.mjs?url";
+export { pdfWorker as pdfWorkerUrl };
 import "react-pdf/dist/Page/AnnotationLayer.css";
 import "react-pdf/dist/Page/TextLayer.css";
 
@@ -110,8 +111,11 @@ function OpenOutside({ path, size }: { path: string; size?: number }) {
 // ── PDF: the pages one under another, with a page and zoom bar at the bottom ─────────────────────────────────
 const ZOOMS = [0.25, 0.33, 0.5, 0.67, 0.75, 0.9, 1, 1.1, 1.25, 1.5, 1.75, 2, 2.5, 3];
 
-function PdfView({ url }: { url: string }) {
-  pdfjs.GlobalWorkerOptions.workerSrc = pdfWorker; // shipped with the app, so PDFs open without internet
+// (also Classgrid Code's file preview, with the PDF's bytes: its panel can't load the file itself, and its pdf.js
+// worker is started from a copy of the worker's code, the panel's files being on another address)
+export function PdfView({ url, data, workerSrc }: { url?: string; data?: Uint8Array; workerSrc?: string }) {
+  pdfjs.GlobalWorkerOptions.workerSrc = workerSrc || pdfWorker; // shipped with the app, so PDFs open without internet
+  const file = useMemo(() => (data ? { data: data.slice() } : url), [data, url]);
   const boxRef = useRef<HTMLDivElement>(null);
   const pageRefs = useRef<(HTMLDivElement | null)[]>([]);
   const [pages, setPages] = useState(0);
@@ -155,7 +159,7 @@ function PdfView({ url }: { url: string }) {
     <div className="absolute inset-0">
       <div ref={boxRef} onScroll={onScroll} className="absolute inset-0 overflow-auto">
         <Document
-          file={url}
+          file={file}
           onLoadSuccess={({ numPages }) => setPages(numPages)}
           onLoadError={() => setFailed(true)}
           loading={<Centered><Spinner className="size-5" /></Centered>}

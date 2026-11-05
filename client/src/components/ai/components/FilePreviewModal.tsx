@@ -38,6 +38,10 @@ import {
 
 import { CustomVideoPlayer } from "@/features/shared/components/CustomVideoPlayer";
 
+// Classgrid Code: PDFs are drawn by its own viewer (loaded only there; the website never loads it)
+const IN_EDITOR = import.meta.env.VITE_EDITOR === "1";
+const EditorPdfPreview = React.lazy(() => import("./EditorPdfPreview"));
+
 // ─── Types ───────────────────────────────────────────────────────────────────
 
 export interface FilePreviewSource {
@@ -304,8 +308,13 @@ export default function FilePreviewModal({ file, onClose, onDelete }: FilePrevie
             </motion.div>
           )}
 
-          {/* PDF viewer */}
-          {isPDF(mime) && srcUrl && (
+          {/* PDF viewer (Classgrid Code: its own, the frame stays blank there) */}
+          {isPDF(mime) && srcUrl && IN_EDITOR && (
+            <React.Suspense fallback={null}>
+              <EditorPdfPreview src={srcUrl} />
+            </React.Suspense>
+          )}
+          {isPDF(mime) && srcUrl && !IN_EDITOR && (
             <iframe
               src={srcUrl}
               title={file.name}
