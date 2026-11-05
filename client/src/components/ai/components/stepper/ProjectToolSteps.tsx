@@ -103,6 +103,7 @@ export function ProjectEditStep({ step }: { step: Step }) {
   const added = real ? Number(real[1]) : step.tool === 'write_project_file' ? lineCount(step.args?.content) : edits.reduce((n, e) => n + lineCount(e.new_text), 0);
   const removed = real ? Number(real[2]) : edits.reduce((n, e) => n + lineCount(e.old_text), 0);
   const failed = isError(step);
+  const rewrote = /^Replaced /.test(String(step.result || '')) || step.args?.overwrite === true;
   // Desktop app: a document (.md) the agent just wrote or changed opens beside the chat, like a side panel
   const wasLoading = useRef(loading);
   useEffect(() => {
@@ -118,7 +119,8 @@ export function ProjectEditStep({ step }: { step: Step }) {
   return (
     <div className="flex flex-col">
       <Row onClick={loading || (fromSpec && !failed) ? undefined : () => setOpen(!open)} open={open}>
-        <ShimmerText active={loading} className="shrink-0">{loading ? (fromSpec ? 'Writing' : 'Editing') : failed ? 'Could not edit' : step.tool === 'write_project_file' || fromSpec ? 'Created' : 'Edited'}</ShimmerText>
+        {/* (a whole existing file written again, overwrite: true, is an edit: "Replaced …" in its answer) */}
+        <ShimmerText active={loading} className="shrink-0">{loading ? (fromSpec ? 'Writing' : 'Editing') : failed ? 'Could not edit' : (step.tool === 'write_project_file' || fromSpec) && !rewrote ? 'Created' : 'Edited'}</ShimmerText>
         <FileBadge path={path} />
         <FileLink path={path} find={edits[0]?.new_text?.split("\n").find((l) => l.trim()) || undefined} />
         {!failed && <span className="shrink-0 text-xs text-[#16a34a] dark:text-[#22c55e]">+{added}</span>}
@@ -191,24 +193,35 @@ function ProjectExploreItem({ step }: { step: Step }) {
 
   if (step.tool === 'bulk_read_project') {
     const paths: string[] = (Array.isArray(step.args?.paths) ? step.args.paths : step.args?.paths ? [step.args.paths] : []).map(String);
-    const answer = isError(step) ? '' : result.replace(/^File reader \([^)]*\) read \d+ files?:\n/, '');
+    // "Files read: a.ts:1-120; b.ts:1-80" (newer servers): each file with the lines read, for the list below
+    const read = result.match(/^File reader \([^)]*\) read \d+ files?:\nFiles read: ([^\n]*)\n/)?.[1];
+    const ranges = (read ? read.split('; ') : []).map((e) => e.match(/^(.+):(\d+)-(\d+)$/)).filter((m): m is RegExpMatchArray => !!m).map((m) => ({ file: m[1] || '', start: Number(m[2]), end: Number(m[3]) }));
+    const answer = isError(step) ? '' : result.replace(/^File reader \([^)]*\) read \d+ files?:\n(Files read: [^\n]*\n)?/, '');
     return (
       <div className="flex flex-col">
         <div className="flex items-center gap-1.5 py-1 text-[14px] text-slate-500 dark:text-[#8a8a8a]">
-          <button type="button" disabled={!answer} onClick={() => setOpen(!open)} className="flex min-w-0 items-center gap-1.5 hover:text-foreground disabled:hover:text-inherit">
+          <button type="button" disabled={!paths.length} onClick={() => setOpen(!open)} className="flex min-w-0 items-center gap-1.5 hover:text-foreground disabled:hover:text-inherit">
             <ShimmerText active={loading} className="shrink-0">{loading ? 'Reading' : isError(step) ? 'Could not read' : 'Read'}</ShimmerText>
             <Name>{paths.length === 1 ? baseName(paths[0]) : `${paths.length} files`}</Name>
             <span className="shrink-0 rounded-full bg-secondary px-2 text-xs">file reader</span>
+            {paths.length > 0 && (open ? <ChevronDown className="size-3.5 shrink-0" /> : <ChevronRight className="size-3.5 shrink-0" />)}
           </button>
         </div>
         {open && (
-          <div className="mb-1 ml-1 max-h-[260px] overflow-auto rounded-md border border-border px-3 py-2 text-[12.5px] whitespace-pre-wrap text-foreground/80">
-            {paths.length > 1 && (
-              <div className="mb-2 flex flex-wrap gap-x-3 gap-y-0.5">
-                {paths.map((p) => <span key={p} className="inline-flex items-center gap-1"><FileBadge path={p} /><FileLink path={p} /></span>)}
-              </div>
-            )}
-            {answer}
+          <div className="mb-1 ml-1 max-h-[260px] overflow-auto rounded-md border border-border text-[12.5px] text-foreground/80">
+            {/* each file it reads, like the Analyzed steps: its name and the lines read (click to open it there) */}
+            {paths.map((p) => {
+              const at = ranges.find((r) => r.file === p || r.file.endsWith(`/${p}`) || p.endsWith(`/${r.file}`));
+              return (
+                <div key={p} className="flex items-center gap-1.5 px-2 py-0.5 text-[14px] text-slate-500 dark:text-[#8a8a8a]">
+                  <ShimmerText active={loading} className="shrink-0">{loading ? 'Analyzing' : 'Analyzed'}</ShimmerText>
+                  <FileBadge path={p} />
+                  <FileLink path={p} />
+                  {at && <button type="button" onClick={() => openInEditor({ path: p, startLine: at.start, endLine: at.end })} className="shrink-0 text-xs text-muted-foreground hover:text-foreground">#L{at.start}-{at.end}</button>}
+                </div>
+              );
+            })}
+            {answer && <div className="border-t border-border px-3 py-2 whitespace-pre-wrap">{answer}</div>}
           </div>
         )}
       </div>

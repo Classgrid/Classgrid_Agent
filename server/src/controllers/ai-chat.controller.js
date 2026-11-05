@@ -3634,7 +3634,9 @@ Every user is using you as a personal AI assistant and agent (like ChatGPT) to m
                                 "You read code files for another AI that is working on this project. Answer its QUESTION using only the FILES below (each line starts with its line number). Reply in short structured bullets, grouped by file. Always give exact names (functions, components, variables, routes, types, settings) and their place as path:line. Quote a short key line exactly when it helps. If the files do not answer something, say so. Never guess.",
                                 `QUESTION:\n${question}\n\nFILES:\n\n${text}`
                             );
-                            return `File reader (${MODEL_DISPLAY_NAMES[model] || model}) read ${paths.length - skipped.length} file${paths.length - skipped.length === 1 ? "" : "s"}:\n${answer}${skipped.length ? `\n\nNot read (too much text in one go; ask again for these): ${skipped.join(", ")}` : ""}`;
+                            // (each file read and its lines, for the step the user sees: "Read 6 files" opens to the list)
+                            const readLines = [...String(text).matchAll(/^=== (.+?) ===\n.*?\(lines \d+-(\d+) of \d+\)/gm)].map((m) => `${m[1]}:1-${m[2]}`);
+                            return `File reader (${MODEL_DISPLAY_NAMES[model] || model}) read ${paths.length - skipped.length} file${paths.length - skipped.length === 1 ? "" : "s"}:\n${readLines.length ? `Files read: ${readLines.join("; ")}\n` : ""}${answer}${skipped.length ? `\n\nNot read (too much text in one go; ask again for these): ${skipped.join(", ")}` : ""}`;
                         } catch (e) {
                             return `Error: the file reader failed (${e.message}). Read the parts you need with view_project_file start_line and end_line.`;
                         }
