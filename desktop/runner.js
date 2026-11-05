@@ -1083,11 +1083,11 @@ function shellSpawn(command, cwd, shell = "powershell") {
 function jobDone(job) {
   if (!job.chat || job.stopped) return;
   const seconds = Math.round((Date.now() - job.startedAt) / 1000);
-  // A moment later: if the AI already saw the result itself (check_background_command), its chat isn't woken
+  // 1 s later (check_background_command looks every 0.5 s): if the AI already saw the result itself, its chat isn't woken
   setTimeout(() => {
     if (job.reported || job.stopped || !socket) return;
     socket.emit("local-job-done", { jobId: job.id, chat: job.chat, command: job.command.slice(0, 1000), exitCode: job.exitCode, seconds, output: cap(job.log.slice(-6000).trim()) });
-  }, 5000);
+  }, 1000);
 }
 
 function killTree(proc) {
