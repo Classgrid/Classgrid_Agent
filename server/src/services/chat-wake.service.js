@@ -32,10 +32,16 @@ export async function wakeChat(userId, sessionId, note) {
     if (!(await answering(userId, sessionId))) runWake(userId, sessionId).catch((e) => console.warn("[chat wake]", e.message));
 }
 
-/** The chat's answer has ended: anything that finished meanwhile wakes it now */
+/** The chat's answer has ended: anything that finished meanwhile wakes it now. (Its end is marked in two steps, the
+ * "working" flag and the running-answer key; this goes on the moment both are gone, checking every 100 ms for up to
+ * 10 s, so a result that came in during the answer is never left waiting) */
 export async function wakeIfPending(userId, sessionId) {
     if (!userId || !sessionId) return;
-    if ((await redis.llen(PENDING(sessionId)).catch(() => 0)) > 0) runWake(userId, sessionId).catch(() => {});
+    for (let i = 0; i < 100; i++) {
+        if (!((await redis.llen(PENDING(sessionId)).catch(() => 0)) > 0)) return;
+        if (!(await answering(userId, sessionId))) return runWake(userId, sessionId).catch((e) => console.warn("[chat wake]", e.message));
+        await new Promise((r) => setTimeout(r, 100));
+    }
 }
 
 // The chat is answering the user right now (also in the first seconds of an answer, before it's marked working):
@@ -48,17 +54,19 @@ async function answering(userId, sessionId) {
 
 async function runWake(userId, sessionId) {
     // One woken turn at a time per chat
+    if (await answering(userId, sessionId)) return; // woken when that answer ends (wakeIfPending)
     const got = await redis.set(LOCK(sessionId), "1", "EX", 15 * 60, "NX").catch(() => null);
-    if (!got) return;
+    if (!got) return; // another wake-up of this chat is running: it takes what is pending when it ends
+    let ran = false;
     try {
         const notes = [];
-        if (await answering(userId, sessionId)) return; // woken again when that answer ends
         for (let n; (n = await redis.lpop(PENDING(sessionId)).catch(() => null)); ) notes.push(n);
         if (!notes.length) return;
         const user = await User.findById(userId).select("-password -verificationToken");
         if (!user) return;
         let meta = {};
         try { meta = JSON.parse((await redis.get(META(sessionId))) || "{}"); } catch { /* none */ }
+        ran = true;
         tell(userId, { sessionId, phase: "start" });
         const question = `[SYSTEM: background work you started in this chat has finished while you were not answering. This message is from Classgrid, not the user.]\n\n${notes.join("\n\n---\n\n")}\n\nTell the user the result now, the way you would mention it in the middle of a conversation: what finished, whether it worked and what it means. If the user's task needs a next step, do it; otherwise don't start new long work.`;
         const { runAgentTask } = await import("./whatsapp-call.service.js");
@@ -77,9 +85,9 @@ async function runWake(userId, sessionId) {
         });
     } finally {
         await redis.del(LOCK(sessionId)).catch(() => {});
-        tell(userId, { sessionId, phase: "end" });
-        // More finished while this turn ran: wake again
-        if ((await redis.llen(PENDING(sessionId)).catch(() => 0)) > 0) runWake(userId, sessionId).catch(() => {});
+        if (ran) tell(userId, { sessionId, phase: "end" });
+        // More finished while this turn ran (or while the lock was held): wake again
+        wakeIfPending(userId, sessionId).catch(() => {});
     }
 }
 
