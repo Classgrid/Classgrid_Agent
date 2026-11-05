@@ -3563,18 +3563,60 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
     wasSubmittingRef.current = submitting;
   }, [submitting]); // eslint-disable-line react-hooks/exhaustive-deps
   // Background work (helpers, a long command) finished after the answer ended: the agent woke up by itself and
-  // answered in this chat; show its update
+  // answers in this chat. Its answer streams in live (thinking, steps, words), like any other answer; when it ends,
+  // the saved version replaces it
   useEffect(() => {
     if (!gridSessionId) return;
     let sock: ReturnType<typeof getSocket> = null;
-    const on = (d: { sessionId?: string; phase?: string }) => {
-      if (d?.sessionId !== gridSessionId) return;
-      if (d.phase === "start") toast.message("Background work finished. The agent is writing an update…");
-      else { refreshSharedMessages(); notifyDesktop("Background work finished. The agent wrote an update.", "aiFinished"); }
+    let liveId: string | null = null;
+    const updateLive = (change: (m: ChatMessage) => ChatMessage) => {
+      if (!liveId || gridOpenChatRef.current !== gridSessionId || gridSubmittingRef.current) return;
+      setMessages((prev) => prev.map((m) => (m.id === liveId ? change(m) : m)));
     };
-    const attach = () => { sock = getSocket(); if (sock) sock.on("chat:woke", on); return !!sock; };
+    const start = () => {
+      if (gridOpenChatRef.current !== gridSessionId || gridSubmittingRef.current) return;
+      const id = createMessageId("assistant");
+      liveId = id;
+      setMessages((prev) => [...prev, { id, role: "assistant", content: "", createdAt: Date.now(), typing: true, steps: [] }]);
+      setThinkingLabel("Thinking");
+      setThinking(true); // "Thinking" shows at once, until its first words or step
+    };
+    // The woken answer's thinking, steps and words, as they are written
+    const onLive = (d: { sessionId?: string; event?: any }) => {
+      if (d?.sessionId !== gridSessionId || !d.event) return;
+      const e = d.event;
+      if (e.type !== "thought" && e.type !== "status" && liveId) setThinking(false);
+      if (e.type === "token" && e.token) updateLive((m) => ({ ...m, content: (m.content || "") + e.token, typing: true }));
+      else if (e.type === "thought" && (e.thought || e.content)) updateLive((m) => ({ ...m, thought: (m.thought || "") + (e.thought || e.content) }));
+      else if (e.type === "tool_start") {
+        updateLive((m) => ({ ...m, steps: [...(m.steps || []), (e.tool === "internal_thought" || e.tool === "internal_thought_process")
+          ? { id: crypto.randomUUID(), type: "thought", title: e.args?.title || "Thought", details: e.args?.details || "", status: "loading" }
+          : { id: crypto.randomUUID(), type: "tool", tool: e.tool, args: e.args, status: "loading" }] as AgentStep[] }));
+      } else if (e.type === "tool_result") {
+        updateLive((m) => {
+          const steps = [...(m.steps || [])];
+          const at = steps.map((s) => s.status === "loading" && (s.type === "thought" || (s.type === "tool" && s.tool === e.tool))).lastIndexOf(true);
+          if (at === -1) return m;
+          const failed = typeof e.result === "string" && /^(Error:|ERROR:|FAILED:)/.test(e.result.trim());
+          const step = steps[at] as AgentStep;
+          steps[at] = step.type === "tool" ? { ...step, status: failed ? "error" : "success", result: e.result } : { ...step, status: "success" };
+          return { ...m, steps };
+        });
+      }
+    };
+    const onWoke = (d: { sessionId?: string; phase?: string }) => {
+      if (d?.sessionId !== gridSessionId) return;
+      if (d.phase === "start") start();
+      else if (d.phase === "end") {
+        if (liveId) setThinking(false);
+        liveId = null;
+        refreshSharedMessages();
+        notifyDesktop("Background work finished. The agent wrote an update.", "aiFinished");
+      }
+    };
+    const attach = () => { sock = getSocket(); if (sock) { sock.on("chat:woke", onWoke); sock.on("chat:woke-live", onLive); } return !!sock; };
     const timer = attach() ? null : setInterval(() => { if (attach() && timer) clearInterval(timer); }, 3000);
-    return () => { if (timer) clearInterval(timer); sock?.off("chat:woke", on); };
+    return () => { if (timer) clearInterval(timer); sock?.off("chat:woke", onWoke); sock?.off("chat:woke-live", onLive); };
   }, [gridSessionId, refreshSharedMessages]);
   const gridMyEmail = (session?.user?.email || "").toLowerCase();
   const gridPeople = React.useMemo(() => Object.fromEntries((grid.data?.members || []).map((p) => [p.email, p])), [grid.data]);

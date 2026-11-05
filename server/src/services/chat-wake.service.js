@@ -19,6 +19,8 @@ export async function rememberChatMeta(sessionId, meta) {
 }
 
 const tell = (userId, data) => { try { getIO().to(String(userId)).emit("chat:woke", data); } catch { /* no socket server */ } };
+// The events of a woken answer the open chat shows live
+const LIVE_EVENTS = new Set(["token", "thought", "tool_start", "tool_result", "status"]);
 
 /**
  * Background work of a chat finished. note: what finished and its result (plain text for the AI).
@@ -65,6 +67,13 @@ async function runWake(userId, sessionId) {
             ...(meta.appMode ? { appMode: meta.appMode } : {}),
             ...(meta.permissionMode ? { permissionMode: meta.permissionMode } : {}),
             wakeUp: true,
+        }, null, (data) => {
+            // The answer streams into the open chat as it is written (its thinking, steps and words), like any other
+            // answer, instead of the whole message appearing at once when it ends
+            if (!LIVE_EVENTS.has(data?.type)) return;
+            const event = data.type === "tool_result" ? { ...data, result: String(data.result ?? "").slice(0, 4000) } : data;
+            // (its own socket event: an app from before this treats every "chat:woke" as the end and would reload each time)
+            try { getIO().to(String(userId)).emit("chat:woke-live", { sessionId, event }); } catch { /* no socket server */ }
         });
     } finally {
         await redis.del(LOCK(sessionId)).catch(() => {});

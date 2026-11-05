@@ -49,7 +49,8 @@ export function AgentMapButton({ sessionId, busy }: { sessionId: string | null |
   React.useEffect(() => {
     const sock = getSocket();
     if (!sock) return;
-    const on = (d: { sessionId?: string }) => { if (d?.sessionId === sessionId) void load(); };
+    // (not on each live "event" of the woken answer: only when it starts and ends)
+    const on = (d: { sessionId?: string; phase?: string }) => { if (d?.sessionId === sessionId && d.phase !== "event") void load(); };
     sock.on("chat:woke", on);
     return () => { sock.off("chat:woke", on); };
   }, [sessionId, load]);

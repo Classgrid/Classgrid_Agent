@@ -839,16 +839,17 @@ export function keepProjectOpen(userId) {
 // Returns { sessionId, answer, error }.
 // quota: set when the user's AI tokens ran out ({ resetDate }), so the task can wait for them to come back.
 // signal: stops the run (its task was deleted); a stopped run returns { aborted: true }
-export async function runAgentTask(user, question, projectId, onSession, sessionId = null, onStep = null, extraBody = {}, signal = null) {
+// onData: every event of the answer as it streams (a woken chat shows it live: chat-wake.service.js)
+export async function runAgentTask(user, question, projectId, onSession, sessionId = null, onStep = null, extraBody = {}, signal = null, onData = null) {
     try {
-        return await runAgentTaskOnce(user, question, projectId, onSession, sessionId, onStep, extraBody, signal);
+        return await runAgentTaskOnce(user, question, projectId, onSession, sessionId, onStep, extraBody, signal, onData);
     } catch (e) {
         if (signal?.aborted) return { sessionId, answer: "", error: "the task was deleted", aborted: true };
         throw e;
     }
 }
 
-async function runAgentTaskOnce(user, question, projectId, onSession, sessionId, onStep, extraBody, signal) {
+async function runAgentTaskOnce(user, question, projectId, onSession, sessionId, onStep, extraBody, signal, onData) {
     const port = process.env.PORT || 3000;
     const res = await fetch(`http://127.0.0.1:${port}/api/ai/ask`, {
         ...(signal ? { signal } : {}),
@@ -877,6 +878,7 @@ async function runAgentTaskOnce(user, question, projectId, onSession, sessionId,
             if (!line) continue;
             try {
                 const data = JSON.parse(line.slice(6));
+                try { onData?.(data); } catch { /* only for showing it live */ }
                 if (data.type === "session_info" && data.sessionId && !sessionId) {
                     sessionId = data.sessionId;
                     onSession?.(sessionId);
