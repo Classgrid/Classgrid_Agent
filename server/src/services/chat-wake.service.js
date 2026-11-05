@@ -74,6 +74,10 @@ async function runWake(userId, sessionId) {
             ...(meta.clientApp ? { clientApp: meta.clientApp } : {}),
             ...(meta.appMode ? { appMode: meta.appMode } : {}),
             ...(meta.permissionMode ? { permissionMode: meta.permissionMode } : {}),
+            // the model (and effort) the user picked in this chat: the woken turn thinks and writes like the rest of the
+            // chat (it used to run on the default "auto" model, which answered without thinking)
+            ...(meta.selectedModel ? { selectedModel: meta.selectedModel } : {}),
+            ...(meta.effort ? { effort: meta.effort } : {}),
             wakeUp: true,
         }, null, (data) => {
             // The answer streams into the open chat as it is written (its thinking, steps and words), like any other

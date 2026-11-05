@@ -6049,7 +6049,7 @@ If a tool fails, never show the error message; say only: "Something went wrong o
             res.on("close", () => {
                 markChatWorking(userId, sessionId, false).then(() => import("../services/chat-wake.service.js")).then((m) => m.wakeIfPending(userId, sessionId)).catch(() => {});
             });
-            import("../services/chat-wake.service.js").then((m) => m.rememberChatMeta(sessionId, { clientApp: body.clientApp || "", appMode: body.appMode || "", permissionMode: body.permissionMode || "" })).catch(() => {});
+            import("../services/chat-wake.service.js").then((m) => m.rememberChatMeta(sessionId, { clientApp: body.clientApp || "", appMode: body.appMode || "", permissionMode: body.permissionMode || "", ...(typeof body.selectedModel === "string" && !body.wakeUp ? { selectedModel: body.selectedModel } : {}), ...(body.effort && !body.wakeUp ? { effort: body.effort } : {}) })).catch(() => {});
         }
         const permissionCtx = {
             mode: PERMISSION_MODES.has(body.permissionMode) && body.taskOrigin !== "whatsapp" ? body.permissionMode : "turbo",
