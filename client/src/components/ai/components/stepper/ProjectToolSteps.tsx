@@ -85,7 +85,10 @@ function FileLink({ path, startLine, endLine, find }: { path: string; startLine?
   );
 }
 
-const ErrorLine = ({ step }: { step: Step }) => (isError(step) ? <div className="ml-10 -mt-1 mb-1 text-xs text-red-600 dark:text-red-500">{String(step.result).replace(/^error:\s*/i, "")}</div> : null);
+// Desktop app and Classgrid Code: a tool's error text is for the AI (it reads it and tries another way), not shown
+// to the user in red; the step still says what didn't work (owner, 2026-11-05). The website keeps showing it
+const SHOW_TOOL_ERRORS = import.meta.env.VITE_DESKTOP !== "1";
+const ErrorLine = ({ step }: { step: Step }) => (SHOW_TOOL_ERRORS && isError(step) ? <div className="ml-10 -mt-1 mb-1 text-xs text-red-600 dark:text-red-500">{String(step.result).replace(/^error:\s*/i, "")}</div> : null);
 
 export function ProjectEditStep({ step }: { step: Step }) {
   const [open, setOpen] = useState(false);
@@ -132,7 +135,7 @@ export function ProjectEditStep({ step }: { step: Step }) {
         <div className="ml-10 mr-2 mb-2 rounded-lg border border-border overflow-hidden text-[12px] font-mono">
           <div className="px-3 py-1.5 border-b border-border text-muted-foreground font-sans text-xs truncate">{path}</div>
           <div className="max-h-[320px] overflow-auto">
-            {failed && <div className="px-3 py-2 text-red-600 dark:text-red-500 font-sans">{step.result}</div>}
+            {failed && SHOW_TOOL_ERRORS && <div className="px-3 py-2 text-red-600 dark:text-red-500 font-sans">{step.result}</div>}
             {step.tool === 'write_project_file'
               ? String(step.args?.content || '').split('\n').slice(0, 200).map((l, i) => (
                   <div key={i} className="px-3 whitespace-pre bg-green-500/10 text-green-800 dark:text-green-300">+ {l}</div>
@@ -601,7 +604,7 @@ export function ComputerStep({ step }: { step: Step }) {
           <img src={shot} alt="The screen" className="block w-full h-auto" />
         </a>
       )}
-      {failed && <div className="ml-10 -mt-1 mb-1 text-xs text-red-600 dark:text-red-500">{result.slice(0, 300)}</div>}
+      {failed && SHOW_TOOL_ERRORS && <div className="ml-10 -mt-1 mb-1 text-xs text-red-600 dark:text-red-500">{result.slice(0, 300)}</div>}
     </div>
   );
 }
