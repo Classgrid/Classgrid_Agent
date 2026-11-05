@@ -35,7 +35,7 @@ export async function wakeChat(userId, sessionId, note) {
 /** The chat's answer has ended: anything that finished meanwhile wakes it now */
 export async function wakeIfPending(userId, sessionId) {
     if (!userId || !sessionId) return;
-    if ((await redis.llen(PENDING(sessionId)).catch(() => 0)) > 0) setTimeout(() => runWake(userId, sessionId).catch(() => {}), 1500);
+    if ((await redis.llen(PENDING(sessionId)).catch(() => 0)) > 0) runWake(userId, sessionId).catch(() => {});
 }
 
 // The chat is answering the user right now (also in the first seconds of an answer, before it's marked working):
@@ -79,13 +79,14 @@ async function runWake(userId, sessionId) {
         await redis.del(LOCK(sessionId)).catch(() => {});
         tell(userId, { sessionId, phase: "end" });
         // More finished while this turn ran: wake again
-        if ((await redis.llen(PENDING(sessionId)).catch(() => 0)) > 0) setTimeout(() => runWake(userId, sessionId).catch(() => {}), 2000);
+        if ((await redis.llen(PENDING(sessionId)).catch(() => 0)) > 0) runWake(userId, sessionId).catch(() => {});
     }
 }
 
 /** A background command on the user's computer finished (from their desktop app) */
 export async function onLocalJobDone(userId, d) {
     if (!d?.chat || d.stopped) return;
-    const output = String(d.output || "").trim();
-    await wakeChat(userId, String(d.chat), `The command \`${String(d.command || "").slice(0, 500)}\` (job ${d.jobId}) finished on the user's computer after ${Math.round((Number(d.seconds) || 0))} seconds with exit code ${d.exitCode}${d.exitCode === 0 ? " (it worked)" : " (it failed)"}.${output ? `\nThe end of its output:\n${output.slice(-4000)}` : "\nIt printed nothing."}`);
+    // Only that it ended: the AI looks at the result itself (check_background_command), like a person checking a job
+    // that finished, and then tells the user what it found
+    await wakeChat(userId, String(d.chat), `The background command \`${String(d.command || "").slice(0, 500)}\` (job_id ${d.jobId}) on the user's computer has just ended. Check its result yourself first with check_background_command (job_id "${d.jobId}"), then tell the user what you found.`);
 }

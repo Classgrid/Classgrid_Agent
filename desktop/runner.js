@@ -738,7 +738,8 @@ const tools = {
     const job = jobs.get(String(job_id));
     if (!job) return `Error: no background command ${job_id} (the desktop app may have been restarted).`;
     const until = Date.now() + Math.min(120, Math.max(0, Number(wait_seconds) || 0)) * 1000;
-    while (job.exitCode === null && Date.now() < until) await wait(500);
+    job.watching = (job.watching || 0) + 1; // (the AI is waiting on it here: its end isn't also sent as a wake-up)
+    try { while (job.exitCode === null && Date.now() < until) await wait(500); } finally { job.watching--; }
     if (job.exitCode !== null) job.reported = true;
     const state = job.exitCode === null ? "still running" : `finished (exit code ${job.exitCode})`;
     return `${job.command}\n${state}, started ${Math.round((Date.now() - job.startedAt) / 1000)}s ago. Last output:\n${cap(job.log.slice(-8000).trim()) || "(no output yet)"}`;
@@ -1083,11 +1084,9 @@ function shellSpawn(command, cwd, shell = "powershell") {
 function jobDone(job) {
   if (!job.chat || job.stopped) return;
   const seconds = Math.round((Date.now() - job.startedAt) / 1000);
-  // 1 s later (check_background_command looks every 0.5 s): if the AI already saw the result itself, its chat isn't woken
-  setTimeout(() => {
-    if (job.reported || job.stopped || !socket) return;
-    socket.emit("local-job-done", { jobId: job.id, chat: job.chat, command: job.command.slice(0, 1000), exitCode: job.exitCode, seconds, output: cap(job.log.slice(-6000).trim()) });
-  }, 1000);
+  // At once, the moment it ends (a chat whose AI is waiting on it with check_background_command gets the result there)
+  if (job.reported || job.watching || !socket) return;
+  socket.emit("local-job-done", { jobId: job.id, chat: job.chat, command: job.command.slice(0, 1000), exitCode: job.exitCode, seconds, output: cap(job.log.slice(-6000).trim()) });
 }
 
 function killTree(proc) {
