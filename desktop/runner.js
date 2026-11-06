@@ -1102,7 +1102,13 @@ function connect(token) {
   if (!token) return;
   socket = io(API, { auth: { token, runner: true }, transports: ["websocket"], reconnection: true });
   socket.on("connect", () => console.log("[runner] connected to", API));
-  socket.on("connect_error", (err) => console.log("[runner] could not connect:", err.message));
+  // socket.io gives up for good when the server refuses a reconnect (its login check, e.g. while it restarts) or
+  // closes the connection itself: the AI then couldn't reach this computer ("the Classgrid desktop app isn't open")
+  // until the app was restarted, though the app was open (2026-11-06). It keeps trying, with the newest login
+  const me = socket;
+  const retry = () => setTimeout(() => { if (socket === me && !me.connected && !me.active && currentToken) { me.auth.token = currentToken; me.connect(); } }, 5000);
+  socket.on("connect_error", (err) => { console.log("[runner] could not connect:", err.message); retry(); });
+  socket.on("disconnect", (reason) => { if (reason === "io server disconnect") retry(); });
   socket.on("local-tool", async (req, ack) => {
     if (typeof ack !== "function") return;
     // One reply stays under the server's 1 MB socket message limit (a bigger one would drop the connection); the AI
