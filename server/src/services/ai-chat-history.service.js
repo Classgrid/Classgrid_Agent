@@ -78,6 +78,8 @@ const TOOL_NOTE_CHARS   = 600;
 // The desktop app remembers much more of a long chat (owner, 2026-11-02): its agent works for hours on the computer
 const DESKTOP_TOOL_NOTE_TURNS = 20;
 const DESKTOP_TOOL_NOTE_CHARS = 6000;
+// The most tool notes one answer gives back in all (a step gets an equal share, at least 300 characters)
+const TOOL_NOTES_TOTAL = 60000;
 const CACHE_TTL_SECONDS = 86400; // 24 hours
 
 /**
@@ -145,27 +147,35 @@ export async function getHistory(sessionId, depth = DEFAULT_DEPTH, { desktop = f
 
                             // Safely restore truncated tool memory for the LLM without blowing up the context window
                             if (itemIndex >= notesFrom && inner.steps && Array.isArray(inner.steps) && inner.steps.length > 0) {
-                                const toolSummaries = inner.steps.map(s => {
-                                    if (!s.tool) return null;
+                                const tools = inner.steps.filter((s) => s && s.tool);
+                                // Every step keeps what it did (the command, file or search), and the answer's notes stay
+                                // within TOOL_NOTES_TOTAL characters: a long answer (100+ commands) used to give back
+                                // 600k characters, too much for the model, and the AI started again from nothing
+                                const each = Math.max(300, Math.min(noteChars, Math.floor(TOOL_NOTES_TOTAL / Math.max(1, tools.length))));
+                                const toolSummaries = tools.map(s => {
+                                    const a = s.args && typeof s.args === 'object' ? s.args : {};
+                                    const what = String(a.command ?? a.path ?? a.query ?? a.pattern ?? a.url ?? a.job_id ?? a.paths ?? '').replace(/\s+/g, ' ').slice(0, 300);
                                     let resExcerpt = "No result recorded";
                                     if (typeof s.result === 'string') {
                                         // Short excerpt, but every link in the result is kept (CDN files, PDFs, meeting links)
-                                        if (s.result.length > noteChars) {
+                                        if (s.result.length > each) {
                                             const links = [...new Set(s.result.match(/https?:\/\/[^\s"'<>)\]]+/g) || [])].slice(0, 10);
-                                            resExcerpt = s.result.substring(0, noteChars) + '...[TRUNCATED]' + (links.length ? ` Links: ${links.join(' ')}` : '');
+                                            resExcerpt = s.result.substring(0, each) + '...[TRUNCATED]' + (links.length ? ` Links: ${links.join(' ')}` : '');
                                         } else {
                                             resExcerpt = s.result;
                                         }
                                     }
-                                    return `Tool Used: ${s.tool} | Result Excerpt: ${resExcerpt}`;
-                                }).filter(Boolean).join('\n');
-                                
+                                    return `Tool Used: ${s.tool}${what ? ` (${what})` : ''} | Result Excerpt: ${resExcerpt}`;
+                                }).join('\n');
+                                // An answer the user stopped: its work is kept, so a next message goes on from it
+                                const stopped = /_\(Stopped\.\)_\s*$|_\(This answer stopped because of an error/.test(String(inner.content || ''));
+
                                 if (toolSummaries) {
                                     return [
                                         parsed,
                                         {
                                             role: 'system',
-                                            content: `[SYSTEM NOTE - YOUR BACKGROUND TOOL MEMORY FOR THIS TURN:\n${toolSummaries}\n(You actually ran these tools. Do not hallucinate that you didn't!)]`
+                                            content: `[SYSTEM NOTE - YOUR BACKGROUND TOOL MEMORY FOR THIS TURN:\n${toolSummaries}\n(You actually ran these tools. Do not hallucinate that you didn't!)${stopped ? "\nThis answer was stopped before it finished. These steps are done: when the user goes on with this task, continue from them and don't run them again." : ""}]`
                                         }
                                     ];
                                 }
