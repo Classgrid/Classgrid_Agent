@@ -55,6 +55,7 @@
  */
 
 import { QueryClient } from "@tanstack/react-query";
+import { keepQueryData } from "./desktopPageCache";
 
 export const queryClient = new QueryClient({
   defaultOptions: {
@@ -65,3 +66,5 @@ export const queryClient = new QueryClient({
     }
   }
 });
+// Desktop app: the last data is kept on this computer, so pages like Settings open with it at once (desktopPageCache)
+keepQueryData(queryClient);

@@ -63,6 +63,8 @@ import { PostHogProvider } from "posthog-js/react";
 
 import { App } from "@/app/App";
 import { AppProviders } from "@/app/providers";
+import { warmPages } from "@/lib/desktopPageCache";
+import { queryClient } from "@/lib/queryClient";
 import "@/styles/global.css";
 
 // Local testing and the desktop app (never the website build): the API calls also send the saved login token, so the
@@ -94,6 +96,9 @@ if (isDesktopApp && !isEditorPanel) {
   };
   sendTheme();
   new MutationObserver(sendTheme).observe(document.documentElement, { attributes: true, attributeFilter: ["class"] });
+  // While the welcome screen plays: every page's first data is fetched in advance (after this file has set up the
+  // login on fetch, below), so no page shows loading bars on its first visit
+  setTimeout(() => warmPages(queryClient), 0);
 }
 if (import.meta.env.DEV || isDesktopApp) {
   const realFetch = window.fetch.bind(window);

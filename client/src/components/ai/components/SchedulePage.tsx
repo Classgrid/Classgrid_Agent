@@ -23,6 +23,7 @@ import { DangerConfirmDialog } from "@/components/marketing_ui/danger-confirm-di
 import { getSocket } from "@/lib/socketClient";
 import { repeatLabel, type ScheduleRepeat } from "./scheduleRepeat";
 import { useNavigate, useLocation } from "react-router-dom";
+import { readPageCache, writePageCache } from "@/lib/desktopPageCache";
 
 type ScheduleStatus = "pending" | "sent" | "failed" | "cancelled";
 
@@ -139,8 +140,9 @@ const INTEGRATION_SUGGESTIONS: ScheduleSuggestion[] = [
 ];
 
 export const SchedulePage: React.FC = () => {
-  const [schedules, setSchedules] = useState<AiSchedule[]>([]);
-  const [loading, setLoading] = useState(true);
+  // (desktop app: the last list shows at once, kept on this computer, and is refreshed quietly: desktopPageCache)
+  const [schedules, setSchedules] = useState<AiSchedule[]>(() => readPageCache<AiSchedule[]>("schedules:all") || []);
+  const [loading, setLoading] = useState(() => !readPageCache("schedules:all"));
   const [filter, setFilter] = useState<"all" | ScheduleStatus>("all");
   const [taskInput, setTaskInput] = useState("");
 
@@ -156,11 +158,14 @@ export const SchedulePage: React.FC = () => {
   const scheduleBasePath = `${baseAgentPath}/schedule`;
 
   const fetchSchedules = async (showLoading = true) => {
+    const kept = readPageCache<AiSchedule[]>(`schedules:${filter}`);
+    if (kept) { setSchedules(kept); setLoading(false); showLoading = false; }
     if (showLoading) setLoading(true);
     try {
       const response = await api.get(`/api/ai/schedules?status=${filter}`);
       if (response.data?.success) {
         setSchedules(response.data.schedules);
+        writePageCache(`schedules:${filter}`, response.data.schedules);
       }
     } catch (error) {
       toast.error("Failed to load schedules");

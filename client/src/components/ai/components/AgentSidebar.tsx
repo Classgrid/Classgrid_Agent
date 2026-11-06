@@ -38,6 +38,7 @@ import { DangerConfirmDialog } from "@/components/marketing_ui/danger-confirm-di
 import { Spinner } from "@/components/marketing_ui/spinner";
 import { toast } from "sonner";
 import { fetchWithRescue } from "@/lib/rescue";
+import { desktopUserId } from "@/lib/desktopPageCache";
 import { OFFLINE_CHAT_NOTE, isUnreachable, keepsChatCopies, listChatCopies, listOtherChatCopies, removeChatCopy, type OtherAccountChats } from "@/lib/desktopChats";
 import { getSocket } from "@/lib/socketClient";
 import { cn } from "@/lib/utils";
@@ -90,7 +91,7 @@ function chatListQuery(): string {
 // another mode) shows it at once and refreshes it quietly, with no grey loading bars
 const listCache = new Map<string, ChatSession[]>();
 // ...and on this computer for the next start, per account (cg_desktop_user), so the first list shows at once too
-const savedListKey = (query: string) => { try { return `cg_chat_list:${localStorage.getItem("cg_desktop_user") || ""}:${query}`; } catch { return ""; } };
+const savedListKey = (query: string) => `cg_chat_list:${desktopUserId()}:${query}`;
 function keptList(query: string): ChatSession[] | undefined {
   if (listCache.has(query)) return listCache.get(query);
   try { const saved = JSON.parse(localStorage.getItem(savedListKey(query)) || "null"); return Array.isArray(saved) ? saved : undefined; } catch { return undefined; }

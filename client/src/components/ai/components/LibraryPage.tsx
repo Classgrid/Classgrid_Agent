@@ -25,6 +25,7 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigge
 import { DangerConfirmDialog } from '@/components/marketing_ui/danger-confirm-dialog';
 import { getSocket } from '@/lib/socketClient';
 import { fetchWithRescue } from "@/lib/rescue";
+import { readPageCache, writePageCache } from "@/lib/desktopPageCache";
 import FilePreviewModal from './FilePreviewModal';
 import { DocsImageViewer } from './DocsImageViewer';
 import { useNavigate, useLocation } from 'react-router-dom';
@@ -49,12 +50,12 @@ interface Quota {
 }
 
 export function LibraryPage() {
-  const [files, setFiles] = useState<LibraryFile[]>([]);
+  const [files, setFiles] = useState<LibraryFile[]>(() => readPageCache<{ files: LibraryFile[] }>("library:newest:all")?.files || []);
   const [quota, setQuota] = useState<Quota>({ used_bytes: 0, max_bytes: 629145600, percentage: 0 });
   const [search, setSearch] = useState('');
   const [activeTab, setActiveTab] = useState<'all' | 'image' | 'video' | 'pdf' | 'doc' | 'audio'>('all');
   const [sort, setSort] = useState<'newest' | 'oldest' | 'largest'>('newest');
-  const [isLoading, setIsLoading] = useState(true);
+  const [isLoading, setIsLoading] = useState(() => !readPageCache("library:newest:all"));
   const [isUploading, setIsUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
   const [deleteId, setDeleteId] = useState<string | null>(null);
@@ -77,7 +78,14 @@ export function LibraryPage() {
 
   const fetchLibrary = useCallback(async () => {
     try {
-      setIsLoading(true);
+      // (desktop app: the last list for this view shows at once, kept on this computer, and is refreshed quietly)
+      const keyNow = `library:${sort}:${activeTab}`;
+      const kept = readPageCache<{ files: LibraryFile[]; quota: Quota | null }>(keyNow);
+      const showQuota = (q: Quota | null | undefined) => {
+        if (q) setQuota({ ...q, percentage: Math.min(100, (q.used_bytes / q.max_bytes) * 100) });
+      };
+      if (kept) { setFiles(kept.files); showQuota(kept.quota); setIsLoading(false); }
+      else setIsLoading(true);
       let url = `${endpointPrefix}/api/ai/library?sort=${sort}`;
       if (activeTab !== 'all') {
         url += `&type=${activeTab}`;
@@ -86,10 +94,8 @@ export function LibraryPage() {
       if (res.ok) {
         const data = await res.json();
         setFiles(data.files || []);
-        if (data.quota) {
-          const percentage = Math.min(100, (data.quota.used_bytes / data.quota.max_bytes) * 100);
-          setQuota({ ...data.quota, percentage });
-        }
+        showQuota(data.quota);
+        writePageCache(keyNow, { files: data.files || [], quota: data.quota || null });
       }
     } catch (err) {
       console.error('Failed to fetch library', err);
