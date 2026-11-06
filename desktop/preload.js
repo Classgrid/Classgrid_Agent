@@ -75,6 +75,14 @@ contextBridge.exposeInMainWorld("classgridDesktop", {
   browserShot: () => ipcRenderer.invoke("cg:browserShot"),
   browserHistory: (q) => ipcRenderer.invoke("cg:browserHistory", q),
   browserHistoryClear: () => ipcRenderer.invoke("cg:browserHistoryClear"),
+  // Settings → Browser: one history entry, the choices (site permissions, downloads), the download folder, download
+  // history (open, show in folder, remove, clear) and clearing all browsing data
+  browserHistoryRemove: (url, at) => ipcRenderer.invoke("cg:browserHistoryRemove", url, at),
+  browserSettings: (patch) => ipcRenderer.invoke("cg:browserSettings", patch),
+  browserPickDownloadDir: () => ipcRenderer.invoke("cg:browserPickDownloadDir"),
+  browserDownloads: (q) => ipcRenderer.invoke("cg:browserDownloads", q),
+  browserDownloadAct: (id, action) => ipcRenderer.invoke("cg:browserDownloadAct", id, action),
+  browserClearData: () => ipcRenderer.invoke("cg:browserClearData"),
   onBrowser: (fn) => {
     const listener = (_e, msg) => fn(msg);
     ipcRenderer.on("cg:browser", listener);

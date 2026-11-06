@@ -13,8 +13,71 @@ const DESKTOP_WIDTH = 1280; // pages are always at least desktop width; a narrow
 const HIDDEN_SIZE = { width: 1280, height: 800 };
 const MAX_TEXT = 20000;
 const MAX_SHOT_BYTES = 520 * 1024; // the runner's answer (the picture as base64, a third bigger) must stay under the socket's 1 MB
-// Websites may use these without asking; anything else (camera, microphone, location, notifications) is refused
+// Websites may use these without asking; camera, microphone, location and notifications follow Settings → Browser
+// (blocked unless the user allows them); anything else is refused
 const ALLOWED_PERMISSIONS = new Set(["fullscreen", "clipboard-sanitized-write", "pointerLock"]);
+
+// ── Settings → Browser (browser-settings.json): site permissions and downloads ─────────────────────────────────
+const SETTINGS_DEFAULT = { camera: "block", microphone: "block", location: "block", notifications: "block", downloadDir: "", askWhere: false };
+let settings = null;
+function browserSettings() {
+  if (settings) return settings;
+  try { settings = { ...SETTINGS_DEFAULT, ...JSON.parse(fs.readFileSync(path.join(app.getPath("userData"), "browser-settings.json"), "utf8")) }; }
+  catch { settings = { ...SETTINGS_DEFAULT }; }
+  return settings;
+}
+function saveSettings() { fs.writeFile(path.join(app.getPath("userData"), "browser-settings.json"), JSON.stringify(settings), () => {}); }
+const downloadDir = () => {
+  const d = browserSettings().downloadDir;
+  return d && fs.existsSync(d) ? d : app.getPath("downloads");
+};
+// A permission the page asks for (Electron's names) is allowed: media is camera and/or microphone
+function permitted(permission, details) {
+  if (ALLOWED_PERMISSIONS.has(permission)) return true;
+  const s = browserSettings();
+  if (permission === "media") {
+    const types = details?.mediaTypes?.length ? details.mediaTypes : details?.mediaType ? [details.mediaType] : ["video", "audio"];
+    return types.every((t) => (t === "video" ? s.camera : t === "audio" ? s.microphone : "block") === "allow");
+  }
+  if (permission === "geolocation") return s.location === "allow";
+  if (permission === "notifications") return s.notifications === "allow";
+  return false;
+}
+
+// ── Downloads (browser-downloads.json): saved to the chosen folder, or where the user picks; newest first ────────
+let downloadsList = null;
+function downloads() {
+  if (downloadsList) return downloadsList;
+  try { downloadsList = JSON.parse(fs.readFileSync(path.join(app.getPath("userData"), "browser-downloads.json"), "utf8")) || []; } catch { downloadsList = []; }
+  return downloadsList;
+}
+function saveDownloads() { fs.writeFile(path.join(app.getPath("userData"), "browser-downloads.json"), JSON.stringify(downloads().slice(0, 1000)), () => {}); }
+let downloadsWired = false;
+function wireDownloads(ses) {
+  if (downloadsWired) return;
+  downloadsWired = true;
+  ses.on("will-download", (_e, item) => {
+    if (!browserSettings().askWhere) {
+      // A free name in the folder: report.pdf, then report (1).pdf...
+      const dir = downloadDir();
+      const ext = path.extname(item.getFilename());
+      const base = path.basename(item.getFilename(), ext) || "download";
+      let file = path.join(dir, base + ext);
+      for (let n = 1; fs.existsSync(file) && n < 1000; n++) file = path.join(dir, `${base} (${n})${ext}`);
+      item.setSavePath(file);
+    }
+    const entry = { id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`, name: item.getFilename(), url: item.getURL(), file: "", size: item.getTotalBytes(), state: "progressing", at: Date.now() };
+    downloads().unshift(entry);
+    saveDownloads();
+    item.once("done", (_ev, state) => {
+      entry.state = state; // completed, cancelled or interrupted
+      entry.file = item.getSavePath() || "";
+      entry.name = entry.file ? path.basename(entry.file) : entry.name;
+      entry.size = item.getReceivedBytes() || entry.size;
+      saveDownloads();
+    });
+  });
+}
 
 let win = null;
 let view = null;
@@ -130,8 +193,9 @@ function ensureView() {
     });
   });
   wc.setAudioMuted(false);
-  wc.session.setPermissionRequestHandler((_wc, permission, done) => done(ALLOWED_PERMISSIONS.has(permission)));
-  wc.session.setPermissionCheckHandler((_wc, permission) => ALLOWED_PERMISSIONS.has(permission));
+  wc.session.setPermissionRequestHandler((_wc, permission, done, details) => done(permitted(permission, details)));
+  wc.session.setPermissionCheckHandler((_wc, permission, _origin, details) => permitted(permission, details));
+  wireDownloads(wc.session);
   // New tabs and pop-ups open in this same page
   wc.setWindowOpenHandler(({ url }) => {
     if (/^https?:\/\//i.test(url)) wc.loadURL(url).catch(() => {});
@@ -594,6 +658,68 @@ ipcMain.handle("cg:browserHistoryClear", (e) => {
   if (!fromApp(e)) return false;
   historyList().length = 0;
   saveHistorySoon();
+  return true;
+});
+// Settings → Browser: one history entry removed (its address and time)
+ipcMain.handle("cg:browserHistoryRemove", (e, url, at) => {
+  if (!fromApp(e)) return false;
+  const list = historyList();
+  const i = list.findIndex((h) => h.url === url && h.at === Number(at));
+  if (i !== -1) { list.splice(i, 1); saveHistorySoon(); }
+  return true;
+});
+// Settings → Browser: the choices (site permissions, the download folder, asking where to save)
+ipcMain.handle("cg:browserSettings", (e, patch) => {
+  if (!fromApp(e)) return null;
+  const s = browserSettings();
+  if (patch && typeof patch === "object") {
+    for (const k of ["camera", "microphone", "location", "notifications"]) if (patch[k] === "allow" || patch[k] === "block") s[k] = patch[k];
+    if (typeof patch.askWhere === "boolean") s.askWhere = patch.askWhere;
+    saveSettings();
+  }
+  return { ...s, downloadDir: downloadDir() };
+});
+ipcMain.handle("cg:browserPickDownloadDir", async (e) => {
+  if (!fromApp(e)) return null;
+  const r = await require("electron").dialog.showOpenDialog(win, { properties: ["openDirectory", "createDirectory"], defaultPath: downloadDir() });
+  if (r.canceled || !r.filePaths[0]) return null;
+  browserSettings().downloadDir = r.filePaths[0];
+  saveSettings();
+  return r.filePaths[0];
+});
+// Download history: list (q: search), open a file, show it in its folder, remove one, clear all
+ipcMain.handle("cg:browserDownloads", (e, q) => {
+  if (!fromApp(e)) return [];
+  const words = String(q || "").toLowerCase().split(/\s+/).filter(Boolean);
+  return downloads().filter((d) => !words.length || words.every((w) => `${d.name} ${d.url}`.toLowerCase().includes(w)))
+    .map((d) => ({ ...d, exists: !!d.file && fs.existsSync(d.file) }));
+});
+ipcMain.handle("cg:browserDownloadAct", (e, id, action) => {
+  if (!fromApp(e)) return false;
+  const list = downloads();
+  const d = list.find((x) => x.id === id);
+  if (action === "clear") { list.length = 0; saveDownloads(); return true; }
+  if (!d) return false;
+  if (action === "remove") { list.splice(list.indexOf(d), 1); saveDownloads(); return true; }
+  if (!d.file || !fs.existsSync(d.file)) return false;
+  const { shell } = require("electron");
+  if (action === "open") { shell.openPath(d.file); return true; }
+  if (action === "show") { shell.showItemInFolder(d.file); return true; }
+  return false;
+});
+// Clear browsing data: history, cookies and logins, site data, cache and the download history (files stay)
+ipcMain.handle("cg:browserClearData", async (e) => {
+  if (!fromApp(e)) return false;
+  const ses = require("electron").session.fromPartition(PARTITION);
+  await ses.clearStorageData().catch(() => {});
+  await ses.clearCache().catch(() => {});
+  historyList().length = 0;
+  saveHistorySoon();
+  downloads().length = 0;
+  saveDownloads();
+  for (const k of Object.keys(chats())) delete chatUrls[k];
+  saveChats();
+  if (live()) view.webContents.loadURL(HOME).catch(() => {});
   return true;
 });
 // The Camera button: the page as it is now

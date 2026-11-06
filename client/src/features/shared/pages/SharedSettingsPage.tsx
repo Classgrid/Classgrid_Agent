@@ -77,10 +77,14 @@ import { SettingsPrivacyCard } from "../components/settings/SettingsPrivacyCard"
 import { SettingsVerifiedDomainCard } from "../components/settings/SettingsVerifiedDomainCard";
 import { SettingsDesktopNotificationsCard } from "../components/settings/SettingsDesktopNotificationsCard";
 import { isChatHost } from "@/lib/chatHost";
+import { SettingsBrowserSection } from "../components/settings/SettingsBrowserSection";
+import { settingsSections, useSettingsSection } from "../settings/settingsSections";
 
 export function SharedSettingsPage() {
   const isChatApp = isChatHost();
   const { data: profileData, isLoading: isProfileLoading } = useUserProfile();
+  const sections = settingsSections({ role: profileData?.role });
+  const { section, go } = useSettingsSection(sections);
   const updateProfile = useUpdateProfile();
   
   const requiresPrefs = profileData?.role !== "org_admin" && profileData?.role !== "super_admin" && !isChatApp;
@@ -160,45 +164,76 @@ export function SharedSettingsPage() {
 
   const isDesktop = import.meta.env.VITE_DESKTOP === "1" || import.meta.env.VITE_EDITOR === "1";
 
+  // One section at a time (the left sidebar lists them: SettingsNav); on phones, where the sidebar is hidden, a row of
+  // section buttons on top
+  const role = profileData?.role;
   return (
     <div className="flex flex-col gap-6 w-full max-w-4xl mx-auto p-4 sm:p-6 lg:p-8 pb-12">
-      <SettingsAppearanceCard />
-      {isDesktop && <SettingsDesktopNotificationsCard />}
-      <SettingsPrivacyCard />
-      {/* Users only: the super admin dashboard does not verify domains */}
-      {!isProfileLoading && profileData?.role !== "super_admin" && <SettingsVerifiedDomainCard />}
-      {isChatApp && <SettingsIdentityCard />}
-      
-      {!isProfileLoading && profileData?.role !== "org_admin" && profileData?.role !== "super_admin" && profileData?.role !== "user" && !isChatApp && (
-        <SettingsPushCard 
-          pushEnabled={pushEnabled} 
-          onChange={handlePushChange} 
-        />
-      )}
+      <div className="md:hidden flex gap-1.5 overflow-x-auto [scrollbar-width:none] -mx-1 px-1">
+        {sections.map((s) => (
+          <button key={s.id} type="button" onClick={() => go(s.id)}
+            className={`shrink-0 h-8 px-3 rounded-full text-[13px] font-medium cursor-pointer ${s.id === section ? "bg-foreground text-background" : "bg-black/[0.05] dark:bg-white/[0.07] text-foreground"}`}>
+            {s.label}
+          </button>
+        ))}
+      </div>
 
-      {profileData?.role !== "org_admin" && (
+      {section === "general" && (
         <>
-          {profileData?.role !== "super_admin" && profileData?.role !== "user" && !isChatApp && <SettingsRoleRequestCard />}
-          <SettingsChangePasswordCard />
-          {profileData?.role !== "super_admin" && <SettingsDeleteAccountCard />}
+          <SettingsAppearanceCard />
+          {role === "org_admin" && (
+            <>
+              <OrgBrandingCard />
+              <CustomDomainCard />
+              <OrgCodesCard />
+            </>
+          )}
         </>
       )}
 
-      {profileData?.role === "super_admin" && (
+      {section === "notifications" && (
+        <>
+          {isDesktop && <SettingsDesktopNotificationsCard />}
+          {!isProfileLoading && role !== "org_admin" && role !== "super_admin" && role !== "user" && !isChatApp && (
+            <SettingsPushCard
+              pushEnabled={pushEnabled}
+              onChange={handlePushChange}
+            />
+          )}
+        </>
+      )}
+
+      {section === "privacy" && (
+        <>
+          <SettingsPrivacyCard />
+          {/* Users only: the super admin dashboard does not verify domains */}
+          {!isProfileLoading && role !== "super_admin" && <SettingsVerifiedDomainCard />}
+          {isChatApp && <SettingsIdentityCard />}
+        </>
+      )}
+
+      {section === "account" && (
+        role === "org_admin" ? (
+          <>
+            <SettingsRoleRequestCard />
+            <SettingsChangePasswordCard />
+            <DeleteOrgCard />
+          </>
+        ) : (
+          <>
+            {role !== "super_admin" && role !== "user" && !isChatApp && <SettingsRoleRequestCard />}
+            <SettingsChangePasswordCard />
+            {role !== "super_admin" && <SettingsDeleteAccountCard />}
+          </>
+        )
+      )}
+
+      {section === "browser" && <SettingsBrowserSection role={role} />}
+
+      {section === "platform" && role === "super_admin" && (
         <>
           <PlatformBrandingCard />
           <PlatformNameCard />
-        </>
-      )}
-
-      {profileData?.role === "org_admin" && (
-        <>
-          <OrgBrandingCard />
-          <CustomDomainCard />
-          <OrgCodesCard />
-          <SettingsRoleRequestCard />
-          <SettingsChangePasswordCard />
-          <DeleteOrgCard />
         </>
       )}
     </div>

@@ -35,6 +35,21 @@ function closeTunnel(userId) {
   try { t.ssh.dispose(); } catch { /* closed */ }
 }
 
+// Settings → Browser → Clear browsing data: the user's browser is switched off and its saved profile (logins, cookies,
+// history, cache) removed; the next page opens in a fresh, empty browser
+export async function clearBrowserData(userId) {
+  userId = String(userId);
+  if (!validUser(userId)) throw new Error("No user");
+  closeTunnel(userId);
+  const ssh = await sandboxSsh();
+  try {
+    await ssh.execCommand(`docker rm -f ${name(userId)} >/dev/null 2>&1; sudo rm -rf /home/ubuntu/studio_users/${userId}/profile`);
+  } finally {
+    ssh.dispose();
+  }
+  await redis.srem(USERS, userId).catch(() => {});
+}
+
 const starting = new Map(); // userId -> Promise (one start at a time per user)
 export async function ensureBrowser(userId) {
   userId = String(userId);

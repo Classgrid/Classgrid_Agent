@@ -83,7 +83,13 @@ import { streamAskAi, clientToolResult, getWorkingChats, getChatHelpers, getChat
 import { getFavicon } from "../controllers/ai-favicon.controller.js";
 import { importChatSession } from "../controllers/ai-chat-import.controller.js";
 import { listStudioShots } from "../services/studio-browser-tools.js";
-import { answerPermission } from "../services/permission-gate.js";
+import { answerPermission, listBrowserSites, setBrowserSite } from "../services/permission-gate.js";
+import { clearBrowserData } from "../services/studio-browser.service.js";
+// DELETE /api/ai/browser-data: the online browser's logins, cookies, history and cache are removed (it starts empty)
+const clearBrowserDataRoute = async (req, res) => {
+  try { await clearBrowserData(String(req.user?._id || req.user?.id || "")); res.json({ ok: true }); }
+  catch (e) { res.status(500).json({ error: String(e?.message || e) }); }
+};
 import { getMarket } from "../controllers/ai-widgets.controller.js";
 import aiTopUpRoutes from "./ai-credits-topup.routes.js";
 import aiCreditsRoutes from "./ai-credits.routes.js";
@@ -201,6 +207,10 @@ router.put("/sessions/:id", isAuthenticated, updateChatSession);
 router.post("/sessions/:id/archive", isAuthenticated, archiveChatSession);
 router.get("/studio/shots/:sessionId", isAuthenticated, listStudioShots);
 router.post("/permission/:id", isAuthenticated, answerPermission);
+// Settings → Browser: websites the AI's browser always opens or never opens, and clearing the online browser's data
+router.get("/browser-sites", isAuthenticated, listBrowserSites);
+router.put("/browser-sites", isAuthenticated, setBrowserSite);
+router.delete("/browser-data", isAuthenticated, clearBrowserDataRoute);
 router.delete("/sessions/:id", isAuthenticated, deleteChatSession);
 router.post("/sessions/:id/share", isAuthenticated, shareChatSession);
 router.post("/sessions/:id/reopen", isAuthenticated, reopenChatSession); // super_admin only (checked in controller)

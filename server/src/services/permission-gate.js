@@ -145,8 +145,23 @@ async function remembered(userId, sessionId, key) {
   return !!(inChat || always);
 }
 
+// Settings → Browser → Website permissions: websites the AI's browser never opens (blocked), per user. The ones it
+// always opens are the "site:<host>" keys in USER_ALLOW (also set by "Always allow" on a permission card).
+const SITE_BLOCK = (userId) => `perm:siteblock:${userId}`;
+const siteHost = (u) => host(String(u || "").trim()).toLowerCase().replace(/^www\./, "");
+async function siteBlocked(userId, url) {
+  if (!userId) return false;
+  const h = siteHost(url);
+  if (!h) return false;
+  const blocked = await redis.smembers(SITE_BLOCK(userId)).catch(() => []);
+  return blocked.some((b) => h === b || h.endsWith(`.${b}`));
+}
+
 // Ask the user (if the mode says so) and wait for the answer. Returns { allowed: true } or { allowed: false, message }.
 export async function askPermission({ mode, userId, sessionId, tool, args, emit, isAborted }) {
+  if (tool === "browser_open" && await siteBlocked(userId, args?.url)) {
+    return { allowed: false, message: `The user blocked ${siteHost(args?.url)} for the browser in Settings → Browser → Website permissions, so it did not open. Do not try to open it another way; tell them, or use another site.` };
+  }
   const a = describeAction(tool, args);
   if (!a || (a.level < ALWAYS_ASKS && (!PERMISSION_MODES.has(mode) || mode === "turbo"))) return { allowed: true };
   if (!asks(mode, a.level)) return { allowed: true };
@@ -185,7 +200,8 @@ export async function askPermission({ mode, userId, sessionId, tool, args, emit,
 export function gateHandlers(handlers, ctx) {
   const modeAsks = PERMISSION_MODES.has(ctx.mode) && ctx.mode !== "turbo";
   for (const [name, fn] of Object.entries(handlers)) {
-    if (typeof fn !== "function" || !isGatedTool(name) || (!modeAsks && !alwaysAsksTool(name))) continue;
+    // (opening a website is always checked: a site blocked in Settings stays blocked in every mode)
+    if (typeof fn !== "function" || !isGatedTool(name) || (!modeAsks && !alwaysAsksTool(name) && name !== "browser_open")) continue;
     handlers[name] = async (args, ...rest) => {
       const p = await askPermission({ ...ctx, tool: name, args });
       if (!p.allowed) return p.message;
@@ -193,6 +209,37 @@ export function gateHandlers(handlers, ctx) {
     };
   }
   return handlers;
+}
+
+// GET /api/ai/browser-sites: the websites with their own rule, { sites: [{ host, rule: "allow" | "block" }] }
+export async function listBrowserSites(req, res) {
+  const userId = String(req.user?._id || req.user?.id || "");
+  const [allowed, blocked] = await Promise.all([
+    redis.smembers(USER_ALLOW(userId)).catch(() => []),
+    redis.smembers(SITE_BLOCK(userId)).catch(() => []),
+  ]);
+  const allowHosts = [...new Set(allowed.filter((k) => k.startsWith("site:")).map((k) => k.slice(5).toLowerCase().replace(/^www\./, "")))];
+  const sites = [
+    ...allowHosts.filter((h) => !blocked.includes(h)).map((h) => ({ host: h, rule: "allow" })),
+    ...blocked.map((h) => ({ host: h, rule: "block" })),
+  ].sort((a, b) => a.host.localeCompare(b.host));
+  res.json({ sites });
+}
+
+// PUT /api/ai/browser-sites  { host, rule: "allow" | "block" | "ask" }  ("ask": no rule of its own, the mode decides)
+export async function setBrowserSite(req, res) {
+  const userId = String(req.user?._id || req.user?.id || "");
+  const h = siteHost(req.body?.host);
+  const rule = String(req.body?.rule || "");
+  if (!userId || !h || !/^[a-z0-9.-]+(:\d+)?$/.test(h) || !["allow", "block", "ask"].includes(rule)) return res.status(400).json({ error: "Enter a website like example.com" });
+  // (an always-allowed site was saved as the host it was opened at: with and without www)
+  await Promise.all([
+    redis.srem(USER_ALLOW(userId), `site:${h}`, `site:www.${h}`).catch(() => {}),
+    redis.srem(SITE_BLOCK(userId), h).catch(() => {}),
+  ]);
+  if (rule === "allow") await redis.sadd(USER_ALLOW(userId), `site:${h}`, `site:www.${h}`).catch(() => {});
+  if (rule === "block") await redis.sadd(SITE_BLOCK(userId), h).catch(() => {});
+  res.json({ ok: true, host: h, rule });
 }
 
 // POST /api/ai/permission/:id  { decision: once | chat | always | no | skip, note }

@@ -162,6 +162,8 @@ import { SlidingSidebar } from "./SlidingSidebar";
 import { useQuery } from "@tanstack/react-query";
 import { apiClient } from "@/lib/apiClient";
 import { AgentNestedMenu } from "@/components/ai/components/AgentSidebar";
+import { SettingsNav } from "@/features/shared/settings/SettingsNav";
+import { isSettingsPath } from "@/features/shared/settings/settingsSections";
 import { AiChatSearchPalette } from "@/components/ai/components/AiChatSearchPalette";
 import { StudioSearchPalette } from "@/features/superadmin/components/StudioSearchPalette";
 import { FileBadge } from "@/features/superadmin/components/StudioFilesView";
@@ -193,6 +195,8 @@ export function AppSidebar({ role, user }: AppSidebarProps) {
   // Requests and Audit Logs under Library, and no main menu
   const studioEverywhere = DESKTOP_APP && import.meta.env.VITE_EDITOR !== "1" && role !== "super_admin" && !location.pathname.split("/").includes("project");
   const isStudio = location.pathname.split("/").includes("studio") || studioEverywhere;
+  // Settings (website and desktop app): its own sidebar, with its sections and a search box (SettingsNav)
+  const onSettings = isSettingsPath(location.pathname) && import.meta.env.VITE_EDITOR !== "1";
   const [searchQuery, setSearchQuery] = useState("");
   // Desktop app's back and forward buttons: whether there is a place to go back or forward to (the browser's
   // Navigation API; both stay on where it is missing)
@@ -337,7 +341,7 @@ export function AppSidebar({ role, user }: AppSidebarProps) {
             </div>
           )}
         </div>
-        <div className={isStudio ? "hidden" : showStorageMenu || showAgentMenu ? "group-data-[collapsible=icon]:hidden mb-1" : "group-data-[collapsible=icon]:hidden"}>
+        <div className={isStudio || onSettings ? "hidden" : showStorageMenu || showAgentMenu ? "group-data-[collapsible=icon]:hidden mb-1" : "group-data-[collapsible=icon]:hidden"}>
           <SidebarSearch 
             searchQuery={searchQuery} 
             setSearchQuery={setSearchQuery} 
@@ -348,10 +352,10 @@ export function AppSidebar({ role, user }: AppSidebarProps) {
 
       <SidebarContent className="p-0">
         <SlidingSidebar
-          showNested={showStorageMenu || showAgentMenu}
+          showNested={showStorageMenu || showAgentMenu || onSettings}
           onBack={() => { setShowStorageMenu(false); setShowAgentMenu(false); }}
           // (desktop app: Studio keeps its back button, the way to Grids, Requests and Audit Logs now that Agent is gone)
-          hideBack={location.pathname.split("/").includes("project") || (!DESKTOP_APP && location.pathname.split("/").includes("studio")) || !!studioPages}
+          hideBack={location.pathname.split("/").includes("project") || (!DESKTOP_APP && location.pathname.split("/").includes("studio")) || !!studioPages || onSettings}
           nestedTitle={showStorageMenu ? "Storage" : showAgentMenu ? (DESKTOP_APP ? "Studio" : "Agent") : ""}
           mainMenu={
             <>
@@ -469,7 +473,9 @@ export function AppSidebar({ role, user }: AppSidebarProps) {
             </>
           }
           nestedMenu={
-            showStorageMenu ? (
+            onSettings ? (
+              <SettingsNav />
+            ) : showStorageMenu ? (
               <SidebarGroup className="pt-1">
                 <SidebarGroupContent>
                   <SidebarMenu>
