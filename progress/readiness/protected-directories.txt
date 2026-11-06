@@ -1,5 +1,0 @@
-server/
-supabase/
-docs/
-marketing_content/
-android/
