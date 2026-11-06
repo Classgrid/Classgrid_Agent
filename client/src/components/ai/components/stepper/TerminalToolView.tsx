@@ -69,7 +69,12 @@ export function TerminalToolView({ command, output, running = false, shell }: Te
               ? <span className="inline-flex items-center gap-2"><Spinner className="size-3.5 shrink-0" />Waiting for output...</span>
               : shown || '(no output)'}
           </div>
-          {failed && exit && <div className="border-t border-slate-200 dark:border-[#2e2e2e] px-3 py-2 text-red-600 dark:text-red-500">Failed (exit code {exit[1]})</div>}
+          {/* Desktop app and Classgrid Code: an exit code other than 0 is often a plain answer ("not found", "no
+              changes"), not a failure: it shows in grey as "Exit code N", like a terminal, not a red "Failed" (owner,
+              2026-11-06). The website keeps "Failed" */}
+          {failed && exit && (import.meta.env.VITE_DESKTOP === "1"
+            ? <div className="border-t border-slate-200 dark:border-[#2e2e2e] px-3 py-2 text-muted-foreground">Exit code {exit[1]}</div>
+            : <div className="border-t border-slate-200 dark:border-[#2e2e2e] px-3 py-2 text-red-600 dark:text-red-500">Failed (exit code {exit[1]})</div>)}
         </div>
       </ToolOutputContainer>
     );
