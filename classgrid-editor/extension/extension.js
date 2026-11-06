@@ -233,31 +233,112 @@ async function answerCall(webview, m, reload) {
   if (m.cgCall) webview.postMessage({ cgReply: m.cgCall, result, error });
 }
 
-// The mic button (dictation): the editor gives its panels no microphone, so Windows' own recorder (winmm) records
-// it, in a PowerShell that waits for "stop" (keep the recording) or "cancel". The WAV goes back to the panel, which
-// sends it for transcription like the website's recording
+// The mic button (dictation): the editor gives its panels no microphone, so Windows' own recorder (winmm's waveIn)
+// records it, in a PowerShell that waits for "stop" (keep the recording) or "cancel". Meanwhile it prints the sound
+// level (the panel's moving bars). The WAV goes back to the panel, which sends it for transcription like the website's
 let micRec = null;
+// 16 kHz, 16-bit mono into eight 0.1 s buffers; Poll() takes the full ones in order, keeps their sound and the loudest
+// sample (Level, 0 to 1); Stop() writes the WAV file (or nothing, when cancelled)
+const MIC_RECORDER = `
+using System; using System.IO; using System.Runtime.InteropServices;
+public class CgRec {
+  [StructLayout(LayoutKind.Sequential)] struct Fmt { public ushort tag, channels; public uint rate, bytesPerSec; public ushort align, bits, extra; }
+  [StructLayout(LayoutKind.Sequential)] struct Hdr { public IntPtr data; public uint length, recorded; public IntPtr user; public uint flags, loops; public IntPtr next, reserved; }
+  [DllImport("winmm.dll")] static extern int waveInOpen(out IntPtr h, int device, ref Fmt f, IntPtr cb, IntPtr inst, int flags);
+  [DllImport("winmm.dll")] static extern int waveInPrepareHeader(IntPtr h, IntPtr hdr, int size);
+  [DllImport("winmm.dll")] static extern int waveInUnprepareHeader(IntPtr h, IntPtr hdr, int size);
+  [DllImport("winmm.dll")] static extern int waveInAddBuffer(IntPtr h, IntPtr hdr, int size);
+  [DllImport("winmm.dll")] static extern int waveInStart(IntPtr h);
+  [DllImport("winmm.dll")] static extern int waveInReset(IntPtr h);
+  [DllImport("winmm.dll")] static extern int waveInClose(IntPtr h);
+  const int N = 8, SIZE = 3200;
+  static readonly int HS = Marshal.SizeOf(typeof(Hdr));
+  IntPtr h; IntPtr[] hdrs = new IntPtr[N]; IntPtr[] bufs = new IntPtr[N]; int next = 0; bool open = false;
+  MemoryStream sound = new MemoryStream();
+  public double Level = 0;
+  public int Start() {
+    var f = new Fmt { tag = 1, channels = 1, rate = 16000, bytesPerSec = 32000, align = 2, bits = 16, extra = 0 };
+    int rc = waveInOpen(out h, -1, ref f, IntPtr.Zero, IntPtr.Zero, 0);
+    if (rc != 0) return rc;
+    open = true;
+    for (int i = 0; i < N; i++) {
+      bufs[i] = Marshal.AllocHGlobal(SIZE);
+      hdrs[i] = Marshal.AllocHGlobal(HS);
+      Marshal.StructureToPtr(new Hdr { data = bufs[i], length = SIZE }, hdrs[i], false);
+      waveInPrepareHeader(h, hdrs[i], HS);
+      waveInAddBuffer(h, hdrs[i], HS);
+    }
+    return waveInStart(h);
+  }
+  public void Poll() { Take(true); }
+  void Take(bool again) {
+    int peak = -1;
+    for (int k = 0; k < N; k++) {
+      var hd = (Hdr)Marshal.PtrToStructure(hdrs[next], typeof(Hdr));
+      if ((hd.flags & 1) == 0) break;
+      int n = (int)hd.recorded;
+      var b = new byte[n];
+      Marshal.Copy(bufs[next], b, 0, n);
+      sound.Write(b, 0, n);
+      for (int i = 0; i + 1 < n; i += 2) { int s = Math.Abs((int)BitConverter.ToInt16(b, i)); if (s > peak) peak = s; }
+      waveInUnprepareHeader(h, hdrs[next], HS);
+      if (again) {
+        Marshal.StructureToPtr(new Hdr { data = bufs[next], length = SIZE }, hdrs[next], false);
+        waveInPrepareHeader(h, hdrs[next], HS);
+        waveInAddBuffer(h, hdrs[next], HS);
+      }
+      next = (next + 1) % N;
+    }
+    if (peak >= 0) Level = Math.Min(1.0, peak / 32768.0);
+  }
+  public void Stop(string file) {
+    if (!open) return;
+    waveInReset(h);
+    Take(false);
+    waveInClose(h);
+    open = false;
+    for (int i = 0; i < N; i++) { Marshal.FreeHGlobal(bufs[i]); Marshal.FreeHGlobal(hdrs[i]); }
+    if (string.IsNullOrEmpty(file)) return;
+    var data = sound.ToArray();
+    using (var w = new BinaryWriter(File.Create(file))) {
+      w.Write(new char[] { 'R', 'I', 'F', 'F' }); w.Write(36 + data.Length); w.Write(new char[] { 'W', 'A', 'V', 'E', 'f', 'm', 't', ' ' });
+      w.Write(16); w.Write((short)1); w.Write((short)1); w.Write(16000); w.Write(32000); w.Write((short)2); w.Write((short)16);
+      w.Write(new char[] { 'd', 'a', 't', 'a' }); w.Write(data.Length); w.Write(data);
+    }
+  }
+}`;
 const MIC_SCRIPT = (file) => [
-  "Add-Type -Namespace CgMic -Name W -MemberDefinition '[DllImport(\"winmm.dll\", CharSet = CharSet.Unicode)] public static extern int mciSendString(string c, System.Text.StringBuilder r, int l, System.IntPtr h);'",
-  "function Mci($c) { [CgMic.W]::mciSendString($c, $null, 0, [IntPtr]::Zero) }",
-  "Mci 'open new type waveaudio alias cgrec' | Out-Null",
-  "Mci 'set cgrec time format ms bitspersample 16 channels 1 samplespersec 16000 bytespersec 32000 alignment 2' | Out-Null",
-  "$rc = Mci 'record cgrec'",
+  "Add-Type -TypeDefinition @'" + MIC_RECORDER + "\n'@",
+  "$r = New-Object CgRec",
+  "$rc = $r.Start()",
   "[Console]::Out.WriteLine(\"REC $rc\"); [Console]::Out.Flush()",
-  "$line = [Console]::In.ReadLine()",
-  "Mci 'stop cgrec' | Out-Null",
-  `if ($line -eq 'stop') { Mci 'save cgrec "${file.replace(/'/g, "''")}"' | Out-Null }`,
-  "Mci 'close cgrec' | Out-Null",
+  "if ($rc -ne 0) { exit }",
+  // While it records: the sound level about 14 times a second (the panel's moving bars), until "stop" or "cancel"
+  "$in = New-Object System.IO.StreamReader([Console]::OpenStandardInput())",
+  "$read = $in.ReadLineAsync()",
+  "while (-not $read.IsCompleted) { $r.Poll(); [Console]::Out.WriteLine(\"LVL \" + [int]($r.Level * 32768)); [Console]::Out.Flush(); Start-Sleep -Milliseconds 70 }",
+  "$line = $read.Result",
+  `if ($line -eq 'stop') { $r.Stop('${file.replace(/'/g, "''")}') } else { $r.Stop($null) }`,
   "[Console]::Out.WriteLine('DONE')",
 ].join("\n");
-function micStart() {
+function micStart(webview) {
   micCancel();
   const file = path.join(require("node:os").tmpdir(), `classgrid-dictation-${Date.now()}.wav`);
   const proc = require("node:child_process").spawn("powershell.exe", ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-EncodedCommand", Buffer.from(MIC_SCRIPT(file), "utf16le").toString("base64")], { windowsHide: true });
   return new Promise((resolve, reject) => {
     let out = "";
+    let rest = "";
     proc.stdout.setEncoding("utf8");
     proc.stdout.on("data", (d) => {
+      // Each "LVL n" line: the sound level now (0 to 32768), for the panel's moving bars
+      rest += d;
+      const lines = rest.split(/\r?\n/);
+      rest = lines.pop();
+      for (const line of lines) {
+        const lvl = line.match(/^LVL (\d+)/);
+        if (lvl && micRec?.proc === proc) webview?.postMessage({ cgEvent: "micLevel", data: Math.min(1, Number(lvl[1]) / 32768) });
+      }
+      if (micRec?.proc === proc) return;
       out += d;
       const m = out.match(/REC (\d+)/);
       if (!m || micRec?.proc === proc) return;
@@ -452,7 +533,7 @@ const HANDLERS = {
   clipboardRead: () => vscode.env.clipboard.readText(),
   clipboardImage: () => clipboardImage(),
   // (the mic button: see micStart)
-  micStart: () => micStart(),
+  micStart: (p) => micStart(p.webview),
   micStop: () => micStop(),
   micCancel: () => micCancel(),
   openExternal: (_p, url) => { if (/^https?:\/\//.test(String(url))) return vscode.env.openExternal(vscode.Uri.parse(String(url))).then(() => undefined); },

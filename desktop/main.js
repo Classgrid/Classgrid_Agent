@@ -90,7 +90,8 @@ const lastPlaceFile = () => path.join(app.getPath("userData"), "last-place.json"
 function lastPlace() {
   try {
     const p = JSON.parse(fs.readFileSync(lastPlaceFile(), "utf8")).path;
-    return typeof p === "string" && p.startsWith("/") ? p : "/";
+    // Only a Studio or Project Mode place: the app never opens on Grids or another page
+    return typeof p === "string" && /^\/(c|superadmin)\/(studio|project)(\/|\?|$)/.test(p) ? p : "/";
   } catch { return "/"; }
 }
 function rememberPlace(url) {
@@ -106,6 +107,8 @@ const isOurs = (url) => { try { return OUR_HOSTS.has(new URL(url).hostname); } c
 
 // The window buttons' colours, the same as our top bar (Studio's greys)
 const TITLE_BAR = { dark: { color: "#181818", symbolColor: "#ffffff" }, light: { color: "#f5f5f5", symbolColor: "#000000" } };
+// ...and the welcome screen's (splash/), which every window opens with
+const SPLASH_BAR = { dark: { color: "#000000", symbolColor: "#ffffff" }, light: { color: "#ffffff", symbolColor: "#000000" } };
 
 // A page of the built-in editor (localhost, its own port): the folder it shows as a Windows path, "" for none,
 // undefined when it isn't the editor
@@ -127,7 +130,7 @@ const appWindowOptions = () => ({
   autoHideMenuBar: true,
   // No Windows title bar: our own top bar (client/src/main.tsx) sits in that row, with the window buttons on its right
   titleBarStyle: "hidden",
-  titleBarOverlay: { ...TITLE_BAR.dark, height: 40 },
+  titleBarOverlay: { ...SPLASH_BAR.dark, height: 40 },
   webPreferences: { preload: path.join(__dirname, "preload.js"), contextIsolation: true, nodeIntegration: false, sandbox: true },
 });
 // The built-in editor's "Open Folder" switches its frame to another folder: that folder opens as this window's
@@ -333,12 +336,43 @@ ipcMain.handle("cg:editorCommand", () => ({ ok: false }));
 // The Edit menu in our top bar (Studio): undo, cut, copy, paste… on what the user was typing in
 const EDIT_ACTIONS = new Set(["undo", "redo", "cut", "copy", "paste", "selectAll"]);
 ipcMain.on("cg:edit", (e, action) => { if (EDIT_ACTIONS.has(action)) e.sender[action](); });
-ipcMain.on("cg:titleBar", (e, dark) => { try { BrowserWindow.fromWebContents(e.sender)?.setTitleBarOverlay(dark ? TITLE_BAR.dark : TITLE_BAR.light); } catch { /* window closing */ } });
+// While the welcome screen shows, the window buttons take its colour; the app's colour (sent meanwhile) follows after it
+const splashBars = new Map(); // webContents id -> the app's last colour (dark or not) while the welcome screen shows
+const setBar = (e, colors) => { try { BrowserWindow.fromWebContents(e.sender)?.setTitleBarOverlay(colors); } catch { /* window closing */ } };
+ipcMain.on("cg:titleBar", (e, dark) => {
+  if (splashBars.has(e.sender.id)) return void splashBars.set(e.sender.id, dark);
+  setBar(e, dark ? TITLE_BAR.dark : TITLE_BAR.light);
+});
+ipcMain.on("cg:splashBar", (e, on, dark) => {
+  if (on) {
+    if (!splashBars.has(e.sender.id)) splashBars.set(e.sender.id, null);
+    return setBar(e, dark ? SPLASH_BAR.dark : SPLASH_BAR.light);
+  }
+  const appDark = splashBars.get(e.sender.id);
+  splashBars.delete(e.sender.id);
+  setBar(e, appDark === false ? TITLE_BAR.light : TITLE_BAR.dark);
+});
 ipcMain.handle("cg:pickFolder", async () => {
   const r = await dialog.showOpenDialog(win, { properties: ["openDirectory"] });
   if (r.canceled) return null;
   runner.allowFolder(r.filePaths[0]); // only folders picked here can be used by the local runner
   return r.filePaths[0];
+});
+// Studio's File → Open File: a code or text file (no pictures, videos, sounds or archives); its folder becomes the project
+const NOT_CODE = new Set(["png", "jpg", "jpeg", "gif", "webp", "bmp", "ico", "svg", "tif", "tiff", "heic", "avif", "psd", "mp4", "mov", "avi", "mkv", "webm", "wmv", "flv", "mp3", "wav", "ogg", "flac", "aac", "m4a", "zip", "rar", "7z", "tar", "gz", "exe", "msi", "dll", "iso", "bin"]);
+ipcMain.handle("cg:pickFile", async () => {
+  const r = await dialog.showOpenDialog(win, {
+    properties: ["openFile"],
+    filters: [
+      { name: "Code and text files", extensions: ["js", "jsx", "ts", "tsx", "mjs", "cjs", "json", "html", "htm", "css", "scss", "less", "md", "txt", "py", "java", "kt", "c", "h", "cpp", "hpp", "cs", "go", "rs", "rb", "php", "swift", "dart", "vue", "svelte", "sql", "sh", "ps1", "bat", "yml", "yaml", "toml", "ini", "env", "xml", "csv", "lua", "r", "pl", "gradle", "lock", "log"] },
+      { name: "All files", extensions: ["*"] },
+    ],
+  });
+  if (r.canceled) return null;
+  const file = r.filePaths[0];
+  if (NOT_CODE.has(path.extname(file).slice(1).toLowerCase())) return { error: "Pick a code or text file, not a picture, video, sound or archive." };
+  runner.allowFolder(path.dirname(file));
+  return { file, folder: path.dirname(file) };
 });
 // The login token arrives from the screens (client/src/main.tsx); the local runner (Day 2) uses it
 ipcMain.on("cg:setToken", (_e, t) => { runner.setToken(t || null); chats.setToken(t || null); memory.setToken(t || null); codeEditor.setToken(t || null); });

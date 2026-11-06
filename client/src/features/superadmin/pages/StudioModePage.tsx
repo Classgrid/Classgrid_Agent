@@ -8,9 +8,9 @@ import {
   PanelRightClose, PanelRightOpen, Plus, RotateCw, Search, Terminal, X,
 } from "lucide-react";
 import { AskAiPanel } from "@/components/ai/components/AskAiPanel";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useLocation, useNavigate } from "react-router-dom";
 import { useResumeGridInvite } from "@/components/ai/components/share-grid/GridJoinPage";
-import { StudioProjectPicker } from "../components/StudioProjectPicker";
+import { StudioProjectPicker, openLocalFolder, openStudioProject } from "../components/StudioProjectPicker";
 import { StudioFilesView } from "../components/StudioFilesView";
 import { StudioTerminalView, useAgentTerminal } from "../components/StudioTerminalView";
 import { StudioReviewModal } from "../components/StudioReviewModal";
@@ -78,6 +78,12 @@ export function StudioModePage() {
   // Back from login with a Share Grid invite: open it
   useResumeGridInvite();
   const [pane, setPane] = useState(readPane);
+  // Desktop app: Schedule and Library are pages, not chats, so they have no right pane (and no button for it)
+  const { pathname } = useLocation();
+  const pathParts = pathname.split("/");
+  const pageId = pathParts[pathParts.indexOf("studio") + 1] || "";
+  const toolPage = import.meta.env.VITE_DESKTOP === "1" && (pageId === "schedule" || pageId === "library");
+  const paneOpen = pane.open && !toolPage;
   const [maximized, setMaximized] = useState(false);
   // A narrow pane shows its tabs as icons only (the name shows on hover)
   const compactTabs = !maximized && pane.width < 520;
@@ -474,7 +480,7 @@ export function StudioModePage() {
     setSidebarResizing(true);
     document.documentElement.classList.add("studio-resizing");
     const move = (ev: PointerEvent) => {
-      const right = pane.open ? (maximized ? window.innerWidth : pane.width) : 48;
+      const right = paneOpen ? (maximized ? window.innerWidth : pane.width) : 48;
       const max = Math.min(MAX_SIDEBAR, window.innerWidth - right - MIN_CHAT);
       setSidebarW(Math.round(Math.min(Math.max(ev.clientX, MIN_SIDEBAR), Math.max(MIN_SIDEBAR, max))));
     };
@@ -496,9 +502,27 @@ export function StudioModePage() {
   const navigate = useNavigate();
   const titleSlot = import.meta.env.VITE_DESKTOP === "1" ? document.getElementById("cg-titlebar-slot") : null;
   const showTab = (kind: TabKind) => { setPane((p) => (p.open ? p : { ...p, open: true })); openTab(kind); };
+  // File → Open Folder / Open File: the folder (or the file's folder) on this computer becomes Studio's project; a
+  // picked file also opens beside the chat
+  const openFolderProject = async (folder?: string) => {
+    const made = await openLocalFolder(folder);
+    if (!made) return false;
+    openStudioProject(made.id);
+    window.dispatchEvent(new Event("studio:projects-changed"));
+    return true;
+  };
+  const openFileProject = async () => {
+    const picked = await (window as { classgridDesktop?: { pickFile?: () => Promise<{ file?: string; folder?: string; error?: string } | null> } }).classgridDesktop?.pickFile?.();
+    if (!picked) return;
+    if (picked.error || !picked.file || !picked.folder) { toast.error(picked.error || "Couldn't open that file"); return; }
+    if (await openFolderProject(picked.folder)) window.dispatchEvent(new CustomEvent(OPEN_PROJECT_FILE_EVENT, { detail: { path: picked.file } }));
+  };
   const studioMenus: MenuSpec[] = [
     { label: "File", items: [
       { label: "New Chat", run: () => window.dispatchEvent(new CustomEvent("agent:new-chat")) },
+      "-",
+      { label: "Open File…", run: () => { void openFileProject(); } },
+      { label: "Open Folder…", run: () => { void openFolderProject(); } },
       "-",
       { label: "New Browser Tab", run: () => showTab("browser") },
       { label: "New Terminal", run: () => showTab("terminal") },
@@ -538,7 +562,7 @@ export function StudioModePage() {
     <div ref={rowRef} className="flex w-full h-full !bg-[#fafafa] dark:!bg-[#121212] text-foreground overflow-hidden">
       {titleSlot && createPortal(<DesktopMenuBar menus={studioMenus} />, titleSlot)}
       {/* Chat */}
-      <div ref={chatColRef} className={`studio-chat @container relative min-w-0 flex-1 flex flex-col ${maximized && pane.open ? "hidden" : ""}`}>
+      <div ref={chatColRef} className={`studio-chat @container relative min-w-0 flex-1 flex flex-col ${maximized && paneOpen ? "hidden" : ""}`}>
         {!isMobile && !hidden && (
           <div
             onPointerDown={sidebarState === "expanded" ? startSidebarResize : startStripDrag}
@@ -551,7 +575,7 @@ export function StudioModePage() {
         )}
         {sidebarResizing && createPortal(<div className="fixed inset-0 z-[200] cursor-col-resize select-none" />, document.body)}
         <AnimatePresence>
-          {!pane.open && (
+          {!pane.open && !toolPage && (
             // Hidden pane: only one button in the top right corner brings it back
             <motion.button
               key="show-pane"
@@ -612,13 +636,13 @@ export function StudioModePage() {
           variant="full-page"
           pageContext={{ path: "/c/studio", title: "Studio" }}
           inputHeader={<StudioProjectPicker />}
-          studioMenu={!pane.open}
+          studioMenu={!paneOpen}
         />
       </div>
 
       {/* Right pane: slides in and out from the right */}
       <AnimatePresence initial={false}>
-        {pane.open && (
+        {paneOpen && (
           <motion.div
             key="pane"
             className={`relative shrink-0 border-l border-border !bg-sidebar ${maximized ? "flex-1" : ""}`}

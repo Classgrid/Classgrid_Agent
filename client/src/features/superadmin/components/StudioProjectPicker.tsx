@@ -46,8 +46,8 @@ const onlineOnly = <T extends { location?: "cloud" | "local" }>(list: T[] | null
 const LIST_W = 288;
 const SIDE_W = 320;
 const desktopApp = (window as any).classgridDesktop as { isDesktop?: boolean; pickFolder?: () => Promise<string | null>; cloneRepo?: (repo: string) => Promise<{ folder?: string; error?: string } | null> } | undefined;
-export async function openLocalFolder(): Promise<Project | null> {
-  const folder = await desktopApp?.pickFolder?.();
+export async function openLocalFolder(picked?: string): Promise<Project | null> {
+  const folder = picked || await desktopApp?.pickFolder?.();
   if (!folder) return null;
   const { res, data } = await api("/projects/local", { method: "POST", body: JSON.stringify({ localPath: folder }) });
   if (!res.ok || !data?.project) { toast.error(data?.error || "Couldn't open that folder"); return null; }

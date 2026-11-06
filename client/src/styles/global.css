@@ -442,6 +442,21 @@
     --sidebar-background: #000000;
     --sidebar-accent: #222222;
   }
+  /* Desktop app, Studio in Incognito (AskAiPanel sets body.cg-incognito-on): Studio's floating sidebar button (above
+     the Incognito frame) is hidden, as Agent's is */
+  body.cg-incognito-on .studio-sidebar-btn {
+    display: none;
+  }
+  /* Studio's grey chat layers (above) are undone inside the Incognito frame, so it has Agent mode's colours */
+  html.dark.desktop-app.studio-mode .studio-chat .cg-incognito [class*="dark:!bg-[#000000]"] {
+    background-color: #000000 !important;
+  }
+  html.dark.desktop-app.studio-mode .studio-chat .cg-incognito [class*="dark:!bg-[#0f0f0f]"] {
+    background-color: #0f0f0f !important;
+  }
+  html.desktop-app.studio-mode:not(.dark) .studio-chat .cg-incognito [class*="!bg-[#fafafa]"] {
+    background-color: #fafafa !important;
+  }
   /* Studio Mode: the sidebar button fades out while the chat scrolls, so it never covers the text */
   .studio-sidebar-btn,
   .studio-question-dots {

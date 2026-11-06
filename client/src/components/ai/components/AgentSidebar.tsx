@@ -76,6 +76,29 @@ const STUDIO_OPTS: StudioListOpts = {
 function readStudioOpts(): StudioListOpts {
   try { return { ...STUDIO_OPTS, ...JSON.parse(localStorage.getItem(STUDIO_OPTS_KEY) || "{}") }; } catch { return STUDIO_OPTS; }
 }
+// Which chat list the page shows: Agent mode's, one project's (Project Mode), or Studio's
+function chatListQuery(): string {
+  const parts = window.location.pathname.split("/");
+  if (!parts.includes("project") && !parts.includes("studio") && !DESKTOP_APP) return "?mode=agent";
+  // Studio lists every project's chats under its project, and its chats sent with no project
+  if (IN_EDITOR || parts.includes("studio") || (DESKTOP_APP && !parts.includes("project"))) return `?project=all&studio=1${readStudioOpts().archivedOnly ? "&archived=1" : ""}`;
+  let openProject: string | null = null;
+  try { openProject = (sessionStorage.getItem("cg_project_open") || localStorage.getItem("cg_project_open")); } catch { /* storage blocked */ }
+  return `?project=${openProject || "all"}`; // no project open: chats of all projects
+}
+// Desktop app: the last list of each kind while the app is open, so coming back to the list (from Grids, a page or
+// another mode) shows it at once and refreshes it quietly, with no grey loading bars
+const listCache = new Map<string, ChatSession[]>();
+// ...and on this computer for the next start, per account (cg_desktop_user), so the first list shows at once too
+const savedListKey = (query: string) => { try { return `cg_chat_list:${localStorage.getItem("cg_desktop_user") || ""}:${query}`; } catch { return ""; } };
+function keptList(query: string): ChatSession[] | undefined {
+  if (listCache.has(query)) return listCache.get(query);
+  try { const saved = JSON.parse(localStorage.getItem(savedListKey(query)) || "null"); return Array.isArray(saved) ? saved : undefined; } catch { return undefined; }
+}
+function keepList(query: string, list: ChatSession[]) {
+  listCache.set(query, list);
+  try { localStorage.setItem(savedListKey(query), JSON.stringify(list.slice(0, 300))); } catch { /* storage full or blocked */ }
+}
 
 const ChatBubbleIcon = ({ className }: { className?: string }) => (
   <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className={className}>
@@ -83,10 +106,13 @@ const ChatBubbleIcon = ({ className }: { className?: string }) => (
   </svg>
 );
 
-export function AgentNestedMenu({ searchQuery = "" }: { searchQuery?: string }) {
+// Desktop app, Studio: the dashboard's other pages (Grids, Requests, Audit Logs), listed under Library
+type MenuPage = { label: string; to?: string; icon?: React.ComponentType<{ size?: number }>; badge?: string | number };
+
+export function AgentNestedMenu({ searchQuery = "", pages }: { searchQuery?: string; pages?: MenuPage[] }) {
   const { state, setOpen: setSidebarOpen } = useSidebar();
   const isCollapsed = state === "collapsed";
-  const [sessions, setSessions] = React.useState<ChatSession[]>([]);
+  const [sessions, setSessions] = React.useState<ChatSession[]>(() => (DESKTOP_APP && keptList(chatListQuery())) || []);
   const [loading, setLoading] = React.useState(false);
   // Desktop app, no internet: the list shows the chats saved on this computer
   const [offlineList, setOfflineList] = React.useState(false);
@@ -146,8 +172,12 @@ export function AgentNestedMenu({ searchQuery = "" }: { searchQuery?: string }) 
   }, []);
 
   // Which list is shown (agent chats, or one project's chats) and which one was asked for last
-  const shownListRef = React.useRef<string | null>(null);
+  const shownListRef = React.useRef<string | null>(DESKTOP_APP && keptList(chatListQuery()) ? chatListQuery() : null);
   const askedListRef = React.useRef<string | null>(null);
+  // (desktop app: the list on screen, with its renames, pins and deletes, is what comes back next time)
+  React.useEffect(() => {
+    if (DESKTOP_APP && shownListRef.current) keepList(shownListRef.current, sessions);
+  }, [sessions]);
   // silent: refresh in the background without the grey loading bars (used after the first load)
   const fetchSessions = (silent = false) => {
     const endpoint = typeof import.meta !== "undefined" && import.meta.env
@@ -155,17 +185,14 @@ export function AgentNestedMenu({ searchQuery = "" }: { searchQuery?: string }) 
       : "/api/ai/sessions";
 
     // Agent mode and Project mode keep separate chat lists (Project mode: the open project's chats, or all project chats on the Projects page)
-    let listQuery = "?mode=agent";
-    if (window.location.pathname.split("/").includes("project") || window.location.pathname.split("/").includes("studio")) { // Studio: the same project chats as Project Mode
-      let openProject: string | null = null;
-      try { openProject = (sessionStorage.getItem("cg_project_open") || localStorage.getItem("cg_project_open")); } catch { /* storage blocked */ }
-      listQuery = `?project=${openProject || "all"}`; // no project open: chats of all projects
-      // Studio lists every project's chats under its project, and its chats sent with no project
-      if (IN_EDITOR || window.location.pathname.split("/").includes("studio")) listQuery = `?project=all&studio=1${readStudioOpts().archivedOnly ? "&archived=1" : ""}`;
-    }
+    const listQuery = chatListQuery();
     // Another list than the one on screen (Agent -> a project, or one project -> another): clear it at once, so
-    // the old mode's chats never show while the new list loads
-    if (shownListRef.current !== listQuery) { setSessions([]); silent = false; }
+    // the old mode's chats never show while the new list loads (desktop app: the last copy of it shows instead)
+    if (shownListRef.current !== listQuery) {
+      const kept = DESKTOP_APP ? keptList(listQuery) : undefined;
+      if (kept) { shownListRef.current = listQuery; setSessions(kept); silent = true; }
+      else { shownListRef.current = null; setSessions([]); silent = false; }
+    }
     if (!silent) setLoading(true);
     askedListRef.current = listQuery;
     // Desktop app: the other accounts' chats for the same list, read from this computer
@@ -531,14 +558,17 @@ export function AgentNestedMenu({ searchQuery = "" }: { searchQuery?: string }) 
   const navigate = useNavigate();
   const location = useLocation();
   const isProjectMode = location.pathname.split("/").includes("project");
-  const isStudioMode = IN_EDITOR || location.pathname.split("/").includes("studio");
+  // (desktop app: Studio's list on every page but Project mode, such as Grids, Requests and Audit Logs)
+  const isStudioMode = IN_EDITOR || location.pathname.split("/").includes("studio") || (DESKTOP_APP && !isProjectMode);
   // Switching between Agent and Project mode shows that mode's own chats
   React.useEffect(() => { fetchSessions(true); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [isProjectMode, isStudioMode]);
 
   // Extract base path robustly by finding the 'agent' segment
   const pathParts = location.pathname.split('/');
   const agentIndex = pathParts.indexOf('agent') !== -1 ? pathParts.indexOf('agent') : pathParts.indexOf('project') !== -1 ? pathParts.indexOf('project') : pathParts.indexOf('studio');
-  const baseAgentPath = agentIndex !== -1
+  const baseAgentPath = DESKTOP_APP && !IN_EDITOR && isStudioMode && !pathParts.includes("studio")
+    ? (location.pathname.startsWith("/superadmin") ? "/superadmin/studio" : "/c/studio") // (desktop app, Grids and other pages: chats open in Studio)
+    : agentIndex !== -1
     ? pathParts.slice(0, agentIndex + 1).join('/')
     : location.pathname;
 
@@ -1270,6 +1300,21 @@ export function AgentNestedMenu({ searchQuery = "" }: { searchQuery?: string }) 
             </SidebarMenuItem>
             )}
 
+            {pages?.map((page) => (
+              <SidebarMenuItem key={page.label}>
+                <SidebarMenuButton
+                  tooltip={page.label}
+                  onClick={() => page.to && navigate(page.to)}
+                  render={
+                    <div className="flex items-center gap-3 w-full cursor-pointer">
+                      {page.icon && <page.icon size={20} />}
+                      <span className="truncate font-medium">{page.label}</span>
+                    </div>
+                  }
+                />
+              </SidebarMenuItem>
+            ))}
+
             <SidebarMenuItem>
               <SidebarMenuButton 
                 tooltip="Search"
@@ -1399,6 +1444,23 @@ export function AgentNestedMenu({ searchQuery = "" }: { searchQuery?: string }) 
               />
             </SidebarMenuItem>
             )}
+
+            {pages?.map((page) => (
+              <SidebarMenuItem key={page.label}>
+                <SidebarMenuButton
+                  onClick={() => page.to && navigate(page.to)}
+                  render={
+                    <div className="flex items-center gap-3 w-full cursor-pointer">
+                      {page.icon && <page.icon size={20} />}
+                      <span className="font-medium text-sm flex-1 min-w-0 truncate">{page.label}</span>
+                      {page.badge && (
+                        <span className="bg-secondary text-secondary-foreground text-[10px] font-bold px-1.5 py-0.5 rounded">{page.badge}</span>
+                      )}
+                    </div>
+                  }
+                />
+              </SidebarMenuItem>
+            ))}
           </SidebarMenu>
         </div>
 

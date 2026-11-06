@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import { Plus, X } from "lucide-react";
-import { closeLocalTerminal, hasLocalTerminals, localShells, LocalTerminalView, openLocalTerminal, useLocalTerminals } from "./LocalTerminal";
+import { closeLocalTerminal, hasLocalTerminals, localShells, LocalTerminalView, openLocalTerminal, openProjectFolder, useLocalTerminals } from "./LocalTerminal";
 
 const EASE = [0.22, 1, 0.36, 1] as const;
 const TERMINAL_TOOLS = new Set(["execute_terminal_command", "run_code", "start_background_command", "check_background_command", "stop_background_command"]);
@@ -57,13 +57,47 @@ export function StudioTerminalView({ entries, onClear }: { entries: TerminalEntr
   const [shown, setShown] = useState<string>("agent");
   const [shells, setShells] = useState<{ id: string; name: string }[]>([]);
   const [picking, setPicking] = useState(false);
+  const [pickAt, setPickAt] = useState({ left: 0, top: 0 });
+  // A click anywhere else closes the shell menu
+  useEffect(() => {
+    if (!picking) return;
+    const close = (e: MouseEvent) => { if (!(e.target as HTMLElement).closest?.("[data-term-picker]")) setPicking(false); };
+    window.addEventListener("mousedown", close);
+    return () => window.removeEventListener("mousedown", close);
+  }, [picking]);
   useEffect(() => { if (hasLocalTerminals()) void localShells().then(setShells); }, []);
   const newTerminal = async (shell?: string) => {
     setPicking(false);
     const t = await openLocalTerminal(shell);
     if (t) setShown(t.id);
   };
-  const shownTerm = mine.find((t) => t.id === shown) || null;
+  // The desktop app opens on a real terminal (the user's own shell, ready to type in) for the open project, in its
+  // folder (no project: the home folder); picking another project switches to that project's terminal. The agent's
+  // commands are the next option.
+  const mineRef = useRef(mine);
+  mineRef.current = mine;
+  const opening = useRef(false);
+  // The open project's folder: only its terminals are listed (no project: only those opened with no project)
+  const [folder, setFolder] = useState<string | null>(() => openProjectFolder());
+  const visible = mine.filter((t) => t.project === folder);
+  useEffect(() => {
+    if (!hasLocalTerminals()) return;
+    const showProjectTerminal = async () => {
+      const folder = openProjectFolder();
+      setFolder(folder);
+      const live = mineRef.current.find((t) => !t.ended && t.project === folder);
+      if (live) { setShown(live.id); return; }
+      if (opening.current) return;
+      opening.current = true;
+      await newTerminal().finally(() => { opening.current = false; });
+    };
+    void showProjectTerminal();
+    const onProject = () => setTimeout(() => void showProjectTerminal(), 0);
+    window.addEventListener("studio:project-changed", onProject);
+    return () => window.removeEventListener("studio:project-changed", onProject);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  const shownTerm = visible.find((t) => t.id === shown) || null;
   const boxRef = useRef<HTMLDivElement>(null);
   // Follow the newest output, unless the user scrolled up to read
   const stick = useRef(true);
@@ -76,19 +110,31 @@ export function StudioTerminalView({ entries, onClear }: { entries: TerminalEntr
     <div className="flex-1 min-h-0 flex flex-col bg-white dark:bg-[#1e1e1e]">
       {hasLocalTerminals() && (
         <div className="shrink-0 flex items-center gap-1 h-9 px-2 border-b border-border overflow-x-auto">
-          <button onClick={() => setShown("agent")} className={`h-7 px-2.5 rounded-md text-[12px] whitespace-nowrap transition-colors ${!shownTerm ? "bg-black/[0.06] dark:bg-white/[0.08] text-foreground" : "text-muted-foreground hover:text-foreground"}`}>Agent</button>
-          {mine.map((t, i) => (
+          {visible.map((t, i) => (
             <span key={t.id} className={`group flex items-center h-7 rounded-md text-[12px] whitespace-nowrap ${shownTerm?.id === t.id ? "bg-black/[0.06] dark:bg-white/[0.08] text-foreground" : "text-muted-foreground hover:text-foreground"}`}>
               <button onClick={() => setShown(t.id)} className="h-7 pl-2.5 pr-1">{t.name} {i + 1}{t.ended ? " (ended)" : ""}</button>
               <button onClick={() => { closeLocalTerminal(t.id); if (shown === t.id) setShown("agent"); }} aria-label={`Close ${t.name} ${i + 1}`} className="flex items-center justify-center size-5 mr-1 rounded hover:bg-black/[0.08] dark:hover:bg-white/[0.1]"><X className="size-3" /></button>
             </span>
           ))}
-          <div className="relative">
-            <button onClick={() => (shells.length > 1 ? setPicking((v) => !v) : void newTerminal())} title="New terminal" aria-label="New terminal" className="flex items-center gap-1 h-7 px-2 rounded-md text-[12px] text-muted-foreground hover:text-foreground hover:bg-black/[0.05] dark:hover:bg-white/[0.06]">
+          {/* The second option: the commands the agent ran in this chat */}
+          <button onClick={() => setShown("agent")} className={`h-7 px-2.5 rounded-md text-[12px] whitespace-nowrap transition-colors ${!shownTerm ? "bg-black/[0.06] dark:bg-white/[0.08] text-foreground" : "text-muted-foreground hover:text-foreground"}`}>Agent commands</button>
+          <div className="relative" data-term-picker>
+            <button
+              onClick={(e) => {
+                if (shells.length <= 1) { void newTerminal(); return; }
+                // (the menu is placed on the page, so the scrolling tab row never cuts it off)
+                const r = e.currentTarget.getBoundingClientRect();
+                setPickAt({ left: r.left, top: r.bottom + 4 });
+                setPicking((v) => !v);
+              }}
+              title="New terminal"
+              aria-label="New terminal"
+              className="flex items-center gap-1 h-7 px-2 rounded-md text-[12px] text-muted-foreground hover:text-foreground hover:bg-black/[0.05] dark:hover:bg-white/[0.06]"
+            >
               <Plus className="size-3.5" /> New terminal
             </button>
             {picking && (
-              <div className="absolute left-0 top-8 z-20 min-w-[170px] rounded-lg border border-border bg-white dark:bg-[#252526] p-1 shadow-lg">
+              <div style={{ position: "fixed", left: pickAt.left, top: pickAt.top }} className="z-50 min-w-[170px] rounded-lg border border-border bg-white dark:bg-[#252526] p-1 shadow-lg">
                 {shells.map((sh) => (
                   <button key={sh.id} onClick={() => void newTerminal(sh.id)} className="w-full text-left h-8 px-2.5 rounded-md text-[13px] hover:bg-black/[0.05] dark:hover:bg-white/[0.06]">{sh.name}</button>
                 ))}

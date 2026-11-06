@@ -246,7 +246,10 @@ export const SchedulePage: React.FC = () => {
     <div className="h-full flex flex-col bg-background relative z-10 p-6 md:p-8 max-w-3xl mx-auto w-full overflow-y-auto">
       {/* Header */}
       <div className="flex items-center justify-between mb-2">
-        <h1 className="text-2xl font-bold tracking-tight">Scheduled</h1>
+        {/* (desktop app, Studio: the name is in the top bar above instead) */}
+        {import.meta.env.VITE_DESKTOP === "1" && location.pathname.split("/").includes("studio")
+          ? <span />
+          : <h1 className="text-2xl font-bold tracking-tight">Scheduled</h1>}
         {activeCount > 0 && (
           <div className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-[#2C2C2C] dark:bg-[#F0EFED] text-[#F0EFED] dark:text-[#2C2C2C] text-xs font-medium">
             <div className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />

@@ -24,6 +24,10 @@
 import React, { useEffect, useMemo, useRef, useState, useCallback, memo, useContext } from "react";
 import { useParams } from "react-router-dom";
 import { SidebarTrigger } from "@/components/marketing_ui/sidebar";
+import { Breadcrumb, BreadcrumbItem, BreadcrumbList, BreadcrumbPage } from "@/components/marketing_ui/breadcrumb";
+import { Separator } from "@/components/marketing_ui/separator";
+import { ClassgridLogoIcon } from "@/components/layout/ClassgridLogoIcon";
+import { newTerminalOutput } from "@/features/superadmin/components/LocalTerminal";
 import hljs from "highlight.js";
 import "highlight.js/styles/github-dark.css";
 import { ExpandedInputModal } from './ExpandedInputModal';
@@ -280,8 +284,20 @@ async function checkAiUploadRateLimit(_count: number): Promise<{ allowed: boolea
 }
 async function recordAiFilesSent(_count: number): Promise<void> { }
 
-const LiveWaveform = ({ stream }: { stream: MediaStream | null }) => {
+// level: Classgrid Code, where the editor records (no stream here): its sound level (v, 0 to 1) about 12 times a
+// second (n counts them, so the same level twice still moves the bars)
+const LiveWaveform = ({ stream, level = null }: { stream: MediaStream | null; level?: { v: number; n: number } | null }) => {
   const [bars, setBars] = useState<number[]>(Array(100).fill(4));
+
+  // Classgrid Code: each new level becomes the newest bars on the right, the older ones moving left (silence stays flat)
+  useEffect(() => {
+    if (stream || level == null) return;
+    const loud = level.v > 0 ? Math.min(1, Math.max(0, (20 * Math.log10(level.v) + 50) / 42)) : 0; // about -50 dB to -8 dB
+    setBars((old) => {
+      const fresh = [0, 1, 2].map(() => (loud < 0.08 ? 4 : 4 + loud * 18 * (0.55 + Math.random() * 0.45)));
+      return [...old.slice(fresh.length), ...fresh];
+    });
+  }, [level, stream]);
 
   useEffect(() => {
     if (!stream) {
@@ -2401,6 +2417,13 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
     return import.meta.env.VITE_EDITOR === "1" && d?.inEditor && d.micStart && d.micStop ? d : null;
   };
   const editorRecordingRef = useRef(false);
+  // Classgrid Code: the sound level the editor reports while it records (the moving bars)
+  const [editorLevel, setEditorLevel] = useState<{ v: number; n: number } | null>(null);
+  useEffect(() => {
+    if (!isRecording || !editorRecordingRef.current) { setEditorLevel(null); return; }
+    const d = (window as unknown as { classgridDesktop?: { onMicLevel?: (fn: (v: number) => void) => () => void } }).classgridDesktop;
+    return d?.onMicLevel?.((v) => setEditorLevel((old) => ({ v: Number(v) || 0, n: (old?.n || 0) + 1 })));
+  }, [isRecording]);
   const startEditorRecording = async () => {
     const mic = editorMic();
     if (!mic) return false;
@@ -2638,6 +2661,12 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
     if (savedId) setSessionId(savedId);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+  // Desktop app, Studio: while Incognito is on, Studio's floating sidebar button is hidden (global.css), as in Agent mode
+  useEffect(() => {
+    if (!DESKTOP_STUDIO || pageContext?.path !== "/c/studio") return;
+    document.body.classList.toggle("cg-incognito-on", isIncognito);
+    return () => document.body.classList.remove("cg-incognito-on");
+  }, [isIncognito, pageContext?.path]);
   useEffect(() => {
     if (!isIncognito) return;
     const t = setTimeout(() => saveIncognitoChat(messages, sessionId), 400);
@@ -2708,6 +2737,8 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
   const [fileMentions, setFileMentions] = useState<string[]>([]);
   // Studio: comments and quotes on code from the Files tab, sent with the next message (kept per chat)
   const isStudio = pageContext?.path === "/c/studio";
+  // Desktop app: Studio's Incognito looks exactly like Agent mode's (its greeting, header row and question list)
+  const studioLook = isStudio && !(DESKTOP_STUDIO && isIncognito);
   const codeNotes = useCodeNotes();
   useEffect(() => { if (isStudio) setCodeNotesChat(sessionId); }, [isStudio, sessionId]);
   // Studio and Project Mode: the agent's permission mode (the shield) and the action it is waiting to be allowed
@@ -3395,6 +3426,21 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
             if (controller.signal.aborted) return;
             saveChatCopy(routeSessionId, sData, mData?.messages); // desktop app: keep a copy on this computer
             if (sData?.session) setIsPinned(!!sData.session.pinned);
+            // Desktop app, Studio: a chat opened from the list opens its project too (or no project), as opening it any
+            // other way does, so the Terminal tab and the Files tab are that project's
+            if (DESKTOP_STUDIO && sData?.session && window.location.pathname.split("/").includes("studio")) {
+              const want: string | null = sData.projectId || null;
+              let now: string | null = null;
+              try { now = sessionStorage.getItem("cg_project_open") || localStorage.getItem("cg_project_open"); } catch { /* storage blocked */ }
+              if (want !== now) {
+                try {
+                  if (want) { localStorage.setItem("cg_project_open", want); sessionStorage.setItem("cg_project_open", want); }
+                  else { localStorage.removeItem("cg_project_open"); sessionStorage.removeItem("cg_project_open"); }
+                } catch { /* storage blocked */ }
+                window.dispatchEvent(new Event("agent:refresh-sessions"));
+                window.dispatchEvent(new CustomEvent("studio:project-changed", { detail: { projectId: want } }));
+              }
+            }
             if (sData?.session) {
               setChatEnded(sData.session.ended
                 ? { reason: sData.session.end_reason ?? null, canReopen: sData.session.end_reason === "user_requested" }
@@ -4619,6 +4665,8 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
           userContext: userContext,
           sessionId: (options && options.explicitSessionId !== undefined) ? (options.explicitSessionId ?? undefined) : (sessionId ?? undefined),
           isIncognito: isIncognito,
+          // Desktop app, Studio: what the user ran and saw in their own terminal since their last message
+          userTerminal: DESKTOP_STUDIO && isStudio ? (newTerminalOutput() || undefined) : undefined,
           // Which mode the user is in (Agent, Project or Studio), so the AI knows what the user can see and do
           appMode: (() => {
             const parts = window.location.pathname.split("/");
@@ -4648,6 +4696,7 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
           projectId: (() => {
             try {
               const parts = window.location.pathname.split("/");
+              if (DESKTOP_STUDIO && isIncognito && parts.includes("studio")) return undefined; // like Agent mode's Incognito: no project
               if (parts.includes("project")) return (sessionStorage.getItem("cg_project_open") || localStorage.getItem("cg_project_open")) || undefined;
               if (parts.includes("studio")) return (sessionStorage.getItem("cg_project_open") || localStorage.getItem("cg_project_open")) || undefined; // Studio Mode: the same open project as Project Mode
               return undefined;
@@ -5490,7 +5539,7 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
                                   {/* Hover Actions (Copy / Edit) */}
                                   {typeof message.content === 'string' && message.content.replace(/\[Attached file:.*?\]/g, '').trim().length > 0 && (
                                     <div className="absolute top-full right-0 mt-1 opacity-0 group-hover:opacity-100 transition-opacity flex flex-row items-center gap-1 z-50 before:absolute before:-top-4 before:left-0 before:right-0 before:h-4">
-                                      {pageContext?.path === "/c/studio" && message.createdAt ? (
+                                      {studioLook && message.createdAt ? (
                                         <span className="mr-1 whitespace-nowrap text-[12px] text-muted-foreground">{messageTime(message.createdAt)}</span>
                                       ) : null}
                                       {!(grid.shared && (gridSenderOf(message) !== gridMyEmail || gridBlockedBy)) && (
@@ -6137,7 +6186,7 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
                           {!isUser && !message.typing && message.content.length > 0 && !message.content.includes("```approval") && !/^\s*\[IMAGE_GENERATION_[^\]]*\]\s*$/.test(message.content) && !message.content.trim().startsWith("ai_quota_exceeded") && message.content.trim() !== "ai_blocked" && (
                             <div className="pl-1 mt-3">
                               <FilesChangedSummary steps={(message.steps || []) as any} checkpoint={message.checkpoint} sessionId={sessionId || undefined} />
-                              <MessageActions content={message.content} messageId={message.id} onReply={() => setReplyToMessage(message)} time={pageContext?.path === "/c/studio" ? message.createdAt : undefined} />
+                              <MessageActions content={message.content} messageId={message.id} onReply={() => setReplyToMessage(message)} time={studioLook ? message.createdAt : undefined} />
                             </div>
                           )}
                         </div>
@@ -6881,7 +6930,7 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
                       <span className="text-sm font-mono mr-3 text-foreground shrink-0">
                         {Math.floor(recordingTime / 60)}:{(recordingTime % 60).toString().padStart(2, '0')}
                       </span>
-                      <LiveWaveform stream={micStream} />
+                      <LiveWaveform stream={micStream} level={editorLevel} />
                     </div>
                   )}
 
@@ -7009,7 +7058,24 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
                 <StudioOverviewButton sessionId={sessionId} />
               </div>
             )}
-            <div className={pageContext?.path === "/c/studio" ? "hidden" : "shrink-0 flex items-center justify-between px-3 sm:px-6 pt-3 h-14"}>
+            {/* Desktop app: Schedule and Library in Studio have the same top bar as Grids, Requests and Audit Logs
+                (DashboardLayout): the sidebar button on the left and the page name in the middle */}
+            {DESKTOP_STUDIO && isStudio && (sessionId === "schedule" || sessionId === "library") && (
+              <header className="flex h-14 shrink-0 items-center justify-center border-b border-border/50 px-4 bg-background/80 backdrop-blur-md relative z-20">
+                <div className="absolute left-4 flex items-center gap-2">
+                  <SidebarTrigger />
+                  <Separator orientation="vertical" className="h-4" />
+                </div>
+                <Breadcrumb>
+                  <BreadcrumbList>
+                    <BreadcrumbItem>
+                      <BreadcrumbPage>{sessionId === "schedule" ? "Schedule" : "Library"}</BreadcrumbPage>
+                    </BreadcrumbItem>
+                  </BreadcrumbList>
+                </Breadcrumb>
+              </header>
+            )}
+            <div className={studioLook ? "hidden" : "shrink-0 flex items-center justify-between px-3 sm:px-6 pt-3 h-14"}>
               {isIncognito || pageContext?.path === "/c/studio" ? <span /> : <SidebarTrigger />}
 
               {/* Ghost button on a new chat: start an incognito chat */}
@@ -7102,11 +7168,30 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
             ) : emptyState ? (
               /* â”€â”€ PostHog-style: everything in one centered block â”€â”€ */
               <div className="flex-1 min-h-0 flex flex-col items-center justify-center px-4 md:px-8 pb-3 sm:pb-0">
+                {/* Desktop app, Studio's new chat: a soft purple glow from the top */}
+                {DESKTOP_STUDIO && studioLook && sessionId !== "schedule" && sessionId !== "library" && (
+                  // Light from the top centre, dimming gradually outwards to nothing above the logo, with a fine grain that
+                  // only shows inside the light, so it never shows steps (light mode: a soft lavender that shows on white)
+                  <div aria-hidden className="pointer-events-none absolute inset-0">
+                    <div
+                      className="absolute inset-0 dark:hidden"
+                      style={{ background: "radial-gradient(ellipse 38% 30% at 50% 0%, rgba(139, 92, 246, 0.16) 0%, rgba(139, 92, 246, 0.14) 20%, rgba(139, 92, 246, 0.1) 40%, rgba(139, 92, 246, 0.062) 60%, rgba(139, 92, 246, 0.028) 80%, rgba(139, 92, 246, 0.008) 92%, transparent 100%)" }}
+                    />
+                    <div
+                      className="absolute inset-0 hidden dark:block"
+                      style={{ background: "radial-gradient(ellipse 38% 30% at 50% 0%, rgba(124, 58, 237, 0.11) 0%, rgba(124, 58, 237, 0.095) 20%, rgba(124, 58, 237, 0.07) 40%, rgba(124, 58, 237, 0.044) 60%, rgba(124, 58, 237, 0.02) 80%, rgba(124, 58, 237, 0.006) 92%, transparent 100%)" }}
+                    />
+                    <div
+                      className="absolute inset-0 opacity-[0.05] mix-blend-overlay"
+                      style={{ backgroundImage: "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E\")" }}
+                    />
+                  </div>
+                )}
                 {/* Phones: greeting in the middle, input pinned to the bottom (like ChatGPT); desktop: one centered block */}
                 <div className="max-w-[68rem] w-full flex flex-col items-center gap-6 flex-1 sm:flex-none">
 
                   {/* Logo on the left of the greeting, one line */}
-                  {pageContext?.path !== "/c/studio" && (
+                  {!studioLook && (
                   <div className="flex items-center justify-center gap-3 mt-auto sm:mt-0">
                     <img src="/logo.png" alt="Classgrid" className="h-9 w-9 sm:h-[46px] sm:w-[46px] shrink-0 object-contain" />
                     {/* Fixed height so the input below never moves while the line types; pauses while the user types */}
@@ -7125,9 +7210,26 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
                   </div>
                   )}
 
+                  {/* Desktop app, Studio's new chat: a faint Classgrid logo fading downwards (white in dark mode, black in
+                      light mode), and the greeting below it */}
+                  {DESKTOP_STUDIO && studioLook && sessionId !== "schedule" && sessionId !== "library" && (
+                    <div className="flex flex-col items-center gap-10 mt-auto sm:mt-0">
+                      <ClassgridLogoIcon
+                        size={76}
+                        aria-hidden
+                        className="text-black/[0.18] dark:text-white/[0.2]"
+                        style={{ maskImage: "linear-gradient(to bottom, black 0%, rgba(0,0,0,0.6) 45%, transparent 90%)", WebkitMaskImage: "linear-gradient(to bottom, black 0%, rgba(0,0,0,0.6) 45%, transparent 90%)" }}
+                      />
+                      <h2 style={{ fontFamily: '"Google Sans", "DM Sans", system-ui, sans-serif' }} className="font-normal text-[1.5rem] sm:text-[1.75rem] leading-tight tracking-[-0.01em] text-center text-foreground">
+                        Hi {(user?.name || "").trim().split(/\s+/)[0] || "there"}, what can we get done today?
+                      </h2>
+                    </div>
+                  )}
+
                   {/* Inline input form â€” not using panelInput */}
                   <div className="w-full max-w-[640px] mt-auto sm:mt-0 @max-[18rem]:hidden">
-                    {inputHeader && <div className="mb-2 flex">{inputHeader}</div>}
+                    {/* (not in Incognito: like Agent mode's, an Incognito chat belongs to no project) */}
+                    {inputHeader && !isIncognito && <div className="mb-2 flex">{inputHeader}</div>}
                     {isTerminated ? (
                       <div className="rounded-xl border border-red-500/20 bg-red-500/10 px-4 py-3 text-center text-sm font-medium text-red-500">
                         <p>This conversation has been terminated.</p>
@@ -7567,7 +7669,7 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
                                 <span className="text-sm font-mono mr-3 text-foreground shrink-0">
                                   {Math.floor(recordingTime / 60)}:{(recordingTime % 60).toString().padStart(2, '0')}
                                 </span>
-                                <LiveWaveform stream={micStream} />
+                                <LiveWaveform stream={micStream} level={editorLevel} />
                               </div>
                             )}
 
@@ -7675,8 +7777,8 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
             )}
           </AnimatePresence>
           {/* Right-side TOC showing user questions */}
-          {tocItems.length > 0 && !showFilesPanel && !showGridPanel && pageContext?.path !== "/c/studio" && <ScrollSpyTOC tocItems={tocItems} activeSection={activeSection} />}
-          {pageContext?.path === "/c/studio" && <QuestionDots tocItems={tocItems} activeSection={activeSection} />}
+          {tocItems.length > 0 && !showFilesPanel && !showGridPanel && !studioLook && <ScrollSpyTOC tocItems={tocItems} activeSection={activeSection} />}
+          {studioLook && <QuestionDots tocItems={tocItems} activeSection={activeSection} />}
         </div>
         </div>
       ) : null}

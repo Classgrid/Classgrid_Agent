@@ -20,6 +20,8 @@ async function play(el) {
   let theme = "system";
   try { theme = localStorage.getItem("vite-ui-theme") || "system"; } catch { /* storage blocked */ }
   if (theme === "light" || (theme === "system" && matchMedia("(prefers-color-scheme: light)").matches)) el.classList.add("light");
+  // The window buttons take the welcome screen's colour while it shows
+  window.classgridDesktop?.setSplashBar?.(true, !el.classList.contains("light"));
 
   const word = $(".cg-word");
   word.innerHTML = [...word.textContent].map((c) => `<span>${c}</span>`).join("");
@@ -27,7 +29,7 @@ async function play(el) {
   const opened = performance.now();
 
   if (matchMedia("(prefers-reduced-motion: reduce)").matches) {
-    gsap.set([$(".cg-logo"), $(".cg-grid"), $(".cg-glow"), $(".cg-line"), $(".cg-hint")], { opacity: 1 });
+    gsap.set([$(".cg-logo"), $(".cg-grid"), $(".cg-glow"), $(".cg-line")], { opacity: 1 });
     gsap.set(letters, { y: 0, opacity: 1 });
     return start(el, opened);
   }
@@ -44,7 +46,6 @@ async function play(el) {
     .fromTo($(".cg-glow"), { opacity: 0, scale: 0.6 }, { opacity: 1, scale: 1, duration: 2 }, 0)
     .to(letters, { y: 0, opacity: 1, duration: 1, stagger: 0.045 }, 0.42)
     .to($(".cg-line"), { opacity: 1, duration: 0.6, ease: "power2.out" }, 0.95)
-    .to($(".cg-hint"), { opacity: 1, duration: 0.8, ease: "power2.out" }, 1.1)
     .call(() => start(el, opened), [], 1.2);
 
   // Framer Motion: the line fills over the welcome time with a light sweeping along it, and the glow breathing
@@ -73,4 +74,5 @@ function leave(el) {
   el.style.pointerEvents = "none";
   animate(el.querySelector(".cg-stack"), { scale: [1, 1.06], filter: ["blur(0px)", "blur(10px)"] }, { duration: 0.6, ease: EASE });
   animate(el, { opacity: [1, 0] }, { duration: 0.6, ease: EASE }).then(() => el.remove());
+  window.classgridDesktop?.setSplashBar?.(false); // the app's top bar shows through now: its colour
 }

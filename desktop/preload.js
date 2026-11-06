@@ -21,6 +21,8 @@ contextBridge.exposeInMainWorld("classgridDesktop", {
   showInFolder: (file) => ipcRenderer.invoke("cg:showInFolder", file),
   openRecordings: () => ipcRenderer.invoke("cg:openRecordings"),
   pickFolder: () => ipcRenderer.invoke("cg:pickFolder"),
+  // A code or text file: { file, folder }, { error } for a picture, video, sound or archive, or null when cancelled
+  pickFile: () => ipcRenderer.invoke("cg:pickFile"),
   setToken: (token) => ipcRenderer.send("cg:setToken", token),
   // The user's own terminals (Studio's Terminal tab): PowerShell, Git Bash or Command Prompt on this computer
   termShells: () => ipcRenderer.invoke("cg:termShells"),
@@ -60,6 +62,8 @@ contextBridge.exposeInMainWorld("classgridDesktop", {
   },
   // Our top bar's light or dark colour, for the window buttons next to it
   setTitleBar: (dark) => ipcRenderer.send("cg:titleBar", !!dark),
+  // The welcome screen's colour for the window buttons while it shows (on), and back to the top bar's after it (off)
+  setSplashBar: (on, dark) => ipcRenderer.send("cg:splashBar", !!on, !!dark),
   // The top bar's Edit menu: undo, redo, cut, copy, paste, selectAll
   edit: (action) => ipcRenderer.send("cg:edit", action),
   // Studio's Browser tab: the AI's browser runs in this app and sits over the tab (rect = the tab's place on screen)

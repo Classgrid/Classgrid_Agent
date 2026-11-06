@@ -402,6 +402,8 @@
     micStart: bind("micStart"),
     micStop: bind("micStop"),
     micCancel: bind("micCancel"),
+    // While the editor records: the sound level (0 to 1) about 12 times a second, for the moving bars
+    onMicLevel: on("micLevel"),
     // A file on this computer, shown in our screens (pictures, PDFs): its address in the editor
     fileUrl: function (file) {
       var f = String(file || "");

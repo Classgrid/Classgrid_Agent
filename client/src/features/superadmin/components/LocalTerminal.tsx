@@ -22,7 +22,7 @@ const desktop = (): Desktop | null => {
 };
 export const hasLocalTerminals = () => !!desktop();
 
-export type LocalTerm = { id: string; name: string; cwd: string; ended: boolean };
+export type LocalTerm = { id: string; name: string; cwd: string; ended: boolean; project: string | null }; // project: the project folder it was opened for (null: none)
 const MAX_KEPT = 200_000;
 let terms: LocalTerm[] = [];
 const kept = new Map<string, string>(); // what each terminal printed (to show again after switching tabs)
@@ -36,6 +36,7 @@ function wire() {
   wired = true;
   d.onTermData(({ id, data }) => {
     kept.set(id, ((kept.get(id) || "") + data).slice(-MAX_KEPT));
+    printed.set(id, (printed.get(id) || 0) + data.length);
     writers.get(id)?.(data);
   });
   d.onTermExit(({ id }) => {
@@ -45,20 +46,49 @@ function wire() {
   });
 }
 
+// For the AI (sent with the user's next message in Studio): what each terminal printed since the last message, as
+// plain text (no colours or cursor codes), at most the last 6,000 characters of each
+const printed = new Map<string, number>(); // how much each terminal has printed in all
+const sentUpTo = new Map<string, number>(); // ...and how much of it the AI has had
+const plain = (s: string) => s
+  .replace(/\x1b\][^\x07\x1b]*(\x07|\x1b\\)/g, "")
+  .replace(/\x1b\[[0-9;?]*[ -/]*[@-~]/g, "")
+  .replace(/\x1b[()][A-Za-z0-9]|\x1b[=>78]/g, "")
+  .replace(/\r\n/g, "\n")
+  .replace(/[^\n]*\r(?!\n)/g, "")
+  .replace(/\n{3,}/g, "\n\n");
+export function newTerminalOutput(): string {
+  const parts: string[] = [];
+  const folder = openProjectFolder(); // only the open project's terminals (no project: those opened with no project)
+  for (const t of terms.filter((x) => x.project === folder)) {
+    const total = printed.get(t.id) || 0;
+    const fresh = total - (sentUpTo.get(t.id) || 0);
+    sentUpTo.set(t.id, total);
+    if (fresh <= 0) continue;
+    const text = plain((kept.get(t.id) || "").slice(-Math.min(fresh, MAX_KEPT))).trim().slice(-6000);
+    if (text) parts.push(`[${t.name}${t.ended ? ", ended" : ""} in ${t.cwd}]\n${text}`);
+  }
+  return parts.join("\n\n");
+}
+
 export function useLocalTerminals() {
   return useSyncExternalStore((f) => { subs.add(f); return () => subs.delete(f); }, () => terms);
 }
 export const localShells = () => desktop()?.termShells().catch(() => []) ?? Promise.resolve([]);
+
+// The open project's folder on this computer (null: no project, or one that isn't on this computer)
+export function openProjectFolder(): string | null {
+  try { return localFolderOf(sessionStorage.getItem("cg_project_open") || localStorage.getItem("cg_project_open")) || null; } catch { return null; }
+}
 
 // A new terminal, starting in the open project's folder on this computer (else the home folder)
 export async function openLocalTerminal(shell?: string): Promise<LocalTerm | null> {
   const d = desktop();
   if (!d) return null;
   wire();
-  let cwd: string | null = null;
-  try { cwd = localFolderOf(sessionStorage.getItem("cg_project_open") || localStorage.getItem("cg_project_open")); } catch { /* none */ }
+  const cwd = openProjectFolder();
   const r = await d.termOpen({ shell, cwd, cols: 100, rows: 30 });
-  const t: LocalTerm = { id: r.id, name: r.name, cwd: r.cwd, ended: false };
+  const t: LocalTerm = { id: r.id, name: r.name, cwd: r.cwd, ended: false, project: cwd };
   terms = [...terms, t];
   changed();
   return t;

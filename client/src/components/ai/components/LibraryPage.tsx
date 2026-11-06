@@ -229,7 +229,10 @@ export function LibraryPage() {
         <div className="max-w-6xl mx-auto w-full">
           <div className="flex flex-col md:flex-row md:items-center justify-between gap-6">
           <div>
-            <h1 className="text-3xl font-bold tracking-tight mb-2">Library</h1>
+            {/* (desktop app, Studio: the name is in the top bar above instead) */}
+            {!(import.meta.env.VITE_DESKTOP === "1" && location.pathname.split("/").includes("studio")) && (
+              <h1 className="text-3xl font-bold tracking-tight mb-2">Library</h1>
+            )}
             <p className="text-muted-foreground text-sm">Manage your uploaded and AI-generated files.</p>
           </div>
           

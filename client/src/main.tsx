@@ -70,6 +70,13 @@ import "@/styles/global.css";
 const isDesktopApp = import.meta.env.VITE_DESKTOP === "1";
 // Desktop app only: Studio Mode's colors everywhere (global.css, html.desktop-app)
 if (isDesktopApp) document.documentElement.classList.add("desktop-app");
+// Desktop app: Google Sans, for Studio's new-chat greeting (AskAiPanel)
+if (isDesktopApp) {
+  const font = document.createElement("link");
+  font.rel = "stylesheet";
+  font.href = "https://fonts.googleapis.com/css2?family=Google+Sans:wght@400;500&display=swap";
+  document.head.appendChild(font);
+}
 // Classgrid Code's Agent panel (the editor build): inside the editor's own window, so no top bar of ours (global.css)
 const isEditorPanel = import.meta.env.VITE_EDITOR === "1";
 if (isEditorPanel) document.documentElement.classList.add("cg-editor");

@@ -95,6 +95,28 @@ const LANG: Record<string, string> = {
   sh: "bash", yml: "yaml", yaml: "yaml", sql: "sql", kt: "kotlin", swift: "swift", cs: "csharp", env: "dotenv",
 };
 const ext = (name: string) => (name.includes(".") ? name.split(".").pop()!.toLowerCase() : "");
+// Every other language Shiki knows (about 240, like VS Code): by its name or alias, which is often the extension
+// itself (dart, kts, toml, vue, lua, ps1...); these extensions and file names need saying
+const MORE_LANG: Record<string, string> = {
+  gradle: "groovy", cfg: "ini", conf: "ini", properties: "ini", psm1: "powershell", ex: "elixir", exs: "elixir",
+  m: "objective-c", mm: "objective-cpp", pl: "perl", pm: "perl", hrl: "erlang", cljs: "clojure", fsx: "fsharp",
+  sol: "solidity", cr: "crystal", mk: "make", patch: "diff", xaml: "xml", csproj: "xml", plist: "xml", ndjson: "json",
+  j2: "jinja", ejs: "html", s: "asm", sv: "system-verilog", vhd: "vhdl", ml: "ocaml", mli: "ocaml", purs: "purescript",
+  re: "reason", res: "rescript", lock: "json", arb: "json",
+};
+const NAME_LANG: Record<string, string> = {
+  dockerfile: "docker", makefile: "make", "cmakelists.txt": "cmake", gemfile: "ruby", rakefile: "ruby", podfile: "ruby",
+  jenkinsfile: "groovy", ".bashrc": "bash", ".zshrc": "bash", ".profile": "bash", ".env": "dotenv", ".editorconfig": "ini",
+  ".gitconfig": "ini", ".npmrc": "ini", "tsconfig.json": "jsonc", "jsconfig.json": "jsonc",
+};
+async function shikiLang(path: string): Promise<string> {
+  const name = path.slice(path.lastIndexOf("/") + 1).toLowerCase();
+  const e = ext(name);
+  const want = NAME_LANG[name] || (name.startsWith(".env") ? "dotenv" : "") || LANG[e] || MORE_LANG[e] || e;
+  if (!want) return "text";
+  const { bundledLanguagesInfo } = await import("shiki");
+  return bundledLanguagesInfo.find((l) => l.id === want || (l.aliases || []).includes(want))?.id || "text";
+}
 
 // File icons: the Seti set with VS Code's own Seti colours (the same icons VS Code and Antigravity show)
 const setiIcon = themeIcons({
@@ -734,10 +756,10 @@ function CodeView({ file, projectId }: { file: OpenFile; projectId: string }) {
     setHtml(null);
     if (file.content === undefined || file.content.length > 300_000) return;
     let gone = false;
-    const lang = LANG[ext(file.path)] || "text";
     const theme = document.documentElement.classList.contains("dark") ? "dark-plus" : "light-plus";
     import("shiki")
       .then(async ({ codeToHtml }) => {
+        const lang = await shikiLang(file.path);
         try {
           return await codeToHtml(file.content!, { lang, theme });
         } catch (e) {

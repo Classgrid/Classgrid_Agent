@@ -139,8 +139,8 @@
 // 🛑 STOP AND ASK BEFORE MAKING ANY CHANGES HERE.
 
 import React, { useState, useEffect, useRef } from "react";
-import { Link, useLocation, useNavigate } from "react-router-dom";
-import { ChevronRight, HardDrive, FileBarChart, Search, Settings, StickyNote } from "lucide-react";
+import { Link, useLocation, useNavigate, useNavigationType } from "react-router-dom";
+import { ArrowLeft, ArrowRight, ChevronRight, HardDrive, FileBarChart, Search, Settings, StickyNote } from "lucide-react";
 import { getLoginPathForPath } from "@/features/auth/auth-helpers";
 import {
   Sidebar,
@@ -182,13 +182,25 @@ interface AppSidebarProps {
 // The desktop app has no Agent mode: its main-menu item is "Studio" (config/sidebar.ts), which opens the chat list
 // the same way "Agent" does on the website
 const DESKTOP_APP = import.meta.env.VITE_DESKTOP === "1";
+// Desktop app's forward button: the furthest place in the history that can be gone forward to
+let lastPlaceIdx = 0;
 const isAgentItem = (label: string) => label === "Agent" || (DESKTOP_APP && label === "Studio");
 
 export function AppSidebar({ role, user }: AppSidebarProps) {
   const location = useLocation();
   const navigate = useNavigate();
-  const isStudio = location.pathname.split("/").includes("studio");
+  // Desktop app (not the super admin's long menu, not Project mode): every page has Studio's sidebar, with Grids,
+  // Requests and Audit Logs under Library, and no main menu
+  const studioEverywhere = DESKTOP_APP && import.meta.env.VITE_EDITOR !== "1" && role !== "super_admin" && !location.pathname.split("/").includes("project");
+  const isStudio = location.pathname.split("/").includes("studio") || studioEverywhere;
   const [searchQuery, setSearchQuery] = useState("");
+  // Desktop app's back and forward buttons: whether there is a place to go back or forward to (the browser's
+  // Navigation API; both stay on where it is missing)
+  // (from the router's own place number in the history: going somewhere new drops the places ahead)
+  const navType = useNavigationType();
+  const placeIdx = typeof window.history.state?.idx === "number" ? window.history.state.idx : 0;
+  if (navType === "PUSH" || placeIdx > lastPlaceIdx) lastPlaceIdx = placeIdx;
+  const canGo = { back: placeIdx > 0, forward: placeIdx < lastPlaceIdx };
   const config = dashboardConfigs.find(c => c.role === role);
 
   const agentItem = config?.sections.flatMap(s => s.items).find(i => i.label === "Agent");
@@ -236,8 +248,8 @@ export function AppSidebar({ role, user }: AppSidebarProps) {
   useEffect(() => {
     setShowStorageMenu(location.pathname.includes("/storage"));
     // (desktop app: no Agent mode, so an /agent page such as Grids shows the main menu, not a chat list)
-    setShowAgentMenu((!DESKTOP_APP && location.pathname.includes("/agent") && !location.pathname.includes("/agent-reviews")) || location.pathname.split("/").includes("project") || location.pathname.split("/").includes("studio"));
-  }, [location.pathname, agentItem]);
+    setShowAgentMenu((!DESKTOP_APP && location.pathname.includes("/agent") && !location.pathname.includes("/agent-reviews")) || location.pathname.split("/").includes("project") || location.pathname.split("/").includes("studio") || studioEverywhere);
+  }, [location.pathname, agentItem, studioEverywhere]);
 
   // Auto-open Agent menu when first question is sent
   useEffect(() => {
@@ -289,6 +301,11 @@ export function AppSidebar({ role, user }: AppSidebarProps) {
 
   // Where Grids lives in this dashboard (for the new-message popup)
   const gridsItem = gridsDashboard ? (config?.sections ?? []).flatMap((s) => s.items).find(isGridsItem) : undefined;
+  // Desktop app, Studio (not the super admin's long menu): no back button; the other pages (Grids, Requests, Audit Logs)
+  // are listed under Library instead
+  const studioPages = studioEverywhere
+    ? sectionsWithBadges.flatMap((s) => s.items).filter((item) => !isAgentItem(item.label) && item.label !== "Log out" && item.to)
+    : null;
   // (the popup is in the sidebar, so it works on every page; the Grids page's own address is where it opens a chat)
   const gridsPath = gridsItem?.to || (location.pathname.startsWith("/superadmin") ? "/superadmin/chat" : "/chat");
 
@@ -305,6 +322,15 @@ export function AppSidebar({ role, user }: AppSidebarProps) {
           <SidebarSwitcher user={user ?? null} />
           {isStudio && (
             <div className="absolute right-9 top-1/2 -translate-y-1/2 flex items-center gap-0.5 group-data-[collapsible=icon]:hidden">
+              {/* Desktop app: back and forward through the places opened (chats, Grids, Schedule...), like a browser */}
+              {DESKTOP_APP && (<>
+                <button type="button" onClick={() => canGo.back && navigate(-1)} aria-disabled={!canGo.back} className={`relative z-10 flex items-center justify-center size-7 rounded-md text-muted-foreground hover:text-foreground hover:bg-sidebar-accent ${canGo.back ? "" : "opacity-40"}`} title="Back" aria-label="Back">
+                  <ArrowLeft className="size-4" />
+                </button>
+                <button type="button" onClick={() => canGo.forward && navigate(1)} aria-disabled={!canGo.forward} className={`relative z-10 flex items-center justify-center size-7 rounded-md text-muted-foreground hover:text-foreground hover:bg-sidebar-accent ${canGo.forward ? "" : "opacity-40"}`} title="Forward" aria-label="Forward">
+                  <ArrowRight className="size-4" />
+                </button>
+              </>)}
               <button type="button" onClick={() => window.dispatchEvent(new Event("agent:open-search-palette"))} className="flex items-center justify-center size-7 rounded-md text-muted-foreground hover:text-foreground hover:bg-sidebar-accent" title="Search chats" aria-label="Search chats">
                 <Search className="size-4" />
               </button>
@@ -325,7 +351,7 @@ export function AppSidebar({ role, user }: AppSidebarProps) {
           showNested={showStorageMenu || showAgentMenu}
           onBack={() => { setShowStorageMenu(false); setShowAgentMenu(false); }}
           // (desktop app: Studio keeps its back button, the way to Grids, Requests and Audit Logs now that Agent is gone)
-          hideBack={location.pathname.split("/").includes("project") || (!DESKTOP_APP && location.pathname.split("/").includes("studio"))}
+          hideBack={location.pathname.split("/").includes("project") || (!DESKTOP_APP && location.pathname.split("/").includes("studio")) || !!studioPages}
           nestedTitle={showStorageMenu ? "Storage" : showAgentMenu ? (DESKTOP_APP ? "Studio" : "Agent") : ""}
           mainMenu={
             <>
@@ -358,6 +384,9 @@ export function AppSidebar({ role, user }: AppSidebarProps) {
                                   setShowStorageMenu(true);
                                 } else if (isAgentItem(item.label)) {
                                   e.preventDefault();
+                                  // Desktop app: Studio always opens Studio (Grids lives at /agent/chat, so the rule below kept
+                                  // the Grids page with Agent's chat list beside it); its list shows once Studio opens
+                                  if (DESKTOP_APP) { if (item.to) navigate(item.to); return; }
                                   setShowAgentMenu(true);
                                   // Only navigate to home if we are NOT already somewhere in the agent section
                                   if (item.to && !(location.pathname.includes("/agent") && !location.pathname.includes("/agent-reviews"))) {
@@ -390,6 +419,7 @@ export function AppSidebar({ role, user }: AppSidebarProps) {
                                     onClick={(e) => {
                                       if (isAgentItem(item.label)) {
                                         e.preventDefault();
+                                        if (DESKTOP_APP) { if (item.to) navigate(item.to); return; } // (as above)
                                         setShowAgentMenu(true);
                                         // Only navigate to home if we are NOT already somewhere in the agent section
                                         if (item.to && !(location.pathname.includes("/agent") && !location.pathname.includes("/agent-reviews"))) {
@@ -470,7 +500,7 @@ export function AppSidebar({ role, user }: AppSidebarProps) {
                 </SidebarGroupContent>
               </SidebarGroup>
             ) : showAgentMenu ? (
-              <AgentNestedMenu searchQuery={searchQuery} />
+              <AgentNestedMenu searchQuery={searchQuery} pages={studioPages || undefined} />
             ) : null
           }
         />

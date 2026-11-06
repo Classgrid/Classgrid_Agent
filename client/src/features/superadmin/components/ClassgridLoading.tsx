@@ -1,4 +1,4 @@
-// The Classgrid app's welcome look (desktop/splash: the logo, the name and the sweeping line, "Getting things ready"),
+// The Classgrid app's welcome look (desktop/splash: the logo, the name and the sweeping line),
 // for a Classgrid Code screen while its data loads: shown once, then it fades away and the screen is ready.
 import { motion } from "framer-motion";
 
@@ -43,7 +43,6 @@ export function ClassgridLoading() {
             transition={{ duration: 1.4, ease: "easeInOut", repeat: Infinity }}
           />
         </div>
-        <div className="mt-4 text-[13px] text-black/50 dark:text-white/50">Getting things ready</div>
       </div>
     </motion.div>
   );
