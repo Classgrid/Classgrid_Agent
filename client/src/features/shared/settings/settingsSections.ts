@@ -30,11 +30,13 @@ export function useSettingsSection(sections: SettingsSection[]) {
   const asked = params.get("section");
   const section = sections.find((s) => s.id === asked)?.id ?? "general";
   const view = params.get("view");
+  // Moving between sections replaces the place in the history (the back arrow leaves Settings at once, it doesn't step
+  // back through the sections); a page inside a section (Browsing history) is a new place, so back returns from it
   const go = (id: SettingsSectionId, nextView?: string | null) => {
     const p = new URLSearchParams();
     p.set("section", id);
     if (nextView) p.set("view", nextView);
-    setParams(p);
+    setParams(p, { replace: !nextView });
   };
   return { section, view, go };
 }
