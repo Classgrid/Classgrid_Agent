@@ -144,6 +144,14 @@ export async function getHistory(sessionId, depth = DEFAULT_DEPTH, { desktop = f
                         const inner = JSON.parse(parsed.content);
                         if (inner && inner.classgrid_ai_message) {
                             parsed.content = inner.content || '';
+                            // An answer that didn't finish: the AI is told so right after it, like Claude Code's
+                            // "[Request interrupted by user]" (the user pressed Stop, or an error cut it off)
+                            const cut = String(inner.content || '');
+                            const interrupted = /_\(Stopped\.\)_\s*$/.test(cut)
+                                ? "[SYSTEM NOTE: the user stopped (interrupted) this answer of yours before it finished. Whatever it did before that is done.]"
+                                : /_\(This answer stopped because of an error/.test(cut)
+                                    ? "[SYSTEM NOTE: this answer of yours was interrupted by an error before it finished (not by the user). Whatever it did before that is done.]"
+                                    : "";
 
                             // Safely restore truncated tool memory for the LLM without blowing up the context window
                             if (itemIndex >= notesFrom && inner.steps && Array.isArray(inner.steps) && inner.steps.length > 0) {
@@ -167,19 +175,18 @@ export async function getHistory(sessionId, depth = DEFAULT_DEPTH, { desktop = f
                                     }
                                     return `Tool Used: ${s.tool}${what ? ` (${what})` : ''} | Result Excerpt: ${resExcerpt}`;
                                 }).join('\n');
-                                // An answer the user stopped: its work is kept, so a next message goes on from it
-                                const stopped = /_\(Stopped\.\)_\s*$|_\(This answer stopped because of an error/.test(String(inner.content || ''));
-
                                 if (toolSummaries) {
                                     return [
                                         parsed,
                                         {
                                             role: 'system',
-                                            content: `[SYSTEM NOTE - YOUR BACKGROUND TOOL MEMORY FOR THIS TURN:\n${toolSummaries}\n(You actually ran these tools. Do not hallucinate that you didn't!)${stopped ? "\nThis answer was stopped before it finished. These steps are done: when the user goes on with this task, continue from them and don't run them again." : ""}]`
-                                        }
+                                            content: `[SYSTEM NOTE - YOUR BACKGROUND TOOL MEMORY FOR THIS TURN:\n${toolSummaries}\n(You actually ran these tools. Do not hallucinate that you didn't!)${interrupted ? "\nThis answer didn't finish (see the note below). These steps are done: when the user goes on with this task, continue from them and don't run them again." : ""}]`
+                                        },
+                                        ...(interrupted ? [{ role: 'system', content: interrupted }] : []),
                                     ];
                                 }
                             }
+                            if (interrupted) return [parsed, { role: 'system', content: interrupted }];
                         }
                     } catch {}
                 }
