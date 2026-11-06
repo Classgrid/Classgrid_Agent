@@ -5559,7 +5559,10 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
                                     // Steps stay open while the agent works, then fold into "Worked for X sec" (old messages load folded)
                                     const isLiveReply = index === messages.length - 1 && (thinking || submitting || !!message.typing);
                                     const toolSteps = (message.steps || []).filter((s) => s.type === 'tool');
-                                    const workDone = !isLiveReply && !(message.steps || []).some((s) => s.status === 'loading');
+                                    // An answer that ended (finished, stopped or cut off) folds into "Worked for" too: a step it was
+                                    // still running when it stopped no longer spins as if it were running (owner, 2026-11-06)
+                                    const workDone = !isLiveReply;
+                                    const shownSteps = isLiveReply ? (message.steps || []) : (message.steps || []).map((s) => (s.status === 'loading' ? { ...s, status: 'success' as const } : s));
                                     const stepper = (
                                   <AgentStepper>
                                     {/* CombinedReasoningBlock MUST be first child - direct sibling of steps */}
@@ -5615,7 +5618,7 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
                                         }
                                       };
 
-                                      (message.steps || []).forEach((step) => {
+                                      shownSteps.forEach((step) => {
                                         if (step.type === 'thought') {
                                           thoughtGroup.push(step);
                                         } else if (step.type === 'tool') {
