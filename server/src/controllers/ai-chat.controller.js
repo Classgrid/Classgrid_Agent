@@ -6795,8 +6795,7 @@ export const getChatSessions = async (req, res) => {
                 sessions = (sessions || []).filter((s) => !ids.has(s.id));
             }
         }
-        // (the desktop app has no Agent mode, so chats shared with the user are listed in its Studio too)
-        if (!project || (req.query?.studio === "1" && !isWebsite(req))) {
+        if (!project) {
             const shared = await getSharedSessionsFor(email).catch(() => []);
             if (shared.length) sessions = [...shared, ...(sessions || [])].sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)));
         }
