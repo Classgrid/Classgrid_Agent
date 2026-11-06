@@ -1551,14 +1551,17 @@ function withModelIdentity(systemContent, model, isStaff, { selected, previousMo
 
 // Cloudflare's native /ai/run endpoint starts streaming noticeably faster than /ai/v1/chat/completions
 // and returns the same OpenAI-style chunks (delta.content / reasoning_content / tool_calls).
-const cloudflareStreamProvider = (model) => ({
+// affinity: one id per chat (or helper), sent as x-session-affinity so each request of that chat reaches the Cloudflare
+// machine holding its prompt cache (prefix caching: the repeated start of the prompt is read from cache, billed lower)
+const cloudflareStreamProvider = (model, affinity) => ({
     name: "cloudflare",
     url: CF_PICKER_MODELS.get(model) === "openai"
         ? `https://api.cloudflare.com/client/v4/accounts/${process.env.CLOUDFLARE_ACCOUNT_ID}/ai/v1/chat/completions`
         : `https://api.cloudflare.com/client/v4/accounts/${process.env.CLOUDFLARE_ACCOUNT_ID}/ai/run/${model}`,
     apiKey: process.env.CLOUDFLARE_WORKERS_AI_TOKEN || "",
     model,
-    timeoutMs: 300000
+    timeoutMs: 300000,
+    ...(affinity ? { headers: { "x-session-affinity": `ses_${String(affinity).replace(/[^a-zA-Z0-9_-]/g, "").slice(0, 80)}` } } : {}),
 });
 
 // "/" commands from the chat box (Project Mode and Studio): what each one asks for, sent for that message only
@@ -3878,7 +3881,7 @@ You work on the user's own Windows computer through their Classgrid desktop app,
                                         };
                                         const r = CLAUDE_CHAT_MODELS.has(model)
                                             ? await streamClaudeChat({ ...helperArgs, ...meterHooks(model, `Helper ${h.no}`), model, loadedToolNames: new Set([...names, "tell_main", ...(hasBrowser ? WORKER_BROWSER_TOOLS.map((t) => t.function.name) : [])]), answerAtDepthLimit: true, maxContinuations: 3 })
-                                            : await streamChat({ ...helperArgs, ...meterHooks(model, `Helper ${h.no}`), provider: cloudflareStreamProvider(model), seesImages: CF_VISION_MODELS.has(model), maxTokens: 8192, maxContinuations: 6, answerAtDepthLimit: true }); // a long report keeps going instead of being cut
+                                            : await streamChat({ ...helperArgs, ...meterHooks(model, `Helper ${h.no}`), provider: cloudflareStreamProvider(model, `${sessionId || "x"}-helper-${h.no}`), seesImages: CF_VISION_MODELS.has(model), maxTokens: 8192, maxContinuations: 6, answerAtDepthLimit: true }); // a long report keeps going instead of being cut
                                         if (userId && r.usage?.total_tokens) deductTokens(userId, orgId, chargeableTokens(r.usage, model), tokenSource).catch(() => {});
                                         h.tokens = (h.tokens || 0) + (r.usage?.total_tokens || 0); // shown in the chat's Agent map
                                         if (!String(r.answer || "").trim()) { lastError = "no answer"; break; } // try the next model
@@ -6366,13 +6369,13 @@ If a tool fails, never show the error message; say only: "Something went wrong o
                                 if (body.taskOrigin !== "whatsapp") modelMessages = withStudioBrowser(modelMessages, sees);
                             }
                             streamed = await streamChat({
-                                provider: cloudflareStreamProvider(model),
+                                provider: cloudflareStreamProvider(model, sessionId),
                                 messages: modelMessages,
                                 seesImages: sees,
                                 // With an image attached it looks at it directly, so the analyze_image detour is not offered (as for Claude)
                                 excludeTools: sees && imageParts.length > 0 ? NO_ANALYZE_IMAGE : undefined,
                                 // The answer must not stop: a round that keeps failing moves on to these models
-                                fallbackProviders: ["@cf/deepseek-ai/deepseek-v4.1-flash-1017", HELPER_GLM_MODEL, "@cf/moonshotai/kimi-k2.6"].filter((m) => m !== model).map(cloudflareStreamProvider),
+                                fallbackProviders: ["@cf/deepseek-ai/deepseek-v4.1-flash-1017", HELPER_GLM_MODEL, "@cf/moonshotai/kimi-k2.6"].filter((m) => m !== model).map((m) => cloudflareStreamProvider(m, sessionId)),
                                 // The thinking picker: Deep thinks every step; Normal plans on the first step and goes
                                 // straight on after each tool result (those steps were 8-23 s of thinking each); Fast never thinks
                                 thinking: thinking === "high" ? "all" : thinking === "low" ? "none" : "first",
@@ -6391,7 +6394,7 @@ If a tool fails, never show the error message; say only: "Something went wrong o
                             });
                             usedModel = model;
                             if (streamed.usage.total_tokens > 0) usageStore.usage = streamed.usage;
-                            console.log(`[AI-STREAM] ${model} streamed answer in ${((Date.now() - generateStartTime) / 1000).toFixed(1)}s, toolsRun=${streamed.toolsRun}`);
+                            console.log(`[AI-STREAM] ${model} streamed answer in ${((Date.now() - generateStartTime) / 1000).toFixed(1)}s, toolsRun=${streamed.toolsRun}, input=${streamed.usage.prompt_tokens}, cacheRead=${streamed.usage.cached_tokens || 0}`);
                             break;
                         } catch (streamErr) {
                             if (requestAborted) return keepUnfinishedAnswer(STOPPED_NOTE);

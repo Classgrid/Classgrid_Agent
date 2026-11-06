@@ -154,7 +154,9 @@ async function streamOneRound({ provider, messages, tools, temperature, maxToken
         const response = await fetch(provider.url, {
             method: "POST",
             signal: controller.signal,
-            headers: { Authorization: `Bearer ${provider.apiKey}`, "Content-Type": "application/json" },
+            // (provider.headers: e.g. Cloudflare's x-session-affinity, so a chat's requests reach the machine that keeps
+            // its prompt cache)
+            headers: { Authorization: `Bearer ${provider.apiKey}`, "Content-Type": "application/json", ...(provider.headers || {}) },
             body: JSON.stringify({
                 model: provider.model,
                 messages,
@@ -302,7 +304,8 @@ export async function streamChat({
     const currentTools = () => tools.filter(t => t?.function?.name !== "internal_thought_process" && !excludeTools?.has(t?.function?.name));
     const conversation = [...messages];
     const toolImages = seesImages ? (await import("./llm-stream-anthropic.js")).makeToolImageCollector(signal, conversation) : null;
-    const usage = { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 };
+    // cached_tokens: the input tokens the provider read from its prompt cache (billed lower), over all rounds
+    const usage = { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0, cached_tokens: 0 };
     let depth = 0;
     let toolsRun = 0;
     let lastToolFailed = false; // a tool in the last round was missing or failed: the next round doesn't think
@@ -386,6 +389,7 @@ export async function streamChat({
                 usage.prompt_tokens += round.usage.prompt_tokens || 0;
                 usage.completion_tokens += round.usage.completion_tokens || 0;
                 usage.total_tokens += round.usage.total_tokens || 0;
+                usage.cached_tokens += round.usage.prompt_tokens_details?.cached_tokens || round.usage.cached_tokens || 0;
                 onRoundUsage?.(round.usage, { cut: !!round.budgetCut });
             }
             if (round.budgetCut) return budgetStop("this round's input alone used up the tokens left");
