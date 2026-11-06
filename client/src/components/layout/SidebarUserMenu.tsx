@@ -105,6 +105,13 @@ export function SidebarUserMenu({ user, customTrigger }: { user: { name: string;
     return () => clearInterval(interval); // cleanup on unmount
   }, []);
 
+  // Desktop app: the colours of the app's own menus (DesktopMenuBar), not the website's, and no Home Page,
+  // Changelog or Support here (they are in the Help menu)
+  const desktop = import.meta.env.VITE_DESKTOP === "1";
+  const hov = desktop ? "hover:bg-slate-100 dark:hover:bg-[#343541]" : "hover:bg-accent hover:text-accent-foreground focus:bg-accent focus:text-accent-foreground";
+  const item = desktop ? "rounded-md focus:bg-slate-100 dark:focus:bg-[#343541] focus:text-inherit" : "";
+  const sep = desktop ? "dark:bg-white/10" : "";
+
   if (!user) return null;
 
   return (
@@ -114,7 +121,7 @@ export function SidebarUserMenu({ user, customTrigger }: { user: { name: string;
           {customTrigger ? customTrigger : <Icons.MoreHorizontal className="w-4 h-4" />}
         </DropdownMenuTrigger>
         <DropdownMenuContent
-          className="w-[280px] rounded-xl shadow-xl border border-border bg-popover text-popover-foreground p-1"
+          className={desktop ? "w-[280px] rounded-xl shadow-xl ring-0 border border-slate-200 dark:border-white/10 bg-white dark:bg-[#202123] text-slate-700 dark:text-[#ececf1] p-1" : "w-[280px] rounded-xl shadow-xl border border-border bg-popover text-popover-foreground p-1"}
           side="bottom"
           align="end"
           sideOffset={8}
@@ -128,18 +135,18 @@ export function SidebarUserMenu({ user, customTrigger }: { user: { name: string;
             </div>
           </div>
 
-          <DropdownMenuSeparator className="mx-1" />
+          <DropdownMenuSeparator className={`mx-1 ${sep}`} />
 
           <div className="p-1">
-            <DropdownMenuItem className="p-0">
-              <Link to={`${basePath}/profile`} className="flex items-center justify-between w-full cursor-pointer rounded-md py-2 px-3 text-sm hover:bg-accent hover:text-accent-foreground focus:bg-accent focus:text-accent-foreground">
+            <DropdownMenuItem className={`p-0 ${item}`}>
+              <Link to={`${basePath}/profile`} className={`flex items-center justify-between w-full cursor-pointer rounded-md py-2 px-3 text-sm ${hov}`}>
                 <span>Profile</span>
                 <Icons.User className="w-4 h-4 text-muted-foreground" />
               </Link>
             </DropdownMenuItem>
 
-            <DropdownMenuItem className="p-0">
-              <Link to={`${basePath}/settings`} className="flex items-center justify-between w-full cursor-pointer rounded-md py-2 px-3 text-sm hover:bg-accent hover:text-accent-foreground focus:bg-accent focus:text-accent-foreground">
+            <DropdownMenuItem className={`p-0 ${item}`}>
+              <Link to={`${basePath}/settings`} className={`flex items-center justify-between w-full cursor-pointer rounded-md py-2 px-3 text-sm ${hov}`}>
                 <span>Settings</span>
                 <Icons.Settings className="w-4 h-4 text-muted-foreground" />
               </Link>
@@ -147,7 +154,7 @@ export function SidebarUserMenu({ user, customTrigger }: { user: { name: string;
 
             <DropdownMenuItem className="justify-between rounded-md py-1.5 px-3 text-sm focus:bg-transparent cursor-default">
               <span>Theme</span>
-              <div className="flex items-center gap-1 bg-muted rounded-full p-0.5 border border-border">
+              <div className={`flex items-center gap-1 rounded-full p-0.5 border ${desktop ? "bg-slate-100 dark:bg-[#343541] border-slate-200 dark:border-white/10" : "bg-muted border-border"}`}>
                 <div onClick={() => setTheme("system")} className={`p-1 rounded-full cursor-pointer transition-all ${theme === 'system' ? 'bg-primary text-primary-foreground shadow-sm' : 'hover:bg-foreground/10 text-muted-foreground'}`}>
                   <Icons.Monitor className="w-3 h-3" />
                 </div>
@@ -161,36 +168,38 @@ export function SidebarUserMenu({ user, customTrigger }: { user: { name: string;
             </DropdownMenuItem>
           </div>
 
-          <DropdownMenuSeparator className="mx-1" />
+          <DropdownMenuSeparator className={`mx-1 ${sep}`} />
 
+          {!desktop && (<>
           <div className="p-1">
-            <DropdownMenuItem className="p-0">
-              <a href="https://classgrid.in" target="_blank" rel="noopener noreferrer" className="flex items-center justify-between w-full cursor-pointer rounded-md py-2 px-3 text-sm hover:bg-accent hover:text-accent-foreground focus:bg-accent focus:text-accent-foreground">
+            <DropdownMenuItem className={`p-0 ${item}`}>
+              <a href="https://classgrid.in" target="_blank" rel="noopener noreferrer" className={`flex items-center justify-between w-full cursor-pointer rounded-md py-2 px-3 text-sm ${hov}`}>
                 <span>Home Page</span>
                 <Icons.House className="w-4 h-4 text-muted-foreground" />
               </a>
             </DropdownMenuItem>
 
-            <DropdownMenuItem className="p-0">
-              <a href="https://classgrid.in/changelog" target="_blank" rel="noopener noreferrer" className="flex items-center justify-between w-full cursor-pointer rounded-md py-2 px-3 text-sm hover:bg-accent hover:text-accent-foreground focus:bg-accent focus:text-accent-foreground">
+            <DropdownMenuItem className={`p-0 ${item}`}>
+              <a href="https://classgrid.in/changelog" target="_blank" rel="noopener noreferrer" className={`flex items-center justify-between w-full cursor-pointer rounded-md py-2 px-3 text-sm ${hov}`}>
                 <span>Changelog</span>
                 <Icons.FileText className="w-4 h-4 text-muted-foreground" />
               </a>
             </DropdownMenuItem>
 
-            <DropdownMenuItem className="p-0">
-              <a href="https://classgrid.in/support/ticket" target="_blank" rel="noopener noreferrer" className="flex items-center justify-between w-full cursor-pointer rounded-md py-2 px-3 text-sm hover:bg-accent hover:text-accent-foreground focus:bg-accent focus:text-accent-foreground">
+            <DropdownMenuItem className={`p-0 ${item}`}>
+              <a href="https://classgrid.in/support/ticket" target="_blank" rel="noopener noreferrer" className={`flex items-center justify-between w-full cursor-pointer rounded-md py-2 px-3 text-sm ${hov}`}>
                 <span>Support</span>
                 <Icons.LifeBuoy className="w-4 h-4 text-muted-foreground" />
               </a>
             </DropdownMenuItem>
           </div>
 
-          <DropdownMenuSeparator className="mx-1" />
+          <DropdownMenuSeparator className={`mx-1 ${sep}`} />
+          </>)}
 
           <div className="p-1">
-            <DropdownMenuItem className="p-0">
-              <div role="button" tabIndex={0} onClick={handleLogout} className="flex w-full items-center cursor-pointer justify-between rounded-md py-2 px-3 text-sm hover:bg-accent hover:text-accent-foreground focus:bg-accent focus:text-accent-foreground">
+            <DropdownMenuItem className={`p-0 ${item}`}>
+              <div role="button" tabIndex={0} onClick={handleLogout} className={`flex w-full items-center cursor-pointer justify-between rounded-md py-2 px-3 text-sm ${hov}`}>
                 <span>Log Out</span>
                 <Icons.LogOut className="w-4 h-4 text-muted-foreground" />
               </div>
@@ -199,9 +208,9 @@ export function SidebarUserMenu({ user, customTrigger }: { user: { name: string;
 
 
 
-          <DropdownMenuSeparator className="mx-0" />
+          <DropdownMenuSeparator className={`mx-0 ${sep}`} />
 
-          <a href="https://status.classgrid.in" target="_blank" rel="noopener noreferrer" className="px-3 py-3 flex items-center justify-between text-xs hover:bg-accent hover:text-accent-foreground transition-colors cursor-pointer rounded-b-lg outline-none focus-visible:bg-accent">
+          <a href="https://status.classgrid.in" target="_blank" rel="noopener noreferrer" className={`px-3 py-3 flex items-center justify-between text-xs ${desktop ? "hover:bg-slate-100 dark:hover:bg-[#343541] rounded-b-lg" : "hover:bg-accent hover:text-accent-foreground rounded-b-lg focus-visible:bg-accent"} transition-colors cursor-pointer outline-none`}>
             <div className="flex flex-col gap-0.5">
               <span className="text-muted-foreground font-medium">Platform Status</span>
               <span className={`${getFooterStatusTextClass(status.state)} font-medium`}>{status.label}</span>

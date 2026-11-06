@@ -26,7 +26,7 @@ import { FileBadge, OPEN_LOCAL_FILE_EVENT, OPEN_PROJECT_FILE_EVENT } from "@/com
 import { fetchWithRescue } from "@/lib/rescue";
 import { toast } from "sonner";
 import { useSidebar } from "@/components/marketing_ui/sidebar";
-import { DesktopMenuBar, editAction, type MenuSpec } from "@/components/layout/DesktopMenuBar";
+import { DesktopMenuBar, editAction, type MenuEntry, type MenuSpec } from "@/components/layout/DesktopMenuBar";
 import { listLocalFiles, localFolderOf } from "../utils/localProject";
 import { PROJECT_PLACE_EVENT, listenProjectSaved, thisComputerCopy, thisDeviceId } from "../utils/projectCopies";
 
@@ -548,7 +548,14 @@ export function StudioModePage() {
       { label: "Show or Hide Pane", run: () => { setMaximized(false); setPane((p) => ({ ...p, open: !p.open })); } },
     ] },
     { label: "Help", items: [
-      { label: "Classgrid Website", run: () => (window as any).classgridDesktop?.openExternal?.("https://classgrid.in") },
+      // Home Page, Changelog and Support live here in the desktop app (not in the profile menu)
+      ...([
+        ["Docs", "https://classgrid.in/docs"],
+        "-",
+        ["Home Page", "https://classgrid.in"],
+        ["Changelog", "https://classgrid.in/changelog"],
+        ["Support", "https://classgrid.in/support/ticket"],
+      ] as const).map((it): MenuEntry => (it === "-" ? "-" : { label: it[0], run: () => (window as any).classgridDesktop?.openExternal?.(it[1]) })),
     ] },
   ];
 
