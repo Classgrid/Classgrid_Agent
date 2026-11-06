@@ -7928,7 +7928,9 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
         isOpen={isAiHubOpen}
         onClose={() => setIsAiHubOpen(false)}
         initialTab={aiHubInitialTab}
-        onSendPrompt={(text) => askQuestion(text, { hidden: true })}
+        // An app just connected: the AI carries on the task in the open chat. With no task open (a new chat) nothing is
+        // sent: the message alone used to start an empty chat named after the app ("Gmail Connected")
+        onSendPrompt={(text) => { if (sessionId && messages.some((m) => m.role === "user" && !m.hidden)) askQuestion(text, { hidden: true }); }}
       />
     </>
   );
