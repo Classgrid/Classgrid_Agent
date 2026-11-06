@@ -1952,6 +1952,13 @@ export const streamAskAi = async (req, res) => {
             volatilePrompt += `</schedule_context>\n\nYou can use the list_schedules, update_schedule, and delete_schedule tools to manage this schedule.`;
         }
 
+        // An app was connected while no chat was open: there is no task to carry on, so nothing runs and no chat is
+        // made (it used to start an empty chat named "Gmail Connected" each time; older apps still send it)
+        if (!sessionId && typeof body.question === "string" && body.question.trim().startsWith("[SYSTEM: I have successfully connected ")) {
+            if (!res.headersSent) res.status(204);
+            return res.end();
+        }
+
         // 2a. If not incognito and no session exists, create one
         if (!isIncognito && !sessionId && body.question) {
             let initialTitle = body.question;
