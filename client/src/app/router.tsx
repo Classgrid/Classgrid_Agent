@@ -76,6 +76,20 @@ function NavigateWithQuery({ to, replace }: { to: string, replace?: boolean }) {
   return <Navigate to={{ pathname: to, search }} replace={replace} />;
 }
 
+// The desktop app has no Agent mode (owner, 2026-11-06): every Agent address (an old link, a saved place, a back
+// button, a reload) and every unknown page opens Studio instead, never a 404, keeping a chat it names (a shared chat,
+// Schedule or Library); super admins stay under /superadmin. The website keeps Agent mode
+const DESKTOP = import.meta.env.VITE_DESKTOP === "1";
+function ToStudio() {
+  const { pathname, search } = useLocation();
+  const base = pathname.startsWith("/superadmin") ? "/superadmin/studio" : "/c/studio";
+  const named = pathname.match(/^\/(?:superadmin\/agent|agent|c\/agent|c)\/([^/]+)(\/.*)?$/);
+  const chat = named?.[1] || "";
+  const rest = chat && !["agent", "studio", "project"].includes(chat) ? `/${chat}${named?.[2] || ""}` : "";
+  return <Navigate to={{ pathname: base + rest, search }} replace />;
+}
+const agentPage = DESKTOP ? <ToStudio /> : <DashboardHomePage />;
+
 import { DashboardHomePage } from "@/features/superadmin/pages/DashboardHomePage";
 import { ProjectModePage } from "@/features/superadmin/pages/ProjectModePage";
 import { EditorPanelPage } from "@/features/superadmin/pages/EditorPanelPage";
@@ -266,14 +280,16 @@ export function AppRouter() {
 
         {/* NEW SUPER ADMIN SHELL */}
         <Route element={<SuperAdminLayout />}>
-          <Route path="/superadmin/dashboard" element={<NavigateWithQuery to="/superadmin/agent" replace />} />
-          <Route path="/superadmin/agent" element={<DashboardHomePage />} />
+          <Route path="/superadmin/dashboard" element={<NavigateWithQuery to={DESKTOP ? "/superadmin/studio" : "/superadmin/agent"} replace />} />
+          <Route path="/superadmin/agent" element={agentPage} />
           <Route path="/superadmin/project" element={<ProjectModePage />} />
           <Route path="/superadmin/project/:sessionId" element={<ProjectModePage />} />
           <Route path="/superadmin/studio" element={<StudioModePage />} />
           <Route path="/superadmin/studio/:sessionId" element={<StudioModePage />} />
-          <Route path="/superadmin/agent/:sessionId" element={<DashboardHomePage />} />
-          <Route path="/superadmin/agent/:sessionId/*" element={<DashboardHomePage />} />
+          {/* (desktop: Schedule's pages live in Studio, /superadmin/studio/schedule/<id>) */}
+          {DESKTOP && <Route path="/superadmin/studio/:sessionId/*" element={<StudioModePage />} />}
+          <Route path="/superadmin/agent/:sessionId" element={agentPage} />
+          <Route path="/superadmin/agent/:sessionId/*" element={agentPage} />
           <Route path="/superadmin/agent-reviews" element={<AgentReviewsPage />} />
           <Route path="/superadmin/ai-usage" element={<AiUsageDashboardPage />} />
           <Route path="/superadmin/ai-usage/models" element={<AiModelsPage />} />
@@ -342,7 +358,7 @@ export function AppRouter() {
 
 
           <Route path="/superadmin/organizations" element={<NavigateWithQuery to="/superadmin/orgs" replace />} />
-          <Route path="/superadmin/*" element={<NavigateWithQuery to="/superadmin/dashboard" replace />} />
+          <Route path="/superadmin/*" element={<NavigateWithQuery to={DESKTOP ? "/superadmin/studio" : "/superadmin/dashboard"} replace />} />
         </Route>
 
         {/* VERCEL STYLE SUPER ADMIN STORAGE SHELL */}
@@ -360,19 +376,20 @@ export function AppRouter() {
         {/* ── DYNAMIC ROLE LAYOUT (Wraps all 10 Dept Dashboards & Common Pages) ── */}
         <Route element={<DynamicRoleLayout />}>
           {/* PUBLIC CHAT DASHBOARD */}
-          <Route path="/agent" element={<DashboardHomePage />} />
-          <Route path="/agent/:sessionId" element={<DashboardHomePage />} />
-          <Route path="/agent/:sessionId/*" element={<DashboardHomePage />} />
-          <Route path="/c/agent" element={<DashboardHomePage />} />
+          <Route path="/agent" element={agentPage} />
+          <Route path="/agent/:sessionId" element={agentPage} />
+          <Route path="/agent/:sessionId/*" element={agentPage} />
+          <Route path="/c/agent" element={agentPage} />
           <Route path="/c/project" element={<ProjectModePage />} />
           <Route path="/c/project/:sessionId" element={<ProjectModePage />} />
           <Route path="/c/studio" element={<StudioModePage />} />
           <Route path="/c/studio/:sessionId" element={<StudioModePage />} />
-          <Route path="/c/agent/:sessionId" element={<DashboardHomePage />} />
-          <Route path="/c/agent/:sessionId/*" element={<DashboardHomePage />} />
-          <Route path="/c" element={<DashboardHomePage />} />
-          <Route path="/c/:sessionId" element={<DashboardHomePage />} />
-          <Route path="/c/:sessionId/*" element={<DashboardHomePage />} />
+          {DESKTOP && <Route path="/c/studio/:sessionId/*" element={<StudioModePage />} />}
+          <Route path="/c/agent/:sessionId" element={agentPage} />
+          <Route path="/c/agent/:sessionId/*" element={agentPage} />
+          <Route path="/c" element={agentPage} />
+          <Route path="/c/:sessionId" element={agentPage} />
+          <Route path="/c/:sessionId/*" element={agentPage} />
           <Route path="/agent/chat" element={<ChatPage />} />
           <Route path="/requests" element={<JoinRequestPage />} />
           <Route path="/requests/:groupId" element={<JoinRequestPage />} />
@@ -432,8 +449,8 @@ export function AppRouter() {
         </Route>
       </Route>
       {/* Old /work links go to /agent */}
-      <Route path="/work/*" element={<Navigate to="/agent" replace />} />
-      <Route path="*" element={<NotFoundPage />} />
+      <Route path="/work/*" element={<Navigate to={DESKTOP ? "/c/studio" : "/agent"} replace />} />
+      <Route path="*" element={DESKTOP ? <ToStudio /> : <NotFoundPage />} />
 
       {/* Public shared chat viewer (no auth required) */}
       <Route path="/shared/:shareId" element={<SharedChatPage />} />

@@ -142,6 +142,8 @@ import {
   AccordionTrigger,
 } from "./ui/accordion";
 import { cn } from "../utils";
+// The desktop app has no Agent mode: Studio there gets Agent's Incognito, Share Grid and Share buttons
+const DESKTOP_STUDIO = import.meta.env.VITE_DESKTOP === "1" && import.meta.env.VITE_EDITOR !== "1";
 import { CodeBlockClient } from "./CodeBlockClient";
 import { ModelPicker, useSelectedModel, MODEL_GROUPS, AUTO_MODEL_ID, getThinkingLevel } from "./ModelPicker";
 import { TypingGreeting } from "./AgentHomeExtras";
@@ -6987,8 +6989,36 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
           : "w-full h-[100dvh] !bg-[#fafafa] dark:!bg-[#000000] flex flex-row overflow-hidden"}>
           <div className="flex-1 min-w-0 min-h-0 relative flex flex-col h-full overflow-hidden">
             {/* Sidebar toggle and Top Right Header Actions */}
+            {/* Desktop app (it has no Agent mode): Studio gets Agent's Incognito button on a new chat, next to the
+                pane button at the top right */}
+            {DESKTOP_STUDIO && pageContext?.path === "/c/studio" && emptyState && !isIncognito && !isLoadingChat && sessionId !== "schedule" && sessionId !== "library" && (
+              <div className={cn("absolute top-3 z-20 flex items-center", studioMenu ? "right-12" : "right-3")}>
+                <IncognitoButton onClick={startIncognito} />
+              </div>
+            )}
+            {/* (and Agent's Share Grid and Share buttons on a chat, also while the pane is open) */}
+            {DESKTOP_STUDIO && pageContext?.path === "/c/studio" && !studioMenu && messages.length > 0 && sessionId && !isIncognito && sessionId !== "schedule" && sessionId !== "library" && (
+              <div className="absolute top-3 right-3 z-20 flex items-center gap-1 text-muted-foreground animate-in fade-in-0 duration-200">
+                <button type="button" aria-label="Share Grid" title="Share Grid" onClick={() => { setShowFilesPanel(false); setShowGridPanel((o) => !o); }} className="flex items-center justify-center h-8 w-8 rounded-md hover:bg-black/5 dark:hover:bg-white/10 transition-colors cursor-pointer">
+                  <ShareGridIcon className="h-4 w-4" />
+                </button>
+                <button type="button" aria-label="Share" title="Share" onClick={handleDirectShare} className="flex items-center justify-center h-8 w-8 rounded-md hover:bg-black/5 dark:hover:bg-white/10 transition-colors cursor-pointer">
+                  <Share className="h-4 w-4" />
+                </button>
+              </div>
+            )}
             {studioMenu && messages.length > 0 && sessionId && !isIncognito && sessionId !== "schedule" && sessionId !== "library" && (
               <div className="absolute top-3 right-12 z-20 flex items-center gap-1 animate-in fade-in-0 duration-200">
+                {DESKTOP_STUDIO && (
+                  <>
+                    <button type="button" aria-label="Share Grid" title="Share Grid" onClick={() => { setShowFilesPanel(false); setShowGridPanel((o) => !o); }} className="flex items-center justify-center h-8 w-8 rounded-md text-muted-foreground hover:text-foreground hover:bg-black/5 dark:hover:bg-white/10 transition-colors cursor-pointer">
+                      <ShareGridIcon className="h-4 w-4" />
+                    </button>
+                    <button type="button" aria-label="Share" title="Share" onClick={handleDirectShare} className="flex items-center justify-center h-8 w-8 rounded-md text-muted-foreground hover:text-foreground hover:bg-black/5 dark:hover:bg-white/10 transition-colors cursor-pointer">
+                      <Share className="h-4 w-4" />
+                    </button>
+                  </>
+                )}
                 <StudioChatMenu
                   sessionId={sessionId}
                   isPinned={isPinned}

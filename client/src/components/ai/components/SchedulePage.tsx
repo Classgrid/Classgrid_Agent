@@ -148,7 +148,8 @@ export const SchedulePage: React.FC = () => {
   const location = useLocation();
 
   const pathParts = location.pathname.split('/');
-  const agentIndex = pathParts.indexOf('agent');
+  // (the desktop app has no Agent mode: there this page lives in Studio, /c/studio/...)
+  const agentIndex = pathParts.indexOf('agent') !== -1 ? pathParts.indexOf('agent') : pathParts.indexOf('studio');
   const baseAgentPath = agentIndex !== -1
     ? pathParts.slice(0, agentIndex + 1).join('/')
     : location.pathname;

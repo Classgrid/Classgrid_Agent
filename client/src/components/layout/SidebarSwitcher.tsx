@@ -93,7 +93,9 @@ export function SidebarSwitcher({ user }: { user: { role?: string; name?: string
   const agentPath = isSuperAdminArea ? "/superadmin/agent" : "/c/agent";
   const projectPath = isSuperAdminArea ? "/superadmin/project" : "/c/project";
   const studioPath = isSuperAdminArea ? "/superadmin/studio" : "/c/studio";
-  const currentMode = pathname.split("/").includes("project") ? "project" : pathname.split("/").includes("studio") ? "studio" : "agent";
+  // (the desktop app has no Agent mode: only Project and Studio, and any other page counts as Studio)
+  const DESKTOP = import.meta.env.VITE_DESKTOP === "1";
+  const currentMode = pathname.split("/").includes("project") ? "project" : pathname.split("/").includes("studio") || DESKTOP ? "studio" : "agent";
   // Project Mode and Studio share the project and its chats: switching between them keeps the open chat
   const openChat = (() => {
     if (currentMode === "agent") return "";
@@ -196,7 +198,7 @@ export function SidebarSwitcher({ user }: { user: { role?: string; name?: string
               Switch Mode
             </DropdownMenuLabel>
             {[
-              { key: "agent", label: "Agent", to: agentPath },
+              ...(DESKTOP ? [] : [{ key: "agent", label: "Agent", to: agentPath }]),
               { key: "project", label: "Project", to: projectPath + openChat },
               { key: "studio", label: "Studio", to: studioPath + openChat },
             ].map((mode) => (

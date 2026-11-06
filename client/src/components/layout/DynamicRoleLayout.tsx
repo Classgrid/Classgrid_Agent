@@ -78,7 +78,7 @@ export function DynamicRoleLayout() {
     const path = window.location.pathname;
     const isAllowed = path === "/agent" || path.startsWith("/agent/") || path === "/c" || path.startsWith("/c/") || path === "/chat" || path === "/requests" || path.startsWith("/requests/") || path === "/audit" || path === "/profile" || path === "/settings" || path === "/classgrid-ai";
     if (!isAllowed) {
-      return <Navigate to="/agent" replace />;
+      return <Navigate to={import.meta.env.VITE_DESKTOP === "1" ? "/c/studio" : "/agent"} replace />; // (the desktop app has no Agent mode)
     }
   }
   

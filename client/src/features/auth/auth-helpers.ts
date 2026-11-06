@@ -224,6 +224,8 @@ export function getRedirectPath(role: string | null | undefined) {
     const subdomain = window.location.hostname.split('.')[0];
     if (subdomain === 'chat') return '/c/agent';
   }
+  // The desktop app has no Agent mode: it starts in Studio (a login, a reload, "Try again")
+  if (import.meta.env.VITE_DESKTOP === "1") return normalizeAuthRole(role) === "super_admin" ? "/superadmin/studio" : "/c/studio";
   // The ERP dashboards are shut down: super admins go to the super admin dashboard, everyone else to Classgrid AI
   return normalizeAuthRole(role) === "super_admin" ? "/superadmin/dashboard" : "/agent";
 }

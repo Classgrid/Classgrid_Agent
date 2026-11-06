@@ -67,6 +67,7 @@ type StudioListOpts = {
 };
 // Classgrid Code's AI panel (/editor/project/...): its chats sidebar is this same list, working like Studio's
 const IN_EDITOR = import.meta.env.VITE_EDITOR === "1";
+const DESKTOP_APP = import.meta.env.VITE_DESKTOP === "1";
 const STUDIO_OPTS_KEY = "cg_studio_list_opts";
 const STUDIO_OPTS: StudioListOpts = {
   groupBy: "project", sortChats: "updated", sortProjects: "recent", unreadOnly: false, hideEmpty: false, openOnly: false,
@@ -540,6 +541,12 @@ export function AgentNestedMenu({ searchQuery = "" }: { searchQuery?: string }) 
   const baseAgentPath = agentIndex !== -1
     ? pathParts.slice(0, agentIndex + 1).join('/')
     : location.pathname;
+
+  // Schedule and Library: under New Chat in Agent mode on the website; in the desktop app (no Agent mode) they are
+  // in Studio's sidebar and open inside Studio, and Project mode (which opens Classgrid Code) has neither
+  const showSchedule = DESKTOP_APP ? isStudioMode && !IN_EDITOR : !isProjectMode && !isStudioMode;
+  const showLibrary = DESKTOP_APP ? isStudioMode && !IN_EDITOR : !isStudioMode;
+  const toolsBase = DESKTOP_APP ? baseAgentPath : baseAgentPath.replace("/project", "/agent");
 
   const handleNewChat = () => {
     navigate(baseAgentPath);
@@ -1233,11 +1240,11 @@ export function AgentNestedMenu({ searchQuery = "" }: { searchQuery?: string }) 
               />
             </SidebarMenuItem>
 
-            {!isProjectMode && !isStudioMode && (
+            {showSchedule && (
               <SidebarMenuItem>
                 <SidebarMenuButton 
                   tooltip="Schedule"
-                  onClick={() => navigate(`${baseAgentPath.replace("/project", "/agent")}/schedule`)}
+                  onClick={() => navigate(`${toolsBase}/schedule`)}
                   render={
                     <div className="flex items-center gap-3 w-full cursor-pointer">
                       <Calendar size={20} />
@@ -1248,11 +1255,11 @@ export function AgentNestedMenu({ searchQuery = "" }: { searchQuery?: string }) 
               </SidebarMenuItem>
             )}
 
-            {!isStudioMode && (
+            {showLibrary && (
             <SidebarMenuItem>
               <SidebarMenuButton 
                 tooltip="Library"
-                onClick={() => navigate(`${baseAgentPath.replace("/project", "/agent")}/library`)}
+                onClick={() => navigate(`${toolsBase}/library`)}
                 render={
                   <div className="flex items-center gap-3 w-full cursor-pointer">
                     <Library size={20} />
@@ -1365,10 +1372,10 @@ export function AgentNestedMenu({ searchQuery = "" }: { searchQuery?: string }) 
               />
             </SidebarMenuItem>
 
-            {!isProjectMode && !isStudioMode && (
+            {showSchedule && (
               <SidebarMenuItem>
                 <SidebarMenuButton 
-                  onClick={() => navigate(`${baseAgentPath.replace("/project", "/agent")}/schedule`)}
+                  onClick={() => navigate(`${toolsBase}/schedule`)}
                   render={
                     <div className="flex items-center gap-3 w-full cursor-pointer">
                       <Calendar size={20} />
@@ -1379,10 +1386,10 @@ export function AgentNestedMenu({ searchQuery = "" }: { searchQuery?: string }) 
               </SidebarMenuItem>
             )}
 
-            {!isStudioMode && (
+            {showLibrary && (
             <SidebarMenuItem>
               <SidebarMenuButton 
-                onClick={() => navigate(`${baseAgentPath.replace("/project", "/agent")}/library`)}
+                onClick={() => navigate(`${toolsBase}/library`)}
                 render={
                   <div className="flex items-center gap-3 w-full cursor-pointer">
                     <Library size={20} />

@@ -125,7 +125,8 @@ export const dashboardConfigs: DashboardConfig[] = [
       {
         label: "OVERVIEW",
         items: [
-          { label: "Agent", to: "/superadmin/dashboard", icon: Play },
+          // (the desktop app has no Agent mode: its chats are in Studio)
+          import.meta.env.VITE_DESKTOP === "1" ? { label: "Studio", to: "/superadmin/studio", icon: Play } : { label: "Agent", to: "/superadmin/dashboard", icon: Play },
           { label: "Playground", to: "/superadmin/playground", icon: Activity },
           { label: "Analytics", to: "/superadmin/analytics", icon: FileBarChart }
         ]
@@ -741,7 +742,7 @@ export const dashboardConfigs: DashboardConfig[] = [
       {
         label: "AI Platform",
         items: [
-          { label: "Agent", to: "/agent", icon: Play },
+          import.meta.env.VITE_DESKTOP === "1" ? { label: "Studio", to: "/c/studio", icon: Play } : { label: "Agent", to: "/agent", icon: Play },
           { label: "Grids", to: "/agent/chat", icon: ClassgridLogoIcon },
           { label: "Requests", to: "/requests", icon: Users },
           { label: "Audit Logs", to: "/audit", icon: Shield }

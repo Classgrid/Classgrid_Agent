@@ -179,6 +179,11 @@ interface AppSidebarProps {
   };
 }
 
+// The desktop app has no Agent mode: its main-menu item is "Studio" (config/sidebar.ts), which opens the chat list
+// the same way "Agent" does on the website
+const DESKTOP_APP = import.meta.env.VITE_DESKTOP === "1";
+const isAgentItem = (label: string) => label === "Agent" || (DESKTOP_APP && label === "Studio");
+
 export function AppSidebar({ role, user }: AppSidebarProps) {
   const location = useLocation();
   const navigate = useNavigate();
@@ -230,7 +235,8 @@ export function AppSidebar({ role, user }: AppSidebarProps) {
   // Auto-open menus based on route changes
   useEffect(() => {
     setShowStorageMenu(location.pathname.includes("/storage"));
-    setShowAgentMenu((location.pathname.includes("/agent") && !location.pathname.includes("/agent-reviews")) || location.pathname.split("/").includes("project") || location.pathname.split("/").includes("studio"));
+    // (desktop app: no Agent mode, so an /agent page such as Grids shows the main menu, not a chat list)
+    setShowAgentMenu((!DESKTOP_APP && location.pathname.includes("/agent") && !location.pathname.includes("/agent-reviews")) || location.pathname.split("/").includes("project") || location.pathname.split("/").includes("studio"));
   }, [location.pathname, agentItem]);
 
   // Auto-open Agent menu when first question is sent
@@ -265,7 +271,8 @@ export function AppSidebar({ role, user }: AppSidebarProps) {
   });
 
   // Only on chat.classgrid.in and superadmin.classgrid.in (the other dashboards are the shut-down ERP)
-  const gridsDashboard = /^(chat|superadmin)\./.test(window.location.hostname) || /^\/(agent|superadmin)(\/|$)/.test(window.location.pathname);
+  // (desktop app: also in Studio and Project, where its chats now are)
+  const gridsDashboard = /^(chat|superadmin)\./.test(window.location.hostname) || /^\/(agent|superadmin)(\/|$)/.test(window.location.pathname) || (DESKTOP_APP && /^\/c\//.test(window.location.pathname));
   // The Grids page is named "Grids", "Grid" or "Chat" in different dashboards; its address always ends in /chat
   const isGridsItem = (item: { label: string; to?: string }) => /\/chat$/.test(item.to || "") || ["Grids", "Grid", "Chat"].includes(item.label);
 
@@ -317,8 +324,9 @@ export function AppSidebar({ role, user }: AppSidebarProps) {
         <SlidingSidebar
           showNested={showStorageMenu || showAgentMenu}
           onBack={() => { setShowStorageMenu(false); setShowAgentMenu(false); }}
-          hideBack={location.pathname.split("/").includes("project") || location.pathname.split("/").includes("studio")}
-          nestedTitle={showStorageMenu ? "Storage" : showAgentMenu ? "Agent" : ""}
+          // (desktop app: Studio keeps its back button, the way to Grids, Requests and Audit Logs now that Agent is gone)
+          hideBack={location.pathname.split("/").includes("project") || (!DESKTOP_APP && location.pathname.split("/").includes("studio"))}
+          nestedTitle={showStorageMenu ? "Storage" : showAgentMenu ? (DESKTOP_APP ? "Studio" : "Agent") : ""}
           mainMenu={
             <>
               {sectionsWithBadges.map((section, index) => (
@@ -348,7 +356,7 @@ export function AppSidebar({ role, user }: AppSidebarProps) {
                               onClick={(e) => {
                                 if (item.label === "Storage") {
                                   setShowStorageMenu(true);
-                                } else if (item.label === "Agent") {
+                                } else if (isAgentItem(item.label)) {
                                   e.preventDefault();
                                   setShowAgentMenu(true);
                                   // Only navigate to home if we are NOT already somewhere in the agent section
@@ -380,7 +388,7 @@ export function AppSidebar({ role, user }: AppSidebarProps) {
                                     to={item.hasNestedNav ? "#" : (item.to || "#")} 
                                     className="flex items-center gap-3 w-full justify-between"
                                     onClick={(e) => {
-                                      if (item.label === "Agent") {
+                                      if (isAgentItem(item.label)) {
                                         e.preventDefault();
                                         setShowAgentMenu(true);
                                         // Only navigate to home if we are NOT already somewhere in the agent section
@@ -471,7 +479,8 @@ export function AppSidebar({ role, user }: AppSidebarProps) {
       {user && <SidebarFooterUser role={role} user={user} />}
       {/* Studio: the same search as the Files tab's "+", starting on Conversations (by project, with groups and pins) */}
       {/* (Classgrid Code: its chats sidebar is narrow, so this search opens in the Agent panel, over the whole window) */}
-      {import.meta.env.VITE_EDITOR === "1" ? null : location.pathname.split("/").includes("studio")
+      {/* (desktop app, no Agent mode: Studio's search everywhere but Project mode, so Agent chats never show) */}
+      {import.meta.env.VITE_EDITOR === "1" ? null : location.pathname.split("/").includes("studio") || (DESKTOP_APP && !location.pathname.split("/").includes("project"))
         ? <StudioSearchPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} initialKind="conversations" fileIcon={(name) => <FileBadge name={name} />} />
         : <AiChatSearchPalette open={paletteOpen} onOpenChange={setPaletteOpen} mode={paletteMode} />}
     </Sidebar>
