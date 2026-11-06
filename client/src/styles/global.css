@@ -473,8 +473,8 @@
   .studio-question-dots {
     transition: opacity 180ms ease;
   }
-  html.studio-scrolling .studio-sidebar-btn,
-  html.studio-scrolling .studio-question-dots {
+  /* (not the question dots: the chat scrolls all the time while an answer is written, and they must stay usable) */
+  html.studio-scrolling .studio-sidebar-btn {
     opacity: 0;
     pointer-events: none;
   }

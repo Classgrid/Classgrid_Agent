@@ -250,10 +250,11 @@ export function QuestionDots({ tocItems, activeSection }: { tocItems: QItem[]; a
             exit={reduce ? { opacity: 0 } : { opacity: 0, x: -6, scale: 0.98 }}
             transition={{ duration: reduce ? 0 : 0.18, ease: DOT_EASE }}
             style={{ transformOrigin: "left center", translateY: "-50%" }}
-            className="absolute left-7 w-[300px] max-w-[calc(100vw-6rem)] rounded-lg border border-black/10 dark:border-white/[0.08] bg-white dark:bg-[#1e1e1e] shadow-2xl"
+            className="absolute left-10 w-[300px] max-w-[calc(100vw-6rem)] rounded-lg border border-black/10 dark:border-white/[0.08] bg-white dark:bg-[#1e1e1e] shadow-2xl"
           >
-            {/* An invisible strip over the gap between the marks and the card, so the card stays open on the way there */}
-            <div aria-hidden className="absolute -left-6 inset-y-0 w-6" />
+            {/* An invisible strip over the small gap between the marks and the card, so the card stays open on the way
+                there (only the gap: over the marks it would take the mouse from the next dot) */}
+            <div aria-hidden className="absolute -left-1.5 inset-y-0 w-1.5" />
             <div className="overflow-hidden rounded-lg">
             {card.length === 1 ? (
               // One question: its text, "13 of 71" and the full date
