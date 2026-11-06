@@ -3,7 +3,7 @@
 // on top of the box below; this tab tells the app where the box is on screen and keeps the toolbar.
 import { useEffect, useRef, useState } from "react";
 import { motion, useReducedMotion } from "framer-motion";
-import { ArrowLeft, ArrowRight, Camera, ExternalLink, Globe, History, RotateCw, Video, X } from "lucide-react";
+import { ArrowLeft, ArrowRight, Camera, ExternalLink, Globe, History, RotateCw, Search, Video, X } from "lucide-react";
 import { useLocation } from "react-router-dom";
 import { toast } from "sonner";
 
@@ -22,9 +22,12 @@ type DesktopBrowser = {
   browserShot: () => Promise<string | null>;
   browserHistory: (q?: string) => Promise<{ url: string; title: string; at: number }[]>;
   browserHistoryClear: () => Promise<boolean>;
+  browserHistoryRemove?: (url: string, at: number) => Promise<boolean>;
   onBrowser: (fn: (msg: any) => void) => () => void;
 };
 const desktop = () => (window as unknown as { classgridDesktop?: Partial<DesktopBrowser> }).classgridDesktop;
+// Site icons come from our server (as on the AI's source chips)
+const API_ORIGIN = import.meta.env.VITE_API_URL || "https://api.classgrid.in";
 // The app can show its own browser here (an older app can't)
 export const hasLocalBrowser = () => typeof desktop()?.browserShow === "function";
 
@@ -128,7 +131,18 @@ export function StudioLocalBrowserView({ paused = false }: { paused?: boolean })
     const t = setTimeout(() => { desktop()?.browserHistory?.(historyQ).then((r) => setHistoryRows(r || [])).catch(() => {}); }, 120);
     return () => clearTimeout(t);
   }, [historyOpen, historyQ]);
-  const dayOf = (t: number) => new Date(t).toLocaleDateString(undefined, { weekday: "long", day: "numeric", month: "short" });
+  const [clearAsk, setClearAsk] = useState(false);
+  // Today, Yesterday, or the day's date
+  const dayLabel = (t: number) => {
+    const d = new Date(t);
+    const today = new Date();
+    const yesterday = new Date(today.getTime() - 86_400_000);
+    if (d.toDateString() === today.toDateString()) return "Today";
+    if (d.toDateString() === yesterday.toDateString()) return "Yesterday";
+    return d.toLocaleDateString(undefined, { weekday: "long", day: "numeric", month: "long" });
+  };
+  // The same page opened again right after (a reload, coming back to it) shows once, at its newest time
+  const historyShown = historyRows.filter((h, i) => i === 0 || historyRows[i - 1]!.url !== h.url || dayLabel(historyRows[i - 1]!.at) !== dayLabel(h.at));
 
   const iconBtn = "flex items-center justify-center size-8 rounded-md text-muted-foreground hover:text-foreground hover:bg-secondary transition-[color,background-color,transform] duration-150 active:scale-[0.94] disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-muted-foreground disabled:active:scale-100";
 
@@ -173,25 +187,58 @@ export function StudioLocalBrowserView({ paused = false }: { paused?: boolean })
       <div ref={boxRef} className="relative flex-1 min-h-0 bg-[#f5f5f5] dark:bg-[#141414]">
         {historyOpen && (
           <div role="dialog" aria-label="History" className="absolute inset-0 z-20 flex flex-col bg-background">
-            <div className="shrink-0 flex items-center gap-2 px-3 h-12 border-b border-border">
-              <History className="size-4 text-muted-foreground" />
-              <input autoFocus data-no-ring value={historyQ} onChange={(e) => setHistoryQ(e.target.value)} placeholder="Search history" className="flex-1 min-w-0 h-8 px-3 rounded-full border border-border bg-white dark:bg-[#1e1e1e] text-sm outline-none" />
-              <button className="h-8 px-3 rounded-md text-[13px] text-muted-foreground hover:text-foreground hover:bg-secondary" onClick={() => { desktop()?.browserHistoryClear?.().then(() => setHistoryRows([])).catch(() => {}); }}>Clear history</button>
-              <button className={iconBtn} onClick={() => setHistoryOpen(false)} title="Close" aria-label="Close"><X className="size-4" /></button>
-            </div>
-            <div className="flex-1 min-h-0 overflow-y-auto px-2 py-2">
-              {!historyRows.length && <p className="px-3 py-6 text-center text-sm text-muted-foreground">{historyQ ? "Nothing matches." : "No history yet."}</p>}
-              {historyRows.map((h, i) => (
-                <div key={`${h.at}-${i}`}>
-                  {(i === 0 || dayOf(historyRows[i - 1]!.at) !== dayOf(h.at)) && <div className="px-3 pt-3 pb-1 text-xs font-medium text-muted-foreground">{dayOf(h.at)}</div>}
-                  <button onClick={() => { act({ action: "open", url: h.url }); setHistoryOpen(false); }} className="w-full flex items-center gap-3 px-3 h-9 rounded-md text-left text-sm hover:bg-secondary">
-                    <span className="shrink-0 w-12 text-xs text-muted-foreground tabular-nums">{new Date(h.at).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" })}</span>
-                    <img src={`https://www.google.com/s2/favicons?domain=${encodeURIComponent((() => { try { return new URL(h.url).host; } catch { return ""; } })())}&sz=32`} alt="" className="size-4 shrink-0 rounded-sm" onError={(e) => { (e.currentTarget as HTMLImageElement).style.visibility = "hidden"; }} />
-                    <span className="min-w-0 truncate">{h.title || h.url}</span>
-                    <span className="min-w-0 shrink truncate text-xs text-muted-foreground">{(() => { try { return new URL(h.url).host; } catch { return h.url; } })()}</span>
-                  </button>
-                </div>
+            {/* Search with its icon inside, Clear (asks once more), Close */}
+            <div className="shrink-0 flex items-center gap-2 px-3 h-14 border-b border-border">
+              <div className="relative flex-1 min-w-0">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground pointer-events-none" />
+                <input autoFocus data-no-ring value={historyQ} onChange={(e) => setHistoryQ(e.target.value)} placeholder="Search history"
+                  className="w-full h-9 pl-9 pr-3 rounded-full bg-black/[0.04] dark:bg-white/[0.06] text-sm outline-none placeholder:text-muted-foreground focus:bg-black/[0.06] dark:focus:bg-white/[0.08] transition-colors" />
+              </div>
+              {historyRows.length > 0 && (clearAsk ? (
+                <>
+                  <button className="h-8 px-3 rounded-full text-[13px] text-muted-foreground hover:text-foreground hover:bg-secondary cursor-pointer" onClick={() => setClearAsk(false)}>Cancel</button>
+                  <button className="h-8 px-3 rounded-full text-[13px] font-medium bg-red-500/10 text-red-600 dark:text-red-400 hover:bg-red-500/15 cursor-pointer" onClick={() => { desktop()?.browserHistoryClear?.().then(() => setHistoryRows([])).catch(() => {}); setClearAsk(false); }}>Clear all</button>
+                </>
+              ) : (
+                <button className="h-8 px-3 rounded-full text-[13px] text-muted-foreground hover:text-foreground hover:bg-secondary cursor-pointer" onClick={() => setClearAsk(true)}>Clear</button>
               ))}
+              <button className={iconBtn} onClick={() => { setHistoryOpen(false); setClearAsk(false); }} title="Close" aria-label="Close"><X className="size-4" /></button>
+            </div>
+            <div className="flex-1 min-h-0 overflow-y-auto pb-3">
+              {!historyRows.length && (
+                <div className="h-full flex flex-col items-center justify-center gap-2 px-6 text-center">
+                  <History className="size-6 text-muted-foreground" />
+                  <p className="text-sm font-medium">{historyQ ? "Nothing matches your search" : "No history yet"}</p>
+                  {!historyQ && <p className="text-xs text-muted-foreground">Pages you and the agent open show up here</p>}
+                </div>
+              )}
+              {historyShown.map((h, i) => {
+                const host = (() => { try { return new URL(h.url).host.replace(/^www\./, ""); } catch { return h.url; } })();
+                const newDay = i === 0 || dayLabel(historyShown[i - 1]!.at) !== dayLabel(h.at);
+                return (
+                  <div key={`${h.at}-${h.url}`}>
+                    {/* The day stays at the top while its pages scroll under it */}
+                    {newDay && <div className="sticky top-0 z-10 px-5 pt-4 pb-2 bg-background text-xs font-semibold text-muted-foreground">{dayLabel(h.at)}</div>}
+                    <div className="group mx-2 flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-black/[0.04] dark:hover:bg-white/[0.05] transition-colors">
+                      <button onClick={() => { act({ action: "open", url: h.url }); setHistoryOpen(false); }} className="min-w-0 flex-1 flex items-center gap-3 text-left cursor-pointer">
+                        <span className="flex items-center justify-center size-8 shrink-0 rounded-lg bg-black/[0.04] dark:bg-white/[0.06]">
+                          <img src={`${API_ORIGIN}/api/ai/favicon?domain=${encodeURIComponent(host)}`} alt="" className="size-4 rounded-sm" onError={(e) => { (e.currentTarget as HTMLImageElement).style.visibility = "hidden"; }} />
+                        </span>
+                        <span className="min-w-0 flex-1">
+                          <span className="block truncate text-sm text-foreground">{h.title || host}</span>
+                          <span className="block truncate text-xs text-muted-foreground">{host}</span>
+                        </span>
+                      </button>
+                      <span className="shrink-0 whitespace-nowrap text-xs text-muted-foreground tabular-nums group-hover:hidden">{new Date(h.at).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" })}</span>
+                      <button title="Remove from history" aria-label="Remove from history"
+                        onClick={() => { desktop()?.browserHistoryRemove?.(h.url, h.at).then(() => setHistoryRows((rows) => rows.filter((r) => !(r.url === h.url && r.at === h.at)))).catch(() => {}); }}
+                        className="hidden group-hover:flex items-center justify-center size-7 shrink-0 rounded-md text-muted-foreground hover:text-foreground hover:bg-black/[0.06] dark:hover:bg-white/[0.08] cursor-pointer">
+                        <X className="size-3.5" />
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
             </div>
           </div>
         )}
