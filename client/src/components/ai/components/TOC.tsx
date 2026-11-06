@@ -213,7 +213,9 @@ export function QuestionDots({ tocItems, activeSection }: { tocItems: QItem[]; a
 
   return (
     <div ref={boxRef} className="studio-question-dots absolute left-2 top-1/2 -translate-y-1/2 z-30 @max-[46rem]:hidden">
-      <div className="flex flex-col items-center gap-[5px] max-h-[60vh] overflow-y-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden py-2 px-1.5" onScroll={() => setHover(null)}>
+      {/* (no gaps between the marks: each one's own space reaches the next, so moving from dot to dot never falls into
+          a gap, and each is wider than it looks, so it is easy to point at) */}
+      <div className="flex flex-col items-center max-h-[60vh] overflow-y-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden py-2 px-0.5" onScroll={() => setHover(null)}>
         {marks.map((group, i) => {
           const on = group.some((x) => x.id === activeSection);
           const bar = group.length > 1;
@@ -224,7 +226,7 @@ export function QuestionDots({ tocItems, activeSection }: { tocItems: QItem[]; a
               onClick={() => jump(group[0].id)}
               onMouseEnter={(e) => show(i, e.currentTarget)}
               onMouseLeave={hide}
-              className="flex items-center justify-center w-3"
+              className="flex items-center justify-center w-6 py-1 cursor-pointer"
               aria-label={bar ? `${group.length} older questions` : `Go to: ${group[0].label}`}
             >
               <motion.span
