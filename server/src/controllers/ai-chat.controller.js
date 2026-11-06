@@ -6424,6 +6424,9 @@ If a tool fails, never show the error message; say only: "Something went wrong o
 
                 if (requestAborted) return keepUnfinishedAnswer(STOPPED_NOTE);
 
+                // The model wrote its answer before a step and then ended without more text: what it wrote (already
+                // on the user's screen) is the answer, not a failure (it used to be retried and marked as cut off)
+                if (!answer && shownAnswerText.trim()) answer = shownAnswerText.trim();
                 if (!answer) {
                     if (accSteps.length > 0) {
                         console.log(`[AI-DEBUG] Answer was null but ${accSteps.length} steps completed. Answering with a short note.`);
