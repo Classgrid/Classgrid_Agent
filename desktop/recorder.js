@@ -91,7 +91,7 @@ async function start(getView, label) {
     const r = rec;
     if (!r || r.busy) return;
     const view = getView();
-    if (!view || view.webContents.isDestroyed()) return;
+    if (!view?.webContents || view.webContents.isDestroyed()) return;
     r.busy = true;
     try {
       const img = await view.webContents.capturePage();

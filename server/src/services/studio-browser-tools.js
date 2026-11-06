@@ -33,6 +33,11 @@ const ACT = [
   fn("browser_click", "Click at a point on the page, in screenshot pixels (the page size is given with each screenshot). Returns a screenshot.", {
     x: { type: "number" }, y: { type: "number" }, double: { type: "boolean", description: "true = double-click." },
   }, ["x", "y"]),
+  fn("browser_select", "Choose a choice in a dropdown by its text: a normal select box or a list the page draws itself (like Firebase's, Google's or Material dropdowns). Use it for every dropdown instead of clicking its list: clicking a list often picks the wrong line. Say which dropdown with field (its label, e.g. \"Country\") or x and y on it (screenshot pixels); with only one dropdown on the page neither is needed. Without option it tells you the dropdown's choices. Returns a screenshot.", {
+    option: { type: "string", description: "The text of the choice, e.g. \"India\" or \"Node.js 20\"." },
+    field: { type: "string", description: "The dropdown's label or name on the page." },
+    x: { type: "number" }, y: { type: "number" },
+  }),
   fn("browser_type", "Type text where the cursor is (click the input first). Returns a screenshot.", {
     text: { type: "string" }, submit: { type: "boolean", description: "true = press Enter after typing." },
   }, ["text"]),
@@ -71,6 +76,8 @@ async function writePad(sessionId, text) {
 const ACTIONS = {
   browser_open: (a) => ({ action: "open", url: String(a?.url || "") }),
   browser_click: (a) => ({ action: "click", x: Number(a?.x), y: Number(a?.y), double: !!a?.double }),
+  browser_select: (a) => ({ action: "select", option: String(a?.option ?? ""), field: String(a?.field ?? ""),
+    ...(a?.x != null && a?.y != null && Number.isFinite(Number(a.x)) && Number.isFinite(Number(a.y)) ? { x: Number(a.x), y: Number(a.y) } : {}) }),
   browser_type: (a) => ({ action: "type", text: String(a?.text ?? ""), submit: !!a?.submit }),
   browser_press: (a) => ({ action: "press", key: String(a?.key || "Enter") }),
   browser_scroll: (a) => ({ action: "scroll", dy: Number(a?.dy ?? 600) }),
@@ -152,8 +159,12 @@ export function makeBrowserHandlers({ userId, sessionId, desktop = false }) {
           }
           r = await browserAct(userId, { ...step, ...chat });
         }
-        if (!r?.ok) return `Error: ${r?.error || "the browser step failed"}${r?.url ? ` (page: ${r.url})` : ""}`;
-        const head = `Page: ${r.title || "(no title)"} — ${r.url}${r.w ? `\nPage size: ${r.w}x${r.h} pixels` : ""}`;
+        if (!r?.ok) {
+          // A Classgrid app from before the dropdown step
+          if (name === "browser_select" && /Unknown action/.test(String(r?.error))) return "Error: this Classgrid app is too old to choose in dropdowns. Click the dropdown, then its choice, and tell the user to update the Classgrid app.";
+          return `Error: ${r?.error || "the browser step failed"}${r?.url ? ` (page: ${r.url})` : ""}`;
+        }
+        const head = `Page: ${r.title || "(no title)"} — ${r.url}${r.w ? `\nPage size: ${r.w}x${r.h} pixels` : ""}${r.note ? `\n${r.note}` : ""}`;
         if (name === "browser_logs") {
           if (!r.logs) return `${head}\n\nThis browser can't show the page's errors (only the desktop app's browser can).`;
           const ago = (t) => `${Math.max(0, Math.round((Date.now() - t) / 1000))}s ago`;
@@ -184,6 +195,7 @@ export const BROWSER_WORKER_SYSTEM = `You are the Browser worker in Classgrid St
 - Work step by step: open a page, look at the screenshot, then click (screenshot pixels; the page size is given with each screenshot), type, press keys or scroll. Every step returns a new screenshot: check it before the next step.
 - Look at the screenshots closely, not only the text: the design and UI/UX (layout, colours, fonts, spacing, images, buttons, how clear and easy the page is to use, anything broken or out of place). Report what you see in the design too.
 - Use browser_read to get exact text and links instead of guessing from the picture.
+- For a dropdown, use browser_select with the choice's text (and the dropdown's label as field) instead of clicking its list.
 - Write what you find and what is done to the scratchpad (scratchpad_write, mode append), with links.
 - Never type a password, card number or one-time code, and never pay, buy, send, post or delete anything: stop and tell the Planner (tell_main) that the user needs to do that step in the browser.
 - If a page blocks you (a captcha, a login wall), stop and say so; do not try to get around it.

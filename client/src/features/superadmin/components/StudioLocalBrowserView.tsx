@@ -39,6 +39,7 @@ function pointerLabel(p: Pointer) {
   if (p.kind === "key") return `Pressing ${p.key || "a key"}`;
   if (p.kind === "open") return `Opening ${host(p.url)}`;
   if (p.kind === "shot") return "Taking a screenshot";
+  if (p.kind === "select") return "Choosing";
   return "Working";
 }
 

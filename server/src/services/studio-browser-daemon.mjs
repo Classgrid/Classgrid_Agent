@@ -1,7 +1,7 @@
 // Runs INSIDE a user's Studio browser container (classgrid-ai-sandbox image) on the sandbox server, not on the API.
 // The API uploads this file to /home/ubuntu/studio_branding/ and starts it with node. It runs one real Chromium
 // (Playwright) with the user's own saved profile, and offers:
-//   POST /act   {action, ...}  open, click, type, press, scroll, back, forward, reload, screenshot, read, tabs
+//   POST /act   {action, ...}  open, click, select, type, press, scroll, back, forward, reload, screenshot, read, tabs
 //   GET  /health
 //   WS   /live  the page as JPEG frames (Chrome's screencast) + nav events + the agent's pointer; takes the viewer's
 //               clicks, wheel, keys and its size (the page follows the size of the Browser tab)
@@ -161,9 +161,96 @@ async function useChat(id) {
   for (const ws of watchers) await frameNow(ws);
 }
 
+// Runs in the page: chooses a dropdown choice by its text. A normal <select> is set right here; for a list the page
+// draws itself (like Firebase's or Google's) it says where to really click: on the dropdown to open it, then on the
+// choice. q: { option, field, x, y (page pixels), phase: "start" | "opened" | "typed" }. No option = list the choices.
+// Returns { done, note } | { click: { x, y }, note? } | { type: true } | { error }
+function pickInPage(q) {
+  const norm = (s) => String(s ?? "").replace(/\s+/g, " ").trim().toLowerCase();
+  const want = norm(q.option);
+  const field = norm(q.field);
+  const shown = (el) => {
+    const r = el.getBoundingClientRect();
+    const s = getComputedStyle(el);
+    return r.width > 0 && r.height > 0 && s.visibility !== "hidden" && s.display !== "none";
+  };
+  const words = (el) => String(el.innerText || el.textContent || el.getAttribute("aria-label") || el.value || "").replace(/\s+/g, " ").trim();
+  const match = (items, get) => (want
+    ? items.find((i) => get(i) === want) || items.find((i) => get(i).startsWith(want)) || items.find((i) => get(i).includes(want)) || null
+    : null);
+  const center = (el) => {
+    el.scrollIntoView({ block: "center", inline: "nearest" });
+    const r = el.getBoundingClientRect();
+    return { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2) };
+  };
+  const quote = (list) => list.filter(Boolean).slice(0, 60).map((s) => `"${s}"`).join(", ");
+  const DROP = 'select, [role="combobox"], [aria-haspopup="listbox"], [aria-haspopup="menu"], [aria-haspopup="true"], mat-select, input[list]';
+  const OPTION = '[role="option"], mat-option, [role="menuitemradio"], [role="menuitem"], [role="listbox"] li';
+  // What a dropdown is called: its own label, else the text around it
+  const label = (el) => [...new Set([
+    el.getAttribute("aria-label"),
+    ...(el.getAttribute("aria-labelledby") || "").split(/\s+/).filter(Boolean).map((id) => document.getElementById(id)?.innerText),
+    ...[...(el.labels || [])].map((l) => l.innerText),
+    el.getAttribute("placeholder"), el.getAttribute("title"), el.getAttribute("name"), el.id,
+  ].filter(Boolean).map(norm))].join(" | ");
+  const around = (el) => norm(el.closest("label, fieldset, mat-form-field, [class*='form-field'], [class*='FormField']")?.innerText || el.parentElement?.innerText || "").slice(0, 200);
+  const typeable = (el) => !!el && (el.matches("input, textarea, [contenteditable='true']") || !!el.querySelector?.("input"));
+
+  // The choices of a list that is open in the page now
+  const open = [...document.querySelectorAll(OPTION)].filter((o) => shown(o) && o.getAttribute("aria-disabled") !== "true");
+  // Which dropdown: the one at the point, the one with that label, or the only one on the page
+  const all = [...document.querySelectorAll(DROP)];
+  const visible = all.filter(shown);
+  const names = (list) => quote(list.map((el) => label(el) || around(el).slice(0, 60)));
+  let target = null;
+  if (Number.isFinite(q.x) && Number.isFinite(q.y)) {
+    const hit = document.elementFromPoint(q.x, q.y);
+    target = hit?.closest(DROP) || hit?.querySelector?.(DROP) || hit;
+  } else if (field) {
+    const pool = [...visible, ...all.filter((el) => el.tagName === "SELECT" && !shown(el))];
+    target = pool.find((el) => label(el) === field) || pool.find((el) => label(el).includes(field)) || pool.find((el) => around(el).includes(field)) || null;
+    if (!target) return { error: `No dropdown called "${q.field}" here. The dropdowns on this page: ${names(visible) || "(none)"}` };
+  } else if (!open.length && visible.length === 1) target = visible[0];
+  const select = target?.tagName === "SELECT" ? target : target?.querySelector?.("select") || null;
+
+  // A normal <select>: set here, as if the user picked it (pages built with React see the change too)
+  if (select) {
+    const opts = [...select.options].filter((o) => !o.disabled);
+    const list = quote(opts.map((o) => (o.text || o.label).trim()));
+    if (!want) return { done: true, note: `The choices in this dropdown: ${list}` };
+    const o = match(opts, (x) => norm(x.text || x.label));
+    if (!o) return { error: `No choice "${q.option}" in this dropdown. Its choices: ${list}` };
+    center(select);
+    Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, "value").set.call(select, o.value);
+    select.dispatchEvent(new Event("input", { bubbles: true }));
+    select.dispatchEvent(new Event("change", { bubbles: true }));
+    return { done: true, note: `Selected "${o.text.trim()}" in the dropdown.` };
+  }
+
+  // A list the page draws: choose from the open list, else open the dropdown first
+  if (open.length && (q.phase !== "start" || !target || target.getAttribute("aria-expanded") === "true")) {
+    const list = quote(open.map(words));
+    if (!want) return { done: true, note: `The choices in this dropdown: ${list}` };
+    const o = match(open, (x) => norm(words(x)));
+    if (o) return { click: center(o), note: `Selected "${words(o)}" in the dropdown.` };
+    // A dropdown you type in (its list follows what is typed): type the choice, then look again
+    if (q.phase === "opened" && typeable(target)) return { type: true };
+    return { error: `No choice "${q.option}" in the open list. Its choices: ${list}` };
+  }
+  if (!target) {
+    return { error: visible.length
+      ? `Say which dropdown: field = its label, or x and y on it. The dropdowns on this page: ${names(visible)}`
+      : "No dropdown is on this page and no list is open." };
+  }
+  if (q.phase === "start") return { click: center(target) };
+  if (q.phase === "opened" && want && typeable(target)) return { type: true };
+  return { error: "The dropdown's list didn't open. Click it, then look at the screenshot." };
+}
+
 async function act(a, byAgent = false) {
   await resizing;
   if (byAgent && a.chat) await useChat(a.chat);
+  let note = null; // what a step found out, told to the AI with the screenshot
   switch (a.action) {
     case "open":
       if (byAgent) point("open", { url: String(a.url || "") });
@@ -178,6 +265,26 @@ async function act(a, byAgent = false) {
         point("click");
       }
       await page.mouse.click(x, y, { clickCount: a.double ? 2 : 1 });
+      break;
+    }
+    case "select": {
+      // A dropdown choice by its text: a normal <select> is set in the page; a list the page draws is opened and its
+      // choice clicked with real clicks
+      const q = { option: String(a.option ?? ""), field: String(a.field ?? ""), phase: "start" };
+      if (a.x != null && a.y != null) { q.x = Number(a.x); q.y = Number(a.y); }
+      if (byAgent) point("select", { option: q.option });
+      for (let n = 0; n < 4 && !note; n++) {
+        const r = await page.evaluate(pickInPage, q);
+        if (!r || r.error) throw new Error(r?.error || "The page didn't answer");
+        if (r.type) { await page.keyboard.type(q.option, { delay: 15 }); q.phase = "typed"; await page.waitForTimeout(800); continue; }
+        if (r.click) {
+          if (byAgent) { pointer = r.click; point("move"); await page.mouse.move(r.click.x, r.click.y, { steps: 6 }); point("click"); }
+          await page.mouse.click(r.click.x, r.click.y);
+        }
+        if (r.note) note = r.note;
+        else { q.phase = "opened"; await page.waitForTimeout(700); }
+      }
+      if (!note) throw new Error("The choice could not be made: look at the screenshot and click it.");
       break;
     }
     case "type":
@@ -226,12 +333,13 @@ async function act(a, byAgent = false) {
     await page.waitForLoadState("domcontentloaded", { timeout: 8000 }).catch(() => {});
     await page.waitForLoadState("networkidle", { timeout: 5000 }).catch(() => {});
     await page.waitForTimeout(800);
-  } else if (["click", "press"].includes(a.action)) {
+  } else if (["click", "press", "select"].includes(a.action)) {
     await page.waitForLoadState("domcontentloaded", { timeout: 8000 }).catch(() => {});
     await page.waitForTimeout(900);
   }
   if (a.action === "scroll") await page.waitForTimeout(1000);
   const out = { ok: true, url: page.url(), title: await page.title().catch(() => ""), w: view.width, h: view.height };
+  if (note) out.note = note;
   if (a.action === "read") {
     out.text = (await page.evaluate(() => document.body?.innerText || "").catch(() => "")).slice(0, MAX_TEXT);
     out.links = await page.evaluate(() => [...document.querySelectorAll("a[href]")].slice(0, 80).map((l) => ({ text: (l.innerText || "").trim().slice(0, 80), href: l.href }))).catch(() => []);
