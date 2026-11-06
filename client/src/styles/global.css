@@ -321,10 +321,21 @@
     gap: 10px;
     padding: 0 140px 0 12px;
     background: var(--sidebar-background);
-    border-bottom: 1px solid var(--border);
     color: var(--foreground);
     -webkit-app-region: drag;
     user-select: none;
+  }
+  /* Its bottom line, just below the 40px row: Windows draws the window buttons over that whole row, so a line inside it
+     was cut off under them on the right */
+  html.desktop-app #cg-titlebar::after {
+    content: "";
+    position: fixed;
+    top: 40px;
+    left: 0;
+    right: 0;
+    height: 1px;
+    background: var(--border);
+    pointer-events: none;
   }
   html.desktop-app #cg-titlebar :is(button, a, input, select, [role="button"], [role="combobox"]) {
     -webkit-app-region: no-drag;
