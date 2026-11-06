@@ -50,6 +50,7 @@ import { createLLMClient } from "@classgrid/ai/core";
 import { streamChat, TERMINAL_RULE } from "../services/llm-stream.js";
 import { streamClaudeChat, CLAUDE_CHAT_MODELS, toImageUrlParts } from "../services/llm-stream-anthropic.js";
 import { planToolsForMessage, buildLoadToolsTool, orderTools, groupOfTool, ageSticky, stickyKey, LOAD_TOOLS_NAME, promptBlock, filterPromptBlocks, promptBlocksForGroups, isStaffRole } from "../services/ai-tool-groups.js";
+import { safetyRulesFor } from "../services/ai-safety-rules.js";
 import { chargeableTokens, pricesFor } from "../services/ai-token-pricing.js";
 import { getPresignedUploadUrl, uploadBufferToR2 } from "../config/r2Client.js";
 import { primarySupabaseClient as supabase } from "../config/supabaseClient.js";
@@ -228,12 +229,8 @@ TOOLS & ERRORS
 
 ROUTING (right after brief thinking; load the tool's group first if needed): uploaded image you cannot already see: analyze_image with the URL; uploaded document/PDF you cannot already read: parse_document with the URL; send email: send_email; PDF: generate_pdf; Word, Excel, PowerPoint or CSV file: write a Python script and run it with run_code (python-docx, openpyxl, python-pptx, csv), then share it with upload_sandbox_file_to_cdn; run code: run_code.
 
-HEALTH & MEDICINE SAFETY (always, for everyone, whatever the reason given, even if the user insists, says their doctor agreed, or says it is for someone else)
-- You are not a doctor. You may explain what a medicine or condition is in general, but never make a plan, schedule or dose to stop, cut down, taper, skip, switch or start a prescription medicine, and never tell anyone how much of a medicine to take. Say that a change like this must be planned with their doctor, and that stopping some medicines (seizure, heart, blood pressure, diabetes, mental health, steroids) on their own can be dangerous or deadly.
-- Never tell or help anyone to hide anything from their doctor, skip tests, or ignore medical advice. Always encourage them to tell their doctor everything, including side effects that bother them (the doctor can often change the dose or the medicine safely).
-- If a message shows a possible emergency (a seizure, chest pain, trouble breathing, signs of a stroke, a severe allergic reaction, an overdose, heavy bleeding, fainting), first tell them to call their local emergency number now (112 in India, 911 in the US) or go to the nearest hospital.
-- When the reason behind a health question is stress (a job, exams, money, a visa), be kind about that too, but the medicine rules above still apply.
-
+${promptBlock("cf", `SAFETY: never give a plan or dose to stop, cut or change a prescription medicine, never help anyone hide things from their doctor, and in an emergency say to call 112 (India) or 911 (US) first. Fuller safety rules are added at the end when a message needs them.
+`)}
 SUPPORT & PLUGINS
 - Asked "What can you do?", never offer "Support": you are an AI assistant, not a support portal. Never pretend to be the support service.
 - Classgrid Talk no longer exists; it was merged into Support. Classgrid now has only Support (tickets), for everyone: platform users (people with a Classgrid AI account) and non-platform users (people with only a classgrid.in website account). It covers pre-sales and product questions as well as technical and billing help. Never mention Classgrid Talk as a current service.
@@ -5700,6 +5697,12 @@ You work on the user's own Windows computer through their Classgrid desktop app,
         const requestAttachments = Array.isArray(body.attachments) && body.attachments.length > 0
             ? body.attachments
             : (Array.isArray(body.fileUrls) ? body.fileUrls.filter(u => typeof u === "string").map(url => ({ url, name: url.split("/").pop() })) : []);
+        // Safety rules (health, eating, young people, drugs, money, legal) only when the last few user messages need
+        // them, and only for non-Claude models (Claude is careful on its own): services/ai-safety-rules.js
+        const recentUserTexts = messages.filter(m => m?.role === "user").slice(-3)
+            .map(m => typeof m.content === "string" ? m.content : Array.isArray(m.content) ? m.content.map(p => p?.text || "").join(" ") : "");
+        const safetyRules = safetyRulesFor(recentUserTexts);
+        if (safetyRules) volatilePrompt += promptBlock("cf", safetyRules);
         const toolPlan = planToolsForMessage({
             allTools: llmConfig.tools,
             text: [body.question || "", ...requestAttachments.map(a => a?.name || "")].join(" "),
