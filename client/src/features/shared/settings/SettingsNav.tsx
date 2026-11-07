@@ -14,11 +14,11 @@ export function SettingsNav() {
   const words = q.toLowerCase().split(/\s+/).filter(Boolean);
   const shown = sections.filter((s) => words.every((w) => `${s.label} ${s.words}`.toLowerCase().includes(w)));
 
-  // (no back button of its own: the back arrow above leaves Settings)
+  // (no back button or title of its own: the back arrow leaves Settings and the page's top bar says "Settings"; the
+  // search box is hidden while the sidebar is folded to icons)
   return (
     <div className="flex flex-col gap-2 px-2 pt-1">
-      <h2 className="h-9 px-2 flex items-center text-[15px] font-semibold text-foreground">Settings</h2>
-      <div className="relative">
+      <div className="relative group-data-[collapsible=icon]:hidden">
         <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground pointer-events-none" />
         <input
           value={q}
