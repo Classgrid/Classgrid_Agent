@@ -9,14 +9,14 @@ import { fetchWithRescue } from "@/lib/rescue";
 import { apiClient } from "@/lib/apiClient";
 import { ImageCropperModal } from "@/components/marketing_ui/ImageCropperModal";
 import { StudioProjectChooser } from "./StudioProjectPicker";
-import { MasteroDialog, PushDialog } from "./StudioMastero";
+import { MasteroDialog, PushDialog, useFolderOnline } from "./StudioMastero";
 import { MasteroOnlineCard } from "./MasteroOnlineCard";
 import { onDesktop, thisComputerCopy, type LocalCopy } from "../utils/projectCopies";
 
 const backendUrl = import.meta.env.VITE_API_URL || "https://api.classgrid.in";
 const EASE = [0.22, 1, 0.36, 1] as const;
 
-type Project = { id: string; name: string; repo: string | null; logo?: string | null; updatedAt?: string; location?: "cloud" | "local"; localCopies?: LocalCopy[]; mastero?: boolean };
+type Project = { id: string; name: string; repo: string | null; logo?: string | null; updatedAt?: string; location?: "cloud" | "local"; localPath?: string | null; localCopies?: LocalCopy[]; mastero?: boolean };
 type Info = { repoUrl: string | null; branch: string | null; commit: { message: string; date: string | null; sha: string; url: string | null } | null; vercel: { name: string; dashboardUrl: string; appUrl: string; domain: string } | null };
 type Commit = { sha: string; message: string; author: string | null; avatar: string | null; date: string | null; url: string | null };
 type History = { branch: string | null; pr: { number: number; title: string; url: string } | null; commits: Commit[] };
@@ -51,6 +51,10 @@ export function StudioProjectView({ projectId, reloadKey = 0 }: { projectId: str
   const [switching, setSwitching] = useState(false);
   // Desktop app: Mastero (a folder project onto a new GitHub repo) and Push (this computer's changes to its repo)
   const [gitDialog, setGitDialog] = useState<"mastero" | "push" | null>(null);
+  // Desktop app: what the project's folder already has online (its GitHub repo, its Vercel project), read on this computer
+  const folderHere = project ? (project.location === "local" ? project.localPath : thisComputerCopy(project)?.path) : null;
+  const folderOnline = useFolderOnline(onDesktop() ? folderHere : null);
+  const folderRepo = !project?.repo ? folderOnline?.repo || null : null; // on GitHub, not linked yet
   // Rename the project here (the new name shows in Project Mode and Studio)
   const [renaming, setRenaming] = useState<string | null>(null);
   const [renameBusy, setRenameBusy] = useState(false);
@@ -219,12 +223,12 @@ export function StudioProjectView({ projectId, reloadKey = 0 }: { projectId: str
           </div>
           {/* (a narrow pane puts the buttons on their own line under the name) */}
           <div className="ml-auto flex items-center gap-2">
-            {onDesktop() && project && !project.repo && project.location === "local" && (
+            {onDesktop() && project && !project.mastero && (project.location === "local" || thisComputerCopy(project)?.here) && (
               <button onClick={() => setGitDialog("mastero")} className="shrink-0 h-8 px-2.5 inline-flex items-center gap-1.5 rounded-md bg-foreground text-background text-[12px] font-medium hover:opacity-90 transition-opacity cursor-pointer" title="Make a GitHub repo for this project and push your code to it">
                 <img src={GITHUB_ICON} alt="" aria-hidden className="size-3.5 invert dark:invert-0" /> Mastero
               </button>
             )}
-            {onDesktop() && project?.repo && (project.location === "local" || thisComputerCopy(project)?.here) && (
+            {onDesktop() && project?.repo && project.mastero && (project.location === "local" || thisComputerCopy(project)?.here) && (
               <button onClick={() => setGitDialog("push")} className="shrink-0 h-8 px-2.5 inline-flex items-center gap-1.5 rounded-md bg-foreground text-background text-[12px] font-medium hover:opacity-90 transition-opacity cursor-pointer" title="Push this computer's changes to GitHub">
                 <ArrowUpFromLine className="size-3.5" /> Push
               </button>
@@ -241,7 +245,7 @@ export function StudioProjectView({ projectId, reloadKey = 0 }: { projectId: str
           </div>
         </motion.div>
 
-        {project && <MasteroDialog project={project} open={gitDialog === "mastero"} onClose={() => setGitDialog(null)} onDone={(p) => { setProject(p); load(); }} />}
+        {project && <MasteroDialog project={project} already={folderOnline} open={gitDialog === "mastero"} onClose={() => setGitDialog(null)} onDone={(p) => { setProject(p); load(); }} />}
         {project && <PushDialog project={project} open={gitDialog === "push"} onClose={() => setGitDialog(null)} onDone={load} />}
 
         {/* Switch to another project, or make a new one */}
@@ -256,14 +260,21 @@ export function StudioProjectView({ projectId, reloadKey = 0 }: { projectId: str
           <div className="flex items-center gap-2">
             <img src={GITHUB_ICON} alt="" aria-hidden className="size-4 dark:invert" />
             <span className="text-[13px] font-medium">GitHub</span>
-            <span className={`ml-auto text-[11px] px-1.5 py-0.5 rounded ${project?.repo && !githubMissing ? "text-[#16825d] dark:text-[#4ec9b0] bg-[#16825d]/10" : "text-muted-foreground bg-black/[0.04] dark:bg-white/[0.05]"}`}>
-              {githubMissing ? "Not connected" : project?.repo ? "Connected" : "No repo"}
+            <span className={`ml-auto text-[11px] px-1.5 py-0.5 rounded ${(project?.repo || folderRepo) && !githubMissing ? "text-[#16825d] dark:text-[#4ec9b0] bg-[#16825d]/10" : "text-muted-foreground bg-black/[0.04] dark:bg-white/[0.05]"}`}>
+              {githubMissing ? "Not connected" : project?.repo ? "Connected" : folderRepo ? "On GitHub" : "No repo"}
             </span>
           </div>
           {githubMissing ? (
             <div className="mt-2 flex items-center justify-between gap-3">
               <p className="text-[12px] text-muted-foreground">GitHub is not connected. Set it up in Project Mode first.</p>
               <Link to={window.location.pathname.startsWith("/superadmin") ? "/superadmin/project" : "/c/project"} className="shrink-0 h-7 px-2.5 inline-flex items-center rounded-md bg-foreground text-background text-[12px] font-medium hover:opacity-90">Go to Project Mode</Link>
+            </div>
+          ) : !project?.repo && folderRepo ? (
+            <div className="mt-2 flex flex-col gap-1.5 text-[12px] text-foreground/80">
+              <a href={`https://github.com/${folderRepo}`} target="_blank" rel="noreferrer" className={linkCls}>
+                <span className="truncate">{folderRepo}</span><ExternalLink className="size-3 shrink-0 opacity-60" />
+              </a>
+              <span className="text-muted-foreground">This folder is on GitHub already. Mastero keeps this repo, so nothing is made twice.</span>
             </div>
           ) : !project?.repo ? (
             <p className="mt-2 text-[12px] text-muted-foreground">No repo linked. Link one from the project picker (🔗 on the project), or ask the agent to make a repo.</p>
@@ -289,8 +300,8 @@ export function StudioProjectView({ projectId, reloadKey = 0 }: { projectId: str
           <div className="flex items-center gap-2">
             <img src={VERCEL_ICON} alt="" aria-hidden className="size-4 dark:invert" />
             <span className="text-[13px] font-medium">Vercel</span>
-            <span className={`ml-auto text-[11px] px-1.5 py-0.5 rounded ${info?.vercel ? "text-[#16825d] dark:text-[#4ec9b0] bg-[#16825d]/10" : "text-muted-foreground bg-black/[0.04] dark:bg-white/[0.05]"}`}>
-              {info?.vercel ? "Connected" : "Not connected"}
+            <span className={`ml-auto text-[11px] px-1.5 py-0.5 rounded ${info?.vercel || folderOnline?.vercel ? "text-[#16825d] dark:text-[#4ec9b0] bg-[#16825d]/10" : "text-muted-foreground bg-black/[0.04] dark:bg-white/[0.05]"}`}>
+              {info?.vercel ? "Connected" : folderOnline?.vercel ? "Deployed" : "Not connected"}
             </span>
           </div>
           {info?.vercel ? (
@@ -298,8 +309,13 @@ export function StudioProjectView({ projectId, reloadKey = 0 }: { projectId: str
               <a href={info.vercel.appUrl} target="_blank" rel="noreferrer" className={linkCls}><span className="truncate">{info.vercel.domain}</span><ExternalLink className="size-3 shrink-0 opacity-60" /></a>
               <a href={info.vercel.dashboardUrl} target="_blank" rel="noreferrer" className={`${linkCls} text-muted-foreground`}><span className="truncate">Vercel project: {info.vercel.name}</span></a>
             </div>
+          ) : folderOnline?.vercel ? (
+            <div className="mt-2 flex flex-col gap-1.5 text-[12px] text-foreground/80">
+              <span className="truncate">Vercel project: {folderOnline.vercel}</span>
+              <span className="text-muted-foreground">This folder was deployed with Vercel. Connect Vercel in AI Hub to see its live link here.</span>
+            </div>
           ) : (
-            <p className="mt-2 text-[12px] text-muted-foreground">{project?.repo ? "No Vercel project uses this repo yet, or Vercel is not connected." : "Link a GitHub repo first."}</p>
+            <p className="mt-2 text-[12px] text-muted-foreground">{project?.repo || folderRepo ? "No Vercel project uses this repo yet, or Vercel is not connected." : "Link a GitHub repo first."}</p>
           )}
         </motion.div>
 

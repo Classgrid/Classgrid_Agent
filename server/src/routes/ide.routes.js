@@ -1078,23 +1078,37 @@ router.put("/mastero-settings", isAuthenticated, async (req, res) => {
 });
 
 // Mastero (Studio's Project tab): a folder project goes on GitHub in one step, when the user asks for it with this
-// button. A new repo is made with the name the user typed, the folder's code is pushed to it from this computer
-// (desktop/runner.js sync_repo; a folder with no .gitignore gets one first, so node_modules and .env stay out), and the
-// project is linked to it. Answers { project, repo, repoUrl } or { error, code }.
+// button. A project already on GitHub (linked, or its folder pushed to a repo before) keeps that repo and only becomes a
+// Mastero project (existing: true). Otherwise a new repo is made with the name the user typed, the folder's code is
+// pushed to it from this computer (desktop/runner.js sync_repo; a folder with no .gitignore gets one first, so
+// node_modules and .env stay out), and the project is linked to it. Answers { project, repo, repoUrl } or { error, code }.
 router.post("/projects/:id/mastero", isAuthenticated, async (req, res) => {
   const project = await ownProject(req, res);
   if (!project) return;
-  if (project.repo) return res.status(409).json({ error: `This project is already on GitHub (${project.repo}).`, code: "has_repo" });
+  if (project.mastero) return res.status(409).json({ error: "This is a Mastero project already.", code: "is_mastero" });
+  // Already linked to its repo (on GitHub and maybe on Vercel already): it only becomes a Mastero project. Nothing new
+  // is made and nothing is pushed.
+  if (project.repo) {
+    project.mastero = true;
+    await project.save();
+    return res.json({ ok: true, existing: true, project: projectJson(project, req), repo: project.repo, repoUrl: `https://github.com/${project.repo}` });
+  }
   if (project.location !== "local" || !project.localPath) return res.status(409).json({ error: "Mastero works with a folder project on this computer." });
-  const name = String(req.body?.name || "").trim();
-  if (!repoSlug(name)) return res.status(400).json({ error: "Give the repo a name" });
   try {
     const ready = await readyForCopy(req, res);
     if (!ready) return;
-    // A folder that's already on GitHub keeps its own repo
+    // A folder that's already on GitHub keeps its own repo: it's linked as it is, so no second repo or project is made
     const had = await onComputer(project, project.localPath, "folder_repo", {});
     const existing = had.error ? null : runnerLine(had.text, "Repo");
-    if (existing) return res.status(409).json({ error: `This folder is already on GitHub as ${existing}. Link it to that repo instead (the link button on the project).`, code: "folder_has_repo", repo: existing });
+    if (existing && REPO_NAME.test(existing)) {
+      const other = await IdeProject.findOne({ owner: req.user._id, _id: { $ne: project._id }, repo: new RegExp(`^${escapeRegex(existing)}$`, "i") }).select("name").lean();
+      if (other) return res.status(409).json({ error: `This folder's repo ${existing} is already your project "${other.name}". Open that project instead, so it isn't made twice.`, code: "repo_taken", repo: existing });
+      project.mastero = true;
+      await linkFolderProject(project, existing, ready.deviceId);
+      return res.json({ ok: true, existing: true, project: projectJson(project, req), repo: existing, repoUrl: `https://github.com/${existing}` });
+    }
+    const name = String(req.body?.name || "").trim();
+    if (!repoSlug(name)) return res.status(400).json({ error: "Give the repo a name" });
     const token = ready.user.github_access_token;
     const made = await newRepoFor(project, token, { name, isPrivate: req.body?.private !== false });
     if (made.error) return res.status(409).json(made);

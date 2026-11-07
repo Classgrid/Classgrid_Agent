@@ -6,10 +6,11 @@ import { ArrowRight, Check, Copy, ExternalLink, FolderGit2, Globe, Lock } from "
 import { toast } from "sonner";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/marketing_ui/dialog";
 import { fetchWithRescue } from "@/lib/rescue";
-import { linkFolderRepo, remember, thisDeviceId } from "../utils/projectCopies";
+import { remember, thisDeviceId } from "../utils/projectCopies";
 
 const backendUrl = import.meta.env.VITE_API_URL || "https://api.classgrid.in";
 const GITHUB_ICON = "https://cdn.classgrid.in/classgrid_intgration/github-icon.svg";
+const VERCEL_ICON = "https://cdn.classgrid.in/classgrid_intgration/vercel-icon-svgrepo-com.svg";
 const dialogCls = "gap-0 p-0 overflow-hidden rounded-xl bg-white dark:!bg-[#1e1e1e] ring-black/10 dark:ring-white/10 shadow-2xl";
 const btn = "h-8 px-3 rounded-md text-[13px] transition-[background-color,opacity,transform] duration-150 active:scale-[0.97] disabled:opacity-40 disabled:active:scale-100 cursor-pointer disabled:cursor-default";
 const cancelCls = `${btn} border border-black/10 dark:border-white/[0.1] hover:bg-black/[0.04] dark:hover:bg-white/[0.05]`;
@@ -53,9 +54,12 @@ const connectGithub = () => window.dispatchEvent(new CustomEvent("open-ai-hub", 
 
 // After the repo is made and pushed, the chat's AI takes over (a hidden message): it asks for the project's name and
 // photo with its Mastero cards (mastero_ask), then tells the user what a Mastero project is
-function startMasteroChat(repo: string, folder: string, isPrivate: boolean) {
+// (made: a new repo was made and pushed; otherwise the project kept the GitHub repo it already had)
+function startMasteroChat(repo: string, folder: string, made: { isPrivate: boolean } | null) {
   const text = [
-    `[Mastero] I pressed Mastero in Studio's Project tab. Classgrid already did this: made the ${isPrivate ? "private" : "public"} GitHub repo ${repo}, pushed the code in my folder ${folder} to it from my computer, and linked the project to it. It is now a Mastero project: the same project on my computer and in the Classgrid cloud, and GitHub is its master copy.`,
+    made
+      ? `[Mastero] I pressed Mastero in Studio's Project tab. Classgrid already did this: made the ${made.isPrivate ? "private" : "public"} GitHub repo ${repo}, pushed the code in my folder ${folder} to it from my computer, and linked the project to it. It is now a Mastero project: the same project on my computer and in the Classgrid cloud, and GitHub is its master copy.`
+      : `[Mastero] I pressed Mastero in Studio's Project tab. My folder ${folder} was already on GitHub as ${repo}, so Classgrid kept that repo (no new repo was made and nothing was pushed) and linked the project to it. It is now a Mastero project: the same project on my computer and in the Classgrid cloud, and GitHub is its master copy.`,
     "Finish Mastero with me, one step at a time:",
     '1. Call mastero_ask with ask "name" and a short, nice name suggestion, then end your answer.',
     '2. When I answer, call mastero_ask with ask "logo", then end your answer.',
@@ -70,6 +74,29 @@ function startMasteroChat(repo: string, folder: string, isPrivate: boolean) {
     "Then give me these links, one line each: https://classgrid.in/docs/mastero (Mastero projects), https://classgrid.in/docs/projects-cloud-and-computer (cloud and computer), https://classgrid.in/docs/connect-github (GitHub and the Classgrid app), https://classgrid.in/docs/pull-requests-and-backups (pushes and backups), https://classgrid.in/docs/review-and-undo (review and undo), https://classgrid.in/docs/deploy-with-vercel (going live).",
   ].join("\n");
   window.dispatchEvent(new CustomEvent("agent:ask", { detail: { text, hidden: true } }));
+}
+
+// Desktop app: what a project's folder already has online, read on this computer (works without Vercel connected):
+// the GitHub repo its origin points to, and the Vercel project it was deployed as (.vercel/project.json, written by
+// Vercel's own CLI). undefined while reading.
+export type FolderOnline = { repo: string | null; vercel: string | null };
+type Desk = { githubRepo?: (folder: string) => Promise<string | null>; readFile?: (folder: string, rel: string) => Promise<{ content?: string; error?: string }> };
+export function useFolderOnline(folder: string | null | undefined) {
+  const [found, setFound] = useState<FolderOnline | undefined>(undefined);
+  useEffect(() => {
+    const d = (window as unknown as { classgridDesktop?: Desk }).classgridDesktop;
+    if (!folder || !d?.githubRepo) { setFound({ repo: null, vercel: null }); return; }
+    let off = false;
+    setFound(undefined);
+    Promise.all([
+      d.githubRepo(folder).catch(() => null),
+      d.readFile?.(folder, ".vercel/project.json").then((r) => {
+        try { const v = JSON.parse(r?.content || "null"); return v?.projectId ? String(v.projectName || "Vercel project") : null; } catch { return null; }
+      }).catch(() => null) ?? null,
+    ]).then(([repo, vercel]) => { if (!off) setFound({ repo: repo || null, vercel: vercel || null }); });
+    return () => { off = true; };
+  }, [folder]);
+  return found;
 }
 
 // Who the repo goes to: the GitHub account, or a button to connect one
@@ -128,8 +155,10 @@ function Footer({ children }: { children: React.ReactNode }) {
 }
 
 // ── Mastero: name the repo, then it's made, pushed and linked ────────────────────────────────────────────────
-export function MasteroDialog({ project, open, onClose, onDone }: { project: Project; open: boolean; onClose: () => void; onDone: (project: Project) => void }) {
+// already: the GitHub repo (and Vercel project) the project or its folder already has: it is kept, never made twice
+export function MasteroDialog({ project, already, open, onClose, onDone }: { project: Project; already?: FolderOnline; open: boolean; onClose: () => void; onDone: (project: Project) => void }) {
   const account = useGithubAccount(open);
+  const keptRepo = project.repo || already?.repo || null;
   const [name, setName] = useState("");
   const [isPrivate, setPrivate] = useState(true);
   const [busy, setBusy] = useState(false);
@@ -155,17 +184,12 @@ export function MasteroDialog({ project, open, onClose, onDone }: { project: Pro
 
   const wanted = repoName(name);
   const go = async () => {
-    if (!wanted || busy || !account) return;
+    if ((!wanted && !keptRepo) || busy || !account) return;
     setBusy(true);
     setError(null);
     try {
       const { ok, data } = await post(`/projects/${project.id}/mastero`, { name: wanted, private: isPrivate });
       if (!ok) {
-        // The folder is already on GitHub: it's linked to that repo instead
-        if (data.code === "folder_has_repo") {
-          const linked = await linkFolderRepo({ ...project, location: "local" });
-          if (linked?.repo) { setDone({ repo: linked.repo, repoUrl: `https://github.com/${linked.repo}` }); onDone(linked as Project); startMasteroChat(linked.repo, folderOf(project.name), isPrivate); return; }
-        }
         setError(data.error === "github_not_connected" ? "GitHub isn't connected. Connect it, then try again." : data.error || "Couldn't put this project on GitHub. Try again.");
         if (data.repo) window.dispatchEvent(new Event("studio:projects-changed"));
         return;
@@ -173,7 +197,7 @@ export function MasteroDialog({ project, open, onClose, onDone }: { project: Pro
       setStep(2);
       setDone({ repo: data.repo, repoUrl: data.repoUrl });
       if (data.project) { remember(data.project); onDone(data.project); }
-      startMasteroChat(data.repo, folderOf(project.name), isPrivate);
+      startMasteroChat(data.repo, folderOf(project.name), data.existing ? null : { isPrivate });
     } finally {
       setBusy(false);
     }
@@ -191,7 +215,7 @@ export function MasteroDialog({ project, open, onClose, onDone }: { project: Pro
           <>
             <div className="px-5 pt-4 pb-5">
               <DialogTitle className="text-[15px] font-medium">{folderOf(project.name)} is on GitHub</DialogTitle>
-              <DialogDescription className="mt-0.5 text-[13px] text-muted-foreground">Your code is pushed and the project is linked. Classgrid AI takes it from here in the chat: it asks for the project's name and photo.</DialogDescription>
+              <DialogDescription className="mt-0.5 text-[13px] text-muted-foreground">{keptRepo ? "It kept its GitHub repo and is a Mastero project now." : "Your code is pushed and the project is linked."} Classgrid AI takes it from here in the chat: it asks for the project's name and photo.</DialogDescription>
               <div className={`${boxCls} mt-3 flex items-center gap-2 h-10 pl-3 pr-1`}>
                 <span className="flex-1 min-w-0 truncate font-mono text-[12.5px] text-muted-foreground">{done.repoUrl}</span>
                 <button type="button" onClick={copy} className="shrink-0 flex items-center justify-center size-8 rounded-md text-muted-foreground hover:text-foreground hover:bg-black/[0.05] dark:hover:bg-white/[0.06] cursor-pointer" title="Copy link" aria-label="Copy link">
@@ -209,12 +233,12 @@ export function MasteroDialog({ project, open, onClose, onDone }: { project: Pro
             <div className="px-5 pt-4 pb-5 flex flex-col gap-3">
               <div>
                 <DialogTitle className="text-[15px] font-medium">Mastero</DialogTitle>
-                <DialogDescription className="mt-0.5 text-[13px] text-muted-foreground">Makes a GitHub repo for this project, pushes your code to it and links it.</DialogDescription>
+                <DialogDescription className="mt-0.5 text-[13px] text-muted-foreground">{keptRepo ? "This project is on GitHub already. Mastero keeps its repo and makes it a Mastero project: nothing new is made." : "Makes a GitHub repo for this project, pushes your code to it and links it."}</DialogDescription>
               </div>
               <AccountRow account={account} onConnect={() => { connectGithub(); onClose(); }} />
               {busy ? (
                 <div className="flex flex-col gap-2 py-1">
-                  {STEPS.map((label, i) => (
+                  {(keptRepo ? ["Linking the project"] : STEPS).map((label, i) => (
                     <div key={label} className={`flex items-center gap-2.5 text-[13px] ${i > step ? "text-muted-foreground/60" : ""}`}>
                       {i < step ? <Check className="size-4 text-[#16825d] dark:text-[#4ec9b0]" />
                         : i === step ? <span className="size-4 flex items-center justify-center"><span className="size-3.5 rounded-full border-2 border-muted-foreground/30 border-t-foreground animate-spin" /></span>
@@ -222,6 +246,21 @@ export function MasteroDialog({ project, open, onClose, onDone }: { project: Pro
                       {label}{i === 1 && i === step ? <span className="text-muted-foreground"> · a big folder takes a minute</span> : null}
                     </div>
                   ))}
+                </div>
+              ) : keptRepo ? (
+                <div className={`${boxCls} flex flex-col divide-y divide-black/10 dark:divide-white/[0.06]`}>
+                  <a href={`https://github.com/${keptRepo}`} target="_blank" rel="noreferrer" className="flex items-center gap-2.5 h-11 px-3 hover:bg-black/[0.02] dark:hover:bg-white/[0.03]">
+                    <img src={GITHUB_ICON} alt="" className="size-4 dark:invert" />
+                    <span className="min-w-0 flex-1 truncate text-[13px] font-mono">{keptRepo}</span>
+                    <ExternalLink className="size-3.5 shrink-0 text-muted-foreground" />
+                  </a>
+                  {already?.vercel && (
+                    <div className="flex items-center gap-2.5 h-11 px-3">
+                      <img src={VERCEL_ICON} alt="" className="size-4 dark:invert" />
+                      <span className="min-w-0 flex-1 truncate text-[13px]">{already.vercel}</span>
+                      <span className="shrink-0 text-[11.5px] text-muted-foreground">On Vercel</span>
+                    </div>
+                  )}
                 </div>
               ) : (
                 <>
@@ -264,7 +303,7 @@ export function MasteroDialog({ project, open, onClose, onDone }: { project: Pro
             </div>
             <Footer>
               <button type="button" onClick={onClose} disabled={busy} className={cancelCls}>Cancel</button>
-              <button type="button" onClick={go} disabled={!wanted || busy || !account} className={goCls}>{busy ? "Working…" : "Make repo and push"}</button>
+              <button type="button" onClick={go} disabled={(!wanted && !keptRepo) || busy || !account} className={goCls}>{busy ? "Working…" : keptRepo ? "Make Mastero project" : "Make repo and push"}</button>
             </Footer>
           </>
         )}
