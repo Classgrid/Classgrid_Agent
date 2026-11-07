@@ -581,6 +581,9 @@ export function StudioModePage() {
       {titleSlot && createPortal(<DesktopMenuBar menus={studioMenus} />, titleSlot)}
       {/* Chat */}
       <div ref={chatColRef} className={`studio-chat @container relative min-w-0 flex-1 flex flex-col ${maximized && paneOpen ? "hidden" : ""}`}>
+        {/* One solid top bar (the sidebar button, "project / chat" and the chat's buttons sit on it): the messages scroll
+            under it instead of showing behind them, like Antigravity */}
+        <div aria-hidden className="pointer-events-none absolute inset-x-0 top-0 z-[15] h-12 bg-background" />
         {!isMobile && !hidden && (
           <div
             onPointerDown={sidebarState === "expanded" ? startSidebarResize : startStripDrag}

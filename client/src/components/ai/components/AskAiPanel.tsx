@@ -3650,6 +3650,12 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
   const replyTyping = (() => { const last = messages[messages.length - 1]; return last?.role === "assistant" && last.typing === true; })();
   const chatBusy = thinking || submitting || replyTyping;
   const chatBusyRef = useRef(chatBusy);
+  // The sidebar shows the AI's dots on this chat while it answers, until the whole answer is out (👍 / 👎 show): at
+  // once, before the server's list catches up
+  useEffect(() => {
+    if (!sessionId) return;
+    window.dispatchEvent(new CustomEvent("studio:chat-working", { detail: { sessionId, working: chatBusy } }));
+  }, [sessionId, chatBusy]);
   chatBusyRef.current = chatBusy;
   // Hidden messages waiting for the AI to finish (with the chat they were sent in: one left from another chat is dropped)
   const waitingHiddenRef = useRef<{ text: string; gen: number }[]>([]);
@@ -5691,6 +5697,7 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
                                       <CombinedReasoningBlock
                                         sentences={message.thought && message.thought.trim().length > 0 ? hideCodeInThought(message.thought).trim().split(/(?<=[.!?\n])\s+/).filter(Boolean) : []}
                                         isStreaming={index === messages.length - 1 && thinking && !(message.steps && message.steps.some(s => s.status === 'loading'))}
+                                        seconds={!message.steps?.length && message.workedMs ? Math.max(1, Math.round(message.workedMs / 1000)) : undefined}
                                       />
                                     )}
 
@@ -7060,15 +7067,19 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
                       {isTranscribing ? <Spinner className="h-4 w-4" /> : isRecording ? <Square className="h-4 w-4 fill-current" /> : <Mic className="h-4 w-4" />}
                     </button>
                     {isGenerating ? (
+                      // (the same size as the send button: when it turns back into it nothing moves, so a quick second
+                      // click can't land on the mic beside it and start recording)
                       <Button
                         type="button"
                         variant="ghost"
-                        onClick={handleStop}
-                        className="h-8 rounded-full bg-foreground text-background hover:bg-foreground/90 px-3 text-[11px] font-medium shadow-sm transition-all active:scale-95"
+                        size="icon"
+                        onPointerDown={(e) => { e.preventDefault(); handleStop(); }}
+                        onClick={(e) => e.preventDefault()}
+                        className="h-8 w-8 shrink-0 rounded-full bg-foreground text-background hover:bg-foreground/90 shadow-sm transition-transform active:scale-95 cursor-pointer"
                         title="Stop generating"
+                        aria-label="Stop generating"
                       >
-                        <Square className="mr-1.5 h-3 w-3 fill-current opacity-80" />
-                        Stop
+                        <Square className="h-3 w-3 fill-current" />
                       </Button>
                     ) : (
                       <Button

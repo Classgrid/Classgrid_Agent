@@ -60,6 +60,7 @@
 import React, { useState, useRef, useEffect } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { SidebarProvider, SidebarInset, SidebarTrigger } from "@/components/marketing_ui/sidebar";
+import { StudioChatCrumb } from "@/features/superadmin/components/StudioChatCrumb";
 import { TooltipProvider } from "@/components/marketing_ui/tooltip";
 import { Breadcrumb, BreadcrumbItem, BreadcrumbList, BreadcrumbPage, BreadcrumbSeparator, BreadcrumbLink } from "@/components/marketing_ui/breadcrumb";
 import { Separator } from "@/components/marketing_ui/separator";
@@ -281,8 +282,10 @@ export function DashboardLayout({ children, role, user }: DashboardLayoutProps) 
               {/* Desktop app, Project Mode: the sidebar button is in the app's top bar instead (ProjectModePage) */}
               {/* Desktop app, Studio's Schedule and Library: the sidebar button is in their own top bar (AskAiPanel) */}
               {isFullBleed && !location.pathname.includes("/agent") && !(import.meta.env.VITE_DESKTOP === "1" && location.pathname.split("/").includes("project")) && !(import.meta.env.VITE_DESKTOP === "1" && import.meta.env.VITE_EDITOR !== "1" && /\/studio\/(schedule|library)(\/|$)/.test(location.pathname)) && (
-                <div className={`absolute z-50 ${location.pathname.split("/").includes("studio") ? "studio-sidebar-btn top-2 left-3" : "top-4 left-4"}`}>
+                <div className={`absolute z-50 ${location.pathname.split("/").includes("studio") ? "studio-sidebar-btn top-2 left-3 right-3 flex items-center gap-1 pointer-events-none [&>*]:pointer-events-auto" : "top-4 left-4"}`}>
                   <SidebarTrigger />
+                  {/* Studio: "project / chat" next to the button (the chat's name switches between the project's chats) */}
+                  {location.pathname.split("/").includes("studio") && !/\/studio\/(schedule|library)(\/|$)/.test(location.pathname) && <StudioChatCrumb />}
                 </div>
               )}
               {children}

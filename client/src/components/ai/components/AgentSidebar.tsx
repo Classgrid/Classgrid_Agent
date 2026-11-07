@@ -22,7 +22,7 @@
 import { MasteroMark } from "@/components/icons/MasteroMark";
 import React from "react";
 import { createPortal } from "react-dom";
-import { Plus, Search, Pin, PinOff, MoreHorizontal, Pencil, Trash2, Share, Copy, Mail, Check, Link2, X, SquarePen, Calendar, Library, FolderInput, FolderPlus, Folder, Star, ChevronDown, ListFilter, Laptop, Cloud } from "lucide-react";
+import { Archive, Plus, Search, Pin, PinOff, MoreHorizontal, Pencil, Trash2, Share, Copy, Mail, Check, Link2, X, SquarePen, Calendar, Library, FolderInput, FolderPlus, Folder, Star, ChevronDown, ListFilter, Laptop, Cloud } from "lucide-react";
 import { format } from "date-fns";
 import { NikhilDateCalendar } from "@/components/marketing_ui/nikhil_date_calendar";
 import { useNavigate, useLocation } from "react-router-dom";
@@ -48,6 +48,18 @@ import { NewProjectDialog, openStudioProject, openLocalFolder } from "@/features
 import { onDesktop, placeActions, savedProject, thisComputerCopy, type LocalCopy } from "@/features/superadmin/utils/projectCopies";
 
 // mastero: a finished Mastero project (its own section); masteroPending: still in its Mastero steps (stays in Projects)
+// A chat the AI is answering: four dots lighting up one after another (in place of the chat's time)
+function WorkingDots() {
+  return (
+    <span className="grid grid-cols-2 gap-[3px] size-[13px] text-muted-foreground">
+      {[0, 1, 3, 2].map((n) => (
+        <span key={n} className="size-[5px] rounded-full bg-current" style={{ animation: "cg-working-dot 1.2s ease-in-out infinite", animationDelay: `${n * 0.3}s` }} />
+      ))}
+      <style dangerouslySetInnerHTML={{ __html: "@keyframes cg-working-dot { 0%, 100% { opacity: .25 } 30% { opacity: 1 } }" }} />
+    </span>
+  );
+}
+
 type SidebarProject = { id: string; name: string; logo?: string | null; location?: "cloud" | "local"; localPath?: string | null; localCopies?: LocalCopy[]; mastero?: boolean; masteroPending?: boolean };
 // Desktop app: a project with a folder on this computer (a folder project, or a cloud project downloaded here)
 const onThisPc = (p: Parameters<typeof thisComputerCopy>[0]) => !!p && (p.location === "local" || !!thisComputerCopy(p));
@@ -859,6 +871,57 @@ export function AgentNestedMenu({ searchQuery = "", pages }: { searchQuery?: str
     }
   };
 
+  // Two sources: the server's list (answers running anywhere, checked every few seconds) and this window's own chat
+  // (told at once by the chat panel); a chat shows the dots while either says it's answering
+  const [serverWorking, setServerWorking] = React.useState<Set<string>>(() => new Set());
+  const [hereWorking, setHereWorking] = React.useState<Set<string>>(() => new Set());
+  const workingIds = React.useMemo(() => new Set([...serverWorking, ...hereWorking]), [serverWorking, hereWorking]);
+  React.useEffect(() => {
+    if (!isStudioMode) return;
+    let off = false;
+    const check = () => {
+      if (document.hidden) return;
+      fetchWithRescue(`${endpointPrefix}/api/ai/working`, { credentials: "include" })
+        .then((r) => (r.ok ? r.json() : null))
+        .then((d) => {
+          if (off || !Array.isArray(d?.working)) return;
+          const next = new Set<string>(d.working.filter((w: any) => !w.helpersOnly).map((w: any) => String(w.sessionId)));
+          setServerWorking((old) => (old.size === next.size && [...next].every((id) => old.has(id)) ? old : next));
+        })
+        .catch(() => {});
+    };
+    check();
+    const t = setInterval(check, 3000);
+    // (at once when an answer starts or ends in this window)
+    window.addEventListener("agent:refresh-sessions", check);
+    const onChat = (e: Event) => {
+      const { sessionId, working } = (e as CustomEvent<{ sessionId?: string; working?: boolean }>).detail || {};
+      if (!sessionId) return;
+      setHereWorking((old) => {
+        if (old.has(sessionId) === !!working) return old;
+        const next = new Set(old);
+        if (working) next.add(sessionId); else next.delete(sessionId);
+        return next;
+      });
+    };
+    window.addEventListener("studio:chat-working", onChat);
+    return () => { off = true; clearInterval(t); window.removeEventListener("agent:refresh-sessions", check); window.removeEventListener("studio:chat-working", onChat); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isStudioMode]);
+
+  // Archive a chat from its row: it leaves the list (Archived Only shows it again); the open chat goes to a new chat
+  const archiveChat = async (id: string) => {
+    const res = await fetchWithRescue(`${endpointPrefix}/api/ai/sessions/${id}/archive`, {
+      method: "POST",
+      credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ archived: true }),
+    }).catch(() => null);
+    if (!res?.ok) { toast.error("Could not archive the chat"); return; }
+    if (id === activeSessionId) { navigate(baseAgentPath); window.dispatchEvent(new Event("agent:new-chat")); }
+    window.dispatchEvent(new Event("agent:refresh-sessions"));
+  };
+
   const renderSessionItem = (session: ChatSession) => {
     const isEditing = editingSessionId === session.id;
 
@@ -889,7 +952,7 @@ export function AgentNestedMenu({ searchQuery = "", pages }: { searchQuery?: str
               onClick={() => handleLoadChat(session.id)}
               className={cn("h-auto cursor-pointer flex-1 min-w-0", isStudioMode && opts.compact ? "py-1" : "py-1.5")}
               render={
-                <div className="flex items-center gap-2.5 w-full min-w-0 pr-8">
+                <div className={cn("flex items-center gap-2.5 w-full min-w-0 pr-8", isStudioMode && "group-hover:pr-[4.75rem]")}>
                   {session.pinned && (
                     <ChatBubbleIcon className="w-[15px] h-[15px] shrink-0 text-muted-foreground/80" />
                   )}
@@ -901,12 +964,42 @@ export function AgentNestedMenu({ searchQuery = "", pages }: { searchQuery?: str
                   {(session as any).grid && (
                     <Star className="w-3 h-3 shrink-0 fill-current text-foreground" aria-label="Shared chat" />
                   )}
-                  {isStudioMode && !session.pinned && opts.showTime && (
+                  {isStudioMode && workingIds.has(session.id) ? (
+                    <span className="shrink-0 -mr-6 group-hover:opacity-0 transition-opacity" aria-label="Answering"><WorkingDots /></span>
+                  ) : isStudioMode && !session.pinned && opts.showTime && (
                     <span className="shrink-0 -mr-6 text-xs text-muted-foreground group-hover:opacity-0 transition-opacity">{shortAge((opts.sortChats === "updated" && session.updated_at) || session.created_at)}</span>
                   )}
                 </div>
               }
             />
+          )}
+
+          {/* Studio: Archive and Pin right on the row when the pointer is over it (like the ⋯ menu's items) */}
+          {!isEditing && isStudioMode && !(session as any).shared && (
+            <div className="absolute right-8 flex items-center opacity-0 group-hover:opacity-100 transition-opacity">
+              <button
+                type="button"
+                onClick={(e) => { e.stopPropagation(); void archiveChat(session.id); }}
+                className="p-1 rounded hover:bg-black/5 dark:hover:bg-white/10 text-muted-foreground hover:text-foreground cursor-pointer"
+                title="Archive chat"
+                aria-label="Archive chat"
+              >
+                <Archive className="w-3.5 h-3.5" />
+              </button>
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  if (!session.pinned && pinnedSessions.length >= 5) { toast.error("You can only pin up to 5 chats."); return; }
+                  handleUpdateSession(session.id, { pinned: !session.pinned });
+                }}
+                className="p-1 rounded hover:bg-black/5 dark:hover:bg-white/10 text-muted-foreground hover:text-foreground cursor-pointer"
+                title={session.pinned ? "Unpin chat" : "Pin chat"}
+                aria-label={session.pinned ? "Unpin chat" : "Pin chat"}
+              >
+                {session.pinned ? <PinOff className="w-3.5 h-3.5" /> : <Pin className="w-3.5 h-3.5" />}
+              </button>
+            </div>
           )}
 
           {!isEditing && (

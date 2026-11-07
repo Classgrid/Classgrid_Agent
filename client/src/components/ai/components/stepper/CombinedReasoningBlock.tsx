@@ -30,7 +30,8 @@ import ReactMarkdown from 'react-markdown';
  * Phase 2: Live typing - sentences stream in from SSE, displayed immediately
  * Phase 3: Finished - collapsible accordion
  */
-type CombinedReasoningBlockProps = { sentences: string[]; isStreaming?: boolean; autoFinishMs?: number };
+// seconds: how long it thought, for an answer loaded later (the live timer is used while it runs)
+type CombinedReasoningBlockProps = { sentences: string[]; isStreaming?: boolean; autoFinishMs?: number; seconds?: number };
 
 // Module-level so ReactMarkdown sees stable component types and doesn't remount every sentence on each render.
 const sentenceMarkdownComponents = {
@@ -95,10 +96,11 @@ export const CombinedReasoningBlock = React.memo(
   (prev, next) =>
     prev.isStreaming === next.isStreaming &&
     prev.autoFinishMs === next.autoFinishMs &&
+    prev.seconds === next.seconds &&
     sameSentences(prev.sentences || [], next.sentences || [])
 );
 
-function CombinedReasoningBlockInner({ sentences, isStreaming = true, autoFinishMs }: CombinedReasoningBlockProps) {
+function CombinedReasoningBlockInner({ sentences, isStreaming = true, autoFinishMs, seconds }: CombinedReasoningBlockProps) {
   const [timer, setTimer] = useState(0);
   const [expanded, setExpanded] = useState(false);
   const [localIsStreaming, setLocalIsStreaming] = useState(isStreaming);
@@ -168,7 +170,8 @@ function CombinedReasoningBlockInner({ sentences, isStreaming = true, autoFinish
             }
             style={isFinished ? {} : { animation: "shimmer 2.5s linear infinite" }}
           >
-            {isFinished ? "Thought" : "Thinking"}
+            {/* "Thought for 4s", like "Worked for": the live timer, else the time saved with the answer */}
+            {isFinished ? (timer > 0 || seconds ? `Thought for ${timer > 0 ? timer : seconds}s` : "Thought") : "Thinking"}
           </p>
           {!isFinished && (
             <span className="text-sm text-muted-foreground relative z-20">
