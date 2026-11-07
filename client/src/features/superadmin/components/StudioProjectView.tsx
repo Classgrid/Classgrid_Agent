@@ -8,11 +8,12 @@ import { Link } from "react-router-dom";
 import { toast } from "sonner";
 import { fetchWithRescue } from "@/lib/rescue";
 import { apiClient } from "@/lib/apiClient";
+import { readPageCache, writePageCache } from "@/lib/desktopPageCache";
 import { ImageCropperModal } from "@/components/marketing_ui/ImageCropperModal";
 import { StudioProjectChooser } from "./StudioProjectPicker";
 import { MasteroDialog, PushDialog, useFolderOnline, warmGithubAccount } from "./StudioMastero";
 import { MasteroOnlineCard } from "./MasteroOnlineCard";
-import { onDesktop, thisComputerCopy, type LocalCopy } from "../utils/projectCopies";
+import { onDesktop, savedProject, thisComputerCopy, type LocalCopy } from "../utils/projectCopies";
 
 const backendUrl = import.meta.env.VITE_API_URL || "https://api.classgrid.in";
 const EASE = [0.22, 1, 0.36, 1] as const;
@@ -41,12 +42,29 @@ function ago(at?: string | null) {
 const GITHUB_ICON = "https://cdn.classgrid.in/classgrid_intgration/github-icon.svg";
 const VERCEL_ICON = "https://cdn.classgrid.in/classgrid_intgration/vercel-icon-svgrepo-com.svg";
 
+// The last answer for each project, so the tab opens with it at once instead of "Loading…" (kept while the app runs,
+// and on this computer in the desktop app), then checked again quietly. A project seen only in the pickers' list
+// gives at least its name, photo and repo.
+type Seen = { project: Project | null; info: Info | null; history: History | null; githubMissing: boolean };
+const seen = new Map<string, Seen>();
+function seenOf(id: string | null): Seen | undefined {
+  if (!id) return undefined;
+  const had = seen.get(id);
+  if (had) return had;
+  const kept = readPageCache<Seen>(`studio-project:${id}`);
+  if (kept) { seen.set(id, kept); return kept; }
+  const listed = savedProject(id);
+  return listed ? { project: listed as Project, info: null, history: null, githubMissing: false } : undefined;
+}
+function keepSeen(id: string, s: Seen) { seen.set(id, s); writePageCache(`studio-project:${id}`, s); }
+
 export function StudioProjectView({ projectId, reloadKey = 0 }: { projectId: string | null; reloadKey?: number }) {
   const reduce = useReducedMotion();
-  const [project, setProject] = useState<Project | null>(null);
-  const [info, setInfo] = useState<Info | null>(null);
-  const [history, setHistory] = useState<History | null>(null);
-  const [githubMissing, setGithubMissing] = useState(false);
+  const first = seenOf(projectId);
+  const [project, setProject] = useState<Project | null>(first?.project ?? null);
+  const [info, setInfo] = useState<Info | null>(first?.info ?? null);
+  const [history, setHistory] = useState<History | null>(first?.history ?? null);
+  const [githubMissing, setGithubMissing] = useState(first?.githubMissing ?? false);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [switching, setSwitching] = useState(false);
@@ -135,13 +153,14 @@ export function StudioProjectView({ projectId, reloadKey = 0 }: { projectId: str
       if (seq !== loadSeq.current) return;
       const p = (list.data.projects || []).find((x: Project) => x.id === projectId) || null;
       setProject(p);
-      if (!p?.repo) { setInfo(null); setHistory(null); return; }
+      if (!p?.repo) { setInfo(null); setHistory(null); keepSeen(projectId, { project: p, info: null, history: null, githubMissing: false }); return; }
       const [gi, hi] = await Promise.all([api(`/projects/${projectId}/github`), api(`/projects/${projectId}/commits`)]);
       if (seq !== loadSeq.current) return;
       const missing = gi.data.error === "github_not_connected" || gi.data.error === "github_expired" || hi.data.error === "github_not_connected";
       setGithubMissing(missing);
       setInfo(gi.res.ok ? gi.data : null);
       setHistory(hi.res.ok ? hi.data : null);
+      if (gi.res.ok && hi.res.ok) keepSeen(projectId, { project: p, info: gi.data, history: hi.data, githubMissing: missing });
       if (!missing && (!gi.res.ok || !hi.res.ok)) setError(hi.data.error || gi.data.error || "Could not load the project's details");
     } catch {
       setError("Could not load the project's details");
@@ -150,7 +169,13 @@ export function StudioProjectView({ projectId, reloadKey = 0 }: { projectId: str
     }
   }, [projectId]);
 
-  useEffect(() => { setProject(null); setInfo(null); setHistory(null); setRenaming(null); load(); }, [load]);
+  // Another project picked: its last answer shows at once (nothing is wiped), then it loads again quietly
+  useEffect(() => {
+    const s = seenOf(projectId);
+    setProject(s?.project ?? null); setInfo(s?.info ?? null); setHistory(s?.history ?? null); setGithubMissing(s?.githubMissing ?? false);
+    setRenaming(null);
+    load();
+  }, [projectId, load]);
   // Desktop app: the GitHub account is checked now, so the Mastero and Push dialogs open with it (no loading there)
   useEffect(() => { if (onDesktop()) void warmGithubAccount(); }, []);
   useEffect(() => { if (reloadKey) load(); }, [reloadKey, load]);
