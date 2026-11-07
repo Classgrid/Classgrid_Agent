@@ -180,7 +180,7 @@ export const getGlobalStats = async (req, res) => {
         const audioTokens = totalCreditsSpent - textTokens - imageTokens; // 10% for audio
 
         const mockModels = [
-            { name: "@cf/deepseek-ai/deepseek-v4-pro-0813", type: "Text (Primary)", usage: "Primary Chat", value: textTokens },
+            { name: "@cf/deepseek-ai/deepseek-v4.1-flash-1017", type: "Text (Primary)", usage: "Primary Chat", value: textTokens },
             { name: "@cf/black-forest-labs/flux-1-schnell", type: "Image Gen", usage: "Image Generation", value: Math.floor(imageTokens * 0.7) },
             { name: "@cf/meta/llama-3.2-11b-vision-instruct", type: "Image Understanding", usage: "Vision/Analysis", value: Math.floor(imageTokens * 0.3) },
             { name: "@cf/openai/whisper-large-v3-turbo", type: "STT", usage: "Speech to Text", value: Math.floor(audioTokens * 0.8) },
@@ -332,7 +332,7 @@ export const getGlobalStats = async (req, res) => {
             const audioTokens = Math.floor(totalTokensFallback * 0.1);
 
             modelsBreakdown = [
-                { name: "@cf/deepseek-ai/deepseek-v4-pro-0813", type: "Text (Primary)", requests: 0, value: textTokens },
+                { name: "@cf/deepseek-ai/deepseek-v4.1-flash-1017", type: "Text (Primary)", requests: 0, value: textTokens },
                 { name: "@cf/black-forest-labs/flux-1-schnell", type: "Image Gen", requests: 0, value: Math.floor(imageTokens * 0.7) },
                 { name: "@cf/meta/llama-3.2-11b-vision-instruct", type: "Image Understanding", requests: 0, value: Math.floor(imageTokens * 0.3) },
                 { name: "@cf/openai/whisper-large-v3-turbo", type: "STT", requests: 0, value: Math.floor(audioTokens * 0.8) },
