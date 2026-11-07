@@ -7834,9 +7834,10 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
             ) : (
               /* â”€â”€ Active conversation: messages scroll, input pinned at bottom â”€â”€ */
               <>
+                {/* (Studio: the messages and their scrollbar start below the chat's top bar, never behind it) */}
                 <div
                   ref={chatScrollRef}
-                  className="flex-1 overflow-y-scroll overscroll-contain scroll-smooth chat-scrollbar [scrollbar-gutter:stable]"
+                  className={cn("flex-1 min-h-0 overflow-y-scroll overscroll-contain scroll-smooth chat-scrollbar [scrollbar-gutter:stable]", isStudio && variant === "full-page" && "mt-12")}
                 >
                   {panelChat}
                 </div>
