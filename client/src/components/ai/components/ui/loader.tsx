@@ -22,26 +22,20 @@
 "use client";
 
 import { cn } from "../../utils";
+import { Spinner } from "@/components/marketing_ui/spinner";
 
 interface LoaderProps {
   size?: "sm" | "md" | "lg";
   className?: string;
 }
 
+// The app's one spinner (the 12-bar Spinner), sized sm / md / lg
 export function Loader({ size = "md", className }: LoaderProps) {
   const sizeClasses = {
-    sm: "h-4 w-4 border-2",
-    md: "h-6 w-6 border-2",
-    lg: "h-8 w-8 border-3",
+    sm: "size-4",
+    md: "size-6",
+    lg: "size-8",
   };
 
-  return (
-    <div
-      className={cn(
-        "animate-spin rounded-full border-muted-foreground/30 border-t-muted-foreground",
-        sizeClasses[size],
-        className,
-      )}
-    />
-  );
+  return <Spinner className={cn("text-muted-foreground", sizeClasses[size], className)} />;
 }

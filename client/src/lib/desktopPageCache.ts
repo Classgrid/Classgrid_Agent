@@ -39,7 +39,9 @@ export function keepQueryData(client: QueryClient) {
     if (t) clearTimeout(t);
     t = setTimeout(() => {
       try {
-        const state = dehydrate(client, { shouldDehydrateQuery: (q) => q.state.status === "success" && JSON.stringify(q.state.data ?? null).length < 200_000 });
+        // (an answer that can't be written as text is skipped, instead of stopping the whole save)
+        const fits = (q: { state: { status: string; data?: unknown } }) => { try { return q.state.status === "success" && JSON.stringify(q.state.data ?? null).length < 200_000; } catch { return false; } };
+        const state = dehydrate(client, { shouldDehydrateQuery: fits });
         localStorage.setItem(key(), JSON.stringify(state));
       } catch { /* storage full */ }
     }, 1500);
@@ -56,9 +58,15 @@ export function warmPages(client: QueryClient) {
   void get("/api/ai/library?sort=newest").then((d) => { if (d?.files) writePageCache("library:newest:all", { files: d.files, quota: d.quota || null }); });
   const warm = (key: unknown[], url: string, pick: (d: any) => unknown) =>
     void get(url).then((d) => { if (d) client.setQueryData(key, pick(d)); });
-  // Settings: the profile, the privacy switches and the verified domain (each card's own data)
-  warm(["user-profile"], "/api/user/profile", (d) => d.user);
-  warm(["privacy-settings"], "/api/user/email-preferences", (d) => ({ hideEmail: !!d.privacySettings?.hideEmail, hideHobbies: !!d.privacySettings?.hideHobbies, hideBio: !!d.privacySettings?.hideBio }));
+  // Settings and the profile page: the profile, the email and privacy switches and the verified domain (each card's
+  // own data; the profile page keeps the whole answers under its own keys)
+  void get("/api/user/profile").then((d) => { if (d?.user) { client.setQueryData(["user-profile"], d.user); client.setQueryData(["global-profile"], d); } });
+  void get("/api/user/email-preferences").then((d) => {
+    if (!d) return;
+    client.setQueryData(["privacy-settings"], { hideEmail: !!d.privacySettings?.hideEmail, hideHobbies: !!d.privacySettings?.hideHobbies, hideBio: !!d.privacySettings?.hideBio });
+    if (d.emailNotifications) client.setQueryData(["email-preferences"], d.emailNotifications);
+    client.setQueryData(["global-settings"], d);
+  });
   warm(["user-verified-domain"], "/api/user/domain", (d) => d);
   warm(["group-audit-logs", { page: "1", pageSize: "50" }], "/api/group-chat/audit-logs?page=1&pageSize=50", (d) => d);
   void import("@/features/chat/services/chatApi").then((m) => m.fetchUnifiedRequests()).then((d) => client.setQueryData(["join-requests", "unified"], d)).catch(() => {});

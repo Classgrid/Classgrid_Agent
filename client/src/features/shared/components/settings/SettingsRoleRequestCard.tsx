@@ -65,6 +65,7 @@ import { useOrgRoles } from "@/features/org-admin/queries/useOrgAdminMembers";
 import { useCurrentUser } from "@/features/auth/queries/useCurrentUser";
 import { apiClient as api } from "@/lib/apiClient";
 import { filterAvailableRoles } from "@/lib/dashboardRoleMap";
+import { Spinner } from "@/components/marketing_ui/spinner";
 
 export function SettingsRoleRequestCard() {
   const qc = useQueryClient();
@@ -217,7 +218,7 @@ export function SettingsRoleRequestCard() {
             className="gap-2"
           >
             {isSubmitting ? (
-              <span className="h-4 w-4 rounded-full border-2 border-current border-t-transparent animate-spin" />
+              <Spinner className="size-4" />
             ) : (
               <Send className="h-4 w-4" />
             )}

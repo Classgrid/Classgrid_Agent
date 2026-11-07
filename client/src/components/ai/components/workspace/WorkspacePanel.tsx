@@ -12,10 +12,11 @@
  */
 // CLASSGRID USES CLOUDFLARE USAGE TO CALCULATE TOKENS, NOT GPT-TOKENIZER (WHICH IS ONLY A FALLBACK)
 import React, { useState } from "react";
-import { X, FileText, Code, Eye, ListTodo, CheckCircle2, Circle, Loader2, XCircle, ExternalLink, Folder, FolderOpen, ChevronRight, ChevronDown } from "lucide-react";
+import { X, FileText, Code, Eye, ListTodo, CheckCircle2, Circle, XCircle, ExternalLink, Folder, FolderOpen, ChevronRight, ChevronDown } from "lucide-react";
 import { motion } from "framer-motion";
 import { Button } from "../ui/button";
 import hljs from "highlight.js";
+import { Spinner } from "@/components/marketing_ui/spinner";
 import "highlight.js/styles/github-dark.css";
 
 export type WorkspaceTab = "files" | "plan" | "code" | "preview";
@@ -448,7 +449,7 @@ ${navScript}`;
                       {status === 'done' ? (
                         <CheckCircle2 className="w-5 h-5 text-emerald-500 shrink-0 mt-0.5" />
                       ) : status === 'running' ? (
-                        <Loader2 className="w-5 h-5 text-blue-500 animate-spin shrink-0 mt-0.5" />
+                        <Spinner className="size-5 text-blue-500 shrink-0 mt-0.5" />
                       ) : status === 'failed' ? (
                         <XCircle className="w-5 h-5 text-red-500 shrink-0 mt-0.5" />
                       ) : (
@@ -539,7 +540,7 @@ ${navScript}`;
               )
             ) : isStreaming && !debouncedHtml ? (
               <div className="flex flex-col items-center justify-center h-full text-muted-foreground gap-4">
-                <Loader2 className="w-8 h-8 animate-spin text-primary" />
+                <Spinner className="size-8 text-primary" />
                 <div className="text-sm">Building Preview...</div>
               </div>
             ) : !debouncedHtml ? (

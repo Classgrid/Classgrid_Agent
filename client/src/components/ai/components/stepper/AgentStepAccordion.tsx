@@ -20,7 +20,7 @@
  */
 
 import React, { useState } from 'react';
-import { ChevronRight, ChevronDown, CheckCircle2, Loader2, XCircle } from 'lucide-react';
+import { ChevronRight, ChevronDown, CheckCircle2, XCircle } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { ShimmerText } from './ShimmerText';
 

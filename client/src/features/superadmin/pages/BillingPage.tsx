@@ -68,10 +68,7 @@
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import type { ColumnDef } from "@tanstack/react-table";
-import {
-  Search, Building2, CreditCard, Clock, CheckCircle,
-  RefreshCw, ShieldCheck, Users,
-} from "lucide-react";
+import { Search, Building2, CreditCard, Clock, CheckCircle, ShieldCheck, Users } from "lucide-react";
 import { toast } from "sonner";
 
 
@@ -80,6 +77,7 @@ import { Button } from "@/components/marketing_ui/button";
 import { Badge } from "@/components/marketing_ui/badge";
 
 import { DataTable } from "@/components/marketing_ui/data-table";
+import { Spinner } from "@/components/marketing_ui/spinner";
 import {
   Dialog, DialogContent, DialogHeader,
   DialogTitle, DialogFooter, DialogDescription,
@@ -300,7 +298,7 @@ export function BillingPage() {
 
           {subLoading ? (
             <div className="py-8 text-center text-sm text-muted-foreground flex items-center justify-center gap-2">
-              <RefreshCw size={14} className="animate-spin" /> Loading subscription…
+              <Spinner className="size-3.5" /> Loading subscription…
             </div>
           ) : (
             <div className="grid gap-4 py-4">

@@ -16,7 +16,8 @@ import { Button } from "@/components/marketing_ui/button";
 import { apiClient } from "@/lib/apiClient";
 import { toast } from "sonner";
 import { useQueryClient } from "@tanstack/react-query";
-import { Loader2 } from "lucide-react";
+
+import { Spinner } from "@/components/marketing_ui/spinner";
 
 export function PauseUserGrantedCredits({ userId, transactionId, isPaused }: { userId: string, transactionId: string, isPaused: boolean }) {
   const [isLoading, setIsLoading] = useState(false);
@@ -47,7 +48,7 @@ export function PauseUserGrantedCredits({ userId, transactionId, isPaused }: { u
       onClick={handlePause}
       disabled={isLoading}
     >
-      {isLoading && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
+      {isLoading && <Spinner className="size-4 mr-2" />}
       {isPaused ? 'Unpause' : 'Pause'}
     </Button>
   );

@@ -6,6 +6,7 @@ import { motion, useReducedMotion } from "framer-motion";
 import { ArrowLeft, ArrowRight, Camera, ExternalLink, Globe, History, RotateCw, Search, Video, X } from "lucide-react";
 import { useLocation } from "react-router-dom";
 import { toast } from "sonner";
+import { Spinner } from "@/components/marketing_ui/spinner";
 
 const EASE = [0.22, 1, 0.36, 1] as const;
 const AGENT_BUSY_MS = 5000;
@@ -153,7 +154,7 @@ export function StudioLocalBrowserView({ paused = false }: { paused?: boolean })
         <button className={iconBtn} disabled={!nav.canGoBack} onClick={() => act({ action: "back" })} title="Back" aria-label="Back"><ArrowLeft className="size-4" /></button>
         <button className={iconBtn} disabled={!nav.canGoForward} onClick={() => act({ action: "forward" })} title="Forward" aria-label="Forward"><ArrowRight className="size-4" /></button>
         <button className={iconBtn} disabled={!hasPage} onClick={() => act({ action: "reload" })} title="Reload" aria-label="Reload">
-          <RotateCw className={`size-4 ${nav.loading ? "animate-spin" : ""}`} />
+          {nav.loading ? <Spinner className="size-4" /> : <RotateCw className="size-4" />}
         </button>
         <input
           data-no-ring

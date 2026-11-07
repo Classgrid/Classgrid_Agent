@@ -7,6 +7,7 @@ import { ArrowLeft, ArrowRight, Camera, ExternalLink, FileImage, Globe, RotateCw
 import { useLocation } from "react-router-dom";
 import { toast } from "sonner";
 import { getSocket } from "@/lib/socketClient";
+import { Spinner } from "@/components/marketing_ui/spinner";
 
 const EASE = [0.22, 1, 0.36, 1] as const;
 type Status = "starting" | "ready" | "error" | "closed";
@@ -166,7 +167,7 @@ export function StudioBrowserView() {
           aria-label="Save a screenshot"
         ><Camera className="size-4" /></a>
         <button className={iconBtn} disabled={!live || fullBusy} onClick={fullPage} title="Full page screenshot (the whole page, top to bottom)" aria-label="Full page screenshot">
-          {fullBusy ? <span className="size-3.5 rounded-full border-2 border-muted-foreground/30 border-t-muted-foreground animate-spin" /> : <FileImage className="size-4" />}
+          {fullBusy ? <Spinner className="size-3.5 text-muted-foreground" /> : <FileImage className="size-4" />}
         </button>
         <button className={iconBtn} disabled={!url} onClick={() => url && window.open(url, "_blank", "noopener,noreferrer")} title="Open in a new tab" aria-label="Open in a new tab"><ExternalLink className="size-4" /></button>
       </div>
@@ -256,7 +257,7 @@ export function StudioBrowserView() {
               className="max-w-sm text-center flex flex-col items-center gap-3"
             >
               <div className="flex items-center justify-center size-12 rounded-full border border-border">
-                {status === "starting" ? <span className="size-5 rounded-full border-2 border-muted-foreground/30 border-t-muted-foreground animate-spin" /> : <Globe className="size-5 text-muted-foreground" />}
+                {status === "starting" ? <Spinner className="size-5 text-muted-foreground" /> : <Globe className="size-5 text-muted-foreground" />}
               </div>
               <p className="text-base font-medium">
                 {status === "starting" ? "Starting your browser…" : status === "error" ? "The browser could not start" : "No page open yet"}

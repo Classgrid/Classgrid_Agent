@@ -63,6 +63,7 @@ import { PresenceProvider } from "@/features/chat/context/PresenceContext";
 import { apiClient } from "@/lib/apiClient";
 import { OAUTH_CONSENT_PATH, peekOAuthConsentReturn, rememberOAuthConsentReturn } from "@/features/oauth/lib/oauthReturn";
 import { isChatHost } from "@/lib/chatHost";
+import { Spinner } from "@/components/marketing_ui/spinner";
 
 export function RequireAuth() {
   const location = useLocation();
@@ -97,7 +98,7 @@ export function RequireAuth() {
     return (
       <div className="flex h-screen w-full items-center justify-center bg-background">
         <div className="flex flex-col items-center">
-          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mb-4"></div>
+          <Spinner className="size-8 text-primary mb-4" />
           <p className="text-muted-foreground text-sm font-medium">Finalizing your account setup...</p>
         </div>
       </div>

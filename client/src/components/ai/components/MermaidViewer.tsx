@@ -22,9 +22,10 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import mermaid from 'mermaid';
-import { Loader2, Maximize2, X, AlertCircle, Copy, Check, Code2, Link as LinkIcon, MoreVertical, FileText } from 'lucide-react';
+import { Maximize2, X, Copy, Check, Code2, Link as LinkIcon, MoreVertical, FileText } from 'lucide-react';
 import { toast } from "sonner";
 import { AnimatePresence, motion } from 'framer-motion';
+import { Spinner } from "@/components/marketing_ui/spinner";
 
 mermaid.initialize({
   startOnLoad: false,
@@ -260,12 +261,12 @@ export const MermaidViewer = ({ chart, onRetry, isTyping }: { chart: string, onR
       <div className={`relative flex justify-center items-center p-6 border border-slate-200 dark:border-white/10 rounded-xl bg-white dark:bg-[#1e1e1e] min-h-[100px] overflow-visible my-4 ${showCode ? "items-start justify-start !p-4" : ""}`}>
         {loading && (
           <div className="absolute inset-0 flex items-center justify-center bg-white/50 dark:bg-black/30 z-10">
-            <Loader2 className="w-5 h-5 text-indigo-500 animate-spin" />
+            <Spinner className="size-5 text-indigo-500" />
           </div>
         )}
         {error ? (
           <div className="w-full bg-slate-50 dark:bg-black/20 p-4 rounded-lg flex flex-col items-center justify-center text-slate-500 dark:text-slate-400 min-h-[120px] border border-slate-200 dark:border-white/10">
-            <Loader2 className="w-5 h-5 text-indigo-500 animate-spin mb-2" />
+            <Spinner className="size-5 text-indigo-500 mb-2" />
             <span className="text-[13px] text-center max-w-[250px]">
               Optimizing diagram layout...
             </span>

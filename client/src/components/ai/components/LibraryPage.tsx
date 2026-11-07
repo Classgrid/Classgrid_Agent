@@ -12,7 +12,7 @@
  */
 // CLASSGRID USES CLOUDFLARE USAGE TO CALCULATE TOKENS, NOT GPT-TOKENIZER (WHICH IS ONLY A FALLBACK)
 import React, { useState, useEffect, useCallback } from 'react';
-import { Upload, Search, FileImage, FileVideo, FileText, FileAudio, File as FileIcon, FileQuestion, MessageSquare, Download, Trash2, MoreVertical, X, Filter, SortDesc, Loader2, CalendarIcon, Music } from 'lucide-react';
+import { Upload, Search, FileImage, FileVideo, FileText, FileAudio, File as FileIcon, FileQuestion, MessageSquare, Download, Trash2, MoreVertical, X, Music } from 'lucide-react';
 import { useDropzone } from 'react-dropzone';
 import { format } from 'date-fns';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/marketing_ui/popover';
@@ -30,6 +30,7 @@ import FilePreviewModal from './FilePreviewModal';
 import { DocsImageViewer } from './DocsImageViewer';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { toast } from 'sonner';
+import { Spinner } from "@/components/marketing_ui/spinner";
 
 interface LibraryFile {
   _id: string;
@@ -285,7 +286,7 @@ export function LibraryPage() {
         {/* Upload Progress */}
         {isUploading && (
           <div className="p-3 bg-accent/50 rounded-xl border border-border/50 flex items-center gap-3">
-            <Loader2 className="w-5 h-5 animate-spin text-muted-foreground" />
+            <Spinner className="size-5 text-muted-foreground" />
             <div className="flex-1">
               <div className="flex justify-between items-center mb-1">
                 <span className="text-xs font-medium">Uploading...</span>

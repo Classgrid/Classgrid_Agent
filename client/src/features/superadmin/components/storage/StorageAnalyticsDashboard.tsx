@@ -140,6 +140,7 @@ import {
 import { Skeleton } from "@/components/marketing_ui/skeleton";
 import { Label } from "@/components/marketing_ui/label";
 import { cn } from "@/lib/utils";
+import { Spinner } from "@/components/marketing_ui/spinner";
 import {
   storageApi,
   type AnalyticsFileQuery,
@@ -773,7 +774,7 @@ export function StorageAnalyticsDashboard() {
             disabled={isRefreshing || summaryQuery.isLoading}
             aria-label="Refresh storage analytics"
           >
-            <RefreshCw className={cn("mr-2 size-4", isRefreshing && "animate-spin")} />
+            {isRefreshing ? <Spinner className="mr-2 size-4" /> : <RefreshCw className="mr-2 size-4" />}
             {isRefreshing ? "Recalculating..." : "Refresh analytics"}
           </Button>
         </div>

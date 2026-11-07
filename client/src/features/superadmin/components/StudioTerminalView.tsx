@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import { Plus, X } from "lucide-react";
 import { closeLocalTerminal, hasLocalTerminals, localShells, LocalTerminalView, openLocalTerminal, openProjectFolder, useLocalTerminals } from "./LocalTerminal";
+import { Spinner } from "@/components/marketing_ui/spinner";
 
 const EASE = [0.22, 1, 0.36, 1] as const;
 const TERMINAL_TOOLS = new Set(["execute_terminal_command", "run_code", "start_background_command", "check_background_command", "stop_background_command"]);
@@ -181,7 +182,7 @@ export function StudioTerminalView({ entries, onClear }: { entries: TerminalEntr
                 <div className="flex items-start gap-2">
                   <span className="text-[#16825d] dark:text-[#4ec9b0] select-none">$</span>
                   <span className="flex-1 min-w-0 whitespace-pre-wrap break-words text-foreground">{x.command}</span>
-                  {x.status === "running" && <span className="mt-1 size-3 shrink-0 rounded-full border-2 border-muted-foreground/30 border-t-muted-foreground animate-spin" />}
+                  {x.status === "running" && <Spinner className="mt-1 size-3 shrink-0 text-muted-foreground" />}
                 </div>
                 {x.output && (
                   <pre className={`mt-1 pl-4 whitespace-pre-wrap break-words ${x.status === "error" ? "text-[#cd3131] dark:text-[#f48771]" : "text-foreground/70"}`}>{x.output}</pre>

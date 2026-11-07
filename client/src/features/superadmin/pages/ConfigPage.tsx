@@ -68,12 +68,13 @@
 import { apiClient } from "@/lib/apiClient";
 import { toast } from "sonner";
 import { useState, useEffect } from "react";
-import { Server, Activity, Database, HardDrive, Cpu, Cloud, AlertTriangle, Clock, Trash2, Mail, LayoutGrid, Network, Loader2 } from "lucide-react";
+import { Server, Activity, Database, HardDrive, Cpu, Cloud, AlertTriangle, Clock, Trash2, Mail, LayoutGrid, Network } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Badge } from "@/components/marketing_ui/badge";
 import { Button } from "@/components/marketing_ui/button";
 import { DangerConfirmDialog } from "@/components/marketing_ui/danger-confirm-dialog";
 import { useSystemHealth } from "../queries/useConfig";
+import { Spinner } from "@/components/marketing_ui/spinner";
 
 // ── helper components ─────────────────────────────────────────────────────────
 
@@ -262,7 +263,7 @@ export function ConfigPage() {
               {isDiskCritical && (
                 <div className="ml-4">
                   <Button variant="outline" size="sm" onClick={() => setIsCleanLogsDialogOpen(true)} disabled={cleaningLogs} className="h-7 text-xs px-2 gap-1.5 border-destructive/30 hover:bg-destructive/10 text-destructive">
-                    {cleaningLogs ? <Loader2 size={12} className="animate-spin" /> : <Trash2 size={12} />}
+                    {cleaningLogs ? <Spinner className="size-3" /> : <Trash2 size={12} />}
                     {cleaningLogs ? "Cleaning..." : "Clean Logs & Cache"}
                   </Button>
                 </div>

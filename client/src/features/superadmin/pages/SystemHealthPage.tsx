@@ -70,10 +70,7 @@ import { Input } from "@/components/marketing_ui/input";
 import { ResponsiveSelect } from "@/components/marketing_ui/responsive-select";
 import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import {
-  Server, Database, Activity, Mail, AlertTriangle, CheckCircle2,
-  RefreshCw, Cpu, MemoryStick, Clock, Zap, XCircle, AlertCircle, Info,
-} from "lucide-react";
+import { Server, Database, Activity, Mail, AlertTriangle, CheckCircle2, RefreshCw, MemoryStick, Clock, Zap, XCircle, AlertCircle, Info } from "lucide-react";
 import type { ColumnDef } from "@tanstack/react-table";
 import { SectionPanel } from "@/components/marketing_ui/SectionPanel";
 import { StatCard } from "@/components/marketing_ui/StatCard";
@@ -82,6 +79,7 @@ import { Button } from "@/components/marketing_ui/button";
 import { DataTable } from "@/components/marketing_ui/data-table";
 import { apiClient } from "@/lib/apiClient";
 import { formatDate, formatTime } from "@/utils/dateUtils";
+import { Spinner } from "@/components/marketing_ui/spinner";
 
 const fetchMetrics = () =>
   apiClient.get<any>("/api/super-admin/system-metrics").then((r) => r.data);
@@ -213,7 +211,7 @@ export function SystemHealthPage() {
         </div>
         <div className="flex items-center gap-2">
           <Button variant="outline" onClick={() => { refetchMetrics(); refetchLogs(); }} disabled={metricsFetching}>
-            <RefreshCw size={14} className={metricsFetching ? "animate-spin mr-2" : "mr-2"} />
+            {metricsFetching ? <Spinner className="mr-2 size-3.5" /> : <RefreshCw size={14} className="mr-2" />}
             Refresh
           </Button>
         </div>

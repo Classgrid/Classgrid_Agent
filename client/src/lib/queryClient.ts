@@ -55,14 +55,18 @@
  */
 
 import { QueryClient } from "@tanstack/react-query";
-import { keepQueryData } from "./desktopPageCache";
+import { PAGE_CACHE_ON, keepQueryData } from "./desktopPageCache";
 
 export const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
       retry: 1,
       staleTime: 30000,
-      refetchOnWindowFocus: false
+      refetchOnWindowFocus: false,
+      // Desktop app: every answer stays for the whole run. By default react-query throws away data no page is showing
+      // after 5 minutes, so Settings (and Requests, Audit Logs, the profile) opened later showed loading bars again,
+      // and the next save then dropped that data from this computer too.
+      ...(PAGE_CACHE_ON ? { gcTime: Infinity } : {}),
     }
   }
 });

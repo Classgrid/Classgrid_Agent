@@ -15,11 +15,12 @@ import React, { useState } from "react";
 import { Button } from "@/components/marketing_ui/button";
 import { toast } from "sonner";
 import { useQueryClient } from "@tanstack/react-query";
-import { Calendar as CalendarIcon, Loader2 } from "lucide-react";
+import { Calendar as CalendarIcon } from "lucide-react";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/marketing_ui/popover";
 import { NikhilDateCalendar } from "@/components/marketing_ui/nikhil_date_calendar";
 import { format } from "date-fns";
 import { aiUsageApi } from "../../queries/useAiUsage";
+import { Spinner } from "@/components/marketing_ui/spinner";
 
 export function ExtendUserGrantedCredits({ userId, currentExpiry }: { userId: string, currentExpiry?: string | null }) {
   const [isLoading, setIsLoading] = useState(false);
@@ -80,7 +81,7 @@ export function ExtendUserGrantedCredits({ userId, currentExpiry }: { userId: st
           <div className="flex justify-end gap-2 mt-2">
             <Button variant="ghost" size="sm" onClick={() => setIsOpen(false)}>Cancel</Button>
             <Button size="sm" onClick={handleExtend} disabled={isLoading || !selectedDate}>
-              {isLoading && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
+              {isLoading && <Spinner className="size-4 mr-2" />}
               Save Expiry
             </Button>
           </div>

@@ -55,9 +55,10 @@
  */
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { Search, Loader2 } from 'lucide-react';
+import { Search } from 'lucide-react';
 import { Input } from '@/components/marketing_ui/input';
 import { searchGifs, type GifResult } from '../services/chatApi';
+import { Spinner } from "@/components/marketing_ui/spinner";
 
 interface GifPickerProps {
   onSelect: (gifUrl: string) => void;
@@ -171,7 +172,7 @@ export function GifPicker({ onSelect }: GifPickerProps) {
         
         {isLoading && (
           <div className="flex justify-center py-4">
-            <Loader2 className="w-5 h-5 animate-spin text-primary" />
+            <Spinner className="size-5 text-primary" />
           </div>
         )}
       </div>

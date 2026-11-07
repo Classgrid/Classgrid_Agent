@@ -99,6 +99,7 @@ import {
 } from "@/components/marketing_ui/dialog";
 import { Skeleton } from "@/components/marketing_ui/skeleton";
 import { cn } from "@/lib/utils";
+import { Spinner } from "@/components/marketing_ui/spinner";
 import {
   useStorageConfiguration,
   useTestStorageConnection,
@@ -431,7 +432,7 @@ function ConnectionPanel({
       >
         <div className="flex items-start gap-3">
           <span className="flex size-10 shrink-0 items-center justify-center rounded-full bg-blue-500/10 text-blue-600 dark:text-blue-400">
-            <RefreshCw className="size-5 animate-spin" aria-hidden="true" />
+            <Spinner className="size-5" aria-hidden="true" />
           </span>
           <div>
             <p className="font-semibold">Testing connection</p>
@@ -646,12 +647,7 @@ export function StorageS3ConfigurationDashboard() {
               onClick={() => void configurationQuery.refetch()}
               disabled={configurationQuery.isFetching}
             >
-              <RefreshCw
-                className={cn(
-                  "size-4",
-                  configurationQuery.isFetching && "animate-spin",
-                )}
-              />
+              {configurationQuery.isFetching ? <Spinner className="size-4" /> : <RefreshCw className="size-4" />}
               Try again
             </Button>
           </AlertDescription>
@@ -680,12 +676,7 @@ export function StorageS3ConfigurationDashboard() {
               configurationQuery.isFetching || testConnectionMutation.isPending
             }
           >
-            <RefreshCw
-              className={cn(
-                "size-4",
-                configurationQuery.isFetching && "animate-spin",
-              )}
-            />
+            {configurationQuery.isFetching ? <Spinner className="size-4" /> : <RefreshCw className="size-4" />}
             Refresh
           </Button>
           <Button

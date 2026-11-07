@@ -19,6 +19,7 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSepara
 import { fetchWithRescue } from "@/lib/rescue";
 import { addCodeNote, CODE_COMMENTS_SAVED_EVENT, lineLabel, removeCodeNote, updateCodeNote, useCodeNotes, type CodeNote } from "./studioCodeNotes";
 import { listLocalFiles, localFolderOf, readLocalFile } from "../utils/localProject";
+import { Spinner } from "@/components/marketing_ui/spinner";
 
 const backendUrl = import.meta.env.VITE_API_URL || "https://api.classgrid.in";
 const EASE = [0.22, 1, 0.36, 1] as const;
@@ -413,7 +414,7 @@ export function StudioFilesView({ projectId, projectName, wide, reloadKey = 0, r
             </button>
           )}
           <button onClick={load} className={iconBtn} title="Refresh" aria-label="Refresh">
-            <RotateCw className={`size-3.5 ${loading ? "animate-spin" : ""}`} />
+            {loading ? <Spinner className="size-3.5" /> : <RotateCw className="size-3.5" />}
           </button>
           {file && (
             <DropdownMenu>
