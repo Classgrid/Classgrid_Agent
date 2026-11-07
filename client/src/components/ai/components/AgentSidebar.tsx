@@ -173,7 +173,6 @@ export function AgentNestedMenu({ searchQuery = "", pages }: { searchQuery?: str
   const [newProjectFor, setNewProjectFor] = React.useState<string | null>(null);
   const [newProjectName, setNewProjectName] = React.useState("");
   const [isMovingChat, setIsMovingChat] = React.useState(false);
-  const [isDeletingSession, setIsDeletingSession] = React.useState(false);
 
   React.useEffect(() => {
     const handleActiveSessionChanged = (e: any) => {
@@ -259,12 +258,22 @@ export function AgentNestedMenu({ searchQuery = "", pages }: { searchQuery?: str
     const socket = getSocket();
     socket?.on("ai:session_title", handleTitle);
 
+    // Another screen changed a chat (Studio's chat menu: rename, archive, bring back): shown here at once, before the
+    // server answers ({ id, updates } changes it, { id, remove } takes it out, { session } adds it back)
+    const handlePatch = (e: any) => {
+      const { id, updates, remove, session } = e.detail || {};
+      if (session?.id) { setSessions((prev) => (prev.some((s) => s.id === session.id) ? prev : [session, ...prev])); return; }
+      if (!id) return;
+      setSessions((prev) => (remove ? prev.filter((s) => s.id !== id) : prev.map((s) => (s.id === id ? { ...s, ...updates } : s))));
+    };
+    window.addEventListener("agent:session-patch", handlePatch);
     window.addEventListener("agent:refresh-sessions", handleRefresh);
     window.addEventListener("agent:session-created", handleCreated);
     // Desktop app: back online, the list comes from the server again
     if (keepsChatCopies()) window.addEventListener("online", handleRefresh);
     return () => {
       socket?.off("ai:session_title", handleTitle);
+      window.removeEventListener("agent:session-patch", handlePatch);
       window.removeEventListener("agent:refresh-sessions", handleRefresh);
       window.removeEventListener("agent:session-created", handleCreated);
       window.removeEventListener("online", handleRefresh);
@@ -298,7 +307,11 @@ export function AgentNestedMenu({ searchQuery = "", pages }: { searchQuery?: str
     }
   }, [shareModalOpen, shareSessionId, endpointPrefix]);
 
+  // Pin, unpin and rename show at once; the server is told behind, and the change is put back if it says no
   const handleUpdateSession = async (id: string, updates: any) => {
+    const before = sessions;
+    setSessions((list) => list.map((s) => (s.id === id ? { ...s, ...updates } : s)));
+    if (updates.pinned !== undefined) toast.success(updates.pinned ? "Pinned" : "Unpinned");
     try {
       const res = await fetchWithRescue(`${endpointPrefix}/api/ai/sessions/${id}`, {
         method: "PUT",
@@ -306,30 +319,28 @@ export function AgentNestedMenu({ searchQuery = "", pages }: { searchQuery?: str
         body: JSON.stringify(updates),
         credentials: "include"
       });
-      if (res.ok) {
-        if (updates.pinned !== undefined) {
-          toast.success(updates.pinned ? "Chat pinned successfully!" : "Chat unpinned.");
-        }
-        fetchSessions(true);
-      } else {
-        const errData = await res.json();
-        if (errData.error) {
-          toast.error(errData.error);
-        } else {
-          toast.error("Failed to update chat.");
-        }
+      if (!res.ok) {
+        setSessions(before);
+        const errData = await res.json().catch(() => ({}));
+        toast.error(errData.error || "Failed to update chat.");
       }
     } catch (e) {
       console.error("Failed to update session", e);
+      setSessions(before);
       toast.error("Failed to update chat.");
     }
   };
 
   // A shared chat someone else owns: "delete" means leave it
   const deleteIsShared = !!(sessions.find((x) => x.id === deleteSessionId) as any)?.shared;
+  // The chat leaves the list at once and the box closes; the server deletes it behind (the chat comes back if that fails)
   const handleDeleteSession = async (id: string) => {
     const leaving = !!(sessions.find((x) => x.id === id) as any)?.shared;
-    setIsDeletingSession(true);
+    const before = sessions;
+    setSessions((list) => list.filter((s) => s.id !== id));
+    setDeleteSessionId(null);
+    if (activeSessionId === id) window.dispatchEvent(new Event("agent:new-chat"));
+    toast.success(leaving ? "You left the chat" : "Chat deleted");
     try {
       const res = await fetchWithRescue(`${endpointPrefix}/api/ai/sessions/${id}`, {
         method: "DELETE",
@@ -337,18 +348,14 @@ export function AgentNestedMenu({ searchQuery = "", pages }: { searchQuery?: str
       });
       if (res.ok) {
         removeChatCopy(id); // desktop app: the copy on this computer goes too
-        toast.success(leaving ? "You left the chat" : "Chat deleted");
-        setDeleteSessionId(null);
-        if (activeSessionId === id) window.dispatchEvent(new Event("agent:new-chat"));
-        fetchSessions(true);
       } else {
+        setSessions(before);
         toast.error("Failed to delete chat");
       }
     } catch (e) {
       console.error("Failed to delete session", e);
+      setSessions(before);
       toast.error("Failed to delete chat");
-    } finally {
-      setIsDeletingSession(false);
     }
   };
 
@@ -818,6 +825,8 @@ export function AgentNestedMenu({ searchQuery = "", pages }: { searchQuery?: str
   /** Move an Agent chat into a Project Mode project: it then leaves the Agent list and opens in Project Mode */
   const moveChatToProject = async (sessionId: string, project: { id: string; name: string }) => {
     setIsMovingChat(true);
+    const before = sessions;
+    setSessions((list) => list.filter((s) => s.id !== sessionId)); // leaves this list at once
     try {
       const res = await fetchWithRescue(`${endpointPrefix}/api/ide/projects/${project.id}/chats`, {
         method: "POST",
@@ -827,6 +836,7 @@ export function AgentNestedMenu({ searchQuery = "", pages }: { searchQuery?: str
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
+        setSessions(before);
         toast.error(data.error === "chat_in_other_project" ? "This chat is already in another project." : data.error || "Could not move the chat.");
         return false;
       }
@@ -838,6 +848,7 @@ export function AgentNestedMenu({ searchQuery = "", pages }: { searchQuery?: str
       navigate(`${projectPath}/${sessionId}`);
       return true;
     } catch {
+      setSessions(before);
       toast.error("Could not move the chat.");
       return false;
     } finally {
@@ -910,15 +921,18 @@ export function AgentNestedMenu({ searchQuery = "", pages }: { searchQuery?: str
   }, [isStudioMode]);
 
   // Archive a chat from its row: it leaves the list (Archived Only shows it again); the open chat goes to a new chat
+  // (the row goes at once; the server archives it behind, and the row comes back if that fails)
   const archiveChat = async (id: string) => {
+    const before = sessions;
+    setSessions((list) => list.filter((s) => s.id !== id));
+    if (id === activeSessionId) { navigate(baseAgentPath); window.dispatchEvent(new Event("agent:new-chat")); }
     const res = await fetchWithRescue(`${endpointPrefix}/api/ai/sessions/${id}/archive`, {
       method: "POST",
       credentials: "include",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ archived: true }),
     }).catch(() => null);
-    if (!res?.ok) { toast.error("Could not archive the chat"); return; }
-    if (id === activeSessionId) { navigate(baseAgentPath); window.dispatchEvent(new Event("agent:new-chat")); }
+    if (!res?.ok) { setSessions(before); toast.error("Could not archive the chat"); return; }
     window.dispatchEvent(new Event("agent:refresh-sessions"));
   };
 
@@ -1978,7 +1992,6 @@ export function AgentNestedMenu({ searchQuery = "", pages }: { searchQuery?: str
         description={deleteIsShared ? "This removes the shared chat from your list. It stays for the other people in it." : "This will permanently delete this chat and all its messages. This action cannot be undone."}
         warningMessage={deleteIsShared ? "You will leave this shared chat." : "This chat will be permanently deleted."}
         actionLabel={deleteIsShared ? "Leave chat" : "Delete chat"}
-        isLoading={isDeletingSession}
         onConfirm={() => { if (deleteSessionId) handleDeleteSession(deleteSessionId); }}
       />
       {isStudioMode && <NewProjectDialog open={newProjectOpen} onOpenChange={setNewProjectOpen} onCreated={(p) => openStudioProject(p.id)} />}
@@ -1999,8 +2012,10 @@ export function AgentNestedMenu({ searchQuery = "", pages }: { searchQuery?: str
         isLoading={isDeletingGroup}
         onConfirm={async () => {
           if (!deleteGroup) return;
+          setDeleteGroup(null); // the group goes at once (groupsApi); the server deletes it behind
+          toast.success("Group deleted");
           setIsDeletingGroup(true);
-          try { await groupsApi.remove(deleteGroup.id); toast.success("Group deleted"); setDeleteGroup(null); }
+          try { await groupsApi.remove(deleteGroup.id); }
           catch (e: any) { toast.error(e?.message || "Could not delete the group"); }
           finally { setIsDeletingGroup(false); }
         }}

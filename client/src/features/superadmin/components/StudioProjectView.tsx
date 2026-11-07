@@ -81,6 +81,11 @@ export function StudioProjectView({ projectId, reloadKey = 0 }: { projectId: str
     const name = (renaming || "").trim();
     if (!projectId || !project || renameBusy) return;
     if (!name || name === project.name) { setRenaming(null); return; }
+    // The new name shows at once; the server is told behind (the old name comes back if it says no)
+    const before = project;
+    setProject({ ...project, name });
+    setRenaming(null);
+    toast.success("Renamed");
     setRenameBusy(true);
     try {
       const res = await fetchWithRescue(`${backendUrl}/api/ide/projects/${projectId}`, {
@@ -90,11 +95,9 @@ export function StudioProjectView({ projectId, reloadKey = 0 }: { projectId: str
         body: JSON.stringify({ name }),
       });
       const saved = await res.json().catch(() => ({}));
-      if (!res.ok) { toast.error(saved.error || "Could not rename the project"); return; }
-      setProject(saved.project);
-      setRenaming(null);
+      if (!res.ok) { setProject(before); toast.error(saved.error || "Could not rename the project"); return; }
+      if (saved.project) setProject(saved.project);
       window.dispatchEvent(new Event("studio:projects-changed"));
-      toast.success("Renamed");
     } finally {
       setRenameBusy(false);
     }

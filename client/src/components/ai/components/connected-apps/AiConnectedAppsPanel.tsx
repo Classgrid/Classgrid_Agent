@@ -82,7 +82,12 @@ export function AiConnectedAppsPanel({ backendUrl }: { backendUrl: string }) {
     fetchGrants();
   }, [backendUrl]);
 
+  // The app leaves the list at once and the box closes; the server removes it behind (it comes back if that fails)
   const handleRemove = async (grant: ConnectedAppGrant) => {
+    const before = grants;
+    setGrants((prev) => prev.filter((g) => g.clientId !== grant.clientId));
+    setRemoveTarget(null);
+    toast.success(`${grant.name} can no longer access your account`);
     setIsRemoving(true);
     try {
       const res = await fetchWithRescue(`${backendUrl}/oauth/grants/${encodeURIComponent(grant.clientId)}`, {
@@ -91,14 +96,12 @@ export function AiConnectedAppsPanel({ backendUrl }: { backendUrl: string }) {
         credentials: "include"
       });
       const data = await res.json().catch(() => ({}));
-      if (res.ok) {
-        setGrants((prev) => prev.filter((g) => g.clientId !== grant.clientId));
-        toast.success(`${grant.name} can no longer access your account`);
-        setRemoveTarget(null);
-      } else {
+      if (!res.ok) {
+        setGrants(before);
         toast.error(data.error_description || data.message || "Couldn't remove this app.");
       }
     } catch {
+      setGrants(before);
       toast.error("Couldn't remove this app.");
     } finally {
       setIsRemoving(false);

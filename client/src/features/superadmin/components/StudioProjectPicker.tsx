@@ -230,15 +230,15 @@ export function StudioProjectPicker() {
   const [renaming, setRenaming] = useState<Project | null>(null);
   // Delete asks in the same dialog as Project Mode (type the project name to confirm)
   const [deleting, setDeleting] = useState<Project | null>(null);
-  const [deleteBusy, setDeleteBusy] = useState(false);
+  // The project leaves the list at once and the box closes; the server deletes it behind (it comes back if that fails)
   const removeProject = async (p: Project) => {
-    setDeleteBusy(true);
-    const { res, data } = await api(`/projects/${p.id}`, { method: "DELETE" }).finally(() => setDeleteBusy(false));
+    const before = projects;
     setDeleting(null);
-    if (!res.ok) { toast.error(data.error || "Could not delete the project"); return; }
     setProjects((list) => (list || []).filter((x) => x.id !== p.id));
     if (picked === p.id) pick(null);
     toast.success(`Deleted ${p.name}`);
+    const { res, data } = await api(`/projects/${p.id}`, { method: "DELETE" });
+    if (!res.ok) { setProjects(before); toast.error(data.error || "Could not delete the project"); }
   };
   const replaceProject = (p: Project) => {
     setProjects((list) => (list || []).map((x) => (x.id === p.id ? p : x)));
@@ -547,13 +547,12 @@ export function StudioProjectPicker() {
       <RenameDialog project={renaming} onClose={() => setRenaming(null)} onRenamed={(p) => { replaceProject(p); setRenaming(null); }} />
       <DangerConfirmDialog
         open={!!deleting}
-        onOpenChange={(o) => { if (!o && !deleteBusy) setDeleting(null); }}
+        onOpenChange={(o) => { if (!o) setDeleting(null); }}
         title="Delete project"
         description={`Delete "${deleting?.name || ""}" from Project Mode.`}
         confirmationSteps={deleting ? [{ label: "To confirm, type the project name", value: deleting.name }] : []}
         warningMessage="Its code stays on GitHub. Only the project here is deleted."
         actionLabel="Delete project"
-        isLoading={deleteBusy}
         onConfirm={() => deleting && removeProject(deleting)}
       />
     </div>
@@ -820,15 +819,17 @@ function RenameDialog({ project, onClose, onRenamed }: { project: Project | null
   const [name, setName] = useState("");
   const [busy, setBusy] = useState(false);
   useEffect(() => { if (project) { setName(project.name); setBusy(false); } }, [project]);
+  // The new name shows at once and the box closes; the server is told behind (the old name comes back if it says no)
   const save = async () => {
     const n = name.trim();
     if (!project || !n || busy || n === project.name) return;
     setBusy(true);
+    onRenamed({ ...project, name: n });
+    toast.success("Renamed");
     try {
       const { res, data } = await api(`/projects/${project.id}`, { method: "PATCH", body: JSON.stringify({ name: n }) });
-      if (!res.ok) { toast.error(data.error || "Could not rename the project"); return; }
-      onRenamed(data.project);
-      toast.success("Renamed");
+      if (!res.ok) { onRenamed(project); toast.error(data.error || "Could not rename the project"); return; }
+      if (data.project) onRenamed(data.project);
     } finally {
       setBusy(false);
     }

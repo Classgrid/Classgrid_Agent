@@ -36,16 +36,29 @@ async function call(path: string, init?: RequestInit) {
     headers: { "Content-Type": "application/json", ...(init?.headers || {}) },
   });
   const data = await res.json().catch(() => ({}));
+  window.dispatchEvent(new Event(CHANGED)); // also after a failure: the lists go back to what the server has
   if (!res.ok) throw new Error(data.error || "Something went wrong");
-  window.dispatchEvent(new Event(CHANGED));
   return data;
 }
 
+// A change shows in every list at once (patchGroups), before the server answers; the answer then replaces it
+const PATCH = "classgrid:chat-groups-patch";
+const patchGroups = (fn: (list: ChatGroup[]) => ChatGroup[]) => window.dispatchEvent(new CustomEvent(PATCH, { detail: fn }));
 export const groupsApi = {
   create: (project: string | null, body: { name: string; icon: string; sessionId?: string }) => call("", { method: "POST", body: JSON.stringify({ ...body, project: project || "none" }) }),
-  update: (id: string, body: Partial<Pick<ChatGroup, "name" | "icon" | "pinned">>) => call(`/${id}`, { method: "PATCH", body: JSON.stringify(body) }),
-  remove: (id: string) => call(`/${id}`, { method: "DELETE" }),
-  setChat: (id: string, sessionId: string, add: boolean) => call(`/${id}/chats`, { method: "PUT", body: JSON.stringify({ sessionId, add }) }),
+  update: (id: string, body: Partial<Pick<ChatGroup, "name" | "icon" | "pinned">>) => {
+    patchGroups((list) => list.map((g) => (g.id === id ? { ...g, ...body } : g)));
+    return call(`/${id}`, { method: "PATCH", body: JSON.stringify(body) });
+  },
+  remove: (id: string) => {
+    patchGroups((list) => list.filter((g) => g.id !== id));
+    return call(`/${id}`, { method: "DELETE" });
+  },
+  setChat: (id: string, sessionId: string, add: boolean) => {
+    // the chat leaves its old group at once; the group it joins gets it with the server's answer
+    patchGroups((list) => list.map((g) => (g.chats.some((c) => c.id === sessionId) && (!add || g.id !== id) ? { ...g, chats: g.chats.filter((c) => c.id !== sessionId) } : g)));
+    return call(`/${id}/chats`, { method: "PUT", body: JSON.stringify({ sessionId, add }) });
+  },
 };
 
 /** The groups of the open project (or, with no project open, the groups made without one), kept fresh */
@@ -59,9 +72,11 @@ export function useChatGroups(enabled: boolean, project: string | null) {
       .then((d) => { if (alive) setGroups(Array.isArray(d.groups) ? d.groups : []); })
       .catch(() => {});
     load();
+    const patch = (e: Event) => { const fn = (e as CustomEvent<(list: ChatGroup[]) => ChatGroup[]>).detail; if (alive && typeof fn === "function") setGroups((l) => fn(l)); };
+    window.addEventListener(PATCH, patch);
     window.addEventListener(CHANGED, load);
     window.addEventListener("agent:refresh-sessions", load);
-    return () => { alive = false; window.removeEventListener(CHANGED, load); window.removeEventListener("agent:refresh-sessions", load); };
+    return () => { alive = false; window.removeEventListener(PATCH, patch); window.removeEventListener(CHANGED, load); window.removeEventListener("agent:refresh-sessions", load); };
   }, [enabled, project]);
   return groups;
 }

@@ -191,22 +191,24 @@ export function AiSkillsPanel({ backendUrl }: { backendUrl: string }) {
     }
   };
 
+  // The skill leaves the list at once and the box closes; the server deletes it behind (the list is read again if that fails)
   const handleDeleteSkill = async (id: string) => {
+    setSkills((list: any[]) => list.filter((s: any) => (s._id ?? s.id) !== id));
+    setDeleteSkillId(null);
+    toast.success("Skill deleted");
     setIsDeletingSkill(true);
     try {
       const res = await fetchWithRescue(`${backendUrl}/api/ai/skills/${id}`, {
         method: 'DELETE',
         credentials: 'include'
       });
-      if (res.ok) {
-        toast.success("Skill deleted");
-        setDeleteSkillId(null);
-        fetchSkills();
-      } else {
+      if (!res.ok) {
         toast.error("Failed to delete skill");
+        fetchSkills();
       }
     } catch (e) {
       toast.error("Failed to delete skill");
+      fetchSkills();
     } finally {
       setIsDeletingSkill(false);
     }

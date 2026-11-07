@@ -168,7 +168,11 @@ export function LibraryPage() {
 
   const { getRootProps, getInputProps, isDragActive } = useDropzone({ onDrop });
 
+  // The file leaves the list at once; the server deletes it behind (it comes back if that fails)
   const handleDelete = async (id: string) => {
+    const before = files;
+    setFiles(files.filter(f => f._id !== id));
+    toast.success("File deleted");
     setIsDeleting(true);
     try {
       const res = await fetchWithRescue(`${endpointPrefix}/api/ai/library/${id}`, {
@@ -181,13 +185,13 @@ export function LibraryPage() {
           const percentage = Math.min(100, (data.quota.used_bytes / data.quota.max_bytes) * 100);
           setQuota({ ...data.quota, percentage });
         }
-        setFiles(files.filter(f => f._id !== id));
-        toast.success("File deleted");
       } else {
+        setFiles(before);
         toast.error("Failed to delete file.");
       }
     } catch (err) {
       console.error("Delete error", err);
+      setFiles(before);
       toast.error("Failed to delete file.");
     } finally {
       setIsDeleting(false);

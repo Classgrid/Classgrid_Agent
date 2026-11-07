@@ -193,14 +193,16 @@ export const SchedulePage: React.FC = () => {
     };
   }, [filter]);
 
+  // The schedule leaves the list at once; the server deletes it behind (it comes back if that fails)
   const handleDelete = async (id: string) => {
+    const before = schedules;
+    setSchedules(schedules.filter(s => s._id !== id));
+    toast.success("Schedule deleted");
     try {
       const response = await api.delete(`/api/ai/schedules/${id}`);
-      if (response.data?.success) {
-        toast.success("Schedule deleted");
-        setSchedules(schedules.filter(s => s._id !== id));
-      }
+      if (!response.data?.success) throw new Error("not deleted");
     } catch (error) {
+      setSchedules(before);
       toast.error("Failed to delete schedule");
     }
   };

@@ -389,13 +389,17 @@ export function AiHubModal({ isOpen, onClose, onSendPrompt, initialTab = "plugin
       }
 
       if (endpoint) {
+        // Shown as disconnected at once; the server is told behind (put back if it says no)
+        const before = connectedPlugins;
+        setConnectedPlugins((list) => list.filter((x) => x !== id));
+        toast.success(`${name} disconnected successfully`);
         const method = (id === 'slack' || id === 'github' || id === 'canva' || id === 'spotify') ? 'DELETE' : 'POST';
         const res = await fetchWithRescue(backendUrl + endpoint, { method, credentials: 'include' });
         if (res.ok) {
-          toast.success(`${name} disconnected successfully`);
-          await fetchStatus();
           window.dispatchEvent(new Event("classgrid:integrations-changed")); // e.g. Project Mode re-checks GitHub
+          void fetchStatus();
         } else {
+          setConnectedPlugins(before);
           toast.error(`Failed to disconnect ${name}`);
         }
       } else {

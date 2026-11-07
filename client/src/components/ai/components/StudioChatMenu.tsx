@@ -119,12 +119,13 @@ export function StudioChatMenu({ sessionId, isPinned, onTogglePin, onDelete, mes
     .map((m) => `**${m.role === "user" ? "You" : "Classgrid AI"}:**\n\n${m.content.trim()}`)
     .join("\n\n---\n\n");
 
+  // The chat leaves the list at once and a new chat opens; the server archives it behind (the list is read again if that fails)
   const archive = async () => {
-    const { res, data } = await call(`/sessions/${sessionId}/archive`, { method: "POST", body: JSON.stringify({ archived: true }) });
-    if (!res.ok) { toast.error(data.error || "Could not archive the chat"); return; }
+    window.dispatchEvent(new CustomEvent("agent:session-patch", { detail: { id: sessionId, remove: true } }));
     toast.success("Chat archived");
-    window.dispatchEvent(new Event("agent:refresh-sessions"));
     goToNewChat();
+    const { res, data } = await call(`/sessions/${sessionId}/archive`, { method: "POST", body: JSON.stringify({ archived: true }) });
+    if (!res.ok) { toast.error(data.error || "Could not archive the chat"); window.dispatchEvent(new Event("agent:refresh-sessions")); }
   };
 
   return (
@@ -218,16 +219,17 @@ function RenameChatDialog({ sessionId, open, onClose }: { sessionId: string; ope
     setTitle("");
     call(`/sessions/${sessionId}`).then(({ data }) => setTitle(data.session?.title || "")).catch(() => {});
   }, [open, sessionId]);
+  // The new name shows at once and the box closes; the server is told behind (the list is read again if it says no)
   const save = async () => {
     const t = title.trim();
     if (!t || busy) return;
     setBusy(true);
+    window.dispatchEvent(new CustomEvent("agent:session-patch", { detail: { id: sessionId, updates: { title: t } } }));
+    toast.success("Renamed");
+    onClose();
     try {
       const { res, data } = await call(`/sessions/${sessionId}`, { method: "PUT", body: JSON.stringify({ title: t }) });
-      if (!res.ok) { toast.error(data.error || "Could not rename the chat"); return; }
-      window.dispatchEvent(new Event("agent:refresh-sessions"));
-      toast.success("Renamed");
-      onClose();
+      if (!res.ok) { toast.error(data.error || "Could not rename the chat"); window.dispatchEvent(new Event("agent:refresh-sessions")); }
     } finally {
       setBusy(false);
     }
@@ -270,12 +272,16 @@ function ArchivedChatsDialog({ open, onClose }: { open: boolean; onClose: () => 
     setList(res.ok ? data.sessions || [] : []);
   };
   useEffect(() => { if (open) { setList(null); load(); } }, [open]);
+  // The chat leaves this box and is back in the list at once; the server is told behind
   const unarchive = async (id: string) => {
-    const { res, data } = await call(`/sessions/${id}/archive`, { method: "POST", body: JSON.stringify({ archived: false }) });
-    if (!res.ok) { toast.error(data.error || "Could not bring the chat back"); return; }
+    const before = list;
+    const chat = (list || []).find((x) => x.id === id);
     setList((l) => (l || []).filter((x) => x.id !== id));
-    window.dispatchEvent(new Event("agent:refresh-sessions"));
+    if (chat) window.dispatchEvent(new CustomEvent("agent:session-patch", { detail: { session: { ...chat, pinned: false } } }));
     toast.success("Back in your chats");
+    const { res, data } = await call(`/sessions/${id}/archive`, { method: "POST", body: JSON.stringify({ archived: false }) });
+    if (!res.ok) { setList(before); toast.error(data.error || "Could not bring the chat back"); }
+    window.dispatchEvent(new Event("agent:refresh-sessions")); // the real row (its project, times) replaces the quick one
   };
   const openChat = (id: string) => {
     window.history.pushState({}, "", `${modeBase()}/${id}`);
