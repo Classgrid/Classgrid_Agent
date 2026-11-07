@@ -12,12 +12,26 @@ const EASE = [0.22, 1, 0.36, 1] as const;
 
 type Shot = { url: string; page?: string; title?: string; tool?: string; at: number };
 
-// The chat open in Studio (/c/studio/<id>)
-function useChatId() {
-  const { pathname } = useLocation();
+// The chat open in Studio (/c/studio/<id>). A new chat gets its id in the address without the router knowing
+// (history.replaceState), so the chat's own "agent:active-session-changed" event is followed too.
+const chatIdFrom = (pathname: string): string | null => {
   const parts = pathname.split("/");
   const at = parts.indexOf("studio");
-  return at !== -1 && parts[at + 1] ? parts[at + 1] : null;
+  return (at !== -1 && parts[at + 1]) || null;
+};
+function useChatId() {
+  const { pathname } = useLocation();
+  const [id, setId] = useState<string | null>(() => chatIdFrom(window.location.pathname));
+  useEffect(() => { setId(chatIdFrom(window.location.pathname)); }, [pathname]);
+  useEffect(() => {
+    const onChange = (e: Event) => {
+      const sessionId = (e as CustomEvent<{ sessionId?: string | null }>).detail?.sessionId;
+      setId(sessionId ? String(sessionId) : chatIdFrom(window.location.pathname));
+    };
+    window.addEventListener("agent:active-session-changed", onChange);
+    return () => window.removeEventListener("agent:active-session-changed", onChange);
+  }, []);
+  return id;
 }
 
 const time = (at: number) => new Date(at).toLocaleString(undefined, { hour: "numeric", minute: "2-digit", month: "short", day: "numeric" });

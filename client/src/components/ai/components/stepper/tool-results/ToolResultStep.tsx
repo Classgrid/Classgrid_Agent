@@ -35,16 +35,6 @@ const APP_NAMES: Record<string, string> = {
   whatsapp_business_connector: 'WhatsApp', aws_ses_connector: 'AWS SES', canva_connector: 'Canva', spotify_connector: 'Spotify',
 };
 
-/** Studio browser steps: the screenshot, from its saved link (stays after a reload) or the picture in the result */
-function browserShot(tool: string, result: unknown): string | null {
-  if (!tool.startsWith('browser_') || !result) return null;
-  const text = typeof result === 'string' ? result : String((result as any)?.text ?? '');
-  const link = text.match(/Screenshot link: (https:\/\/\S+?\.jpg)/)?.[1];
-  if (link) return link;
-  const data = typeof result === 'object' ? (result as any)?.images?.[0]?.data : null;
-  return typeof data === 'string' && data.length > 100 ? `data:image/jpeg;base64,${data}` : null;
-}
-
 /** "Used Google Workspace  List drive files" / "Used Classgrid  Get my profile" */
 function rowTitle(tool: string, args: any) {
   // Custom connectors: "Used Linear  Create issue"
@@ -63,8 +53,8 @@ export function ToolResultStep({ tool, args, result, status, text, defaultOpen =
   const hasResult = result !== undefined && result !== null && result !== '';
   const canOpen = status !== 'loading' && (hasResult || !!requestFields(args));
   const { app, action } = rowTitle(tool, args);
-  const shot = status !== 'loading' ? browserShot(tool, result) : null;
-  const [shotBig, setShotBig] = useState(false);
+  // The JavaScript the agent runs in the page, shown under its step like a command (browser_run_js)
+  const code = tool === 'browser_run_js' && typeof args?.code === 'string' && args.code.trim() ? args.code.trim() : null;
 
   const body = useMemo(() => {
     if (!detailOpen) return null;
@@ -99,16 +89,9 @@ export function ToolResultStep({ tool, args, result, status, text, defaultOpen =
         </div>
       )}
 
-      {/* Studio browser: the screenshot the agent took, right under its step */}
-      {shot && (
-        <button
-          type="button"
-          onClick={() => setShotBig((b) => !b)}
-          title={shotBig ? 'Show smaller' : 'Show bigger'}
-          className={cn('ml-10 mr-2 mb-2 mt-0.5 block overflow-hidden rounded-lg border border-slate-200 dark:border-[#2a2a2a] transition-[max-width] duration-300 cursor-zoom-in', shotBig ? 'max-w-full cursor-zoom-out' : 'max-w-[360px]')}
-        >
-          <img src={shot} alt="Screenshot of the page" loading="lazy" className="block w-full h-auto" />
-        </button>
+      {/* Studio browser: its screenshots are in the Screenshots tab, not under each step; code it runs is shown here */}
+      {code && (
+        <pre className="ml-10 mr-2 mb-2 mt-0.5 max-w-[640px] max-h-[220px] overflow-auto rounded-lg border border-slate-200 dark:border-[#2a2a2a] bg-[#f6f6f4] dark:bg-[#1b1b1b] px-3 py-2 font-mono text-[12.5px] leading-[1.5] text-slate-800 dark:text-[#dcdcdc] whitespace-pre [scrollbar-width:thin]">{code}</pre>
       )}
 
       {cardOpen && canOpen && (

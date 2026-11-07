@@ -1,7 +1,7 @@
 // Runs INSIDE a user's Studio browser container (classgrid-ai-sandbox image) on the sandbox server, not on the API.
 // The API uploads this file to /home/ubuntu/studio_branding/ and starts it with node. It runs one real Chromium
 // (Playwright) with the user's own saved profile, and offers:
-//   POST /act   {action, ...}  open, click, select, type, press, scroll, back, forward, reload, screenshot, read, tabs
+//   POST /act   {action, ...}  open, click, select, type, press, scroll, back, forward, reload, screenshot, read, js, tabs
 //   GET  /health
 //   WS   /live  the page as JPEG frames (Chrome's screencast) + nav events + the agent's pointer; takes the viewer's
 //               clicks, wheel, keys and its size (the page follows the size of the Browser tab)
@@ -247,10 +247,15 @@ function pickInPage(q) {
   return { error: "The dropdown's list didn't open. Click it, then look at the screenshot." };
 }
 
+// The AI's own JavaScript (the body of an async function) as one expression the page runs; what it returns comes back
+// as text (the same copy is in desktop/browser.js)
+const jsInPage = (code) => `(async () => { try { const v = await (async () => {\n${code}\n})(); let s; try { s = typeof v === "string" ? v : v === undefined ? "(nothing returned)" : JSON.stringify(v, null, 2); } catch { s = String(v); } return { value: String(s) }; } catch (e) { return { error: String((e && e.stack) || e) }; } })()`;
+
 async function act(a, byAgent = false) {
   await resizing;
   if (byAgent && a.chat) await useChat(a.chat);
   let note = null; // what a step found out, told to the AI with the screenshot
+  let result = null; // what the AI's own code returned ("js")
   switch (a.action) {
     case "open":
       if (byAgent) point("open", { url: String(a.url || "") });
@@ -324,6 +329,17 @@ async function act(a, byAgent = false) {
       await page.waitForLoadState("networkidle", { timeout: 4000 }).catch(() => {});
       await page.waitForTimeout(Math.min(10000, Math.max(500, Number(a.seconds || 2) * 1000)));
       break;
+    case "js": {
+      // The AI's own JavaScript, run in the page like the browser's developer console
+      if (byAgent) point("js");
+      const r = await Promise.race([
+        page.evaluate(jsInPage(String(a.code ?? ""))),
+        page.waitForTimeout(30000).then(() => ({ error: "the code ran for more than 30 seconds" })),
+      ]);
+      if (!r || r.error) throw new Error(`The code failed: ${r?.error || "the page didn't answer"}`);
+      result = r.value;
+      break;
+    }
     case "tabs": break;
     default: throw new Error(`Unknown action: ${a.action}`);
   }
@@ -333,13 +349,14 @@ async function act(a, byAgent = false) {
     await page.waitForLoadState("domcontentloaded", { timeout: 8000 }).catch(() => {});
     await page.waitForLoadState("networkidle", { timeout: 5000 }).catch(() => {});
     await page.waitForTimeout(800);
-  } else if (["click", "press", "select"].includes(a.action)) {
+  } else if (["click", "press", "select", "js"].includes(a.action)) {
     await page.waitForLoadState("domcontentloaded", { timeout: 8000 }).catch(() => {});
     await page.waitForTimeout(900);
   }
   if (a.action === "scroll") await page.waitForTimeout(1000);
   const out = { ok: true, url: page.url(), title: await page.title().catch(() => ""), w: view.width, h: view.height };
   if (note) out.note = note;
+  if (result !== null) out.result = String(result).slice(0, MAX_TEXT);
   if (a.action === "read") {
     out.text = (await page.evaluate(() => document.body?.innerText || "").catch(() => "")).slice(0, MAX_TEXT);
     out.links = await page.evaluate(() => [...document.querySelectorAll("a[href]")].slice(0, 80).map((l) => ({ text: (l.innerText || "").trim().slice(0, 80), href: l.href }))).catch(() => []);

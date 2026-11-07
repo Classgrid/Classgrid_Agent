@@ -452,6 +452,10 @@ function pickInPage(q) {
   return { error: "The dropdown's list didn't open. Click it, then look at the screenshot." };
 }
 
+// The AI's own JavaScript (the body of an async function) as one expression the page runs; what it returns comes back
+// as text (the same copy is in server/src/services/studio-browser-daemon.mjs)
+const jsInPage = (code) => `(async () => { try { const v = await (async () => {\n${code}\n})(); let s; try { s = typeof v === "string" ? v : v === undefined ? "(nothing returned)" : JSON.stringify(v, null, 2); } catch { s = String(v); } return { value: String(s) }; } catch (e) { return { error: String((e && e.stack) || e) }; } })()`;
+
 async function act(a, byAgent) {
   ensureView();
   const wc = view.webContents;
@@ -459,6 +463,7 @@ async function act(a, byAgent) {
   applyZoom();
   const g = geometry();
   let note = null; // what a step found out, told to the AI with the screenshot
+  let result = null; // what the AI's own code returned ("js")
   switch (a.action) {
     case "open": {
       const url = norm(String(a.url || "").trim());
@@ -545,6 +550,17 @@ async function act(a, byAgent) {
       await settle(4000);
       await wait(Math.min(10000, Math.max(500, Number(a.seconds || 2) * 1000)));
       break;
+    case "js": {
+      // The AI's own JavaScript, run in the page like the browser's developer console
+      if (byAgent) { point("js"); cursor(null, null, "Running code"); }
+      const r = await Promise.race([
+        wc.executeJavaScript(jsInPage(String(a.code ?? "")), true),
+        wait(30000).then(() => ({ error: "the code ran for more than 30 seconds" })),
+      ]);
+      if (!r || r.error) throw new Error(`The code failed: ${r?.error || "the page didn't answer"}`);
+      result = r.value;
+      break;
+    }
     case "tabs": break;
     case "logs": break;
     default: throw new Error(`Unknown action: ${a.action}`);
@@ -555,7 +571,7 @@ async function act(a, byAgent) {
     await wait(150);
     await settle(10000);
     await wait(800);
-  } else if (["click", "press", "select"].includes(a.action) || (a.action === "type" && a.submit)) {
+  } else if (["click", "press", "select", "js"].includes(a.action) || (a.action === "type" && a.submit)) {
     await wait(300);
     await settle(8000);
     await wait(600);
@@ -563,6 +579,7 @@ async function act(a, byAgent) {
   applyZoom();
   const out = { ok: true, url: wc.getURL(), title: wc.getTitle(), w: g.w, h: g.h };
   if (note) out.note = note;
+  if (result !== null) out.result = String(result).slice(0, MAX_TEXT);
   if (a.action === "read") {
     out.text = String(await wc.executeJavaScript("document.body ? document.body.innerText : ''").catch(() => "")).slice(0, MAX_TEXT);
     out.links = await wc.executeJavaScript(`[...document.querySelectorAll("a[href]")].slice(0, 80).map((l) => ({ text: (l.innerText || "").trim().slice(0, 80), href: l.href }))`).catch(() => []);

@@ -94,8 +94,37 @@ function describeCustomMcp(args: any, result: unknown, status: 'loading' | 'succ
 }
 const humanTool = (t: any) => String(t || 'a tool').replace(/[_-]+/g, ' ');
 
+/** Studio browser steps say what they did, like a command: "Opened jeevanpatra.com", "Clicked at x: 512, y: 300" */
+function describeBrowser(tool: string, args: any, status: 'loading' | 'success' | 'error'): string | null {
+  const a = args ?? {};
+  const short = (t: unknown, n = 80) => { const s = String(t ?? '').replace(/\s+/g, ' ').trim(); return s.length > n ? `${s.slice(0, n)}…` : s; };
+  const site = String(a.url ?? '').trim().replace(/^https?:\/\/(www\.)?/i, '').replace(/\/$/, '');
+  const at = `x: ${Math.round(Number(a.x) || 0)}, y: ${Math.round(Number(a.y) || 0)}`;
+  const dy = Number(a.dy ?? 600) || 0;
+  // [while running, when done, when it failed]
+  const words: Record<string, [string, string, string]> = {
+    browser_open: [`Opening ${site}`, `Opened ${site}`, `Couldn't open ${site}`],
+    browser_click: [`${a.double ? 'Double-clicking' : 'Clicking'} at ${at}`, `${a.double ? 'Double-clicked' : 'Clicked'} at ${at}`, `Couldn't click at ${at}`],
+    browser_type: [`Typing "${short(a.text)}"`, `Typed "${short(a.text)}"${a.submit ? ' and pressed Enter' : ''}`, `Couldn't type "${short(a.text)}"`],
+    browser_select: a.option
+      ? [`Choosing "${short(a.option)}"${a.field ? ` in ${short(a.field, 40)}` : ''}`, `Chose "${short(a.option)}"${a.field ? ` in ${short(a.field, 40)}` : ''}`, `Couldn't choose "${short(a.option)}"`]
+      : [`Reading the dropdown's choices`, `Read the dropdown's choices${a.field ? ` in ${short(a.field, 40)}` : ''}`, `Couldn't read the dropdown`],
+    browser_press: [`Pressing ${short(a.key || 'Enter', 30)}`, `Pressed ${short(a.key || 'Enter', 30)}`, `Couldn't press ${short(a.key || 'Enter', 30)}`],
+    browser_scroll: [`Scrolling ${dy < 0 ? 'up' : 'down'}`, `Scrolled ${dy < 0 ? 'up' : 'down'} ${Math.abs(dy)} px`, `Couldn't scroll`],
+    browser_back: ['Going back', 'Went back a page', "Couldn't go back"],
+    browser_wait: ['Waiting for the page', `Waited ${Math.min(10, Math.max(1, Number(a.seconds) || 2))} sec`, "Couldn't wait for the page"],
+    browser_screenshot: ['Taking a screenshot', 'Took a screenshot', "Couldn't take a screenshot"],
+    browser_read: ['Reading the page text', 'Read the page text', "Couldn't read the page"],
+    browser_logs: ["Reading the page's errors", "Read the page's errors", "Couldn't read the page's errors"],
+    browser_run_js: ['Running JavaScript in the page', 'Ran JavaScript in the page', 'The JavaScript failed'],
+  };
+  const w = words[tool];
+  return w ? (status === 'loading' ? `${w[0]}...` : w[status === 'error' ? 2 : 1]) : null;
+}
+
 export function describeStep(tool: string, args: any, result: unknown, status: 'loading' | 'success' | 'error'): string | null {
   if (tool === 'custom_mcp_connector') return describeCustomMcp(args, result, status);
+  if (tool.startsWith('browser_')) return describeBrowser(tool, args, status);
   const op = APP[tool] && args?.operation ? String(args.operation) : tool;
   const { verb, noun } = splitAction(op);
   if (!verb || (!PAST[verb] && !ING[verb])) return null;

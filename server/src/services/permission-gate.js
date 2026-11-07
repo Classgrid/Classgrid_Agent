@@ -63,6 +63,8 @@ export function describeAction(tool, args = {}) {
       return { title: "Click on the page?", detail: `At x ${Math.round(Number(args?.x) || 0)}, y ${Math.round(Number(args?.y) || 0)}`, key: "browser_click", label: "clicking in the browser", level: 1 };
     case "browser_press":
       return { title: "Press this key in the page?", detail: String(args?.key || ""), key: "browser_press", label: "pressing keys in the browser", level: 1 };
+    case "browser_run_js":
+      return { title: "Run this code in the page?", detail: String(args?.code || "").slice(0, 1500), key: "browser_run_js", label: "running code in pages", level: 1 };
     case "browser_select":
       return { title: "Choose this in a dropdown?", detail: `${args?.option ? `"${args.option}"` : "(see the choices)"}${args?.field ? ` in ${args.field}` : ""}`, key: "browser_select", label: "choosing in dropdowns", level: 1 };
     // Custom connectors (MCP apps like n8n, Linear): asks per app tool, like claude.ai. Reading the user's own

@@ -51,6 +51,9 @@ const ACT = [
   fn("browser_wait", "Wait for a slow page to finish loading (1 to 10 seconds), then take a screenshot.", {
     seconds: { type: "number", description: "How long to wait, 1 to 10 (default 2)." },
   }),
+  fn("browser_run_js", "Run your own JavaScript in the current page, like the browser's developer console, and get back what it returns. Write it as the body of an async function: use return to send a value back (objects come back as JSON) and await works. Use it to read exact data (tables, lists, prices, attributes, form values, element positions) or for something clicks can't do well. The page and the user's sign-ins are real: never use it to send, buy, post, delete, change settings or read passwords and cookies. Returns text, no screenshot (take one with browser_screenshot when you need it).", {
+    code: { type: "string", description: "The JavaScript, e.g. return [...document.querySelectorAll('table tr')].map((r) => r.innerText);" },
+  }, ["code"]),
 ];
 
 // The Planner (main AI in Studio): plans, keeps the scratchpad and sends the worker for long jobs; it has the full
@@ -85,6 +88,7 @@ const ACTIONS = {
   browser_wait: (a) => ({ action: "wait", seconds: Number(a?.seconds ?? 2) }),
   browser_screenshot: () => ({ action: "screenshot" }),
   browser_read: () => ({ action: "read", screenshot: false }),
+  browser_run_js: (a) => ({ action: "js", code: String(a?.code ?? ""), screenshot: false }),
   browser_logs: () => ({ action: "logs", screenshot: false }),
 };
 
@@ -162,6 +166,8 @@ export function makeBrowserHandlers({ userId, sessionId, desktop = false }) {
         if (!r?.ok) {
           // A Classgrid app from before the dropdown step
           if (name === "browser_select" && /Unknown action/.test(String(r?.error))) return "Error: this Classgrid app is too old to choose in dropdowns. Click the dropdown, then its choice, and tell the user to update the Classgrid app.";
+          // A Classgrid app from before running code in the page
+          if (name === "browser_run_js" && /Unknown action/.test(String(r?.error))) return "Error: this Classgrid app is too old to run code in the page. Use browser_read and screenshots instead, and tell the user to update the Classgrid app.";
           return `Error: ${r?.error || "the browser step failed"}${r?.url ? ` (page: ${r.url})` : ""}`;
         }
         const head = `Page: ${r.title || "(no title)"} — ${r.url}${r.w ? `\nPage size: ${r.w}x${r.h} pixels` : ""}${r.note ? `\n${r.note}` : ""}`;
@@ -172,6 +178,7 @@ export function makeBrowserHandlers({ userId, sessionId, desktop = false }) {
           const net = r.logs.network.map((n) => `- ${n.status ? n.status : n.error} ${n.method} ${n.url} (${n.type}) · ${ago(n.at)}`).join("\n");
           return `${head}\n\nConsole errors and warnings since this page opened:\n${cons || "(none)"}\n\nFailed web requests:\n${net || "(none)"}`;
         }
+        if (name === "browser_run_js") return `${head}\n\nThe code returned:\n${r.result ?? "(nothing returned)"}`;
         if (name === "browser_read") {
           const links = (r.links || []).filter((l) => l.text).slice(0, 60).map((l) => `- ${l.text}: ${l.href}`).join("\n");
           return `${head}\n\n${r.text || "(no text)"}${links ? `\n\nLinks:\n${links}` : ""}`;
@@ -196,6 +203,7 @@ export const BROWSER_WORKER_SYSTEM = `You are the Browser worker in Classgrid St
 - Look at the screenshots closely, not only the text: the design and UI/UX (layout, colours, fonts, spacing, images, buttons, how clear and easy the page is to use, anything broken or out of place). Report what you see in the design too.
 - Use browser_read to get exact text and links instead of guessing from the picture.
 - For a dropdown, use browser_select with the choice's text (and the dropdown's label as field) instead of clicking its list.
+- To get exact data from a page (a table, a list, prices, values) or do what clicks can't, use browser_run_js with a short script that returns it. Never use it to send, buy, post, delete or read passwords and cookies.
 - Write what you find and what is done to the scratchpad (scratchpad_write, mode append), with links.
 - Never type a password, card number or one-time code, and never pay, buy, send, post or delete anything: stop and tell the Planner (tell_main) that the user needs to do that step in the browser.
 - If a page blocks you (a captcha, a login wall), stop and say so; do not try to get around it.
