@@ -1319,7 +1319,7 @@ function whereYouWorkRule(args) {
     const rule = whereYouWorkPlace(args);
     const p = args.project;
     const both = rule && args.desktop && p?.repo && (p.bothPlaces || p.localCopies?.length); // the desktop app only
-    if (both && p.mastero) return rule + ` This is a MASTERO project: the same project on the user's computer and in the Classgrid cloud (this chat works in the ${p.bothPlaces ? "computer" : "cloud"} copy), and its GitHub repo ${p.repo} is the master copy. ${args.masteroAutoPush ? "After every answer that changes files, Classgrid pushes those changes to GitHub by itself: don't ask before pushing and don't push them again yourself." : "Before pushing, ask the user yes or no (the user turned off automatic pushes in Settings → Mastero); push only after a yes, then say in one short line what you pushed and to which branch."} If the user isn't happy with a change that is already on GitHub, undo it with git revert (a new commit that takes it back) and push that; never rewrite GitHub's history (no reset --hard, no force push). Code runs in the Classgrid cloud only for Node.js (Node 20 / TypeScript) and Python (3.13) projects; for other kinds (Go, Flutter, Java, C++ and the rest) you can read, write and push the code, and it runs on the user's computer. In the cloud the project needs the Classgrid GitHub app installed on its repo (Projects page → Install app), and cloud pushes go to a classgrid/ branch with a pull request the user merges on GitHub; the computer copy gets them with a pull. The cloud keeps the code only while it's in use: it leaves the server 5 minutes after the code editor closes (30 minutes without use in Studio), with unpushed work saved to a classgrid-backup-… branch first. Pushes go only to GitHub, never to Vercel (going live on the user's Vercel is a separate step they ask for). Docs to share when useful: https://classgrid.in/docs/projects-cloud-and-computer, https://classgrid.in/docs/connect-github, https://classgrid.in/docs/pull-requests-and-backups, https://classgrid.in/docs/review-and-undo, https://classgrid.in/docs/deploy-with-vercel.`;
+    if (both && p.mastero) return rule + ` This is a MASTERO project: the same project on the user's computer and in the Classgrid cloud (this chat works in the ${p.bothPlaces ? "computer" : "cloud"} copy), and its GitHub repo ${p.repo} is the master copy. ${args.masteroAutoPush ? "After every answer that changes files, Classgrid pushes those changes to GitHub by itself: don't ask before pushing and don't push them again yourself." : "Before pushing, ask the user yes or no (the user turned off automatic pushes in Settings → Mastero); push only after a yes, then say in one short line what you pushed and to which branch."} If the user isn't happy with a change that is already on GitHub, undo it with git revert (a new commit that takes it back) and push that; never rewrite GitHub's history (no reset --hard, no force push). Code runs in the Classgrid cloud only for Node.js (Node 20 / TypeScript) and Python (3.13) projects; for other kinds (Go, Flutter, Java, C++ and the rest) you can read, write and push the code, and it runs on the user's computer. In the cloud the project needs the Classgrid GitHub app installed on its repo (Projects page → Install app), and cloud pushes go to a classgrid/ branch with a pull request the user merges on GitHub; the computer copy gets them with a pull. The cloud keeps the code only while it's in use: it leaves the server 5 minutes after the code editor closes (30 minutes without use in Studio), with unpushed work saved to a classgrid-backup-… branch first. Pushes go only to GitHub, never to Vercel (going live on the user's Vercel is a separate step they ask for). Docs to share when useful: https://classgrid.in/docs/mastero (start here), https://classgrid.in/docs/projects-cloud-and-computer, https://classgrid.in/docs/connect-github, https://classgrid.in/docs/pull-requests-and-backups, https://classgrid.in/docs/review-and-undo, https://classgrid.in/docs/deploy-with-vercel.`;
     return both ? rule + ` This project lives in BOTH places, the cloud and a copy on the user's computer (this chat works in the ${p.bothPlaces ? "computer" : "cloud"} copy), linked by its GitHub repo ${p.repo}. Nothing is saved to GitHub by itself: commit and push only when the user asks, and then say in one short line what you pushed and to which branch. Pushes go only to GitHub, never to Vercel.` : rule;
 }
 function whereYouWorkPlace({ desktop, project, task }) {
@@ -6771,7 +6771,7 @@ export const getChatSessions = async (req, res) => {
         if (req.user?._id) {
             const IdeProject = (await import("../models/IdeProject.js")).default;
             const [mine, owned] = await Promise.all([
-                User.findById(req.user._id).select("desktop_chat_ids web_chat_ids studio_chat_ids call_chat_ids").lean().catch(() => null),
+                User.findById(req.user._id).select("desktop_chat_ids web_chat_ids studio_chat_ids call_chat_ids online_chat_ids").lean().catch(() => null),
                 IdeProject.find({ owner: req.user._id }).select("name location chatSessionIds pcChatSessionIds").lean().catch(() => []),
             ]);
             const desk = new Set(mine?.desktop_chat_ids || []);
@@ -6789,7 +6789,8 @@ export const getChatSessions = async (req, res) => {
             const callChats = new Set(mine?.call_chat_ids || []); // WhatsApp work: not started in either app
             const kept = (id) => (inProject.has(id) || studioChats.has(id)) && !callChats.has(id);
             const hide = isWebsite(req) ? "pc" : "cloud";
-            sessions = (sessions || []).filter((s) => !kept(s.id) || chatPlace(s.id) !== hide);
+            const online = new Set(mine?.online_chat_ids || []); // Mastero chats the user took online: on the website too
+            sessions = (sessions || []).filter((s) => !kept(s.id) || chatPlace(s.id) !== hide || (hide === "pc" && online.has(s.id)));
         }
         // Agent mode and Project mode keep separate chat lists: ?mode=agent leaves out chats that belong to a
         // project, ?project=<id> shows only that project's chats (the user's own projects only). No query = all.
@@ -6865,8 +6866,12 @@ export const getChatSession = async (req, res) => {
         let projectLocation = null;
         if (req.user?._id) {
             const IdeProject = (await import("../models/IdeProject.js")).default;
-            const p = await IdeProject.findOne({ owner: req.user._id, chatSessionIds: id }).select("_id name location chatSessionIds pcChatSessionIds").lean();
-            if (p && !(isWebsite(req) && pcChatIds(p).includes(id))) {
+            const p = await IdeProject.findOne({ owner: req.user._id, chatSessionIds: id }).select("_id name location chatSessionIds pcChatSessionIds mastero").lean();
+            // A Mastero project's chat from the desktop app, opened on the website by the user (its link or QR code from
+            // the Project tab): from now on it is online too, in its cloud project
+            const takenOnline = !!(p?.mastero && isWebsite(req) && pcChatIds(p).includes(id));
+            if (takenOnline) await User.updateOne({ _id: req.user._id }, { $addToSet: { online_chat_ids: id } }).catch(() => {});
+            if (p && (takenOnline || !(isWebsite(req) && pcChatIds(p).includes(id)))) {
                 projectId = String(p._id);
                 projectName = p.name || null;
                 projectLocation = p.location || "cloud";
@@ -6877,6 +6882,22 @@ export const getChatSession = async (req, res) => {
     } catch (e) {
         console.error("Error getting session:", e);
         res.status(500).json({ error: "Failed to load session" });
+    }
+};
+
+// The user copied a Mastero chat's link in the desktop app's Project tab: the chat goes online now (listed on the
+// website too). Nothing goes online before the user does this, or opens the link.
+export const takeChatOnline = async (req, res) => {
+    try {
+        const { id } = req.params;
+        const session = await getSessionById(id);
+        if (!session) return res.status(404).json({ error: "Chat not found" });
+        if (!(await canAccessSession(session, req.user?.email))) return res.status(403).json({ error: "Forbidden" });
+        await User.updateOne({ _id: req.user._id }, { $addToSet: { online_chat_ids: id } });
+        res.json({ ok: true, url: `https://chat.classgrid.in/c/studio/${id}` });
+    } catch (e) {
+        console.error("Error taking a chat online:", e);
+        res.status(500).json({ error: "Could not take the chat online" });
     }
 };
 

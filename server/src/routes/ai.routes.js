@@ -78,7 +78,7 @@ import {
     chatWithSyllabus, 
     getMyPersona 
 } from "../controllers/ai.controller.js";
-import { streamAskAi, clientToolResult, getWorkingChats, getChatHelpers, getChatSessions, getChatSession, getChatSessionMessages, uploadChatImage, updateChatSession, archiveChatSession, deleteChatSession, shareChatSession, reopenChatSession, createPublicShare, getPublicShare, submitAiFeedback, getAgentReviews, updateAgentReviewStatus, processAgentReviewsCron, deleteAgentReview, bulkDeleteAgentReviews, generateImage, getMyGeneratedImages, deleteGeneratedImage, getMyUsage, getOrgUsage, getSkills, createSkill, updateSkill, deleteSkill, getPreferences, updatePreferences } from "../controllers/ai-chat.controller.js";
+import { streamAskAi, clientToolResult, getWorkingChats, getChatHelpers, getChatSessions, getChatSession, getChatSessionMessages, uploadChatImage, takeChatOnline, updateChatSession, archiveChatSession, deleteChatSession, shareChatSession, reopenChatSession, createPublicShare, getPublicShare, submitAiFeedback, getAgentReviews, updateAgentReviewStatus, processAgentReviewsCron, deleteAgentReview, bulkDeleteAgentReviews, generateImage, getMyGeneratedImages, deleteGeneratedImage, getMyUsage, getOrgUsage, getSkills, createSkill, updateSkill, deleteSkill, getPreferences, updatePreferences } from "../controllers/ai-chat.controller.js";
 
 import { getFavicon } from "../controllers/ai-favicon.controller.js";
 import { importChatSession } from "../controllers/ai-chat-import.controller.js";
@@ -226,6 +226,7 @@ router.get("/shared/:shareId", getPublicShare);
 
 // R2 Image Upload for Chat
 router.post("/upload", isAuthenticated, requireChatOnboarding, uploadChatImage);
+router.post("/sessions/:id/online", isAuthenticated, takeChatOnline);
 
 // Top-up Routes
 router.use("/topup", aiTopUpRoutes);

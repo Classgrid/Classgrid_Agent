@@ -101,6 +101,7 @@
     "papaparse": "^5.5.3",
     "pdfjs-dist": "^6.1.200",
     "posthog-js": "^1.431.2",
+    "qrcode.react": "^4.2.0",
     "react": "^19.2.0",
     "react-chartjs-2": "^5.3.1",
     "react-confetti": "^6.4.0",

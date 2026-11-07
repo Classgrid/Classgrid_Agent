@@ -58,7 +58,7 @@ export function SettingsMasteroSection() {
       <h2 className="flex items-center gap-2 text-xl font-semibold text-foreground"><MasteroMark className="size-5" /> Mastero</h2>
       <p className="text-sm text-muted-foreground mt-1">
         Mastero projects live on your computer and in the Classgrid cloud, with GitHub as the master copy.{" "}
-        <a href="https://classgrid.in/docs/projects-cloud-and-computer" target="_blank" rel="noreferrer" className="text-foreground underline underline-offset-2 hover:opacity-80">Learn more</a>
+        <a href="https://classgrid.in/docs/mastero" target="_blank" rel="noreferrer" className="text-foreground underline underline-offset-2 hover:opacity-80">Learn more</a>
       </p>
 
       <Section title="Pushing to GitHub">

@@ -67,7 +67,7 @@ function startMasteroChat(repo: string, folder: string, isPrivate: boolean) {
     "- Code runs in the Classgrid cloud only for Node.js (Node 20 / TypeScript) and Python (3.13). Go, Flutter, Java, C++ and others: you can read, write and push them in the cloud, and they run on my computer. On my computer you can do everything.",
     "- The cloud keeps the code only while it's in use: it leaves the server 5 minutes after the code editor closes (30 minutes without use in Studio); unpushed work is saved to a classgrid-backup-… branch on GitHub first.",
     "- It can go live on my own Vercel account when I ask.",
-    "Then give me these links, one line each: https://classgrid.in/docs/projects-cloud-and-computer (cloud and computer), https://classgrid.in/docs/connect-github (GitHub and the Classgrid app), https://classgrid.in/docs/pull-requests-and-backups (pushes and backups), https://classgrid.in/docs/review-and-undo (review and undo), https://classgrid.in/docs/deploy-with-vercel (going live).",
+    "Then give me these links, one line each: https://classgrid.in/docs/mastero (Mastero projects), https://classgrid.in/docs/projects-cloud-and-computer (cloud and computer), https://classgrid.in/docs/connect-github (GitHub and the Classgrid app), https://classgrid.in/docs/pull-requests-and-backups (pushes and backups), https://classgrid.in/docs/review-and-undo (review and undo), https://classgrid.in/docs/deploy-with-vercel (going live).",
   ].join("\n");
   window.dispatchEvent(new CustomEvent("agent:ask", { detail: { text, hidden: true } }));
 }

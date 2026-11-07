@@ -10,12 +10,13 @@ import { apiClient } from "@/lib/apiClient";
 import { ImageCropperModal } from "@/components/marketing_ui/ImageCropperModal";
 import { StudioProjectChooser } from "./StudioProjectPicker";
 import { MasteroDialog, PushDialog } from "./StudioMastero";
+import { MasteroOnlineCard } from "./MasteroOnlineCard";
 import { onDesktop, thisComputerCopy, type LocalCopy } from "../utils/projectCopies";
 
 const backendUrl = import.meta.env.VITE_API_URL || "https://api.classgrid.in";
 const EASE = [0.22, 1, 0.36, 1] as const;
 
-type Project = { id: string; name: string; repo: string | null; logo?: string | null; updatedAt?: string; location?: "cloud" | "local"; localCopies?: LocalCopy[] };
+type Project = { id: string; name: string; repo: string | null; logo?: string | null; updatedAt?: string; location?: "cloud" | "local"; localCopies?: LocalCopy[]; mastero?: boolean };
 type Info = { repoUrl: string | null; branch: string | null; commit: { message: string; date: string | null; sha: string; url: string | null } | null; vercel: { name: string; dashboardUrl: string; appUrl: string; domain: string } | null };
 type Commit = { sha: string; message: string; author: string | null; avatar: string | null; date: string | null; url: string | null };
 type History = { branch: string | null; pr: { number: number; title: string; url: string } | null; commits: Commit[] };
@@ -301,6 +302,13 @@ export function StudioProjectView({ projectId, reloadKey = 0 }: { projectId: str
             <p className="mt-2 text-[12px] text-muted-foreground">{project?.repo ? "No Vercel project uses this repo yet, or Vercel is not connected." : "Link a GitHub repo first."}</p>
           )}
         </motion.div>
+
+        {/* Mastero project, desktop app: the open chat's link and QR code for chat.classgrid.in (online only when the user takes it there) */}
+        {onDesktop() && project?.mastero && (
+          <motion.div {...rise(3)}>
+            <MasteroOnlineCard className={card} />
+          </motion.div>
+        )}
 
         {/* Last commit */}
         {info?.commit && (
