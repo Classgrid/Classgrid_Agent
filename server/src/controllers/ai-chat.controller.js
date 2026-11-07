@@ -1591,6 +1591,30 @@ const SLASH_COMMAND_LINES = {
     compact: `The chat's earlier messages were just summarised (the long_term_memory above). Continue from that summary.`,
 };
 
+// A Mastero project's chat is the same chat in the desktop app and on the website (owner, 2026-11-07). A picture sent
+// from the desktop app goes to the AI inside the request and is kept only on that computer, so the website would show
+// it empty: once the AI has it, it is also put on our storage, and its placeholder in the saved message becomes the
+// picture's link. Other chats keep the desktop rule (the picture is never stored).
+async function keepMasteroPictures(userId, sessionId, messageId, images) {
+    if (!userId || !sessionId || !messageId || !images?.length) return;
+    const IdeProject = (await import("../models/IdeProject.js")).default;
+    const mastero = await IdeProject.exists({ owner: userId, chatSessionIds: sessionId, mastero: true }).catch(() => null);
+    if (!mastero) return;
+    const { data: row } = await supabase.from("ai_chat_messages").select("file_urls").eq("id", messageId).single();
+    let urls = Array.isArray(row?.file_urls) ? [...row.file_urls] : [];
+    let changed = false;
+    for (const img of images) {
+        if (!urls.includes(img.placeholder)) continue;
+        const bytes = Buffer.from(img.dataUrl.slice(img.dataUrl.indexOf(",") + 1), "base64");
+        const key = `ai-chat-uploads/${userId}/${img.id}-${String(img.name).replace(/[^\w.-]+/g, "_")}`;
+        const link = await uploadBufferToR2(bytes, img.name, img.mimeType, key).catch((e) => { console.error("[Mastero] Picture upload failed:", e.message); return null; });
+        if (link) { urls = urls.map((u) => (u === img.placeholder ? link : u)); changed = true; }
+    }
+    if (!changed) return;
+    await supabase.from("ai_chat_messages").update({ file_urls: urls }).eq("id", messageId);
+    await invalidateHistoryCache(sessionId).catch(() => {});
+}
+
 export const streamAskAi = async (req, res) => {
     const requestStartedAt = Date.now();
     const body = req.body || {};
@@ -2003,7 +2027,11 @@ export const streamAskAi = async (req, res) => {
         // 2b. Save user message: to Supabase (source of truth) + Redis (cache) in parallel
         if (!isIncognito && sessionId && body.question) {
             saveMessage(sessionId, "user", body.question, body.fileUrls || [], gridSender?.email || null)
-                .then(() => { if (gridSender) req.app.get("io")?.to(`aigrid:${sessionId}`).emit("aigrid:update", { sessionId, kind: "messages", by: gridSender.email }); })
+                .then((saved) => {
+                    if (gridSender) req.app.get("io")?.to(`aigrid:${sessionId}`).emit("aigrid:update", { sessionId, kind: "messages", by: gridSender.email });
+                    // (in the background: the AI already has the pictures in this request)
+                    if (inlineImages.length) keepMasteroPictures(req.user?._id, sessionId, saved?.id, inlineImages).catch((e) => console.error("[Mastero] Keeping pictures failed:", e.message));
+                })
                 .catch(err => console.error("Failed to save user message:", err));
             // The file links go into the AI's history too, so follow-ups can re-open an uploaded file.
             appendToHistory(sessionId, "user", gridSender ? `${gridSender.name}: ${body.question}` : body.question, body.fileUrls || []).catch(err => console.error("Failed to append user msg to Redis:", err));

@@ -1202,10 +1202,17 @@ export function AgentNestedMenu({ searchQuery = "", pages }: { searchQuery?: str
 
   // Mastero projects: under Pinned, before the Projects list
   const masteroSection = isStudioMode && masteroFolders.length > 0 && !opts.archivedOnly && (
-    <div className="mb-2">
-      <p className="flex items-center gap-1.5 px-2 py-1.5 text-xs font-medium text-muted-foreground/70"><MasteroMark className="size-3.5" /> Mastero projects</p>
-      {masteroFolders.map(renderFolder)}
-    </div>
+    // (opens and closes like Pinned: the arrow shows on hover)
+    <Accordion defaultValue={["mastero"]} multiple className="w-full">
+      <AccordionItem value="mastero" className="border-none mb-2">
+        <AccordionTrigger className="px-2 py-1.5 hover:no-underline group/acc-trigger [&_[data-slot=accordion-trigger-icon]]:opacity-0 hover:[&_[data-slot=accordion-trigger-icon]]:opacity-100 flex items-center h-auto min-h-0 border-transparent focus-visible:ring-0 cursor-pointer">
+          <span className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground/70"><MasteroMark className="size-3.5" /> Mastero projects</span>
+        </AccordionTrigger>
+        <AccordionContent className="pb-0 pt-1 px-0">
+          {masteroFolders.map(renderFolder)}
+        </AccordionContent>
+      </AccordionItem>
+    </Accordion>
   );
 
   const studioProjects = (
