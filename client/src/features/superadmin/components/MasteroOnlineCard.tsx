@@ -1,7 +1,6 @@
 // Studio's Project tab, a Mastero project in the desktop app: the open chat's link on chat.classgrid.in, as a QR code to
-// scan with a phone and a "copy link" window (like Remote Control). The chat goes online only when the user does one of
-// these by hand: copying the link (POST /api/ai/sessions/:id/online), or opening it on the website (the server marks it
-// then). Until then it stays in the desktop app.
+// scan with a phone and a "copy link" window (like Remote Control). A finished Mastero project's chats are listed in both
+// places already (the server's chat list); this is the quick way to carry on with the open one on another device.
 import { useState } from "react";
 import { Check, Copy, X } from "lucide-react";
 import { toast } from "sonner";
@@ -28,15 +27,14 @@ export function MasteroOnlineCard({ className = "" }: { className?: string }) {
   const [copied, setCopied] = useState(false);
   const link = chatId ? chatLink(chatId) : "";
 
-  const copy = async () => {
+  // Copies at once; the chat is put online in the background (opening the link on the website does it too)
+  const copy = () => {
     if (!chatId) return;
-    const res = await fetchWithRescue(`${backendUrl}/api/ai/sessions/${chatId}/online`, { method: "POST", credentials: "include" }).catch(() => null);
-    if (!res?.ok) { toast.error("Couldn't take this chat online. Try again."); return; }
-    try {
-      await navigator.clipboard.writeText(link);
+    navigator.clipboard.writeText(link).then(() => {
       setCopied(true);
       setTimeout(() => setCopied(false), 1500);
-    } catch { toast.error("Couldn't copy the link"); }
+    }).catch(() => toast.error("Couldn't copy the link"));
+    void fetchWithRescue(`${backendUrl}/api/ai/sessions/${chatId}/online`, { method: "POST", credentials: "include" }).catch(() => null);
   };
 
   return (
@@ -46,7 +44,7 @@ export function MasteroOnlineCard({ className = "" }: { className?: string }) {
           <span className="text-[13px] font-medium">Continue online</span>
           <p className="text-[12px] text-muted-foreground">
             {chatId
-              ? <>Open this chat on chat.classgrid.in or your phone. It stays in this app until you open it there or copy its link. Scan the code, or <button type="button" onClick={() => setOpen(true)} className="text-[#3b82f6] hover:underline underline-offset-2 cursor-pointer">copy link</button>.</>
+              ? <>Open this chat on your phone or chat.classgrid.in and carry on there: the same chat, and the same code through GitHub. Scan the code, or <button type="button" onClick={() => setOpen(true)} className="text-[#3b82f6] hover:underline underline-offset-2 cursor-pointer">copy link</button>.</>
               : "Start a chat in this project to open it on chat.classgrid.in or your phone."}
           </p>
         </div>
@@ -68,7 +66,7 @@ export function MasteroOnlineCard({ className = "" }: { className?: string }) {
           </div>
           <div className="px-5 pt-4 pb-5">
             <DialogTitle className="text-[15px] font-medium">Open on chat.classgrid.in</DialogTitle>
-            <DialogDescription className="mt-0.5 text-[13px] text-muted-foreground">Continue this chat from your phone or another computer. Scan the QR code or copy the link below. Copying it puts the chat online.</DialogDescription>
+            <DialogDescription className="mt-0.5 text-[13px] text-muted-foreground">Continue this chat from your phone or another computer: it's the same chat there. Scan the QR code or copy the link below.</DialogDescription>
             <div className="mt-3 flex items-center gap-2 h-10 pl-3 pr-1 rounded-lg border border-black/10 dark:border-white/[0.08] bg-black/[0.02] dark:bg-[#161616]">
               <span className="flex-1 min-w-0 truncate font-mono text-[12.5px] text-muted-foreground">{link}</span>
               <button type="button" onClick={copy} className="shrink-0 flex items-center justify-center size-8 rounded-md text-muted-foreground hover:text-foreground hover:bg-black/[0.05] dark:hover:bg-white/[0.06] cursor-pointer" title="Copy link" aria-label="Copy link">

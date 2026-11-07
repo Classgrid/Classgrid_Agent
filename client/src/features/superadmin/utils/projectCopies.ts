@@ -10,7 +10,7 @@ const LIST_KEY = "cg_studio_projects";
 export const PROJECT_PLACE_EVENT = "classgrid:project-place-changed";
 
 export type LocalCopy = { deviceId: string; path: string; at?: string; here?: boolean };
-type PlaceProject = { id: string; name?: string; repo?: string | null; location?: "cloud" | "local"; localPath?: string | null; localCopies?: LocalCopy[] };
+type PlaceProject = { id: string; name?: string; repo?: string | null; logo?: string | null; updatedAt?: string; location?: "cloud" | "local"; localPath?: string | null; localCopies?: LocalCopy[]; mastero?: boolean; masteroPending?: boolean };
 type Desktop = { isDesktop?: boolean; deviceId?: string; pickFolder?: () => Promise<string | null> };
 const desktop = () => (window as unknown as { classgridDesktop?: Desktop }).classgridDesktop;
 
@@ -35,11 +35,30 @@ async function api(path: string, body: Record<string, unknown>) {
   return { res, data };
 }
 
-// The saved project list (read for the Files tab and the open project) gets the project's new place at once
+// What the saved project list keeps of each project. Mastero's two flags are kept too: a Mastero project is moved from
+// "local" (a folder) to the cloud with this computer's copy, and a screen reading an old copy of the list without them
+// took it for a folder project still (and a chat on the website then couldn't be linked to it)
+const listEntry = ({ id, name, repo, logo, updatedAt, location, localPath, localCopies, mastero, masteroPending }: PlaceProject): PlaceProject =>
+  ({ id, name, repo, logo, updatedAt, location, localPath, localCopies, mastero: !!mastero, masteroPending: !!masteroPending && !mastero });
+
+// The whole project list from the server, kept for the next visit (Project Mode and the Studio pickers write it)
+export function saveProjectList(list: PlaceProject[]) {
+  try { localStorage.setItem(LIST_KEY, JSON.stringify(list.map(listEntry))); } catch { /* storage blocked */ }
+}
+
+// The saved project list (read for the Files tab and the open project) gets the project's new place at once: where it
+// is, its repo and its Mastero state (a project not in the list yet is added, so savedProject finds it)
 export function remember(project: PlaceProject) {
   try {
     const list = JSON.parse(localStorage.getItem(LIST_KEY) || "[]") as PlaceProject[];
-    const next = list.map((p) => (p.id === project.id ? { ...p, repo: project.repo ?? p.repo, location: project.location, localPath: project.localPath, localCopies: project.localCopies } : p));
+    const merged = (p: PlaceProject) => listEntry({
+      ...p,
+      ...project,
+      repo: project.repo ?? p.repo,
+      mastero: project.mastero ?? p.mastero,
+      masteroPending: project.masteroPending ?? p.masteroPending,
+    });
+    const next = list.some((p) => p.id === project.id) ? list.map((p) => (p.id === project.id ? merged(p) : p)) : [merged({ id: project.id }), ...list];
     localStorage.setItem(LIST_KEY, JSON.stringify(next));
   } catch { /* storage blocked */ }
   window.dispatchEvent(new CustomEvent(PROJECT_PLACE_EVENT, { detail: { project } }));
@@ -114,6 +133,7 @@ export function placeActions(project: PlaceProject | null | undefined): { label:
   if (!project || !onDesktop()) return [];
   if (project.location === "local") return [];
   if (!project.repo) return [];
+  if (project.mastero || project.masteroPending) return []; // (its copy here stays on: that's where Push works)
   const copy = thisComputerCopy(project);
   if (!copy) return [{ label: "Get a copy on this computer", run: () => getCopyOnThisComputer(project) }];
   return [copy.here ? { label: "Open in the cloud", run: () => openProjectIn(project, "cloud") } : { label: "Open on this computer", run: () => openProjectIn(project, "local") }];

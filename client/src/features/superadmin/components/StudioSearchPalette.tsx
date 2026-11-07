@@ -173,7 +173,7 @@ export function StudioSearchPalette({ open, onClose, files: givenFiles, recent =
         const pinned = f.pinned.filter(match);
         const loose = f.chats.filter(match);
         const grouped = f.groups
-          .map((g) => ({ g, list: g.chats.map((c) => byId.get(c.id) || c).filter((c) => !c.pinned && match(c)) }))
+          .map((g) => ({ g, list: g.chats.filter((c) => onDesktop() || byId.has(c.id)).map((c) => byId.get(c.id) || c).filter((c) => !c.pinned && match(c)) }))
           .filter((x) => !t || x.list.length);
         const count = pinned.length + loose.length + grouped.reduce((n, x) => n + x.list.length, 0);
         if (!count && (t || !f.groups.length)) return;

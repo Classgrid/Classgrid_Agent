@@ -8,6 +8,7 @@ import { apiClient } from "@/lib/apiClient";
 import { StudioSearchPalette } from "@/features/superadmin/components/StudioSearchPalette";
 import { FileBadge } from "@/features/superadmin/components/StudioFilesView";
 import { OPEN_PROJECT_FILE_EVENT } from "@/components/ai/components/stepper/ProjectToolSteps";
+import { remember } from "@/features/superadmin/utils/projectCopies";
 
 type EditorDesktop = {
   editorFolder?: string | null;
@@ -43,9 +44,8 @@ export function useEditorProject(signedIn: boolean) {
         try {
           localStorage.setItem("cg_project_open", String(p.id));
           sessionStorage.setItem("cg_project_open", String(p.id));
-          const list = JSON.parse(localStorage.getItem("cg_studio_projects") || "[]") as { id: string }[];
-          const mine = { id: String(p.id), name: p.name, repo: p.repo || null, logo: p.logo || null, updatedAt: p.updatedAt, location: "local", localPath: p.localPath || folder };
-          localStorage.setItem("cg_studio_projects", JSON.stringify([mine, ...list.filter((x) => x.id !== mine.id)]));
+          // The saved list gets the project as the server says it is (a Mastero project is a cloud project with its copy here)
+          remember({ ...p, id: String(p.id), localPath: p.location === "cloud" ? null : p.localPath || folder });
         } catch { /* storage blocked */ }
       })
       .catch(() => { /* the page still opens */ })

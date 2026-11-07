@@ -49,6 +49,9 @@ const ideProjectSchema = new mongoose.Schema(
     // Mastero started (repo made or kept, project linked) but not finished: the user still names it, adds its photo and
     // confirms in the chat. Until then nothing Mastero shows and nothing is pushed by itself.
     masteroPending: { type: Boolean, default: false },
+    // The repo Mastero made for this folder while its code isn't on it yet (the first push failed, or is still going):
+    // pressing Mastero again pushes to this repo instead of making a second one. Cleared once the project is linked.
+    masteroRepo: { type: String, default: null },
     // Unpushed work pushed to GitHub when the project left the sandbox, shown once on the next open
     lastBackup: { branch: { type: String }, at: { type: Date } },
     // "local": a folder on the user's own computer, run by the Classgrid desktop app (services/local-runner.service.js)

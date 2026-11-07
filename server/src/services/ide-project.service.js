@@ -77,11 +77,13 @@ async function newestFileEdit(ssh, project) {
 
 // The project a chat works on: the one on the user's screen (sent with their latest message and checked to be
 // theirs), so files, commands and pushes never land in another project when a chat started elsewhere;
-// else the project the chat belongs to
-export async function projectForChat(sessionId) {
+// else the project the chat belongs to.
+// website: the caller works for the website, which only ever reaches the cloud copy: a project in both places is the
+// cloud project there, even when this chat's last desktop message left it marked "On this computer"
+export async function projectForChat(sessionId, { website = false } = {}) {
   await connectDB();
   const onScreen = await redis.get(UI_PROJECT(sessionId)).catch(() => null);
-  const here = await redis.get(CHAT_HERE(sessionId)).catch(() => null);
+  const here = website ? null : await redis.get(CHAT_HERE(sessionId)).catch(() => null);
   if (onScreen) {
     const p = await IdeProject.findById(onScreen).lean().catch(() => null);
     if (p) return onComputerCopy(p, here);
@@ -393,6 +395,10 @@ export const projectTools = {
 export async function masteroAsk(sessionId, { ask, suggestion }) {
   const project = await projectForChat(sessionId);
   if (!project) return "No project is open in this chat.";
+  // The cards come only between the Mastero button and Finish (one step at a time, in order): never on a project that
+  // isn't being made a Mastero project, and never again once it is one
+  if (project.mastero) return `"${project.name}" is a Mastero project already (on GitHub: ${project.repo}). No card was shown; there is nothing left to finish.`;
+  if (!project.masteroPending || !project.repo) return "No card was shown: Mastero hasn't started for this project. The user starts it with the Mastero button in Studio's Project tab.";
   const kind = ask === "logo" ? "logo" : ask === "confirm" ? "confirm" : "name";
   return JSON.stringify({
     shown: kind,
@@ -565,7 +571,9 @@ export async function pushProject(project, ssh, message, { direct: askedDirect =
   // With the Classgrid GitHub app set up, the push goes through the app installed on the repo (never the user's
   // own GitHub key). The commit is in the user's name with Classgrid AI as co-author, so both show as contributors.
   const owner = await githubUser(project.owner, "github_name github_email email");
-  const directToMain = askedDirect || ALWAYS_DIRECT_PUSH_EMAILS.has(String(owner?.email || "").toLowerCase());
+  // A Mastero project (owner, 2026-11-07): GitHub's main branch is the one master copy both places work on, so its
+  // pushes go straight there, never to a classgrid/ branch and pull request (the computer copy pulls them)
+  const directToMain = askedDirect || !!project.mastero || ALWAYS_DIRECT_PUSH_EMAILS.has(String(owner?.email || "").toLowerCase());
   let key;
   if (directToMain) {
     // Straight to main with the user's own GitHub account (only when the user asks for it)
@@ -1045,7 +1053,7 @@ function terminalRunsText(ctx, rel) {
 }
 
 export async function editorContextFor(sessionId, { website = false } = {}) {
-  const project = await projectForChat(sessionId);
+  const project = await projectForChat(sessionId, { website });
   if (!project) return "";
   // A folder on the user's own computer: the Classgrid desktop app runs the project tools there (local-runner.service.js).
   // The website never gets its folder path or editor (the folder project works only in the desktop app).
@@ -1173,8 +1181,8 @@ async function snapshotCommit(ssh, project, label) {
   return commit;
 }
 
-export async function startCheckpoint(sessionId) {
-  const project = await projectForChat(sessionId);
+export async function startCheckpoint(sessionId, { website = false } = {}) {
+  const project = await projectForChat(sessionId, { website });
   if (!project || project.location === "local") return null; // a folder on the user's computer has no copy here to compare
   let ssh;
   try {
@@ -1191,9 +1199,10 @@ export async function startCheckpoint(sessionId) {
   }
 }
 
-export async function finishCheckpoint(sessionId, id) {
-  if (!id) return saveBothPlaces(sessionId).catch((e) => console.error("[IDE] Auto-save failed:", e.message));
-  const project = await projectForChat(sessionId);
+// website: the answer was sent from the website (ai-chat.controller.js fromWebsite), so its work is in the cloud copy
+export async function finishCheckpoint(sessionId, id, { website = false } = {}) {
+  if (!id) return saveBothPlaces(sessionId, null, null, { website }).catch((e) => console.error("[IDE] Auto-save failed:", e.message));
+  const project = await projectForChat(sessionId, { website });
   const cp = JSON.parse((await redis.get(CP_KEY(sessionId, id))) || "null");
   if (!project || !cp) return;
   let ssh;
@@ -1201,7 +1210,7 @@ export async function finishCheckpoint(sessionId, id) {
     ssh = await sandboxSsh();
     cp.after = await snapshotCommit(ssh, project, `cp-${id}-after`);
     await redis.set(CP_KEY(sessionId, id), JSON.stringify(cp), "EX", CP_TTL);
-    await saveBothPlaces(sessionId, ssh, cp).catch((e) => console.error("[IDE] Auto-save failed:", e.message));
+    await saveBothPlaces(sessionId, ssh, cp, { website }).catch((e) => console.error("[IDE] Auto-save failed:", e.message));
   } finally {
     ssh?.dispose();
   }
@@ -1214,16 +1223,57 @@ export async function masteroAutoPush(userId) {
   return u?.mastero_settings?.auto_push !== false;
 }
 
+// A Mastero project, before each answer (owner, 2026-11-07): the copy this chat works in (the user's computer, or the
+// cloud) first gets the newest code from GitHub's main branch, so work done in the other place is here too and the two
+// never drift apart. The user's own changes here are kept (rebase --autostash); when both sides changed the same lines
+// it stops and nothing is lost. Answers one short line for the AI ("" when there was nothing new).
+export async function pullMastero(project) {
+  if (!project?.mastero || !project.repo) return "";
+  const owner = await githubUser(project.owner, "github_name github_email").catch(() => null);
+  const key = owner?.github_access_token;
+  if (project.bothPlaces) {
+    const { callLocal } = await import("./local-runner.service.js");
+    const out = String(await callLocal(project, "sync_repo", { mode: "pull", repo: project.repo, token: key, name: owner?.github_name, email: owner?.github_email }).catch((e) => `Error: ${e.message}`));
+    if (/^Error/.test(out)) return `Getting the newest code from GitHub into the user's computer copy didn't work: ${out.replace(/^Error:\s*(?:[A-Z_]{4,}\s+)?/, "").slice(0, 300)} Tell the user in one short line.`;
+    return /Got \d+ new change/.test(out) ? `${out.trim().split("\n").pop()} (work done in the cloud copy, now on the user's computer).` : "";
+  }
+  if (!key) return "";
+  const ssh = await sandboxSsh().catch(() => null);
+  if (!ssh) return "";
+  try {
+    const dir = projectHostDir(project);
+    const { stdout: isRepo } = await ssh.execCommand(`[ -d ${q(dir)}/.git ] && echo yes`);
+    if (!isRepo.trim()) return ""; // not downloaded yet: opening it downloads the newest
+    const auth = Buffer.from(`x-access-token:${key}`).toString("base64");
+    const gitAuth = `GIT_TERMINAL_PROMPT=0 GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=http.https://github.com/.extraheader GIT_CONFIG_VALUE_0="AUTHORIZATION: basic ${auth}"`;
+    const branch = (await ssh.execCommand(`git -C ${q(dir)} rev-parse --abbrev-ref HEAD`)).stdout.trim() || "main";
+    const got = await ssh.execCommand(`${gitAuth} git -C ${q(dir)} fetch -q origin ${q(branch)}`);
+    if (got.code) return "";
+    const { stdout: behind } = await ssh.execCommand(`git -C ${q(dir)} rev-list --count HEAD..FETCH_HEAD`);
+    const n = Number(behind.trim()) || 0;
+    if (!n) return "";
+    const pulled = await ssh.execCommand(`git -C ${q(dir)} -c user.name=Classgrid -c user.email=agent@classgrid.in rebase -q --autostash FETCH_HEAD`);
+    if (pulled.code) {
+      await ssh.execCommand(`git -C ${q(dir)} rebase --abort 2>/dev/null`);
+      return "GitHub has changes made on the user's computer to the same lines as changes here, so they couldn't be joined by themselves. Nothing was lost. Tell the user in one short line.";
+    }
+    return `Got ${n} new change${n === 1 ? "" : "s"} from GitHub (work done on the user's computer, now in the cloud copy).`;
+  } finally {
+    ssh.dispose();
+  }
+}
+
 // One project in both places (the cloud and a copy on the user's computer): after an answer that changed files, the
 // work is pushed to GitHub by itself, so either place has the same code the next time it opens. The user is told in
 // one short line ("project-saved" on their socket).
-async function saveBothPlaces(sessionId, ssh = null, cp = null) {
+async function saveBothPlaces(sessionId, ssh = null, cp = null, { website = false } = {}) {
   // Owner's rule (2026-11-02): Classgrid never commits or pushes to GitHub by itself; the user asks the agent to push.
   // Except a Mastero project, while its owner keeps Settings → Mastero "Push after every change" on (owner, 2026-11-07):
-  // GitHub is its master copy, so every answer's changes go there (a change the user doesn't want is undone with git revert)
+  // GitHub is its master copy, so every answer's changes go there (a change the user doesn't want is undone with git revert).
+  // Only a finished one (mastero true): while Mastero waits for the user's Finish (masteroPending) nothing is pushed.
   if (!sessionId) return;
-  const project = await projectForChat(sessionId);
-  if (!project?.repo || !project.mastero || !(await masteroAutoPush(project.owner))) return;
+  const project = await projectForChat(sessionId, { website });
+  if (!project?.repo || project.mastero !== true || !(await masteroAutoPush(project.owner))) return;
   let line = "";
   if (project.bothPlaces) {
     // This computer's copy: the desktop app commits and pushes, only when something changed
@@ -1233,8 +1283,9 @@ async function saveBothPlaces(sessionId, ssh = null, cp = null) {
     const out = await callLocal(project, "sync_repo", { mode: "push", repo: project.repo, message: "Saved by Classgrid", token: key, name: owner?.github_name, email: owner?.github_email });
     if (/^Error/.test(out)) line = `Your work on this computer couldn't be saved to GitHub: ${out.replace(/^Error:\s*(?:[A-Z_]{4,}\s+)?/, "").slice(0, 300)}`;
     else if (/Saved to GitHub/.test(out)) line = out.trim().split("\n").pop();
-  } else if (project.location !== "local" && project.localCopies?.length && ssh && cp?.before && cp?.after) {
-    // The cloud copy of a project that also has a copy on a computer: pushed to the project's branch, like the Push button
+  } else if (project.location !== "local" && (project.mastero || project.localCopies?.length) && ssh && cp?.before && cp?.after) {
+    // The cloud copy (a Mastero project worked on in the cloud, on the website or "Open in the cloud"): pushed to the
+    // project's branch, like the Push button. A Mastero project is pushed even with no computer copy left: GitHub is its master copy.
     const dir = projectHostDir(project);
     const { stdout } = await ssh.execCommand(`git -C ${q(dir)} diff --name-only ${cp.before} ${cp.after} | head -50`);
     const files = stdout.split("\n").map((f) => f.trim()).filter((f) => f && !f.startsWith(`${GUIDE_PROJECT_DIR}/`));

@@ -343,7 +343,9 @@ router.get("/projects", isAuthenticated, async (req, res) => {
   // cloud project). The desktop app once saved a folder's GitHub link there by mistake: clear it, so cloud projects
   // and repo links work again.
   await IdeProject.updateMany({ owner: req.user._id, location: "local", repo: { $nin: [null, ""] } }, { $set: { repo: null } }).catch(() => {});
-  const projects = await IdeProject.find({ owner: req.user._id, ...(isWebsite(req) ? { location: { $ne: "local" } } : {}) }).sort({ updatedAt: -1 }).limit(200);
+  // The website lists a project Mastero is still making (masteroPending) only after the user's Finish: until then
+  // nothing Mastero shows there (owner's rule), and it opens in the desktop app as before
+  const projects = await IdeProject.find({ owner: req.user._id, ...(isWebsite(req) ? { location: { $ne: "local" }, masteroPending: { $ne: true } } : {}) }).sort({ updatedAt: -1 }).limit(200);
   const edits = await newestFileEdits(projects);
   const list = projects.map((p) => {
     const json = projectJson(p, req);
@@ -383,8 +385,24 @@ router.post("/projects/local", isAuthenticated, async (req, res) => {
   if (!name) return res.status(400).json({ error: "Give the project a name" });
   await connectDB();
   // The same folder opens its project again (Windows paths: any case, with or without a slash at the end)
-  const existing = await IdeProject.findOne({ owner: req.user._id, location: "local", localPath: new RegExp(`^${escapeRegex(localPath.replace(/[\\/]+$/, ""))}[\\\\/]*$`, "i") });
+  const samePath = new RegExp(`^${escapeRegex(localPath.replace(/[\\/]+$/, ""))}[\\\\/]*$`, "i");
+  const existing = await IdeProject.findOne({ owner: req.user._id, location: "local", localPath: samePath });
   if (existing) return res.json({ project: projectJson(existing, req) });
+  // A folder that is a cloud project's copy on a computer (after Mastero, or "Also use in the cloud", the folder became
+  // that project's copy): it opens that project, never a second folder project "name (2)". This computer's copy first
+  // when the app says which computer it is; then it is set to open here ("On this computer").
+  const deviceId = String(req.body?.deviceId || "");
+  const knownDevice = DEVICE_ID.test(deviceId);
+  const linked = (knownDevice && (await IdeProject.findOne({ owner: req.user._id, location: "cloud", localCopies: { $elemMatch: { deviceId, path: samePath } } })))
+    || (await IdeProject.findOne({ owner: req.user._id, location: "cloud", "localCopies.path": samePath }).sort({ updatedAt: -1 }));
+  if (linked) {
+    const mine = knownDevice ? copyOn(linked, deviceId) : null;
+    if (mine && samePath.test(mine.path) && !mine.here) {
+      putCopy(linked, deviceId, { path: mine.path, at: new Date(), here: true });
+      await linked.save();
+    }
+    return res.json({ project: projectJson(linked, req) });
+  }
   // A name that is already used gets a number, like "app (2)"
   let free = name;
   for (let n = 2; n < 100 && (await nameTaken(req.user._id, free)); n++) free = `${name.slice(0, 74)} (${n})`;
@@ -410,6 +428,11 @@ router.patch("/projects/:id", isAuthenticated, async (req, res) => {
   }
   if (req.body?.repo !== undefined) {
     if (req.body.repo !== null && !REPO_NAME.test(req.body.repo)) return res.status(400).json({ error: "Pick a repo" });
+    // A Mastero project (or one being made one) is its repo: GitHub is its master copy and every push goes there, so it
+    // can't be unlinked or moved to another repo here (the repo itself can still be renamed on GitHub by the agent)
+    if ((project.mastero || project.masteroPending) && String(req.body.repo || "").toLowerCase() !== String(project.repo || "").toLowerCase()) {
+      return res.status(409).json({ error: `This is a Mastero project: it stays on ${project.repo}.`, code: "is_mastero" });
+    }
     if (req.body.repo) {
       // One project per repo, so the same code never shows up twice
       const other = await IdeProject.findOne({ owner: req.user._id, _id: { $ne: project._id }, repo: new RegExp(`^${req.body.repo.replace(/\./g, "\\.")}$`, "i") }).select("name"); // repo names are only letters, digits, - _ . /
@@ -567,7 +590,8 @@ router.post("/projects/:id/open", isAuthenticated, async (req, res) => {
       // One open PR per project: while a Classgrid pull request is open, work starts from its branch, so the
       // AI sees the changes that are not merged yet and its new commits go to that same pull request
       const base = (await ssh.execCommand(`git -C ${dir} rev-parse --abbrev-ref HEAD`)).stdout.trim();
-      const openBranch = await openClassgridPrBranch(project.repo, key, base);
+      // (a Mastero project works on the main branch in both places: no pull request branch)
+      const openBranch = project.mastero ? null : await openClassgridPrBranch(project.repo, key, base);
       if (openBranch) {
         const ref = JSON.stringify(`+refs/heads/${openBranch}:refs/remotes/origin/${openBranch}`);
         await ssh.execCommand(
@@ -649,7 +673,7 @@ async function projectGithub(project, userId) {
   const repoRes = await gh("");
   if (!repoRes.ok) return { gh, error: repoRes.status === 404 ? "The repo was not found, or Classgrid cannot see it" : `GitHub said ${repoRes.status}` };
   const base = (await repoRes.json()).default_branch || "main";
-  const branch = (await openClassgridPrBranch(project.repo, key, base)) || base;
+  const branch = (project.mastero ? null : await openClassgridPrBranch(project.repo, key, base)) || base;
   return { gh, branch };
 }
 
@@ -871,11 +895,11 @@ async function onComputer(project, folder, tool, args) {
 
 // The branch both places work on, like opening in the cloud: the open Classgrid pull request's branch, else the
 // repo's default branch. Also the repo's size in KB (for the free space check).
-async function projectBranch(repo, key) {
+async function projectBranch(repo, key, { mastero = false } = {}) {
   const r = await fetch(`https://api.github.com/repos/${repo}`, { headers: ghHeaders(key) }).catch(() => null);
   if (!r?.ok) return { error: r?.status === 404 ? `GitHub can't find ${repo}, or Classgrid can't see it.` : "GitHub can't be reached right now. Try again in a moment." };
   const info = await r.json().catch(() => ({}));
-  return { branch: (await openClassgridPrBranch(repo, key, info.default_branch)) || info.default_branch || "main", sizeKb: Number(info.size) || 0 };
+  return { branch: (mastero ? null : await openClassgridPrBranch(repo, key, info.default_branch)) || info.default_branch || "main", sizeKb: Number(info.size) || 0 };
 }
 
 // Before the computer copy is used: the cloud copy's work that isn't on GitHub yet is pushed to the project's branch
@@ -939,7 +963,7 @@ router.post("/projects/:id/copy", isAuthenticated, async (req, res) => {
     const saved = await saveCloudCopy(project);
     if (saved?.error) return res.status(409).json({ error: saved.error });
     const key = await ready.key(project);
-    const where = await projectBranch(project.repo, key);
+    const where = await projectBranch(project.repo, key, { mastero: !!project.mastero });
     if (where.error) return res.status(502).json({ error: where.error });
     const r = await onComputer(project, folder, "clone_repo", { repo: project.repo, branch: where.branch, size_kb: where.sizeKb, token: key, name: ready.user.github_name, email: ready.user.github_email });
     if (r.error) return res.status(409).json({ error: r.code === "folder_gone" ? "This folder wasn't picked in the Classgrid app. Pick it again." : r.error, code: r.code });
@@ -1035,6 +1059,7 @@ async function linkFolderProject(project, repo, deviceId) {
   // Its chats so far happened on this computer: they stay there and never show on the website
   project.pcChatSessionIds = [...new Set([...pcChatIds(project), ...(project.chatSessionIds || [])])];
   project.repo = repo;
+  project.masteroRepo = null; // linked now: a repo Mastero made and couldn't fill is either this one or not used
   project.location = "cloud";
   project.localPath = null;
   putCopy(project, deviceId, { path: folder, at: new Date(), here: true });
@@ -1068,58 +1093,124 @@ router.post("/projects/:id/cloud", isAuthenticated, async (req, res) => {
 
 // Settings → Mastero: push the user's Mastero projects after every change without asking (on by default)
 router.get("/mastero-settings", isAuthenticated, async (req, res) => {
+  await connectDB();
   const u = await User.findById(req.user._id).select("mastero_settings").lean().catch(() => null);
   res.json({ autoPush: u?.mastero_settings?.auto_push !== false });
 });
 router.put("/mastero-settings", isAuthenticated, async (req, res) => {
   if (typeof req.body?.autoPush !== "boolean") return res.status(400).json({ error: "autoPush must be true or false" });
-  await User.updateOne({ _id: req.user._id }, { $set: { "mastero_settings.auto_push": req.body.autoPush } });
-  res.json({ autoPush: req.body.autoPush });
+  try {
+    await connectDB();
+    await User.updateOne({ _id: req.user._id }, { $set: { "mastero_settings.auto_push": req.body.autoPush } });
+    res.json({ autoPush: req.body.autoPush });
+  } catch (e) {
+    console.error("[IDE] Saving Mastero settings failed:", e.message);
+    res.status(500).json({ error: "Could not save this setting. Try again." });
+  }
 });
+
+// Whether a repo has any code on GitHub yet: "empty" (made, nothing pushed), "gone" (deleted, or this login can't see
+// it) or "has_code". When GitHub can't be asked it counts as "has_code", so nothing is ever pushed over code that may be there.
+async function repoState(repo, key) {
+  const r = await fetch(`https://api.github.com/repos/${repo}/branches?per_page=1`, { headers: ghHeaders(key) }).catch(() => null);
+  if (r?.status === 404) return "gone";
+  if (!r?.ok) return "has_code";
+  const list = await r.json().catch(() => null);
+  return Array.isArray(list) && !list.length ? "empty" : "has_code";
+}
+
+// Another of the user's projects already on this repo (one project per repo, so the same code never shows up twice)
+const projectOnRepo = (userId, repo, notId) =>
+  IdeProject.findOne({ owner: userId, _id: { $ne: notId }, repo: new RegExp(`^${escapeRegex(repo)}$`, "i") }).select("name").lean();
 
 // Mastero (Studio's Project tab): a folder project goes on GitHub in one step, when the user asks for it with this
 // button. A project already on GitHub (linked, or its folder pushed to a repo before) keeps that repo and only becomes a
 // Mastero project (existing: true). Otherwise a new repo is made with the name the user typed, the folder's code is
 // pushed to it from this computer (desktop/runner.js sync_repo; a folder with no .gitignore gets one first, so
 // node_modules and .env stay out), and the project is linked to it. Answers { project, repo, repoUrl } or { error, code }.
+// It only starts Mastero (masteroPending): the project is a Mastero project after the user finishes in the chat
+// (/mastero-confirm). Pressing it again before that is safe: the repo already made is used again, never a second one.
+const MASTERO_LOCK = (id) => `ide:masteroBusy:${id}`;
 router.post("/projects/:id/mastero", isAuthenticated, async (req, res) => {
   const project = await ownProject(req, res);
   if (!project) return;
   if (project.mastero) return res.status(409).json({ error: "This is a Mastero project already.", code: "is_mastero" });
-  // Already linked to its repo (on GitHub and maybe on Vercel already): it only becomes a Mastero project. Nothing new
-  // is made and nothing is pushed.
-  if (project.repo) {
-    project.masteroPending = true;
-    await project.save();
-    return res.json({ ok: true, existing: true, project: projectJson(project, req), repo: project.repo, repoUrl: `https://github.com/${project.repo}` });
+  // One press at a time: two presses together would both try to make the repo
+  if (!(await redis.set(MASTERO_LOCK(project._id), "1", "EX", 600, "NX").catch(() => "OK"))) {
+    return res.status(409).json({ error: "Mastero is already working on this project. Wait a moment for it to finish.", code: "mastero_busy" });
   }
-  if (project.location !== "local" || !project.localPath) return res.status(409).json({ error: "Mastero works with a folder project on this computer." });
   try {
+    // Already linked to its repo (on GitHub and maybe on Vercel already): it only becomes a Mastero project. Nothing new
+    // is made. Also the way back in while Mastero isn't finished yet (the chat's cards were closed): it starts again.
+    if (project.repo) {
+      const other = await projectOnRepo(req.user._id, project.repo, project._id);
+      if (other) return res.status(409).json({ error: `This project's repo ${project.repo} is also your project "${other.name}". Open that project instead, so it isn't made twice.`, code: "repo_taken", repo: project.repo });
+      // Linked to a repo that is still empty (a first push that never happened): this computer's copy is pushed to it
+      // now, so Mastero never finishes on a repo without the code. A repo with code is left as it is.
+      let message = "";
+      const deviceId = String(req.body?.deviceId || "");
+      const copy = !isWebsite(req) && DEVICE_ID.test(deviceId) ? copyOn(project, deviceId) : null;
+      if (copy) {
+        const user = await githubTokenFor(req.user._id);
+        const key = user && ((await repoAppToken(project.repo).catch(() => null)) || user.github_access_token);
+        if (key && (await repoState(project.repo, key)) === "empty") {
+          const pushed = await onComputer(project, copy.path, "sync_repo", { mode: "push", repo: project.repo, message: "First version from Classgrid", exact: true, token: key, name: user.github_name, email: user.github_email });
+          if (pushed.error) return res.status(409).json({ error: `Your code couldn't be pushed to ${project.repo}: ${pushed.error} Press Mastero again to try once more.`, code: pushed.code || "push_failed", repo: project.repo });
+          message = lastLine(pushed.text);
+        }
+      }
+      project.masteroPending = true;
+      project.masteroRepo = null;
+      await project.save();
+      return res.json({ ok: true, existing: !message, project: projectJson(project, req), repo: project.repo, repoUrl: `https://github.com/${project.repo}`, ...(message ? { message } : {}) });
+    }
+    if (project.location !== "local" || !project.localPath) return res.status(409).json({ error: "Mastero works with a folder project on this computer." });
     const ready = await readyForCopy(req, res);
     if (!ready) return;
+    const token = ready.user.github_access_token;
+    const pushTo = (repo) => onComputer(project, project.localPath, "sync_repo", { mode: "push", repo, message: "First version from Classgrid", exact: true, token, name: ready.user.github_name, email: ready.user.github_email });
     // A folder that's already on GitHub keeps its own repo: it's linked as it is, so no second repo or project is made
     const had = await onComputer(project, project.localPath, "folder_repo", {});
     const existing = had.error ? null : runnerLine(had.text, "Repo");
     if (existing && REPO_NAME.test(existing)) {
-      const other = await IdeProject.findOne({ owner: req.user._id, _id: { $ne: project._id }, repo: new RegExp(`^${escapeRegex(existing)}$`, "i") }).select("name").lean();
+      const other = await projectOnRepo(req.user._id, existing, project._id);
       if (other) return res.status(409).json({ error: `This folder's repo ${existing} is already your project "${other.name}". Open that project instead, so it isn't made twice.`, code: "repo_taken", repo: existing });
+      // The folder points at a repo that is still empty (desktop/runner.js sync_repo links the folder to the repo before
+      // pushing, so a first push that failed leaves that link behind): the code is pushed there first, so the project is
+      // never linked to a repo without its code. A repo that has code is linked as it is, and nothing is pushed.
+      let message = "";
+      if ((await repoState(existing, await ready.key({ repo: existing }))) === "empty") {
+        const pushed = await pushTo(existing);
+        if (pushed.error) return res.status(409).json({ error: `Your code couldn't be pushed to ${existing}: ${pushed.error} Press Mastero again to try once more.`, code: pushed.code || "push_failed", repo: existing });
+        message = lastLine(pushed.text);
+      }
       project.masteroPending = true;
       await linkFolderProject(project, existing, ready.deviceId);
-      return res.json({ ok: true, existing: true, project: projectJson(project, req), repo: existing, repoUrl: `https://github.com/${existing}` });
+      return res.json({ ok: true, existing: !message, project: projectJson(project, req), repo: existing, repoUrl: `https://github.com/${existing}`, ...(message ? { message } : {}) });
     }
-    const name = String(req.body?.name || "").trim();
-    if (!repoSlug(name)) return res.status(400).json({ error: "Give the repo a name" });
-    const token = ready.user.github_access_token;
-    const made = await newRepoFor(project, token, { name, isPrivate: req.body?.private !== false });
-    if (made.error) return res.status(409).json(made);
-    const pushed = await onComputer(project, project.localPath, "sync_repo", { mode: "push", repo: made.repo, message: "First version from Classgrid", exact: true, token, name: ready.user.github_name, email: ready.user.github_email });
-    if (pushed.error) return res.status(409).json({ error: `The repo ${made.repo} was made, but your code couldn't be pushed: ${pushed.error}`, code: pushed.code || "push_failed", repo: made.repo });
+    // The repo Mastero made on an earlier press whose push failed is used again (unless the user deleted it on GitHub),
+    // so pressing again never makes a second repo or says the name is taken by the first one
+    let repo = project.masteroRepo && (await repoState(project.masteroRepo, token)) !== "gone" ? project.masteroRepo : null;
+    if (!repo) {
+      const name = String(req.body?.name || "").trim();
+      if (!repoSlug(name)) return res.status(400).json({ error: "Give the repo a name" });
+      const made = await newRepoFor(project, token, { name, isPrivate: req.body?.private !== false });
+      if (made.error) return res.status(409).json(made);
+      repo = made.repo;
+      // Kept before the push, so a push that fails (or a request that dies) is retried into this same repo
+      project.masteroRepo = repo;
+      await project.save();
+    }
+    const pushed = await pushTo(repo);
+    if (pushed.error) return res.status(409).json({ error: `The repo ${repo} was made, but your code couldn't be pushed: ${pushed.error} Press Mastero again to try the push once more (no second repo is made).`, code: pushed.code || "push_failed", repo });
     project.masteroPending = true;
-    await linkFolderProject(project, made.repo, ready.deviceId);
-    res.json({ ok: true, project: projectJson(project, req), repo: made.repo, repoUrl: `https://github.com/${made.repo}`, message: lastLine(pushed.text) });
+    await linkFolderProject(project, repo, ready.deviceId);
+    res.json({ ok: true, project: projectJson(project, req), repo, repoUrl: `https://github.com/${repo}`, message: lastLine(pushed.text) });
   } catch (e) {
     console.error("[IDE] Mastero failed:", e.message);
     res.status(500).json({ error: "Could not put this project on GitHub" });
+  } finally {
+    redis.del(MASTERO_LOCK(project._id)).catch(() => {});
   }
 });
 
@@ -1132,18 +1223,21 @@ router.post("/projects/:id/mastero-confirm", isAuthenticated, async (req, res) =
   if (!project.masteroPending || !project.repo) return res.status(409).json({ error: "Press Mastero in the Project tab first." });
   project.mastero = true;
   project.masteroPending = false;
+  project.masteroRepo = null;
   await project.save();
   res.json({ ok: true, project: projectJson(project, req) });
 });
 
 // Push (Studio's Project tab): the project's folder on this computer is committed with the message the user typed and
-// pushed to its repo, when the user asks for it with this button
+// pushed to its repo, when the user asks for it with this button. A Mastero project's button only: nothing Mastero runs
+// before the user finished Mastero in the chat (owner's rule).
 router.post("/projects/:id/push-here", isAuthenticated, async (req, res) => {
   const project = await ownProject(req, res);
   if (!project) return;
   const message = String(req.body?.message || "").trim().slice(0, 200);
   if (!message) return res.status(400).json({ error: "Write what changed (the commit message)" });
   if (!project.repo) return res.status(409).json({ error: "This project isn't on GitHub yet. Use Mastero first.", code: "not_on_github" });
+  if (!project.mastero) return res.status(409).json({ error: project.masteroPending ? "Finish Mastero in the chat first (name, photo, then Finish)." : "Push works for Mastero projects. Use Mastero first.", code: "not_mastero" });
   try {
     const ready = await readyForCopy(req, res);
     if (!ready) return;

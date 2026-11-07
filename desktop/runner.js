@@ -580,6 +580,14 @@ const tools = {
       if (!fs.existsSync(ignore)) {
         try { fs.writeFileSync(ignore, "node_modules/\n.env\n.env.*\n!.env.example\ndist/\nbuild/\n.next/\nout/\n.vercel/\n__pycache__/\n.venv/\nvenv/\n*.log\n.DS_Store\nThumbs.db\n"); } catch { /* read-only folder: pushed as it is */ }
       }
+      // A folder's own .gitignore may not leave out secrets and installed packages: they're also left out here, in this
+      // computer's git settings only (.git/info/exclude), so they never reach GitHub (maybe a public repo)
+      try {
+        const exclude = path.join(String(git("rev-parse", "--git-dir").stdout || ".git").trim().replace(/^(?![A-Za-z]:|\/)/, `${root}/`), "info", "exclude");
+        const had = fs.existsSync(exclude) ? fs.readFileSync(exclude, "utf8") : "";
+        const missing = ["node_modules/", ".env", ".env.*", "!.env.example", ".venv/", "venv/", "__pycache__/"].filter((l) => !had.split(/\r?\n/).includes(l));
+        if (missing.length) { fs.mkdirSync(path.dirname(exclude), { recursive: true }); fs.appendFileSync(exclude, `${had && !had.endsWith("\n") ? "\n" : ""}${missing.join("\n")}\n`); }
+      } catch { /* no git folder settings: the .gitignore above still applies */ }
       git("remote", "add", "origin", `https://github.com/${repo}.git`);
       origin = originOf(git);
     } else if (repo && (repoOfAddress(origin) || "").toLowerCase() !== String(repo).toLowerCase()) {

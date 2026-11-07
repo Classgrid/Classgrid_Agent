@@ -36,11 +36,14 @@ export function StudioAgentsView() {
       .then((r) => r.json()).then((d) => { if (!off && Array.isArray(d?.working)) setWorking(d.working); }).catch(() => {});
     loadChats();
     loadWorking();
-    fetchWithRescue(`${API}/api/ide/projects`, { credentials: "include" })
+    // (again when a project changes, e.g. Mastero made a folder project a cloud project)
+    const loadPlaces = () => fetchWithRescue(`${API}/api/ide/projects`, { credentials: "include" })
       .then((r) => r.json()).then((d) => { if (!off && Array.isArray(d?.projects)) setPlaces(new Map(d.projects.map((p: Project) => [String(p.id), p]))); }).catch(() => {});
+    loadPlaces();
+    window.addEventListener("studio:projects-changed", loadPlaces);
     const fast = setInterval(() => { loadWorking(); tick((n) => n + 1); }, 3000);
     const slow = setInterval(loadChats, 20000);
-    return () => { off = true; clearInterval(fast); clearInterval(slow); };
+    return () => { off = true; clearInterval(fast); clearInterval(slow); window.removeEventListener("studio:projects-changed", loadPlaces); };
   }, []);
 
   const projectOf = (id: string) => places.get(id) || (savedProject(id) as Project | null);
@@ -50,7 +53,7 @@ export function StudioAgentsView() {
   const hidden = (c: Chat | undefined) => !onDesktop() && !!c?.project_id && projectOf(c.project_id)?.location === "local";
   const byId = useMemo(() => new Map((chats || []).map((c) => [c.id, c])), [chats]);
   const busy = new Set(working.map((w) => w.sessionId));
-  const shownWorking = working.filter((w) => !hidden(byId.get(w.sessionId)));
+  const shownWorking = working.filter((w) => !hidden(byId.get(w.sessionId)) && (onDesktop() || byId.has(w.sessionId)));
   const projects = useMemo(() => {
     const groups = new Map<string, { id: string | null; name: string; logo?: string | null; chats: Chat[] }>();
     for (const c of chats || []) {

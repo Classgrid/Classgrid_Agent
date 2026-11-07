@@ -86,7 +86,6 @@ import {
   MessageSquareWarning,
   AlertTriangle,
   OctagonAlert,
-  Loader2,
   UploadCloud,
   Server,
   Mail,
@@ -168,7 +167,7 @@ import { StudioChatMenu, OpenInProjectButton, StudioOverviewButton } from "./Stu
 import { EditorChatHeader, editorIconButton } from "./EditorChatHeader";
 import { EditorChatSidePanel } from "./EditorChatSidePanel";
 import { keepUploadsOnPC, publishChatUploads } from "@/features/superadmin/components/StudioUploadsView";
-import { MasteroAskStep } from "./stepper/MasteroAskStep";
+import { MasteroAskStep, masteroCardOpen } from "./stepper/MasteroAskStep";
 import { PermissionCard, PermissionModePicker, PERMISSION_MODE_KEY, readPermissionMode, type PermissionMode, type PermissionRequest } from "./PermissionControls";
 import AIThinkingBlock from "./AIThinkingBlock";
 import RichChatInput from "./RichChatInput";
@@ -263,6 +262,24 @@ function rememberEndedChat(id: string, reason: string | null | undefined) {
     if (reason === undefined) { if (!(id in all)) return; delete all[id]; } else { all[id] = reason; }
     localStorage.setItem(ENDED_CHATS_KEY, JSON.stringify(all));
   } catch { /* storage unavailable: the server check still applies */ }
+}
+
+// The project a chat opens with, from its session details (null: it opens as a plain chat). On the website a folder
+// project's chat (This PC) opens as a plain chat, since the folder is only in the desktop app. The server's word on the
+// project's place comes first: this browser's saved project list can be older than a Mastero step and still say
+// "local" for a project that is in the cloud now. A finished Mastero project is always in the cloud.
+function chatProjectOf(sData: any): string | null {
+  const id: string | null = sData?.projectId || null;
+  if (!id) return null;
+  if (onDesktop() || sData.projectMastero) return id;
+  return (sData.projectLocation || savedProject(id)?.location) !== "local" ? id : null;
+}
+
+// A message only for the AI (Mastero's card telling it what the user picked, a login done...): never a bubble, a
+// question dot or copied text. Sent now it has hidden; loaded from the server it is known by its "[SYSTEM:" start.
+function isHiddenMessage(m: { role?: string; content?: unknown; hidden?: boolean } | null | undefined): boolean {
+  if (!m) return false;
+  return !!m.hidden || (m.role === "user" && typeof m.content === "string" && m.content.trim().startsWith("[SYSTEM:"));
 }
 
 async function getPresignedUrlForAskAiFile(name: string, type: string, size: number): Promise<any> {
@@ -2124,7 +2141,7 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
   // Build TOC items from user questions
   const tocItems = useMemo(() => {
     return messages
-      .filter((m) => m.role === "user" && m.content)
+      .filter((m) => m.role === "user" && m.content && !isHiddenMessage(m)) // no dots for messages only for the AI
       .map((m) => {
         let label = m.tocSummary || m.content.trim();
         if (!m.tocSummary) {
@@ -2742,11 +2759,14 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
   const [fileMentions, setFileMentions] = useState<string[]>([]);
   // Studio: comments and quotes on code from the Files tab, sent with the next message (kept per chat)
   const isStudio = pageContext?.path === "/c/studio";
-  // Mastero's card (the AI's mastero_ask in the newest answer): shown on the chat box until the user answers it
+  // Mastero's card (the AI's mastero_ask in the newest answer): shown on the chat box until the user answers it. Only
+  // the newest answer's last card: once the user answers or cancels, a (hidden) message follows it, so the card goes.
+  // After a reload the same rule finds it again (an unanswered card is still the last answer's).
   const masteroAsk = (() => {
     const last = messages[messages.length - 1];
     if (!last || last.role !== "assistant") return null;
-    return [...(last.steps || [])].reverse().find((s: any) => s.type === "tool" && s.tool === "mastero_ask" && s.status === "success") as any || null;
+    const step = [...(last.steps || [])].reverse().find((s: any) => s.type === "tool" && s.tool === "mastero_ask") as any;
+    return step && masteroCardOpen(step) ? step : null;
   })();
   // Studio's Uploads tab: the files sent in this chat (pictures sent from the desktop app as they are on this computer)
   useEffect(() => {
@@ -3276,7 +3296,7 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
           const sData = await sessionRes.json();
           savedDetails = sData;
           // Website: a folder project's chat (This PC) opens as a plain chat; that project is never opened here
-          const chatProject: string | null = sData.projectId && (onDesktop() || (sData.projectLocation || savedProject(sData.projectId)?.location) !== "local") ? sData.projectId : null;
+          const chatProject: string | null = chatProjectOf(sData);
           // A project's chat opened from Agent mode (Library, an old link...): open it in Project Mode, in its project
           const parts = window.location.pathname.split("/");
           const agentAt = parts.indexOf("agent");
@@ -3375,7 +3395,11 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
     // (hidden: sent for the AI only, like Mastero's steps telling it what the user picked)
     const handleAsk = (e: Event) => {
       const { text, hidden } = (e as CustomEvent<{ text?: string; hidden?: boolean }>).detail || {};
-      if (text) askQuestionRef.current?.(text, hidden ? { hidden: true } : undefined);
+      if (!text) return;
+      // The AI is still answering (e.g. the user sent a message while a Mastero card was saving): the hidden message
+      // waits its turn (the queue below sends it), so it doesn't start a second answer that mixes into this one
+      if (hidden && chatBusyRef.current) { waitingHiddenRef.current.push({ text, gen: chatGenRef.current }); return; }
+      askQuestionRef.current?.(text, hidden ? { hidden: true } : undefined);
     };
 
     window.addEventListener("agent:new-chat", handleNewChat);
@@ -3448,10 +3472,12 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
             if (controller.signal.aborted) return;
             saveChatCopy(routeSessionId, sData, mData?.messages); // desktop app: keep a copy on this computer
             if (sData?.session) setIsPinned(!!sData.session.pinned);
-            // Desktop app, Studio: a chat opened from the list opens its project too (or no project), as opening it any
-            // other way does, so the Terminal tab and the Files tab are that project's
-            if (DESKTOP_STUDIO && sData?.session && window.location.pathname.split("/").includes("studio")) {
-              const want: string | null = sData.projectId || null;
+            // Studio (website and desktop app): a chat opened by its link (the list, a copied link or QR code, a reload)
+            // opens its project too (or no project), as opening it any other way does, so the Project, Files and
+            // Terminal tabs are that project's. The website used to skip this, so a Mastero project's chat opened there
+            // said "No project picked". Same rule as handleLoadChat (a folder project's chat stays a plain chat online).
+            if (sData?.session && window.location.pathname.split("/").includes("studio")) {
+              const want: string | null = chatProjectOf(sData);
               let now: string | null = null;
               try { now = sessionStorage.getItem("cg_project_open") || localStorage.getItem("cg_project_open"); } catch { /* storage blocked */ }
               if (want !== now) {
@@ -3619,6 +3645,14 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
   const gridSessionId = sessionId && !isIncognito && sessionId !== "schedule" && sessionId !== "library" ? sessionId : null;
   const gridSubmittingRef = useRef(submitting);
   gridSubmittingRef.current = submitting;
+  // The AI is still answering (its stream, or its words still being typed out). Mastero's card stays locked then, and
+  // a hidden message sent meanwhile (agent:ask) waits for the answer to end, so two answers never mix into one.
+  const replyTyping = (() => { const last = messages[messages.length - 1]; return last?.role === "assistant" && last.typing === true; })();
+  const chatBusy = thinking || submitting || replyTyping;
+  const chatBusyRef = useRef(chatBusy);
+  chatBusyRef.current = chatBusy;
+  // Hidden messages waiting for the AI to finish (with the chat they were sent in: one left from another chat is dropped)
+  const waitingHiddenRef = useRef<{ text: string; gen: number }[]>([]);
   const gridOpenChatRef = useRef(gridSessionId);
   gridOpenChatRef.current = gridSessionId;
   const gridMyEmailRef = useRef("");
@@ -3741,7 +3775,7 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
       .filter((p) => p.role === "member" && p.joinedAt)
       .map((p) => ({ name: p.name, email: p.email, via: via[p.email], at: new Date(p.joinedAt as string).getTime() }))
       .sort((a, b) => a.at - b.at);
-    const visible = messages.filter((m) => !m.hidden && !(m.role === "user" && typeof m.content === "string" && m.content.trim().startsWith("[SYSTEM:")));
+    const visible = messages.filter((m) => !isHiddenMessage(m));
     const byMessage: Record<string, any[]> = {};
     const after: any[] = [];
     for (const j of joins) {
@@ -3925,6 +3959,7 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
     if (messages.length === 0) return;
     try {
       const text = messages
+        .filter((m) => !isHiddenMessage(m)) // messages only for the AI aren't the user's
         .map((m) => `${m.role === "user" ? "You" : "Classgrid AI"}:\n${m.content}`)
         .join("\n\n---\n\n");
       await navigator.clipboard.writeText(text);
@@ -4365,8 +4400,12 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
     let apiQuestion = question.trim();
     const isDocsContextActive = pageContext?.path?.startsWith("/docs") && pageContext.path !== lastSentDocsPath;
 
+    // A hidden message (Mastero's card telling the AI what the user picked, a login done...) is for the AI only: what the
+    // user is typing, their files and pasted text stay in the chat box for their own next message
+    const hiddenSend = !!options?.hidden;
+    const sentPasted = hiddenSend ? [] : pastedTexts;
     // Only send files that successfully uploaded
-    const filesToUpload = attachedFiles
+    const filesToUpload = (hiddenSend ? [] : attachedFiles)
       .filter(f => f.status === "done" && f.url)
       .map(f => ({
         name: f.name,
@@ -4384,10 +4423,10 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
       apiQuestion = apiQuestion ? `${apiQuestion}\n\n${codeNotesText(sentCodeNotes)}` : codeNotesText(sentCodeNotes);
     }
 
-    if (!apiQuestion && !isDocsContextActive && filesToUpload.length === 0 && pastedTexts.length === 0) return;
+    if (!apiQuestion && !isDocsContextActive && filesToUpload.length === 0 && sentPasted.length === 0) return;
 
-    if (pastedTexts.length > 0) {
-      apiQuestion = `${apiQuestion}\n\n${pastedTexts.map((pt, i) => `[PASTED TEXT ${i + 1}]:\n${pt}`).join("\n\n")}`;
+    if (sentPasted.length > 0) {
+      apiQuestion = `${apiQuestion}\n\n${sentPasted.map((pt, i) => `[PASTED TEXT ${i + 1}]:\n${pt}`).join("\n\n")}`;
     }
 
     if (isDocsContextActive && pageContext?.path && filesToUpload.length === 0) {
@@ -4408,13 +4447,15 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
     }
 
     setError("");
-    setInput("");
-    setAttachedFiles([]);
-    setPastedTexts([]);
-    localStorage.removeItem("askAiDraftInput");
-    localStorage.removeItem("askAiDraftFiles");
-    localStorage.removeItem("askAiDraftPastedTexts");
-    localStorage.removeItem("askAiDraftContext");
+    if (!hiddenSend) {
+      setInput("");
+      setAttachedFiles([]);
+      setPastedTexts([]);
+      localStorage.removeItem("askAiDraftInput");
+      localStorage.removeItem("askAiDraftFiles");
+      localStorage.removeItem("askAiDraftPastedTexts");
+      localStorage.removeItem("askAiDraftContext");
+    }
 
     // CLEAR BUFFERS SO OLD STREAM DOESN'T BLEED IN
     tokenBufferRef.current = "";
@@ -4430,8 +4471,8 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
 
     const uploadedAttachments: AiAttachment[] = filesToUpload;
 
-    const pastedTextAttachments: AiAttachment[] = pastedTexts.map((pt, i) => ({
-      name: pastedTexts.length > 1 ? `Pasted text ${i + 1}.txt` : `Pasted text.txt`,
+    const pastedTextAttachments: AiAttachment[] = sentPasted.map((pt, i) => ({
+      name: sentPasted.length > 1 ? `Pasted text ${i + 1}.txt` : `Pasted text.txt`,
       url: "",
       mimeType: "text/plain",
       size: new Blob([pt]).size,
@@ -5173,8 +5214,16 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
 
     // If we are fully done generating and typing (and, in a shared chat, the agent isn't answering someone else)
     if (!thinking && !submitting && !isTyping && !gridBlockedBy) {
-      // First check if there is a priority message
-      if (priorityMessage) {
+      // A hidden message (Mastero's card telling the AI what the user picked) that waited for the last answer goes
+      // first, so the AI hears it before anything typed after it. One left from another chat is dropped.
+      waitingHiddenRef.current = waitingHiddenRef.current.filter((w) => w.gen === chatGenRef.current);
+      const hiddenNext = waitingHiddenRef.current.shift();
+      if (hiddenNext) {
+        setSubmitting(true);
+        setTimeout(() => askQuestionRef.current?.(hiddenNext.text, { hidden: true }), 50);
+      }
+      // Then check if there is a priority message
+      else if (priorityMessage) {
         setSubmitting(true);
         const textToSend = priorityMessage.text;
         const isEditMsg = priorityMessage.isEdit;
@@ -5370,8 +5419,7 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
           const node = (
           <>
             {messages.map((rawMessage, index) => {
-              if (rawMessage.hidden) return null;
-              if (rawMessage.role === 'user' && typeof rawMessage.content === 'string' && rawMessage.content.trim().startsWith('[SYSTEM:')) return null;
+              if (isHiddenMessage(rawMessage)) return null;
 
               // Parse pasted text out of the content dynamically to reconstruct chips on page refresh
               const message = { ...rawMessage };
@@ -6532,10 +6580,11 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
                 </>
               )}
               <form onSubmit={handleSubmit} className={cn("@container space-y-2", endedView && "hidden")}>
-                {/* Mastero: the AI asks for the project's name or photo; its card sits just above the chat box */}
+                {/* Mastero: the AI asks for the project's name, photo or Finish; its card sits just above the chat box.
+                    Locked while the AI is still answering (its words still being typed out too, so nothing mixes) */}
                 {masteroAsk && (
                   <div className={cn(variant === "overlay" ? "w-full" : "sm:w-[80%]", "w-full mx-auto")}>
-                    <MasteroAskStep key={masteroAsk.id} stepId={masteroAsk.id} args={masteroAsk.args} result={masteroAsk.result} status={masteroAsk.status} active className="w-full" />
+                    <MasteroAskStep key={masteroAsk.id} stepId={masteroAsk.id} args={masteroAsk.args} result={masteroAsk.result} status={masteroAsk.status} active={!chatBusy && !gridBlockedBy} className="w-full" />
                   </div>
                 )}
                 {/* The agent waits for the user to allow an action: its card sits just above the chat box */}

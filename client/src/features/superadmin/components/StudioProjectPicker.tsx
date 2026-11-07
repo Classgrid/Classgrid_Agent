@@ -2,20 +2,21 @@
 // made in either mode shows in both. A new project can start with a GitHub repo or without one.
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { Check, ChevronDown, ChevronRight, Cloud, Folder, FolderOpen, FolderPlus, HardDriveDownload, Loader2, FolderX, Laptop, Link2, Pencil, Search, Trash2, X } from "lucide-react";
+import { Check, ChevronDown, ChevronRight, Cloud, Folder, FolderOpen, FolderPlus, HardDriveDownload, FolderX, Laptop, Link2, Pencil, Search, Trash2, X } from "lucide-react";
 import { toast } from "sonner";
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/marketing_ui/dialog";
 import { DangerConfirmDialog } from "@/components/marketing_ui/danger-confirm-dialog";
 import { fetchWithRescue } from "@/lib/rescue";
 import { ProjectPlaceSwitch } from "./ProjectPlaceSwitch";
-import { getCopyOnThisComputer, thisComputerCopy, type LocalCopy } from "../utils/projectCopies";
+import { getCopyOnThisComputer, saveProjectList, thisComputerCopy, type LocalCopy } from "../utils/projectCopies";
+import { Spinner } from "@/components/marketing_ui/spinner";
 
 const backendUrl = import.meta.env.VITE_API_URL || "https://api.classgrid.in";
 const PICK_KEY = "cg_project_open"; // the same open project as Project Mode: both views always show one project
 const EASE = [0.22, 1, 0.36, 1] as const;
 
-type Project = { id: string; name: string; repo: string | null; logo?: string | null; updatedAt: string; location?: "cloud" | "local"; localPath?: string | null; localCopies?: LocalCopy[] };
+type Project = { id: string; name: string; repo: string | null; logo?: string | null; updatedAt: string; location?: "cloud" | "local"; localPath?: string | null; localCopies?: LocalCopy[]; mastero?: boolean; masteroPending?: boolean };
 type Repo = { fullName: string; private: boolean };
 
 async function api(path: string, init?: RequestInit) {
@@ -52,7 +53,9 @@ export async function openLocalFolder(picked?: string): Promise<Project | null> 
   const { res, data } = await api("/projects/local", { method: "POST", body: JSON.stringify({ localPath: folder }) });
   if (!res.ok || !data?.project) { toast.error(data?.error || "Couldn't open that folder"); return null; }
   const p = data.project;
-  return { id: String(p.id), name: p.name, repo: p.repo || null, logo: p.logo || null, updatedAt: p.updatedAt, location: "local", localPath: p.localPath };
+  // Its place and Mastero state as the server says (a folder that is a Mastero project's copy here is that cloud
+  // project, not a new folder project), never "local" by default
+  return { id: String(p.id), name: p.name, repo: p.repo || null, logo: p.logo || null, updatedAt: p.updatedAt, location: p.location === "cloud" ? "cloud" : "local", localPath: p.localPath || null, localCopies: p.localCopies, mastero: !!p.mastero, masteroPending: !!p.masteroPending };
 }
 
 function readPick(): string | null {
@@ -73,7 +76,7 @@ async function fetchProjects(): Promise<Project[] | null> {
     const { res, data } = await api("/projects");
     if (!res.ok) return null;
     const list: Project[] = data.projects || [];
-    try { localStorage.setItem(LIST_KEY, JSON.stringify(list.map(({ id, name, repo, logo, updatedAt, location, localPath, localCopies }) => ({ id, name, repo, logo, updatedAt, location, localPath, localCopies })))); } catch { /* storage blocked */ }
+    saveProjectList(list); // with each project's Mastero state, so no screen takes a Mastero project for a folder one
     return list;
   } catch { return null; }
 }
@@ -115,7 +118,7 @@ const downloadButton = (p: Project, downloading: string | null, download: (p: Pr
     aria-label="Download to this PC"
     className="shrink-0 flex items-center justify-center size-7 mr-1 rounded text-muted-foreground hover:text-foreground hover:bg-black/[0.06] dark:hover:bg-white/[0.08] disabled:opacity-50"
   >
-    {downloading === p.id ? <Loader2 className="size-3.5 animate-spin" /> : <HardDriveDownload className="size-3.5" />}
+    {downloading === p.id ? <Spinner className="size-3.5" /> : <HardDriveDownload className="size-3.5" />}
   </button>
 );
 
@@ -326,7 +329,7 @@ export function StudioProjectPicker() {
             <div className="hidden group-hover:flex items-center pr-1">
               {[
                 { label: "Rename", Icon: Pencil, run: () => { setOpen(false); setRenaming(p); } },
-                { label: p.repo ? "Change repo" : "Link a repo", Icon: Link2, run: () => { setOpen(false); setLinking(p); } },
+                ...(p.mastero || p.masteroPending ? [] : [{ label: p.repo ? "Change repo" : "Link a repo", Icon: Link2, run: () => { setOpen(false); setLinking(p); } }]),
                 { label: "Delete", Icon: Trash2, run: () => setDeleting(p) },
               ].map(({ label, Icon, run }) => (
                 <button key={label} type="button" onClick={run} title={label} aria-label={label} className="flex items-center justify-center size-6 rounded text-muted-foreground hover:text-foreground hover:bg-black/[0.06] dark:hover:bg-white/[0.08] transition-colors">

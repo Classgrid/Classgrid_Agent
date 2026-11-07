@@ -1,8 +1,9 @@
 // Studio Mode's Project tab: everything about the open project in one place (the same project as Project Mode):
 // its name and logo, GitHub (repo, working branch, open pull request), Vercel, the last commit and the history.
 import { useCallback, useEffect, useRef, useState } from "react";
+import { Spinner } from "@/components/marketing_ui/spinner";
 import { motion, useReducedMotion } from "framer-motion";
-import { ArrowLeftRight, ArrowUpFromLine, Check, ExternalLink, FolderGit2, GitBranch, GitCommitHorizontal, GitPullRequest, ImagePlus, Loader2, Pencil, RotateCw, X } from "lucide-react";
+import { ArrowLeftRight, ArrowUpFromLine, Check, ExternalLink, FolderGit2, GitBranch, GitCommitHorizontal, GitPullRequest, ImagePlus, Pencil, RotateCw, X } from "lucide-react";
 import { Link } from "react-router-dom";
 import { toast } from "sonner";
 import { fetchWithRescue } from "@/lib/rescue";
@@ -16,7 +17,7 @@ import { onDesktop, thisComputerCopy, type LocalCopy } from "../utils/projectCop
 const backendUrl = import.meta.env.VITE_API_URL || "https://api.classgrid.in";
 const EASE = [0.22, 1, 0.36, 1] as const;
 
-type Project = { id: string; name: string; repo: string | null; logo?: string | null; updatedAt?: string; location?: "cloud" | "local"; localPath?: string | null; localCopies?: LocalCopy[]; mastero?: boolean };
+type Project = { id: string; name: string; repo: string | null; logo?: string | null; updatedAt?: string; location?: "cloud" | "local"; localPath?: string | null; localCopies?: LocalCopy[]; mastero?: boolean; masteroPending?: boolean };
 type Info = { repoUrl: string | null; branch: string | null; commit: { message: string; date: string | null; sha: string; url: string | null } | null; vercel: { name: string; dashboardUrl: string; appUrl: string; domain: string } | null };
 type Commit = { sha: string; message: string; author: string | null; avatar: string | null; date: string | null; url: string | null };
 type History = { branch: string | null; pr: { number: number; title: string; url: string } | null; commits: Commit[] };
@@ -121,16 +122,22 @@ export function StudioProjectView({ projectId, reloadKey = 0 }: { projectId: str
     }
   };
 
+  // Only the newest load shows its answer: an older one still on its way (started before Mastero answered) would bring
+  // back the Mastero button or hide Push after Finish
+  const loadSeq = useRef(0);
   const load = useCallback(async () => {
     if (!projectId) return;
+    const seq = ++loadSeq.current;
     setLoading(true);
     setError(null);
     try {
       const list = await api("/projects");
+      if (seq !== loadSeq.current) return;
       const p = (list.data.projects || []).find((x: Project) => x.id === projectId) || null;
       setProject(p);
       if (!p?.repo) { setInfo(null); setHistory(null); return; }
       const [gi, hi] = await Promise.all([api(`/projects/${projectId}/github`), api(`/projects/${projectId}/commits`)]);
+      if (seq !== loadSeq.current) return;
       const missing = gi.data.error === "github_not_connected" || gi.data.error === "github_expired" || hi.data.error === "github_not_connected";
       setGithubMissing(missing);
       setInfo(gi.res.ok ? gi.data : null);
@@ -139,7 +146,7 @@ export function StudioProjectView({ projectId, reloadKey = 0 }: { projectId: str
     } catch {
       setError("Could not load the project's details");
     } finally {
-      setLoading(false);
+      if (seq === loadSeq.current) setLoading(false);
     }
   }, [projectId]);
 
@@ -147,6 +154,12 @@ export function StudioProjectView({ projectId, reloadKey = 0 }: { projectId: str
   // Desktop app: the GitHub account is checked now, so the Mastero and Push dialogs open with it (no loading there)
   useEffect(() => { if (onDesktop()) void warmGithubAccount(); }, []);
   useEffect(() => { if (reloadKey) load(); }, [reloadKey, load]);
+  // A project changed somewhere else (Mastero finished in the chat, a new name or photo): shown here at once
+  useEffect(() => {
+    const again = () => { void load(); };
+    window.addEventListener("studio:projects-changed", again);
+    return () => window.removeEventListener("studio:projects-changed", again);
+  }, [load]);
 
   if (!projectId) {
     return (
@@ -188,7 +201,7 @@ export function StudioProjectView({ projectId, reloadKey = 0 }: { projectId: str
               ? <img src={project.logo} alt="" className="size-full object-cover" />
               : <FolderGit2 className="size-5 text-muted-foreground" />}
             <span className={`absolute inset-0 flex items-center justify-center bg-black/50 text-white transition-opacity ${logoBusy ? "opacity-100" : "opacity-0 group-hover:opacity-100"}`}>
-              {logoBusy ? <Loader2 className="size-4 animate-spin" /> : <ImagePlus className="size-4" />}
+              {logoBusy ? <Spinner className="size-4" /> : <ImagePlus className="size-4" />}
             </span>
           </button>
           <div className="min-w-[10rem] flex-1">
@@ -205,7 +218,7 @@ export function StudioProjectView({ projectId, reloadKey = 0 }: { projectId: str
                   className="min-w-0 flex-1 h-7 px-2 rounded-md border border-black/15 dark:border-white/15 bg-white dark:bg-[#161616] text-[14px] font-medium outline-none focus:border-black/30 dark:focus:border-white/25"
                 />
                 <button onClick={saveName} disabled={renameBusy} className="shrink-0 flex items-center justify-center size-7 rounded-md text-muted-foreground hover:text-foreground hover:bg-black/[0.05] dark:hover:bg-white/[0.06]" title="Save name" aria-label="Save name">
-                  {renameBusy ? <Loader2 className="size-3.5 animate-spin" /> : <Check className="size-3.5" />}
+                  {renameBusy ? <Spinner className="size-3.5" /> : <Check className="size-3.5" />}
                 </button>
                 <button onClick={() => setRenaming(null)} disabled={renameBusy} className="shrink-0 flex items-center justify-center size-7 rounded-md text-muted-foreground hover:text-foreground hover:bg-black/[0.05] dark:hover:bg-white/[0.06]" title="Cancel" aria-label="Cancel">
                   <X className="size-3.5" />
@@ -225,12 +238,22 @@ export function StudioProjectView({ projectId, reloadKey = 0 }: { projectId: str
           </div>
           {/* (a narrow pane puts the buttons on their own line under the name) */}
           <div className="ml-auto flex items-center gap-2">
-            {onDesktop() && project && !project.mastero && (project.location === "local" || thisComputerCopy(project)?.here) && (
+            {/* Mastero, desktop app, one step at a time: the button only before it starts (pressing it twice did it all
+                again); while the chat does its steps (name, photo, Finish) only this line; Push and Continue online
+                only after Finish (mastero) */}
+            {onDesktop() && project?.masteroPending && !project.mastero && (
+              <span className="shrink-0 inline-flex items-center gap-1.5 text-[12px] text-muted-foreground">
+                Finish Mastero in the chat
+                {/* (the cards were cancelled or the chat is gone: start the chat steps again, the repo stays as it is) */}
+                <button type="button" onClick={() => setGitDialog("mastero")} className="text-foreground underline underline-offset-2 hover:opacity-80 cursor-pointer">Continue</button>
+              </span>
+            )}
+            {onDesktop() && project && !project.mastero && !project.masteroPending && (project.location === "local" || thisComputerCopy(project)?.here) && (
               <button onClick={() => setGitDialog("mastero")} className="shrink-0 h-8 px-2.5 inline-flex items-center gap-1.5 rounded-md bg-foreground text-background text-[12px] font-medium hover:opacity-90 transition-opacity cursor-pointer" title="Make a GitHub repo for this project and push your code to it">
                 <img src={GITHUB_ICON} alt="" aria-hidden className="size-3.5 invert dark:invert-0" /> Mastero
               </button>
             )}
-            {onDesktop() && project?.repo && project.mastero && (project.location === "local" || thisComputerCopy(project)?.here) && (
+            {onDesktop() && project?.repo && project.mastero === true && !project.masteroPending && (project.location === "local" || thisComputerCopy(project)?.here) && (
               <button onClick={() => setGitDialog("push")} className="shrink-0 h-8 px-2.5 inline-flex items-center gap-1.5 rounded-md bg-foreground text-background text-[12px] font-medium hover:opacity-90 transition-opacity cursor-pointer" title="Push this computer's changes to GitHub">
                 <ArrowUpFromLine className="size-3.5" /> Push
               </button>
@@ -242,13 +265,15 @@ export function StudioProjectView({ projectId, reloadKey = 0 }: { projectId: str
               Open in Project Mode
             </Link>
             <button onClick={load} className="shrink-0 flex items-center justify-center size-8 rounded-md text-muted-foreground hover:text-foreground hover:bg-black/[0.05] dark:hover:bg-white/[0.06] transition-colors" title="Refresh" aria-label="Refresh">
-              <RotateCw className={`size-3.5 ${loading ? "animate-spin" : ""}`} />
+              {loading ? <Spinner className="size-3.5" /> : <RotateCw className="size-3.5" />}
             </button>
           </div>
         </motion.div>
 
-        {project && <MasteroDialog project={project} already={folderOnline} open={gitDialog === "mastero"} onClose={() => setGitDialog(null)} onDone={(p) => { setProject(p); load(); }} />}
-        {project && <PushDialog project={project} open={gitDialog === "push"} onClose={() => setGitDialog(null)} onDone={load} />}
+        {/* (Mastero's answer is shown at once, so its button goes away at once; the load after it is the newest, so a
+            load started before can't bring the old state back) */}
+        {onDesktop() && project && <MasteroDialog project={project} already={folderOnline} open={gitDialog === "mastero"} onClose={() => setGitDialog(null)} onDone={(p) => { setProject((old) => ({ ...(old || {}), ...p })); void load(); }} />}
+        {onDesktop() && project?.mastero === true && <PushDialog project={project} open={gitDialog === "push"} onClose={() => setGitDialog(null)} onDone={load} />}
 
         {/* Switch to another project, or make a new one */}
         {switching && (
@@ -322,7 +347,7 @@ export function StudioProjectView({ projectId, reloadKey = 0 }: { projectId: str
         </motion.div>
 
         {/* Mastero project, desktop app: the open chat's link and QR code for chat.classgrid.in (online only when the user takes it there) */}
-        {onDesktop() && project?.mastero && (
+        {onDesktop() && project?.mastero === true && !project.masteroPending && (
           <motion.div {...rise(3)}>
             <MasteroOnlineCard className={card} />
           </motion.div>

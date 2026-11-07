@@ -3,10 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
-import {
-  ArrowLeft, ArrowRight, Bot, Camera, ExternalLink, FileDiff, FileText, FolderGit2, FolderOpen, Globe, Images, Maximize2, Minimize2,
-  PanelRightClose, PanelRightOpen, Plus, RotateCw, Search, Terminal, Upload, X,
-} from "lucide-react";
+import { Bot, FileDiff, FileText, FolderGit2, FolderOpen, Globe, Images, Maximize2, Minimize2, PanelRightClose, PanelRightOpen, Plus, Search, Terminal, Upload, X } from "lucide-react";
 import { AskAiPanel } from "@/components/ai/components/AskAiPanel";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { useResumeGridInvite } from "@/components/ai/components/share-grid/GridJoinPage";
@@ -29,7 +26,8 @@ import { toast } from "sonner";
 import { useSidebar } from "@/components/marketing_ui/sidebar";
 import { DesktopMenuBar, editAction, type MenuEntry, type MenuSpec } from "@/components/layout/DesktopMenuBar";
 import { listLocalFiles, localFolderOf } from "../utils/localProject";
-import { PROJECT_PLACE_EVENT, listenProjectSaved, thisComputerCopy, thisDeviceId } from "../utils/projectCopies";
+import { PROJECT_PLACE_EVENT, listenProjectSaved, onDesktop, thisComputerCopy, thisDeviceId } from "../utils/projectCopies";
+import { Spinner } from "@/components/marketing_ui/spinner";
 
 type TabKind = "browser" | "review" | "files" | "terminal" | "project" | "shots" | "uploads" | "file" | "agents";
 type Tab = { id: string; kind: TabKind; path?: string }; // path: a "file" tab's file on this computer (desktop app)
@@ -294,13 +292,24 @@ export function StudioModePage() {
     return d.onBrowser((m) => { if (m?.type === "nav") setBrowserPage({ url: m.url || "", title: m.title || "" }); });
   }, []);
 
-  const studioProjectInfo = useMemo<{ name: string; repo: string | null } | null>(() => {
+  // (read again when a project changes elsewhere: Mastero started or finished, renamed, a new photo)
+  const [projectsSeen, setProjectsSeen] = useState(0);
+  useEffect(() => {
+    const again = () => setProjectsSeen((n) => n + 1);
+    window.addEventListener("studio:projects-changed", again);
+    return () => window.removeEventListener("studio:projects-changed", again);
+  }, []);
+  const studioProjectInfo = useMemo<{ name: string; repo: string | null; pushHere: boolean } | null>(() => {
     try {
       const list = JSON.parse(localStorage.getItem("cg_studio_projects") || "[]");
       const p = (Array.isArray(list) ? list : []).find((x: { id: string }) => x.id === studioProject);
-      return p ? { name: p.name, repo: p.repo || null } : null;
+      if (!p) return null;
+      // The pane's Push is the cloud copy's push. It isn't for a project being made Mastero (nothing Mastero shows before
+      // Finish), nor in the desktop app for a project whose copy is on this computer: its Push is in the Project tab
+      const here = onDesktop() && (p.location === "local" || !!thisComputerCopy(p)?.here);
+      return { name: p.name, repo: p.repo || null, pushHere: !!p.repo && !p.masteroPending && !here };
     } catch { return null; }
-  }, [studioProject, filesReload]);
+  }, [studioProject, filesReload, projectsSeen]);
   const studioProjectName = studioProjectInfo?.name || null;
 
   // Push to GitHub, like Project Mode's button: commit everything and push it (to the project's open pull request)
@@ -613,7 +622,7 @@ export function StudioModePage() {
               transition={{ duration: reduce ? 0 : 0.2, ease: EASE }}
               className="absolute top-3 left-1/2 -translate-x-1/2 z-30 flex items-center gap-2 rounded-full border border-black/10 dark:border-white/[0.08] bg-white dark:bg-[#1e1e1e] pl-3 pr-3.5 h-8 shadow-lg text-[12px] text-muted-foreground"
             >
-              <span className="size-3 rounded-full border-2 border-muted-foreground/30 border-t-muted-foreground animate-spin" />
+              <Spinner className="size-3 text-muted-foreground" />
               {studioProjectInfo?.repo ? `Downloading ${studioProjectInfo.name} from GitHub…` : `Getting ${studioProjectInfo?.name || "the project"} ready…`}
             </motion.div>
           )}
@@ -724,7 +733,7 @@ export function StudioModePage() {
                     <Plus className="relative size-4" />
                   </motion.button>
                   <div className="ml-auto shrink-0 flex items-center gap-1">
-                    {studioProjectInfo?.repo && (
+                    {studioProjectInfo?.pushHere && (
                       <button
                         onClick={() => setPushOpen(true)}
                         disabled={pushing}

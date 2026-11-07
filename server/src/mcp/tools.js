@@ -366,7 +366,7 @@ export const getMcpTools = () => [
 
   {
     name: 'mastero_ask',
-    description: "Mastero (Studio, Classgrid desktop app): after a [SYSTEM: Mastero] message says the user's folder was put on GitHub, show the user a card on the chat box that asks for the project's name (ask \"name\", with your suggestion), its photo/logo (ask \"logo\"), or, last, the user's confirmation that makes it a Mastero project (ask \"confirm\"). The card saves the answer itself and the answer comes back as the user's next message. One card at a time, in that order; end your answer right after calling it.",
+    description: "Mastero (Studio, Classgrid desktop app): only after a [SYSTEM: Mastero] message says the user's folder was put on GitHub (never on your own, and never once the project is a Mastero project), show the user a card on the chat box that asks for the project's name (ask \"name\", with your suggestion), its photo/logo (ask \"logo\"), or, last, the user's confirmation that makes it a Mastero project (ask \"confirm\"). The card saves the answer itself and the answer comes back as the user's next message. One card at a time, in that order; end your answer right after calling it.",
     inputSchema: {
       type: 'object',
       properties: {
@@ -1787,7 +1787,8 @@ const alreadyExistsText = (what, title, when, extra = '') =>
 export const handleToolCall = async (name, args, context = {}) => {
   // A project opened from a folder on the user's own computer: its file and terminal tools run in their desktop app
   if (LOCAL_TOOLS.has(name) && context.sessionId) {
-    const project = await projectForChat(context.sessionId).catch(() => null);
+    // (from the website a project in both places is its cloud copy, so its tools run there instead of being refused)
+    const project = await projectForChat(context.sessionId, { website: context.desktop === false }).catch(() => null);
     if (process.env.CG_LOCAL_DEV) console.log(`[Local runner] ${name} in chat ${context.sessionId}: project ${project?._id || "none"} (${project?.location || "-"})`);
     if (project?.location === "local") {
       // Only the desktop app reaches the user's computer (desktop: false = sent from the website, ai-chat.controller.js)

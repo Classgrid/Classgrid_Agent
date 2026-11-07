@@ -2,7 +2,8 @@
 // user types, the folder's code pushed to it, the project linked to it), and Push sends the folder's changes with the
 // commit message the user types. Server: routes/ide.routes.js /mastero and /push-here.
 import { useEffect, useState } from "react";
-import { ArrowRight, Check, Copy, ExternalLink, FolderGit2, Globe, Loader2, Lock } from "lucide-react";
+import { Spinner } from "@/components/marketing_ui/spinner";
+import { ArrowRight, Check, Copy, ExternalLink, FolderGit2, Globe, Lock } from "lucide-react";
 import { toast } from "sonner";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/marketing_ui/dialog";
 import { fetchWithRescue } from "@/lib/rescue";
@@ -18,7 +19,7 @@ const cancelCls = `${btn} border border-black/10 dark:border-white/[0.1] hover:b
 const goCls = `${btn} bg-foreground text-background font-medium hover:opacity-90`;
 const boxCls = "rounded-lg border border-black/10 dark:border-white/[0.08] bg-black/[0.02] dark:bg-[#161616]";
 
-type Project = { id: string; name: string; repo: string | null; logo?: string | null };
+type Project = { id: string; name: string; repo: string | null; logo?: string | null; mastero?: boolean; masteroPending?: boolean };
 type Account = { login: string | null; name: string | null; avatar: string | null };
 
 const NEW_SERVER = "This needs the newest Classgrid server, which isn't live yet. Try again after the next update.";
@@ -70,27 +71,26 @@ function useGithubAccount(open: boolean) {
 }
 const connectGithub = () => window.dispatchEvent(new CustomEvent("open-ai-hub", { detail: { tab: "plugins", quiet: true } }));
 
-// After the repo is made and pushed, the chat's AI takes over (a hidden message): it asks for the project's name and
-// photo with its Mastero cards (mastero_ask), then tells the user what a Mastero project is
+// After the repo is made and pushed, the chat's AI takes over (a hidden message): one card at a time on the chat box
+// (mastero_ask), in this order: the project's name, its photo (optional, can be skipped), then Finish. Only after Finish
+// does it explain, in a few simple words with the links each on its own line. The message says it is a new start, so an
+// earlier Mastero try in the same chat never mixes in.
 // (made: a new repo was made and pushed; otherwise the project kept the GitHub repo it already had)
 function startMasteroChat(repo: string, folder: string, made: { isPrivate: boolean } | null) {
   const text = [
     made
       ? `[SYSTEM: Mastero] I pressed Mastero in Studio's Project tab. Classgrid already did this: made the ${made.isPrivate ? "private" : "public"} GitHub repo ${repo}, pushed the code in my folder ${folder} to it from my computer, and linked the project to it. Mastero isn't finished yet: it becomes a Mastero project (the same project on my computer and in the Classgrid cloud, with GitHub as its master copy) only when I confirm at the end.`
       : `[SYSTEM: Mastero] I pressed Mastero in Studio's Project tab. My folder ${folder} was already on GitHub as ${repo}, so Classgrid kept that repo (no new repo was made and nothing was pushed) and linked the project to it. Mastero isn't finished yet: it becomes a Mastero project (the same project on my computer and in the Classgrid cloud, with GitHub as its master copy) only when I confirm at the end.`,
-    "Finish Mastero with me, one step at a time:",
+    "Forget any earlier Mastero steps in this chat: this is a new start, from step 1. Finish Mastero with me, one step at a time:",
     '1. Call mastero_ask with ask "name" and a short, nice name suggestion, then end your answer.',
-    '2. When I answer, call mastero_ask with ask "logo", then end your answer.',
+    '2. When I answer, call mastero_ask with ask "logo" (the photo is optional: say in a few words that I can skip it), then end your answer.',
     '3. When I answer, call mastero_ask with ask "confirm", then end your answer. Don\'t explain anything yet.',
-    "4. Only after I confirm, tell me in short, clear points:",
-    "- It's a Mastero project now and GitHub is its master copy.",
-    "- After every answer that changes files, the changes are pushed to GitHub (Settings → Mastero can switch that to asking yes or no first). From my computer they go to the folder's own branch (main for a new repo).",
-    "- If I'm not happy with a change: the Review / Undo box under your answer takes it back while the project is open, and a change already on GitHub you undo with git revert and push that (GitHub's history is never rewritten).",
-    "- To use it in the cloud too (website, phone), the Classgrid GitHub app must be installed on this repo: Projects page → Install app. In the cloud, pushes go to a classgrid/ branch with a pull request that I merge on GitHub, and my computer gets them with a pull the next time it opens.",
-    "- Code runs in the Classgrid cloud only for Node.js (Node 20 / TypeScript) and Python (3.13). Go, Flutter, Java, C++ and others: you can read, write and push them in the cloud, and they run on my computer. On my computer you can do everything.",
-    "- The cloud keeps the code only while it's in use: it leaves the server 5 minutes after the code editor closes (30 minutes without use in Studio); unpushed work is saved to a classgrid-backup-… branch on GitHub first.",
-    "- It can go live on my own Vercel account when I ask.",
-    "Then give me these links, one line each: https://classgrid.in/docs/mastero (Mastero projects), https://classgrid.in/docs/projects-cloud-and-computer (cloud and computer), https://classgrid.in/docs/connect-github (GitHub and the Classgrid app), https://classgrid.in/docs/pull-requests-and-backups (pushes and backups), https://classgrid.in/docs/review-and-undo (review and undo), https://classgrid.in/docs/deploy-with-vercel (going live).",
+    "4. Only after I finish, tell me what changed, in your own simple words, like talking to a friend: not a list of rules, no technical words (no branch, pull request, revert). Start with one line saying it's done, then at most 4 short bullet points, one easy sentence each, about what matters to me now: my code is kept on GitHub; my changes go there by themselves after each answer (I can switch that to asking first in Settings → Mastero); if I don't like a change, I just tell you and you take it back; and I can use it from the website or my phone too.",
+    "Then a line \"Learn more:\" with each link on its own line as a bullet with a short name as the link text, exactly like this:",
+    "- [Mastero projects](https://classgrid.in/docs/mastero)",
+    "- [Using it in the cloud](https://classgrid.in/docs/projects-cloud-and-computer)",
+    "- [Undo a change](https://classgrid.in/docs/review-and-undo)",
+    "Nothing more. Keep these details for later, only when I ask: in the cloud the Classgrid GitHub app must be installed on the repo (Projects page → Install app) and pushes from there go to a classgrid/ branch with a pull request I merge on GitHub; the cloud runs Node.js (Node 20 / TypeScript) and Python (3.13) projects, other kinds run on my computer; the cloud keeps the code only while it's in use (5 minutes after the code editor closes, 30 minutes without use in Studio; unpushed work is saved to a classgrid-backup-… branch first); a change already on GitHub is undone with git revert; it can go live on my own Vercel when I ask (https://classgrid.in/docs/deploy-with-vercel).",
   ].join("\n");
   window.dispatchEvent(new CustomEvent("agent:ask", { detail: { text, hidden: true } }));
 }
@@ -183,8 +183,12 @@ export function MasteroDialog({ project, already, open, onClose, onDone }: { pro
   const [busy, setBusy] = useState(false);
   const [step, setStep] = useState(0);
   const [error, setError] = useState<string | null>(null);
-  const [done, setDone] = useState<{ repo: string; repoUrl: string } | null>(null);
+  // existing: the project kept the repo it had (nothing was made or pushed). Kept here because once it's done the
+  // project passed in has its repo, so keptRepo can't tell any more
+  const [done, setDone] = useState<{ repo: string; repoUrl: string; existing: boolean } | null>(null);
   const [copied, setCopied] = useState(false);
+  // Each opening starts clean (only when it opens: the project changing behind the done screen, e.g. its new name
+  // from the chat, must not wipe it)
   useEffect(() => {
     if (!open) return;
     setName(repoName(folderOf(project.name))); // a project named by its folder's path: the folder's name
@@ -192,14 +196,16 @@ export function MasteroDialog({ project, already, open, onClose, onDone }: { pro
     setError(null);
     setDone(null);
     setCopied(false);
-  }, [open, project.name]);
-  // The steps while it works (one request: the push is the long part, so it shows soon after starting)
+  }, [open]); // eslint-disable-line react-hooks/exhaustive-deps
+  // The steps while it works (one request: the push is the long part, so it shows soon after starting). A kept repo has
+  // only the one step, so it keeps turning until the answer comes.
   useEffect(() => {
     if (!busy) return;
     setStep(0);
+    if (keptRepo) return;
     const t = setTimeout(() => setStep(1), 2500);
     return () => clearTimeout(t);
-  }, [busy]);
+  }, [busy]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const wanted = repoName(name);
   const go = async () => {
@@ -214,7 +220,7 @@ export function MasteroDialog({ project, already, open, onClose, onDone }: { pro
         return;
       }
       setStep(2);
-      setDone({ repo: data.repo, repoUrl: data.repoUrl });
+      setDone({ repo: data.repo, repoUrl: data.repoUrl, existing: !!data.existing });
       if (data.project) { remember(data.project); onDone(data.project); }
       startMasteroChat(data.repo, folderOf(project.name), data.existing ? null : { isPrivate });
     } finally {
@@ -234,7 +240,7 @@ export function MasteroDialog({ project, already, open, onClose, onDone }: { pro
           <>
             <div className="px-5 pt-4 pb-5">
               <DialogTitle className="text-[15px] font-medium">{folderOf(project.name)} is on GitHub</DialogTitle>
-              <DialogDescription className="mt-0.5 text-[13px] text-muted-foreground">{keptRepo ? "It kept its GitHub repo." : "Your code is pushed and the project is linked."} Finish in the chat: name the project, add its photo, then confirm to make it a Mastero project.</DialogDescription>
+              <DialogDescription className="mt-0.5 text-[13px] text-muted-foreground">{done.existing ? "It kept its GitHub repo." : "Your code is pushed and the project is linked."} Now finish in the chat, one step at a time: give the project a name, add a photo if you like (you can skip it), then press Finish. It becomes a Mastero project only then.</DialogDescription>
               <div className={`${boxCls} mt-3 flex items-center gap-2 h-10 pl-3 pr-1`}>
                 <span className="flex-1 min-w-0 truncate font-mono text-[12.5px] text-muted-foreground">{done.repoUrl}</span>
                 <button type="button" onClick={copy} className="shrink-0 flex items-center justify-center size-8 rounded-md text-muted-foreground hover:text-foreground hover:bg-black/[0.05] dark:hover:bg-white/[0.06] cursor-pointer" title="Copy link" aria-label="Copy link">
@@ -243,7 +249,7 @@ export function MasteroDialog({ project, already, open, onClose, onDone }: { pro
               </div>
             </div>
             <Footer>
-              <button type="button" onClick={onClose} className={cancelCls}>Done</button>
+              <button type="button" onClick={onClose} className={cancelCls}>Go to the chat</button>
               <a href={done.repoUrl} target="_blank" rel="noreferrer" className={`${goCls} inline-flex items-center gap-1.5`}>Open on GitHub <ExternalLink className="size-3.5" /></a>
             </Footer>
           </>
@@ -252,7 +258,7 @@ export function MasteroDialog({ project, already, open, onClose, onDone }: { pro
             <div className="px-5 pt-4 pb-5 flex flex-col gap-3">
               <div>
                 <DialogTitle className="text-[15px] font-medium">Mastero</DialogTitle>
-                <DialogDescription className="mt-0.5 text-[13px] text-muted-foreground">{keptRepo ? "This project is on GitHub already. Mastero keeps its repo and makes it a Mastero project: nothing new is made." : "Makes a GitHub repo for this project, pushes your code to it and links it."}</DialogDescription>
+                <DialogDescription className="mt-0.5 text-[13px] text-muted-foreground">{keptRepo ? "This project is on GitHub already. Mastero keeps its repo (nothing new is made), then you finish it in the chat." : "Makes a GitHub repo for this project, pushes your code to it and links it. Then you finish it in the chat."}</DialogDescription>
               </div>
               <AccountRow account={account} onConnect={() => { connectGithub(); onClose(); }} />
               {busy ? (
@@ -260,7 +266,7 @@ export function MasteroDialog({ project, already, open, onClose, onDone }: { pro
                   {(keptRepo ? ["Linking the project"] : STEPS).map((label, i) => (
                     <div key={label} className={`flex items-center gap-2.5 text-[13px] ${i > step ? "text-muted-foreground/60" : ""}`}>
                       {i < step ? <Check className="size-4 text-[#16825d] dark:text-[#4ec9b0]" />
-                        : i === step ? <Loader2 className="size-4 animate-spin" />
+                        : i === step ? <Spinner className="size-4" />
                         : <span className="size-4 flex items-center justify-center"><span className="size-1.5 rounded-full bg-current" /></span>}
                       {label}{i === 1 && i === step ? <span className="text-muted-foreground"> · a big folder takes a minute</span> : null}
                     </div>
@@ -322,7 +328,7 @@ export function MasteroDialog({ project, already, open, onClose, onDone }: { pro
             </div>
             <Footer>
               <button type="button" onClick={onClose} disabled={busy} className={cancelCls}>Cancel</button>
-              <button type="button" onClick={go} disabled={(!wanted && !keptRepo) || busy || !account} className={goCls}>{busy ? "Working…" : keptRepo ? "Make Mastero project" : "Make repo and push"}</button>
+              <button type="button" onClick={go} disabled={(!wanted && !keptRepo) || busy || !account} className={goCls}>{busy ? "Working…" : keptRepo ? "Start Mastero" : "Make repo and push"}</button>
             </Footer>
           </>
         )}
@@ -381,7 +387,7 @@ export function PushDialog({ project, open, onClose, onDone }: { project: Projec
               className="w-full h-9 px-3 rounded-md border border-black/10 dark:border-white/[0.08] bg-white dark:bg-[#161616] text-[13px] outline-none focus:border-black/30 dark:focus:border-white/25"
             />
           </div>
-          {busy && <p className="text-[12.5px] text-muted-foreground flex items-center gap-2"><Loader2 className="size-3.5 animate-spin" />Pushing…</p>}
+          {busy && <p className="text-[12.5px] text-muted-foreground flex items-center gap-2"><Spinner className="size-3.5" />Pushing…</p>}
           {error && <p className="rounded-md bg-red-500/10 px-3 py-2 text-[12.5px] text-red-600 dark:text-red-400">{error}</p>}
         </div>
         <Footer>

@@ -22,7 +22,7 @@
 import { MasteroMark } from "@/components/icons/MasteroMark";
 import React from "react";
 import { createPortal } from "react-dom";
-import { MessageSquare, Plus, Search, Pin, PinOff, MoreHorizontal, Pencil, Trash2, Share, Copy, Mail, Check, Link2, FileText, ExternalLink, X, Loader2, SquarePen, Calendar, Library, FolderInput, FolderPlus, Folder, Star, ChevronDown, ListFilter, Laptop, Cloud } from "lucide-react";
+import { Plus, Search, Pin, PinOff, MoreHorizontal, Pencil, Trash2, Share, Copy, Mail, Check, Link2, X, SquarePen, Calendar, Library, FolderInput, FolderPlus, Folder, Star, ChevronDown, ListFilter, Laptop, Cloud } from "lucide-react";
 import { format } from "date-fns";
 import { NikhilDateCalendar } from "@/components/marketing_ui/nikhil_date_calendar";
 import { useNavigate, useLocation } from "react-router-dom";
@@ -47,9 +47,13 @@ import { GroupDialog, groupIcon, groupsApi, openProjectId, useChatGroups, type C
 import { NewProjectDialog, openStudioProject, openLocalFolder } from "@/features/superadmin/components/StudioProjectPicker";
 import { onDesktop, placeActions, savedProject, thisComputerCopy, type LocalCopy } from "@/features/superadmin/utils/projectCopies";
 
-type SidebarProject = { id: string; name: string; logo?: string | null; location?: "cloud" | "local"; localPath?: string | null; localCopies?: LocalCopy[]; mastero?: boolean };
+// mastero: a finished Mastero project (its own section); masteroPending: still in its Mastero steps (stays in Projects)
+type SidebarProject = { id: string; name: string; logo?: string | null; location?: "cloud" | "local"; localPath?: string | null; localCopies?: LocalCopy[]; mastero?: boolean; masteroPending?: boolean };
 // Desktop app: a project with a folder on this computer (a folder project, or a cloud project downloaded here)
 const onThisPc = (p: Parameters<typeof thisComputerCopy>[0]) => !!p && (p.location === "local" || !!thisComputerCopy(p));
+// A message only for the AI (e.g. Mastero's card telling it what the user picked: "[SYSTEM: Mastero] ..."): never in
+// a copied chat, as it is never a bubble
+const onlyForAi = (msg: any) => msg?.role === "user" && typeof msg.content === "string" && msg.content.trim().startsWith("[SYSTEM:");
 
 interface ChatSession {
   id: string;
@@ -369,7 +373,7 @@ export function AgentNestedMenu({ searchQuery = "", pages }: { searchQuery?: str
       const data = await res.json();
       if (data.messages) {
         let transcript = "";
-        data.messages.forEach((msg: any) => {
+        data.messages.filter((msg: any) => !onlyForAi(msg)).forEach((msg: any) => {
           let cleanContent = msg.content;
           if (cleanContent) {
             cleanContent = cleanContent.replace(/\[IMAGE_GENERATION_COMPLETE:\s*([\s\S]*?)\s*\|\s*(https?:\/\/[^\]]+)\]/g, '[Generated Image: $1]($2)');
@@ -419,7 +423,7 @@ export function AgentNestedMenu({ searchQuery = "", pages }: { searchQuery?: str
       const data = await res.json();
       if (data.messages) {
         let transcript = "";
-        data.messages.forEach((msg: any) => {
+        data.messages.filter((msg: any) => !onlyForAi(msg)).forEach((msg: any) => {
           let cleanContent = msg.content;
           if (cleanContent) {
             cleanContent = cleanContent.replace(/\[IMAGE_GENERATION_COMPLETE:\s*([\s\S]*?)\s*\|\s*(https?:\/\/[^\]]+)\]/g, '[Generated Image: $1]($2)');
@@ -442,7 +446,7 @@ export function AgentNestedMenu({ searchQuery = "", pages }: { searchQuery?: str
       const data = await res.json();
       if (data.messages) {
         let md = "";
-        data.messages.forEach((msg: any) => {
+        data.messages.filter((msg: any) => !onlyForAi(msg)).forEach((msg: any) => {
           const role = msg.role === 'user' ? 'You' : 'Classgrid AI';
           md += `### **${role}**\n${msg.content}\n\n`;
         });
@@ -524,8 +528,15 @@ export function AgentNestedMenu({ searchQuery = "", pages }: { searchQuery?: str
   const groupedIds = new Set(groups.flatMap((g) => g.chats.map((c) => c.id)));
   const sortedGroups = [...groups].sort((a, b) => Number(b.pinned) - Number(a.pinned));
 
-  // Website: a chat of a folder project (This PC) never shows; it lives only in the desktop app
-  const hiddenChat = (s: ChatSession) => !onDesktop() && !!s.project_id && (localProjectIds.current.has(s.project_id) || savedProject(s.project_id)?.location === "local");
+  // Website: a chat of a folder project (This PC) never shows; it lives only in the desktop app. The fresh list from the
+  // server wins over this browser's saved one, which can be from before a Mastero step and still say "local" for a
+  // project that is in the cloud now (its chats would be left out).
+  const hiddenChat = (s: ChatSession) => {
+    if (onDesktop() || !s.project_id) return false;
+    if (localProjectIds.current.has(s.project_id)) return true;
+    if ((projects || []).some((p) => p.id === s.project_id)) return false;
+    return savedProject(s.project_id)?.location === "local";
+  };
   const filteredSessions = sessions.filter(s => !hiddenChat(s) && s.title.toLowerCase().includes(searchQuery.toLowerCase()));
   const pinnedSessions = filteredSessions.filter(s => s.pinned);
   const unpinnedSessions = filteredSessions.filter(s => !s.pinned && !groupedIds.has(s.id));
@@ -689,8 +700,9 @@ export function AgentNestedMenu({ searchQuery = "", pages }: { searchQuery?: str
       for (const g of sortedGroups) if (!g.projectId || names.has(g.projectId) || folders.has(g.projectId)) folderFor(g.projectId || null).groups.push(g);
     }
     if (!searchQuery && !opts.hideEmpty && !opts.unreadOnly && !opts.archivedOnly) {
-      // (desktop app: only the projects on this computer; its cloud projects' chats are on the website)
-      for (const p of projects || []) if (!onDesktop() || onThisPc(p)) folderFor(p.id);
+      // (desktop app: only the projects on this computer; its cloud projects' chats are on the website. A finished
+      // Mastero project is listed anyway: it is on this computer and in the cloud, with its own section)
+      for (const p of projects || []) if (!onDesktop() || onThisPc(p) || p.mastero) folderFor(p.id);
       folderFor(null);
     }
     let list = [...folders.values()];
@@ -716,7 +728,8 @@ export function AgentNestedMenu({ searchQuery = "", pages }: { searchQuery?: str
   const dropFolder = (target: string) => {
     const from = dragFolder.current;
     dragFolder.current = null;
-    if (!from || from === target) return;
+    // (the Mastero section keeps its own order: its folders don't move into or among the Projects list)
+    if (!from || from === target || from.startsWith("mastero:") || target.startsWith("mastero:")) return;
     const keys = studioFolders.map((f) => f.key).filter((k) => k !== from);
     keys.splice(Math.max(0, keys.indexOf(target)), 0, from);
     setFolderOrder(keys);
@@ -724,17 +737,20 @@ export function AgentNestedMenu({ searchQuery = "", pages }: { searchQuery?: str
     setOpt({ sortProjects: "custom" });
   };
   // Mastero projects (owner, 2026-11-07): their own section under Pinned, on the website and in the app, each with all
-  // its chats (the same project on this computer and in the cloud); they leave the Projects list below
-  const masteroIds = React.useMemo(() => new Set((projects || []).filter((p) => p.mastero).map((p) => p.id)), [projects]);
+  // its chats (the same project on this computer and in the cloud); they leave the Projects list below. Only finished
+  // ones (mastero: true, after Finish in the chat): a project still in its Mastero steps stays in Projects, as before.
+  const masteroIds = React.useMemo(() => new Set((projects || []).filter((p) => p.mastero === true).map((p) => p.id)), [projects]);
   const masteroFolders = React.useMemo(() => {
     const byId = new Map<string, (typeof studioFolders)[number]>();
     for (const f of studioFolders) {
       if (!f.id || !masteroIds.has(f.id)) continue;
       const had = byId.get(f.id);
-      if (had) byId.set(f.id, { ...had, chats: [...had.chats, ...f.chats], groups: [...had.groups, ...f.groups] });
+      // (desktop app: its This PC and Cloud folders become one, its chats in the list's order again)
+      if (had) byId.set(f.id, { ...had, chats: sortChats([...had.chats, ...f.chats]), groups: [...had.groups, ...f.groups] });
       else byId.set(f.id, { ...f, key: `mastero:${f.id}` });
     }
     return [...byId.values()];
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [studioFolders, masteroIds]);
   // Desktop app: This PC and Cloud are two lists, never one. Chats with no project keep their own folder after them
   const studioFolderSections = (() => {
@@ -778,7 +794,7 @@ export function AgentNestedMenu({ searchQuery = "", pages }: { searchQuery?: str
       .then((res) => res.json())
       .then((data) => {
         const list: SidebarProject[] = Array.isArray(data.projects)
-          ? data.projects.map((p: any) => ({ id: String(p.id), name: String(p.name || "Untitled"), logo: p.logo || null, location: p.location, localPath: p.localPath || null, localCopies: p.localCopies, mastero: !!p.mastero }))
+          ? data.projects.map((p: any) => ({ id: String(p.id), name: String(p.name || "Untitled"), logo: p.logo || null, location: p.location, localPath: p.localPath || null, localCopies: p.localCopies, mastero: !!p.mastero, masteroPending: !!p.masteroPending && !p.mastero }))
           : [];
         // Website: folder projects (This PC) are never listed; they live only in the desktop app
         localProjectIds.current = new Set(list.filter((p) => p.location === "local").map((p) => p.id));
@@ -1110,6 +1126,10 @@ export function AgentNestedMenu({ searchQuery = "", pages }: { searchQuery?: str
                 const full = fullFolders.includes(f.key);
                 const shown = full || searchQuery ? f.chats : f.chats.slice(0, 5);
                 const isCurrent = (f.id || null) === (openProject || null);
+                // A Mastero project (finished or still in its steps) gets no "Open in the cloud / on this computer":
+                // it is in both places, and switching off this computer's copy would take its Push away
+                const fresh = f.id ? (projects || []).find((p) => p.id === f.id) : null;
+                const actions = fresh?.mastero || fresh?.masteroPending ? [] : placeActions(savedProject(f.id));
                 return (
                   <div
                     key={f.key}
@@ -1131,7 +1151,7 @@ export function AgentNestedMenu({ searchQuery = "", pages }: { searchQuery?: str
                       </button>
                       <div className="absolute right-1 flex items-center">
                         {/* Desktop app: the project's menu, to get a copy on this computer or switch between it and the cloud */}
-                        {placeActions(savedProject(f.id)).length > 0 && (
+                        {actions.length > 0 && (
                           <DropdownMenu>
                             <DropdownMenuTrigger asChild>
                               <button type="button" className="opacity-0 group-hover/fld:opacity-100 focus-visible:opacity-100 data-[state=open]:opacity-100 transition-opacity p-1 rounded hover:bg-black/5 dark:hover:bg-white/10 text-muted-foreground hover:text-foreground cursor-pointer" title="Project menu" aria-label={`${f.name} menu`}>
@@ -1139,7 +1159,7 @@ export function AgentNestedMenu({ searchQuery = "", pages }: { searchQuery?: str
                               </button>
                             </DropdownMenuTrigger>
                             <DropdownMenuContent side="right" align="start" sideOffset={8} className={menuBox("w-[240px]")}>
-                              {placeActions(savedProject(f.id)).map((a) => (
+                              {actions.map((a) => (
                                 <DropdownMenuItem key={a.label} className={menuItem} onClick={() => { a.run(); }}>{a.label}</DropdownMenuItem>
                               ))}
                             </DropdownMenuContent>
@@ -1698,7 +1718,7 @@ export function AgentNestedMenu({ searchQuery = "", pages }: { searchQuery?: str
                 <div className="flex flex-col gap-6">
                   {isLoadingPreview ? (
                     <div className="flex items-center justify-center h-full pt-16">
-                      <Loader2 className="w-8 h-8 animate-spin text-slate-300 dark:text-white/20" />
+                      <Spinner className="size-8 text-slate-300 dark:text-white/20" />
                     </div>
                   ) : (
                     sharePreviewMessages
@@ -1771,7 +1791,7 @@ export function AgentNestedMenu({ searchQuery = "", pages }: { searchQuery?: str
                 disabled={isCreatingLink}
               >
                 <div className="w-[56px] h-[56px] rounded-full bg-primary text-primary-foreground flex items-center justify-center transition-transform hover:scale-105 shadow-sm">
-                  {isCreatingLink ? <Loader2 className="w-6 h-6 animate-spin" /> : linkCopied ? <Check className="w-6 h-6" /> : <Link2 className="w-6 h-6" />}
+                  {isCreatingLink ? <Spinner className="size-6" /> : linkCopied ? <Check className="w-6 h-6" /> : <Link2 className="w-6 h-6" />}
                 </div>
                 <span className="text-[12px] text-slate-400 dark:text-white/60 font-medium">Copy link</span>
               </button>
@@ -1811,7 +1831,7 @@ export function AgentNestedMenu({ searchQuery = "", pages }: { searchQuery?: str
                 disabled={isSharingEmail || sharedEmailSuccess}
               >
                 <div className={`w-[56px] h-[56px] rounded-full flex items-center justify-center transition-transform shadow-sm ${sharedEmailSuccess ? 'bg-green-600 text-white hover:scale-105' : 'bg-primary text-primary-foreground hover:scale-105'}`}>
-                  {sharedEmailSuccess ? <Check className="w-6 h-6" /> : isSharingEmail ? <Loader2 className="w-6 h-6 animate-spin" /> : <Mail className="w-6 h-6" />}
+                  {sharedEmailSuccess ? <Check className="w-6 h-6" /> : isSharingEmail ? <Spinner className="size-6" /> : <Mail className="w-6 h-6" />}
                 </div>
                 <span className="text-[12px] text-slate-400 dark:text-white/60 font-medium">Email</span>
               </button>

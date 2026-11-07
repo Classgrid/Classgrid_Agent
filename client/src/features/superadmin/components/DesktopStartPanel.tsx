@@ -8,7 +8,7 @@ import { openLocalFolder } from "./StudioProjectPicker";
 import { fetchWithRescue } from "@/lib/rescue";
 
 export type LocalWorkspace = { id: string; name: string; localPath?: string | null };
-type Made = { id: string; name: string; repo: string | null; logo?: string | null; updatedAt: string; location: "local"; localPath: string | null };
+type Made = { id: string; name: string; repo: string | null; logo?: string | null; updatedAt: string; location: "local" | "cloud"; localPath: string | null; localCopies?: { deviceId: string; path: string; at?: string; here?: boolean }[]; mastero?: boolean; masteroPending?: boolean };
 // A project on this computer (a folder, or a cloud project's copy here)
 export type RecentProject = { id: string; name: string; path: string; open: () => void };
 // One of the user's cloud projects: downloaded to a folder here (or opened, when it has a copy here already)
@@ -33,7 +33,8 @@ export async function makeLocalProject(folder: string, name?: string): Promise<M
   const data = res ? await res.json().catch(() => ({})) : {};
   if (!res?.ok || !data?.project) { toast.error(data?.error || "Couldn't open that folder"); return null; }
   const p = data.project;
-  return { id: String(p.id), name: p.name, repo: p.repo || null, logo: p.logo || null, updatedAt: p.updatedAt, location: "local", localPath: p.localPath || folder };
+  // (as the server says: a folder that became a Mastero project opens as that cloud project, its copy on this computer)
+  return { id: String(p.id), name: p.name, repo: p.repo || null, logo: p.logo || null, updatedAt: p.updatedAt, location: p.location || "local", localPath: p.location === "cloud" ? null : p.localPath || folder, localCopies: p.localCopies, mastero: !!p.mastero, masteroPending: !!p.masteroPending };
 }
 
 // A box's open menu closes on a click anywhere else
@@ -66,7 +67,7 @@ export function DesktopStartPanel({ recent, cloud, githubRepos, onOpen, onConnec
 
   const openFolder = async () => {
     setBusy("folder");
-    try { const p = await openLocalFolder(); if (p) onOpen({ ...p, location: "local", localPath: p.localPath || null }); }
+    try { const p = await openLocalFolder(); if (p) onOpen(p); }
     finally { setBusy(null); }
   };
   const clone = async (repo: string) => {

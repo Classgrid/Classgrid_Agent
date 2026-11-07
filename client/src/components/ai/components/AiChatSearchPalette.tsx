@@ -15,7 +15,7 @@ import { useEffect, useRef, useState, useCallback } from "react";
 import { createPortal } from "react-dom";
 import { useNavigate } from "react-router-dom";
 import { AnimatePresence, motion } from "framer-motion";
-import { Search, FileText, ArrowRight, Command, Loader2, MessageSquare, LayoutDashboard } from "lucide-react";
+import { Search, FileText, ArrowRight, Command, MessageSquare, LayoutDashboard } from "lucide-react";
 import { Spinner } from "@/components/marketing_ui/spinner";
 import { cn } from "@/lib/utils";
 import { useLocation } from "react-router-dom";

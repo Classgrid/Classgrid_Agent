@@ -37,7 +37,7 @@ import { DesktopStartPanel, makeLocalProject, type CloudProject, type LocalWorks
 import { DesktopMenuBar, editorMenus } from "@/components/layout/DesktopMenuBar";
 import { openLocalFolder } from "../components/StudioProjectPicker";
 import { ProjectPlaceSwitch } from "../components/ProjectPlaceSwitch";
-import { PROJECT_PLACE_EVENT, getCopyOnThisComputer, linkFolderRepo, listenProjectSaved, onDesktop, saveThisComputerCopy, thisComputerCopy, thisDeviceId, type LocalCopy } from "../utils/projectCopies";
+import { PROJECT_PLACE_EVENT, getCopyOnThisComputer, linkFolderRepo, listenProjectSaved, onDesktop, saveProjectList, saveThisComputerCopy, thisComputerCopy, thisDeviceId, type LocalCopy } from "../utils/projectCopies";
 
 const backendUrl = import.meta.env.VITE_API_URL || "https://api.classgrid.in";
 const OPEN_PROJECT_KEY = "cg_project_open"; // which project this browser had open (per-viewer convenience)
@@ -51,7 +51,7 @@ let reloadedInProject = (() => {
 })();
 const AI_PANEL_KEY = "cg_project_ai_closed"; // whether the AI panel was closed (per-viewer convenience)
 
-type Project = { id: string; name: string; repo: string | null; logo?: string | null; lastOpenedAt: string | null; createdAt?: string; updatedAt: string; location?: "cloud" | "local"; localPath?: string | null; localCopies?: LocalCopy[]; mastero?: boolean };
+type Project = { id: string; name: string; repo: string | null; logo?: string | null; lastOpenedAt: string | null; createdAt?: string; updatedAt: string; location?: "cloud" | "local"; localPath?: string | null; localCopies?: LocalCopy[]; mastero?: boolean; masteroPending?: boolean };
 type GithubAccount = { login: string | null; name: string | null; email: string | null; avatar: string | null };
 
 async function api(path: string, init?: RequestInit) {
@@ -305,7 +305,7 @@ export function ProjectModePage() {
     freshList.current = true;
     if (res.ok) {
       setProjects(data.projects || []);
-      try { localStorage.setItem("cg_studio_projects", JSON.stringify((data.projects || []).map(({ id, name, repo, logo, updatedAt, location, localPath, localCopies }: Project) => ({ id, name, repo, logo, updatedAt, location, localPath, localCopies })))); } catch { /* storage blocked */ }
+      saveProjectList(data.projects || []); // with each project's Mastero state, so no screen takes a Mastero project for a folder one
     }
     else setProjects((list) => list || []);
   }, []);
@@ -333,10 +333,15 @@ export function ProjectModePage() {
     // Connected or disconnected somewhere else (AI Hub panel, another tab): check again
     const again = () => { checkGithub(); loadProjects(); };
     const onVisible = () => { if (document.visibilityState === "visible") again(); };
+    // A project changed in Studio or the chat (Mastero started or finished, a new name or photo): the list and its
+    // Mastero section show it at once, without a refresh
+    const changed = () => { void loadProjects(); };
     window.addEventListener("classgrid:integrations-changed", again);
+    window.addEventListener("studio:projects-changed", changed);
     document.addEventListener("visibilitychange", onVisible);
     return () => {
       window.removeEventListener("classgrid:integrations-changed", again);
+      window.removeEventListener("studio:projects-changed", changed);
       document.removeEventListener("visibilitychange", onVisible);
     };
   }, [isSuperAdmin, checkGithub, loadProjects]);
@@ -730,8 +735,10 @@ export function ProjectModePage() {
   // Desktop app: the start panel (open a folder, clone a repo, the cloud projects to download, the projects on this
   // computer opened before)
   const isDesktop = !!(window as { classgridDesktop?: { isDesktop?: boolean } }).classgridDesktop?.isDesktop;
+  // (a folder the server knows as a cloud project's copy here, like a Mastero project's folder, stays that cloud
+  // project: made "local" again, every screen took it for a folder project and its chats couldn't be linked online)
   const openWorkspace = (w: LocalWorkspace & Partial<Project>) => {
-    const full = { repo: null, updatedAt: new Date().toISOString(), lastOpenedAt: null, ...w, location: "local" as const } as Project;
+    const full = { repo: null, updatedAt: new Date().toISOString(), lastOpenedAt: null, ...w, location: w.location === "cloud" ? "cloud" : "local" } as Project;
     setProjects((list) => (list && !list.some((x) => x.id === full.id) ? [full, ...list] : list));
     open(full);
   };
@@ -746,9 +753,11 @@ export function ProjectModePage() {
   }));
   // Website: only cloud projects. Folder projects stay in the desktop app and are never listed online
   const websiteProjects = (projects || []).filter((p) => p.location !== "local");
-  // Mastero projects (on the user's computer and in the cloud, GitHub as the master copy) are listed first, in their own section
-  const masteroCount = websiteProjects.filter((p) => p.mastero).length;
-  const listedProjects = [...websiteProjects.filter((p) => p.mastero), ...websiteProjects.filter((p) => !p.mastero)];
+  // Mastero projects (on the user's computer and in the cloud, GitHub as the master copy) are listed first, in their own
+  // section. Only finished ones (the user pressed Finish in the chat): one still in its Mastero steps stays a cloud project
+  const isMastero = (p: Project) => p.mastero === true;
+  const masteroCount = websiteProjects.filter(isMastero).length;
+  const listedProjects = [...websiteProjects.filter(isMastero), ...websiteProjects.filter((p) => !isMastero(p))];
   const sectionTitle = (title: string, desc: string, mark?: boolean) => (
     <div className="mt-2 first:mt-0 flex flex-col gap-0.5">
       <h2 className="flex items-center gap-2 text-sm font-semibold text-foreground">{mark && <MasteroMark className="size-4" />}{title}</h2>
@@ -790,7 +799,7 @@ export function ProjectModePage() {
   // The top bar's File → Open Folder: Windows' own folder picker, then that folder opens as a project
   const pickAndOpenFolder = async () => {
     const p = await openLocalFolder();
-    if (p) openWorkspace({ ...p, location: "local", localPath: p.localPath || null });
+    if (p) openWorkspace({ ...p, localPath: p.localPath || null }); // (its place as the server says: see openWorkspace)
   };
 
   // A new Classgrid window from the editor's "New Window" (desktop/main.js): ?openFolder= opens that folder here
