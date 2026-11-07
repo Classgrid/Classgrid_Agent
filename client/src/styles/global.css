@@ -456,7 +456,7 @@
   /* Desktop app, Studio in Incognito (AskAiPanel sets body.cg-incognito-on): Studio's floating sidebar button (above
      the Incognito frame) is hidden, as Agent's is */
   body.cg-incognito-on .studio-sidebar-btn {
-    display: none;
+    display: none !important; /* (beats the top bar's own flex class) */
   }
   /* Studio's grey chat layers (above) are undone inside the Incognito frame, so it has Agent mode's colours */
   html.dark.desktop-app.studio-mode .studio-chat .cg-incognito [class*="dark:!bg-[#000000]"] {
@@ -492,6 +492,10 @@
     transition: none !important;
   }
   /* Studio Mode: the icon strip dragged away to the left; only the sidebar button stays */
+  /* Studio: the pane fills the window, so the hidden chat's "project / chat" bar doesn't sit on the pane's tabs */
+  html.studio-pane-max .studio-chat-crumb {
+    display: none !important; /* (beats the crumb's own flex class) */
+  }
   html.studio-sidebar-hidden [data-slot="sidebar-gap"] {
     width: 0 !important;
   }

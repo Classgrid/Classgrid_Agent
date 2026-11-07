@@ -85,6 +85,11 @@ export function StudioModePage() {
   const toolPage = import.meta.env.VITE_DESKTOP === "1" && (pageId === "schedule" || pageId === "library");
   const paneOpen = pane.open && !toolPage;
   const [maximized, setMaximized] = useState(false);
+  // (the chat's "project / chat" bar hides while the pane fills the window: the chat isn't shown then)
+  useEffect(() => {
+    document.documentElement.classList.toggle("studio-pane-max", maximized && pane.open);
+    return () => document.documentElement.classList.remove("studio-pane-max");
+  }, [maximized, pane.open]);
   // A narrow pane shows its tabs as icons only (the name shows on hover)
   const compactTabs = !maximized && pane.width < 520;
   const [resizing, setResizing] = useState(false);

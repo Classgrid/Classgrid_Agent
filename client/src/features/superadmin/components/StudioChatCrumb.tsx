@@ -50,7 +50,7 @@ export function StudioChatCrumb() {
   const crumb = "min-w-0 truncate rounded-md px-1.5 py-0.5 text-[13.5px] transition-colors hover:bg-black/[0.05] dark:hover:bg-white/[0.06] cursor-pointer";
 
   return (
-    <div className="flex items-center gap-0.5 min-w-0 max-w-[min(32rem,calc(100%-3rem))]">
+    <div className="studio-chat-crumb flex items-center gap-0.5 min-w-0 max-w-[min(32rem,calc(100%-3rem))]">
       <button type="button" onClick={() => window.dispatchEvent(new CustomEvent("studio:open-tab", { detail: { kind: "project" } }))} className={`${crumb} shrink-0 max-w-[12rem] text-muted-foreground hover:text-foreground`} title="Open the Project tab">
         {projectName}
       </button>
