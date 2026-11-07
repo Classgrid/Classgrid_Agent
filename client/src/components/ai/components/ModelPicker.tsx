@@ -75,8 +75,6 @@ export const MODEL_GROUPS: { label: string; models: ChatModelOption[] }[] = [
     label: "DeepSeek",
     models: [
       { id: "@cf/deepseek-ai/deepseek-v4.1-flash-1017", name: "DeepSeek V4.1 Flash", description: "Newest DeepSeek: fast, low cost and sees images", provider: "cloudflare", logo: LOGOS.deepseek, addedAt: "2026-10-29" },
-      { id: "@cf/deepseek-ai/deepseek-v4-pro-0813", name: "DeepSeek V4 Pro", description: "Strong reasoning and tool use", provider: "cloudflare", logo: LOGOS.deepseek },
-      { id: "@cf/deepseek-ai/deepseek-v4-flash-0731", name: "DeepSeek V4 Flash", description: "Fast and low cost", provider: "cloudflare", logo: LOGOS.deepseek },
     ],
   },
   {
@@ -84,15 +82,10 @@ export const MODEL_GROUPS: { label: string; models: ChatModelOption[] }[] = [
     models: [
       { id: "@cf/openai/gpt-oss-120b", name: "GPT-OSS 120B", description: "OpenAI open-weight model", provider: "cloudflare", logo: LOGOS.openai },
       { id: "@cf/openai/gpt-oss-20b", name: "GPT-OSS 20B", description: "Small and fast OpenAI open-weight model", provider: "cloudflare", logo: LOGOS.openai },
-      { id: "@cf/moonshotai/kimi-k2.6", name: "Kimi K2.6", description: "Strong agent model", provider: "cloudflare", logo: LOGOS.kimi },
-      { id: "@cf/moonshotai/kimi-k2.7-code", name: "Kimi K2.7 Code", description: "Tuned for coding", provider: "cloudflare", logo: LOGOS.kimi },
       { id: "@cf/zai-org/glm-5.3", name: "GLM 5.3", description: "Large Z.ai model", provider: "cloudflare", logo: LOGOS.glm },
-      { id: "@cf/zai-org/glm-5.3-flash", name: "GLM 5.3 Flash", description: "Cheap and fast", provider: "cloudflare", logo: LOGOS.glm },
-      { id: "@cf/zai-org/glm-5.2", name: "GLM 5.2", description: "Previous Z.ai model", provider: "cloudflare", logo: LOGOS.glm },
       { id: "@cf/zai-org/glm-4.7-flash", name: "GLM 4.7 Flash", description: "Lowest cost Z.ai model", provider: "cloudflare", logo: LOGOS.glm },
       { id: "@cf/qwen/qwen3.8-27b", name: "Qwen 3.8 27B", description: "Alibaba Qwen model", provider: "cloudflare", logo: LOGOS.qwen },
       { id: "@cf/google/gemma-4-26b-a4b-it", name: "Gemma 4 26B", description: "Google open model", provider: "cloudflare", logo: LOGOS.google },
-      { id: "@cf/nvidia/nemotron-3-120b-a12b", name: "Nemotron 3 120B", description: "NVIDIA open model", provider: "cloudflare", logo: LOGOS.nvidia },
       { id: "@cf/meta/llama-4-scout-17b-16e-instruct", name: "Llama 4 Scout", description: "Meta open model", provider: "cloudflare", logo: LOGOS.meta },
       { id: "@cf/mistralai/mistral-small-3.1-24b-instruct", name: "Mistral Small 3.1", description: "Mistral open model", provider: "cloudflare", logo: LOGOS.mistral },
     ],

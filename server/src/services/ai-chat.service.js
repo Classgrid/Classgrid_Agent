@@ -129,7 +129,7 @@ const MEMORY_HEADER = /^\[Summary of messages 1-(\d+)\]\n/;
 // Every 8 messages DeepSeek V4 Flash rewrites one summary of the whole chat (User facts + Task state).
 const MEMORY_EVERY = 8;
 const MEMORY_MESSAGE_CHARS = 3000;
-const MEMORY_FLASH_MODEL = "@cf/deepseek-ai/deepseek-v4-flash-0731";
+const MEMORY_FLASH_MODEL = "@cf/deepseek-ai/deepseek-v4.1-flash-1017";
 // The desktop app: more of each message read, and the newest DeepSeek Flash writes its longer memory
 const DESKTOP_MEMORY_MESSAGE_CHARS = 6000;
 const DESKTOP_MEMORY_FLASH_MODEL = "@cf/deepseek-ai/deepseek-v4.1-flash-1017";

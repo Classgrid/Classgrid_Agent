@@ -58,7 +58,7 @@ export const buildWorker = new Worker('build-steps', async (job) => {
                 name: "cloudflare",
                 url: `https://api.cloudflare.com/client/v4/accounts/${process.env.CLOUDFLARE_ACCOUNT_ID}/ai/v1/chat/completions`,
                 apiKey: process.env.CLOUDFLARE_WORKERS_AI_TOKEN || "",
-                model: "@cf/deepseek-ai/deepseek-v4-pro-0813"
+                model: "@cf/deepseek-ai/deepseek-v4.1-flash-1017"
             }
         ]
     });

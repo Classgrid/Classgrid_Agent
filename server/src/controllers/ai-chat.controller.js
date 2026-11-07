@@ -51,6 +51,7 @@ import { streamChat, TERMINAL_RULE } from "../services/llm-stream.js";
 import { streamClaudeChat, CLAUDE_CHAT_MODELS, toImageUrlParts } from "../services/llm-stream-anthropic.js";
 import { planToolsForMessage, buildLoadToolsTool, orderTools, groupOfTool, ageSticky, stickyKey, LOAD_TOOLS_NAME, promptBlock, filterPromptBlocks, promptBlocksForGroups, isStaffRole } from "../services/ai-tool-groups.js";
 import { safetyRulesFor } from "../services/ai-safety-rules.js";
+import { cfModel } from "../services/cf-retired-models.js";
 import { chargeableTokens, pricesFor } from "../services/ai-token-pricing.js";
 import { getPresignedUploadUrl, uploadBufferToR2 } from "../config/r2Client.js";
 import { primarySupabaseClient as supabase } from "../config/supabaseClient.js";
@@ -1089,12 +1090,13 @@ async function readPageDirect(startUrl, pageLinks = []) {
 }
 const estimatePromptTokens = (parts) => Math.ceil(parts.reduce((n, p) => n + (typeof p === "string" ? p.length : (JSON.stringify(p ?? "") || "").length), 0) / 4);
 
-// Chat models (approved by the platform owner, 2026-10-07): V4 Pro answers anything non-trivial,
-// V4 Flash answers short simple messages faster. Set AI_FLASH_ROUTING=off to send everything to Pro.
-const CF_PRO_MODEL = "@cf/deepseek-ai/deepseek-v4-pro-0813";
-const CF_FLASH_MODEL = "@cf/deepseek-ai/deepseek-v4-flash-0731";
-// The fast model "Auto" uses for short simple messages
-const CF_AUTO_FLASH_MODEL = "@cf/zai-org/glm-5.2";
+// Chat models: the main model answers anything non-trivial, the Auto model short simple messages. Set
+// AI_FLASH_ROUTING=off to send everything to the main model. Cloudflare removes DeepSeek V4 Pro / V4 Flash and
+// GLM 5.2 on 20 Nov 2026, so the main model is DeepSeek V4.1 Flash and the Auto one GLM 5.3 (owner's order, 2026-11-07).
+const CF_PRO_MODEL = "@cf/deepseek-ai/deepseek-v4.1-flash-1017";
+const CF_FLASH_MODEL = "@cf/deepseek-ai/deepseek-v4.1-flash-1017";
+// The model "Auto" uses for short simple messages
+const CF_AUTO_FLASH_MODEL = "@cf/zai-org/glm-5.3";
 const HARD_TASK_PATTERN = /\b(code|coding|debug|error|bug|function|script|sql|query|database|analy[sz]e|analysis|compare|explain|why|how (do|does|can|to)|step[- ]by[- ]step|plan|strategy|essay|report|pdf|document|file|diagram|flowchart|mermaid|chart|graph|calculate|solve|math|prove|design|architecture|write|draft|create|generate|build|deploy|schedule|email|summari[sz]e|translate|review|research|detail)/i;
 // "how do/does/can/to ..." asks for an explanation; "how are you" / "how is my day" stays on Flash.
 
@@ -1104,7 +1106,7 @@ function pickChatModel({ question, fileUrls, scheduleContext }) {
     if (!q || q.startsWith("[SYSTEM") || (fileUrls && fileUrls.length > 0) || scheduleContext) return CF_PRO_MODEL;
     if (q.length > 160 || q.includes("```") || q.split("\n").length > 3) return CF_PRO_MODEL;
     if (HARD_TASK_PATTERN.test(q)) return CF_PRO_MODEL;
-    // Short simple messages: GLM 5.2 (platform owner decision, 2026-10-29; was GLM 4.7 Flash)
+    // Short simple messages: GLM 5.3 (was GLM 5.2, which Cloudflare removes on 20 Nov 2026)
     return CF_AUTO_FLASH_MODEL;
 }
 
@@ -1157,20 +1159,13 @@ const stopHelpers = (sessionId) => {
     HELPER_BOARDS.delete(String(sessionId || "none"));
 };
 const CF_PICKER_MODELS = new Map([
-    [CF_PRO_MODEL, "native"],
-    [CF_FLASH_MODEL, "native"],
     ["@cf/deepseek-ai/deepseek-v4.1-flash-1017", "native"],
     ["@cf/openai/gpt-oss-120b", "native"],
     ["@cf/openai/gpt-oss-20b", "native"],
-    ["@cf/moonshotai/kimi-k2.6", "native"],
-    ["@cf/moonshotai/kimi-k2.7-code", "native"],
     ["@cf/zai-org/glm-5.3", "native"],
-    ["@cf/zai-org/glm-5.3-flash", "native"],
-    ["@cf/zai-org/glm-5.2", "native"],
     ["@cf/zai-org/glm-4.7-flash", "native"],
     ["@cf/qwen/qwen3.8-27b", "native"],
     ["@cf/google/gemma-4-26b-a4b-it", "native"],
-    ["@cf/nvidia/nemotron-3-120b-a12b", "native"],
     ["@cf/meta/llama-4-scout-17b-16e-instruct", "native"],
     ["@cf/mistralai/mistral-small-3.1-24b-instruct", "openai"],
 ]);
@@ -1263,8 +1258,6 @@ const MODEL_DISPLAY_NAMES = {
     "claude-sonnet-5-5": "Claude Sonnet 5.5",
     "claude-opus-5-5": "Claude Opus 5.5",
     "claude-fable-5-1": "Claude Fable 5.1",
-    [CF_PRO_MODEL]: "DeepSeek V4 Pro",
-    [CF_FLASH_MODEL]: "DeepSeek V4 Flash",
     "@cf/deepseek-ai/deepseek-v4.1-flash-1017": "DeepSeek V4.1 Flash",
     "@cf/openai/gpt-oss-120b": "GPT-OSS 120B",
     "@cf/openai/gpt-oss-20b": "GPT-OSS 20B",
@@ -1694,6 +1687,8 @@ export const streamAskAi = async (req, res) => {
         const resetDate = user?.ai_tokens?.week_reset_date ? new Date(user.ai_tokens.week_reset_date) : new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
         return { error: check.reason === "Insufficient tokens." ? "ai_quota_exceeded" : "ai_blocked", message: check.reason, resetDate: resetDate.toISOString() };
     };
+    // A model Cloudflare removed (an older app, a saved chat) goes to its replacement (services/cf-retired-models.js)
+    if (typeof body.selectedModel === "string") body.selectedModel = cfModel(body.selectedModel);
     // A model turned off in the super admin Model manager is not used: the message goes to Auto instead
     if (typeof body.selectedModel === "string" && body.selectedModel !== "auto") {
         const { disabledModels } = await import("../services/model-access.service.js");
@@ -3046,7 +3041,7 @@ Every user is using you as a personal AI assistant and agent (like ChatGPT) to m
                     name: "cloudflare",
                     url: `https://api.cloudflare.com/client/v4/accounts/${process.env.CLOUDFLARE_ACCOUNT_ID}/ai/v1/chat/completions`,
                     apiKey: process.env.CLOUDFLARE_WORKERS_AI_TOKEN || "",
-                    model: "@cf/deepseek-ai/deepseek-v4-pro-0813",
+                    model: "@cf/deepseek-ai/deepseek-v4.1-flash-1017",
                     timeoutMs: 300000
                 },
                 {
@@ -3521,7 +3516,7 @@ Every user is using you as a personal AI assistant and agent (like ChatGPT) to m
                 // file from a short spec, go to a low-cost model, so the main model gets only its short answer, never
                 // the whole files. When the main model costs more than the reader, a whole read of a big file (or a
                 // cat of it) is sent to the reader instead.
-                const READER_MODELS = ["@cf/deepseek-ai/deepseek-v4.1-flash-1017", CF_FLASH_MODEL];
+                const READER_MODELS = ["@cf/deepseek-ai/deepseek-v4.1-flash-1017", HELPER_GLM_MODEL];
                 const READER_MIN_LINES = Number(process.env.READER_MIN_LINES) || 350;
                 const readerOn = pricesFor(typeof body.selectedModel === "string" ? body.selectedModel : "auto").input > pricesFor(READER_MODELS[0]).input;
                 const READER_PIECE_LINES = 150;
@@ -6375,7 +6370,7 @@ If a tool fails, never show the error message; say only: "Something went wrong o
                                 // With an image attached it looks at it directly, so the analyze_image detour is not offered (as for Claude)
                                 excludeTools: sees && imageParts.length > 0 ? NO_ANALYZE_IMAGE : undefined,
                                 // The answer must not stop: a round that keeps failing moves on to these models
-                                fallbackProviders: ["@cf/deepseek-ai/deepseek-v4.1-flash-1017", HELPER_GLM_MODEL, "@cf/moonshotai/kimi-k2.6"].filter((m) => m !== model).map((m) => cloudflareStreamProvider(m, sessionId)),
+                                fallbackProviders: ["@cf/deepseek-ai/deepseek-v4.1-flash-1017", HELPER_GLM_MODEL, "@cf/qwen/qwen3.8-27b"].filter((m) => m !== model).map((m) => cloudflareStreamProvider(m, sessionId)),
                                 // The thinking picker: Deep thinks every step; Normal plans on the first step and goes
                                 // straight on after each tool result (those steps were 8-23 s of thinking each); Fast never thinks
                                 thinking: thinking === "high" ? "all" : thinking === "low" ? "none" : "first",
@@ -7786,7 +7781,7 @@ export const generateImage = async (req, res) => {
         // Step 1: Prompt Upsampling (Enhancement) via LLM
         let enhancedPrompt = prompt;
         try {
-            const llmUrl = `https://api.cloudflare.com/client/v4/accounts/${cfAccountId}/ai/run/@cf/deepseek-ai/deepseek-v4-pro-0813`;
+            const llmUrl = `https://api.cloudflare.com/client/v4/accounts/${cfAccountId}/ai/run/@cf/deepseek-ai/deepseek-v4.1-flash-1017`;
             const llmRes = await fetch(llmUrl, {
                 method: 'POST',
                 headers: {

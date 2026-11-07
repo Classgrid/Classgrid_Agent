@@ -34,6 +34,7 @@
 // Unlike the SDK, the internal_thought_process tool is not offered: the model's native reasoning
 // already streams live, and a thought-tool call costs a whole extra model round before the answer.
 // A call to it is still handled if the model makes one anyway.
+import { cfSwapProvider } from "./cf-retired-models.js";
 
 // Cloudflare refuses a whole request with too many pictures in it ("too many images in request"), and a long task
 // with screenshots (computer tool, browser) keeps adding them: only the newest ones stay, older ones become a note
@@ -145,6 +146,8 @@ export function noThinkingFor(model) {
 }
 
 async function streamOneRound({ provider, messages, tools, temperature, maxTokens, timeoutMs, signal, onToken, onThought, inputTooBig, quick = false }) {
+    // A Workers AI model Cloudflare has removed goes to its replacement (cf-retired-models.js)
+    provider = cfSwapProvider(provider);
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(new Error(`Timeout after ${timeoutMs}ms`)), timeoutMs);
     const onOuterAbort = () => controller.abort(signal.reason);
