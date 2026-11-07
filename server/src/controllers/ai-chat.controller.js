@@ -74,7 +74,7 @@ import {
 } from "../services/ai-chat.service.js";
 import { getHistory, getHistoryCount, appendToHistory, invalidateHistoryCache, getChatTranscript } from "../services/ai-chat-history.service.js";
 import { canAccessSession, gridLabelMap, gridProfilesText, getSharedSessionsFor, leaveSharedChat, sharedChatIdsFor } from "../services/ai-chat-grid.service.js";
-import { editorContextFor, rememberProjectSnapshot, sandboxDataDir, startCheckpoint, finishCheckpoint, linkChatToProject, forgetChatScreenProject, touchStudio, pcChatIds } from "../services/ide-project.service.js";
+import { editorContextFor, rememberProjectSnapshot, sandboxDataDir, startCheckpoint, finishCheckpoint, linkChatToProject, forgetChatScreenProject, touchStudio, pcChatIds, masteroAutoPush } from "../services/ide-project.service.js";
 import { PLANNER_BROWSER_TOOLS, PLANNER_BLIND_TOOLS, WORKER_BROWSER_TOOLS, BROWSER_TOOL_NAMES, makeBrowserHandlers, BROWSER_WORKER_SYSTEM } from "../services/studio-browser-tools.js";
 import { ensureBrowser } from "../services/studio-browser.service.js";
 import { gateHandlers, askPermission, PERMISSION_MODES } from "../services/permission-gate.js";
@@ -1313,10 +1313,13 @@ const READ_LOCAL_FILE_TOOL = {
 // the desktop app's AI and the website's AI never mix them up (the desktop AI used to reach for the cloud sandbox,
 // and the website AI for the user's computer)
 // A project in both places (the cloud and a copy on the user's computer) gets one more line: it is kept in step through GitHub
+// A Mastero project (Studio's Mastero button, owner 2026-11-07) gets its own line instead: GitHub is its master copy,
+// and its pushes follow the user's Settings → Mastero choice (args.masteroAutoPush)
 function whereYouWorkRule(args) {
     const rule = whereYouWorkPlace(args);
     const p = args.project;
     const both = rule && args.desktop && p?.repo && (p.bothPlaces || p.localCopies?.length); // the desktop app only
+    if (both && p.mastero) return rule + ` This is a MASTERO project: the same project on the user's computer and in the Classgrid cloud (this chat works in the ${p.bothPlaces ? "computer" : "cloud"} copy), and its GitHub repo ${p.repo} is the master copy. ${args.masteroAutoPush ? "After every answer that changes files, Classgrid pushes those changes to GitHub by itself: don't ask before pushing and don't push them again yourself." : "Before pushing, ask the user yes or no (the user turned off automatic pushes in Settings → Mastero); push only after a yes, then say in one short line what you pushed and to which branch."} If the user isn't happy with a change that is already on GitHub, undo it with git revert (a new commit that takes it back) and push that; never rewrite GitHub's history (no reset --hard, no force push). Code runs in the Classgrid cloud only for Node.js (Node 20 / TypeScript) and Python (3.13) projects; for other kinds (Go, Flutter, Java, C++ and the rest) you can read, write and push the code, and it runs on the user's computer. In the cloud the project needs the Classgrid GitHub app installed on its repo (Projects page → Install app), and cloud pushes go to a classgrid/ branch with a pull request the user merges on GitHub; the computer copy gets them with a pull. The cloud keeps the code only while it's in use: it leaves the server 5 minutes after the code editor closes (30 minutes without use in Studio), with unpushed work saved to a classgrid-backup-… branch first. Pushes go only to GitHub, never to Vercel (going live on the user's Vercel is a separate step they ask for). Docs to share when useful: https://classgrid.in/docs/projects-cloud-and-computer, https://classgrid.in/docs/connect-github, https://classgrid.in/docs/pull-requests-and-backups, https://classgrid.in/docs/review-and-undo, https://classgrid.in/docs/deploy-with-vercel.`;
     return both ? rule + ` This project lives in BOTH places, the cloud and a copy on the user's computer (this chat works in the ${p.bothPlaces ? "computer" : "cloud"} copy), linked by its GitHub repo ${p.repo}. Nothing is saved to GitHub by itself: commit and push only when the user asks, and then say in one short line what you pushed and to which branch. Pushes go only to GitHub, never to Vercel.` : rule;
 }
 function whereYouWorkPlace({ desktop, project, task }) {
@@ -2141,7 +2144,8 @@ You are currently talking to Nikhil Shinde (nikhil.shinde@classgrid.in), the CRE
             sessionId && !isIncognito ? editorContextFor(sessionId, { website: fromWebsite }).catch(() => "") : "",
             sessionId && !isIncognito && body.taskOrigin !== "whatsapp" ? projectForChat(sessionId).then((p) => inChatWorktree(p, sessionId)).catch(() => null) : null,
         ]);
-        let whereYouWork = whereYouWorkRule({ desktop: body.clientApp === "desktop", project: whereProject, task: !!body.taskOrigin });
+        const masteroPush = whereProject?.mastero ? await masteroAutoPush(whereProject.owner).catch(() => true) : false;
+        let whereYouWork = whereYouWorkRule({ desktop: body.clientApp === "desktop", project: whereProject, task: !!body.taskOrigin, masteroAutoPush: masteroPush });
         // The desktop app's memory notes: one folder for everything, plus one per project (named after the chat's project)
         const memoryProject = body.clientApp === "desktop" && whereProject ? `${whereProject.name || "project"}-${String(whereProject._id).slice(-6)}` : "";
         const isProjectChat = !!projectContext; // Project Mode chat: Agent-mode website hosting rules are not sent
@@ -3607,7 +3611,7 @@ Every user is using you as a personal AI assistant and agent (like ChatGPT) to m
                         const result = await handleToolCall('read_sandbox_file', args, { sessionId });
                         return result.isError ? result.content[0].text : result.content[0].text;
                     },
-                    ...Object.fromEntries(["list_project_files", "view_project_file", "search_project", "find_project_files", "write_project_file", "edit_project_file", "push_project_to_github", "create_github_repo_for_project", "update_project_github_repo", "start_background_command", "check_background_command", "stop_background_command", "search_project_by_meaning", "rename_project"].map((toolName) => [
+                    ...Object.fromEntries(["list_project_files", "view_project_file", "search_project", "find_project_files", "write_project_file", "edit_project_file", "push_project_to_github", "create_github_repo_for_project", "update_project_github_repo", "start_background_command", "check_background_command", "stop_background_command", "search_project_by_meaning", "rename_project", "mastero_ask"].map((toolName) => [
                         toolName,
                         async (args) => {
                             touchStudio(req.user?._id).catch(() => {}); // the project's code is in use: not cleaned up while the agent works

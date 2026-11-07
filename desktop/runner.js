@@ -531,7 +531,8 @@ const tools = {
     return `Repo: ${repo}\nLinked ${root} to ${repo}.`;
   },
 
-  sync_repo(root, { mode = "pull", repo, branch, message, token, name, email }) {
+  // exact: the commit message as the user typed it (Studio's Push button), without the changed files added to it
+  sync_repo(root, { mode = "pull", repo, branch, message, exact = false, token, name, email }) {
     if (!fs.existsSync(root)) return `Error: FOLDER_GONE The copy on this computer isn't at ${root} any more.`;
     const git = gitIn(root, token);
     const inside = git("rev-parse", "--is-inside-work-tree");
@@ -574,6 +575,11 @@ const tools = {
     let origin = originOf(git);
     if (!origin) {
       if (!repo) return "Error: NO_REMOTE This folder isn't linked to a GitHub repo yet.";
+      // Its first push: installed packages, build output and secrets (.env) stay off GitHub
+      const ignore = path.join(root, ".gitignore");
+      if (!fs.existsSync(ignore)) {
+        try { fs.writeFileSync(ignore, "node_modules/\n.env\n.env.*\n!.env.example\ndist/\nbuild/\n.next/\nout/\n.vercel/\n__pycache__/\n.venv/\nvenv/\n*.log\n.DS_Store\nThumbs.db\n"); } catch { /* read-only folder: pushed as it is */ }
+      }
       git("remote", "add", "origin", `https://github.com/${repo}.git`);
       origin = originOf(git);
     } else if (repo && (repoOfAddress(origin) || "").toLowerCase() !== String(repo).toLowerCase()) {
@@ -586,7 +592,7 @@ const tools = {
     const changed = String(git("diff", "--cached", "--name-only").stdout || "").trim().split("\n").filter(Boolean);
     if (changed.length) {
       const what = `${changed.slice(0, 3).join(", ")}${changed.length > 3 ? ` and ${changed.length - 3} more` : ""}`;
-      const c = git(...by, "commit", "-q", "-m", `${String(message || "Saved by Classgrid").slice(0, 200)}: ${what}`);
+      const c = git(...by, "commit", "-q", "-m", exact && message ? String(message).slice(0, 200) : `${String(message || "Saved by Classgrid").slice(0, 200)}: ${what}`);
       if (c.status !== 0) return `Error: git commit failed: ${gitLast(c)}`;
     }
     if (git("rev-parse", "-q", "--verify", "HEAD").status !== 0) return `Repo: ${ghRepo}\nBranch: -\nNothing to save yet: this folder has no files.`;

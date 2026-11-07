@@ -365,6 +365,19 @@ export const getMcpTools = () => [
   },
 
   {
+    name: 'mastero_ask',
+    description: "Mastero (Studio, Classgrid desktop app): after a [Mastero] message says the user's folder was put on GitHub, show the user a card in the chat that asks for the project's name (ask \"name\", with your suggestion) or its photo/logo (ask \"logo\"). The card saves the answer itself and the answer comes back as the user's next message. One card at a time; end your answer right after calling it.",
+    inputSchema: {
+      type: 'object',
+      properties: {
+        ask: { type: 'string', enum: ['name', 'logo'], description: '"name": the project\'s name in Classgrid. "logo": its photo.' },
+        suggestion: { type: 'string', description: 'For "name": a short, nice project name to suggest (the user can change it).' }
+      },
+      required: ['ask']
+    }
+  },
+
+  {
     name: 'rename_project',
     description: "Rename the Classgrid project open in this chat (the name the user sees in Project Mode). Fails if the user already has a project with that name.",
     inputSchema: {

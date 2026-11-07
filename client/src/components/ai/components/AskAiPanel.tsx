@@ -167,6 +167,8 @@ import { ScrollSpyTOC, MobileTOCButton, QuestionDots, messageTime } from "./TOC"
 import { StudioChatMenu, OpenInProjectButton, StudioOverviewButton } from "./StudioChatMenu";
 import { EditorChatHeader, editorIconButton } from "./EditorChatHeader";
 import { EditorChatSidePanel } from "./EditorChatSidePanel";
+import { keepUploadsOnPC, publishChatUploads } from "@/features/superadmin/components/StudioUploadsView";
+import { MasteroAskStep } from "./stepper/MasteroAskStep";
 import { PermissionCard, PermissionModePicker, PERMISSION_MODE_KEY, readPermissionMode, type PermissionMode, type PermissionRequest } from "./PermissionControls";
 import AIThinkingBlock from "./AIThinkingBlock";
 import RichChatInput from "./RichChatInput";
@@ -2148,6 +2150,7 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
   const [showGridPanel, setShowGridPanel] = useState(false);
   const [isAiHubOpen, setIsAiHubOpen] = useState(false);
   const [aiHubInitialTab, setAiHubInitialTab] = useState<string>("plugins");
+  const aiHubQuiet = useRef(false);
 
   useEffect(() => {
     const handleOpenAiHub = (e: Event) => {
@@ -2155,6 +2158,8 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
       if (customEvent.detail?.tab) {
         setAiHubInitialTab(customEvent.detail.tab);
       }
+      // quiet: opened for a step that goes on by itself (Mastero's Connect GitHub), so a new connection doesn't wake the AI
+      aiHubQuiet.current = !!customEvent.detail?.quiet;
       setIsAiHubOpen(true);
     };
     window.addEventListener('open-ai-hub', handleOpenAiHub);
@@ -2737,6 +2742,14 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
   const [fileMentions, setFileMentions] = useState<string[]>([]);
   // Studio: comments and quotes on code from the Files tab, sent with the next message (kept per chat)
   const isStudio = pageContext?.path === "/c/studio";
+  // Studio's Uploads tab: the files sent in this chat (pictures sent from the desktop app as they are on this computer)
+  useEffect(() => {
+    if (!isStudio) return;
+    const files = messages.flatMap((m) => (m.attachments ? showLocalImages(m.attachments) : [])
+      .filter((a) => a.url && a.mimeType !== LOCAL_IMAGE_MISSING)
+      .map((a) => ({ url: a.url, name: a.name, mimeType: a.mimeType, at: m.createdAt })));
+    publishChatUploads(sessionId || null, files);
+  }, [isStudio, messages, localImagesFound, sessionId]);
   // Desktop app: Studio's Incognito looks exactly like Agent mode's (its greeting, header row and question list)
   const studioLook = isStudio && !(DESKTOP_STUDIO && isIncognito);
   const codeNotes = useCodeNotes();
@@ -2906,6 +2919,8 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
 
     // Show files in UI immediately (optimistic) â€” no delay like Vercel/ChatGPT
     setAttachedFiles(prev => [...prev, ...accepted]);
+    // Desktop app: a copy is kept on this computer for Studio's Uploads tab
+    keepUploadsOnPC(accepted.map(f => f.file).filter((f): f is File => !!f), sessionId);
 
     // If we had dropped files, show the warning now
     if (droppedWarning) {
@@ -3351,9 +3366,10 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
     };
 
     // Another part of the page sends a message for the user (e.g. Project Mode's "Ask Agent to create repo")
+    // (hidden: sent for the AI only, like Mastero's steps telling it what the user picked)
     const handleAsk = (e: Event) => {
-      const text = (e as CustomEvent<{ text?: string }>).detail?.text;
-      if (text) askQuestionRef.current?.(text);
+      const { text, hidden } = (e as CustomEvent<{ text?: string; hidden?: boolean }>).detail || {};
+      if (text) askQuestionRef.current?.(text, hidden ? { hidden: true } : undefined);
     };
 
     window.addEventListener("agent:new-chat", handleNewChat);
@@ -5935,6 +5951,12 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
                                           }
 
                                           // Image the AI is looking at: shown right away (live), then its answer
+                                          // Mastero: the card that asks for the project's name or photo (only the newest answer's card can be used)
+                                          if (step.tool === 'mastero_ask') {
+                                            elements.push(<MasteroAskStep key={step.id} stepId={step.id} args={step.args} result={step.result} status={step.status} active={index === messages.length - 1} />);
+                                            return;
+                                          }
+
                                           // Audio being turned into text: the file with a player right away, then the transcript
                                           if (step.tool === 'transcribe_audio') {
                                             elements.push(<AudioTranscribeStep key={step.id} args={step.args} result={step.result} status={step.status} />);
@@ -7930,7 +7952,7 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
         initialTab={aiHubInitialTab}
         // An app just connected: the AI carries on the task in the open chat. With no task open (a new chat) nothing is
         // sent: the message alone used to start an empty chat named after the app ("Gmail Connected")
-        onSendPrompt={(text) => { if (sessionId && messages.some((m) => m.role === "user" && !m.hidden)) askQuestion(text, { hidden: true }); }}
+        onSendPrompt={(text) => { if (!aiHubQuiet.current && sessionId && messages.some((m) => m.role === "user" && !m.hidden)) askQuestion(text, { hidden: true }); }}
       />
     </>
   );

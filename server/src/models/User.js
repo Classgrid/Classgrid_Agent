@@ -795,6 +795,11 @@ const userSchema = new mongoose.Schema(
     archived_chat_ids: { type: [String], default: [] },
     // Studio chats sent with no project open: listed in Studio, not in Agent mode
     studio_chat_ids: { type: [String], default: [] },
+    // Settings → Mastero: auto_push = the user's Mastero projects are pushed to GitHub after every answer that changed
+    // files, without asking (on by default); off = the AI asks yes or no before each push
+    mastero_settings: {
+        auto_push: { type: Boolean, default: true },
+    },
     // Where each chat started: in the desktop app (or Classgrid Code), or on the website. A chat is listed only where it
     // started; the two never show each other's chats (owner, 2026-11-04)
     desktop_chat_ids: { type: [String], default: [] },

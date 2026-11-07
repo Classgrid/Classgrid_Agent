@@ -3,9 +3,10 @@
 import { useSearchParams } from "react-router-dom";
 import { Bell, Globe, Lock, Palette, Settings2, UserRound, type LucideIcon } from "lucide-react";
 import { isChatHost } from "@/lib/chatHost";
+import { MasteroMark } from "@/components/icons/MasteroMark";
 
-export type SettingsSectionId = "general" | "notifications" | "privacy" | "account" | "browser" | "platform";
-export type SettingsSection = { id: SettingsSectionId; label: string; icon: LucideIcon; words: string };
+export type SettingsSectionId = "general" | "notifications" | "privacy" | "account" | "browser" | "mastero" | "platform";
+export type SettingsSection = { id: SettingsSectionId; label: string; icon: LucideIcon | typeof MasteroMark; words: string };
 type Who = { role?: string | null };
 
 const DESKTOP = import.meta.env.VITE_DESKTOP === "1" || import.meta.env.VITE_EDITOR === "1";
@@ -20,6 +21,7 @@ export function settingsSections({ role }: Who): SettingsSection[] {
     { id: "privacy" as const, label: "Privacy", icon: Lock, words: "privacy data domain verified identity" },
     { id: "account" as const, label: "Account", icon: UserRound, words: "account password delete role request security" },
     { id: "browser" as const, label: "Browser", icon: Globe, words: "browser history downloads cookies logins site data cache camera microphone location notifications websites permissions block allow" },
+    { id: "mastero" as const, label: "Mastero", icon: MasteroMark, words: "mastero projects github push commit revert undo cloud computer node python" },
     ...(role === "super_admin" ? [{ id: "platform" as const, label: "Platform", icon: Palette, words: "platform branding name logo" }] : []),
   ];
 }

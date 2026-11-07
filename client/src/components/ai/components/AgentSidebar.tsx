@@ -19,6 +19,7 @@
  * =========================================================================================
  */
 
+import { MasteroMark } from "@/components/icons/MasteroMark";
 import React from "react";
 import { createPortal } from "react-dom";
 import { MessageSquare, Plus, Search, Pin, PinOff, MoreHorizontal, Pencil, Trash2, Share, Copy, Mail, Check, Link2, FileText, ExternalLink, X, Loader2, SquarePen, Calendar, Library, FolderInput, FolderPlus, Folder, Star, ChevronDown, ListFilter, Laptop, Cloud } from "lucide-react";
@@ -46,7 +47,7 @@ import { GroupDialog, groupIcon, groupsApi, openProjectId, useChatGroups, type C
 import { NewProjectDialog, openStudioProject, openLocalFolder } from "@/features/superadmin/components/StudioProjectPicker";
 import { onDesktop, placeActions, savedProject, thisComputerCopy, type LocalCopy } from "@/features/superadmin/utils/projectCopies";
 
-type SidebarProject = { id: string; name: string; logo?: string | null; location?: "cloud" | "local"; localPath?: string | null; localCopies?: LocalCopy[] };
+type SidebarProject = { id: string; name: string; logo?: string | null; location?: "cloud" | "local"; localPath?: string | null; localCopies?: LocalCopy[]; mastero?: boolean };
 // Desktop app: a project with a folder on this computer (a folder project, or a cloud project downloaded here)
 const onThisPc = (p: Parameters<typeof thisComputerCopy>[0]) => !!p && (p.location === "local" || !!thisComputerCopy(p));
 
@@ -711,6 +712,7 @@ export function AgentNestedMenu({ searchQuery = "", pages }: { searchQuery?: str
     return list;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isStudioMode, studioChats, sortedGroups, projects, searchQuery, opts, folderOrder, openProject, readAt]);
+  const studioFoldersAll = studioFolders;
   const dropFolder = (target: string) => {
     const from = dragFolder.current;
     dragFolder.current = null;
@@ -721,8 +723,22 @@ export function AgentNestedMenu({ searchQuery = "", pages }: { searchQuery?: str
     try { localStorage.setItem("cg_studio_folder_order", JSON.stringify(keys)); } catch { /* storage blocked */ }
     setOpt({ sortProjects: "custom" });
   };
+  // Mastero projects (owner, 2026-11-07): their own section under Pinned, on the website and in the app, each with all
+  // its chats (the same project on this computer and in the cloud); they leave the Projects list below
+  const masteroIds = React.useMemo(() => new Set((projects || []).filter((p) => p.mastero).map((p) => p.id)), [projects]);
+  const masteroFolders = React.useMemo(() => {
+    const byId = new Map<string, (typeof studioFolders)[number]>();
+    for (const f of studioFolders) {
+      if (!f.id || !masteroIds.has(f.id)) continue;
+      const had = byId.get(f.id);
+      if (had) byId.set(f.id, { ...had, chats: [...had.chats, ...f.chats], groups: [...had.groups, ...f.groups] });
+      else byId.set(f.id, { ...f, key: `mastero:${f.id}` });
+    }
+    return [...byId.values()];
+  }, [studioFolders, masteroIds]);
   // Desktop app: This PC and Cloud are two lists, never one. Chats with no project keep their own folder after them
   const studioFolderSections = (() => {
+    const studioFolders = studioFoldersAll.filter((f) => !f.id || !masteroIds.has(f.id));
     if (!onDesktop()) return [{ key: "all", label: "", list: studioFolders }];
     const pc = studioFolders.filter((f) => f.id && f.place === "pc");
     const cloud = studioFolders.filter((f) => f.id && f.place === "cloud");
@@ -762,7 +778,7 @@ export function AgentNestedMenu({ searchQuery = "", pages }: { searchQuery?: str
       .then((res) => res.json())
       .then((data) => {
         const list: SidebarProject[] = Array.isArray(data.projects)
-          ? data.projects.map((p: any) => ({ id: String(p.id), name: String(p.name || "Untitled"), logo: p.logo || null, location: p.location, localPath: p.localPath || null, localCopies: p.localCopies }))
+          ? data.projects.map((p: any) => ({ id: String(p.id), name: String(p.name || "Untitled"), logo: p.logo || null, location: p.location, localPath: p.localPath || null, localCopies: p.localCopies, mastero: !!p.mastero }))
           : [];
         // Website: folder projects (This PC) are never listed; they live only in the desktop app
         localProjectIds.current = new Set(list.filter((p) => p.location === "local").map((p) => p.id));
@@ -1089,6 +1105,89 @@ export function AgentNestedMenu({ searchQuery = "", pages }: { searchQuery?: str
 
   // Studio: the projects list (header with Display Options, then each project). The open sidebar and the icon
   // strip's chats popover both show it
+  const renderFolder = (f: (typeof studioFolders)[number]) => {
+                const isOpen = !closedFolders.includes(f.key) || !!searchQuery;
+                const full = fullFolders.includes(f.key);
+                const shown = full || searchQuery ? f.chats : f.chats.slice(0, 5);
+                const isCurrent = (f.id || null) === (openProject || null);
+                return (
+                  <div
+                    key={f.key}
+                    className="mb-1"
+                    onDragOver={(e) => { if (dragFolder.current) e.preventDefault(); }}
+                    onDrop={(e) => { e.preventDefault(); dropFolder(f.key); }}
+                  >
+                    {/* The project's row: same look as a group row (icon, name, + new chat, open / closed arrow) */}
+                    <div className="group/fld relative flex items-center" draggable onDragStart={() => { dragFolder.current = f.key; }} onDragEnd={() => { dragFolder.current = null; }}>
+                      <button
+                        type="button"
+                        onClick={() => toggleFolder(f.key)}
+                        className={cn("flex-1 min-w-0 flex items-center gap-2.5 h-8 pl-2 pr-16 rounded-md text-sm hover:bg-sidebar-accent transition-colors cursor-pointer", isCurrent ? "text-sidebar-foreground" : "text-muted-foreground")}
+                      >
+                        {f.logo && opts.showLogos
+                          ? <img src={f.logo} alt="" className="w-4 h-4 shrink-0 rounded object-cover" />
+                          : <Folder className="w-4 h-4 shrink-0" strokeWidth={2} />}
+                        <span className="truncate">{f.name}</span>
+                      </button>
+                      <div className="absolute right-1 flex items-center">
+                        {/* Desktop app: the project's menu, to get a copy on this computer or switch between it and the cloud */}
+                        {placeActions(savedProject(f.id)).length > 0 && (
+                          <DropdownMenu>
+                            <DropdownMenuTrigger asChild>
+                              <button type="button" className="opacity-0 group-hover/fld:opacity-100 focus-visible:opacity-100 data-[state=open]:opacity-100 transition-opacity p-1 rounded hover:bg-black/5 dark:hover:bg-white/10 text-muted-foreground hover:text-foreground cursor-pointer" title="Project menu" aria-label={`${f.name} menu`}>
+                                <MoreHorizontal className="w-3.5 h-3.5" />
+                              </button>
+                            </DropdownMenuTrigger>
+                            <DropdownMenuContent side="right" align="start" sideOffset={8} className={menuBox("w-[240px]")}>
+                              {placeActions(savedProject(f.id)).map((a) => (
+                                <DropdownMenuItem key={a.label} className={menuItem} onClick={() => { a.run(); }}>{a.label}</DropdownMenuItem>
+                              ))}
+                            </DropdownMenuContent>
+                          </DropdownMenu>
+                        )}
+                        <button
+                          type="button"
+                          onClick={() => newChatIn(f.id)}
+                          className="opacity-0 group-hover/fld:opacity-100 focus-visible:opacity-100 transition-opacity p-1 rounded hover:bg-black/5 dark:hover:bg-white/10 text-muted-foreground hover:text-foreground cursor-pointer"
+                          title={f.id ? "New chat in this project" : "New chat with no project"}
+                          aria-label={f.id ? `New chat in ${f.name}` : "New chat with no project"}
+                        >
+                          <Plus className="w-3.5 h-3.5" />
+                        </button>
+                        <button type="button" onClick={() => toggleFolder(f.key)} className="p-1 rounded text-muted-foreground hover:text-foreground cursor-pointer" aria-label={isOpen ? "Close project" : "Open project"}>
+                          <ChevronDown className={cn("w-3.5 h-3.5 transition-transform duration-200", !isOpen && "-rotate-90")} />
+                        </button>
+                      </div>
+                    </div>
+                    {isOpen && (
+                      <div className="pl-4 mt-0.5">
+                        {f.groups.map(renderGroup)}
+                        <SidebarMenu>
+                          {shown.length ? shown.map(renderSessionItem) : !f.groups.length && <div className="px-2 py-1.5 text-xs text-muted-foreground">No chats yet</div>}
+                          {!full && !searchQuery && f.chats.length > shown.length && (
+                            <button
+                              type="button"
+                              onClick={() => setFullFolders((prev) => [...prev, f.key])}
+                              className="w-full px-2 py-1.5 text-left text-xs font-medium text-muted-foreground hover:text-foreground rounded-md hover:bg-muted transition-colors cursor-pointer"
+                            >
+                              Show {f.chats.length - shown.length} more
+                            </button>
+                          )}
+                        </SidebarMenu>
+                      </div>
+                    )}
+                  </div>
+                );
+  };
+
+  // Mastero projects: under Pinned, before the Projects list
+  const masteroSection = isStudioMode && masteroFolders.length > 0 && !opts.archivedOnly && (
+    <div className="mb-2">
+      <p className="flex items-center gap-1.5 px-2 py-1.5 text-xs font-medium text-muted-foreground/70"><MasteroMark className="size-3.5" /> Mastero projects</p>
+      {masteroFolders.map(renderFolder)}
+    </div>
+  );
+
   const studioProjects = (
             <div className="mt-1">
               <div className="group/projects flex items-center justify-between px-2 py-1.5">
@@ -1171,80 +1270,7 @@ export function AgentNestedMenu({ searchQuery = "", pages }: { searchQuery?: str
                       {s.key === "pc" ? <Laptop className="size-3.5" /> : <Cloud className="size-3.5" />} {s.label}
                     </p>
                   )}
-                  {s.list.map((f) => {
-                const isOpen = !closedFolders.includes(f.key) || !!searchQuery;
-                const full = fullFolders.includes(f.key);
-                const shown = full || searchQuery ? f.chats : f.chats.slice(0, 5);
-                const isCurrent = (f.id || null) === (openProject || null);
-                return (
-                  <div
-                    key={f.key}
-                    className="mb-1"
-                    onDragOver={(e) => { if (dragFolder.current) e.preventDefault(); }}
-                    onDrop={(e) => { e.preventDefault(); dropFolder(f.key); }}
-                  >
-                    {/* The project's row: same look as a group row (icon, name, + new chat, open / closed arrow) */}
-                    <div className="group/fld relative flex items-center" draggable onDragStart={() => { dragFolder.current = f.key; }} onDragEnd={() => { dragFolder.current = null; }}>
-                      <button
-                        type="button"
-                        onClick={() => toggleFolder(f.key)}
-                        className={cn("flex-1 min-w-0 flex items-center gap-2.5 h-8 pl-2 pr-16 rounded-md text-sm hover:bg-sidebar-accent transition-colors cursor-pointer", isCurrent ? "text-sidebar-foreground" : "text-muted-foreground")}
-                      >
-                        {f.logo && opts.showLogos
-                          ? <img src={f.logo} alt="" className="w-4 h-4 shrink-0 rounded object-cover" />
-                          : <Folder className="w-4 h-4 shrink-0" strokeWidth={2} />}
-                        <span className="truncate">{f.name}</span>
-                      </button>
-                      <div className="absolute right-1 flex items-center">
-                        {/* Desktop app: the project's menu, to get a copy on this computer or switch between it and the cloud */}
-                        {placeActions(savedProject(f.id)).length > 0 && (
-                          <DropdownMenu>
-                            <DropdownMenuTrigger asChild>
-                              <button type="button" className="opacity-0 group-hover/fld:opacity-100 focus-visible:opacity-100 data-[state=open]:opacity-100 transition-opacity p-1 rounded hover:bg-black/5 dark:hover:bg-white/10 text-muted-foreground hover:text-foreground cursor-pointer" title="Project menu" aria-label={`${f.name} menu`}>
-                                <MoreHorizontal className="w-3.5 h-3.5" />
-                              </button>
-                            </DropdownMenuTrigger>
-                            <DropdownMenuContent side="right" align="start" sideOffset={8} className={menuBox("w-[240px]")}>
-                              {placeActions(savedProject(f.id)).map((a) => (
-                                <DropdownMenuItem key={a.label} className={menuItem} onClick={() => { a.run(); }}>{a.label}</DropdownMenuItem>
-                              ))}
-                            </DropdownMenuContent>
-                          </DropdownMenu>
-                        )}
-                        <button
-                          type="button"
-                          onClick={() => newChatIn(f.id)}
-                          className="opacity-0 group-hover/fld:opacity-100 focus-visible:opacity-100 transition-opacity p-1 rounded hover:bg-black/5 dark:hover:bg-white/10 text-muted-foreground hover:text-foreground cursor-pointer"
-                          title={f.id ? "New chat in this project" : "New chat with no project"}
-                          aria-label={f.id ? `New chat in ${f.name}` : "New chat with no project"}
-                        >
-                          <Plus className="w-3.5 h-3.5" />
-                        </button>
-                        <button type="button" onClick={() => toggleFolder(f.key)} className="p-1 rounded text-muted-foreground hover:text-foreground cursor-pointer" aria-label={isOpen ? "Close project" : "Open project"}>
-                          <ChevronDown className={cn("w-3.5 h-3.5 transition-transform duration-200", !isOpen && "-rotate-90")} />
-                        </button>
-                      </div>
-                    </div>
-                    {isOpen && (
-                      <div className="pl-4 mt-0.5">
-                        {f.groups.map(renderGroup)}
-                        <SidebarMenu>
-                          {shown.length ? shown.map(renderSessionItem) : !f.groups.length && <div className="px-2 py-1.5 text-xs text-muted-foreground">No chats yet</div>}
-                          {!full && !searchQuery && f.chats.length > shown.length && (
-                            <button
-                              type="button"
-                              onClick={() => setFullFolders((prev) => [...prev, f.key])}
-                              className="w-full px-2 py-1.5 text-left text-xs font-medium text-muted-foreground hover:text-foreground rounded-md hover:bg-muted transition-colors cursor-pointer"
-                            >
-                              Show {f.chats.length - shown.length} more
-                            </button>
-                          )}
-                        </SidebarMenu>
-                      </div>
-                    )}
-                  </div>
-                );
-                  })}
+                  {s.list.map(renderFolder)}
                 </div>
               ))}
             </div>
@@ -1373,7 +1399,7 @@ export function AgentNestedMenu({ searchQuery = "", pages }: { searchQuery?: str
                   </div>
                 </PopoverTrigger>
                 <PopoverContent side="right" align="start" sideOffset={10} className={cn("p-2 bg-white dark:bg-[#202123] border border-slate-200 dark:border-white/10 rounded-2xl shadow-xl max-h-[70vh] overflow-y-auto", isStudioMode ? "w-[300px]" : "w-[280px]")}>
-                  {isStudioMode ? studioProjects : (<>
+                  {isStudioMode ? <>{masteroSection}{studioProjects}</> : (<>
                   <div className="text-xs font-semibold text-slate-500 dark:text-slate-400 mb-2 px-2">Today</div>
                   <SidebarMenu className="mb-4">
                     {loading && (
@@ -1598,6 +1624,7 @@ export function AgentNestedMenu({ searchQuery = "", pages }: { searchQuery?: str
             </AccordionItem>
             )}
           </Accordion>
+          {isStudioMode && masteroSection}
           {isStudioMode && studioProjects}
           {/* Desktop app: chats the other accounts on this computer had; opening one lets this account go on with it */}
           {otherChats.some((a) => a.chats.some((c) => c.title.toLowerCase().includes(searchQuery.toLowerCase()))) && (

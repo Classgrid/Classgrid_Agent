@@ -54,6 +54,7 @@
  * ─────────────────────────────────────────────────────────
  */
 
+import { SettingsMasteroSection } from "@/features/shared/components/settings/SettingsMasteroSection";
 import React, { useState, useEffect } from "react";
 import { Save } from "lucide-react";
 import { Button } from "@/components/marketing_ui/button";
@@ -229,6 +230,8 @@ export function SharedSettingsPage() {
       )}
 
       {section === "browser" && <SettingsBrowserSection role={role} />}
+
+      {section === "mastero" && <SettingsMasteroSection />}
 
       {section === "platform" && role === "super_admin" && (
         <>

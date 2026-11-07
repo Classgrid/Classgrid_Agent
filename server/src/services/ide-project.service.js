@@ -370,6 +370,8 @@ export const projectTools = {
 
   update_project_github_repo: (sessionId, args) => withProject(sessionId, (project, ssh) => updateProjectRepo(project, ssh, args || {})),
 
+  mastero_ask: (sessionId, args) => masteroAsk(sessionId, args || {}),
+
   // The Classgrid project's own name (what the user sees in Project Mode); same check as renaming it on the website
   rename_project: async (sessionId, { new_name }) => {
     const project = await projectForChat(sessionId);
@@ -385,6 +387,23 @@ export const projectTools = {
     return `Project renamed from "${project.name}" to "${name}".`;
   },
 };
+
+// Mastero, after the user's folder was put on GitHub (Studio's Mastero button): a card in the chat asks the user for the
+// project's name or its photo. The card saves the answer itself; the answer comes back as the user's next message.
+export async function masteroAsk(sessionId, { ask, suggestion }) {
+  const project = await projectForChat(sessionId);
+  if (!project) return "No project is open in this chat.";
+  const kind = ask === "logo" ? "logo" : "name";
+  return JSON.stringify({
+    shown: kind,
+    project_id: String(project._id),
+    project_name: project.name,
+    repo: project.repo || null,
+    logo: project.logo || null,
+    suggestion: kind === "name" ? String(suggestion || "").trim().slice(0, 80) || null : null,
+    note: "The card is on the user's screen now. End your answer here with one short line; their answer comes as their next message.",
+  });
+}
 
 // Rename the project's GitHub repo or change its description, website or public/private setting.
 // A new name is also saved on the project and in the downloaded code, so pushing keeps working.
@@ -1188,16 +1207,23 @@ export async function finishCheckpoint(sessionId, id) {
   }
 }
 
+// Settings → Mastero "Push after every change" (on unless the user turned it off)
+export async function masteroAutoPush(userId) {
+  if (!userId) return false;
+  const u = await User.findById(userId).select("mastero_settings").lean().catch(() => null);
+  return u?.mastero_settings?.auto_push !== false;
+}
+
 // One project in both places (the cloud and a copy on the user's computer): after an answer that changed files, the
 // work is pushed to GitHub by itself, so either place has the same code the next time it opens. The user is told in
 // one short line ("project-saved" on their socket).
 async function saveBothPlaces(sessionId, ssh = null, cp = null) {
-  // Owner's rule (2026-11-02): Classgrid never commits or pushes to GitHub by itself; the user asks the agent to push
-  return;
-  // eslint-disable-next-line no-unreachable
+  // Owner's rule (2026-11-02): Classgrid never commits or pushes to GitHub by itself; the user asks the agent to push.
+  // Except a Mastero project, while its owner keeps Settings → Mastero "Push after every change" on (owner, 2026-11-07):
+  // GitHub is its master copy, so every answer's changes go there (a change the user doesn't want is undone with git revert)
   if (!sessionId) return;
   const project = await projectForChat(sessionId);
-  if (!project?.repo) return;
+  if (!project?.repo || !project.mastero || !(await masteroAutoPush(project.owner))) return;
   let line = "";
   if (project.bothPlaces) {
     // This computer's copy: the desktop app commits and pushes, only when something changed

@@ -43,6 +43,9 @@ const ideProjectSchema = new mongoose.Schema(
     // Not set on projects made before this existed (see pcChatIds in services/ide-project.service.js).
     pcChatSessionIds: { type: [String], default: undefined },
     lastOpenedAt: { type: Date, default: null },
+    // Made a Mastero project (Studio's Mastero button): a folder from the user's computer put on GitHub, so it is the same
+    // project on that computer and in the cloud, with GitHub as the master copy
+    mastero: { type: Boolean, default: false },
     // Unpushed work pushed to GitHub when the project left the sandbox, shown once on the next open
     lastBackup: { branch: { type: String }, at: { type: Date } },
     // "local": a folder on the user's own computer, run by the Classgrid desktop app (services/local-runner.service.js)

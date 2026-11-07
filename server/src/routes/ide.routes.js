@@ -272,7 +272,7 @@ async function ownProject(req, res) {
 // The website never gets folder paths on the user's computer (utils/client-app.js)
 const projectJson = (p, req) => {
   const web = isWebsite(req);
-  return { id: p._id, name: p.name, repo: p.repo, logo: p.logo || null, location: p.location || "cloud", localPath: web ? null : p.localPath || null, localCopies: (p.localCopies || []).map((c) => ({ deviceId: c.deviceId, path: web ? null : c.path, at: c.at, here: !!c.here })), lastOpenedAt: p.lastOpenedAt, createdAt: p.createdAt, updatedAt: p.updatedAt };
+  return { id: p._id, name: p.name, repo: p.repo, logo: p.logo || null, location: p.location || "cloud", localPath: web ? null : p.localPath || null, localCopies: (p.localCopies || []).map((c) => ({ deviceId: c.deviceId, path: web ? null : c.path, at: c.at, here: !!c.here })), lastOpenedAt: p.lastOpenedAt, createdAt: p.createdAt, updatedAt: p.updatedAt, mastero: !!p.mastero };
 };
 
 // A project logo must be a picture this user uploaded to our R2 (same upload as the profile picture).
@@ -1008,22 +1008,38 @@ router.post("/projects/:id/sync", isAuthenticated, async (req, res) => {
   }
 });
 
-// A new private GitHub repo for a folder project, named after it, made with the user's own key (like
-// createRepoForProject: GitHub itself checks the user may make it)
-async function newRepoFor(project, token) {
-  const base = String(project.name || "project").toLowerCase().replace(/[^a-z0-9._-]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 60) || "project";
-  for (const name of [base, `${base}-${String(project._id).slice(-6)}`]) {
+// A new GitHub repo for a folder project (private unless the user said public), named as the user typed it or after
+// the project, made with the user's own key (like createRepoForProject: GitHub itself checks the user may make it).
+// A name the user typed is used as it is: when it's taken they're told, instead of getting another name.
+const repoSlug = (name) => String(name || "").trim().toLowerCase().replace(/[^a-z0-9._-]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 60);
+async function newRepoFor(project, token, { name: wanted, isPrivate = true } = {}) {
+  const base = repoSlug(wanted) || repoSlug(project.name) || "project";
+  for (const name of wanted ? [base] : [base, `${base}-${String(project._id).slice(-6)}`]) {
     const r = await fetch("https://api.github.com/user/repos", {
       method: "POST",
       headers: { ...ghHeaders(token), "Content-Type": "application/json" },
-      body: JSON.stringify({ name, private: true, description: "Made by Classgrid Project Mode" }),
+      body: JSON.stringify({ name, private: isPrivate, description: "Made by Classgrid Project Mode" }),
     }).catch(() => null);
     const gh = r ? await r.json().catch(() => ({})) : {};
     if (r?.ok && gh.full_name) return { repo: gh.full_name };
     if (r?.status === 401) return { error: "GitHub refused your saved login. Reconnect GitHub in AI Hub, then try again." };
     if (r?.status !== 422) return { error: `Couldn't make a GitHub repo: ${gh.message || r?.status || "GitHub can't be reached"}` };
   }
-  return { error: "Couldn't make a GitHub repo: that name is already taken on your GitHub. Rename the project, then try again." };
+  return { error: wanted ? `You already have a repo called "${base}" on GitHub. Pick another name.` : "Couldn't make a GitHub repo: that name is already taken on your GitHub. Rename the project, then try again.", code: "name_taken" };
+}
+
+// A folder project now on GitHub becomes the same project in both places (the cloud, and its folder as this computer's
+// copy), keeping its name, logo and chats
+async function linkFolderProject(project, repo, deviceId) {
+  const folder = project.localPath;
+  // Its chats so far happened on this computer: they stay there and never show on the website
+  project.pcChatSessionIds = [...new Set([...pcChatIds(project), ...(project.chatSessionIds || [])])];
+  project.repo = repo;
+  project.location = "cloud";
+  project.localPath = null;
+  putCopy(project, deviceId, { path: folder, at: new Date(), here: true });
+  await project.save();
+  redis.del(GIT_INFO_KEY(project._id)).catch(() => {});
 }
 
 // A folder project whose folder is on GitHub (the user asked the agent to make a repo and push it): it is linked to that
@@ -1042,18 +1058,77 @@ router.post("/projects/:id/cloud", isAuthenticated, async (req, res) => {
     if (!REPO_NAME.test(repo || "")) return res.status(409).json({ error: "This folder isn't on GitHub yet. Ask the agent to make a GitHub repo for this project and push it.", code: "not_on_github" });
     const other = await IdeProject.findOne({ owner: req.user._id, _id: { $ne: project._id }, repo: new RegExp(`^${escapeRegex(repo)}$`, "i") }).select("name");
     if (other) return res.status(409).json({ error: `This folder's repo ${repo} is already linked to your project "${other.name}". Open that project instead.`, code: "repo_taken" });
-    const folder = project.localPath;
-    // Its chats so far happened on this computer: they stay there and never show on the website
-    project.pcChatSessionIds = [...new Set([...pcChatIds(project), ...(project.chatSessionIds || [])])];
-    project.repo = repo;
-    project.location = "cloud";
-    project.localPath = null;
-    putCopy(project, ready.deviceId, { path: folder, at: new Date(), here: true });
-    await project.save();
+    await linkFolderProject(project, repo, ready.deviceId);
     res.json({ ok: true, project: projectJson(project, req), message: `Linked to ${repo}. This project now works in the cloud too.` });
   } catch (e) {
     console.error("[IDE] Linking the folder's repo failed:", e.message);
     res.status(500).json({ error: "Could not link this folder's GitHub repo" });
+  }
+});
+
+// Settings → Mastero: push the user's Mastero projects after every change without asking (on by default)
+router.get("/mastero-settings", isAuthenticated, async (req, res) => {
+  const u = await User.findById(req.user._id).select("mastero_settings").lean().catch(() => null);
+  res.json({ autoPush: u?.mastero_settings?.auto_push !== false });
+});
+router.put("/mastero-settings", isAuthenticated, async (req, res) => {
+  if (typeof req.body?.autoPush !== "boolean") return res.status(400).json({ error: "autoPush must be true or false" });
+  await User.updateOne({ _id: req.user._id }, { $set: { "mastero_settings.auto_push": req.body.autoPush } });
+  res.json({ autoPush: req.body.autoPush });
+});
+
+// Mastero (Studio's Project tab): a folder project goes on GitHub in one step, when the user asks for it with this
+// button. A new repo is made with the name the user typed, the folder's code is pushed to it from this computer
+// (desktop/runner.js sync_repo; a folder with no .gitignore gets one first, so node_modules and .env stay out), and the
+// project is linked to it. Answers { project, repo, repoUrl } or { error, code }.
+router.post("/projects/:id/mastero", isAuthenticated, async (req, res) => {
+  const project = await ownProject(req, res);
+  if (!project) return;
+  if (project.repo) return res.status(409).json({ error: `This project is already on GitHub (${project.repo}).`, code: "has_repo" });
+  if (project.location !== "local" || !project.localPath) return res.status(409).json({ error: "Mastero works with a folder project on this computer." });
+  const name = String(req.body?.name || "").trim();
+  if (!repoSlug(name)) return res.status(400).json({ error: "Give the repo a name" });
+  try {
+    const ready = await readyForCopy(req, res);
+    if (!ready) return;
+    // A folder that's already on GitHub keeps its own repo
+    const had = await onComputer(project, project.localPath, "folder_repo", {});
+    const existing = had.error ? null : runnerLine(had.text, "Repo");
+    if (existing) return res.status(409).json({ error: `This folder is already on GitHub as ${existing}. Link it to that repo instead (the link button on the project).`, code: "folder_has_repo", repo: existing });
+    const token = ready.user.github_access_token;
+    const made = await newRepoFor(project, token, { name, isPrivate: req.body?.private !== false });
+    if (made.error) return res.status(409).json(made);
+    const pushed = await onComputer(project, project.localPath, "sync_repo", { mode: "push", repo: made.repo, message: "First version from Classgrid", exact: true, token, name: ready.user.github_name, email: ready.user.github_email });
+    if (pushed.error) return res.status(409).json({ error: `The repo ${made.repo} was made, but your code couldn't be pushed: ${pushed.error}`, code: pushed.code || "push_failed", repo: made.repo });
+    project.mastero = true;
+    await linkFolderProject(project, made.repo, ready.deviceId);
+    res.json({ ok: true, project: projectJson(project, req), repo: made.repo, repoUrl: `https://github.com/${made.repo}`, message: lastLine(pushed.text) });
+  } catch (e) {
+    console.error("[IDE] Mastero failed:", e.message);
+    res.status(500).json({ error: "Could not put this project on GitHub" });
+  }
+});
+
+// Push (Studio's Project tab): the project's folder on this computer is committed with the message the user typed and
+// pushed to its repo, when the user asks for it with this button
+router.post("/projects/:id/push-here", isAuthenticated, async (req, res) => {
+  const project = await ownProject(req, res);
+  if (!project) return;
+  const message = String(req.body?.message || "").trim().slice(0, 200);
+  if (!message) return res.status(400).json({ error: "Write what changed (the commit message)" });
+  if (!project.repo) return res.status(409).json({ error: "This project isn't on GitHub yet. Use Mastero first.", code: "not_on_github" });
+  try {
+    const ready = await readyForCopy(req, res);
+    if (!ready) return;
+    const folder = project.location === "local" ? project.localPath : copyOn(project, ready.deviceId)?.path;
+    if (!folder) return res.status(409).json({ error: "There's no copy of this project on this computer.", code: "no_copy" });
+    const r = await onComputer(project, folder, "sync_repo", { mode: "push", repo: project.repo, message, exact: true, token: await ready.key(project), name: ready.user.github_name, email: ready.user.github_email });
+    if (r.error) return res.status(409).json({ error: r.error, code: r.code });
+    redis.del(GIT_INFO_KEY(project._id)).catch(() => {});
+    res.json({ ok: true, branch: runnerLine(r.text, "Branch"), message: lastLine(r.text) });
+  } catch (e) {
+    console.error("[IDE] Push from this computer failed:", e.message);
+    res.status(500).json({ error: "Could not push to GitHub" });
   }
 });
 

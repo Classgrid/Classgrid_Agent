@@ -36,7 +36,7 @@ async function api(path: string, body: Record<string, unknown>) {
 }
 
 // The saved project list (read for the Files tab and the open project) gets the project's new place at once
-function remember(project: PlaceProject) {
+export function remember(project: PlaceProject) {
   try {
     const list = JSON.parse(localStorage.getItem(LIST_KEY) || "[]") as PlaceProject[];
     const next = list.map((p) => (p.id === project.id ? { ...p, repo: project.repo ?? p.repo, location: project.location, localPath: project.localPath, localCopies: project.localCopies } : p));

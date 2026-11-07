@@ -50,7 +50,6 @@ export function StudioLocalFileView({ path }: { path: string }) {
     desktop()?.fileInfo?.(path).then(setInfo).catch(() => setInfo({ exists: false }));
   }, [path, reload]);
   const url = useMemo(() => `${desktop()?.fileUrl?.(path) || ""}${reload ? `?r=${reload}` : ""}`, [path, reload]);
-  const ext = extOf(path);
 
   return (
     <div className="flex-1 min-h-0 flex flex-col">
@@ -67,27 +66,36 @@ export function StudioLocalFileView({ path }: { path: string }) {
           <Centered><Spinner className="size-5" /></Centered>
         ) : !info.exists ? (
           <Centered><p className="text-sm text-muted-foreground">This file isn't there any more.</p></Centered>
-        ) : ext === "pdf" ? (
-          <PdfView key={url} url={url} />
-        ) : IMAGE.has(ext) ? (
-          <div className="h-full overflow-auto flex items-center justify-center p-4"><img src={url} alt={baseName(path)} className="max-w-full max-h-full object-contain" /></div>
-        ) : VIDEO.has(ext) ? (
-          <div className="h-full flex items-center justify-center p-4"><video src={url} controls className="max-w-full max-h-full" /></div>
-        ) : AUDIO.has(ext) ? (
-          <Centered><audio src={url} controls /></Centered>
-        ) : SHEET.has(ext) ? (
-          <SheetView key={url} url={url} />
-        ) : WORD.has(ext) ? (
-          <WordView key={url} url={url} />
-        ) : MARKDOWN.has(ext) && (info.size || 0) <= MAX_TEXT_BYTES ? (
-          <MarkdownView key={url} url={url} path={path} />
-        ) : BINARY.has(ext) || (info.size || 0) > MAX_TEXT_BYTES ? (
-          <OpenOutside path={path} size={info.size} />
         ) : (
-          <TextView key={url} url={url} />
+          <FileContent url={url} name={path} size={info.size} path={path} />
         )}
       </div>
     </div>
+  );
+}
+
+// What's inside a file, by its kind: a file on this computer (path) or one online (url only, like an upload on the
+// website); kinds that can't be shown here open in the computer's own app, or download
+export function FileContent({ url, name, size, path }: { url: string; name: string; size?: number; path?: string }) {
+  const ext = extOf(name);
+  return ext === "pdf" ? (
+    <PdfView key={url} url={url} />
+  ) : IMAGE.has(ext) ? (
+    <div className="h-full overflow-auto flex items-center justify-center p-4"><img src={url} alt={baseName(name)} className="max-w-full max-h-full object-contain" /></div>
+  ) : VIDEO.has(ext) ? (
+    <div className="h-full flex items-center justify-center p-4"><video src={url} controls className="max-w-full max-h-full" /></div>
+  ) : AUDIO.has(ext) ? (
+    <Centered><audio src={url} controls /></Centered>
+  ) : SHEET.has(ext) ? (
+    <SheetView key={url} url={url} />
+  ) : WORD.has(ext) ? (
+    <WordView key={url} url={url} />
+  ) : MARKDOWN.has(ext) && (size || 0) <= MAX_TEXT_BYTES ? (
+    <MarkdownView key={url} url={url} path={path || ""} />
+  ) : BINARY.has(ext) || (size || 0) > MAX_TEXT_BYTES ? (
+    <OpenOutside path={path} url={url} name={name} size={size} />
+  ) : (
+    <TextView key={url} url={url} />
   );
 }
 
@@ -95,15 +103,18 @@ function Centered({ children }: { children: React.ReactNode }) {
   return <div className="h-full flex flex-col items-center justify-center gap-3 px-6 text-center">{children}</div>;
 }
 
-function OpenOutside({ path, size }: { path: string; size?: number }) {
+function OpenOutside({ path, url, name, size }: { path?: string; url: string; name: string; size?: number }) {
+  const btn = "h-9 px-4 inline-flex items-center rounded-lg border border-border bg-background text-sm font-medium hover:bg-secondary cursor-pointer";
   return (
     <Centered>
-      <span className="[&_svg]:size-10 [&_span]:size-10"><FileBadge path={path} /></span>
-      <p className="text-base font-medium">{baseName(path)}</p>
-      <p className="text-sm text-muted-foreground">{sizeText(size)} · This kind of file opens in your computer's own app.</p>
-      <button onClick={() => desktop()?.openPath?.(path)} className="h-9 px-4 rounded-lg border border-border bg-background text-sm font-medium hover:bg-secondary">
-        Open {baseName(path)}
-      </button>
+      <span className="[&_svg]:size-10 [&_span]:size-10"><FileBadge path={name} /></span>
+      <p className="text-base font-medium">{baseName(name)}</p>
+      <p className="text-sm text-muted-foreground">{size ? `${sizeText(size)} · ` : ""}{path ? "This kind of file opens in your computer's own app." : "This kind of file can't be shown here."}</p>
+      {path ? (
+        <button onClick={() => desktop()?.openPath?.(path)} className={btn}>Open {baseName(name)}</button>
+      ) : (
+        <a href={url} download={baseName(name)} target="_blank" rel="noopener noreferrer" className={btn}>Download {baseName(name)}</a>
+      )}
     </Centered>
   );
 }
@@ -173,7 +184,7 @@ export function PdfView({ url, data, workerSrc }: { url?: string; data?: Uint8Ar
         </Document>
       </div>
       {pages > 0 && (
-        <div className="absolute bottom-4 left-1/2 -translate-x-1/2 flex items-center gap-1 rounded-xl border border-border bg-background/95 px-2 py-1.5 shadow-lg backdrop-blur">
+        <div className="absolute bottom-4 left-1/2 -translate-x-1/2 z-10 flex items-center gap-1 whitespace-nowrap rounded-xl border border-border bg-background/95 px-2 py-1.5 shadow-lg backdrop-blur [&>*]:shrink-0">
           <button className={iconBtn} disabled={page <= 1} onClick={() => go(page - 1)} title="Previous page" aria-label="Previous page"><ChevronLeft className="size-4" /></button>
           <input
             data-no-ring
@@ -184,7 +195,7 @@ export function PdfView({ url, data, workerSrc }: { url?: string; data?: Uint8Ar
             className="h-8 w-10 rounded-md border border-border bg-background text-center text-sm outline-none"
             aria-label="Page"
           />
-          <span className="px-1 text-sm text-muted-foreground">/ {pages}</span>
+          <span className="px-1 text-sm text-muted-foreground whitespace-nowrap select-none">/ {pages}</span>
           <button className={iconBtn} disabled={page >= pages} onClick={() => go(page + 1)} title="Next page" aria-label="Next page"><ChevronRight className="size-4" /></button>
           <span className="mx-1 h-5 w-px bg-border" />
           <button className={iconBtn} onClick={() => step(-1)} title="Zoom out" aria-label="Zoom out"><ZoomOut className="size-4" /></button>

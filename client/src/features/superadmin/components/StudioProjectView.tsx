@@ -2,18 +2,20 @@
 // its name and logo, GitHub (repo, working branch, open pull request), Vercel, the last commit and the history.
 import { useCallback, useEffect, useRef, useState } from "react";
 import { motion, useReducedMotion } from "framer-motion";
-import { ArrowLeftRight, Check, ExternalLink, FolderGit2, GitBranch, GitCommitHorizontal, GitPullRequest, ImagePlus, Pencil, RotateCw, X } from "lucide-react";
+import { ArrowLeftRight, ArrowUpFromLine, Check, ExternalLink, FolderGit2, GitBranch, GitCommitHorizontal, GitPullRequest, ImagePlus, Pencil, RotateCw, X } from "lucide-react";
 import { Link } from "react-router-dom";
 import { toast } from "sonner";
 import { fetchWithRescue } from "@/lib/rescue";
 import { apiClient } from "@/lib/apiClient";
 import { ImageCropperModal } from "@/components/marketing_ui/ImageCropperModal";
 import { StudioProjectChooser } from "./StudioProjectPicker";
+import { MasteroDialog, PushDialog } from "./StudioMastero";
+import { onDesktop, thisComputerCopy, type LocalCopy } from "../utils/projectCopies";
 
 const backendUrl = import.meta.env.VITE_API_URL || "https://api.classgrid.in";
 const EASE = [0.22, 1, 0.36, 1] as const;
 
-type Project = { id: string; name: string; repo: string | null; logo?: string | null; updatedAt?: string };
+type Project = { id: string; name: string; repo: string | null; logo?: string | null; updatedAt?: string; location?: "cloud" | "local"; localCopies?: LocalCopy[] };
 type Info = { repoUrl: string | null; branch: string | null; commit: { message: string; date: string | null; sha: string; url: string | null } | null; vercel: { name: string; dashboardUrl: string; appUrl: string; domain: string } | null };
 type Commit = { sha: string; message: string; author: string | null; avatar: string | null; date: string | null; url: string | null };
 type History = { branch: string | null; pr: { number: number; title: string; url: string } | null; commits: Commit[] };
@@ -46,6 +48,8 @@ export function StudioProjectView({ projectId, reloadKey = 0 }: { projectId: str
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [switching, setSwitching] = useState(false);
+  // Desktop app: Mastero (a folder project onto a new GitHub repo) and Push (this computer's changes to its repo)
+  const [gitDialog, setGitDialog] = useState<"mastero" | "push" | null>(null);
   // Rename the project here (the new name shows in Project Mode and Studio)
   const [renaming, setRenaming] = useState<string | null>(null);
   const [renameBusy, setRenameBusy] = useState(false);
@@ -165,7 +169,7 @@ export function StudioProjectView({ projectId, reloadKey = 0 }: { projectId: str
     <div className="flex-1 min-h-0 overflow-y-auto">
       <div className="px-4 py-4 flex flex-col gap-3">
         {/* Name and logo */}
-        <motion.div {...rise(0)} className="flex items-center gap-3">
+        <motion.div {...rise(0)} className="flex flex-wrap items-center gap-x-3 gap-y-2">
           <button
             onClick={() => logoInputRef.current?.click()}
             disabled={logoBusy || !project}
@@ -180,7 +184,7 @@ export function StudioProjectView({ projectId, reloadKey = 0 }: { projectId: str
               {logoBusy ? <span className="size-3.5 rounded-full border-2 border-white/30 border-t-white animate-spin" /> : <ImagePlus className="size-4" />}
             </span>
           </button>
-          <div className="min-w-0 flex-1">
+          <div className="min-w-[10rem] flex-1">
             {renaming !== null ? (
               <div className="flex items-center gap-1">
                 <input
@@ -212,16 +216,32 @@ export function StudioProjectView({ projectId, reloadKey = 0 }: { projectId: str
             )}
             <p className="text-[12px] text-muted-foreground">Shared with Project Mode{project?.updatedAt ? ` · edited ${ago(project.updatedAt)}` : ""}</p>
           </div>
-          <button onClick={() => setSwitching((s) => !s)} className={`shrink-0 h-8 px-2.5 inline-flex items-center gap-1.5 rounded-md border border-black/10 dark:border-white/10 text-[12px] hover:text-foreground hover:bg-black/[0.04] dark:hover:bg-white/[0.05] transition-colors ${switching ? "text-foreground bg-black/[0.04] dark:bg-white/[0.05]" : "text-muted-foreground"}`}>
-            <ArrowLeftRight className="size-3.5" /> Switch
-          </button>
-          <Link to={window.location.pathname.startsWith("/superadmin") ? "/superadmin/project" : "/c/project"} className="shrink-0 h-8 px-2.5 inline-flex items-center gap-1.5 rounded-md border border-black/10 dark:border-white/10 text-[12px] text-muted-foreground hover:text-foreground hover:bg-black/[0.04] dark:hover:bg-white/[0.05] transition-colors">
-            Open in Project Mode
-          </Link>
-          <button onClick={load} className="shrink-0 flex items-center justify-center size-8 rounded-md text-muted-foreground hover:text-foreground hover:bg-black/[0.05] dark:hover:bg-white/[0.06] transition-colors" title="Refresh" aria-label="Refresh">
-            <RotateCw className={`size-3.5 ${loading ? "animate-spin" : ""}`} />
-          </button>
+          {/* (a narrow pane puts the buttons on their own line under the name) */}
+          <div className="ml-auto flex items-center gap-2">
+            {onDesktop() && project && !project.repo && project.location === "local" && (
+              <button onClick={() => setGitDialog("mastero")} className="shrink-0 h-8 px-2.5 inline-flex items-center gap-1.5 rounded-md bg-foreground text-background text-[12px] font-medium hover:opacity-90 transition-opacity cursor-pointer" title="Make a GitHub repo for this project and push your code to it">
+                <img src={GITHUB_ICON} alt="" aria-hidden className="size-3.5 invert dark:invert-0" /> Mastero
+              </button>
+            )}
+            {onDesktop() && project?.repo && (project.location === "local" || thisComputerCopy(project)?.here) && (
+              <button onClick={() => setGitDialog("push")} className="shrink-0 h-8 px-2.5 inline-flex items-center gap-1.5 rounded-md bg-foreground text-background text-[12px] font-medium hover:opacity-90 transition-opacity cursor-pointer" title="Push this computer's changes to GitHub">
+                <ArrowUpFromLine className="size-3.5" /> Push
+              </button>
+            )}
+            <button onClick={() => setSwitching((s) => !s)} className={`shrink-0 h-8 px-2.5 inline-flex items-center gap-1.5 rounded-md border border-black/10 dark:border-white/10 text-[12px] hover:text-foreground hover:bg-black/[0.04] dark:hover:bg-white/[0.05] transition-colors ${switching ? "text-foreground bg-black/[0.04] dark:bg-white/[0.05]" : "text-muted-foreground"}`}>
+              <ArrowLeftRight className="size-3.5" /> Switch
+            </button>
+            <Link to={window.location.pathname.startsWith("/superadmin") ? "/superadmin/project" : "/c/project"} className="shrink-0 h-8 px-2.5 inline-flex items-center gap-1.5 rounded-md border border-black/10 dark:border-white/10 text-[12px] text-muted-foreground hover:text-foreground hover:bg-black/[0.04] dark:hover:bg-white/[0.05] transition-colors">
+              Open in Project Mode
+            </Link>
+            <button onClick={load} className="shrink-0 flex items-center justify-center size-8 rounded-md text-muted-foreground hover:text-foreground hover:bg-black/[0.05] dark:hover:bg-white/[0.06] transition-colors" title="Refresh" aria-label="Refresh">
+              <RotateCw className={`size-3.5 ${loading ? "animate-spin" : ""}`} />
+            </button>
+          </div>
         </motion.div>
+
+        {project && <MasteroDialog project={project} open={gitDialog === "mastero"} onClose={() => setGitDialog(null)} onDone={(p) => { setProject(p); load(); }} />}
+        {project && <PushDialog project={project} open={gitDialog === "push"} onClose={() => setGitDialog(null)} onDone={load} />}
 
         {/* Switch to another project, or make a new one */}
         {switching && (

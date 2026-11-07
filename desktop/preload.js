@@ -1,5 +1,5 @@
 // What our screens can ask the desktop app for (window.classgridDesktop). Nothing else from the computer is exposed.
-const { contextBridge, ipcRenderer } = require("electron");
+const { contextBridge, ipcRenderer, webUtils } = require("electron");
 
 contextBridge.exposeInMainWorld("classgridDesktop", {
   isDesktop: true,
@@ -23,6 +23,16 @@ contextBridge.exposeInMainWorld("classgridDesktop", {
   pickFolder: () => ipcRenderer.invoke("cg:pickFolder"),
   // A code or text file: { file, folder }, { error } for a picture, video, sound or archive, or null when cancelled
   pickFile: () => ipcRenderer.invoke("cg:pickFile"),
+  // Studio's Uploads tab: files kept on this computer. A dropped or picked file is copied from where it is; one
+  // without a place on disk (pasted) is sent as its bytes
+  uploadsList: () => ipcRenderer.invoke("cg:uploadsList"),
+  uploadsAdd: async (files, chatId) => ipcRenderer.invoke("cg:uploadsAdd", await Promise.all([...files].map(async (f) => {
+    const at = webUtils.getPathForFile(f);
+    return at ? { path: at, name: f.name, type: f.type } : { name: f.name, type: f.type, data: new Uint8Array(await f.arrayBuffer()) };
+  })), chatId || null),
+  uploadsRemove: (id) => ipcRenderer.invoke("cg:uploadsRemove", id),
+  uploadsPick: (chatId) => ipcRenderer.invoke("cg:uploadsPick", chatId || null),
+  uploadsFolder: () => ipcRenderer.invoke("cg:uploadsFolder"),
   setToken: (token) => ipcRenderer.send("cg:setToken", token),
   // The user's own terminals (Studio's Terminal tab): PowerShell, Git Bash or Command Prompt on this computer
   termShells: () => ipcRenderer.invoke("cg:termShells"),

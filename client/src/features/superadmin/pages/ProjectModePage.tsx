@@ -10,7 +10,8 @@
  * super admin dashboard are live.
  * ─────────────────────────────────────────────────────────
  */
-import { useCallback, useEffect, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useRef, useState } from "react";
+import { MasteroMark } from "@/components/icons/MasteroMark";
 import { createPortal } from "react-dom";
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import { useParams } from "react-router-dom";
@@ -50,7 +51,7 @@ let reloadedInProject = (() => {
 })();
 const AI_PANEL_KEY = "cg_project_ai_closed"; // whether the AI panel was closed (per-viewer convenience)
 
-type Project = { id: string; name: string; repo: string | null; logo?: string | null; lastOpenedAt: string | null; createdAt?: string; updatedAt: string; location?: "cloud" | "local"; localPath?: string | null; localCopies?: LocalCopy[] };
+type Project = { id: string; name: string; repo: string | null; logo?: string | null; lastOpenedAt: string | null; createdAt?: string; updatedAt: string; location?: "cloud" | "local"; localPath?: string | null; localCopies?: LocalCopy[]; mastero?: boolean };
 type GithubAccount = { login: string | null; name: string | null; email: string | null; avatar: string | null };
 
 async function api(path: string, init?: RequestInit) {
@@ -745,6 +746,15 @@ export function ProjectModePage() {
   }));
   // Website: only cloud projects. Folder projects stay in the desktop app and are never listed online
   const websiteProjects = (projects || []).filter((p) => p.location !== "local");
+  // Mastero projects (on the user's computer and in the cloud, GitHub as the master copy) are listed first, in their own section
+  const masteroCount = websiteProjects.filter((p) => p.mastero).length;
+  const listedProjects = [...websiteProjects.filter((p) => p.mastero), ...websiteProjects.filter((p) => !p.mastero)];
+  const sectionTitle = (title: string, desc: string, mark?: boolean) => (
+    <div className="mt-2 first:mt-0 flex flex-col gap-0.5">
+      <h2 className="flex items-center gap-2 text-sm font-semibold text-foreground">{mark && <MasteroMark className="size-4" />}{title}</h2>
+      <p className="text-xs text-muted-foreground">{desc}</p>
+    </div>
+  );
   useEffect(() => { if (isDesktop && githubConnected) loadRepos(); }, [isDesktop, githubConnected, loadRepos]);
 
   // Desktop app: one thin top bar like Cursor. The built-in editor's own top bar is hidden (desktop/editor.js), so its
@@ -1129,8 +1139,11 @@ export function ProjectModePage() {
                   </div>
                 )}
 
-                {websiteProjects.map((p) => (
-                  <div key={p.id} className="group rounded-xl border border-border bg-background p-5 flex flex-col gap-3 hover:bg-secondary/60 transition-colors">
+                {listedProjects.map((p, i) => (
+                  <Fragment key={p.id}>
+                  {masteroCount > 0 && i === 0 && sectionTitle("Mastero projects", "On your computer and in the Classgrid cloud. GitHub is the master copy.", true)}
+                  {masteroCount > 0 && i === masteroCount && sectionTitle("Cloud projects", "Your code stays on GitHub. Opening a project downloads it fresh.")}
+                  <div className="group rounded-xl border border-border bg-background p-5 flex flex-col gap-3 hover:bg-secondary/60 transition-colors">
                     <div className="flex items-center gap-4 min-w-0">
                       {renaming?.id === p.id ? (
                         <button
@@ -1203,6 +1216,7 @@ export function ProjectModePage() {
                       )}
                     </div>
                   </div>
+                  </Fragment>
                 ))}
               </div>
             )}

@@ -19,7 +19,7 @@ const chatIdFrom = (pathname: string): string | null => {
   const at = parts.indexOf("studio");
   return (at !== -1 && parts[at + 1]) || null;
 };
-function useChatId() {
+export function useChatId() {
   const { pathname } = useLocation();
   const [id, setId] = useState<string | null>(() => chatIdFrom(window.location.pathname));
   useEffect(() => { setId(chatIdFrom(window.location.pathname)); }, [pathname]);

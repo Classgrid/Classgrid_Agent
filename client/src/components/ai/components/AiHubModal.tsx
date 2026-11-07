@@ -187,6 +187,13 @@ export function AiHubModal({ isOpen, onClose, onSendPrompt, initialTab = "plugin
       fetchStatus();
     }
   }, [isOpen]);
+  // Desktop app: a login finished in the computer's browser shows here when the user comes back to the app
+  React.useEffect(() => {
+    if (!isOpen || import.meta.env.VITE_DESKTOP !== "1") return;
+    const again = () => { fetchStatus(); };
+    window.addEventListener("focus", again);
+    return () => window.removeEventListener("focus", again);
+  }, [isOpen]);
 
   React.useEffect(() => {
     if (!isOpen || Object.keys(builtinTools).length) return;
@@ -263,7 +270,10 @@ export function AiHubModal({ isOpen, onClose, onSendPrompt, initialTab = "plugin
           `width=${width},height=${height},left=${left},top=${top},scrollbars=yes`
         );
         
-        if (!popup) {
+        // Desktop app: the login opens in the computer's own browser (no window here), so only the polling below
+        // tells when it's done
+        const inBrowser = !popup && !!(window as unknown as { classgridDesktop?: { isDesktop?: boolean } }).classgridDesktop?.isDesktop;
+        if (!popup && !inBrowser) {
           setIsConnecting(false);
           toast.error("Popup blocked. Please allow popups for this site.");
           return;
@@ -298,7 +308,7 @@ export function AiHubModal({ isOpen, onClose, onSendPrompt, initialTab = "plugin
           }
 
           // If user closed the popup manually, stop polling after a grace period
-          if (popup.closed) {
+          if (popup?.closed) {
             // Give 3 more seconds for the backend to finalize the token
             setTimeout(async () => {
               try {

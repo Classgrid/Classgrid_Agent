@@ -5,7 +5,7 @@ import { createPortal } from "react-dom";
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import {
   ArrowLeft, ArrowRight, Bot, Camera, ExternalLink, FileDiff, FileText, FolderGit2, FolderOpen, Globe, Images, Maximize2, Minimize2,
-  PanelRightClose, PanelRightOpen, Plus, RotateCw, Search, Terminal, X,
+  PanelRightClose, PanelRightOpen, Plus, RotateCw, Search, Terminal, Upload, X,
 } from "lucide-react";
 import { AskAiPanel } from "@/components/ai/components/AskAiPanel";
 import { Link, useLocation, useNavigate } from "react-router-dom";
@@ -18,6 +18,7 @@ import { StudioProjectView } from "../components/StudioProjectView";
 import { StudioBrowserView } from "../components/StudioBrowserView";
 import { StudioLocalBrowserView, hasLocalBrowser } from "../components/StudioLocalBrowserView";
 import { StudioShotsView } from "../components/StudioShotsView";
+import { StudioUploadsView } from "../components/StudioUploadsView";
 import { StudioLocalFileView, baseName } from "../components/StudioLocalFileView";
 import { StudioAgentsView } from "../components/StudioAgentsView";
 import { StudioReviewView } from "../components/StudioReviewView";
@@ -30,7 +31,7 @@ import { DesktopMenuBar, editAction, type MenuEntry, type MenuSpec } from "@/com
 import { listLocalFiles, localFolderOf } from "../utils/localProject";
 import { PROJECT_PLACE_EVENT, listenProjectSaved, thisComputerCopy, thisDeviceId } from "../utils/projectCopies";
 
-type TabKind = "browser" | "review" | "files" | "terminal" | "project" | "shots" | "file" | "agents";
+type TabKind = "browser" | "review" | "files" | "terminal" | "project" | "shots" | "uploads" | "file" | "agents";
 type Tab = { id: string; kind: TabKind; path?: string }; // path: a "file" tab's file on this computer (desktop app)
 
 const TAB_INFO: Record<TabKind, { label: string; Icon: typeof Globe }> = {
@@ -40,6 +41,7 @@ const TAB_INFO: Record<TabKind, { label: string; Icon: typeof Globe }> = {
   terminal: { label: "Terminal", Icon: Terminal },
   project: { label: "Project", Icon: FolderGit2 },
   shots: { label: "Screenshots", Icon: Images },
+  uploads: { label: "Uploads", Icon: Upload },
   file: { label: "File", Icon: FileText },
   agents: { label: "Agents", Icon: Bot },
 };
@@ -56,7 +58,7 @@ const MIN_CHAT = 320;
 
 // The pane's tabs and the selected one, kept across a refresh
 const TABS_KEY = "cg_studio_tabs";
-const TAB_KINDS = new Set<TabKind>(["browser", "review", "files", "terminal", "project", "shots", "file", "agents"]);
+const TAB_KINDS = new Set<TabKind>(["browser", "review", "files", "terminal", "project", "shots", "uploads", "file", "agents"]);
 function readTabs(): { tabs: Tab[]; active: string | null } {
   try {
     const saved = JSON.parse(localStorage.getItem(TABS_KEY) || "null");
@@ -542,7 +544,7 @@ export function StudioModePage() {
       { label: "Select All", keys: "Ctrl+A", run: () => editAction("selectAll") },
     ] },
     { label: "View", items: [
-      ...(["browser", "files", "terminal", "review", "project", "shots", "agents"] as TabKind[]).map((kind) => ({ label: TAB_INFO[kind].label, run: () => showTab(kind) })),
+      ...(["browser", "files", "terminal", "review", "project", "shots", "uploads", "agents"] as TabKind[]).map((kind) => ({ label: TAB_INFO[kind].label, run: () => showTab(kind) })),
       "-",
       { label: "Show or Hide Sidebar", run: toggleSidebar },
       { label: "Show or Hide Pane", run: () => { setMaximized(false); setPane((p) => ({ ...p, open: !p.open })); } },
@@ -784,6 +786,7 @@ export function StudioModePage() {
                     {activeTab?.kind === "terminal" && <StudioTerminalView entries={terminal.entries} onClear={terminal.clear} />}
                     {activeTab?.kind === "project" && <StudioProjectView projectId={studioProject} reloadKey={filesReload} />}
                     {activeTab?.kind === "shots" && <StudioShotsView />}
+                    {activeTab?.kind === "uploads" && <StudioUploadsView />}
                     {activeTab?.kind === "file" && activeTab.path && <StudioLocalFileView path={activeTab.path} />}
                     {activeTab?.kind === "agents" && <StudioAgentsView />}
                     {activeTab?.kind === "review" && <StudioReviewView projectId={studioProject} onChanged={() => setFilesReload((n) => n + 1)} />}

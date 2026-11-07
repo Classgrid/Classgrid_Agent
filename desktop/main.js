@@ -10,6 +10,7 @@ const codeEditor = require("./codeeditor");
 const terminal = require("./terminal"); // the user's own terminals in Studio's Terminal tab
 const browser = require("./browser");
 const chats = require("./chats");
+const uploads = require("./uploads");
 const memory = require("./memory");
 
 const PORT = Number(process.env.CG_PORT) || 47821; // CG_PORT: a second copy while testing
@@ -358,6 +359,16 @@ ipcMain.handle("cg:pickFolder", async () => {
   runner.allowFolder(r.filePaths[0]); // only folders picked here can be used by the local runner
   return r.filePaths[0];
 });
+// Studio's Uploads tab: the files the user uploaded, kept on this computer (desktop/uploads.js)
+ipcMain.handle("cg:uploadsList", () => uploads.list());
+ipcMain.handle("cg:uploadsAdd", (_e, files, chatId) => uploads.add(files, chatId));
+ipcMain.handle("cg:uploadsRemove", (_e, id) => uploads.remove(String(id || "")));
+ipcMain.handle("cg:uploadsPick", async (_e, chatId) => {
+  const r = await dialog.showOpenDialog(win, { title: "Upload files", buttonLabel: "Upload", properties: ["openFile", "multiSelections"] });
+  if (r.canceled || !r.filePaths.length) return { files: [] };
+  return uploads.add(r.filePaths.map((p) => ({ path: p })), chatId);
+});
+ipcMain.handle("cg:uploadsFolder", async () => { const dir = uploads.folder(); if (dir) { fs.mkdirSync(dir, { recursive: true }); shell.openPath(dir); } });
 // Studio's File → Open File: a code or text file (no pictures, videos, sounds or archives); its folder becomes the project
 const NOT_CODE = new Set(["png", "jpg", "jpeg", "gif", "webp", "bmp", "ico", "svg", "tif", "tiff", "heic", "avif", "psd", "mp4", "mov", "avi", "mkv", "webm", "wmv", "flv", "mp3", "wav", "ogg", "flac", "aac", "m4a", "zip", "rar", "7z", "tar", "gz", "exe", "msi", "dll", "iso", "bin"]);
 ipcMain.handle("cg:pickFile", async () => {
@@ -375,7 +386,7 @@ ipcMain.handle("cg:pickFile", async () => {
   return { file, folder: path.dirname(file) };
 });
 // The login token arrives from the screens (client/src/main.tsx); the local runner (Day 2) uses it
-ipcMain.on("cg:setToken", (_e, t) => { runner.setToken(t || null); chats.setToken(t || null); memory.setToken(t || null); codeEditor.setToken(t || null); });
+ipcMain.on("cg:setToken", (_e, t) => { runner.setToken(t || null); chats.setToken(t || null); uploads.setToken(t || null); memory.setToken(t || null); codeEditor.setToken(t || null); });
 // The AI's memory of each account used on this computer (desktop/memory.js): switching accounts keeps it
 ipcMain.handle("cg:saveMemory", (_e, m) => { try { return memory.saveMine(m); } catch { return false; } });
 ipcMain.handle("cg:otherMemory", () => { try { return memory.others(); } catch { return []; } });
@@ -446,6 +457,7 @@ if (!app.requestSingleInstanceLock()) {
     Menu.setApplicationMenu(null);
     runner.init(app.getPath("userData"));
     chats.init(app.getPath("userData"));
+    uploads.init(app.getPath("userData"));
     memory.init(app.getPath("userData"));
     if (!fs.existsSync(path.join(APP_DIR, "index.html"))) {
       dialog.showErrorBox("Classgrid", "The app's screens are missing. Run: npm run build:client");
