@@ -65,8 +65,8 @@ export function MasteroOnlineCard({ className = "" }: { className?: string }) {
             {link && <Qr value={link} size={200} />}
           </div>
           <div className="px-5 pt-4 pb-5">
-            <DialogTitle className="text-[15px] font-medium">Open on chat.classgrid.in</DialogTitle>
-            <DialogDescription className="mt-0.5 text-[13px] text-muted-foreground">Continue this chat from your phone or another computer: it's the same chat there. Scan the QR code or copy the link below.</DialogDescription>
+            <DialogTitle className="sr-only">Continue this chat</DialogTitle>
+            <DialogDescription className="text-[13px] text-muted-foreground">Continue this chat from your phone or another computer: it's the same chat there. Scan the QR code or copy the link below.</DialogDescription>
             <div className="mt-3 flex items-center gap-2 h-10 pl-3 pr-1 rounded-lg border border-black/10 dark:border-white/[0.08] bg-black/[0.02] dark:bg-[#161616]">
               <span className="flex-1 min-w-0 truncate font-mono text-[12.5px] text-muted-foreground">{link}</span>
               <button type="button" onClick={copy} className="shrink-0 flex items-center justify-center size-8 rounded-md text-muted-foreground hover:text-foreground hover:bg-black/[0.05] dark:hover:bg-white/[0.06] cursor-pointer" title="Copy link" aria-label="Copy link">
