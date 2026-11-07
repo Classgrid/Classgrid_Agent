@@ -1,15 +1,15 @@
 // Mastero's cards in the chat (the AI's mastero_ask tool): after the user's folder was put on GitHub, the AI asks for
 // the project's name, then its photo. The card saves the answer itself (the same project rename and logo as the
 // Project tab), then tells the AI as the user's next (hidden) message, so it goes on to the next step.
-import { useRef, useState } from "react";
-import { Check, FolderGit2, ImagePlus } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { Check, FolderGit2, ImagePlus, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import { fetchWithRescue } from "@/lib/rescue";
 import { apiClient } from "@/lib/apiClient";
 import { ImageCropperModal } from "@/components/marketing_ui/ImageCropperModal";
 
 const backendUrl = import.meta.env.VITE_API_URL || "https://api.classgrid.in";
-type Shown = { shown?: "name" | "logo"; project_id?: string; project_name?: string; repo?: string | null; logo?: string | null; suggestion?: string | null };
+type Shown = { shown?: "name" | "logo" | "confirm"; project_id?: string; project_name?: string; repo?: string | null; logo?: string | null; suggestion?: string | null };
 
 const parse = (result: unknown): Shown | null => {
   try { const d = typeof result === "string" ? JSON.parse(result) : result; return d && typeof d === "object" && (d as Shown).project_id ? (d as Shown) : null; } catch { return null; }
@@ -32,17 +32,22 @@ async function saveProject(id: string, body: Record<string, unknown>) {
 }
 
 // active: this is the newest message (an older card was answered already and only shows what was picked)
-export function MasteroAskStep({ stepId, args, result, status, active }: { stepId: string; args?: { ask?: string; suggestion?: string }; result?: unknown; status: string; active: boolean }) {
+// className: where it sits (on the chat box it takes the box's width)
+export function MasteroAskStep({ stepId, args, result, status, active, className = "ml-10 mr-2 my-1.5 max-w-[460px]" }: { stepId: string; args?: { ask?: string; suggestion?: string }; result?: unknown; status: string; active: boolean; className?: string }) {
   const info = parse(result);
-  const ask = (info?.shown || args?.ask) === "logo" ? "logo" : "name";
+  const asked = info?.shown || args?.ask;
+  const ask = asked === "logo" ? "logo" : asked === "confirm" ? "confirm" : "name";
   const [answered, setAnswered] = useState<string | null>(() => { try { return localStorage.getItem(doneKey(stepId)); } catch { return null; } });
   const [name, setName] = useState(() => info?.suggestion || args?.suggestion || folderName(info?.project_name));
   const [busy, setBusy] = useState(false);
   const [cropSrc, setCropSrc] = useState<string | null>(null);
   const [logo, setLogo] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
+  // The AI's suggested name arrives with the step's result (after a reload too): put it in the box once
+  const suggested = info?.suggestion || args?.suggestion || "";
+  useEffect(() => { if (suggested && !name) setName(suggested); }, [suggested]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  if (status === "loading" || !info) return null;
+  if (status === "loading" || !info || answered) return null; // answered: the AI goes on, the card leaves the chat box
   const finish = (what: string, message: string) => {
     try { localStorage.setItem(doneKey(stepId), what); } catch { /* storage blocked */ }
     setAnswered(what);
@@ -56,7 +61,7 @@ export function MasteroAskStep({ stepId, args, result, status, active }: { stepI
     setBusy(true);
     try {
       await saveProject(info.project_id!, { name: n });
-      finish(n, `[Mastero] I named the project "${n}" (saved). Go on with the next Mastero step.`);
+      finish(n, `[SYSTEM: Mastero] I named the project "${n}" (saved). Go on with the next Mastero step.`);
     } catch (e: any) {
       toast.error(e.message);
     } finally {
@@ -82,7 +87,7 @@ export function MasteroAskStep({ stepId, args, result, status, active }: { stepI
       if (!put.ok) throw new Error("Couldn't upload the photo. Try again.");
       await saveProject(info.project_id!, { logo: data.publicUrl });
       setLogo(data.publicUrl);
-      finish("photo", "[Mastero] I added the project's photo (saved). Go on with the next Mastero step.");
+      finish("photo", "[SYSTEM: Mastero] I added the project's photo (saved). Go on with the next Mastero step.");
     } catch (e: any) {
       toast.error(e.message || "Couldn't upload the photo. Try again.");
       throw e; // the crop window shows it failed
@@ -91,28 +96,57 @@ export function MasteroAskStep({ stepId, args, result, status, active }: { stepI
     }
   };
 
-  const steps = ["Name", "Photo"];
-  const at = ask === "name" ? 0 : 1;
+  // The last step: only the user's confirmation makes it a Mastero project (its section, Push and the pushes after
+  // every answer start then)
+  const confirm = async () => {
+    if (locked) return;
+    setBusy(true);
+    try {
+      const res = await fetchWithRescue(`${backendUrl}/api/ide/projects/${info.project_id}/mastero-confirm`, { method: "POST", credentials: "include" }).catch(() => null);
+      const data = res ? await res.json().catch(() => ({})) : {};
+      if (!res?.ok) throw new Error(data.error || "Couldn't finish Mastero. Try again.");
+      window.dispatchEvent(new Event("studio:projects-changed"));
+      finish("confirmed", "[SYSTEM: Mastero] I confirmed: it is a Mastero project now. Now tell me how it works, as you were asked at the start.");
+    } catch (e: any) {
+      toast.error(e.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const steps = ["Name", "Photo", "Confirm"];
+  const at = ask === "name" ? 0 : ask === "logo" ? 1 : 2;
   const shownLogo = logo || (answered === "photo" ? info.logo : null);
 
   return (
-    <div className="relative z-10 ml-10 mr-2 my-1.5 max-w-[460px] rounded-xl border border-slate-200 dark:border-[#2a2a2a] bg-white dark:bg-[#171717] overflow-hidden">
-      {/* Mastero's steps: name, then photo */}
+    <div className={`relative z-10 ${className} rounded-xl border border-slate-200 dark:border-[#2a2a2a] bg-white dark:bg-[#171717] overflow-hidden shadow-sm`}>
+      {/* One step at a time: name, then photo, then the user's confirmation */}
       <div className="flex items-center gap-2 px-3.5 py-2.5 border-b border-slate-200 dark:border-[#2a2a2a] text-[12.5px]">
         <span className="font-medium text-slate-800 dark:text-[#e6e6e6]">Mastero</span>
         <span className="text-slate-400 dark:text-[#7d7d7d]">·</span>
-        {steps.map((label, i) => (
-          <span key={label} className="flex items-center gap-1.5">
-            {i > 0 && <span className="w-4 h-px bg-slate-200 dark:bg-[#333]" />}
-            <span className={`flex items-center justify-center size-4 rounded-full text-[10px] ${i < at || (i === at && answered) ? "bg-[#16825d] text-white" : i === at ? "bg-foreground text-background" : "bg-slate-100 dark:bg-[#262626] text-slate-400"}`}>
-              {i < at || (i === at && answered) ? <Check className="size-2.5" /> : i + 1}
-            </span>
-            <span className={i === at ? "text-slate-800 dark:text-[#e6e6e6]" : "text-slate-400 dark:text-[#7d7d7d]"}>{label}</span>
-          </span>
-        ))}
+        <span className="text-slate-800 dark:text-[#e6e6e6]">{steps[at]}</span>
+        <span className="ml-auto text-slate-400 dark:text-[#7d7d7d]">Step {at + 1} of {steps.length}</span>
       </div>
 
-      {ask === "name" ? (
+      {ask === "confirm" ? (
+        <div className="p-3.5 flex flex-col gap-3">
+          <div className="flex items-center gap-3">
+            <div className="size-12 shrink-0 rounded-xl border border-slate-200 dark:border-[#2a2a2a] overflow-hidden flex items-center justify-center bg-slate-50 dark:bg-[#1d1d1d]">
+              {info.logo ? <img src={info.logo} alt="" className="size-full object-cover" /> : <FolderGit2 className="size-5 text-slate-400" />}
+            </div>
+            <div className="min-w-0 flex-1 leading-tight">
+              <p className="truncate text-[14px] font-medium text-slate-800 dark:text-[#e6e6e6]">{info.project_name}</p>
+              {info.repo && <p className="truncate text-[12px] font-mono text-slate-500 dark:text-[#8a8a8a]">{info.repo}</p>}
+            </div>
+          </div>
+          <p className="text-[13px] text-slate-600 dark:text-[#a9a9a9]">Make it a Mastero project? It works on this computer and in the Classgrid cloud, and your changes are pushed to GitHub after every answer (you can change that in Settings → Mastero).</p>
+          <div className="flex justify-end">
+            <button type="button" onClick={confirm} disabled={locked} className="h-9 px-4 rounded-md bg-foreground text-background text-[13px] font-medium hover:opacity-90 disabled:opacity-40 cursor-pointer disabled:cursor-default">
+              {busy ? "Finishing…" : "Make it Mastero"}
+            </button>
+          </div>
+        </div>
+      ) : ask === "name" ? (
         <div className="p-3.5 flex flex-col gap-2.5">
           <p className="text-[13px] text-slate-600 dark:text-[#a9a9a9]">What should this project be called in Classgrid?</p>
           {answered ? (
@@ -144,7 +178,7 @@ export function MasteroAskStep({ stepId, args, result, status, active }: { stepI
             className="size-20 shrink-0 rounded-xl border border-dashed border-black/15 dark:border-white/15 overflow-hidden flex flex-col items-center justify-center gap-1 text-slate-400 hover:bg-slate-50 dark:hover:bg-[#1d1d1d] cursor-pointer disabled:cursor-default disabled:hover:bg-transparent"
           >
             {shownLogo ? <img src={shownLogo} alt="" className="size-full object-cover" />
-              : busy ? <span className="size-4 rounded-full border-2 border-slate-300 border-t-slate-600 animate-spin" />
+              : busy ? <Loader2 className="size-5 animate-spin" />
               : answered ? <FolderGit2 className="size-6" />
               : <><ImagePlus className="size-6" /><span className="text-[11px]">Upload</span></>}
           </button>
@@ -153,7 +187,7 @@ export function MasteroAskStep({ stepId, args, result, status, active }: { stepI
             {!answered && (
               <div className="flex items-center gap-2">
                 <button type="button" onClick={() => fileRef.current?.click()} disabled={locked} className="h-8 px-3 rounded-md bg-foreground text-background text-[12.5px] font-medium hover:opacity-90 disabled:opacity-40 cursor-pointer disabled:cursor-default">Upload photo</button>
-                <button type="button" onClick={() => finish("skipped", "[Mastero] I skipped the photo for now. Go on with the next Mastero step.")} disabled={locked} className="h-8 px-3 rounded-md border border-black/10 dark:border-white/[0.1] text-[12.5px] hover:bg-black/[0.04] dark:hover:bg-white/[0.05] disabled:opacity-40 cursor-pointer disabled:cursor-default">Skip</button>
+                <button type="button" onClick={() => finish("skipped", "[SYSTEM: Mastero] I skipped the photo for now. Go on with the next Mastero step.")} disabled={locked} className="h-8 px-3 rounded-md border border-black/10 dark:border-white/[0.1] text-[12.5px] hover:bg-black/[0.04] dark:hover:bg-white/[0.05] disabled:opacity-40 cursor-pointer disabled:cursor-default">Skip</button>
               </div>
             )}
           </div>

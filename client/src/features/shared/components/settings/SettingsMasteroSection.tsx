@@ -1,13 +1,17 @@
 // Settings → Mastero: how the AI works with the user's Mastero projects (a folder from their computer put on GitHub
 // with Studio's Mastero button: the same project on the computer and in the cloud, GitHub as the master copy).
 // Kept on the server (routes/ide.routes.js /mastero-settings), so the app and the website show the same choice.
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { Switch } from "@/components/marketing_ui/switch";
 import { fetchWithRescue } from "@/lib/rescue";
+import { readPageCache, writePageCache } from "@/lib/desktopPageCache";
 import { MasteroMark } from "@/components/icons/MasteroMark";
 
 const backendUrl = import.meta.env.VITE_API_URL || "https://api.classgrid.in";
+// The last answer, so the switch shows at once (kept while the app runs, and on this computer in the desktop app)
+const PUSH_CACHE = "mastero:autoPush";
+let knownAutoPush: boolean | undefined = readPageCache<boolean>(PUSH_CACHE);
 
 function Row({ title, desc, children }: { title: string; desc?: React.ReactNode; children?: React.ReactNode }) {
   return (
@@ -34,15 +38,19 @@ function Section({ title, desc, children }: { title: string; desc?: string; chil
 }
 
 export function SettingsMasteroSection() {
-  const [autoPush, setAutoPush] = useState<boolean | null>(null);
+  // Shown at once with the last answer (on until known), then checked quietly; a flip made meanwhile wins
+  const [autoPush, setAutoPushState] = useState<boolean>(knownAutoPush ?? true);
+  const touched = useRef(false);
+  const setAutoPush = (v: boolean) => { knownAutoPush = v; writePageCache(PUSH_CACHE, v); setAutoPushState(v); };
   useEffect(() => {
     fetchWithRescue(`${backendUrl}/api/ide/mastero-settings`, { credentials: "include" })
       .then((r) => (r.ok ? r.json() : null))
-      .then((d) => setAutoPush(d ? d.autoPush !== false : true))
-      .catch(() => setAutoPush(true));
+      .then((d) => { if (d && !touched.current) setAutoPush(d.autoPush !== false); })
+      .catch(() => {});
   }, []);
   const changePush = async (on: boolean) => {
     const was = autoPush;
+    touched.current = true;
     setAutoPush(on);
     const res = await fetchWithRescue(`${backendUrl}/api/ide/mastero-settings`, {
       method: "PUT",
@@ -68,7 +76,7 @@ export function SettingsMasteroSection() {
             ? "Off: the AI asks you yes or no before it pushes your changes to GitHub."
             : "On: when an answer changes files, the changes go to GitHub by themselves, without asking."}
         >
-          <Switch checked={autoPush !== false} disabled={autoPush === null} onCheckedChange={(v) => void changePush(v)} />
+          <Switch checked={autoPush} onCheckedChange={(v) => void changePush(v)} />
         </Row>
       </Section>
     </div>

@@ -2742,6 +2742,12 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
   const [fileMentions, setFileMentions] = useState<string[]>([]);
   // Studio: comments and quotes on code from the Files tab, sent with the next message (kept per chat)
   const isStudio = pageContext?.path === "/c/studio";
+  // Mastero's card (the AI's mastero_ask in the newest answer): shown on the chat box until the user answers it
+  const masteroAsk = (() => {
+    const last = messages[messages.length - 1];
+    if (!last || last.role !== "assistant") return null;
+    return [...(last.steps || [])].reverse().find((s: any) => s.type === "tool" && s.tool === "mastero_ask" && s.status === "success") as any || null;
+  })();
   // Studio's Uploads tab: the files sent in this chat (pictures sent from the desktop app as they are on this computer)
   useEffect(() => {
     if (!isStudio) return;
@@ -5302,7 +5308,7 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
     <div ref={variant !== "full-page" ? chatScrollRef : undefined} className={cn("relative overscroll-contain chat-scrollbar [scrollbar-gutter:stable]", variant === "full-page" ? "w-full" : centerEmptyInput ? "shrink-0" : "flex-1 min-h-0 overflow-y-auto")}>
 
 
-      <div className={cn("flex flex-col gap-4 px-4 py-4 transition-all duration-300 ease-[cubic-bezier(0.22,1,0.36,1)]", variant === "full-page" && "max-w-[48rem] mx-auto w-full pb-48")}>
+      <div className={cn("flex flex-col gap-4 px-4 py-4 transition-all duration-300 ease-[cubic-bezier(0.22,1,0.36,1)]", variant === "full-page" && "max-w-[48rem] mx-auto w-full pb-48", variant === "full-page" && masteroAsk && "pb-[25rem]")}>
         {offlineCopyOf && offlineCopyOf === sessionId && !isLoadingChat && (
           <div className="self-center rounded-full border border-border/60 px-3 py-1 text-xs text-muted-foreground">{OFFLINE_CHAT_NOTE}</div>
         )}
@@ -5951,9 +5957,11 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
                                           }
 
                                           // Image the AI is looking at: shown right away (live), then its answer
-                                          // Mastero: the card that asks for the project's name or photo (only the newest answer's card can be used)
+                                          // Mastero: its card asking for the project's name or photo sits on the chat box (masteroAsk); the
+                                          // steps only say it was asked
                                           if (step.tool === 'mastero_ask') {
-                                            elements.push(<MasteroAskStep key={step.id} stepId={step.id} args={step.args} result={step.result} status={step.status} active={index === messages.length - 1} />);
+                                            const photo = step.args?.ask === 'logo';
+                                            elements.push(<ToolResultStep key={step.id} tool={step.tool} args={step.args} result={undefined} status={step.status} text={step.status === 'loading' ? 'Asking…' : photo ? "Asked for the project's photo" : step.args?.ask === 'confirm' ? 'Asked to confirm Mastero' : "Asked for the project's name"} />);
                                             return;
                                           }
 
@@ -6524,6 +6532,12 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
                 </>
               )}
               <form onSubmit={handleSubmit} className={cn("@container space-y-2", endedView && "hidden")}>
+                {/* Mastero: the AI asks for the project's name or photo; its card sits just above the chat box */}
+                {masteroAsk && (
+                  <div className={cn(variant === "overlay" ? "w-full" : "sm:w-[80%]", "w-full mx-auto")}>
+                    <MasteroAskStep key={masteroAsk.id} stepId={masteroAsk.id} args={masteroAsk.args} result={masteroAsk.result} status={masteroAsk.status} active className="w-full" />
+                  </div>
+                )}
                 {/* The agent waits for the user to allow an action: its card sits just above the chat box */}
                 {pendingPermission && (
                   <div className={cn(variant === "overlay" ? "w-full" : "sm:w-[80%]", "w-full mx-auto")}>

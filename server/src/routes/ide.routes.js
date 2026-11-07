@@ -272,7 +272,7 @@ async function ownProject(req, res) {
 // The website never gets folder paths on the user's computer (utils/client-app.js)
 const projectJson = (p, req) => {
   const web = isWebsite(req);
-  return { id: p._id, name: p.name, repo: p.repo, logo: p.logo || null, location: p.location || "cloud", localPath: web ? null : p.localPath || null, localCopies: (p.localCopies || []).map((c) => ({ deviceId: c.deviceId, path: web ? null : c.path, at: c.at, here: !!c.here })), lastOpenedAt: p.lastOpenedAt, createdAt: p.createdAt, updatedAt: p.updatedAt, mastero: !!p.mastero };
+  return { id: p._id, name: p.name, repo: p.repo, logo: p.logo || null, location: p.location || "cloud", localPath: web ? null : p.localPath || null, localCopies: (p.localCopies || []).map((c) => ({ deviceId: c.deviceId, path: web ? null : c.path, at: c.at, here: !!c.here })), lastOpenedAt: p.lastOpenedAt, createdAt: p.createdAt, updatedAt: p.updatedAt, mastero: !!p.mastero, masteroPending: !!p.masteroPending && !p.mastero };
 };
 
 // A project logo must be a picture this user uploaded to our R2 (same upload as the profile picture).
@@ -1089,7 +1089,7 @@ router.post("/projects/:id/mastero", isAuthenticated, async (req, res) => {
   // Already linked to its repo (on GitHub and maybe on Vercel already): it only becomes a Mastero project. Nothing new
   // is made and nothing is pushed.
   if (project.repo) {
-    project.mastero = true;
+    project.masteroPending = true;
     await project.save();
     return res.json({ ok: true, existing: true, project: projectJson(project, req), repo: project.repo, repoUrl: `https://github.com/${project.repo}` });
   }
@@ -1103,7 +1103,7 @@ router.post("/projects/:id/mastero", isAuthenticated, async (req, res) => {
     if (existing && REPO_NAME.test(existing)) {
       const other = await IdeProject.findOne({ owner: req.user._id, _id: { $ne: project._id }, repo: new RegExp(`^${escapeRegex(existing)}$`, "i") }).select("name").lean();
       if (other) return res.status(409).json({ error: `This folder's repo ${existing} is already your project "${other.name}". Open that project instead, so it isn't made twice.`, code: "repo_taken", repo: existing });
-      project.mastero = true;
+      project.masteroPending = true;
       await linkFolderProject(project, existing, ready.deviceId);
       return res.json({ ok: true, existing: true, project: projectJson(project, req), repo: existing, repoUrl: `https://github.com/${existing}` });
     }
@@ -1114,13 +1114,26 @@ router.post("/projects/:id/mastero", isAuthenticated, async (req, res) => {
     if (made.error) return res.status(409).json(made);
     const pushed = await onComputer(project, project.localPath, "sync_repo", { mode: "push", repo: made.repo, message: "First version from Classgrid", exact: true, token, name: ready.user.github_name, email: ready.user.github_email });
     if (pushed.error) return res.status(409).json({ error: `The repo ${made.repo} was made, but your code couldn't be pushed: ${pushed.error}`, code: pushed.code || "push_failed", repo: made.repo });
-    project.mastero = true;
+    project.masteroPending = true;
     await linkFolderProject(project, made.repo, ready.deviceId);
     res.json({ ok: true, project: projectJson(project, req), repo: made.repo, repoUrl: `https://github.com/${made.repo}`, message: lastLine(pushed.text) });
   } catch (e) {
     console.error("[IDE] Mastero failed:", e.message);
     res.status(500).json({ error: "Could not put this project on GitHub" });
   }
+});
+
+// The last Mastero step: the user confirmed in the chat (after naming it and adding its photo). Only now is it a Mastero
+// project: its section, Push, Continue online and the pushes after every answer start from here.
+router.post("/projects/:id/mastero-confirm", isAuthenticated, async (req, res) => {
+  const project = await ownProject(req, res);
+  if (!project) return;
+  if (project.mastero) return res.json({ ok: true, project: projectJson(project, req) });
+  if (!project.masteroPending || !project.repo) return res.status(409).json({ error: "Press Mastero in the Project tab first." });
+  project.mastero = true;
+  project.masteroPending = false;
+  await project.save();
+  res.json({ ok: true, project: projectJson(project, req) });
 });
 
 // Push (Studio's Project tab): the project's folder on this computer is committed with the message the user typed and

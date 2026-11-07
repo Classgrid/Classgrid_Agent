@@ -2,16 +2,17 @@
 // user types, the folder's code pushed to it, the project linked to it), and Push sends the folder's changes with the
 // commit message the user types. Server: routes/ide.routes.js /mastero and /push-here.
 import { useEffect, useState } from "react";
-import { ArrowRight, Check, Copy, ExternalLink, FolderGit2, Globe, Lock } from "lucide-react";
+import { ArrowRight, Check, Copy, ExternalLink, FolderGit2, Globe, Loader2, Lock } from "lucide-react";
 import { toast } from "sonner";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/marketing_ui/dialog";
 import { fetchWithRescue } from "@/lib/rescue";
+import { readPageCache, writePageCache } from "@/lib/desktopPageCache";
 import { remember, thisDeviceId } from "../utils/projectCopies";
 
 const backendUrl = import.meta.env.VITE_API_URL || "https://api.classgrid.in";
 const GITHUB_ICON = "https://cdn.classgrid.in/classgrid_intgration/github-icon.svg";
 const VERCEL_ICON = "https://cdn.classgrid.in/classgrid_intgration/vercel-icon-svgrepo-com.svg";
-const dialogCls = "gap-0 p-0 overflow-hidden rounded-xl bg-white dark:!bg-[#1e1e1e] ring-black/10 dark:ring-white/10 shadow-2xl";
+const dialogCls = "grid-cols-[minmax(0,1fr)] gap-0 p-0 overflow-hidden rounded-xl bg-white dark:!bg-[#1e1e1e] ring-black/10 dark:ring-white/10 shadow-2xl";
 const btn = "h-8 px-3 rounded-md text-[13px] transition-[background-color,opacity,transform] duration-150 active:scale-[0.97] disabled:opacity-40 disabled:active:scale-100 cursor-pointer disabled:cursor-default";
 const cancelCls = `${btn} border border-black/10 dark:border-white/[0.1] hover:bg-black/[0.04] dark:hover:bg-white/[0.05]`;
 const goCls = `${btn} bg-foreground text-background font-medium hover:opacity-90`;
@@ -33,20 +34,37 @@ async function post(path: string, body: Record<string, unknown>) {
   return { ok: res.ok, data: await res.json().catch(() => ({})) };
 }
 
-// The user's GitHub account (who the repo will belong to): undefined while checking, null when not connected
+// The user's GitHub account (who the repo will belong to): null when not connected, undefined only until the very
+// first check. The last answer is kept while the app runs and on this computer (desktopPageCache), so the dialogs
+// open with it at once and check again quietly; the Project tab checks ahead (warmGithubAccount).
+const ACCOUNT_CACHE = "github:me";
+let knownAccount: Account | null | undefined = readPageCache<Account | null>(ACCOUNT_CACHE);
+const accountWatchers = new Set<(a: Account | null) => void>();
+let checking: Promise<void> | null = null;
+export function warmGithubAccount() {
+  if (checking) return checking;
+  checking = fetchWithRescue(`${backendUrl}/api/ide/github/me`, { credentials: "include" })
+    .then(async (r) => { const d = await r.json().catch(() => ({})); return r.ok ? (d as Account) : null; })
+    .catch(() => (knownAccount === undefined ? null : knownAccount) as Account | null)
+    .then((a) => {
+      knownAccount = a;
+      writePageCache(ACCOUNT_CACHE, a);
+      accountWatchers.forEach((w) => w(a));
+    })
+    .finally(() => { checking = null; });
+  return checking;
+}
 function useGithubAccount(open: boolean) {
-  const [account, setAccount] = useState<Account | null | undefined>(undefined);
+  const [account, setAccount] = useState<Account | null | undefined>(knownAccount);
   useEffect(() => {
     if (!open) return;
-    let off = false;
-    setAccount(undefined);
-    const check = () => fetchWithRescue(`${backendUrl}/api/ide/github/me`, { credentials: "include" })
-      .then(async (r) => { const d = await r.json().catch(() => ({})); if (!off) setAccount(r.ok ? d : null); })
-      .catch(() => { if (!off) setAccount(null); });
-    check();
+    setAccount(knownAccount);
+    accountWatchers.add(setAccount);
+    void warmGithubAccount();
     // GitHub connected in the computer's browser meanwhile: shown when the user comes back to the app
+    const check = () => void warmGithubAccount();
     window.addEventListener("focus", check);
-    return () => { off = true; window.removeEventListener("focus", check); };
+    return () => { accountWatchers.delete(setAccount); window.removeEventListener("focus", check); };
   }, [open]);
   return account;
 }
@@ -58,12 +76,13 @@ const connectGithub = () => window.dispatchEvent(new CustomEvent("open-ai-hub", 
 function startMasteroChat(repo: string, folder: string, made: { isPrivate: boolean } | null) {
   const text = [
     made
-      ? `[Mastero] I pressed Mastero in Studio's Project tab. Classgrid already did this: made the ${made.isPrivate ? "private" : "public"} GitHub repo ${repo}, pushed the code in my folder ${folder} to it from my computer, and linked the project to it. It is now a Mastero project: the same project on my computer and in the Classgrid cloud, and GitHub is its master copy.`
-      : `[Mastero] I pressed Mastero in Studio's Project tab. My folder ${folder} was already on GitHub as ${repo}, so Classgrid kept that repo (no new repo was made and nothing was pushed) and linked the project to it. It is now a Mastero project: the same project on my computer and in the Classgrid cloud, and GitHub is its master copy.`,
+      ? `[SYSTEM: Mastero] I pressed Mastero in Studio's Project tab. Classgrid already did this: made the ${made.isPrivate ? "private" : "public"} GitHub repo ${repo}, pushed the code in my folder ${folder} to it from my computer, and linked the project to it. Mastero isn't finished yet: it becomes a Mastero project (the same project on my computer and in the Classgrid cloud, with GitHub as its master copy) only when I confirm at the end.`
+      : `[SYSTEM: Mastero] I pressed Mastero in Studio's Project tab. My folder ${folder} was already on GitHub as ${repo}, so Classgrid kept that repo (no new repo was made and nothing was pushed) and linked the project to it. Mastero isn't finished yet: it becomes a Mastero project (the same project on my computer and in the Classgrid cloud, with GitHub as its master copy) only when I confirm at the end.`,
     "Finish Mastero with me, one step at a time:",
     '1. Call mastero_ask with ask "name" and a short, nice name suggestion, then end your answer.',
     '2. When I answer, call mastero_ask with ask "logo", then end your answer.',
-    "3. When that's done, tell me in short, clear points:",
+    '3. When I answer, call mastero_ask with ask "confirm", then end your answer. Don\'t explain anything yet.',
+    "4. Only after I confirm, tell me in short, clear points:",
     "- It's a Mastero project now and GitHub is its master copy.",
     "- After every answer that changes files, the changes are pushed to GitHub (Settings → Mastero can switch that to asking yes or no first). From my computer they go to the folder's own branch (main for a new repo).",
     "- If I'm not happy with a change: the Review / Undo box under your answer takes it back while the project is open, and a change already on GitHub you undo with git revert and push that (GitHub's history is never rewritten).",
@@ -105,8 +124,8 @@ function AccountRow({ account, onConnect }: { account: Account | null | undefine
     <div className={`${boxCls} flex items-center gap-2.5 h-12 px-3`}>
       {account === undefined ? (
         <>
-          <span className="size-6 rounded-full bg-black/[0.06] dark:bg-white/[0.08] animate-pulse" />
-          <span className="h-3 w-32 rounded bg-black/[0.06] dark:bg-white/[0.08] animate-pulse" />
+          <img src={GITHUB_ICON} alt="" className="size-5 dark:invert opacity-70" />
+          <p className="min-w-0 flex-1 text-[13px] text-muted-foreground">GitHub</p>
         </>
       ) : account ? (
         <>
@@ -215,7 +234,7 @@ export function MasteroDialog({ project, already, open, onClose, onDone }: { pro
           <>
             <div className="px-5 pt-4 pb-5">
               <DialogTitle className="text-[15px] font-medium">{folderOf(project.name)} is on GitHub</DialogTitle>
-              <DialogDescription className="mt-0.5 text-[13px] text-muted-foreground">{keptRepo ? "It kept its GitHub repo and is a Mastero project now." : "Your code is pushed and the project is linked."} Classgrid AI takes it from here in the chat: it asks for the project's name and photo.</DialogDescription>
+              <DialogDescription className="mt-0.5 text-[13px] text-muted-foreground">{keptRepo ? "It kept its GitHub repo." : "Your code is pushed and the project is linked."} Finish in the chat: name the project, add its photo, then confirm to make it a Mastero project.</DialogDescription>
               <div className={`${boxCls} mt-3 flex items-center gap-2 h-10 pl-3 pr-1`}>
                 <span className="flex-1 min-w-0 truncate font-mono text-[12.5px] text-muted-foreground">{done.repoUrl}</span>
                 <button type="button" onClick={copy} className="shrink-0 flex items-center justify-center size-8 rounded-md text-muted-foreground hover:text-foreground hover:bg-black/[0.05] dark:hover:bg-white/[0.06] cursor-pointer" title="Copy link" aria-label="Copy link">
@@ -241,7 +260,7 @@ export function MasteroDialog({ project, already, open, onClose, onDone }: { pro
                   {(keptRepo ? ["Linking the project"] : STEPS).map((label, i) => (
                     <div key={label} className={`flex items-center gap-2.5 text-[13px] ${i > step ? "text-muted-foreground/60" : ""}`}>
                       {i < step ? <Check className="size-4 text-[#16825d] dark:text-[#4ec9b0]" />
-                        : i === step ? <span className="size-4 flex items-center justify-center"><span className="size-3.5 rounded-full border-2 border-muted-foreground/30 border-t-foreground animate-spin" /></span>
+                        : i === step ? <Loader2 className="size-4 animate-spin" />
                         : <span className="size-4 flex items-center justify-center"><span className="size-1.5 rounded-full bg-current" /></span>}
                       {label}{i === 1 && i === step ? <span className="text-muted-foreground"> · a big folder takes a minute</span> : null}
                     </div>
@@ -362,7 +381,7 @@ export function PushDialog({ project, open, onClose, onDone }: { project: Projec
               className="w-full h-9 px-3 rounded-md border border-black/10 dark:border-white/[0.08] bg-white dark:bg-[#161616] text-[13px] outline-none focus:border-black/30 dark:focus:border-white/25"
             />
           </div>
-          {busy && <p className="text-[12.5px] text-muted-foreground flex items-center gap-2"><span className="size-3 rounded-full border-2 border-muted-foreground/30 border-t-muted-foreground animate-spin" />Pushing…</p>}
+          {busy && <p className="text-[12.5px] text-muted-foreground flex items-center gap-2"><Loader2 className="size-3.5 animate-spin" />Pushing…</p>}
           {error && <p className="rounded-md bg-red-500/10 px-3 py-2 text-[12.5px] text-red-600 dark:text-red-400">{error}</p>}
         </div>
         <Footer>

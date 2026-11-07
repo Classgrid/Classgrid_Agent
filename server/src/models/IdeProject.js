@@ -46,6 +46,9 @@ const ideProjectSchema = new mongoose.Schema(
     // Made a Mastero project (Studio's Mastero button): a folder from the user's computer put on GitHub, so it is the same
     // project on that computer and in the cloud, with GitHub as the master copy
     mastero: { type: Boolean, default: false },
+    // Mastero started (repo made or kept, project linked) but not finished: the user still names it, adds its photo and
+    // confirms in the chat. Until then nothing Mastero shows and nothing is pushed by itself.
+    masteroPending: { type: Boolean, default: false },
     // Unpushed work pushed to GitHub when the project left the sandbox, shown once on the next open
     lastBackup: { branch: { type: String }, at: { type: Date } },
     // "local": a folder on the user's own computer, run by the Classgrid desktop app (services/local-runner.service.js)

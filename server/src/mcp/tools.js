@@ -366,11 +366,11 @@ export const getMcpTools = () => [
 
   {
     name: 'mastero_ask',
-    description: "Mastero (Studio, Classgrid desktop app): after a [Mastero] message says the user's folder was put on GitHub, show the user a card in the chat that asks for the project's name (ask \"name\", with your suggestion) or its photo/logo (ask \"logo\"). The card saves the answer itself and the answer comes back as the user's next message. One card at a time; end your answer right after calling it.",
+    description: "Mastero (Studio, Classgrid desktop app): after a [SYSTEM: Mastero] message says the user's folder was put on GitHub, show the user a card on the chat box that asks for the project's name (ask \"name\", with your suggestion), its photo/logo (ask \"logo\"), or, last, the user's confirmation that makes it a Mastero project (ask \"confirm\"). The card saves the answer itself and the answer comes back as the user's next message. One card at a time, in that order; end your answer right after calling it.",
     inputSchema: {
       type: 'object',
       properties: {
-        ask: { type: 'string', enum: ['name', 'logo'], description: '"name": the project\'s name in Classgrid. "logo": its photo.' },
+        ask: { type: 'string', enum: ['name', 'logo', 'confirm'], description: '"name": the project\'s name in Classgrid. "logo": its photo. "confirm": the user confirms, and only then it is a Mastero project.' },
         suggestion: { type: 'string', description: 'For "name": a short, nice project name to suggest (the user can change it).' }
       },
       required: ['ask']

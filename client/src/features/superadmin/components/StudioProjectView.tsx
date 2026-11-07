@@ -2,14 +2,14 @@
 // its name and logo, GitHub (repo, working branch, open pull request), Vercel, the last commit and the history.
 import { useCallback, useEffect, useRef, useState } from "react";
 import { motion, useReducedMotion } from "framer-motion";
-import { ArrowLeftRight, ArrowUpFromLine, Check, ExternalLink, FolderGit2, GitBranch, GitCommitHorizontal, GitPullRequest, ImagePlus, Pencil, RotateCw, X } from "lucide-react";
+import { ArrowLeftRight, ArrowUpFromLine, Check, ExternalLink, FolderGit2, GitBranch, GitCommitHorizontal, GitPullRequest, ImagePlus, Loader2, Pencil, RotateCw, X } from "lucide-react";
 import { Link } from "react-router-dom";
 import { toast } from "sonner";
 import { fetchWithRescue } from "@/lib/rescue";
 import { apiClient } from "@/lib/apiClient";
 import { ImageCropperModal } from "@/components/marketing_ui/ImageCropperModal";
 import { StudioProjectChooser } from "./StudioProjectPicker";
-import { MasteroDialog, PushDialog, useFolderOnline } from "./StudioMastero";
+import { MasteroDialog, PushDialog, useFolderOnline, warmGithubAccount } from "./StudioMastero";
 import { MasteroOnlineCard } from "./MasteroOnlineCard";
 import { onDesktop, thisComputerCopy, type LocalCopy } from "../utils/projectCopies";
 
@@ -144,6 +144,8 @@ export function StudioProjectView({ projectId, reloadKey = 0 }: { projectId: str
   }, [projectId]);
 
   useEffect(() => { setProject(null); setInfo(null); setHistory(null); setRenaming(null); load(); }, [load]);
+  // Desktop app: the GitHub account is checked now, so the Mastero and Push dialogs open with it (no loading there)
+  useEffect(() => { if (onDesktop()) void warmGithubAccount(); }, []);
   useEffect(() => { if (reloadKey) load(); }, [reloadKey, load]);
 
   if (!projectId) {
@@ -186,7 +188,7 @@ export function StudioProjectView({ projectId, reloadKey = 0 }: { projectId: str
               ? <img src={project.logo} alt="" className="size-full object-cover" />
               : <FolderGit2 className="size-5 text-muted-foreground" />}
             <span className={`absolute inset-0 flex items-center justify-center bg-black/50 text-white transition-opacity ${logoBusy ? "opacity-100" : "opacity-0 group-hover:opacity-100"}`}>
-              {logoBusy ? <span className="size-3.5 rounded-full border-2 border-white/30 border-t-white animate-spin" /> : <ImagePlus className="size-4" />}
+              {logoBusy ? <Loader2 className="size-4 animate-spin" /> : <ImagePlus className="size-4" />}
             </span>
           </button>
           <div className="min-w-[10rem] flex-1">
@@ -203,7 +205,7 @@ export function StudioProjectView({ projectId, reloadKey = 0 }: { projectId: str
                   className="min-w-0 flex-1 h-7 px-2 rounded-md border border-black/15 dark:border-white/15 bg-white dark:bg-[#161616] text-[14px] font-medium outline-none focus:border-black/30 dark:focus:border-white/25"
                 />
                 <button onClick={saveName} disabled={renameBusy} className="shrink-0 flex items-center justify-center size-7 rounded-md text-muted-foreground hover:text-foreground hover:bg-black/[0.05] dark:hover:bg-white/[0.06]" title="Save name" aria-label="Save name">
-                  {renameBusy ? <span className="size-3 rounded-full border-2 border-muted-foreground/30 border-t-muted-foreground animate-spin" /> : <Check className="size-3.5" />}
+                  {renameBusy ? <Loader2 className="size-3.5 animate-spin" /> : <Check className="size-3.5" />}
                 </button>
                 <button onClick={() => setRenaming(null)} disabled={renameBusy} className="shrink-0 flex items-center justify-center size-7 rounded-md text-muted-foreground hover:text-foreground hover:bg-black/[0.05] dark:hover:bg-white/[0.06]" title="Cancel" aria-label="Cancel">
                   <X className="size-3.5" />

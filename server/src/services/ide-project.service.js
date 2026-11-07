@@ -393,7 +393,7 @@ export const projectTools = {
 export async function masteroAsk(sessionId, { ask, suggestion }) {
   const project = await projectForChat(sessionId);
   if (!project) return "No project is open in this chat.";
-  const kind = ask === "logo" ? "logo" : "name";
+  const kind = ask === "logo" ? "logo" : ask === "confirm" ? "confirm" : "name";
   return JSON.stringify({
     shown: kind,
     project_id: String(project._id),

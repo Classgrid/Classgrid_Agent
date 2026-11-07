@@ -59,7 +59,7 @@ export function MasteroOnlineCard({ className = "" }: { className?: string }) {
 
       {/* The bigger code with the link to copy */}
       <Dialog open={open} onOpenChange={setOpen}>
-        <DialogContent showCloseButton={false} overlayClassName="bg-black/50 supports-backdrop-filter:backdrop-blur-none" className="sm:max-w-[26rem] gap-0 p-0 overflow-hidden rounded-xl bg-white dark:!bg-[#1e1e1e] ring-black/10 dark:ring-white/10 shadow-2xl">
+        <DialogContent showCloseButton={false} overlayClassName="bg-black/50 supports-backdrop-filter:backdrop-blur-none" className="sm:max-w-[26rem] grid-cols-[minmax(0,1fr)] gap-0 p-0 overflow-hidden rounded-xl bg-white dark:!bg-[#1e1e1e] ring-black/10 dark:ring-white/10 shadow-2xl">
           <div className="relative flex items-center justify-center py-8 bg-black/[0.03] dark:bg-black/40 border-b border-black/10 dark:border-white/[0.06]">
             <button type="button" onClick={() => setOpen(false)} className="absolute top-3 right-3 flex items-center justify-center size-7 rounded-md text-muted-foreground hover:text-foreground hover:bg-black/[0.05] dark:hover:bg-white/[0.06] cursor-pointer" aria-label="Close">
               <X className="size-4" />
