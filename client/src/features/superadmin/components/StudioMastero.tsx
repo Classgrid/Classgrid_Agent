@@ -343,7 +343,9 @@ export function PushDialog({ project, open, onClose, onDone }: { project: Projec
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  useEffect(() => { if (open) { setMessage(""); setError(null); } }, [open]);
+  // What the push did, shown in this window (the desktop app has no pop-up messages): pushed, or nothing new
+  const [result, setResult] = useState<{ pushed: boolean; text: string } | null>(null);
+  useEffect(() => { if (open) { setMessage(""); setError(null); setResult(null); } }, [open]);
 
   const go = async () => {
     if (!message.trim() || busy || !account) return;
@@ -355,9 +357,10 @@ export function PushDialog({ project, open, onClose, onDone }: { project: Projec
         setError(data.error === "github_not_connected" ? "GitHub isn't connected. Connect it, then try again." : data.error || "Couldn't push. Try again.");
         return;
       }
-      toast.success(data.message || "Pushed to GitHub");
+      const text = String(data.message || "").trim();
+      const nothing = /nothing new|already has/i.test(text);
+      setResult({ pushed: !nothing, text: nothing ? `Nothing new to push: GitHub already has all your changes${data.branch ? ` on ${data.branch}` : ""}.` : text || `Pushed to GitHub${data.branch ? `, branch ${data.branch}` : ""}.` });
       onDone();
-      onClose();
     } finally {
       setBusy(false);
     }
@@ -383,16 +386,27 @@ export function PushDialog({ project, open, onClose, onDone }: { project: Projec
               onKeyDown={(e) => { if (e.key === "Enter") go(); }}
               placeholder="What changed?"
               maxLength={200}
-              disabled={busy}
+              disabled={busy || !!result}
               className="w-full h-9 px-3 rounded-md border border-black/10 dark:border-white/[0.08] bg-white dark:bg-[#161616] text-[13px] outline-none focus:border-black/30 dark:focus:border-white/25"
             />
           </div>
-          {busy && <p className="text-[12.5px] text-muted-foreground flex items-center gap-2"><Spinner className="size-3.5" />Pushing…</p>}
+          {result && (
+            <p className="flex items-start gap-2 rounded-md bg-black/[0.03] dark:bg-white/[0.04] px-3 py-2 text-[12.5px]">
+              <Check className={`size-4 shrink-0 ${result.pushed ? "text-[#16825d] dark:text-[#4ec9b0]" : "text-muted-foreground"}`} />
+              <span>{result.text}</span>
+            </p>
+          )}
           {error && <p className="rounded-md bg-red-500/10 px-3 py-2 text-[12.5px] text-red-600 dark:text-red-400">{error}</p>}
         </div>
         <Footer>
-          <button type="button" onClick={onClose} disabled={busy} className={cancelCls}>Cancel</button>
-          <button type="button" onClick={go} disabled={!message.trim() || busy || !account} className={goCls}>{busy ? "Pushing…" : "Push"}</button>
+          {result ? (
+            <button type="button" onClick={onClose} className={goCls}>Done</button>
+          ) : (
+            <>
+              <button type="button" onClick={onClose} disabled={busy} className={cancelCls}>Cancel</button>
+              <button type="button" onClick={go} disabled={!message.trim() || busy || !account} className={`${goCls} inline-flex items-center gap-1.5`}>{busy && <Spinner className="size-3.5" />}{busy ? "Pushing…" : "Push"}</button>
+            </>
+          )}
         </Footer>
       </DialogContent>
     </Dialog>
