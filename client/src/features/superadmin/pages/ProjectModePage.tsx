@@ -399,6 +399,17 @@ export function ProjectModePage() {
     rememberOpen(project.id);
     setFolder(null);
     setLocalFolder(null);
+    // Desktop app, a project with its copy on this computer (a Mastero project too): nothing is downloaded, so Classgrid
+    // Code opens at once with no loading screen; the server only notes it was opened here, behind
+    const copyHere = onDesktopApp ? thisComputerCopy(project) : null;
+    if (copyHere?.path) {
+      setLocalFolder(copyHere.path);
+      setBusyId(null);
+      void api(`/projects/${project.id}/open`, { method: "POST", body: JSON.stringify({ replace, resume, deviceId: thisDeviceId() || undefined }) })
+        .then(({ res, data }) => { if (data?.project) setProjects((list) => (list || []).map((p) => (p.id === project.id ? data.project : p))); if (res.ok && data.localPath && data.localPath !== copyHere.path) setLocalFolder(data.localPath); })
+        .catch(() => {});
+      return;
+    }
     const newLines = !resume && !project.repo ? NEW_PROJECT_LINES : undefined;
     setProgress({ label: resume ? "Reconnecting to your project" : newLines ? (newLines[0] ?? "") : "Downloading the latest code from GitHub", value: 3, target: 70, lines: newLines });
     try {

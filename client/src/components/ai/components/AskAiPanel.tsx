@@ -5357,8 +5357,22 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
     </div>
   );
 
-  // Desktop app, Project Mode side panel with no messages yet: the input sits in the middle (like Antigravity)
-  const centerEmptyInput = import.meta.env.VITE_DESKTOP === "1" && inCodeMode && emptyState && !isLoadingChat && variant === "overlay";
+  // A side panel with no messages yet (Project Mode on the website and in the desktop app, and Classgrid Code): the
+  // Studio greeting and the input sit in the middle (like Antigravity); the first message moves the input down
+  const centerEmptyInput = emptyState && !isLoadingChat && variant === "overlay";
+  const emptyGreeting = (
+    <div className="shrink-0 flex flex-col items-center gap-6 px-6 pb-2 text-center">
+      <ClassgridLogoIcon
+        size={56}
+        aria-hidden
+        className="text-black/[0.18] dark:text-white/[0.2]"
+        style={{ maskImage: "linear-gradient(to bottom, black 0%, rgba(0,0,0,0.6) 45%, transparent 90%)", WebkitMaskImage: "linear-gradient(to bottom, black 0%, rgba(0,0,0,0.6) 45%, transparent 90%)" }}
+      />
+      <h2 style={{ fontFamily: '"Google Sans", "DM Sans", system-ui, sans-serif' }} className="font-normal text-[1.25rem] leading-snug tracking-[-0.01em] text-foreground">
+        Hi {(user?.name || "").trim().split(/\s+/)[0] || "there"}, what can we get done today?
+      </h2>
+    </div>
+  );
   const panelChat = (
     <div ref={variant !== "full-page" ? chatScrollRef : undefined} className={cn("relative overscroll-contain chat-scrollbar [scrollbar-gutter:stable]", variant === "full-page" ? "w-full" : centerEmptyInput ? "shrink-0" : "flex-1 min-h-0 overflow-y-auto")}>
 
@@ -6477,7 +6491,7 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
           : variant === "overlay" ? "" : "border-t border-border"
       )}>
         <AnimatePresence>
-          {showScrollButton && (
+          {showScrollButton && !emptyState && (
             <motion.div
               initial={{ opacity: 0, y: 10 }}
               animate={{ opacity: 1, y: 0 }}
@@ -7306,9 +7320,9 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
                   </div>
                   )}
 
-                  {/* Desktop app, Studio's new chat: a faint Classgrid logo fading downwards (white in dark mode, black in
-                      light mode), and the greeting below it */}
-                  {DESKTOP_STUDIO && studioLook && sessionId !== "schedule" && sessionId !== "library" && (
+                  {/* Studio's new chat (website and desktop app): a faint Classgrid logo fading downwards (white in dark
+                      mode, black in light mode), and the greeting below it */}
+                  {studioLook && sessionId !== "schedule" && sessionId !== "library" && (
                     <div className="flex flex-col items-center gap-10 mt-auto sm:mt-0">
                       <ClassgridLogoIcon
                         size={76}
@@ -7918,6 +7932,7 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
               {onOverlayWidthChange && <OverlayDragHandle onChange={onOverlayWidthChange} onResizingChange={onOverlayResizingChange} />}
               {panelHeader}
               <div className={centerEmptyInput ? "flex-1" : "hidden"} />
+              {centerEmptyInput && emptyGreeting}
               {panelChat}
               {panelInput}
               <div className={centerEmptyInput ? "flex-1" : "hidden"} />
