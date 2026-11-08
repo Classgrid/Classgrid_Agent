@@ -3,6 +3,8 @@
 // by the "Build Classgrid Code" workflow (.github/workflows/build-classgrid-editor.yml) and saved as an editor-<version>
 // release of Classgrid/Classgrid_Agent. Uses the GitHub CLI (gh) signed in on this computer.
 // Run: npm run get-classgrid-code      (npm run release runs it too; nothing is downloaded when it is already the newest)
+//      npm run get-classgrid-code -- --tag=editor-<version>   (that build instead of the newest published one, e.g. when
+//      two builds ran at once and the one from older code was published last)
 import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
@@ -24,8 +26,15 @@ const gh = (args) => {
 };
 
 const list = JSON.parse(gh(["release", "list", "--repo", REPO, "--limit", "50", "--json", "tagName,publishedAt"]));
-const newest = list.filter((r) => /^editor-/.test(r.tagName)).sort((a, b) => b.publishedAt.localeCompare(a.publishedAt))[0];
-if (!newest) { console.error(`No Classgrid Code release (editor-*) in ${REPO} yet. Run the "Build Classgrid Code" workflow first.`); process.exit(1); }
+const wanted = process.argv.find((a) => a.startsWith("--tag="))?.slice("--tag=".length);
+const editors = list.filter((r) => /^editor-/.test(r.tagName));
+const newest = wanted
+  ? editors.find((r) => r.tagName === wanted)
+  : editors.sort((a, b) => b.publishedAt.localeCompare(a.publishedAt))[0];
+if (!newest) {
+  console.error(wanted ? `No Classgrid Code release ${wanted} in ${REPO}.` : `No Classgrid Code release (editor-*) in ${REPO} yet. Run the "Build Classgrid Code" workflow first.`);
+  process.exit(1);
+}
 
 const have = fs.existsSync(tagFile) ? fs.readFileSync(tagFile, "utf8").trim() : "";
 if (have === newest.tagName && fs.existsSync(zip)) {

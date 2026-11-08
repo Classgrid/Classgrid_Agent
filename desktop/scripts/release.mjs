@@ -2,6 +2,7 @@
 // it with latest.yml to R2 (desktop/), where installed apps look for updates. Raise "version" in package.json first.
 // Run: npm run release      (R2 keys are read from server/.env)
 //      npm run release -- --upload-only   (only uploads the installer already in dist/, e.g. after an upload failed)
+//      npm run release -- --tag=editor-<version>   (ships that Classgrid Code build instead of the newest published one)
 import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
@@ -18,7 +19,8 @@ const run = (args) => {
   if (r.status !== 0) process.exit(r.status ?? 1);
 };
 if (!process.argv.includes("--upload-only")) {
-  run(["run", "get-classgrid-code"]); // Classgrid Code, our editor (the newest editor-* release on GitHub)
+  const tag = process.argv.find((a) => a.startsWith("--tag="));
+  run(["run", "get-classgrid-code", ...(tag ? ["--", tag] : [])]); // Classgrid Code, our editor (the newest editor-* release on GitHub, or --tag)
   run(["run", "build:client"]);
   run(["run", "dist"]);
 }
