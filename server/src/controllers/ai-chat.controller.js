@@ -3923,6 +3923,7 @@ You work on the user's own Windows computer through their Classgrid desktop app,
                                     try {
                                         emitHelper({ helper: i, state: "restart" }); // a retry starts its report again
                                         h.live = "";
+                                        h.nowModel = model; // (the Agent map shows the model working now)
                                         deadline = Date.now() + (h.canEdit || hasBrowser ? 12 : 4) * 60 * 1000;
                                         const helperArgs = {
                                             messages: [{ role: "system", content: system }, { role: "user", content: task }],
@@ -3939,7 +3940,7 @@ You work on the user's own Windows computer through their Classgrid desktop app,
                                             : await streamChat({ ...helperArgs, ...meterHooks(model, `Helper ${h.no}`), provider: cloudflareStreamProvider(model, `${sessionId || "x"}-helper-${h.no}`), seesImages: CF_VISION_MODELS.has(model), maxTokens: 8192, maxContinuations: 6, answerAtDepthLimit: true }); // a long report keeps going instead of being cut
                                         if (userId && r.usage?.total_tokens) deductTokens(userId, orgId, chargeableTokens(r.usage, model), tokenSource).catch(() => {});
                                         h.tokens = (h.tokens || 0) + (r.usage?.total_tokens || 0); // shown in the chat's Agent map
-                                        if (!String(r.answer || "").trim()) { lastError = "no answer"; break; } // try the next model
+                                        if (!String(r.answer || "").trim()) { lastError = "no answer"; h.switches = [...(h.switches || []), { from: model, why: "it gave no answer" }]; break; } // try the next model
                                         h.usedModel = model;
                                         return { state: "done", text: String(r.answer).slice(0, 40000) };
                                     } catch (e) {
@@ -3947,6 +3948,8 @@ You work on the user's own Windows computer through their Classgrid desktop app,
                                         if (h.abort.signal.aborted) return { state: "failed", text: "stopped because the user stopped the chat" };
                                         // "Too many requests", a timeout or a busy server: wait once and retry this model, then move to the next one
                                         if (/429|408|5\d\d|rate limit|timeout|timed out/i.test(lastError) && attempt < 2) { await sleep(4000); continue; }
+                                        // The Agent map says why the next model took over
+                                        h.switches = [...(h.switches || []), { from: model, why: lastError.slice(0, 300) }];
                                         break;
                                     }
                                 }
@@ -6795,7 +6798,9 @@ export const getChatHelpers = async (req, res) => {
             no: h.no,
             task: String(h.task || ""),
             type: h.type || null,
-            model: MODEL_DISPLAY_NAMES[h.usedModel || h.model] || h.usedModel || h.model || null,
+            model: MODEL_DISPLAY_NAMES[h.usedModel || h.nowModel || h.model] || h.usedModel || h.nowModel || h.model || null,
+            // A model that stopped and the one that took over ("Claude Opus 5.5 stopped: … GLM 5.3 took over")
+            switches: (h.switches || []).map((x) => ({ from: MODEL_DISPLAY_NAMES[x.from] || x.from, why: x.why })),
             tokens: h.tokens || 0,
             canEdit: !!h.canEdit,
             state: h.state,

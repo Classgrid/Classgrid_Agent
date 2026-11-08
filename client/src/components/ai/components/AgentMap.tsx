@@ -14,6 +14,8 @@ type Helper = {
   no: number; task: string; type: string | null; model: string | null; tokens?: number; canEdit: boolean;
   state: "running" | "done" | "failed"; startedAt: number | null; endedAt: number | null;
   thought?: string; steps: any[]; live?: string; report: string; notes: string[];
+  /** Models that stopped (an error, no answer) before the current one took over */
+  switches?: { from: string; why: string }[];
 };
 
 const took = (h: Helper, now: number) => {
@@ -23,6 +25,8 @@ const took = (h: Helper, now: number) => {
 };
 const tokensText = (n?: number) => (!n ? "" : n >= 1_000_000 ? `${(n / 1_000_000).toFixed(1)}M tokens` : n >= 1000 ? `${(n / 1000).toFixed(1)}k tokens` : `${n} tokens`);
 const title = (h: Helper) => (h.task.split("\n")[0] || "").replace(/\s+/g, " ").trim().slice(0, 90) || `Helper ${h.no}`;
+// "Claude Opus 5.5 → GLM 5.3" when another model took over
+const modelText = (h: Helper) => [...(h.switches || []).map((x) => x.from), h.model].filter(Boolean).join(" → ");
 const stateText = (h: Helper) => (h.state === "running" ? "Working" : h.state === "done" ? "Finished" : "Failed");
 // (a server from before the full steps sent { tool, what, result, failed })
 const asSteps = (h: Helper): AgentStep[] =>
@@ -65,9 +69,12 @@ function HelperDetail({ helper, now, onBack, renderAnswer }: { helper: Helper; n
             <DialogTitle className="truncate text-[15px] font-semibold">{title(helper)}</DialogTitle>
           </div>
           <p className="mt-1 text-[13px] text-muted-foreground">
-            {stateText(helper)}{helper.type ? ` · ${helper.type}` : ""}{helper.model ? ` · ${helper.model}` : ""} · {helper.canEdit ? "can edit" : "read only"} · background
+            {stateText(helper)}{helper.type ? ` · ${helper.type}` : ""}{helper.model ? ` · ${modelText(helper)}` : ""} · {helper.canEdit ? "can edit" : "read only"} · background
           </p>
           <p className="text-[13px] text-muted-foreground">Started by the main agent · {took(helper, now)}{helper.tokens ? ` · ${tokensText(helper.tokens)}` : ""}</p>
+          {(helper.switches || []).map((x, i, all) => (
+            <p key={i} className="text-[13px] text-muted-foreground">{x.from} stopped ({x.why}), so {all[i + 1]?.from || helper.model} took over</p>
+          ))}
         </div>
       </div>
       <div ref={follow.ref} onScroll={follow.onScroll} className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-5 py-4">
@@ -181,7 +188,7 @@ export function AgentMapButton({ sessionId, busy, renderAnswer }: { sessionId: s
                         <ChevronRight className="ml-auto size-3.5 shrink-0 text-muted-foreground opacity-0 group-hover:opacity-100" />
                       </div>
                       <div className="ml-4 mt-0.5 text-xs text-muted-foreground truncate">
-                        {stateText(h)} · {took(h, now)} · {asSteps(h).length} {asSteps(h).length === 1 ? "step" : "steps"}{h.tokens ? ` · ${tokensText(h.tokens)}` : ""}{h.model ? ` · ${h.model}` : ""}
+                        {stateText(h)} · {took(h, now)} · {asSteps(h).length} {asSteps(h).length === 1 ? "step" : "steps"}{h.tokens ? ` · ${tokensText(h.tokens)}` : ""}{h.model ? ` · ${modelText(h)}` : ""}
                       </div>
                     </button>
                   ))}
