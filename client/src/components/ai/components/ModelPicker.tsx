@@ -162,8 +162,9 @@ export function ModelPicker({ value, onChange, disabled }: ModelPickerProps) {
     queryKey: ["model-access"],
     queryFn: async () => {
       const data = (await apiClient.get("/api/ai/model-access")).data as { fable?: { unlocked: boolean; exempt?: boolean; toppedUpInr: number; requiredInr: number }; disabledModels?: string[] };
-      // While the server restarts, the rescue server answers this address with a 200 that has no "fable": that is not
-      // an answer, so it is retried instead of being shown (it crashed the panel with "reading 'unlocked'")
+      // An answer without "fable" is not this call's answer (in Classgrid Code, before bridge.js numbered each page's
+      // calls apart, a reloaded panel got another call's answer here and crashed with "reading 'unlocked'"): it is
+      // asked again instead of being shown
       if (!data || typeof data !== "object" || !data.fable) throw new Error("model access not available");
       return data as { fable: { unlocked: boolean; exempt?: boolean; toppedUpInr: number; requiredInr: number }; disabledModels?: string[] };
     },

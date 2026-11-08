@@ -219,13 +219,18 @@
   var UPLOAD = /^https:\/\/[a-z0-9]+\.r2\.cloudflarestorage\.com\//;
   var fetches = {};
   var nextFetch = 1;
+  // Each load of the page numbers its calls apart from every earlier load: when the panel reloads (a new login, Reload
+  // window...), answers to the old page's calls can still be on their way from the extension, and with plain 1, 2, 3...
+  // the new page's call 1 took the old call 1's answer (the model picker got /api/ai/working's answer, with no "fable",
+  // and crashed with "reading 'unlocked'")
+  var fetchPage = Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
   window.fetch = function (input, init) {
     var req;
     try { req = new Request(input, init); } catch (err) { return realFetch(input, init); }
     var url = req.url;
     if (url.indexOf(location.origin + "/") === 0) return realFetch(base + url.slice(location.origin.length + 1), init); // our own files
     if (!API.test(url) && !UPLOAD.test(url)) return realFetch(input, init);
-    var id = nextFetch++;
+    var id = fetchPage + "-" + nextFetch++;
     var signal = (init && init.signal) || req.signal;
     var body = req.method === "GET" || req.method === "HEAD" ? Promise.resolve(null) : req.arrayBuffer();
     return body.then(function (buf) {

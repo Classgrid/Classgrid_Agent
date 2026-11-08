@@ -76,7 +76,7 @@ async function activate(context) {
         const last = context.workspaceState.get(LAST_CHAT_KEY);
         return typeof last === "string" && /^[\w-]+$/.test(last) ? `/editor/project/${last}` : "/editor/project";
       });
-      view.onDidDispose(() => { loaders.delete(load); if (screens.agent === view.webview) screens.agent = null; });
+      view.onDidDispose(() => { loaders.delete(load); stopFetches(view.webview); if (screens.agent === view.webview) screens.agent = null; });
     },
   }, { webviewOptions: { retainContextWhenHidden: true } }));
 
@@ -126,7 +126,8 @@ async function activate(context) {
     settingsPanel = vscode.window.createWebviewPanel("classgrid.settings", "Classgrid Settings", vscode.ViewColumn.Active, { enableScripts: true, retainContextWhenHidden: true });
     settingsPanel.iconPath = vscode.Uri.file(path.join(__dirname, "media", "classgrid.svg"));
     const load = holdScreens(settingsPanel.webview, page ? `/editor/settings?section=${page}` : "/editor/settings");
-    settingsPanel.onDidDispose(() => { loaders.delete(load); settingsPanel = null; });
+    const panelView = settingsPanel.webview;
+    settingsPanel.onDidDispose(() => { loaders.delete(load); stopFetches(panelView); settingsPanel = null; });
   }));
   context.subscriptions.push(vscode.commands.registerCommand("classgrid.searchChats", async () => {
     // (it opens in the Agent panel's page, which covers the whole window for it, like the AI Hub)
@@ -137,7 +138,9 @@ async function activate(context) {
   context.subscriptions.push(vscode.commands.registerCommand("classgrid.open", () => {
     const panel = vscode.window.createWebviewPanel("classgrid.app", "Classgrid", vscode.ViewColumn.Active, { enableScripts: true, retainContextWhenHidden: true });
     panel.iconPath = vscode.Uri.file(path.join(__dirname, "media", "classgrid.svg"));
-    holdScreens(panel.webview, "/");
+    const load = holdScreens(panel.webview, "/");
+    const panelView = panel.webview;
+    panel.onDidDispose(() => { loaders.delete(load); stopFetches(panelView); });
   }));
 
   // The Agent is on the right side when the editor opens (the right side bar starts open: configurationDefaults in
@@ -200,6 +203,8 @@ function holdScreens(webview, startPath) {
   ].join("; ");
   // The page keeps its own address (so our screens' pages work); only its files point at the editor's copy
   const load = () => {
+    // The page that goes away doesn't need its calls' answers any more (a long answer would keep coming for nothing)
+    stopFetches(webview);
     const html = fs.readFileSync(path.join(APP_DIR, "index.html"), "utf8").replace(/\b(src|href)="\.\//g, `$1="${base}`);
     webview.html = html.replace(/<head([^>]*)>/, `<head$1>
 <meta http-equiv="Content-Security-Policy" content="${csp}">
@@ -208,7 +213,7 @@ function holdScreens(webview, startPath) {
   };
   webview.onDidReceiveMessage((m) => {
     if (m?.cgFetch) return proxyFetch(webview, m);
-    if (m?.cgFetchAbort) return FETCHES.get(m.cgFetchAbort)?.abort();
+    if (m?.cgFetchAbort) return FETCHES.get(m.cgFetchAbort)?.ac.abort();
     if (m?.cgStore) return keepStorage(m);
     // (only the Agent panel and the chats sidebar cover the window for their big windows; a tab like Settings shows its
     // own windows inside the tab)
@@ -431,13 +436,17 @@ function clipboardImage() {
 }
 
 // Our screens' calls to our server, carried by the editor (a page loaded from the editor's files can't call it
-// itself); a streamed answer comes back piece by piece as it arrives
-const FETCHES = new Map();
+// itself); a streamed answer comes back piece by piece as it arrives. Each page load numbers its calls with its own
+// prefix (bridge.js), so a call's answer only ever reaches the call that asked for it.
+const FETCHES = new Map(); // call id -> { ac, webview }
+function stopFetches(webview) {
+  for (const [id, f] of FETCHES) if (f.webview === webview) { FETCHES.delete(id); f.ac.abort(); }
+}
 async function proxyFetch(webview, m) {
   const id = m.cgFetch;
   if (!API.test(String(m.url)) && !UPLOAD.test(String(m.url))) return webview.postMessage({ cgFetchError: id, error: "only Classgrid's server is carried by the editor" });
   const ac = new AbortController();
-  FETCHES.set(id, ac);
+  FETCHES.set(id, { ac, webview });
   try {
     const headers = (Array.isArray(m.headers) ? m.headers : []).filter(([k]) => !/^(host|origin|referer|content-length|connection|cookie)$/i.test(String(k)));
     const res = await fetch(m.url, { method: m.method || "GET", headers, body: m.body ? Buffer.from(m.body, "base64") : undefined, signal: ac.signal, redirect: "follow" });
