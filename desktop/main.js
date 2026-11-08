@@ -168,6 +168,23 @@ function openAppWindow(folder) {
   w.loadURL(APP_URL + base + (folder ? `?openFolder=${encodeURIComponent(folder)}` : ""));
 }
 
+// The "Classgrid Code" icon runs the app with --code: the app's window stays hidden, Classgrid Code opens signed in with
+// the app's login (one login for both), then the app closes. Not signed in yet: the app's window shows to sign in first,
+// and Classgrid Code opens once the user has signed in.
+let codeOnly = process.argv.includes("--code");
+let codeWaiting = codeOnly;
+function showMain() {
+  codeOnly = false;
+  if (win && !win.isDestroyed()) { if (win.isMinimized()) win.restore(); win.show(); win.focus(); }
+}
+async function startCodeEditor() {
+  if (!codeEditor.hasLogin()) { codeWaiting = true; return showMain(); }
+  codeWaiting = false;
+  try { await codeEditor.start(); }
+  catch (err) { showMain(); dialog.showMessageBox(win, { type: "error", title: "Classgrid Code", message: "Classgrid Code didn't start.", detail: String(err.message || err) }); return; }
+  if (codeOnly) setTimeout(() => { if (codeOnly) app.quit(); }, 1000);
+}
+
 function createWindow() {
   win = new BrowserWindow({
     width: 1400,
@@ -218,8 +235,11 @@ function createWindow() {
   });
   // The welcome screen is at the top of the page, so the window can show as soon as the page is read (the black
   // background matches it). ready-to-show comes too late here.
-  win.webContents.once("dom-ready", () => win.show());
-  setTimeout(() => { if (win && !win.isDestroyed() && !win.isVisible()) win.show(); }, 4000);
+  win.webContents.once("dom-ready", () => { if (!codeOnly) win.show(); });
+  setTimeout(() => { if (win && !win.isDestroyed() && !win.isVisible() && !codeOnly) win.show(); }, 4000);
+  // (--code: the page sends its login as soon as it starts; none a few seconds after it loaded means the user has to
+  // sign in first)
+  if (codeOnly) win.webContents.once("did-finish-load", () => setTimeout(() => { if (codeWaiting && !codeEditor.hasLogin()) showMain(); }, 4000));
   browser.attach(win); // the AI's browser (Studio's Browser tab) lives in this window
   win.webContents.on("did-navigate", (_e, url) => rememberPlace(url));
   win.webContents.on("did-navigate-in-page", (_e, url, isMainFrame) => { if (isMainFrame) rememberPlace(url); });
@@ -386,7 +406,11 @@ ipcMain.handle("cg:pickFile", async () => {
   return { file, folder: path.dirname(file) };
 });
 // The login token arrives from the screens (client/src/main.tsx); the local runner (Day 2) uses it
-ipcMain.on("cg:setToken", (_e, t) => { runner.setToken(t || null); chats.setToken(t || null); uploads.setToken(t || null); memory.setToken(t || null); codeEditor.setToken(t || null); });
+ipcMain.on("cg:setToken", (_e, t) => {
+  runner.setToken(t || null); chats.setToken(t || null); uploads.setToken(t || null); memory.setToken(t || null); codeEditor.setToken(t || null);
+  // (the "Classgrid Code" icon was waiting for the login)
+  if (t && codeWaiting) startCodeEditor();
+});
 // The AI's memory of each account used on this computer (desktop/memory.js): switching accounts keeps it
 ipcMain.handle("cg:saveMemory", (_e, m) => { try { return memory.saveMine(m); } catch { return false; } });
 ipcMain.handle("cg:otherMemory", () => { try { return memory.others(); } catch { return []; } });
@@ -448,9 +472,11 @@ if (!app.requestSingleInstanceLock()) {
   app.quit();
 } else {
   app.on("second-instance", (_e, argv) => {
+    // The "Classgrid Code" icon while the app is open: only the editor opens
+    if (argv.includes("--code")) return void startCodeEditor();
     // The app opened again: bring its window forward. The window may already be gone (the app is closing, or it is
     // installing an update), so it is only touched while it exists.
-    if (win && !win.isDestroyed()) { if (win.isMinimized()) win.restore(); win.focus(); }
+    if (win && !win.isDestroyed()) { if (codeOnly) showMain(); if (win.isMinimized()) win.restore(); win.focus(); }
     handleDeepLink(argv.find((a) => a.startsWith("classgrid://")));
   });
   app.whenReady().then(async () => {

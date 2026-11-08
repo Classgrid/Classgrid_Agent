@@ -122,6 +122,18 @@ module.exports = {
     if (code) setTimeout(() => { launch(["--open-url", `classgrid-code://classgrid.classgrid/login?code=${encodeURIComponent(code)}`]).catch(() => {}); }, 2500);
     return { opened: true };
   },
+  // The "Classgrid Code" icon (desktop and Start menu): the editor on its own, with its last folder, signed in with the
+  // app's login. Resolves once the login link is sent too, so the app may close after it.
+  async start() {
+    await launch([]);
+    const code = await loginCode();
+    if (code) {
+      await new Promise((r) => setTimeout(r, 2500));
+      await launch(["--open-url", `classgrid-code://classgrid.classgrid/login?code=${encodeURIComponent(code)}`]).catch(() => {});
+    }
+    return { opened: true };
+  },
+  hasLogin: () => !!token,
   // A file the AI mentions: open it in Classgrid Code with its lines selected (the editor's Classgrid extension opens
   // classgrid-code://classgrid.classgrid/open)
   async reveal(folder, file, startLine, endLine) {

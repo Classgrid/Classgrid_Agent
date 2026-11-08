@@ -30,6 +30,9 @@ extraResources:
     to: ptyhost.js
   - from: classgrid-code.zip
     to: classgrid-code.zip
+  # (the icon of the "Classgrid Code" shortcut, build/installer.nsh)
+  - from: build/code.ico
+    to: classgrid-code.ico
 win:
   target:
     - target: nsis
@@ -42,6 +45,8 @@ nsis:
   createDesktopShortcut: true
   createStartMenuShortcut: true
   shortcutName: Classgrid
+  # Classgrid Code's own desktop and Start menu icon
+  include: build/installer.nsh
   artifactName: "Classgrid Setup ${version}.${ext}"
 protocols:
   - name: Classgrid
