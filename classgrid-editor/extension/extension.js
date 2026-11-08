@@ -98,9 +98,14 @@ async function activate(context) {
         if (res.ok && typeof data.path === "string") token = new URL(data.path, "https://chat.classgrid.in").searchParams.get("token");
       } catch (err) { log.appendLine(`[${new Date().toISOString()}] sign-in from the Classgrid app failed: ${err?.message || err}`); }
       if (!token) return vscode.window.showErrorMessage("Classgrid sign-in didn't finish. Open the project again from Project Mode in the Classgrid app.");
+      // The Classgrid app hands over its login on every start of Classgrid Code (the shortcut runs the app with --code,
+      // which sends this a moment after the editor opens). The panels reload only when the login is new: with the same
+      // login already in place they are left alone, so the Agent panel no longer flashes a second time a few seconds
+      // after opening (owner, 2026-11-08)
+      const sameLogin = storage.token === token;
       keepStorage({ cgStore: "set", key: "token", value: token });
       keepStorage({ cgStore: "set", key: "cg_signed_in_at", value: String(Date.now()) });
-      for (const load of loaders) load();
+      if (!sameLogin) for (const load of loaders) load();
       vscode.commands.executeCommand("classgrid.agent.focus").then(undefined, () => {});
     },
   }));
