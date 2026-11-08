@@ -4817,6 +4817,9 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
         let finalPayload: any = null;
         let streamError: string | null = null;
         let chatEndedSeen = false;
+        // The answer stopped because all AI usage is used up (free limit, granted and top-up credits): the limit card
+        // is shown under it, with the reset time the server sends
+        let limitEndedReset: string | null = null;
         let hasReceivedTokens = false;
 
         while (true) {
@@ -5031,6 +5034,8 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
                 setChatEnded({ reason: event.reason ?? null, canReopen: !!event.canReopen });
                 setMessageQueue([]);
                 setPriorityMessage(null);
+              } else if (event.type === "limit_ended") {
+                limitEndedReset = event.resetDate || new Date().toISOString();
               } else if (event.type === "error") {
                 streamError = event.error || "Unable to answer right now. Please try again.";
               }
@@ -5092,6 +5097,11 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
             // Non-streamed response (tool calls, error fallbacks), so type it out
             await wait(prefersReducedMotion ? 0 : 100);
             await typeAssistantResponse(answer);
+          }
+          // All usage ran out during this answer: the limit card (reset time, top-up) under what was written
+          if (limitEndedReset) {
+            const reset = limitEndedReset;
+            setMessages((prev) => [...prev, { id: createMessageId("assistant"), role: "assistant", content: `ai_quota_exceeded|${reset}`, createdAt: Date.now(), typing: false }]);
           }
         } else {
           throw new Error("The AI connection was interrupted. Please try again.");
@@ -7978,8 +7988,11 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
           transition={prefersReducedMotion ? { duration: 0 } : panelTransition}
         >
           {panelHeader}
+          <div className={centerEmptyInput ? "flex-1" : "hidden"} />
+          {centerEmptyInput && emptyGreeting}
           {panelChat}
           {panelInput}
+          <div className={centerEmptyInput ? "flex-1" : "hidden"} />
         </motion.aside>
       )}
 
