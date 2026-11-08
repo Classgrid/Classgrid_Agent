@@ -102,11 +102,21 @@ async function askRunnerOnce(userId, tool, payload) {
             // A connection that can't do this step (Classgrid Code's has no browser, only the desktop app's has) says so at
             // once, and the next one is asked: the newest connection was Classgrid Code's whenever it was open, so the AI's
             // browser fell back to an empty cloud browser instead of the Studio browser on screen (2026-11-05)
+            // A connection that doesn't answer at all (Classgrid Code left open after the app was closed: every step of the
+            // chat and its helpers timed out on it, 2026-11-08) is skipped, and the next one is asked
             let reply = null;
+            let lastError = null;
             for (const s of here) {
-                reply = await s.timeout(timeoutFor(tool)).emitWithAck("local-tool", payload);
+                try {
+                    reply = await s.timeout(timeoutFor(tool)).emitWithAck("local-tool", payload);
+                } catch (err) {
+                    lastError = err;
+                    reply = null;
+                    continue;
+                }
                 if (!(typeof reply?.text === "string" && /can't run on this computer|wasn't opened in the Classgrid app/.test(reply.text))) break;
             }
+            if (typeof reply?.text !== "string" && lastError) throw lastError;
             return typeof reply?.text === "string" ? reply : null;
         }
         // Connected to another server process: reach it through the Redis adapter (a few seconds to find it)
