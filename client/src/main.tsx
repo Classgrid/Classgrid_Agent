@@ -64,6 +64,7 @@ import { PostHogProvider } from "posthog-js/react";
 import { App } from "@/app/App";
 import { AppProviders } from "@/app/providers";
 import { warmPages } from "@/lib/desktopPageCache";
+import { installDesktopHistory } from "@/lib/desktopHistory";
 import { queryClient } from "@/lib/queryClient";
 import "@/styles/global.css";
 
@@ -72,6 +73,8 @@ import "@/styles/global.css";
 const isDesktopApp = import.meta.env.VITE_DESKTOP === "1";
 // Desktop app only: Studio Mode's colors everywhere (global.css, html.desktop-app)
 if (isDesktopApp) document.documentElement.classList.add("desktop-app");
+// Desktop app: the sidebar's back and forward arrows count every place (lib/desktopHistory.ts), before the router starts
+installDesktopHistory();
 // Desktop app: Google Sans, for Studio's new-chat greeting (AskAiPanel)
 if (isDesktopApp) {
   const font = document.createElement("link");

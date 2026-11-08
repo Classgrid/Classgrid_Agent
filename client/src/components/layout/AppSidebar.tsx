@@ -202,6 +202,21 @@ export function AppSidebar({ role, user }: AppSidebarProps) {
   // Navigation API; both stay on where it is missing)
   // (from the router's own place number in the history: going somewhere new drops the places ahead)
   const navType = useNavigationType();
+  // Places set with history.pushState straight (a chat opened from the chat menu, for one) and the browser's own
+  // back/forward don't go through the router: lib/desktopHistory.ts says "cg:history" on those, and the arrows
+  // follow (a straight push is a new place, so the places ahead are dropped)
+  const [, historyTick] = useState(0);
+  useEffect(() => {
+    if (!DESKTOP_APP) return;
+    const onHistory = (e: Event) => {
+      const d = (e as CustomEvent).detail;
+      if (d?.type === "push" && typeof d.idx === "number") lastPlaceIdx = d.idx;
+      historyTick((n) => n + 1);
+    };
+    window.addEventListener("cg:history", onHistory);
+    window.addEventListener("popstate", onHistory);
+    return () => { window.removeEventListener("cg:history", onHistory); window.removeEventListener("popstate", onHistory); };
+  }, []);
   const placeIdx = typeof window.history.state?.idx === "number" ? window.history.state.idx : 0;
   if (navType === "PUSH" || placeIdx > lastPlaceIdx) lastPlaceIdx = placeIdx;
   const canGo = { back: placeIdx > 0, forward: placeIdx < lastPlaceIdx };
