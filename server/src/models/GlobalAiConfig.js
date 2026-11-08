@@ -109,6 +109,10 @@ const globalAiConfigSchema = new mongoose.Schema(
             type: Boolean,
             default: false,
         },
+        // One free limit per computer: all accounts on the same computer (the desktop app sends its scrambled Windows
+        // ID) share one free limit, so more accounts don't give more free usage. Off: every account has its own free
+        // limit. The super admin dashboard's switch (Global AI Fallback Limits); off unless turned on there.
+        free_limit_per_computer: { type: Boolean, default: false },
         metadata: {
             type: mongoose.Schema.Types.Mixed,
             default: {},

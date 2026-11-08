@@ -137,7 +137,7 @@ export const hasEnoughTokens = async (userId, orgId, requiredTokens = 1, { paidO
     }
 
     // FETCH GLOBAL CONFIG
-    const globalConfig = await GlobalAiConfig.findOne({ key: "singleton" }).select("global_user_weekly_limit global_ai_blocked classgrid_custom_limits_enabled classgrid_user_weekly_limit global_token_reset_value global_token_reset_unit classgrid_token_reset_value classgrid_token_reset_unit global_image_reset_value global_image_reset_unit classgrid_image_reset_value classgrid_image_reset_unit").lean() || {};
+    const globalConfig = await GlobalAiConfig.findOne({ key: "singleton" }).select("global_user_weekly_limit global_ai_blocked free_limit_per_computer classgrid_custom_limits_enabled classgrid_user_weekly_limit global_token_reset_value global_token_reset_unit classgrid_token_reset_value classgrid_token_reset_unit global_image_reset_value global_image_reset_unit classgrid_image_reset_value classgrid_image_reset_unit").lean() || {};
     if (globalConfig.global_ai_blocked) {
         return { allowed: false, reason: "AI access is globally blocked by administrators." };
     }
@@ -204,8 +204,9 @@ export const hasEnoughTokens = async (userId, orgId, requiredTokens = 1, { paidO
             .catch(e => console.error("Reset date update error:", e));
     }
 
-    // The free limit is shared by all accounts on the same computer
-    const usedOnComputer = await deviceFreeUsed(userId);
+    // The free limit is shared by all accounts on the same computer, when the super admin dashboard's switch is on
+    // (the computer's count is kept either way, so turning the switch on later counts what was already used)
+    const usedOnComputer = globalConfig.free_limit_per_computer === true ? await deviceFreeUsed(userId) : null;
     const freeLeft = Math.min(weeklyLimit - usedThisWeek, usedOnComputer === null ? Infinity : weeklyLimit - usedOnComputer);
     // The credit pools (granted / promotion and paid / top-up), without the expired ones.
     // Note: paused/revoked credits are already subtracted from balance by the per-transaction controllers
@@ -425,11 +426,11 @@ export const deductTokens = async (userId, orgId, tokenAmount, source, { noSpill
             // Free tier, with the same dashboard limit the pre-request check uses.
             const user = await User.findById(userId).select("ai_tokens");
             const org = orgId ? await Organization.findById(orgId).select("ai_config").lean() : null;
-            const globalConfig = await GlobalAiConfig.findOne({ key: "singleton" }).select("global_user_weekly_limit classgrid_custom_limits_enabled classgrid_user_weekly_limit global_token_reset_value global_token_reset_unit classgrid_token_reset_value classgrid_token_reset_unit").lean() || {};
+            const globalConfig = await GlobalAiConfig.findOne({ key: "singleton" }).select("global_user_weekly_limit free_limit_per_computer classgrid_custom_limits_enabled classgrid_user_weekly_limit global_token_reset_value global_token_reset_unit classgrid_token_reset_value classgrid_token_reset_unit").lean() || {};
             const weeklyLimit = resolveWeeklyLimit(user, org, globalConfig, orgId);
             const currentUsed = user?.ai_tokens?.used_this_week || 0;
-            // The free limit is shared by all accounts on the same computer
-            const usedOnComputer = await deviceFreeUsed(userId);
+            // The free limit is shared by all accounts on the same computer, when the dashboard's switch is on
+            const usedOnComputer = globalConfig.free_limit_per_computer === true ? await deviceFreeUsed(userId) : null;
             const headroom = Math.max(0, Math.min(weeklyLimit - currentUsed, usedOnComputer === null ? Infinity : weeklyLimit - usedOnComputer));
             const actualDeduction = Math.min(tokenAmount, headroom);
             const overflow = tokenAmount - actualDeduction;

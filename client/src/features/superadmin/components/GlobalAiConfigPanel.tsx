@@ -24,6 +24,7 @@ import {
 } from "@/components/marketing_ui/dialog";
 import { Input } from "@/components/marketing_ui/input";
 import { Label } from "@/components/marketing_ui/label";
+import { Switch } from "@/components/marketing_ui/switch";
 import { BlueSlider } from "@/components/marketing_ui/BlueSlider";
 import { toast } from "sonner";
 import { Spinner } from "@/components/marketing_ui/spinner";
@@ -307,9 +308,28 @@ export function GlobalAiConfigPanel({ grantCreditsNode }: { grantCreditsNode?: R
               </DialogContent>
             </Dialog>
           </div>
+
+          {/* One free limit per computer (the desktop app sends the computer's scrambled Windows ID) */}
+          <div className="p-5 border-t border-border flex items-start justify-between gap-4">
+            <div className="flex flex-col gap-1">
+              <Label htmlFor="free-limit-per-computer" className="text-sm font-medium text-foreground">One free limit per computer</Label>
+              <p className="text-xs text-muted-foreground">
+                On: every account used on the same computer shares one free limit, so more accounts on one PC don't give more free usage.
+                Off: every account has its own free limit, even on the same computer.
+              </p>
+            </div>
+            <Switch
+              id="free-limit-per-computer"
+              checked={!!data?.free_limit_per_computer}
+              disabled={updateConfigMutation.isPending}
+              onCheckedChange={(on) => updateConfigMutation.mutate({ free_limit_per_computer: on }, {
+                onSuccess: () => toast.success(on ? "One free limit per computer is on" : "Every account has its own free limit now"),
+              })}
+            />
+          </div>
         </div>
       </div>
-      
+
       {grantCreditsNode}
       </div>
 

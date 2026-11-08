@@ -76,6 +76,7 @@ export const updateGlobalAiConfig = async (req, res) => {
             global_image_weekly_limit,
             global_whatsapp_scheduling_limit, 
             global_ai_blocked,
+            free_limit_per_computer,
             credits_per_inr,
             image_generation_token_cost,
             cf_input_cost_per_million,
@@ -101,6 +102,7 @@ export const updateGlobalAiConfig = async (req, res) => {
         if (global_image_weekly_limit !== undefined) config.global_image_weekly_limit = global_image_weekly_limit;
         if (global_whatsapp_scheduling_limit !== undefined) config.global_whatsapp_scheduling_limit = global_whatsapp_scheduling_limit;
         if (global_ai_blocked !== undefined) config.global_ai_blocked = global_ai_blocked;
+        if (free_limit_per_computer !== undefined) config.free_limit_per_computer = free_limit_per_computer === true;
         if (credits_per_inr !== undefined) config.credits_per_inr = credits_per_inr;
         if (image_generation_token_cost !== undefined) config.image_generation_token_cost = image_generation_token_cost;
         if (cf_input_cost_per_million !== undefined) config.cf_input_cost_per_million = cf_input_cost_per_million;
