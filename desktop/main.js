@@ -262,17 +262,32 @@ ipcMain.handle("cg:notify", (_e, { title, body } = {}) => {
     return true;
   } catch { return false; }
 });
-// This computer's own Windows ID (MachineGuid), scrambled so the real ID never leaves the computer: the free AI
+// This computer's own ID (Windows' MachineGuid, the Mac's platform UUID, Linux's machine-id), scrambled so the real
+// ID never leaves the computer: with the super admin dashboard's "One free limit per computer" switch on, the free AI
 // limit counts per computer, not per account (more accounts on one PC don't give more free usage)
 let deviceId;
+const machineId = () => {
+  const { execFileSync } = require("node:child_process");
+  if (process.platform === "win32") {
+    const out = execFileSync("reg", ["query", "HKLM\\SOFTWARE\\Microsoft\\Cryptography", "/v", "MachineGuid", "/reg:64"], { encoding: "utf8", windowsHide: true, timeout: 5000 });
+    return (out.match(/MachineGuid\s+REG_SZ\s+([\w-]+)/i) || [])[1];
+  }
+  if (process.platform === "darwin") {
+    const out = execFileSync("ioreg", ["-rd1", "-c", "IOPlatformExpertDevice"], { encoding: "utf8", timeout: 5000 });
+    return (out.match(/"IOPlatformUUID"\s*=\s*"([\w-]+)"/i) || [])[1];
+  }
+  for (const f of ["/etc/machine-id", "/var/lib/dbus/machine-id"]) {
+    try { const id = fs.readFileSync(f, "utf8").trim(); if (id) return id; } catch { /* the next place */ }
+  }
+  return undefined;
+};
 ipcMain.on("cg:deviceId", (e) => {
   if (deviceId === undefined) {
     deviceId = null;
     try {
-      const out = require("node:child_process").execFileSync("reg", ["query", "HKLM\\SOFTWARE\\Microsoft\\Cryptography", "/v", "MachineGuid", "/reg:64"], { encoding: "utf8", windowsHide: true, timeout: 5000 });
-      const guid = (out.match(/MachineGuid\s+REG_SZ\s+([\w-]+)/i) || [])[1];
-      if (guid) deviceId = require("node:crypto").createHash("sha256").update(`classgrid-device:${guid.toLowerCase()}`).digest("hex");
-    } catch { /* not Windows, or the key can't be read */ }
+      const id = machineId();
+      if (id) deviceId = require("node:crypto").createHash("sha256").update(`classgrid-device:${id.toLowerCase()}`).digest("hex");
+    } catch { /* the ID can't be read: no computer known, so the free limit is per account */ }
   }
   e.returnValue = deviceId;
 });
