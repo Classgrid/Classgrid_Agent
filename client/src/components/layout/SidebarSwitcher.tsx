@@ -145,7 +145,8 @@ export function SidebarSwitcher({ user }: { user: { role?: string; name?: string
 
   return (
     <SidebarMenu>
-      <SidebarMenuItem onMouseEnter={() => setLogoShown(true)} onMouseLeave={() => setLogoShown(false)}>
+      {/* Desktop app: only the name, no logo sliding in on hover (owner, 2026-11-08) */}
+      <SidebarMenuItem onMouseEnter={() => !DESKTOP && setLogoShown(true)} onMouseLeave={() => setLogoShown(false)}>
         {/* (Classgrid Code: no mode switcher in its narrow chats sidebar, the logo is only the logo) */}
         <DropdownMenu open={IN_EDITOR ? false : undefined}>
           <DropdownMenuTrigger render={
