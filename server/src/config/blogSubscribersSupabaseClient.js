@@ -105,8 +105,8 @@ function loadMarketingEnvFallback() {
 export function getBlogSubscribersSb() {
     loadMarketingEnvFallback();
 
-    const blogUrl = process.env.BLOG_SUPABASE_URL || "https://bumxgscngzjadyozdpce.supabase.co";
-    const blogServiceKey = process.env.BLOG_SUPABASE_SERVICE_ROLE_KEY || "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImJ1bXhnc2NuZ3pqYWR5b3pkcGNlIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3MTM3NDgzNSwiZXhwIjoyMDg2OTUwODM1fQ.NP6osv-1ewQ7254Lf9ikLeJ-oZTTZKDO8UIkamKr3ww";
+    const blogUrl = process.env.BLOG_SUPABASE_URL || "";
+    const blogServiceKey = process.env.BLOG_SUPABASE_SERVICE_ROLE_KEY || "";
 
     if (!blogUrl || !blogServiceKey) {
         throw new Error("Blog subscriber Supabase credentials are not configured.");

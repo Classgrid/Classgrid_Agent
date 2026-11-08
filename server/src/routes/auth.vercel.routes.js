@@ -35,9 +35,14 @@ import connectDB from "../../config/db.js";
 
 const router = express.Router();
 
-// Hardcoded Vercel Keys (as requested)
-const VERCEL_CLIENT_ID = "oac_3hVOxjqQqi7I3jGi19sKQl7r";
-const VERCEL_CLIENT_SECRET = "5ZXJiWYrsT4iRwuQbont7H0M";
+// Vercel Integration credentials come from the environment only.
+// Never hardcode these: this file is committed to git.
+const VERCEL_CLIENT_ID = process.env.VERCEL_CLIENT_ID || "";
+const VERCEL_CLIENT_SECRET = process.env.VERCEL_CLIENT_SECRET || "";
+
+if (!VERCEL_CLIENT_ID || !VERCEL_CLIENT_SECRET) {
+    console.warn("[Vercel OAuth] VERCEL_CLIENT_ID / VERCEL_CLIENT_SECRET are not set; Vercel connect will fail until they are configured.");
+}
 
 const getVercelAuthUrl = (state) => {
     // Since this is a full Vercel Integration (classgrid-mcp) and not just a simple OAuth app,

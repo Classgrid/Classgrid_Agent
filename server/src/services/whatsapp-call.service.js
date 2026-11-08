@@ -1,3 +1,4 @@
+import { getJwtSecret } from "../utils/jwt-secret.js";
 /*
  * ─────────────────────────────────────────────────────────
  * 🚫 NO BLOCKS RULE (owner's order, 2026-10-23) 🚫
@@ -802,7 +803,7 @@ async function askClassgridLive(call, request, projectName) {
 function userToken(user) {
     return jwt.sign(
         { id: user._id, role: user.role, organizationId: user.organization_id || null, rememberMe: false },
-        process.env.JWT_SECRET || "dev_secret",
+        getJwtSecret(),
         { expiresIn: "12h" }
     );
 }

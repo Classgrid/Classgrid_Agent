@@ -1,3 +1,4 @@
+import { getJwtSecret } from "../utils/jwt-secret.js";
 /*
  * ─────────────────────────────────────────────────────────
  * 🚫 NO BLOCKS RULE (owner's order, 2026-10-23) 🚫
@@ -118,7 +119,7 @@ import { sendSMS } from "../services/sms.service.js";
 import { RecaptchaVerificationError, verifyRecaptchaToken } from "../services/recaptcha.service.js";
 import { isPublicChatAccount, needsChatOnboarding, isSharedTestWhatsapp, readableJobRole } from "../utils/chat-onboarding.js";
 
-const JWT_SECRET = process.env.JWT_SECRET || "dev_secret";
+const JWT_SECRET = getJwtSecret();
 const getFrontendUrl = () => {
     return process.env.FRONTEND_URL?.trim() || (process.env.NODE_ENV === "production" ? "https://classgrid.in" : "https://classgrid.in");
 };
@@ -3153,7 +3154,7 @@ export const chatOnboard = async (req, res) => {
         }
         await user.save();
 
-        const JWT_SECRET = process.env.JWT_SECRET || 'dev_secret';
+        const JWT_SECRET = getJwtSecret();
         const token = jwt.sign({ id: user._id.toString(), role: user.role, organization_id: user.organization_id }, JWT_SECRET, { expiresIn: '30d' });
         // The chat calls the API with the login cookie, not this JSON token: without the cookie every request
         // after sign-up was 401 until the user logged out and in again

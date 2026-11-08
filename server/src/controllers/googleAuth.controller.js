@@ -1,3 +1,4 @@
+import { getJwtSecret } from "../utils/jwt-secret.js";
 /*
  * ─────────────────────────────────────────────────────────
  * 🚫 NO BLOCKS RULE (owner's order, 2026-10-23) 🚫
@@ -86,7 +87,7 @@ import {
 import { checkAndRegisterDevice } from "../services/device-fingerprint.service.js";
 import Organization from "../models/Organization.js";
 
-const JWT_SECRET = process.env.JWT_SECRET || "dev_secret";
+const JWT_SECRET = getJwtSecret();
 
 // Function to get the correct frontend URL based on environment
 const getFrontendUrl = () => {

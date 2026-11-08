@@ -10,25 +10,22 @@
  * super admin dashboard are live.
  * ─────────────────────────────────────────────────────────
  */
-// CLASSGRID USES CLOUDFLARE USAGE TO CALCULATE TOKENS, NOT GPT-TOKENIZER (WHICH IS ONLY A FALLBACK)
-import mongoose from 'mongoose';
 
-const uri = "mongodb+srv://classgrid-admin:aiLfOjcURw9UUALw@classgrid.sa5ww0z.mongodb.net/classgrid?retryWrites=true&w=majority&appName=Classgrid&authSource=admin";
-
-async function run() {
-  try {
-    await mongoose.connect(uri);
-    const db = mongoose.connection.db;
-    
-    // Check if platform_rag_chunks has the users
-    const chunks = await db.collection('platform_rag_chunks').find({ content: { $regex: 'admin@cds.classgrid.in', $options: 'i' } }).toArray();
-    console.log("RAG chunks containing admin@cds.classgrid.in:", chunks.length);
-    if(chunks.length > 0) {
-        console.log("Sample chunk:", chunks[0].content);
+/**
+ * Single source of truth for the JWT signing secret.
+ *
+ * There is deliberately NO fallback value. A hardcoded default secret means anyone
+ * who can read this repository can mint valid tokens for production, so a missing
+ * secret must fail loudly instead of silently signing with "dev_secret".
+ *
+ * Set JWT_SECRET in the environment (server/.env on EC2, Vercel env vars, etc.).
+ */
+export function getJwtSecret() {
+    const secret = process.env.JWT_SECRET;
+    if (!secret) {
+        throw new Error("JWT_SECRET is not set. Refusing to sign or verify tokens with a default secret.");
     }
-  } finally {
-    await mongoose.disconnect();
-  }
+    return secret;
 }
 
-run().catch(console.dir);
+export default getJwtSecret;

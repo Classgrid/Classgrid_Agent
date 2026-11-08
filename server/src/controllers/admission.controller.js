@@ -1,3 +1,4 @@
+import { getJwtSecret } from "../utils/jwt-secret.js";
 /*
  * ─────────────────────────────────────────────────────────
  * 🚫 NO BLOCKS RULE (owner's order, 2026-10-23) 🚫
@@ -118,7 +119,7 @@ import { executeAllocation } from "../services/admissions/division-allocator.ser
 import { generateDTEExport, generateSARALExport, generateAICTEExport, generateStateBoardExport } from "../services/admissions/govt-export.service.js";
 import * as xlsx from "xlsx";
 
-const JWT_SECRET = process.env.JWT_SECRET || "dev_secret";
+const JWT_SECRET = getJwtSecret();
 
 const emitSeatBroadcast = (orgId, type, seatResult) => {
     if (!seatResult?.success) {

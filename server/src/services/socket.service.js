@@ -1,3 +1,4 @@
+import { getJwtSecret } from "../utils/jwt-secret.js";
 /*
  * ─────────────────────────────────────────────────────────
  * 🚫 NO BLOCKS RULE (owner's order, 2026-10-23) 🚫
@@ -105,7 +106,7 @@ function startAnalyticsPush() {
     }, ANALYTICS_PUSH_MS);
 }
 
-const JWT_SECRET = process.env.JWT_SECRET || "dev_secret";
+const JWT_SECRET = getJwtSecret();
 const REDIS_URL = process.env.REDIS_URL; // No default localhost fallback to avoid forcing Redis
 
 const isDev = process.env.NODE_ENV !== "production";

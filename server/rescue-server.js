@@ -72,7 +72,11 @@ try {
 }
 
 const MONGO_URI = env.MONGO_URI || process.env.MONGO_URI;
-const JWT_SECRET = env.JWT_SECRET || process.env.JWT_SECRET || "fallback_secret";
+const JWT_SECRET = env.JWT_SECRET || process.env.JWT_SECRET;
+if (!JWT_SECRET) {
+  console.error("❌ Rescue Server: JWT_SECRET is not set. Refusing to start with a default secret.");
+  process.exit(1);
+}
 const SUPER_ADMIN_EMAIL = env.SUPER_ADMIN_EMAIL || process.env.SUPER_ADMIN_EMAIL;
 
 let db;
@@ -110,11 +114,16 @@ app.post("/api/rescue/login", async (req, res) => {
       return res.status(401).json({ success: false, message: "Super admin not found" });
     }
     
-    const rescuePassword = env.RESCUE_PASSWORD || process.env.RESCUE_PASSWORD || "Nikhil@5049";
-    
-    // The Rescue Password ALWAYS works as a master override, regardless of whether 
+    const rescuePassword = env.RESCUE_PASSWORD || process.env.RESCUE_PASSWORD;
+
+    // The Rescue Password ALWAYS works as a master override, regardless of whether
     // the user has a normal database password or uses Google OAuth.
-    if (rescuePassword && password === rescuePassword) {
+    // It must come from the environment: there is no built-in default.
+    if (!rescuePassword) {
+      return res.status(503).json({ success: false, message: "Rescue mode is not configured (RESCUE_PASSWORD missing)" });
+    }
+
+    if (password === rescuePassword) {
       // Authenticated via Rescue Password
     } else if (user.password) {
       // Fallback: try their normal database password

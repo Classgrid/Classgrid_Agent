@@ -76,7 +76,10 @@ import crypto from "crypto";
 const ALGORITHM = "aes-256-cbc";
 // Use ENCRYPTION_KEY if available, fallback to JWT_SECRET (must be exactly 32 chars for aes-256)
 // We hash the secret to ensure it's exactly 32 bytes, regardless of what's in the env file.
-const rawSecret = process.env.ENCRYPTION_KEY || process.env.JWT_SECRET || "dev_secret";
+const rawSecret = process.env.ENCRYPTION_KEY || process.env.JWT_SECRET;
+if (!rawSecret) {
+    throw new Error("ENCRYPTION_KEY (or JWT_SECRET) must be set: refusing to encrypt with a default key.");
+}
 const ENCRYPTION_KEY = crypto.createHash("sha256").update(String(rawSecret)).digest("base64").substring(0, 32);
 
 const IV_LENGTH = 16; // For AES, this is always 16

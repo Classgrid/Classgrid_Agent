@@ -1,3 +1,4 @@
+import { getJwtSecret } from "../utils/jwt-secret.js";
 /*
  * ─────────────────────────────────────────────────────────
  * 🚫 NO BLOCKS RULE (owner's order, 2026-10-23) 🚫
@@ -86,7 +87,7 @@ function safeConsentReturn(value) {
 }
 
 function stateSecret() {
-    return process.env.OAUTH_STATE_SECRET || process.env.JWT_SECRET || "dev_secret";
+    return process.env.OAUTH_STATE_SECRET || getJwtSecret();
 }
 
 function signatureFor(encodedPayload) {

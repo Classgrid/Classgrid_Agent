@@ -1,3 +1,4 @@
+import { getJwtSecret } from "../utils/jwt-secret.js";
 /*
  * ─────────────────────────────────────────────────────────
  * 🚫 NO BLOCKS RULE (owner's order, 2026-10-23) 🚫
@@ -78,7 +79,7 @@ import Organization from "../models/Organization.js";
 import connectDB from "../../config/db.js";
 import { needsChatOnboarding } from "../utils/chat-onboarding.js";
 
-const JWT_SECRET = process.env.JWT_SECRET || "dev_secret";
+const JWT_SECRET = getJwtSecret();
 
 /**
  * Shared account checks for an already-loaded user (used by isAuthenticated and by the OAuth

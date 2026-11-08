@@ -1,3 +1,4 @@
+import { getJwtSecret } from "../utils/jwt-secret.js";
 /*
  * ─────────────────────────────────────────────────────────
  * 🚫 NO BLOCKS RULE (owner's order, 2026-10-23) 🚫
@@ -667,7 +668,7 @@ export const impersonateUser = async (req, res) => {
                 impersonatedBy: superAdminId, // Mark this token as impersonated!
                 org_type: targetUser.org_type
             },
-            process.env.JWT_SECRET || "dev_secret",
+            getJwtSecret(),
             { expiresIn: "1h" } // Only valid for 1 hour
         );
 

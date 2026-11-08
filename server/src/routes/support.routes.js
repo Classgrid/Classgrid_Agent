@@ -1,3 +1,4 @@
+import { getJwtSecret } from "../utils/jwt-secret.js";
 /*
  * ─────────────────────────────────────────────────────────
  * 🚫 NO BLOCKS RULE (owner's order, 2026-10-23) 🚫
@@ -111,7 +112,7 @@ async function enforceStrictSession(req, res, next) {
 
     const proxySecret = req.headers["x-proxy-auth-secret"];
     const proxyEmail = req.headers["x-proxy-auth-email"];
-    const JWT_SECRET = process.env.JWT_SECRET || "dev_secret";
+    const JWT_SECRET = getJwtSecret();
 
     if (proxySecret && proxySecret === JWT_SECRET && proxyEmail) {
         req.loggedInUserEmail = proxyEmail.trim().toLowerCase();
