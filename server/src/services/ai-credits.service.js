@@ -207,54 +207,50 @@ export const hasEnoughTokens = async (userId, orgId, requiredTokens = 1, { paidO
     // The free limit is shared by all accounts on the same computer
     const usedOnComputer = await deviceFreeUsed(userId);
     const freeLeft = Math.min(weeklyLimit - usedThisWeek, usedOnComputer === null ? Infinity : weeklyLimit - usedOnComputer);
-    if (requiredTokens <= freeLeft) {
-        // spendable: what one answer may use in total. deductTokens spills free-pool overflow into the first
-        // credit pool, so that pool's balance counts too (the live token check during an answer stops at this number).
-        const spill = pickCreditSource(user);
-        const t = user.ai_tokens || {};
-        const spillBalance = spill === "promotion" ? (t.promotion_credits_balance || 0) : spill === "personal" ? (t.ai_credits_balance || 0) : 0;
-        return { allowed: true, source: "weekly_free", remaining: freeLeft, spendable: freeLeft + spillBalance };
-    }
-
-    // 3. FIFO LOGIC: Determine which came FIRST between Top-Up (Paid) and Granted (Promotion)
-    const now = new Date().getTime();
-    
-    // Check if Promotion credits are expired
+    // The credit pools (granted / promotion and paid / top-up), without the expired ones.
     // Note: paused/revoked credits are already subtracted from balance by the per-transaction controllers
+    const now = new Date().getTime();
     let promoBalance = user.ai_tokens?.promotion_credits_balance || 0;
     if (user.ai_tokens?.promotion_credits_end_date && new Date(user.ai_tokens.promotion_credits_end_date).getTime() < now) {
         promoBalance = 0; // Expired
     }
-    
-    // Check if Paid credits are expired
     let paidBalance = user.ai_tokens?.ai_credits_balance || 0;
     if (user.ai_tokens?.ai_credits_end_date && new Date(user.ai_tokens.ai_credits_end_date).getTime() < now) {
         paidBalance = 0; // Expired
     }
-    
+    // spendable: what one answer may use in total: the free pool, then the granted credits, then the top-up credits
+    // (deductTokens spills from one into the next as each runs out). The live token check during an answer stops
+    // only at this number, so an answer goes on across the pools and stops only when everything is used up.
+    const freeHeadroom = Math.max(0, freeLeft);
+    const spendable = freeHeadroom + promoBalance + paidBalance;
+
+    if (requiredTokens <= freeLeft) {
+        return { allowed: true, source: "weekly_free", remaining: freeLeft, spendable };
+    }
+
+    // 3. FIFO LOGIC: Determine which came FIRST between Top-Up (Paid) and Granted (Promotion)
     const promoStart = user.ai_tokens?.promotion_credits_start_date ? new Date(user.ai_tokens.promotion_credits_start_date).getTime() : Infinity;
     const paidStart = user.ai_tokens?.ai_credits_start_date ? new Date(user.ai_tokens.ai_credits_start_date).getTime() : Infinity;
 
     // Whichever was purchased/granted FIRST gets used FIRST (FIFO)
     if (promoBalance >= requiredTokens && paidBalance >= requiredTokens) {
         if (promoStart <= paidStart) {
-            return { allowed: true, source: "promotion", remaining: promoBalance };
+            return { allowed: true, source: "promotion", remaining: promoBalance, spendable };
         } else {
-            return { allowed: true, source: "personal", remaining: paidBalance };
+            return { allowed: true, source: "personal", remaining: paidBalance, spendable };
         }
     } else if (promoBalance >= requiredTokens) {
-        return { allowed: true, source: "promotion", remaining: promoBalance };
+        return { allowed: true, source: "promotion", remaining: promoBalance, spendable };
     } else if (paidBalance >= requiredTokens) {
-        return { allowed: true, source: "personal", remaining: paidBalance };
+        return { allowed: true, source: "personal", remaining: paidBalance, spendable };
     }
 
-    // No single pool covers it, but the pools together may: the free pool spills over into the first credit pool
-    // when it runs out (see deductTokens), so free headroom + that pool's balance counts.
-    const freeHeadroom = Math.max(0, freeLeft);
-    const spillSource = pickCreditSource(user);
-    const spillBalance = spillSource === "promotion" ? promoBalance : spillSource === "personal" ? paidBalance : 0;
-    if (freeHeadroom > 0 && freeHeadroom + spillBalance >= requiredTokens) {
-        return { allowed: true, source: "weekly_free", remaining: freeHeadroom + spillBalance };
+    // No single pool covers it, but the pools together may: each pool spills over into the next when it runs out
+    // (see deductTokens), so the free headroom and both credit pools count together.
+    if (spendable >= requiredTokens) {
+        if (freeHeadroom > 0) return { allowed: true, source: "weekly_free", remaining: spendable, spendable };
+        const first = pickCreditSource(user);
+        if (first) return { allowed: true, source: first, remaining: spendable, spendable };
     }
 
     return { allowed: false, reason: "Insufficient tokens." };
@@ -362,7 +358,22 @@ function pickCreditSource(user) {
     return null;
 }
 
-export const deductTokens = async (userId, orgId, tokenAmount, source) => {
+// A credit pool that ran out during a request: the rest goes to the other credit pool (granted <-> top-up), if it has
+// anything left, so an answer is never left unpaid while the user still has credits
+async function spillToOtherPool(userId, orgId, rest, from) {
+    if (!(rest > 0)) return null;
+    const other = from === "promotion" ? "personal" : "promotion";
+    const user = await User.findById(userId).select("ai_tokens");
+    const t = user?.ai_tokens || {};
+    const ok = other === "promotion"
+        ? (t.promotion_credits_balance || 0) > 0 && !(t.promotion_credits_end_date && new Date(t.promotion_credits_end_date).getTime() < Date.now())
+        : (t.ai_credits_balance || 0) > 0 && !(t.ai_credits_end_date && new Date(t.ai_credits_end_date).getTime() < Date.now());
+    if (!ok) return null;
+    const spill = await deductTokens(userId, orgId, rest, other, { noSpill: true });
+    return { to: other, tokens: rest, spill };
+}
+
+export const deductTokens = async (userId, orgId, tokenAmount, source, { noSpill = false } = {}) => {
     try {
         let result = { success: false, remaining: 0, type: "unknown" };
 
@@ -372,7 +383,8 @@ export const deductTokens = async (userId, orgId, tokenAmount, source) => {
             const currentBalance = Math.max(0, user?.ai_tokens?.ai_credits_balance || 0);
             const actualDeduction = Math.min(tokenAmount, currentBalance);
             if (actualDeduction <= 0) {
-                return { success: true, remaining: 0, limit: 0, type: "personal", uncharged: tokenAmount };
+                const spilled = noSpill ? null : await spillToOtherPool(userId, orgId, tokenAmount, "personal");
+                return { success: true, remaining: 0, limit: 0, type: "personal", uncharged: spilled ? (spilled.spill?.uncharged || 0) : tokenAmount, ...(spilled ? { spilledTo: spilled.to, spilledTokens: spilled.tokens, spill: spilled.spill } : {}) };
             }
             const updatedUser = await User.findByIdAndUpdate(userId, {
                 $inc: {
@@ -381,6 +393,10 @@ export const deductTokens = async (userId, orgId, tokenAmount, source) => {
                 }
             }, { returnDocument: 'after' });
             result = { success: true, remaining: Math.max(0, updatedUser.ai_tokens.ai_credits_balance), limit: updatedUser.ai_tokens.ai_credits_balance + actualDeduction, type: "personal", uncharged: tokenAmount - actualDeduction };
+            if (result.uncharged > 0 && !noSpill) {
+                const spilled = await spillToOtherPool(userId, orgId, result.uncharged, "personal");
+                if (spilled) Object.assign(result, { spilledTo: spilled.to, spilledTokens: spilled.tokens, spill: spilled.spill, uncharged: spilled.spill?.uncharged || 0 });
+            }
             triggerEmailAlerts(userId, orgId, "personal", currentBalance, result.remaining, user?.ai_tokens?.total_ai_credits_purchased || currentBalance);
 
         } else if (source === "promotion") {
@@ -389,7 +405,8 @@ export const deductTokens = async (userId, orgId, tokenAmount, source) => {
             const currentBalance = Math.max(0, user?.ai_tokens?.promotion_credits_balance || 0);
             const actualDeduction = Math.min(tokenAmount, currentBalance);
             if (actualDeduction <= 0) {
-                return { success: true, remaining: 0, limit: 0, type: "promotion", uncharged: tokenAmount };
+                const spilled = noSpill ? null : await spillToOtherPool(userId, orgId, tokenAmount, "promotion");
+                return { success: true, remaining: 0, limit: 0, type: "promotion", uncharged: spilled ? (spilled.spill?.uncharged || 0) : tokenAmount, ...(spilled ? { spilledTo: spilled.to, spilledTokens: spilled.tokens, spill: spilled.spill } : {}) };
             }
             const updatedUser = await User.findByIdAndUpdate(userId, {
                 $inc: {
@@ -398,6 +415,10 @@ export const deductTokens = async (userId, orgId, tokenAmount, source) => {
                 }
             }, { returnDocument: 'after' });
             result = { success: true, remaining: Math.max(0, updatedUser.ai_tokens.promotion_credits_balance), limit: updatedUser.ai_tokens.promotion_credits_balance + actualDeduction, type: "promotion", uncharged: tokenAmount - actualDeduction };
+            if (result.uncharged > 0 && !noSpill) {
+                const spilled = await spillToOtherPool(userId, orgId, result.uncharged, "promotion");
+                if (spilled) Object.assign(result, { spilledTo: spilled.to, spilledTokens: spilled.tokens, spill: spilled.spill, uncharged: spilled.spill?.uncharged || 0 });
+            }
             triggerEmailAlerts(userId, orgId, "promotion", currentBalance, result.remaining, user?.ai_tokens?.total_promotion_credits_granted || currentBalance);
 
         } else if (source === "weekly_free") {

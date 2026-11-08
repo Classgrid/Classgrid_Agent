@@ -6089,9 +6089,13 @@ If a tool fails, never show the error message; say only: "Something went wrong o
                 return;
             }
             tokenSource = check.source;
-            if (check.remaining !== undefined) llmConfig.defaultMaxTokens = Math.max(1, Math.min(8192, check.remaining));
-            quotaRemaining = check.remaining;
-            liveMeter.spendable = check.spendable ?? check.remaining;
+            // What this answer may use in total: the free limit, then the granted credits, then the top-up credits
+            // (deductTokens moves from one to the next as each runs out). The answer goes on across them and stops
+            // only when all of it is used up, never in the middle just because one pool ended.
+            const spendable = check.spendable ?? check.remaining;
+            if (spendable !== undefined) llmConfig.defaultMaxTokens = Math.max(1, Math.min(8192, spendable));
+            quotaRemaining = spendable;
+            liveMeter.spendable = spendable;
             playground("start", { question: String(body.question || "").slice(0, 300), model: typeof body.selectedModel === "string" ? body.selectedModel : "auto", spendable: liveMeter.spendable ?? null });
         } catch (err) {
             console.error("Quota check error:", err);
@@ -6189,6 +6193,7 @@ If a tool fails, never show the error message; say only: "Something went wrong o
         const isDiagramRequest = false; // Disabled aggressive Mermaid validation to fix prompt injection bug
 
         let answer = null;
+        let limitEnded = false; // the answer stopped because the free limit and all credits are used up
         let usedModel = CF_PRO_MODEL;
         let attempt = 1;
         const maxAttempts = 2;
@@ -6454,6 +6459,7 @@ If a tool fails, never show the error message; say only: "Something went wrong o
                 }
 
                 if (!streamed) rebuildPromptForCloudflare(); // the SDK fallback runs Cloudflare/Mistral models
+                if (streamed?.stoppedForBudget) limitEnded = true; // all the user's AI usage ran out during this answer
                 answer = streamed
                     ? streamed.answer
                     : await usageStorage.run(usageStore, () => currentClient.generate({
@@ -6731,6 +6737,12 @@ If a tool fails, never show the error message; say only: "Something went wrong o
             }
 
             res.write(`data: ${JSON.stringify({ type: "answer", answer })}\n\n`);
+            // Everything is used up (free limit, granted and top-up credits): the chat shows the limit card under the
+            // answer, with the reset time and the top-up button
+            if (limitEnded) {
+                const blocked = await quotaBlocked({ reason: "Insufficient tokens." }).catch(() => null);
+                res.write(`data: ${JSON.stringify({ type: "limit_ended", resetDate: blocked?.resetDate || null })}\n\n`);
+            }
         }
 
     } catch (err) {

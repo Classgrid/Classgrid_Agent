@@ -47,7 +47,7 @@ export function InsufficientCreditsCard({
       <div className="mb-3 flex items-center gap-2">
         <XCircle className="h-4 w-4 text-muted-foreground" />
         <h3 className="text-base font-semibold text-card-foreground">
-          {modelName ? `Not enough credits for ${modelName}` : "Insufficient AI Credits"}
+          {modelName ? `Not enough credits for ${modelName}` : "Your AI usage is used up for now"}
         </h3>
       </div>
 
@@ -60,8 +60,8 @@ export function InsufficientCreditsCard({
           </>
         ) : (
           <>
-            You've used up your AI Credits for now. To continue using the AI, purchase more AI Credits.
-            Your plan's baseline quota will refresh on {formattedDate}.
+            You've used your free limit and any granted or top-up credits you had. Your free limit comes back on {formattedDate}.
+            To keep going before that, top up AI credits. Anything I was in the middle of can be continued by saying "continue".
           </>
         )}
       </p>

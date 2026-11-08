@@ -125,7 +125,7 @@ export const THINKING_CUT_PROMPT = "You ran out of room while thinking and wrote
 // A round that ended with neither text nor a tool call (some models stop after thinking): ask for the reply itself
 export const EMPTY_ANSWER_PROMPT = "You stopped without writing anything to the user. Write your reply to the user now, directly (not in your thinking): what you found or did, and what is still left. If you still need a tool to finish what was asked, call it.";
 // Added to what was written so far when the user's tokens run out during an answer
-export const BUDGET_STOP_NOTE = "_(Stopped here: your AI tokens ran out while I was working. Top up AI credits or wait for your token reset, then ask me to continue.)_";
+export const BUDGET_STOP_NOTE = "_(I had to stop here: all of your AI usage is used up for now. Once your limit resets, or after a top-up, say \"continue\" and I'll pick up from this point.)_";
 export const budgetStopAnswer = (text) => `${String(text || "").trim()}\n\n${BUDGET_STOP_NOTE}`.trim();
 export const CONTINUE_PROMPT ="Your previous reply was cut off by the length limit. Continue EXACTLY where it stopped, even mid-word, mid-sentence or mid-code, without repeating anything and without any preamble, apology or comment. If you were inside a code block, keep writing inside it (do not open a new ```). Finish everything that was asked.";
 
