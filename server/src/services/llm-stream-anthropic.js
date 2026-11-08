@@ -75,6 +75,8 @@ function contentAfterFallback(content) {
     return [...content.slice(0, lastFallback).filter((b) => b.type === "text"), ...content.slice(lastFallback)];
 }
 
+// The key comes from the server's .env, which every deploy writes from the GitHub secret PRODUCTION_ENV
+// (deploy-backend.yml): a key changed on the server by hand lasts only until the next push. Change the secret.
 let client = null;
 function getClient() {
     if (!client) client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY, maxRetries: 2 });
