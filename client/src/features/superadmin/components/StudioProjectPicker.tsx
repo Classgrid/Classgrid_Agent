@@ -20,13 +20,25 @@ type Project = { id: string; name: string; repo: string | null; logo?: string | 
 type Repo = { fullName: string; private: boolean };
 
 async function api(path: string, init?: RequestInit) {
-  const res = await fetchWithRescue(`${backendUrl}/api/ide${path}`, {
-    credentials: "include",
-    ...init,
-    headers: { "Content-Type": "application/json", ...(init?.headers || {}) },
-  });
-  const data = await res.json().catch(() => ({}));
-  return { res, data };
+  // A server that never answers (restarting, bad network) used to leave the spinner turning for ever: 25 seconds, then
+  // the call fails like any other and the button is usable again
+  const abort = new AbortController();
+  const timer = setTimeout(() => abort.abort(), 25000);
+  try {
+    const res = await fetchWithRescue(`${backendUrl}/api/ide${path}`, {
+      credentials: "include",
+      ...init,
+      signal: abort.signal,
+      headers: { "Content-Type": "application/json", ...(init?.headers || {}) },
+    });
+    const data = await res.json().catch(() => ({}));
+    return { res, data };
+  } catch (err) {
+    const timedOut = (err as Error)?.name === "AbortError";
+    return { res: { ok: false, status: 0 } as Response, data: { error: timedOut ? "The server didn't answer. Please try again." : "Couldn't reach the server." } };
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 const LIST_KEY = "cg_studio_projects";

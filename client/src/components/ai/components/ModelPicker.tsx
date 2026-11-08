@@ -160,11 +160,20 @@ export function ModelPicker({ value, onChange, disabled }: ModelPickerProps) {
   const selected = ALL_MODELS.find((m) => m.id === value);
   const { data: access } = useQuery({
     queryKey: ["model-access"],
-    queryFn: async () => (await apiClient.get("/api/ai/model-access")).data as { fable: { unlocked: boolean; exempt?: boolean; toppedUpInr: number; requiredInr: number }; disabledModels?: string[] },
+    queryFn: async () => {
+      const data = (await apiClient.get("/api/ai/model-access")).data as { fable?: { unlocked: boolean; exempt?: boolean; toppedUpInr: number; requiredInr: number }; disabledModels?: string[] };
+      // While the server restarts, the rescue server answers this address with a 200 that has no "fable": that is not
+      // an answer, so it is retried instead of being shown (it crashed the panel with "reading 'unlocked'")
+      if (!data || typeof data !== "object" || !data.fable) throw new Error("model access not available");
+      return data as { fable: { unlocked: boolean; exempt?: boolean; toppedUpInr: number; requiredInr: number }; disabledModels?: string[] };
+    },
     staleTime: 60 * 1000,
+    retry: 3,
+    retryDelay: (n) => Math.min(2000 * 2 ** n, 15000),
   });
-  const fableLocked = access ? !access.fable.unlocked : false;
-  const fableLeft = access ? Math.max(0, access.fable.requiredInr - access.fable.toppedUpInr) : 0;
+  const fable = access?.fable;
+  const fableLocked = fable ? !fable.unlocked : false;
+  const fableLeft = fable ? Math.max(0, fable.requiredInr - fable.toppedUpInr) : 0;
   // Models the super admin turned off (Model manager) are not shown
   const offModels = new Set(access?.disabledModels || []);
 

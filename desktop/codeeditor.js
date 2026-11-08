@@ -55,6 +55,40 @@ async function launch(args) {
   spawn(path.join(dir, EXE), args, { cwd: dir, env, detached: true, stdio: "ignore", windowsHide: false }).unref();
 }
 
+// The first start of a freshly unpacked Classgrid Code is slow: Windows checks its 239 MB program and thousands of
+// files the first time they run (the installer is not signed yet). So, right after the unpack at the app's start, the
+// editor is run once with no window (its command-line mode only lists extensions and exits), and Windows does that
+// check then, not when the person clicks Open. Runs once per unpacked version.
+let warmed = null;
+function warmUp() {
+  if (warmed) return warmed;
+  warmed = (async () => {
+    const dir = await unpacked();
+    const mark = path.join(dir, ".warmed");
+    if (fs.existsSync(mark)) return;
+    const env = { ...process.env };
+    delete env.ELECTRON_RUN_AS_NODE;
+    await new Promise((resolve) => {
+      const p = spawn(path.join(dir, EXE), ["--list-extensions"], { cwd: dir, env, stdio: "ignore", windowsHide: true });
+      const t = setTimeout(() => { try { p.kill(); } catch { /* already gone */ } resolve(); }, 120000);
+      p.on("error", () => { clearTimeout(t); resolve(); });
+      p.on("exit", () => { clearTimeout(t); resolve(); });
+    });
+    try { fs.writeFileSync(mark, new Date().toISOString()); } catch { /* next start warms again */ }
+  })();
+  warmed.catch(() => { warmed = null; });
+  return warmed;
+}
+
+// One open per folder at a time: clicks while the editor is still coming up don't start more copies of it
+const opening = new Map(); // folder -> promise
+function once(key, work) {
+  if (opening.has(key)) return opening.get(key);
+  const p = work().finally(() => setTimeout(() => opening.delete(key), 8000));
+  opening.set(key, p);
+  return p;
+}
+
 const CODE_TYPES = [".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs", ".json", ".jsonc", ".md", ".mdx", ".txt", ".log", ".csv", ".html", ".htm", ".css", ".scss", ".sass", ".less", ".vue", ".svelte", ".py", ".ipynb", ".java", ".kt", ".c", ".h", ".cpp", ".hpp", ".cc", ".cs", ".go", ".rs", ".php", ".rb", ".swift", ".dart", ".lua", ".r", ".sql", ".sh", ".bash", ".ps1", ".bat", ".cmd", ".yml", ".yaml", ".toml", ".ini", ".cfg", ".conf", ".xml", ".svg", ".env", ".gitignore", ".gitattributes", ".editorconfig", ".prisma", ".graphql", ".dockerfile"];
 
 // Classgrid Code in Windows' menus, like an installed editor: "Open with" on any file, and "Open with Classgrid Code"
@@ -113,14 +147,18 @@ module.exports = {
     token = t || null;
   },
   unpacked,
+  warmUp,
   register,
   // Project Mode: open the folder in Classgrid Code, signed in
-  async open(folder) {
-    await launch([path.resolve(folder)]);
-    const code = await loginCode();
-    // (the login link goes to the same editor once it is up)
-    if (code) setTimeout(() => { launch(["--open-url", `classgrid-code://classgrid.classgrid/login?code=${encodeURIComponent(code)}`]).catch(() => {}); }, 2500);
-    return { opened: true };
+  open(folder) {
+    const target = path.resolve(folder);
+    return once(target.toLowerCase(), async () => {
+      await launch([target]);
+      const code = await loginCode();
+      // (the login link goes to the same editor once it is up)
+      if (code) setTimeout(() => { launch(["--open-url", `classgrid-code://classgrid.classgrid/login?code=${encodeURIComponent(code)}`]).catch(() => {}); }, 2500);
+      return { opened: true };
+    });
   },
   // The "Classgrid Code" icon (desktop and Start menu): the editor on its own, with its last folder, signed in with the
   // app's login. Resolves once the login link is sent too, so the app may close after it.
