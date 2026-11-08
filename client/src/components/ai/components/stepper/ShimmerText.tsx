@@ -7,10 +7,12 @@ import { cn } from '@/lib/utils';
 
 /** True while the AI is still working on this reply (steps running or the answer still being written) */
 export const StepWorkingContext = createContext(false);
+/** False where step labels never shine (a helper's steps in the Agent map: only its thinking moves) */
+export const StepShineContext = createContext(true);
 
 export function ShimmerText({ active, className, children, timer = true }: { active: boolean; className?: string; children: React.ReactNode; timer?: boolean }) {
   const replyWorking = useContext(StepWorkingContext);
-  const shine = active || replyWorking;
+  const shine = useContext(StepShineContext) && (active || replyWorking);
   const [seconds, setSeconds] = useState(0);
   useEffect(() => {
     if (!active) return;

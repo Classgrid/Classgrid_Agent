@@ -1139,6 +1139,26 @@ const helperBoard = (sessionId) => {
     if (!HELPER_BOARDS.has(key)) HELPER_BOARDS.set(key, { helpers: [], nextNo: 1 });
     return HELPER_BOARDS.get(key);
 };
+// A helper's steps for the chat's Agent map, in the same shape as the main AI's steps, so they show with the same
+// stepper (its thinking, each tool with what it ran and what came back). Long texts (a whole file written) are cut.
+const cutArgs = (a) => {
+    if (!a || typeof a !== "object") return a ?? {};
+    const out = {};
+    for (const [k, v] of Object.entries(a)) out[k] = typeof v === "string" && v.length > 4000 ? `${v.slice(0, 4000)}…` : v;
+    return out;
+};
+const helperStep = (h, id, tool, args) => {
+    // Its thinking so far ends before this step, like the main AI's
+    if (h.thought && !h.thought.endsWith("\n")) h.thought += "\n\n";
+    const step = { id, type: "tool", tool, args: cutArgs(args), status: "loading", at: Date.now() };
+    if (h.steps.length < 200) h.steps.push(step);
+    return step;
+};
+const helperStepDone = (step, out) => {
+    step.result = String(out && typeof out === "object" ? out.text : out ?? "").slice(0, 6000);
+    step.status = /^(error|tool error|failed)/i.test(step.result.trim()) ? "error" : "success";
+};
+
 // The files finished helpers changed, in the same "FILES CHANGED IN PROJECT:" list a code run gives, so the
 // chat's "files changed" box counts helpers' work too
 const helperChangesText = (helpers) => {
@@ -3819,15 +3839,11 @@ Every user is using you as a personal AI assistant and agent (like ChatGPT) to m
                                 if (Date.now() > deadline) return "Time is up: do not call any more tools. Write your full final answer now from what you already did.";
                                 const id = `h${i}-${stepNo++}`;
                                 emitHelper({ helper: i, id, tool: n, args: a });
-                                // The step for the Agent map (what it ran, on what)
-                                const what = a?.command || a?.path || a?.query || a?.url || a?.message || "";
-                                const step = { tool: n, what: String(what).slice(0, 200), at: Date.now() };
-                                if (h.steps.length < 80) h.steps.push(step);
+                                const step = helperStep(h, id, n, a);
                                 playground("tool", { who: `Helper ${h.no}`, tool: n, detail: JSON.stringify(a ?? {}).slice(0, 200) });
                                 const out = onComputer ? await computerHandlers[n](a, { fromHelper: true }) : outsideProject(n, a) ? (n === "view_project_file" ? await readLocalFile(req.user?._id || req.user?.id, { path: a.path }) : await runOnComputer(req.user?._id || req.user?.id, n, a || {}, sessionId)) : h.wt && LOCAL_TOOLS.has(n) ? await callLocal(h.wt.project, n, a || {}, sessionId) : (await handleToolCall(n, a, { sessionId, desktop: !fromWebsite })).content[0].text;
                                 emitHelper({ helper: i, id, result: String(out && typeof out === "object" ? out.text : out).slice(0, 6000) });
-                                step.result = String(out && typeof out === "object" ? out.text : out).slice(0, 400);
-                                step.failed = /^(error|tool error|failed)/i.test(step.result.trim());
+                                helperStepDone(step, out);
                                 // The files this helper changed, for the chat's "files changed" box
                                 const changed = (n === "write_project_file" || n === "edit_project_file") && a?.path ? String(out).match(/\+(\d+) -(\d+)\)\./) : null;
                                 if (changed) {
@@ -3848,9 +3864,10 @@ Every user is using you as a personal AI assistant and agent (like ChatGPT) to m
                                         if (Date.now() > deadline) return "Time is up: do not call any more tools. Write your full final answer now from what you already did.";
                                         const id = `h${i}-${stepNo++}`;
                                         emitHelper({ helper: i, id, tool: n, args: a });
-                                        if (h.steps.length < 80) h.steps.push({ tool: n, what: String(a?.url || a?.key || "").slice(0, 200), at: Date.now() });
+                                        const step = helperStep(h, id, n, a);
                                         const out = await browserHandlers[n](a);
                                         emitHelper({ helper: i, id, result: String(out && typeof out === "object" ? out.text : out).slice(0, 6000) });
+                                        helperStepDone(step, out);
                                         return withInbox(out);
                                     };
                                 }
@@ -3861,6 +3878,7 @@ Every user is using you as a personal AI assistant and agent (like ChatGPT) to m
                                 const id = `h${i}-${stepNo++}`;
                                 emitHelper({ helper: i, id, tool: "tell_main", args: a });
                                 emitHelper({ helper: i, id, result: "Sent to the main AI." });
+                                helperStepDone(helperStep(h, id, "tell_main", a), "Sent to the main AI.");
                                 return withInbox("Sent to the main AI.");
                             };
                             // A helper's commands and browser actions ask the user too, in the same permission mode (computer tools
@@ -3904,13 +3922,14 @@ You work on the user's own Windows computer through their Classgrid desktop app,
                                     if (h.abort.signal.aborted) return { state: "failed", text: "stopped because the user stopped the chat" };
                                     try {
                                         emitHelper({ helper: i, state: "restart" }); // a retry starts its report again
+                                        h.live = "";
                                         deadline = Date.now() + (h.canEdit || hasBrowser ? 12 : 4) * 60 * 1000;
                                         const helperArgs = {
                                             messages: [{ role: "system", content: system }, { role: "user", content: task }],
                                             tools: defs,
                                             toolHandlers: liveHandlers,
-                                            onToken: (piece) => emitHelper({ helper: i, text: piece }),
-                                            onThought: (piece) => emitHelper({ helper: i, thought: piece }),
+                                            onToken: (piece) => { emitHelper({ helper: i, text: piece }); if (h.live.length < 40000) h.live += piece; },
+                                            onThought: (piece) => { emitHelper({ helper: i, thought: piece }); if (h.thought.length < 60000) h.thought += piece; },
                                             maxToolDepth: h.canEdit || hasBrowser ? 60 : 30, // big repos need more looking around before a full answer
                                             timeoutMs: 240000,
                                             signal: h.abort.signal
@@ -3937,7 +3956,7 @@ You work on the user's own Windows computer through their Classgrid desktop app,
                         };
 
                         const batch = specs.slice(0, room).map((s, i) => {
-                            const h = { startedAt: Date.now(), steps: [], no: board.nextNo++, quiet: args?._quiet === true, task: s.task, canEdit: s.canEdit, type: s.type, role: s.role, worktree: s.worktree && s.canEdit && !s.browser, withChat: s.withChat, model: pickModel(s.model, i), state: "running", report: "", reportTaken: false, inbox: [], notes: [], notesRead: 0, changes: new Map(), abort: new AbortController() };
+                            const h = { startedAt: Date.now(), steps: [], thought: "", live: "", no: board.nextNo++, quiet: args?._quiet === true, task: s.task, canEdit: s.canEdit, type: s.type, role: s.role, worktree: s.worktree && s.canEdit && !s.browser, withChat: s.withChat, model: pickModel(s.model, i), state: "running", report: "", reportTaken: false, inbox: [], notes: [], notesRead: 0, changes: new Map(), abort: new AbortController() };
                             h.promise = runHelper(h, i).catch((e) => ({ state: "failed", text: String(e?.message || e) })).then((out) => {
                                 h.state = out.state;
                                 h.endedAt = Date.now();
@@ -6782,8 +6801,11 @@ export const getChatHelpers = async (req, res) => {
             state: h.state,
             startedAt: h.startedAt || null,
             endedAt: h.endedAt || null,
-            steps: (h.steps || []).map((s) => ({ tool: s.tool, what: s.what, at: s.at, failed: !!s.failed, result: s.result || "" })),
-            report: h.state === "running" ? "" : String(h.report || "").slice(0, 6000),
+            thought: String(h.thought || ""),
+            steps: (h.steps || []).map((s) => ({ ...s, status: s.status === "loading" && h.state !== "running" ? "success" : s.status })),
+            // While it works: its answer as it writes it
+            live: h.state === "running" ? String(h.live || "") : "",
+            report: h.state === "running" ? "" : String(h.report || "").slice(0, 40000),
             notes: h.notes || [],
         })),
     });

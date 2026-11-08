@@ -125,6 +125,8 @@ function describeBrowser(tool: string, args: any, status: 'loading' | 'success' 
 export function describeStep(tool: string, args: any, result: unknown, status: 'loading' | 'success' | 'error'): string | null {
   if (tool === 'custom_mcp_connector') return describeCustomMcp(args, result, status);
   if (tool.startsWith('browser_')) return describeBrowser(tool, args, status);
+  // A helper's note to the main agent (the Agent map shows a helper's steps like the main agent's)
+  if (tool === 'tell_main') return status === 'loading' ? 'Sending a note to the main agent...' : 'Sent a note to the main agent';
   const op = APP[tool] && args?.operation ? String(args.operation) : tool;
   const { verb, noun } = splitAction(op);
   if (!verb || (!PAST[verb] && !ING[verb])) return null;

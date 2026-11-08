@@ -23,82 +23,47 @@
 
 import React, { useEffect, useMemo, useRef, useState, useCallback, memo, useContext } from "react";
 import { useParams } from "react-router-dom";
+
 import { SidebarTrigger } from "@/components/marketing_ui/sidebar";
+
 import { Breadcrumb, BreadcrumbItem, BreadcrumbList, BreadcrumbPage } from "@/components/marketing_ui/breadcrumb";
+
 import { Separator } from "@/components/marketing_ui/separator";
+
 import { ClassgridLogoIcon } from "@/components/layout/ClassgridLogoIcon";
+
 import { newTerminalOutput } from "@/features/superadmin/components/LocalTerminal";
+
 import hljs from "highlight.js";
 import "highlight.js/styles/github-dark.css";
 import { ExpandedInputModal } from './ExpandedInputModal';
 import { AiHubModal } from "./AiHubModal";
+
 import { SlashCommandMenu, slashCommandsFor, leadingSlashCommand, type SlashCommand } from "./SlashCommandMenu";
+
 import { InsufficientCreditsCard } from "./InsufficientCreditsCard";
+
 import { WorkspacePanel } from "./workspace/WorkspacePanel";
+
 import { SchedulePage } from "./SchedulePage";
+
 import { ScheduleDetailPage } from "./ScheduleDetailPage";
+
 import { LibraryPage } from "./LibraryPage";
+
 import ReactDOM from "react-dom";
 
 import { AiChartRenderer } from "./AiChartRenderer";
+
 import { ImageGeneration, type ImageGenerationStatus } from "./ImageGeneration";
+
 import { DangerConfirmDialog } from '@/components/marketing_ui/danger-confirm-dialog';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/marketing_ui/tooltip";
+
 import JSON5 from 'json5';
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
-import {
-  ArrowUp,
-  BarChart3,
-  Bot,
-  Check,
-  ClipboardList,
-  Copy,
-  CreditCard,
-  ChevronRight,
-  ArrowDown,
-  File,
-  FileImage,
-  FileText,
-  FileSpreadsheet,
-  FileIcon,
-  Globe2,
-  HelpCircle,
-  LayoutDashboard,
-  MessageCircleMore,
-  Paperclip,
-  School,
-  Search,
-  Sparkles,
-  Square,
-  Mic,
-  ThumbsDown,
-  ThumbsUp,
-  Trash2,
-  UserRound,
-  X,
-  Plus,
-  Pencil,
-  Share,
-  MoreHorizontal,
-  Pin,
-  Info,
-  Lightbulb,
-  MessageSquareWarning,
-  AlertTriangle,
-  OctagonAlert,
-  UploadCloud,
-  Server,
-  Mail,
-  Calendar,
-  HardDrive,
-  Users,
-  Video,
-  Music,
-  CornerDownRight,
-  Layers,
-  ListTodo,
-  type LucideIcon,
-} from "lucide-react";
+
+import { ArrowUp, BarChart3, Bot, Check, ClipboardList, Copy, CreditCard, ChevronRight, ArrowDown, File, FileImage, FileText, FileSpreadsheet, FileIcon, Globe2, HelpCircle, LayoutDashboard, MessageCircleMore, Paperclip, School, Search, Sparkles, Square, Mic, ThumbsDown, ThumbsUp, Trash2, UserRound, X, Plus, Pencil, Share, MoreHorizontal, Pin, Info, Lightbulb, MessageSquareWarning, AlertTriangle, OctagonAlert, Server, Mail, Calendar, HardDrive, Users, Video, Music, CornerDownRight, Layers, ListTodo, type LucideIcon } from "lucide-react";
 
 const CustomSlidersIcon = ({ className }: { className?: string }) => (
   <svg
@@ -121,8 +86,11 @@ const CustomSlidersIcon = ({ className }: { className?: string }) => (
 );
 
 import { Button } from "./ui/button";
+
 import { Spinner } from "@/components/marketing_ui/spinner";
+
 import { Input } from "./ui/input";
+
 import {
   Table,
   TableBody,
@@ -131,6 +99,7 @@ import {
   TableHeader,
   TableRow,
 } from "./ui/table";
+
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -138,37 +107,61 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/marketing_ui/dropdown-menu";
+
 import {
   Accordion,
   AccordionContent,
   AccordionItem,
   AccordionTrigger,
 } from "./ui/accordion";
+
 import { cn } from "../utils";
+
 // The desktop app has no Agent mode: Studio there gets Agent's Incognito button
 const DESKTOP_STUDIO = import.meta.env.VITE_DESKTOP === "1" && import.meta.env.VITE_EDITOR !== "1";
 import { CodeBlockClient } from "./CodeBlockClient";
+
 import { ModelPicker, useSelectedModel, MODEL_GROUPS, AUTO_MODEL_ID, getThinkingLevel } from "./ModelPicker";
+
 import { TypingGreeting } from "./AgentHomeExtras";
+
 import { toast } from "sonner";
+
 import { getSocket } from "@/lib/socketClient";
+
 import FilePreviewModal, { type FilePreviewSource } from "./FilePreviewModal";
 import { DocsImageViewer } from "./DocsImageViewer";
+
 import { SourceChip, type ChatSource } from "./SourceChip";
+
 import { AnswerImage, SourceCards } from "./AnswerImages";
+
 import { ReviewSummary, ScoreBreakdown } from "./ReviewBlocks";
+
 import { PointsList, RatingCard } from "./PointsBlocks";
+
 import { ClockBlock } from "./ClockBlock";
+
 import { WeatherCard, MarketCard, MapCard, CountdownCard } from "./LiveCards";
+
 import { FollowUps, ActionCards, ReportCard, Timetable, AttendanceCalendar, StudyPlanner } from "./StudyBlocks";
+
 import { WidgetBlock } from "./WidgetBlock";
+
 import { ScrollSpyTOC, MobileTOCButton, QuestionDots, messageTime } from "./TOC";
+
 import { StudioChatMenu, OpenInProjectButton, StudioOverviewButton } from "./StudioChatMenu";
+
 import { EditorChatHeader, editorIconButton } from "./EditorChatHeader";
+
 import { EditorChatSidePanel } from "./EditorChatSidePanel";
+
 import { keepUploadsOnPC, publishChatUploads } from "@/features/superadmin/components/StudioUploadsView";
+
 import { MasteroAskStep, masteroCardOpen } from "./stepper/MasteroAskStep";
+
 import { PermissionCard, PermissionModePicker, PERMISSION_MODE_KEY, readPermissionMode, type PermissionMode, type PermissionRequest } from "./PermissionControls";
+
 import AIThinkingBlock from "./AIThinkingBlock";
 import RichChatInput from "./RichChatInput";
 import ReactMarkdown from "react-markdown";
@@ -183,54 +176,54 @@ import {
   CarouselNext,
 } from "@/components/marketing_ui/carousel";
 
+
 import rehypeKatex from "rehype-katex";
 import "katex/dist/katex.min.css";
 import { MermaidViewer } from "./MermaidViewer";
+
 import { PdfAttachment } from "@/features/chat/components/PdfAttachment";
+
 import { CopyBlockClient } from "./CopyBlockClient";
+
 import { ApprovalCard } from "./ApprovalCard";
-import { WorkflowAccordion } from "./stepper/WorkflowAccordion";
+
 
 // â”€â”€â”€ Agent Stepper Components â”€â”€â”€
 import { AgentStepper } from "./stepper/AgentStepper";
-import { AgentStepAccordion } from "./stepper/AgentStepAccordion";
-import { ThoughtStepView } from "./stepper/ThoughtStepView";
-import { TerminalToolView } from "./stepper/TerminalToolView";
-import { DatabaseQueryView } from "./stepper/DatabaseQueryView";
-import { FileActionView } from "./stepper/FileActionView";
-import { WebSearchView } from "./stepper/WebSearchView";
-import { MasterWorkflowWrapper } from "./stepper/MasterWorkflowWrapper";
-import { OpenPageView } from "./stepper/OpenPageView";
-import { EmailActionView } from "./stepper/EmailActionView";
+
 import { DocumentGenerationView } from "./stepper/DocumentGenerationView";
+
 import { ShareGridPanel, useShareGrid, GridSenderTag, GridJoinLine, GridReplyingLine } from "./share-grid/ShareGridPanel";
-import { KnowledgeBaseSearchView } from "./stepper/KnowledgeBaseSearchView";
-import { CdnUploadView } from "./stepper/CdnUploadView";
-import { EmailSentView } from "./stepper/EmailSentView";
-import { ToolResultStep } from "./stepper/tool-results/ToolResultStep";
+
 import { IncognitoBar, IncognitoButton, loadIncognitoChat, loadIncognitoSessionId, saveIncognitoChat, clearIncognitoChat } from "./IncognitoMode";
+
 import { IncognitoTransition, type IncognitoRun } from "./IncognitoTransition";
+
 import { SpotifyDisplay } from "./answer-cards/spotify";
+
 import { McpConnectCards } from "./answer-cards/mcp-connect";
+
 import { SongsDisplay } from "./answer-cards/songs";
-import { describeStep } from "./stepper/tool-results/describeStep";
-import { specialStepTitle, emailTitle } from "./stepper/tool-results/stepTitles";
-import { StepWorkingContext } from "./stepper/ShimmerText";
-import { ImageReadStep } from "./stepper/tool-results/ImageReadStep";
-import { AudioTranscribeStep } from "./stepper/tool-results/AudioTranscribeStep";
-import { StepBoundary } from "./stepper/StepBoundary";
-import { FILE_DRAG_TYPE, FileBadge, FileMentionChip, parseFileMention, parseProjectLink, FilesChangedSummary, ProjectEditStep, ProjectExploreGroup, ProjectPushStep, ProjectRunChanges, ProjectHelpersStep, TerminalStep, ComputerStep, PROJECT_BACKGROUND_TOOLS, PROJECT_EDIT_TOOLS, PROJECT_EXPLORE_TOOLS } from "./stepper/ProjectToolSteps";
-import { LiveDocStep, LIVE_DOC_TOOLS } from "@/features/live-docs/LiveDocStep";
-import { PublishedPageStep } from "./stepper/PublishedPageStep";
+
+import { FILE_DRAG_TYPE, FileBadge, FileMentionChip, parseFileMention, parseProjectLink, FilesChangedSummary } from "./stepper/ProjectToolSteps";
 import { CombinedReasoningBlock } from "./stepper/CombinedReasoningBlock";
+
+import { ReplySteps } from "./stepper/ReplySteps";
+
 import { CodeNoteChips, StudioCodeNotesBar } from "@/features/superadmin/components/StudioCodeNotesBar";
+
 import { clearCodeNotes, codeNotesText, getCodeNotes, setCodeNotesChat, splitCodeNotes, toChip, useCodeNotes, type CodeNote, type CodeNoteChip } from "@/features/superadmin/components/studioCodeNotes";
+
 import { onDesktop, savedProject } from "@/features/superadmin/utils/projectCopies";
+
 import { AiFeedbackModal } from "./AiFeedbackModal";
+
 import { ChatEndedCard } from "./ChatEndedCard";
+
 
 // â”€â”€â”€ SDK-local type definitions & stubs â”€â”€â”€
 import { useCurrentUser } from "@/features/auth/queries/useCurrentUser";
+
 
 type PageContext = {
   path?: string;
@@ -243,11 +236,17 @@ type PageContext = {
 
 import { usePostHog } from 'posthog-js/react';
 import { fetchWithRescue } from "@/lib/rescue";
+
 import { LOCAL_IMAGE_MISSING, keepLocalImage, loadLocalImages, readAsDataUrl, sendsInline, showLocalImages } from "@/lib/desktopImages";
+
 import { OFFLINE_CHAT_NOTE, continueChatCopy, continuedChatOf, continuedFrom, isUnreachable, keepsChatCopies, readChatCopy, readOtherChatCopy, removeChatCopy, saveChatCopy, syncChatCopy, type OtherChatRef } from "@/lib/desktopChats";
+
 import { memoryNotesIndex, otherAccountsMemory, syncComputerMemory } from "@/lib/desktopMemory";
+
 import { showDesktopNotification } from "@/lib/desktopNotifications";
+
 import { AgentMapButton } from "./AgentMap";
+
 
 // Fetch real presigned URL for R2 uploads
 // Chats known to be ended (id -> end reason), so an ended chat shows its card at once on refresh or open,
@@ -1195,28 +1194,6 @@ function escapeMoneyDollars(text: string): string {
     .join("");
 }
 
-// Some models draft whole code blocks (e.g. widget cards) in their thinking. The thinking panel shows one
-// "Drafting code…" line for each such stretch instead of a wall of raw code.
-const DRAFTING_LINE = "✏️ Drafting code…";
-// Single, non-nested repeats only: a nested one like ([\w-]+(\s*[\w-]+)*) backtracks forever on plain sentences and froze the page
-const TAG_OR_CSS_RE = /^\s*(?:<\/?[a-z][\w-]*[\s>/]|[.#]?[\w-][\w\s.#:,>+~*="'()[\]-]*\{[^}]*:)/i;
-const JS_START_RE = /^\s*(?:const|let|var|function|document\.|return|if\s*\(|for\s*\(|\w+\.\w+\s*=)/;
-const CLOSERS_RE = /^\s*[})\];,]+\s*$/;
-function hideCodeInThought(text: string): string {
-  const withoutFences = text.replace(/```[\s\S]*?(?:```|$)/g, `\n${DRAFTING_LINE}\n`);
-  const out: string[] = [];
-  for (const line of withoutFences.split("\n")) {
-    const isCode = line === DRAFTING_LINE || TAG_OR_CSS_RE.test(line) || CLOSERS_RE.test(line)
-      || (JS_START_RE.test(line) && /[;{}=]/.test(line));
-    if (isCode) {
-      if (out[out.length - 1] !== DRAFTING_LINE) out.push(DRAFTING_LINE);
-    } else {
-      out.push(line);
-    }
-  }
-  return out.join("\n");
-}
-
 // A flashcard slide's answer starts at a line like "Answer:", "**Answer:**" or "💡 **Answer:** ..."
 const FLASHCARD_ANSWER_RE = /^[ \t]*(?:[^\w\s*#>]+[ \t]*)?(?:[*_]{1,2})?A(?:ns)?(?:wer)?(?:[*_]{1,2})?[ \t]*[:：]/im;
 
@@ -2029,6 +2006,10 @@ const AssistantMessageContent = memo(({ content, sources, createdAt, isTyping, o
     prevProps.isHistorical === nextProps.isHistorical
   );
 });
+
+// A helper's answer in the Agent map, shown like the main agent's answers
+const helperAnswer = (text: string, writing: boolean) => <AssistantMessageContent content={text} isTyping={writing} isHistorical={!writing} />;
+
 export const INTEGRATIONS_LIST: any[] = [
   { id: "image", name: "Create image", description: "Visualize anything", icon: FileImage, type: "action" },
   { id: "web", name: "Web search", description: "Find real-time news and info", icon: Globe2, type: "action" },
@@ -5706,418 +5687,7 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
                                   This is required for the CSS .combined-reasoning-block ~ * trick to work! */}
                               {((message.thought && message.thought.trim().length > 0) || (index === messages.length - 1 && thinking) || (message.steps && message.steps.length > 0)) && (
                                 <div className="mb-4">
-                                  {(() => {
-                                    // Steps stay open while the agent works, then fold into "Worked for X sec" (old messages load folded)
-                                    const isLiveReply = index === messages.length - 1 && (thinking || submitting || !!message.typing);
-                                    const toolSteps = (message.steps || []).filter((s) => s.type === 'tool');
-                                    // An answer that ended (finished, stopped or cut off) folds into "Worked for" too: a step it was
-                                    // still running when it stopped no longer spins as if it were running (owner, 2026-11-06)
-                                    const workDone = !isLiveReply;
-                                    const shownSteps = isLiveReply ? (message.steps || []) : (message.steps || []).map((s) => (s.status === 'loading' ? { ...s, status: 'success' as const } : s));
-                                    const stepper = (
-                                  <AgentStepper>
-                                    {/* CombinedReasoningBlock MUST be first child - direct sibling of steps */}
-                                    {((message.thought && message.thought.trim().length > 0) || (index === messages.length - 1 && thinking)) && (
-                                      <CombinedReasoningBlock
-                                        sentences={message.thought && message.thought.trim().length > 0 ? hideCodeInThought(message.thought).trim().split(/(?<=[.!?\n])\s+/).filter(Boolean) : []}
-                                        isStreaming={index === messages.length - 1 && thinking && !(message.steps && message.steps.some(s => s.status === 'loading'))}
-                                        seconds={!message.steps?.length && message.workedMs ? Math.max(1, Math.round(message.workedMs / 1000)) : undefined}
-                                      />
-                                    )}
-
-                                    {/* Steps - CSS sibling hiding hides these during Phase 1 & 2 */}
-                                    {(() => {
-                                      const elements: React.ReactNode[] = [];
-                                      let thoughtGroup: any[] = [];
-
-                                      // Project file reads/searches in a row show as one "Exploring 2 files, 1 search" group
-                                      let exploreGroup: any[] = [];
-                                      const flushExplore = () => {
-                                        if (exploreGroup.length > 0) {
-                                          elements.push(<ProjectExploreGroup key={`explore-${exploreGroup[0].id}`} steps={exploreGroup} />);
-                                          exploreGroup = [];
-                                        }
-                                      };
-
-                                      const flushThoughts = () => {
-                                        flushExplore();
-                                        if (thoughtGroup.length > 0) {
-                                          if (thoughtGroup.length === 1) {
-                                            const step = thoughtGroup[0];
-                                            elements.push(
-                                              <ThoughtStepView
-                                                key={step.id}
-                                                title={step.title}
-                                                details={step.details}
-                                              />
-                                            );
-                                          } else {
-                                            elements.push(
-                                              <WorkflowAccordion
-                                                key={`group-${thoughtGroup[0].id}`}
-                                                title={`${thoughtGroup.length} steps`}
-                                                steps={thoughtGroup.map(s => ({
-                                                  id: s.id,
-                                                  type: 'thought',
-                                                  title: s.title,
-                                                  details: s.details
-                                                }))}
-                                                defaultExpanded={false}
-                                              />
-                                            );
-                                          }
-                                          thoughtGroup = [];
-                                        }
-                                      };
-
-                                      shownSteps.forEach((step) => {
-                                        if (step.type === 'thought') {
-                                          thoughtGroup.push(step);
-                                        } else if (step.type === 'tool') {
-                                          if (PROJECT_EXPLORE_TOOLS.has(step.tool)) {
-                                            // A big file sent to the file reader instead ("Not read: …") is only for the AI
-                                            if (step.tool === 'view_project_file' && /^Not read: /.test(String(step.result || ''))) return;
-                                            if (thoughtGroup.length > 0) flushThoughts();
-                                            exploreGroup.push(step);
-                                            return;
-                                          }
-                                          flushThoughts();
-
-                                          if (PROJECT_EDIT_TOOLS.has(step.tool)) {
-                                            // "File already exists, use the edit tool" is only for the AI: it then edits the file,
-                                            // and that edit is the step the user sees
-                                            if (step.tool === 'write_project_file' && /already exists, so it was not changed/i.test(String(step.result || ''))) return;
-                                            // A failed edit try that changed nothing ("old_text was not found…"): the AI reads the file and tries again
-                                            if (step.tool === 'edit_project_file' && /Nothing was changed\./.test(String(step.result || ''))) return;
-                                            elements.push(<ProjectEditStep key={step.id} step={step} />);
-                                            return;
-                                          }
-                                          if (LIVE_DOC_TOOLS.has(step.tool ?? '')) {
-                                            elements.push(<LiveDocStep key={step.id} step={step} />);
-                                            return;
-                                          }
-                                          if (step.tool === 'push_project_to_github') {
-                                            elements.push(<ProjectPushStep key={step.id} step={step} />);
-                                            return;
-                                          }
-                                          if (step.tool === 'publish_page') {
-                                            elements.push(<PublishedPageStep key={step.id} step={step} />);
-                                            return;
-                                          }
-                                          if (step.tool === 'run_project_helpers') {
-                                            elements.push(<ProjectHelpersStep key={step.id} step={step} />);
-                                            return;
-                                          }
-                                          if (step.tool === 'computer') {
-                                            elements.push(<ComputerStep key={step.id} step={step} />);
-                                            return;
-                                          }
-                                          if (PROJECT_BACKGROUND_TOOLS.has(step.tool ?? '')) {
-                                            // Same look as a normal command: the command (or the check run inside it) and its output
-                                            const bgCommand = step.tool === 'start_background_command'
-                                              ? String(step.args?.command || '')
-                                              : step.tool === 'check_background_command'
-                                                ? (step.args?.run_inside ? String(step.args.run_inside) : `check job ${step.args?.job_id || ''}`)
-                                                : `stop job ${step.args?.job_id || ''}`;
-                                            elements.push(
-                                              <TerminalStep
-                                                key={step.id}
-                                                name="Bash"
-                                                description={step.args?.description ? String(step.args.description) : undefined}
-                                                command={bgCommand}
-                                                output={step.result}
-                                                status={step.status}
-                                              />
-                                            );
-                                            return;
-                                          }
-
-                                          // Render specific tool views
-                                          if (step.tool === 'run_code' || step.tool === 'execute_terminal_command') {
-                                            elements.push(
-                                              <AgentStepAccordion
-                                                key={step.id}
-                                                title={specialStepTitle(step.tool, step.args, step.result, step.status) ?? (step.tool === 'run_code' ? 'Executing Code' : 'Running a command')}
-                                                status={step.status}                                              >
-                                                <TerminalToolView
-                                                  command={step.args?.command || step.args?.code || 'Running...'}
-                                                  output={step.result || 'Waiting for output...'}
-                                                  running={step.status === 'loading'}
-                                                  shell={step.args?.shell}
-                                                />
-                                              </AgentStepAccordion>
-                                            );
-                                            elements.push(<ProjectRunChanges key={`changes-${step.id}`} result={step.result} />);
-                                            return;
-                                          }
-
-                                          if (step.tool === 'unified_db_query') {
-                                            let results = [];
-                                            try {
-                                              if (step.result && step.result.startsWith('[')) {
-                                                results = JSON.parse(step.result.split('\n\n[SYSTEM DIRECTIVE')[0]);
-                                              } else if (step.result && step.result.startsWith('{')) {
-                                                results = [JSON.parse(step.result)];
-                                              }
-                                            } catch (e) { }
-                                            elements.push(
-                                              <AgentStepAccordion
-                                                key={step.id}
-                                                title={specialStepTitle(step.tool, step.args, step.result, step.status) ?? "Querying Database"}
-                                                status={step.status}                                              >
-                                                <DatabaseQueryView
-                                                  query={JSON.stringify(step.args, null, 2)}
-                                                  results={results}
-                                                />
-                                              </AgentStepAccordion>
-                                            );
-                                            return;
-                                          }
-
-                                          if (step.tool === 'parse_document') {
-                                            elements.push(
-                                              <AgentStepAccordion
-                                                key={step.id}
-                                                title={specialStepTitle(step.tool, step.args, step.result, step.status) ?? "Uploaded File"}
-                                                status={step.status}                                              >
-                                                <FileActionView fileName={step.args?.url?.split('/').pop() || 'document'} />
-                                              </AgentStepAccordion>
-                                            );
-                                            return;
-                                          }
-
-                                          if (step.tool === 'send_email') {
-                                            const draftingStep = (
-                                              <AgentStepAccordion
-                                                key={`${step.id}-draft`}
-                                                title={emailTitle(step.args, false, step.status) ?? (step.status === 'success' ? "Drafted email" : "Drafting email")}
-                                                status={step.status === 'success' ? 'success' : step.status}                                              >
-                                                <EmailActionView
-                                                  to={step.args?.to || "Unknown Recipient"}
-                                                  subject={step.args?.subject || "No Subject"}
-                                                  bodyPreview={step.args?.htmlBody || step.args?.body || "Empty body"}
-                                                />
-                                              </AgentStepAccordion>
-                                            );
-
-                                            if (step.status === 'success') {
-                                              let toCount = 1;
-                                              if (step.args?.to && step.args.to.includes(',')) {
-                                                toCount = step.args.to.split(',').length;
-                                              }
-                                              elements.push(
-                                                <React.Fragment key={step.id}>
-                                                  {draftingStep}
-                                                  <AgentStepAccordion
-                                                    key={`${step.id}-sent`}
-                                                    title={emailTitle(step.args, true, "success") ?? "Sent email"}
-                                                    status="success"
-                                                  >
-                                                    <EmailSentView
-                                                      toCount={toCount}
-                                                      subject={step.args?.subject || "No Subject"}
-                                                    />
-                                                  </AgentStepAccordion>
-                                                </React.Fragment>
-                                              );
-                                            } else {
-                                              elements.push(draftingStep);
-                                            }
-                                            return;
-                                          }
-
-                                          if (step.tool === 'open_url') {
-                                            elements.push(
-                                              <AgentStepAccordion
-                                                key={step.id}
-                                                title={specialStepTitle(step.tool, step.args, step.result, step.status) ?? (step.status === 'loading' ? "Opening page" : step.status === 'error' ? "Couldn't open page" : "Opened page")}
-                                                status={step.status}
-                                              >
-                                                <OpenPageView url={step.args?.url} result={step.result} status={step.status} />
-                                              </AgentStepAccordion>
-                                            );
-                                            return;
-                                          }
-
-                                          if (step.tool === 'search_web') {
-                                            let searchResults = [];
-                                            let searchError;
-                                            if (step.result) {
-                                              if (step.result.startsWith('Web Search failed')) {
-                                                searchError = step.result;
-                                              } else {
-                                                try {
-                                                  const parsed = JSON.parse(step.result);
-                                                  if (parsed.results && Array.isArray(parsed.results)) {
-                                                    searchResults = parsed.results;
-                                                  }
-                                                } catch (e) {
-                                                  searchError = "Could not parse search results.";
-                                                }
-                                              }
-                                            }
-                                            elements.push(
-                                              <AgentStepAccordion
-                                                key={step.id}
-                                                title={specialStepTitle(step.tool, step.args, step.result, step.status) ?? "Searched the web"}
-                                                status={step.status}                                              >
-                                                <WebSearchView
-                                                  query={step.args?.query}
-                                                  searchDomain={step.args?.domain}
-                                                  results={searchResults}
-                                                  error={searchError}
-                                                />
-                                              </AgentStepAccordion>
-                                            );
-                                            return;
-                                          }
-
-                                          if (step.tool === 'generate_pdf' || step.tool === 'generate_pdf_from_db') {
-                                            let fileName = "document.pdf";
-                                            let pageCount = 1;
-                                            let size = "Unknown";
-
-                                            if (step.result && step.result.includes("SUCCESS")) {
-                                              size = "Available via CDN";
-                                            }
-
-                                            elements.push(
-                                              <AgentStepAccordion
-                                                key={step.id}
-                                                title={specialStepTitle(step.tool, step.args, step.result, step.status) ?? (step.tool === 'generate_pdf_from_db' ? "Generating database report" : "Generating PDF document")}
-                                                status={step.status}                                              >
-                                                <DocumentGenerationView
-                                                  fileName={step.args?.title ? `${step.args.title.replace(/[^a-z0-9]/gi, '_').toLowerCase()}.pdf` : fileName}
-                                                  pageCount={pageCount}
-                                                  size={size}
-                                                />
-                                              </AgentStepAccordion>
-                                            );
-                                            return;
-                                          }
-
-                                          if (step.tool === 'search_knowledge_base') {
-                                            elements.push(
-                                              <AgentStepAccordion
-                                                key={step.id}
-                                                title={specialStepTitle(step.tool, step.args, step.result, step.status) ?? "Searched Knowledge Base"}
-                                                status={step.status}                                              >
-                                                <KnowledgeBaseSearchView
-                                                  results={[{
-                                                    title: step.args?.query || "Search Query",
-                                                    source: "Internal Knowledge Base"
-                                                  }]}
-                                                />
-                                              </AgentStepAccordion>
-                                            );
-                                            return;
-                                          }
-
-                                          if (step.tool === 'upload_file_to_cdn') {
-                                            let cdnUrl = "";
-                                            if (step.result && step.result.includes("Public URL:")) {
-                                              cdnUrl = step.result.split("Public URL:")[1].trim();
-                                            }
-                                            elements.push(
-                                              <AgentStepAccordion
-                                                key={step.id}
-                                                title={specialStepTitle(step.tool, step.args, step.result, step.status) ?? "Upload file to CDN"}
-                                                status={step.status}                                                icon={<UploadCloud className="h-4 w-4" />}
-                                              >
-                                                <CdnUploadView
-                                                  fileName={step.args?.fileName || "upload.file"}
-                                                  url={cdnUrl}
-                                                  status={step.status}
-                                                  error={step.error || (!cdnUrl ? step.result : undefined)}
-                                                />
-                                              </AgentStepAccordion>
-                                            );
-                                            return;
-                                          }
-
-                                          // Image the AI is looking at: shown right away (live), then its answer
-                                          // Mastero: its card asking for the project's name or photo sits on the chat box (masteroAsk); the
-                                          // steps only say it was asked
-                                          if (step.tool === 'mastero_ask') {
-                                            const photo = step.args?.ask === 'logo';
-                                            elements.push(<ToolResultStep key={step.id} tool={step.tool} args={step.args} result={undefined} status={step.status} text={step.status === 'loading' ? 'Asking…' : photo ? "Asked for the project's photo" : step.args?.ask === 'confirm' ? 'Asked to confirm Mastero' : "Asked for the project's name"} />);
-                                            return;
-                                          }
-
-                                          // Audio being turned into text: the file with a player right away, then the transcript
-                                          if (step.tool === 'transcribe_audio') {
-                                            elements.push(<AudioTranscribeStep key={step.id} args={step.args} result={step.result} status={step.status} />);
-                                            return;
-                                          }
-
-                                          const isImageUpload = step.tool === 'upload_sandbox_file_to_cdn'
-                                            && (/^image\//.test(String(step.args?.mimeType ?? '')) || /\.(png|jpe?g|gif|webp)$/i.test(String(step.args?.sandboxFilePath ?? '')));
-                                          if (step.tool === 'analyze_image' || step.tool === 'view_image' || isImageUpload) {
-                                            elements.push(
-                                              <ImageReadStep
-                                                key={step.id}
-                                                tool={step.tool}
-                                                args={step.args}
-                                                result={step.result}
-                                                status={step.status}
-                                                text={isImageUpload
-                                                  ? (step.status === 'loading' ? 'Uploading image...' : 'Uploaded image')
-                                                  : (step.status === 'loading' ? 'Analyzing image...' : 'Analyzed image')}
-                                              />
-                                            );
-                                            return;
-                                          }
-
-                                          // Generic fallback
-                                          let dynamicText = `Successfully used ${step.tool.replace(/_/g, ' ')}`;
-                                          let loadingText = `Using ${step.tool.replace(/_/g, ' ')}...`;
-
-                                          if (step.tool === 'notion_connector' && step.args?.operation) {
-                                            if (step.args.operation === 'search' && step.args.query) {
-                                              dynamicText = `Searched Notion for "${step.args.query}"`;
-                                              loadingText = `Searching Notion for "${step.args.query}"...`;
-                                            } else {
-                                              dynamicText = `Successfully used Notion to ${step.args.operation.replace(/_/g, ' ')}`;
-                                              loadingText = `Using Notion to ${step.args.operation.replace(/_/g, ' ')}...`;
-                                            }
-                                          } else if (step.tool === 'google_workspace_connector' && step.args?.operation) {
-                                            dynamicText = `Successfully used Google Workspace to ${step.args.operation.replace(/_/g, ' ')}`;
-                                            loadingText = `Using Google Workspace to ${step.args.operation.replace(/_/g, ' ')}...`;
-                                          } else if (step.tool === 'zoom_connector' && step.args?.operation) {
-                                            dynamicText = `Successfully used Zoom to ${step.args.operation.replace(/_/g, ' ')}`;
-                                            loadingText = `Using Zoom to ${step.args.operation.replace(/_/g, ' ')}...`;
-                                          }
-
-                                          // Say what the step actually did and found ("Found 5 classroom assignments: …")
-                                          const described = describeStep(step.tool, step.args, step.result, step.status);
-                                          elements.push(
-                                            <ToolResultStep
-                                              key={step.id}
-                                              tool={step.tool}
-                                              args={step.args}
-                                              result={step.result}
-                                              status={step.status}
-                                              text={described ?? (step.status === 'success' ? dynamicText : loadingText)}
-                                            />
-                                          );
-                                        }
-                                      });
-
-                                      flushThoughts();
-                                      return elements.map((el, i) => React.isValidElement(el)
-                                        ? <StepBoundary key={el.key ?? i} tool={(el.props as any)?.step?.tool}>{el}</StepBoundary>
-                                        : el);
-                                    })()}
-                                  </AgentStepper>
-                                    );
-                                    // Every step label keeps its shine until the whole reply is finished
-                                    const stepperLive = <StepWorkingContext.Provider value={!workDone}>{stepper}</StepWorkingContext.Provider>;
-                                    return toolSteps.length > 0 ? (
-                                      <MasterWorkflowWrapper isFinished={workDone} durationMs={message.workedMs} stepCount={toolSteps.length}>
-                                        {stepperLive}
-                                      </MasterWorkflowWrapper>
-                                    ) : stepperLive;
-                                  })()}
+                                  <ReplySteps thought={message.thought} steps={message.steps} live={index === messages.length - 1 && (thinking || submitting || !!message.typing)} thinking={index === messages.length - 1 && thinking} workedMs={message.workedMs} />
                                 </div>
                               )}
 
@@ -7078,7 +6648,7 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
 
                   {/* Bottom Right action bar: send OR stop */}
                   <div className="absolute bottom-3 right-3 flex items-center gap-0.5">
-                    <AgentMapButton sessionId={sessionId} busy={isGenerating} />
+                    <AgentMapButton sessionId={sessionId} busy={isGenerating} renderAnswer={helperAnswer} />
                     {showsPermissionMode && <PermissionModePicker value={permissionMode} onChange={setPermissionMode} />}
                     <ModelPicker value={selectedModel} onChange={setSelectedModel} disabled={isGenerating} />
                     <button
@@ -7819,7 +7389,7 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
 
                             {/* Bottom right: send */}
                             <div className="absolute bottom-3 right-3 flex items-center gap-0.5">
-                              <AgentMapButton sessionId={sessionId} busy={isGenerating} />
+                              <AgentMapButton sessionId={sessionId} busy={isGenerating} renderAnswer={helperAnswer} />
                               {showsPermissionMode && <PermissionModePicker value={permissionMode} onChange={setPermissionMode} />}
                               <ModelPicker value={selectedModel} onChange={setSelectedModel} />
                               <button
