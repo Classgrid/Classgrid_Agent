@@ -1,0 +1,42 @@
+name: Publish desktop app to the CDN
+
+# After a new desktop version reaches main (npm run release has already put it on R2), the EC2 server puts the same
+# installer on the public CDN (S3 at desktop/Classgrid-Setup-<version>.exe) and removes the older one there
+# (desktop/scripts/publish-cdn.mjs). The server is inside AWS, so this doesn't depend on the network of the computer
+# that made the release.
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'desktop/package.json'
+      - 'desktop/scripts/publish-cdn.mjs'
+      - '.github/workflows/publish-desktop-cdn.yml'
+  workflow_dispatch: # by hand, from the Actions tab
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Publish the installer to the CDN from the server
+        env:
+          EC2_HOST: ${{ secrets.EC2_HOST }}
+          EC2_SSH_KEY: ${{ secrets.EC2_SSH_KEY }}
+        run: |
+          VERSION=$(node -p "require('./desktop/package.json').version")
+          echo "Desktop app version $VERSION"
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$EC2_SSH_KEY" > ~/.ssh/ec2.pem
+          chmod 600 ~/.ssh/ec2.pem
+          SSH="ssh -i $HOME/.ssh/ec2.pem -o StrictHostKeyChecking=no -o ServerAliveInterval=30 ubuntu@$EC2_HOST"
+
+          $SSH "bash -s -- $VERSION" <<'REMOTE'
+          set -e
+          cd /var/www/classgrid_platform
+          git fetch origin
+          git show origin/main:desktop/scripts/publish-cdn.mjs > "$HOME/publish-cdn.mjs"
+          node "$HOME/publish-cdn.mjs" "$1"
+          REMOTE

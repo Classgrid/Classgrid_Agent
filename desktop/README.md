@@ -26,7 +26,8 @@ npm run dist           # dist/Classgrid Setup <version>.exe
 ## Publish an update
 
 1. Raise `"version"` in `package.json`.
-2. Run `npm run release`. It gets the editor (stops if its release isn't there yet), builds, makes the installer and uploads it with `latest.yml` to R2 (`desktop/`), using the R2 keys from `server/.env`.
+2. Run `npm run release`. It gets the editor (stops if its release isn't there yet), builds, makes the installer and uploads it with `latest.yml` to R2 (`desktop/`), using the R2 keys from `server/.env`. To ship a particular Classgrid Code build instead of the newest published one: `npm run release -- --tag=editor-<version>`.
+3. Commit and push the new version. On main, the "Publish desktop app to the CDN" workflow has the EC2 server put the same installer (checked against R2's `latest.yml`) on the CDN at `desktop/Classgrid-Setup-<version>.exe` and remove the older one there (`scripts/publish-cdn.mjs`).
 
 Installed apps check for an update on start and every 6 hours, download it, and offer "Restart now".
 
