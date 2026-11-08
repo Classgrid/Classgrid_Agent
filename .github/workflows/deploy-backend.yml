@@ -23,45 +23,50 @@ jobs:
 
 
 
+      # Plain ssh, which every runner has: appleboy/ssh-action downloaded its own program from GitHub's release files on
+      # every run, so every deploy failed while those downloads answered 504 (2026-11-08)
       - name: SSH and Deploy Backend
-        uses: appleboy/ssh-action@master
         env:
           PRODUCTION_ENV: ${{ secrets.PRODUCTION_ENV }}
-        with:
-          host: ${{ secrets.EC2_HOST }}
-          username: ubuntu
-          key: ${{ secrets.EC2_SSH_KEY }}
-          envs: PRODUCTION_ENV
-          script: |
-            set -e
-            cd /var/www/classgrid_platform
+          EC2_HOST: ${{ secrets.EC2_HOST }}
+          EC2_SSH_KEY: ${{ secrets.EC2_SSH_KEY }}
+        run: |
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$EC2_SSH_KEY" > ~/.ssh/ec2.pem
+          chmod 600 ~/.ssh/ec2.pem
+          SSH="ssh -i $HOME/.ssh/ec2.pem -o StrictHostKeyChecking=no -o ServerAliveInterval=30 ubuntu@$EC2_HOST"
 
-            # The new version goes live only when nobody is using the server (server/scripts/deploy-when-idle.sh):
-            # this job only gets things ready and starts the wait on EC2; a newer push replaces an older wait.
-            git fetch origin
-            git show origin/main:server/scripts/deploy-when-idle.sh > "$HOME/deploy-when-idle.sh"
-            chmod +x "$HOME/deploy-when-idle.sh"
-            if [ -f "$HOME/.classgrid-deploy-wait.pid" ]; then kill "$(cat "$HOME/.classgrid-deploy-wait.pid")" 2>/dev/null || true; fi
+          # The settings for the next start (the running server read its own when it started)
+          printf '%s\n' "$PRODUCTION_ENV" | $SSH 'cat > /var/www/classgrid_platform/server/.env'
 
-            # FREE UP RAM & ADD SWAP SPACE TO PREVENT OUT-OF-MEMORY CRASHES DURING NPM INSTALL
-            sudo fallocate -l 2G /swapfile || true
-            sudo chmod 600 /swapfile || true
-            sudo mkswap /swapfile || true
-            sudo swapon /swapfile || true
+          $SSH 'bash -s' <<'REMOTE'
+          set -e
+          cd /var/www/classgrid_platform
 
-            # The settings for the next start (the running server read its own when it started)
-            echo "$PRODUCTION_ENV" > server/.env
+          # The new version goes live only when nobody is using the server (server/scripts/deploy-when-idle.sh):
+          # this job only gets things ready and starts the wait on EC2; a newer push replaces an older wait.
+          git fetch origin
+          git show origin/main:server/scripts/deploy-when-idle.sh > "$HOME/deploy-when-idle.sh"
+          chmod +x "$HOME/deploy-when-idle.sh"
+          if [ -f "$HOME/.classgrid-deploy-wait.pid" ]; then kill "$(cat "$HOME/.classgrid-deploy-wait.pid")" 2>/dev/null || true; fi
 
-            if ! command -v redis-server &> /dev/null; then
-              sudo apt-get update || true
-              sudo DEBIAN_FRONTEND=noninteractive apt-get install -y redis-server || true
-            fi
+          # FREE UP RAM & ADD SWAP SPACE TO PREVENT OUT-OF-MEMORY CRASHES DURING NPM INSTALL
+          sudo fallocate -l 2G /swapfile || true
+          sudo chmod 600 /swapfile || true
+          sudo mkswap /swapfile || true
+          sudo swapon /swapfile || true
 
-            # ENSURE REDIS IS RUNNING WITHOUT RESTARTING IT
-            sudo systemctl daemon-reload || true
-            sudo systemctl enable redis-server || true
-            sudo systemctl start redis-server || sudo service redis start || true
+          if ! command -v redis-server &> /dev/null; then
+            sudo apt-get update || true
+            sudo DEBIAN_FRONTEND=noninteractive apt-get install -y redis-server || true
+          fi
 
-            # Wait for a quiet minute, then update and restart (log: ~/deploy-when-idle.log)
-            setsid nohup "$HOME/deploy-when-idle.sh" >> "$HOME/deploy-when-idle.log" 2>&1 < /dev/null &
-            echo "The new server version will go live at the next quiet moment (see ~/deploy-when-idle.log on EC2)"
+          # ENSURE REDIS IS RUNNING WITHOUT RESTARTING IT
+          sudo systemctl daemon-reload || true
+          sudo systemctl enable redis-server || true
+          sudo systemctl start redis-server || sudo service redis start || true
+
+          # Wait for a quiet minute, then update and restart (log: ~/deploy-when-idle.log)
+          setsid nohup "$HOME/deploy-when-idle.sh" >> "$HOME/deploy-when-idle.log" 2>&1 < /dev/null &
+          echo "The new server version will go live at the next quiet moment (see ~/deploy-when-idle.log on EC2)"
+          REMOTE
