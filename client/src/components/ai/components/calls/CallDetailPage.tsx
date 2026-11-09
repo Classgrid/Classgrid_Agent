@@ -16,7 +16,7 @@ import { getSocket } from "@/lib/socketClient";
 import { readPageCache, writePageCache } from "@/lib/desktopPageCache";
 import { cn } from "@/lib/utils";
 import {
-  ACTIVE, CountUp, ORIGIN, Pop, RUN_OUTCOME, RUN_REASON, SIDE_EFFECT_LABEL, SPRING, STATUS, StatusBadge, between, callsMemory, dotClass, fmtClock, fmtDate, fmtDuration, fmtTime,
+  ACTIVE, CountUp, ORIGIN, RUN_OUTCOME, RUN_REASON, SIDE_EFFECT_LABEL, SPRING, STATUS, StatusBadge, between, callsMemory, dotClass, fmtClock, fmtDate, fmtDuration, fmtTime,
   helpersAndSkills, modelLabel, prettyJson, publicToolName, sideEffectOf, stepLabel, StepCounts, toneClass, toolsUsed, useMotion,
   type CallRecord, type SentItem, type SideEffect, type TranscriptLine, type WorkRun, type WorkStep,
 } from "./callsShared";
@@ -144,7 +144,7 @@ export const CallDetailPage: React.FC<{ id?: string }> = ({ id }) => {
               {call.duration_ms > 0 && (<><span aria-hidden>·</span><span>{fmtDuration(call.duration_ms)}</span></>)}
             </motion.div>
             <motion.h1 variants={m.row} className="mt-2 text-[26px] sm:text-[30px] font-semibold tracking-[-0.01em] leading-tight break-words">{call.name || "Call"}</motion.h1>
-            {call.summary && <motion.p variants={m.row} className="mt-2.5 text-[15.5px] text-muted-foreground leading-relaxed line-clamp-3">{call.summary}</motion.p>}
+            {call.summary && <motion.p variants={m.row} className="mt-2.5 text-[15.5px] text-muted-foreground leading-relaxed line-clamp-3">{call.summary}</p>}
           </div>
           <motion.div variants={m.row} className="flex flex-col items-end gap-2 shrink-0">
             <StatusBadge status={call.status} />
@@ -280,8 +280,8 @@ function TranscriptTab({ call }: { call: CallRecord }) {
           {call.transcript.map((l, i) => (
             <motion.li
               key={`${l.at}-${i}`}
-              variants={m.row} layout={!m.reduce}
-              initial={m.reduce ? false : { opacity: 0, y: 10, filter: "blur(2px)" }} animate={{ opacity: 1, y: 0, filter: "blur(0px)" }}
+              variants={m.row}
+              initial={m.reduce ? false : { opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }}
               ref={(el) => { refs.current[i] = el; }}
               className={cn("rounded-lg -mx-2 px-2 transition-colors", hits[hit] === i && "bg-amber-50 dark:bg-amber-500/10")}
             >
@@ -324,7 +324,7 @@ function LiveWork({ w }: { w: CallRecord["live_works"][number] }) {
   const [open, setOpen] = useState(false);
   const m = useMotion();
   return (
-    <motion.div layout={!m.reduce} className="rounded-xl border border-border/60 overflow-hidden">
+    <motion.div className="rounded-xl border border-border/60 overflow-hidden">
       <button type="button" onClick={() => setOpen((o) => !o)} className="w-full flex items-center gap-3 px-4 py-3 cursor-pointer text-left hover:bg-muted/30 transition-colors">
         <Sparkles className="w-4 h-4 text-muted-foreground shrink-0" />
         <span className="flex-1 text-[13.5px] truncate">{w.request}</span>
@@ -416,7 +416,7 @@ function WorkTab({ call, runs, steps }: { call: CallRecord; runs: WorkRun[]; ste
       )}
       <AnimatePresence initial={false}>
         {runs.map((run, i) => (
-          <motion.div key={run.no || i} variants={m.row} layout={!m.reduce} initial={m.reduce ? false : { opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}>
+          <motion.div key={run.no || i} variants={m.row} initial={m.reduce ? false : { opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}>
             <RunBlock run={run} steps={steps.filter((s) => (s.run || 1) === (run.no || i + 1))} live={ACTIVE.includes(call.status) && !run.ended_at} defaultOpen={i === runs.length - 1} />
           </motion.div>
         ))}
@@ -449,7 +449,7 @@ function RunBlock({ run, steps, live, defaultOpen }: { run: WorkRun; steps: Work
   }, [steps, run.started_at, run.ended_at]);
 
   return (
-    <motion.section layout={!m.reduce} className="rounded-2xl border border-border/60 overflow-hidden">
+    <motion.section className="rounded-2xl border border-border/60 overflow-hidden">
       <button type="button" onClick={() => setOpen((o) => !o)} className="w-full flex items-center gap-3 px-4 py-3 text-left hover:bg-muted/30 transition-colors cursor-pointer">
         <motion.span animate={{ rotate: open ? 90 : 0 }} transition={SPRING} className="inline-flex shrink-0"><ChevronRight className="w-4 h-4 text-muted-foreground" /></motion.span>
         <div className="flex-1 min-w-0">
@@ -561,11 +561,11 @@ function StepRow({ step }: { step: WorkStep }) {
   const argsText = prettyJson(step.args);
   return (
     <motion.li
-      variants={m.row} layout={!m.reduce}
+      variants={m.row}
       initial={m.reduce ? false : { opacity: 0, x: -8 }} animate={{ opacity: 1, x: 0 }}
       className="relative"
     >
-      <Pop className={cn("absolute -left-[25px] top-[13px] h-2.5 w-2.5 rounded-full ring-4 ring-background", bad ? "bg-red-500" : effect === "sleep" ? "bg-violet-500" : "bg-emerald-500")} delay={0.08}>{null}</Pop>
+      <span className={cn("absolute -left-[25px] top-[13px] h-2.5 w-2.5 rounded-full ring-4 ring-background", bad ? "bg-red-500" : effect === "sleep" ? "bg-violet-500" : "bg-emerald-500")} />
       <motion.button
         type="button" onClick={() => setOpen((o) => !o)}
         whileTap={m.reduce ? undefined : { scale: 0.995 }}
@@ -612,7 +612,7 @@ function StepRow({ step }: { step: WorkStep }) {
 function GapRow({ ms }: { ms: number }) {
   const m = useMotion();
   return (
-    <motion.li variants={m.row} layout={!m.reduce} initial={m.reduce ? false : { opacity: 0 }} animate={{ opacity: 1 }} className="relative py-1.5 text-[11.5px] text-muted-foreground/80 italic">
+    <motion.li variants={m.row} initial={m.reduce ? false : { opacity: 0 }} animate={{ opacity: 1 }} className="relative py-1.5 text-[11.5px] text-muted-foreground/80 italic">
       <span className="absolute -left-[22px] top-[11px] h-1.5 w-1.5 rounded-full bg-border ring-4 ring-background" />
       {fmtDuration(ms, { short: true })} of thinking, with no tool used
     </motion.li>
@@ -716,7 +716,7 @@ function Clamp({ text, lines = 6, className = "" }: { text: string; lines?: numb
   const long = text.length > 420 || text.split("\n").length > lines;
   return (
     <div>
-      <motion.p layout="position" className={className} style={!open && long ? { display: "-webkit-box", WebkitLineClamp: lines, WebkitBoxOrient: "vertical", overflow: "hidden" } : undefined}>{text}</motion.p>
+      <p className={className} style={!open && long ? { display: "-webkit-box", WebkitLineClamp: lines, WebkitBoxOrient: "vertical", overflow: "hidden" } : undefined}>{text}</p>
       {long && <button onClick={() => setOpen((o) => !o)} className="mt-1 text-[12px] text-muted-foreground hover:text-foreground underline underline-offset-4 cursor-pointer">{open ? "Show less" : "Show all"}</button>}
     </div>
   );

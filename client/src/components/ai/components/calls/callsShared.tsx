@@ -15,8 +15,8 @@ export const SOFT: Transition = { duration: 0.32, ease: EASE };
 // A list whose rows come in one after the other
 export const listVariants: Variants = { hidden: {}, show: { transition: { staggerChildren: 0.045, delayChildren: 0.04 } } };
 export const rowVariants: Variants = {
-  hidden: { opacity: 0, y: 10, filter: "blur(2px)" },
-  show: { opacity: 1, y: 0, filter: "blur(0px)", transition: SOFT },
+  hidden: { opacity: 0, y: 8 },
+  show: { opacity: 1, y: 0, transition: SOFT },
   exit: { opacity: 0, y: -6, transition: { duration: 0.18 } },
 };
 // A block that grows open and folds shut (height + fade)
