@@ -2626,8 +2626,8 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
   const [callTitle, setCallTitle] = useState("");
   useEffect(() => {
     const on = (e: Event) => setCallTitle(String((e as CustomEvent).detail || ""));
-    window.addEventListener("calls:title", on);
-    return () => window.removeEventListener("calls:title", on);
+    window.addEventListener("toolpage:title", on);
+    return () => window.removeEventListener("toolpage:title", on);
   }, []);
   const [localSessionId, setLocalSessionId] = useState<string | null>(null);
   const [expandedDoc, setExpandedDoc] = useState<string | null>(null);
@@ -6784,8 +6784,8 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
             )}
             {/* Desktop app: Schedule and Library in Studio have the same top bar as Grids, Requests and Audit Logs
                 (DashboardLayout): the sidebar button on the left and the page name in the middle */}
-            {/* Calls has this same top bar on the website too (owner, 2026-11-09) */}
-            {isToolPage(sessionId) && ((DESKTOP_STUDIO && isStudio) || sessionId === "calls") && (
+            {/* The same top bar on the website too (owner, 2026-11-09): inside one item it reads "Schedule / <name>" */}
+            {isToolPage(sessionId) && (
               <header className="flex h-14 shrink-0 items-center justify-center border-b border-border/50 px-4 bg-background/80 backdrop-blur-md relative z-20">
                 <div className="absolute left-4 flex items-center gap-2">
                   <SidebarTrigger />
@@ -6793,15 +6793,15 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
                 </div>
                 <Breadcrumb>
                   <BreadcrumbList>
-                    {sessionId === "calls" && detailId ? (
-                      // Inside one call: "Calls / <the call's name>" (Calls goes back to the list)
+                    {detailId && (sessionId === "calls" || sessionId === "schedule") ? (
+                      // Inside one item: "Calls / <the call's name>", "Schedule / <the schedule's name>" (the first part goes back to the list)
                       <>
                         <BreadcrumbItem>
-                          <button type="button" className="transition-colors hover:text-foreground cursor-pointer" onClick={() => window.dispatchEvent(new Event("calls:back"))}>Calls</button>
+                          <button type="button" className="transition-colors hover:text-foreground cursor-pointer" onClick={() => window.dispatchEvent(new Event("toolpage:back"))}>{sessionId === "calls" ? "Calls" : "Schedule"}</button>
                         </BreadcrumbItem>
                         <BreadcrumbSeparator />
                         <BreadcrumbItem>
-                          <BreadcrumbPage className="max-w-[40vw] truncate">{callTitle || "Call"}</BreadcrumbPage>
+                          <BreadcrumbPage className="max-w-[40vw] truncate">{callTitle || (sessionId === "calls" ? "Call" : "Schedule")}</BreadcrumbPage>
                         </BreadcrumbItem>
                       </>
                     ) : (
@@ -6813,7 +6813,7 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
                 </Breadcrumb>
               </header>
             )}
-            <div className={studioLook || sessionId === "calls" ? "hidden" : "shrink-0 flex items-center justify-between px-3 sm:px-6 pt-3 h-14"}>
+            <div className={studioLook || isToolPage(sessionId) ? "hidden" : "shrink-0 flex items-center justify-between px-3 sm:px-6 pt-3 h-14"}>
               {isIncognito || pageContext?.path === "/c/studio" ? <span /> : <SidebarTrigger />}
 
               {/* Ghost button on a new chat: start an incognito chat */}

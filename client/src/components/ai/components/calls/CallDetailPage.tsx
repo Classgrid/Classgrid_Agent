@@ -74,13 +74,13 @@ export const CallDetailPage: React.FC<{ id?: string }> = ({ id }) => {
   const navigate = useNavigate();
   const { pathname } = useLocation();
   useEffect(() => {
-    window.dispatchEvent(new CustomEvent("calls:title", { detail: call?.name || "" }));
-    return () => { window.dispatchEvent(new CustomEvent("calls:title", { detail: "" })); };
+    window.dispatchEvent(new CustomEvent("toolpage:title", { detail: call?.name || "" }));
+    return () => { window.dispatchEvent(new CustomEvent("toolpage:title", { detail: "" })); };
   }, [call?.name]);
   useEffect(() => {
     const back = () => navigate(`${callsBasePath(pathname)}/calls`);
-    window.addEventListener("calls:back", back);
-    return () => window.removeEventListener("calls:back", back);
+    window.addEventListener("toolpage:back", back);
+    return () => window.removeEventListener("toolpage:back", back);
   }, [navigate, pathname]);
 
   // Live: the server says "calls:updated" { id } after every write to this record (a line said, a step done, the

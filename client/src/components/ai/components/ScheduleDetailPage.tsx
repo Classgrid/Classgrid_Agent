@@ -32,7 +32,6 @@ import { Button } from "@/components/marketing_ui/button";
 import { Skeleton } from "@/components/marketing_ui/skeleton";
 import { DangerConfirmDialog } from "@/components/marketing_ui/danger-confirm-dialog";
 import { NikhilTimeCalendar } from "@/components/marketing_ui/nikhil_time_calendar";
-import { Breadcrumb, BreadcrumbItem, BreadcrumbList, BreadcrumbPage, BreadcrumbSeparator, BreadcrumbLink } from "@/components/marketing_ui/breadcrumb";
 import { toast } from "sonner";
 import { apiClient as api } from "@/lib/apiClient";
 import { getSocket } from "@/lib/socketClient";
@@ -140,6 +139,18 @@ export const ScheduleDetailPage: React.FC<{ id?: string }> = ({ id: propId }) =>
     }
   }, [id, navigate, backPath]);
 
+  // The top bar's breadcrumb shows "Schedule / <this schedule's name>" (AskAiPanel listens), and its "Schedule"
+  // goes back to the list
+  useEffect(() => {
+    window.dispatchEvent(new CustomEvent("toolpage:title", { detail: schedule?.title || "" }));
+    return () => { window.dispatchEvent(new CustomEvent("toolpage:title", { detail: "" })); };
+  }, [schedule?.title]);
+  useEffect(() => {
+    const back = () => navigate(backPath);
+    window.addEventListener("toolpage:back", back);
+    return () => window.removeEventListener("toolpage:back", back);
+  }, [navigate, backPath]);
+
   const handleDelete = async () => {
     if (!id) return;
     setIsDeleting(true);
@@ -189,13 +200,6 @@ export const ScheduleDetailPage: React.FC<{ id?: string }> = ({ id: propId }) =>
   if (loading) {
     return (
       <div className="mx-auto w-full max-w-6xl animate-pulse p-4 pb-16 sm:p-6 lg:p-8">
-        {/* Breadcrumb */}
-        <div className="mb-6 flex items-center gap-2">
-          <div className="h-4 w-20 rounded bg-muted" />
-          <div className="h-4 w-3 rounded bg-muted" />
-          <div className="h-4 w-32 rounded bg-muted" />
-        </div>
-
         {/* Heading */}
         <div className="mb-8 border-b border-border pb-8">
           <div className="flex items-center gap-3">
@@ -272,25 +276,7 @@ export const ScheduleDetailPage: React.FC<{ id?: string }> = ({ id: propId }) =>
   return (
     <div className="mx-auto h-full w-full max-w-6xl overflow-y-auto p-4 pb-16 sm:p-6 lg:p-8">
 
-      {/* Breadcrumb */}
-      <div className="mb-6">
-        <Breadcrumb>
-          <BreadcrumbList>
-            <BreadcrumbItem>
-              <BreadcrumbLink asChild>
-                <div role="button" tabIndex={0} onClick={() => navigate(backPath)} className="inline-flex cursor-pointer border-none bg-transparent p-0 hover:text-foreground">
-                  Schedules
-                </div>
-              </BreadcrumbLink>
-            </BreadcrumbItem>
-            <BreadcrumbSeparator />
-            <BreadcrumbItem>
-              <BreadcrumbPage>{schedule.title || "Schedule Details"}</BreadcrumbPage>
-            </BreadcrumbItem>
-          </BreadcrumbList>
-        </Breadcrumb>
-      </div>
-
+      {/* (the breadcrumb "Schedule / <name>" is in the top bar above, AskAiPanel; owner 2026-11-09) */}
       {/* Heading */}
       <header className="mb-8 border-b border-border pb-8">
         <div className="flex flex-wrap items-center gap-3">
