@@ -26,7 +26,7 @@ import { useParams } from "react-router-dom";
 
 import { SidebarTrigger } from "@/components/marketing_ui/sidebar";
 
-import { Breadcrumb, BreadcrumbItem, BreadcrumbList, BreadcrumbPage } from "@/components/marketing_ui/breadcrumb";
+import { Breadcrumb, BreadcrumbItem, BreadcrumbList, BreadcrumbPage, BreadcrumbSeparator } from "@/components/marketing_ui/breadcrumb";
 
 import { Separator } from "@/components/marketing_ui/separator";
 
@@ -2622,6 +2622,13 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
   const params = useParams<{ sessionId?: string; "*"?: string }>();
   const routeSessionId = params.sessionId;
   const detailId = params["*"] || undefined;
+  // Calls: the open call's name for the top bar's breadcrumb ("Calls / <name>"), sent by CallDetailPage
+  const [callTitle, setCallTitle] = useState("");
+  useEffect(() => {
+    const on = (e: Event) => setCallTitle(String((e as CustomEvent).detail || ""));
+    window.addEventListener("calls:title", on);
+    return () => window.removeEventListener("calls:title", on);
+  }, []);
   const [localSessionId, setLocalSessionId] = useState<string | null>(null);
   const [expandedDoc, setExpandedDoc] = useState<string | null>(null);
   const [viewingPastedText, setViewingPastedText] = useState<{ title: string, content: string } | null>(null);
@@ -6786,9 +6793,22 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
                 </div>
                 <Breadcrumb>
                   <BreadcrumbList>
-                    <BreadcrumbItem>
-                      <BreadcrumbPage>{sessionId === "schedule" ? "Schedule" : sessionId === "calls" ? "Calls" : "Library"}</BreadcrumbPage>
-                    </BreadcrumbItem>
+                    {sessionId === "calls" && detailId ? (
+                      // Inside one call: "Calls / <the call's name>" (Calls goes back to the list)
+                      <>
+                        <BreadcrumbItem>
+                          <button type="button" className="transition-colors hover:text-foreground cursor-pointer" onClick={() => window.dispatchEvent(new Event("calls:back"))}>Calls</button>
+                        </BreadcrumbItem>
+                        <BreadcrumbSeparator />
+                        <BreadcrumbItem>
+                          <BreadcrumbPage className="max-w-[40vw] truncate">{callTitle || "Call"}</BreadcrumbPage>
+                        </BreadcrumbItem>
+                      </>
+                    ) : (
+                      <BreadcrumbItem>
+                        <BreadcrumbPage>{sessionId === "schedule" ? "Schedule" : sessionId === "calls" ? "Calls" : "Library"}</BreadcrumbPage>
+                      </BreadcrumbItem>
+                    )}
                   </BreadcrumbList>
                 </Breadcrumb>
               </header>

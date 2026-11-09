@@ -1,8 +1,70 @@
 // Shared bits of the Calls pages (the list and one call's record): the record's shape as the server sends it,
 // status words and colours, time formatting, and what to call each step of the AI's work.
-import React from "react";
+import React, { useEffect, useRef } from "react";
 import { Phone, MessageCircle, Mail } from "lucide-react";
+import { motion, useReducedMotion, type Transition, type Variants } from "framer-motion";
+import gsap from "gsap";
 import { describeStep } from "../stepper/tool-results/describeStep";
+
+// ─── Motion (framer-motion for layout and enter/leave, GSAP for counting numbers) ───
+
+export const EASE: [number, number, number, number] = [0.22, 1, 0.36, 1];
+export const SPRING: Transition = { type: "spring", stiffness: 420, damping: 36, mass: 0.8 };
+export const SOFT: Transition = { duration: 0.32, ease: EASE };
+
+// A list whose rows come in one after the other
+export const listVariants: Variants = { hidden: {}, show: { transition: { staggerChildren: 0.045, delayChildren: 0.04 } } };
+export const rowVariants: Variants = {
+  hidden: { opacity: 0, y: 10, filter: "blur(2px)" },
+  show: { opacity: 1, y: 0, filter: "blur(0px)", transition: SOFT },
+  exit: { opacity: 0, y: -6, transition: { duration: 0.18 } },
+};
+// A block that grows open and folds shut (height + fade)
+export const foldVariants: Variants = {
+  closed: { height: 0, opacity: 0, transition: { height: { duration: 0.26, ease: EASE }, opacity: { duration: 0.16 } } },
+  open: { height: "auto", opacity: 1, transition: { height: { duration: 0.3, ease: EASE }, opacity: { duration: 0.24, delay: 0.06 } } },
+};
+// A page or tab panel coming in
+export const panelVariants: Variants = {
+  hidden: { opacity: 0, y: 8 },
+  show: { opacity: 1, y: 0, transition: { duration: 0.28, ease: EASE } },
+  exit: { opacity: 0, y: -6, transition: { duration: 0.16, ease: EASE } },
+};
+
+// With "reduce motion" on, everything appears in place
+export function useMotion() {
+  const reduce = !!useReducedMotion();
+  return { reduce, list: reduce ? undefined : listVariants, row: reduce ? undefined : rowVariants, panel: reduce ? undefined : panelVariants, fold: reduce ? undefined : foldVariants };
+}
+
+// A number that counts up to its value when it appears or changes (GSAP)
+export function CountUp({ value, className = "", suffix = "" }: { value: number; className?: string; suffix?: string }) {
+  const ref = useRef<HTMLSpanElement | null>(null);
+  const shown = useRef(0);
+  const reduce = useReducedMotion();
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    if (reduce) { shown.current = value; el.textContent = `${value}${suffix}`; return; }
+    const o = { n: shown.current };
+    const tween = gsap.to(o, { n: value, duration: 0.7, ease: "power2.out", onUpdate: () => { el.textContent = `${Math.round(o.n)}${suffix}`; } });
+    shown.current = value;
+    return () => { tween.kill(); };
+  }, [value, suffix, reduce]);
+  return <span ref={ref} className={cn("tabular-nums", className)}>{value}{suffix}</span>;
+}
+
+// A thing that pops in with a small spring (status dots, badges)
+export const Pop = ({ children, className = "", delay = 0 }: { children: React.ReactNode; className?: string; delay?: number }) => {
+  const reduce = useReducedMotion();
+  return (
+    <motion.span className={className} initial={reduce ? false : { scale: 0.6, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} transition={{ ...SPRING, delay }}>
+      {children}
+    </motion.span>
+  );
+};
+
+const cn = (...parts: Array<string | false | null | undefined>) => parts.filter(Boolean).join(" ");
 
 export type CallOrigin = "call" | "message" | "email";
 export type CallStatus = "live" | "answered" | "queued" | "working" | "sleeping" | "waiting" | "paused" | "retrying" | "done" | "failed" | "stopped";
@@ -48,6 +110,10 @@ export interface CallRecord extends Omit<CallListItem, "tasks" | "counts" | "mod
   sent: SentItem[];
 }
 
+// What the pages already loaded, kept while the app is open: going back to the list or into a call shows it at once
+// and refreshes quietly (no loading bars the second time, owner 2026-11-09). The desktop app also keeps it on disk.
+export const callsMemory = { list: null as CallListItem[] | null, calls: new Map<string, CallRecord>() };
+
 // The states still changing (the pages refresh themselves while a call is in one of these)
 export const ACTIVE: CallStatus[] = ["live", "queued", "working", "retrying"];
 
@@ -90,13 +156,23 @@ export function StepCounts({ total, failed, className = "", word = "done" }: { t
   );
 }
 
+// The badge swaps with a small fade when the status changes (live updates)
 export function StatusBadge({ status, className = "" }: { status: CallStatus; className?: string }) {
   const s = STATUS[status] || STATUS.working;
+  const reduce = useReducedMotion();
   return (
-    <span title={s.help} className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-[11px] font-medium whitespace-nowrap ${toneClass[s.tone]} ${className}`}>
+    <motion.span
+      key={status}
+      layout={!reduce}
+      initial={reduce ? false : { opacity: 0, scale: 0.92 }}
+      animate={{ opacity: 1, scale: 1 }}
+      transition={SPRING}
+      title={s.help}
+      className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-[11px] font-medium whitespace-nowrap ${toneClass[s.tone]} ${className}`}
+    >
       <span className={`h-1.5 w-1.5 rounded-full ${dotClass[s.tone]} ${s.pulse ? "animate-pulse" : ""}`} />
       {s.label}
-    </span>
+    </motion.span>
   );
 }
 

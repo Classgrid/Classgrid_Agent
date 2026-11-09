@@ -3,6 +3,7 @@
 // the transcript, every step the AI did afterwards, what it sent, what failed. Nothing here can be sent or edited.
 import React, { useEffect, useMemo, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
+import { AnimatePresence, LayoutGroup, motion } from "framer-motion";
 import { Phone, Search, MessageSquare, Mail, FolderPlus, ChevronRight, Clock } from "lucide-react";
 // (the list is sized for a desktop window: wide, 15–16 px text)
 import { apiClient as api } from "@/lib/apiClient";
@@ -11,7 +12,7 @@ import { readPageCache, writePageCache } from "@/lib/desktopPageCache";
 import { getSocket } from "@/lib/socketClient";
 import { cn } from "@/lib/utils";
 import {
-  ACTIVE, ORIGIN, STATUS, StatusBadge, StepCounts, dayLabel, dotClass, fmtDuration, fmtTime, type CallListItem, type CallStatus,
+  ACTIVE, ORIGIN, SPRING, STATUS, StatusBadge, StepCounts, callsMemory, dayLabel, dotClass, fmtDuration, fmtTime, panelVariants, useMotion, type CallListItem, type CallStatus,
 } from "./callsShared";
 
 type Filter = "all" | "working" | "needs_you" | "done" | "failed";
@@ -35,8 +36,10 @@ export const CallsPage: React.FC = () => {
   const location = useLocation();
   const base = `${callsBasePath(location.pathname)}/calls`;
 
-  const [calls, setCalls] = useState<CallListItem[]>(() => readPageCache<CallListItem[]>("calls:all") || []);
-  const [loading, setLoading] = useState(() => !readPageCache("calls:all"));
+  // Shown at once from what was loaded before (this session, or the desktop app's saved copy), then refreshed quietly
+  const kept = callsMemory.list || readPageCache<CallListItem[]>("calls:all") || null;
+  const [calls, setCalls] = useState<CallListItem[]>(() => kept || []);
+  const [loading, setLoading] = useState(() => !kept);
   const [failed, setFailed] = useState(false);
   const [filter, setFilter] = useState<Filter>("all");
   const [q, setQ] = useState("");
@@ -47,6 +50,7 @@ export const CallsPage: React.FC = () => {
       const res = await api.get("/api/calls?limit=200");
       if (res.data?.success) {
         setCalls(res.data.calls);
+        callsMemory.list = res.data.calls;
         writePageCache("calls:all", res.data.calls);
         setFailed(false);
       }
@@ -97,9 +101,14 @@ export const CallsPage: React.FC = () => {
     return out;
   }, [shown]);
 
+  const m = useMotion();
+
   // (the page name is in the top bar; no title, subtitle or counters here, owner 2026-11-09)
   return (
-    <div className="h-full flex flex-col bg-background relative z-10 px-6 py-6 md:px-10 md:py-8 max-w-5xl mx-auto w-full overflow-y-auto">
+    <motion.div
+      variants={m.panel} initial="hidden" animate="show"
+      className="h-full flex flex-col bg-background relative z-10 px-6 py-6 md:px-10 md:py-8 max-w-5xl mx-auto w-full overflow-y-auto"
+    >
       {(calls.length > 0 || q) && (
         <div className="flex flex-col sm:flex-row sm:items-center gap-3 mb-7">
           <div className="flex items-center gap-2.5 flex-1 bg-muted/40 dark:bg-white/5 border border-border/60 rounded-xl px-4 py-2.5 focus-within:border-foreground/20 transition-colors">
@@ -113,20 +122,26 @@ export const CallsPage: React.FC = () => {
               onChange={(e) => setQ(e.target.value)}
             />
           </div>
-          <div className="flex gap-1.5 overflow-x-auto">
-            {FILTERS.map((f) => (
-              <button
-                key={f.id}
-                onClick={() => setFilter(f.id)}
-                className={cn(
-                  "px-3.5 py-1.5 rounded-full text-[13px] font-medium transition-colors cursor-pointer whitespace-nowrap",
-                  filter === f.id ? "bg-[#2C2C2C] text-[#F0EFED] dark:bg-[#F0EFED] dark:text-[#2C2C2C] shadow-sm" : "text-muted-foreground hover:bg-muted/60",
-                )}
-              >
-                {f.label}
-              </button>
-            ))}
-          </div>
+          {/* The dark pill slides from the old filter to the new one */}
+          <LayoutGroup id="calls-filters">
+            <div className="flex gap-1.5 overflow-x-auto">
+              {FILTERS.map((f) => (
+                <button
+                  key={f.id}
+                  onClick={() => setFilter(f.id)}
+                  className={cn(
+                    "relative px-3.5 py-1.5 rounded-full text-[13px] font-medium transition-colors cursor-pointer whitespace-nowrap",
+                    filter === f.id ? "text-[#F0EFED] dark:text-[#2C2C2C]" : "text-muted-foreground hover:bg-muted/60",
+                  )}
+                >
+                  {filter === f.id && (
+                    <motion.span layoutId="calls-filter-pill" transition={m.reduce ? { duration: 0 } : SPRING} className="absolute inset-0 rounded-full bg-[#2C2C2C] dark:bg-[#F0EFED] shadow-sm" />
+                  )}
+                  <span className="relative">{f.label}</span>
+                </button>
+              ))}
+            </div>
+          </LayoutGroup>
         </div>
       )}
 
@@ -151,33 +166,43 @@ export const CallsPage: React.FC = () => {
       ) : calls.length === 0 ? (
         <EmptyCalls />
       ) : shown.length === 0 ? (
-        <div className="py-16 text-center text-sm text-muted-foreground">No calls match.</div>
+        <motion.div variants={panelVariants} initial="hidden" animate="show" className="py-16 text-center text-sm text-muted-foreground">No calls match.</motion.div>
       ) : (
-        <div className="flex flex-col">
+        // Rows come in one after the other; a new call slides in at the top and the others move down
+        <motion.div variants={m.list} initial="hidden" animate="show" className="flex flex-col">
           {groups.map((g) => (
-            <section key={g.day} className="mb-7">
+            <motion.section key={g.day} variants={m.row} layout={!m.reduce} className="mb-7">
               <h3 className="text-[12px] font-semibold text-muted-foreground uppercase tracking-wider mb-2 px-1">{g.day}</h3>
-              <div className="rounded-2xl border border-border/60 divide-y divide-border/40 overflow-hidden bg-background">
-                {g.items.map((c) => <CallRow key={c._id} call={c} onOpen={() => navigate(`${base}/${c._id}`)} />)}
-              </div>
-            </section>
+              <motion.div layout={!m.reduce} className="rounded-2xl border border-border/60 divide-y divide-border/40 overflow-hidden bg-background">
+                <AnimatePresence initial={false}>
+                  {g.items.map((c) => <CallRow key={c._id} call={c} reduce={m.reduce} onOpen={() => navigate(`${base}/${c._id}`)} />)}
+                </AnimatePresence>
+              </motion.div>
+            </motion.section>
           ))}
-        </div>
+        </motion.div>
       )}
-    </div>
+    </motion.div>
   );
 };
 
-function CallRow({ call, onOpen }: { call: CallListItem; onOpen: () => void }) {
+function CallRow({ call, onOpen, reduce }: { call: CallListItem; onOpen: () => void; reduce: boolean }) {
   const O = ORIGIN[call.origin] || ORIGIN.call;
   const Icon = O.icon;
   const tone = STATUS[call.status]?.tone || "neutral";
   const c = call.counts || {};
   const line = call.summary || (call.status === "live" ? "On the call now…" : call.status === "queued" ? "Starting the work…" : call.status === "working" ? "Working on it…" : call.tasks ? `${call.tasks} task${call.tasks === 1 ? "" : "s"} saved on the call` : "");
   return (
-    <button
+    <motion.button
       type="button"
       onClick={onOpen}
+      layout={!reduce}
+      initial={reduce ? false : { opacity: 0, y: 10, filter: "blur(2px)" }}
+      animate={{ opacity: 1, y: 0, filter: "blur(0px)" }}
+      exit={reduce ? undefined : { opacity: 0, x: -12, transition: { duration: 0.18 } }}
+      transition={{ layout: SPRING, duration: 0.3, ease: [0.22, 1, 0.36, 1] }}
+      whileHover={reduce ? undefined : { x: 3 }}
+      whileTap={reduce ? undefined : { scale: 0.995 }}
       className="w-full text-left flex items-start gap-4 px-5 py-4 hover:bg-muted/40 dark:hover:bg-white/[0.03] transition-colors cursor-pointer group"
     >
       <div className="relative w-12 h-12 rounded-xl bg-muted/60 dark:bg-white/5 flex items-center justify-center shrink-0 mt-0.5">
@@ -198,22 +223,22 @@ function CallRow({ call, onOpen }: { call: CallListItem; onOpen: () => void }) {
           {(c.steps || 0) > 0 && <StepCounts total={c.steps || 0} failed={c.failed || 0} word={(c.steps || 0) - (c.failed || 0) === 1 ? "step done" : "steps done"} />}
         </div>
       </div>
-      <ChevronRight className="w-[18px] h-[18px] text-muted-foreground/40 group-hover:text-muted-foreground shrink-0 mt-3.5 transition-colors" />
-    </button>
+      <ChevronRight className="w-[18px] h-[18px] text-muted-foreground/40 group-hover:text-muted-foreground group-hover:translate-x-0.5 shrink-0 mt-3.5 transition-all" />
+    </motion.button>
   );
 }
 
 function EmptyCalls() {
   return (
-    <div className="rounded-2xl border border-dashed border-border/70 px-6 py-14 text-center">
-      <div className="mx-auto w-12 h-12 rounded-2xl bg-muted/60 dark:bg-white/5 flex items-center justify-center">
+    <motion.div variants={panelVariants} initial="hidden" animate="show" className="rounded-2xl border border-dashed border-border/70 px-6 py-14 text-center">
+      <motion.div initial={{ scale: 0.8, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} transition={{ ...SPRING, delay: 0.1 }} className="mx-auto w-12 h-12 rounded-2xl bg-muted/60 dark:bg-white/5 flex items-center justify-center">
         <Phone className="w-5 h-5 text-muted-foreground" />
-      </div>
+      </motion.div>
       <h3 className="mt-4 text-[15px] font-semibold">No calls yet</h3>
       <p className="mt-1.5 text-sm text-muted-foreground max-w-sm mx-auto">
         Call the Classgrid WhatsApp number from your verified phone. The call, and every step Classgrid AI takes after it, shows up here.
       </p>
-    </div>
+    </motion.div>
   );
 }
 

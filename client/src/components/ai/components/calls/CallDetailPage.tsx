@@ -2,7 +2,10 @@
 // for it afterwards, run by run and step by step (tool, what went in, what came out, how long, what failed), its
 // thinking, the models it used, the WhatsApp messages and emails it sent or read, and the project it made.
 // There is no chat box here: the user can only read. The link sent on WhatsApp after a call opens this page.
+// Motion: framer-motion for the page, tabs, folds and rows; GSAP counts the numbers up (owner, 2026-11-09).
 import React, { useEffect, useMemo, useRef, useState } from "react";
+import { useLocation, useNavigate } from "react-router-dom";
+import { AnimatePresence, LayoutGroup, motion } from "framer-motion";
 import {
   Phone, Clock, Copy, Check, Search, AlertTriangle, ChevronDown, ChevronRight, MessageSquare, Mail, FolderPlus, Folder,
   Brain, Wrench, Moon, Flag, Globe, Terminal, FileText, Sparkles, Users, BookOpen, CircleDot, Hourglass,
@@ -10,12 +13,14 @@ import {
 import { toast } from "sonner";
 import { apiClient as api } from "@/lib/apiClient";
 import { getSocket } from "@/lib/socketClient";
+import { readPageCache, writePageCache } from "@/lib/desktopPageCache";
 import { cn } from "@/lib/utils";
 import {
-  ACTIVE, ORIGIN, RUN_OUTCOME, RUN_REASON, SIDE_EFFECT_LABEL, STATUS, StatusBadge, between, dotClass, fmtClock, fmtDate, fmtDuration, fmtTime,
-  helpersAndSkills, modelLabel, prettyJson, publicToolName, sideEffectOf, stepLabel, StepCounts, toneClass, toolsUsed,
+  ACTIVE, CountUp, ORIGIN, Pop, RUN_OUTCOME, RUN_REASON, SIDE_EFFECT_LABEL, SPRING, STATUS, StatusBadge, between, callsMemory, dotClass, fmtClock, fmtDate, fmtDuration, fmtTime,
+  helpersAndSkills, modelLabel, prettyJson, publicToolName, sideEffectOf, stepLabel, StepCounts, toneClass, toolsUsed, useMotion,
   type CallRecord, type SentItem, type SideEffect, type TranscriptLine, type WorkRun, type WorkStep,
 } from "./callsShared";
+import { callsBasePath } from "./CallsPage";
 
 type Tab = "transcript" | "work" | "details";
 const TAB_KEY = "calls:tab";
@@ -26,27 +31,57 @@ const Eyebrow = ({ children, className = "" }: { children: React.ReactNode; clas
 );
 
 // (no "back to Calls" link here: the sidebar's Calls button is the way back, owner 2026-11-09)
+// What was loaded before for this call (this session, or the desktop app's saved copy): shown at once, refreshed quietly
+const keptCall = (id?: string) => (id ? callsMemory.calls.get(id) || readPageCache<CallRecord>(`call:${id}`) || null : null);
+
 export const CallDetailPage: React.FC<{ id?: string }> = ({ id }) => {
-  const [call, setCall] = useState<CallRecord | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [call, setCall] = useState<CallRecord | null>(() => keptCall(id));
+  const [loading, setLoading] = useState(() => !keptCall(id));
   const [missing, setMissing] = useState(false);
   const [tab, setTab] = useState<Tab>(readTab);
   const [copied, setCopied] = useState(false);
+  const m = useMotion();
 
   const load = async (quiet = false) => {
     if (!id) return;
     try {
       const res = await api.get(`/api/calls/${id}`);
-      if (res.data?.success) { setCall(res.data.call); setMissing(false); }
-      else setMissing(true);
+      if (res.data?.success) {
+        setCall(res.data.call);
+        callsMemory.calls.set(id, res.data.call);
+        writePageCache(`call:${id}`, res.data.call);
+        setMissing(false);
+      } else setMissing(true);
     } catch (e: any) {
       if (e?.response?.status === 404) setMissing(true);
       else if (!quiet) toast.error("The call could not be loaded");
     } finally {
-      if (!quiet) setLoading(false);
+      setLoading(false);
     }
   };
-  useEffect(() => { setLoading(true); load(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [id]);
+  useEffect(() => {
+    // Another call opened: its kept copy shows at once; only a call never seen before shows the loading bars
+    const kept = keptCall(id);
+    setCall(kept);
+    setLoading(!kept);
+    setMissing(false);
+    load(!!kept);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [id]);
+
+  // The top bar's breadcrumb shows "Calls / <this call's name>" (AskAiPanel listens for this), and its "Calls" goes
+  // back to the list
+  const navigate = useNavigate();
+  const { pathname } = useLocation();
+  useEffect(() => {
+    window.dispatchEvent(new CustomEvent("calls:title", { detail: call?.name || "" }));
+    return () => { window.dispatchEvent(new CustomEvent("calls:title", { detail: "" })); };
+  }, [call?.name]);
+  useEffect(() => {
+    const back = () => navigate(`${callsBasePath(pathname)}/calls`);
+    window.addEventListener("calls:back", back);
+    return () => window.removeEventListener("calls:back", back);
+  }, [navigate, pathname]);
 
   // Live: the server says "calls:updated" { id } after every write to this record (a line said, a step done, the
   // status), and the page reloads it (a burst of events reloads once). While the call is live or the AI is working
@@ -77,12 +112,12 @@ export const CallDetailPage: React.FC<{ id?: string }> = ({ id }) => {
   if (loading) return <DetailSkeleton />;
   if (missing || !call) {
     return (
-      <div className="mx-auto w-full max-w-6xl p-6 md:p-8">
+      <motion.div variants={m.panel} initial="hidden" animate="show" className="mx-auto w-full max-w-6xl p-6 md:p-8">
         <div className="mt-10 rounded-2xl border border-border/60 p-10 text-center">
           <p className="text-[15px] font-medium">This call was not found.</p>
           <p className="mt-1 text-sm text-muted-foreground">It may belong to another account, or the link is not complete.</p>
         </div>
-      </div>
+      </motion.div>
     );
   }
 
@@ -93,88 +128,107 @@ export const CallDetailPage: React.FC<{ id?: string }> = ({ id }) => {
   const runs = call.work?.runs || [];
   const workMs = between(call.work?.started_at, call.work?.ended_at || (ACTIVE.includes(call.status) ? new Date() : call.work?.started_at));
   const showProblem = ["failed", "retrying", "stopped"].includes(call.status);
+  const TABS: Array<[Tab, string]> = [["transcript", call.origin === "call" ? "Transcript" : "Message"], ["work", "What the AI did"], ["details", "Details"]];
 
   return (
-    <div className="mx-auto w-full max-w-6xl p-4 pb-20 sm:p-6 lg:p-8">
+    <motion.div variants={m.list} initial="hidden" animate="show" className="mx-auto w-full max-w-6xl p-4 pb-20 sm:p-6 lg:p-8">
       {/* ── Head ── */}
       <header className="pb-6 border-b border-border/60">
         <div className="flex items-start justify-between gap-4">
           <div className="min-w-0">
-            <div className="flex items-center gap-2 text-[12px] text-muted-foreground">
+            <motion.div variants={m.row} className="flex items-center gap-2 text-[12px] text-muted-foreground">
               <OriginIcon className="w-3.5 h-3.5" />
               <span>{O.label}</span>
               <span aria-hidden>·</span>
               <span>{fmtDate(call.started_at)}, {fmtTime(call.started_at)}</span>
               {call.duration_ms > 0 && (<><span aria-hidden>·</span><span>{fmtDuration(call.duration_ms)}</span></>)}
-            </div>
-            <h1 className="mt-2 text-[26px] sm:text-[30px] font-semibold tracking-[-0.01em] leading-tight break-words">{call.name || "Call"}</h1>
-            {call.summary && <p className="mt-2.5 text-[15.5px] text-muted-foreground leading-relaxed line-clamp-3">{call.summary}</p>}
+            </motion.div>
+            <motion.h1 variants={m.row} className="mt-2 text-[26px] sm:text-[30px] font-semibold tracking-[-0.01em] leading-tight break-words">{call.name || "Call"}</motion.h1>
+            {call.summary && <motion.p variants={m.row} className="mt-2.5 text-[15.5px] text-muted-foreground leading-relaxed line-clamp-3">{call.summary}</motion.p>}
           </div>
-          <div className="flex flex-col items-end gap-2 shrink-0">
+          <motion.div variants={m.row} className="flex flex-col items-end gap-2 shrink-0">
             <StatusBadge status={call.status} />
             {call.status === "sleeping" && call.wake_at && <span className="text-[11px] text-muted-foreground">continues {fmtDate(call.wake_at)}, {fmtTime(call.wake_at)}</span>}
-          </div>
+          </motion.div>
         </div>
 
-        {/* Quick facts */}
-        <div className="mt-5 flex flex-wrap gap-2">
+        {/* Quick facts (the numbers count up) */}
+        <motion.div variants={m.list} className="mt-5 flex flex-wrap gap-2">
           {call.project_name && (
-            <Fact icon={call.project_made ? FolderPlus : Folder} label={call.project_made ? "Project made" : "Project"} value={call.project_name} />
+            <Fact icon={call.project_made ? FolderPlus : Folder} label={call.project_made ? "Project made" : "Project"}><span className="font-medium truncate max-w-[220px]">{call.project_name}</span></Fact>
           )}
           {(counts.steps || 0) > 0 && (
-            <div className="inline-flex items-center gap-2 rounded-lg border border-border/60 px-3 py-2 text-[13.5px]">
-              <Wrench className="w-3.5 h-3.5 text-muted-foreground" />
-              <span className="text-muted-foreground">Steps</span>
-              <StepCounts total={counts.steps || 0} failed={counts.failed || 0} className="font-medium" />
-            </div>
+            <Fact icon={Wrench} label="Steps"><StepCounts total={counts.steps || 0} failed={counts.failed || 0} className="font-medium" /></Fact>
           )}
-          {workMs > 0 && <Fact icon={Hourglass} label="Worked" value={fmtDuration(workMs)} />}
-          {(counts.whatsapp_sent || 0) > 0 && <Fact icon={MessageSquare} label="WhatsApp sent" value={String(counts.whatsapp_sent)} />}
-          {((counts.emails_read || 0) + (counts.emails_sent || 0)) > 0 && <Fact icon={Mail} label="Emails" value={`${counts.emails_read || 0} read · ${counts.emails_sent || 0} sent`} />}
-          {(call.work?.models || []).length > 0 && <Fact icon={Sparkles} label="Model" value={call.work.models.map(modelLabel).join(", ")} />}
-        </div>
+          {workMs > 0 && <Fact icon={Hourglass} label="Worked"><span className="font-medium">{fmtDuration(workMs)}</span></Fact>}
+          {(counts.whatsapp_sent || 0) > 0 && <Fact icon={MessageSquare} label="WhatsApp sent"><CountUp value={counts.whatsapp_sent || 0} className="font-medium" /></Fact>}
+          {((counts.emails_read || 0) + (counts.emails_sent || 0)) > 0 && (
+            <Fact icon={Mail} label="Emails"><span className="font-medium"><CountUp value={counts.emails_read || 0} /> read · <CountUp value={counts.emails_sent || 0} /> sent</span></Fact>
+          )}
+          {(call.work?.models || []).length > 0 && <Fact icon={Sparkles} label="Model"><span className="font-medium truncate max-w-[260px]">{call.work.models.map(modelLabel).join(", ")}</span></Fact>}
+        </motion.div>
       </header>
 
       {/* ── Problem banner ── */}
-      {showProblem && (
-        <div className={cn("mt-5 flex items-start gap-3 rounded-xl border px-4 py-3 text-[13px]",
-          call.status === "stopped" ? "border-border/60 bg-muted/40" : "border-red-200 bg-red-50 text-red-800 dark:border-red-500/20 dark:bg-red-500/10 dark:text-red-200")}>
-          <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" />
-          <div className="min-w-0">
-            <p className="font-medium">{STATUS[call.status].help}</p>
-            {call.error && <p className="mt-0.5 opacity-80 break-words">{call.error}</p>}
-          </div>
-        </div>
-      )}
+      <AnimatePresence initial={false}>
+        {showProblem && (
+          <motion.div
+            key="problem"
+            initial={m.reduce ? false : { opacity: 0, y: -6, height: 0 }} animate={{ opacity: 1, y: 0, height: "auto" }} exit={{ opacity: 0, height: 0 }}
+            className={cn("mt-5 flex items-start gap-3 rounded-xl border px-4 py-3 text-[13px] overflow-hidden",
+              call.status === "stopped" ? "border-border/60 bg-muted/40" : "border-red-200 bg-red-50 text-red-800 dark:border-red-500/20 dark:bg-red-500/10 dark:text-red-200")}
+          >
+            <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" />
+            <div className="min-w-0">
+              <p className="font-medium">{STATUS[call.status].help}</p>
+              {call.error && <p className="mt-0.5 opacity-80 break-words">{call.error}</p>}
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
-      {/* ── Tabs ── */}
-      <div className="mt-6 flex items-center justify-between gap-3">
-        <div className="inline-flex rounded-lg bg-muted/60 dark:bg-white/5 p-1 text-[14.5px]">
-          {([["transcript", call.origin === "call" ? "Transcript" : "Message"], ["work", "What the AI did"], ["details", "Details"]] as Array<[Tab, string]>).map(([t, label]) => (
-            <button
-              key={t}
-              onClick={() => pickTab(t)}
-              className={cn("px-4 py-2 rounded-md font-medium transition-colors cursor-pointer",
-                tab === t ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground")}
-            >
-              {label}
-              {t === "work" && (counts.steps || 0) > 0 && <span className="ml-1.5 text-[11px] text-muted-foreground">{counts.steps}</span>}
-            </button>
-          ))}
-        </div>
+      {/* ── Tabs (the white pill slides between them) ── */}
+      <motion.div variants={m.row} className="mt-6 flex items-center justify-between gap-3">
+        <LayoutGroup id="calls-tabs">
+          <div className="inline-flex rounded-lg bg-muted/60 dark:bg-white/5 p-1 text-[14.5px]">
+            {TABS.map(([t, label]) => (
+              <button
+                key={t}
+                onClick={() => pickTab(t)}
+                className={cn("relative px-4 py-2 rounded-md font-medium transition-colors cursor-pointer", tab === t ? "text-foreground" : "text-muted-foreground hover:text-foreground")}
+              >
+                {tab === t && <motion.span layoutId="calls-tab-pill" transition={m.reduce ? { duration: 0 } : SPRING} className="absolute inset-0 rounded-md bg-background shadow-sm" />}
+                <span className="relative">
+                  {label}
+                  {t === "work" && (counts.steps || 0) > 0 && <span className="ml-1.5 text-[11px] text-muted-foreground"><CountUp value={counts.steps || 0} /></span>}
+                </span>
+              </button>
+            ))}
+          </div>
+        </LayoutGroup>
         {tab === "transcript" && call.transcript.length > 0 && (
           <button onClick={copyTranscript} className="inline-flex items-center gap-1.5 text-[12px] text-muted-foreground hover:text-foreground cursor-pointer">
-            {copied ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />} {copied ? "Copied" : "Copy"}
+            <AnimatePresence mode="wait" initial={false}>
+              <motion.span key={copied ? "y" : "n"} initial={{ opacity: 0, scale: 0.7 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.7 }} transition={{ duration: 0.14 }} className="inline-flex">
+                {copied ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
+              </motion.span>
+            </AnimatePresence>
+            {copied ? "Copied" : "Copy"}
           </button>
         )}
-      </div>
+      </motion.div>
 
+      {/* The tab panel fades and slides as the tab changes */}
       <div className="mt-5">
-        {tab === "transcript" && <TranscriptTab call={call} />}
-        {tab === "work" && <WorkTab call={call} runs={runs} steps={steps} />}
-        {tab === "details" && <DetailsTab call={call} steps={steps} />}
+        <AnimatePresence mode="wait" initial={false}>
+          <motion.div key={tab} variants={m.panel} initial="hidden" animate="show" exit="exit">
+            {tab === "transcript" && <TranscriptTab call={call} />}
+            {tab === "work" && <WorkTab call={call} runs={runs} steps={steps} />}
+            {tab === "details" && <DetailsTab call={call} steps={steps} />}
+          </motion.div>
+        </AnimatePresence>
       </div>
-    </div>
+    </motion.div>
   );
 };
 
@@ -184,6 +238,7 @@ function TranscriptTab({ call }: { call: CallRecord }) {
   const [q, setQ] = useState("");
   const [hit, setHit] = useState(0);
   const refs = useRef<Array<HTMLLIElement | null>>([]);
+  const m = useMotion();
   const needle = q.trim().toLowerCase();
   const hits = useMemo(() => call.transcript.map((l, i) => (needle && l.text.toLowerCase().includes(needle) ? i : -1)).filter((i) => i >= 0), [call.transcript, needle]);
   useEffect(() => { setHit(0); }, [needle]);
@@ -195,7 +250,7 @@ function TranscriptTab({ call }: { call: CallRecord }) {
   if (!call.transcript.length) {
     return (
       <Empty icon={Phone} title={call.status === "live" ? "The call is going on" : "Nothing was recorded on this call"}
-        text={call.status === "live" ? "What is said shows up here as the call goes on." : "The call ended before anything was said."} />
+        text={call.status === "live" ? "What is said shows up here as the call goes on." : "The call ended before anything was said."} pulse={call.status === "live"} />
     );
   }
 
@@ -219,33 +274,67 @@ function TranscriptTab({ call }: { call: CallRecord }) {
         )}
       </div>
 
-      <ol className="relative">
-        {call.transcript.map((l, i) => (
-          <li key={i} ref={(el) => { refs.current[i] = el; }} className={cn("rounded-lg -mx-2 px-2", hits[hit] === i && "bg-amber-50 dark:bg-amber-500/10")}>
-            <TranscriptRow line={l} needle={needle} origin={call.origin} />
+      {/* Lines come in one after the other; a new line said on a live call slides in at the bottom */}
+      <motion.ol variants={m.list} initial="hidden" animate="show" className="relative">
+        <AnimatePresence initial={false}>
+          {call.transcript.map((l, i) => (
+            <motion.li
+              key={`${l.at}-${i}`}
+              variants={m.row} layout={!m.reduce}
+              initial={m.reduce ? false : { opacity: 0, y: 10, filter: "blur(2px)" }} animate={{ opacity: 1, y: 0, filter: "blur(0px)" }}
+              ref={(el) => { refs.current[i] = el; }}
+              className={cn("rounded-lg -mx-2 px-2 transition-colors", hits[hit] === i && "bg-amber-50 dark:bg-amber-500/10")}
+            >
+              <TranscriptRow line={l} needle={needle} origin={call.origin} />
+            </motion.li>
+          ))}
+        </AnimatePresence>
+        {call.status === "live" && (
+          <li className="flex gap-3 py-2.5">
+            <span className="w-10 shrink-0" />
+            <Typing />
           </li>
-        ))}
-      </ol>
+        )}
+      </motion.ol>
 
       {call.live_works?.length > 0 && (
-        <section className="mt-8">
+        <motion.section variants={m.row} initial="hidden" animate="show" className="mt-8">
           <Eyebrow>Done during the call</Eyebrow>
           <div className="mt-3 space-y-2">
-            {call.live_works.map((w, i) => (
-              <details key={i} className="group rounded-xl border border-border/60 open:bg-muted/20">
-                <summary className="flex items-center gap-3 px-4 py-3 cursor-pointer list-none">
-                  <Sparkles className="w-4 h-4 text-muted-foreground shrink-0" />
-                  <span className="flex-1 text-[13px] truncate">{w.request}</span>
-                  <span className="text-[11px] text-muted-foreground">{w.late ? "answered after the call" : fmtDuration(between(w.started_at, w.ended_at), { short: true })}</span>
-                  <ChevronRight className="w-4 h-4 text-muted-foreground transition-transform group-open:rotate-90" />
-                </summary>
-                <div className="px-4 pb-4 text-[13px] whitespace-pre-wrap break-words text-foreground/90">{w.error ? <span className="text-red-600 dark:text-red-400">{w.error}</span> : w.answer || "No answer was kept."}</div>
-              </details>
-            ))}
+            {call.live_works.map((w, i) => <LiveWork key={i} w={w} />)}
           </div>
-        </section>
+        </motion.section>
       )}
     </div>
+  );
+}
+
+// Three small dots that breathe: the call is going on
+function Typing() {
+  return (
+    <span className="inline-flex items-center gap-1 px-2 py-1.5 rounded-full bg-muted/60 dark:bg-white/5">
+      {[0, 1, 2].map((i) => (
+        <motion.span key={i} className="h-1.5 w-1.5 rounded-full bg-muted-foreground/70" animate={{ opacity: [0.3, 1, 0.3], y: [0, -2, 0] }} transition={{ duration: 1.1, repeat: Infinity, delay: i * 0.16, ease: "easeInOut" }} />
+      ))}
+    </span>
+  );
+}
+
+function LiveWork({ w }: { w: CallRecord["live_works"][number] }) {
+  const [open, setOpen] = useState(false);
+  const m = useMotion();
+  return (
+    <motion.div layout={!m.reduce} className="rounded-xl border border-border/60 overflow-hidden">
+      <button type="button" onClick={() => setOpen((o) => !o)} className="w-full flex items-center gap-3 px-4 py-3 cursor-pointer text-left hover:bg-muted/30 transition-colors">
+        <Sparkles className="w-4 h-4 text-muted-foreground shrink-0" />
+        <span className="flex-1 text-[13.5px] truncate">{w.request}</span>
+        <span className="text-[11px] text-muted-foreground">{w.late ? "answered after the call" : fmtDuration(between(w.started_at, w.ended_at), { short: true })}</span>
+        <motion.span animate={{ rotate: open ? 90 : 0 }} transition={SPRING} className="inline-flex"><ChevronRight className="w-4 h-4 text-muted-foreground" /></motion.span>
+      </button>
+      <Fold open={open}>
+        <div className="px-4 pb-4 text-[13.5px] whitespace-pre-wrap break-words text-foreground/90">{w.error ? <span className="text-red-600 dark:text-red-400">{w.error}</span> : w.answer || "No answer was kept."}</div>
+      </Fold>
+    </motion.div>
   );
 }
 
@@ -267,7 +356,7 @@ function TranscriptRow({ line, needle, origin }: { line: TranscriptLine; needle:
   const isCaller = line.who === "caller";
   const isNote = line.kind === "task" || line.kind === "asked" || line.kind === "tool";
   if (isNote) {
-    const label = line.kind === "task" ? "Saved a task" : line.kind === "asked" ? "Asked Classgrid" : `Used ${(line.tool || "a tool").replace(/_/g, " ")}`;
+    const label = line.kind === "task" ? "Saved a task" : line.kind === "asked" ? "Asked Classgrid" : `Used ${publicToolName(line.tool || "")}`;
     const Icon = line.kind === "task" ? Flag : line.kind === "asked" ? Sparkles : Wrench;
     return (
       <div className="flex gap-3 py-2 pl-[52px]">
@@ -298,6 +387,7 @@ function TranscriptRow({ line, needle, origin }: { line: TranscriptLine; needle:
 // ─── What the AI did ──────────────────────────────────────────
 
 function WorkTab({ call, runs, steps }: { call: CallRecord; runs: WorkRun[]; steps: WorkStep[] }) {
+  const m = useMotion();
   if (call.status === "answered") {
     return <Empty icon={Phone} title="Answered on the call" text="No task was saved, so there was no work after the call. The recap the AI sent is under Details." />;
   }
@@ -310,9 +400,9 @@ function WorkTab({ call, runs, steps }: { call: CallRecord; runs: WorkRun[]; ste
     );
   }
   return (
-    <div className="space-y-6">
+    <motion.div variants={m.list} initial="hidden" animate="show" className="space-y-6">
       {call.tasks?.length > 0 && (
-        <section className="rounded-xl border border-border/60 bg-muted/20 px-4 py-3">
+        <motion.section variants={m.row} className="rounded-xl border border-border/60 bg-muted/20 px-4 py-3">
           <Eyebrow>{call.tasks.length === 1 ? "The task" : `${call.tasks.length} tasks, in order`}</Eyebrow>
           <ol className="mt-2 space-y-1.5">
             {call.tasks.map((t, i) => (
@@ -322,12 +412,16 @@ function WorkTab({ call, runs, steps }: { call: CallRecord; runs: WorkRun[]; ste
               </li>
             ))}
           </ol>
-        </section>
+        </motion.section>
       )}
-      {runs.map((run, i) => (
-        <RunBlock key={run.no || i} run={run} steps={steps.filter((s) => (s.run || 1) === (run.no || i + 1))} live={ACTIVE.includes(call.status) && !run.ended_at} defaultOpen={i === runs.length - 1} />
-      ))}
-    </div>
+      <AnimatePresence initial={false}>
+        {runs.map((run, i) => (
+          <motion.div key={run.no || i} variants={m.row} layout={!m.reduce} initial={m.reduce ? false : { opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}>
+            <RunBlock run={run} steps={steps.filter((s) => (s.run || 1) === (run.no || i + 1))} live={ACTIVE.includes(call.status) && !run.ended_at} defaultOpen={i === runs.length - 1} />
+          </motion.div>
+        ))}
+      </AnimatePresence>
+    </motion.div>
   );
 }
 
@@ -335,28 +429,29 @@ const GAP_MS = 20000; // a quiet stretch this long between two steps is shown as
 
 function RunBlock({ run, steps, live, defaultOpen }: { run: WorkRun; steps: WorkStep[]; live: boolean; defaultOpen: boolean }) {
   const [open, setOpen] = useState(defaultOpen);
+  const m = useMotion();
   const outcome = RUN_OUTCOME[live ? "" : run.outcome] ?? { label: "Running", tone: "blue" as const };
   const ms = between(run.started_at, run.ended_at || (live ? new Date() : run.started_at));
   const failedSteps = steps.filter((s) => s.status !== "ok").length;
 
   // Steps in time order, with the quiet stretches between them
   const rows = useMemo(() => {
-    const out: Array<{ kind: "step"; step: WorkStep } | { kind: "gap"; ms: number }> = [];
+    const out: Array<{ kind: "step"; step: WorkStep; key: string } | { kind: "gap"; ms: number; key: string }> = [];
     let prevEnd: number | null = new Date(run.started_at).getTime();
     for (const s of steps) {
       const at = new Date(s.at).getTime();
-      if (prevEnd != null && at - prevEnd >= GAP_MS) out.push({ kind: "gap", ms: at - prevEnd });
-      out.push({ kind: "step", step: s });
+      if (prevEnd != null && at - prevEnd >= GAP_MS) out.push({ kind: "gap", ms: at - prevEnd, key: `gap-${at}` });
+      out.push({ kind: "step", step: s, key: `${s.tool}-${s.at}` });
       prevEnd = s.ended_at ? new Date(s.ended_at).getTime() : at;
     }
-    if (run.ended_at && prevEnd != null && new Date(run.ended_at).getTime() - prevEnd >= GAP_MS) out.push({ kind: "gap", ms: new Date(run.ended_at).getTime() - prevEnd });
+    if (run.ended_at && prevEnd != null && new Date(run.ended_at).getTime() - prevEnd >= GAP_MS) out.push({ kind: "gap", ms: new Date(run.ended_at).getTime() - prevEnd, key: "gap-end" });
     return out;
   }, [steps, run.started_at, run.ended_at]);
 
   return (
-    <section className="rounded-2xl border border-border/60 overflow-hidden">
+    <motion.section layout={!m.reduce} className="rounded-2xl border border-border/60 overflow-hidden">
       <button type="button" onClick={() => setOpen((o) => !o)} className="w-full flex items-center gap-3 px-4 py-3 text-left hover:bg-muted/30 transition-colors cursor-pointer">
-        <ChevronRight className={cn("w-4 h-4 text-muted-foreground transition-transform shrink-0", open && "rotate-90")} />
+        <motion.span animate={{ rotate: open ? 90 : 0 }} transition={SPRING} className="inline-flex shrink-0"><ChevronRight className="w-4 h-4 text-muted-foreground" /></motion.span>
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 flex-wrap">
             <span className="text-[15.5px] font-semibold">Run {run.no}</span>
@@ -368,12 +463,18 @@ function RunBlock({ run, steps, live, defaultOpen }: { run: WorkRun; steps: Work
             {run.model && <span className="inline-flex items-center gap-1"><Sparkles className="w-3 h-3" />{modelLabel(run.model)}</span>}
           </div>
         </div>
-        <span className={cn("inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-[11px] font-medium whitespace-nowrap", toneClass[outcome.tone])}>
-          <span className={cn("h-1.5 w-1.5 rounded-full", dotClass[outcome.tone], live && "animate-pulse")} />{outcome.label}
-        </span>
+        <AnimatePresence mode="wait" initial={false}>
+          <motion.span
+            key={outcome.label}
+            initial={m.reduce ? false : { opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.9 }} transition={SPRING}
+            className={cn("inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-[11px] font-medium whitespace-nowrap", toneClass[outcome.tone])}
+          >
+            <span className={cn("h-1.5 w-1.5 rounded-full", dotClass[outcome.tone], live && "animate-pulse")} />{outcome.label}
+          </motion.span>
+        </AnimatePresence>
       </button>
 
-      {open && (
+      <Fold open={open}>
         <div className="border-t border-border/60 px-4 py-4 space-y-4">
           {run.thought && <Thinking text={run.thought} />}
 
@@ -381,17 +482,19 @@ function RunBlock({ run, steps, live, defaultOpen }: { run: WorkRun; steps: Work
             <p className="text-[13px] text-muted-foreground">{live ? "Working… the first step shows here when it finishes." : "This run used no tools."}</p>
           )}
           {rows.length > 0 && (
-            <ol className="relative ml-2 border-l border-border/70 pl-5 space-y-1">
-              {rows.map((r, i) => r.kind === "gap"
-                ? <GapRow key={`g${i}`} ms={r.ms} />
-                : <StepRow key={`${r.step.tool}-${r.step.at}-${i}`} step={r.step} />)}
+            <motion.ol variants={m.list} initial="hidden" animate="show" className="relative ml-2 border-l border-border/70 pl-5 space-y-1">
+              <AnimatePresence initial={false}>
+                {rows.map((r) => r.kind === "gap"
+                  ? <GapRow key={r.key} ms={r.ms} />
+                  : <StepRow key={r.key} step={r.step} />)}
+              </AnimatePresence>
               {live && (
-                <li className="relative py-2 text-[13px] text-muted-foreground">
-                  <span className="absolute -left-[25px] top-[13px] h-2.5 w-2.5 rounded-full bg-blue-500 animate-pulse ring-4 ring-background" />
-                  Working…
+                <li className="relative py-2 text-[13px] text-muted-foreground flex items-center gap-2">
+                  <motion.span className="absolute -left-[25px] top-[13px] h-2.5 w-2.5 rounded-full bg-blue-500 ring-4 ring-background" animate={{ scale: [1, 1.35, 1], opacity: [1, 0.6, 1] }} transition={{ duration: 1.4, repeat: Infinity, ease: "easeInOut" }} />
+                  Working… <Typing />
                 </li>
               )}
-            </ol>
+            </motion.ol>
           )}
 
           {run.error && (
@@ -406,8 +509,22 @@ function RunBlock({ run, steps, live, defaultOpen }: { run: WorkRun; steps: Work
             </div>
           )}
         </div>
+      </Fold>
+    </motion.section>
+  );
+}
+
+// Grows open and folds shut with a smooth height
+function Fold({ open, children }: { open: boolean; children: React.ReactNode }) {
+  const m = useMotion();
+  return (
+    <AnimatePresence initial={false}>
+      {open && (
+        <motion.div key="fold" variants={m.fold} initial={m.reduce ? false : "closed"} animate="open" exit={m.reduce ? undefined : "closed"} className="overflow-hidden">
+          {children}
+        </motion.div>
       )}
-    </section>
+    </AnimatePresence>
   );
 }
 
@@ -420,9 +537,11 @@ function Thinking({ text }: { text: string }) {
         <Brain className="w-4 h-4 text-muted-foreground" />
         <span className="font-medium">The AI's thinking</span>
         <span className="text-[11px] text-muted-foreground">· its own notes while working, not a full account</span>
-        <ChevronDown className={cn("ml-auto w-4 h-4 text-muted-foreground transition-transform", open && "rotate-180")} />
+        <motion.span animate={{ rotate: open ? 180 : 0 }} transition={SPRING} className="ml-auto inline-flex"><ChevronDown className="w-4 h-4 text-muted-foreground" /></motion.span>
       </button>
-      {open && <div className="px-3.5 pb-3.5 text-[13px] leading-relaxed whitespace-pre-wrap break-words text-muted-foreground max-h-[420px] overflow-y-auto chat-scrollbar">{clean}</div>}
+      <Fold open={open}>
+        <div className="px-3.5 pb-3.5 text-[13px] leading-relaxed whitespace-pre-wrap break-words text-muted-foreground max-h-[420px] overflow-y-auto chat-scrollbar">{clean}</div>
+      </Fold>
     </div>
   );
 }
@@ -433,6 +552,7 @@ const SIDE_ICON: Record<Exclude<SideEffect, null>, React.ComponentType<{ classNa
 
 function StepRow({ step }: { step: WorkStep }) {
   const [open, setOpen] = useState(false);
+  const m = useMotion();
   const bad = step.status !== "ok";
   const effect = sideEffectOf(step.tool);
   const ms = between(step.at, step.ended_at);
@@ -440,9 +560,17 @@ function StepRow({ step }: { step: WorkStep }) {
   const Icon = effect ? SIDE_ICON[effect] : null;
   const argsText = prettyJson(step.args);
   return (
-    <li className="relative">
-      <span className={cn("absolute -left-[25px] top-[13px] h-2.5 w-2.5 rounded-full ring-4 ring-background", bad ? "bg-red-500" : effect === "sleep" ? "bg-violet-500" : "bg-emerald-500")} />
-      <button type="button" onClick={() => setOpen((o) => !o)} className="w-full flex items-start gap-2.5 rounded-lg px-2 py-2 -ml-2 text-left hover:bg-muted/40 transition-colors cursor-pointer">
+    <motion.li
+      variants={m.row} layout={!m.reduce}
+      initial={m.reduce ? false : { opacity: 0, x: -8 }} animate={{ opacity: 1, x: 0 }}
+      className="relative"
+    >
+      <Pop className={cn("absolute -left-[25px] top-[13px] h-2.5 w-2.5 rounded-full ring-4 ring-background", bad ? "bg-red-500" : effect === "sleep" ? "bg-violet-500" : "bg-emerald-500")} delay={0.08}>{null}</Pop>
+      <motion.button
+        type="button" onClick={() => setOpen((o) => !o)}
+        whileTap={m.reduce ? undefined : { scale: 0.995 }}
+        className="w-full flex items-start gap-2.5 rounded-lg px-2 py-2 -ml-2 text-left hover:bg-muted/40 transition-colors cursor-pointer"
+      >
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 flex-wrap">
             <span className={cn("text-[14.5px] break-words", bad && "text-red-700 dark:text-red-300")}>{label}</span>
@@ -458,8 +586,8 @@ function StepRow({ step }: { step: WorkStep }) {
           {!open && bad && step.result && <p className="mt-0.5 text-[12.5px] text-red-700/80 dark:text-red-300/80 line-clamp-2 break-words">{step.result}</p>}
         </div>
         <span className="shrink-0 pt-0.5 font-mono text-[11px] tabular-nums text-muted-foreground">{fmtTime(step.at)}{ms > 0 ? ` · ${fmtDuration(ms, { short: true })}` : ""}</span>
-      </button>
-      {open && (
+      </motion.button>
+      <Fold open={open}>
         <div className="ml-0 mb-2 rounded-xl border border-border/60 bg-muted/20 text-[12.5px] divide-y divide-border/50">
           <div className="px-3.5 py-2.5 flex items-center gap-2 text-muted-foreground">
             <Wrench className="w-3.5 h-3.5" /><span className="text-[12.5px] font-medium">{publicToolName(step.tool)}</span>
@@ -476,75 +604,78 @@ function StepRow({ step }: { step: WorkStep }) {
             <pre className={cn("mt-1.5 font-mono text-[11.5px] leading-relaxed whitespace-pre-wrap break-words max-h-[320px] overflow-y-auto chat-scrollbar", bad ? "text-red-700 dark:text-red-300" : "text-foreground/85")}>{step.result || "(nothing was returned)"}</pre>
           </div>
         </div>
-      )}
-    </li>
+      </Fold>
+    </motion.li>
   );
 }
 
 function GapRow({ ms }: { ms: number }) {
+  const m = useMotion();
   return (
-    <li className="relative py-1.5 text-[11.5px] text-muted-foreground/80 italic">
+    <motion.li variants={m.row} layout={!m.reduce} initial={m.reduce ? false : { opacity: 0 }} animate={{ opacity: 1 }} className="relative py-1.5 text-[11.5px] text-muted-foreground/80 italic">
       <span className="absolute -left-[22px] top-[11px] h-1.5 w-1.5 rounded-full bg-border ring-4 ring-background" />
       {fmtDuration(ms, { short: true })} of thinking, with no tool used
-    </li>
+    </motion.li>
   );
 }
 
 // ─── Details ──────────────────────────────────────────────────
 
 function DetailsTab({ call, steps }: { call: CallRecord; steps: WorkStep[] }) {
+  const m = useMotion();
   const tools = toolsUsed(steps);
   const { helpers, skills } = helpersAndSkills(steps);
   const sent = [...(call.sent || [])].sort((a, b) => new Date(a.at).getTime() - new Date(b.at).getTime());
   const workMs = between(call.work?.started_at, call.work?.ended_at);
   return (
-    <div className="space-y-6">
-      <section className="rounded-2xl border border-border/60 divide-y divide-border/50 sm:grid sm:grid-cols-2 sm:divide-y-0 overflow-hidden">
+    <motion.div variants={m.list} initial="hidden" animate="show" className="space-y-6">
+      <motion.section variants={m.row} className="rounded-2xl border border-border/60 divide-y divide-border/50 sm:grid sm:grid-cols-2 sm:divide-y-0 overflow-hidden">
         <Cell label="Status"><StatusBadge status={call.status} /></Cell>
         <Cell label={call.origin === "call" ? "Call" : "Started"}>{fmtDate(call.started_at)}, {fmtTime(call.started_at)}{call.duration_ms ? ` · ${fmtDuration(call.duration_ms)}` : ""}{call.ended_by ? <span className="text-muted-foreground"> · ended: {endedByLabel(call.ended_by)}</span> : null}</Cell>
         <Cell label="Work">{call.work?.started_at ? <>{fmtTime(call.work.started_at)}{call.work.ended_at ? ` – ${fmtTime(call.work.ended_at)}` : ""}{workMs > 0 ? ` · ${fmtDuration(workMs)}` : ""} · {call.work.runs?.length || 0} run{(call.work.runs?.length || 0) === 1 ? "" : "s"}</> : <span className="text-muted-foreground">none</span>}</Cell>
         <Cell label="Steps"><StepCounts total={call.work?.counts?.steps || 0} failed={call.work?.counts?.failed || 0} /></Cell>
-        <Cell label="Models">{call.call_model && <span className="text-muted-foreground">On the call: {modelLabel(call.call_model)}</span>}{(call.work?.models || []).length ? <div className="mt-0.5">{call.work.models.map((m) => <span key={m} className="mr-1.5 inline-flex rounded-md bg-muted px-1.5 py-0.5 text-[12px]">{modelLabel(m)}</span>)}</div> : (!call.call_model && <span className="text-muted-foreground">—</span>)}</Cell>
+        <Cell label="Models">{call.call_model && <span className="text-muted-foreground">On the call: {modelLabel(call.call_model)}</span>}{(call.work?.models || []).length ? <div className="mt-0.5">{call.work.models.map((mm) => <span key={mm} className="mr-1.5 inline-flex rounded-md bg-muted px-1.5 py-0.5 text-[12px]">{modelLabel(mm)}</span>)}</div> : (!call.call_model && <span className="text-muted-foreground">—</span>)}</Cell>
         <Cell label="Project">{call.project_name ? <>{call.project_name}{call.project_made && <span className="text-muted-foreground"> · made for this call</span>}</> : <span className="text-muted-foreground">none</span>}</Cell>
         <Cell label="Helpers">{helpers.length ? helpers.join(", ") : <span className="text-muted-foreground">none used</span>}</Cell>
         <Cell label="Skills">{skills.length ? skills.join(", ") : <span className="text-muted-foreground">none used</span>}</Cell>
-      </section>
+      </motion.section>
 
-      <section>
+      <motion.section variants={m.row}>
         <Eyebrow>Tools used</Eyebrow>
         {tools.length ? (
-          <ul className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-x-6">
+          <motion.ul variants={m.list} initial="hidden" animate="show" className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-x-6">
             {tools.map((t) => (
-              <li key={t.name} className="flex items-center justify-between gap-3 py-1.5 border-b border-border/40 text-[13px]">
+              <motion.li key={t.name} variants={m.row} className="flex items-center justify-between gap-3 py-1.5 border-b border-border/40 text-[13px]">
                 <span className="text-[14px] truncate">{publicToolName(t.name)}</span>
-                <span className="text-muted-foreground tabular-nums shrink-0">×{t.count}{t.failed ? <span className="text-red-600 dark:text-red-400"> · {t.failed} failed</span> : null}</span>
-              </li>
+                <span className="text-muted-foreground tabular-nums shrink-0">×<CountUp value={t.count} />{t.failed ? <span className="text-red-600 dark:text-red-400"> · {t.failed} failed</span> : null}</span>
+              </motion.li>
             ))}
-          </ul>
+          </motion.ul>
         ) : <p className="mt-2 text-[13px] text-muted-foreground">No tools were used.</p>}
-      </section>
+      </motion.section>
 
-      <section>
+      <motion.section variants={m.row}>
         <Eyebrow>Sent to you</Eyebrow>
         {sent.length ? (
-          <ol className="mt-3 space-y-2">
+          <motion.ol variants={m.list} initial="hidden" animate="show" className="mt-3 space-y-2">
             {sent.map((s, i) => <SentRow key={i} item={s} />)}
-          </ol>
+          </motion.ol>
         ) : <p className="mt-2 text-[13px] text-muted-foreground">Nothing was sent yet.</p>}
-      </section>
+      </motion.section>
 
-      <section className="text-[11.5px] text-muted-foreground font-mono">
+      <motion.section variants={m.row} className="text-[11.5px] text-muted-foreground font-mono">
         <div>record {call._id}</div>
         {call.call_id && <div>call {call.call_id}</div>}
-      </section>
-    </div>
+      </motion.section>
+    </motion.div>
   );
 }
 
 function SentRow({ item }: { item: SentItem }) {
+  const m = useMotion();
   const Icon = item.kind === "email" ? Mail : MessageSquare;
   return (
-    <li className="flex gap-3 rounded-xl border border-border/60 px-3.5 py-2.5">
+    <motion.li variants={m.row} className="flex gap-3 rounded-xl border border-border/60 px-3.5 py-2.5">
       <Icon className="w-4 h-4 mt-0.5 text-muted-foreground shrink-0" />
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-2 text-[11.5px] text-muted-foreground">
@@ -554,19 +685,20 @@ function SentRow({ item }: { item: SentItem }) {
         </div>
         <Clamp text={item.text} lines={4} className="mt-1 text-[13px] whitespace-pre-wrap break-words text-foreground/90" />
       </div>
-    </li>
+    </motion.li>
   );
 }
 
 // ─── Small parts ──────────────────────────────────────────────
 
-function Fact({ icon: Icon, label, value, warn = false }: { icon: React.ComponentType<{ className?: string }>; label: string; value: string; warn?: boolean }) {
+function Fact({ icon: Icon, label, children }: { icon: React.ComponentType<{ className?: string }>; label: string; children: React.ReactNode }) {
+  const m = useMotion();
   return (
-    <div className={cn("inline-flex items-center gap-2 rounded-lg border border-border/60 px-3 py-2 text-[13.5px]", warn && "border-red-200 dark:border-red-500/30")}>
-      <Icon className={cn("w-3.5 h-3.5", warn ? "text-red-500" : "text-muted-foreground")} />
+    <motion.div variants={m.row} whileHover={m.reduce ? undefined : { y: -1 }} className="inline-flex items-center gap-2 rounded-lg border border-border/60 px-3 py-2 text-[13.5px]">
+      <Icon className="w-3.5 h-3.5 text-muted-foreground" />
       <span className="text-muted-foreground">{label}</span>
-      <span className="font-medium truncate max-w-[220px]">{value}</span>
-    </div>
+      {children}
+    </motion.div>
   );
 }
 
@@ -584,7 +716,7 @@ function Clamp({ text, lines = 6, className = "" }: { text: string; lines?: numb
   const long = text.length > 420 || text.split("\n").length > lines;
   return (
     <div>
-      <p className={className} style={!open && long ? { display: "-webkit-box", WebkitLineClamp: lines, WebkitBoxOrient: "vertical", overflow: "hidden" } : undefined}>{text}</p>
+      <motion.p layout="position" className={className} style={!open && long ? { display: "-webkit-box", WebkitLineClamp: lines, WebkitBoxOrient: "vertical", overflow: "hidden" } : undefined}>{text}</motion.p>
       {long && <button onClick={() => setOpen((o) => !o)} className="mt-1 text-[12px] text-muted-foreground hover:text-foreground underline underline-offset-4 cursor-pointer">{open ? "Show less" : "Show all"}</button>}
     </div>
   );
@@ -593,9 +725,13 @@ function Clamp({ text, lines = 6, className = "" }: { text: string; lines?: numb
 function Empty({ icon: Icon, title, text, pulse = false }: { icon: React.ComponentType<{ className?: string }>; title: string; text: string; pulse?: boolean }) {
   return (
     <div className="rounded-2xl border border-dashed border-border/70 px-6 py-12 text-center">
-      <div className={cn("mx-auto w-11 h-11 rounded-2xl bg-muted/60 dark:bg-white/5 flex items-center justify-center", pulse && "animate-pulse")}>
+      <motion.div
+        initial={{ scale: 0.8, opacity: 0 }} animate={pulse ? { scale: [1, 1.06, 1], opacity: 1 } : { scale: 1, opacity: 1 }}
+        transition={pulse ? { duration: 1.6, repeat: Infinity, ease: "easeInOut" } : SPRING}
+        className="mx-auto w-11 h-11 rounded-2xl bg-muted/60 dark:bg-white/5 flex items-center justify-center"
+      >
         <Icon className="w-5 h-5 text-muted-foreground" />
-      </div>
+      </motion.div>
       <h3 className="mt-3 text-[14.5px] font-semibold">{title}</h3>
       <p className="mt-1 text-[13px] text-muted-foreground max-w-sm mx-auto">{text}</p>
     </div>
