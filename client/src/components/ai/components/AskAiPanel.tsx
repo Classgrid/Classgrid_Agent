@@ -4872,13 +4872,13 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
             ? (payload.error === "ai_quota_exceeded" && payload.resetDate ? `${payload.error}|${payload.resetDate}` : payload.error)
             : "Unable to answer right now. Please try again."
         );
-      }
+      } 
 
       // --- SSE STREAM READER ---
       const contentType = response.headers.get("content-type") || "";
 
       if (contentType.includes("text/event-stream") && response.body) {
-        const reader = response.body.getReader();
+        let reader: ReadableStreamDefaultReader<any> = response.body.getReader();
         const decoder = new TextDecoder();
         let buffer = "";
         let finalPayload: any = null;
@@ -4888,9 +4888,47 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
         // is shown under it, with the reset time the server sends
         let limitEndedReset: string | null = null;
         let hasReceivedTokens = false;
+        // Desktop app and Classgrid Code: an answer can be picked up again after an internet drop. The server names
+        // it (turn_info) and keeps its events for a few minutes; the events seen so far are counted, so after a drop
+        // the chat asks for the rest from that number and the answer goes on, like Claude Code's retry. Steps already
+        // run on this computer are remembered by id so a replayed event never runs one twice.
+        let turnId: string | null = null;
+        let eventsSeen = 0;
+        const handledPcCalls = new Set<string>();
+        const reattach = async (): Promise<ReadableStreamDefaultReader<any> | null> => {
+          if (!turnId) return null;
+          for (let attempt = 0; attempt < 60 && !controller.signal.aborted; attempt++) {
+            await new Promise((r) => setTimeout(r, Math.min(5000, 1000 * (attempt + 1))));
+            if (controller.signal.aborted) return null;
+            try {
+              const r = await fetchWithRescue(`${apiBase}/api/ai/turn/${turnId}/events?from=${eventsSeen}`, { credentials: "include", signal: controller.signal });
+              if (r.status === 404 || r.status === 403) return null; // the answer is gone (it was stopped, or an older server)
+              if (r.ok && r.body) { buffer = ""; return r.body.getReader(); }
+            } catch { /* still offline: try again */ }
+          }
+          return null;
+        };
+        const readNext = async (): Promise<ReadableStreamReadResult<any>> => {
+          for (;;) {
+            try {
+              const chunk = await reader.read();
+              if (chunk.done && turnId && !finalPayload && !streamError && !chatEndedSeen) {
+                // Cut off before the answer ended: come back for the rest
+                const again = await reattach();
+                if (again) { reader = again; continue; }
+              }
+              return chunk;
+            } catch (e) {
+              if (controller.signal.aborted || !turnId) throw e;
+              const again = await reattach();
+              if (!again) throw e;
+              reader = again;
+            }
+          }
+        };
 
         while (true) {
-          const { done, value } = await reader.read();
+          const { done, value } = await readNext();
           if (done) break;
 
           buffer += decoder.decode(value, { stream: true });
@@ -4901,10 +4939,13 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
           for (const part of parts) {
             const dataMatch = part.match(/^data:\s*(.+)$/m);
             if (!dataMatch) continue;
+            eventsSeen++;
 
             try {
               const event = JSON.parse(dataMatch[1]);
-              if (event.type === "status") {
+              if (event.type === "turn_info" && event.turnId) {
+                turnId = String(event.turnId);
+              } else if (event.type === "status") {
                 setThinkingLabel(
                   event.label === "searching" ? "Searching the web" :
                     event.label === "reading page" ? "Reading webpage" :
@@ -4982,8 +5023,12 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
                   return [...prev, { id: createMessageId("assistant"), role: "assistant", content: "", createdAt: Date.now(), checkpoint: event.id }];
                 });
               } else if (event.type === "pc_tool_call") {
-                // A step for this computer: run it and post the reply, without holding up the stream
-                if (canRunPcTools && event.id) void runPcToolCall(event);
+                // A step for this computer: run it and post the reply, without holding up the stream (once per id,
+                // even when the event comes again after a reconnect)
+                if (canRunPcTools && event.id && !handledPcCalls.has(String(event.id))) {
+                  handledPcCalls.add(String(event.id));
+                  void runPcToolCall(event);
+                }
               } else if (event.type === "file_update") {
                 setSandboxFiles(prev => ({ ...prev, ...(event.files || {}) }));
               } else if (event.type === "plan_step_update") {

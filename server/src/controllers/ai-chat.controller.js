@@ -1814,7 +1814,14 @@ export const streamAskAi = async (req, res) => {
     // answer goes down this stream as pc_tool_call and the app posts the reply back (local-runner.service.js
     // pcExecutors). Not for the website, headless task turns or wake-ups (no app is on their stream).
     let unregisterPcExecutor = null;
+    let durableTurn = null;
     if (body.pcTools === true && !fromWebsite && !body.taskOrigin && !body.wakeUp && userId) {
+        // The answer survives the app's internet dropping: its events are kept under a turn id and the app comes back
+        // for them (GET /api/ai/turn/:id/events); from here on `res` is the facade that keeps them (durable-turn.service.js)
+        const { startDurableTurn } = await import("../services/durable-turn.service.js");
+        durableTurn = startDurableTurn(res, userId);
+        res = durableTurn.res;
+        res.write(`data: ${JSON.stringify({ type: "turn_info", turnId: durableTurn.id })}\n\n`);
         const { registerPcExecutor } = await import("../services/local-runner.service.js");
         const alive = () => !res.writableEnded && !res.destroyed;
         unregisterPcExecutor = registerPcExecutor(userId, {
@@ -6193,11 +6200,17 @@ If a tool fails, never show the error message; say only: "Something went wrong o
         let requestAborted = false;
         const streamAbort = new AbortController();
 
-        req.on('close', () => {
-            requestAborted = true;
-            streamAbort.abort();
-            if (!res.writableEnded) res.end();
-        });
+        if (durableTurn) {
+            // The app's connection dropping doesn't stop this answer: it waits for the app to come back
+            // (durable-turn.service.js); only the grace period running out stops it
+            durableTurn.onAbort(() => { requestAborted = true; streamAbort.abort(); });
+        } else {
+            req.on('close', () => {
+                requestAborted = true;
+                streamAbort.abort();
+                if (!res.writableEnded) res.end();
+            });
+        }
 
         // One answer at a time in a chat: a new message from the same person stops their older answer that is still
         // running there (one the page lost track of would otherwise go on hidden, waiting on permission prompts and
@@ -7186,6 +7199,14 @@ export const pcToolResult = async (req, res) => {
     if (state === "bad_id") return res.status(400).json({ error: "Bad tool call id" });
     if (state === "unknown") return res.status(404).json({ error: "Unknown tool call" });
     res.json({ ok: true });
+};
+
+// The desktop app comes back for an answer after its internet dropped (turn_info on /ask gave the id): it gets every
+// event from number `from` on, then the live stream (durable-turn.service.js)
+export const turnEvents = async (req, res) => {
+    const { attachToTurn } = await import("../services/durable-turn.service.js");
+    const ok = attachToTurn(String(req.params?.id || ""), String(req.user?.id), res, Number(req.query?.from) || 0);
+    if (!ok) res.status(404).json({ error: "This answer isn't here any more" });
 };
 
 // A background command on the user's computer finished (the desktop app tells it over HTTP, like every other step
