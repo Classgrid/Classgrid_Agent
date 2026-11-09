@@ -4833,12 +4833,14 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
         }
         await postTurnCmd({ type: "round_done", roundId });
       };
+      // The request as sent, kept so the same answer can be asked for again after a server restart (resumeTurn)
+      let requestBodyText = "";
       const response = await fetchWithRescue(endpoint, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         credentials: "include",
         signal: controller.signal,
-        body: JSON.stringify({
+        body: (requestBodyText = JSON.stringify({
           question: apiQuestion,
           // The app runs the AI's steps on this computer itself (see runPcToolCall above) and drives the loop
           pcTools: canRunPcTools ? true : undefined,
@@ -4905,7 +4907,7 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
             pageHistory: pageHistory,
             summary: pageContext?.summary || (typeof window !== "undefined" ? (window as any).classgrid_current_ticket_context : undefined),
           },
-        }),
+        })),
       });
 
       // Error responses (403 ban, 429 rate-limit) are still JSON
@@ -4946,6 +4948,30 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
         let turnId: string | null = null;
         let eventsSeen = 0;
         const handledPcCalls = new Set<string>();
+        const resumedTurns = new Set<string>();
+        // The server doesn't know this answer any more (it restarted): ask for the same answer again; its rounds saved
+        // in Redis let it go on from where it was, like Claude Code retrying its request
+        const resumeAfterRestart = async (): Promise<ReadableStreamDefaultReader<any> | null> => {
+          if (!turnId || resumedTurns.has(turnId) || !requestBodyText) return null;
+          resumedTurns.add(turnId);
+          const oldTurn = turnId;
+          try {
+            const r = await fetchWithRescue(endpoint, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              credentials: "include",
+              signal: controller.signal,
+              body: JSON.stringify({ ...JSON.parse(requestBodyText), resumeTurn: oldTurn }),
+            });
+            if (!r.ok || !r.body || !(r.headers.get("content-type") || "").includes("text/event-stream")) return null;
+            // A fresh answer stream: its own event numbering and its own id (turn_info)
+            buffer = "";
+            eventsSeen = 0;
+            turnId = null;
+            if (activeTurnIdRef.current === oldTurn) activeTurnIdRef.current = null;
+            return r.body.getReader();
+          } catch { return null; }
+        };
         const reattach = async (): Promise<ReadableStreamDefaultReader<any> | null> => {
           if (!turnId) return null;
           for (let attempt = 0; attempt < 60 && !controller.signal.aborted; attempt++) {
@@ -4953,7 +4979,8 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
             if (controller.signal.aborted) return null;
             try {
               const r = await fetchWithRescue(`${apiBase}/api/ai/turn/${turnId}/events?from=${eventsSeen}`, { credentials: "include", signal: controller.signal });
-              if (r.status === 404 || r.status === 403) return null; // the answer is gone (it was stopped, or an older server)
+              if (r.status === 403) return null;
+              if (r.status === 404) return await resumeAfterRestart(); // the server restarted (or the answer is long gone)
               if (r.ok && r.body) { buffer = ""; return r.body.getReader(); }
             } catch { /* still offline: try again */ }
           }

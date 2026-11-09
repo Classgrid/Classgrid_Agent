@@ -499,6 +499,12 @@ export async function streamClaudeChat({
     // The desktop app driving the loop (local-loop.service.js): after a round with tool calls it decides which run,
     // in what order; `toolDriver(calls, { run, text })` resolves with Map(callId -> { content, isError })
     toolDriver = null,
+    // Going on with an answer after a server restart (turn-state.service.js): the conversation and usage saved after
+    // its last round replace a fresh start; onConversation(conversation, usage) is called after every round with tools
+    resumeProvider = null, // "claude" for a conversation saved by this loop; another loop's is ignored
+    resumeConversation = null,
+    resumeUsage = null,
+    onConversation = null,
 }) {
     if (!CLAUDE_CHAT_MODELS.has(model)) throw new StreamChatError(`Unsupported Claude model: ${model}`);
     if (!process.env.ANTHROPIC_API_KEY) throw new StreamChatError("ANTHROPIC_API_KEY is not set");
@@ -506,7 +512,8 @@ export async function streamClaudeChat({
     const systemText = messages.filter((m) => m.role === "system").map((m) => m.content).join("\n\n");
     const system = toSystemBlocks(systemText, systemCacheBoundary);
     const attachmentBlocks = await toAttachmentBlocks(attachments, signal);
-    const conversation = toClaudeMessages(messages, attachmentBlocks);
+    const resumed = resumeProvider === "claude" && Array.isArray(resumeConversation) && resumeConversation.length > 0;
+    const conversation = resumed ? resumeConversation : toClaudeMessages(messages, attachmentBlocks);
     // With an image attached Claude looks at it directly, so the analyze_image detour is not offered.
     const hasNativeImage = attachmentBlocks.some((b) => b.type === "image");
     const claudeTools = withToolSearch(toClaudeTools(hasNativeImage ? tools.filter((t) => t?.function?.name !== "analyze_image") : tools), loadedToolNames);
@@ -570,6 +577,7 @@ export async function streamClaudeChat({
         prompt_tokens: 0, completion_tokens: 0, total_tokens: 0,
         input_tokens: 0, output_tokens: 0, cache_read_input_tokens: 0, cache_creation_input_tokens: 0,
     };
+    if (resumed && resumeUsage) addUsage(usage, resumeUsage); // what the rounds before the restart already used
     const betas = ["thinking-binding-controls-2026-08-01"];
     if (FALLBACK_MODELS.has(model)) betas.push("server-side-fallback-2026-07-01");
 
@@ -592,7 +600,10 @@ export async function streamClaudeChat({
         ...(FALLBACK_MODELS.has(model) ? { fallbacks: "default" } : {}),
     };
 
-    const earlierCalls = []; // { name, input } of every tool call already handled in this answer
+    // { name, input } of every tool call already handled in this answer (after a restart: the ones in the saved rounds)
+    const earlierCalls = resumed
+        ? conversation.flatMap((m) => (m.role === "assistant" && Array.isArray(m.content) ? m.content.filter((b) => b?.type === "tool_use").map((b) => ({ name: b.name, input: JSON.stringify(b.input ?? {}) })) : []))
+        : [];
     let depth = 0;
     let toolsRun = 0;
     let hadReasoning = false;
@@ -852,6 +863,7 @@ export async function streamClaudeChat({
             // All results go back in one user message, which keeps Claude making parallel calls.
             conversation.push({ role: "user", content: [...toolResults, ...extraTexts.map((text) => ({ type: "text", text: `Rules for the tools just loaded:\n${text}` }))] });
             earlierCalls.push(...callsThisRound);
+            if (onConversation) { try { await onConversation(conversation, usage); } catch { /* the answer goes on without the saved copy */ } }
             if (stopAnswer) return { answer: stopAnswer, usage, toolsRun, servedModel };
             if (countsTowardDepth) depth++;
         }

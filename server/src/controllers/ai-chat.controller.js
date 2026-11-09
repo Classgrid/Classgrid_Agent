@@ -1816,6 +1816,7 @@ export const streamAskAi = async (req, res) => {
     let unregisterPcExecutor = null;
     let durableTurn = null;
     let localLoop = null; // the app driving the loop (set below, once the abort controls exist)
+    let resumeState = null; // an answer going on after a server restart (turn-state.service.js)
     if (body.pcTools === true && !fromWebsite && !body.taskOrigin && !body.wakeUp && userId) {
         // The answer survives the app's internet dropping: its events are kept under a turn id and the app comes back
         // for them (GET /api/ai/turn/:id/events); from here on `res` is the facade that keeps them (durable-turn.service.js)
@@ -2070,8 +2071,21 @@ export const streamAskAi = async (req, res) => {
             }
         }
 
+        // Going on with an answer after a server restart: the app asks for the same answer again (resumeTurn), its
+        // rounds saved in Redis replace a fresh start, and the user's message isn't saved a second time
+        if (durableTurn && typeof body.resumeTurn === "string" && body.resumeTurn) {
+            const { loadTurnState } = await import("../services/turn-state.service.js");
+            const saved = await loadTurnState(body.resumeTurn);
+            if (saved && saved.userId === String(userId) && saved.sessionId === String(sessionId) && Array.isArray(saved.conversation) && saved.conversation.length) {
+                resumeState = saved;
+                console.log(`[AI-STREAM] going on with answer ${body.resumeTurn} after a restart (${saved.steps?.length || 0} steps so far)`);
+            } else {
+                res.write(`data: ${JSON.stringify({ type: "error", error: "This answer can't be picked up again. What it did so far is in the chat." })}\n\n`);
+                return;
+            }
+        }
         // 2b. Save user message: to Supabase (source of truth) + Redis (cache) in parallel
-        if (!isIncognito && sessionId && body.question) {
+        if (!isIncognito && sessionId && body.question && !resumeState) {
             saveMessage(sessionId, "user", body.question, body.fileUrls || [], gridSender?.email || null)
                 .then((saved) => {
                     if (gridSender) req.app.get("io")?.to(`aigrid:${sessionId}`).emit("aigrid:update", { sessionId, kind: "messages", by: gridSender.email });
@@ -6282,6 +6296,14 @@ If a tool fails, never show the error message; say only: "Something went wrong o
         // answer, so it never disappears after a reload or when the chat syncs (website, desktop app and Classgrid Code)
         const STOPPED_NOTE = "_(Stopped.)_";
         const FAILED_NOTE = "_(This answer stopped because of an error. Say \"continue\" and it picks up from here.)_";
+        // After every model round with tools, the answer's state so far goes to Redis (the model conversation in its
+        // own format, the steps, the thinking, the usage), so a server restart doesn't end the answer: the app asks for
+        // it again with resumeTurn and it goes on from that round (turn-state.service.js)
+        const saveTurnProgress = durableTurn ? async (conversation, usage) => {
+            const { saveTurnState } = await import("../services/turn-state.service.js");
+            const provider = conversation.some((m) => m?.role === "system" || Array.isArray(m?.tool_calls) || m?.role === "tool") ? "cf" : "claude";
+            await saveTurnState(durableTurn.id, { userId: String(userId), sessionId: String(sessionId), provider, conversation, usage, steps: accSteps, thought: accThought, at: Date.now() });
+        } : null;
         let unfinishedKept = false;
         const keepUnfinishedAnswer = (note) => {
             if (unfinishedKept || isIncognito || !sessionId) return;
@@ -6302,8 +6324,9 @@ If a tool fails, never show the error message; say only: "Something went wrong o
                 if (attempt > 1 && !res.writableEnded) {
                     res.write(`data: ${JSON.stringify({ type: "status", label: "auto-correcting syntax with fallback model..." })}\n\n`);
                 }
-                accThought = "";
-                accSteps = [];
+                // (after a server restart the steps and thinking of the saved rounds are kept, so the saved answer is whole)
+                accThought = attempt === 1 && resumeState ? String(resumeState.thought || "") : "";
+                accSteps = attempt === 1 && resumeState ? [...(resumeState.steps || [])] : [];
                 accSources = [];
 
                 console.log(`[AI-DEBUG] ===== GENERATE START ===== attempt=${attempt} question="${(body.question || '').slice(0, 100)}" messagesCount=${messages.length} timestamp=${new Date().toISOString()}`);
@@ -6414,6 +6437,11 @@ If a tool fails, never show the error message; say only: "Something went wrong o
                                 signal: streamAbort.signal,
                                 // The desktop app driving the loop decides which tool calls run (local-loop.service.js)
                                 toolDriver: localLoop ? localLoop.driver : null,
+                                // Going on after a server restart: the rounds saved in Redis (turn-state.service.js)
+                                resumeProvider: resumeState ? resumeState.provider : null,
+                                resumeConversation: resumeState ? resumeState.conversation : null,
+                                resumeUsage: resumeState ? resumeState.usage : null,
+                                onConversation: saveTurnProgress,
                                 onStatus,
                                 onThought,
                                 onToken
@@ -6507,6 +6535,11 @@ If a tool fails, never show the error message; say only: "Something went wrong o
                                 signal: streamAbort.signal,
                                 // The desktop app driving the loop decides which tool calls run (local-loop.service.js)
                                 toolDriver: localLoop ? localLoop.driver : null,
+                                // Going on after a server restart: the rounds saved in Redis (turn-state.service.js)
+                                resumeProvider: resumeState ? resumeState.provider : null,
+                                resumeConversation: resumeState ? resumeState.conversation : null,
+                                resumeUsage: resumeState ? resumeState.usage : null,
+                                onConversation: saveTurnProgress,
                                 onStatus,
                                 onThought,
                                 onToken
@@ -6833,6 +6866,8 @@ If a tool fails, never show the error message; say only: "Something went wrong o
         if (replacedCheck) clearInterval(replacedCheck);
         if (unregisterPcExecutor) unregisterPcExecutor(); // helpers still working after this use the socket path
         if (localLoop) localLoop.dispose();
+        // The answer ended here: its saved rounds (and the ones of the run it went on from) aren't needed any more
+        if (durableTurn) import("../services/turn-state.service.js").then((m) => { m.clearTurnState(durableTurn.id); if (resumeState && body.resumeTurn) m.clearTurnState(String(body.resumeTurn)); }).catch(() => {});
         // The answer is over: background results that waited for it wake the chat now
         if (runKey) redis.get(runKey).then((newest) => (newest === runId ? redis.del(runKey) : null))
             .then(() => import("../services/chat-wake.service.js")).then((m) => m.wakeIfPending(userId, sessionId)).catch(() => {});

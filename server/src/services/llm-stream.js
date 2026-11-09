@@ -302,16 +302,24 @@ export async function streamChat({
     // The desktop app driving the loop (local-loop.service.js): after a round with tool calls it decides which run,
     // in what order; `toolDriver(calls, { run, text })` resolves with Map(callId -> { content, isError })
     toolDriver = null,
+    // Going on with an answer after a server restart (turn-state.service.js): the conversation and usage saved after
+    // its last round replace a fresh start; onConversation(conversation, usage) is called after every round with tools
+    resumeProvider = null, // "cf" for a conversation saved by this loop; another loop's is ignored
+    resumeConversation = null,
+    resumeUsage = null,
+    onConversation = null,
     // How much the model thinks: "all" (every round, Deep), "first" (plans on the first round, then each round after a
     // tool result goes straight to the next step: those rounds were 8-23 s of thinking each, Normal), "none" (Fast)
     thinking = "all"
 }) {
     // `tools` is re-read every round: load_tools can add tools to the same array mid-answer.
     const currentTools = () => tools.filter(t => t?.function?.name !== "internal_thought_process" && !excludeTools?.has(t?.function?.name));
-    const conversation = [...messages];
+    const resumed = resumeProvider === "cf" && Array.isArray(resumeConversation) && resumeConversation.length > 0;
+    const conversation = resumed ? [...resumeConversation] : [...messages];
     const toolImages = seesImages ? (await import("./llm-stream-anthropic.js")).makeToolImageCollector(signal, conversation) : null;
     // cached_tokens: the input tokens the provider read from its prompt cache (billed lower), over all rounds
     const usage = { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0, cached_tokens: 0 };
+    if (resumed && resumeUsage) for (const k of Object.keys(usage)) usage[k] += Number(resumeUsage[k]) || 0; // the rounds before the restart
     let depth = 0;
     let toolsRun = 0;
     let lastToolFailed = false; // a tool in the last round was missing or failed: the next round doesn't think
@@ -584,6 +592,7 @@ export async function streamChat({
 
             // Tool messages hold only text, so the images follow as one message the model looks at
             if (roundImages.length) conversation.push({ role: "user", content: [{ type: "text", text: "The images from the tool results above. Look at them yourself:" }, ...roundImages] });
+            if (onConversation) { try { await onConversation(conversation, usage); } catch { /* the answer goes on without the saved copy */ } }
             if (stopAnswer) return { answer: stopAnswer, usage, toolsRun };
             if (countsTowardDepth) depth++;
             lastToolFailed = toolFailedThisRound;
