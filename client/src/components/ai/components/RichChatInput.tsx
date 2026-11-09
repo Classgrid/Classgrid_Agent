@@ -93,6 +93,10 @@ const RichChatInput = forwardRef<any, Props>(function RichChatInput(
 ) {
   const elRef = useRef<HTMLDivElement | null>(null);
   const lastValue = useRef<string | null>(null);
+  // Values given to onChange that the panel has not shown back in `value` yet. The panel takes typed text as a
+  // low-priority update, so a redraw of the panel for something else can still carry an older `value`; that older
+  // value is this box's own earlier text coming back, not a new value, and must not be put into the box
+  const pendingEmits = useRef<string[]>([]);
   // Ctrl+K: the link is asked in our own small dialog; the selected text is kept so the link goes on it
   const [linkAsk, setLinkAsk] = useState<{ text: string; range: Range | null } | null>(null);
   const [linkUrl, setLinkUrl] = useState("");
@@ -118,7 +122,20 @@ const RichChatInput = forwardRef<any, Props>(function RichChatInput(
     elRef.current = node;
     if (node && !(node as any).__richReady) {
       (node as any).__richReady = true;
-      Object.defineProperty(node, "value", { configurable: true, get: () => lastValue.current ?? "" });
+      // `el.value = "..."` sets the box at once (the panel clears it this way after a send, since the `value`
+      // prop may not change when the state had not yet caught up with the typing)
+      Object.defineProperty(node, "value", {
+        configurable: true,
+        get: () => lastValue.current ?? "",
+        set: (v: unknown) => {
+          const s = typeof v === "string" ? v : "";
+          pendingEmits.current = [];
+          lastValue.current = s;
+          node.innerHTML = markdownToHtml(s);
+          if (!s) node.style.height = "";
+          if (document.activeElement === node) placeCaretAtEnd(node);
+        },
+      });
       Object.defineProperty(node, "selectionStart", { configurable: true, get: () => caretOffset() });
       Object.defineProperty(node, "selectionEnd", { configurable: true, get: () => caretOffset() });
       const nativeFocus = HTMLElement.prototype.focus;
@@ -137,7 +154,10 @@ const RichChatInput = forwardRef<any, Props>(function RichChatInput(
     const el = elRef.current;
     if (!el) return;
     const v = value || "";
-    if (v === lastValue.current) return;
+    if (v === lastValue.current) { pendingEmits.current = []; return; }
+    const echo = pendingEmits.current.indexOf(v);
+    if (echo >= 0) { pendingEmits.current = pendingEmits.current.slice(echo + 1); return; }
+    pendingEmits.current = [];
     lastValue.current = v;
     el.innerHTML = markdownToHtml(v);
     if (!v) el.style.height = "";
@@ -173,6 +193,7 @@ const RichChatInput = forwardRef<any, Props>(function RichChatInput(
     if (!(el.textContent || "").split(ZWSP).join("").trim() && !el.querySelector("li,pre")) el.innerHTML = "";
     const v = htmlToMarkdown(el.innerHTML);
     lastValue.current = v;
+    pendingEmits.current.push(v);
     onChange?.({ target: el as RichChatTarget, currentTarget: el as RichChatTarget });
   }, [onChange]);
 

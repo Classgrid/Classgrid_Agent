@@ -21,7 +21,7 @@
  * =========================================================================================
  */
 
-import React, { useEffect, useMemo, useRef, useState, useCallback, memo, useContext } from "react";
+import React, { useEffect, useMemo, useRef, useState, useCallback, memo, useContext, startTransition } from "react";
 import { useParams } from "react-router-dom";
 
 import { SidebarTrigger } from "@/components/marketing_ui/sidebar";
@@ -163,7 +163,7 @@ import { MasteroAskStep, masteroCardOpen } from "./stepper/MasteroAskStep";
 import { PermissionCard, PermissionModePicker, PERMISSION_MODE_KEY, readPermissionMode, type PermissionMode, type PermissionRequest } from "./PermissionControls";
 
 import AIThinkingBlock from "./AIThinkingBlock";
-import RichChatInput from "./RichChatInput";
+import RichChatInput, { type RichChatTarget } from "./RichChatInput";
 import ReactMarkdown from "react-markdown";
 import remarkMath from "remark-math";
 import remarkGfm from "remark-gfm";
@@ -2775,9 +2775,52 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
     setSlashMenuOpen(!!m);
     if (m) { setSlashMenuQuery(m[1] || ""); setSlashMenuIndex(0); }
   };
+  // What is in the chat box right now. The box keeps its own text; the `input` state follows it a moment later
+  // (see onTyped), so anything that acts on the text at once (send, a menu pick) reads it from the box
+  const typedNow = (): string => {
+    const v = (inputRef.current as any)?.value;
+    return typeof v === "string" ? v : input;
+  };
+  // Empties the box itself too: right after a send the `input` state may still hold older text, so setting it to
+  // "" would not always reach the box
+  const clearTyped = () => {
+    setInput("");
+    const el = inputRef.current as any;
+    if (el && typeof el.value === "string") el.value = "";
+  };
+  // A key typed in the chat box: the box shows the key at once on its own; the panel's state (and so the panel's
+  // redraw, which is big) follows as a low-priority update that can wait behind the next keys. Only the box's own
+  // size is set right away
+  const onTyped = (event: { target: RichChatTarget }) => {
+    const val = event.target.value;
+    const wordCount = val.trim().split(/\s+/).filter(w => w.length > 0).length;
+    if (val.length === 0) {
+      event.target.style.height = '';
+    } else if (!isExpandedBox || wordCount < 90) {
+      event.target.style.height = 'auto';
+      event.target.style.height = `${Math.min(event.target.scrollHeight, 180)}px`;
+    }
+    const cursorPosition = event.target.selectionStart;
+    const atMatch = val.slice(0, cursorPosition).match(/(?:^|\s)@(\S*)$/);
+    startTransition(() => {
+      if (val !== input) typingRenderRef.current = true;
+      setInput(val);
+      if (isExpandedBox && wordCount < 90) setIsExpandedBox(false);
+      // @ mention logic
+      if (atMatch) {
+        setAtMenuOpen(true);
+        setAtMenuQuery(atMatch[1] || "");
+        setAtMenuSelectedIndex(0);
+      } else {
+        setAtMenuOpen(false);
+      }
+      updateSlashMenu(val, cursorPosition);
+    });
+  };
   const pickSlashCommand = (c: SlashCommand) => {
-    const cursor = (inputRef.current as any)?.selectionStart ?? input.length;
-    const rest = input.slice(cursor).trimStart();
+    const text = typedNow();
+    const cursor = (inputRef.current as any)?.selectionStart ?? text.length;
+    const rest = text.slice(cursor).trimStart();
     setSlashMenuOpen(false);
     if (c.id === "plugin") {
       setInput(rest);
@@ -3139,7 +3182,7 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
 
     // ONLY clear drafts if the user actually changed (security)
     if (userChanged) {
-      setInput("");
+      clearTyped();
       setAttachedFiles([]);
       setPastedTexts([]);
       localStorage.removeItem("askAiDraftInput");
@@ -3203,7 +3246,7 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
       setMessages([]);
       setSessionId(null);
       setChatEnded(null);
-      setInput("");
+      clearTyped();
       setAttachedFiles([]);
       setLastSentDocsPath(null);
 
@@ -3905,7 +3948,7 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
 
   function handleClearChat() {
     setMessages([]);
-    setInput("");
+    clearTyped();
     setSessionId(null);
     setAttachedFiles([]);
     setLastSentDocsPath(null);
@@ -3967,7 +4010,8 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
 
   const hasDocsContext = pageContext?.path?.startsWith("/docs") && pageContext.path !== lastSentDocsPath;
   const isAnyFileUploading = attachedFiles.some(f => f.status === "uploading");
-  const canSubmit = (input.trim().length > 0 || hasDocsContext || attachedFiles.length > 0 || pastedTexts.length > 0 || fileMentions.length > 0 || (isStudio && codeNotes.length > 0)) && !isAnyFileUploading && !gridBlockedBy;
+  const canSubmitWith = (text: string) => (text.trim().length > 0 || hasDocsContext || attachedFiles.length > 0 || pastedTexts.length > 0 || fileMentions.length > 0 || (isStudio && codeNotes.length > 0)) && !isAnyFileUploading && !gridBlockedBy;
+  const canSubmit = canSubmitWith(input);
   // A file dropped on the chat box from the Files tab becomes a chip in it
   useEffect(() => {
     const inBox = (t: EventTarget | null) => !!(t as HTMLElement | null)?.closest?.("form")?.querySelector?.("#ask-ai-input");
@@ -4435,7 +4479,7 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
 
     setError("");
     if (!hiddenSend) {
-      setInput("");
+      clearTyped();
       setAttachedFiles([]);
       setPastedTexts([]);
       localStorage.removeItem("askAiDraftInput");
@@ -5156,9 +5200,11 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
   }
 
   function submitInput() {
-    if (!canSubmit) return;
+    // The box's own text, not the `input` state: the last keys typed may not have reached the state yet
+    const typed = typedNow();
+    if (!canSubmitWith(typed)) return;
 
-    let finalInput = input;
+    let finalInput = typed;
     // Dropped files go first, as file names
     if (fileMentions.length) {
       finalInput = `${fileMentions.map((p) => `\`${p}\``).join(" ")} ${finalInput}`.trim();
@@ -5186,7 +5232,7 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
         }
       ]);
       // Clear inputs since it's safely queued
-      setInput("");
+      clearTyped();
       setAttachedFiles([]);
       setPastedTexts([]);
       localStorage.removeItem("askAiDraftInput");
@@ -6401,9 +6447,10 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
                                       if (item.action) {
                                         item.action();
                                       } else {
-                                        const cursorPosition = (inputRef.current as any)?.selectionStart || input.length;
-                                        const textBeforeCursor = input.slice(0, cursorPosition);
-                                        const textAfterCursor = input.slice(cursorPosition);
+                                        const text = typedNow();
+                                        const cursorPosition = (inputRef.current as any)?.selectionStart || text.length;
+                                        const textBeforeCursor = text.slice(0, cursorPosition);
+                                        const textAfterCursor = text.slice(cursorPosition);
                                         const lastAtIndex = textBeforeCursor.lastIndexOf('@');
                                         const newInput = textBeforeCursor.slice(0, lastAtIndex) + '@' + item.name + ' ' + textAfterCursor;
                                         setInput(newInput);
@@ -6508,34 +6555,7 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
                     ref={inputRef as any}
                     disabled={isRecording || isTranscribing || !!chatEnded}
                     value={input}
-                    onChange={(event) => {
-                      const val = event.target.value;
-                      if (val !== input) typingRenderRef.current = true;
-                      setInput(val);
-                      const wordCount = val.trim().split(/\s+/).filter(w => w.length > 0).length;
-                      if (isExpandedBox && wordCount < 90) {
-                        setIsExpandedBox(false);
-                      }
-                      if (val.length === 0) {
-                        event.target.style.height = '';
-                      } else if (!isExpandedBox || wordCount < 90) {
-                        event.target.style.height = 'auto';
-                        event.target.style.height = `${Math.min(event.target.scrollHeight, 180)}px`;
-                      }
-
-                      // @ mention logic
-                      const cursorPosition = event.target.selectionStart;
-                      const textBeforeCursor = val.slice(0, cursorPosition);
-                      const atMatch = textBeforeCursor.match(/(?:^|\s)@(\S*)$/);
-                      if (atMatch) {
-                        setAtMenuOpen(true);
-                        setAtMenuQuery(atMatch[1]);
-                        setAtMenuSelectedIndex(0);
-                      } else {
-                        setAtMenuOpen(false);
-                      }
-                      updateSlashMenu(val, cursorPosition);
-                    }}
+                    onChange={onTyped}
                     onPaste={handlePaste}
                     onKeyDown={(e) => {
                       if (slashMenuKey(e)) return;
@@ -6571,9 +6591,10 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
                             if (selectedItem.action) {
                               selectedItem.action();
                             } else {
-                              const cursorPosition = (inputRef.current as any)?.selectionStart || input.length;
-                              const textBeforeCursor = input.slice(0, cursorPosition);
-                              const textAfterCursor = input.slice(cursorPosition);
+                              const text = typedNow();
+                              const cursorPosition = (inputRef.current as any)?.selectionStart || text.length;
+                              const textBeforeCursor = text.slice(0, cursorPosition);
+                              const textAfterCursor = text.slice(cursorPosition);
                               const lastAtIndex = textBeforeCursor.lastIndexOf('@');
                               const newInput = textBeforeCursor.slice(0, lastAtIndex) + '@' + selectedItem.name + ' ' + textAfterCursor;
                               setInput(newInput);
@@ -6591,7 +6612,7 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
 
                       if (e.key === "Enter" && !e.shiftKey) {
                         e.preventDefault();
-                        if (canSubmit) {
+                        if (canSubmitWith(typedNow())) {
                           submitInput();
                           setIsExpandedBox(false);
                           setAtMenuOpen(false);
@@ -7199,9 +7220,10 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
                                                 if (item.action) {
                                                   item.action();
                                                 } else {
-                                                  const cursorPosition = (inputRef.current as any)?.selectionStart || input.length;
-                                                  const textBeforeCursor = input.slice(0, cursorPosition);
-                                                  const textAfterCursor = input.slice(cursorPosition);
+                                                  const text = typedNow();
+                                                  const cursorPosition = (inputRef.current as any)?.selectionStart || text.length;
+                                                  const textBeforeCursor = text.slice(0, cursorPosition);
+                                                  const textAfterCursor = text.slice(cursorPosition);
                                                   const lastAtIndex = textBeforeCursor.lastIndexOf('@');
                                                   const newInput = textBeforeCursor.slice(0, lastAtIndex) + '@' + item.name + ' ' + textAfterCursor;
                                                   setInput(newInput);
@@ -7253,34 +7275,7 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
                               ref={inputRef as any}
                               disabled={isRecording || isTranscribing}
                               value={input}
-                              onChange={(event) => {
-                                const val = event.target.value;
-                                if (val !== input) typingRenderRef.current = true;
-                                setInput(val);
-                                const wordCount = val.trim().split(/\s+/).filter(w => w.length > 0).length;
-                                if (isExpandedBox && wordCount < 90) {
-                                  setIsExpandedBox(false);
-                                }
-                                if (val.length === 0) {
-                                  event.target.style.height = '';
-                                } else if (!isExpandedBox || wordCount < 90) {
-                                  event.target.style.height = 'auto';
-                                  event.target.style.height = `${Math.min(event.target.scrollHeight, 180)}px`;
-                                }
-
-                                // @ mention logic
-                                const cursorPosition = event.target.selectionStart;
-                                const textBeforeCursor = val.slice(0, cursorPosition);
-                                const atMatch = textBeforeCursor.match(/(?:^|\s)@(\S*)$/);
-                                if (atMatch) {
-                                  setAtMenuOpen(true);
-                                  setAtMenuQuery(atMatch[1]);
-                                  setAtMenuSelectedIndex(0);
-                                } else {
-                                  setAtMenuOpen(false);
-                                }
-                                updateSlashMenu(val, cursorPosition);
-                              }}
+                              onChange={onTyped}
                               onPaste={handlePaste}
                               onKeyDown={(e) => {
                                 if (slashMenuKey(e)) return;
@@ -7316,9 +7311,10 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
                                       if (selectedItem.action) {
                                         selectedItem.action();
                                       } else {
-                                        const cursorPosition = (inputRef.current as any)?.selectionStart || input.length;
-                                        const textBeforeCursor = input.slice(0, cursorPosition);
-                                        const textAfterCursor = input.slice(cursorPosition);
+                                        const text = typedNow();
+                                        const cursorPosition = (inputRef.current as any)?.selectionStart || text.length;
+                                        const textBeforeCursor = text.slice(0, cursorPosition);
+                                        const textAfterCursor = text.slice(cursorPosition);
                                         const lastAtIndex = textBeforeCursor.lastIndexOf('@');
                                         const newInput = textBeforeCursor.slice(0, lastAtIndex) + '@' + selectedItem.name + ' ' + textAfterCursor;
                                         setInput(newInput);
@@ -7336,7 +7332,7 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
 
                                 if (e.key === "Enter" && !e.shiftKey) {
                                   e.preventDefault();
-                                  if (canSubmit) {
+                                  if (canSubmitWith(typedNow())) {
                                     submitInput();
                                     setIsExpandedBox(false);
                                     setAtMenuOpen(false);
