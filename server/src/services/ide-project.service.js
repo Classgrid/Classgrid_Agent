@@ -1227,14 +1227,39 @@ export async function masteroAutoPush(userId) {
 // cloud) first gets the newest code from GitHub's main branch, so work done in the other place is here too and the two
 // never drift apart. The user's own changes here are kept (rebase --autostash); when both sides changed the same lines
 // it stops and nothing is lost. Answers one short line for the AI ("" when there was nothing new).
+// The pull ran before every answer, so a chat waited for git on the user's computer (or the cloud) each time, even when
+// GitHub had nothing new: minutes on a slow connection (2026-11-09). Now GitHub is asked first (one quick request for
+// where each of the repo's branches is); when no branch moved since this copy's last good pull, there's nothing to get.
+const MASTERO_PULLED = (projectId, place) => `mastero:pulled:${projectId}:${place}`;
+async function githubBranchesNow(repo, key) {
+  try {
+    const r = await fetch(`https://api.github.com/repos/${repo}/branches?per_page=100`, {
+      headers: { ...(key ? { Authorization: `Bearer ${key}` } : {}), Accept: "application/vnd.github+json", "User-Agent": "Classgrid" },
+      signal: AbortSignal.timeout(4000),
+    });
+    if (!r.ok) return null;
+    const list = await r.json();
+    if (!Array.isArray(list) || list.length >= 100) return null; // more than one page: pulled as before
+    return list.map((b) => `${b.name}:${b.commit?.sha}`).sort().join(",");
+  } catch {
+    return null; // GitHub didn't answer in time: pulled as before
+  }
+}
 export async function pullMastero(project) {
   if (!project?.mastero || !project.repo) return "";
   const owner = await githubUser(project.owner, "github_name github_email").catch(() => null);
   const key = owner?.github_access_token;
+  const githubNow = await githubBranchesNow(project.repo, key);
+  const pulledBefore = async (place) => !!githubNow && (await redis.get(MASTERO_PULLED(project._id, place)).catch(() => null)) === githubNow;
+  const pulledUpTo = (place) => (githubNow ? redis.set(MASTERO_PULLED(project._id, place), githubNow, "EX", 7 * 24 * 60 * 60).catch(() => {}) : null);
   if (project.bothPlaces) {
+    // (the computer gets every branch from GitHub when it pulls, so one mark covers whichever branch it is on)
+    const place = `computer:${project.localPath || ""}`;
+    if (await pulledBefore(place)) return "";
     const { callLocal } = await import("./local-runner.service.js");
     const out = String(await callLocal(project, "sync_repo", { mode: "pull", repo: project.repo, token: key, name: owner?.github_name, email: owner?.github_email }).catch((e) => `Error: ${e.message}`));
     if (/^Error/.test(out)) return `Getting the newest code from GitHub into the user's computer copy didn't work: ${out.replace(/^Error:\s*(?:[A-Z_]{4,}\s+)?/, "").slice(0, 300)} Tell the user in one short line.`;
+    await pulledUpTo(place);
     return /Got \d+ new change/.test(out) ? `${out.trim().split("\n").pop()} (work done in the cloud copy, now on the user's computer).` : "";
   }
   if (!key) return "";
@@ -1247,16 +1272,23 @@ export async function pullMastero(project) {
     const auth = Buffer.from(`x-access-token:${key}`).toString("base64");
     const gitAuth = `GIT_TERMINAL_PROMPT=0 GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=http.https://github.com/.extraheader GIT_CONFIG_VALUE_0="AUTHORIZATION: basic ${auth}"`;
     const branch = (await ssh.execCommand(`git -C ${q(dir)} rev-parse --abbrev-ref HEAD`)).stdout.trim() || "main";
+    // (the cloud copy gets only its own branch, so the mark is per branch)
+    const place = `cloud:${branch}`;
+    if (await pulledBefore(place)) return "";
     const got = await ssh.execCommand(`${gitAuth} git -C ${q(dir)} fetch -q origin ${q(branch)}`);
     if (got.code) return "";
     const { stdout: behind } = await ssh.execCommand(`git -C ${q(dir)} rev-list --count HEAD..FETCH_HEAD`);
     const n = Number(behind.trim()) || 0;
-    if (!n) return "";
+    if (!n) {
+      await pulledUpTo(place);
+      return "";
+    }
     const pulled = await ssh.execCommand(`git -C ${q(dir)} -c user.name=Classgrid -c user.email=agent@classgrid.in rebase -q --autostash FETCH_HEAD`);
     if (pulled.code) {
       await ssh.execCommand(`git -C ${q(dir)} rebase --abort 2>/dev/null`);
       return "GitHub has changes made on the user's computer to the same lines as changes here, so they couldn't be joined by themselves. Nothing was lost. Tell the user in one short line.";
     }
+    await pulledUpTo(place);
     return `Got ${n} new change${n === 1 ? "" : "s"} from GitHub (work done on the user's computer, now in the cloud copy).`;
   } finally {
     ssh.dispose();
