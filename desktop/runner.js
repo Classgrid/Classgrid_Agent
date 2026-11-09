@@ -784,6 +784,7 @@ const tools = {
 // The backend shows the user a permission card before each read, so this is not limited to picked folders.
 // Pictures and documents go back in pieces: the backend's socket takes at most 1 MB per message.
 
+const { documentText } = require("./doctext"); // documents read on this computer (only their text goes to the AI)
 const LOCAL_IMAGE_TYPES = { ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".gif": "image/gif", ".webp": "image/webp", ".bmp": "image/bmp" };
 const LOCAL_DOC_TYPES = { ".pdf": "application/pdf", ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document", ".doc": "application/msword", ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", ".xls": "application/vnd.ms-excel", ".pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation", ".ppt": "application/vnd.ms-powerpoint" };
 const MAX_IMAGE_FILE_BYTES = 10 * 1024 * 1024;
@@ -877,6 +878,27 @@ async function readLocalFile({ path: given, start_line, end_line, chunk = 0 } = 
     return readLocalVideo(full, stat, key);
   }
   const kind = LOCAL_IMAGE_TYPES[ext] ? "image" : LOCAL_DOC_TYPES[ext] ? "document" : LOCAL_AUDIO_TYPES[ext] ? "audio" : null;
+  // A document is read right here and only its text goes to the AI (doctext.js), like a script in the terminal would:
+  // sending the whole file to the server first took minutes on a slow connection. One that can't be read here (a scanned
+  // PDF, an old .doc / .ppt) still goes to the server below, which handles those.
+  if (kind === "document" && !(Number(chunk) > 0) && stat.size <= MAX_DOC_FILE_BYTES) {
+    let doc = null;
+    try { doc = await documentText(fs.readFileSync(full), path.basename(full)); } catch { doc = null; }
+    if (doc && doc.text) {
+      const lines = doc.text.split("\n");
+      const start = Math.min(lines.length, Math.max(1, Number(start_line) || 1));
+      const last = Math.min(lines.length, Number(end_line) || lines.length);
+      const out = [];
+      let chars = 0;
+      for (let n = start; n <= last && (!out.length || chars + lines[n - 1].length <= TEXT_WINDOW_CHARS); n++) {
+        out.push(lines[n - 1].slice(0, TEXT_WINDOW_CHARS));
+        chars += lines[n - 1].length + 1;
+      }
+      const end = start + out.length - 1;
+      const more = end < lines.length ? ` To read more, call read_local_file again with start_line ${end + 1}.` : "";
+      return { text: `${full} (${doc.kind}${doc.detail ? `, ${doc.detail}` : ""}, lines ${start}-${end} of ${lines.length} of its text).${more}\n${out.join("\n")}` };
+    }
+  }
   if (kind) {
     const max = kind === "image" ? MAX_IMAGE_FILE_BYTES : kind === "audio" ? MAX_AUDIO_FILE_BYTES : MAX_DOC_FILE_BYTES;
     if (stat.size > max) throw new Error(`${full} is ${sizeText(stat.size)}; files like this can be read up to ${sizeText(max)}.`);
