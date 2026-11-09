@@ -449,9 +449,15 @@ async function handleUtterance(call, chunks) {
     }
 }
 
-async function runTool(call, t, cutOff) {
+async function runTool(call, t, cutOff, { canHangUp = true } = {}) {
     // A tool request cut off by the answer length limit has a broken input: ask the AI to try again
     if (cutOff) return { content: "Your request was cut off before it was complete. Try again, shorter.", is_error: true };
+    // Owner, 2026-11-09: calls were cut the moment a task was saved or a tool answered, because the AI asked to hang
+    // up in the same turn, before it had told the caller anything. Hanging up is only done in a turn of its own,
+    // after the AI has spoken (its goodbye).
+    if (t.name === "end_call" && !canHangUp) {
+        return { content: "Not hung up: the caller has not heard your answer yet. Tell them the result (or that the task is saved), and when they say goodbye call end_call on its own, with your goodbye in the same reply.", is_error: true };
+    }
     if (t.name === "start_task") {
         const task = String(t.input?.task || "").trim();
         const project = t.input?.project_name ? await findProject(call.user, t.input.project_name).catch(() => null) : null;
@@ -486,14 +492,16 @@ async function reply(call) {
         if (!tools.length || call.ended) return;
         // Every tool the AI asked for gets its answer in one message, even when a tool fails
         // (a request without its answer would make every later turn of the call fail)
+        // The AI may hang up only when end_call is its only tool in this turn and it said something (its goodbye)
+        const canHangUp = tools.length === 1 && !!text;
         const results = [];
         for (const t of tools) {
             let out;
-            try { out = await runTool(call, t, cutOff); } catch (e) { out = { content: `Failed: ${e.message}`, is_error: true }; }
+            try { out = await runTool(call, t, cutOff, { canHangUp }); } catch (e) { out = { content: `Failed: ${e.message}`, is_error: true }; }
             results.push({ type: "tool_result", tool_use_id: t.id, content: String(out.content || "Done."), ...(out.is_error ? { is_error: true } : {}) });
         }
         call.messages.push({ role: "user", content: results });
-        if (tools.some((t) => t.name === "end_call") && !cutOff) {
+        if (canHangUp && tools.some((t) => t.name === "end_call") && !cutOff) {
             await speakingDone(call);
             endCall(call.id, "AI hung up");
             return;
