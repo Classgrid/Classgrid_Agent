@@ -91,13 +91,14 @@ jobs:
           rm -rf "$EXT" && mkdir -p "$EXT/desktop"
           cp -r classgrid-editor/extension/. "$EXT/"
           cp -r desktop/app-editor "$EXT/app"
-          cp desktop/runner.js desktop/doctext.js desktop/aimemory.js desktop/computer.js desktop/chats.js desktop/memory.js desktop/notify-toast.ps1 "$EXT/desktop/"
+          cp desktop/runner.js desktop/doctext.js desktop/pdfpages.js desktop/aimemory.js desktop/computer.js desktop/chats.js desktop/memory.js desktop/notify-toast.ps1 "$EXT/desktop/"
           test -f "$EXT/desktop/notify-toast.ps1" || { echo "notify-toast.ps1 is missing from the editor build" >&2; exit 1; }
           SIO=$(node -p "require('./desktop/package.json').dependencies['socket.io-client']")
           # (and the two document readers doctext.js uses, the same versions as the desktop app)
           XLSXV=$(node -p "require('./desktop/package.json').dependencies['xlsx']")
           PDFV=$(node -p "require('./desktop/package.json').dependencies['pdf-parse']")
-          (cd "$EXT/desktop" && echo '{"name":"classgrid-desktop-parts","private":true}' > package.json && npm install --no-audit --no-fund --omit=dev "socket.io-client@${SIO}" "xlsx@${XLSXV}" "pdf-parse@${PDFV}")
+          WEV=$(node -p "require('./desktop/package.json').dependencies['word-extractor']")
+          (cd "$EXT/desktop" && echo '{"name":"classgrid-desktop-parts","private":true}' > package.json && npm install --no-audit --no-fund --omit=dev "socket.io-client@${SIO}" "xlsx@${XLSXV}" "pdf-parse@${PDFV}" "word-extractor@${WEV}")
           ls "$EXT" "$EXT/desktop"
 
       - name: Get VS Code's open-source code (${{ env.VSCODE_VERSION }})
@@ -165,8 +166,8 @@ jobs:
           node -e "const p=require('./$EXT/package.json');const c=p.contributes.viewsContainers.secondarySidebar.find(x=>x.id==='classgrid');const v=p.contributes.views.classgrid.find(x=>x.id==='classgrid.agent');if(!c||!v)process.exit(1)" || fail "the Agent panel on the right side isn't there"
           test -f "$EXT/app/index.html" || fail "our Classgrid screens aren't inside the editor"
           ls "$EXT/app/assets/"*.js > /dev/null || fail "our screens' code isn't inside the editor"
-          for f in runner.js doctext.js aimemory.js chats.js memory.js; do test -f "$EXT/desktop/$f" || fail "the desktop part $f isn't inside"; done
-          for m in xlsx pdf-parse; do test -d "$EXT/desktop/node_modules/$m" || fail "the document reader $m isn't inside"; done
+          for f in runner.js doctext.js pdfpages.js aimemory.js chats.js memory.js; do test -f "$EXT/desktop/$f" || fail "the desktop part $f isn't inside"; done
+          for m in xlsx pdf-parse word-extractor; do test -d "$EXT/desktop/node_modules/$m" || fail "the document reader $m isn't inside"; done
           test -d "$EXT/desktop/node_modules/socket.io-client" || fail "the runner's connection to Classgrid isn't inside"
           grep -q 'window.classgridDesktop' "$EXT/bridge.js" || fail "the bridge for our screens isn't inside"
           ! grep -qE 'createServer|localhost:[0-9]' "$EXT/extension.js" || fail "the Agent panel uses a localhost server"

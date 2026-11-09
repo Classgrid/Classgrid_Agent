@@ -223,9 +223,21 @@ export async function readLocalFile(userId, args = {}) {
     const given = String(args?.path || "").trim();
     if (!given) return "Error: path is empty. Give the full path of the file, like C:\\Users\\name\\Downloads\\photo.png";
     const notOpen = "The Classgrid desktop app isn't open on the user's computer, so files there can't be read right now. Tell the user to open the Classgrid desktop app, then try again.";
-    const first = await callRunner(userId, "read_local_file", { path: given, start_line: args?.start_line, end_line: args?.end_line });
+    const first = await callRunner(userId, "read_local_file", { path: given, start_line: args?.start_line, end_line: args?.end_line, start_page: args?.start_page });
     if (!first) return notOpen;
     if (/read_local_file can't run on this computer/.test(first.text)) return "Error: the user's Classgrid desktop app is an older version that can't read files on their computer. Ask them to update the app (or reinstall it from classgrid.in), then try again.";
+    // A scanned PDF whose pages the app already made into pictures on the computer (only the pictures came here)
+    if (Array.isArray(first.images) && first.images.length && first.pdfPages) {
+        let linkText = "";
+        try {
+            const { uploadBufferToR2 } = await import("../config/r2Client.js");
+            const links = await Promise.all(first.images.map((b64, n) => uploadBufferToR2(Buffer.from(b64, "base64"), `local-pdf-page-${first.pdfPages.first + n}.jpg`, "image/jpeg")));
+            linkText = ` If no pictures are shown to you below, read each page with analyze_image (ask it to write out all the text and tables on the page): ${links.map((l, n) => `page ${first.pdfPages.first + n}: ${l}`).join(", ")}`;
+        } catch (e) {
+            console.warn(`[read_local_file] could not upload the PDF's pages for analyze_image: ${e.message}`);
+        }
+        return { text: `${first.text}${linkText}`, images: first.images.map((data) => ({ data })) };
+    }
     // A video: pictures from across it, taken by the app (one by one, and all on one sheet for analyze_image), and
     // the words in its sound
     if (first.video && Array.isArray(first.video.frames)) {

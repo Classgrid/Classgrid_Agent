@@ -785,6 +785,7 @@ const tools = {
 // Pictures and documents go back in pieces: the backend's socket takes at most 1 MB per message.
 
 const { documentText } = require("./doctext"); // documents read on this computer (only their text goes to the AI)
+const { pdfPagePictures } = require("./pdfpages"); // a scanned PDF's pages as pictures, made on this computer
 const LOCAL_IMAGE_TYPES = { ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".gif": "image/gif", ".webp": "image/webp", ".bmp": "image/bmp" };
 const LOCAL_DOC_TYPES = { ".pdf": "application/pdf", ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document", ".doc": "application/msword", ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", ".xls": "application/vnd.ms-excel", ".pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation", ".ppt": "application/vnd.ms-powerpoint" };
 const MAX_IMAGE_FILE_BYTES = 10 * 1024 * 1024;
@@ -850,7 +851,7 @@ function textWindow(text, label, start_line, end_line) {
   return `${label} (lines ${start}-${end} of ${lines.length}).${more}\n${out.join("\n")}`;
 }
 
-async function readLocalFile({ path: given, start_line, end_line, chunk = 0 } = {}) {
+async function readLocalFile({ path: given, start_line, end_line, start_page, chunk = 0 } = {}) {
   const full = localPath(given);
   let stat;
   try { stat = fs.statSync(full); } catch { throw new Error(`there is no file or folder at ${full}`); }
@@ -897,6 +898,18 @@ async function readLocalFile({ path: given, start_line, end_line, chunk = 0 } = 
       const end = start + out.length - 1;
       const more = end < lines.length ? ` To read more, call read_local_file again with start_line ${end + 1}.` : "";
       return { text: `${full} (${doc.kind}${doc.detail ? `, ${doc.detail}` : ""}, lines ${start}-${end} of ${lines.length} of its text).${more}\n${out.join("\n")}` };
+    }
+    // A scanned PDF (no text inside): its pages become pictures here, and only those go to the AI
+    if (!doc && ext === ".pdf") {
+      try {
+        const { pages, first, images } = await pdfPagePictures(full, start_page);
+        const last = first + images.length - 1;
+        const more = last < pages ? ` To see pages ${last + 1}-${Math.min(pages, last + 20)}, call read_local_file again with start_page: ${last + 1}. Don't use the terminal for this PDF.` : "";
+        const which = images.length === pages ? `Its ${pages === 1 ? "page is" : `${pages} pages are`}` : `Pages ${first}-${last} of ${pages} are`;
+        return { text: `${full} is a scanned PDF with no text inside (${pages} page${pages === 1 ? "" : "s"}). ${which} attached below as ${images.length === 1 ? "a picture; read it" : "pictures; read them"} yourself.${more}`, images, pdfPages: { pages, first } };
+      } catch (e) {
+        console.log("[runner] scanned PDF pages couldn't be made here, the server makes them:", e.message);
+      }
     }
   }
   if (kind) {
@@ -1181,7 +1194,25 @@ function connect(token) {
       }
       console.log("[runner] tool", tool, "in", root);
       if (!tools[tool]) return ack({ text: `Error: ${tool} can't run on this computer.` });
-      if (!isAllowedRoot(root)) return ack({ text: `Error: the folder ${root || "(none)"} wasn't opened in the Classgrid app on this computer, so it can't be used. Ask the user to open it with "Open folder" in the app.` });
+      // A project folder this computer's list doesn't have yet (the app was reinstalled or its data cleared, or the
+      // project was opened on the website): the server only sends folders of this user's own projects, which the user
+      // picked with Open folder before, so it is added to the list and used, instead of stopping the AI (2026-11-09: the
+      // AI couldn't run any command in a project chat after a reinstall). The AI is never stopped and the user is never
+      // asked to open a folder (owner, 2026-11-09): a project folder that isn't on this computer runs the terminal and
+      // file tools on the whole computer, from the home folder, like a chat without a project.
+      if (!isAllowedRoot(root)) {
+        let isDir = false;
+        try { isDir = !!root && fs.statSync(root).isDirectory(); } catch { isDir = false; }
+        if (isDir) {
+          allowFolder(root);
+          console.log("[runner] project folder added to the list:", root);
+        } else {
+          console.log("[runner] project folder not on this computer, using the whole computer:", root);
+          if (computerFileTools[tool]) return ack({ text: String(await computerFileTools[tool](args)) });
+          if (COMPUTER_TOOLS.has(tool)) return ack({ text: String(await tools[tool](require("node:os").homedir(), args)) });
+          return ack({ text: `The project's folder ${root} isn't on this computer. Use full paths (like C:\\Users\\name\\Documents\\file.txt) with read_local_file, list_project_files, search_project and the terminal, which work on any file and folder on this computer.` });
+        }
+      }
       const text = await tools[tool](root, args);
       ack({ text: String(text) });
     } catch (err) {
