@@ -2558,19 +2558,21 @@ CRITICAL: If you call ANY integration tool (e.g. Google Classroom, Gmail, Google
                     if (typeof body.memoryIndex === "string") redis.set(notesKey, body.memoryIndex.slice(0, 25000), "EX", 30 * 24 * 3600).catch(() => {});
                     let notes = (typeof body.memoryIndex === "string" ? body.memoryIndex : body.wakeUp ? (await redis.get(notesKey).catch(() => "")) || "" : "").slice(0, 25000).trim();
                     // The list with this project's own notes and the user's rules in full, from the app on the computer.
-                    // No waiting on the computer in front of the answer (owner, 2026-11-09: the answer must start at
-                    // once): the pack the app gave last time is used (Redis, per user and project) and the app is asked
-                    // for a fresh one in the background for the next message; a note the AI saves or deletes drops the
-                    // pack (the memory handlers below). Only the very first answer of a user and project waits, shortly.
+                    // The app sends the pack with the message (memoryPack, made on the computer for the open project,
+                    // named by its id as "id:<last 6>"; like Claude Code sends its memory with every request; nothing is
+                    // kept on the server and nothing is asked of it, owner 2026-11-09). Only an older app that sent none,
+                    // or one for another project, has the computer asked, shortly.
                     let memoryRules = "";
                     const memoryUserId = req.user?._id || req.user?.id;
-                    const packKey = `memindex:pack:${memoryUserId}:${memoryProject || "-"}`;
-                    const freshPack = () => runOnComputer(memoryUserId, "memory", { action: "index", project: memoryProject }, sessionId)
-                        .then((got) => { if (typeof got === "string" && got.trim().startsWith("{")) redis.set(packKey, got.slice(0, 60000), "EX", 24 * 3600).catch(() => {}); return got; })
-                        .catch(() => null);
-                    let fromApp = await redis.get(packKey).catch(() => null);
-                    if (fromApp) freshPack(); // in the background: the next message gets today's notes
-                    else fromApp = await Promise.race([freshPack(), new Promise((r) => setTimeout(() => r(null), 1500))]);
+                    const packProject = String(body.memoryPackProject || "");
+                    const packMatches = memoryProject ? packProject === `id:${String(whereProject?._id || "").slice(-6)}` : packProject === "";
+                    const packFromMessage = typeof body.memoryPack === "string" && body.memoryPack.trim().startsWith("{") && packMatches;
+                    const fromApp = packFromMessage
+                        ? body.memoryPack
+                        : await Promise.race([
+                            runOnComputer(memoryUserId, "memory", { action: "index", project: memoryProject }, sessionId).catch(() => null),
+                            new Promise((r) => setTimeout(() => r(null), 1500)),
+                        ]);
                     let memoryFolder = "";
                     try { const got = JSON.parse(fromApp); notes = String(got.index || notes).slice(0, 25000).trim(); memoryRules = String(got.rules || "").slice(0, 8000).trim(); memoryFolder = String(got.folder || "").slice(0, 300); } catch { /* an older app, or not open */ }
                     // The user's rules go at the very end of the instructions, where every model follows them most closely
@@ -6056,11 +6058,9 @@ If a tool fails, never show the error message; say only: "Something went wrong o
         if (body.clientApp === "desktop" && !body.taskOrigin) {
             // The AI's own memory notes on the computer (the desktop app runs them)
             const memoryUser = req.user?._id || req.user?.id;
-            // (a saved or deleted note drops the cached MEMORY.md pack, so the next answer reads today's notes)
-            const dropMemoryPack = (r) => { redis.del(`memindex:pack:${memoryUser}:${memoryProject || "-"}`, `memindex:pack:${memoryUser}:-`).catch(() => {}); return r; };
-            llmConfig.toolHandlers.save_memory = (a) => runOnComputer(memoryUser, "memory", { ...a, action: "save", project: a?.project_only && memoryProject ? memoryProject : "" }, sessionId).then(dropMemoryPack);
+            llmConfig.toolHandlers.save_memory = (a) => runOnComputer(memoryUser, "memory", { ...a, action: "save", project: a?.project_only && memoryProject ? memoryProject : "" }, sessionId);
             llmConfig.toolHandlers.read_memory = (a) => runOnComputer(memoryUser, "memory", { ...a, action: "read", project: memoryProject }, sessionId);
-            llmConfig.toolHandlers.delete_memory = (a) => runOnComputer(memoryUser, "memory", { ...a, action: "delete", project: memoryProject }, sessionId).then(dropMemoryPack);
+            llmConfig.toolHandlers.delete_memory = (a) => runOnComputer(memoryUser, "memory", { ...a, action: "delete", project: memoryProject }, sessionId);
             // A cloud project chat in the desktop app: the project's own terminal works on the cloud copy, and
             // computer_terminal runs on the user's computer (PowerShell, Bash or cmd), so the terminal is there in every chat
             if (!onComputer && chatProject?.location !== "local" && !fullToolList.some((t) => t.function.name === "computer_terminal")) {

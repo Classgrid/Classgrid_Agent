@@ -4843,6 +4843,27 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
           return typeof ctx === "string" && ctx.trim().startsWith("{") && ctx !== "{}" ? ctx.slice(0, 40000) : undefined;
         } catch { return undefined; }
       })();
+      // Desktop app / Classgrid Code: the AI's memory notes pack (MEMORY.md with this project's notes, the user's
+      // rules, the folder) is made here on the computer and goes with the message, like Claude Code sends its memory
+      // with every request; nothing is kept on the server and nothing is asked of it. The project's notes folder is
+      // found on this computer by the project's id ("id:<last 6>", see desktop/aimemory.js).
+      const memoryPackProject = (() => {
+        try {
+          const parts = window.location.pathname.split("/");
+          if (!(parts.includes("project") || parts.includes("studio"))) return "";
+          const id = sessionStorage.getItem("cg_project_open") || localStorage.getItem("cg_project_open") || "";
+          return id ? `id:${id.slice(-6)}` : "";
+        } catch { return ""; }
+      })();
+      const memoryPack: string | undefined = await (async () => {
+        const run = (window as any).classgridDesktop?.runTool;
+        if (typeof run !== "function" || isIncognito) return undefined;
+        try {
+          const reply: any = await Promise.race([run({ tool: "memory", args: { action: "index", project: memoryPackProject } }), new Promise((r) => setTimeout(() => r(null), 400))]);
+          const text = reply && typeof reply === "object" ? reply.text : null;
+          return typeof text === "string" && text.trim().startsWith("{") ? text.slice(0, 60000) : undefined;
+        } catch { return undefined; }
+      })();
       // The request as sent, kept so the same answer can be asked for again after a server restart (resumeTurn)
       let requestBodyText = "";
       const response = await fetchWithRescue(endpoint, {
@@ -4856,6 +4877,8 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
           pcTools: canRunPcTools ? true : undefined,
           localLoop: canRunPcTools ? true : undefined,
           editorContext,
+          memoryPack,
+          memoryPackProject: memoryPack !== undefined ? memoryPackProject : undefined,
           selectedModel,
           userName: session?.user?.name ?? undefined,
           userEmail: session?.user?.email ?? undefined,

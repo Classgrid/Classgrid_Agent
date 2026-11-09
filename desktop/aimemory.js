@@ -16,9 +16,21 @@ const MAX_RULES = 8 * 1024;
 const slug = (name) => String(name || "").toLowerCase().replace(/\.md$/, "").replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 60);
 const oneLine = (s, max) => String(s || "").replace(/\s+/g, " ").trim().slice(0, max);
 
+const baseFolder = () => path.join(app.getPath("documents"), "Classgrid memory");
+// A project's memory folder is "<name>-<last 6 of its id>". The app on this computer knows only the id when it packs
+// the notes for a message (it never asks the server), so "id:<last 6>" finds the folder by that ending; a project
+// with no notes yet has no folder, so there is nothing to show for it
+const resolveProject = (project) => {
+  const m = /^id:([a-z0-9]{6})$/i.exec(String(project || ""));
+  if (!m) return project || "";
+  try {
+    const hit = fs.readdirSync(path.join(baseFolder(), "projects")).find((d) => d.toLowerCase().endsWith(`-${m[1].toLowerCase()}`));
+    return hit || "";
+  } catch { return ""; }
+};
 // The main folder, or a project's own folder inside it
 const folder = (project) => {
-  const base = path.join(app.getPath("documents"), "Classgrid memory");
+  const base = baseFolder();
   const dir = project && slug(project) ? path.join(base, "projects", slug(project)) : base;
   fs.mkdirSync(dir, { recursive: true });
   return dir;
@@ -106,6 +118,7 @@ module.exports = {
   run(args = {}) {
     try {
       const action = String(args.action || "");
+      if (typeof args.project === "string" && /^id:/i.test(args.project)) args = { ...args, project: resolveProject(args.project) };
       if (action === "save") return save(args);
       if (action === "read") return read(args);
       if (action === "delete") return remove(args);
