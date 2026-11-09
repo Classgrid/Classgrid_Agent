@@ -2100,6 +2100,18 @@ export const streamAskAi = async (req, res) => {
             const session = await createSession(userEmail, initialTitle, hideFromUser);
             if (session) {
                 sessionId = session.id;
+                // The chat's project and editor notes are looked up now, from the project the app says is open, while
+                // the message is saved and the chat is linked to it (answers must start at once, owner 2026-11-09)
+                if (!contextP && body.taskOrigin !== "whatsapp") {
+                    const hint = /^[0-9a-f]{24}$/i.test(String(body.projectId || "")) && req.user?._id
+                        ? { projectId: String(body.projectId), userId: String(req.user._id), deviceId: body.clientApp === "desktop" ? body.deviceId || null : null }
+                        : null;
+                    const editorNotes = typeof body.editorContext === "string" ? body.editorContext : null;
+                    contextP = Promise.all([
+                        editorContextFor(sessionId, { website: fromWebsite, editorContext: editorNotes, hint }).catch(() => ""),
+                        projectForChat(sessionId, { hint }).then((p) => (fromWebsite && p?.bothPlaces ? { ...p, location: "cloud", localPath: null, bothPlaces: false } : p)).then((p) => inChatWorktree(p, sessionId)).catch(() => null),
+                    ]);
+                }
                 // Generate a real title in the background (delayed 5s to avoid competing with main LLM call for API rate limits).
                 // Incognito chats are never listed, so they need no title.
                 if (!skipAutoTitle && !hideFromUser) {

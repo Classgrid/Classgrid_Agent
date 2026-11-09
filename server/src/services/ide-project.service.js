@@ -88,16 +88,18 @@ const PROJECT_LOOKUP_MS = 30000;
 export function forgetProjectLookup(sessionId) {
   for (const key of projectLookups.keys()) if (key.startsWith(`${sessionId}|`)) projectLookups.delete(key);
 }
-export async function projectForChat(sessionId, { website = false } = {}) {
+// hint: for a chat made just now, the project the app says is open ({ projectId, userId, deviceId }), so the lookup
+// doesn't wait for the chat to be linked to it first (the link happens meanwhile and gives the same answer)
+export async function projectForChat(sessionId, { website = false, hint = null } = {}) {
   const key = `${sessionId}|${website ? 1 : 0}`;
   const kept = projectLookups.get(key);
   if (kept && Date.now() - kept.at < PROJECT_LOOKUP_MS) return kept.promise;
-  const promise = lookupProjectForChat(sessionId, website);
+  const promise = lookupProjectForChat(sessionId, website, hint);
   projectLookups.set(key, { at: Date.now(), promise });
   promise.catch(() => {}).finally(() => setTimeout(() => { if (projectLookups.get(key)?.promise === promise) projectLookups.delete(key); }, PROJECT_LOOKUP_MS).unref?.());
   return promise;
 }
-async function lookupProjectForChat(sessionId, website) {
+async function lookupProjectForChat(sessionId, website, hint) {
   await connectDB();
   const [onScreen, here] = await Promise.all([
     redis.get(UI_PROJECT(sessionId)).catch(() => null),
@@ -106,6 +108,10 @@ async function lookupProjectForChat(sessionId, website) {
   if (onScreen) {
     const p = await IdeProject.findById(onScreen).lean().catch(() => null);
     if (p) return onComputerCopy(p, here);
+  }
+  if (hint?.projectId && hint?.userId) {
+    const p = await IdeProject.findOne({ _id: hint.projectId, owner: hint.userId }).lean().catch(() => null);
+    if (p && !(website && p.location === "local")) return onComputerCopy(p, website ? null : hint.deviceId || here);
   }
   return onComputerCopy(await IdeProject.findOne({ chatSessionIds: sessionId }).lean(), here);
 }
@@ -1072,8 +1078,8 @@ function terminalRunsText(ctx, rel) {
     (r.output ? `\n  Output (its end):\n  \`\`\`\n${String(r.output).slice(-(r.exitCode === 0 ? 800 : 3000))}\n  \`\`\`` : "")).join("\n");
 }
 
-export async function editorContextFor(sessionId, { website = false, editorContext = null } = {}) {
-  const project = await projectForChat(sessionId, { website });
+export async function editorContextFor(sessionId, { website = false, editorContext = null, hint = null } = {}) {
+  const project = await projectForChat(sessionId, { website, hint });
   if (!project) return "";
   // A folder on the user's own computer: the Classgrid desktop app runs the project tools there (local-runner.service.js).
   // The website never gets its folder path or editor (the folder project works only in the desktop app).
