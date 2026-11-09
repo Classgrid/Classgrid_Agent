@@ -102,6 +102,29 @@ function rules(project) {
   return all.length > MAX_RULES ? `${all.slice(0, MAX_RULES)}\n...(more rules in the memory folder)` : all;
 }
 
+// Notes whose text has the words asked for (any note, not only the list's one-line descriptions): the lines that
+// match, so a fact saved inside a note (a number, a name, a date) is found even when the note's title doesn't say it
+function search({ query, project = "" }) {
+  const q = String(query || "").trim().toLowerCase();
+  if (!q) return "Error: say what to search for.";
+  const words = q.split(/\s+/).filter(Boolean);
+  const hits = [];
+  for (const p of project ? ["", project] : [""]) {
+    let names = [];
+    try { names = fs.readdirSync(folder(p)).filter((f) => f.endsWith(".md") && f !== "MEMORY.md"); } catch { /* none */ }
+    for (const f of names) {
+      let text = "";
+      try { text = fs.readFileSync(path.join(folder(p), f), "utf8"); } catch { continue; }
+      const lower = text.toLowerCase();
+      if (!words.every((w) => lower.includes(w))) continue;
+      const lines = text.split(/\r?\n/).filter((l) => { const ll = l.toLowerCase(); return words.some((w) => ll.includes(w)); }).slice(0, 8).map((l) => `  ${l.trim().slice(0, 300)}`);
+      hits.push(`### ${f.replace(/\.md$/, "")}${p ? " (this project)" : ""}\n${lines.join("\n")}`);
+      if (hits.length >= 12) break;
+    }
+  }
+  return hits.length ? hits.join("\n\n") : `No memory note mentions "${String(query).trim()}".`;
+}
+
 function index(project) {
   const cut = (t) => (t.length > MAX_INDEX ? `${t.slice(0, MAX_INDEX)}\n...(the list is long: keep it short, merge or delete old notes)` : t);
   const main = readIndex("");
@@ -122,10 +145,11 @@ module.exports = {
       if (action === "save") return save(args);
       if (action === "read") return read(args);
       if (action === "delete") return remove(args);
+      if (action === "search") return search(args);
       if (action === "list") return index(args.project || "") || "No memories saved yet.";
       // For the server, at the start of each answer: the list and the rules in full
       if (action === "index") return JSON.stringify({ index: index(args.project || ""), rules: rules(args.project || ""), folder: folder() });
-      return 'Error: action must be "save", "read", "delete" or "list".';
+      return 'Error: action must be "save", "read", "search", "delete" or "list".';
     } catch (e) {
       return `Error: ${e.message}`;
     }
