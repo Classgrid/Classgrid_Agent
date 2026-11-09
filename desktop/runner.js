@@ -694,15 +694,19 @@ const tools = {
   },
 
   // Python / JavaScript code, or shell lines, run in the project folder on this computer
-  run_code(root, { language = "bash", code = "" }) {
+  // (__chat: which chat started it. It is passed on to the command, so a script that runs longer than AUTO_BACKGROUND_S
+  // and goes on in the background wakes that chat with its result when it ends. It wasn't passed on before, so the AI
+  // was told "you are woken with the result", ended its answer, and was never woken: every Python script longer than
+  // 45 seconds looked like the AI "never came back", 2026-11-09)
+  run_code(root, { language = "bash", code = "", __chat }) {
     if (!String(code).trim()) return Promise.resolve("Error: code is empty");
     const lang = String(language).toLowerCase();
-    if (lang === "bash" || lang === "shell" || lang === "sh" || lang === "powershell") return tools.execute_terminal_command(root, { command: code });
+    if (lang === "bash" || lang === "shell" || lang === "sh" || lang === "powershell") return tools.execute_terminal_command(root, { command: code, __chat });
     const ext = lang === "python" ? "py" : "js";
     const file = path.join(require("node:os").tmpdir(), `classgrid-run-${Date.now()}.${ext}`);
     fs.writeFileSync(file, String(code), "utf8");
     const runner = lang === "python" ? (process.platform === "win32" ? "python" : "python3") : "node";
-    return tools.execute_terminal_command(root, { command: `${runner} "${file}"` }).finally(() => fs.rm(file, { force: true }, () => {}));
+    return tools.execute_terminal_command(root, { command: `${runner} "${file}"`, __chat }).finally(() => fs.rm(file, { force: true }, () => {}));
   },
 
   // A command in the project folder (PowerShell on Windows), up to 10 minutes
