@@ -3092,6 +3092,7 @@ Every user is using you as a personal AI assistant and agent (like ChatGPT) to m
             return shown;
         };
         const generatedImages = []; // images made in this answer: shown by the app, never copied by the model
+        let modelSeesImages = false; // set when the model is chosen: one that sees pictures gets a computer's picture itself, with no storage link to wait for
         // Web pages search_web used in this answer, numbered across searches so [n] in the reply points at
         // one page. Streamed as a "sources" event and saved with the message (the chat shows them as chips).
         let accSources = [];
@@ -4096,7 +4097,7 @@ You work on the user's own Windows computer through their Classgrid desktop app,
                         return `${lines.join("\n\n")}\n\n${running ? `${running} helper(s) still working.` : "All helpers have finished."}${helperChangesText(reported)}`;
                     },
                     // Desktop app only (see READ_LOCAL_FILE_TOOL): the user's own Classgrid app reads the file
-                    read_local_file: async (args) => readLocalFile(req.user?._id || req.user?.id, args),
+                    read_local_file: async (args) => readLocalFile(req.user?._id || req.user?.id, args, { seesImages: modelSeesImages }),
                     run_code: async (args) => {
                         // A project from a folder on the user's computer: the code runs there, in their desktop app
                         const localProject = fromWebsite ? null : await localProjectFor(sessionId);
@@ -6330,6 +6331,7 @@ If a tool fails, never show the error message; say only: "Something went wrong o
 
                     if (CLAUDE_CHAT_MODELS.has(requestedModel)) {
                         console.log(`[AI-STREAM] user selected ${requestedModel}`);
+                        modelSeesImages = true;
                         if (messages[0]?.role === "system") messages[0] = { ...messages[0], content: withModelIdentity(messages[0].content, requestedModel, isStaffRole(req.user?.role), { selected: requestedModel, previousModel }) };
                         try {
                             // view_image is Claude-only (native vision); it is loaded whenever the sandbox tools are.
@@ -6413,6 +6415,7 @@ If a tool fails, never show the error message; say only: "Something went wrong o
                         try {
                             // A model that sees images gets the attached images inside the newest user message (like Claude)
                             const sees = CF_VISION_MODELS.has(model);
+                            modelSeesImages = sees;
                             let modelMessages = messages;
                             let imageParts = [];
                             if (sees) {

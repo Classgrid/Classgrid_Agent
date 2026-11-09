@@ -16,6 +16,7 @@ files:
   - uploads.js
   - doctext.js
   - pdfpages.js
+  - picture.js
   - aimemory.js
   - recorder.js
   - computer.js

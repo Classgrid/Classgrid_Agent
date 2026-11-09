@@ -59,7 +59,8 @@ export function registerRunnerSocket(socket) {
 // Commands may run for a while; file tools are quick
 // (editor_context is asked before every answer, only for extra context: a desktop app that doesn't answer, e.g. while it
 // updates, held each message 60 s before the AI started; 3 s, then the answer goes on without it)
-const timeoutFor = (tool) => (tool === "editor_context" ? 3000 : tool === "computer" ? 2 * 60 * 1000 : tool === "execute_terminal_command" || tool === "run_code" || tool === "push_project_to_github" || tool === "clone_repo" || tool === "sync_repo" || tool === "check_background_command" || tool === "wait_until" ? 11 * 60 * 1000 : tool === "browser" ? 2 * 60 * 1000 : 60 * 1000);
+// (a file sent from the computer straight to Classgrid's storage, read_local_file with upload: a big sound file on a slow connection)
+const timeoutFor = (tool, args = null) => (tool === "editor_context" ? 3000 : tool === "computer" ? 2 * 60 * 1000 : tool === "execute_terminal_command" || tool === "run_code" || tool === "push_project_to_github" || tool === "clone_repo" || tool === "sync_repo" || tool === "check_background_command" || tool === "wait_until" || args?.upload ? 11 * 60 * 1000 : tool === "browser" ? 2 * 60 * 1000 : 60 * 1000);
 
 // A command still running in the background: the AI is told it will be woken with the result (chat-wake.service.js
 // onLocalJobDone), so it ends its answer instead of calling check_background_command again and again, up to 2 minutes
@@ -96,7 +97,7 @@ async function askRunnerOnce(userId, tool, payload) {
         if (here.length) {
             // (only the editor state goes to all of them, being read-only: the first answer is used)
             if (tool === "editor_context" && here.length > 1) {
-                const reply = await Promise.any(here.map((s) => s.timeout(timeoutFor(tool)).emitWithAck("local-tool", payload))).catch(() => null);
+                const reply = await Promise.any(here.map((s) => s.timeout(timeoutFor(tool, payload?.args)).emitWithAck("local-tool", payload))).catch(() => null);
                 return typeof reply?.text === "string" ? reply : null;
             }
             // A connection that can't do this step (Classgrid Code's has no browser, only the desktop app's has) says so at
@@ -108,7 +109,7 @@ async function askRunnerOnce(userId, tool, payload) {
             let lastError = null;
             for (const s of here) {
                 try {
-                    reply = await s.timeout(timeoutFor(tool)).emitWithAck("local-tool", payload);
+                    reply = await s.timeout(timeoutFor(tool, payload?.args)).emitWithAck("local-tool", payload);
                 } catch (err) {
                     lastError = err;
                     reply = null;
@@ -122,7 +123,7 @@ async function askRunnerOnce(userId, tool, payload) {
         // Connected to another server process: reach it through the Redis adapter (a few seconds to find it)
         const anywhere = await Promise.race([io.in(room).fetchSockets(), new Promise((r) => setTimeout(() => r([]), 4000))]).catch(() => []);
         if (!anywhere.length) return null;
-        const replies = await io.to(room).timeout(timeoutFor(tool)).emitWithAck("local-tool", payload);
+        const replies = await io.to(room).timeout(timeoutFor(tool, payload?.args)).emitWithAck("local-tool", payload);
         return (Array.isArray(replies) ? replies.find((r) => r && typeof r.text === "string") : null) || null;
     } catch (err) {
         return { text: `Error: the Classgrid desktop app didn't answer in time (${err.message}). Ask the user to check the app is open.` };
@@ -197,11 +198,29 @@ async function gatherFile(userId, file) {
     return { buf: Buffer.concat(parts) };
 }
 
-// Sound from the user's computer: put on Classgrid's storage, then turned into words like any audio (transcribe_audio)
-async function soundToText(buf, name, mime) {
+// A sound file (or a video's sound) from the user's computer, put on Classgrid's storage: { link }, or an error text.
+// The app sends it there itself in one request (to a signed link made here) instead of through this server in 512 KB
+// pieces, one round trip each (a 10-minute video's sound was 38 of them, 2026-11-09). An older app, or a send that
+// failed, still comes in pieces.
+async function soundToStorage(userId, file, name, mime) {
+    const { getPresignedUploadUrl, uploadBufferToR2 } = await import("../config/r2Client.js");
     try {
-        const { uploadBufferToR2 } = await import("../config/r2Client.js");
-        const link = await uploadBufferToR2(buf, name, mime);
+        const { uploadUrl, publicUrl } = await getPresignedUploadUrl(name, mime, 15 * 60);
+        // (chunk 1: an older app that doesn't know "upload" answers with one small piece instead of reading it all again)
+        const sent = await callRunner(userId, "read_local_file", { path: file.path, chunk: 1, upload: { url: uploadUrl, mime } });
+        if (sent?.uploaded?.bytes === file.bytes) return { link: publicUrl };
+        if (sent?.text) console.warn(`[read_local_file] the app didn't send the sound to storage itself: ${String(sent.text).slice(0, 200)}`);
+    } catch (e) {
+        console.warn(`[read_local_file] could not have the app send the sound to storage: ${e.message}`);
+    }
+    const got = await gatherFile(userId, file);
+    if (typeof got === "string") return got;
+    return { link: await uploadBufferToR2(got.buf, name, mime) };
+}
+
+// Sound on Classgrid's storage, turned into words like any audio (transcribe_audio)
+async function soundToText(link) {
+    try {
         const { handleToolCall } = await import("../mcp/tools.js");
         const said = String((await handleToolCall("transcribe_audio", { fileUrl: link }))?.content?.[0]?.text || "").trim();
         if (!said || /^Error/i.test(said)) return ` Its sound couldn't be turned into words${said ? ` (${said.replace(/^Error:\s*/i, "").slice(0, 200)})` : ""}. The sound file is here: ${link}`;
@@ -219,7 +238,7 @@ ${said}
  * user first on the permission card). Pictures come back as images the AI looks at itself (as view_image), documents
  * (PDF, Word, Excel, PowerPoint) as their text, other files as text.
  */
-export async function readLocalFile(userId, args = {}) {
+export async function readLocalFile(userId, args = {}, { seesImages = false } = {}) {
     const given = String(args?.path || "").trim();
     if (!given) return "Error: path is empty. Give the full path of the file, like C:\\Users\\name\\Downloads\\photo.png";
     const notOpen = "The Classgrid desktop app isn't open on the user's computer, so files there can't be read right now. Tell the user to open the Classgrid desktop app, then try again.";
@@ -250,8 +269,8 @@ export async function readLocalFile(userId, args = {}) {
         }
         let heard = "";
         if (first.file?.kind === "audio") {
-            const sound = await gatherFile(userId, first.file);
-            heard = typeof sound === "string" ? ` Its sound couldn't be fetched (${sound.replace(/^Error: /, "")}).` : await soundToText(sound.buf, "local-video-sound.wav", "audio/wav");
+            const sound = await soundToStorage(userId, first.file, "local-video-sound.wav", "audio/wav");
+            heard = typeof sound === "string" ? ` Its sound couldn't be fetched (${sound.replace(/^Error: /, "")}).` : await soundToText(sound.link);
         }
         const frames = first.video.frames;
         const shown = first.video.sheet ? [first.video.sheet, ...frames] : frames;
@@ -261,20 +280,29 @@ export async function readLocalFile(userId, args = {}) {
     const file = first.file;
     if (!file || typeof file.data !== "string") return first.text;
 
+    const sizeOf = (n) => (n >= 1048576 ? `${(n / 1048576).toFixed(1)} MB` : n >= 1024 ? `${Math.round(n / 1024)} KB` : `${n} bytes`);
+    if (file.kind === "audio") {
+        const sound = await soundToStorage(userId, file, file.name || "local-audio", file.mime);
+        if (typeof sound === "string") return sound;
+        return `Audio ${file.path} (${sizeOf(file.bytes)}).${await soundToText(sound.link)}`;
+    }
+
     const got = await gatherFile(userId, file);
     if (typeof got === "string") return got;
     const { buf } = got;
-    const size = buf.length >= 1048576 ? `${(buf.length / 1048576).toFixed(1)} MB` : buf.length >= 1024 ? `${Math.round(buf.length / 1024)} KB` : `${buf.length} bytes`;
+    const size = sizeOf(buf.length);
 
-    if (file.kind === "audio") return `Audio ${file.path} (${size}).${await soundToText(buf, file.name || "local-audio", file.mime)}`;
     if (file.kind === "image") {
-        // A model that can't see pictures uses analyze_image on a Classgrid link, like an uploaded picture
+        // A model that can't see pictures uses analyze_image on a Classgrid link, like an uploaded picture. A model that
+        // sees pictures gets the picture itself below, so it doesn't wait for that upload (2026-11-09).
         let link = "";
-        try {
-            const { uploadBufferToR2 } = await import("../config/r2Client.js");
-            link = await uploadBufferToR2(buf, file.mime === "image/jpeg" ? "local-file.jpg" : `local-file${String(file.name).match(/\.(png|gif|webp)$/i)?.[0] || ".png"}`, file.mime);
-        } catch (e) {
-            console.warn(`[read_local_file] could not upload the picture for analyze_image: ${e.message}`);
+        if (!seesImages) {
+            try {
+                const { uploadBufferToR2 } = await import("../config/r2Client.js");
+                link = await uploadBufferToR2(buf, file.mime === "image/jpeg" ? "local-file.jpg" : `local-file${String(file.name).match(/\.(png|gif|webp)$/i)?.[0] || ".png"}`, file.mime);
+            } catch (e) {
+                console.warn(`[read_local_file] could not upload the picture for analyze_image: ${e.message}`);
+            }
         }
         const text = `Picture ${file.path} (${size}${buf.length !== file.size ? ", made smaller to show it" : ""}) is attached below. Look at it yourself; describe only what you actually see.${link ? ` If no picture is shown to you below, use analyze_image with this link: ${link}` : ""}`;
         return { text, images: [{ data: buf.toString("base64") }] };

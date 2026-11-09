@@ -786,6 +786,7 @@ const tools = {
 
 const { documentText } = require("./doctext"); // documents read on this computer (only their text goes to the AI)
 const { pdfPagePictures } = require("./pdfpages"); // a scanned PDF's pages as pictures, made on this computer
+const { shrinkPicture, ONE_STEP_BYTES } = require("./picture"); // a picture made small enough here to go in one message
 const LOCAL_IMAGE_TYPES = { ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".gif": "image/gif", ".webp": "image/webp", ".bmp": "image/bmp" };
 const LOCAL_DOC_TYPES = { ".pdf": "application/pdf", ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document", ".doc": "application/msword", ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", ".xls": "application/vnd.ms-excel", ".pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation", ".ppt": "application/vnd.ms-powerpoint" };
 const MAX_IMAGE_FILE_BYTES = 10 * 1024 * 1024;
@@ -808,23 +809,15 @@ function localPath(given) {
 
 const sizeText = (n) => (n >= 1048576 ? `${(n / 1048576).toFixed(1)} MB` : n >= 1024 ? `${Math.round(n / 1024)} KB` : `${n} bytes`);
 
-// Big PNG / JPEG pictures (and BMP, which the AI can't take) are made smaller with Electron's image tools
-function imageForModel(buf, ext) {
+// A picture bigger than one message (and BMP, which the AI can't take) is made smaller here (picture.js), so it goes
+// in one piece instead of up to seven round trips; a kind that can't be made smaller here (WebP) goes in pieces as before
+async function imageForModel(full, buf, ext) {
+  if (buf.length <= ONE_STEP_BYTES && ext !== ".bmp") return { buf, mime: LOCAL_IMAGE_TYPES[ext] };
+  let small = null;
+  try { small = await shrinkPicture(full, buf, ext); } catch (e) { console.log("[runner] picture couldn't be made smaller here:", e.message); }
+  if (small) return small;
   if (buf.length <= MODEL_IMAGE_BYTES && ext !== ".bmp") return { buf, mime: LOCAL_IMAGE_TYPES[ext] };
-  let nativeImage = null;
-  try { nativeImage = require("electron").nativeImage; } catch { /* not inside the app */ }
-  const img = nativeImage?.createFromBuffer ? nativeImage.createFromBuffer(buf) : null;
-  if (!img || img.isEmpty()) {
-    throw new Error(ext === ".bmp" ? "this BMP picture can't be opened here. Save it as PNG or JPG and try again." : `this picture is ${sizeText(buf.length)} and couldn't be made smaller to show it (pictures can be shown up to 3.5 MB, and only PNG and JPG pictures can be made smaller).`);
-  }
-  const { width, height } = img.getSize();
-  const scale = Math.min(1, 2000 / Math.max(width, height));
-  const small = scale < 1 ? img.resize({ width: Math.round(width * scale), height: Math.round(height * scale), quality: "good" }) : img;
-  const png = small.toPNG();
-  if (png.length <= MODEL_IMAGE_BYTES) return { buf: png, mime: "image/png" };
-  const jpg = small.toJPEG(85);
-  if (jpg.length <= MODEL_IMAGE_BYTES) return { buf: jpg, mime: "image/jpeg" };
-  throw new Error(`this picture is too big to show to the AI, even after making it smaller (${sizeText(jpg.length)}).`);
+  throw new Error(ext === ".bmp" ? "this BMP picture can't be opened here. Save it as PNG or JPG and try again." : `this picture is ${sizeText(buf.length)} and couldn't be made smaller to show it (pictures can be shown up to 3.5 MB, and only PNG and JPG pictures can be made smaller).`);
 }
 
 // One piece of the file being sent (lastBinary), as the backend asks for them
@@ -851,7 +844,7 @@ function textWindow(text, label, start_line, end_line) {
   return `${label} (lines ${start}-${end} of ${lines.length}).${more}\n${out.join("\n")}`;
 }
 
-async function readLocalFile({ path: given, start_line, end_line, start_page, chunk = 0 } = {}) {
+async function readLocalFile({ path: given, start_line, end_line, start_page, chunk = 0, upload = null } = {}) {
   const full = localPath(given);
   let stat;
   try { stat = fs.statSync(full); } catch { throw new Error(`there is no file or folder at ${full}`); }
@@ -872,6 +865,22 @@ async function readLocalFile({ path: given, start_line, end_line, start_page, ch
   markSeen(full);
 
   const ext = path.extname(full).toLowerCase();
+  // The server's second call for a sound file or a video's sound: the sound goes straight to Classgrid's storage in
+  // one request (to a signed link the server made) instead of through the server in 512 KB pieces, one round trip
+  // each (a 10-minute video's sound was 38 of them, 2026-11-09). The sound is still here from the first call.
+  if (upload?.url) {
+    const key = `${full}|${stat.size}|${stat.mtimeMs}`;
+    let bin = lastBinary && (lastBinary.key === key || lastBinary.key === `${key}|sound`) ? lastBinary : null;
+    if (!bin && LOCAL_AUDIO_TYPES[ext] && stat.size <= MAX_AUDIO_FILE_BYTES) bin = { buf: fs.readFileSync(full) };
+    if (!bin) return { text: `Error: ${full} isn't ready to send. Read it first.` };
+    try {
+      const r = await fetch(String(upload.url), { method: "PUT", headers: { "Content-Type": String(upload.mime || "application/octet-stream") }, body: bin.buf, signal: AbortSignal.timeout(10 * 60 * 1000) });
+      if (!r.ok) return { text: `Error: Classgrid's storage didn't take the file (HTTP ${r.status}).` };
+      return { text: `Sent ${sizeText(bin.buf.length)} to Classgrid's storage.`, uploaded: { bytes: bin.buf.length } };
+    } catch (e) {
+      return { text: `Error: the file couldn't be sent to Classgrid's storage (${e.message}).` };
+    }
+  }
   if (LOCAL_VIDEO_TYPES.has(ext)) {
     // The video's sound goes in pieces after its pictures (the pictures are taken once)
     const key = `${full}|${stat.size}|${stat.mtimeMs}|sound`;
@@ -919,7 +928,7 @@ async function readLocalFile({ path: given, start_line, end_line, start_page, ch
     if (!lastBinary || lastBinary.key !== key) {
       const raw = fs.readFileSync(full);
       if (!raw.length) throw new Error(`${full} is empty`);
-      const ready = kind === "image" ? imageForModel(raw, ext) : { buf: raw, mime: kind === "audio" ? LOCAL_AUDIO_TYPES[ext] : LOCAL_DOC_TYPES[ext] };
+      const ready = kind === "image" ? await imageForModel(full, raw, ext) : { buf: raw, mime: kind === "audio" ? LOCAL_AUDIO_TYPES[ext] : LOCAL_DOC_TYPES[ext] };
       lastBinary = { key, kind, mime: ready.mime, buf: ready.buf };
     }
     return { text: `${full} (${sizeText(stat.size)})`, file: piece(lastBinary, full, stat, chunk) };
