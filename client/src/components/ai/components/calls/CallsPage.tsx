@@ -58,12 +58,15 @@ export const CallsPage: React.FC = () => {
 
   useEffect(() => { load(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, []);
 
-  // While a call is live or its work is running, the list refreshes itself
+  // The list refreshes itself while it is open (a call made right now shows up by itself): every 6 seconds while
+  // a call is live or its work is running, every 20 seconds otherwise, and whenever the window comes back in front
   const anyActive = calls.some((c) => ACTIVE.includes(c.status));
   useEffect(() => {
-    if (!anyActive) return;
-    const t = setInterval(() => load(true), 8000);
-    return () => clearInterval(t);
+    const t = setInterval(() => load(true), anyActive ? 6000 : 20000);
+    const onFocus = () => { if (document.visibilityState !== "hidden") load(true); };
+    window.addEventListener("focus", onFocus);
+    document.addEventListener("visibilitychange", onFocus);
+    return () => { clearInterval(t); window.removeEventListener("focus", onFocus); document.removeEventListener("visibilitychange", onFocus); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [anyActive]);
 
