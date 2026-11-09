@@ -1815,6 +1815,7 @@ export const streamAskAi = async (req, res) => {
     // pcExecutors). Not for the website, headless task turns or wake-ups (no app is on their stream).
     let unregisterPcExecutor = null;
     let durableTurn = null;
+    let localLoop = null; // the app driving the loop (set below, once the abort controls exist)
     if (body.pcTools === true && !fromWebsite && !body.taskOrigin && !body.wakeUp && userId) {
         // The answer survives the app's internet dropping: its events are kept under a turn id and the app comes back
         // for them (GET /api/ai/turn/:id/events); from here on `res` is the facade that keeps them (durable-turn.service.js)
@@ -6200,6 +6201,18 @@ If a tool fails, never show the error message; say only: "Something went wrong o
         let requestAborted = false;
         const streamAbort = new AbortController();
 
+        // The desktop app driving the loop itself (body.localLoop, local-loop.service.js): after each model round the
+        // app is handed the tool calls and says which run, in what order, or stops the answer
+        if (durableTurn && body.localLoop === true) {
+            const { makeLocalLoopDriver } = await import("../services/local-loop.service.js");
+            localLoop = makeLocalLoopDriver({
+                turnId: durableTurn.id,
+                userId: String(userId),
+                emit: (ev) => { if (!res.writableEnded) res.write(`data: ${JSON.stringify(ev)}\n\n`); },
+                onStop: () => { requestAborted = true; streamAbort.abort(); },
+            });
+            res.write(`data: ${JSON.stringify({ type: "local_loop", on: true })}\n\n`);
+        }
         if (durableTurn) {
             // The app's connection dropping doesn't stop this answer: it waits for the app to come back
             // (durable-turn.service.js); only the grace period running out stops it
@@ -6399,6 +6412,8 @@ If a tool fails, never show the error message; say only: "Something went wrong o
                                 // plus the last images Claude generated in this chat, so it can look at its own images
                                 attachments: [...withInlineImages(body.attachments, inlineImages), ...recentGeneratedImageAttachments(messages)],
                                 signal: streamAbort.signal,
+                                // The desktop app driving the loop decides which tool calls run (local-loop.service.js)
+                                toolDriver: localLoop ? localLoop.driver : null,
                                 onStatus,
                                 onThought,
                                 onToken
@@ -6490,6 +6505,8 @@ If a tool fails, never show the error message; say only: "Something went wrong o
                                 ...meterHooks(model),
                                 timeoutMs: llmConfig.providers[0].timeoutMs,
                                 signal: streamAbort.signal,
+                                // The desktop app driving the loop decides which tool calls run (local-loop.service.js)
+                                toolDriver: localLoop ? localLoop.driver : null,
                                 onStatus,
                                 onThought,
                                 onToken
@@ -6815,6 +6832,7 @@ If a tool fails, never show the error message; say only: "Something went wrong o
         if (keepAliveInterval) clearInterval(keepAliveInterval);
         if (replacedCheck) clearInterval(replacedCheck);
         if (unregisterPcExecutor) unregisterPcExecutor(); // helpers still working after this use the socket path
+        if (localLoop) localLoop.dispose();
         // The answer is over: background results that waited for it wake the chat now
         if (runKey) redis.get(runKey).then((newest) => (newest === runId ? redis.del(runKey) : null))
             .then(() => import("../services/chat-wake.service.js")).then((m) => m.wakeIfPending(userId, sessionId)).catch(() => {});
@@ -7198,6 +7216,15 @@ export const pcToolResult = async (req, res) => {
     const state = await storePcToolReply(String(req.user?.id), String(req.body?.id || ""), req.body?.reply);
     if (state === "bad_id") return res.status(400).json({ error: "Bad tool call id" });
     if (state === "unknown") return res.status(404).json({ error: "Unknown tool call" });
+    res.json({ ok: true });
+};
+
+// The desktop app driving an answer's loop (local_loop on /ask): run this call, skip it, close the round, or stop
+export const turnCommand = async (req, res) => {
+    const { handleTurnCommand } = await import("../services/local-loop.service.js");
+    const r = await handleTurnCommand(String(req.params?.id || ""), String(req.user?.id), req.body || {});
+    if (r.error === "unknown_turn") return res.status(404).json({ error: "This answer isn't here any more" });
+    if (r.error) return res.status(400).json({ error: r.error });
     res.json({ ok: true });
 };
 

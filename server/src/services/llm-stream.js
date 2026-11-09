@@ -299,6 +299,9 @@ export async function streamChat({
     fallbackProviders = [],
     // The model sees images (like Claude): images from tool results are shown to it, not just their links
     seesImages = false,
+    // The desktop app driving the loop (local-loop.service.js): after a round with tool calls it decides which run,
+    // in what order; `toolDriver(calls, { run, text })` resolves with Map(callId -> { content, isError })
+    toolDriver = null,
     // How much the model thinks: "all" (every round, Deep), "first" (plans on the first round, then each round after a
     // tool result goes straight to the next step: those rounds were 8-23 s of thinking each, Normal), "none" (Fast)
     thinking = "all"
@@ -472,22 +475,23 @@ export async function streamChat({
             let countsTowardDepth = false;
             let stopAnswer = null;
             const roundImages = []; // images from this round's tool results, shown to a model that sees images
+            // First pass: calls with bad arguments and the thought tool are answered at once; the rest are real calls
+            const realCalls = []; // { call, args }
+            const earlyResults = new Map(); // call id -> result text for the two early cases
             for (const call of round.toolCalls) {
                 const toolName = call.function.name;
-                let toolResult;
-
                 let args;
                 try {
                     args = JSON.parse(call.function.arguments || "{}");
                 } catch {
-                    conversation.push({ role: "tool", tool_call_id: call.id, content: "Error: Invalid JSON arguments." });
+                    earlyResults.set(call.id, "Error: Invalid JSON arguments.");
                     countsTowardDepth = true;
                     continue;
                 }
-
                 if (toolName === "internal_thought_process") {
                     const alreadyThought = wasCalled("internal_thought_process");
                     callsThisRound.push(call);
+                    let toolResult;
                     if (alreadyThought) {
                         toolResult = "ERROR: You have ALREADY used the internal_thought_process tool. Provide your final answer now.";
                         countsTowardDepth = true;
@@ -498,10 +502,16 @@ export async function streamChat({
                         onStatus?.("analyzing");
                         toolResult = "Thought logged. Provide your final answer now.";
                     }
-                    conversation.push({ role: "tool", tool_call_id: call.id, content: toolResult });
+                    earlyResults.set(call.id, toolResult);
                     continue;
                 }
-
+                realCalls.push({ call, args });
+            }
+            // One real call: the checks, then the handler. With a toolDriver (the desktop app driving the loop,
+            // local-loop.service.js) the app says which calls run and in what order; otherwise they run here in turn.
+            const runCall = async ({ call, args }) => {
+                const toolName = call.function.name;
+                let toolResult;
                 countsTowardDepth = true;
                 const alreadyCalled = wasCalled(toolName, call.function.arguments);
                 callsThisRound.push(call);
@@ -532,6 +542,30 @@ export async function streamChat({
                     }
                     if (!isLoader) onStatus?.("analyzing");
                 }
+                return toolResult;
+            };
+            const driven = toolDriver && realCalls.length
+                ? await toolDriver(realCalls.map(({ call, args }) => ({ id: call.id, name: call.function.name, input: args })), {
+                    run: async (id) => {
+                        const rc = realCalls.find((x) => x.call.id === id);
+                        const r = await runCall(rc);
+                        return { content: r, isError: toolFailed(r && typeof r === "object" && "text" in r ? r.text : r) };
+                    },
+                    text: round.text,
+                })
+                : null;
+
+            // Second pass, in the model's own order: every call gets its tool message
+            for (const call of round.toolCalls) {
+                const toolName = call.function.name;
+                if (earlyResults.has(call.id)) {
+                    conversation.push({ role: "tool", tool_call_id: call.id, content: earlyResults.get(call.id) });
+                    continue;
+                }
+                const rc = realCalls.find((x) => x.call.id === call.id);
+                if (!rc) continue;
+                countsTowardDepth = true;
+                const toolResult = driven ? (driven.get(call.id)?.content ?? "Not run.") : await runCall(rc);
 
                 // A handler may return { text, ... } (load_tools does); the model gets the text.
                 const resultText = toolResult && typeof toolResult === "object" && "text" in toolResult ? toolResult.text : toolResult;

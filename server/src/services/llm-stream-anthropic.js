@@ -496,6 +496,9 @@ export async function streamClaudeChat({
     onToken,
     onThought,
     onStatus,
+    // The desktop app driving the loop (local-loop.service.js): after a round with tool calls it decides which run,
+    // in what order; `toolDriver(calls, { run, text })` resolves with Map(callId -> { content, isError })
+    toolDriver = null,
 }) {
     if (!CLAUDE_CHAT_MODELS.has(model)) throw new StreamChatError(`Unsupported Claude model: ${model}`);
     if (!process.env.ANTHROPIC_API_KEY) throw new StreamChatError("ANTHROPIC_API_KEY is not set");
@@ -767,7 +770,9 @@ export async function streamClaudeChat({
             let countsTowardDepth = false;
             let stopAnswer = null;
 
-            for (const call of toolUses) {
+            // One call: the checks, then the handler. With a toolDriver (the desktop app driving the loop,
+            // local-loop.service.js) the app says which calls run and in what order; otherwise they run here in turn.
+            const runCall = async (call) => {
                 const inputKey = JSON.stringify(call.input ?? {});
                 let content;
                 let isError = false;
@@ -808,8 +813,16 @@ export async function streamClaudeChat({
                     }
                     if (!isLoader) onStatus?.("analyzing");
                 }
-                countsTowardDepth = true;
                 callsThisRound.push({ name: call.name, input: inputKey });
+                return { content, isError };
+            };
+            const outcomes = toolDriver
+                ? await toolDriver(toolUses.map((c) => ({ id: c.id, name: c.name, input: c.input ?? {} })), { run: (id) => runCall(toolUses.find((c) => c.id === id)), text })
+                : null;
+
+            for (const call of toolUses) {
+                const { content, isError } = outcomes ? (outcomes.get(call.id) || { content: "Not run.", isError: true }) : await runCall(call);
+                countsTowardDepth = true;
                 // A handler may return { text, toolReferences }: load_tools hands Claude the deferred tools it
                 // asked for as tool_reference blocks, which the API expands into their full definitions.
                 const isObjectResult = content && typeof content === "object" && "text" in content;

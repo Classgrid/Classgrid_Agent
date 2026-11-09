@@ -3884,6 +3884,9 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
   }, [session?.user?.email]);
   const abortControllerRef = useRef<AbortController | null>(null);
   const retryCountRef = useRef(0);
+  // Desktop app and Classgrid Code: the answer being driven by this app right now (turn_info), so Stop can tell the
+  // server at once and tool rounds can be driven (local loop)
+  const activeTurnIdRef = useRef<string | null>(null);
 
   const isGenerating = submitting || thinking || (messages[messages.length - 1]?.typing === true);
   // Studio's Browser tab is locked while the agent works in it
@@ -3975,6 +3978,14 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
   }
 
   function handleStop() {
+    // 0. Desktop app / Classgrid Code: tell the server to stop this answer now (an answer there outlives a dropped
+    // connection, so closing the request alone would let it run on for a few minutes)
+    const turnId = activeTurnIdRef.current;
+    if (turnId) {
+      activeTurnIdRef.current = null;
+      const base = (typeof import.meta !== "undefined" && import.meta.env ? (import.meta.env.VITE_API_URL || "https://api.classgrid.in") : "");
+      void fetchWithRescue(`${base}/api/ai/turn/${turnId}/cmd`, { method: "POST", headers: { "Content-Type": "application/json" }, credentials: "include", body: JSON.stringify({ type: "stop" }) }).catch(() => {});
+    }
     // 1. Abort any ongoing network request
     if (abortControllerRef.current) {
       abortControllerRef.current.abort();
@@ -4752,6 +4763,10 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
 
     // Desktop app: the chat whose copy on this computer is updated when this answer finishes (never incognito)
     let keepChatId: string | null = isIncognito ? null : replySession || null;
+    // Desktop app / Classgrid Code: this answer's id on the server (turn_info) and the tool steps this app is waiting
+    // on while it drives the loop (both cleared when the answer ends, see finally)
+    let myTurnId: string | null = null;
+    const toolDoneWaiters = new Map<string, () => void>();
     try {
       const endpoint = typeof import.meta !== "undefined" && import.meta.env
         ? (import.meta.env.VITE_API_URL || "https://api.classgrid.in") + "/api/ai/ask"
@@ -4783,6 +4798,41 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
           await new Promise((r) => setTimeout(r, 1500 * (attempt + 1)));
         }
       };
+      // The app drives the AI's loop (local loop): after each model round the server hands over the tool calls the
+      // model asked for (round_end); this app says which run, in what order (run), and closes the round (round_done).
+      // Steps on this computer then run here (pc_tool_call above); online tools run on the server. A command is
+      // posted until it gets through, so a short internet drop never loses the loop.
+      const postTurnCmd = async (cmd: any): Promise<boolean> => {
+        const turnId = activeTurnIdRef.current;
+        if (!turnId) return false;
+        for (let attempt = 0; attempt < 6; attempt++) {
+          try {
+            const r = await fetchWithRescue(`${apiBase}/api/ai/turn/${turnId}/cmd`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              credentials: "include",
+              body: JSON.stringify(cmd),
+            });
+            if (r.ok) return true;
+            if (r.status === 404 || r.status === 400) return false; // the answer or the round is gone
+          } catch { /* offline: try again */ }
+          await new Promise((r) => setTimeout(r, 1000 * (attempt + 1)));
+        }
+        return false;
+      };
+      const driveRound = async (ev: any) => {
+        const roundId = Number(ev.roundId);
+        const calls: any[] = Array.isArray(ev.calls) ? ev.calls : [];
+        for (const call of calls) {
+          if (!activeTurnIdRef.current) return;
+          const key = `${roundId}:${call.id}`;
+          const done = new Promise<void>((resolve) => toolDoneWaiters.set(key, resolve));
+          const sent = await postTurnCmd({ type: "run", roundId, id: call.id });
+          if (!sent) { toolDoneWaiters.delete(key); return; }
+          await done;
+        }
+        await postTurnCmd({ type: "round_done", roundId });
+      };
       const response = await fetchWithRescue(endpoint, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -4790,8 +4840,9 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
         signal: controller.signal,
         body: JSON.stringify({
           question: apiQuestion,
-          // The app runs the AI's steps on this computer itself (see runPcToolCall above)
+          // The app runs the AI's steps on this computer itself (see runPcToolCall above) and drives the loop
           pcTools: canRunPcTools ? true : undefined,
+          localLoop: canRunPcTools ? true : undefined,
           selectedModel,
           userName: session?.user?.name ?? undefined,
           userEmail: session?.user?.email ?? undefined,
@@ -4945,6 +4996,16 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
               const event = JSON.parse(dataMatch[1]);
               if (event.type === "turn_info" && event.turnId) {
                 turnId = String(event.turnId);
+                myTurnId = turnId;
+                activeTurnIdRef.current = turnId;
+              } else if (event.type === "round_end") {
+                // The model asked for tools: this app drives the round (which run, in what order)
+                void driveRound(event);
+              } else if (event.type === "tool_done") {
+                const wake = toolDoneWaiters.get(`${Number(event.roundId)}:${event.id}`);
+                if (wake) { toolDoneWaiters.delete(`${Number(event.roundId)}:${event.id}`); wake(); }
+              } else if (event.type === "local_loop") {
+                // (the server confirmed this app drives the loop; nothing to show)
               } else if (event.type === "status") {
                 setThinkingLabel(
                   event.label === "searching" ? "Searching the web" :
@@ -5280,6 +5341,10 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
         await typeAssistantResponse(fallback);
       }
     } finally {
+      // This answer is over on this side: no more commands for it, and nothing waits on its tool steps
+      if (myTurnId && activeTurnIdRef.current === myTurnId) activeTurnIdRef.current = null;
+      for (const wake of toolDoneWaiters.values()) wake();
+      toolDoneWaiters.clear();
       if (replySession && runningRepliesRef.current.get(replySession)?.controller === controller) runningRepliesRef.current.delete(replySession);
       // Desktop app: keep the finished chat on this computer (a moment later, so the server has saved the answer)
       const finishedChat = keepChatId;
