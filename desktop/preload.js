@@ -62,6 +62,9 @@ contextBridge.exposeInMainWorld("classgridDesktop", {
   readFile: (folder, rel) => ipcRenderer.invoke("cg:readFile", folder, rel),
   // One AI step on this computer, asked by the chat for a pc_tool_call on the answer's own stream (runner.js runTool)
   runTool: (req) => ipcRenderer.invoke("cg:runTool", req),
+  // The editor notes (open file, cursor, selection, problems, terminal runs) sent with each message, so the server
+  // never asks this computer for them in front of an answer
+  editorContext: () => ipcRenderer.invoke("cg:editorContext"),
   openInEditor: (folder, file, line) => ipcRenderer.invoke("cg:openInEditor", folder, file, line),
   startEditor: (folder) => ipcRenderer.invoke("cg:startEditor", folder),
   revealInEditor: (folder, file, startLine, endLine) => ipcRenderer.invoke("cg:revealInEditor", folder, file, startLine, endLine),

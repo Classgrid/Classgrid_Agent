@@ -2004,6 +2004,7 @@ export const streamAskAi = async (req, res) => {
 
             // Ownership verified, safe to load history
             messages = await getHistory(sessionId, historyDepth, { desktop: desktopChat });
+            console.log(`[AI-TIMING] history loaded at +${Date.now() - requestStartedAt}ms`);
             // The desktop app sees the chat word for word up to a size the model can hold (about 100,000 tokens);
             // older messages beyond that are covered by the summary and recall
             if (desktopChat) {
@@ -2232,11 +2233,13 @@ You are currently talking to Nikhil Shinde (nikhil.shinde@classgrid.in), the CRE
         // snapshot that lets this answer be undone) run at the same time: one after another they took seconds
         const checkpointP = sessionId && !isIncognito ? startCheckpoint(sessionId, { website: fromWebsite }).catch(() => null) : Promise.resolve(null);
         const [projectContext, whereProject] = await Promise.all([
-            sessionId && !isIncognito ? editorContextFor(sessionId, { website: fromWebsite }).catch(() => "") : "",
+            // (the desktop app sends its editor notes with the message, so nothing is asked of the computer here)
+            sessionId && !isIncognito ? editorContextFor(sessionId, { website: fromWebsite, editorContext: typeof body.editorContext === "string" ? body.editorContext : null }).catch(() => "") : "",
             // (the website always works in the cloud copy: a project in both places that the desktop app last used from
             // its computer copy is the cloud project here, so a Mastero chat isn't told it's a folder the website can't reach)
             sessionId && !isIncognito && body.taskOrigin !== "whatsapp" ? projectForChat(sessionId).then((p) => (fromWebsite && p?.bothPlaces ? { ...p, location: "cloud", localPath: null, bothPlaces: false } : p)).then((p) => inChatWorktree(p, sessionId)).catch(() => null) : null,
         ]);
+        console.log(`[AI-TIMING] project context at +${Date.now() - requestStartedAt}ms`);
         const masteroPush = whereProject?.mastero ? await masteroAutoPush(whereProject.owner).catch(() => true) : false;
         let whereYouWork = whereYouWorkRule({ desktop: body.clientApp === "desktop", project: whereProject, task: !!body.taskOrigin, masteroAutoPush: masteroPush });
         // A Mastero project: this copy gets the newest code from GitHub first (what was done in the other place), and the AI
@@ -2554,12 +2557,20 @@ CRITICAL: If you call ANY integration tool (e.g. Google Classroom, Gmail, Google
                     const notesKey = `memindex:${req.user?._id || req.user?.id}`;
                     if (typeof body.memoryIndex === "string") redis.set(notesKey, body.memoryIndex.slice(0, 25000), "EX", 30 * 24 * 3600).catch(() => {});
                     let notes = (typeof body.memoryIndex === "string" ? body.memoryIndex : body.wakeUp ? (await redis.get(notesKey).catch(() => "")) || "" : "").slice(0, 25000).trim();
-                    // Straight from the app on the computer: the list with this project's own notes, and the user's rules in full
+                    // The list with this project's own notes and the user's rules in full, from the app on the computer.
+                    // No waiting on the computer in front of the answer (owner, 2026-11-09: the answer must start at
+                    // once): the pack the app gave last time is used (Redis, per user and project) and the app is asked
+                    // for a fresh one in the background for the next message; a note the AI saves or deletes drops the
+                    // pack (the memory handlers below). Only the very first answer of a user and project waits, shortly.
                     let memoryRules = "";
-                    const fromApp = await Promise.race([
-                        runOnComputer(req.user?._id || req.user?.id, "memory", { action: "index", project: memoryProject }, sessionId).catch(() => null),
-                        new Promise((r) => setTimeout(() => r(null), 3000)),
-                    ]);
+                    const memoryUserId = req.user?._id || req.user?.id;
+                    const packKey = `memindex:pack:${memoryUserId}:${memoryProject || "-"}`;
+                    const freshPack = () => runOnComputer(memoryUserId, "memory", { action: "index", project: memoryProject }, sessionId)
+                        .then((got) => { if (typeof got === "string" && got.trim().startsWith("{")) redis.set(packKey, got.slice(0, 60000), "EX", 24 * 3600).catch(() => {}); return got; })
+                        .catch(() => null);
+                    let fromApp = await redis.get(packKey).catch(() => null);
+                    if (fromApp) freshPack(); // in the background: the next message gets today's notes
+                    else fromApp = await Promise.race([freshPack(), new Promise((r) => setTimeout(() => r(null), 1500))]);
                     let memoryFolder = "";
                     try { const got = JSON.parse(fromApp); notes = String(got.index || notes).slice(0, 25000).trim(); memoryRules = String(got.rules || "").slice(0, 8000).trim(); memoryFolder = String(got.folder || "").slice(0, 300); } catch { /* an older app, or not open */ }
                     // The user's rules go at the very end of the instructions, where every model follows them most closely
@@ -5806,6 +5817,7 @@ You work on the user's own Windows computer through their Classgrid desktop app,
             .map(m => typeof m.content === "string" ? m.content : Array.isArray(m.content) ? m.content.map(p => p?.text || "").join(" ") : "");
         const safetyRules = safetyRulesFor(recentUserTexts);
         if (safetyRules) volatilePrompt += promptBlock("cf", safetyRules);
+        console.log(`[AI-TIMING] prompt built at +${Date.now() - requestStartedAt}ms`);
         const toolPlan = planToolsForMessage({
             allTools: llmConfig.tools,
             text: [body.question || "", ...requestAttachments.map(a => a?.name || "")].join(" "),
@@ -6044,9 +6056,11 @@ If a tool fails, never show the error message; say only: "Something went wrong o
         if (body.clientApp === "desktop" && !body.taskOrigin) {
             // The AI's own memory notes on the computer (the desktop app runs them)
             const memoryUser = req.user?._id || req.user?.id;
-            llmConfig.toolHandlers.save_memory = (a) => runOnComputer(memoryUser, "memory", { ...a, action: "save", project: a?.project_only && memoryProject ? memoryProject : "" }, sessionId);
+            // (a saved or deleted note drops the cached MEMORY.md pack, so the next answer reads today's notes)
+            const dropMemoryPack = (r) => { redis.del(`memindex:pack:${memoryUser}:${memoryProject || "-"}`, `memindex:pack:${memoryUser}:-`).catch(() => {}); return r; };
+            llmConfig.toolHandlers.save_memory = (a) => runOnComputer(memoryUser, "memory", { ...a, action: "save", project: a?.project_only && memoryProject ? memoryProject : "" }, sessionId).then(dropMemoryPack);
             llmConfig.toolHandlers.read_memory = (a) => runOnComputer(memoryUser, "memory", { ...a, action: "read", project: memoryProject }, sessionId);
-            llmConfig.toolHandlers.delete_memory = (a) => runOnComputer(memoryUser, "memory", { ...a, action: "delete", project: memoryProject }, sessionId);
+            llmConfig.toolHandlers.delete_memory = (a) => runOnComputer(memoryUser, "memory", { ...a, action: "delete", project: memoryProject }, sessionId).then(dropMemoryPack);
             // A cloud project chat in the desktop app: the project's own terminal works on the cloud copy, and
             // computer_terminal runs on the user's computer (PowerShell, Bash or cmd), so the terminal is there in every chat
             if (!onComputer && chatProject?.location !== "local" && !fullToolList.some((t) => t.function.name === "computer_terminal")) {

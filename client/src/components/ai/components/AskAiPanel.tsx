@@ -4833,6 +4833,16 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
         }
         await postTurnCmd({ type: "round_done", roundId });
       };
+      // Desktop app / Classgrid Code: the editor notes (open file, cursor, selection, problems, terminal runs) go with
+      // the message, so the server never asks this computer for them in front of the answer
+      const editorContext: string | undefined = await (async () => {
+        const get = (window as any).classgridDesktop?.editorContext;
+        if (typeof get !== "function") return undefined;
+        try {
+          const ctx = await Promise.race([get(), new Promise((r) => setTimeout(() => r(null), 400))]);
+          return typeof ctx === "string" && ctx.trim().startsWith("{") && ctx !== "{}" ? ctx.slice(0, 40000) : undefined;
+        } catch { return undefined; }
+      })();
       // The request as sent, kept so the same answer can be asked for again after a server restart (resumeTurn)
       let requestBodyText = "";
       const response = await fetchWithRescue(endpoint, {
@@ -4845,6 +4855,7 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
           // The app runs the AI's steps on this computer itself (see runPcToolCall above) and drives the loop
           pcTools: canRunPcTools ? true : undefined,
           localLoop: canRunPcTools ? true : undefined,
+          editorContext,
           selectedModel,
           userName: session?.user?.name ?? undefined,
           userEmail: session?.user?.email ?? undefined,

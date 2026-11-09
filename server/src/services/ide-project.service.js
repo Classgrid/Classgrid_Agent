@@ -1052,7 +1052,7 @@ function terminalRunsText(ctx, rel) {
     (r.output ? `\n  Output (its end):\n  \`\`\`\n${String(r.output).slice(-(r.exitCode === 0 ? 800 : 3000))}\n  \`\`\`` : "")).join("\n");
 }
 
-export async function editorContextFor(sessionId, { website = false } = {}) {
+export async function editorContextFor(sessionId, { website = false, editorContext = null } = {}) {
   const project = await projectForChat(sessionId, { website });
   if (!project) return "";
   // A folder on the user's own computer: the Classgrid desktop app runs the project tools there (local-runner.service.js).
@@ -1062,7 +1062,7 @@ export async function editorContextFor(sessionId, { website = false } = {}) {
     return `\n\n<project_editor>\n${[
       PROJECT_MODE_RULES,
       `Project: ${project.name}. This project is a folder on the user's OWN computer (${project.localPath || "a local folder"}), not on Classgrid's servers. The Classgrid desktop app on that computer runs your project tools there: the file tools read and change the real files on their disk, and terminal commands run in that folder on their computer (Windows, PowerShell), so use PowerShell commands, not Linux-only ones. Paths are relative to the project folder; /data and /home/workspace/... don't exist here. push_project_to_github commits everything and pushes it to the folder's GitHub repository with the user's own GitHub login on that computer. Review/Undo snapshots and search by meaning aren't available for this project. Code you run (run_code, Python, Go, Node, anything) runs on their computer too, never somewhere else: there is no sandbox in this project, so never mention one. If a tool says the desktop app isn't open, tell the user to open the Classgrid app on that computer.`,
-      ...(await localEditorLines(project)),
+      ...(await localEditorLines(project, editorContext)),
     ].join("\n")}\n</project_editor>`;
   }
   let ssh;
@@ -1132,11 +1132,18 @@ ${rulesFile.text}`);
 
 // A folder project's editor (the desktop app's built-in editor): open file, cursor, selection, tabs, errors and the
 // user's terminal commands, read by their Classgrid app
-async function localEditorLines(project) {
+// `given`: the editor notes the desktop app sent with the message (JSON text), so the computer isn't asked for them in
+// front of the answer; an older app that sends none is asked over the runner as before
+async function localEditorLines(project, given = null) {
   try {
-    const { callLocal } = await import("./local-runner.service.js");
     let ctx = null;
-    try { ctx = JSON.parse(await callLocal(project, "editor_context", {})); } catch { return []; }
+    if (typeof given === "string" && given.trim().startsWith("{")) {
+      try { ctx = JSON.parse(given); } catch { ctx = null; }
+    }
+    if (!ctx) {
+      const { callLocal } = await import("./local-runner.service.js");
+      try { ctx = JSON.parse(await callLocal(project, "editor_context", {})); } catch { return []; }
+    }
     if (!ctx || Date.now() - (ctx.updatedAt || 0) > 6 * 60 * 60 * 1000) return [];
     const root = String(project.localPath || "").replace(/[\\/]+$/, "").toLowerCase();
     const rel = (p) => { const s = String(p || ""); return root && s.toLowerCase().startsWith(root) ? s.slice(root.length).replace(/^[\\/]+/, "").replace(/\\/g, "/") : s; };

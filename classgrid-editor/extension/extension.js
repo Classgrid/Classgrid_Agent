@@ -640,6 +640,8 @@ const HANDLERS = {
   readFile: (_p, folder, rel) => parts.runner.readForFilesTab(String(folder || ""), String(rel || "")),
   // One AI step on this computer (pc_tool_call on the answer's own stream): the same runner the socket fallback uses
   runTool: (_p, req) => parts.runner.runTool(req && typeof req === "object" ? req : {}),
+  // The editor notes sent with each message (so the server never asks this computer for them in front of an answer)
+  editorContext: () => { try { return parts.runner.tools.editor_context(); } catch { return "{}"; } },
   // A file the AI mentions or changed opens in this editor, at its lines
   openInEditor: async (_p, folder, file, line) => {
     if (!parts.runner.isAllowed(folder)) return;

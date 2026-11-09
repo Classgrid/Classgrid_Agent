@@ -438,6 +438,7 @@
     readFile: bind("readFile"),
     // One AI step on this computer, asked by the chat for a pc_tool_call on the answer's own stream (runner.js runTool)
     runTool: bind("runTool"),
+    editorContext: bind("editorContext"),
     openInEditor: bind("openInEditor"),
     revealInEditor: bind("revealInEditor"),
     onOpenFolderProject: on("openFolderProject"),

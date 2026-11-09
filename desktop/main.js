@@ -344,6 +344,7 @@ ipcMain.handle("cg:readFile", (_e, folder, rel) => runner.readForFilesTab(String
 // One AI step on this computer, asked by the chat screens for a pc_tool_call on the answer's own stream (the step's
 // reply goes back over HTTP, never a separate socket). Only the app's own screens may ask: never the AI browser view
 // or any page opened in it
+ipcMain.handle("cg:editorContext", () => { try { return runner.tools.editor_context(); } catch { return "{}"; } });
 ipcMain.handle("cg:runTool", (e, req) => {
   let from = "";
   try { from = String(e.sender.getURL() || ""); } catch { from = ""; }
