@@ -1774,10 +1774,16 @@ export const streamAskAi = async (req, res) => {
         }
     }
 
-    // Desktop app: the computer this account uses (the free limit counts per computer)
-    if (body.clientApp === "desktop" && body.deviceId) await rememberDevice(userId, body.deviceId);
+    // Desktop app: the computer this account uses (the free limit counts per computer). Noted alongside the checks
+    // below, not in front of them (answers must start at once, owner 2026-11-09)
+    const deviceNoted = body.clientApp === "desktop" && body.deviceId ? rememberDevice(userId, body.deviceId).catch((e) => console.error("rememberDevice:", e?.message)) : null;
+    // The chat's row is read while the usage check runs (it is needed right after it), not after it
+    const sessionRowP = body.sessionId && !body.isIncognito ? getSessionById(body.sessionId).catch(() => null) : null;
+    let firstCheck = null; // the usage check before the answer; the one before the model call reuses it when nothing changed
     try {
         const check = await hasEnoughTokens(userId, orgId, estimatePromptTokens([body.question || ""]) + MIN_PROMPT_TOKENS + REPLY_TOKEN_ALLOWANCE, { paidOnly: fablePaidOnly });
+        firstCheck = check;
+        if (deviceNoted) await deviceNoted;
         if (!check.allowed && check.paidOnly) {
             res.writeHead(402, { "Content-Type": "application/json" });
             res.end(JSON.stringify({ error: "Claude Fable 5.1 runs on paid AI credits only, and you have none left. Top up AI credits to keep using it, or pick another model (your free weekly tokens work with every other model).", code: "fable_needs_paid_credits" }));
@@ -1894,6 +1900,7 @@ export const streamAskAi = async (req, res) => {
         // answer, and replies went from ~5 s to 10-15 s; older messages are in the chat's summary and recall_chat; owner, 2026-11-04)
         let historyDepth = Math.min(parseInt(body.historyDepth, 10) || (desktopChat ? 40 : 12), 500);
         let messages = [];
+        let contextP = null; // the chat's project and editor notes, looked up while the history loads
         let dynamicSystemPrompt = "";
         // Per-request / per-user context. Appended AFTER all fixed rules so the long fixed prefix
         // stays byte-identical between requests and can be served from the provider's prompt cache.
@@ -1905,7 +1912,7 @@ export const streamAskAi = async (req, res) => {
 
         if (sessionId && !isIncognito) {
             // ÃƒÂ°Ã…Â¸Ã…Â¡Ã‚Â¨ CRITICAL SECURITY CHECK: Verify Ownership before loading history ÃƒÂ°Ã…Â¸Ã…Â¡Ã‚Â¨
-            const sessionData = await getSessionById(sessionId);
+            const sessionData = (sessionRowP && String(body.sessionId) === String(sessionId) ? await sessionRowP : null) || await getSessionById(sessionId);
             if (!sessionData) {
                 res.write(`data: ${JSON.stringify({ type: "error", error: "Session not found." })}\n\n`);
                 res.end();
@@ -1932,19 +1939,22 @@ export const streamAskAi = async (req, res) => {
                 if (compacted) sessionData.long_term_memory = (await getSessionById(sessionId))?.long_term_memory || sessionData.long_term_memory;
             }
 
+            // The message count and the Share Grid labels are read together, not one after the other
+            const historyCountP = sessionData.long_term_memory ? getHistoryCount(sessionId) : Promise.resolve(0);
+            const gridP = gridLabelMap(sessionId);
             // Inject Mistral long_term_memory if available
             if (sessionData.long_term_memory) {
                 // Every message after the summary is sent (+2 overlap), so nothing falls between the two.
                 // An older summary without the coverage header covered up to the previous 8-message mark.
                 const covered = memoryCoverage(sessionData.long_term_memory);
-                const total = await getHistoryCount(sessionId);
+                const total = await historyCountP;
                 const sinceSummary = covered !== null ? total - covered : (total % 8) + 8;
                 historyDepth = desktopChat ? Math.min(Math.max(sinceSummary + 2, 20), 60) : Math.min(Math.max(sinceSummary + 2, 4), 30);
                 volatilePrompt += `\n\n<long_term_memory>\nA background model's summary of messages 1-${covered ?? "?"} of this chat (not their exact text; for the exact text of an older message call recall_chat or search_recall_chat). The messages after it follow in full.\n${memoryText(sessionData.long_term_memory)}\n</long_term_memory>`;
             }
 
             // Share Grid: the AI sees each user message as "Name: text" and knows who is in the chat
-            const grid = await gridLabelMap(sessionId);
+            const grid = await gridP;
             if (grid) {
                 const labeledKey = `ai:grid-labeled:${sessionId}`;
                 if (!(await redis.get(labeledKey).catch(() => "1"))) {
@@ -2002,6 +2012,15 @@ export const streamAskAi = async (req, res) => {
                 volatilePrompt += `\n\n<shared_chat>\nThis is a Share Grid chat: one Classgrid AI chat that ${grid.members.length} people use together (not a Grids group chat). Each user message starts with the name of the person who sent it. The latest message is from ${gridSender.name}.\nThe system turns off plugins (connected apps like Gmail, Google Drive, Notion, Slack) in Share Grid chats, so you can't use them here. If someone asks, tell them plugins work in their own private chats.\nThe people in this chat and their profiles:\n${people}\n</shared_chat>`;
             }
 
+            // The chat's project and editor notes are looked up while the history loads, not after it (answers must
+            // start at once, owner 2026-11-09); they are awaited where they are used (whereProject below)
+            contextP = Promise.all([
+                // (the desktop app sends its editor notes with the message, so nothing is asked of the computer here)
+                editorContextFor(sessionId, { website: fromWebsite, editorContext: typeof body.editorContext === "string" ? body.editorContext : null }).catch(() => ""),
+                // (the website always works in the cloud copy: a project in both places that the desktop app last used from
+                // its computer copy is the cloud project here, so a Mastero chat isn't told it's a folder the website can't reach)
+                body.taskOrigin !== "whatsapp" ? projectForChat(sessionId).then((p) => (fromWebsite && p?.bothPlaces ? { ...p, location: "cloud", localPath: null, bothPlaces: false } : p)).then((p) => inChatWorktree(p, sessionId)).catch(() => null) : null,
+            ]);
             // Ownership verified, safe to load history
             messages = await getHistory(sessionId, historyDepth, { desktop: desktopChat });
             console.log(`[AI-TIMING] history loaded at +${Date.now() - requestStartedAt}ms`);
@@ -2232,11 +2251,9 @@ You are currently talking to Nikhil Shinde (nikhil.shinde@classgrid.in), the CRE
         // The three steps that may ask the user's computer (what's open in the editor, the project's folder, and the
         // snapshot that lets this answer be undone) run at the same time: one after another they took seconds
         const checkpointP = sessionId && !isIncognito ? startCheckpoint(sessionId, { website: fromWebsite }).catch(() => null) : Promise.resolve(null);
-        const [projectContext, whereProject] = await Promise.all([
-            // (the desktop app sends its editor notes with the message, so nothing is asked of the computer here)
+        // (started while the history loaded, see contextP above; a chat made just now has none yet)
+        const [projectContext, whereProject] = contextP ? await contextP : await Promise.all([
             sessionId && !isIncognito ? editorContextFor(sessionId, { website: fromWebsite, editorContext: typeof body.editorContext === "string" ? body.editorContext : null }).catch(() => "") : "",
-            // (the website always works in the cloud copy: a project in both places that the desktop app last used from
-            // its computer copy is the cloud project here, so a Mastero chat isn't told it's a folder the website can't reach)
             sessionId && !isIncognito && body.taskOrigin !== "whatsapp" ? projectForChat(sessionId).then((p) => (fromWebsite && p?.bothPlaces ? { ...p, location: "cloud", localPath: null, bothPlaces: false } : p)).then((p) => inChatWorktree(p, sessionId)).catch(() => null) : null,
         ]);
         console.log(`[AI-TIMING] project context at +${Date.now() - requestStartedAt}ms`);
@@ -6155,7 +6172,10 @@ If a tool fails, never show the error message; say only: "Something went wrong o
         try {
             const estimatedPromptTokens = estimatePromptTokens([...messages.map(m => m.content), activeToolList]);
             const estimatedCost = chargeableTokens({ prompt_tokens: estimatedPromptTokens, completion_tokens: REPLY_TOKEN_ALLOWANCE }, isClaudeRequest ? body.selectedModel : CF_PRO_MODEL);
-            const check = await hasEnoughTokens(userId, orgId, estimatedCost, { paidOnly: fablePaidOnly });
+            // The check made seconds ago is reused when it clearly covers this estimate too (a second database round
+            // trip in front of every answer otherwise); a tight balance is checked again for real
+            const firstSpendable = firstCheck?.allowed ? (firstCheck.spendable ?? firstCheck.remaining) : undefined;
+            const check = firstCheck?.allowed && (firstSpendable === undefined || firstSpendable >= estimatedCost * 3) ? firstCheck : await hasEnoughTokens(userId, orgId, estimatedCost, { paidOnly: fablePaidOnly });
             if (!check.allowed && check.paidOnly) {
                 res.write(`data: ${JSON.stringify({ type: "error", error: "Claude Fable 5.1 runs on paid AI credits only, and you don't have enough left for this message. Top up AI credits, or pick another model (your free weekly tokens work with every other model)." })}\n\n`);
                 return;

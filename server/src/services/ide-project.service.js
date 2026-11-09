@@ -80,10 +80,29 @@ async function newestFileEdit(ssh, project) {
 // else the project the chat belongs to.
 // website: the caller works for the website, which only ever reaches the cloud copy: a project in both places is the
 // cloud project there, even when this chat's last desktop message left it marked "On this computer"
+// One answer asks for its chat's project several times while it is prepared (editor context, checkpoint, where the
+// chat works): the lookup is made once and shared for 3 seconds, so those are one set of database reads, not three
+// (answers must start at once, owner 2026-11-09). linkChatToProject forgets it, since it changes the answer.
+const projectLookups = new Map(); // `${sessionId}|${website}` -> { at, promise }
+const PROJECT_LOOKUP_MS = 3000;
+export function forgetProjectLookup(sessionId) {
+  for (const key of projectLookups.keys()) if (key.startsWith(`${sessionId}|`)) projectLookups.delete(key);
+}
 export async function projectForChat(sessionId, { website = false } = {}) {
+  const key = `${sessionId}|${website ? 1 : 0}`;
+  const kept = projectLookups.get(key);
+  if (kept && Date.now() - kept.at < PROJECT_LOOKUP_MS) return kept.promise;
+  const promise = lookupProjectForChat(sessionId, website);
+  projectLookups.set(key, { at: Date.now(), promise });
+  promise.catch(() => {}).finally(() => setTimeout(() => { if (projectLookups.get(key)?.promise === promise) projectLookups.delete(key); }, PROJECT_LOOKUP_MS).unref?.());
+  return promise;
+}
+async function lookupProjectForChat(sessionId, website) {
   await connectDB();
-  const onScreen = await redis.get(UI_PROJECT(sessionId)).catch(() => null);
-  const here = website ? null : await redis.get(CHAT_HERE(sessionId)).catch(() => null);
+  const [onScreen, here] = await Promise.all([
+    redis.get(UI_PROJECT(sessionId)).catch(() => null),
+    website ? null : redis.get(CHAT_HERE(sessionId)).catch(() => null),
+  ]);
   if (onScreen) {
     const p = await IdeProject.findById(onScreen).lean().catch(() => null);
     if (p) return onComputerCopy(p, here);
@@ -1001,6 +1020,7 @@ export function pcChatIds(p) {
 
 export async function linkChatToProject(userId, projectId, sessionId, deviceId = null, { website = false, desktop = false } = {}) {
   await connectDB();
+  forgetProjectLookup(sessionId);
   const project = await IdeProject.findOne({ _id: projectId, owner: userId }).select("_id location localCopies");
   // A folder project works only in the desktop app: a message from the website never links a chat to it
   if (!project || (website && project.location === "local")) return;
