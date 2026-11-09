@@ -4985,7 +4985,10 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
           buffer += decoder.decode(value, { stream: true });
           const parts = buffer.split("\n\n");
           buffer = parts.pop() || "";
-          if (isStale() || superseded()) continue; // old chat's reply, or one a newer message replaced: received to the end (server saves it), never shown here
+          // Old chat's reply, or one a newer message replaced: received to the end (the server saves it), never shown
+          // here. The events that drive the answer (its id, tool rounds, steps for this computer) are still handled,
+          // so an answer keeps running when the user looks at another chat meanwhile.
+          const stale = isStale() || superseded();
 
           for (const part of parts) {
             const dataMatch = part.match(/^data:\s*(.+)$/m);
@@ -4994,6 +4997,8 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
 
             try {
               const event = JSON.parse(dataMatch[1]);
+              const drivesAnswer = event.type === "turn_info" || event.type === "round_end" || event.type === "tool_done" || event.type === "pc_tool_call" || event.type === "local_loop";
+              if (stale && !drivesAnswer) continue;
               if (event.type === "turn_info" && event.turnId) {
                 turnId = String(event.turnId);
                 myTurnId = turnId;
