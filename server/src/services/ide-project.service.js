@@ -84,7 +84,7 @@ async function newestFileEdit(ssh, project) {
 // chat works): the lookup is made once and shared for 3 seconds, so those are one set of database reads, not three
 // (answers must start at once, owner 2026-11-09). linkChatToProject forgets it, since it changes the answer.
 const projectLookups = new Map(); // `${sessionId}|${website}` -> { at, promise }
-const PROJECT_LOOKUP_MS = 3000;
+const PROJECT_LOOKUP_MS = 30000;
 export function forgetProjectLookup(sessionId) {
   for (const key of projectLookups.keys()) if (key.startsWith(`${sessionId}|`)) projectLookups.delete(key);
 }

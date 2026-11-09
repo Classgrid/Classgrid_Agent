@@ -450,7 +450,23 @@ export async function updateSessionPinned(sessionId, pinned) {
 /**
  * Retrieves a single session by ID.
  */
+// A chat's row is read at the start of every answer (ownership, ended, summary). It is kept in this process for a
+// few seconds, so the next message of the same chat doesn't wait on the database for it again (answers must start at
+// once, owner 2026-11-09). Code that changes the row calls forgetSession first.
+const sessionRows = new Map(); // sessionId -> { at, promise }
+const SESSION_ROW_MS = 5000;
+export function forgetSession(sessionId) { sessionRows.delete(String(sessionId)); }
 export async function getSessionById(sessionId) {
+    const key = String(sessionId);
+    const kept = sessionRows.get(key);
+    if (kept && Date.now() - kept.at < SESSION_ROW_MS) return kept.promise;
+    const promise = readSessionRow(sessionId);
+    sessionRows.set(key, { at: Date.now(), promise });
+    promise.then((row) => { if (!row) sessionRows.delete(key); }, () => sessionRows.delete(key));
+    if (sessionRows.size > 5000) sessionRows.clear();
+    return promise;
+}
+async function readSessionRow(sessionId) {
     const { data, error } = await primarySupabaseClient
         .from('ai_chat_sessions')
         .select('*')

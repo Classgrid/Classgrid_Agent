@@ -1090,6 +1090,21 @@ async function readPageDirect(startUrl, pageLinks = []) {
 }
 const estimatePromptTokens = (parts) => Math.ceil(parts.reduce((n, p) => n + (typeof p === "string" ? p.length : (JSON.stringify(p ?? "") || "").length), 0) / 4);
 
+// A few lookups every answer makes that rarely change within seconds (the user's row, preferences, skills, the usage
+// check): kept in this process for a moment, so an answer starts without waiting on the database for what it read
+// seconds ago (answers must start at once, owner 2026-11-09). Nothing of the user's data is kept anywhere else.
+const shortLived = new Map(); // key -> { at, promise }
+async function keptFor(key, ms, load) {
+    const have = shortLived.get(key);
+    if (have && Date.now() - have.at < ms) return have.promise;
+    const promise = Promise.resolve().then(load);
+    shortLived.set(key, { at: Date.now(), promise });
+    promise.catch(() => { if (shortLived.get(key)?.promise === promise) shortLived.delete(key); });
+    if (shortLived.size > 5000) shortLived.clear();
+    return promise;
+}
+const forgetKept = (key) => shortLived.delete(key);
+
 // Chat models: the main model answers anything non-trivial, the Auto model short simple messages. Set
 // AI_FLASH_ROUTING=off to send everything to the main model. Cloudflare removes DeepSeek V4 Pro / V4 Flash and
 // GLM 5.2 on 20 Nov 2026, so the main model is DeepSeek V4.1 Flash and the Auto one GLM 5.3 (owner's order, 2026-11-07).
@@ -1781,7 +1796,11 @@ export const streamAskAi = async (req, res) => {
     const sessionRowP = body.sessionId && !body.isIncognito ? getSessionById(body.sessionId).catch(() => null) : null;
     let firstCheck = null; // the usage check before the answer; the one before the model call reuses it when nothing changed
     try {
-        const check = await hasEnoughTokens(userId, orgId, estimatePromptTokens([body.question || ""]) + MIN_PROMPT_TOKENS + REPLY_TOKEN_ALLOWANCE, { paidOnly: fablePaidOnly });
+        // (the same check from the last 10 seconds is reused while the balance is clearly enough; a tight or blocked
+        // balance is always checked for real)
+        const quotaKey = `quota:${userId}:${orgId || "-"}:${fablePaidOnly ? 1 : 0}`;
+        const check = await keptFor(quotaKey, 10000, () => hasEnoughTokens(userId, orgId, estimatePromptTokens([body.question || ""]) + MIN_PROMPT_TOKENS + REPLY_TOKEN_ALLOWANCE, { paidOnly: fablePaidOnly }));
+        if (!check.allowed || ((check.spendable ?? check.remaining) !== undefined && (check.spendable ?? check.remaining) < 50000)) forgetKept(quotaKey);
         firstCheck = check;
         if (deviceNoted) await deviceNoted;
         if (!check.allowed && check.paidOnly) {
@@ -1941,7 +1960,7 @@ export const streamAskAi = async (req, res) => {
             if (slashCommand === "compact") {
                 res.write(`data: ${JSON.stringify({ type: "status", label: "Compacting chat memory..." })}\n\n`);
                 compacted = await triggerMemoryAgent(sessionId, { force: true }).catch(() => false);
-                if (compacted) sessionData.long_term_memory = (await getSessionById(sessionId))?.long_term_memory || sessionData.long_term_memory;
+                if (compacted) { (await import("../services/ai-chat.service.js")).forgetSession(sessionId); sessionData.long_term_memory = (await getSessionById(sessionId))?.long_term_memory || sessionData.long_term_memory; }
             }
 
             // The message count and the Share Grid labels are read together, not one after the other
@@ -2237,16 +2256,19 @@ You are currently talking to Nikhil Shinde (nikhil.shinde@classgrid.in), the CRE
         // Where this chat started (first message wins): the desktop app's chats and the website's chats are separate lists
         if (sessionId && !isIncognito && !gridSender && !body.taskOrigin && req.user?._id) {
             const placeField = fromWebsite ? "web_chat_ids" : body.clientApp === "desktop" ? "desktop_chat_ids" : null;
-            if (placeField) await User.updateOne({ _id: req.user._id, desktop_chat_ids: { $ne: sessionId }, web_chat_ids: { $ne: sessionId } }, { $addToSet: { [placeField]: sessionId } }).catch(() => {});
+            if (placeField) User.updateOne({ _id: req.user._id, desktop_chat_ids: { $ne: sessionId }, web_chat_ids: { $ne: sessionId } }, { $addToSet: { [placeField]: sessionId } }).catch(() => {}); // (not waited for: the answer starts meanwhile)
         }
         // (desktop app: an Incognito chat in Studio is kept out of the project and Studio's list, as Agent mode's
         // Incognito chats are kept out of every list; the website is unchanged)
         const incognitoHere = hideFromUser && !fromWebsite;
         if (sessionId && !isIncognito && !incognitoHere && !gridSender && /^[0-9a-f]{24}$/i.test(String(body.projectId || "")) && req.user?._id) {
-            await linkChatToProject(req.user._id, body.projectId, sessionId, body.clientApp === "desktop" ? body.deviceId : null, { website: fromWebsite, desktop: !fromWebsite && body.clientApp === "desktop" }).catch(() => {});
+            // (waited for only when the chat's project is looked up after this, i.e. a chat made just now; an existing
+            // chat's project was looked up while its history loaded, so the answer starts meanwhile)
+            const linked = linkChatToProject(req.user._id, body.projectId, sessionId, body.clientApp === "desktop" ? body.deviceId : null, { website: fromWebsite, desktop: !fromWebsite && body.clientApp === "desktop" }).catch(() => {});
+            if (!contextP) await linked;
         } else if (sessionId && !isIncognito && !incognitoHere && !gridSender && body.appMode === "studio" && body.taskOrigin !== "whatsapp" && req.user?._id) {
-            // Studio with no project open: the chat is kept in Studio's own chat list
-            await User.updateOne({ _id: req.user._id }, { $addToSet: { studio_chat_ids: sessionId } }).catch(() => {});
+            // Studio with no project open: the chat is kept in Studio's own chat list (not waited for)
+            User.updateOne({ _id: req.user._id }, { $addToSet: { studio_chat_ids: sessionId } }).catch(() => {});
             await forgetChatScreenProject(sessionId);
         }
         // Work from WhatsApp (calls and messages): its chat is listed only in Studio (owner, 2026-11-02)
@@ -2481,11 +2503,12 @@ CRITICAL: If you call ANY integration tool (e.g. Google Classroom, Gmail, Google
         const hasUserContext = !!req.user && !!(body.userName || body.userEmail || body.userRole || body.subdomain);
         const UserModel = (await import("../models/User.js")).default;
         const AiSkillModel = (await import("../models/AiSkill.js")).default;
+        // (read once and kept for 10 seconds: the same user's next message doesn't wait on the database for them again)
         const [deepContext, userPrefsDocResult, customSkillsResult, latestUserResult] = await Promise.all([
             null, // The ERP is gone: its class/subject/teacher context (buildDeepContext) is no longer added
-            userId ? UserModel.findById(userId).select("ai_preferences").lean().catch((e) => { console.error("Error loading AI Preferences:", e); return null; }) : null,
-            userId ? AiSkillModel.find({ userId, is_active: true }).lean().catch((e) => { console.error("Error loading AI skills:", e); return []; }) : [],
-            req.user ? mongoose.model('User').findById(req.user._id).lean().catch((e) => { console.error("Error loading user for integrations:", e); return null; }) : null
+            userId ? keptFor(`prefs:${userId}`, 10000, () => UserModel.findById(userId).select("ai_preferences").lean().catch((e) => { console.error("Error loading AI Preferences:", e); return null; })) : null,
+            userId ? keptFor(`skills:${userId}`, 10000, () => AiSkillModel.find({ userId, is_active: true }).lean().catch((e) => { console.error("Error loading AI skills:", e); return []; })) : [],
+            req.user ? keptFor(`user:${req.user._id}`, 10000, () => mongoose.model('User').findById(req.user._id).lean().catch((e) => { console.error("Error loading user for integrations:", e); return null; })) : null
         ]);
         console.log(`[AI-TIMING] user lookups done at +${Date.now() - requestStartedAt}ms`);
 
