@@ -78,6 +78,18 @@ export const dotClass: Record<Tone, string> = {
   neutral: "bg-muted-foreground/60", blue: "bg-blue-500", green: "bg-emerald-500", amber: "bg-amber-500", red: "bg-red-500", violet: "bg-violet-500",
 };
 
+// "52 done" with a green dot, and "4 failed" with a red dot only when something failed (never one red number for
+// all the steps, owner 2026-11-09)
+export function StepCounts({ total, failed, className = "", word = "done" }: { total: number; failed: number; className?: string; word?: string }) {
+  const ok = Math.max(0, total - failed);
+  return (
+    <span className={`inline-flex items-center gap-2.5 ${className}`}>
+      <span className="inline-flex items-center gap-1.5"><span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />{ok} {word}</span>
+      {failed > 0 && <span className="inline-flex items-center gap-1.5 text-red-600 dark:text-red-400"><span className="h-1.5 w-1.5 rounded-full bg-red-500" />{failed} failed</span>}
+    </span>
+  );
+}
+
 export function StatusBadge({ status, className = "" }: { status: CallStatus; className?: string }) {
   const s = STATUS[status] || STATUS.working;
   return (
@@ -226,6 +238,31 @@ export function toolsUsed(steps: WorkStep[]) {
     map.set(s.tool, e);
   }
   return [...map.values()].sort((a, b) => b.count - a.count);
+}
+
+// The name a user sees for a tool (never the internal id, owner 2026-11-09)
+const TOOL_NAMES: Array<[RegExp, string]> = [
+  [/^google_workspace_connector/, "Google"], [/^microsoft_workspace_connector/, "Microsoft"], [/^github_workspace_connector/, "GitHub"],
+  [/^slack_workspace_connector/, "Slack"], [/^notion_connector/, "Notion"], [/^zoom_connector/, "Zoom"], [/^vercel_connector/, "Vercel"],
+  [/^supabase_connector/, "Supabase"], [/^sanity_connector/, "Sanity"], [/^youtube_connector/, "YouTube"], [/^facebook_connector/, "Facebook"],
+  [/^instagram_connector/, "Instagram"], [/^whatsapp_business_connector/, "WhatsApp Business"], [/^aws_ses_connector/, "Email (AWS)"],
+  [/^canva_connector/, "Canva"], [/^spotify_connector/, "Spotify"],
+  [/^run_code/, "Run code"], [/^upload_sandbox_file_to_cdn|^upload_file|^cdn_upload/, "Upload file"], [/^parse_document/, "Read document"],
+  [/^get_my_profile/, "My profile"], [/^send_whatsapp_message/, "WhatsApp message"], [/^read_whatsapp_messages/, "Read WhatsApp"],
+  [/^wait_for_whatsapp_reply/, "Wait for WhatsApp reply"], [/^read_agent_email/, "Check email"], [/^send_email|^gmail_send|^send_gmail/, "Send email"],
+  [/^web_search|^search_web/, "Web search"], [/^open_page|^browse|^fetch_url/, "Open web page"], [/^end_task/, "End task"], [/^sleep_until/, "Pause"],
+  [/^create_presentation|^generate_pptx/, "Make presentation"], [/^generate_document|^create_document/, "Make document"],
+  [/^run_project_helpers/, "Helpers"], [/^check_helpers/, "Check helpers"], [/^message_helper/, "Message a helper"], [/^define_helper/, "Define a helper"],
+  [/^run_workflow/, "Workflow"], [/^read_skill|^list_skills|^create_skill/, "Skill"], [/^read_local_file/, "Read file on computer"],
+  [/^computer_write|^computer_edit/, "Edit file on computer"], [/^run_local_command|^terminal/, "Terminal"], [/^analyze_image/, "Look at picture"],
+  [/^query_database|^database/, "Database"], [/^knowledge_base|^search_knowledge/, "Knowledge base"], [/^generate_image|^create_image/, "Make picture"],
+];
+export function publicToolName(tool: string): string {
+  const hit = TOOL_NAMES.find(([re]) => re.test(tool));
+  if (hit) return hit[1];
+  const t = tool.replace(/^mcp__[^_]+__/, "").replace(/_connector$/, "").replace(/[_-]+/g, " ").trim();
+  const words = t ? t[0]!.toUpperCase() + t.slice(1) : "Step";
+  return words.replace(/\bwhatsapp\b/gi, "WhatsApp").replace(/\bgithub\b/gi, "GitHub").replace(/\bcdn\b/gi, "CDN").replace(/\bai\b/gi, "AI").replace(/\burl\b/gi, "URL").replace(/\bpdf\b/gi, "PDF");
 }
 
 export function prettyJson(v: unknown): string {

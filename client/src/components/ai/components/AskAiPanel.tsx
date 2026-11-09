@@ -6777,7 +6777,8 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
             )}
             {/* Desktop app: Schedule and Library in Studio have the same top bar as Grids, Requests and Audit Logs
                 (DashboardLayout): the sidebar button on the left and the page name in the middle */}
-            {DESKTOP_STUDIO && isStudio && isToolPage(sessionId) && (
+            {/* Calls has this same top bar on the website too (owner, 2026-11-09) */}
+            {isToolPage(sessionId) && ((DESKTOP_STUDIO && isStudio) || sessionId === "calls") && (
               <header className="flex h-14 shrink-0 items-center justify-center border-b border-border/50 px-4 bg-background/80 backdrop-blur-md relative z-20">
                 <div className="absolute left-4 flex items-center gap-2">
                   <SidebarTrigger />
@@ -6792,7 +6793,7 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
                 </Breadcrumb>
               </header>
             )}
-            <div className={studioLook ? "hidden" : "shrink-0 flex items-center justify-between px-3 sm:px-6 pt-3 h-14"}>
+            <div className={studioLook || sessionId === "calls" ? "hidden" : "shrink-0 flex items-center justify-between px-3 sm:px-6 pt-3 h-14"}>
               {isIncognito || pageContext?.path === "/c/studio" ? <span /> : <SidebarTrigger />}
 
               {/* Ghost button on a new chat: start an incognito chat */}

@@ -12,7 +12,7 @@ import { apiClient as api } from "@/lib/apiClient";
 import { cn } from "@/lib/utils";
 import {
   ACTIVE, ORIGIN, RUN_OUTCOME, RUN_REASON, SIDE_EFFECT_LABEL, STATUS, StatusBadge, between, dotClass, fmtClock, fmtDate, fmtDuration, fmtTime,
-  helpersAndSkills, modelLabel, prettyJson, sideEffectOf, stepLabel, toneClass, toolsUsed,
+  helpersAndSkills, modelLabel, prettyJson, publicToolName, sideEffectOf, stepLabel, StepCounts, toneClass, toolsUsed,
   type CallRecord, type SentItem, type SideEffect, type TranscriptLine, type WorkRun, type WorkStep,
 } from "./callsShared";
 
@@ -67,7 +67,7 @@ export const CallDetailPage: React.FC<{ id?: string }> = ({ id }) => {
   if (loading) return <DetailSkeleton />;
   if (missing || !call) {
     return (
-      <div className="mx-auto w-full max-w-4xl p-6 md:p-8">
+      <div className="mx-auto w-full max-w-6xl p-6 md:p-8">
         <div className="mt-10 rounded-2xl border border-border/60 p-10 text-center">
           <p className="text-[15px] font-medium">This call was not found.</p>
           <p className="mt-1 text-sm text-muted-foreground">It may belong to another account, or the link is not complete.</p>
@@ -85,7 +85,7 @@ export const CallDetailPage: React.FC<{ id?: string }> = ({ id }) => {
   const showProblem = ["failed", "retrying", "stopped"].includes(call.status);
 
   return (
-    <div className="mx-auto w-full max-w-4xl p-4 pb-20 sm:p-6 lg:p-8">
+    <div className="mx-auto w-full max-w-6xl p-4 pb-20 sm:p-6 lg:p-8">
       {/* ── Head ── */}
       <header className="pb-6 border-b border-border/60">
         <div className="flex items-start justify-between gap-4">
@@ -97,8 +97,8 @@ export const CallDetailPage: React.FC<{ id?: string }> = ({ id }) => {
               <span>{fmtDate(call.started_at)}, {fmtTime(call.started_at)}</span>
               {call.duration_ms > 0 && (<><span aria-hidden>·</span><span>{fmtDuration(call.duration_ms)}</span></>)}
             </div>
-            <h1 className="mt-2 text-[22px] sm:text-[26px] font-semibold tracking-[-0.01em] leading-tight break-words">{call.name || "Call"}</h1>
-            {call.summary && <p className="mt-2 text-[14px] text-muted-foreground leading-relaxed line-clamp-3">{call.summary}</p>}
+            <h1 className="mt-2 text-[26px] sm:text-[30px] font-semibold tracking-[-0.01em] leading-tight break-words">{call.name || "Call"}</h1>
+            {call.summary && <p className="mt-2.5 text-[15.5px] text-muted-foreground leading-relaxed line-clamp-3">{call.summary}</p>}
           </div>
           <div className="flex flex-col items-end gap-2 shrink-0">
             <StatusBadge status={call.status} />
@@ -111,7 +111,13 @@ export const CallDetailPage: React.FC<{ id?: string }> = ({ id }) => {
           {call.project_name && (
             <Fact icon={call.project_made ? FolderPlus : Folder} label={call.project_made ? "Project made" : "Project"} value={call.project_name} />
           )}
-          {(counts.steps || 0) > 0 && <Fact icon={Wrench} label="Steps" value={`${counts.steps}${counts.failed ? ` · ${counts.failed} failed` : ""}`} warn={!!counts.failed} />}
+          {(counts.steps || 0) > 0 && (
+            <div className="inline-flex items-center gap-2 rounded-lg border border-border/60 px-3 py-2 text-[13.5px]">
+              <Wrench className="w-3.5 h-3.5 text-muted-foreground" />
+              <span className="text-muted-foreground">Steps</span>
+              <StepCounts total={counts.steps || 0} failed={counts.failed || 0} className="font-medium" />
+            </div>
+          )}
           {workMs > 0 && <Fact icon={Hourglass} label="Worked" value={fmtDuration(workMs)} />}
           {(counts.whatsapp_sent || 0) > 0 && <Fact icon={MessageSquare} label="WhatsApp sent" value={String(counts.whatsapp_sent)} />}
           {((counts.emails_read || 0) + (counts.emails_sent || 0)) > 0 && <Fact icon={Mail} label="Emails" value={`${counts.emails_read || 0} read · ${counts.emails_sent || 0} sent`} />}
@@ -133,12 +139,12 @@ export const CallDetailPage: React.FC<{ id?: string }> = ({ id }) => {
 
       {/* ── Tabs ── */}
       <div className="mt-6 flex items-center justify-between gap-3">
-        <div className="inline-flex rounded-lg bg-muted/60 dark:bg-white/5 p-1 text-[13px]">
+        <div className="inline-flex rounded-lg bg-muted/60 dark:bg-white/5 p-1 text-[14.5px]">
           {([["transcript", call.origin === "call" ? "Transcript" : "Message"], ["work", "What the AI did"], ["details", "Details"]] as Array<[Tab, string]>).map(([t, label]) => (
             <button
               key={t}
               onClick={() => pickTab(t)}
-              className={cn("px-3.5 py-1.5 rounded-md font-medium transition-colors cursor-pointer",
+              className={cn("px-4 py-2 rounded-md font-medium transition-colors cursor-pointer",
                 tab === t ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground")}
             >
               {label}
@@ -272,7 +278,7 @@ function TranscriptRow({ line, needle, origin }: { line: TranscriptLine; needle:
           <span className={cn("text-[12px] font-semibold", isCaller ? "text-foreground" : "text-blue-700 dark:text-blue-300")}>{isCaller ? "You" : "Classgrid AI"}</span>
           {line.kind === "email" && <span className="text-[11px] text-muted-foreground">email</span>}
         </div>
-        <p className="mt-0.5 text-[14px] leading-relaxed whitespace-pre-wrap break-words text-foreground/90"><Highlight text={line.text} needle={needle} /></p>
+        <p className="mt-0.5 text-[15.5px] leading-relaxed whitespace-pre-wrap break-words text-foreground/90"><Highlight text={line.text} needle={needle} /></p>
         {line.args?.file && <a href={line.args.file} target="_blank" rel="noreferrer" className="mt-1 inline-flex items-center gap-1 text-[12px] text-blue-600 dark:text-blue-400 underline underline-offset-2"><FileText className="w-3 h-3" />{line.args.name || "File"}</a>}
       </div>
     </div>
@@ -300,7 +306,7 @@ function WorkTab({ call, runs, steps }: { call: CallRecord; runs: WorkRun[]; ste
           <Eyebrow>{call.tasks.length === 1 ? "The task" : `${call.tasks.length} tasks, in order`}</Eyebrow>
           <ol className="mt-2 space-y-1.5">
             {call.tasks.map((t, i) => (
-              <li key={i} className="flex gap-2 text-[13.5px] leading-relaxed">
+              <li key={i} className="flex gap-2 text-[14.5px] leading-relaxed">
                 {call.tasks.length > 1 && <span className="font-mono text-[11px] text-muted-foreground pt-1">{i + 1}.</span>}
                 <span className="break-words">{t.text}{t.project_name ? <span className="text-muted-foreground"> · in {t.project_name}</span> : null}</span>
               </li>
@@ -343,12 +349,12 @@ function RunBlock({ run, steps, live, defaultOpen }: { run: WorkRun; steps: Work
         <ChevronRight className={cn("w-4 h-4 text-muted-foreground transition-transform shrink-0", open && "rotate-90")} />
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 flex-wrap">
-            <span className="text-[14px] font-semibold">Run {run.no}</span>
+            <span className="text-[15.5px] font-semibold">Run {run.no}</span>
             <span className="text-[12px] text-muted-foreground">{RUN_REASON[run.reason] || run.reason || ""}</span>
           </div>
           <div className="mt-0.5 flex items-center gap-x-3 gap-y-1 flex-wrap text-[11.5px] text-muted-foreground">
             <span className="inline-flex items-center gap-1"><Clock className="w-3 h-3" />{fmtTime(run.started_at)}{run.ended_at ? ` – ${fmtTime(run.ended_at)}` : ""} · {fmtDuration(ms, { short: true })}</span>
-            <span>{steps.length} step{steps.length === 1 ? "" : "s"}{failedSteps ? ` · ${failedSteps} failed` : ""}</span>
+            <StepCounts total={steps.length} failed={failedSteps} word={steps.length === 1 ? "step done" : "steps done"} />
             {run.model && <span className="inline-flex items-center gap-1"><Sparkles className="w-3 h-3" />{modelLabel(run.model)}</span>}
           </div>
         </div>
@@ -429,7 +435,7 @@ function StepRow({ step }: { step: WorkStep }) {
       <button type="button" onClick={() => setOpen((o) => !o)} className="w-full flex items-start gap-2.5 rounded-lg px-2 py-2 -ml-2 text-left hover:bg-muted/40 transition-colors cursor-pointer">
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 flex-wrap">
-            <span className={cn("text-[13.5px] break-words", bad && "text-red-700 dark:text-red-300")}>{label}</span>
+            <span className={cn("text-[14.5px] break-words", bad && "text-red-700 dark:text-red-300")}>{label}</span>
             {effect && Icon && (
               <span className={cn("inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[10.5px] font-medium",
                 effect === "whatsapp" || effect === "email_sent" ? toneClass.green : effect === "sleep" ? toneClass.violet : "bg-muted text-muted-foreground")}>
@@ -446,7 +452,7 @@ function StepRow({ step }: { step: WorkStep }) {
       {open && (
         <div className="ml-0 mb-2 rounded-xl border border-border/60 bg-muted/20 text-[12.5px] divide-y divide-border/50">
           <div className="px-3.5 py-2.5 flex items-center gap-2 text-muted-foreground">
-            <Wrench className="w-3.5 h-3.5" /><span className="font-mono text-[11.5px]">{step.tool}</span>
+            <Wrench className="w-3.5 h-3.5" /><span className="text-[12.5px] font-medium">{publicToolName(step.tool)}</span>
             <span className="ml-auto font-mono text-[11px]">{fmtTime(step.at)}{step.ended_at ? ` → ${fmtTime(step.ended_at)}` : ""}</span>
           </div>
           {argsText && argsText !== "{}" && (
@@ -487,7 +493,7 @@ function DetailsTab({ call, steps }: { call: CallRecord; steps: WorkStep[] }) {
         <Cell label="Status"><StatusBadge status={call.status} /></Cell>
         <Cell label={call.origin === "call" ? "Call" : "Started"}>{fmtDate(call.started_at)}, {fmtTime(call.started_at)}{call.duration_ms ? ` · ${fmtDuration(call.duration_ms)}` : ""}{call.ended_by ? <span className="text-muted-foreground"> · ended: {endedByLabel(call.ended_by)}</span> : null}</Cell>
         <Cell label="Work">{call.work?.started_at ? <>{fmtTime(call.work.started_at)}{call.work.ended_at ? ` – ${fmtTime(call.work.ended_at)}` : ""}{workMs > 0 ? ` · ${fmtDuration(workMs)}` : ""} · {call.work.runs?.length || 0} run{(call.work.runs?.length || 0) === 1 ? "" : "s"}</> : <span className="text-muted-foreground">none</span>}</Cell>
-        <Cell label="Steps">{(call.work?.counts?.steps || 0)}{call.work?.counts?.failed ? <span className="text-red-600 dark:text-red-400"> · {call.work.counts.failed} failed</span> : null}</Cell>
+        <Cell label="Steps"><StepCounts total={call.work?.counts?.steps || 0} failed={call.work?.counts?.failed || 0} /></Cell>
         <Cell label="Models">{call.call_model && <span className="text-muted-foreground">On the call: {modelLabel(call.call_model)}</span>}{(call.work?.models || []).length ? <div className="mt-0.5">{call.work.models.map((m) => <span key={m} className="mr-1.5 inline-flex rounded-md bg-muted px-1.5 py-0.5 text-[12px]">{modelLabel(m)}</span>)}</div> : (!call.call_model && <span className="text-muted-foreground">—</span>)}</Cell>
         <Cell label="Project">{call.project_name ? <>{call.project_name}{call.project_made && <span className="text-muted-foreground"> · made for this call</span>}</> : <span className="text-muted-foreground">none</span>}</Cell>
         <Cell label="Helpers">{helpers.length ? helpers.join(", ") : <span className="text-muted-foreground">none used</span>}</Cell>
@@ -500,7 +506,7 @@ function DetailsTab({ call, steps }: { call: CallRecord; steps: WorkStep[] }) {
           <ul className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-x-6">
             {tools.map((t) => (
               <li key={t.name} className="flex items-center justify-between gap-3 py-1.5 border-b border-border/40 text-[13px]">
-                <span className="font-mono text-[12px] truncate">{t.name}</span>
+                <span className="text-[14px] truncate">{publicToolName(t.name)}</span>
                 <span className="text-muted-foreground tabular-nums shrink-0">×{t.count}{t.failed ? <span className="text-red-600 dark:text-red-400"> · {t.failed} failed</span> : null}</span>
               </li>
             ))}
@@ -546,7 +552,7 @@ function SentRow({ item }: { item: SentItem }) {
 
 function Fact({ icon: Icon, label, value, warn = false }: { icon: React.ComponentType<{ className?: string }>; label: string; value: string; warn?: boolean }) {
   return (
-    <div className={cn("inline-flex items-center gap-2 rounded-lg border border-border/60 px-2.5 py-1.5 text-[12px]", warn && "border-red-200 dark:border-red-500/30")}>
+    <div className={cn("inline-flex items-center gap-2 rounded-lg border border-border/60 px-3 py-2 text-[13.5px]", warn && "border-red-200 dark:border-red-500/30")}>
       <Icon className={cn("w-3.5 h-3.5", warn ? "text-red-500" : "text-muted-foreground")} />
       <span className="text-muted-foreground">{label}</span>
       <span className="font-medium truncate max-w-[220px]">{value}</span>
@@ -596,7 +602,7 @@ function endedByLabel(why: string) {
 
 function DetailSkeleton() {
   return (
-    <div className="mx-auto w-full max-w-4xl animate-pulse p-4 sm:p-6 lg:p-8">
+    <div className="mx-auto w-full max-w-6xl animate-pulse p-4 sm:p-6 lg:p-8">
       <div className="h-3 w-48 rounded bg-muted" />
       <div className="mt-3 h-7 w-2/3 rounded bg-muted" />
       <div className="mt-3 h-4 w-1/2 rounded bg-muted" />
