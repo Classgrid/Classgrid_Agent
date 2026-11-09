@@ -16,10 +16,14 @@ const loops = new Map(); // turnId -> { userId, rounds: Map<roundId, Round>, nex
  * tool calls; it resolves with a Map(callId -> { content, isError }) once the app has driven the round.
  */
 export function makeLocalLoopDriver({ turnId, userId, emit, onStop }) {
-    const state = { userId: String(userId), rounds: new Map(), nextRound: 0, emit, onStop, stopped: false };
+    const state = { userId: String(userId), rounds: new Map(), nextRound: 0, emit, onStop, stopped: false, disposed: false };
     loops.set(turnId, state);
-    const driver = async (calls, { run, text }) => {
+    // `helper`: which helper's round this is (helpers are driven by the app too, each round on its own); the main
+    // answer's rounds carry none. Once the answer has ended (dispose), a helper still working gets null back and its
+    // loop runs the calls itself, as the app's stream is gone.
+    const driverFor = (helper) => async (calls, { run, text }) => {
         if (state.stopped) throw new StreamChatError("Request aborted");
+        if (state.disposed) return null;
         const roundId = ++state.nextRound;
         return new Promise((resolve, reject) => {
             const round = {
@@ -31,15 +35,17 @@ export function makeLocalLoopDriver({ turnId, userId, emit, onStop }) {
             };
             round.timer.unref?.();
             state.rounds.set(roundId, round);
-            emit({ type: "round_end", roundId, calls: calls.map((c) => ({ id: c.id, name: c.name, input: c.input })), text: String(text || "").slice(0, 4000) });
+            emit({ type: "round_end", roundId, ...(helper !== undefined && helper !== null ? { helper } : {}), calls: calls.map((c) => ({ id: c.id, name: c.name, input: c.input })), text: String(text || "").slice(0, 4000) });
         });
     };
+    const driver = driverFor(null);
     const dispose = () => {
+        state.disposed = true;
         if (loops.get(turnId) === state) loops.delete(turnId);
-        for (const r of state.rounds.values()) { clearTimeout(r.timer); }
-        state.rounds.clear();
+        // Rounds still open when the answer ends (a helper's): the server finishes them itself
+        for (const [roundId] of state.rounds) finishRound(state, roundId, "the answer ended, so the server ran the rest").catch(() => {});
     };
-    return { driver, dispose };
+    return { driver, driverFor, dispose };
 }
 
 async function runOne(state, roundId, round, id) {
