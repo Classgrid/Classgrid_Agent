@@ -6971,7 +6971,6 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
                   {/* Inline input form â€” not using panelInput */}
                   <div className="w-full max-w-[640px] mt-auto sm:mt-0 @max-[18rem]:hidden">
                     {/* (not in Incognito: like Agent mode's, an Incognito chat belongs to no project) */}
-                    {inputHeader && !isIncognito && <div className="mb-2 flex">{inputHeader}</div>}
                     {isTerminated ? (
                       <div className="rounded-xl border border-red-500/20 bg-red-500/10 px-4 py-3 text-center text-sm font-medium text-red-500">
                         <p>This conversation has been terminated.</p>
@@ -7055,6 +7054,14 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
                               <AiFeedbackModal isOpen={endedFeedbackOpen} onClose={() => setEndedFeedbackOpen(false)} onSubmit={submitEndedFeedback} isSubmitting={endedFeedbackSubmitting} />
                             )}
                           </>
+                        )}
+                        {/* Studio: the project / folder row is a rounded tab that sits on top of the input box, one shape with
+                            it (the box's rounded top corners show against the tab, like the code editor's chat). Not in
+                            Incognito: like Agent mode's, an Incognito chat belongs to no project */}
+                        {inputHeader && !isIncognito && !endedView && (
+                          <div className="relative z-0 -mb-[18px] flex items-center rounded-t-[16px] border border-b-0 border-border bg-black/[0.045] dark:bg-white/[0.06] px-3.5 pt-2 pb-[26px] text-[13.5px]">
+                            {inputHeader}
+                          </div>
                         )}
                         <form onSubmit={handleSubmit} className={cn("@container space-y-2", endedView && "hidden")}>
                           <div className={cn(
