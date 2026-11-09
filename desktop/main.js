@@ -341,6 +341,15 @@ ipcMain.handle("cg:listFiles", (_e, folder) => runner.listForFilesTab(String(fol
 // A folder project's GitHub repo ("owner/name"), read from its git settings
 ipcMain.handle("cg:githubRepo", (_e, folder) => runner.githubRepoOf(String(folder || "")));
 ipcMain.handle("cg:readFile", (_e, folder, rel) => runner.readForFilesTab(String(folder || ""), String(rel || "")));
+// One AI step on this computer, asked by the chat screens for a pc_tool_call on the answer's own stream (the step's
+// reply goes back over HTTP, never a separate socket). Only the app's own screens may ask: never the AI browser view
+// or any page opened in it
+ipcMain.handle("cg:runTool", (e, req) => {
+  let from = "";
+  try { from = String(e.sender.getURL() || ""); } catch { from = ""; }
+  if (!from.startsWith(`${APP_URL}/`) && from !== APP_URL) return { text: "Error: this step can only be asked by the Classgrid app itself." };
+  return runner.runTool(req && typeof req === "object" ? req : {});
+});
 
 // Project Mode, folder projects: open the folder in VS Code or File Explorer (only folders picked in this app)
 ipcMain.handle("cg:openFolder", (_e, folder) => { if (runner.isAllowed(folder)) shell.openPath(String(folder)); });

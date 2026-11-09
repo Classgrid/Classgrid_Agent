@@ -4756,6 +4756,33 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
       const endpoint = typeof import.meta !== "undefined" && import.meta.env
         ? (import.meta.env.VITE_API_URL || "https://api.classgrid.in") + "/api/ai/ask"
         : "/api/ai/ask";
+      // Desktop app and Classgrid Code: a step the AI wants on this computer comes down this answer's own stream as
+      // pc_tool_call, runs here through the app's runner, and its reply goes back over HTTP to the same server turn
+      // (owner, 2026-11-09: no separate socket between the AI and the terminal; the result can't be lost on the way)
+      const canRunPcTools = typeof (window as any).classgridDesktop?.runTool === "function";
+      const apiBase = endpoint.replace(/\/api\/ai\/ask$/, "");
+      const runPcToolCall = async (ev: any) => {
+        let reply: any;
+        try {
+          reply = await (window as any).classgridDesktop.runTool({ tool: ev.tool, args: ev.args || {}, root: ev.root, chat: ev.chat });
+        } catch (e: any) {
+          reply = { text: `Error: ${e?.message || e}` };
+        }
+        if (!reply || typeof reply !== "object") reply = { text: String(reply ?? "") };
+        // The reply is posted until it gets through (a short internet drop must not lose a finished step)
+        for (let attempt = 0; attempt < 5; attempt++) {
+          try {
+            const r = await fetchWithRescue(`${apiBase}/api/ai/pc-tool-result`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              credentials: "include",
+              body: JSON.stringify({ id: ev.id, reply }),
+            });
+            if (r.ok || r.status === 400 || r.status === 404) return;
+          } catch { /* try again */ }
+          await new Promise((r) => setTimeout(r, 1500 * (attempt + 1)));
+        }
+      };
       const response = await fetchWithRescue(endpoint, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -4763,6 +4790,8 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
         signal: controller.signal,
         body: JSON.stringify({
           question: apiQuestion,
+          // The app runs the AI's steps on this computer itself (see runPcToolCall above)
+          pcTools: canRunPcTools ? true : undefined,
           selectedModel,
           userName: session?.user?.name ?? undefined,
           userEmail: session?.user?.email ?? undefined,
@@ -4952,6 +4981,9 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
                   if (lastMsg && lastMsg.role === "assistant") return [...prev.slice(0, -1), { ...lastMsg, checkpoint: event.id }];
                   return [...prev, { id: createMessageId("assistant"), role: "assistant", content: "", createdAt: Date.now(), checkpoint: event.id }];
                 });
+              } else if (event.type === "pc_tool_call") {
+                // A step for this computer: run it and post the reply, without holding up the stream
+                if (canRunPcTools && event.id) void runPcToolCall(event);
               } else if (event.type === "file_update") {
                 setSandboxFiles(prev => ({ ...prev, ...(event.files || {}) }));
               } else if (event.type === "plan_step_update") {

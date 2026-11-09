@@ -638,6 +638,8 @@ const HANDLERS = {
   listFiles: (_p, folder) => parts.runner.listForFilesTab(String(folder || "")),
   githubRepo: (_p, folder) => parts.runner.githubRepoOf(String(folder || "")),
   readFile: (_p, folder, rel) => parts.runner.readForFilesTab(String(folder || ""), String(rel || "")),
+  // One AI step on this computer (pc_tool_call on the answer's own stream): the same runner the socket fallback uses
+  runTool: (_p, req) => parts.runner.runTool(req && typeof req === "object" ? req : {}),
   // A file the AI mentions or changed opens in this editor, at its lines
   openInEditor: async (_p, folder, file, line) => {
     if (!parts.runner.isAllowed(folder)) return;

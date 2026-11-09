@@ -78,7 +78,7 @@ import {
     chatWithSyllabus, 
     getMyPersona 
 } from "../controllers/ai.controller.js";
-import { streamAskAi, clientToolResult, getWorkingChats, getChatHelpers, getChatSessions, getChatSession, getChatSessionMessages, uploadChatImage, takeChatOnline, updateChatSession, archiveChatSession, deleteChatSession, shareChatSession, reopenChatSession, createPublicShare, getPublicShare, submitAiFeedback, getAgentReviews, updateAgentReviewStatus, processAgentReviewsCron, deleteAgentReview, bulkDeleteAgentReviews, generateImage, getMyGeneratedImages, deleteGeneratedImage, getMyUsage, getOrgUsage, getSkills, createSkill, updateSkill, deleteSkill, getPreferences, updatePreferences } from "../controllers/ai-chat.controller.js";
+import { streamAskAi, clientToolResult, pcToolResult, localJobDone, getWorkingChats, getChatHelpers, getChatSessions, getChatSession, getChatSessionMessages, uploadChatImage, takeChatOnline, updateChatSession, archiveChatSession, deleteChatSession, shareChatSession, reopenChatSession, createPublicShare, getPublicShare, submitAiFeedback, getAgentReviews, updateAgentReviewStatus, processAgentReviewsCron, deleteAgentReview, bulkDeleteAgentReviews, generateImage, getMyGeneratedImages, deleteGeneratedImage, getMyUsage, getOrgUsage, getSkills, createSkill, updateSkill, deleteSkill, getPreferences, updatePreferences } from "../controllers/ai-chat.controller.js";
 
 import { getFavicon } from "../controllers/ai-favicon.controller.js";
 import { importChatSession } from "../controllers/ai-chat-import.controller.js";
@@ -116,6 +116,10 @@ router.get("/my-persona", isAuthenticated, getMyPersona);
 router.post("/ask", isAuthenticated, requireChatOnboarding, streamAskAi);
 // A caller's result for a tool it runs on its own side (clientTools on /ask, used by benchmark harnesses)
 router.post("/client-tool-result", isAuthenticated, clientToolResult);
+// The desktop app's reply to a step it ran on the computer for a streaming answer (pc_tool_call), and the end of a
+// background command there (the chat is woken with the result)
+router.post("/pc-tool-result", isAuthenticated, pcToolResult);
+router.post("/local-job-done", isAuthenticated, localJobDone);
 router.post("/feedback", isAuthenticated, submitAiFeedback);
 router.get("/agent-reviews", isAuthenticated, getAgentReviews);
 router.put("/agent-reviews/:id/status", isAuthenticated, updateAgentReviewStatus);

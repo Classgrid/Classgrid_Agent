@@ -60,6 +60,8 @@ contextBridge.exposeInMainWorld("classgridDesktop", {
   listFiles: (folder) => ipcRenderer.invoke("cg:listFiles", folder),
   githubRepo: (folder) => ipcRenderer.invoke("cg:githubRepo", folder),
   readFile: (folder, rel) => ipcRenderer.invoke("cg:readFile", folder, rel),
+  // One AI step on this computer, asked by the chat for a pc_tool_call on the answer's own stream (runner.js runTool)
+  runTool: (req) => ipcRenderer.invoke("cg:runTool", req),
   openInEditor: (folder, file, line) => ipcRenderer.invoke("cg:openInEditor", folder, file, line),
   startEditor: (folder) => ipcRenderer.invoke("cg:startEditor", folder),
   revealInEditor: (folder, file, startLine, endLine) => ipcRenderer.invoke("cg:revealInEditor", folder, file, startLine, endLine),

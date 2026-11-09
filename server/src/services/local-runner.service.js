@@ -5,9 +5,68 @@
  * The app keeps a socket open with auth.runner = true; it joins the room runner:<userId>. A tool call is sent to
  * that room with an acknowledgement and the app answers with the tool's text.
  */
+import crypto from "node:crypto";
 import { getIO } from "./socket.service.js";
 import { projectForChat } from "./ide-project.service.js";
 import redis from "../config/redis.js";
+
+// ── The app that is chatting runs the step itself (owner's requirement, 2026-11-09) ──────────────────────────
+// While an answer streams to the desktop app or Classgrid Code and the app said it can run steps (body.pcTools),
+// streamAskAi registers an executor for the user. Every step on the computer is then sent down THAT answer's own
+// stream as a `pc_tool_call` event; the app runs it with its runner and posts the reply to POST /api/ai/pc-tool-result.
+// No separate socket between the AI and the terminal: the result travels back on the same line the chat uses, to the
+// very app the user is typing in (never "the oldest connection"). The socket below stays only as the fallback: turns
+// with no app on the stream (wake-ups, WhatsApp tasks), helpers that outlive the answer, and older apps.
+const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+const pcExecutors = new Map(); // userId -> { send(event) => boolean, alive() => boolean }
+export function registerPcExecutor(userId, exec) {
+    const key = String(userId);
+    pcExecutors.set(key, exec);
+    return () => { if (pcExecutors.get(key) === exec) pcExecutors.delete(key); };
+}
+export function pcExecutorFor(userId) {
+    const exec = pcExecutors.get(String(userId));
+    return exec && exec.alive() ? exec : null;
+}
+const PC_RESULT = (id) => `ai:pctool:res:${id}`;
+const PC_OWNER = (id) => `ai:pctool:owner:${id}`;
+export const PC_REPLY_CHARS = 300000; // same cap as the runner's own replies (desktop/runner.js REPLY_CHARS)
+// How long the server waits for the app's reply: the AI's own timeout_seconds (plus a minute for the app), else the
+// tool's usual limit
+const pcTimeoutFor = (tool, args) => {
+    const chosen = Number(args?.timeout_seconds);
+    if (Number.isFinite(chosen) && chosen > 0) return (Math.min(600, Math.max(5, chosen)) + 60) * 1000;
+    return timeoutFor(tool, args);
+};
+async function askViaApp(exec, userId, tool, payload) {
+    const id = crypto.randomBytes(12).toString("hex");
+    await redis.set(PC_OWNER(id), String(userId), "EX", 3600).catch(() => {});
+    const timeoutMs = pcTimeoutFor(tool, payload?.args);
+    const sent = exec.send({ type: "pc_tool_call", id, tool, args: payload?.args || {}, root: payload?.root, projectId: payload?.projectId, chat: payload?.chat, timeout_ms: timeoutMs });
+    if (!sent) return null; // the stream is gone: the caller falls back to the socket
+    const until = Date.now() + timeoutMs;
+    while (Date.now() < until) {
+        const raw = await redis.get(PC_RESULT(id)).catch(() => null);
+        if (raw !== null) {
+            redis.del(PC_RESULT(id), PC_OWNER(id)).catch(() => {});
+            try { const r = JSON.parse(raw); return r && typeof r.text === "string" ? r : { text: String(raw) }; } catch { return { text: String(raw) }; }
+        }
+        if (!exec.alive()) return null; // the user's stream dropped while the step ran: the socket path takes over
+        await wait(300);
+    }
+    return { text: `Error: the Classgrid desktop app didn't answer in time (${Math.round(timeoutMs / 1000)} s). Ask the user to check the app is open.` };
+}
+/** The app's reply to a pc_tool_call (POST /api/ai/pc-tool-result): kept for the waiting step above */
+export async function storePcToolReply(userId, id, reply) {
+    if (!/^[0-9a-f]{24}$/.test(String(id || ""))) return "bad_id";
+    const owner = await redis.get(PC_OWNER(id)).catch(() => null);
+    if (!owner || owner !== String(userId)) return "unknown";
+    const obj = reply && typeof reply === "object" ? reply : { text: String(reply ?? "") };
+    const text = typeof obj.text === "string" ? obj.text : String(obj.text ?? "");
+    const stored = { ...obj, text: text.length > PC_REPLY_CHARS ? `${text.slice(0, PC_REPLY_CHARS)}\n… (cut: the answer was too long; read or search a smaller part)` : text };
+    await redis.set(PC_RESULT(id), JSON.stringify(stored), "EX", 3600);
+    return "ok";
+}
 
 export const LOCAL_TOOLS = new Set([
     "list_project_files", "view_project_file", "search_project", "find_project_files", "write_project_file", "edit_project_file",
@@ -76,7 +135,14 @@ function withWakeNote(reply) {
 
 // Sends one tool call to the user's desktop app. Returns its whole answer ({ text, ... }), or null when the app isn't open.
 async function askRunner(userId, tool, payload) {
-    return withWakeNote(await askRunnerOnce(userId, tool, withQuietProgress(tool, payload)));
+    const quiet = withQuietProgress(tool, payload);
+    // The app that is chatting runs it (see pcExecutors above); the socket only when there is no such app
+    const exec = pcExecutorFor(userId);
+    if (exec) {
+        const reply = await askViaApp(exec, userId, tool, quiet);
+        if (reply) return withWakeNote(reply);
+    }
+    return withWakeNote(await askRunnerOnce(userId, tool, quiet));
 }
 // Windows PowerShell draws a progress bar for every piece of a download (Invoke-WebRequest, Expand-Archive...), even in a
 // hidden window, which makes them many times slower: it is switched off for the AI's PowerShell commands

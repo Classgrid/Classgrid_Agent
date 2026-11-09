@@ -1454,9 +1454,10 @@ const MEMORY_NOTE_DEFS = [
 ];
 
 const COMPUTER_TERMINAL_DEFS = [
-    terminalDef("execute_terminal_command", "Run a command in a terminal on the user's own computer (Windows PowerShell; on a Mac or Linux, bash). It starts in the user's home folder; each command is a new terminal, so use full paths or cd in the same command. For Bash, set shell to bash (Git Bash, or WSL); for Command Prompt, set shell to cmd. It waits for the command to finish and gives you its whole output in one step, up to 10 minutes: use it for every command that ends by itself, even a slow one (ssh to a server, installs, builds, file work). The user is asked to allow each command first.", {
+    terminalDef("execute_terminal_command", "Run a command in a terminal on the user's own computer (Windows PowerShell; on a Mac or Linux, bash). It starts in the user's home folder; each command is a new terminal, so use full paths or cd in the same command. For Bash, set shell to bash (Git Bash, or WSL); for Command Prompt, set shell to cmd. It waits for the command to finish and gives you its whole output in one step: use it for every command that ends by itself, even a slow one (ssh to a server, installs, builds, file work). It waits up to timeout_seconds (2 minutes unless you set it, up to 10 minutes): pick a longer one for slow work; past it the command keeps running in the background and you are woken with its result. The user is asked to allow each command first.", {
         command: { type: "string", description: "The exact command to run" },
         shell: { type: "string", enum: ["powershell", "bash", "cmd"], description: "Which shell runs it: powershell (default), bash (Git Bash, or WSL when Git Bash isn't there) or cmd" },
+        timeout_seconds: { type: "integer", minimum: 5, maximum: 600, description: "How long to wait for the command to finish, in seconds (default 120, at most 600). Set it higher for installs, builds, long scripts" },
         description: { type: "string", description: "A few plain words saying what the command does, shown to the user above it (e.g. \"List the Downloads folder\")" },
     }, ["command"]),
     terminalDef("start_background_command", "Runs a command in the background on the user's own computer (in their home folder) and returns a job_id. It keeps running after your answer ends, and when it exits you are woken with its output and exit code, so it is how you wait for anything without holding up the conversation: a dev server, a long build or download, or a small loop that waits until something is ready (a GitHub run finishing, a site answering). A command that finishes in seconds is simpler with execute_terminal_command. The user is asked to allow it first.", {
@@ -1808,6 +1809,19 @@ export const streamAskAi = async (req, res) => {
     });
     // Send 2KB of whitespace padding to force NGINX, Vercel Edge, and AWS ALB to immediately flush headers and start the stream
     res.write(':' + Array(2048).join(' ') + '\n\n');
+
+    // The desktop app / Classgrid Code that can run steps itself (body.pcTools): every step on the computer in this
+    // answer goes down this stream as pc_tool_call and the app posts the reply back (local-runner.service.js
+    // pcExecutors). Not for the website, headless task turns or wake-ups (no app is on their stream).
+    let unregisterPcExecutor = null;
+    if (body.pcTools === true && !fromWebsite && !body.taskOrigin && !body.wakeUp && userId) {
+        const { registerPcExecutor } = await import("../services/local-runner.service.js");
+        const alive = () => !res.writableEnded && !res.destroyed;
+        unregisterPcExecutor = registerPcExecutor(userId, {
+            alive,
+            send: (event) => { if (!alive()) return false; res.write(`data: ${JSON.stringify(event)}\n\n`); return true; },
+        });
+    }
 
     let keepAliveInterval = null;
     let replacedCheck = null;
@@ -5909,19 +5923,24 @@ If a tool fails, never show the error message; say only: "Something went wrong o
                 for (let i = list.length - 1; i >= 0; i--) if (SANDBOX_ONLY.has(list[i].function.name)) list.splice(i, 1);
             }
             for (const n of SANDBOX_ONLY) { toolPlan.allowedToolNames.delete(n); toolPlan.loadedNames.delete(n); }
-            const localRunCode = "Run Python, JavaScript or PowerShell code on the user's own computer (in the project folder in a project, otherwise in their home folder) and get its output. Files it makes are saved on their computer. The user is asked to allow it first.";
+            const localRunCode = "Run Python, JavaScript or PowerShell code on the user's own computer (in the project folder in a project, otherwise in their home folder) and get its output. Files it makes are saved on their computer. It waits up to timeout_seconds (2 minutes unless you set it, up to 10 minutes): set it higher for a script that reads many pages or works on many files; past it the script keeps running in the background and you are woken with its result. The user is asked to allow it first.";
+            const withTimeout = (fn) => {
+                const p = fn.parameters && typeof fn.parameters === "object" ? fn.parameters : { type: "object", properties: {} };
+                return { ...fn, description: localRunCode, parameters: { ...p, properties: { ...(p.properties || {}), timeout_seconds: { type: "integer", minimum: 5, maximum: 600, description: "How long to wait for the script to finish, in seconds (default 120, at most 600)" } } } };
+            };
             for (const list of [fullToolList, activeToolList]) {
                 const t = list.find((x) => x.function.name === "run_code");
-                if (t) list.splice(list.indexOf(t), 1, { ...t, function: { ...t.function, description: localRunCode } });
+                if (t) list.splice(list.indexOf(t), 1, { ...t, function: withTimeout(t.function) });
                 // load_tools describes the groups the same way (no sandbox, no CDN here)
                 const lt = list.find((x) => x.function.name === LOAD_TOOLS_NAME);
                 if (lt) list.splice(list.indexOf(lt), 1, { ...lt, function: { ...lt.function, description: String(lt.function.description).replace(", and upload files to the CDN", "").replace("Run Python, JavaScript or bash in the sandbox, read sandbox files, upload sandbox files to the CDN, build websites", "Run Python, JavaScript or PowerShell on the user's computer, build websites") } });
             }
         }
         if (chatProject?.location === "local") {
-            const def = terminalDef("execute_terminal_command", "Run a command in the project folder on the user's own computer (Windows PowerShell by default; set shell to bash for Bash, or to cmd for Command Prompt). It waits for the command to finish and gives you its whole output in one step, up to 10 minutes: use it for every command that ends by itself (git, installs, builds, tests, scripts, ssh). Use start_background_command only for servers and watchers. The user is asked to allow each command first.", {
+            const def = terminalDef("execute_terminal_command", "Run a command in the project folder on the user's own computer (Windows PowerShell by default; set shell to bash for Bash, or to cmd for Command Prompt). It waits for the command to finish and gives you its whole output in one step: use it for every command that ends by itself (git, installs, builds, tests, scripts, ssh). It waits up to timeout_seconds (2 minutes unless you set it, up to 10 minutes): pick a longer one for slow work; past it the command keeps running in the background and you are woken with its result. Use start_background_command only for servers and watchers. The user is asked to allow each command first.", {
                 command: { type: "string", description: "The exact command to run" },
-        shell: { type: "string", enum: ["powershell", "bash", "cmd"], description: "Which shell runs it: powershell (default), bash (Git Bash, or WSL when Git Bash isn't there) or cmd" },
+                shell: { type: "string", enum: ["powershell", "bash", "cmd"], description: "Which shell runs it: powershell (default), bash (Git Bash, or WSL when Git Bash isn't there) or cmd" },
+                timeout_seconds: { type: "integer", minimum: 5, maximum: 600, description: "How long to wait for the command to finish, in seconds (default 120, at most 600). Set it higher for installs, builds, tests, long scripts" },
                 description: { type: "string", description: "A few plain words saying what the command does, shown to the user above it" },
             }, ["command"]);
             for (const list of [fullToolList, activeToolList]) {
@@ -6782,6 +6801,7 @@ If a tool fails, never show the error message; say only: "Something went wrong o
     } finally {
         if (keepAliveInterval) clearInterval(keepAliveInterval);
         if (replacedCheck) clearInterval(replacedCheck);
+        if (unregisterPcExecutor) unregisterPcExecutor(); // helpers still working after this use the socket path
         // The answer is over: background results that waited for it wake the chat now
         if (runKey) redis.get(runKey).then((newest) => (newest === runId ? redis.del(runKey) : null))
             .then(() => import("../services/chat-wake.service.js")).then((m) => m.wakeIfPending(userId, sessionId)).catch(() => {});
@@ -7156,6 +7176,28 @@ export const clientToolResult = async (req, res) => {
     const owner = await redis.get(`ai:clienttool:owner:${id}`).catch(() => null);
     if (!owner || owner !== String(req.user?.id)) return res.status(404).json({ error: "Unknown tool call" });
     await redis.set(`ai:clienttool:${id}`, String(req.body?.result ?? "").slice(0, 60000), "EX", 3600);
+    res.json({ ok: true });
+};
+
+// The desktop app's reply to a step it ran itself (pc_tool_call on /ask; local-runner.service.js pcExecutors)
+export const pcToolResult = async (req, res) => {
+    const { storePcToolReply } = await import("../services/local-runner.service.js");
+    const state = await storePcToolReply(String(req.user?.id), String(req.body?.id || ""), req.body?.reply);
+    if (state === "bad_id") return res.status(400).json({ error: "Bad tool call id" });
+    if (state === "unknown") return res.status(404).json({ error: "Unknown tool call" });
+    res.json({ ok: true });
+};
+
+// A background command on the user's computer finished (the desktop app tells it over HTTP, like every other step
+// result; the runner socket's local-job-done stays for older apps): the chat that started it is woken with the result
+export const localJobDone = async (req, res) => {
+    const b = req.body || {};
+    if (!b.chat || !b.jobId) return res.status(400).json({ error: "chat and jobId are needed" });
+    const { onLocalJobDone } = await import("../services/chat-wake.service.js");
+    onLocalJobDone(String(req.user?.id), {
+        chat: String(b.chat), jobId: String(b.jobId), command: String(b.command || "").slice(0, 1000),
+        exitCode: b.exitCode, seconds: Number(b.seconds) || 0, output: String(b.output || "").slice(0, 6000), stopped: !!b.stopped,
+    }).catch(() => {});
     res.json({ ok: true });
 };
 

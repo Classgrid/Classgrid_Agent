@@ -14,7 +14,7 @@ const STREAM_FROM_BYTES = 8 * 1024 * 1024; // view_project_file streams a file b
 const MAX_OUTPUT = 60000;
 const VIEW_LINES = 2000; // lines view_project_file shows when no end_line is given
 const REPLY_CHARS = 300000; // most text in one tool answer sent to the server (its socket messages are 1 MB at most)
-const AUTO_BACKGROUND_S = Number(process.env.CG_AUTO_BACKGROUND_S) || 45; // a command still running after this keeps running as a background job
+const AUTO_BACKGROUND_S = Number(process.env.CG_AUTO_BACKGROUND_S) || 120; // a command still running after this (when the AI set no timeout_seconds) keeps running as a background job
 const wait = (ms) => new Promise((r) => setTimeout(r, ms));
 const SKIP_DIRS = new Set(["node_modules", ".git", "dist", "build", ".next", ".turbo", ".cache", "__pycache__", ".venv", "venv"]);
 
@@ -698,24 +698,27 @@ const tools = {
   // and goes on in the background wakes that chat with its result when it ends. It wasn't passed on before, so the AI
   // was told "you are woken with the result", ended its answer, and was never woken: every Python script longer than
   // 45 seconds looked like the AI "never came back", 2026-11-09)
-  run_code(root, { language = "bash", code = "", __chat }) {
+  run_code(root, { language = "bash", code = "", timeout_seconds, __chat }) {
     if (!String(code).trim()) return Promise.resolve("Error: code is empty");
     const lang = String(language).toLowerCase();
-    if (lang === "bash" || lang === "shell" || lang === "sh" || lang === "powershell") return tools.execute_terminal_command(root, { command: code, __chat });
+    if (lang === "bash" || lang === "shell" || lang === "sh" || lang === "powershell") return tools.execute_terminal_command(root, { command: code, timeout_seconds, __chat });
     const ext = lang === "python" ? "py" : "js";
     const file = path.join(require("node:os").tmpdir(), `classgrid-run-${Date.now()}.${ext}`);
     fs.writeFileSync(file, String(code), "utf8");
     const runner = lang === "python" ? (process.platform === "win32" ? "python" : "python3") : "node";
-    return tools.execute_terminal_command(root, { command: `${runner} "${file}"`, __chat }).finally(() => fs.rm(file, { force: true }, () => {}));
+    return tools.execute_terminal_command(root, { command: `${runner} "${file}"`, timeout_seconds, __chat }).finally(() => fs.rm(file, { force: true }, () => {}));
   },
 
-  // A command in the project folder (PowerShell on Windows), up to 10 minutes
-  // A command that is still running after AUTO_BACKGROUND_S seconds keeps running as a background job (it isn't
-  // stopped): the AI gets its job_id and waits for it with check_background_command, and can work on meanwhile
-  execute_terminal_command(root, { command, shell }) {
+  // A command in the project folder (PowerShell on Windows). The AI waits for it in the foreground for timeout_seconds
+  // (2 minutes unless it chose another, at most 10, like Claude Code's terminal; the owner removed the fixed 45 s on
+  // 2026-11-09). A command still running after that keeps running as a background job (it isn't stopped): the AI gets
+  // its job_id and is woken with the result when it ends, and can work on meanwhile.
+  execute_terminal_command(root, { command, shell, timeout_seconds }) {
     if (!command) return Promise.resolve("Error: command is empty");
     const blocked = blockedByHooks(root, command);
     if (blocked) return Promise.resolve(`Error: this project's hooks block commands containing "${blocked}" (.classgrid/hooks.json), so it didn't run.`);
+    const chosen = Number(timeout_seconds);
+    const waitS = Number.isFinite(chosen) && chosen > 0 ? Math.min(600, Math.max(5, Math.round(chosen))) : AUTO_BACKGROUND_S;
     return new Promise((resolve) => {
       const proc = shellSpawn(String(command), root, shell);
       const job = { proc, command: String(command), log: "", startedAt: Date.now(), exitCode: null };
@@ -729,8 +732,8 @@ const tools = {
         job.id = id;
         job.chat = arguments[1] && arguments[1].__chat;
         jobs.set(id, job);
-        resolve(`${cap(job.log.trim()) || "(no output yet)"}\n[Still running after ${AUTO_BACKGROUND_S} seconds, so it keeps running in the background as job_id ${id}. Wait for it to finish with check_background_command (job_id "${id}", wait_seconds up to 120), or stop it with stop_background_command.]`);
-      }, AUTO_BACKGROUND_S * 1000);
+        resolve(`${cap(job.log.trim()) || "(no output yet)"}\n[Still running after ${waitS} seconds, so it keeps running in the background as job_id ${id}. Wait for it to finish with check_background_command (job_id "${id}", wait_seconds up to 120), or stop it with stop_background_command.]`);
+      }, waitS * 1000);
       proc.on("close", (code) => { job.exitCode = code; clearTimeout(toBackground); if (!moved) resolve(`${cap(job.log.trim()) || "(no output)"}\n[exit code ${code}]`); else jobDone(job); });
       proc.on("error", (err) => { job.exitCode = -1; clearTimeout(toBackground); if (!moved) resolve(`Error: ${err.message}`); });
     });
@@ -1142,13 +1145,19 @@ function shellSpawn(command, cwd, shell = "powershell") {
   return spawn("powershell.exe", ["-NoLogo", "-ExecutionPolicy", "Bypass", "-Command", `[Console]::OutputEncoding=[Text.UTF8Encoding]::new($false); $OutputEncoding=[Text.UTF8Encoding]::new($false); ${command}`], { cwd, windowsHide: true });
 }
 
-// A background job finished: the server wakes the chat that started it (unless it was stopped on purpose)
+// A background job finished: the server wakes the chat that started it (unless it was stopped on purpose). It is told
+// over HTTP, like every other step result (POST /api/ai/local-job-done); the socket only when that fails (older server)
 function jobDone(job) {
   if (!job.chat || job.stopped) return;
   const seconds = Math.round((Date.now() - job.startedAt) / 1000);
   // At once, the moment it ends (a chat whose AI is waiting on it with check_background_command gets the result there)
-  if (job.reported || job.watching || !socket) return;
-  socket.emit("local-job-done", { jobId: job.id, chat: job.chat, command: job.command.slice(0, 1000), exitCode: job.exitCode, seconds, output: cap(job.log.slice(-6000).trim()) });
+  if (job.reported || job.watching) return;
+  const note = { jobId: job.id, chat: job.chat, command: job.command.slice(0, 1000), exitCode: job.exitCode, seconds, output: cap(job.log.slice(-6000).trim()) };
+  const bySocket = () => { if (socket) socket.emit("local-job-done", note); };
+  if (!currentToken || typeof fetch !== "function") return bySocket();
+  fetch(`${API}/api/ai/local-job-done`, { method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${currentToken}` }, body: JSON.stringify(note) })
+    .then((r) => { if (!r.ok) bySocket(); })
+    .catch(bySocket);
 }
 
 function killTree(proc) {
@@ -1171,67 +1180,75 @@ function connect(token) {
   const retry = () => setTimeout(() => { if (socket === me && !me.connected && !me.active && currentToken) { me.auth.token = currentToken; me.connect(); } }, 5000);
   socket.on("connect_error", (err) => { console.log("[runner] could not connect:", err.message); retry(); });
   socket.on("disconnect", (reason) => { if (reason === "io server disconnect") retry(); });
+  // The socket is the fallback path (turns with no app on their stream, older servers): the chatting app itself runs
+  // its steps through runTool (asked by the screens for each pc_tool_call on the answer's stream)
   socket.on("local-tool", async (req, ack) => {
     if (typeof ack !== "function") return;
-    // One reply stays under the server's 1 MB socket message limit (a bigger one would drop the connection); the AI
-    // only ever sees 100 KB of a tool's answer anyway
-    const send = ack;
-    ack = (r) => send(r && typeof r.text === "string" && r.text.length > REPLY_CHARS ? { ...r, text: `${r.text.slice(0, REPLY_CHARS)}\n… (cut: the answer was too long; read or search a smaller part)` } : r);
-    try {
-      const { tool, args = {}, root, chat } = req || {};
-      if (chat) args.__chat = String(chat); // which chat started it (a finished background job wakes that chat)
-      // The AI's browser steps go to the app's own browser (browser.js)
-      // The AI using any app on this computer: screen pictures, the real mouse and keyboard (computer.js)
-      if (tool === "computer") {
-        console.log("[runner] computer", args.action);
-        const r = await require("./computer").act(args);
-        return ack({ text: r.text, computer: { image: r.image } });
-      }
-      // The AI's own memory notes on this computer (aimemory.js)
-      if (tool === "memory") return ack({ text: require("./aimemory").run(args) });
-      if (tool === "browser" && browserStep) {
-        console.log("[runner] browser", args.action);
-        return ack({ text: "ok", browser: await browserStep(args) });
-      }
-      if (anywhereTools[tool]) {
-        console.log("[runner] tool", tool, args.path, args.chunk ? `piece ${args.chunk}` : "");
-        return ack(await anywhereTools[tool](args));
-      }
-      if (!root && computerFileTools[tool]) {
-        console.log("[runner] computer", tool, args.path);
-        return ack({ text: String(await computerFileTools[tool](args)) });
-      }
-      if (!root && COMPUTER_TOOLS.has(tool)) {
-        console.log("[runner] computer", tool);
-        return ack({ text: String(await tools[tool](require("node:os").homedir(), args)) });
-      }
-      console.log("[runner] tool", tool, "in", root);
-      if (!tools[tool]) return ack({ text: `Error: ${tool} can't run on this computer.` });
-      // A project folder this computer's list doesn't have yet (the app was reinstalled or its data cleared, or the
-      // project was opened on the website): the server only sends folders of this user's own projects, which the user
-      // picked with Open folder before, so it is added to the list and used, instead of stopping the AI (2026-11-09: the
-      // AI couldn't run any command in a project chat after a reinstall). The AI is never stopped and the user is never
-      // asked to open a folder (owner, 2026-11-09): a project folder that isn't on this computer runs the terminal and
-      // file tools on the whole computer, from the home folder, like a chat without a project.
-      if (!isAllowedRoot(root)) {
-        let isDir = false;
-        try { isDir = !!root && fs.statSync(root).isDirectory(); } catch { isDir = false; }
-        if (isDir) {
-          allowFolder(root);
-          console.log("[runner] project folder added to the list:", root);
-        } else {
-          console.log("[runner] project folder not on this computer, using the whole computer:", root);
-          if (computerFileTools[tool]) return ack({ text: String(await computerFileTools[tool](args)) });
-          if (COMPUTER_TOOLS.has(tool)) return ack({ text: String(await tools[tool](require("node:os").homedir(), args)) });
-          return ack({ text: `The project's folder ${root} isn't on this computer. Use full paths (like C:\\Users\\name\\Documents\\file.txt) with read_local_file, list_project_files, search_project and the terminal, which work on any file and folder on this computer.` });
-        }
-      }
-      const text = await tools[tool](root, args);
-      ack({ text: String(text) });
-    } catch (err) {
-      ack({ text: `Error: ${err.message || err}` });
-    }
+    ack(await runTool(req));
   });
+}
+
+// One step of the AI on this computer: { tool, args, root?, chat? } -> { text, computer?, browser?, file?, images?... }.
+// Used by the chat screens (pc_tool_call on the answer's own stream, posted back to /api/ai/pc-tool-result) and by the
+// socket fallback above. One reply stays under the server's 1 MB message limit; the AI only ever sees 100 KB of it.
+async function runTool(req) {
+  const capReply = (r) => (r && typeof r.text === "string" && r.text.length > REPLY_CHARS ? { ...r, text: `${r.text.slice(0, REPLY_CHARS)}\n… (cut: the answer was too long; read or search a smaller part)` } : r);
+  try {
+    const { tool, root, chat } = req || {};
+    const args = (req && req.args && typeof req.args === "object") ? req.args : {};
+    if (chat) args.__chat = String(chat); // which chat started it (a finished background job wakes that chat)
+    if (tool === "ping") return { text: "ok" };
+    // The AI's browser steps go to the app's own browser (browser.js)
+    // The AI using any app on this computer: screen pictures, the real mouse and keyboard (computer.js)
+    if (tool === "computer") {
+      console.log("[runner] computer", args.action);
+      const r = await require("./computer").act(args);
+      return capReply({ text: r.text, computer: { image: r.image } });
+    }
+    // The AI's own memory notes on this computer (aimemory.js)
+    if (tool === "memory") return capReply({ text: require("./aimemory").run(args) });
+    if (tool === "browser" && browserStep) {
+      console.log("[runner] browser", args.action);
+      return capReply({ text: "ok", browser: await browserStep(args) });
+    }
+    if (anywhereTools[tool]) {
+      console.log("[runner] tool", tool, args.path, args.chunk ? `piece ${args.chunk}` : "");
+      return capReply(await anywhereTools[tool](args));
+    }
+    if (!root && computerFileTools[tool]) {
+      console.log("[runner] computer", tool, args.path);
+      return capReply({ text: String(await computerFileTools[tool](args)) });
+    }
+    if (!root && COMPUTER_TOOLS.has(tool)) {
+      console.log("[runner] computer", tool);
+      return capReply({ text: String(await tools[tool](require("node:os").homedir(), args)) });
+    }
+    console.log("[runner] tool", tool, "in", root);
+    if (!tools[tool]) return { text: `Error: ${tool} can't run on this computer.` };
+    // A project folder this computer's list doesn't have yet (the app was reinstalled or its data cleared, or the
+    // project was opened on the website): the server only sends folders of this user's own projects, which the user
+    // picked with Open folder before, so it is added to the list and used, instead of stopping the AI (2026-11-09: the
+    // AI couldn't run any command in a project chat after a reinstall). The AI is never stopped and the user is never
+    // asked to open a folder (owner, 2026-11-09): a project folder that isn't on this computer runs the terminal and
+    // file tools on the whole computer, from the home folder, like a chat without a project.
+    if (!isAllowedRoot(root)) {
+      let isDir = false;
+      try { isDir = !!root && fs.statSync(root).isDirectory(); } catch { isDir = false; }
+      if (isDir) {
+        allowFolder(root);
+        console.log("[runner] project folder added to the list:", root);
+      } else {
+        console.log("[runner] project folder not on this computer, using the whole computer:", root);
+        if (computerFileTools[tool]) return capReply({ text: String(await computerFileTools[tool](args)) });
+        if (COMPUTER_TOOLS.has(tool)) return capReply({ text: String(await tools[tool](require("node:os").homedir(), args)) });
+        return { text: `The project's folder ${root} isn't on this computer. Use full paths (like C:\\Users\\name\\Documents\\file.txt) with read_local_file, list_project_files, search_project and the terminal, which work on any file and folder on this computer.` };
+      }
+    }
+    const text = await tools[tool](root, args);
+    return capReply({ text: String(text) });
+  } catch (err) {
+    return { text: `Error: ${err.message || err}` };
+  }
 }
 
 // The Files tab for a folder project: the same shapes as the server's /projects/:id/files and /file
@@ -1288,6 +1305,7 @@ function readForFilesTab(root, rel) {
 
 module.exports = {
   tools, // the AI's tools on this computer (also used by the terminal tests)
+  runTool, // one step { tool, args, root?, chat? } -> reply, for the chat screens (pc_tool_call) and the socket
   readLocalFile,
   listForFilesTab,
   githubRepoOf,
