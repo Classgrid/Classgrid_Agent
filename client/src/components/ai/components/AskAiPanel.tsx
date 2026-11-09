@@ -7475,7 +7475,7 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
           </AnimatePresence>
           {/* Right-side TOC showing user questions */}
           {tocItems.length > 0 && !showFilesPanel && !showGridPanel && !studioLook && <ScrollSpyTOC tocItems={tocItems} activeSection={activeSection} />}
-          {studioLook && <QuestionDots tocItems={tocItems} activeSection={activeSection} />}
+          {studioLook && !isToolPage(sessionId) && <QuestionDots tocItems={tocItems} activeSection={activeSection} />}
         </div>
         </div>
       ) : null}

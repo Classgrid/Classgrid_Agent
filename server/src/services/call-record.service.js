@@ -53,14 +53,14 @@ export async function callStarted({ callId, user, phone, startedAt, model }) {
 
 // One line of the call: what the caller said, what the AI said, or what the AI did (a task saved, a question asked)
 export function callLine(callId, { at = 0, who = "ai", kind = "speech", text = "", tool = "", args = null }) {
-    if (!callId) return;
-    Call.updateOne({ call_id: callId }, { $push: { transcript: { at, who, kind, text: cut(text, 6000), tool, args: cutArgs(args) } } }).catch(warn("callLine"));
+    if (!callId) return Promise.resolve();
+    return Call.updateOne({ call_id: callId }, { $push: { transcript: { at, who, kind, text: cut(text, 6000), tool, args: cutArgs(args) } } }).catch(warn("callLine"));
 }
 
 export function callEnded(callId, { why = "", startedAt, tasks = [] }) {
-    if (!callId) return;
+    if (!callId) return Promise.resolve();
     const endedAt = new Date();
-    Call.updateOne({ call_id: callId }, {
+    return Call.updateOne({ call_id: callId }, {
         $set: {
             ended_at: endedAt, duration_ms: Math.max(0, endedAt.getTime() - (startedAt || endedAt.getTime())), ended_by: why,
             tasks: tasks.map((t) => ({ text: cut(t.task, 4000), project_name: t.project?.name || "", coding: !!t.coding })),
@@ -71,8 +71,8 @@ export function callEnded(callId, { why = "", startedAt, tasks = [] }) {
 
 // A call with no task: the recap the caller got on WhatsApp is the record's summary
 export function callRecap(callId, text) {
-    if (!callId || !text) return;
-    Call.updateOne({ call_id: callId }, { $set: { summary: cut(text, 3000), status: "answered" }, $push: { sent: { kind: "whatsapp", by: "classgrid", text: cut(text) } } }).catch(warn("callRecap"));
+    if (!callId || !text) return Promise.resolve();
+    return Call.updateOne({ call_id: callId }, { $set: { summary: cut(text, 3000), status: "answered" }, $push: { sent: { kind: "whatsapp", by: "classgrid", text: cut(text) } } }).catch(warn("callRecap"));
 }
 
 // Work the AI did live during the call (ask_classgrid)
@@ -85,8 +85,8 @@ export function callLiveWork(callId, entry) {
 
 // The project the work runs in (made: it was made for this call)
 export function callProject(callId, { projectId, projectName, made = false }) {
-    if (!callId) return;
-    Call.updateOne({ call_id: callId }, { $set: { project_id: projectId ? String(projectId) : null, project_name: projectName || null, project_made: made } }).catch(warn("callProject"));
+    if (!callId) return Promise.resolve();
+    return Call.updateOne({ call_id: callId }, { $set: { project_id: projectId ? String(projectId) : null, project_name: projectName || null, project_made: made } }).catch(warn("callProject"));
 }
 
 // ─── A task not from a call (a WhatsApp message or an email started it) ───
@@ -110,15 +110,15 @@ export async function taskRecordStarted({ task, user, origin, items = [] }) {
 
 // The job after a call made its task: the record now belongs to that task
 export function attachTask(callId, { taskId, sessionId = null, projectId = null, projectName = null }) {
-    if (!callId || !taskId) return;
-    Call.updateOne({ call_id: callId }, {
+    if (!callId || !taskId) return Promise.resolve();
+    return Call.updateOne({ call_id: callId }, {
         $set: { agent_task_id: taskId, ...(sessionId ? { session_id: sessionId } : {}), ...(projectId ? { project_id: String(projectId), project_name: projectName || null } : {}) },
     }).catch(warn("attachTask"));
 }
 
 export function setSession(taskId, sessionId) {
-    if (!taskId || !sessionId) return;
-    Call.updateOne({ agent_task_id: taskId }, { $set: { session_id: sessionId } }).catch(warn("setSession"));
+    if (!taskId || !sessionId) return Promise.resolve();
+    return Call.updateOne({ agent_task_id: taskId }, { $set: { session_id: sessionId } }).catch(warn("setSession"));
 }
 
 // The link the user gets on WhatsApp: the task's record (null when the task has none, e.g. a chat-only task)
@@ -135,12 +135,12 @@ export async function linkForCall(callId) {
 
 // A WhatsApp message or email sent to the user for this work by the server (the AI's own sends come from its steps)
 export function noteSent(taskId, text, { kind = "whatsapp", to = "" } = {}) {
-    if (!taskId || !text) return;
-    Call.updateOne({ agent_task_id: taskId }, { $push: { sent: { kind, by: "classgrid", to, text: cut(text) } }, $inc: { [`work.counts.${kind === "email" ? "emails_sent" : "whatsapp_sent"}`]: 1 } }).catch(warn("noteSent"));
+    if (!taskId || !text) return Promise.resolve();
+    return Call.updateOne({ agent_task_id: taskId }, { $push: { sent: { kind, by: "classgrid", to, text: cut(text) } }, $inc: { [`work.counts.${kind === "email" ? "emails_sent" : "whatsapp_sent"}`]: 1 } }).catch(warn("noteSent"));
 }
 export function noteSentForCall(callId, text) {
-    if (!callId || !text) return;
-    Call.updateOne({ call_id: callId }, { $push: { sent: { kind: "whatsapp", by: "classgrid", text: cut(text) } }, $inc: { "work.counts.whatsapp_sent": 1 } }).catch(warn("noteSentForCall"));
+    if (!callId || !text) return Promise.resolve();
+    return Call.updateOne({ call_id: callId }, { $push: { sent: { kind: "whatsapp", by: "classgrid", text: cut(text) } }, $inc: { "work.counts.whatsapp_sent": 1 } }).catch(warn("noteSentForCall"));
 }
 
 // ─── Runs of the work ──────────────────────────────────────────
@@ -166,7 +166,7 @@ export function runRecorder(taskId, { reason = "", attempt = 1 } = {}) {
             $set: { status: "working", "work.ended_at": null, wake_at: null, error: "" },
             $inc: { "work.attempts": 1 },
             $push: { "work.runs": { started_at: startedAt, reason, no: 0 } },
-        }, { new: true, projection: { "work.runs": 1 } }).catch(warn("runStarted"));
+        }, { returnDocument: "after", projection: { "work.runs": 1 } }).catch(warn("runStarted"));
         if (!doc) return;
         runNo = doc.work?.runs?.length || 1;
         await Call.updateOne({ _id: doc._id }, { $set: { [`work.runs.${runNo - 1}.no`]: runNo } }).catch(() => {});
