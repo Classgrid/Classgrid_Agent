@@ -9,6 +9,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { apiClient as api } from "@/lib/apiClient";
+import { getSocket } from "@/lib/socketClient";
 import { cn } from "@/lib/utils";
 import {
   ACTIVE, ORIGIN, RUN_OUTCOME, RUN_REASON, SIDE_EFFECT_LABEL, STATUS, StatusBadge, between, dotClass, fmtClock, fmtDate, fmtDuration, fmtTime,
@@ -47,12 +48,21 @@ export const CallDetailPage: React.FC<{ id?: string }> = ({ id }) => {
   };
   useEffect(() => { setLoading(true); load(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [id]);
 
-  // While the call is live or the AI is working, the page refreshes itself (steps appear as they happen)
+  // Live: the server says "calls:updated" { id } after every write to this record (a line said, a step done, the
+  // status), and the page reloads it (a burst of events reloads once). While the call is live or the AI is working
+  // a timed reload every 8 seconds stays as a safety net
   const active = !!call && ACTIVE.includes(call.status);
   useEffect(() => {
-    if (!active) return;
-    const t = setInterval(() => load(true), 5000);
-    return () => clearInterval(t);
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const soon = (d?: { id?: string }) => {
+      if (d?.id && d.id !== id) return;
+      if (timer) return;
+      timer = setTimeout(() => { timer = null; load(true); }, 350);
+    };
+    const socket = getSocket();
+    socket?.on("calls:updated", soon);
+    const t = active ? setInterval(() => load(true), 8000) : null;
+    return () => { socket?.off("calls:updated", soon); if (timer) clearTimeout(timer); if (t) clearInterval(t); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [active, id]);
 

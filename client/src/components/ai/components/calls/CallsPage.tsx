@@ -8,6 +8,7 @@ import { Phone, Search, MessageSquare, Mail, FolderPlus, ChevronRight, Clock } f
 import { apiClient as api } from "@/lib/apiClient";
 import { Skeleton } from "@/components/marketing_ui/skeleton";
 import { readPageCache, writePageCache } from "@/lib/desktopPageCache";
+import { getSocket } from "@/lib/socketClient";
 import { cn } from "@/lib/utils";
 import {
   ACTIVE, ORIGIN, STATUS, StatusBadge, StepCounts, dayLabel, dotClass, fmtDuration, fmtTime, type CallListItem, type CallStatus,
@@ -58,15 +59,25 @@ export const CallsPage: React.FC = () => {
 
   useEffect(() => { load(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, []);
 
-  // The list refreshes itself while it is open (a call made right now shows up by itself): every 6 seconds while
-  // a call is live or its work is running, every 20 seconds otherwise, and whenever the window comes back in front
+  // Live: the server says "calls:updated" after every write to one of this user's records (a new call, a line said,
+  // a step done), and the list reloads (a burst of events reloads once). Timed reloads stay as a safety net: every
+  // 10 seconds while a call is live or its work is running, every 30 seconds otherwise, and when the window
+  // comes back in front
   const anyActive = calls.some((c) => ACTIVE.includes(c.status));
   useEffect(() => {
-    const t = setInterval(() => load(true), anyActive ? 6000 : 20000);
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const soon = () => { if (timer) return; timer = setTimeout(() => { timer = null; load(true); }, 400); };
+    const socket = getSocket();
+    socket?.on("calls:updated", soon);
+    const t = setInterval(() => load(true), anyActive ? 10000 : 30000);
     const onFocus = () => { if (document.visibilityState !== "hidden") load(true); };
     window.addEventListener("focus", onFocus);
     document.addEventListener("visibilitychange", onFocus);
-    return () => { clearInterval(t); window.removeEventListener("focus", onFocus); document.removeEventListener("visibilitychange", onFocus); };
+    return () => {
+      socket?.off("calls:updated", soon);
+      if (timer) clearTimeout(timer);
+      clearInterval(t); window.removeEventListener("focus", onFocus); document.removeEventListener("visibilitychange", onFocus);
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [anyActive]);
 
