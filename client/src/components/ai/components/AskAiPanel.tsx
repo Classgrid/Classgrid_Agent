@@ -50,6 +50,12 @@ import { SchedulePage } from "./SchedulePage";
 import { ScheduleDetailPage } from "./ScheduleDetailPage";
 
 import { LibraryPage } from "./LibraryPage";
+import { CallsPage } from "./calls/CallsPage";
+import { CallDetailPage } from "./calls/CallDetailPage";
+
+// Pages that live at a chat's address but are not chats (Schedule, Library, Calls): no chat is loaded for them
+const TOOL_PAGES = new Set(["schedule", "library", "calls"]);
+const isToolPage = (id?: string | null) => !!id && TOOL_PAGES.has(id);
 
 import ReactDOM from "react-dom";
 
@@ -3294,7 +3300,7 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
 
     const handleLoadChat = async (e: any) => {
       const id = e.detail?.sessionId;
-      if (!id || id === "schedule" || id === "library") return;
+      if (!id || isToolPage(id)) return;
 
       detachRunningReply();
       setMessages([]);
@@ -3440,7 +3446,7 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
   // Sync chat when routeSessionId changes
   const [routeLoadAttempt, setRouteLoadAttempt] = useState(0);
   useEffect(() => {
-    if (!routeSessionId || routeSessionId === "schedule" || routeSessionId === "library") return;
+    if (!routeSessionId || isToolPage(routeSessionId)) return;
     if (urlSyncedSessionRef.current === routeSessionId) { urlSyncedSessionRef.current = null; return; }
 
     // Each load gets its own abort controller: opening another chat (or leaving) cancels this one,
@@ -3666,7 +3672,7 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
   const [submitting, setSubmitting] = useState(false);
 
   // Share Grid: people in this chat, and live updates when someone else sends a message
-  const gridSessionId = sessionId && !isIncognito && sessionId !== "schedule" && sessionId !== "library" ? sessionId : null;
+  const gridSessionId = sessionId && !isIncognito && !isToolPage(sessionId) ? sessionId : null;
   const gridSubmittingRef = useRef(submitting);
   gridSubmittingRef.current = submitting;
   // The AI is still answering (its stream, or its words still being typed out). Mastero's card stays locked then, and
@@ -6751,12 +6757,12 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
             {/* Sidebar toggle and Top Right Header Actions */}
             {/* Desktop app (it has no Agent mode): Studio gets Agent's Incognito button on a new chat, next to the
                 pane button at the top right */}
-            {DESKTOP_STUDIO && pageContext?.path === "/c/studio" && emptyState && !isIncognito && !isLoadingChat && sessionId !== "schedule" && sessionId !== "library" && (
+            {DESKTOP_STUDIO && pageContext?.path === "/c/studio" && emptyState && !isIncognito && !isLoadingChat && !isToolPage(sessionId) && (
               <div className={cn("absolute top-3 z-20 flex items-center", studioMenu ? "right-12" : "right-3")}>
                 <IncognitoButton onClick={startIncognito} />
               </div>
             )}
-            {studioMenu && messages.length > 0 && sessionId && !isIncognito && sessionId !== "schedule" && sessionId !== "library" && (
+            {studioMenu && messages.length > 0 && sessionId && !isIncognito && !isToolPage(sessionId) && (
               <div className="absolute top-3 right-12 z-20 flex items-center gap-1 animate-in fade-in-0 duration-200">
                 <StudioChatMenu
                   sessionId={sessionId}
@@ -6771,7 +6777,7 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
             )}
             {/* Desktop app: Schedule and Library in Studio have the same top bar as Grids, Requests and Audit Logs
                 (DashboardLayout): the sidebar button on the left and the page name in the middle */}
-            {DESKTOP_STUDIO && isStudio && (sessionId === "schedule" || sessionId === "library") && (
+            {DESKTOP_STUDIO && isStudio && isToolPage(sessionId) && (
               <header className="flex h-14 shrink-0 items-center justify-center border-b border-border/50 px-4 bg-background/80 backdrop-blur-md relative z-20">
                 <div className="absolute left-4 flex items-center gap-2">
                   <SidebarTrigger />
@@ -6780,7 +6786,7 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
                 <Breadcrumb>
                   <BreadcrumbList>
                     <BreadcrumbItem>
-                      <BreadcrumbPage>{sessionId === "schedule" ? "Schedule" : "Library"}</BreadcrumbPage>
+                      <BreadcrumbPage>{sessionId === "schedule" ? "Schedule" : sessionId === "calls" ? "Calls" : "Library"}</BreadcrumbPage>
                     </BreadcrumbItem>
                   </BreadcrumbList>
                 </Breadcrumb>
@@ -6790,11 +6796,11 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
               {isIncognito || pageContext?.path === "/c/studio" ? <span /> : <SidebarTrigger />}
 
               {/* Ghost button on a new chat: start an incognito chat */}
-              {emptyState && !isIncognito && !isLoadingChat && sessionId !== "schedule" && sessionId !== "library" && (
+              {emptyState && !isIncognito && !isLoadingChat && !isToolPage(sessionId) && (
                 <IncognitoButton onClick={startIncognito} />
               )}
 
-              {messages.length > 0 && sessionId && !isIncognito && sessionId !== "schedule" && sessionId !== "library" && pageContext?.path !== "/c/studio" && (
+              {messages.length > 0 && sessionId && !isIncognito && !isToolPage(sessionId) && pageContext?.path !== "/c/studio" && (
                 <div className="flex items-center gap-1 text-muted-foreground">
                   {/* Questions list (the side list is hidden on smaller screens and phones) */}
                   <MobileTOCButton tocItems={tocItems} activeSection={activeSection} />
@@ -6838,6 +6844,10 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
               <div className="flex-1 overflow-y-auto">
                 <LibraryPage />
               </div>
+            ) : sessionId === "calls" ? (
+              <div className="flex-1 overflow-y-auto">
+                {detailId ? <CallDetailPage id={detailId} /> : <CallsPage />}
+              </div>
             ) : isLoadingChat ? (
               <>
                 <div className="flex-1 overflow-y-scroll overscroll-contain scroll-smooth chat-scrollbar [scrollbar-gutter:stable]">
@@ -6880,7 +6890,7 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
               /* â”€â”€ PostHog-style: everything in one centered block â”€â”€ */
               <div className="flex-1 min-h-0 flex flex-col items-center justify-center px-4 md:px-8 pb-3 sm:pb-0">
                 {/* Desktop app, Studio's new chat: a soft purple glow from the top */}
-                {DESKTOP_STUDIO && studioLook && sessionId !== "schedule" && sessionId !== "library" && (
+                {DESKTOP_STUDIO && studioLook && !isToolPage(sessionId) && (
                   // Light from the top centre, dimming gradually outwards to nothing above the logo, with a fine grain that
                   // only shows inside the light, so it never shows steps (light mode: a soft lavender that shows on white)
                   <div aria-hidden className="pointer-events-none absolute inset-0">
@@ -6923,7 +6933,7 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
 
                   {/* Studio's new chat (website and desktop app): a faint Classgrid logo fading downwards (white in dark
                       mode, black in light mode), and the greeting below it */}
-                  {studioLook && sessionId !== "schedule" && sessionId !== "library" && (
+                  {studioLook && !isToolPage(sessionId) && (
                     <div className="flex flex-col items-center gap-10 mt-auto sm:mt-0">
                       <ClassgridLogoIcon
                         size={76}

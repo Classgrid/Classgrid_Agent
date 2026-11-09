@@ -90,6 +90,14 @@ function ToStudio() {
 }
 const agentPage = DESKTOP ? <ToStudio /> : <DashboardHomePage />;
 
+// The link sent on WhatsApp after a call (chat.classgrid.in/calls/<id>) opens the call's read-only record under
+// Calls: in Studio in the desktop app, in Agent mode on the website (owner, 2026-11-09)
+function ToCalls() {
+  const { pathname, search } = useLocation();
+  const rest = pathname.replace(/^\/calls/, "");
+  return <Navigate to={{ pathname: `${DESKTOP ? "/c/studio/calls" : "/agent/calls"}${rest}`, search }} replace />;
+}
+
 import { DashboardHomePage } from "@/features/superadmin/pages/DashboardHomePage";
 import { ProjectModePage } from "@/features/superadmin/pages/ProjectModePage";
 import { EditorPanelPage } from "@/features/superadmin/pages/EditorPanelPage";
@@ -450,6 +458,9 @@ export function AppRouter() {
       </Route>
       {/* Old /work links go to /agent */}
       <Route path="/work/*" element={<Navigate to={DESKTOP ? "/c/studio" : "/agent"} replace />} />
+      {/* The link sent on WhatsApp after a call: the call's record under Calls */}
+      <Route path="/calls" element={<ToCalls />} />
+      <Route path="/calls/*" element={<ToCalls />} />
       <Route path="*" element={DESKTOP ? <ToStudio /> : <NotFoundPage />} />
 
       {/* Public shared chat viewer (no auth required) */}

@@ -40,6 +40,7 @@ import { chargeableTokens } from "./ai-token-pricing.js";
 import { toWhatsappText, splitWhatsappText } from "./ai-feature-limits.js";
 import { BUSY_KEY, markLastIn } from "./whatsapp-inbox.service.js";
 import { BUDGET_STOP_NOTE } from "./llm-stream.js";
+import * as record from "./call-record.service.js";
 
 const GRAPH = "https://graph.facebook.com/v22.0";
 const CALL_MODEL = "claude-haiku-5-5"; // fastest Claude, so the voice replies come quickly
@@ -67,6 +68,14 @@ const CHAT_URL = "https://chat.classgrid.in";
 
 const calls = new Map(); // call id -> live call
 const jobNumbers = new Map(); // number -> call tasks running for it on this server
+
+// One line of the call: kept in memory (for the recap) and written to the call's record (the Calls page in the app).
+// who: caller | ai · kind: speech (said out loud) | task (a task saved) | asked (ask_classgrid) | tool (a project tool)
+function line(call, who, kind, text, extra = {}) {
+    const prefix = who === "caller" ? "Caller" : kind === "task" ? "AI saved a task" : kind === "asked" ? "AI asked Classgrid" : kind === "tool" ? `AI used ${extra.tool}` : "AI";
+    call.transcript.push(`${prefix}: ${text}`);
+    record.callLine(call.id, { at: Date.now() - call.startedAt, who: who === "caller" ? "caller" : kind === "speech" ? "ai" : "classgrid", kind, text, tool: extra.tool || "", args: extra.args || null });
+}
 
 // A live call, or a call task running, for this number (then a new WhatsApp message is taken in after it)
 export function numberInUse(number) {
@@ -428,7 +437,7 @@ async function handleUtterance(call, chunks) {
     try {
         const said = await speechToText(chunks);
         if (!said || call.ended) return;
-        call.transcript.push(`Caller: ${said}`);
+        line(call, "caller", "speech", said);
         call.messages.push({ role: "user", content: said });
         await reply(call);
     } catch (e) {
@@ -448,7 +457,7 @@ async function runTool(call, t, cutOff) {
         const project = t.input?.project_name ? await findProject(call.user, t.input.project_name).catch(() => null) : null;
         if (!task) return { content: "Nothing was saved: the task text was empty. Call start_task again with the full task.", is_error: true };
         call.tasks.push({ task, project, coding: t.input?.coding_work === true });
-        call.transcript.push(`AI saved a task: ${task}`);
+        line(call, "ai", "task", task, { tool: "start_task", args: { project_name: t.input?.project_name || "", coding_work: t.input?.coding_work === true } });
         return {
             content: project || !t.input?.project_name
                 ? `Task saved (${call.tasks.length} so far). It starts when the call ends.`
@@ -457,12 +466,13 @@ async function runTool(call, t, cutOff) {
     }
     if (t.name === "end_call") return { content: "Hanging up." };
     if (t.name === "ask_classgrid") {
-        call.transcript.push(`AI asked Classgrid: ${t.input?.request || ""}`);
+        line(call, "ai", "asked", String(t.input?.request || ""), { tool: "ask_classgrid", args: { project_name: t.input?.project_name || "" } });
         return { content: await askClassgridLive(call, String(t.input?.request || ""), t.input?.project_name) };
     }
     if (PROJECT_TOOLS.some((p) => p.name === t.name)) {
-        call.transcript.push(`AI used ${t.name} ${JSON.stringify(t.input || {})}`);
-        return { content: await runProjectTool(call, t) };
+        const out = await runProjectTool(call, t);
+        line(call, "ai", "tool", out, { tool: t.name, args: t.input || {} });
+        return { content: out };
     }
     return { content: "This tool is not available.", is_error: true };
 }
@@ -471,7 +481,7 @@ async function reply(call) {
     // A few rounds, so the AI can use a tool and then talk about the result
     for (let round = 0; round < 4 && !call.ended; round++) {
         const { text, tools, cutOff } = await claudeTurn(call);
-        if (text) call.transcript.push(`AI: ${text}`);
+        if (text) line(call, "ai", "speech", text);
         await speak(call, text);
         if (!tools.length || call.ended) return;
         // Every tool the AI asked for gets its answer in one message, even when a tool fails
@@ -492,7 +502,7 @@ async function reply(call) {
     // Still using tools after 4 rounds: one last answer without tools, so the results are said
     if (!call.ended) {
         const { text } = await claudeTurn(call, { noTools: true });
-        if (text) call.transcript.push(`AI: ${text}`);
+        if (text) line(call, "ai", "speech", text);
         await speak(call, text);
     }
 }
@@ -537,6 +547,7 @@ export function endCall(callId, why = "ended") {
     try { call.pc?.close(); } catch { /* already closed */ }
     if (why !== "remote") callAction(callId, "terminate").catch(() => { /* call already over */ });
     console.log(`[WA call] ${callId} ended (${why}) after ${Math.round((Date.now() - call.startedAt) / 1000)}s`);
+    record.callEnded(callId, { why, startedAt: call.startedAt, tasks: call.tasks });
     afterCall(call, why).catch((e) => console.error("[WA call] after-call work failed:", e.message));
 }
 
@@ -563,13 +574,18 @@ async function callSummary(call) {
 
 async function afterCall(call, why) {
     if (why === "error" || /^connection/.test(why)) {
-        await sendWhatsappText(call.from, `Sorry, the call dropped${call.tasks.length ? ", but your request is saved and Classgrid AI is working on it" : ""}. You can call again anytime.`);
+        const text = `Sorry, the call dropped${call.tasks.length ? ", but your request is saved and Classgrid AI is working on it" : ""}. You can call again anytime.`;
+        record.noteSentForCall(call.id, text);
+        await sendWhatsappText(call.from, text);
     }
     if (!call.tasks.length) {
         // No task: a short recap of the call (questions were already answered live)
         if (call.transcript.some((l) => l.startsWith("Caller:"))) {
             const recap = await callSummary(call).catch(() => "");
-            if (recap) await sendWhatsappText(call.from, `📞 *Your call with Classgrid AI*\n${recap}`);
+            if (recap) {
+                record.callRecap(call.id, recap);
+                await sendWhatsappText(call.from, `📞 *Your call with Classgrid AI*\n${recap}`);
+            }
         }
         return;
     }
@@ -588,6 +604,9 @@ async function afterCall(call, why) {
         for (let i = 2; await findProject(call.user, name, { withLocal: true }).catch(() => null); i++) name = `${base} ${i}`;
         project = await IdeProject.create({ owner: call.user._id, name }).catch((e) => { console.error("[WA call] project could not be made:", e.message); return null; });
         if (project) console.log(`[WA call] ${call.id}: no project named, made "${name}" (Project Mode only)`);
+        if (project) record.callProject(call.id, { projectId: project._id, projectName: project.name, made: true });
+    } else if (project) {
+        record.callProject(call.id, { projectId: project._id, projectName: project.name, made: false });
     }
     const groups = new Map([[project ? String(project._id) : "none", { project, tasks: call.tasks.map((t) => t.task) }]]);
     // Work the AI started live during the call for the same project finishes first; the task then carries on in
@@ -595,7 +614,9 @@ async function afterCall(call, why) {
     const announced = call.liveWorks.length > 0;
     if (announced) {
         // The user hears from us now, not only when the live work is done (the task doesn't say it again)
-        await sendWhatsappText(call.from, `Got it. Classgrid AI is working on it now. I'll send you the result here when it's done.${call.callsLine ? `\n${call.callsLine}` : ""}`);
+        const text = `Got it. Classgrid AI is working on it now. I'll send you the result here when it's done.${call.callsLine ? `\n${call.callsLine}` : ""}`;
+        record.noteSentForCall(call.id, text);
+        await sendWhatsappText(call.from, text);
         await Promise.all(call.liveWorks);
     }
     let n = 0;
@@ -612,7 +633,7 @@ async function afterCall(call, why) {
             id: groups.size > 1 ? `${call.id}:${n++}` : call.id, userId: String(call.user._id), from: call.from, question,
             projectId: project ? String(project._id) : null, projectName: project?.name || null,
             sessionId: liveSession, startedAt: Date.now(), attempts: 0, steps: [], callsLine: call.callsLine || "", announced,
-            callStartedAt: call.startedAt,
+            callStartedAt: call.startedAt, callId: call.id,
         }).catch((e) => console.error(`[WA call] task for ${call.id} failed:`, e.message));
     }
 }
@@ -660,7 +681,12 @@ async function runCallJob(job, { resumed = false, lockToken = null } = {}) {
             return;
         }
         if (job.attempts > MAX_TRIES) {
-            await sendWhatsappText(job.from, `Sorry, Classgrid AI could not finish your task after ${MAX_TRIES} tries.${job.sessionId ? `\n\nWhat it did so far: ${CHAT_URL}/agent/${job.sessionId}` : ""}`);
+            // The link opens the call's record in the app (read-only), never a chat
+            const link = (await record.linkForCall(job.callId)) || (job.sessionId ? `${CHAT_URL}/agent/${job.sessionId}` : "");
+            const text = `Sorry, Classgrid AI could not finish your task after ${MAX_TRIES} tries.${link ? `\n\nWhat it did so far: ${link}` : ""}`;
+            await record.markFailedForCall(job.callId, `Could not finish after ${MAX_TRIES} tries.`);
+            record.noteSentForCall(job.callId, text);
+            await sendWhatsappText(job.from, text);
             await forget();
             return;
         }
@@ -690,6 +716,8 @@ async function runCallJob(job, { resumed = false, lockToken = null } = {}) {
                 projectId: job.projectId, projectName: job.projectName,
             });
             await save();
+            // The call's record now belongs to this task (every run of the task is written to it)
+            record.attachTask(job.callId, { taskId: job.taskId, sessionId: job.sessionId, projectId: job.projectId, projectName: job.projectName });
         }
         // Every minute: the task is marked as running, and if it was deleted meanwhile the run is stopped
         const stop = new AbortController();
@@ -697,12 +725,18 @@ async function runCallJob(job, { resumed = false, lockToken = null } = {}) {
             if (await taskGone()) { stop.abort(); return; }
             AgentTask.updateOne({ _id: job.taskId, status: "working" }, { $set: { heartbeat_at: new Date() } }).catch(() => {});
         }, 60 * 1000);
+        // Every tool, its timing, the thinking and the model of this run go into the call's record
+        const rec = record.runRecorder(job.taskId, { reason: resumed ? "restart" : "call", attempt: job.attempts });
         const result = await runAgentTask(user, question, job.projectId, (sessionId) => {
             tasks.setTaskSession(job.taskId, sessionId);
             if (job.sessionId) return;
             job.sessionId = sessionId;
             save();
-            if (!job.announced) sendWhatsappText(job.from, `Got it. Classgrid AI is working on it now${where}. I'll send you the result here when it's done.${job.callsLine ? `\n${job.callsLine}` : ""}`);
+            if (!job.announced) {
+                const text = `Got it. Classgrid AI is working on it now${where}. I'll send you the result here when it's done.${job.callsLine ? `\n${job.callsLine}` : ""}`;
+                record.noteSent(job.taskId, text);
+                sendWhatsappText(job.from, text);
+            }
         }, job.sessionId, (stepText, info) => {
             // Each finished tool step is kept, so a resume after a restart knows what not to redo
             job.steps = [...(job.steps || []), stepText].slice(-40);
@@ -710,7 +744,8 @@ async function runCallJob(job, { resumed = false, lockToken = null } = {}) {
             if (info?.name === "send_whatsapp_message") sends.push(info);
             tasks.logTaskStep(job.taskId, info);
             save();
-        }, { taskOrigin: "whatsapp" }, stop.signal).finally(() => clearInterval(taskBeat));
+        }, { taskOrigin: "whatsapp" }, stop.signal, rec.onData).finally(() => clearInterval(taskBeat));
+        await rec.end(result);
         if (result.aborted || await taskGone()) {
             console.log(`[WA call] task ${job.id} was deleted during its run, its job stops`);
             await forget();
@@ -782,19 +817,26 @@ async function askClassgridLive(call, request, projectName) {
         }
     })();
     call.livePending[pendingKey] = true;
+    const liveStartedAt = new Date();
     const safeWork = work.catch((e) => ({ answer: "", error: e.message })).finally(() => { call.livePending[pendingKey] = false; });
     // After the call, a saved task for the same project waits for this work and carries on in its chat
     call.liveWorks.push(safeWork);
     const timeout = new Promise((resolve) => setTimeout(() => resolve(null), 90 * 1000));
     const result = await Promise.race([safeWork, timeout]);
     if (!result) {
-        safeWork.then((r) => {
+        safeWork.then(async (r) => {
+            record.callLiveWork(call.id, { key: r.key, sessionId: r.sessionId, request, startedAt: liveStartedAt, answer: r.answer, error: r.error, late: true });
             // A saved task for the same project carries on in this chat and sends the result (no second message)
             if (call.ended && call.tasks.some((t) => (t.project ? String(t.project._id) : "none") === r.key)) return;
-            sendWhatsappText(call.from, `${r.answer || `Classgrid AI could not finish this${r.error ? `: ${r.error}` : "."}`}${r.sessionId ? `\n\n${CHAT_URL}/agent/${r.sessionId}` : ""}`);
+            // The link opens the call's record in the app (read-only), never a chat
+            const link = (await record.linkForCall(call.id)) || (r.sessionId ? `${CHAT_URL}/agent/${r.sessionId}` : "");
+            const text = `${r.answer || `Classgrid AI could not finish this${r.error ? `: ${r.error}` : "."}`}${link ? `\n\n${link}` : ""}`;
+            record.noteSentForCall(call.id, text);
+            sendWhatsappText(call.from, text);
         });
         return "Still working on it. The answer will be sent to the caller on WhatsApp when it is ready.";
     }
+    record.callLiveWork(call.id, { key: result.key, sessionId: result.sessionId, request, startedAt: liveStartedAt, answer: result.answer, error: result.error, late: false });
     if (!result.answer) return `Classgrid could not answer${result.error ? `: ${result.error}` : "."}`;
     return result.answer.slice(0, 4000);
 }
@@ -956,6 +998,8 @@ export async function answerCall({ id, from, sdp, user, tokenSource, callsLine =
         speech: { active: false, chunks: [], loud: 0, quiet: 0, ms: 0, loudMs: 0 }, pending: [], liveSessions: {}, livePending: {}, liveWorks: [],
     };
     calls.set(id, call);
+    // The call's record exists from its first second (the Calls page in the app shows it as live)
+    record.callStarted({ callId: id, user, phone: from, startedAt: call.startedAt, model: CALL_MODEL });
 
     pc.ontrack = (e) => {
         if (e.track.kind !== "audio" || call.sink) return;
@@ -1025,7 +1069,7 @@ export async function answerCall({ id, from, sdp, user, tokenSource, callsLine =
     // Greeting
     const first = String(user.name || "").split(" ")[0];
     const hello = `Hi${first ? ` ${first}` : ""}, this is Classgrid AI. What can I do for you?`;
-    call.transcript.push(`AI: ${hello}`);
+    line(call, "ai", "speech", hello);
     call.messages.push({ role: "user", content: "[Call connected.]" }, { role: "assistant", content: hello });
     speak(call, hello);
     return true;

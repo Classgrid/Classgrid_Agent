@@ -109,6 +109,7 @@ import aiCreditsTopupRoutes from "../src/routes/ai-credits-topup.routes.js";
 import aiLibraryRoutes from "../src/routes/ai-library.routes.js";
 import sharePageRoutes from "../src/routes/share-page.routes.js";
 import aiScheduleRoutes from "../src/routes/ai-schedule.routes.js";
+import callsRoutes from "../src/routes/calls.routes.js";
 import liveDocRoutes from "../src/routes/live-doc.routes.js";
 import voiceRoutes from "../src/routes/voice.routes.js";
 import auditRoutes from "../src/routes/audit.routes.js";
@@ -434,6 +435,7 @@ app.use("/api/ai/topup", aiCreditsTopupRoutes);
 app.use("/api/ai/library", aiLibraryRoutes);
 app.use("/api/pages", sharePageRoutes); // share pages the AI publishes (chat.classgrid.in/p/<id>)
 app.use("/api/ai/schedules", aiScheduleRoutes);
+app.use("/api/calls", callsRoutes); // the user's calls with Classgrid AI and what the AI did for each (read-only)
 app.use("/api/docs", liveDocRoutes); // live docs the AI writes (chat.classgrid.in/docs/<id>)
 app.use("/api/ai-integrations", aiIntegrationsRoutes);
 app.use("/api/custom-mcp", customMcpRoutes); // custom MCP servers (custom plugins) each user adds

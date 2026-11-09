@@ -22,7 +22,7 @@
 import { MasteroMark } from "@/components/icons/MasteroMark";
 import React from "react";
 import { createPortal } from "react-dom";
-import { Archive, Plus, Search, Pin, PinOff, MoreHorizontal, Pencil, Trash2, Share, Copy, Mail, Check, Link2, X, SquarePen, Calendar, Library, FolderInput, FolderPlus, Folder, Star, ChevronDown, ListFilter, Laptop, Cloud } from "lucide-react";
+import { Archive, Plus, Search, Pin, PinOff, MoreHorizontal, Pencil, Trash2, Share, Copy, Mail, Check, Link2, X, SquarePen, Calendar, Library, FolderInput, FolderPlus, Folder, Star, ChevronDown, ListFilter, Laptop, Cloud, Phone } from "lucide-react";
 import { format } from "date-fns";
 import { NikhilDateCalendar } from "@/components/marketing_ui/nikhil_date_calendar";
 import { useNavigate, useLocation } from "react-router-dom";
@@ -608,6 +608,9 @@ export function AgentNestedMenu({ searchQuery = "", pages }: { searchQuery?: str
   // in Studio's sidebar and open inside Studio, and Project mode (which opens Classgrid Code) has neither
   const showSchedule = DESKTOP_APP ? isStudioMode && !IN_EDITOR : !isProjectMode && !isStudioMode;
   const showLibrary = DESKTOP_APP ? isStudioMode && !IN_EDITOR : !isStudioMode;
+  // Calls (owner, 2026-11-09): the user's calls with Classgrid AI and what it did after each, read-only. Same place
+  // as Schedule: Studio's sidebar in the desktop app, Agent mode on the website
+  const showCalls = showSchedule;
   const toolsBase = DESKTOP_APP ? baseAgentPath : baseAgentPath.replace("/project", "/agent");
 
   const handleNewChat = () => {
@@ -1448,13 +1451,28 @@ export function AgentNestedMenu({ searchQuery = "", pages }: { searchQuery?: str
 
             {showLibrary && (
             <SidebarMenuItem>
-              <SidebarMenuButton 
+              <SidebarMenuButton
                 tooltip="Library"
                 onClick={() => navigate(`${toolsBase}/library`)}
                 render={
                   <div className="flex items-center gap-3 w-full cursor-pointer">
                     <Library size={20} />
                     <span className="truncate font-medium">Library</span>
+                  </div>
+                }
+              />
+            </SidebarMenuItem>
+            )}
+
+            {showCalls && (
+            <SidebarMenuItem>
+              <SidebarMenuButton
+                tooltip="Calls"
+                onClick={() => navigate(`${toolsBase}/calls`)}
+                render={
+                  <div className="flex items-center gap-3 w-full cursor-pointer">
+                    <Phone size={20} />
+                    <span className="truncate font-medium">Calls</span>
                   </div>
                 }
               />
@@ -1594,12 +1612,26 @@ export function AgentNestedMenu({ searchQuery = "", pages }: { searchQuery?: str
 
             {showLibrary && (
             <SidebarMenuItem>
-              <SidebarMenuButton 
+              <SidebarMenuButton
                 onClick={() => navigate(`${toolsBase}/library`)}
                 render={
                   <div className="flex items-center gap-3 w-full cursor-pointer">
                     <Library size={20} />
                     <span className="font-medium text-sm">Library</span>
+                  </div>
+                }
+              />
+            </SidebarMenuItem>
+            )}
+
+            {showCalls && (
+            <SidebarMenuItem>
+              <SidebarMenuButton
+                onClick={() => navigate(`${toolsBase}/calls`)}
+                render={
+                  <div className="flex items-center gap-3 w-full cursor-pointer">
+                    <Phone size={20} />
+                    <span className="font-medium text-sm">Calls</span>
                   </div>
                 }
               />

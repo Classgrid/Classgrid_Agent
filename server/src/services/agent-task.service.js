@@ -44,6 +44,7 @@ import { noteMessagesRead, messagesByIds, messagesSince, readUpTo } from "./what
 import {
     sendWhatsappText, markWhatsappRead, findCaller, numberInUse, runAgentTask, openProject, keepProjectOpen,
 } from "./whatsapp-call.service.js";
+import * as record from "./call-record.service.js";
 
 const MAX_WORK_MS = 48 * 60 * 60 * 1000;
 const ALARM_MS = 5 * 60 * 1000;
@@ -56,7 +57,12 @@ const CHAT_URL = "https://chat.classgrid.in";
 
 const india = (d) => new Date(d).toLocaleString("en-IN", { timeZone: "Asia/Kolkata", dateStyle: "medium", timeStyle: "short" });
 const short = (text) => (text.length > 3000 ? `${text.slice(0, 3000).trimEnd()}…` : text);
-const chatLink = (sessionId, label = "Full result") => (sessionId ? `\n\n${label}: ${CHAT_URL}/agent/${sessionId}` : "");
+// The link in a WhatsApp message about a task opens the task's record under Calls in the app (read-only, owner's
+// rule 2026-11-09), never a chat. A task with no record (started in a chat) still links to its chat.
+async function taskLink(task, label = "Full result") {
+    const url = (await record.linkForTask(task?._id)) || (task?.session_id ? `${CHAT_URL}/agent/${task.session_id}` : "");
+    return url ? `\n\n${label}: ${url}` : "";
+}
 // Not running anywhere (never started, or its server stopped)
 const notRunning = () => ({ $or: [{ heartbeat_at: null }, { heartbeat_at: { $lt: new Date(Date.now() - STALE_MS) } }] });
 
@@ -242,6 +248,7 @@ export async function endTaskFromTool({ sessionId, summary }) {
     );
     if (!task) return "No open task in this chat.";
     await endTaskLog(task._id, summary);
+    await record.syncStatus(task._id);
     return "Task ended. Its saved record (WhatsApp messages and steps) is deleted in 1 hour.";
 }
 
@@ -273,6 +280,7 @@ export async function setTaskSession(taskId, sessionId) {
     if (!taskId || !sessionId) return;
     await AgentTask.updateOne({ _id: taskId, session_id: null }, { $set: { session_id: sessionId } }).catch(() => {});
     await TaskLog.updateMany({ agent_task_id: taskId, session_id: null }, { $set: { session_id: sessionId } }).catch(() => {});
+    record.setSession(taskId, sessionId);
 }
 
 // A natural closing message written by the small model: one short summary line, then the details as a list.
@@ -346,15 +354,20 @@ async function endTask(task, answer = "") {
     console.log(`[agent task] ${task._id} ended after 48 hours`);
     // Its record is deleted 1 hour later
     await endTaskLog(task._id);
+    await record.syncStatus(task._id, { error: "Not finished in 48 hours." });
     if (!task.phone) return;
     // It was only waiting for the user's reply (no time set): closed, nothing failed
     if (task.status === "sleeping" && !task.wake_at && task.wake_on_reply) {
         const user = await User.findById(task.user_id).select("_id organization_id").catch(() => null);
         const recap = user ? await closingMessage(user, task, { closed: true }) : "";
-        await sendWhatsappText(task.phone, `${recap || "This task is now closed (48 hours have passed)."}\n\n🔒 *Task closed.* Message me anytime to start a new one.${chatLink(task.session_id, "Full chat")}`);
+        const text = `${recap || "This task is now closed (48 hours have passed)."}\n\n🔒 *Task closed.* Message me anytime to start a new one.${await taskLink(task, "Full record")}`;
+        record.noteSent(task._id, text);
+        await sendWhatsappText(task.phone, text);
         return;
     }
-    await sendWhatsappText(task.phone, `Sorry, Classgrid AI could not finish your task in 48 hours, so it has stopped.${answer ? `\n\nWhere it got to:\n${short(answer)}` : ""}${chatLink(task.session_id, "What it did so far")}`);
+    const text = `Sorry, Classgrid AI could not finish your task in 48 hours, so it has stopped.${answer ? `\n\nWhere it got to:\n${short(answer)}` : ""}${await taskLink(task, "What it did so far")}`;
+    record.noteSent(task._id, text);
+    await sendWhatsappText(task.phone, text);
 }
 
 async function pauseForTokens(task, user, resetDate) {
@@ -362,8 +375,11 @@ async function pauseForTokens(task, user, resetDate) {
     const resetAt = resetDate ? new Date(resetDate) : fresh?.ai_tokens?.week_reset_date ? new Date(fresh.ai_tokens.week_reset_date) : new Date(Date.now() + 60 * 60 * 1000);
     const notify = !task.pause_notified && task.phone;
     await AgentTask.updateOne({ _id: task._id }, { $set: { status: "waiting_tokens", wake_at: resetAt, heartbeat_at: null, pause_notified: true } });
+    await record.syncStatus(task._id);
     if (notify) {
-        await sendWhatsappText(task.phone, `⏸️ Your AI tokens ran out, so I paused your task. I'll continue by myself when your tokens come back (${india(resetAt)}), or sooner if you top up.`);
+        const text = `⏸️ Your AI tokens ran out, so I paused your task. I'll continue by myself when your tokens come back (${india(resetAt)}), or sooner if you top up.`;
+        record.noteSent(task._id, text);
+        await sendWhatsappText(task.phone, text);
     }
 }
 
@@ -388,11 +404,22 @@ function alreadySent(answer, sends, phone) {
     return !said.length || said.filter((w) => sent.has(w)).length / said.length >= 0.5;
 }
 
-export async function afterRun({ user, phone, sessionId, projectId, projectName, goal, origin, result, steps = 0, runStartedAt, taskId = null, latest = "", sends = [] }) {
+export async function afterRun(args) {
+    let id = args.taskId || null;
+    try {
+        id = (await afterRunDecide(args)) || id;
+    } finally {
+        // The call's record shows the same state as the task (working, waiting for you, done, failed...)
+        if (id) await record.syncStatus(id, { error: args.result?.answer ? "" : args.result?.error || "" });
+    }
+}
+
+// Returns the task's id (it may make the task), or null when the task was deleted
+async function afterRunDecide({ user, phone, sessionId, projectId, projectName, goal, origin, result, steps = 0, runStartedAt, taskId = null, latest = "", sends = [] }) {
     const started = runStartedAt || new Date();
     let task = taskId ? await AgentTask.findById(taskId) : null;
     // Its task was deleted from MongoDB: nothing is sent and nothing is made again
-    if (taskId && !task) { console.log(`[agent task] ${taskId} was deleted, nothing more is done`); return; }
+    if (taskId && !task) { console.log(`[agent task] ${taskId} was deleted, nothing more is done`); return null; }
     if (!task && sessionId) task = await AgentTask.findOne({ session_id: sessionId });
     if (task && sessionId && !task.session_id) await setTaskSession(task._id, sessionId);
     if (!task) {
@@ -405,7 +432,11 @@ export async function afterRun({ user, phone, sessionId, projectId, projectName,
     }
     if (sessionId && !task.session_id) task.session_id = sessionId;
     if (result.answer) task.last_answer = String(result.answer).slice(-4000);
-    const say = (text) => (task.origin === "whatsapp" && task.phone && text ? sendWhatsappText(task.phone, text) : null);
+    const say = (text) => {
+        if (!(task.origin === "whatsapp" && task.phone && text)) return null;
+        record.noteSent(task._id, text);
+        return sendWhatsappText(task.phone, text);
+    };
     task.heartbeat_at = null;
 
     // The Agent chose to sleep during this run
@@ -414,16 +445,19 @@ export async function afterRun({ user, phone, sessionId, projectId, projectName,
         // Its message or the question it wrote before sleeping goes to the user (not only the "waiting" line)
         const wrote = String(result.answer || "").replace(/💤 Waiting for[^\n]*$/, "").trim();
         if (task.sleep_message || wrote) await say(result.answer);
-        return wakeIfUnread(task._id);
+        await wakeIfUnread(task._id);
+        return task._id;
     }
     if (result.quota) {
         await task.save();
-        return pauseForTokens(task, user, result.quota.resetDate);
+        await pauseForTokens(task, user, result.quota.resetDate);
+        return task._id;
     }
     if (Date.now() - new Date(task.work_started_at).getTime() >= MAX_WORK_MS) {
         task.status = "working";
         await task.save();
-        return endTask(task, result.answer || "");
+        await endTask(task, result.answer || "");
+        return task._id;
     }
     task.no_progress = steps > 0 ? 0 : (task.no_progress || 0) + 1;
     const stuck = task.no_progress >= NO_PROGRESS_LIMIT;
@@ -436,8 +470,8 @@ export async function afterRun({ user, phone, sessionId, projectId, projectName,
             note: `Your last run failed (${String(result.error || "no answer").slice(0, 300)}). Continue the task.`,
         });
         await task.save();
-        if (stuck) await say(`Classgrid AI is stuck on your task (it failed ${NO_PROGRESS_LIMIT} times in a row). Reply here and it will try again.${chatLink(task.session_id, "What it did so far")}`);
-        return;
+        if (stuck) await say(`Classgrid AI is stuck on your task (it failed ${NO_PROGRESS_LIMIT} times in a row). Reply here and it will try again.${await taskLink(task, "What it did so far")}`);
+        return task._id;
     }
 
     // What the Agent already sent the user itself on WhatsApp is not sent a second time
@@ -450,20 +484,21 @@ export async function afterRun({ user, phone, sessionId, projectId, projectName,
         await TaskLog.updateMany({ agent_task_id: task._id, ended: true, ended_at: { $gte: started } }, { $set: { ended: false, ended_at: null } }).catch(() => {});
         if (!repeat) await say(short(result.answer));
         wakeTask(task._id, "reply").catch((e) => console.error("[agent task] wake failed:", e.message));
-        return;
+        return task._id;
     }
     // The big model ended the task itself (end_task) during this run: the user is told it is completed
     if (task.ended_by_ai_at && task.ended_by_ai_at >= started) {
         task.status = "done";
         await task.save();
         console.log(`[agent task] ${task._id} completed (ended by the Agent)`);
-        await say(`${repeat ? "" : `${short(result.answer)}\n\n`}✅ *Task completed.*${chatLink(task.session_id)}`);
-        return;
+        await say(`${repeat ? "" : `${short(result.answer)}\n\n`}✅ *Task completed.*${await taskLink(task)}`);
+        return task._id;
     }
     // Otherwise the task waits for the user's reply (the big model decides when the task is done)
     Object.assign(task, { status: "sleeping", wake_at: null, wake_on_reply: true });
     await task.save();
     if (!repeat) await say(short(result.answer));
+    return task._id;
 }
 
 // ─── Waking a task ────────────────────────────────────────────
@@ -568,13 +603,16 @@ export async function wakeTask(taskId, reason) {
         const runStartedAt = new Date();
         let steps = 0;
         const sends = []; // WhatsApp messages the Agent sent itself during this run
+        // Every tool, its timing, the thinking and the model of this run go into the task's record (Calls page)
+        const rec = record.runRecorder(task._id, { reason });
         const result = await runAgentTask(user, question, task.project_id, (sessionId) => {
             setTaskSession(task._id, sessionId);
         }, task.session_id, (stepText, info) => {
             if (!stepText.startsWith("sleep_until")) steps++;
             if (info?.name === "send_whatsapp_message") sends.push(info);
             logTaskStep(task._id, info);
-        }, { taskOrigin: task.origin });
+        }, { taskOrigin: task.origin }, null, rec.onData);
+        await rec.end(result);
         await afterRun({
             user, phone: task.phone, sessionId: result.sessionId || task.session_id, projectId: task.project_id,
             projectName: task.project_name, goal, origin: task.origin, result, steps, runStartedAt, taskId: task._id, sends,
@@ -583,6 +621,7 @@ export async function wakeTask(taskId, reason) {
     } catch (e) {
         console.error(`[agent task] ${task._id} failed:`, e.message);
         await AgentTask.updateOne({ _id: task._id }, { $set: { status: "sleeping", heartbeat_at: null, wake_at: new Date(Date.now() + RETRY_MS) } }).catch(() => {});
+        await record.syncStatus(task._id, { error: e.message });
     } finally {
         if (heartbeat) clearInterval(heartbeat);
         stopKeepOpen();
@@ -646,7 +685,10 @@ async function takeMessages(number, user, ids, replied = "") {
             ...(await projectForNewTask(user, items.map((m) => m.text).join(" "))),
         });
         console.log(`[agent task] ${number}: new task ${task._id} in project "${task.project_name || "-"}"`);
+        // Its record under Calls in the app (the link the user gets opens it)
+        await record.taskRecordStarted({ task, user, origin: "message", items });
     }
+    record.noteSent(task._id, reply);
     // 4. Saved in the task's record for the big model
     await saveTaskMessages(task, items);
     await logSmall(task, "user", reply);
@@ -723,7 +765,10 @@ async function onAgentEmail(email) {
             ...(await projectForNewTask(user, email.subject)),
         });
         console.log(`[agent task] email from ${address}: new task ${task._id} in project "${task.project_name || "-"}"`);
+        // Its record under Calls in the app
+        await record.taskRecordStarted({ task, user, origin: "email", items: [item] });
     }
+    record.noteSent(task._id, reply, { kind: "email", to: user.email });
     // 3. Saved in the task's record for the big model, then passed to it (a running one gets it after its run)
     await saveTaskMessages(task, [item]);
     await logSmall(task, "user", reply);

@@ -82,7 +82,7 @@ export function StudioModePage() {
   const { pathname } = useLocation();
   const pathParts = pathname.split("/");
   const pageId = pathParts[pathParts.indexOf("studio") + 1] || "";
-  const toolPage = import.meta.env.VITE_DESKTOP === "1" && (pageId === "schedule" || pageId === "library");
+  const toolPage = import.meta.env.VITE_DESKTOP === "1" && (pageId === "schedule" || pageId === "library" || pageId === "calls");
   const paneOpen = pane.open && !toolPage;
   const [maximized, setMaximized] = useState(false);
   // (the chat's "project / chat" bar hides while the pane fills the window: the chat isn't shown then)

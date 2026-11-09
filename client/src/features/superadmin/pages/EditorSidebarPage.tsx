@@ -100,7 +100,7 @@ export function EditorSidebarPage() {
   }, [sessionId, section, navigate]);
   useEffect(() => editorDesktop()?.onActiveChat?.((id) => {
     const want = id || null;
-    if (want === "schedule" || want === "library" || want === shown.current) return;
+    if (want === "schedule" || want === "library" || want === "calls" || want === shown.current) return;
     shown.current = want;
     navigate(want ? `${BASE}/${want}` : BASE, { replace: true });
   }), [navigate]);
