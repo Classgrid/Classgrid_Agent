@@ -86,6 +86,26 @@ function withQuietProgress(tool, payload) {
     if (["bash", "sh", "git-bash", "cmd"].includes(String(a.shell || "powershell").toLowerCase())) return payload;
     return { ...payload, args: { ...a, command: `$ProgressPreference='SilentlyContinue'; ${a.command}` } };
 }
+// A runner connection whose line silently died (the user's internet dropped, the PC slept) stays in the room until the
+// socket's ping timeout, which is 24 hours here (socket.service.js), and it is asked first, being the oldest: every
+// step on the computer then waited the whole tool timeout on it (browser 2 min, a command 11 min) before the live app
+// was asked, so a chat "never came back" (2026-11-09: three dead connections ahead of the app, 4 minutes per browser
+// step, 33 minutes per command). Before a step, every connection is asked at once for a quick answer, and the ones
+// that don't answer are dropped and disconnected, so only live ones are asked.
+const PROBE_MS = 4000;
+async function liveSockets(here) {
+    const checked = await Promise.all(here.map(async (s) => {
+        try {
+            await s.timeout(PROBE_MS).emitWithAck("local-tool", { tool: "ping", args: {} }); // any answer counts, even "can't run"
+            return s;
+        } catch {
+            try { s.disconnect(true); } catch { /* already gone */ }
+            return null;
+        }
+    }));
+    return checked.filter(Boolean);
+}
+
 async function askRunnerOnce(userId, tool, payload) {
     const io = getIO();
     const room = runnerRoom(String(userId));
@@ -93,7 +113,9 @@ async function askRunnerOnce(userId, tool, payload) {
         // The app's socket on this server process: ask it directly (no Redis round trip)
         // (oldest connection first, as before 2026-11-04: newest first sent Studio's browser steps to Classgrid Code's
         // connection whenever it was opened after the app; owner asked to undo only that change, 2026-11-05)
-        const here = await io.local.in(room).fetchSockets();
+        const all = await io.local.in(room).fetchSockets();
+        const here = all.length ? await liveSockets(all) : all;
+        if (all.length && !here.length) return null; // every connection here is dead: the app isn't really open
         if (here.length) {
             // (only the editor state goes to all of them, being read-only: the first answer is used)
             if (tool === "editor_context" && here.length > 1) {
@@ -113,6 +135,7 @@ async function askRunnerOnce(userId, tool, payload) {
                 } catch (err) {
                     lastError = err;
                     reply = null;
+                    try { s.disconnect(true); } catch { /* already gone */ } // it answered the probe but not the step: not asked again
                     continue;
                 }
                 if (!(typeof reply?.text === "string" && /can't run on this computer|wasn't opened in the Classgrid app/.test(reply.text))) break;
