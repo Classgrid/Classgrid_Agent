@@ -3,9 +3,8 @@
 // thinking, the models it used, the WhatsApp messages and emails it sent or read, and the project it made.
 // There is no chat box here: the user can only read. The link sent on WhatsApp after a call opens this page.
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { useLocation, useNavigate } from "react-router-dom";
 import {
-  ArrowLeft, Phone, Clock, Copy, Check, Search, AlertTriangle, ChevronDown, ChevronRight, MessageSquare, Mail, FolderPlus, Folder,
+  Phone, Clock, Copy, Check, Search, AlertTriangle, ChevronDown, ChevronRight, MessageSquare, Mail, FolderPlus, Folder,
   Brain, Wrench, Moon, Flag, Globe, Terminal, FileText, Sparkles, Users, BookOpen, CircleDot, Hourglass,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -16,7 +15,6 @@ import {
   helpersAndSkills, modelLabel, prettyJson, sideEffectOf, stepLabel, toneClass, toolsUsed,
   type CallRecord, type SentItem, type SideEffect, type TranscriptLine, type WorkRun, type WorkStep,
 } from "./callsShared";
-import { callsBasePath } from "./CallsPage";
 
 type Tab = "transcript" | "work" | "details";
 const TAB_KEY = "calls:tab";
@@ -26,11 +24,8 @@ const Eyebrow = ({ children, className = "" }: { children: React.ReactNode; clas
   <p className={cn("font-mono text-[11px] uppercase tracking-[0.15em] text-muted-foreground", className)}>{children}</p>
 );
 
+// (no "back to Calls" link here: the sidebar's Calls button is the way back, owner 2026-11-09)
 export const CallDetailPage: React.FC<{ id?: string }> = ({ id }) => {
-  const navigate = useNavigate();
-  const location = useLocation();
-  const backPath = `${callsBasePath(location.pathname)}/calls`;
-
   const [call, setCall] = useState<CallRecord | null>(null);
   const [loading, setLoading] = useState(true);
   const [missing, setMissing] = useState(false);
@@ -73,7 +68,6 @@ export const CallDetailPage: React.FC<{ id?: string }> = ({ id }) => {
   if (missing || !call) {
     return (
       <div className="mx-auto w-full max-w-4xl p-6 md:p-8">
-        <BackLink onClick={() => navigate(backPath)} />
         <div className="mt-10 rounded-2xl border border-border/60 p-10 text-center">
           <p className="text-[15px] font-medium">This call was not found.</p>
           <p className="mt-1 text-sm text-muted-foreground">It may belong to another account, or the link is not complete.</p>
@@ -92,10 +86,8 @@ export const CallDetailPage: React.FC<{ id?: string }> = ({ id }) => {
 
   return (
     <div className="mx-auto w-full max-w-4xl p-4 pb-20 sm:p-6 lg:p-8">
-      <BackLink onClick={() => navigate(backPath)} />
-
       {/* ── Head ── */}
-      <header className="mt-4 pb-6 border-b border-border/60">
+      <header className="pb-6 border-b border-border/60">
         <div className="flex items-start justify-between gap-4">
           <div className="min-w-0">
             <div className="flex items-center gap-2 text-[12px] text-muted-foreground">
@@ -552,14 +544,6 @@ function SentRow({ item }: { item: SentItem }) {
 
 // ─── Small parts ──────────────────────────────────────────────
 
-function BackLink({ onClick }: { onClick: () => void }) {
-  return (
-    <button onClick={onClick} className="inline-flex items-center gap-1.5 text-[13px] text-muted-foreground hover:text-foreground transition-colors cursor-pointer">
-      <ArrowLeft className="w-4 h-4" /> Calls
-    </button>
-  );
-}
-
 function Fact({ icon: Icon, label, value, warn = false }: { icon: React.ComponentType<{ className?: string }>; label: string; value: string; warn?: boolean }) {
   return (
     <div className={cn("inline-flex items-center gap-2 rounded-lg border border-border/60 px-2.5 py-1.5 text-[12px]", warn && "border-red-200 dark:border-red-500/30")}>
@@ -613,8 +597,7 @@ function endedByLabel(why: string) {
 function DetailSkeleton() {
   return (
     <div className="mx-auto w-full max-w-4xl animate-pulse p-4 sm:p-6 lg:p-8">
-      <div className="h-4 w-16 rounded bg-muted" />
-      <div className="mt-6 h-3 w-48 rounded bg-muted" />
+      <div className="h-3 w-48 rounded bg-muted" />
       <div className="mt-3 h-7 w-2/3 rounded bg-muted" />
       <div className="mt-3 h-4 w-1/2 rounded bg-muted" />
       <div className="mt-6 flex gap-2">{[1, 2, 3].map((i) => <div key={i} className="h-8 w-28 rounded-lg bg-muted" />)}</div>
