@@ -144,7 +144,7 @@ export const CallDetailPage: React.FC<{ id?: string }> = ({ id }) => {
               {call.duration_ms > 0 && (<><span aria-hidden>·</span><span>{fmtDuration(call.duration_ms)}</span></>)}
             </motion.div>
             <motion.h1 variants={m.row} className="mt-2 text-[26px] sm:text-[30px] font-semibold tracking-[-0.01em] leading-tight break-words">{call.name || "Call"}</motion.h1>
-            {call.summary && <motion.p variants={m.row} className="mt-2.5 text-[15.5px] text-muted-foreground leading-relaxed line-clamp-3">{call.summary}</p>}
+            {call.summary && <motion.p variants={m.row} className="mt-2.5 text-[15.5px] text-muted-foreground leading-relaxed line-clamp-3">{call.summary}</motion.p>}
           </div>
           <motion.div variants={m.row} className="flex flex-col items-end gap-2 shrink-0">
             <StatusBadge status={call.status} />
