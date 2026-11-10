@@ -373,7 +373,11 @@ export function promptBlocksForGroups(text, groupIds, ctx) {
 }
 
 // Sticky groups: a group stays loaded for STICKY_TURNS user messages after it was last matched or used.
-export const STICKY_TURNS = 3;
+// It used to be 3: the loaded tool list then changed from message to message with the words in each message, and
+// the tool list is the first thing in the model's prompt, so every change threw away the whole prompt cache (7 of 11
+// Claude answers on 2026-11-10 read 0 from cache and wrote 65-80k tokens afresh: slow and paid in full). A group now
+// stays loaded for the rest of the chat, so the tool list only grows, and only when a new kind of work starts.
+export const STICKY_TURNS = 1000;
 export const stickyKey = (sessionId) => `ai:groups:${sessionId}`;
 
 /** Ages the stored {groupId: turnsSinceUse} map by one turn and returns the ids still sticky. */
