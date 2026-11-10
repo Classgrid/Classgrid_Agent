@@ -4929,13 +4929,8 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
           // the request carries each picture once: 6 pictures of 5 MB stay under the server's 50 MB limit
           fileUrls: uploadedAttachments.length > 0 ? uploadedAttachments.filter(a => !a.url.startsWith("data:")).map(a => a.url) : [],
           attachments: uploadedAttachments.length > 0 ? uploadedAttachments.map(a => ({ url: a.url, name: a.name, mimeType: a.mimeType })) : undefined,
-          history: messages
-            .filter((m) => m.role === "user" || m.role === "assistant")
-            .slice(-500)
-            .map((m) => ({
-              role: m.role,
-              content: m.content && m.content.length > 2000 ? m.content.substring(0, 2000) + "\n...[TRUNCATED]" : (m.content || "")
-            })),
+          // (the chat history is NOT sent: the server owns it and ignores body.history; sending up to 500 messages of
+          // 2,000 characters each put up to a megabyte in front of every message, seconds on a weak connection, 2026-11-10)
           pageContext: {
             ...pageContext,
             pageHistory: pageHistory,
