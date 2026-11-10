@@ -171,7 +171,7 @@ const orgStatusKept = new Map(); // orgId -> { at, promise of the status }
 export function forgetAuthUser(userId) { usersKept.delete(String(userId)); }
 async function keptSettings() {
     if (settingsKept && Date.now() - settingsKept.at < SETTINGS_KEEP_MS) return settingsKept.promise;
-    const promise = SystemSettings.findOne().lean().catch(() => null);
+    const promise = SystemSettings.findOne().lean().exec().catch(() => null);
     settingsKept = { at: Date.now(), promise };
     return promise;
 }
@@ -179,7 +179,8 @@ async function keptUser(userId) {
     const key = String(userId);
     const have = usersKept.get(key);
     if (have && Date.now() - have.at < USER_KEEP_MS) return have.promise;
-    const promise = User.findById(userId).select("-password -verificationToken").maxTimeMS(5000).lean();
+    // .exec() so a real Promise is kept: a mongoose Query can only be awaited once ("Query was already executed").
+    const promise = User.findById(userId).select("-password -verificationToken").maxTimeMS(5000).lean().exec();
     usersKept.set(key, { at: Date.now(), promise });
     promise.then((u) => { if (!u) usersKept.delete(key); }, () => usersKept.delete(key));
     if (usersKept.size > 20000) usersKept.clear();
@@ -189,7 +190,7 @@ export async function keptOrgStatus(orgId) {
     const key = String(orgId);
     const have = orgStatusKept.get(key);
     if (have && Date.now() - have.at < ORG_KEEP_MS) return have.promise;
-    const promise = Organization.findById(orgId).select("status").lean().then((o) => o?.status ?? null).catch(() => null);
+    const promise = Organization.findById(orgId).select("status").lean().exec().then((o) => o?.status ?? null).catch(() => null);
     orgStatusKept.set(key, { at: Date.now(), promise });
     if (orgStatusKept.size > 20000) orgStatusKept.clear();
     return promise;
