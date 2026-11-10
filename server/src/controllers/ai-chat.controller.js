@@ -2632,6 +2632,7 @@ CRITICAL: If you call ANY integration tool (e.g. Google Classroom, Gmail, Google
                     const packProject = String(body.memoryPackProject || "");
                     const packMatches = memoryProject ? packProject === `id:${String(whereProject?._id || "").slice(-6)}` : packProject === "";
                     const packFromMessage = typeof body.memoryPack === "string" && body.memoryPack.trim().startsWith("{") && packMatches;
+                    if (!packFromMessage) console.log(`[AI-TIMING] memory pack not in the message (sent for "${packProject}", chat's project "${memoryProject}"): asking the computer`);
                     const fromApp = packFromMessage
                         ? body.memoryPack
                         : await Promise.race([
@@ -2821,9 +2822,16 @@ CRITICAL: If you call ANY integration tool (e.g. Google Classroom, Gmail, Google
                         const cachedGoogle = await redis.get(googleVerifiedKey).catch(() => null);
                         if (cachedGoogle === "1") {
                             googleConnected = true;
+                        } else if (cachedGoogle === "0") {
+                            googleConnected = false;
                         } else {
-                            googleConnected = await verifyWithPing('Google', 'https://oauth2.googleapis.com/tokeninfo', latestUser.google_access_token, refreshGoogle);
-                            if (googleConnected) redis.set(googleVerifiedKey, "1", "EX", 300).catch(() => {});
+                            // Not checked in the last 5 minutes: the token in the database counts as connected for this
+                            // answer, and the ping runs in the background for the next one (it held every answer up to
+                            // 5 seconds in front of the model; answers must start at once, owner 2026-11-09)
+                            googleConnected = true;
+                            verifyWithPing('Google', 'https://oauth2.googleapis.com/tokeninfo', latestUser.google_access_token, refreshGoogle)
+                                .then((ok) => redis.set(googleVerifiedKey, ok ? "1" : "0", "EX", ok ? 300 : 60))
+                                .catch(() => {});
                         }
                     }
 
