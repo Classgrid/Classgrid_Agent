@@ -90,6 +90,12 @@ function getClient() {
 // again (14 of 116 Claude requests in one day, 1.15M tokens written, 2026-11-10). The automatic marker on the newest
 // message stays at 5 minutes (the API wants the one-hour entries in front of the 5-minute one).
 const CACHE_1H = { type: "ephemeral", ttl: "1h" };
+// A stream that goes quiet: the SDK's timeout covers only the wait for the headers, so a stream that stalls after
+// message_start would hang for ever (an Opus answer sat 6+ minutes after its first thought with nothing arriving,
+// 2026-11-10). The API sends ping events while the model thinks, so a quiet stream is a dead one: it is closed and
+// the round is tried again on the same model, twice, before the error goes up (and the answer moves to a fallback).
+const STREAM_IDLE_MS = 150000;
+const IDLE_RETRIES = 2;
 function toSystemBlocks(systemText, cacheBoundary) {
     if (!systemText) return undefined;
     const boundary = Number.isInteger(cacheBoundary) && cacheBoundary > 0 && cacheBoundary < systemText.length
@@ -673,6 +679,7 @@ export async function streamClaudeChat({
     };
     let lastRoundText = "";
     let refusedRounds = 0; // rounds in a row in which every tool call was refused (see MAX_REFUSED_ROUNDS)
+    let idleRetries = 0; // rounds closed because nothing arrived for STREAM_IDLE_MS, and tried again
     const budgetStop = (why) => {
         console.log(`[AI-STREAM] Claude stopped: the user's tokens ran out (${why}, toolsRun=${toolsRun})`);
         return { answer: budgetStopAnswer(continuedText + lastRoundText), usage, toolsRun, servedModel, stoppedForBudget: true };
@@ -709,7 +716,16 @@ export async function streamClaudeChat({
             // The first event carries this round's real input count: if that alone uses up the user's tokens,
             // the round is cut right there, before anything is written
             let budgetCut = false;
+            let idleStop = false;
+            let idleTimer = null;
+            const armIdle = () => {
+                clearTimeout(idleTimer);
+                idleTimer = setTimeout(() => { idleStop = true; stream.abort(); }, STREAM_IDLE_MS);
+                idleTimer.unref?.();
+            };
+            armIdle();
             for await (const event of stream) {
+                armIdle();
                 if (event.type === "message_start") {
                     roundUsage = { ...(event.message?.usage || {}) };
                     console.log(`[AI-TIMING] claude message_start after ${Date.now() - sentAt}ms (round ${depth}, cacheRead=${roundUsage.cache_read_input_tokens ?? 0}, cacheWrite=${roundUsage.cache_creation_input_tokens ?? 0}, input=${roundUsage.input_tokens ?? 0})`);
@@ -730,6 +746,22 @@ export async function streamClaudeChat({
                 } else if (event.delta.type === "text_delta" && event.delta.text) {
                     splitter.push(event.delta.text);
                 }
+            }
+            clearTimeout(idleTimer);
+            if (idleStop) {
+                // Nothing came for STREAM_IDLE_MS: the same round again (what this round showed is kept and continued)
+                if (idleRetries < IDLE_RETRIES && !signal?.aborted) {
+                    idleRetries++;
+                    console.warn(`[AI-STREAM] Claude: nothing arrived for ${STREAM_IDLE_MS / 1000}s (round ${depth}); closed the stream, trying the round again (${idleRetries}/${IDLE_RETRIES})`);
+                    splitter.flush();
+                    if (roundText.trim()) {
+                        continuedText += roundText;
+                        conversation.push({ role: "assistant", content: [{ type: "text", text: roundText }] });
+                        conversation.push({ role: "user", content: CONTINUE_PROMPT });
+                    }
+                    continue;
+                }
+                throw new StreamChatError(`Anthropic stream stalled: nothing arrived for ${STREAM_IDLE_MS / 1000} seconds`);
             }
             splitter.flush();
             if (budgetCut) {
