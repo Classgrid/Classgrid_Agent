@@ -469,7 +469,17 @@ async function act(a, byAgent) {
       const url = norm(String(a.url || "").trim());
       if (byAgent) point("open", { url });
       let failed = null;
-      await Promise.race([wc.loadURL(url).catch((e) => { if (e.code !== "ERR_ABORTED") failed = e; }), wait(45000)]);
+      // The step ends when the page is readable, not when every last script and image has finished: a page like
+      // Wikipedia keeps loading in the background for 30-45 s after it is on screen, and the AI (and the user) sat
+      // waiting all that time (owner, 2026-11-10). Readable = the document is ready and nothing new has started
+      // loading for 2 seconds (or the full load finished first); 45 s is the ceiling either way.
+      const fullLoad = wc.loadURL(url).catch((e) => { if (e.code !== "ERR_ABORTED") failed = e; });
+      const readable = new Promise((resolve) => {
+        const onReady = () => { wc.off("dom-ready", onReady); settle(2000).then(() => wait(500)).then(resolve); };
+        wc.on("dom-ready", onReady);
+        fullLoad.finally(() => { wc.off("dom-ready", onReady); resolve(); });
+      });
+      await Promise.race([fullLoad, readable, wait(45000)]);
       if (failed) {
         const why = String(failed.code || failed.message || "the page didn't load");
         throw new Error(`${why} while opening ${url}${isLocal(url) && /REFUSED/.test(why) ? ". Nothing is running at that address on the user's computer: start the server first" : ""}`);
