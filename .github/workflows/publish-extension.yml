@@ -1,0 +1,90 @@
+name: Publish the Classgrid extension (VS Code Marketplace + Open VSX)
+
+# The Claude Code way (plan/extension-release.md): the Classgrid extension in the stores, for VS Code, Cursor, Windsurf
+# and VSCodium. Release: bump "version" in classgrid-editor/extension/package.json, then
+#   git tag ext-v0.1.0; git push origin ext-v0.1.0
+# Secrets (repo Settings > Secrets > Actions): VSCE_PAT (Azure DevOps token, Marketplace > Manage) and OVSX_PAT (Open
+# VSX token). A store whose secret is missing is skipped, not failed. Run by hand: builds the .vsix and only publishes
+# when "publish" is ticked.
+on:
+  push:
+    tags:
+      - 'ext-v*'
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: 'Publish to the stores (otherwise only build the .vsix)'
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      # Only the folders this needs (actions/checkout stops on this repo's old .github_org entry)
+      - name: Get the extension, our screens (client) and the desktop app's parts
+        env:
+          TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          git clone --filter=blob:none --sparse --no-recurse-submodules "https://x-access-token:${TOKEN}@github.com/${{ github.repository }}.git" repo
+          git -C repo checkout "${{ github.sha }}"
+          git -C repo sparse-checkout set classgrid-editor client desktop
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Check the version
+        id: version
+        working-directory: repo
+        run: |
+          VERSION=$(node -p "require('./classgrid-editor/extension/package.json').version")
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          if [ "${{ github.ref_type }}" = "tag" ]; then
+            TAG="${{ github.ref_name }}"
+            [ "$TAG" = "ext-v$VERSION" ] || { echo "Tag $TAG doesn't match package.json version $VERSION (expected ext-v$VERSION)" >&2; exit 1; }
+          fi
+
+      - name: Install our screens' packages
+        working-directory: repo/client
+        run: npm ci --no-audit --no-fund
+
+      - name: Pack the .vsix (screens, extension, runner)
+        working-directory: repo
+        run: |
+          node classgrid-editor/pack-vsix.mjs --out "$GITHUB_WORKSPACE/classgrid-${{ steps.version.outputs.version }}.vsix"
+          test -f "$GITHUB_WORKSPACE/classgrid-${{ steps.version.outputs.version }}.vsix"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: classgrid-${{ steps.version.outputs.version }}.vsix
+          path: classgrid-${{ steps.version.outputs.version }}.vsix
+
+      - name: Publish to the VS Code Marketplace
+        if: github.ref_type == 'tag' || inputs.publish
+        env:
+          VSCE_PAT: ${{ secrets.VSCE_PAT }}
+        run: |
+          if [ -z "$VSCE_PAT" ]; then echo "::warning::VSCE_PAT isn't set: skipped the VS Code Marketplace"; exit 0; fi
+          npx --yes @vscode/vsce@latest publish --packagePath "classgrid-${{ steps.version.outputs.version }}.vsix" -p "$VSCE_PAT"
+
+      - name: Publish to Open VSX (Cursor, Windsurf, VSCodium)
+        if: github.ref_type == 'tag' || inputs.publish
+        env:
+          OVSX_PAT: ${{ secrets.OVSX_PAT }}
+        run: |
+          if [ -z "$OVSX_PAT" ]; then echo "::warning::OVSX_PAT isn't set: skipped Open VSX"; exit 0; fi
+          npx --yes ovsx@latest publish "classgrid-${{ steps.version.outputs.version }}.vsix" -p "$OVSX_PAT"
+
+      - name: Attach the .vsix to a GitHub release
+        if: github.ref_type == 'tag'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create "${{ github.ref_name }}" "classgrid-${{ steps.version.outputs.version }}.vsix" \
+            --repo "${{ github.repository }}" --title "Classgrid extension ${{ steps.version.outputs.version }}" \
+            --notes "Classgrid for VS Code, Cursor, Windsurf and VSCodium. Install from the VS Code Marketplace or Open VSX, or download the .vsix below."

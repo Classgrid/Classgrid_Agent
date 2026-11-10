@@ -129,7 +129,9 @@
     "electron-shim.js",
     "media/**",
     "package.json",
-    "LICENSE.txt"
+    "LICENSE.txt",
+    "README.md",
+    "CHANGELOG.md"
   ],
   "scripts": {
     "package": "vsce package --no-dependencies --out classgrid-0.1.0.vsix",

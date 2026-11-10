@@ -12,6 +12,7 @@ const browser = require("./browser");
 const chats = require("./chats");
 const uploads = require("./uploads");
 const memory = require("./memory");
+const editors = require("./editors"); // the Classgrid extension in VS Code, Cursor, Windsurf, VSCodium
 
 const PORT = Number(process.env.CG_PORT) || 47821; // CG_PORT: a second copy while testing
 const APP_URL = `http://localhost:${PORT}`;
@@ -250,6 +251,9 @@ ipcMain.on("cg:version", (e) => { e.returnValue = app.getVersion(); });
 // Notification settings: one file on this computer, shared with Classgrid Code (%APPDATA%\Classgrid)
 const NOTIFY_FILE = path.join(process.env.APPDATA || app.getPath("appData"), "Classgrid", "notification-settings.json");
 ipcMain.handle("cg:getNotificationSettings", () => { try { return JSON.parse(fs.readFileSync(NOTIFY_FILE, "utf8")); } catch { return null; } });
+// Settings → General: the Classgrid extension in the other code editors on this computer (editors.js)
+ipcMain.handle("cg:editorExtension", () => editors.status());
+ipcMain.handle("cg:setEditorExtension", (_e, on) => editors.setChoice(!!on));
 ipcMain.handle("cg:saveNotificationSettings", (_e, s) => { try { fs.mkdirSync(path.dirname(NOTIFY_FILE), { recursive: true }); fs.writeFileSync(NOTIFY_FILE, JSON.stringify(s && typeof s === "object" ? s : {})); return true; } catch { return false; } });
 // A Windows notification from our screens (a Grids message while the window is in the background). The window comes
 // forward when the notification is clicked.
@@ -521,9 +525,27 @@ if (!app.requestSingleInstanceLock()) {
     // Classgrid Code: unpacked, run once with no window so Windows' first-run check happens now, and put in Windows'
     // "Open with" and right-click menus (codeeditor.js), all in the background
     if (app.isPackaged) setTimeout(() => codeEditor.register().then(() => codeEditor.warmUp()).catch(() => {}), 5000);
+    // The Classgrid extension in VS Code / Cursor / Windsurf / VSCodium: asked once, then kept up to date (editors.js)
+    editors.init(app.getPath("appData"));
+    if (app.isPackaged) setTimeout(() => editors.check({ ask: askAddToEditors }), 30000);
   });
   app.on("window-all-closed", () => app.quit());
   app.on("before-quit", () => { runner.stopAll(); require("./recorder").stop(); require("./computer").stop(); terminal.stop(); });
+}
+
+// One question, once: add the Classgrid extension to the code editors found on this computer
+async function askAddToEditors(names) {
+  if (!win || win.isDestroyed()) return false;
+  const { response } = await dialog.showMessageBox(win, {
+    type: "question",
+    title: "Classgrid",
+    message: `Add Classgrid to ${names}?`,
+    detail: "The Classgrid Agent will be in the side panel of your other code editor, signed in with your Classgrid account. You can change this later in Settings → General.",
+    buttons: ["Add Classgrid", "No thanks"],
+    defaultId: 0,
+    cancelId: 1,
+  });
+  return response === 0;
 }
 
 // Updates: the installed app checks our R2 storage (desktop/latest.yml) on start and every 6 hours, downloads a new

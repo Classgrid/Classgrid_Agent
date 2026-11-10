@@ -79,6 +79,7 @@ import { SettingsVerifiedDomainCard } from "../components/settings/SettingsVerif
 import { SettingsDesktopNotificationsCard } from "../components/settings/SettingsDesktopNotificationsCard";
 import { isChatHost } from "@/lib/chatHost";
 import { SettingsBrowserSection } from "../components/settings/SettingsBrowserSection";
+import { SettingsEditorExtensionCard } from "../components/settings/SettingsEditorExtensionCard";
 import { settingsSections, useSettingsSection } from "../settings/settingsSections";
 
 export function SharedSettingsPage() {
@@ -182,6 +183,7 @@ export function SharedSettingsPage() {
       {section === "general" && (
         <>
           <SettingsAppearanceCard />
+          <SettingsEditorExtensionCard />
           {role === "org_admin" && (
             <>
               <OrgBrandingCard />

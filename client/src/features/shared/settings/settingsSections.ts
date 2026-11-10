@@ -16,7 +16,7 @@ export function settingsSections({ role }: Who): SettingsSection[] {
   // The push notifications card (SharedSettingsPage): only for roles that have it on the main site
   const push = !!role && role !== "org_admin" && role !== "super_admin" && role !== "user" && !chat;
   return [
-    { id: "general" as const, label: "General", icon: Settings2, words: "appearance theme dark mode light role sidebar" },
+    { id: "general" as const, label: "General", icon: Settings2, words: "appearance theme dark mode light role sidebar code editors vs code cursor windsurf extension" },
     ...(DESKTOP || push ? [{ id: "notifications" as const, label: "Notifications", icon: Bell, words: "notifications sound volume agent grids alerts push" }] : []),
     { id: "privacy" as const, label: "Privacy", icon: Lock, words: "privacy data domain verified identity" },
     { id: "account" as const, label: "Account", icon: UserRound, words: "account password delete role request security" },

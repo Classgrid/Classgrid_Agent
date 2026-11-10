@@ -22,7 +22,8 @@ if (!fs.existsSync(path.join(appEditor, "index.html"))) throw new Error("desktop
 
 fs.rmSync(out, { recursive: true, force: true });
 fs.mkdirSync(path.join(out, "desktop"), { recursive: true });
-for (const f of ["extension.js", "bridge.js", "editor-context.js", "electron-shim.js", "LICENSE.txt", "package.json"]) fs.copyFileSync(path.join(ext, f), path.join(out, f));
+// (README.md and CHANGELOG.md are the store page and its "Changelog" tab)
+for (const f of ["extension.js", "bridge.js", "editor-context.js", "electron-shim.js", "LICENSE.txt", "package.json", "README.md", "CHANGELOG.md"]) fs.copyFileSync(path.join(ext, f), path.join(out, f));
 fs.cpSync(path.join(ext, "media"), path.join(out, "media"), { recursive: true });
 fs.cpSync(appEditor, path.join(out, "app"), { recursive: true });
 for (const f of ["runner.js", "doctext.js", "pdfpages.js", "picture.js", "aimemory.js", "computer.js", "chats.js", "memory.js", "notify-toast.ps1"]) {
@@ -39,6 +40,8 @@ pkg.files = [...new Set([...(pkg.files || []), "app/**", "desktop/**"])];
 delete pkg.scripts;
 fs.writeFileSync(path.join(out, "package.json"), JSON.stringify(pkg, null, 2));
 
-const vsix = path.join(ext, `classgrid-${pkg.version}.vsix`);
+// --out <file>: where the .vsix goes (the publish workflow); default: next to the extension
+const outArg = process.argv.indexOf("--out");
+const vsix = outArg > 0 ? path.resolve(process.argv[outArg + 1]) : path.join(ext, `classgrid-${pkg.version}.vsix`);
 run(`npx --yes @vscode/vsce@latest package --no-dependencies --out "${vsix}"`, out);
 console.log(`\nPacked: ${vsix} (${(fs.statSync(vsix).size / 1024 / 1024).toFixed(1)} MB)`);
