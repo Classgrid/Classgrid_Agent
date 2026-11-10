@@ -136,6 +136,15 @@ export const CONTINUE_PROMPT ="Your previous reply was cut off by the length lim
 // result carries a note to get everything in one go; at REPEAT_BLOCK_AT that shape runs no more in this answer.
 export const REPEAT_NOTE_AT = 10;
 export const REPEAT_BLOCK_AT = 40;
+// Tools that read a file by line numbers page through it on purpose (start_line / end_line): they are never blocked,
+// only told to read more at once (a 1,707-line file read 40 lines at a time was blocked at the 40th page, and the model
+// then asked for the same page 100 more times, 2026-11-10)
+const PAGING_TOOLS = new Set(["view_project_file", "read_local_file"]);
+// A tool result that was refused (not run): the same call again and again, or one the model already made
+export const REFUSED_RESULT = /^(Error: you have made this same kind of call|ERROR: You have ALREADY called)/;
+// After this many rounds in a row in which every call was refused, the model is asked to answer with no tools, instead
+// of looping until the user stops it (DeepSeek Flash: 100 refused calls, 10 minutes, 2026-11-10)
+export const MAX_REFUSED_ROUNDS = 3;
 export function makeRepeatGuard() {
     const counts = new Map();
     return {
@@ -144,13 +153,14 @@ export function makeRepeatGuard() {
             const shape = `${toolName}:${JSON.stringify(input ?? {}).replace(/\d+/g, "#").slice(0, 2000)}`;
             const n = (counts.get(shape) || 0) + 1;
             counts.set(shape, n);
-            if (n >= REPEAT_BLOCK_AT) return `Error: you have made this same kind of call (${toolName}, only the numbers differ) ${n} times in this answer. It is not run any more in this answer. Tell the user what you have so far and what stopped you.`;
+            if (n >= REPEAT_BLOCK_AT && !PAGING_TOOLS.has(toolName)) return `Error: you have made this same kind of call (${toolName}, only the numbers differ) ${n} times in this answer. It is not run any more in this answer. Tell the user what you have so far and what stopped you.`;
             return null;
         },
         // Call after running: the note to append to the result, or ""
         after(toolName, input) {
             const shape = `${toolName}:${JSON.stringify(input ?? {}).replace(/\d+/g, "#").slice(0, 2000)}`;
             const n = counts.get(shape) || 0;
+            if (PAGING_TOOLS.has(toolName) && n >= REPEAT_NOTE_AT && n % REPEAT_NOTE_AT === 0) return `\n\n[Note: this is the ${n}th page of this file you read in this answer. Read the rest in one call: leave end_line out (up to 2,000 lines come back) or give a wide start_line-end_line range.]`;
             return n === REPEAT_NOTE_AT ? `\n\n[Note: this is the ${n}th time you run this same kind of call with other numbers. Get everything you need in one call (return the whole table or list at once; results up to 40,000 characters come through) instead of small slices. After ${REPEAT_BLOCK_AT} such calls it stops running.]` : "";
         },
     };
@@ -353,6 +363,7 @@ export async function streamChat({
     let continuedText = ""; // earlier parts of an answer that was cut off and continued
     let continuations = 0;
     let lastIntro = ""; // start of the previous tool round's text, to catch a model stuck repeating itself
+    let refusedRounds = 0; // rounds in a row in which every tool call was refused (see MAX_REFUSED_ROUNDS)
     let lastRoundText = "";
     const budgetStop = (why) => {
         console.log(`[AI-STREAM] stopped: the user's tokens ran out (${why}, toolsRun=${toolsRun})`);
@@ -594,6 +605,7 @@ export async function streamChat({
                 : null;
 
             // Second pass, in the model's own order: every call gets its tool message
+            let refusedThisRound = 0;
             for (const call of round.toolCalls) {
                 const toolName = call.function.name;
                 if (earlyResults.has(call.id)) {
@@ -607,6 +619,7 @@ export async function streamChat({
 
                 // A handler may return { text, ... } (load_tools does); the model gets the text.
                 const resultText = toolResult && typeof toolResult === "object" && "text" in toolResult ? toolResult.text : toolResult;
+                if (REFUSED_RESULT.test(String(resultText ?? ""))) refusedThisRound++;
                 if (toolResult && typeof toolResult === "object" && typeof toolResult.stopAnswer === "string") {
                     // sleep_until: what the AI wrote before it (often its question to the user) is kept, not lost
                     const said = toolName === "sleep_until" ? String(round.text || "").trim() : "";
@@ -626,6 +639,26 @@ export async function streamChat({
             if (stopAnswer) return { answer: stopAnswer, usage, toolsRun };
             if (countsTowardDepth) depth++;
             lastToolFailed = toolFailedThisRound;
+            // A model that keeps asking for calls that are refused (the same call again and again, or one it already
+            // made) is asked to answer from what it has, with no tools, after MAX_REFUSED_ROUNDS such rounds in a row
+            refusedRounds = round.toolCalls.length > 0 && refusedThisRound === round.toolCalls.length ? refusedRounds + 1 : 0;
+            if (refusedRounds >= MAX_REFUSED_ROUNDS) {
+                console.log(`[AI-STREAM] ${refusedRounds} rounds of refused tool calls in a row (${round.toolCalls.map((c) => c.function.name).join(", ")}), asking for the answer`);
+                conversation.push({ role: "user", content: "No more tool calls are possible. Answer now from what you found so far, and say what you could not check." });
+                const leftNow = tokensLeft?.();
+                if (leftNow !== undefined && leftNow !== null && leftNow <= 0) return budgetStop("nothing left");
+                const lastMax = roundMaxTokens();
+                if (lastMax < 1) return budgetStop("nothing left to write with");
+                const last = await streamOneRound({ provider, messages: conversation, tools: [], temperature, maxTokens: lastMax, timeoutMs, signal, onToken: undefined, onThought: undefined, inputTooBig });
+                if (last.usage) {
+                    usage.prompt_tokens += last.usage.prompt_tokens || 0;
+                    usage.completion_tokens += last.usage.completion_tokens || 0;
+                    usage.total_tokens += last.usage.total_tokens || 0;
+                    onRoundUsage?.(last.usage, { cut: !!last.budgetCut });
+                }
+                if (last.budgetCut) return budgetStop("this round's input alone used up the tokens left");
+                return { answer: (continuedText + (last.rawText || "")).trim() || null, usage, toolsRun };
+            }
         }
     } catch (err) {
         const wrapped = err instanceof StreamChatError ? err : new StreamChatError(err?.message || String(err));

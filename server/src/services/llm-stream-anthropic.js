@@ -43,7 +43,7 @@
 
 import Anthropic from "@anthropic-ai/sdk";
 import { createHash } from "node:crypto";
-import { StreamChatError, CONTINUE_PROMPT, THINKING_CUT_PROMPT, budgetStopAnswer, makeRepeatGuard } from "./llm-stream.js";
+import { StreamChatError, CONTINUE_PROMPT, THINKING_CUT_PROMPT, budgetStopAnswer, makeRepeatGuard, REFUSED_RESULT, MAX_REFUSED_ROUNDS } from "./llm-stream.js";
 
 export const CLAUDE_CHAT_MODELS = new Set([
     "claude-haiku-5-5",
@@ -672,6 +672,7 @@ export async function streamClaudeChat({
         return r;
     };
     let lastRoundText = "";
+    let refusedRounds = 0; // rounds in a row in which every tool call was refused (see MAX_REFUSED_ROUNDS)
     const budgetStop = (why) => {
         console.log(`[AI-STREAM] Claude stopped: the user's tokens ran out (${why}, toolsRun=${toolsRun})`);
         return { answer: budgetStopAnswer(continuedText + lastRoundText), usage, toolsRun, servedModel, stoppedForBudget: true };
@@ -884,9 +885,11 @@ export async function streamClaudeChat({
                 ? await toolDriver(toolUses.map((c) => ({ id: c.id, name: c.name, input: c.input ?? {} })), { run: (id) => runCall(toolUses.find((c) => c.id === id)), text })
                 : null;
 
+            let refusedThisRound = 0;
             for (const call of toolUses) {
                 const { content, isError } = outcomes ? (outcomes.get(call.id) || { content: "Not run.", isError: true }) : await runCall(call);
                 countsTowardDepth = true;
+                if (REFUSED_RESULT.test(String((content && typeof content === "object" && "text" in content ? content.text : content) ?? ""))) refusedThisRound++;
                 // A handler may return { text, toolReferences }: load_tools hands Claude the deferred tools it
                 // asked for as tool_reference blocks, which the API expands into their full definitions.
                 const isObjectResult = content && typeof content === "object" && "text" in content;
@@ -919,6 +922,26 @@ export async function streamClaudeChat({
             if (onConversation) { try { await onConversation(conversation, usage); } catch { /* the answer goes on without the saved copy */ } }
             if (stopAnswer) return { answer: stopAnswer, usage, toolsRun, servedModel };
             if (countsTowardDepth) depth++;
+            // A model that keeps asking for calls that are refused (the same call again and again, or one it already
+            // made) is asked to answer from what it has, with no tools, after MAX_REFUSED_ROUNDS such rounds in a row
+            refusedRounds = toolUses.length > 0 && refusedThisRound === toolUses.length ? refusedRounds + 1 : 0;
+            if (refusedRounds >= MAX_REFUSED_ROUNDS) {
+                console.log(`[AI-STREAM] Claude: ${refusedRounds} rounds of refused tool calls in a row (${toolUses.map((c) => c.name).join(", ")}), asking for the answer`);
+                conversation.push({ role: "user", content: "No more tool calls are possible. Answer now from what you found so far, and say what you could not check." });
+                const leftNow = tokensLeft?.();
+                if (leftNow !== undefined && leftNow !== null && leftNow <= 0) return budgetStop("nothing left");
+                const lastMax = budgetMaxTokens();
+                if (lastMax < 1) return budgetStop("nothing left to write with");
+                const last = await getClient().beta.messages.stream(
+                    { ...params, max_tokens: lastMax, messages: conversation, tool_choice: { type: "none" } },
+                    { signal, timeout: timeoutMs },
+                ).finalMessage();
+                addUsage(usage, last.usage);
+                onRoundUsage?.(roundShape(last.usage), { cut: false });
+                const lastText = (last.content || []).filter((b) => b.type === "text").map((b) => b.text).join("").trim();
+                if (lastText) onToken?.(lastText);
+                return { answer: (continuedText + lastText).trim() || null, usage, toolsRun, servedModel };
+            }
         }
     } catch (err) {
         // A round that failed or was aborted mid-stream is still billed for what it processed.
