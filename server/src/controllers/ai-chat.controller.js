@@ -6294,6 +6294,20 @@ If a tool fails, never show the error message; say only: "Something went wrong o
         };
         // Where you work: the last words of the system prompt (desktop app or website, and where things run)
         messages[0].content += whereYouWork;
+        // [AI-CACHE]: a short hash of every part of the prompt, so two answers of one chat can be compared in the log to
+        // see which part changed between them and broke the model's prompt cache (44k of 72k tokens were rewritten
+        // between two answers 18 s apart, 2026-11-10)
+        try {
+            const h = (s) => crypto.createHash("sha1").update(String(s)).digest("hex").slice(0, 8);
+            const parts = [`static ${h(filterPromptBlocks(dynamicSystemPrompt, promptCtx))} ${filterPromptBlocks(dynamicSystemPrompt, promptCtx).length}`, `where ${h(whereYouWork)} ${whereYouWork.length}`];
+            for (const sec of filterPromptBlocks(volatilePrompt, promptCtx).split(/\n(?=\n|<|---|===|[A-Z]{3,})/).filter((s) => s.trim().length > 40)) {
+                parts.push(`${h(sec)} ${sec.length} ${sec.trim().slice(0, 28).replace(/\s+/g, " ")}`);
+            }
+            const hist = messages.slice(1, -1);
+            parts.push(`history ${hist.length} msgs ${h(JSON.stringify(hist))}`);
+            parts.push(`tools ${activeToolList.length}/${fullToolList.length} ${h(fullToolList.map((t) => t.function.name).join(","))} loaded ${h([...toolPlan.loadedNames].sort().join(","))}`);
+            console.log(`[AI-CACHE] ${parts.join(" | ")}`);
+        } catch { /* a log line only */ }
         // The per-message notes (see tailPrompt) go in front of the user's message, at the end of the conversation
         if (tailPrompt.trim()) {
             const lastUser = [...messages].reverse().find((m) => m.role === "user");
