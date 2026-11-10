@@ -3,7 +3,7 @@
   "displayName": "Classgrid",
   "description": "The Classgrid AI inside Classgrid Code: the Agent chat on the right side, and the AI's terminal, files and memory on this computer.",
   "publisher": "classgrid",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "private": false,
   "license": "UNLICENSED",
   "engines": {
@@ -83,7 +83,11 @@
     "commands": [
       {
         "command": "classgrid.showAgent",
-        "title": "Classgrid: Show the Agent"
+        "title": "Classgrid: Show the Agent",
+        "icon": {
+          "light": "media/icon.png",
+          "dark": "media/icon.png"
+        }
       },
       {
         "command": "classgrid.open",
@@ -110,6 +114,14 @@
         "title": "Classgrid: Sign out"
       }
     ],
+    "menus": {
+      "editor/title": [
+        {
+          "command": "classgrid.showAgent",
+          "group": "navigation@-100"
+        }
+      ]
+    },
     "keybindings": [
       {
         "command": "classgrid.searchChats",
