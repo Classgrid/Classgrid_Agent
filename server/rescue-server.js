@@ -203,6 +203,9 @@ app.get("/api/rescue/status", (req, res) => {
 
 let fullBackend = null;
 let backupJobsStarted = false;
+// This copy is the rescue one: a turn request for an answer running in the main copy is passed to it, and the main
+// copy passes the other way (src/services/sibling-process.js)
+process.env.CG_PROCESS_ROLE = "rescue";
 try {
   await import("./env.js");
   fullBackend = (await import("./api/index.js")).default;

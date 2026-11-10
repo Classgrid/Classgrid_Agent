@@ -7424,7 +7424,12 @@ export const pcToolResult = async (req, res) => {
 export const turnCommand = async (req, res) => {
     const { handleTurnCommand } = await import("../services/local-loop.service.js");
     const r = await handleTurnCommand(String(req.params?.id || ""), String(req.user?.id), req.body || {});
-    if (r.error === "unknown_turn") return res.status(404).json({ error: "This answer isn't here any more" });
+    if (r.error === "unknown_turn") {
+        // The answer may be running in the other copy of this server (sibling-process.js)
+        const { forwardToSibling } = await import("../services/sibling-process.js");
+        if (await forwardToSibling(req, res)) return;
+        return res.status(404).json({ error: "This answer isn't here any more" });
+    }
     if (r.error) return res.status(400).json({ error: r.error });
     res.json({ ok: true });
 };
@@ -7434,7 +7439,11 @@ export const turnCommand = async (req, res) => {
 export const turnEvents = async (req, res) => {
     const { attachToTurn } = await import("../services/durable-turn.service.js");
     const ok = attachToTurn(String(req.params?.id || ""), String(req.user?.id), res, Number(req.query?.from) || 0);
-    if (!ok) res.status(404).json({ error: "This answer isn't here any more" });
+    if (ok) return;
+    // The answer may be running in the other copy of this server (sibling-process.js): its stream is relayed
+    const { forwardToSibling } = await import("../services/sibling-process.js");
+    if (await forwardToSibling(req, res)) return;
+    res.status(404).json({ error: "This answer isn't here any more" });
 };
 
 // A background command on the user's computer finished (the desktop app tells it over HTTP, like every other step
