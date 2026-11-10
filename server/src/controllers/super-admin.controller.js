@@ -1,4 +1,5 @@
 import { getJwtSecret } from "../utils/jwt-secret.js";
+import { forgetFeatureFlags } from "../services/feature-flag.service.js";
 /*
  * ─────────────────────────────────────────────────────────
  * 🚫 NO BLOCKS RULE (owner's order, 2026-10-23) 🚫
@@ -392,6 +393,7 @@ export const upsertFeatureFlag = async (req, res) => {
             },
             { upsert: true, returnDocument: 'after' }
         );
+        forgetFeatureFlags(); // (the flags are kept in memory between requests)
 
         const io = req.app.get("io");
         if (io) {
@@ -414,6 +416,7 @@ export const toggleFeatureFlag = async (req, res) => {
         flag.isEnabled = !flag.isEnabled;
         flag.lastModifiedBy = req.user._id;
         await flag.save();
+        forgetFeatureFlags(); // (the flags are kept in memory between requests)
 
         const io = req.app.get("io");
         if (io) {

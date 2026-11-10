@@ -130,9 +130,26 @@ export async function runCustomMcpTool(userId, args = {}) {
 }
 
 /** One line for the system prompt listing the user's custom connectors and their tools. */
+// Read on every message: it used to load the full documents (tool schemas, 150 KB, two round trips, 310-330 ms in front
+// of every answer, measured 2026-11-10). Only the fields the line needs are read, and the line is kept per user for a
+// minute; every change to a server (model hooks in models/CustomMcpServer.js) forgets it.
+const MCP_LINE_MS = 60000;
+const mcpLines = new Map(); // userId -> { at, promise }
+export function forgetCustomMcpLine(userId) { if (userId) mcpLines.delete(String(userId)); else mcpLines.clear(); }
+CustomMcpServer.onChanged = forgetCustomMcpLine;
 export async function customMcpPromptLine(userId) {
     if (!userId) return "";
-    const servers = await CustomMcpServer.find({ userId, enabled: true }).sort({ createdAt: 1 }).lean();
+    const key = String(userId);
+    const kept = mcpLines.get(key);
+    if (kept && Date.now() - kept.at < MCP_LINE_MS) return kept.promise;
+    const promise = readCustomMcpPromptLine(userId);
+    mcpLines.set(key, { at: Date.now(), promise });
+    promise.catch(() => mcpLines.delete(key));
+    if (mcpLines.size > 20000) mcpLines.clear();
+    return promise;
+}
+async function readCustomMcpPromptLine(userId) {
+    const servers = await CustomMcpServer.find({ userId, enabled: true }).select("name status lastError tools.name createdAt").sort({ createdAt: 1 }).lean();
     if (!servers.length) return "";
     const rows = servers.map((s) => {
         if (s.status !== "connected") return `${s.name} (${s.status === "needs_login" ? "needs login: use operation login to show the card" : "error: " + s.lastError})`;

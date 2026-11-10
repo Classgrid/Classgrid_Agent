@@ -208,7 +208,7 @@ async function isVerifiedOrgDomain(origin) {
   }
 }
 
-const apiCors = cors({
+const apiCorsOptions = {
     origin: function (origin, callback) {
       // Allow requests with no origin (mobile apps, curl, server-to-server)
       if (!origin) return callback(null, true);
@@ -241,7 +241,12 @@ const apiCors = cors({
       callback(new Error(`CORS blocked: ${origin}`));
     },
     credentials: true
-  });
+  };
+// The desktop app's pages come from a localhost origin: without maxAge the browser keeps a preflight answer for 5 s
+// only, so every message and every tool step paid an extra round trip first (236-278 ms measured, 2026-11-10). The
+// desktop app keeps it for two hours; the website's CORS is unchanged.
+const DESKTOP_APP_ORIGIN = /^http:\/\/(localhost|127\.0\.0\.1|[a-z0-9-]+\.localhost)(:\d+)?$/;
+const apiCors = cors((req, callback) => callback(null, DESKTOP_APP_ORIGIN.test(String(req.headers.origin || "")) ? { ...apiCorsOptions, maxAge: 7200 } : apiCorsOptions));
 
 // Remote MCP and its discovery files use Bearer tokens only: any website may call them, but never with the login cookie
 const tokenOnlyCors = cors({ origin: "*", credentials: false });

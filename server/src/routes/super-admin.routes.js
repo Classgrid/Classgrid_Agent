@@ -2542,6 +2542,7 @@ router.post("/rollback/:logId", async (req, res) => {
         } else if (action === "feature_flag.toggle" && targetId) {
             const FeatureFlag = (await import("../models/FeatureFlag.js")).default;
             await FeatureFlag.findOneAndUpdate({ key: targetId }, [{ $set: { isEnabled: { $not: "$isEnabled" } } }]);
+            (await import("../services/feature-flag.service.js")).forgetFeatureFlags(); // (the flags are kept in memory between requests)
             rollbackMessage = "Feature flag toggled back.";
         } else {
             return res.status(400).json({ success: false, message: `Cannot auto-rollback action type: ${action}. Manual intervention required.` });

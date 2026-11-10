@@ -1026,13 +1026,19 @@ export function pcChatIds(p) {
 
 export async function linkChatToProject(userId, projectId, sessionId, deviceId = null, { website = false, desktop = false } = {}) {
   await connectDB();
-  forgetProjectLookup(sessionId);
-  const project = await IdeProject.findOne({ _id: projectId, owner: userId }).select("_id location localCopies");
+  const [project, wasOnScreen, wasHere] = await Promise.all([
+    IdeProject.findOne({ _id: projectId, owner: userId }).select("_id location localCopies"),
+    redis.get(UI_PROJECT(sessionId)).catch(() => null),
+    redis.get(CHAT_HERE(sessionId)).catch(() => null),
+  ]);
   // A folder project works only in the desktop app: a message from the website never links a chat to it
   if (!project || (website && project.location === "local")) return;
-  await redis.set(UI_PROJECT(sessionId), String(project._id), "EX", 24 * 60 * 60).catch(() => {}); // the user's own project on screen
   // Sent from the desktop app on a computer where this project is set to "On this computer": the chat works in that copy
   const here = deviceId ? (project.localCopies || []).some((c) => c.deviceId === String(deviceId) && c.here) : false;
+  // The kept lookup (projectForChat) is forgotten only when the answer changes: the same project on screen from the same
+  // place keeps it, so the second lookup of a message (before the model call) doesn't go to the database every time
+  if (wasOnScreen !== String(project._id) || (here ? wasHere !== String(deviceId) : !!wasHere)) forgetProjectLookup(sessionId);
+  await redis.set(UI_PROJECT(sessionId), String(project._id), "EX", 24 * 60 * 60).catch(() => {}); // the user's own project on screen
   await (here ? redis.set(CHAT_HERE(sessionId), String(deviceId), "EX", 24 * 60 * 60) : redis.del(CHAT_HERE(sessionId))).catch(() => {});
   // A chat stays with the project it started in (chats are kept per project); it is never moved to another one
   const other = await IdeProject.findOne({ owner: userId, chatSessionIds: sessionId, _id: { $ne: project._id } }).select("_id").lean();

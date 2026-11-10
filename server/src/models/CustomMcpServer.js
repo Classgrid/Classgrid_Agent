@@ -38,4 +38,10 @@ const customMcpServerSchema = new mongoose.Schema({
 
 customMcpServerSchema.index({ userId: 1, name: 1 });
 
+// The system-prompt line listing a user's connectors is kept in memory (services/custom-mcp-ai.js sets onChanged);
+// any change to a server forgets it, so the next answer sees the change
+customMcpServerSchema.post("save", function (doc) { this.constructor.onChanged?.(doc?.userId); });
+customMcpServerSchema.post("deleteOne", { document: true, query: false }, function (doc) { this.constructor.onChanged?.(doc?.userId); });
+customMcpServerSchema.post(["deleteMany", "updateOne", "updateMany", "findOneAndUpdate", "findOneAndDelete"], function () { this.model.onChanged?.(null); });
+
 export default mongoose.models.CustomMcpServer || mongoose.model("CustomMcpServer", customMcpServerSchema);

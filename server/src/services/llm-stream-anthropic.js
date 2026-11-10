@@ -42,6 +42,7 @@
 //   "drop_block" makes a prefix mismatch degrade instead of failing the request.
 
 import Anthropic from "@anthropic-ai/sdk";
+import { createHash } from "node:crypto";
 import { StreamChatError, CONTINUE_PROMPT, THINKING_CUT_PROMPT, budgetStopAnswer, makeRepeatGuard } from "./llm-stream.js";
 
 export const CLAUDE_CHAT_MODELS = new Set([
@@ -84,12 +85,17 @@ function getClient() {
     return client;
 }
 
+// The explicit cache markers (tools, the fixed system prompt, the user's text) keep their entries for an hour instead
+// of 5 minutes: a message 5-60 minutes after the previous one read nothing from the cache and wrote the whole prompt
+// again (14 of 116 Claude requests in one day, 1.15M tokens written, 2026-11-10). The automatic marker on the newest
+// message stays at 5 minutes (the API wants the one-hour entries in front of the 5-minute one).
+const CACHE_1H = { type: "ephemeral", ttl: "1h" };
 function toSystemBlocks(systemText, cacheBoundary) {
     if (!systemText) return undefined;
     const boundary = Number.isInteger(cacheBoundary) && cacheBoundary > 0 && cacheBoundary < systemText.length
         ? cacheBoundary
         : systemText.length;
-    const blocks = [{ type: "text", text: systemText.slice(0, boundary), cache_control: { type: "ephemeral" } }];
+    const blocks = [{ type: "text", text: systemText.slice(0, boundary), cache_control: CACHE_1H }];
     const tail = systemText.slice(boundary);
     if (tail.trim()) blocks.push({ type: "text", text: tail });
     return blocks;
@@ -390,25 +396,48 @@ export async function toImageUrlParts(attachments, signal) {
 
 function toClaudeMessages(messages, attachmentBlocks) {
     const out = [];
+    // The system notes inside the history (the "[SYSTEM NOTE - YOUR BACKGROUND TOOL MEMORY ...]" note after an answer
+    // that ran tools, ai-chat-history.service.js) travel as the first text block of the next user message, in their
+    // place in the conversation. They used to be joined into the system prompt: every answer that ran tools then
+    // changed the system prompt on the next turn, and the model re-read the whole chat from scratch (prompt cache;
+    // 43 of 90 Claude turns in one day, 2026-11-10).
+    let leading = true; // the system messages before the first user/assistant one ARE the system prompt (streamClaudeChat)
+    let notes = [];
     for (const m of messages) {
+        if (m.role === "system") {
+            if (!leading) { const t = typeof m.content === "string" ? m.content : JSON.stringify(m.content ?? ""); if (t.trim()) notes.push(t); }
+            continue;
+        }
         if (m.role !== "user" && m.role !== "assistant") continue;
+        leading = false;
         const text = typeof m.content === "string" ? m.content : JSON.stringify(m.content ?? "");
         if (!text.trim()) continue;
         if (out.length === 0 && m.role === "assistant") continue; // the first message must be from the user
-        out.push({ role: m.role, content: text, ...(m.perMessageNote ? { perMessageNote: String(m.perMessageNote) } : {}) });
+        const msg = { role: m.role, content: text, ...(m.perMessageNote ? { perMessageNote: String(m.perMessageNote) } : {}) };
+        if (m.role === "user" && notes.length) { msg.notes = notes.join("\n\n"); notes = []; }
+        out.push(msg);
     }
-    // Attachments belong to the newest user message; blocks go before its text.
     const blocks = attachmentBlocks || [];
-    const last = out[out.length - 1];
-    if (last?.role === "user" && (blocks.length > 0 || last.perMessageNote)) {
-        // The per-message notes (time, editor notes) are their own block AFTER the message text, and the message text
-        // carries a cache breakpoint: on the next turn this same text comes back from the history byte for byte, so the
-        // prefix up to and including it is read from the cache, and only the notes and the new message are new. (With
-        // the notes mixed into the text, no turn's prefix ever matched the next one's: the whole history was re-read.)
-        const textBlock = last.perMessageNote ? { type: "text", text: last.content, cache_control: { type: "ephemeral" } } : { type: "text", text: last.content };
-        last.content = [...blocks, textBlock, ...(last.perMessageNote ? [{ type: "text", text: last.perMessageNote }] : [])];
+    for (let i = 0; i < out.length; i++) {
+        const m = out[i];
+        const isLast = i === out.length - 1;
+        const lastWithExtras = isLast && m.role === "user" && (blocks.length > 0 || m.perMessageNote);
+        if (!m.notes && !lastWithExtras) { delete m.perMessageNote; continue; }
+        // The per-message notes (time, editor notes, model name) are their own block AFTER the message text, and the
+        // message text carries a cache breakpoint: on the next turn this same text comes back from the history byte for
+        // byte, so the prefix up to and including it is read from the cache, and only the notes and the new message are
+        // new. (With the notes mixed into the text, no turn's prefix ever matched the next one's: the whole history was
+        // re-read.) Attachments (pictures, PDFs) come after the text too, so a chat with pictures caches the same way.
+        const textBlock = lastWithExtras && m.perMessageNote ? { type: "text", text: m.content, cache_control: CACHE_1H } : { type: "text", text: m.content };
+        m.content = [
+            ...(m.notes ? [{ type: "text", text: m.notes }] : []),
+            textBlock,
+            ...(lastWithExtras ? blocks : []),
+            ...(lastWithExtras && m.perMessageNote ? [{ type: "text", text: m.perMessageNote }] : []),
+        ];
+        delete m.notes;
+        delete m.perMessageNote;
     }
-    for (const m of out) delete m.perMessageNote;
     return out;
 }
 
@@ -428,7 +457,7 @@ function withToolSearch(claudeTools, loadedToolNames) {
         .map(({ cache_control, ...t }) => ({ ...t, defer_loading: true })); // deferred tools can't carry cache_control
     const head = [TOOL_SEARCH_TOOL, ...loaded];
     // The cache breakpoint goes on the last always-loaded tool.
-    head[head.length - 1] = { ...head[head.length - 1], cache_control: { type: "ephemeral" } };
+    head[head.length - 1] = { ...head[head.length - 1], cache_control: CACHE_1H };
     return [...head, ...deferred];
 }
 
@@ -453,7 +482,7 @@ function toClaudeTools(tools) {
             };
         });
     // Tools render before the system prompt; caching the last one caches the whole tool list.
-    if (out.length > 0) out[out.length - 1] = { ...out[out.length - 1], cache_control: { type: "ephemeral" } };
+    if (out.length > 0) out[out.length - 1] = { ...out[out.length - 1], cache_control: CACHE_1H };
     return out;
 }
 
@@ -515,14 +544,24 @@ export async function streamClaudeChat({
     if (!CLAUDE_CHAT_MODELS.has(model)) throw new StreamChatError(`Unsupported Claude model: ${model}`);
     if (!process.env.ANTHROPIC_API_KEY) throw new StreamChatError("ANTHROPIC_API_KEY is not set");
 
-    const systemText = messages.filter((m) => m.role === "system").map((m) => m.content).join("\n\n");
+    // The system prompt is the system messages in front of the conversation; a system note inside the history goes
+    // with the next user message (toClaudeMessages)
+    const leadingSystem = [];
+    for (const m of messages) { if (m.role !== "system") break; leadingSystem.push(m.content); }
+    const systemText = leadingSystem.join("\n\n");
     const system = toSystemBlocks(systemText, systemCacheBoundary);
     const attachmentBlocks = await toAttachmentBlocks(attachments, signal);
     const resumed = resumeProvider === "claude" && Array.isArray(resumeConversation) && resumeConversation.length > 0;
     const conversation = resumed ? resumeConversation : toClaudeMessages(messages, attachmentBlocks);
-    // With an image attached Claude looks at it directly, so the analyze_image detour is not offered.
-    const hasNativeImage = attachmentBlocks.some((b) => b.type === "image");
-    const claudeTools = withToolSearch(toClaudeTools(hasNativeImage ? tools.filter((t) => t?.function?.name !== "analyze_image") : tools), loadedToolNames);
+    // (analyze_image stays in the list on picture turns too: a tool list that differs from the last message's empties
+    // the prompt cache; Claude looks at an attached picture directly anyway)
+    const claudeTools = withToolSearch(toClaudeTools(tools), loadedToolNames);
+    // What really went to the model, for the cache log: the two system blocks and the loaded tools (depth 0 only)
+    try {
+        const h = (t) => createHash("sha1").update(String(t || "")).digest("hex").slice(0, 8);
+        const loadedNames = claudeTools.filter((t) => !t.defer_loading).map((t) => t.name);
+        console.log(`[AI-CACHE-REAL] sys0 ${h(system?.[0]?.text)} ${system?.[0]?.text?.length || 0} | sys1 ${h(system?.[1]?.text)} ${system?.[1]?.text?.length || 0} | tools ${h(loadedNames.join(","))} ${loadedNames.length} loaded, ${claudeTools.length - loadedNames.length} deferred | turns ${conversation.length}`);
+    } catch { /* a log line only */ }
     const sentToolNames = new Set(claudeTools.map((t) => t.name));
     const deferredToolNames = new Set(claudeTools.filter((t) => t.defer_loading).map((t) => t.name));
     if (conversation.length === 0) throw new StreamChatError("No user message to send");
@@ -660,6 +699,7 @@ export async function streamClaudeChat({
             };
             let roundText = "";
             const splitter = createThinkSplitter((piece) => { roundText += piece; onToken?.(piece); }, emitThought);
+            const sentAt = Date.now();
             const stream = getClient().beta.messages.stream(
                 { ...params, max_tokens: roundMax, messages: conversation },
                 { signal, timeout: timeoutMs },
@@ -671,6 +711,7 @@ export async function streamClaudeChat({
             for await (const event of stream) {
                 if (event.type === "message_start") {
                     roundUsage = { ...(event.message?.usage || {}) };
+                    console.log(`[AI-TIMING] claude message_start after ${Date.now() - sentAt}ms (round ${depth}, cacheRead=${roundUsage.cache_read_input_tokens ?? 0}, cacheWrite=${roundUsage.cache_creation_input_tokens ?? 0}, input=${roundUsage.input_tokens ?? 0})`);
                     if (inputTooBig?.(roundShape(roundUsage))) {
                         budgetCut = true;
                         stream.abort();

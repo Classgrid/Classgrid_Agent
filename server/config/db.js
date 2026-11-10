@@ -54,15 +54,16 @@ if (!cached) {
  * Formula: maxPoolSize = floor(maxConnections / numWorkers) - buffer
  *
  * Staging  (t3.micro,  2 workers): maxPoolSize = 10, minPoolSize = 2
- * Production (t3.medium, 4 workers): maxPoolSize = 20, minPoolSize = 4
- * Development (fork, 1 worker):    maxPoolSize = 20, minPoolSize = 4
+ * Production (t3.medium, 4 workers): maxPoolSize = 20, minPoolSize = 10
+ * Development (fork, 1 worker):    maxPoolSize = 20, minPoolSize = 10
+ * (minPoolSize 10, not 4: a read on a fresh pool connection took 952 ms against 155 ms on a warm one, 2026-11-10)
  */
 const isProduction = process.env.NODE_ENV === "production";
 const isStaging = process.env.NODE_ENV === "staging";
 
 const POOL_CONFIG = isStaging
   ? { maxPoolSize: 10, minPoolSize: 2 }
-  : { maxPoolSize: 20, minPoolSize: 4 };
+  : { maxPoolSize: 20, minPoolSize: 10 };
 
 const connectDB = async () => {
   // ✅ KEY FIX: Always check if the connection is still alive.

@@ -215,8 +215,16 @@ export const isAuthenticated = async (req, res, next) => {
         // Ensure DB is connected (critical for serverless cold starts)
         await connectDB();
 
+        // The settings, the user's row and the organization's status are each 150 ms away: on a miss they are read
+        // together, not one after another (the token names the organization, so its status is warmed here and found
+        // ready in getUserAccessBlock)
+        const settingsP = keptSettings();
+        const normalMode = !decoded.isProvisional && !decoded.impersonation;
+        const userRowP = normalMode ? keptUser(decoded.id) : null;
+        const orgHint = decoded.organization_id || decoded.orgId;
+        if (normalMode && orgHint && decoded.role !== "super_admin") keptOrgStatus(orgHint).catch(() => {});
         // Dynamically check system settings for emergency locks (kept in memory for a few seconds, see keptSettings)
-        const settings = await keptSettings();
+        const settings = await settingsP;
 
         if (decoded.isProvisional) {
             // Strictly limit what endpoints a provisional token can access.
@@ -257,7 +265,7 @@ export const isAuthenticated = async (req, res, next) => {
             // ── NORMAL MODE ──
             // (the row is kept in memory for a few seconds and hydrated into a fresh document per request, so handlers
             // that change and save req.user keep working)
-            const userRow = await keptUser(decoded.id);
+            const userRow = await userRowP;
             if (!userRow) {
                 return res.status(401).json({ message: "User no longer exists" });
             }

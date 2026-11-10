@@ -205,6 +205,7 @@ export async function ensureFeatureFlagCatalog() {
 
     if (operations.length > 0) {
         await FeatureFlag.bulkWrite(operations, { ordered: false });
+        forgetFeatureFlags();
     }
 }
 
@@ -217,14 +218,30 @@ export function isFeatureEnabledForOrganization(flag, { organizationId, organiza
     return allowedOrgTypes.length === 0 || allowedOrgTypes.includes(organizationType);
 }
 
+// The flags are read on EVERY request (platformAccessGate, then enforceFeatureFlags): two database reads of 150 ms each
+// in front of every answer, poll and tool step (measured 2026-11-10). They are kept in this process for a few seconds;
+// every writer calls forgetFeatureFlags, so a change made on this process applies at once (another process: within
+// FLAGS_KEEP_MS).
+const FLAGS_KEEP_MS = 20000;
+let flagsKept = null; // { at, promise of the lean list }
+export function forgetFeatureFlags() { flagsKept = null; }
+function keptFlags() {
+    if (flagsKept && Date.now() - flagsKept.at < FLAGS_KEEP_MS) return flagsKept.promise;
+    const promise = FeatureFlag.find({})
+        .select("key name description isEnabled disabledForOrgs enabledForOrgs allowedOrgTypes routePrefixes exemptRoutePrefixes")
+        .lean()
+        .maxTimeMS(1500)
+        .exec();
+    flagsKept = { at: Date.now(), promise };
+    promise.catch(() => { if (flagsKept?.promise === promise) flagsKept = null; });
+    return promise;
+}
+
 export async function findBlockingFeatureFlag({ requestPath, organizationId, organizationType } = {}) {
     const path = normalizePath(requestPath);
     if (!path.startsWith("/api/")) return null;
 
-    const flags = await FeatureFlag.find({})
-        .select("key name description isEnabled disabledForOrgs enabledForOrgs allowedOrgTypes routePrefixes exemptRoutePrefixes")
-        .lean()
-        .maxTimeMS(1500);
+    const flags = await keptFlags();
 
     return flags.find((flag) => {
         const appliesToPath = (flag.routePrefixes || []).some((prefix) => matchesPrefix(path, prefix));
@@ -241,10 +258,7 @@ export async function platformAccessGate(req, res, next) {
 
     try {
         if (mongoose.connection.readyState !== 1) return next();
-        const platformFlag = await FeatureFlag.findOne({ key: "platform_access" })
-            .select("key name description isEnabled exemptRoutePrefixes")
-            .lean()
-            .maxTimeMS(1500);
+        const platformFlag = (await keptFlags()).find((flag) => flag.key === "platform_access") || null;
 
         if (!platformFlag || platformFlag.isEnabled) return next();
 
