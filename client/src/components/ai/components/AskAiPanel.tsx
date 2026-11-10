@@ -243,7 +243,7 @@ type PageContext = {
 import { usePostHog } from 'posthog-js/react';
 import { fetchWithRescue } from "@/lib/rescue";
 
-import { LOCAL_IMAGE_MISSING, keepLocalImage, loadLocalImages, readAsDataUrl, sendsInline, showLocalImages } from "@/lib/desktopImages";
+import { LOCAL_IMAGE_MISSING, jpegName, keepLocalImage, loadLocalImages, readAsDataUrl, sendsInline, shrinkForAi, showLocalImages } from "@/lib/desktopImages";
 
 import { OFFLINE_CHAT_NOTE, continueChatCopy, continuedChatOf, continuedFrom, isUnreachable, keepsChatCopies, readChatCopy, readOtherChatCopy, removeChatCopy, saveChatCopy, syncChatCopy, type OtherChatRef } from "@/lib/desktopChats";
 
@@ -285,6 +285,31 @@ function chatProjectOf(sData: any): string | null {
 function isHiddenMessage(m: { role?: string; content?: unknown; hidden?: boolean } | null | undefined): boolean {
   if (!m) return false;
   return !!m.hidden || (m.role === "user" && typeof m.content === "string" && m.content.trim().startsWith("[SYSTEM:"));
+}
+
+// The chat request's JSON, gzipped where the browser can (Chromium, Electron): the plain text where it can't or when
+// it is small anyway. The server's body parser inflates gzip on its own.
+async function gzipJson(text: string): Promise<BodyInit> {
+  if (typeof CompressionStream === "undefined" || text.length < 2048) return text;
+  try {
+    const stream = new Blob([text]).stream().pipeThrough(new CompressionStream("gzip"));
+    return await new Response(stream).blob();
+  } catch {
+    return text;
+  }
+}
+
+// Keeps the connection to the server warm while the user types: a request after an idle minute paid a new TCP and TLS
+// handshake first (0.5-0.6 s measured, 2026-11-10). One tiny HEAD at most every 20 s, never awaited.
+let lastWarmAt = 0;
+function warmServerConnection() {
+  const now = Date.now();
+  if (now - lastWarmAt < 20000) return;
+  lastWarmAt = now;
+  try {
+    const base = typeof import.meta !== "undefined" && import.meta.env ? (import.meta.env.VITE_API_URL || "https://api.classgrid.in") : "";
+    fetch(`${base}/api/health`, { method: "HEAD", credentials: "include", keepalive: true }).catch(() => {});
+  } catch { /* nothing to do */ }
 }
 
 async function getPresignedUrlForAskAiFile(name: string, type: string, size: number): Promise<any> {
@@ -2805,6 +2830,7 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
   // redraw, which is big) follows as a low-priority update that can wait behind the next keys. Only the box's own
   // size is set right away
   const onTyped = (event: { target: RichChatTarget }) => {
+    warmServerConnection(); // (the connection is ready when the message is sent)
     const val = event.target.value;
     const wordCount = val.trim().split(/\s+/).filter(w => w.length > 0).length;
     if (val.length === 0) {
@@ -3010,10 +3036,14 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
     const sentInline = new Set<string>();
     await Promise.all(accepted.filter(f => f.file && sendsInline(f)).map(async (f) => {
       try {
-        const dataUrl = await readAsDataUrl(f.file!);
+        // (made small here first: a full-screen screenshot of 1-3 MB took 10-15 s to send; see shrinkForAi)
+        const { blob, converted } = await shrinkForAi(f.file!);
+        const dataUrl = await readAsDataUrl(blob);
         if (!dataUrl.startsWith("data:image/")) return;
         sentInline.add(f.id);
-        setAttachedFiles(prev => prev.map(x => x.id === f.id ? { ...x, status: "done", url: dataUrl } : x));
+        setAttachedFiles(prev => prev.map(x => x.id === f.id
+          ? { ...x, status: "done", url: dataUrl, ...(converted ? { name: jpegName(x.name), type: "image/jpeg", size: blob.size } : {}) }
+          : x));
       } catch { /* not readable here: uploaded below like any other file */ }
     }));
     const toUpload = accepted.filter(f => !sentInline.has(f.id));
@@ -3860,28 +3890,7 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
   const [countdown, setCountdown] = useState("");
   // (Classgrid Code: its one layout from the first moment, so the scroll watcher and the down arrow stay on it)
   const [isMobile, setIsMobile] = useState(() => import.meta.env.VITE_EDITOR === "1");
-  const [userContext, setUserContext] = useState<any>(null);
-
-  // Fetch contextual user data on mount if session exists
-  useEffect(() => {
-    if (session?.user?.email) {
-      const endpoint = typeof import.meta !== "undefined" && import.meta.env
-        ? (import.meta.env.VITE_API_URL || "https://api.classgrid.in") + "/api/user/ai-context"
-        : "/api/user/ai-context";
-
-      fetchWithRescue(endpoint, { credentials: "include" })
-        .then((res) => {
-          if (!res.ok) throw new Error("Network response was not ok");
-          return res.json();
-        })
-        .then((data) => {
-          if (data?.userContext) {
-            setUserContext(data.userContext);
-          }
-        })
-        .catch((err) => console.error("Failed to fetch user context", err));
-    }
-  }, [session?.user?.email]);
+  // (the ERP user context fetched here on every open was never read by the server: gone, 2026-11-10)
   const abortControllerRef = useRef<AbortController | null>(null);
   const retryCountRef = useRef(0);
   // Desktop app and Classgrid Code: the answer being driven by this app right now (turn_info), so Stop can tell the
@@ -4839,8 +4848,11 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
         const get = (window as any).classgridDesktop?.editorContext;
         if (typeof get !== "function") return undefined;
         try {
+          // (only a project chat has an editor; "{}" is sent as it is, so the server never asks this computer again)
+          const parts = window.location.pathname.split("/");
+          if (!(parts.includes("project") || parts.includes("studio"))) return undefined;
           const ctx = await Promise.race([get(), new Promise((r) => setTimeout(() => r(null), 400))]);
-          return typeof ctx === "string" && ctx.trim().startsWith("{") && ctx !== "{}" ? ctx.slice(0, 40000) : undefined;
+          return typeof ctx === "string" && ctx.trim().startsWith("{") ? ctx.slice(0, 40000) : undefined;
         } catch { return undefined; }
       })();
       // Desktop app / Classgrid Code: the AI's memory notes pack (MEMORY.md with this project's notes, the user's
@@ -4866,12 +4878,7 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
       })();
       // The request as sent, kept so the same answer can be asked for again after a server restart (resumeTurn)
       let requestBodyText = "";
-      const response = await fetchWithRescue(endpoint, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        credentials: "include",
-        signal: controller.signal,
-        body: (requestBodyText = JSON.stringify({
+      requestBodyText = JSON.stringify({
           question: apiQuestion,
           // The app runs the AI's steps on this computer itself (see runPcToolCall above) and drives the loop
           pcTools: canRunPcTools ? true : undefined,
@@ -4885,7 +4892,6 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
           userRole: session?.user?.role ?? undefined,
           isEdit: options?.isEdit,
           subdomain: typeof window !== "undefined" ? window.location.hostname : undefined,
-          userContext: userContext,
           sessionId: (options && options.explicitSessionId !== undefined) ? (options.explicitSessionId ?? undefined) : (sessionId ?? undefined),
           isIncognito: isIncognito,
           // Desktop app, Studio: what the user ran and saw in their own terminal since their last message
@@ -4904,8 +4910,8 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
           effort: getThinkingLevel() === "normal" ? undefined : getThinkingLevel() === "fast" ? "low" : "high",
           // Desktop app: what the user saved in their other Classgrid accounts on this computer
           computerMemory: otherAccountsMemory(),
-          // Desktop app: the AI's own memory notes on this computer (MEMORY.md)
-          memoryIndex: memoryNotesIndex(),
+          // Desktop app: the AI's own memory notes on this computer (MEMORY.md); the pack above already holds them
+          memoryIndex: memoryPack !== undefined ? undefined : memoryNotesIndex(),
           // Desktop app: this computer's scrambled Windows ID (the free limit counts per computer)
           deviceId: (window as any).classgridDesktop?.deviceId || undefined,
           // Website or Classgrid desktop app, so the AI knows where the user is
@@ -4930,13 +4936,18 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
           fileUrls: uploadedAttachments.length > 0 ? uploadedAttachments.filter(a => !a.url.startsWith("data:")).map(a => a.url) : [],
           attachments: uploadedAttachments.length > 0 ? uploadedAttachments.map(a => ({ url: a.url, name: a.name, mimeType: a.mimeType })) : undefined,
           // (the chat history is NOT sent: the server owns it and ignores body.history; sending up to 500 messages of
-          // 2,000 characters each put up to a megabyte in front of every message, seconds on a weak connection, 2026-11-10)
-          pageContext: {
-            ...pageContext,
-            pageHistory: pageHistory,
-            summary: pageContext?.summary || (typeof window !== "undefined" ? (window as any).classgrid_current_ticket_context : undefined),
-          },
-        })),
+          // 2,000 characters each put up to a megabyte in front of every message, seconds on a weak connection, 2026-11-10;
+          // the page context and the user context went the same way: the server never read them)
+      });
+      // The body goes gzipped (15 KB -> about 4 KB: one network flight instead of several on a new connection); the
+      // server's body parser inflates it. Where the browser can't gzip, the plain JSON goes.
+      const gzippedBody = await gzipJson(requestBodyText);
+      const response = await fetchWithRescue(endpoint, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...(gzippedBody !== requestBodyText ? { "Content-Encoding": "gzip" } : {}) },
+        credentials: "include",
+        signal: controller.signal,
+        body: gzippedBody,
       });
 
       // Error responses (403 ban, 429 rate-limit) are still JSON

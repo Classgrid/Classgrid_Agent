@@ -11,6 +11,7 @@ const vscode = require("vscode");
 const fs = require("node:fs");
 const path = require("node:path");
 const crypto = require("node:crypto");
+const https = require("node:https");
 
 // Packed inside the editor: ./app (our screens) and ./desktop (the desktop app's parts). While developing, the same
 // files straight from the repo.
@@ -442,18 +443,40 @@ const FETCHES = new Map(); // call id -> { ac, webview }
 function stopFetches(webview) {
   for (const [id, f] of FETCHES) if (f.webview === webview) { FETCHES.delete(id); f.ac.abort(); }
 }
+// One connection to the server, kept open between requests: Node's own fetch closes an idle socket after 4 s, so a
+// message sent a few seconds after the last request paid a new TCP and TLS handshake first (0.5-1.5 s measured,
+// 2026-11-10). This agent keeps sockets open until the server closes them (about a minute).
+const keepAliveAgent = new https.Agent({ keepAlive: true, keepAliveMsecs: 15000, maxSockets: 8, timeout: 0 });
+function httpsRequest(url, { method, headers, body, signal }) {
+  return new Promise((resolve, reject) => {
+    const req = https.request(url, { method, headers, agent: keepAliveAgent, signal }, resolve);
+    req.on("error", reject);
+    if (body) req.end(body); else req.end();
+  });
+}
 async function proxyFetch(webview, m) {
   const id = m.cgFetch;
   if (!API.test(String(m.url)) && !UPLOAD.test(String(m.url))) return webview.postMessage({ cgFetchError: id, error: "only Classgrid's server is carried by the editor" });
   const ac = new AbortController();
   FETCHES.set(id, { ac, webview });
   try {
-    const headers = (Array.isArray(m.headers) ? m.headers : []).filter(([k]) => !/^(host|origin|referer|content-length|connection|cookie)$/i.test(String(k)));
-    const res = await fetch(m.url, { method: m.method || "GET", headers, body: m.body ? Buffer.from(m.body, "base64") : undefined, signal: ac.signal, redirect: "follow" });
+    const headers = Object.fromEntries((Array.isArray(m.headers) ? m.headers : []).filter(([k]) => !/^(host|origin|referer|content-length|connection|cookie)$/i.test(String(k))));
+    const body = m.body ? Buffer.from(m.body, "base64") : undefined;
+    let url = String(m.url);
+    let res = await httpsRequest(url, { method: m.method || "GET", headers, body, signal: ac.signal });
+    // (a redirect is followed like fetch's redirect: "follow" did, up to 5 times, on the same two hosts only)
+    for (let hops = 0; hops < 5 && [301, 302, 303, 307, 308].includes(res.statusCode) && res.headers.location; hops++) {
+      const next = new URL(res.headers.location, url).toString();
+      res.resume();
+      if (!API.test(next) && !UPLOAD.test(next)) throw new Error("redirected away from Classgrid's server");
+      const again = res.statusCode === 303 || ((res.statusCode === 301 || res.statusCode === 302) && m.method && m.method !== "GET" && m.method !== "HEAD");
+      url = next;
+      res = await httpsRequest(url, { method: again ? "GET" : (m.method || "GET"), headers, body: again ? undefined : body, signal: ac.signal });
+    }
     const back = [];
-    res.headers.forEach((v, k) => { if (!/^(content-encoding|content-length|transfer-encoding|set-cookie|connection)$/i.test(k)) back.push([k, v]); });
-    webview.postMessage({ cgFetchHead: id, status: res.status, statusText: res.statusText, headers: back });
-    if (res.body) for await (const chunk of res.body) webview.postMessage({ cgFetchChunk: id, data: Buffer.from(chunk).toString("base64") });
+    for (const [k, v] of Object.entries(res.headers)) { if (/^(content-encoding|content-length|transfer-encoding|set-cookie|connection)$/i.test(k)) continue; back.push([k, Array.isArray(v) ? v.join(", ") : String(v)]); }
+    webview.postMessage({ cgFetchHead: id, status: res.statusCode, statusText: res.statusMessage || "", headers: back });
+    for await (const chunk of res) webview.postMessage({ cgFetchChunk: id, data: Buffer.from(chunk).toString("base64") });
     webview.postMessage({ cgFetchEnd: id });
   } catch (err) {
     if (err?.name !== "AbortError") log.appendLine(`[${new Date().toISOString()}] ${m.method || "GET"} ${String(m.url).replace(/\?.*$/, "")} failed: ${err?.message || err}`);

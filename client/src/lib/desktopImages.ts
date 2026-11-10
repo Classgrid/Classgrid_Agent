@@ -18,6 +18,42 @@ export const LOCAL_IMAGE_MISSING = "application/x-classgrid-local-image";
 export const sendsInline = (file: { type?: string; size?: number }) =>
   onDesktop() && INLINE_TYPES.has(String(file.type || "").toLowerCase()) && Number(file.size) > 0 && Number(file.size) <= INLINE_IMAGE_MAX_BYTES;
 
+// The picture is made small on this computer before it goes into the request: a full-screen PNG screenshot is 1-3 MB
+// and took 10-15 s each to send on the owner's connection (two of them: 29 s before the server saw the message,
+// 2026-11-10). The AI models read a picture at most 1568 px on its long side anyway, so it is scaled to that and saved
+// as JPEG; 1-3 MB becomes 100-250 KB with the text still sharp. GIFs (animated) and pictures that don't get smaller
+// stay as they are. The flow is unchanged: the picture still goes inside the request and is never uploaded first.
+export const AI_IMAGE_MAX_SIDE = 1568;
+export const AI_IMAGE_QUALITY = 0.85;
+export async function shrinkForAi(file: File | Blob): Promise<{ blob: Blob; converted: boolean }> {
+  const type = String(file.type || "").toLowerCase();
+  if (type === "image/gif" || typeof createImageBitmap !== "function") return { blob: file, converted: false };
+  let bmp: ImageBitmap | null = null;
+  try {
+    bmp = await createImageBitmap(file);
+    const scale = Math.min(1, AI_IMAGE_MAX_SIDE / Math.max(bmp.width, bmp.height));
+    const w = Math.max(1, Math.round(bmp.width * scale));
+    const h = Math.max(1, Math.round(bmp.height * scale));
+    const canvas = document.createElement("canvas");
+    canvas.width = w;
+    canvas.height = h;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return { blob: file, converted: false };
+    ctx.fillStyle = "#ffffff"; // (a transparent PNG gets a white background, not a black one)
+    ctx.fillRect(0, 0, w, h);
+    ctx.drawImage(bmp, 0, 0, w, h);
+    const out = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/jpeg", AI_IMAGE_QUALITY));
+    if (out && out.size > 0 && out.size < file.size) return { blob: out, converted: true };
+    return { blob: file, converted: false };
+  } catch {
+    return { blob: file, converted: false };
+  } finally {
+    bmp?.close?.();
+  }
+}
+/** The name of a picture saved as JPEG by shrinkForAi: the same name with a .jpg ending */
+export const jpegName = (name: string) => (name || "image").replace(/\.[a-z0-9]{2,5}$/i, "") + ".jpg";
+
 export const readAsDataUrl = (file: Blob) =>
   new Promise<string>((resolve, reject) => {
     const r = new FileReader();

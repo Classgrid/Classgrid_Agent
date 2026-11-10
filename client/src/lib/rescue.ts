@@ -68,7 +68,8 @@ export async function fetchWithRescue(input: RequestInfo | URL, init?: RequestIn
     markMainDown();
   } catch (err) {
     if ((err as Error)?.name === "AbortError") throw err;
-    markMainDown();
+    // (a thrown error is this computer's own connection, not the server: the rescue copy is tried once for this
+    // request, but the next 30 s of requests are not all sent to it first, 2026-11-10)
   }
   return fetch(rescueUrl, init);
 }
