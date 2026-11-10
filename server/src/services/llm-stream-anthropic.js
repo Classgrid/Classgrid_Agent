@@ -724,28 +724,32 @@ export async function streamClaudeChat({
                 idleTimer.unref?.();
             };
             armIdle();
-            for await (const event of stream) {
-                armIdle();
-                if (event.type === "message_start") {
-                    roundUsage = { ...(event.message?.usage || {}) };
-                    console.log(`[AI-TIMING] claude message_start after ${Date.now() - sentAt}ms (round ${depth}, cacheRead=${roundUsage.cache_read_input_tokens ?? 0}, cacheWrite=${roundUsage.cache_creation_input_tokens ?? 0}, input=${roundUsage.input_tokens ?? 0})`);
-                    if (inputTooBig?.(roundShape(roundUsage))) {
-                        budgetCut = true;
-                        stream.abort();
-                        break;
+            try {
+                for await (const event of stream) {
+                    armIdle();
+                    if (event.type === "message_start") {
+                        roundUsage = { ...(event.message?.usage || {}) };
+                        console.log(`[AI-TIMING] claude message_start after ${Date.now() - sentAt}ms (round ${depth}, cacheRead=${roundUsage.cache_read_input_tokens ?? 0}, cacheWrite=${roundUsage.cache_creation_input_tokens ?? 0}, input=${roundUsage.input_tokens ?? 0})`);
+                        if (inputTooBig?.(roundShape(roundUsage))) {
+                            budgetCut = true;
+                            stream.abort();
+                            break;
+                        }
+                        continue;
                     }
-                    continue;
+                    if (event.type === "message_delta") {
+                        if (roundUsage && event.usage?.output_tokens !== undefined) roundUsage.output_tokens = event.usage.output_tokens;
+                        continue;
+                    }
+                    if (event.type !== "content_block_delta") continue;
+                    if (event.delta.type === "thinking_delta" && event.delta.thinking) {
+                        emitThought(event.delta.thinking);
+                    } else if (event.delta.type === "text_delta" && event.delta.text) {
+                        splitter.push(event.delta.text);
+                    }
                 }
-                if (event.type === "message_delta") {
-                    if (roundUsage && event.usage?.output_tokens !== undefined) roundUsage.output_tokens = event.usage.output_tokens;
-                    continue;
-                }
-                if (event.type !== "content_block_delta") continue;
-                if (event.delta.type === "thinking_delta" && event.delta.thinking) {
-                    emitThought(event.delta.thinking);
-                } else if (event.delta.type === "text_delta" && event.delta.text) {
-                    splitter.push(event.delta.text);
-                }
+            } catch (e) {
+                if (!idleStop) throw e; // (a stream closed by the idle watchdog ends here on purpose)
             }
             clearTimeout(idleTimer);
             if (idleStop) {
