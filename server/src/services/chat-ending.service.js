@@ -93,6 +93,7 @@ export async function requestEndConversation({ sessionId, userEmail, role, reaso
         end_reason: reason,
         end_summary: String(summary || "").slice(0, 500),
     }).eq("id", sessionId);
+    import("./ai-chat.service.js").then((m) => m.forgetSession(sessionId)).catch(() => {}); // the row kept in memory for answers is stale now
     if (error) return { ok: false, text: `FAILED to end chat: ${error.message}` };
 
     await redis.del(key).catch(() => {});
@@ -114,6 +115,7 @@ export async function warnUser({ sessionId, userEmail, message }) {
         warned_count: warned,
         last_warning_at: new Date().toISOString(),
     }).eq("id", sessionId);
+    import("./ai-chat.service.js").then((m) => m.forgetSession(sessionId)).catch(() => {});
     if (error) return { ok: false, text: `FAILED to record warning: ${error.message}` };
     return { ok: true, warned, text: `Warning ${warned} recorded. Now tell the user politely${message ? ` (${String(message).slice(0, 200)})` : ""} that the chat may be ended if this continues.` };
 }
@@ -124,6 +126,7 @@ export async function reopenConversation(sessionId, userEmail) {
     if (!session.ended) return { status: 200, body: { ok: true } };
     if (session.end_reason !== "user_requested") return { status: 403, body: { error: "This chat was ended by Classgrid AI and cannot be reopened.", code: "CHAT_ENDED" } };
     const { error } = await supabase.from("ai_chat_sessions").update({ ended: false, ended_at: null, end_reason: null, end_summary: null }).eq("id", sessionId);
+    import("./ai-chat.service.js").then((m) => m.forgetSession(sessionId)).catch(() => {});
     if (error) return { status: 500, body: { error: "Failed to reopen chat" } };
     return { status: 200, body: { ok: true } };
 }

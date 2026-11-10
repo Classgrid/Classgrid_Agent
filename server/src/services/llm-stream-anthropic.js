@@ -395,14 +395,20 @@ function toClaudeMessages(messages, attachmentBlocks) {
         const text = typeof m.content === "string" ? m.content : JSON.stringify(m.content ?? "");
         if (!text.trim()) continue;
         if (out.length === 0 && m.role === "assistant") continue; // the first message must be from the user
-        out.push({ role: m.role, content: text });
+        out.push({ role: m.role, content: text, ...(m.perMessageNote ? { perMessageNote: String(m.perMessageNote) } : {}) });
     }
     // Attachments belong to the newest user message; blocks go before its text.
     const blocks = attachmentBlocks || [];
     const last = out[out.length - 1];
-    if (blocks.length > 0 && last?.role === "user") {
-        last.content = [...blocks, { type: "text", text: last.content }];
+    if (last?.role === "user" && (blocks.length > 0 || last.perMessageNote)) {
+        // The per-message notes (time, editor notes) are their own block AFTER the message text, and the message text
+        // carries a cache breakpoint: on the next turn this same text comes back from the history byte for byte, so the
+        // prefix up to and including it is read from the cache, and only the notes and the new message are new. (With
+        // the notes mixed into the text, no turn's prefix ever matched the next one's: the whole history was re-read.)
+        const textBlock = last.perMessageNote ? { type: "text", text: last.content, cache_control: { type: "ephemeral" } } : { type: "text", text: last.content };
+        last.content = [...blocks, textBlock, ...(last.perMessageNote ? [{ type: "text", text: last.perMessageNote }] : [])];
     }
+    for (const m of out) delete m.perMessageNote;
     return out;
 }
 

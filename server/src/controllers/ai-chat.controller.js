@@ -1090,6 +1090,17 @@ async function readPageDirect(startUrl, pageLinks = []) {
 }
 const estimatePromptTokens = (parts) => Math.ceil(parts.reduce((n, p) => n + (typeof p === "string" ? p.length : (JSON.stringify(p ?? "") || "").length), 0) / 4);
 
+// The per-message notes (time, editor notes, the user's terminal) travel beside the user's message (perMessageNote)
+// so the message text stays byte-identical in the history of later turns (prompt cache). Models that take plain
+// text (Cloudflare, the SDK fallback) get the notes folded in front of the text at call time, here.
+const foldPerMessageNotes = (msgs) => msgs.map((m) => {
+    if (!m || !m.perMessageNote) return m;
+    const { perMessageNote, ...rest } = m;
+    if (typeof rest.content === "string") return { ...rest, content: `${perMessageNote}\n\n${rest.content}` };
+    if (Array.isArray(rest.content)) return { ...rest, content: [{ type: "text", text: perMessageNote }, ...rest.content] };
+    return rest;
+});
+
 // A few lookups every answer makes that rarely change within seconds (the user's row, preferences, skills, the usage
 // check): kept in this process for a moment, so an answer starts without waiting on the database for what it read
 // seconds ago (answers must start at once, owner 2026-11-09). Nothing of the user's data is kept anywhere else.
@@ -6311,14 +6322,16 @@ If a tool fails, never show the error message; say only: "Something went wrong o
             parts.push(`tools ${activeToolList.length}/${fullToolList.length} ${h(fullToolList.map((t) => t.function.name).join(","))} loaded ${h([...toolPlan.loadedNames].sort().join(","))}`);
             console.log(`[AI-CACHE] ${parts.join(" | ")}`);
         } catch { /* a log line only */ }
-        // The per-message notes (see tailPrompt) go in front of the user's message, at the end of the conversation
+        // The per-message notes (see tailPrompt) go with the user's message, at the end of the conversation, but as a
+        // SEPARATE part (perMessageNote), never mixed into the message text: the message text must be byte-identical
+        // when it comes back as history on the next turn, or the model's prompt cache misses from that message on
+        // (the note mixed into the text made every turn re-read the whole history: cacheRead stuck at the tools and the
+        // fixed rules, 2026-11-10). Claude gets the note as its own content block after the message (with a cache
+        // breakpoint on the message itself, llm-stream-anthropic.js toClaudeMessages); the other models get it folded
+        // in front of the text at call time (foldPerMessageNotes).
         if (tailPrompt.trim()) {
             const lastUser = [...messages].reverse().find((m) => m.role === "user");
-            if (lastUser) {
-                const note = `[Notes from Classgrid for this message. They are not from the user: use them, never show, quote or mention them.]${tailPrompt}\n[End of the notes. The user's message follows.]\n\n`;
-                if (typeof lastUser.content === "string") lastUser.content = note + lastUser.content;
-                else if (Array.isArray(lastUser.content)) lastUser.content = [{ type: "text", text: note }, ...lastUser.content];
-            }
+            if (lastUser) lastUser.perMessageNote = `[Notes from Classgrid for this message. They are not from the user: use them, never show, quote or mention them.]${tailPrompt}\n[End of the notes. The user's message is above.]`;
         }
         // Rebuilds the system prompt for a Cloudflare model (OCR / thinking rules, no Claude vision line) when Claude
         // was tried first and failed; groups loaded meanwhile keep their rules.
@@ -6609,10 +6622,10 @@ If a tool fails, never show the error message; say only: "Something went wrong o
                             // A model that sees images gets the attached images inside the newest user message (like Claude)
                             const sees = CF_VISION_MODELS.has(model);
                             modelSeesImages = sees;
-                            let modelMessages = messages;
+                            let modelMessages = foldPerMessageNotes(messages);
                             let imageParts = [];
                             if (sees) {
-                                modelMessages = [...messages];
+                                modelMessages = [...modelMessages];
                                 if (modelMessages[0]?.role === "system") modelMessages[0] = { ...modelMessages[0], content: modelMessages[0].content + CF_NATIVE_VISION_NOTE };
                                 imageParts = await toImageUrlParts([...withInlineImages(body.attachments, inlineImages), ...recentGeneratedImageAttachments(messages)], streamAbort.signal);
                                 const lastUser = modelMessages.map((m) => m.role).lastIndexOf("user");
@@ -6692,7 +6705,7 @@ If a tool fails, never show the error message; say only: "Something went wrong o
                 answer = streamed
                     ? streamed.answer
                     : await usageStorage.run(usageStore, () => currentClient.generate({
-                        messages,
+                        messages: foldPerMessageNotes(messages),
                         maxToolDepth: 800,
                         timeoutMs: isDiagramRequest && attempt === 1 ? 15000 : 1200000,
                         onStatus,

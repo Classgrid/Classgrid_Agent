@@ -88,6 +88,7 @@ export async function updateSessionTitle(sessionId, title) {
         .eq('id', sessionId)
         .select()
         .single();
+    forgetSession(sessionId);
 
     if (error) {
         console.error("Error updating AI chat session title:", error);
@@ -343,6 +344,7 @@ export async function triggerMemoryAgent(sessionId, { force = false } = {}) {
             .from('ai_chat_sessions')
             .update({ long_term_memory: `[Summary of messages 1-${total}]\n${summary}` })
             .eq('id', sessionId);
+        forgetSession(sessionId);
 
         if (updateErr) {
             console.error("[Memory Agent] Error saving to DB:", updateErr);
@@ -419,6 +421,7 @@ export async function deleteSession(sessionId) {
         .from('ai_chat_sessions')
         .delete()
         .eq('id', sessionId);
+    forgetSession(sessionId);
 
     if (error) {
         console.error("Error deleting AI chat session:", error);
@@ -439,6 +442,7 @@ export async function updateSessionPinned(sessionId, pinned) {
         .eq('id', sessionId)
         .select()
         .single();
+    forgetSession(sessionId);
 
     if (error) {
         console.error("Error updating AI chat session pinned status:", error);
@@ -454,7 +458,7 @@ export async function updateSessionPinned(sessionId, pinned) {
 // few seconds, so the next message of the same chat doesn't wait on the database for it again (answers must start at
 // once, owner 2026-11-09). Code that changes the row calls forgetSession first.
 const sessionRows = new Map(); // sessionId -> { at, promise }
-const SESSION_ROW_MS = 5000;
+const SESSION_ROW_MS = 30000; // (every writer of the row calls forgetSession, so a change is seen at once)
 export function forgetSession(sessionId) { sessionRows.delete(String(sessionId)); }
 export async function getSessionById(sessionId) {
     const key = String(sessionId);

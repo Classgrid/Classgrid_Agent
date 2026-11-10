@@ -252,6 +252,7 @@ export async function leaveSharedChat(session, email) {
     const next = others.find((m) => m.role === "member") || others[0];
     const newOwner = norm(next.user_email);
     const { error } = await sb.from("ai_chat_sessions").update({ user_email: newOwner, pinned: false }).eq("id", session.id);
+    import("./ai-chat.service.js").then((m) => m.forgetSession(session.id)).catch(() => {}); // the row kept in memory for answers is stale now
     if (error) throw error;
     await sb.from("ai_chat_grid_members").update({ role: "owner" }).eq("session_id", session.id).eq("user_email", newOwner);
     await sb.from("ai_chat_grid_members").update({ removed_at: now, role: "member" }).eq("session_id", session.id).eq("user_email", me);
