@@ -1812,8 +1812,9 @@ export const streamAskAi = async (req, res) => {
     try {
         // (the same check from the last 10 seconds is reused while the balance is clearly enough; a tight or blocked
         // balance is always checked for real)
+        // (the database is 150 ms away per read, measured 2026-11-10; this check alone is three reads)
         const quotaKey = `quota:${userId}:${orgId || "-"}:${fablePaidOnly ? 1 : 0}`;
-        const check = await keptFor(quotaKey, 10000, () => hasEnoughTokens(userId, orgId, estimatePromptTokens([body.question || ""]) + MIN_PROMPT_TOKENS + REPLY_TOKEN_ALLOWANCE, { paidOnly: fablePaidOnly }));
+        const check = await keptFor(quotaKey, 30000, () => hasEnoughTokens(userId, orgId, estimatePromptTokens([body.question || ""]) + MIN_PROMPT_TOKENS + REPLY_TOKEN_ALLOWANCE, { paidOnly: fablePaidOnly }));
         if (!check.allowed || ((check.spendable ?? check.remaining) !== undefined && (check.spendable ?? check.remaining) < 50000)) forgetKept(quotaKey);
         firstCheck = check;
         if (deviceNoted) await deviceNoted;
@@ -2540,9 +2541,11 @@ CRITICAL: If you call ANY integration tool (e.g. Google Classroom, Gmail, Google
         // (read once and kept for 10 seconds: the same user's next message doesn't wait on the database for them again)
         const [deepContext, userPrefsDocResult, customSkillsResult, latestUserResult] = await Promise.all([
             null, // The ERP is gone: its class/subject/teacher context (buildDeepContext) is no longer added
-            userId ? keptFor(`prefs:${userId}`, 10000, () => UserModel.findById(userId).select("ai_preferences").lean().catch((e) => { console.error("Error loading AI Preferences:", e); return null; })) : null,
-            userId ? keptFor(`skills:${userId}`, 10000, () => AiSkillModel.find({ userId, is_active: true }).lean().catch((e) => { console.error("Error loading AI skills:", e); return []; })) : [],
-            req.user ? keptFor(`user:${req.user._id}`, 10000, () => mongoose.model('User').findById(req.user._id).lean().catch((e) => { console.error("Error loading user for integrations:", e); return null; })) : null
+            // (each read is 150 ms away; preferences and skills change rarely, the user's row holds the connected
+            // integrations, which a user may connect and use within a minute, so it is kept for a shorter time)
+            userId ? keptFor(`prefs:${userId}`, 60000, () => UserModel.findById(userId).select("ai_preferences").lean().catch((e) => { console.error("Error loading AI Preferences:", e); return null; })) : null,
+            userId ? keptFor(`skills:${userId}`, 60000, () => AiSkillModel.find({ userId, is_active: true }).lean().catch((e) => { console.error("Error loading AI skills:", e); return []; })) : [],
+            req.user ? keptFor(`user:${req.user._id}`, 20000, () => mongoose.model('User').findById(req.user._id).lean().catch((e) => { console.error("Error loading user for integrations:", e); return null; })) : null
         ]);
         console.log(`[AI-TIMING] user lookups done at +${Date.now() - requestStartedAt}ms`);
 

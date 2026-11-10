@@ -127,10 +127,10 @@ export async function getUserAccessBlock(user, { issuedAtMs, settings, allowStat
         };
     }
 
-    // Organization status check
+    // Organization status check (kept in memory for a few seconds, see keptOrgStatus)
     if (user.organization_id && user.role !== "super_admin") {
-        const org = await Organization.findById(user.organization_id).select("status").lean();
-        if (org && ["suspended", "blocked"].includes(org.status)) {
+        const orgStatus = await keptOrgStatus(user.organization_id);
+        if (orgStatus && ["suspended", "blocked"].includes(orgStatus)) {
             return {
                 status: 403,
                 body: {
@@ -158,6 +158,43 @@ export async function getUserAccessBlock(user, { issuedAtMs, settings, allowStat
  *   req.isImpersonating        — boolean
  *   req.effectiveOrganizationId — always from JWT (authoritative)
  */
+// The database is about 150 ms away per read (measured from the server, 2026-11-10), and every API request read the
+// system settings, the user's row and the organization's status before anything else: 300-450 ms in front of every
+// answer, every poll, every click. They are kept in this process for a few seconds instead (a blocked user or a
+// maintenance switch takes effect within that time).
+const SETTINGS_KEEP_MS = 15000;
+const USER_KEEP_MS = 15000;
+const ORG_KEEP_MS = 30000;
+let settingsKept = null; // { at, promise }
+const usersKept = new Map(); // userId -> { at, promise of the lean row }
+const orgStatusKept = new Map(); // orgId -> { at, promise of the status }
+export function forgetAuthUser(userId) { usersKept.delete(String(userId)); }
+async function keptSettings() {
+    if (settingsKept && Date.now() - settingsKept.at < SETTINGS_KEEP_MS) return settingsKept.promise;
+    const promise = SystemSettings.findOne().lean().catch(() => null);
+    settingsKept = { at: Date.now(), promise };
+    return promise;
+}
+async function keptUser(userId) {
+    const key = String(userId);
+    const have = usersKept.get(key);
+    if (have && Date.now() - have.at < USER_KEEP_MS) return have.promise;
+    const promise = User.findById(userId).select("-password -verificationToken").maxTimeMS(5000).lean();
+    usersKept.set(key, { at: Date.now(), promise });
+    promise.then((u) => { if (!u) usersKept.delete(key); }, () => usersKept.delete(key));
+    if (usersKept.size > 20000) usersKept.clear();
+    return promise;
+}
+export async function keptOrgStatus(orgId) {
+    const key = String(orgId);
+    const have = orgStatusKept.get(key);
+    if (have && Date.now() - have.at < ORG_KEEP_MS) return have.promise;
+    const promise = Organization.findById(orgId).select("status").lean().then((o) => o?.status ?? null).catch(() => null);
+    orgStatusKept.set(key, { at: Date.now(), promise });
+    if (orgStatusKept.size > 20000) orgStatusKept.clear();
+    return promise;
+}
+
 export const isAuthenticated = async (req, res, next) => {
     let token;
 
@@ -177,8 +214,8 @@ export const isAuthenticated = async (req, res, next) => {
         // Ensure DB is connected (critical for serverless cold starts)
         await connectDB();
 
-        // Dynamically check system settings for emergency locks
-        const settings = await SystemSettings.findOne();
+        // Dynamically check system settings for emergency locks (kept in memory for a few seconds, see keptSettings)
+        const settings = await keptSettings();
 
         if (decoded.isProvisional) {
             // Strictly limit what endpoints a provisional token can access.
@@ -217,10 +254,13 @@ export const isAuthenticated = async (req, res, next) => {
             res.setHeader("X-Impersonation", "true");
         } else {
             // ── NORMAL MODE ──
-            const user = await User.findById(decoded.id).select("-password -verificationToken").maxTimeMS(5000);
-            if (!user) {
+            // (the row is kept in memory for a few seconds and hydrated into a fresh document per request, so handlers
+            // that change and save req.user keep working)
+            const userRow = await keptUser(decoded.id);
+            if (!userRow) {
                 return res.status(401).json({ message: "User no longer exists" });
             }
+            const user = User.hydrate(userRow);
 
             // Password change, global lock / maintenance, user status and organization status checks
             const block = await getUserAccessBlock(user, { issuedAtMs: decoded.iat * 1000, settings });

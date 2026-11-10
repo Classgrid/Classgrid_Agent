@@ -115,6 +115,7 @@ export async function addMember(session, email) {
         .from("ai_chat_grid_members")
         .upsert([{ session_id: session.id, user_email: me, role: "member", joined_at: new Date().toISOString(), removed_at: null }], { onConflict: "session_id,user_email" });
     if (error) return { error: "Could not join this chat.", status: 500 };
+    forgetGridLabels(session.id);
     // The AI's cached history has no names yet: rebuild it with "Name: …" on every user message
     const { invalidateHistoryCache } = await import("./ai-chat-history.service.js");
     await invalidateHistoryCache(session.id).catch(() => {});
@@ -145,7 +146,22 @@ export async function getSharedSessionsFor(email) {
  * Names the AI sees for the people in a shared chat. Two people with the same name also get their
  * email name ("Nikhil Shinde (nikhilsubsun123)"). Null when the chat isn't shared (fewer than 2 people).
  */
+// The members of a chat are read at the start of every answer (200 ms from the database): kept in this process for a
+// minute; a member joining, leaving or handing over drops it (forgetGridLabels)
+const gridLabelsKept = new Map(); // sessionId -> { at, promise }
+const GRID_LABELS_KEEP_MS = 60000;
+export function forgetGridLabels(sessionId) { gridLabelsKept.delete(String(sessionId)); }
 export async function gridLabelMap(sessionId) {
+    const key = String(sessionId || "");
+    const have = gridLabelsKept.get(key);
+    if (have && Date.now() - have.at < GRID_LABELS_KEEP_MS) return have.promise;
+    const promise = readGridLabelMap(sessionId);
+    gridLabelsKept.set(key, { at: Date.now(), promise });
+    promise.catch(() => gridLabelsKept.delete(key));
+    if (gridLabelsKept.size > 20000) gridLabelsKept.clear();
+    return promise;
+}
+async function readGridLabelMap(sessionId) {
     const members = await getActiveMembers(sessionId);
     if (members.length < 2) return null;
     const profiles = await profilesFor(members.map((m) => m.user_email));
@@ -246,6 +262,7 @@ export async function leaveSharedChat(session, email) {
     const now = new Date().toISOString();
     if (norm(session.user_email) !== me) {
         await sb.from("ai_chat_grid_members").update({ removed_at: now }).eq("session_id", session.id).eq("user_email", me);
+        forgetGridLabels(session.id);
         return "left";
     }
     if (others.length === 0) return "delete";
@@ -256,6 +273,7 @@ export async function leaveSharedChat(session, email) {
     if (error) throw error;
     await sb.from("ai_chat_grid_members").update({ role: "owner" }).eq("session_id", session.id).eq("user_email", newOwner);
     await sb.from("ai_chat_grid_members").update({ removed_at: now, role: "member" }).eq("session_id", session.id).eq("user_email", me);
+    forgetGridLabels(session.id);
     // The old owner's invite link stops working; the new owner can make a new one
     await sb.from("ai_chat_grid_invites").update({ status: "revoked" }).eq("session_id", session.id).eq("invite_type", "link").eq("status", "pending");
     return "transferred";
