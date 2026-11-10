@@ -3968,7 +3968,7 @@ Every user is using you as a personal AI assistant and agent (like ChatGPT) to m
                                 emitHelper({ helper: i, id, tool: n, args: a });
                                 const step = helperStep(h, id, n, a);
                                 playground("tool", { who: `Helper ${h.no}`, tool: n, detail: JSON.stringify(a ?? {}).slice(0, 200) });
-                                const out = onComputer ? await computerHandlers[n](a, { fromHelper: true }) : outsideProject(n, a) ? (n === "view_project_file" ? await readLocalFile(req.user?._id || req.user?.id, { path: a.path }) : await runOnComputer(req.user?._id || req.user?.id, n, a || {}, sessionId)) : h.wt && LOCAL_TOOLS.has(n) ? await callLocal(h.wt.project, n, a || {}, sessionId) : (await handleToolCall(n, a, { sessionId, desktop: !fromWebsite })).content[0].text;
+                                const out = onComputer ? await computerHandlers[n](a, { fromHelper: true }) : outsideProject(n, a) ? (n === "view_project_file" ? await readLocalFile(req.user?._id || req.user?.id, { path: a.path }, { chat: sessionId }) : await runOnComputer(req.user?._id || req.user?.id, n, a || {}, sessionId)) : h.wt && LOCAL_TOOLS.has(n) ? await callLocal(h.wt.project, n, a || {}, sessionId) : (await handleToolCall(n, a, { sessionId, desktop: !fromWebsite })).content[0].text;
                                 emitHelper({ helper: i, id, result: String(out && typeof out === "object" ? out.text : out).slice(0, 6000) });
                                 helperStepDone(step, out);
                                 // The files this helper changed, for the chat's "files changed" box
@@ -4220,7 +4220,7 @@ You work on the user's own Windows computer through their Classgrid desktop app,
                         return `${lines.join("\n\n")}\n\n${running ? `${running} helper(s) still working.` : "All helpers have finished."}${helperChangesText(reported)}`;
                     },
                     // Desktop app only (see READ_LOCAL_FILE_TOOL): the user's own Classgrid app reads the file
-                    read_local_file: async (args) => readLocalFile(req.user?._id || req.user?.id, args, { seesImages: modelSeesImages }),
+                    read_local_file: async (args) => readLocalFile(req.user?._id || req.user?.id, args, { seesImages: modelSeesImages, chat: sessionId }),
                     run_code: async (args) => {
                         // A project from a folder on the user's computer: the code runs there, in their desktop app
                         const localProject = fromWebsite ? null : await localProjectFor(sessionId);

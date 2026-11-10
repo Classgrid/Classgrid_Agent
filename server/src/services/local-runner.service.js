@@ -291,7 +291,7 @@ const LOCAL_FILE_TEXT_CHARS = 18000;
 async function gatherFile(userId, file) {
     const parts = [Buffer.from(file.data, "base64")];
     for (let n = 1; n < Number(file.chunks || 1); n++) {
-        const next = await callRunner(userId, "read_local_file", { path: file.path, chunk: n });
+        const next = await callRunner(userId, "read_local_file", { path: file.path, chunk: n }, chat);
         if (!next) return "The Classgrid desktop app isn't open on the user's computer any more. Tell the user to open it, then try again.";
         if (typeof next.file?.data !== "string" || next.file.chunk !== n || next.file.bytes !== file.bytes) return next.text?.startsWith("Error") ? next.text : `Error: ${file.path} changed while it was being read. Try again.`;
         parts.push(Buffer.from(next.file.data, "base64"));
@@ -308,7 +308,7 @@ async function soundToStorage(userId, file, name, mime) {
     try {
         const { uploadUrl, publicUrl } = await getPresignedUploadUrl(name, mime, 15 * 60);
         // (chunk 1: an older app that doesn't know "upload" answers with one small piece instead of reading it all again)
-        const sent = await callRunner(userId, "read_local_file", { path: file.path, chunk: 1, upload: { url: uploadUrl, mime } });
+        const sent = await callRunner(userId, "read_local_file", { path: file.path, chunk: 1, upload: { url: uploadUrl, mime } }, chat);
         if (sent?.uploaded?.bytes === file.bytes) return { link: publicUrl };
         if (sent?.text) console.warn(`[read_local_file] the app didn't send the sound to storage itself: ${String(sent.text).slice(0, 200)}`);
     } catch (e) {
@@ -339,11 +339,11 @@ ${said}
  * user first on the permission card). Pictures come back as images the AI looks at itself (as view_image), documents
  * (PDF, Word, Excel, PowerPoint) as their text, other files as text.
  */
-export async function readLocalFile(userId, args = {}, { seesImages = false } = {}) {
+export async function readLocalFile(userId, args = {}, { seesImages = false, chat = null } = {}) {
     const given = String(args?.path || "").trim();
     if (!given) return "Error: path is empty. Give the full path of the file, like C:\\Users\\name\\Downloads\\photo.png";
     const notOpen = "The Classgrid desktop app isn't open on the user's computer, so files there can't be read right now. Tell the user to open the Classgrid desktop app, then try again.";
-    const first = await callRunner(userId, "read_local_file", { path: given, start_line: args?.start_line, end_line: args?.end_line, start_page: args?.start_page });
+    const first = await callRunner(userId, "read_local_file", { path: given, start_line: args?.start_line, end_line: args?.end_line, start_page: args?.start_page }, chat);
     if (!first) return notOpen;
     if (/read_local_file can't run on this computer/.test(first.text)) return "Error: the user's Classgrid desktop app is an older version that can't read files on their computer. Ask them to update the app (or reinstall it from classgrid.in), then try again.";
     // A scanned PDF whose pages the app already made into pictures on the computer (only the pictures came here)

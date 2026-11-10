@@ -42,7 +42,7 @@
 //   "drop_block" makes a prefix mismatch degrade instead of failing the request.
 
 import Anthropic from "@anthropic-ai/sdk";
-import { StreamChatError, CONTINUE_PROMPT, THINKING_CUT_PROMPT, budgetStopAnswer } from "./llm-stream.js";
+import { StreamChatError, CONTINUE_PROMPT, THINKING_CUT_PROMPT, budgetStopAnswer, makeRepeatGuard } from "./llm-stream.js";
 
 export const CLAUDE_CHAT_MODELS = new Set([
     "claude-haiku-5-5",
@@ -604,6 +604,7 @@ export async function streamClaudeChat({
     const earlierCalls = resumed
         ? conversation.flatMap((m) => (m.role === "assistant" && Array.isArray(m.content) ? m.content.filter((b) => b?.type === "tool_use").map((b) => ({ name: b.name, input: JSON.stringify(b.input ?? {}) })) : []))
         : [];
+    const repeatGuard = makeRepeatGuard(); // the same kind of call again and again, with other numbers
     let depth = 0;
     let toolsRun = 0;
     let hadReasoning = false;
@@ -805,6 +806,9 @@ export async function streamClaudeChat({
                     // Found through tool search but its group (and that group's rules) isn't loaded yet.
                     content = `Error: Before using ${call.name}, call load_tools with groups ["${groupNeedingLoad(call.name)}"] to load it and its rules, then call ${call.name} again.`;
                     isError = true;
+                } else if ((content = repeatGuard.before(call.name, call.input))) {
+                    // the same kind of call again and again (see makeRepeatGuard): not run any more
+                    isError = true;
                 } else {
                     // load_tools only changes which tools are visible: no status pill, and not counted as an action.
                     const isLoader = call.name === LOAD_TOOLS_TOOL;
@@ -823,6 +827,8 @@ export async function streamClaudeChat({
                         isError = true;
                     }
                     if (!isLoader) onStatus?.("analyzing");
+                    const repeatNote = repeatGuard.after(call.name, call.input);
+                    if (repeatNote) content = content && typeof content === "object" && "text" in content ? { ...content, text: String(content.text ?? "") + repeatNote } : String(content ?? "") + repeatNote;
                 }
                 callsThisRound.push({ name: call.name, input: inputKey });
                 return { content, isError };
@@ -845,7 +851,7 @@ export async function streamClaudeChat({
                 const refs = isObjectResult && Array.isArray(content.toolReferences)
                     ? content.toolReferences.filter((n) => deferredToolNames.has(n))
                     : [];
-                const resultText = String((isObjectResult ? content.text : content) ?? "").slice(0, call.name === "run_project_helpers" || call.name === "check_helpers" || call.name === "read_whatsapp_messages" || call.name === "wait_for_whatsapp_reply" ? 200000 : ["execute_terminal_command", "computer_terminal", "check_background_command", "start_background_command", "send_background_input", "run_code"].includes(call.name) ? 60000 : call.name === "view_project_file" || call.name === "search_project" ? 100000 : call.name === "open_url" || call.name === "read_local_file" ? 20000 : 6000);
+                const resultText = String((isObjectResult ? content.text : content) ?? "").slice(0, call.name === "run_project_helpers" || call.name === "check_helpers" || call.name === "read_whatsapp_messages" || call.name === "wait_for_whatsapp_reply" ? 200000 : ["execute_terminal_command", "computer_terminal", "check_background_command", "start_background_command", "send_background_input", "run_code"].includes(call.name) ? 60000 : ["browser_run_js", "browser_read", "browser_logs", "browser_open"].includes(call.name) ? 40000 : call.name === "view_project_file" || call.name === "search_project" ? 100000 : call.name === "open_url" || call.name === "read_local_file" ? 20000 : 6000);
                 // The tool_result can only hold the references, so a loaded group's rules follow as a text block.
                 if (refs.length > 0 && content.instructions) extraTexts.push(String(content.instructions));
                 const images = refs.length > 0 || isError ? [] : await toolResultImages(call.name, isObjectResult ? content : null, resultText);

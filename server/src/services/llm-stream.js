@@ -131,6 +131,31 @@ export const CONTINUE_PROMPT ="Your previous reply was cut off by the length lim
 
 // The terminal rule, sent with every message where the AI can use a terminal (cloud and desktop app; owner's rule,
 // 2026-11-04): a missing or failed tool is never a reason to stop and think, the terminal does the job
+// A model going round in circles with nearly the same call (the same script with other numbers, 92 times in one
+// answer, 2026-11-09): the calls of one answer are counted by their shape (numbers taken out). At REPEAT_NOTE_AT the
+// result carries a note to get everything in one go; at REPEAT_BLOCK_AT that shape runs no more in this answer.
+export const REPEAT_NOTE_AT = 10;
+export const REPEAT_BLOCK_AT = 40;
+export function makeRepeatGuard() {
+    const counts = new Map();
+    return {
+        // Call before running: null = go ahead, else the text to return instead of running
+        before(toolName, input) {
+            const shape = `${toolName}:${JSON.stringify(input ?? {}).replace(/\d+/g, "#").slice(0, 2000)}`;
+            const n = (counts.get(shape) || 0) + 1;
+            counts.set(shape, n);
+            if (n >= REPEAT_BLOCK_AT) return `Error: you have made this same kind of call (${toolName}, only the numbers differ) ${n} times in this answer. It is not run any more in this answer. Tell the user what you have so far and what stopped you.`;
+            return null;
+        },
+        // Call after running: the note to append to the result, or ""
+        after(toolName, input) {
+            const shape = `${toolName}:${JSON.stringify(input ?? {}).replace(/\d+/g, "#").slice(0, 2000)}`;
+            const n = counts.get(shape) || 0;
+            return n === REPEAT_NOTE_AT ? `\n\n[Note: this is the ${n}th time you run this same kind of call with other numbers. Get everything you need in one call (return the whole table or list at once; results up to 40,000 characters come through) instead of small slices. After ${REPEAT_BLOCK_AT} such calls it stops running.]` : "";
+        },
+    };
+}
+
 export const TERMINAL_RULE = "--- USE THE TERMINAL (every message) ---\nYou don't need a special tool for anything the terminal can do. When a tool is missing, not loaded or fails, don't stop to think it over and don't call it again the same way: do the same job right away with the terminal (execute_terminal_command): git add / commit / push to push code, gh repo create (or git remote add origin and git push -u) for a new GitHub repo, and normal shell commands for files, installs, builds and checks.";
 // A tool result that says the tool is missing or failed
 export const toolFailed = (text) => /^\s*(error\b|tool error|failed\b|not run\b|not created\b|this folder project only works)/i.test(String(text ?? ""))
@@ -316,6 +341,7 @@ export async function streamChat({
     const currentTools = () => tools.filter(t => t?.function?.name !== "internal_thought_process" && !excludeTools?.has(t?.function?.name));
     const resumed = resumeProvider === "cf" && Array.isArray(resumeConversation) && resumeConversation.length > 0;
     const conversation = resumed ? [...resumeConversation] : [...messages];
+    const repeatGuard = makeRepeatGuard(); // the same kind of call again and again, with other numbers
     const toolImages = seesImages ? (await import("./llm-stream-anthropic.js")).makeToolImageCollector(signal, conversation) : null;
     // cached_tokens: the input tokens the provider read from its prompt cache (billed lower), over all rounds
     const usage = { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0, cached_tokens: 0 };
@@ -532,6 +558,8 @@ export async function streamChat({
                     toolResult = `Error: The tool ${toolName} is not loaded. Call load_tools with its group first.`;
                 } else if (!handler) {
                     toolResult = `Error: Unknown tool ${toolName}.`;
+                } else if ((toolResult = repeatGuard.before(toolName, args))) {
+                    // the same kind of call again and again (see makeRepeatGuard): not run any more
                 } else {
                     // load_tools only changes which tools are visible: no status pill, and not counted as an action.
                     const isLoader = toolName === "load_tools";
@@ -549,6 +577,8 @@ export async function streamChat({
                         toolResult = `Tool error: ${e instanceof Error ? e.message : String(e)}`;
                     }
                     if (!isLoader) onStatus?.("analyzing");
+                    const repeatNote = repeatGuard.after(toolName, args);
+                    if (repeatNote) toolResult = toolResult && typeof toolResult === "object" && "text" in toolResult ? { ...toolResult, text: String(toolResult.text ?? "") + repeatNote } : String(toolResult ?? "") + repeatNote;
                 }
                 return toolResult;
             };
@@ -587,7 +617,7 @@ export async function streamChat({
                 // terminal, TERMINAL_RULE in every message's instructions; owner's rule, 2026-11-04)
                 if (toolFailed(resultText)) toolFailedThisRound = true;
                 // load_tools carries the full rules of the loaded groups, so it isn't cut like normal tool output.
-                conversation.push({ role: "tool", tool_call_id: call.id, content: String(resultText ?? "").slice(0, toolName === "run_project_helpers" || toolName === "check_helpers" || toolName === "read_whatsapp_messages" || toolName === "wait_for_whatsapp_reply" ? 200000 : ["execute_terminal_command", "computer_terminal", "check_background_command", "start_background_command", "send_background_input", "run_code"].includes(toolName) ? 60000 : toolName === "load_tools" ? 40000 : toolName === "view_project_file" || toolName === "search_project" ? 100000 : toolName === "open_url" || toolName === "read_local_file" ? 20000 : 6000) });
+                conversation.push({ role: "tool", tool_call_id: call.id, content: String(resultText ?? "").slice(0, toolName === "run_project_helpers" || toolName === "check_helpers" || toolName === "read_whatsapp_messages" || toolName === "wait_for_whatsapp_reply" ? 200000 : ["execute_terminal_command", "computer_terminal", "check_background_command", "start_background_command", "send_background_input", "run_code"].includes(toolName) ? 60000 : toolName === "load_tools" || ["browser_run_js", "browser_read", "browser_logs", "browser_open"].includes(toolName) ? 40000 : toolName === "view_project_file" || toolName === "search_project" ? 100000 : toolName === "open_url" || toolName === "read_local_file" ? 20000 : 6000) });
             }
 
             // Tool messages hold only text, so the images follow as one message the model looks at

@@ -125,7 +125,8 @@ export async function listStudioShots(req, res) {
 // (or is an older version without a browser), so the cloud browser is used.
 export async function desktopBrowserAct(userId, step) {
   const { callRunner } = await import("./local-runner.service.js");
-  const reply = await callRunner(userId, "browser", step);
+  // (step.chat: the chat this step belongs to, so it goes to that chat's own app when several are open)
+  const reply = await callRunner(userId, "browser", step, step?.chat ? String(step.chat) : null);
   if (!reply) return null;
   if (reply.browser && typeof reply.browser === "object") return reply.browser;
   if (/can't run on this computer/.test(String(reply.text))) return null;
