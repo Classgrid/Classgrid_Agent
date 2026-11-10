@@ -453,6 +453,97 @@
     --sidebar-background: #000000;
     --sidebar-accent: #222222;
   }
+  /* Inside an editor (Classgrid Code, VS Code, Cursor, Windsurf): our screens take the editor's own theme colors, as
+     the editor's other panels do. VS Code hands every page it shows its theme as --vscode-* variables and marks the
+     page vscode-dark / vscode-light; the extension's bridge then marks ours html.cg-editor-theme. Light and dark
+     alike: the variables already carry the theme in use. Incognito keeps its own colors. */
+  html.desktop-app.cg-editor.cg-editor-theme,
+  html.desktop-app.cg-editor.cg-editor-theme .studio-chat {
+    --background: var(--vscode-sideBar-background);
+    --color-background: var(--vscode-sideBar-background);
+    --foreground: var(--vscode-foreground);
+    --card: var(--vscode-editorWidget-background);
+    --card-foreground: var(--vscode-foreground);
+    --popover: var(--vscode-editorWidget-background);
+    --popover-foreground: var(--vscode-foreground);
+    --secondary: var(--vscode-input-background);
+    --secondary-foreground: var(--vscode-input-foreground, var(--vscode-foreground));
+    --muted: var(--vscode-list-hoverBackground);
+    --muted-foreground: var(--vscode-descriptionForeground);
+    --accent: var(--vscode-list-hoverBackground);
+    --accent-foreground: var(--vscode-foreground);
+    --border: var(--vscode-panel-border, var(--vscode-widget-border));
+    --input: var(--vscode-input-border, var(--vscode-panel-border));
+    --ring: var(--vscode-focusBorder);
+    --surface-1: var(--vscode-editorWidget-background);
+    --surface-2: var(--vscode-input-background);
+    --sidebar-background: var(--vscode-sideBar-background);
+    --sidebar-foreground: var(--vscode-sideBar-foreground, var(--vscode-foreground));
+    --sidebar-accent: var(--vscode-list-hoverBackground);
+    --sidebar-accent-foreground: var(--vscode-foreground);
+    --sidebar-border: var(--vscode-sideBarSectionHeader-border, var(--vscode-panel-border));
+  }
+  /* The screens' fixed colors, by their place: the page itself (the side bar's color), a raised part such as the
+     composer, a card or a window (the editor's widget color), a chip or a hovered row (the editor's input and hover
+     colors). Each class is matched whole, so a hover class keeps its own rule below. */
+  html.desktop-app.cg-editor.cg-editor-theme.dark [class~="dark:!bg-[#000000]"]:not(.cg-incognito, .cg-incognito *),
+  html.desktop-app.cg-editor.cg-editor-theme.dark [class~="max-sm:dark:!bg-black"]:not(.cg-incognito, .cg-incognito *),
+  html.desktop-app.cg-editor.cg-editor-theme.dark [class~="dark:bg-[#111]"]:not(.cg-incognito, .cg-incognito *),
+  html.desktop-app.cg-editor.cg-editor-theme.dark [class~="dark:bg-[#111111]"]:not(.cg-incognito, .cg-incognito *),
+  html.desktop-app.cg-editor.cg-editor-theme.dark [class~="dark:bg-[#121212]"]:not(.cg-incognito, .cg-incognito *) {
+    background-color: var(--vscode-sideBar-background) !important;
+  }
+  html.desktop-app.cg-editor.cg-editor-theme.dark [class~="dark:!bg-[#0f0f0f]"]:not(.cg-incognito, .cg-incognito *),
+  html.desktop-app.cg-editor.cg-editor-theme.dark [class~="dark:bg-[#151515]"]:not(.cg-incognito, .cg-incognito *),
+  html.desktop-app.cg-editor.cg-editor-theme.dark [class~="dark:bg-[#161616]"]:not(.cg-incognito, .cg-incognito *),
+  html.desktop-app.cg-editor.cg-editor-theme.dark [class~="dark:bg-[#171717]"]:not(.cg-incognito, .cg-incognito *),
+  html.desktop-app.cg-editor.cg-editor-theme.dark [class~="dark:bg-[#1a1a1a]"]:not(.cg-incognito, .cg-incognito *),
+  html.desktop-app.cg-editor.cg-editor-theme.dark [class~="dark:bg-[#1b1b1b]"]:not(.cg-incognito, .cg-incognito *),
+  html.desktop-app.cg-editor.cg-editor-theme.dark [class~="dark:bg-[#1c1c1c]"]:not(.cg-incognito, .cg-incognito *),
+  html.desktop-app.cg-editor.cg-editor-theme.dark [class~="dark:bg-[#1d1d1d]"]:not(.cg-incognito, .cg-incognito *),
+  html.desktop-app.cg-editor.cg-editor-theme.dark [class~="dark:bg-[#1e1e1e]"]:not(.cg-incognito, .cg-incognito *),
+  html.desktop-app.cg-editor.cg-editor-theme.dark [class~="dark:!bg-[#1e1e1e]"]:not(.cg-incognito, .cg-incognito *),
+  html.desktop-app.cg-editor.cg-editor-theme.dark [class~="dark:bg-[#1f1f1f]"]:not(.cg-incognito, .cg-incognito *),
+  html.desktop-app.cg-editor.cg-editor-theme.dark [class~="dark:bg-[#202020]"]:not(.cg-incognito, .cg-incognito *),
+  html.desktop-app.cg-editor.cg-editor-theme.dark [class~="dark:bg-[#202123]"]:not(.cg-incognito, .cg-incognito *),
+  html.desktop-app.cg-editor.cg-editor-theme.dark [class~="dark:bg-[#212121]"]:not(.cg-incognito, .cg-incognito *) {
+    background-color: var(--vscode-editorWidget-background) !important;
+  }
+  html.desktop-app.cg-editor.cg-editor-theme.dark [class~="dark:bg-[#222]"]:not(.cg-incognito, .cg-incognito *),
+  html.desktop-app.cg-editor.cg-editor-theme.dark [class~="dark:bg-[#222222]"]:not(.cg-incognito, .cg-incognito *),
+  html.desktop-app.cg-editor.cg-editor-theme.dark [class~="dark:bg-[#232323]"]:not(.cg-incognito, .cg-incognito *),
+  html.desktop-app.cg-editor.cg-editor-theme.dark [class~="dark:bg-[#262626]"]:not(.cg-incognito, .cg-incognito *),
+  html.desktop-app.cg-editor.cg-editor-theme.dark [class~="dark:bg-[#2a2a2a]"]:not(.cg-incognito, .cg-incognito *),
+  html.desktop-app.cg-editor.cg-editor-theme.dark [class~="dark:bg-[#2C2C2C]"]:not(.cg-incognito, .cg-incognito *),
+  html.desktop-app.cg-editor.cg-editor-theme.dark [class~="dark:bg-[#2c2c2c]"]:not(.cg-incognito, .cg-incognito *),
+  html.desktop-app.cg-editor.cg-editor-theme.dark [class~="dark:bg-[#333]"]:not(.cg-incognito, .cg-incognito *) {
+    background-color: var(--vscode-input-background) !important;
+  }
+  html.desktop-app.cg-editor.cg-editor-theme.dark [class~="dark:hover:bg-[#1a1a1a]"]:hover:not(.cg-incognito, .cg-incognito *),
+  html.desktop-app.cg-editor.cg-editor-theme.dark [class~="dark:hover:bg-[#1d1d1d]"]:hover:not(.cg-incognito, .cg-incognito *),
+  html.desktop-app.cg-editor.cg-editor-theme.dark [class~="dark:hover:bg-[#1f1f1f]"]:hover:not(.cg-incognito, .cg-incognito *),
+  html.desktop-app.cg-editor.cg-editor-theme.dark [class~="dark:hover:bg-[#222]"]:hover:not(.cg-incognito, .cg-incognito *),
+  html.desktop-app.cg-editor.cg-editor-theme.dark [class~="dark:hover:bg-[#262626]"]:hover:not(.cg-incognito, .cg-incognito *),
+  html.desktop-app.cg-editor.cg-editor-theme.dark [class~="dark:hover:bg-[#2a2a2a]"]:hover:not(.cg-incognito, .cg-incognito *),
+  html.desktop-app.cg-editor.cg-editor-theme.dark [class~="dark:hover:bg-[#2c2c2c]"]:hover:not(.cg-incognito, .cg-incognito *),
+  html.desktop-app.cg-editor.cg-editor-theme.dark [class~="dark:hover:bg-[#343541]"]:hover:not(.cg-incognito, .cg-incognito *) {
+    background-color: var(--vscode-list-hoverBackground) !important;
+  }
+  html.desktop-app.cg-editor.cg-editor-theme.dark [class~="dark:border-[#262626]"]:not(.cg-incognito, .cg-incognito *) {
+    border-color: var(--vscode-panel-border, var(--vscode-widget-border)) !important;
+  }
+  html.desktop-app.cg-editor.cg-editor-theme:not(.dark) [class~="!bg-[#fafafa]"]:not(.cg-incognito, .cg-incognito *),
+  html.desktop-app.cg-editor.cg-editor-theme:not(.dark) [class~="max-sm:!bg-[#fafafa]"]:not(.cg-incognito, .cg-incognito *) {
+    background-color: var(--vscode-sideBar-background) !important;
+  }
+  html.desktop-app.cg-editor.cg-editor-theme:not(.dark) [class~="!bg-white"]:not(.cg-incognito, .cg-incognito *),
+  html.desktop-app.cg-editor.cg-editor-theme:not(.dark) [class~="bg-white"]:not(.cg-incognito, .cg-incognito *) {
+    background-color: var(--vscode-editorWidget-background) !important;
+  }
+  html.desktop-app.cg-editor.cg-editor-theme:not(.dark) [class~="bg-[#f1f1ef]"]:not(.cg-incognito, .cg-incognito *),
+  html.desktop-app.cg-editor.cg-editor-theme:not(.dark) [class~="bg-[#F9F8F7]"]:not(.cg-incognito, .cg-incognito *) {
+    background-color: var(--vscode-input-background) !important;
+  }
   /* Desktop app, Studio in Incognito (AskAiPanel sets body.cg-incognito-on): Studio's floating sidebar button (above
      the Incognito frame) is hidden, as Agent's is */
   body.cg-incognito-on .studio-sidebar-btn {

@@ -162,14 +162,16 @@
   };
   var uncoverWindow = function () { root.classList.remove("cg-want-cover"); };
 
-  // Our screens follow the editor's light or dark theme (the editor marks its pages vscode-light / vscode-dark), so the
-  // AI panel, the AI Hub and the Settings tab always match the code around them
+  // Our screens follow the editor's theme (the editor marks its pages vscode-light / vscode-dark and hands them its
+  // colors as --vscode-* variables), so the AI panel, the AI Hub and the Settings tab always match the code around
+  // them: light or dark here, and the colors themselves through html.cg-editor-theme (global.css)
   var followEditorTheme = function () {
     var b = document.body;
     if (!b) return;
     var dark = b.classList.contains("vscode-dark") || b.classList.contains("vscode-high-contrast");
     var light = b.classList.contains("vscode-light") || b.classList.contains("vscode-high-contrast-light");
     if (!dark && !light) return;
+    root.classList.add("cg-editor-theme");
     var want = dark ? "dark" : "light";
     var now = null;
     try { now = localStorage.getItem("theme"); } catch (err) { /* storage blocked */ }

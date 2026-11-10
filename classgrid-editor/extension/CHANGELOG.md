@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.3
+
+- The Agent panel, the chats sidebar and Settings take the colors of the editor's own theme (Dark Modern, Light Modern or any theme you use), like the editor's other panels, instead of Classgrid's own colors.
+
 ## 0.1.0
 
 - First release in the VS Code Marketplace and Open VSX.
