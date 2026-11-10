@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.6
+
+- A request no longer hangs for a minute after the editor sat idle: idle connections to the server are closed after 10 seconds, and a request on a connection that died meanwhile is sent again on a fresh one.
+
 ## 0.1.3
 
 - The Agent panel, the chats sidebar and Settings take the colors of the editor's own theme (Dark Modern, Light Modern or any theme you use), like the editor's other panels, instead of Classgrid's own colors.

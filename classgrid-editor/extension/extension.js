@@ -459,12 +459,26 @@ function stopFetches(webview) {
 }
 // One connection to the server, kept open between requests: Node's own fetch closes an idle socket after 4 s, so a
 // message sent a few seconds after the last request paid a new TCP and TLS handshake first (0.5-1.5 s measured,
-// 2026-11-10). This agent keeps sockets open until the server closes them (about a minute).
-const keepAliveAgent = new https.Agent({ keepAlive: true, keepAliveMsecs: 15000, maxSockets: 8, timeout: 0 });
-function httpsRequest(url, { method, headers, body, signal }) {
+// 2026-11-10). A socket idle for more than 10 s is closed: on mobile internet a connection left idle for longer is
+// often silently dead (the carrier's address translation forgot it), and a request on it hung about 60 s before
+// failing (the panel showed "Thinking" the whole time, 2026-11-10). The agent's timeout closes idle sockets only; a
+// request that is streaming is never cut by it.
+const IDLE_SOCKET_MS = 10000;
+const keepAliveAgent = new https.Agent({ keepAlive: true, keepAliveMsecs: 5000, maxSockets: 8, timeout: IDLE_SOCKET_MS });
+// A connection that died while it was kept open fails at once on the next request: that request is sent once more on
+// a fresh connection (Node's own advice for keep-alive agents), instead of the panel seeing the error
+const DEAD_SOCKET = /^(ECONNRESET|EPIPE|ETIMEDOUT|ECONNREFUSED)$/;
+function httpsRequest(url, opts, attempt = 0) {
+  const { method, headers, body, signal } = opts;
   return new Promise((resolve, reject) => {
     const req = https.request(url, { method, headers, agent: keepAliveAgent, signal }, resolve);
-    req.on("error", reject);
+    req.on("error", (err) => {
+      if (attempt === 0 && req.reusedSocket && !signal?.aborted && DEAD_SOCKET.test(String(err?.code || ""))) {
+        log.appendLine(`[${new Date().toISOString()}] ${method} ${String(url).replace(/\?.*$/, "")}: the kept connection had died (${err.code}), sent again on a new one`);
+        return httpsRequest(url, opts, 1).then(resolve, reject);
+      }
+      reject(err);
+    });
     if (body) req.end(body); else req.end();
   });
 }
