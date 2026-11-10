@@ -278,7 +278,9 @@ export const isAuthenticated = async (req, res, next) => {
             }
 
             const isAuthOrOnboardingRoute = req.originalUrl.startsWith('/api/auth');
-            if (user.role === 'user' && (!user.metadata || !user.metadata.whatsappPhone) && !isAuthOrOnboardingRoute) {
+            // (a Classgrid extension login, client: "editor", needs no WhatsApp number: the extension has no WhatsApp or
+            // schedules; the website and the desktop app still ask for it)
+            if (user.role === 'user' && decoded.client !== 'editor' && (!user.metadata || !user.metadata.whatsappPhone) && !isAuthOrOnboardingRoute) {
                 return res.status(403).json({
                     success: false,
                     message: 'Account onboarding incomplete. You must verify your WhatsApp number.',
@@ -294,6 +296,8 @@ export const isAuthenticated = async (req, res, next) => {
         // Organization ID always sourced from JWT (authoritative)
         req.effectiveOrganizationId = decoded.organizationId || null;
         req.authRememberMe = decoded.rememberMe === true;
+        // Signed in from the Classgrid extension (Classgrid Code, VS Code, Cursor): auth.controller.js generateEditorToken
+        req.editorClient = decoded.client === "editor";
 
         next();
     } catch (err) {
@@ -376,7 +380,8 @@ export const requirePasswordSet = (req, res, next) => {
  * Blocks the AI for public chat accounts that haven't finished sign-up (verified WhatsApp number + age).
  */
 export const requireChatOnboarding = (req, res, next) => {
-    if (!req.isImpersonating && needsChatOnboarding(req.user)) {
+    // The Classgrid extension needs no WhatsApp number or age (no WhatsApp or schedules there)
+    if (!req.isImpersonating && !req.editorClient && needsChatOnboarding(req.user)) {
         return res.status(403).json({
             message: "Please finish signing up by verifying your WhatsApp number.",
             code: "CHAT_ONBOARDING_REQUIRED",

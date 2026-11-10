@@ -295,7 +295,10 @@ router.post("/editor-code", isAuthenticated, async (req, res) => {
     // 60 seconds for the Classgrid app's handoff; 5 minutes with PKCE (useless without the verifier), so a code pasted
     // by hand still works
     const ttl = challenge ? 300 : 60;
-    await redis.set(`desktoplogin:${code}`, `/editor/project?token=${encodeURIComponent(token)}`, "EX", ttl);
+    // A browser sign-in gets the extension's own login (client: "editor": no WhatsApp number needed there); the
+    // Classgrid app's handoff keeps handing over its own login
+    const handed = challenge ? authController.generateEditorToken(req.user) : token;
+    await redis.set(`desktoplogin:${code}`, `/editor/project?token=${encodeURIComponent(handed)}`, "EX", ttl);
     if (challenge) await redis.set(`desktoplogin-pkce:${code}`, challenge, "EX", ttl);
     res.json({ code });
 });

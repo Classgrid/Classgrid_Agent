@@ -13,6 +13,7 @@
 "use client";
 
 import React, { useState, Suspense, useEffect, useRef, useMemo, lazy } from "react";
+import { pendingEditorSignIn } from "@/features/auth/editorHandoff";
 import { useSearchParams, useNavigate } from "react-router-dom";
 import { REGEXP_ONLY_DIGITS_AND_CHARS } from "input-otp";
 import { InputOTP, InputOTPGroup, InputOTPSlot } from "@/components/marketing_ui/input-otp";
@@ -208,6 +209,14 @@ function saveOnboarding(data: SavedOnboarding) {
   try { localStorage.setItem(ONBOARDING_STORAGE_KEY, JSON.stringify(data)); } catch { /* storage unavailable */ }
 }
 
+// Signing in to the Classgrid extension (features/auth/editorHandoff.ts): the extension has no WhatsApp or schedules,
+// so sign-up stops after the email code and the password, and the login goes straight to the editor
+function finishForEditor(token?: string) {
+  if (token) localStorage.setItem("token", token);
+  clearOnboarding();
+  window.location.href = "/editor-signed-in";
+}
+
 function clearOnboarding() {
   try { localStorage.removeItem(ONBOARDING_STORAGE_KEY); } catch { /* storage unavailable */ }
 }
@@ -318,6 +327,8 @@ function LoginContent() {
 
 
   const timerRef = useRef<NodeJS.Timeout | null>(null);
+  // Editor sign-up: the login from the email code, used once the password is saved
+  const editorTokenRef = useRef("");
   const whatsappTimerRef = useRef<NodeJS.Timeout | null>(null);
   const isRedirecting = useRef(false);
 
@@ -476,6 +487,8 @@ function LoginContent() {
     
     if (onboard === "true" && token) {
       localStorage.setItem("token", token);
+      // Google / GitHub sign-in for the Classgrid extension: no WhatsApp step, hand the login to the editor
+      if (pendingEditorSignIn()) return finishForEditor();
       if (urlEmail) setEmail(urlEmail);
       
       // Force Email OTP even for OAuth users
@@ -692,6 +705,7 @@ function LoginContent() {
       if (result.token) {
         localStorage.setItem("token", result.token);
       }
+      if (pendingEditorSignIn()) return finishForEditor();
 
       // The chat checks the sign-up: an account without a verified WhatsApp number comes back here
       // and continues at the WhatsApp step.
@@ -736,6 +750,7 @@ function LoginContent() {
     if (deviceOtpMode) {
       try {
         await verifyDeviceOtp({ email: email.trim(), otp: otp.trim() });
+        if (pendingEditorSignIn()) return finishForEditor();
         // Unfinished sign-ups are sent back from the chat to the WhatsApp step.
         window.location.href = "/";
       } catch (err: any) {
@@ -749,11 +764,18 @@ function LoginContent() {
         email,
         otp,
         name: mode === "signup" ? `${firstName} ${lastName}`.trim() : undefined,
+        editor: pendingEditorSignIn() ? true : undefined,
       });
 
       if (res.data?.token || res.data?.emailVerifiedTicket) {
         const user = res.data.user;
         const needsOnboarding = mode === "signup" || (!user?.metadata?.whatsappPhone || !user?.metadata?.age) || !res.data.token;
+
+        // Classgrid extension: sign-in is done with the email code; sign-up still sets a password first
+        if (pendingEditorSignIn() && res.data.token) {
+          if (mode !== "signup") return finishForEditor(res.data.token);
+          editorTokenRef.current = res.data.token;
+        }
 
         if (needsOnboarding) {
           // Proof of email verification, required by /chat/finalize-onboarding
@@ -867,6 +889,7 @@ function LoginContent() {
         password,
         emailVerifiedTicket,
       });
+      if (editorTokenRef.current) return finishForEditor(editorTokenRef.current);
       saveOnboarding({ email: email.trim(), firstName, lastName, ticket: emailVerifiedTicket, step: "whatsapp" });
       setStep("whatsapp");
     } catch (err: any) {
@@ -879,6 +902,7 @@ function LoginContent() {
         setStep("email");
         setError("Your email verification expired. Please enter your email to get a new code.");
       } else if (err?.code === "409") {
+        if (editorTokenRef.current) return finishForEditor(editorTokenRef.current);
         // The password was already saved earlier (email is verified by the ticket): go on to WhatsApp.
         saveOnboarding({ email: email.trim(), firstName, lastName, ticket: emailVerifiedTicket, step: "whatsapp" });
         setPassword("");

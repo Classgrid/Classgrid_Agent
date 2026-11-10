@@ -391,6 +391,15 @@ const generateToken = (user, req = null, rememberMe = false) => {
     );
 };
 
+// The Classgrid extension's login (Classgrid Code, VS Code, Cursor), made by /editor-code for a browser sign-in.
+// client: "editor" lets it use the AI without a WhatsApp number and age (the extension has no WhatsApp or schedules);
+// the website and the desktop app still ask for them (auth.middleware.js). 30 days, like other editor sign-ins.
+export const generateEditorToken = (user) => jwt.sign(
+    { id: user._id, role: user.role, organizationId: user.organization_id || null, rememberMe: true, client: "editor" },
+    JWT_SECRET,
+    { expiresIn: "30d" }
+);
+
 // Helper: Set Cookie (duration matches JWT expiry)
 const setTokenCookie = (res, token, req = null, rememberMe = false) => {
     const isProd = process.env.NODE_ENV === "production";
@@ -3239,7 +3248,7 @@ export const chatSendEmailOtp = async (req, res) => {
 export const chatVerifyEmailOtp = async (req, res) => {
     try {
         await connectDB();
-        const { email, otp, name } = req.body;
+        const { email, otp, name, editor } = req.body;
         if (!email || !otp) return res.status(400).json({ message: 'Email and OTP are required' });
 
         const OnboardingOTP = (await import('../models/OnboardingOTP.js')).default;
@@ -3275,6 +3284,10 @@ export const chatVerifyEmailOtp = async (req, res) => {
         if (!needsOnboarding) {
             token = generateToken(user, req);
             setTokenCookie(res, token, req);
+        } else if (editor === true) {
+            // Signing in to the Classgrid extension: the verified email is enough (no WhatsApp step there). No cookie: the
+            // page only uses it to get the editor's own login (/editor-code); the website still asks for WhatsApp.
+            token = generateToken(user, req);
         }
         recordLoginMethod(res, req, user, "email"); // the email code was correct
 
