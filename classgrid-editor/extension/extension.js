@@ -68,8 +68,11 @@ async function activate(context) {
   context.subscriptions.push(vscode.workspace.onDidChangeWorkspaceFolders((e) => { for (const f of e.added) runner.allowFolder(f.uri.fsPath); }));
   context.subscriptions.push({ dispose: () => runner.stopAll() });
 
-  // The right side: only the Agent panel (the same one as Project Mode's right side)
-  context.subscriptions.push(vscode.window.registerWebviewViewProvider("classgrid.agent", {
+  // The Agent panel, in two places like Claude Code: the right side (classgrid.agent) and, in VS Code / Cursor /
+  // Windsurf, also a Classgrid icon on the left activity bar (classgrid.sidebar). Classgrid Code has its own left strip.
+  const stockEditor = !/classgrid/i.test(vscode.env.appName || "");
+  vscode.commands.executeCommand("setContext", "classgrid.stockEditor", stockEditor);
+  const agentProvider = {
     resolveWebviewView(view) {
       screens.agent = view.webview;
       // (it opens on the chat that was open last time in this folder, like the editor brings back your files)
@@ -78,8 +81,12 @@ async function activate(context) {
         return typeof last === "string" && /^[\w-]+$/.test(last) ? `/editor/project/${last}` : "/editor/project";
       });
       view.onDidDispose(() => { loaders.delete(load); stopFetches(view.webview); if (screens.agent === view.webview) screens.agent = null; });
+      view.onDidChangeVisibility(() => { if (view.visible) screens.agent = view.webview; });
     },
-  }, { webviewOptions: { retainContextWhenHidden: true } }));
+  };
+  for (const id of ["classgrid.agent", "classgrid.sidebar"]) {
+    context.subscriptions.push(vscode.window.registerWebviewViewProvider(id, agentProvider, { webviewOptions: { retainContextWhenHidden: true } }));
+  }
 
 
 
