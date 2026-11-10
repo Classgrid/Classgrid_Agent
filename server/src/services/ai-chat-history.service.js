@@ -120,18 +120,28 @@ export async function getHistory(sessionId, depth = DEFAULT_DEPTH, { desktop = f
 
     try {
         // Check if the Redis list exists
-        const listLen = await redis.llen(key);
+        let listLen = await redis.llen(key);
 
         if (listLen === 0) {
             // Cache miss — warm from Supabase
             await warmCache(sessionId);
+            listLen = await redis.llen(key);
         }
 
-        // LRANGE with negative index: -safeDepth gets the last N items
-        const raw = await redis.lrange(key, -safeDepth, -1);
-        // Tool notes are kept only for the last TOOL_NOTE_TURNS assistant messages.
+        // The window the model sees starts at an ANCHORED position, not "the last N messages": a window that slides by
+        // two messages on every turn changed the first history message every time, and the model's prompt cache
+        // (a prefix match) then re-read the whole history on every answer (44k of 72k tokens re-read between two
+        // answers 18 s apart, 2026-11-10). The start moves only every ANCHOR_STEP messages, so between moves the
+        // history is byte-identical and comes from the cache; the window is between depth and depth+ANCHOR_STEP-1 long.
+        const ANCHOR_STEP = desktop ? 16 : 8;
+        const wantedStart = Math.max(0, listLen - safeDepth);
+        const start = Math.floor(wantedStart / ANCHOR_STEP) * ANCHOR_STEP;
+        const raw = await redis.lrange(key, start, -1);
+        // Tool notes are kept only for the last noteTurns assistant messages, from an anchored answer too (every 4
+        // answers), so an older answer doesn't lose its notes on every turn and change the prefix
         const assistantPositions = raw.map((item, i) => (/"role"\s*:\s*"assistant"/.test(item) ? i : -1)).filter(i => i >= 0);
-        const notesFrom = assistantPositions.length > noteTurns ? assistantPositions[assistantPositions.length - noteTurns] : 0;
+        const noteKeep = Math.max(0, assistantPositions.length - noteTurns);
+        const notesFrom = noteKeep > 0 ? assistantPositions[Math.floor(noteKeep / 4) * 4] : 0;
         return raw.flatMap((item, itemIndex) => {
             try {
                 const parsed = JSON.parse(item);

@@ -2062,6 +2062,9 @@ export const streamAskAi = async (req, res) => {
                 let total = messages.reduce((n, m) => n + size(m), 0);
                 let dropped = 0;
                 while (total > 400000 && messages.length > 20) { total -= size(messages.shift()); dropped++; }
+                // (dropped in blocks of 16, so the first message the model sees stays the same from turn to turn and the
+                // history keeps coming from the model's prompt cache; see getHistory's anchored window)
+                while (dropped % 16 !== 0 && messages.length > 20) { total -= size(messages.shift()); dropped++; }
                 // Older messages no longer fit: bring the summary up to date now (at most every 10 minutes), so what was
                 // left out is in it, like Claude Code's compaction
                 if (dropped && (await redis.set(`compact:auto:${sessionId}`, "1", "EX", 600, "NX").catch(() => null))) {
