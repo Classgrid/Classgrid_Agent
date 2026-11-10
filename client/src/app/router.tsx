@@ -183,6 +183,7 @@ import { TestFullScreenLoginPage } from "@/features/auth/pages/TestFullScreenLog
 import { ResetPasswordPage } from "@/features/auth/pages/ResetPasswordPage";
 import { RequiredPasswordResetPage } from "@/features/auth/pages/RequiredPasswordResetPage";
 import { OAuthConsentPage } from "@/features/oauth/pages/OAuthConsentPage";
+import EditorSignedInPage, { EditorSignInWatcher } from "@/features/auth/pages/EditorSignedInPage";
 import { RequireAuth } from "@/features/auth/components/RequireAuth";
 import { getRedirectPath } from "@/features/auth/auth-helpers";
 import { useCurrentUser } from "@/features/auth/queries/useCurrentUser";
@@ -241,6 +242,9 @@ export function AppRouter() {
   }
 
   return (
+    <>
+    {/* Sign-in started from an editor (Classgrid Code, VS Code, Cursor): hands the login back after any sign-in */}
+    <EditorSignInWatcher />
     <Routes>
       <Route path="/test-full-login" element={<TestFullScreenLoginPage />} />
       <Route path="/sandbox-profile" element={<SandboxProfilePage />} />
@@ -259,6 +263,8 @@ export function AppRouter() {
       {import.meta.env.DEV && <Route path="/oauth/preview" element={<OAuthConsentPage preview />} />}
 
       <Route path="/logout" element={<LogoutPage />} />
+      {/* The browser half of signing in to the Classgrid extension (features/auth/editorHandoff.ts) */}
+      <Route path="/editor-signed-in" element={<EditorSignedInPage />} />
       {/* ── DYNAMIC AUTH ROUTES (Based on Subdomain) ── */}
       <Route
         path="/login"
@@ -470,6 +476,7 @@ export function AppRouter() {
       {/* Share pages the AI published (checks login itself) */}
       <Route path="/p/:id" element={<SharePagePage />} />
     </Routes>
+    </>
   );
 }
 

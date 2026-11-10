@@ -4,7 +4,7 @@
   "description": "The Classgrid AI inside Classgrid Code: the Agent chat on the right side, and the AI's terminal, files and memory on this computer.",
   "publisher": "classgrid",
   "version": "0.1.0",
-  "private": true,
+  "private": false,
   "license": "UNLICENSED",
   "engines": {
     "vscode": "^1.98.0"
@@ -17,7 +17,9 @@
     "virtualWorkspaces": true
   },
   "activationEvents": [
-    "onStartupFinished"
+    "onStartupFinished",
+    "onUri",
+    "onWebviewPanel:classgrid"
   ],
   "contributes": {
     "configurationDefaults": {
@@ -77,6 +79,18 @@
       {
         "command": "classgrid.openSettings",
         "title": "Classgrid: Settings"
+      },
+      {
+        "command": "classgrid.signIn",
+        "title": "Classgrid: Sign in"
+      },
+      {
+        "command": "classgrid.pasteSignInCode",
+        "title": "Classgrid: Paste sign-in code"
+      },
+      {
+        "command": "classgrid.signOut",
+        "title": "Classgrid: Sign out"
       }
     ],
     "keybindings": [
@@ -86,5 +100,39 @@
         "mac": "cmd+k"
       }
     ]
+  },
+  "icon": "media/icon.png",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Classgrid/Classgrid_Agent"
+  },
+  "bugs": {
+    "url": "https://github.com/Classgrid/Classgrid_Agent/issues"
+  },
+  "homepage": "https://classgrid.in",
+  "categories": [
+    "AI",
+    "Chat",
+    "Other"
+  ],
+  "keywords": [
+    "classgrid",
+    "ai",
+    "agent",
+    "chat",
+    "studio"
+  ],
+  "files": [
+    "extension.js",
+    "bridge.js",
+    "editor-context.js",
+    "electron-shim.js",
+    "media/**",
+    "package.json",
+    "LICENSE.txt"
+  ],
+  "scripts": {
+    "package": "vsce package --no-dependencies --out classgrid-0.1.0.vsix",
+    "publish": "vsce publish --no-dependencies"
   }
 }

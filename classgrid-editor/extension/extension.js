@@ -83,32 +83,34 @@ async function activate(context) {
 
 
 
-  // The login comes from the Classgrid app: Project Mode opens the editor with
-  // classgrid-code://classgrid.classgrid/login?code=<one-time code from /api/auth/editor-code>, which is swapped for the
-  // user's login (/api/auth/desktop-exchange). The editor never shows a login of its own.
+  // Two ways in, both ending at <scheme>://classgrid.classgrid/login?code=<one-time code>, swapped for the login through
+  // /api/auth/desktop-exchange (no RPC):
+  // 1. the Classgrid app: Project Mode opens the editor with a code from /api/auth/editor-code (no state);
+  // 2. the browser, like Antigravity and Claude Code (plan/editor-sign-in.md): "Sign in with Classgrid" opens
+  //    chat.classgrid.in/login with a state and a PKCE challenge; the link back carries the same state, and the code
+  //    only works with this editor's verifier. The scheme is this editor's own (classgrid-code, vscode, cursor...).
   context.subscriptions.push(vscode.window.registerUriHandler({
     async handleUri(uri) {
       // A file from the Classgrid app's chat: open it with its lines selected
       if (uri.path === "/open") return openAt(new URLSearchParams(uri.query));
       if (uri.path !== "/login") return;
-      const code = new URLSearchParams(uri.query).get("code") || "";
-      let token = null;
-      try {
-        const res = await fetch("https://api.classgrid.in/api/auth/desktop-exchange", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ code }) });
-        const data = await res.json().catch(() => ({}));
-        if (res.ok && typeof data.path === "string") token = new URL(data.path, "https://chat.classgrid.in").searchParams.get("token");
-      } catch (err) { log.appendLine(`[${new Date().toISOString()}] sign-in from the Classgrid app failed: ${err?.message || err}`); }
-      if (!token) return vscode.window.showErrorMessage("Classgrid sign-in didn't finish. Open the project again from Project Mode in the Classgrid app.");
-      // The Classgrid app hands over its login on every start of Classgrid Code (the shortcut runs the app with --code,
-      // which sends this a moment after the editor opens). The panels reload only when the login is new: with the same
-      // login already in place they are left alone, so the Agent panel no longer flashes a second time a few seconds
-      // after opening (owner, 2026-11-08)
-      const sameLogin = storage.token === token;
-      keepStorage({ cgStore: "set", key: "token", value: token });
-      keepStorage({ cgStore: "set", key: "cg_signed_in_at", value: String(Date.now()) });
-      if (!sameLogin) for (const load of loaders) load();
-      vscode.commands.executeCommand("classgrid.agent.focus").then(undefined, () => {});
+      const q = new URLSearchParams(uri.query);
+      const code = q.get("code") || "";
+      const state = q.get("state");
+      if (state === null) return finishSignIn(code, null);
+      const pending = await pendingSignIn();
+      if (!pending || !sameText(pending.state, state)) {
+        log.appendLine(`[${new Date().toISOString()}] sign-in link refused: it wasn't started in this editor`);
+        return vscode.window.showErrorMessage("This Classgrid sign-in link wasn't started in this editor, so it was ignored. Run \"Classgrid: Sign in\" to sign in.");
+      }
+      return finishSignIn(code, pending.verifier);
     },
+  }));
+  context.subscriptions.push(vscode.commands.registerCommand("classgrid.signIn", () => startSignIn()));
+  context.subscriptions.push(vscode.commands.registerCommand("classgrid.pasteSignInCode", () => pasteSignInCode()));
+  context.subscriptions.push(vscode.commands.registerCommand("classgrid.signOut", async () => {
+    await forgetLogin();
+    vscode.window.showInformationMessage("Signed out of Classgrid.");
   }));
 
   context.subscriptions.push(vscode.commands.registerCommand("classgrid.showAgent", () => vscode.commands.executeCommand("classgrid.agent.focus")));
@@ -206,6 +208,9 @@ function holdScreens(webview, startPath) {
   const load = () => {
     // The page that goes away doesn't need its calls' answers any more (a long answer would keep coming for nothing)
     stopFetches(webview);
+    // Signed out: our own sign-in screen (browser sign-in, like Antigravity and Claude Code)
+    if (!storage.token) { webview.html = signedOutHtml(webview); return; }
+    if (!fs.existsSync(path.join(APP_DIR, "index.html"))) { webview.html = signedOutHtml(webview, "missing"); return; }
     const html = fs.readFileSync(path.join(APP_DIR, "index.html"), "utf8").replace(/\b(src|href)="\.\//g, `$1="${base}`);
     webview.html = html.replace(/<head([^>]*)>/, `<head$1>
 <meta http-equiv="Content-Security-Policy" content="${csp}">
@@ -213,6 +218,8 @@ function holdScreens(webview, startPath) {
 <script>${bridge}</script>`);
   };
   webview.onDidReceiveMessage((m) => {
+    if (m?.cgSignIn) return startSignIn();
+    if (m?.cgPasteCode) return pasteSignInCode();
     if (m?.cgFetch) return proxyFetch(webview, m);
     if (m?.cgFetchAbort) return FETCHES.get(m.cgFetchAbort)?.ac.abort();
     if (m?.cgStore) return keepStorage(m);
@@ -473,6 +480,13 @@ async function proxyFetch(webview, m) {
       url = next;
       res = await httpsRequest(url, { method: again ? "GET" : (m.method || "GET"), headers, body: again ? undefined : body, signal: ac.signal });
     }
+    // The login has expired (or was revoked): back to the sign-in screen. Only for /api/auth/me with the login we hold,
+    // so a 401 from some other call (or an old token) never signs you out
+    const sentAuth = Object.entries(headers).find(([k]) => /^authorization$/i.test(k))?.[1];
+    if (res.statusCode === 401 && /\/api\/auth\/me(\?|$)/.test(url) && storage.token && sentAuth === `Bearer ${storage.token}`) {
+      log.appendLine(`[${new Date().toISOString()}] the Classgrid login has expired: showing the sign-in screen`);
+      setTimeout(() => forgetLogin(), 0);
+    }
     const back = [];
     for (const [k, v] of Object.entries(res.headers)) { if (/^(content-encoding|content-length|transfer-encoding|set-cookie|connection)$/i.test(k)) continue; back.push([k, Array.isArray(v) ? v.join(", ") : String(v)]); }
     webview.postMessage({ cgFetchHead: id, status: res.statusCode, statusText: res.statusMessage || "", headers: back });
@@ -540,6 +554,82 @@ function followAppSignOut() {
   let at = 0;
   try { at = Number(JSON.parse(fs.readFileSync(SIGNED_OUT_NOTE, "utf8")).at) || 0; } catch { return; }
   if (storage.token && at > (Number(storage.cg_signed_in_at) || 0)) forgetLogin();
+}
+
+// Browser sign-in (plan/editor-sign-in.md): state + PKCE, kept in the editor's secret storage until the link comes back
+const SIGN_IN_KEY = "classgrid.signIn";
+const SIGN_IN_MAX_AGE = 15 * 60 * 1000;
+const sameText = (a, b) => { const x = Buffer.from(String(a)), y = Buffer.from(String(b)); return x.length === y.length && crypto.timingSafeEqual(x, y); };
+async function pendingSignIn() {
+  try {
+    const p = JSON.parse((await parts.context.secrets.get(SIGN_IN_KEY)) || "null");
+    return p && Date.now() - p.at < SIGN_IN_MAX_AGE ? p : null;
+  } catch { return null; }
+}
+async function startSignIn() {
+  const state = crypto.randomBytes(24).toString("base64url");
+  const verifier = crypto.randomBytes(48).toString("base64url");
+  const challenge = crypto.createHash("sha256").update(verifier).digest("base64url");
+  await parts.context.secrets.store(SIGN_IN_KEY, JSON.stringify({ state, verifier, at: Date.now() }));
+  const callback = `${vscode.env.uriScheme}://classgrid.classgrid/login`;
+  const query = new URLSearchParams({ editor: "1", state, challenge, callback }).toString();
+  const opened = await vscode.env.openExternal(vscode.Uri.parse(`https://chat.classgrid.in/login?${query}`)).then((ok) => ok, () => false);
+  if (!opened) return;
+  const pick = await vscode.window.showInformationMessage("Finish signing in to Classgrid in your browser.", "Paste a code instead");
+  if (pick) pasteSignInCode();
+}
+async function pasteSignInCode() {
+  const pending = await pendingSignIn();
+  if (!pending) {
+    const pick = await vscode.window.showWarningMessage("Start the sign-in first: it opens Classgrid in your browser, which then gives you the code.", "Sign in");
+    if (pick) startSignIn();
+    return;
+  }
+  const code = await vscode.window.showInputBox({ title: "Classgrid: Paste sign-in code", prompt: "The code shown on the \"You're signed in\" page in your browser", ignoreFocusOut: true, validateInput: (v) => /^[A-Za-z0-9_-]{16,64}$/.test(v.trim()) ? null : "That doesn't look like a Classgrid sign-in code." });
+  if (code) finishSignIn(code.trim(), pending.verifier);
+}
+async function finishSignIn(code, verifier) {
+  let token = null, message = "";
+  try {
+    const res = await fetch("https://api.classgrid.in/api/auth/desktop-exchange", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(verifier ? { code, verifier } : { code }) });
+    const data = await res.json().catch(() => ({}));
+    if (res.ok && typeof data.path === "string") token = new URL(data.path, "https://chat.classgrid.in").searchParams.get("token");
+    else message = typeof data.message === "string" ? data.message : "";
+  } catch (err) { log.appendLine(`[${new Date().toISOString()}] Classgrid sign-in failed: ${err?.message || err}`); }
+  if (!token) {
+    const pick = await vscode.window.showErrorMessage(`Classgrid sign-in didn't finish.${message ? ` ${message}` : ""}`, "Sign in again");
+    if (pick) startSignIn();
+    return;
+  }
+  if (verifier) await parts.context.secrets.delete(SIGN_IN_KEY).then(undefined, () => {});
+  // The Classgrid app hands over its login on every start of Classgrid Code (the shortcut runs the app with --code,
+  // which sends this a moment after the editor opens). The panels reload only when the login is new: with the same
+  // login already in place they are left alone, so the Agent panel no longer flashes a second time a few seconds
+  // after opening (owner, 2026-11-08)
+  const sameLogin = storage.token === token;
+  keepStorage({ cgStore: "set", key: "token", value: token });
+  keepStorage({ cgStore: "set", key: "cg_signed_in_at", value: String(Date.now()) });
+  if (!sameLogin) for (const load of loaders) load();
+  vscode.commands.executeCommand("classgrid.agent.focus").then(undefined, () => {});
+  if (verifier) vscode.window.showInformationMessage("Signed in to Classgrid.");
+}
+// The Agent panel while signed out (or when this editor has no copy of our screens)
+function signedOutHtml(webview, why) {
+  const nonce = crypto.randomBytes(16).toString("base64");
+  const logo = webview.asWebviewUri(vscode.Uri.file(path.join(__dirname, "media", "icon.png")));
+  const body = why === "missing"
+    ? `<h1>Classgrid can't open here yet</h1><p>This copy of the extension is missing Classgrid's screens. Reinstall the latest Classgrid extension.</p>`
+    : `<h1>Sign in to Classgrid</h1><p>Use your Classgrid account to chat with the Agent here. It opens the Classgrid sign-in page in your browser.</p>
+<button id="in" class="main">Sign in with Classgrid</button><button id="paste" class="link">Have a code? Paste it</button>`;
+  return `<!doctype html><html><head><meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src ${webview.cspSource}; style-src 'unsafe-inline'; script-src 'nonce-${nonce}'">
+<style>body{margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;font-family:var(--vscode-font-family);color:var(--vscode-foreground);background:var(--vscode-sideBar-background)}
+.box{max-width:300px;padding:24px;text-align:center}img{width:40px;height:40px;margin-bottom:14px}h1{font-size:16px;font-weight:600;margin:0 0 8px}
+p{font-size:13px;line-height:1.55;color:var(--vscode-descriptionForeground);margin:0 0 18px}button{font:inherit;cursor:pointer;border:0}
+.main{width:100%;padding:8px 12px;border-radius:6px;background:var(--vscode-button-background);color:var(--vscode-button-foreground)}
+.main:hover{background:var(--vscode-button-hoverBackground)}.link{margin-top:12px;background:none;color:var(--vscode-textLink-foreground);font-size:12px}</style></head>
+<body><div class="box"><img src="${logo}" alt="">${body}</div>
+<script nonce="${nonce}">const vs=acquireVsCodeApi();document.getElementById("in")?.addEventListener("click",()=>vs.postMessage({cgSignIn:true}));document.getElementById("paste")?.addEventListener("click",()=>vs.postMessage({cgPasteCode:true}));</script></body></html>`;
 }
 
 // Saved settings and login, kept in the editor's secret storage (a moment after the last change)

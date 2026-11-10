@@ -290,7 +290,13 @@ router.post("/editor-code", isAuthenticated, async (req, res) => {
     const { default: redis } = await import("../config/redis.js");
     const { randomBytes } = await import("node:crypto");
     const code = randomBytes(24).toString("base64url");
-    await redis.set(`desktoplogin:${code}`, `/editor/project?token=${encodeURIComponent(token)}`, "EX", 60);
+    // Sign-in started from the editor (browser login, PKCE): the code only works with the editor's secret verifier
+    const challenge = String(req.body?.challenge || "").replace(/[^A-Za-z0-9_-]/g, "").slice(0, 128);
+    // 60 seconds for the Classgrid app's handoff; 5 minutes with PKCE (useless without the verifier), so a code pasted
+    // by hand still works
+    const ttl = challenge ? 300 : 60;
+    await redis.set(`desktoplogin:${code}`, `/editor/project?token=${encodeURIComponent(token)}`, "EX", ttl);
+    if (challenge) await redis.set(`desktoplogin-pkce:${code}`, challenge, "EX", ttl);
     res.json({ code });
 });
 router.post("/desktop-exchange", loginLimiter, async (req, res) => {
@@ -300,7 +306,20 @@ router.post("/desktop-exchange", loginLimiter, async (req, res) => {
     const key = `desktoplogin:${code}`;
     const path = await redis.get(key).catch(() => null);
     if (!path) return res.status(400).json({ message: "This sign-in link has expired. Please try again." });
-    await redis.del(key).catch(() => {});
+    // PKCE: a code made for the editor's browser sign-in needs the verifier whose sha256 is the stored challenge
+    const pkceKey = `desktoplogin-pkce:${code}`;
+    const challenge = await redis.get(pkceKey).catch(() => null);
+    if (challenge) {
+        const { createHash, timingSafeEqual } = await import("node:crypto");
+        const verifier = String(req.body?.verifier || "");
+        const got = Buffer.from(createHash("sha256").update(verifier).digest("base64url"));
+        const want = Buffer.from(challenge);
+        if (!verifier || got.length !== want.length || !timingSafeEqual(got, want)) {
+            await redis.del(key, pkceKey).catch(() => {});
+            return res.status(400).json({ message: "This sign-in code doesn't belong to this editor. Please sign in again." });
+        }
+    }
+    await redis.del(key, pkceKey).catch(() => {});
     res.json({ path });
 });
 

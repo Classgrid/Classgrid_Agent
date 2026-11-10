@@ -1,0 +1,2 @@
+﻿UNLICENSED - Copyright (c) Classgrid. All rights reserved.
+This extension is part of Classgrid Code and is not licensed for redistribution.

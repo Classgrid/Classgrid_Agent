@@ -65,6 +65,7 @@ import { App } from "@/app/App";
 import { AppProviders } from "@/app/providers";
 import { warmPages } from "@/lib/desktopPageCache";
 import { installDesktopHistory } from "@/lib/desktopHistory";
+import { captureEditorSignIn } from "@/features/auth/editorHandoff";
 import { queryClient } from "@/lib/queryClient";
 import "@/styles/global.css";
 
@@ -75,6 +76,8 @@ const isDesktopApp = import.meta.env.VITE_DESKTOP === "1";
 if (isDesktopApp) document.documentElement.classList.add("desktop-app");
 // Desktop app: the sidebar's back and forward arrows count every place (lib/desktopHistory.ts), before the router starts
 installDesktopHistory();
+// Website only: /login?editor=1&... from the Classgrid extension (Classgrid Code, VS Code, Cursor) is kept for after sign-in
+if (!isDesktopApp && import.meta.env.VITE_EDITOR !== "1") captureEditorSignIn();
 // Desktop app: Google Sans, for Studio's new-chat greeting (AskAiPanel)
 if (isDesktopApp) {
   const font = document.createElement("link");
