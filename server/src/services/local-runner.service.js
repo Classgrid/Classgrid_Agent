@@ -18,15 +18,27 @@ import redis from "../config/redis.js";
 // very app the user is typing in (never "the oldest connection"). The socket below stays only as the fallback: turns
 // with no app on the stream (wake-ups, WhatsApp tasks), helpers that outlive the answer, and older apps.
 const wait = (ms) => new Promise((r) => setTimeout(r, ms));
-const pcExecutors = new Map(); // userId -> { send(event) => boolean, alive() => boolean }
-export function registerPcExecutor(userId, exec) {
-    const key = String(userId);
-    pcExecutors.set(key, exec);
-    return () => { if (pcExecutors.get(key) === exec) pcExecutors.delete(key); };
+// One executor per answer in progress: { userId, sessionId, send(event) => boolean, alive() => boolean }. A step is
+// sent to the answer's own app (by chat), so the desktop app, Classgrid Code and the website used at the same time
+// each get their own steps (keyed by user alone, a second app's answer took over the first one's steps, 2026-11-10).
+const pcExecutors = new Set();
+export function registerPcExecutor(exec) {
+    exec.userId = String(exec.userId);
+    exec.sessionId = exec.sessionId ? String(exec.sessionId) : null;
+    pcExecutors.add(exec);
+    return () => { pcExecutors.delete(exec); };
 }
-export function pcExecutorFor(userId) {
-    const exec = pcExecutors.get(String(userId));
-    return exec && exec.alive() ? exec : null;
+export function pcExecutorFor(userId, sessionId) {
+    const u = String(userId);
+    const live = [...pcExecutors].filter((e) => e.userId === u && e.alive());
+    if (!live.length) return null;
+    if (sessionId) {
+        const own = live.find((e) => e.sessionId === String(sessionId));
+        if (own) return own;
+    }
+    // No chat named (a lookup before the answer, a repo sync): only when the user has a single answer running is it
+    // clear which app to ask; otherwise the socket path decides
+    return live.length === 1 ? live[0] : null;
 }
 const PC_RESULT = (id) => `ai:pctool:res:${id}`;
 const PC_OWNER = (id) => `ai:pctool:owner:${id}`;
@@ -137,7 +149,7 @@ function withWakeNote(reply) {
 async function askRunner(userId, tool, payload) {
     const quiet = withQuietProgress(tool, payload);
     // The app that is chatting runs it (see pcExecutors above); the socket only when there is no such app
-    const exec = pcExecutorFor(userId);
+    const exec = pcExecutorFor(userId, payload?.chat);
     if (exec) {
         const reply = await askViaApp(exec, userId, tool, quiet);
         if (reply) return withWakeNote(reply);

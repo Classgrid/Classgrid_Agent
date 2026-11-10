@@ -379,20 +379,26 @@ export const deductTokens = async (userId, orgId, tokenAmount, source, { noSpill
         let result = { success: false, remaining: 0, type: "unknown" };
 
         if (source === "personal") {
-            // Read current balance FIRST, then cap the deduction
-            const user = await User.findById(userId).select("ai_tokens.ai_credits_balance");
-            const currentBalance = Math.max(0, user?.ai_tokens?.ai_credits_balance || 0);
-            const actualDeduction = Math.min(tokenAmount, currentBalance);
-            if (actualDeduction <= 0) {
+            // Read current balance FIRST, then cap the deduction. Several answers of the same user may end at the same
+            // moment (desktop app, Classgrid Code and the website at once): the deduction only goes through while the
+            // balance still covers it, else the balance is read again (never below zero, never charged twice)
+            let user, currentBalance, actualDeduction, updatedUser = null;
+            for (let attempt = 0; attempt < 4 && !updatedUser; attempt++) {
+                user = await User.findById(userId).select("ai_tokens.ai_credits_balance ai_tokens.total_ai_credits_purchased");
+                currentBalance = Math.max(0, user?.ai_tokens?.ai_credits_balance || 0);
+                actualDeduction = Math.min(tokenAmount, currentBalance);
+                if (actualDeduction <= 0) break;
+                updatedUser = await User.findOneAndUpdate({ _id: userId, "ai_tokens.ai_credits_balance": { $gte: actualDeduction } }, {
+                    $inc: {
+                        "ai_tokens.ai_credits_balance": -actualDeduction,
+                        "ai_tokens.total_ai_tokens_used": actualDeduction
+                    }
+                }, { returnDocument: 'after' });
+            }
+            if (actualDeduction <= 0 || !updatedUser) {
                 const spilled = noSpill ? null : await spillToOtherPool(userId, orgId, tokenAmount, "personal");
                 return { success: true, remaining: 0, limit: 0, type: "personal", uncharged: spilled ? (spilled.spill?.uncharged || 0) : tokenAmount, ...(spilled ? { spilledTo: spilled.to, spilledTokens: spilled.tokens, spill: spilled.spill } : {}) };
             }
-            const updatedUser = await User.findByIdAndUpdate(userId, {
-                $inc: {
-                    "ai_tokens.ai_credits_balance": -actualDeduction,
-                    "ai_tokens.total_ai_tokens_used": actualDeduction
-                }
-            }, { returnDocument: 'after' });
             result = { success: true, remaining: Math.max(0, updatedUser.ai_tokens.ai_credits_balance), limit: updatedUser.ai_tokens.ai_credits_balance + actualDeduction, type: "personal", uncharged: tokenAmount - actualDeduction };
             if (result.uncharged > 0 && !noSpill) {
                 const spilled = await spillToOtherPool(userId, orgId, result.uncharged, "personal");
@@ -401,20 +407,24 @@ export const deductTokens = async (userId, orgId, tokenAmount, source, { noSpill
             triggerEmailAlerts(userId, orgId, "personal", currentBalance, result.remaining, user?.ai_tokens?.total_ai_credits_purchased || currentBalance);
 
         } else if (source === "promotion") {
-            // Read current balance FIRST, then cap the deduction
-            const user = await User.findById(userId).select("ai_tokens.promotion_credits_balance");
-            const currentBalance = Math.max(0, user?.ai_tokens?.promotion_credits_balance || 0);
-            const actualDeduction = Math.min(tokenAmount, currentBalance);
-            if (actualDeduction <= 0) {
+            // Read current balance FIRST, then cap the deduction (same guard against answers ending at the same moment)
+            let user, currentBalance, actualDeduction, updatedUser = null;
+            for (let attempt = 0; attempt < 4 && !updatedUser; attempt++) {
+                user = await User.findById(userId).select("ai_tokens.promotion_credits_balance ai_tokens.total_promotion_credits_granted");
+                currentBalance = Math.max(0, user?.ai_tokens?.promotion_credits_balance || 0);
+                actualDeduction = Math.min(tokenAmount, currentBalance);
+                if (actualDeduction <= 0) break;
+                updatedUser = await User.findOneAndUpdate({ _id: userId, "ai_tokens.promotion_credits_balance": { $gte: actualDeduction } }, {
+                    $inc: {
+                        "ai_tokens.promotion_credits_balance": -actualDeduction,
+                        "ai_tokens.total_ai_tokens_used": actualDeduction
+                    }
+                }, { returnDocument: 'after' });
+            }
+            if (actualDeduction <= 0 || !updatedUser) {
                 const spilled = noSpill ? null : await spillToOtherPool(userId, orgId, tokenAmount, "promotion");
                 return { success: true, remaining: 0, limit: 0, type: "promotion", uncharged: spilled ? (spilled.spill?.uncharged || 0) : tokenAmount, ...(spilled ? { spilledTo: spilled.to, spilledTokens: spilled.tokens, spill: spilled.spill } : {}) };
             }
-            const updatedUser = await User.findByIdAndUpdate(userId, {
-                $inc: {
-                    "ai_tokens.promotion_credits_balance": -actualDeduction,
-                    "ai_tokens.total_ai_tokens_used": actualDeduction
-                }
-            }, { returnDocument: 'after' });
             result = { success: true, remaining: Math.max(0, updatedUser.ai_tokens.promotion_credits_balance), limit: updatedUser.ai_tokens.promotion_credits_balance + actualDeduction, type: "promotion", uncharged: tokenAmount - actualDeduction };
             if (result.uncharged > 0 && !noSpill) {
                 const spilled = await spillToOtherPool(userId, orgId, result.uncharged, "promotion");

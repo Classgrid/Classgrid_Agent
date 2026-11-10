@@ -1842,6 +1842,7 @@ export const streamAskAi = async (req, res) => {
     // answer goes down this stream as pc_tool_call and the app posts the reply back (local-runner.service.js
     // pcExecutors). Not for the website, headless task turns or wake-ups (no app is on their stream).
     let unregisterPcExecutor = null;
+    let pcExecutor = null; // this answer's app, for the steps on the computer (local-runner.service.js pcExecutors)
     let durableTurn = null;
     let localLoop = null; // the app driving the loop (set below, once the abort controls exist)
     let resumeState = null; // an answer going on after a server restart (turn-state.service.js)
@@ -1854,10 +1855,13 @@ export const streamAskAi = async (req, res) => {
         res.write(`data: ${JSON.stringify({ type: "turn_info", turnId: durableTurn.id })}\n\n`);
         const { registerPcExecutor } = await import("../services/local-runner.service.js");
         const alive = () => !res.writableEnded && !res.destroyed;
-        unregisterPcExecutor = registerPcExecutor(userId, {
+        pcExecutor = {
+            userId: String(userId),
+            sessionId: body.sessionId || null, // (a chat made just now gets its id below, once it exists)
             alive,
             send: (event) => { if (!alive()) return false; res.write(`data: ${JSON.stringify(event)}\n\n`); return true; },
-        });
+        };
+        unregisterPcExecutor = registerPcExecutor(pcExecutor);
     }
 
     let keepAliveInterval = null;
@@ -2103,6 +2107,7 @@ export const streamAskAi = async (req, res) => {
             const session = await createSession(userEmail, initialTitle, hideFromUser);
             if (session) {
                 sessionId = session.id;
+                if (pcExecutor) pcExecutor.sessionId = String(sessionId); // the steps of this new chat go to this app
                 // The chat's project and editor notes are looked up now, from the project the app says is open, while
                 // the message is saved and the chat is linked to it (answers must start at once, owner 2026-11-09)
                 if (!contextP && body.taskOrigin !== "whatsapp") {
