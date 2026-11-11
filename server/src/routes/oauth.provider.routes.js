@@ -516,9 +516,10 @@ const isRequestIdShape = (value) => typeof value === "string" && value.length > 
 // The app's name is self-chosen (a DCR client can call itself "Classgrid Official"), so the consent page
 // also shows where the code is really sent and flags apps nobody at Classgrid registered.
 // Apps Classgrid trusts: the name must match AND every redirect must go to the vendor's own hosts.
-function isVerifiedVendorClient(client) {
+function isVerifiedVendorClient(client, redirectUri) {
     if (!client || !/chatgpt|openai/i.test(client.name || "")) return false;
-    const uris = client.redirectUris || [];
+    // On the consent screen, judge the redirect actually used (it is already checked against the registered list)
+    const uris = redirectUri ? [redirectUri] : (client.redirectUris || []);
     if (!uris.length) return false;
     return uris.every((u) => {
         try {
@@ -536,7 +537,7 @@ function describeClientForConsent(client, redirectUri) {
     return {
         name: client.name,
         clientId: client.clientId,
-        clientKind: (client.createdBy || isVerifiedVendorClient(client)) ? "registered" : "dynamic", // "dynamic" = self-registered, unverified
+        clientKind: (client.createdBy || isVerifiedVendorClient(client, redirectUri)) ? "registered" : "dynamic", // "dynamic" = self-registered, unverified
         redirectHost
     };
 }
