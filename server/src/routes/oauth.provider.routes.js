@@ -515,6 +515,19 @@ const isRequestIdShape = (value) => typeof value === "string" && value.length > 
 
 // The app's name is self-chosen (a DCR client can call itself "Classgrid Official"), so the consent page
 // also shows where the code is really sent and flags apps nobody at Classgrid registered.
+// Apps Classgrid trusts: the name must match AND every redirect must go to the vendor's own hosts.
+function isVerifiedVendorClient(client) {
+    if (!client || !/chatgpt|openai/i.test(client.name || "")) return false;
+    const uris = client.redirectUris || [];
+    if (!uris.length) return false;
+    return uris.every((u) => {
+        try {
+            const h = new URL(u).hostname.toLowerCase();
+            return h === "chatgpt.com" || h.endsWith(".chatgpt.com") || h === "openai.com" || h.endsWith(".openai.com");
+        } catch { return false; }
+    });
+}
+
 function describeClientForConsent(client, redirectUri) {
     let redirectHost = null;
     if (redirectUri) {
@@ -523,7 +536,7 @@ function describeClientForConsent(client, redirectUri) {
     return {
         name: client.name,
         clientId: client.clientId,
-        clientKind: client.createdBy ? "registered" : "dynamic", // "dynamic" = self-registered, unverified
+        clientKind: (client.createdBy || isVerifiedVendorClient(client)) ? "registered" : "dynamic", // "dynamic" = self-registered, unverified
         redirectHost
     };
 }
@@ -715,7 +728,7 @@ router.get("/grants", requireConsentPageOrigin, isAuthenticated, async (req, res
         }
 
         const clients = byClient.size
-            ? await OAuthClient.find({ clientId: { $in: [...byClient.keys()] } }).select("clientId name createdBy").lean()
+            ? await OAuthClient.find({ clientId: { $in: [...byClient.keys()] } }).select("clientId name createdBy redirectUris").lean()
             : [];
         const clientById = new Map(clients.map((c) => [c.clientId, c]));
 
@@ -724,7 +737,7 @@ router.get("/grants", requireConsentPageOrigin, isAuthenticated, async (req, res
             return {
                 clientId,
                 name: client?.name || "Removed app",
-                clientKind: client?.createdBy ? "registered" : "dynamic",
+                clientKind: (client?.createdBy || isVerifiedVendorClient(client)) ? "registered" : "dynamic",
                 scopes: describeScopes([...row.scopes]).map(({ scope, label, sensitive }) => ({ scope, label, sensitive })),
                 connectedAt: row.connectedAt,
                 lastUsedAt: row.lastUsedAt

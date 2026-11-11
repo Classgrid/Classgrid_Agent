@@ -218,9 +218,9 @@ if (hasIntegrationCallback) {
       root.innerHTML = "<div style='display:flex;justify-content:center;align-items:center;height:100vh;font-family:sans-serif;'>Authenticating... You can close this window.</div>";
   }
 } else if (window.location.hostname === "chat.classgrid.in" || (import.meta.env.DEV && params.has("cgcheck"))) {
-  // VPN / proxy / Tor visitors get a blank page and the app never loads; everyone else first passes the
-  // Cloudflare Turnstile "Verify you are human" check (owner, 2026-11-01). See /api/net-check.
-  netCheckBlocked().then((blocked) => (blocked ? showBlankPage() : humanCheck().then(renderApp)));
+  // The Cloudflare "Verify you are human" check shows ONLY for VPN / proxy / Tor visitors.
+  // Normal visitors go straight into the app. See /api/net-check.
+  netCheckBlocked().then((blocked) => (blocked ? humanCheck().then(renderApp) : renderApp()));
 } else {
   renderApp();
 }
