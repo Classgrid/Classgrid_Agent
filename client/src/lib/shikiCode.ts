@@ -3,7 +3,7 @@
 // shiki like the files do"). Shiki loads only when something needs colouring; until then the plain text shows.
 
 /** The Shiki theme for the page's current colour mode */
-export const shikiTheme = () => (typeof document !== "undefined" && document.documentElement.classList.contains("dark") ? "dark-plus" : "light-plus");
+export const shikiTheme = (): "dark-plus" | "light-plus" => (typeof document !== "undefined" && document.documentElement.classList.contains("dark") ? "dark-plus" : "light-plus");
 
 // Endings and names Shiki does not know by that word
 const BY_EXT: Record<string, string> = {

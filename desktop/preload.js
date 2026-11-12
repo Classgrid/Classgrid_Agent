@@ -65,6 +65,7 @@ contextBridge.exposeInMainWorld("classgridDesktop", {
   runTool: (req) => ipcRenderer.invoke("cg:runTool", req),
   // Studio's Review tab for a folder on this computer: an answer's changes (null for a cloud project's answer), and
   // its files put back, one or all (runner.js reviewCheckpoint / rejectCheckpoint)
+  listCheckpoints: (chat) => ipcRenderer.invoke("cg:listCheckpoints", chat),
   reviewCheckpoint: (chat, cp) => ipcRenderer.invoke("cg:reviewCheckpoint", chat, cp),
   rejectCheckpoint: (chat, cp, file) => ipcRenderer.invoke("cg:rejectCheckpoint", chat, cp, file ?? null),
   // The editor notes (open file, cursor, selection, problems, terminal runs) sent with each message, so the server

@@ -775,6 +775,7 @@ const HANDLERS = {
   // One AI step on this computer (pc_tool_call on the answer's own stream): the same runner the socket fallback uses
   runTool: (_p, req) => parts.runner.runTool(req && typeof req === "object" ? req : {}),
   // Studio's Review tab for a folder on this computer: an answer's changes, and its files put back (runner.js keepBefore)
+  listCheckpoints: (_p, chat) => parts.runner.listCheckpoints(chat),
   reviewCheckpoint: (_p, chat, cp) => parts.runner.reviewCheckpoint(chat, cp),
   rejectCheckpoint: (_p, chat, cp, file) => parts.runner.rejectCheckpoint(chat, cp, file || null),
   // The editor notes sent with each message (so the server never asks this computer for them in front of an answer)

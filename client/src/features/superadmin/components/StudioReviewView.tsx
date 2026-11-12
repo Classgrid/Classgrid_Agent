@@ -10,7 +10,8 @@ import { toast } from "sonner";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/marketing_ui/dropdown-menu";
 import { CHECKPOINTS_CHANGED_EVENT, FileBadge, REVIEW_CHECKPOINT_EVENT, checkpointsFor, markCheckpoint, readCheckpointState } from "@/components/ai/components/stepper/ProjectToolSteps";
 import { fetchWithRescue } from "@/lib/rescue";
-import { shikiLangForFile, shikiLines, shikiTheme } from "@/lib/shikiCode";
+import { shikiLangForFile, shikiLines } from "@/lib/shikiCode";
+import { useShikiTheme } from "@/lib/useShikiTheme";
 import { DangerConfirmDialog } from "@/components/marketing_ui/danger-confirm-dialog";
 
 const backendUrl = import.meta.env.VITE_API_URL || "https://api.classgrid.in";
@@ -26,6 +27,7 @@ type View = { split: boolean; hideWs: boolean; fold: boolean };
 // A folder on this computer: the desktop app (or Classgrid Code) kept the answer's before-copies itself and shows,
 // rejects or undoes the changes from them; a cloud project's answer is on the server (the routes below)
 type LocalReview = {
+  listCheckpoints?: (chat: string) => Promise<string[]>;
   reviewCheckpoint?: (chat: string, cp: string) => Promise<{ files: ReviewFile[]; finished: boolean } | null>;
   rejectCheckpoint?: (chat: string, cp: string, file: string | null) => Promise<number | null>;
 };
@@ -164,9 +166,14 @@ export function StudioReviewView({ projectId, onChanged }: { projectId: string |
   const cpPath = (cp: string) => `/projects/${projectId}/checkpoints/${chatId}/${cp}`;
   const load = async (want: string | null = picked) => {
     setError("");
-    const cps = chatId ? checkpointsFor(chatId) : [];
+    let cps = chatId ? checkpointsFor(chatId) : [];
+    // (the copies kept on this computer count too: a chat made by the same message has no list yet)
+    if (chatId && localReview()?.listCheckpoints) {
+      const here = await localReview()!.listCheckpoints!(chatId).catch(() => [] as string[]);
+      cps = [...new Set([...cps, ...here])].sort();
+    }
     setAnswers(cps);
-    const cp = want && cps.includes(want) ? want : cps.at(-1) || null;
+    const cp = want || cps.at(-1) || null;
     setCheckpoint(cp);
     if (!chatId || !cp) { setFiles([]); return; }
     setFiles(null);
@@ -240,9 +247,9 @@ export function StudioReviewView({ projectId, onChanged }: { projectId: string |
   // The code coloured with Shiki (VS Code's grammars and themes), like the Files tab: each file's rows go to Shiki
   // as one piece of code and come back one coloured line per row; until then the rows show plain
   const [shikiRows, setShikiRows] = useState<WeakMap<Row, string>>(() => new WeakMap());
+  const theme = useShikiTheme(); // (coloured again when light / dark mode switches)
   useEffect(() => {
     let gone = false;
-    const theme = shikiTheme();
     (async () => {
       const map = new WeakMap<Row, string>();
       for (const [file, { rows }] of prepared) {
@@ -253,7 +260,7 @@ export function StudioReviewView({ projectId, onChanged }: { projectId: string |
       if (!gone) setShikiRows(map);
     })().catch(() => { /* plain rows stay */ });
     return () => { gone = true; };
-  }, [prepared]);
+  }, [prepared, theme]);
 
   // Find across all files: match case, whole word, or a regular expression
   const q = find || "";

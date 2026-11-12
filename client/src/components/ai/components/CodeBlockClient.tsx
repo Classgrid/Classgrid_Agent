@@ -58,9 +58,9 @@ export function CodeBlockClient({ rawCode, html, language = 'javascript' }: { ra
   }
 
   return (
-    <div className="group relative my-6 rounded-xl border border-slate-200 dark:border-white/10 bg-white dark:bg-[#111113] overflow-hidden text-sm shadow-sm dark:shadow-xl">
+    <div className="group relative my-6 rounded-xl border border-slate-200 dark:border-white/10 bg-white dark:bg-[#0f0f0f] overflow-hidden text-sm shadow-sm dark:shadow-xl">
       {/* Vercel-style Code Header */}
-      <div className="flex items-center justify-between px-4 py-2.5 border-b border-slate-200 dark:border-white/5 bg-slate-100 dark:bg-[#18181b]">
+      <div className="flex items-center justify-between px-4 py-2.5 border-b border-slate-200 dark:border-white/5 bg-slate-100 dark:bg-[#161616]">
         <div className="flex items-center gap-3">
           <span className="flex items-center justify-center bg-white dark:bg-white/10 text-slate-700 dark:text-zinc-300 text-[10px] font-bold px-1.5 py-0.5 rounded-[4px] border border-slate-200 dark:border-transparent min-w-[24px] tracking-wider">
             {badgeText}
@@ -83,7 +83,7 @@ export function CodeBlockClient({ rawCode, html, language = 'javascript' }: { ra
 
       {/* Code Content */}
       <div
-        className="relative overflow-auto text-sm code-block-wrapper custom-scrollbar [&>pre]:!bg-transparent [&>pre]:!m-0"
+        className="relative overflow-auto text-sm code-block-wrapper custom-scrollbar [&_pre]:!bg-transparent [&_code]:!bg-transparent [&>pre]:!m-0"
         dangerouslySetInnerHTML={{ __html: html }}
       />
     </div>

@@ -1310,6 +1310,13 @@ function cpFileName(m, key) {
   if (root && key.toLowerCase().startsWith(root.toLowerCase() + path.sep)) return path.relative(root, key).split(path.sep).join("/");
   return key;
 }
+// The answers of a chat with copies kept here, oldest first (the Review tab lists them even when the chat's own list
+// is empty, as in a chat made by the same message, 2026-11-12)
+function listCheckpoints(chat) {
+  const c = cpSafe(chat);
+  if (!checkpointsDir || !c) return [];
+  try { return fs.readdirSync(path.join(checkpointsDir, c)).filter((n) => /^\d{10,16}$/.test(n)).sort(); } catch { return []; }
+}
 // Review: the changes of one answer, or null when this computer kept nothing for it (a cloud project's answer)
 function reviewCheckpoint(chat, cp) {
   const dir = cpFolder(chat, cp);
@@ -1481,6 +1488,7 @@ module.exports = {
   githubRepoOf,
   readForFilesTab,
   // Studio's Review tab for a folder on this computer: an answer's changes, and its files put back (see keepBefore)
+  listCheckpoints,
   reviewCheckpoint,
   rejectCheckpoint,
   init(userDataDir) { foldersFile = path.join(userDataDir, "folders.json"); checkpointsDir = path.join(userDataDir, "checkpoints"); },

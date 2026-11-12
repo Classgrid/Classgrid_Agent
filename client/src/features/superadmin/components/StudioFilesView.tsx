@@ -13,6 +13,7 @@ const dragFile = (e: React.DragEvent, path: string) => {
 import { createPortal } from "react-dom";
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import { themeIcons } from "seti-icons";
+import { useShikiTheme } from "@/lib/useShikiTheme";
 import { Check, ChevronRight, Copy, Download, Folder, FolderOpen, FolderTree, Link2, ListTree, MessageSquare, MoreVertical, Plus, Quote, RotateCw, Search, X } from "lucide-react";
 import { StudioSearchPalette } from "./StudioSearchPalette";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/marketing_ui/dropdown-menu";
@@ -753,11 +754,11 @@ function CodeView({ file, projectId }: { file: OpenFile; projectId: string }) {
   // Shiki colours code with VS Code's own rules and its Dark+ / Light+ themes; it loads only when a file opens
   const [html, setHtml] = useState<string | null>(null);
   const [oldVersion, setOldVersion] = useState(false);
+  const theme = useShikiTheme(); // (coloured again when light / dark mode switches)
   useEffect(() => {
     setHtml(null);
     if (file.content === undefined || file.content.length > 300_000) return;
     let gone = false;
-    const theme = document.documentElement.classList.contains("dark") ? "dark-plus" : "light-plus";
     import("shiki")
       .then(async ({ codeToHtml }) => {
         const lang = await shikiLang(file.path);
@@ -771,7 +772,7 @@ function CodeView({ file, projectId }: { file: OpenFile; projectId: string }) {
       .then((out) => { if (!gone) setHtml(out); })
       .catch((e) => { if (isOldVersion(e) && !gone) setOldVersion(true); });
     return () => { gone = true; };
-  }, [file.content, file.path]);
+  }, [file.content, file.path, theme]);
   const textRows = useMemo(() => (file.content === undefined ? [] : file.content.split("\n")), [file.content]);
   const lines = textRows.length;
   const scrollRef = useRef<HTMLDivElement>(null);
