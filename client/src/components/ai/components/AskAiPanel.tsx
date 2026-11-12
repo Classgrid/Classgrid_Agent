@@ -34,7 +34,6 @@ import { ClassgridLogoIcon } from "@/components/layout/ClassgridLogoIcon";
 
 import { newTerminalOutput } from "@/features/superadmin/components/LocalTerminal";
 
-import hljs from "highlight.js";
 import "highlight.js/styles/github-dark.css";
 import { ExpandedInputModal } from './ExpandedInputModal';
 import { AiHubModal } from "./AiHubModal";
@@ -125,7 +124,7 @@ import { cn } from "../utils";
 
 // The desktop app has no Agent mode: Studio there gets Agent's Incognito button
 const DESKTOP_STUDIO = import.meta.env.VITE_DESKTOP === "1" && import.meta.env.VITE_EDITOR !== "1";
-import { CodeBlockClient } from "./CodeBlockClient";
+import { CodeBlockShiki } from "./CodeBlockShiki";
 
 import { ModelPicker, useSelectedModel, MODEL_GROUPS, AUTO_MODEL_ID, getThinkingLevel } from "./ModelPicker";
 
@@ -1446,14 +1445,8 @@ const MarkdownComponents = {
     if (!isActuallyInline) {
       return (
         <div className="w-full pb-2 overflow-hidden not-prose">
-          <CodeBlockClient
-            language={language}
-            rawCode={String(children).replace(/\n$/, "")}
-            html={`<pre class="text-[13px] py-4 px-4 !m-0 flex flex-col"><code class="font-mono hljs">${!isTyping && language && hljs.getLanguage(language)
-              ? hljs.highlight(String(children).replace(/\n$/, ""), { language }).value
-              : String(children).replace(/\n$/, "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
-              }</code></pre>`}
-          />
+          {/* Coloured with Shiki, like the Files tab (plain while the answer is still being typed) */}
+          <CodeBlockShiki language={language} rawCode={String(children).replace(/\n$/, "")} isTyping={isTyping} />
         </div>
       );
     }

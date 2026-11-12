@@ -42,9 +42,8 @@ import remarkGithubAlerts from "remark-github-alerts";
 import rehypeKatex from "rehype-katex";
 import { MermaidViewer } from "@/components/ai/components/MermaidViewer";
 import { CopyBlockClient } from "@/components/ai/components/CopyBlockClient";
-import { CodeBlockClient } from "@/components/ai/components/CodeBlockClient";
+import { CodeBlockShiki } from "@/components/ai/components/CodeBlockShiki";
 import { Info, Lightbulb, MessageSquareWarning, AlertTriangle, OctagonAlert } from "lucide-react";
-import hljs from "highlight.js";
 import 'highlight.js/styles/atom-one-dark.css';
 import { fetchWithRescue } from "@/lib/rescue";
 
@@ -155,15 +154,7 @@ function MessageRow({ msg, isUser }: { msg: SharedMessage; isUser: boolean }) {
               if (!inline) {
                 return (
                   <div className="w-full pb-2 overflow-hidden not-prose">
-                    <CodeBlockClient
-                      language={language}
-                      rawCode={String(children).replace(/\n$/, "")}
-                      html={`<pre class="text-[13px] py-4 px-4 !m-0 flex flex-col"><code class="font-mono hljs">${
-                        language && hljs.getLanguage(language)
-                          ? hljs.highlight(String(children).replace(/\n$/, ""), { language }).value
-                          : String(children).replace(/\n$/, "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
-                      }</code></pre>`}
-                    />
+                    <CodeBlockShiki language={language} rawCode={String(children).replace(/\n$/, "")} />
                   </div>
                 );
               }
