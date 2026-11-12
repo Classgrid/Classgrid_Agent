@@ -783,7 +783,7 @@ export function FilesChangedSummary({ steps, checkpoint, sessionId }: { steps: S
         {!done && <span className="text-[#16a34a] dark:text-[#22c55e]">+{added}</span>}
         {!done && <span className="text-red-600 dark:text-red-500">-{removed}</span>}
         {open ? <ChevronDown className="size-3.5" /> : <ChevronRight className="size-3.5" />}
-        {checkpoint && sessionId && inProjectMode() && !status && (
+        {checkpoint && sessionId && reviewButtonsOn() && !status && (
           <span className="ml-auto flex items-center gap-1.5" onClick={(e) => e.stopPropagation()}>
             <span role="button" tabIndex={0} onClick={() => reviewCheckpoint({ sessionId, checkpoint, mode: 'review' })} className="rounded-md border border-border px-2.5 py-1 text-xs text-foreground hover:bg-secondary">Review</span>
             <span role="button" tabIndex={0} onClick={() => reviewCheckpoint({ sessionId, checkpoint, mode: 'undo' })} className="rounded-md border border-border px-2.5 py-1 text-xs text-foreground hover:bg-secondary">Undo</span>
@@ -808,6 +808,8 @@ export function FilesChangedSummary({ steps, checkpoint, sessionId }: { steps: S
 const FILE_MENTION = /^((?:[\w.@-]+\/)*[\w@-][\w.@-]*\.(?:tsx?|jsx?|mjs|cjs|json|md|mdx|html?|css|scss|sass|less|py|rb|go|rs|java|kt|php|c|h|cpp|hpp|cs|swift|vue|svelte|ya?ml|toml|ini|env|txt|sh|sql|graphql|xml|svg|prisma|dart|lock|tsbuildinfo|gitignore|config))(?::(\d+)(?:-(\d+))?|#L(\d+)(?:-L?(\d+))?|,?\s*\(?lines?\s*(\d+)(?:\s*[-–]\s*(\d+))?\)?)?$/i;
 
 const inProjectMode = () => typeof window !== 'undefined' && window.location.pathname.split('/').includes('project');
+// Review and Undo under an answer: Project Mode (the review window) and Studio (the Review tab opens on that answer)
+const reviewButtonsOn = () => typeof window !== 'undefined' && window.location.pathname.split('/').some((p) => p === 'project' || p === 'studio');
 // File and folder chips in answers: Project Mode and Studio (a click opens the file in the Files tab)
 const fileChipsOn = () => typeof window !== 'undefined' && window.location.pathname.split('/').some((p) => p === 'project' || p === 'studio');
 // A folder named in the answer (`src/components/`): needs a "/" so normal words never match

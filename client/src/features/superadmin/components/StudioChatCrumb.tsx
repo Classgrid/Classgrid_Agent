@@ -1,9 +1,9 @@
 // Studio's chat top bar, next to the sidebar button (website and desktop app), like Antigravity: "project / chat".
 // The project opens the Project tab; the chat's name opens a short list of that project's other chats to switch to.
 import { useEffect, useMemo, useState } from "react";
-import { Check, ChevronDown } from "lucide-react";
+import { Check, ChevronDown, Plus } from "lucide-react";
 import { useLocation, useNavigate } from "react-router-dom";
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/marketing_ui/dropdown-menu";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/marketing_ui/dropdown-menu";
 import { fetchWithRescue } from "@/lib/rescue";
 import { useChatId } from "./StudioShotsView";
 import { savedProject } from "../utils/projectCopies";
@@ -65,6 +65,12 @@ export function StudioChatCrumb() {
           </DropdownMenuTrigger>
           {/* (a short list that stays inside the chat column) */}
           <DropdownMenuContent align="start" sideOffset={6} className="w-72 max-w-[calc(100vw-2rem)] max-h-80 overflow-y-auto z-[100] bg-white dark:bg-[#202123] text-slate-700 dark:text-[#ececf1] border border-slate-200 dark:border-white/10 rounded-2xl p-2 shadow-2xl [scrollbar-width:thin]">
+            {/* A new chat in this same project, first in the list (owner, 2026-11-12: like the video's top bar) */}
+            <DropdownMenuItem onClick={() => { navigate(base); window.dispatchEvent(new Event("agent:new-chat")); }} className="flex items-center gap-3 py-2 px-3 text-[14px] cursor-pointer hover:bg-slate-100 dark:hover:bg-[#343541] focus:bg-slate-100 dark:focus:bg-[#343541] focus:text-slate-900 dark:focus:text-[#ececf1] rounded-xl transition-colors">
+              <Plus className="size-3.5 shrink-0" />
+              <span className="min-w-0 flex-1 truncate">New chat</span>
+            </DropdownMenuItem>
+            <DropdownMenuSeparator className="my-1 bg-slate-200 dark:bg-white/10" />
             {siblings.length ? siblings.map((c) => (
               <DropdownMenuItem key={c.id} onClick={() => { if (c.id !== chatId) navigate(`${base}/${c.id}`); }} className="flex items-center gap-3 py-2 px-3 text-[14px] cursor-pointer hover:bg-slate-100 dark:hover:bg-[#343541] focus:bg-slate-100 dark:focus:bg-[#343541] focus:text-slate-900 dark:focus:text-[#ececf1] rounded-xl transition-colors">
                 <span className="min-w-0 flex-1 truncate">{cleanTitle(c.title)}</span>

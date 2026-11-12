@@ -53,8 +53,7 @@ export function StudioReviewModal({ projectId, onChanged }: { projectId: string 
       const d = (e as CustomEvent).detail;
       if (!projectId || !d?.checkpoint) return;
       if (d.mode === "undo") { setConfirm({ kind: "undo", sessionId: d.sessionId, checkpoint: d.checkpoint }); return; }
-      setReview({ sessionId: d.sessionId, checkpoint: d.checkpoint, files: null, open: null, busy: false });
-      loadReview(d);
+      // "Review" in Studio opens the Review tab (StudioModePage), not this window
     };
     window.addEventListener(REVIEW_CHECKPOINT_EVENT, onReview);
     return () => window.removeEventListener(REVIEW_CHECKPOINT_EVENT, onReview);

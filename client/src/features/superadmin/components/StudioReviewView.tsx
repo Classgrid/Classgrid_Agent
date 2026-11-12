@@ -8,11 +8,39 @@ import { useLocation } from "react-router-dom";
 import { Check, ChevronDown, ChevronRight, ChevronUp, ChevronsDownUp, ChevronsUpDown, Columns2, FileDiff, FoldVertical, ListTree, MoreVertical, RotateCw, Search, Space, Undo2, X } from "lucide-react";
 import { toast } from "sonner";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/marketing_ui/dropdown-menu";
-import { CHECKPOINTS_CHANGED_EVENT, FileBadge, checkpointsFor, markCheckpoint, readCheckpointState } from "@/components/ai/components/stepper/ProjectToolSteps";
+import hljs from "highlight.js";
+import { CHECKPOINTS_CHANGED_EVENT, FileBadge, REVIEW_CHECKPOINT_EVENT, checkpointsFor, markCheckpoint, readCheckpointState } from "@/components/ai/components/stepper/ProjectToolSteps";
 import { fetchWithRescue } from "@/lib/rescue";
 import { DangerConfirmDialog } from "@/components/marketing_ui/danger-confirm-dialog";
 
 const backendUrl = import.meta.env.VITE_API_URL || "https://api.classgrid.in";
+// The code in the diff is coloured like in the Files tab, one line at a time (highlight.js, the theme the chat's code
+// blocks use). The language comes from the file's ending; an unknown ending stays plain.
+const HL_LANG: Record<string, string> = {
+  ts: "typescript", tsx: "typescript", mts: "typescript", cts: "typescript", js: "javascript", jsx: "javascript", mjs: "javascript", cjs: "javascript",
+  json: "json", css: "css", scss: "scss", less: "less", html: "xml", htm: "xml", xml: "xml", svg: "xml", vue: "xml", md: "markdown", mdx: "markdown",
+  py: "python", rb: "ruby", go: "go", rs: "rust", java: "java", kt: "kotlin", swift: "swift", c: "c", h: "c", cpp: "cpp", cc: "cpp", hpp: "cpp", cs: "csharp",
+  php: "php", sh: "bash", bash: "bash", zsh: "bash", ps1: "powershell", yml: "yaml", yaml: "yaml", toml: "ini", ini: "ini", env: "bash", sql: "sql",
+  dart: "dart", lua: "lua", r: "r", scala: "scala", gradle: "groovy", dockerfile: "dockerfile", makefile: "makefile", graphql: "graphql", prisma: "sql",
+};
+const langOf = (file: string) => {
+  const name = file.split("/").pop() || file;
+  const ext = name.includes(".") ? name.split(".").pop()!.toLowerCase() : name.toLowerCase();
+  const lang = HL_LANG[ext];
+  return lang && hljs.getLanguage(lang) ? lang : null;
+};
+const colourCache = new Map<string, string>();
+const coloured = (text: string, lang: string | null) => {
+  if (!lang || !text.trim()) return null;
+  const key = `${lang}\u0000${text}`;
+  let html = colourCache.get(key);
+  if (html === undefined) {
+    try { html = hljs.highlight(text, { language: lang, ignoreIllegals: true }).value; } catch { html = ""; }
+    if (colourCache.size > 5000) colourCache.clear();
+    colourCache.set(key, html);
+  }
+  return html || null;
+};
 const LIST_KEY = "cg_studio_review_list";
 const VIEW_KEY = "cg_studio_review_view";
 const CONTEXT = 3; // unchanged lines kept around each change when folding
@@ -196,6 +224,18 @@ export function StudioReviewView({ projectId, onChanged }: { projectId: string |
     return () => window.removeEventListener(CHECKPOINTS_CHANGED_EVENT, onChange);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [chatId, projectId]);
+  // "Review" under an answer in the chat: this tab shows that answer's changes (the Studio page opens the tab)
+  useEffect(() => {
+    const onReview = (e: Event) => {
+      const d = (e as CustomEvent<{ sessionId: string; checkpoint: string; mode: string }>).detail;
+      if (!d || d.mode !== "review" || d.sessionId !== chatId || !d.checkpoint) return;
+      setPicked(d.checkpoint);
+      load(d.checkpoint);
+    };
+    window.addEventListener(REVIEW_CHECKPOINT_EVENT, onReview);
+    return () => window.removeEventListener(REVIEW_CHECKPOINT_EVENT, onReview);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [chatId, projectId]);
   // The agent changes a file while this tab is open: the changes refresh by themselves (no page reload needed)
   const pickedRef = useRef(picked);
   pickedRef.current = picked;
@@ -344,8 +384,13 @@ export function StudioReviewView({ projectId, onChanged }: { projectId: string |
   const allOpen = !!files?.length && files.every((f) => open.has(f.file));
   // The found words themselves are marked inside the line: the current one in orange, the others in yellow
   const allMatches = useMemo(() => (matcher ? new RegExp(matcher.source, `${matcher.flags}g`) : null), [matcher]);
-  const hl = (text: string, current: boolean) => {
-    if (!allMatches || !text) return text || " ";
+  const hl = (text: string, current: boolean, lang: string | null = null) => {
+    if (!allMatches) {
+      const html = coloured(text, lang);
+      if (html) return <span className="hljs !bg-transparent !p-0 !text-inherit" dangerouslySetInnerHTML={{ __html: html }} />;
+      return text || " ";
+    }
+    if (!text) return " ";
     const parts: React.ReactNode[] = [];
     let last = 0;
     allMatches.lastIndex = 0;
@@ -403,7 +448,7 @@ export function StudioReviewView({ projectId, onChanged }: { projectId: string |
           </span>
         )}
         <div className="ml-auto shrink-0 flex items-center gap-1">
-          {!!files?.length && (
+          {!!files?.length && !(checkpoint && readCheckpointState(checkpoint).status) && (
             <>
               <button className={`${btn} @max-[30rem]:px-0 @max-[30rem]:w-7 @max-[30rem]:flex @max-[30rem]:items-center @max-[30rem]:justify-center`} disabled={busy} onClick={() => setConfirmUndo(true)} title="Undo" aria-label="Undo">
                 <span className="@max-[30rem]:hidden">Undo</span><Undo2 className="hidden @max-[30rem]:block size-3.5" />
@@ -508,6 +553,8 @@ export function StudioReviewView({ projectId, onChanged }: { projectId: string |
                           {p.rows.map((r, i) => {
                             const attrs = { "data-hit": `${f.file}|${i}` };
                             if (r.kind === "fold") return foldRow(i, r.hidden, attrs);
+                            // (a hunk's "@@" line is a thin line between the parts of the file, nothing at the top)
+                            if (r.kind === "hunk") return i === 0 ? <div key={i} {...attrs} /> : <div key={i} {...attrs} className="my-1 border-t border-border/70" />;
                             return (
                               <div key={i} {...attrs} className={`flex ${ROW_BG[tone(r)]} ${isCurrent(f.file, i) ? "outline outline-1 outline-sky-500" : ""}`}>
                                 <span className={`shrink-0 flex select-none text-[#237893] dark:text-[#6e7681] ${NUMBER_BG[tone(r)]}`}>
@@ -515,7 +562,7 @@ export function StudioReviewView({ projectId, onChanged }: { projectId: string |
                                   <span className="w-9 pr-2 text-right">{lineNo(r.newLine)}</span>
                                 </span>
                                 <span className={`shrink-0 w-4 select-none ${SIGN_COLOR[r.kind] || "text-transparent"}`}>{SIGN[r.kind] || " "}</span>
-                                <span className={`min-w-0 flex-1 pr-4 whitespace-pre-wrap break-words ${r.kind === "hunk" ? "text-muted-foreground" : ""}`}>{r.kind === "hunk" ? r.text : hl(r.text, isCurrent(f.file, i))}</span>
+                                <span className="min-w-0 flex-1 pr-4 whitespace-pre-wrap break-words">{hl(r.text, isCurrent(f.file, i), langOf(f.file))}</span>
                               </div>
                             );
                           })}
@@ -531,7 +578,7 @@ export function StudioReviewView({ projectId, onChanged }: { projectId: string |
                             const attrs = { "data-hit": `${f.file}|${i}` };
                             if (x.full) return x.full.kind === "fold"
                               ? foldRow(i, x.full.hidden, attrs)
-                              : <div key={i} {...attrs} className="px-4 text-muted-foreground whitespace-pre overflow-hidden text-ellipsis">{x.full.text}</div>;
+                              : i === 0 ? <div key={i} {...attrs} /> : <div key={i} {...attrs} className="my-1 border-t border-border/70" />;
                             return (
                               <div key={i} {...attrs} className={`grid grid-cols-2 ${isCurrent(f.file, i) ? "outline outline-1 outline-sky-500" : ""}`}>
                                 {(["left", "right"] as const).map((side) => {
@@ -541,7 +588,7 @@ export function StudioReviewView({ projectId, onChanged }: { projectId: string |
                                     <div key={side} className={`flex min-w-0 ${side === "right" ? "border-l border-border" : ""} ${r ? ROW_BG[t] : "bg-black/[0.02] dark:bg-white/[0.02]"}`}>
                                       <span className="shrink-0 w-11 pr-2 text-right select-none text-[#237893] dark:text-[#6e7681]">{r ? lineNo(side === "left" ? r.oldLine : r.newLine) : ""}</span>
                                       <span className={`shrink-0 w-4 select-none ${r && r.kind !== "same" ? SIGN_COLOR[r.kind] : "text-transparent"}`}>{r && r.kind !== "same" ? SIGN[r.kind] : " "}</span>
-                                      <span className="min-w-0 pr-3 whitespace-pre-wrap break-all">{r ? hl(r.text, isCurrent(f.file, i)) : ""}</span>
+                                      <span className="min-w-0 pr-3 whitespace-pre-wrap break-all">{r ? hl(r.text, isCurrent(f.file, i), langOf(f.file)) : ""}</span>
                                     </div>
                                   );
                                 })}

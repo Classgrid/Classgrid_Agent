@@ -20,7 +20,7 @@ import { StudioLocalFileView, baseName } from "../components/StudioLocalFileView
 import { StudioAgentsView } from "../components/StudioAgentsView";
 import { StudioReviewView } from "../components/StudioReviewView";
 import { PushToGithubModal } from "../components/PushToGithubModal";
-import { FileBadge, OPEN_LOCAL_FILE_EVENT, OPEN_PROJECT_FILE_EVENT } from "@/components/ai/components/stepper/ProjectToolSteps";
+import { FileBadge, OPEN_LOCAL_FILE_EVENT, OPEN_PROJECT_FILE_EVENT, REVIEW_CHECKPOINT_EVENT } from "@/components/ai/components/stepper/ProjectToolSteps";
 import { fetchWithRescue } from "@/lib/rescue";
 import { toast } from "sonner";
 import { useSidebar } from "@/components/marketing_ui/sidebar";
@@ -222,6 +222,17 @@ export function StudioModePage() {
     };
     window.addEventListener("agent:tool", onTool);
     return () => window.removeEventListener("agent:tool", onTool);
+  }, []);
+
+  // "Review" under an answer: the pane opens on the Review tab, which shows that answer (StudioReviewView listens too)
+  useEffect(() => {
+    const onReview = (e: Event) => {
+      const d = (e as CustomEvent<{ mode?: string }>).detail;
+      if (d?.mode === "review") showTab("review");
+    };
+    window.addEventListener(REVIEW_CHECKPOINT_EVENT, onReview);
+    return () => window.removeEventListener(REVIEW_CHECKPOINT_EVENT, onReview);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // A file clicked in the agent's steps opens in the Files tab, at those lines
