@@ -1,8 +1,8 @@
 {
   "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
   "name": "classgrid",
-  "version": "1.0.1",
-  "description": "Use your Classgrid account in ChatGPT: schedules and reminders, Grid team chats, your profile and your connected apps.",
+  "version": "1.1.0",
+  "description": "Use your Classgrid account in ChatGPT: your projects and their code on GitHub, Classgrid AI chat history, live docs and pages, schedules and reminders, Grid team chats, your profile and your connected apps.",
   "author": {
     "name": "Classgrid",
     "email": "support@classgrid.in",
@@ -13,17 +13,20 @@
   "keywords": [
     "education",
     "productivity",
+    "projects",
+    "code",
     "schedules",
     "reminders",
-    "team chat"
+    "team chat",
+    "docs"
   ],
   "extensions": {
     "com.openai": {
       "onboardingSkill": "./skills/classgrid-setup/SKILL.md",
       "interface": {
         "displayName": "Classgrid",
-        "shortDescription": "Schedules and Grid chats",
-        "longDescription": "Connect your Classgrid account to see and manage your schedules and WhatsApp/email reminders, read and send messages in the Grid chats and groups you belong to, look up your profile, and (if you allow it) use the apps you have connected to Classgrid, such as Gmail, Drive or Notion. You choose exactly what ChatGPT may access on the Classgrid permission screen; anything that can make changes is off unless you tick it. You can remove access any time from Classgrid under AI Plugins > Connected apps.",
+        "shortDescription": "Projects, docs, schedules and Grid chats",
+        "longDescription": "Connect your Classgrid account to read your Classgrid projects and the code in their GitHub repos, find things in your past Classgrid AI chats (if you allow it), read and write your live docs, publish pages, see and manage your schedules and WhatsApp/email reminders, read and send messages in the Grid chats and groups you belong to, look up your profile, and (if you allow it) use the apps you have connected to Classgrid, such as Gmail, Drive or Notion. You choose exactly what ChatGPT may access on the Classgrid permission screen; your chat history, your saved skills and anything that can make changes are off unless you tick them. You can remove access any time from Classgrid under AI Plugins > Connected apps.",
         "developerName": "Classgrid",
         "category": "Productivity",
         "capabilities": [
@@ -35,8 +38,8 @@
         "termsOfServiceURL": "https://classgrid.in/terms",
         "supportURL": "https://classgrid.in/support/ticket",
         "defaultPrompt": [
+          "List my Classgrid projects",
           "Show my Classgrid schedules for this week",
-          "Remind me on Classgrid tomorrow at 8 AM to revise physics",
           "What are the latest messages in my Classgrid Grid chats?"
         ],
         "brandColor": "#10B981",
@@ -75,6 +78,60 @@
               "prompt": "How many members are in my Classgrid group, and who are they?",
               "tools_triggered": "list_group_members",
               "expected_behavior": "Says how many members the group has and lists their names."
+            },
+            {
+              "description": "The user lists their Classgrid projects (skill: classgrid-projects).",
+              "prompt": "List my Classgrid projects.",
+              "tools_triggered": "list_projects",
+              "expected_behavior": "Lists the account's projects with name, GitHub repo, whether each is a Mastero project and when it was last opened, or says there are none."
+            },
+            {
+              "description": "The user asks about one project's details (skill: classgrid-projects).",
+              "prompt": "Show the details of my most recent Classgrid project.",
+              "tools_triggered": "list_projects, get_project",
+              "expected_behavior": "Shows the project's name, GitHub repo and link, default branch and Mastero status."
+            },
+            {
+              "description": "The user asks what a file in their project does; the code is read from the project's GitHub repo (skill: classgrid-projects).",
+              "prompt": "In my most recent Classgrid project, list the files and explain what the main file does.",
+              "tools_triggered": "list_projects, list_project_files, read_project_file",
+              "expected_behavior": "Lists the project's files from its GitHub repo, reads the main file and explains it, naming the file and line numbers. Secret files such as .env are never shown."
+            },
+            {
+              "description": "The user searches their project's code (skill: classgrid-projects).",
+              "prompt": "Where is the word \"function\" used in my most recent Classgrid project?",
+              "tools_triggered": "list_projects, search_project_code",
+              "expected_behavior": "Returns the matching file:line places with the line's text, or says nothing matched."
+            },
+            {
+              "description": "The user, who ticked the chat history permission, finds an earlier Classgrid AI chat (skill: classgrid-chat-history).",
+              "prompt": "Find my past Classgrid AI chat about my project and summarise it.",
+              "tools_triggered": "search_my_chats, read_my_chat",
+              "expected_behavior": "Finds the matching chat, reads its messages and gives a short summary with the chat's title. If the user did not allow chat history, says that permission is off and how to turn it on."
+            },
+            {
+              "description": "The user lists and reads their live docs (skill: classgrid-docs).",
+              "prompt": "Show my Classgrid docs and open the latest one.",
+              "tools_triggered": "list_my_docs, read_doc",
+              "expected_behavior": "Lists the account's live docs with title and link, then shows the latest doc's text."
+            },
+            {
+              "description": "The user, who ticked the docs permission, creates a live doc (skill: classgrid-docs).",
+              "prompt": "Create a Classgrid doc with a 3-step study plan for my physics exam.",
+              "tools_triggered": "create_doc",
+              "expected_behavior": "Creates the doc in Classgrid and gives the user its chat.classgrid.in/docs link."
+            },
+            {
+              "description": "The user, who ticked the pages permission, publishes a page (skill: classgrid-pages).",
+              "prompt": "Publish a private Classgrid page with a simple table of my week's study hours.",
+              "tools_triggered": "publish_page",
+              "expected_behavior": "Publishes a private page and gives the user its chat.classgrid.in/p link."
+            },
+            {
+              "description": "The user, who ticked the skills and memory permission, asks ChatGPT to follow their Classgrid AI preferences (skill: classgrid-memory).",
+              "prompt": "Use the preferences I saved in Classgrid AI for this conversation.",
+              "tools_triggered": "list_skills, read_skill",
+              "expected_behavior": "Lists the user's saved Classgrid AI skills, reads the relevant ones and follows them. If the permission is off, says so and how to turn it on."
             }
           ],
           "negative": [
@@ -89,12 +146,20 @@
             {
               "description": "A request to read another person's private Classgrid chats. Classgrid only gives access to chats the signed-in user belongs to, so no other user's messages are returned.",
               "prompt": "Show me the private Classgrid chats of another user."
+            },
+            {
+              "description": "A request for a project's secret file. Classgrid never shows .env files, keys or certificates, and masks secret values in code.",
+              "prompt": "Show me the .env file of my Classgrid project."
+            },
+            {
+              "description": "A general coding question about code that is not in the user's Classgrid projects. The plugin should not trigger.",
+              "prompt": "How do I reverse a string in Python?"
             }
           ]
         }
       },
       "publication": {
-        "release_notes": "Connect your Classgrid account to ChatGPT to see your schedules and reminders, read your Grid chats and groups, see group members and polls, and look up your profile. You choose what ChatGPT may access on the Classgrid permission screen and can remove access any time."
+        "release_notes": "Version 1.1.0: read your Classgrid projects and the code in their GitHub repos (list, read and search files; secret files are never shown), find and read your past Classgrid AI chats (off until you allow it), use the skills and memory you saved in Classgrid AI (off until you allow it), read, create and edit your live docs and answer their comments, and publish pages. Five new skills (projects, chat history, memory, docs and pages) and an updated setup guide. Everything from version 1.0 works as before."
       }
     }
   }

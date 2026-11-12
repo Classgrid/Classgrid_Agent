@@ -21,6 +21,12 @@
               "schedules:write",
               "grid:read",
               "grid:write",
+              "projects:read",
+              "chats:read",
+              "skills:read",
+              "docs:read",
+              "docs:write",
+              "pages:write",
               "offline_access"
             ]
           }
