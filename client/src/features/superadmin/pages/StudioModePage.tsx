@@ -224,17 +224,18 @@ export function StudioModePage() {
     return () => window.removeEventListener("agent:tool", onTool);
   }, []);
 
-  // "Review" under an answer: the pane opens on the Review tab, which shows that answer (StudioReviewView listens too)
+  // "Review" under an answer: the pane opens on the Review tab, which shows that answer (StudioReviewView listens too).
+  // The listener is set once and calls the latest showTab (kept in a ref below, where showTab is defined), so the
+  // open Review tab is found instead of a second one being added.
+  const showTabRef = useRef<(kind: TabKind) => void>(() => {});
   useEffect(() => {
     const onReview = (e: Event) => {
       const d = (e as CustomEvent<{ mode?: string }>).detail;
-      if (d?.mode === "review") showTab("review");
+      if (d?.mode === "review") showTabRef.current("review");
     };
     window.addEventListener(REVIEW_CHECKPOINT_EVENT, onReview);
     return () => window.removeEventListener(REVIEW_CHECKPOINT_EVENT, onReview);
-    // (with the current openTab, so the Review tab is found and not opened twice)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [openTab]);
+  }, []);
 
   // A file clicked in the agent's steps opens in the Files tab, at those lines
   const [reveal, setReveal] = useState<{ path: string; startLine?: number; endLine?: number; n: number } | null>(null);
@@ -530,6 +531,7 @@ export function StudioModePage() {
   const navigate = useNavigate();
   const titleSlot = import.meta.env.VITE_DESKTOP === "1" ? document.getElementById("cg-titlebar-slot") : null;
   const showTab = (kind: TabKind) => { setPane((p) => (p.open ? p : { ...p, open: true })); openTab(kind); };
+  showTabRef.current = showTab;
   // File → Open Folder / Open File: the folder (or the file's folder) on this computer becomes Studio's project; a
   // picked file also opens beside the chat
   const openFolderProject = async (folder?: string) => {
