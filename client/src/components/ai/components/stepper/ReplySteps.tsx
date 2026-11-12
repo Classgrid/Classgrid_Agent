@@ -10,6 +10,18 @@ import { TerminalToolView } from "./TerminalToolView";
 import { MasterWorkflowWrapper } from "./MasterWorkflowWrapper";
 import { ToolResultStep } from "./tool-results/ToolResultStep";
 import { describeStep } from "./tool-results/describeStep";
+import { connectorWording, INVERT_IN_DARK } from "./tool-results/connectorWording";
+
+// A connected app's step line, like the launch video: the app's logo, what the step did, the app's name in grey
+function AppStepLine({ icon, app, invert, children }: { icon?: string; app: string; invert?: boolean; children: React.ReactNode }) {
+  return (
+    <span className="inline-flex items-center gap-2 min-w-0">
+      {icon && <img src={icon} alt="" className={`size-4 shrink-0 rounded-[3px] object-contain ${invert ? "dark:invert" : ""}`} />}
+      <span className="min-w-0 break-words">{children}</span>
+      <span className="shrink-0 text-slate-400 dark:text-[#6f6f6f] font-normal">{app}</span>
+    </span>
+  );
+}
 import { specialStepTitle, emailTitle } from "./tool-results/stepTitles";
 import { StepWorkingContext, StepShineContext } from "./ShimmerText";
 import { ImageReadStep } from "./tool-results/ImageReadStep";
@@ -449,6 +461,9 @@ export function ReplySteps({ thought, steps, live, thinking, workedMs, shineStep
 
         // Say what the step actually did and found ("Found 5 classroom assignments: …")
         const described = describeStep(step.tool, step.args, step.result, step.status);
+        // A connected app: its logo and name on the line (the words stay the described ones, "Found 2 events: …")
+        const wording = connectorWording(step.tool, step.args, step.status);
+        const line = described ?? wording?.text ?? (step.status === 'success' ? dynamicText : loadingText);
         elements.push(
           <ToolResultStep
             key={step.id}
@@ -456,7 +471,7 @@ export function ReplySteps({ thought, steps, live, thinking, workedMs, shineStep
             args={step.args}
             result={step.result}
             status={step.status}
-            text={described ?? (step.status === 'success' ? dynamicText : loadingText)}
+            text={wording ? <AppStepLine icon={wording.icon} app={wording.app} invert={INVERT_IN_DARK.has(wording.app)}>{line}</AppStepLine> : line}
           />
         );
       }
