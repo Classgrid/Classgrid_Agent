@@ -2,13 +2,16 @@
 // it with latest.yml to R2 (desktop/), where installed apps look for updates. Raise "version" in package.json first.
 // Run: npm run release      (R2 keys are read from server/.env)
 //      npm run release -- --upload-only   (only uploads the installer already in dist/, e.g. after an upload failed)
+//      npm run release -- --no-upload     (builds and checks only; the installer stays in dist/: the GitHub build,
+//                                          .github/workflows/build-desktop-app.yml, keeps it as the run's artifact)
 //      npm run release -- --tag=editor-<version>   (ships that Classgrid Code build instead of the newest published one)
+// After the upload, older versions in R2's desktop/ are removed (the owner keeps only the newest, as on the CDN).
 import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import dotenv from "dotenv";
-import { S3Client, PutObjectCommand } from "@aws-sdk/client-s3";
+import { S3Client, PutObjectCommand, ListObjectsV2Command, DeleteObjectCommand } from "@aws-sdk/client-s3";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(here, "..");
@@ -61,6 +64,16 @@ if (!process.argv.includes("--upload-only")) {
 const { version } = JSON.parse(fs.readFileSync(path.join(root, "package.json"), "utf8"));
 const dist = path.join(root, "dist");
 const exe = `Classgrid Setup ${version}.exe`;
+if (process.argv.includes("--no-upload")) {
+  for (const name of [exe, `${exe}.blockmap`, "latest.yml"]) {
+    if (!fs.existsSync(path.join(dist, name))) { console.error(`Missing ${name}`); process.exit(1); }
+  }
+  console.log(`\nClassgrid ${version} is built and checked, not uploaded: ${path.join(dist, exe)}`);
+  process.exit(0);
+}
+for (const name of ["R2_ACCOUNT_ID", "R2_ACCESS_KEY_ID", "R2_SECRET_ACCESS_KEY", "R2_BUCKET_NAME"]) {
+  if (!process.env[name]) { console.error(`Release stopped: ${name} is not set (server/.env has the R2 keys)`); process.exit(1); }
+}
 const files = [
   [exe, "application/octet-stream"],
   [`${exe}.blockmap`, "application/octet-stream"],
@@ -85,5 +98,15 @@ for (const [name, type] of files) {
     CacheControl: name === "latest.yml" ? "no-cache" : "public, max-age=31536000, immutable",
   }));
   console.log(`Uploaded desktop/${name}`);
+}
+// Only the newest version stays in R2's desktop/ (the installers and their blockmaps of older versions go)
+{
+  const { Contents = [] } = await s3.send(new ListObjectsV2Command({ Bucket: process.env.R2_BUCKET_NAME, Prefix: "desktop/" }));
+  for (const o of Contents) {
+    const m = /^desktop\/Classgrid Setup (\d+\.\d+\.\d+)\.exe(\.blockmap)?$/.exec(o.Key || "");
+    if (!m || m[1] === version) continue;
+    await s3.send(new DeleteObjectCommand({ Bucket: process.env.R2_BUCKET_NAME, Key: o.Key }));
+    console.log(`Removed the old ${o.Key}`);
+  }
 }
 console.log(`\nClassgrid ${version} is out. Download link: ${process.env.R2_PUBLIC_URL}/desktop/${encodeURIComponent(exe)}`);

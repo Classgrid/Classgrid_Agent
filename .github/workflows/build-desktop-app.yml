@@ -1,0 +1,86 @@
+name: Build desktop app
+
+# Builds the Windows installer of the Classgrid desktop app on GitHub, so no computer of ours has to be on: Classgrid
+# Code from its newest editor-* release (or the one given), the screens, the installer, and then the two release checks
+# (desktop/scripts/release.mjs: every required file is in the packing list, and the packed app starts). A build that
+# fails a check never reaches anyone (owner's rule, 2026-11-12).
+# - publish off (the default): the installer is kept as this run's artifact, to install and test by hand.
+# - publish on: the installer goes to R2 (installed apps update from there) and the CDN (publish-desktop-cdn.yml).
+# Raise "version" in desktop/package.json first.
+on:
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: "Upload to R2 and the CDN (installed apps update themselves)"
+        type: boolean
+        default: false
+      editor_tag:
+        description: "Classgrid Code release to ship (editor-<version>); empty = the newest published one"
+        type: string
+        default: ""
+
+permissions:
+  contents: read
+  actions: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 90
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install the screens' packages
+        working-directory: client
+        shell: bash
+        run: npm ci --no-audit --no-fund
+
+      - name: Install the app's packages
+        working-directory: desktop
+        shell: bash
+        run: npm ci --no-audit --no-fund
+
+      # The R2 keys for the upload come from the server settings (the same GitHub secret the server deploy writes)
+      - name: Server settings for the upload
+        if: ${{ inputs.publish }}
+        shell: bash
+        env:
+          PRODUCTION_ENV: ${{ secrets.PRODUCTION_ENV }}
+        run: printf '%s\n' "$PRODUCTION_ENV" > server/.env
+
+      - name: Build, check${{ inputs.publish && ' and publish' || '' }}
+        working-directory: desktop
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VITE_POSTHOG_KEY: ${{ secrets.VITE_POSTHOG_KEY }}
+          VITE_POSTHOG_HOST: ${{ secrets.VITE_POSTHOG_HOST }}
+        run: |
+          ARGS=""
+          if [ "${{ inputs.publish }}" != "true" ]; then ARGS="$ARGS --no-upload"; fi
+          if [ -n "${{ inputs.editor_tag }}" ]; then ARGS="$ARGS --tag=${{ inputs.editor_tag }}"; fi
+          npm run release -- $ARGS
+
+      - name: Keep the installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: Classgrid-Setup
+          path: |
+            desktop/dist/Classgrid Setup *.exe
+            desktop/dist/Classgrid Setup *.exe.blockmap
+            desktop/dist/latest.yml
+          retention-days: 14
+          if-no-files-found: error
+
+      # The CDN copy (S3 behind cdn.classgrid.in) is made by the server from R2, like after a release from a computer
+      - name: Put the installer on the CDN
+        if: ${{ inputs.publish }}
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run publish-desktop-cdn.yml --ref main
