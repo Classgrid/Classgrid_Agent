@@ -6255,8 +6255,11 @@ If a tool fails, never show the error message; say only: "Something went wrong o
                 toolPlan.loadedNames.add(def.function.name);
             }
         }
-        // The desktop app's commands on the computer (set above) show in the chat's terminal box like a project's
-        for (const name of [...COMPUTER_TERMINAL_TOOLS, "run_code", "computer_terminal"]) {
+        // The desktop app's commands on the computer (set above) show in the chat's terminal box like a project's, and
+        // its "computer" steps (mouse and keyboard) as "Clicked on the screen" cards: these handlers are set after the
+        // first pass above, so they are shown here (the computer tool was left out and its steps never reached the
+        // chat: an answer with 20 screen steps showed only "Thought for 318s", owner, 2026-11-12)
+        for (const name of [...COMPUTER_TERMINAL_TOOLS, "run_code", "computer_terminal", "computer"]) {
             const fn = llmConfig.toolHandlers[name];
             if (typeof fn === "function" && !stepWrapped.has(fn)) llmConfig.toolHandlers[name] = showStep(name === "computer_terminal" ? "execute_terminal_command" : name, fn);
         }
