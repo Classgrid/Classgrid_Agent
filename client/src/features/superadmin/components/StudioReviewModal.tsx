@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import { X } from "lucide-react";
 import { toast } from "sonner";
-import { REVIEW_CHECKPOINT_EVENT, markCheckpoint } from "@/components/ai/components/stepper/ProjectToolSteps";
+import { REVIEW_CHECKPOINT_EVENT, markCheckpoint, readCheckpointState } from "@/components/ai/components/stepper/ProjectToolSteps";
 import { fetchWithRescue } from "@/lib/rescue";
 import { DangerConfirmDialog } from "@/components/marketing_ui/danger-confirm-dialog";
 
@@ -21,6 +21,20 @@ type LocalReview = {
   rejectCheckpoint?: (chat: string, cp: string, file: string | null) => Promise<number | null>;
 };
 const localReview = () => (window as unknown as { classgridDesktop?: LocalReview }).classgridDesktop;
+// The app's own words for a failed step (without Electron's "Error invoking remote method" wrapper)
+const errorText = (e: unknown) => String((e as Error)?.message || e || "").replace(/^Error invoking remote method '[^']+': (?:Error: )?/, "");
+// A diff's lines without its file header (the header lines come before the first hunk only: a removed "-- note" line
+// is "--- note" inside one)
+export function diffBody(diff: string): string[] {
+  const out: string[] = [];
+  let inHunk = false;
+  for (const l of diff.split("\n")) {
+    if (l.startsWith("@@")) inHunk = true;
+    if (!inHunk && /^(diff --git|index |--- |\+\+\+ |new file mode|deleted file mode)/.test(l)) continue;
+    out.push(l);
+  }
+  return out;
+}
 
 async function api(path: string, init?: RequestInit) {
   const res = await fetchWithRescue(`${backendUrl}/api/ide${path}`, {
@@ -41,11 +55,18 @@ export function StudioReviewModal({ projectId, onChanged }: { projectId: string 
   const cpPath = (r: { sessionId: string; checkpoint: string }) => `/projects/${projectId}/checkpoints/${r.sessionId}/${r.checkpoint}`;
 
   const loadReview = async (r: { sessionId: string; checkpoint: string }) => {
-    const here = localReview()?.reviewCheckpoint ? await localReview()!.reviewCheckpoint!(r.sessionId, r.checkpoint).catch(() => null) : null;
-    if (here) { setReview({ ...r, files: here.files || [], open: null, busy: false }); return; }
-    const { res, data } = await api(cpPath(r));
-    if (!res.ok) { toast.error(data.error || "Could not load the changes"); setReview(null); return; }
-    setReview({ ...r, files: data.files || [], open: null, busy: false });
+    try {
+      const here = localReview()?.reviewCheckpoint ? await localReview()!.reviewCheckpoint!(r.sessionId, r.checkpoint).catch(() => null) : null;
+      if (here) { setReview({ ...r, files: here.files || [], open: null, busy: false }); return; }
+      // (an answer the app kept on this computer with no copies changed no files: the server has no snapshot of it)
+      if (localReview()?.reviewCheckpoint && readCheckpointState(r.checkpoint).pc) { setReview({ ...r, files: [], open: null, busy: false }); return; }
+      const { res, data } = await api(cpPath(r));
+      if (!res.ok) { toast.error(data.error || "Could not load the changes"); setReview(null); return; }
+      setReview({ ...r, files: data.files || [], open: null, busy: false });
+    } catch {
+      toast.error("Could not load the changes");
+      setReview(null);
+    }
   };
 
   useEffect(() => {
@@ -53,7 +74,8 @@ export function StudioReviewModal({ projectId, onChanged }: { projectId: string 
       const d = (e as CustomEvent).detail;
       if (!projectId || !d?.checkpoint) return;
       if (d.mode === "undo") { setConfirm({ kind: "undo", sessionId: d.sessionId, checkpoint: d.checkpoint }); return; }
-      // "Review" in Studio opens the Review tab (StudioModePage), not this window
+      // "Review" in Studio opens the Review tab (StudioModePage), in Classgrid Code the editor's Review tab
+      // (EditorPanelPage), not this window
     };
     window.addEventListener(REVIEW_CHECKPOINT_EVENT, onReview);
     return () => window.removeEventListener(REVIEW_CHECKPOINT_EVENT, onReview);
@@ -64,11 +86,20 @@ export function StudioReviewModal({ projectId, onChanged }: { projectId: string 
   const putBack = async (r: { sessionId: string; checkpoint: string }, action: "undo" | "reject", file?: string): Promise<{ ok: boolean; reverted: number; error?: string }> => {
     const local = localReview();
     if (local?.rejectCheckpoint) {
-      const n = await local.rejectCheckpoint(r.sessionId, r.checkpoint, file ?? null).catch(() => null);
-      if (n !== null && n !== undefined) return { ok: true, reverted: n };
+      try {
+        const n = await local.rejectCheckpoint(r.sessionId, r.checkpoint, file ?? null);
+        if (n !== null && n !== undefined) return { ok: true, reverted: n };
+      } catch (e) {
+        return { ok: false, reverted: 0, error: errorText(e) }; // (some file could not be put back: the app says which)
+      }
+      if (readCheckpointState(r.checkpoint).pc) return { ok: true, reverted: 0 }; // (kept on this computer, nothing to put back)
     }
-    const { res, data } = await api(`${cpPath(r)}/${action}`, { method: "POST", body: JSON.stringify(file ? { file } : {}) });
-    return { ok: res.ok, reverted: Number(data.reverted) || 0, error: data.error };
+    try {
+      const { res, data } = await api(`${cpPath(r)}/${action}`, { method: "POST", body: JSON.stringify(file ? { file } : {}) });
+      return { ok: res.ok, reverted: Number(data.reverted) || 0, error: data.error };
+    } catch {
+      return { ok: false, reverted: 0 };
+    }
   };
   const undo = async (d: { sessionId: string; checkpoint: string }) => {
     setConfirmBusy(true);
@@ -174,7 +205,7 @@ export function StudioReviewModal({ projectId, onChanged }: { projectId: string 
                         className="overflow-hidden"
                       >
                         <pre className="mx-5 mb-3 max-h-[45vh] overflow-auto rounded-lg border border-black/10 dark:border-white/[0.08] bg-white dark:bg-[#161616] font-mono text-[12px] leading-5">
-                          {f.diff.split("\n").filter((l) => !/^(diff --git|index |--- |\+\+\+ )/.test(l)).map((l, i) => (
+                          {diffBody(f.diff).map((l, i) => (
                             <div key={i} className={l.startsWith("+") ? "px-3 bg-[#16825d]/10 text-[#16825d] dark:text-[#4ec9b0]" : l.startsWith("-") ? "px-3 bg-[#cd3131]/10 text-[#cd3131] dark:text-[#f48771]" : l.startsWith("@@") ? "px-3 text-muted-foreground" : "px-3"}>{l || " "}</div>
                           ))}
                         </pre>

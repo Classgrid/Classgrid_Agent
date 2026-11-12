@@ -32,6 +32,8 @@ type LocalReview = {
   rejectCheckpoint?: (chat: string, cp: string, file: string | null) => Promise<number | null>;
 };
 const localReview = () => (window as unknown as { classgridDesktop?: LocalReview }).classgridDesktop;
+// The app's own words for a failed step (without Electron's "Error invoking remote method" wrapper)
+const errorText = (e: unknown) => String((e as Error)?.message || e || "").replace(/^Error invoking remote method '[^']+': (?:Error: )?/, "");
 
 async function api(path: string, init?: RequestInit) {
   const res = await fetchWithRescue(`${backendUrl}/api/ide${path}`, {
@@ -48,10 +50,11 @@ function diffRows(diff: string): Row[] {
   const rows: Row[] = [];
   let oldLine = 0;
   let newLine = 0;
+  let inHunk = false; // (the file header lines come before the first hunk only: a removed "-- note" line is "--- note" inside one)
   for (const l of diff.split("\n")) {
-    if (/^(diff --git|index |--- |\+\+\+ |new file mode|deleted file mode)/.test(l)) continue;
+    if (!inHunk && /^(diff --git|index |--- |\+\+\+ |new file mode|deleted file mode)/.test(l)) continue;
     const hunk = l.match(/^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@/);
-    if (hunk) { oldLine = Number(hunk[1]); newLine = Number(hunk[2]); rows.push({ kind: "hunk", text: l, oldLine: null, newLine: null }); continue; }
+    if (hunk) { inHunk = true; oldLine = Number(hunk[1]); newLine = Number(hunk[2]); rows.push({ kind: "hunk", text: l, oldLine: null, newLine: null }); continue; }
     if (l.startsWith("\\")) continue;
     if (l.startsWith("+")) rows.push({ kind: "add", text: l.slice(1), oldLine: null, newLine: newLine++ });
     else if (l.startsWith("-")) rows.push({ kind: "del", text: l.slice(1), oldLine: oldLine++, newLine: null });
@@ -138,7 +141,9 @@ function readView(): View {
   try { return { split: false, hideWs: false, fold: false, ...JSON.parse(localStorage.getItem(VIEW_KEY) || "{}") }; } catch { return { split: false, hideWs: false, fold: false }; }
 }
 
-export function StudioReviewView({ projectId, onChanged }: { projectId: string | null; onChanged?: () => void }) {
+// initialCheckpoint: the answer to open on (the editor's Review tab gets it in its address); otherwise the answer
+// "Review" was pressed for, or the newest
+export function StudioReviewView({ projectId, onChanged, initialCheckpoint = null }: { projectId: string | null; onChanged?: () => void; initialCheckpoint?: string | null }) {
   // The chat open in Studio, including a chat made by the message just sent (its id reaches the address without the
   // router noticing; useChatId follows the "agent:active-session-changed" event too). Reading the router's location
   // alone left this tab on "Nothing to review" for every new chat (owner, 2026-11-12).
@@ -166,41 +171,52 @@ export function StudioReviewView({ projectId, onChanged }: { projectId: string |
   });
 
   const cpPath = (cp: string) => `/projects/${projectId}/checkpoints/${chatId}/${cp}`;
+  // Only the newest load shows: an older one still running (a refresh while files load, the chat switched) is dropped
+  const loadSeq = useRef(0);
   const load = async (want: string | null = picked) => {
+    const seq = ++loadSeq.current;
+    const current = () => seq === loadSeq.current;
+    const show = (list: ReviewFile[]) => {
+      if (!current()) return;
+      setFiles(list);
+      setOpen((o) => new Set([...o].filter((f) => list.some((x) => x.file === f))));
+    };
     setError("");
-    let cps = chatId ? checkpointsFor(chatId) : [];
-    // (the copies kept on this computer count too: a chat made by the same message has no list yet)
-    let here: string[] = [];
-    if (chatId && localReview()?.listCheckpoints) {
-      here = await localReview()!.listCheckpoints!(chatId).catch(() => [] as string[]);
-      cps = [...new Set([...cps, ...here])].sort();
-    }
-    setAnswers(cps);
-    // No answer asked for: the newest answer that changed files on this computer, else the newest of the chat
-    const cp = want || here.at(-1) || cps.at(-1) || null;
-    setCheckpoint(cp);
-    if (!chatId || !cp) { setFiles([]); return; }
-    setFiles(null);
-    // Kept on this computer (a folder project): the app has it; otherwise it is a cloud project's answer, on the server
-    const local = localReview();
-    if (local?.reviewCheckpoint) {
-      const here = await local.reviewCheckpoint(chatId, cp).catch(() => null);
-      if (here) {
-        const list: ReviewFile[] = here.files || [];
-        setFiles(list);
-        setOpen((o) => new Set([...o].filter((f) => list.some((x) => x.file === f))));
-        return;
+    try {
+      let cps = chatId ? checkpointsFor(chatId) : [];
+      // (the copies kept on this computer count too: a chat made by the same message has no list yet)
+      let here: string[] = [];
+      if (chatId && localReview()?.listCheckpoints) {
+        here = await localReview()!.listCheckpoints!(chatId).catch(() => [] as string[]);
+        cps = [...new Set([...cps, ...here])].sort();
       }
+      if (!current()) return;
+      setAnswers(cps);
+      // No answer asked for: the newest answer that changed files on this computer, else the newest of the chat
+      const cp = want || here.at(-1) || cps.at(-1) || null;
+      setCheckpoint(cp);
+      if (!chatId || !cp) { show([]); return; }
+      setFiles(null);
+      // Kept on this computer (a folder project): the app has it; otherwise it is a cloud project's answer, on the server
+      const local = localReview();
+      if (local?.reviewCheckpoint) {
+        const kept = await local.reviewCheckpoint(chatId, cp).catch(() => null);
+        if (kept) { show(kept.files || []); return; }
+      }
+      // (an answer the app kept on this computer with no copies changed no files: the server has no snapshot of it)
+      if (readCheckpointState(cp).pc) { show([]); return; }
+      if (!projectId) { show([]); return; }
+      const { res, data } = await api(cpPath(cp));
+      if (!current()) return;
+      if (!res.ok) { setError(data.error || "Could not load the changes"); show([]); return; }
+      show(data.files || []);
+    } catch {
+      // (the server could not be reached and the app kept nothing for this answer)
+      if (current()) { setError("Could not load the changes"); setFiles([]); }
     }
-    if (!projectId) { setFiles([]); return; }
-    const { res, data } = await api(cpPath(cp));
-    if (!res.ok) { setError(data.error || "Could not load the changes"); setFiles([]); return; }
-    const list: ReviewFile[] = data.files || [];
-    setFiles(list);
-    setOpen((o) => new Set([...o].filter((f) => list.some((x) => x.file === f))));
   };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  useEffect(() => { const want = takeRequestedReview(chatId); setPicked(want); load(want); }, [projectId, chatId]);
+  useEffect(() => { const want = initialCheckpoint || takeRequestedReview(chatId); setPicked(want); load(want); }, [projectId, chatId]);
   // A new answer with changes (or one just kept / rejected) in this chat: show its changes
   useEffect(() => {
     const onChange = (e: Event) => { if ((e as CustomEvent<{ sessionId: string }>).detail?.sessionId === chatId) { setPicked(null); load(null); } };
@@ -213,6 +229,7 @@ export function StudioReviewView({ projectId, onChanged }: { projectId: string |
     const onReview = (e: Event) => {
       const d = (e as CustomEvent<{ sessionId: string; checkpoint: string; mode: string }>).detail;
       if (!d || d.mode !== "review" || d.sessionId !== chatId || !d.checkpoint) return;
+      takeRequestedReview(chatId); // (this tab handles the press now; nothing is left for a later mount)
       setPicked(d.checkpoint);
       load(d.checkpoint);
     };
@@ -313,19 +330,31 @@ export function StudioReviewView({ projectId, onChanged }: { projectId: string |
     if (!checkpoint || !chatId) return null;
     const local = localReview();
     if (local?.rejectCheckpoint) {
-      const n = await local.rejectCheckpoint(chatId, checkpoint, one ?? null).catch(() => null);
-      if (n !== null && n !== undefined) return n;
+      try {
+        const n = await local.rejectCheckpoint(chatId, checkpoint, one ?? null);
+        if (n !== null && n !== undefined) return n;
+      } catch (e) {
+        // (some file could not be put back, say one open in another program: the app says which)
+        toast.error(errorText(e) || "Could not put the files back");
+        return null;
+      }
+      if (readCheckpointState(checkpoint).pc) return 0; // (kept on this computer, nothing to put back)
     }
     if (!projectId) { toast.error("Could not put the files back"); return null; }
-    const { res, data } = await api(`${cpPath(checkpoint)}/${action}`, { method: "POST", body: JSON.stringify(one ? { file: one } : {}) });
-    if (!res.ok) { toast.error(data.error || (action === "undo" ? "Could not undo the changes" : "Could not reject the changes")); return null; }
-    return Number(data.reverted) || 0;
+    try {
+      const { res, data } = await api(`${cpPath(checkpoint)}/${action}`, { method: "POST", body: JSON.stringify(one ? { file: one } : {}) });
+      if (!res.ok) { toast.error(data.error || (action === "undo" ? "Could not undo the changes" : "Could not reject the changes")); return null; }
+      return Number(data.reverted) || 0;
+    } catch {
+      toast.error(action === "undo" ? "Could not undo the changes" : "Could not reject the changes");
+      return null;
+    }
   };
   const doReject = async (one?: string) => {
     if (!checkpoint) return;
     setBusy(true);
-    const reverted = await putBack(one, "reject");
-    setBusy(false);
+    let reverted: number | null = null;
+    try { reverted = await putBack(one, "reject"); } finally { setBusy(false); }
     if (reverted === null) return;
     markCheckpoint(checkpoint, one ? { rejectedFiles: [one] } : { status: "rejected" });
     toast.success(one ? `${one} put back` : `Rejected: ${reverted} file${reverted === 1 ? "" : "s"} put back`);
@@ -338,8 +367,8 @@ export function StudioReviewView({ projectId, onChanged }: { projectId: string |
   const doUndo = async () => {
     if (!checkpoint) return;
     setBusy(true);
-    const reverted = await putBack(undefined, "undo");
-    setBusy(false);
+    let reverted: number | null = null;
+    try { reverted = await putBack(undefined, "undo"); } finally { setBusy(false); }
     if (reverted === null) return;
     markCheckpoint(checkpoint, { status: "undone" });
     toast.success(`Undone: ${reverted} file${reverted === 1 ? "" : "s"} put back`);

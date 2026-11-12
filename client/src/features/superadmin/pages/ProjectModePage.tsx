@@ -28,7 +28,8 @@ import { AiHubModal } from "@/components/ai/components/AiHubModal";
 import { useCurrentUser } from "@/features/auth/queries/useCurrentUser";
 import { fetchWithRescue } from "@/lib/rescue";
 import { Progress, ProgressLabel, ProgressValue } from "@/components/marketing_ui/progress";
-import { OPEN_PROJECT_FILE_EVENT, REVIEW_CHECKPOINT_EVENT, markCheckpoint } from "@/components/ai/components/stepper/ProjectToolSteps";
+import { OPEN_PROJECT_FILE_EVENT, REVIEW_CHECKPOINT_EVENT, markCheckpoint, readCheckpointState } from "@/components/ai/components/stepper/ProjectToolSteps";
+import { diffBody } from "../components/StudioReviewModal";
 import { PushToGithubModal } from "../components/PushToGithubModal";
 import { ImageCropperModal } from "@/components/marketing_ui/ImageCropperModal";
 import { apiClient } from "@/lib/apiClient";
@@ -645,10 +646,45 @@ export function ProjectModePage() {
   const [confirm, setConfirm] = useState<{ kind: "undo"; sessionId: string; checkpoint: string } | { kind: "reject"; file?: string } | { kind: "fresh"; project: Project } | null>(null);
   const [confirmBusy, setConfirmBusy] = useState(false);
   const cpPath = (r: { sessionId: string; checkpoint: string }) => `/projects/${openProject?.id}/checkpoints/${r.sessionId}/${r.checkpoint}`;
+  // A folder on this computer: the app kept the answer's before-copies itself (desktop/runner.js) and shows, rejects
+  // or undoes the changes from them; a cloud project's answer is on the server
+  type LocalReview = {
+    reviewCheckpoint?: (chat: string, cp: string) => Promise<{ files: ReviewFile[]; finished: boolean } | null>;
+    rejectCheckpoint?: (chat: string, cp: string, file: string | null) => Promise<number | null>;
+  };
+  const localReview = () => (window as unknown as { classgridDesktop?: LocalReview }).classgridDesktop;
+  const errorText = (e: unknown) => String((e as Error)?.message || e || "").replace(/^Error invoking remote method '[^']+': (?:Error: )?/, "");
   const loadReview = async (r: { sessionId: string; checkpoint: string }) => {
-    const { res, data } = await api(cpPath(r));
-    if (!res.ok) { toast.error(data.error || "Could not load the changes"); setReview(null); return; }
-    setReview({ ...r, files: data.files || [], open: null, busy: false });
+    try {
+      const here = localReview()?.reviewCheckpoint ? await localReview()!.reviewCheckpoint!(r.sessionId, r.checkpoint).catch(() => null) : null;
+      if (here) { setReview({ ...r, files: here.files || [], open: null, busy: false }); return; }
+      // (an answer the app kept on this computer with no copies changed no files: the server has no snapshot of it)
+      if (localReview()?.reviewCheckpoint && readCheckpointState(r.checkpoint).pc) { setReview({ ...r, files: [], open: null, busy: false }); return; }
+      const { res, data } = await api(cpPath(r));
+      if (!res.ok) { toast.error(data.error || "Could not load the changes"); setReview(null); return; }
+      setReview({ ...r, files: data.files || [], open: null, busy: false });
+    } catch {
+      toast.error("Could not load the changes");
+      setReview(null);
+    }
+  };
+  const putBack = async (r: { sessionId: string; checkpoint: string }, action: "undo" | "reject", file?: string): Promise<{ ok: boolean; reverted: number; error?: string }> => {
+    const local = localReview();
+    if (local?.rejectCheckpoint) {
+      try {
+        const n = await local.rejectCheckpoint(r.sessionId, r.checkpoint, file ?? null);
+        if (n !== null && n !== undefined) return { ok: true, reverted: n };
+      } catch (e) {
+        return { ok: false, reverted: 0, error: errorText(e) }; // (some file could not be put back: the app says which)
+      }
+      if (readCheckpointState(r.checkpoint).pc) return { ok: true, reverted: 0 }; // (kept on this computer, nothing to put back)
+    }
+    try {
+      const { res, data } = await api(`${cpPath(r)}/${action}`, { method: "POST", body: JSON.stringify(file ? { file } : {}) });
+      return { ok: res.ok, reverted: Number(data.reverted) || 0, error: data.error };
+    } catch {
+      return { ok: false, reverted: 0 };
+    }
   };
   useEffect(() => {
     const onReview = async (e: Event) => {
@@ -664,24 +700,24 @@ export function ProjectModePage() {
   }, [openProject]);
   const undo = async (d: { sessionId: string; checkpoint: string }) => {
     setConfirmBusy(true);
-    const { res, data } = await api(`${cpPath(d)}/undo`, { method: "POST", body: "{}" });
+    const r = await putBack(d, "undo");
     setConfirmBusy(false);
     setConfirm(null);
-    if (res.ok) { markCheckpoint(d.checkpoint, { status: "undone" }); toast.success(`Undone: ${data.reverted} file${data.reverted === 1 ? "" : "s"} put back`); }
-    else toast.error(data.error || "Could not undo");
+    if (r.ok) { markCheckpoint(d.checkpoint, { status: "undone" }); toast.success(`Undone: ${r.reverted} file${r.reverted === 1 ? "" : "s"} put back`); }
+    else toast.error(r.error || "Could not undo");
   };
   const rejectChanges = (file?: string) => { if (review) setConfirm({ kind: "reject", file }); };
   const doReject = async (file?: string) => {
     if (!review) return;
     setConfirm(null);
     setReview({ ...review, busy: true });
-    const { res, data } = await api(`${cpPath(review)}/reject`, { method: "POST", body: JSON.stringify({ file }) });
-    if (res.ok) {
+    const r = await putBack(review, "reject", file);
+    if (r.ok) {
       markCheckpoint(review.checkpoint, file ? { rejectedFiles: [file] } : { status: "rejected" });
-      toast.success(file ? `${file} put back` : `Rejected: ${data.reverted} file${data.reverted === 1 ? "" : "s"} put back`);
+      toast.success(file ? `${file} put back` : `Rejected: ${r.reverted} file${r.reverted === 1 ? "" : "s"} put back`);
       if (!file) { setReview(null); return; }
     }
-    else toast.error(data.error || "Could not reject the changes");
+    else toast.error(r.error || "Could not reject the changes");
     loadReview(review);
   };
 
@@ -1402,7 +1438,7 @@ export function ProjectModePage() {
                   </div>
                   {review.open === f.file && (
                     <pre className="mx-5 mb-3 max-h-[45vh] overflow-auto rounded-lg border border-border text-[12px] leading-5">
-                      {f.diff.split("\n").filter((l) => !/^(diff --git|index |--- |\+\+\+ )/.test(l)).map((l, i) => (
+                      {diffBody(f.diff).map((l, i) => (
                         <div key={i} className={l.startsWith("+") ? "px-3 bg-green-500/10 text-green-800 dark:text-green-300" : l.startsWith("-") ? "px-3 bg-red-500/10 text-red-800 dark:text-red-300" : l.startsWith("@@") ? "px-3 text-muted-foreground" : "px-3"}>{l || " "}</div>
                       ))}
                     </pre>

@@ -2385,6 +2385,10 @@ The user is in ${appMode === "agent" ? "Agent mode" : appMode === "project" ? "P
         if (thinking === "high" && slashCommand !== "boost") tailPrompt += "\n\n--- SPEED ---\nThe user picked Deep thinking: think carefully, check your work twice and look for mistakes before you answer.";
         // Project Mode: snapshot the project before this answer, so its changes can be reviewed, rejected or undone
         let checkpointId = await checkpointP;
+        // The server's own snapshot id (null for a folder on the computer): the save at the end of the answer (the
+        // "after" picture and the Mastero push) works with this one, never with the app's id below (2026-11-12:
+        // the app's id there made finishCheckpoint find no snapshot and skip the push after each computer answer)
+        const cloudCheckpointId = checkpointId;
         // A folder on the user's computer has no copy here to snapshot: the app keeps the answer's before-copies itself
         // (desktop/runner.js keepBefore) under the id it sent with the message, and every step on the computer carries
         // that id. The chat's Review tab then lists this answer like a cloud project's (owner, 2026-11-12).
@@ -2392,7 +2396,7 @@ The user is in ${appMode === "agent" ? "Agent mode" : appMode === "project" ? "P
         // touch: the app's own checkpoint wins whenever the chat works on the computer, 2026-11-12)
         // (also when this computer holds a copy of the project: an existing chat's first message from here is looked
         // up before the chat is linked to this computer, so the project still reads as the cloud one)
-        const onThisComputer = whereProject?.location === "local" || (!!body.deviceId && (whereProject?.localCopies || []).some((c) => c?.deviceId && String(c.deviceId) === String(body.deviceId)));
+        const onThisComputer = whereProject?.location === "local" || (!!body.deviceId && (whereProject?.localCopies || []).some((c) => c?.here && c?.deviceId && String(c.deviceId) === String(body.deviceId)));
         if (body.clientApp === "desktop" && onThisComputer && /^\d{10,16}$/.test(String(body.localCheckpoint || ""))) checkpointId = String(body.localCheckpoint);
         if (pcExecutor && checkpointId) pcExecutor.checkpoint = checkpointId;
         if (checkpointId && !res.writableEnded) res.write(`data: ${JSON.stringify({ type: "checkpoint", id: checkpointId })}\n\n`);
@@ -6986,7 +6990,7 @@ If a tool fails, never show the error message; say only: "Something went wrong o
                 // Helpers still working keep changing files after the answer ends: the "after" picture for Review is
                 // taken once they have all finished
                 const helpersWorking = helperBoard(sessionId).helpers.filter((h) => h.state === "running" && h.promise).map((h) => h.promise);
-                Promise.all(helpersWorking).then(() => finishCheckpoint(sessionId, checkpointId, { website: fromWebsite })).catch(() => {});
+                Promise.all(helpersWorking).then(() => finishCheckpoint(sessionId, cloudCheckpointId, { website: fromWebsite })).catch(() => {});
             }
 
             // Extract AI-created file links (PDFs, Excel, etc.) from the CDN and save to Library

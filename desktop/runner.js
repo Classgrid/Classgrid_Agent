@@ -47,7 +47,9 @@ function resolveIn(root, given = "") {
   if (path.isAbsolute(rel) || /^[a-zA-Z]:/.test(rel)) throw new Error("Path must be inside the project (relative to the project folder)");
   const full = path.resolve(root, rel || ".");
   const rootFull = path.resolve(root);
-  if (full !== rootFull && !full.toLowerCase().startsWith(rootFull.toLowerCase() + path.sep)) throw new Error("Path must stay inside the project");
+  // (the disk ignores case on Windows and macOS; on Linux "../Proj" is another folder)
+  const fold = (p) => (process.platform === "win32" || process.platform === "darwin" ? p.toLowerCase() : p);
+  if (full !== rootFull && !fold(full).startsWith(fold(rootFull) + path.sep)) throw new Error("Path must stay inside the project");
   if (full.split(path.sep).includes(".git")) throw new Error("The .git folder can't be changed directly");
   return { full, rel: path.relative(rootFull, full).replace(/\\/g, "/") || "." };
 }
@@ -1351,6 +1353,7 @@ function rejectCheckpoint(chat, cp, onlyFile) {
   if (!dir || !fs.existsSync(path.join(dir, "files.json"))) return null;
   const m = cpManifest(dir);
   let count = 0;
+  const failed = [];
   for (const [key, entry] of Object.entries(m.files)) {
     const full = cpPath(key, entry);
     if (onlyFile && cpFileName(m, full) !== onlyFile) continue;
@@ -1368,9 +1371,12 @@ function rejectCheckpoint(chat, cp, onlyFile) {
       }
     } catch (e) {
       console.warn("[runner] could not put a file back:", e.message);
+      failed.push(cpFileName(m, full));
     }
     seenAt.delete(full.toLowerCase()); // (the AI must read it again before editing it)
   }
+  // (the others are back; the screens show which ones are not, say a file open in another program)
+  if (failed.length) throw new Error(`Could not put back ${failed.join(", ")}`);
   return count;
 }
 
@@ -1386,10 +1392,13 @@ async function runTool(req) {
     // A file about to be changed in an answer with a checkpoint: its copy is kept first (Review / Reject / Undo)
     if (checkpoint && chat && CHECKPOINT_TOOLS.has(tool) && args.path) {
       // (the project folder may not be in this computer's list yet, see below: a folder that exists is used as is)
+      // (a folder in the list counts even when it is gone from the disk: the tools write there as before)
       let inRoot = false;
-      try { inRoot = !!root && fs.statSync(root).isDirectory(); } catch { inRoot = false; }
+      try { inRoot = !!root && (isAllowedRoot(root) || fs.statSync(root).isDirectory()); } catch { inRoot = false; }
       let full = null;
       try { full = inRoot ? resolveIn(root, args.path).full : localPath(args.path); } catch { full = null; }
+      // (a full path in a project chat: notebook_edit takes it as it is, so its copy is kept under that path)
+      if (!full && inRoot && path.isAbsolute(String(args.path))) { try { full = localPath(args.path); } catch { full = null; } }
       if (full) keepBefore(chat, checkpoint, full, inRoot ? root : null);
     }
     if (tool === "ping") return { text: "ok" };

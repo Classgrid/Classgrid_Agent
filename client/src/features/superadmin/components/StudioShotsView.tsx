@@ -16,7 +16,8 @@ type Shot = { url: string; page?: string; title?: string; tool?: string; at: num
 // (history.replaceState), so the chat's own "agent:active-session-changed" event is followed too.
 const chatIdFrom = (pathname: string): string | null => {
   const parts = pathname.split("/");
-  const at = parts.indexOf("studio");
+  // (/c/studio/<id>, or the editor's Review tab /editor/review/<id>)
+  const at = parts.indexOf("studio") !== -1 ? parts.indexOf("studio") : parts.indexOf("review");
   return (at !== -1 && parts[at + 1]) || null;
 };
 export function useChatId() {

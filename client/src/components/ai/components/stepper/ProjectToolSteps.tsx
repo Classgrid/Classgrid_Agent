@@ -738,7 +738,8 @@ export function reviewLatestChanges(sessionId: string) {
 
 // What the user did with an answer's changes (kept, rejected, undone, or single files rejected). Remembered in this
 // browser so the box under the answer stays right after a refresh; the files themselves are changed on the server.
-type CheckpointState = { status?: 'kept' | 'rejected' | 'undone'; rejectedFiles?: string[] };
+// pc: the app on this computer kept this answer's copies itself (the server has no snapshot of it)
+type CheckpointState = { status?: 'kept' | 'rejected' | 'undone'; rejectedFiles?: string[]; pc?: boolean };
 const CHECKPOINT_STATE_EVENT = "classgrid:checkpoint-state";
 const cpKey = (id: string) => `cg_cp_${id}`;
 export const readCheckpointState = (id?: string): CheckpointState => {
@@ -755,13 +756,6 @@ export function markCheckpoint(id: string, change: CheckpointState) {
 export function FilesChangedSummary({ steps, checkpoint, sessionId }: { steps: Step[]; checkpoint?: string; sessionId?: string }) {
   const [open, setOpen] = useState(false);
   const [cpState, setCpState] = useState<CheckpointState>(() => readCheckpointState(checkpoint));
-  useEffect(() => { if (checkpoint && sessionId) addCheckpoint(sessionId, checkpoint); }, [checkpoint, sessionId]);
-  useEffect(() => {
-    setCpState(readCheckpointState(checkpoint));
-    const onState = (e: Event) => { const d = (e as CustomEvent).detail; if (d?.id === checkpoint) setCpState(d.state); };
-    window.addEventListener(CHECKPOINT_STATE_EVENT, onState);
-    return () => window.removeEventListener(CHECKPOINT_STATE_EVENT, onState);
-  }, [checkpoint]);
   const byFile = new Map<string, FileChange>();
   const add = (c: FileChange) => {
     const prev = byFile.get(c.path) || { path: c.path, added: 0, removed: 0 };
@@ -778,6 +772,15 @@ export function FilesChangedSummary({ steps, checkpoint, sessionId }: { steps: S
     }
   }
   const files = [...byFile.values()];
+  // (only an answer that changed files is an answer the Review tab lists)
+  const changed = files.length > 0;
+  useEffect(() => { if (checkpoint && sessionId && changed) addCheckpoint(sessionId, checkpoint); }, [checkpoint, sessionId, changed]);
+  useEffect(() => {
+    setCpState(readCheckpointState(checkpoint));
+    const onState = (e: Event) => { const d = (e as CustomEvent).detail; if (d?.id === checkpoint) setCpState(d.state); };
+    window.addEventListener(CHECKPOINT_STATE_EVENT, onState);
+    return () => window.removeEventListener(CHECKPOINT_STATE_EVENT, onState);
+  }, [checkpoint]);
   if (!files.length) return null;
   const rejected = new Set(cpState.rejectedFiles || []);
   const allRejected = files.every((f) => rejected.has(f.path));

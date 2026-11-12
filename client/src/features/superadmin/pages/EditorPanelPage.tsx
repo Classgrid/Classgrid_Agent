@@ -6,8 +6,9 @@ import { useNavigate, useParams } from "react-router-dom";
 import { AskAiPanel } from "@/components/ai";
 import { apiClient } from "@/lib/apiClient";
 import { StudioSearchPalette } from "@/features/superadmin/components/StudioSearchPalette";
+import { StudioReviewModal } from "@/features/superadmin/components/StudioReviewModal";
 import { FileBadge } from "@/features/superadmin/components/StudioFilesView";
-import { OPEN_PROJECT_FILE_EVENT } from "@/components/ai/components/stepper/ProjectToolSteps";
+import { OPEN_PROJECT_FILE_EVENT, REVIEW_CHECKPOINT_EVENT } from "@/components/ai/components/stepper/ProjectToolSteps";
 import { remember } from "@/features/superadmin/utils/projectCopies";
 
 type EditorDesktop = {
@@ -20,6 +21,9 @@ type EditorDesktop = {
   onToggleSidebar?: (fn: () => void) => () => void;
   openInEditor?: (folder: string, file?: string, line?: number) => Promise<unknown>;
   openPath?: (path: string) => Promise<unknown>;
+  // The editor's Review tab (EditorReviewPage): opened for an answer, and told of a later press
+  openReview?: (chat: string, cp: string) => Promise<unknown>;
+  onReviewAnswer?: (fn: (d: { chat?: string; cp?: string | null }) => void) => () => void;
 };
 // classgrid-editor/extension/bridge.js
 export const editorDesktop = (): EditorDesktop | undefined => (window as unknown as { classgridDesktop?: EditorDesktop }).classgridDesktop;
@@ -94,6 +98,15 @@ export function EditorPanelPage() {
     window.addEventListener(OPEN_PROJECT_FILE_EVENT, onOpenFile);
     return () => window.removeEventListener(OPEN_PROJECT_FILE_EVENT, onOpenFile);
   }, []);
+  // "Review" under an answer: the editor's Review tab, the same Review as the app's Studio (like the Settings tab)
+  useEffect(() => {
+    const onReview = (e: Event) => {
+      const d = (e as CustomEvent<{ sessionId?: string; checkpoint?: string; mode?: string }>).detail;
+      if (d?.mode === "review" && d.sessionId && d.checkpoint) editorDesktop()?.openReview?.(d.sessionId, d.checkpoint);
+    };
+    window.addEventListener(REVIEW_CHECKPOINT_EVENT, onReview);
+    return () => window.removeEventListener(REVIEW_CHECKPOINT_EVENT, onReview);
+  }, []);
   // The chat search (the chats sidebar's search box, or Ctrl+K): Studio's search, in the middle of the whole window
   // like the AI Hub (the left sidebar is too narrow for it)
   const [searchOpen, setSearchOpen] = useState(false);
@@ -114,9 +127,14 @@ export function EditorPanelPage() {
     );
   }
   if (!ready) return <div className="cg-editor-panel h-[100dvh] bg-background" />;
+  // The editor's folder project, saved by useEditorProject before the page shows (the review window needs its id for
+  // an answer the editor kept no copies of, which is on the server)
+  const projectId = (() => { try { return sessionStorage.getItem("cg_project_open") || localStorage.getItem("cg_project_open"); } catch { return null; } })();
   return (
     <div className="cg-editor-panel h-[100dvh] bg-background">
       <AskAiPanel open onOpenChange={() => {}} variant="overlay" hideClearChat overlayWidth={width} />
+      {/* "Undo" under an answer asks here and puts the files back ("Review" opens the editor's Review tab above) */}
+      <StudioReviewModal projectId={projectId} />
       <StudioSearchPalette
         open={searchOpen}
         onClose={() => setSearchOpen(false)}

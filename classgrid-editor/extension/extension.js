@@ -139,6 +139,24 @@ async function activate(context) {
     const panelView = settingsPanel.webview;
     settingsPanel.onDidDispose(() => { loaders.delete(load); stopFetches(panelView); settingsPanel = null; });
   }));
+  // "Review" under an answer in the Agent panel: the Review tab (the same Review as the app's Studio: every changed
+  // file with its diff, Accept / Reject / Undo), opened on that answer; pressed again, the open tab shows that answer
+  let reviewPanel = null;
+  context.subscriptions.push(vscode.commands.registerCommand("classgrid.openReview", (chat, cp) => {
+    const c = typeof chat === "string" && /^[A-Za-z0-9_-]{1,80}$/.test(chat) ? chat : null;
+    const p = typeof cp === "string" && /^\d{10,16}$/.test(cp) ? cp : null;
+    if (!c) return;
+    if (reviewPanel) {
+      reviewPanel.reveal(vscode.ViewColumn.Active);
+      reviewPanel.webview.postMessage({ cgEvent: "reviewAnswer", data: { chat: c, cp: p } });
+      return;
+    }
+    reviewPanel = vscode.window.createWebviewPanel("classgrid.review", "Classgrid Review", vscode.ViewColumn.Active, { enableScripts: true, retainContextWhenHidden: true });
+    reviewPanel.iconPath = vscode.Uri.file(path.join(__dirname, "media", "classgrid.svg"));
+    const load = holdScreens(reviewPanel.webview, `/editor/review/${c}${p ? `?cp=${p}` : ""}`);
+    const panelView = reviewPanel.webview;
+    reviewPanel.onDidDispose(() => { loaders.delete(load); stopFetches(panelView); reviewPanel = null; });
+  }));
   context.subscriptions.push(vscode.commands.registerCommand("classgrid.searchChats", async () => {
     // (it opens in the Agent panel's page, which covers the whole window for it, like the AI Hub)
     await vscode.commands.executeCommand("classgrid.agent.focus").then(undefined, () => {});
@@ -823,6 +841,7 @@ const HANDLERS = {
     await vscode.env.openExternal(vscode.Uri.parse("classgrid://logout")).then(undefined, () => {});
   },
   openSettings: (_p, section) => vscode.commands.executeCommand("classgrid.openSettings", section).then(() => undefined),
+  openReview: (_p, chat, cp) => vscode.commands.executeCommand("classgrid.openReview", chat, cp).then(() => undefined),
   // The X on the AI panel's top line: closes the right side (the Agent button in the title bar opens it again)
   closePanel: () => vscode.commands.executeCommand("workbench.action.closeAuxiliaryBar").then(() => undefined),
   // Settings → Appearance: the whole editor light, dark, or the same as the computer (our screens follow it: bridge.js)

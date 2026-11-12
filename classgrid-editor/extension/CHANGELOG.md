@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.8
+
+- Review under an answer opens the Review tab: the same Review as the Classgrid app's Studio, every changed file with its diff, Accept, Reject (one file or all) and Undo. Review and Undo also work in Project Mode, for a chat made by the same message, and when the server cannot be reached.
+
 ## 0.1.7
 
 - Review works for folders on this computer: the answer's changes show as a diff to accept, reject (one file or all) or undo. The chat's Review and Undo buttons under an answer work the same way.

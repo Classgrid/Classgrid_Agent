@@ -210,7 +210,7 @@ import { McpConnectCards } from "./answer-cards/mcp-connect";
 
 import { SongsDisplay } from "./answer-cards/songs";
 
-import { FILE_DRAG_TYPE, FileBadge, FileMentionChip, parseFileMention, parseProjectLink, FilesChangedSummary } from "./stepper/ProjectToolSteps";
+import { FILE_DRAG_TYPE, FileBadge, FileMentionChip, parseFileMention, parseProjectLink, FilesChangedSummary, markCheckpoint } from "./stepper/ProjectToolSteps";
 import { CombinedReasoningBlock } from "./stepper/CombinedReasoningBlock";
 
 import { ReplySteps } from "./stepper/ReplySteps";
@@ -4870,14 +4870,15 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
         } catch { return undefined; }
       })();
       // The request as sent, kept so the same answer can be asked for again after a server restart (resumeTurn)
+      // A folder on this computer: this answer's changes are kept by the app under this id (Review / Reject / Undo)
+      const localCheckpoint = canRunPcTools ? String(Date.now()) : undefined;
       let requestBodyText = "";
       requestBodyText = JSON.stringify({
           question: apiQuestion,
           // The app runs the AI's steps on this computer itself (see runPcToolCall above) and drives the loop
           pcTools: canRunPcTools ? true : undefined,
           localLoop: canRunPcTools ? true : undefined,
-          // A folder on this computer: this answer's changes are kept by the app under this id (Review / Reject / Undo)
-          localCheckpoint: canRunPcTools ? String(Date.now()) : undefined,
+          localCheckpoint,
           editorContext,
           memoryPack,
           memoryPackProject: memoryPack !== undefined ? memoryPackProject : undefined,
@@ -5144,6 +5145,8 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
                   });
                 }
               } else if (event.type === "checkpoint") {
+                // (the app's own id came back: this answer's copies are on this computer, the server has no snapshot)
+                if (localCheckpoint && String(event.id) === localCheckpoint) markCheckpoint(localCheckpoint, { pc: true });
                 // Project Mode: this answer's snapshot, for Review / Reject / Undo under the answer
                 setMessages((prev) => {
                   const lastMsg = prev[prev.length - 1];

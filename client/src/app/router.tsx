@@ -102,6 +102,7 @@ import { DashboardHomePage } from "@/features/superadmin/pages/DashboardHomePage
 import { ProjectModePage } from "@/features/superadmin/pages/ProjectModePage";
 import { EditorPanelPage } from "@/features/superadmin/pages/EditorPanelPage";
 import { EditorSettingsPage } from "@/features/superadmin/pages/EditorSettingsPage";
+import { EditorReviewPage } from "@/features/superadmin/pages/EditorReviewPage";
 import { StudioModePage } from "@/features/superadmin/pages/StudioModePage";
 import { LeadsPage } from "@/features/superadmin/pages/LeadsPage";
 import { LeadDetailsPage } from "@/features/superadmin/pages/LeadDetailsPage";
@@ -259,6 +260,7 @@ export function AppRouter() {
       <Route path="/editor/project/:sessionId" element={<EditorPanelPage />} />
       {/* Classgrid Code's Settings tab (the gear in its title bar): Profile, Appearance and Docs */}
       {import.meta.env.VITE_EDITOR === "1" && <Route path="/editor/settings" element={<EditorSettingsPage />} />}
+      {import.meta.env.VITE_EDITOR === "1" && <Route path="/editor/review/:sessionId" element={<EditorReviewPage />} />}
       {/* Local dev only: look at the OAuth consent screen with sample data */}
       {import.meta.env.DEV && <Route path="/oauth/preview" element={<OAuthConsentPage preview />} />}
 

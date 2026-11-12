@@ -464,6 +464,9 @@
     signOut: bind("signOut"),
     // (the Settings tab: the AI panel asks it to show one of its pages, like Plugins)
     onSettingsSection: on("settingsSection"),
+    // "Review" under an answer in the AI panel: the Review tab, on that answer; (the Review tab: a later press)
+    openReview: bind("openReview"),
+    onReviewAnswer: on("reviewAnswer"),
     // The X on the AI panel's top line: closes the right side
     closePanel: bind("closePanel"),
     // The chats sidebar on the left edge: its width, the chat picked there (opens in the Agent panel), and the chat
