@@ -82,6 +82,11 @@ function wireDownloads(ses) {
 let win = null;
 let view = null;
 let shownRect = null; // where the Browser tab is (window pixels), or null while it isn't on screen
+// The address an "open" step is loading right now, until it is on screen. While the first page of a chat is still on
+// its way, the page has no address yet (about:blank), and the Browser tab opening at that moment took that for
+// "nothing open yet" and loaded Google over it: the AI's page was replaced in a blink, its screenshot showed Google,
+// and it opened the page again (owner, 2026-11-12). The page on its way counts as the open page.
+let pendingUrl = null;
 let zoom = 1;
 let pointerAt = 0;
 
@@ -97,7 +102,8 @@ function navInfo() {
   const wc = view?.webContents;
   if (!wc || wc.isDestroyed()) return { type: "nav", url: "", title: "", canGoBack: false, canGoForward: false, loading: false };
   const url = wc.getURL();
-  return { type: "nav", url: url === "about:blank" ? "" : url, title: wc.getTitle(), canGoBack: wc.navigationHistory.canGoBack(), canGoForward: wc.navigationHistory.canGoForward(), loading: wc.isLoading() };
+  const shown = url && url !== "about:blank" ? url : (pendingUrl || "");
+  return { type: "nav", url: shown, title: wc.getTitle(), canGoBack: wc.navigationHistory.canGoBack(), canGoForward: wc.navigationHistory.canGoForward(), loading: wc.isLoading() || !!pendingUrl };
 }
 
 // ── Each chat has its own page: back in a chat, its last page opens again; a new chat starts empty ─────────────
@@ -473,13 +479,14 @@ async function act(a, byAgent) {
       // Wikipedia keeps loading in the background for 30-45 s after it is on screen, and the AI (and the user) sat
       // waiting all that time (owner, 2026-11-10). Readable = the document is ready and nothing new has started
       // loading for 2 seconds (or the full load finished first); 45 s is the ceiling either way.
+      pendingUrl = url;
       const fullLoad = wc.loadURL(url).catch((e) => { if (e.code !== "ERR_ABORTED") failed = e; });
       const readable = new Promise((resolve) => {
         const onReady = () => { wc.off("dom-ready", onReady); settle(2000).then(() => wait(500)).then(resolve); };
         wc.on("dom-ready", onReady);
         fullLoad.finally(() => { wc.off("dom-ready", onReady); resolve(); });
       });
-      await Promise.race([fullLoad, readable, wait(45000)]);
+      try { await Promise.race([fullLoad, readable, wait(45000)]); } finally { if (pendingUrl === url) pendingUrl = null; }
       if (failed) {
         const why = String(failed.code || failed.message || "the page didn't load");
         throw new Error(`${why} while opening ${url}${isLocal(url) && /REFUSED/.test(why) ? ". Nothing is running at that address on the user's computer: start the server first" : ""}`);
@@ -649,8 +656,8 @@ async function agentAct(step) {
 const fromApp = (e) => !!win && !win.isDestroyed() && e.sender === win.webContents;
 ipcMain.on("cg:browserShow", (e, rect) => {
   if (!fromApp(e) || !rect) return;
-  // Nothing open yet: Google
-  const fresh = !live() || !/^https?:/.test(view.webContents.getURL());
+  // Nothing open yet (and nothing on its way): Google
+  const fresh = !live() || (!/^https?:/.test(view.webContents.getURL()) && !pendingUrl && !view.webContents.isLoading());
   const z = win.webContents.getZoomFactor() || 1;
   const r = { x: Math.round(Number(rect.x) * z), y: Math.round(Number(rect.y) * z), width: Math.round(Number(rect.width) * z), height: Math.round(Number(rect.height) * z) };
   if (!Object.values(r).every(Number.isFinite) || r.width < 20 || r.height < 20) return;
