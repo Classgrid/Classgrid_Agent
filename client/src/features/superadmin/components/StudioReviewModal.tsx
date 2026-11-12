@@ -14,6 +14,14 @@ const EASE = [0.22, 1, 0.36, 1] as const;
 type ReviewFile = { file: string; added: number; removed: number; kind: string; diff: string };
 type Review = { sessionId: string; checkpoint: string; files: ReviewFile[] | null; open: string | null; busy: boolean };
 
+// A folder on this computer: the desktop app (or Classgrid Code) kept the answer's before-copies itself and shows,
+// rejects or undoes the changes from them; a cloud project's answer is on the server (the routes below)
+type LocalReview = {
+  reviewCheckpoint?: (chat: string, cp: string) => Promise<{ files: ReviewFile[]; finished: boolean } | null>;
+  rejectCheckpoint?: (chat: string, cp: string, file: string | null) => Promise<number | null>;
+};
+const localReview = () => (window as unknown as { classgridDesktop?: LocalReview }).classgridDesktop;
+
 async function api(path: string, init?: RequestInit) {
   const res = await fetchWithRescue(`${backendUrl}/api/ide${path}`, {
     credentials: "include",
@@ -33,6 +41,8 @@ export function StudioReviewModal({ projectId, onChanged }: { projectId: string 
   const cpPath = (r: { sessionId: string; checkpoint: string }) => `/projects/${projectId}/checkpoints/${r.sessionId}/${r.checkpoint}`;
 
   const loadReview = async (r: { sessionId: string; checkpoint: string }) => {
+    const here = localReview()?.reviewCheckpoint ? await localReview()!.reviewCheckpoint!(r.sessionId, r.checkpoint).catch(() => null) : null;
+    if (here) { setReview({ ...r, files: here.files || [], open: null, busy: false }); return; }
     const { res, data } = await api(cpPath(r));
     if (!res.ok) { toast.error(data.error || "Could not load the changes"); setReview(null); return; }
     setReview({ ...r, files: data.files || [], open: null, busy: false });
@@ -51,13 +61,23 @@ export function StudioReviewModal({ projectId, onChanged }: { projectId: string 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId]);
 
+  // Puts the files back: on this computer when the app kept this answer's copies, otherwise on the server
+  const putBack = async (r: { sessionId: string; checkpoint: string }, action: "undo" | "reject", file?: string): Promise<{ ok: boolean; reverted: number; error?: string }> => {
+    const local = localReview();
+    if (local?.rejectCheckpoint) {
+      const n = await local.rejectCheckpoint(r.sessionId, r.checkpoint, file ?? null).catch(() => null);
+      if (n !== null && n !== undefined) return { ok: true, reverted: n };
+    }
+    const { res, data } = await api(`${cpPath(r)}/${action}`, { method: "POST", body: JSON.stringify(file ? { file } : {}) });
+    return { ok: res.ok, reverted: Number(data.reverted) || 0, error: data.error };
+  };
   const undo = async (d: { sessionId: string; checkpoint: string }) => {
     setConfirmBusy(true);
-    const { res, data } = await api(`${cpPath(d)}/undo`, { method: "POST", body: "{}" });
+    const r = await putBack(d, "undo");
     setConfirmBusy(false);
     setConfirm(null);
-    if (res.ok) { markCheckpoint(d.checkpoint, { status: "undone" }); toast.success(`Undone: ${data.reverted} file${data.reverted === 1 ? "" : "s"} put back`); onChanged?.(); }
-    else toast.error(data.error || "Could not undo");
+    if (r.ok) { markCheckpoint(d.checkpoint, { status: "undone" }); toast.success(`Undone: ${r.reverted} file${r.reverted === 1 ? "" : "s"} put back`); onChanged?.(); }
+    else toast.error(r.error || "Could not undo");
   };
 
   const rejectChanges = (file?: string) => { if (review) setConfirm({ kind: "reject", file }); };
@@ -65,13 +85,13 @@ export function StudioReviewModal({ projectId, onChanged }: { projectId: string 
     if (!review) return;
     setConfirm(null);
     setReview({ ...review, busy: true });
-    const { res, data } = await api(`${cpPath(review)}/reject`, { method: "POST", body: JSON.stringify({ file }) });
-    if (res.ok) {
+    const r = await putBack(review, "reject", file);
+    if (r.ok) {
       markCheckpoint(review.checkpoint, file ? { rejectedFiles: [file] } : { status: "rejected" });
-      toast.success(file ? `${file} put back` : `Rejected: ${data.reverted} file${data.reverted === 1 ? "" : "s"} put back`);
+      toast.success(file ? `${file} put back` : `Rejected: ${r.reverted} file${r.reverted === 1 ? "" : "s"} put back`);
       onChanged?.();
       if (!file) { setReview(null); return; }
-    } else toast.error(data.error || "Could not reject the changes");
+    } else toast.error(r.error || "Could not reject the changes");
     loadReview(review);
   };
 

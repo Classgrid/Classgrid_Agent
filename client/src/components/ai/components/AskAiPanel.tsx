@@ -4788,7 +4788,7 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
       const runPcToolCall = async (ev: any) => {
         let reply: any;
         try {
-          reply = await (window as any).classgridDesktop.runTool({ tool: ev.tool, args: ev.args || {}, root: ev.root, chat: ev.chat });
+          reply = await (window as any).classgridDesktop.runTool({ tool: ev.tool, args: ev.args || {}, root: ev.root, chat: ev.chat, checkpoint: ev.checkpoint });
         } catch (e: any) {
           reply = { text: `Error: ${e?.message || e}` };
         }
@@ -4883,6 +4883,8 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
           // The app runs the AI's steps on this computer itself (see runPcToolCall above) and drives the loop
           pcTools: canRunPcTools ? true : undefined,
           localLoop: canRunPcTools ? true : undefined,
+          // A folder on this computer: this answer's changes are kept by the app under this id (Review / Reject / Undo)
+          localCheckpoint: canRunPcTools ? String(Date.now()) : undefined,
           editorContext,
           memoryPack,
           memoryPackProject: memoryPack !== undefined ? memoryPackProject : undefined,

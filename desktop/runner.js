@@ -1188,15 +1188,185 @@ function connect(token) {
   });
 }
 
-// One step of the AI on this computer: { tool, args, root?, chat? } -> { text, computer?, browser?, file?, images?... }.
+// ── Review for a folder on this computer: the answer's before-copies ──────────────────────────────────────────
+// A cloud project's answer is snapshotted on the sandbox (server, startCheckpoint), but a folder on this computer has
+// no copy there, so Studio's Review tab was always empty for it (owner, 2026-11-12). The app keeps the snapshot itself:
+// per answer (the checkpoint id the chat sends with the message, carried on each pc_tool_call), a copy of every file
+// before the AI's first change to it in that answer, in userData/checkpoints/<chat>/<checkpoint>/. Review is the diff
+// of those copies against the files now; Reject and Undo put the copies back (a file the AI created is removed).
+// The replies have the same shape as the server's /projects/:id/checkpoints routes, so the Review tab works the same
+// for both kinds of project.
+let checkpointsDir = null;
+const CHECKPOINT_TOOLS = new Set(["write_project_file", "edit_project_file", "notebook_edit"]);
+const BEFORE_MAX_BYTES = 20 * 1024 * 1024; // (a bigger file is changed without a copy: not reviewed)
+const DIFF_MAX_LINES = 4000; // (bigger files are shown as replaced whole, the line-by-line diff would be too slow)
+const cpSafe = (v) => String(v || "").replace(/[^A-Za-z0-9_-]/g, "").slice(0, 80);
+function cpFolder(chat, cp) {
+  const c = cpSafe(chat);
+  const id = cpSafe(cp);
+  return checkpointsDir && c && id ? path.join(checkpointsDir, c, id) : null;
+}
+function cpManifest(dir) {
+  try { const m = JSON.parse(fs.readFileSync(path.join(dir, "files.json"), "utf8")); return m && m.files ? m : { files: {} }; } catch { return { files: {} }; }
+}
+function cpSaveManifest(dir, m) { fs.mkdirSync(dir, { recursive: true }); fs.writeFileSync(path.join(dir, "files.json"), JSON.stringify(m)); }
+// The file a step is about to change: its copy is kept once per answer, before the first change
+function keepBefore(chat, cp, full, root) {
+  const dir = cpFolder(chat, cp);
+  if (!dir || !full) return;
+  try {
+    const key = path.resolve(full);
+    const m = cpManifest(dir);
+    if (!m.root && root) m.root = path.resolve(String(root));
+    if (m.files[key]) return;
+    if (fs.existsSync(key)) {
+      const st = fs.statSync(key);
+      if (!st.isFile() || st.size > BEFORE_MAX_BYTES) return;
+      const name = `${Object.keys(m.files).length}.before`;
+      fs.mkdirSync(dir, { recursive: true });
+      fs.copyFileSync(key, path.join(dir, name));
+      m.files[key] = { kind: "changed", before: name };
+    } else {
+      m.files[key] = { kind: "added" };
+    }
+    cpSaveManifest(dir, m);
+  } catch (e) {
+    console.warn("[runner] checkpoint copy failed:", e.message);
+  }
+}
+// A unified diff (3 lines of context) of two texts, like git's, for the Review tab's diff view
+function unifiedDiff(file, beforeText, afterText) {
+  const a = beforeText === null ? [] : beforeText.replace(/\r\n/g, "\n").split("\n");
+  const b = afterText === null ? [] : afterText.replace(/\r\n/g, "\n").split("\n");
+  if (a.length && a[a.length - 1] === "" && beforeText.endsWith("\n")) a.pop();
+  if (b.length && b[b.length - 1] === "" && afterText.endsWith("\n")) b.pop();
+  // Edit script: pairs of [kind, text] (" " same, "-" removed, "+" added)
+  let ops = [];
+  if (a.length > DIFF_MAX_LINES || b.length > DIFF_MAX_LINES) {
+    ops = [...a.map((t) => ["-", t]), ...b.map((t) => ["+", t])];
+  } else {
+    // Longest common subsequence, from the end, on the lines after a shared head and tail
+    let head = 0;
+    while (head < a.length && head < b.length && a[head] === b[head]) head++;
+    let tail = 0;
+    while (tail < a.length - head && tail < b.length - head && a[a.length - 1 - tail] === b[b.length - 1 - tail]) tail++;
+    const am = a.slice(head, a.length - tail);
+    const bm = b.slice(head, b.length - tail);
+    const n = am.length, mLen = bm.length;
+    const lcs = new Array(n + 1);
+    for (let i = 0; i <= n; i++) lcs[i] = new Uint32Array(mLen + 1);
+    for (let i = n - 1; i >= 0; i--) for (let j = mLen - 1; j >= 0; j--) lcs[i][j] = am[i] === bm[j] ? lcs[i + 1][j + 1] + 1 : Math.max(lcs[i + 1][j], lcs[i][j + 1]);
+    for (let i = 0; i < head; i++) ops.push([" ", a[i]]);
+    let i = 0, j = 0;
+    while (i < n && j < mLen) {
+      if (am[i] === bm[j]) { ops.push([" ", am[i]]); i++; j++; }
+      else if (lcs[i + 1][j] >= lcs[i][j + 1]) { ops.push(["-", am[i]]); i++; }
+      else { ops.push(["+", bm[j]]); j++; }
+    }
+    while (i < n) ops.push(["-", am[i++]]);
+    while (j < mLen) ops.push(["+", bm[j++]]);
+    for (let k = a.length - tail; k < a.length; k++) ops.push([" ", a[k]]);
+  }
+  let added = 0, removed = 0;
+  for (const [k] of ops) { if (k === "+") added++; else if (k === "-") removed++; }
+  // Hunks: each run of changes with 3 lines of context around it
+  const CONTEXT = 3;
+  const lines = [`--- ${beforeText === null ? "/dev/null" : `a/${file}`}`, `+++ ${afterText === null ? "/dev/null" : `b/${file}`}`];
+  let oldNo = 1, newNo = 1;
+  let k = 0;
+  while (k < ops.length) {
+    if (ops[k][0] === " ") { oldNo++; newNo++; k++; continue; }
+    // the hunk starts CONTEXT lines before this change and runs until CONTEXT same lines after the last change
+    let start = k;
+    let back = 0;
+    while (back < CONTEXT && start > 0 && ops[start - 1][0] === " ") { start--; back++; }
+    let end = k;
+    let same = 0;
+    while (end < ops.length) {
+      if (ops[end][0] === " ") { same++; if (same > CONTEXT * 2) { end -= CONTEXT; break; } }
+      else same = 0;
+      end++;
+    }
+    if (end > ops.length) end = ops.length;
+    const hunkOldStart = oldNo - back;
+    const hunkNewStart = newNo - back;
+    let oldCount = 0, newCount = 0;
+    const body = [];
+    for (let x = start; x < end; x++) {
+      const [kind, text] = ops[x];
+      body.push(kind + text);
+      if (kind !== "+") oldCount++;
+      if (kind !== "-") newCount++;
+    }
+    lines.push(`@@ -${hunkOldStart},${oldCount} +${hunkNewStart},${newCount} @@`, ...body);
+    for (let x = k; x < end; x++) { if (ops[x][0] !== "+") oldNo++; if (ops[x][0] !== "-") newNo++; }
+    k = end;
+  }
+  return { diff: lines.join("\n").slice(0, 60000), added, removed };
+}
+// The name a file shows under in Review: inside the project folder, relative to it; otherwise its full path
+function cpFileName(m, key) {
+  const root = m.root ? path.resolve(m.root) : null;
+  if (root && key.toLowerCase().startsWith(root.toLowerCase() + path.sep)) return path.relative(root, key).split(path.sep).join("/");
+  return key;
+}
+// Review: the changes of one answer, or null when this computer kept nothing for it (a cloud project's answer)
+function reviewCheckpoint(chat, cp) {
+  const dir = cpFolder(chat, cp);
+  if (!dir || !fs.existsSync(path.join(dir, "files.json"))) return null;
+  const m = cpManifest(dir);
+  const files = [];
+  for (const [key, entry] of Object.entries(m.files)) {
+    const file = cpFileName(m, key);
+    const existsNow = fs.existsSync(key) && fs.statSync(key).isFile();
+    const beforeText = entry.kind === "added" ? null : readText(path.join(dir, entry.before));
+    const afterText = existsNow ? readText(key) : null;
+    if (beforeText === afterText) continue; // (put back, or never really changed)
+    const kind = beforeText === null ? "added" : afterText === null ? "deleted" : "changed";
+    const { diff, added, removed } = unifiedDiff(file, beforeText, afterText);
+    files.push({ file, added, removed, kind, diff });
+  }
+  return { files, finished: true };
+}
+// Reject (one file, or every file) and Undo: the before-copies put back; a file the AI created is removed
+function rejectCheckpoint(chat, cp, onlyFile) {
+  const dir = cpFolder(chat, cp);
+  if (!dir || !fs.existsSync(path.join(dir, "files.json"))) return null;
+  const m = cpManifest(dir);
+  let count = 0;
+  for (const [key, entry] of Object.entries(m.files)) {
+    if (onlyFile && cpFileName(m, key) !== onlyFile) continue;
+    if (entry.kind === "added") {
+      if (fs.existsSync(key)) { fs.rmSync(key, { force: true }); count++; }
+    } else {
+      const before = path.join(dir, entry.before);
+      if (!fs.existsSync(before)) continue;
+      const same = fs.existsSync(key) && readText(key) === readText(before);
+      if (same) continue;
+      fs.mkdirSync(path.dirname(key), { recursive: true });
+      fs.copyFileSync(before, key);
+      count++;
+    }
+    seenAt.delete(key.toLowerCase()); // (the AI must read it again before editing it)
+  }
+  return count;
+}
+
+// One step of the AI on this computer: { tool, args, root?, chat?, checkpoint? } -> { text, computer?, browser?, file?, images?... }.
 // Used by the chat screens (pc_tool_call on the answer's own stream, posted back to /api/ai/pc-tool-result) and by the
 // socket fallback above. One reply stays under the server's 1 MB message limit; the AI only ever sees 100 KB of it.
 async function runTool(req) {
   const capReply = (r) => (r && typeof r.text === "string" && r.text.length > REPLY_CHARS ? { ...r, text: `${r.text.slice(0, REPLY_CHARS)}\n… (cut: the answer was too long; read or search a smaller part)` } : r);
   try {
-    const { tool, root, chat } = req || {};
+    const { tool, root, chat, checkpoint } = req || {};
     const args = (req && req.args && typeof req.args === "object") ? req.args : {};
     if (chat) args.__chat = String(chat); // which chat started it (a finished background job wakes that chat)
+    // A file about to be changed in an answer with a checkpoint: its copy is kept first (Review / Reject / Undo)
+    if (checkpoint && chat && CHECKPOINT_TOOLS.has(tool) && args.path) {
+      let full = null;
+      try { full = root && isAllowedRoot(root) ? resolveIn(root, args.path).full : localPath(args.path); } catch { full = null; }
+      if (full) keepBefore(chat, checkpoint, full, root && isAllowedRoot(root) ? root : null);
+    }
     if (tool === "ping") return { text: "ok" };
     // The AI's browser steps go to the app's own browser (browser.js)
     // The AI using any app on this computer: screen pictures, the real mouse and keyboard (computer.js)
@@ -1305,12 +1475,15 @@ function readForFilesTab(root, rel) {
 
 module.exports = {
   tools, // the AI's tools on this computer (also used by the terminal tests)
-  runTool, // one step { tool, args, root?, chat? } -> reply, for the chat screens (pc_tool_call) and the socket
+  runTool, // one step { tool, args, root?, chat?, checkpoint? } -> reply, for the chat screens (pc_tool_call) and the socket
   readLocalFile,
   listForFilesTab,
   githubRepoOf,
   readForFilesTab,
-  init(userDataDir) { foldersFile = path.join(userDataDir, "folders.json"); },
+  // Studio's Review tab for a folder on this computer: an answer's changes, and its files put back (see keepBefore)
+  reviewCheckpoint,
+  rejectCheckpoint,
+  init(userDataDir) { foldersFile = path.join(userDataDir, "folders.json"); checkpointsDir = path.join(userDataDir, "checkpoints"); },
   // The screens refresh the token often: only a different person (or logging out) reconnects; otherwise the fresh
   // token is just kept for the next reconnect
   setToken(token) {

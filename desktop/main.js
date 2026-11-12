@@ -361,6 +361,10 @@ ipcMain.handle("cg:runTool", (e, req) => {
   if (!from.startsWith(`${APP_URL}/`) && from !== APP_URL) return { text: "Error: this step can only be asked by the Classgrid app itself." };
   return runner.runTool(req && typeof req === "object" ? req : {});
 });
+// Studio's Review tab for a folder on this computer (runner.js keepBefore): an answer's changes, Reject, Undo
+const fromOurScreens = (e) => { try { const from = String(e.sender.getURL() || ""); return from.startsWith(`${APP_URL}/`) || from === APP_URL; } catch { return false; } };
+ipcMain.handle("cg:reviewCheckpoint", (e, chat, cp) => (fromOurScreens(e) ? runner.reviewCheckpoint(chat, cp) : null));
+ipcMain.handle("cg:rejectCheckpoint", (e, chat, cp, file) => (fromOurScreens(e) ? runner.rejectCheckpoint(chat, cp, file || null) : null));
 
 // Project Mode, folder projects: open the folder in VS Code or File Explorer (only folders picked in this app)
 ipcMain.handle("cg:openFolder", (_e, folder) => { if (runner.isAllowed(folder)) shell.openPath(String(folder)); });

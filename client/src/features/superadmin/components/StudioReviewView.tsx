@@ -5,7 +5,7 @@
 // the same checkpoints as Project Mode.
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useLocation } from "react-router-dom";
-import { Check, ChevronDown, ChevronRight, ChevronUp, ChevronsDownUp, ChevronsUpDown, Columns2, FileDiff, FoldVertical, ListTree, MoreVertical, RotateCw, Search, Space, X } from "lucide-react";
+import { Check, ChevronDown, ChevronRight, ChevronUp, ChevronsDownUp, ChevronsUpDown, Columns2, FileDiff, FoldVertical, ListTree, MoreVertical, RotateCw, Search, Space, Undo2, X } from "lucide-react";
 import { toast } from "sonner";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/marketing_ui/dropdown-menu";
 import { CHECKPOINTS_CHANGED_EVENT, FileBadge, checkpointsFor, markCheckpoint, readCheckpointState } from "@/components/ai/components/stepper/ProjectToolSteps";
@@ -21,6 +21,14 @@ type ReviewFile = { file: string; added: number; removed: number; kind: string; 
 type Row = { kind: "add" | "del" | "same" | "hunk" | "fold"; text: string; oldLine: number | null; newLine: number | null; hidden?: number };
 type Pair = { left: Row | null; right: Row | null; full?: Row };
 type View = { split: boolean; hideWs: boolean; fold: boolean };
+
+// A folder on this computer: the desktop app (or Classgrid Code) kept the answer's before-copies itself and shows,
+// rejects or undoes the changes from them; a cloud project's answer is on the server (the routes below)
+type LocalReview = {
+  reviewCheckpoint?: (chat: string, cp: string) => Promise<{ files: ReviewFile[]; finished: boolean } | null>;
+  rejectCheckpoint?: (chat: string, cp: string, file: string | null) => Promise<number | null>;
+};
+const localReview = () => (window as unknown as { classgridDesktop?: LocalReview }).classgridDesktop;
 
 async function api(path: string, init?: RequestInit) {
   const res = await fetchWithRescue(`${backendUrl}/api/ide${path}`, {
@@ -159,8 +167,20 @@ export function StudioReviewView({ projectId, onChanged }: { projectId: string |
     setAnswers(cps);
     const cp = want && cps.includes(want) ? want : cps.at(-1) || null;
     setCheckpoint(cp);
-    if (!projectId || !chatId || !cp) { setFiles([]); return; }
+    if (!chatId || !cp) { setFiles([]); return; }
     setFiles(null);
+    // Kept on this computer (a folder project): the app has it; otherwise it is a cloud project's answer, on the server
+    const local = localReview();
+    if (local?.reviewCheckpoint) {
+      const here = await local.reviewCheckpoint(chatId, cp).catch(() => null);
+      if (here) {
+        const list: ReviewFile[] = here.files || [];
+        setFiles(list);
+        setOpen((o) => new Set([...o].filter((f) => list.some((x) => x.file === f))));
+        return;
+      }
+    }
+    if (!projectId) { setFiles([]); return; }
     const { res, data } = await api(cpPath(cp));
     if (!res.ok) { setError(data.error || "Could not load the changes"); setFiles([]); return; }
     const list: ReviewFile[] = data.files || [];
@@ -246,15 +266,42 @@ export function StudioReviewView({ projectId, onChanged }: { projectId: string |
   // Reject asks first in our own confirm card (the same one as deleting a chat)
   const [confirmReject, setConfirmReject] = useState<{ file?: string } | null>(null);
   const reject = (one?: string) => { if (checkpoint) setConfirmReject({ file: one }); };
+  // Puts the files back: on this computer when the app kept this answer's copies, otherwise on the server
+  const putBack = async (one?: string, action: "reject" | "undo" = "reject"): Promise<number | null> => {
+    if (!checkpoint || !chatId) return null;
+    const local = localReview();
+    if (local?.rejectCheckpoint) {
+      const n = await local.rejectCheckpoint(chatId, checkpoint, one ?? null).catch(() => null);
+      if (n !== null && n !== undefined) return n;
+    }
+    if (!projectId) { toast.error("Could not put the files back"); return null; }
+    const { res, data } = await api(`${cpPath(checkpoint)}/${action}`, { method: "POST", body: JSON.stringify(one ? { file: one } : {}) });
+    if (!res.ok) { toast.error(data.error || (action === "undo" ? "Could not undo the changes" : "Could not reject the changes")); return null; }
+    return Number(data.reverted) || 0;
+  };
   const doReject = async (one?: string) => {
     if (!checkpoint) return;
     setBusy(true);
-    const { res, data } = await api(`${cpPath(checkpoint)}/reject`, { method: "POST", body: JSON.stringify({ file: one }) });
+    const reverted = await putBack(one, "reject");
     setBusy(false);
-    if (!res.ok) { toast.error(data.error || "Could not reject the changes"); return; }
+    if (reverted === null) return;
     markCheckpoint(checkpoint, one ? { rejectedFiles: [one] } : { status: "rejected" });
-    toast.success(one ? `${one} put back` : `Rejected: ${data.reverted} file${data.reverted === 1 ? "" : "s"} put back`);
+    toast.success(one ? `${one} put back` : `Rejected: ${reverted} file${reverted === 1 ? "" : "s"} put back`);
     setConfirmReject(null);
+    onChanged?.();
+    load();
+  };
+  // Undo: the project back to how it was before this answer (asks first, like Reject)
+  const [confirmUndo, setConfirmUndo] = useState(false);
+  const doUndo = async () => {
+    if (!checkpoint) return;
+    setBusy(true);
+    const reverted = await putBack(undefined, "undo");
+    setBusy(false);
+    if (reverted === null) return;
+    markCheckpoint(checkpoint, { status: "undone" });
+    toast.success(`Undone: ${reverted} file${reverted === 1 ? "" : "s"} put back`);
+    setConfirmUndo(false);
     onChanged?.();
     load();
   };
@@ -358,6 +405,9 @@ export function StudioReviewView({ projectId, onChanged }: { projectId: string |
         <div className="ml-auto shrink-0 flex items-center gap-1">
           {!!files?.length && (
             <>
+              <button className={`${btn} @max-[30rem]:px-0 @max-[30rem]:w-7 @max-[30rem]:flex @max-[30rem]:items-center @max-[30rem]:justify-center`} disabled={busy} onClick={() => setConfirmUndo(true)} title="Undo" aria-label="Undo">
+                <span className="@max-[30rem]:hidden">Undo</span><Undo2 className="hidden @max-[30rem]:block size-3.5" />
+              </button>
               <button className={`${btn} @max-[30rem]:px-0 @max-[30rem]:w-7 @max-[30rem]:flex @max-[30rem]:items-center @max-[30rem]:justify-center`} disabled={busy} onClick={() => reject()} title="Reject all" aria-label="Reject all">
                 <span className="@max-[30rem]:hidden">Reject all</span><X className="hidden @max-[30rem]:block size-3.5" />
               </button>

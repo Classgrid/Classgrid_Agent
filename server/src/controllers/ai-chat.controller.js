@@ -2384,7 +2384,12 @@ The user is in ${appMode === "agent" ? "Agent mode" : appMode === "project" ? "P
         if (thinking === "low") tailPrompt += "\n\n--- SPEED ---\nThe user picked Fast: answer quickly and keep it short. Don't plan at length or double-check things that are clearly right; use as few steps as the task needs.";
         if (thinking === "high" && slashCommand !== "boost") tailPrompt += "\n\n--- SPEED ---\nThe user picked Deep thinking: think carefully, check your work twice and look for mistakes before you answer.";
         // Project Mode: snapshot the project before this answer, so its changes can be reviewed, rejected or undone
-        const checkpointId = await checkpointP;
+        let checkpointId = await checkpointP;
+        // A folder on the user's computer has no copy here to snapshot: the app keeps the answer's before-copies itself
+        // (desktop/runner.js keepBefore) under the id it sent with the message, and every step on the computer carries
+        // that id. The chat's Review tab then lists this answer like a cloud project's (owner, 2026-11-12).
+        if (!checkpointId && body.clientApp === "desktop" && whereProject?.location === "local" && /^\d{10,16}$/.test(String(body.localCheckpoint || ""))) checkpointId = String(body.localCheckpoint);
+        if (pcExecutor && checkpointId) pcExecutor.checkpoint = checkpointId;
         if (checkpointId && !res.writableEnded) res.write(`data: ${JSON.stringify({ type: "checkpoint", id: checkpointId })}\n\n`);
         dynamicSystemPrompt += promptBlock("connector:zoom|connector:google|connector:microsoft|schedules", `\nCRITICAL TIMEZONE RULE FOR MEETINGS: When scheduling a Zoom meeting or Google Calendar event, the APIs EXPECT the 'startTime' parameter to be in UTC format (with a 'Z' at the end). To ensure accuracy, YOU MUST ALWAYS USE the \`get_timezone_time\` tool to check the current time and UTC offset for the user's location BEFORE scheduling any future meetings. Use the offset returned by the tool (e.g. GMT+05:30) to calculate the correct UTC time for the meeting.`);
 

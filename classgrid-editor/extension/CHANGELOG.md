@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.7
+
+- Review works for folders on this computer: the answer's changes show as a diff to accept, reject (one file or all) or undo. The chat's Review and Undo buttons under an answer work the same way.
+
 ## 0.1.6
 
 - A request no longer hangs for a minute after the editor sat idle: idle connections to the server are closed after 10 seconds, and a request on a connection that died meanwhile is sent again on a fresh one.

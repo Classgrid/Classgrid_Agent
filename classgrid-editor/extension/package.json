@@ -3,7 +3,7 @@
   "displayName": "Classgrid",
   "description": "The Classgrid AI inside Classgrid Code: the Agent chat on the right side, and the AI's terminal, files and memory on this computer.",
   "publisher": "classgrid",
-  "version": "0.1.6",
+  "version": "0.1.7",
   "private": false,
   "license": "UNLICENSED",
   "engines": {
