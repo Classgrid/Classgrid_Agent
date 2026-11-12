@@ -22,15 +22,15 @@ before(async () => {
     allow = await import("../../src/mcp/mcp-allowlist.js");
     ctxMod = await import("../../src/mcp/mcp-context.js");
     srv = await import("../../src/mcp/mcp-server.js");
-    tools = await import("../../src/mcp/tools.js");
+    tools = await import("../../src/mcp/mcp-extra-tools.js"); // the /mcp tool list: tools.js plus the MCP-only tools
     oauth = await import("../../src/routes/oauth.provider.routes.js");
     ({ Client } = await import("@modelcontextprotocol/sdk/client/index.js"));
     ({ InMemoryTransport } = await import("@modelcontextprotocol/sdk/inMemory.js"));
-    REAL_TOOLS = tools.getMcpTools();
+    REAL_TOOLS = tools.getRemoteMcpTools();
     REAL_NAMES = REAL_TOOLS.map((t) => t.name);
 });
 
-const ALL_SCOPES = ["profile:read", "schedules:read", "schedules:write", "grid:read", "grid:write", "apps:use", "offline_access"];
+const ALL_SCOPES = ["profile:read", "schedules:read", "schedules:write", "grid:read", "grid:write", "apps:use", "projects:read", "chats:read", "skills:read", "docs:read", "docs:write", "pages:write", "offline_access"];
 const DENIED = ["execute_terminal_command", "ubuntu", "unified_db_query", "read_server_logs", "read_local_file", "read_sandbox_file", "run_code", "manage_rag_document", "supabase_connector", "vercel_connector", "sanity_connector", "aws_ses_connector", "whatsapp_business_connector", "facebook_connector", "instagram_connector", "send_whatsapp_message", "generate_image", "edit_image", "transcribe_audio", "update_ai_preferences", "create_skill", "update_skill", "delete_skill", "list_organizations", "list_global_users", "list_support_tickets", "list_blog_subscribers", "get_student_count"];
 const USER = { _id: "64b000000000000000000001", email: "t@school.edu", role: "super_admin", organization_id: "64b0000000000000000000aa", notion_access_token: "x" };
 // Every app connected, so apps:use would list every connector

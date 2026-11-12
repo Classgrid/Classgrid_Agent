@@ -1,0 +1,116 @@
+// MCP-only tools (projects from GitHub, chat history, docs, pages): scopes, listing, secret handling, and the
+// argument checks that answer before any database or GitHub call.
+// Run: node --test tests/mcp/*.test.mjs
+import "./_helpers.mjs";
+import { test, describe, before } from "node:test";
+import assert from "node:assert/strict";
+
+let extra, scopes, ctxMod, srv, Client, InMemoryTransport;
+before(async () => {
+    extra = await import("../../src/mcp/mcp-extra-tools.js");
+    scopes = await import("../../src/mcp/mcp-scopes.js");
+    ctxMod = await import("../../src/mcp/mcp-context.js");
+    srv = await import("../../src/mcp/mcp-server.js");
+    ({ Client } = await import("@modelcontextprotocol/sdk/client/index.js"));
+    ({ InMemoryTransport } = await import("@modelcontextprotocol/sdk/inMemory.js"));
+});
+
+const USER = { _id: "64b000000000000000000001", email: "t@school.edu", role: "student" };
+const ctxFor = (s) => ctxMod.buildMcpContext({ user: USER, tokenId: "tok1", clientId: "cli1", scopes: s });
+
+const listed = async (s) => {
+    const server = srv.buildMcpServer(ctxFor(s), {
+        user: USER, tokenId: "tok1", getMcpTools: extra.getRemoteMcpTools, handleToolCall: async () => ({ content: [] }),
+        checkChatAccess: async () => null, searchUsers: async () => ({ content: [] }), toolLimiter: async () => ({ allowed: true }), audit: () => {},
+    });
+    const [a, b] = InMemoryTransport.createLinkedPair();
+    const client = new Client({ name: "t", version: "1" });
+    await Promise.all([server.connect(a), client.connect(b)]);
+    return (await client.listTools()).tools;
+};
+
+describe("scopes", () => {
+    test("chat history and skills are off until the user ticks them; reading projects and docs starts ticked", () => {
+        const byScope = new Map(scopes.describeScopes(["projects:read", "chats:read", "skills:read", "docs:read", "docs:write", "pages:write"]).map((s) => [s.scope, s]));
+        assert.equal(byScope.get("chats:read").defaultChecked, false);
+        assert.equal(byScope.get("skills:read").defaultChecked, false);
+        assert.equal(byScope.get("docs:write").defaultChecked, false);
+        assert.equal(byScope.get("pages:write").defaultChecked, false);
+        assert.equal(byScope.get("projects:read").defaultChecked, true);
+        assert.equal(byScope.get("docs:read").defaultChecked, true);
+    });
+    test("v1 scopes and their tools are unchanged", () => {
+        const v1 = { "profile:read": ["get_my_profile"], "schedules:read": ["list_schedules"] };
+        for (const [scope, tools] of Object.entries(v1)) assert.deepEqual(scopes.MCP_SCOPES.find((s) => s.scope === scope).tools, tools);
+        for (const s of ["profile:read", "schedules:read", "schedules:write", "grid:read", "grid:write", "apps:use", "offline_access"]) assert.ok(scopes.SUPPORTED_SCOPES.includes(s), s);
+    });
+});
+
+describe("tools/list", () => {
+    test("projects:read lists the five project tools, read-only, with the MCP version of list_project_files", async () => {
+        const tools = await listed(["projects:read"]);
+        assert.deepEqual(tools.map((t) => t.name).sort(), ["get_project", "list_project_files", "list_projects", "read_project_file", "search_project_code"]);
+        const files = tools.find((t) => t.name === "list_project_files");
+        assert.ok(files.inputSchema.required.includes("project_id"), "takes a project id, not the AI chat's open project");
+        for (const t of tools) assert.deepEqual([t.annotations.readOnlyHint, t.annotations.destructiveHint], [true, false], t.name);
+    });
+    test("each new scope lists only its own tools", async () => {
+        assert.deepEqual((await listed(["chats:read"])).map((t) => t.name).sort(), ["list_my_chats", "read_my_chat", "search_my_chats"]);
+        assert.deepEqual((await listed(["skills:read"])).map((t) => t.name).sort(), ["list_skills", "read_skill"]);
+        assert.deepEqual((await listed(["docs:read"])).map((t) => t.name).sort(), ["list_my_docs", "read_doc"]);
+        assert.deepEqual((await listed(["docs:write"])).map((t) => t.name).sort(), ["create_doc", "doc_comments", "edit_doc"]);
+        assert.deepEqual((await listed(["pages:write"])).map((t) => t.name).sort(), ["page_comments", "publish_page"]);
+    });
+    test("the AI chat's own tool list does not gain the MCP-only tools", async () => {
+        const { getMcpTools } = await import("../../src/mcp/tools.js");
+        const names = new Set(getMcpTools().map((t) => t.name));
+        for (const n of ["list_projects", "get_project", "read_project_file", "search_project_code", "list_my_chats", "list_my_docs"]) assert.equal(names.has(n), false, n);
+    });
+});
+
+describe("secrets", () => {
+    test("secret files are recognised by name", () => {
+        for (const f of [".env", "server/.env.production", "keys/id_rsa", "deploy.pem", "a/b/credentials.json", "gcp-service-account.json", "infra/terraform.tfstate"]) assert.equal(extra.isSecretFile(f), true, f);
+        for (const f of ["src/env.ts", "README.md", "src/keyboard.js", "package.json"]) assert.equal(extra.isSecretFile(f), false, f);
+    });
+    test("dependencies, build output, Classgrid's guide folder and secrets are skipped", () => {
+        for (const f of ["node_modules/x/index.js", "dist/app.js", ".classgrid/classgrid_guide/SKILL.md", "config/.env"]) assert.equal(extra.isSkippedPath(f), true, f);
+        assert.equal(extra.isSkippedPath("src/index.js"), false);
+    });
+    test("token-like strings are masked", () => {
+        const out = extra.maskSecrets("key=AKIAABCDEFGHIJKLMNOP gh=ghp_abcdefghijklmnopqrstuvwxyz0123456789 ok=hello");
+        assert.doesNotMatch(out, /AKIAABCDEFGHIJKLMNOP|ghp_abcdef/);
+        assert.match(out, /ok=hello/);
+        const code = extra.maskSecrets("const token = '1234567890:AAFabcdefghijklmnopqrstuvwxyz012345';\nconst apiKey = \"abcd1234efgh5678\";\nconst db = 'mongodb+srv://me:pa55word@cluster0.x.net/db';\nconst name = 'hello world';");
+        assert.doesNotMatch(code, /AAFabcdef|abcd1234efgh5678|pa55word/);
+        assert.match(code, /const token = '\[hidden secret\]'/);
+        assert.match(code, /const name = 'hello world'/);
+    });
+});
+
+describe("clear errors before any database or GitHub call", () => {
+    const call = (name, args) => extra.handleRemoteToolCall(name, args, ctxFor(["projects:read", "chats:read"]));
+    test("a bad project id", async () => {
+        const r = await call("get_project", { project_id: "nope" });
+        assert.equal(r.isError, true);
+        assert.match(r.content[0].text, /list_projects/);
+    });
+    test("a secret file or a path outside the project is refused", async () => {
+        const secret = await call("read_project_file", { project_id: "64b000000000000000000009", path: "server/.env" });
+        assert.equal(secret.isError, true);
+        assert.match(secret.content[0].text, /secret/);
+        const out = await call("read_project_file", { project_id: "64b000000000000000000009", path: "../../etc/passwd" });
+        assert.equal(out.isError, true);
+        assert.match(out.content[0].text, /inside the project/);
+    });
+    test("an empty search and a bad chat id", async () => {
+        assert.equal((await call("search_project_code", { project_id: "64b000000000000000000009", query: "  " })).isError, true);
+        const chat = await call("read_my_chat", { chat_id: "x'; drop" });
+        assert.equal(chat.isError, true);
+        assert.match(chat.content[0].text, /list_my_chats/);
+    });
+    test("no signed-in user", async () => {
+        const r = await extra.handleRemoteToolCall("list_projects", {}, { userId: "" });
+        assert.equal(r.isError, true);
+    });
+});

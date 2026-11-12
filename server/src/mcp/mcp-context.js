@@ -91,7 +91,7 @@ const HIDDEN_ARGS = Object.freeze({
 // would turn a single-document lookup into a query that matches other documents)
 const STRING_ONLY_ARGS = new Set([
     "schedule_id", "scheduleId", "threadId", "groupId", "messageId", "pollId", "status",
-    "ticketId", "talkId",
+    "ticketId", "talkId", "project_id", "chat_id", "doc_id", "page_id", "skill_id", "comment_id",
 ]);
 
 const MAX_LIMIT = 100;

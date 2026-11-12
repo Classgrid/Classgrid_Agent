@@ -95,6 +95,45 @@ export const MCP_SCOPES = Object.freeze([
         ],
     },
     {
+        // Code is read from the project's GitHub repo only (mcp-extra-tools.js)
+        scope: "projects:read",
+        label: "Read your projects and their code on GitHub",
+        sensitive: false,
+        tools: ["list_projects", "get_project", "list_project_files", "read_project_file", "search_project_code"],
+    },
+    {
+        // Off until the user ticks it (owner's order, 2026-11-12: the user chooses to share their chat history)
+        scope: "chats:read",
+        label: "Read your Classgrid AI chat history",
+        sensitive: true,
+        tools: ["list_my_chats", "read_my_chat", "search_my_chats"],
+    },
+    {
+        // Skills hold what the user asked Classgrid AI to remember, so they are off until ticked too
+        scope: "skills:read",
+        label: "Read your Classgrid AI skills and memory",
+        sensitive: true,
+        tools: ["list_skills", "read_skill"],
+    },
+    {
+        scope: "docs:read",
+        label: "Read your live docs",
+        sensitive: false,
+        tools: ["list_my_docs", "read_doc"],
+    },
+    {
+        scope: "docs:write",
+        label: "Create and edit your live docs",
+        sensitive: true,
+        tools: ["create_doc", "edit_doc", "doc_comments"],
+    },
+    {
+        scope: "pages:write",
+        label: "Publish pages and answer their comments",
+        sensitive: true,
+        tools: ["publish_page", "page_comments"],
+    },
+    {
         scope: OFFLINE_ACCESS_SCOPE,
         label: "Stay connected (refresh access)",
         sensitive: false,

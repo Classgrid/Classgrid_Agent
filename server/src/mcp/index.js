@@ -68,17 +68,17 @@ export const createMcpRouter = (expressRouter) => {
 // Builds the POST /mcp router with the real tools, OAuth token check, Redis and Supabase.
 // Throws if the allowlist is unsafe; the caller then leaves /mcp unmounted.
 export async function loadRemoteMcpRouter(overrides = {}) {
-  const [{ createRemoteMcpRouter }, tools, oauth, redisModule, supabase] = await Promise.all([
+  const [{ createRemoteMcpRouter }, extra, oauth, redisModule, supabase] = await Promise.all([
     import("./mcp-server.js"),
-    import("./tools.js"),
+    import("./mcp-extra-tools.js"), // tools.js plus the MCP-only tools
     import("../routes/oauth.provider.routes.js"),
     import("../config/redis.js"),
     import("../config/supabaseClient.js"),
   ]);
 
   return createRemoteMcpRouter({
-    getMcpTools: tools.getMcpTools,
-    handleToolCall: tools.handleToolCall,
+    getMcpTools: extra.getRemoteMcpTools,
+    handleToolCall: extra.handleRemoteToolCall,
     verifyToken: oauth.verifyOAuthAccessToken,
     extractBearerToken: oauth.extractBearerToken,
     getResourceUrl: oauth.getMcpResourceUrl,

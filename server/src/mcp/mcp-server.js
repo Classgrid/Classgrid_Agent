@@ -98,7 +98,7 @@ export function buildMcpServer(ctx, { user, tokenId, getMcpTools, handleToolCall
         { name: "classgrid", version: "2.0.0" },
         {
             capabilities: { tools: {} },
-            instructions: "Classgrid tools act as the signed-in user, on their own schedules, Grid chats and connected apps. Confirm with the user before sending messages or deleting anything.",
+            instructions: "Classgrid tools act as the signed-in user, on their own schedules, Grid chats, projects (code read from GitHub), Classgrid AI chats, live docs, pages and connected apps. Confirm with the user before sending messages, publishing, editing or deleting anything.",
         }
     );
 
