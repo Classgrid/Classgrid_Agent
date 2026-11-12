@@ -46,7 +46,11 @@ if (!process.argv.includes("--upload-only")) {
 {
   const unpackedExe = path.join(root, "dist", "win-unpacked", "Classgrid.exe");
   if (!fs.existsSync(unpackedExe)) { console.error(`Release stopped: ${unpackedExe} is missing, the packed app cannot be start-tested`); process.exit(1); }
-  const r = spawnSync(unpackedExe, ["--smoke-test"], { timeout: 60000, encoding: "utf8", windowsHide: true });
+  // (an editor's terminal sets ELECTRON_RUN_AS_NODE, which makes the app act as plain Node and refuse the switch:
+  // "bad option: --smoke-test", as on the first run of this check, 2026-11-12; the app is started as itself here)
+  const appEnv = { ...process.env };
+  delete appEnv.ELECTRON_RUN_AS_NODE;
+  const r = spawnSync(unpackedExe, ["--smoke-test"], { timeout: 60000, encoding: "utf8", windowsHide: true, env: appEnv });
   if (r.error || r.status !== 0) {
     console.error(`Release stopped: the packed app did not start cleanly (${r.error ? r.error.message : `exit code ${r.status}`}).\n${(r.stderr || "").slice(-2000)}`);
     process.exit(1);
