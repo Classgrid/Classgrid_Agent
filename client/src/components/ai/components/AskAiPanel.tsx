@@ -210,7 +210,6 @@ import { SpotifyDisplay } from "./answer-cards/spotify";
 import { McpConnectCards } from "./answer-cards/mcp-connect";
 
 import { SongsDisplay } from "./answer-cards/songs";
-import { CalendarEventsDisplay, hasCalendarEvents } from "./answer-cards/calendar";
 
 import { FILE_DRAG_TYPE, FileBadge, FileMentionChip, parseFileMention, parseProjectLink, FilesChangedSummary } from "./stepper/ProjectToolSteps";
 import { CombinedReasoningBlock } from "./stepper/CombinedReasoningBlock";
@@ -6112,10 +6111,6 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
                           {/* Spotify: the finished results (songs, playlists, artists, albums, now playing), only when this answer used Spotify */}
                           {!isUser && !message.typing && (message.steps || []).some((s: any) => s.type === 'tool' && s.tool === 'spotify_connector') && (
                             <div className="pl-1 mt-3 max-w-[640px]"><SpotifyDisplay steps={(message.steps || []) as any[]} /></div>
-                          )}
-                          {/* Calendar: the events this answer listed, one row each (clock, time, title, length), like the launch video */}
-                          {!isUser && !message.typing && hasCalendarEvents(message.steps as any[]) && (
-                            <div className="pl-1 mt-3 max-w-[640px]"><CalendarEventsDisplay steps={(message.steps || []) as any[]} /></div>
                           )}
                           {/* Songs: YouTube player for found songs, private player + download for saved ones */}
                           {!isUser && (message.steps || []).some((s: any) => s.type === 'tool' && (s.tool === 'play_song' || s.tool === 'download_song')) && (
