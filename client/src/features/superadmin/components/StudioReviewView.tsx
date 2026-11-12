@@ -7,7 +7,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Check, ChevronDown, ChevronRight, ChevronUp, ChevronsDownUp, ChevronsUpDown, Columns2, FileDiff, FoldVertical, ListTree, MoreVertical, RotateCw, Search, Space, Undo2, X } from "lucide-react";
 import { toast } from "sonner";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/marketing_ui/dropdown-menu";
-import { CHECKPOINTS_CHANGED_EVENT, FileBadge, REVIEW_CHECKPOINT_EVENT, checkpointsFor, markCheckpoint, readCheckpointState } from "@/components/ai/components/stepper/ProjectToolSteps";
+import { CHECKPOINTS_CHANGED_EVENT, FileBadge, REVIEW_CHECKPOINT_EVENT, checkpointsFor, markCheckpoint, readCheckpointState, takeRequestedReview } from "@/components/ai/components/stepper/ProjectToolSteps";
 import { fetchWithRescue } from "@/lib/rescue";
 import { shikiLangForFile, shikiLines } from "@/lib/shikiCode";
 import { useShikiTheme } from "@/lib/useShikiTheme";
@@ -170,12 +170,14 @@ export function StudioReviewView({ projectId, onChanged }: { projectId: string |
     setError("");
     let cps = chatId ? checkpointsFor(chatId) : [];
     // (the copies kept on this computer count too: a chat made by the same message has no list yet)
+    let here: string[] = [];
     if (chatId && localReview()?.listCheckpoints) {
-      const here = await localReview()!.listCheckpoints!(chatId).catch(() => [] as string[]);
+      here = await localReview()!.listCheckpoints!(chatId).catch(() => [] as string[]);
       cps = [...new Set([...cps, ...here])].sort();
     }
     setAnswers(cps);
-    const cp = want || cps.at(-1) || null;
+    // No answer asked for: the newest answer that changed files on this computer, else the newest of the chat
+    const cp = want || here.at(-1) || cps.at(-1) || null;
     setCheckpoint(cp);
     if (!chatId || !cp) { setFiles([]); return; }
     setFiles(null);
@@ -198,7 +200,7 @@ export function StudioReviewView({ projectId, onChanged }: { projectId: string |
     setOpen((o) => new Set([...o].filter((f) => list.some((x) => x.file === f))));
   };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  useEffect(() => { setPicked(null); load(null); }, [projectId, chatId]);
+  useEffect(() => { const want = takeRequestedReview(chatId); setPicked(want); load(want); }, [projectId, chatId]);
   // A new answer with changes (or one just kept / rejected) in this chat: show its changes
   useEffect(() => {
     const onChange = (e: Event) => { if ((e as CustomEvent<{ sessionId: string }>).detail?.sessionId === chatId) { setPicked(null); load(null); } };

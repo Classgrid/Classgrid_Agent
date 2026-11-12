@@ -703,8 +703,20 @@ export function ProjectRunChanges({ result }: { result?: string }) {
 
 // Project Mode shows the review window for an answer's checkpoint (Review = see and accept/reject, Undo = go back)
 export const REVIEW_CHECKPOINT_EVENT = "classgrid:review-checkpoint";
-const reviewCheckpoint = (detail: { sessionId: string; checkpoint: string; mode: 'review' | 'undo' }) =>
+// The answer "Review" was last pressed for: the Review tab reads it when it opens for that press (the tab is not on
+// screen yet at the first press, so the event alone reached nobody and the tab showed the newest answer instead,
+// owner, 2026-11-12)
+let requestedReview: { sessionId: string; checkpoint: string } | null = null;
+export function takeRequestedReview(sessionId: string | null): string | null {
+  const r = requestedReview;
+  if (!r || !sessionId || r.sessionId !== sessionId) return null; // (kept for the tab of that chat, which may mount a moment later)
+  requestedReview = null;
+  return r.checkpoint;
+}
+const reviewCheckpoint = (detail: { sessionId: string; checkpoint: string; mode: 'review' | 'undo' }) => {
+  if (detail.mode === "review") requestedReview = { sessionId: detail.sessionId, checkpoint: detail.checkpoint };
   window.dispatchEvent(new CustomEvent(REVIEW_CHECKPOINT_EVENT, { detail }));
+};
 // Every answer with changes in a chat, oldest first, whatever happened to them (kept, pushed, rejected): Studio's
 // Review tab shows them all
 const chatCheckpoints = new Map<string, string[]>();
