@@ -14,7 +14,7 @@ import { createPortal } from "react-dom";
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import { themeIcons } from "seti-icons";
 import { useShikiTheme } from "@/lib/useShikiTheme";
-import { Check, ChevronRight, Copy, Download, Folder, FolderOpen, FolderTree, Link2, ListTree, MessageSquare, MoreVertical, Plus, Quote, RotateCw, Search, X } from "lucide-react";
+import { Check, ChevronRight, Copy, Download, Folder, FolderOpen, FolderTree, Link2, ListTree, MessageSquare, MoreVertical, PanelLeft, PanelRight, Plus, Quote, RotateCw, Search, X } from "lucide-react";
 import { StudioSearchPalette } from "./StudioSearchPalette";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/marketing_ui/dropdown-menu";
 import { fetchWithRescue } from "@/lib/rescue";
@@ -25,6 +25,7 @@ import { Spinner } from "@/components/marketing_ui/spinner";
 const backendUrl = import.meta.env.VITE_API_URL || "https://api.classgrid.in";
 const EASE = [0.22, 1, 0.36, 1] as const;
 const TREE_KEY = "cg_studio_tree_width";
+const TREE_SIDE_KEY = "cg_studio_tree_side"; // "left" (like the launch video) or "right" (the default)
 
 type Entry = { path: string; type: "file" | "dir"; size: number | null };
 type Listing = { source: "github" | "sandbox" | "local"; repo: string | null; branch: string | null; files: Entry[]; truncated?: boolean };
@@ -152,6 +153,10 @@ export function StudioFilesView({ projectId, projectName, wide, reloadKey = 0, r
     return 280;
   });
   const [dragging, setDragging] = useState(false);
+  // Which side the folder tree and its filter sit on: right (as before) or left, like the launch video. The button in
+  // the top bar switches it; the choice is remembered (owner, 2026-11-12)
+  const [treeSide, setTreeSide] = useState<"left" | "right">(() => { try { return localStorage.getItem(TREE_SIDE_KEY) === "left" ? "left" : "right"; } catch { return "right"; } });
+  const switchSide = () => setTreeSide((side) => { const next = side === "left" ? "right" : "left"; try { localStorage.setItem(TREE_SIDE_KEY, next); } catch { /* storage blocked */ } return next; });
   const boxRef = useRef<HTMLDivElement>(null);
   // Live: files the agent is writing right now, and files it just changed (they flash for a few seconds)
   const [writing, setWriting] = useState<Set<string>>(new Set());
@@ -317,8 +322,8 @@ export function StudioFilesView({ projectId, projectName, wide, reloadKey = 0, r
     setDragging(true);
     let last = treeW;
     const move = (ev: PointerEvent) => {
-      // Dragged almost to the left edge: the tree covers the whole section (only the files show)
-      const want = rect.right - ev.clientX;
+      // Dragged almost to the far edge: the tree covers the whole section (only the files show)
+      const want = treeSide === "left" ? ev.clientX - rect.left : rect.right - ev.clientX;
       setFilesOnly(want > rect.width - 120);
       last = Math.round(Math.min(Math.max(want, 200), rect.width - 260));
       setTreeW(last);
@@ -401,6 +406,9 @@ export function StudioFilesView({ projectId, projectName, wide, reloadKey = 0, r
           )}
         </AnimatePresence>
         <div className="ml-auto flex items-center gap-0.5 shrink-0">
+          <button onClick={switchSide} className={iconBtn} title={treeSide === "left" ? "Move the files to the right" : "Move the files to the left"} aria-label={treeSide === "left" ? "Move the files to the right" : "Move the files to the left"}>
+            {treeSide === "left" ? <PanelRight className="size-3.5" /> : <PanelLeft className="size-3.5" />}
+          </button>
           <button onClick={() => setSearchOpen(true)} className={iconBtn} title="Search files, conversations and projects" aria-label="Search files, conversations and projects">
             <Plus className="size-3.5" />
           </button>
@@ -458,7 +466,7 @@ export function StudioFilesView({ projectId, projectName, wide, reloadKey = 0, r
         }}
         fileIcon={(name) => <FileBadge name={name} />}
       />
-      <div ref={boxRef} className="relative flex-1 min-h-0 flex">
+      <div ref={boxRef} className={`relative flex-1 min-h-0 flex ${treeSide === "left" ? "flex-row-reverse" : ""}`}>
         {/* Code */}
         {file && (!showTree || split) && !filesOnly && (
           <motion.div

@@ -1210,24 +1210,28 @@ function cpManifest(dir) {
   try { const m = JSON.parse(fs.readFileSync(path.join(dir, "files.json"), "utf8")); return m && m.files ? m : { files: {} }; } catch { return { files: {} }; }
 }
 function cpSaveManifest(dir, m) { fs.mkdirSync(dir, { recursive: true }); fs.writeFileSync(path.join(dir, "files.json"), JSON.stringify(m)); }
+// The manifest's key for a file: its path, without case on Windows (the disk ignores case there)
+const cpId = (full) => (process.platform === "win32" ? full.toLowerCase() : full);
+const cpPath = (key, entry) => (entry && entry.path) || key;
 // The file a step is about to change: its copy is kept once per answer, before the first change
 function keepBefore(chat, cp, full, root) {
   const dir = cpFolder(chat, cp);
   if (!dir || !full) return;
   try {
     const key = path.resolve(full);
+    const id = cpId(key); // (Windows: one entry for a file named in two spellings)
     const m = cpManifest(dir);
     if (!m.root && root) m.root = path.resolve(String(root));
-    if (m.files[key]) return;
+    if (m.files[id]) return;
     if (fs.existsSync(key)) {
       const st = fs.statSync(key);
       if (!st.isFile() || st.size > BEFORE_MAX_BYTES) return;
       const name = `${Object.keys(m.files).length}.before`;
       fs.mkdirSync(dir, { recursive: true });
       fs.copyFileSync(key, path.join(dir, name));
-      m.files[key] = { kind: "changed", before: name };
+      m.files[id] = { kind: "changed", before: name, path: key };
     } else {
-      m.files[key] = { kind: "added" };
+      m.files[id] = { kind: "added", path: key };
     }
     cpSaveManifest(dir, m);
   } catch (e) {
@@ -1324,14 +1328,20 @@ function reviewCheckpoint(chat, cp) {
   const m = cpManifest(dir);
   const files = [];
   for (const [key, entry] of Object.entries(m.files)) {
-    const file = cpFileName(m, key);
-    const existsNow = fs.existsSync(key) && fs.statSync(key).isFile();
-    const beforeText = entry.kind === "added" ? null : readText(path.join(dir, entry.before));
-    const afterText = existsNow ? readText(key) : null;
-    if (beforeText === afterText) continue; // (put back, or never really changed)
-    const kind = beforeText === null ? "added" : afterText === null ? "deleted" : "changed";
-    const { diff, added, removed } = unifiedDiff(file, beforeText, afterText);
-    files.push({ file, added, removed, kind, diff });
+    // (one file that cannot be read, say one open in another program or far too big, leaves the others shown)
+    try {
+      const full = cpPath(key, entry);
+      const file = cpFileName(m, full);
+      const existsNow = fs.existsSync(full) && fs.statSync(full).isFile();
+      const beforeText = entry.kind === "added" ? null : readText(path.join(dir, entry.before));
+      const afterText = existsNow ? readText(full) : null;
+      if (beforeText === afterText) continue; // (put back, or never really changed)
+      const kind = beforeText === null ? "added" : afterText === null ? "deleted" : "changed";
+      const { diff, added, removed } = unifiedDiff(file, beforeText, afterText);
+      files.push({ file, added, removed, kind, diff });
+    } catch (e) {
+      console.warn("[runner] review skipped a file:", e.message);
+    }
   }
   return { files, finished: true };
 }
@@ -1342,19 +1352,24 @@ function rejectCheckpoint(chat, cp, onlyFile) {
   const m = cpManifest(dir);
   let count = 0;
   for (const [key, entry] of Object.entries(m.files)) {
-    if (onlyFile && cpFileName(m, key) !== onlyFile) continue;
-    if (entry.kind === "added") {
-      if (fs.existsSync(key)) { fs.rmSync(key, { force: true }); count++; }
-    } else {
-      const before = path.join(dir, entry.before);
-      if (!fs.existsSync(before)) continue;
-      const same = fs.existsSync(key) && readText(key) === readText(before);
-      if (same) continue;
-      fs.mkdirSync(path.dirname(key), { recursive: true });
-      fs.copyFileSync(before, key);
-      count++;
+    const full = cpPath(key, entry);
+    if (onlyFile && cpFileName(m, full) !== onlyFile) continue;
+    try {
+      if (entry.kind === "added") {
+        if (fs.existsSync(full)) { fs.rmSync(full, { force: true }); count++; }
+      } else {
+        const before = path.join(dir, entry.before);
+        if (!fs.existsSync(before)) continue;
+        const same = fs.existsSync(full) && readText(full) === readText(before);
+        if (same) continue;
+        fs.mkdirSync(path.dirname(full), { recursive: true });
+        fs.copyFileSync(before, full);
+        count++;
+      }
+    } catch (e) {
+      console.warn("[runner] could not put a file back:", e.message);
     }
-    seenAt.delete(key.toLowerCase()); // (the AI must read it again before editing it)
+    seenAt.delete(full.toLowerCase()); // (the AI must read it again before editing it)
   }
   return count;
 }
@@ -1370,9 +1385,12 @@ async function runTool(req) {
     if (chat) args.__chat = String(chat); // which chat started it (a finished background job wakes that chat)
     // A file about to be changed in an answer with a checkpoint: its copy is kept first (Review / Reject / Undo)
     if (checkpoint && chat && CHECKPOINT_TOOLS.has(tool) && args.path) {
+      // (the project folder may not be in this computer's list yet, see below: a folder that exists is used as is)
+      let inRoot = false;
+      try { inRoot = !!root && fs.statSync(root).isDirectory(); } catch { inRoot = false; }
       let full = null;
-      try { full = root && isAllowedRoot(root) ? resolveIn(root, args.path).full : localPath(args.path); } catch { full = null; }
-      if (full) keepBefore(chat, checkpoint, full, root && isAllowedRoot(root) ? root : null);
+      try { full = inRoot ? resolveIn(root, args.path).full : localPath(args.path); } catch { full = null; }
+      if (full) keepBefore(chat, checkpoint, full, inRoot ? root : null);
     }
     if (tool === "ping") return { text: "ok" };
     // The AI's browser steps go to the app's own browser (browser.js)

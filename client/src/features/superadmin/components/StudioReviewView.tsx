@@ -4,7 +4,6 @@
 // or expand all files, hide whitespace-only changes, fold unchanged lines, and Accept / Reject (all, or one file) on
 // the same checkpoints as Project Mode.
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useLocation } from "react-router-dom";
 import { Check, ChevronDown, ChevronRight, ChevronUp, ChevronsDownUp, ChevronsUpDown, Columns2, FileDiff, FoldVertical, ListTree, MoreVertical, RotateCw, Search, Space, Undo2, X } from "lucide-react";
 import { toast } from "sonner";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/marketing_ui/dropdown-menu";
@@ -13,6 +12,7 @@ import { fetchWithRescue } from "@/lib/rescue";
 import { shikiLangForFile, shikiLines } from "@/lib/shikiCode";
 import { useShikiTheme } from "@/lib/useShikiTheme";
 import { DangerConfirmDialog } from "@/components/marketing_ui/danger-confirm-dialog";
+import { useChatId } from "./StudioShotsView";
 
 const backendUrl = import.meta.env.VITE_API_URL || "https://api.classgrid.in";
 const LIST_KEY = "cg_studio_review_list";
@@ -139,8 +139,10 @@ function readView(): View {
 }
 
 export function StudioReviewView({ projectId, onChanged }: { projectId: string | null; onChanged?: () => void }) {
-  const { pathname } = useLocation();
-  const chatId = (() => { const parts = pathname.split("/"); const at = parts.indexOf("studio"); return at !== -1 && parts[at + 1] ? parts[at + 1] : null; })();
+  // The chat open in Studio, including a chat made by the message just sent (its id reaches the address without the
+  // router noticing; useChatId follows the "agent:active-session-changed" event too). Reading the router's location
+  // alone left this tab on "Nothing to review" for every new chat (owner, 2026-11-12).
+  const chatId = useChatId();
   const [checkpoint, setCheckpoint] = useState<string | null>(null);
   const [answers, setAnswers] = useState<string[]>([]); // this chat's answers with changes, oldest first
   const [picked, setPicked] = useState<string | null>(null); // null = the newest answer
@@ -636,6 +638,16 @@ export function StudioReviewView({ projectId, onChanged }: { projectId: string |
         actionLabel={confirmReject?.file ? "Reject file" : "Reject all"}
         isLoading={busy}
         onConfirm={() => doReject(confirmReject?.file)}
+      />
+      <DangerConfirmDialog
+        open={confirmUndo}
+        onOpenChange={(o) => { if (!o && !busy) setConfirmUndo(false); }}
+        title="Undo this answer"
+        description="The project goes back to how it was before this answer. Changes made after it are undone too."
+        warningMessage="This can't be undone."
+        actionLabel="Undo"
+        isLoading={busy}
+        onConfirm={doUndo}
       />
     </div>
   );

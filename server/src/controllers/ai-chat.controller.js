@@ -2390,7 +2390,10 @@ The user is in ${appMode === "agent" ? "Agent mode" : appMode === "project" ? "P
         // that id. The chat's Review tab then lists this answer like a cloud project's (owner, 2026-11-12).
         // (a Mastero project worked on in its computer copy still got a cloud snapshot above, of a copy the steps never
         // touch: the app's own checkpoint wins whenever the chat works on the computer, 2026-11-12)
-        if (body.clientApp === "desktop" && whereProject?.location === "local" && /^\d{10,16}$/.test(String(body.localCheckpoint || ""))) checkpointId = String(body.localCheckpoint);
+        // (also when this computer holds a copy of the project: an existing chat's first message from here is looked
+        // up before the chat is linked to this computer, so the project still reads as the cloud one)
+        const onThisComputer = whereProject?.location === "local" || (!!body.deviceId && (whereProject?.localCopies || []).some((c) => c?.deviceId && String(c.deviceId) === String(body.deviceId)));
+        if (body.clientApp === "desktop" && onThisComputer && /^\d{10,16}$/.test(String(body.localCheckpoint || ""))) checkpointId = String(body.localCheckpoint);
         if (pcExecutor && checkpointId) pcExecutor.checkpoint = checkpointId;
         if (checkpointId && !res.writableEnded) res.write(`data: ${JSON.stringify({ type: "checkpoint", id: checkpointId })}\n\n`);
         dynamicSystemPrompt += promptBlock("connector:zoom|connector:google|connector:microsoft|schedules", `\nCRITICAL TIMEZONE RULE FOR MEETINGS: When scheduling a Zoom meeting or Google Calendar event, the APIs EXPECT the 'startTime' parameter to be in UTC format (with a 'Z' at the end). To ensure accuracy, YOU MUST ALWAYS USE the \`get_timezone_time\` tool to check the current time and UTC offset for the user's location BEFORE scheduling any future meetings. Use the offset returned by the tool (e.g. GMT+05:30) to calculate the correct UTC time for the meeting.`);

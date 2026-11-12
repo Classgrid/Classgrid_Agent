@@ -154,7 +154,8 @@ async function askRunner(userId, tool, payload) {
         const reply = await askViaApp(exec, userId, tool, quiet);
         if (reply) return withWakeNote(reply);
     }
-    return withWakeNote(await askRunnerOnce(userId, tool, quiet));
+    // (the answer's checkpoint goes along on the socket too, so the app keeps its before-copies for the Review tab)
+    return withWakeNote(await askRunnerOnce(userId, tool, exec?.checkpoint ? { ...quiet, checkpoint: exec.checkpoint } : quiet));
 }
 // Windows PowerShell draws a progress bar for every piece of a download (Invoke-WebRequest, Expand-Archive...), even in a
 // hidden window, which makes them many times slower: it is switched off for the AI's PowerShell commands

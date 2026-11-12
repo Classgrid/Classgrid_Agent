@@ -232,8 +232,9 @@ export function StudioModePage() {
     };
     window.addEventListener(REVIEW_CHECKPOINT_EVENT, onReview);
     return () => window.removeEventListener(REVIEW_CHECKPOINT_EVENT, onReview);
+    // (with the current openTab, so the Review tab is found and not opened twice)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [openTab]);
 
   // A file clicked in the agent's steps opens in the Files tab, at those lines
   const [reveal, setReveal] = useState<{ path: string; startLine?: number; endLine?: number; n: number } | null>(null);
