@@ -14,6 +14,12 @@ const uploads = require("./uploads");
 const memory = require("./memory");
 const editors = require("./editors"); // the Classgrid extension in VS Code, Cursor, Windsurf, VSCodium
 
+// The release's start test (scripts/release.mjs): started with --smoke-test, the packed app ends here with code 0
+// once every part above has loaded. A part left out of the installer (electron-builder.yml lists the files one by
+// one) throws before this line, so the release stops before anything is uploaded. 1.0.14 shipped without editors.js
+// and died at start on every computer (2026-11-12).
+if (process.argv.includes("--smoke-test")) app.exit(0);
+
 const PORT = Number(process.env.CG_PORT) || 47821; // CG_PORT: a second copy while testing
 const APP_URL = `http://localhost:${PORT}`;
 const APP_DIR = path.join(__dirname, "app");

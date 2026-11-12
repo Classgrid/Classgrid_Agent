@@ -10,6 +10,7 @@ files:
   - preload.js
   - runner.js
   - codeeditor.js
+  - editors.js
   - browser.js
   - chats.js
   - memory.js

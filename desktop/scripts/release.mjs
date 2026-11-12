@@ -25,6 +25,35 @@ if (!process.argv.includes("--upload-only")) {
   run(["run", "dist"]);
 }
 
+// Release checks, always, before anything is uploaded (owner's rule, 2026-11-12: 1.0.14 was packed without editors.js,
+// a file main.js requires, and died at start on every computer; the packing list names the files one by one).
+// 1. Every file the app's own scripts require is in electron-builder.yml's files list.
+{
+  const yml = fs.readFileSync(path.join(root, "electron-builder.yml"), "utf8");
+  const listed = new Set([...yml.matchAll(/^  - ([A-Za-z0-9_-]+\.js)$/gm)].map((m) => m[1]));
+  const required = new Set();
+  for (const f of fs.readdirSync(root).filter((f) => f.endsWith(".js"))) {
+    for (const m of fs.readFileSync(path.join(root, f), "utf8").matchAll(/require\("\.\/([A-Za-z0-9_-]+)(?:\.js)?"\)/g)) required.add(`${m[1]}.js`);
+  }
+  const missing = [...required].filter((f) => !listed.has(f) && f !== "ptyhost.js"); // (ptyhost.js is shipped outside the asar, extraResources)
+  if (missing.length) {
+    console.error(`Release stopped: ${missing.join(", ")} ${missing.length === 1 ? "is" : "are"} required by the app but not in electron-builder.yml's files list. Add ${missing.length === 1 ? "it" : "them"} to the list and run the release again.`);
+    process.exit(1);
+  }
+  console.log("Check 1 passed: every required file is in the packing list");
+}
+// 2. The packed app starts: dist/win-unpacked/Classgrid.exe --smoke-test ends with code 0 (main.js) within 60 s.
+{
+  const unpackedExe = path.join(root, "dist", "win-unpacked", "Classgrid.exe");
+  if (!fs.existsSync(unpackedExe)) { console.error(`Release stopped: ${unpackedExe} is missing, the packed app cannot be start-tested`); process.exit(1); }
+  const r = spawnSync(unpackedExe, ["--smoke-test"], { timeout: 60000, encoding: "utf8", windowsHide: true });
+  if (r.error || r.status !== 0) {
+    console.error(`Release stopped: the packed app did not start cleanly (${r.error ? r.error.message : `exit code ${r.status}`}).\n${(r.stderr || "").slice(-2000)}`);
+    process.exit(1);
+  }
+  console.log("Check 2 passed: the packed app starts");
+}
+
 const { version } = JSON.parse(fs.readFileSync(path.join(root, "package.json"), "utf8"));
 const dist = path.join(root, "dist");
 const exe = `Classgrid Setup ${version}.exe`;
