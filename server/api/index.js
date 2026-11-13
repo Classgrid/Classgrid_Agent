@@ -495,6 +495,10 @@ app.get("/.well-known/openai-apps-challenge", (req, res) => {
   res.type("text/plain").send(token);
 });
 
+// Any other /.well-known/ address is a clean 404. MCP clients (Claude) look for /.well-known/openid-configuration
+// after a sign-in check; the website's catch-all answered it with a 500, which reads as a broken sign-in server.
+app.all(/^\/\.well-known\//, (req, res) => res.status(404).json({ error: "not_found" }));
+
 // 🌐 MODULE 22: Public Tenant Info (Subdomain Resolution)
 app.get("/api/tenant/info", getPublicTenantInfo);
 
