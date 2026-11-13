@@ -3058,9 +3058,11 @@ export const handleToolCall = async (name, args, context = {}) => {
 
         // 2. READ 1:1 MESSAGES
         if (name === 'read_chat_messages') {
+          // Deleted messages only say "This message was deleted": left out, so the limit is filled with real ones
           const { data: messages, error } = await sb.from('chat_messages')
             .select('*')
             .eq('thread_id', args.threadId)
+            .not('is_deleted', 'is', true)
             .order('created_at', { ascending: false })
             .limit(args.limit || 50);
           if (error) throw error;
@@ -3349,9 +3351,11 @@ export const handleToolCall = async (name, args, context = {}) => {
         if (name === 'read_group_chat_messages') {
           const thread = await getThread(args.groupId);
           if (!thread) return { content: [{ type: 'text', text: 'Error: Group thread not found.' }], isError: true };
+          // Deleted messages only say "This message was deleted": left out, so the limit is filled with real ones
           const { data: messages, error } = await sb.from('chat_messages')
             .select('*')
             .eq('thread_id', thread.id)
+            .not('is_deleted', 'is', true)
             .order('created_at', { ascending: false })
             .limit(args.limit || 50);
           if (error) throw error;

@@ -101,6 +101,7 @@ import ClassroomMembership from "../models/ClassroomMembership.js";
 import AiSchedule from "../models/AiSchedule.js";
 import AiUsageLog from "../models/AiUsageLog.js";
 import { LIVE_DOC_TOOLS, LIVE_DOC_PROMPT, buildLiveDocHandlers } from "../services/live-doc-tools.js";
+import { APP_HISTORY_TOOLS, buildAppHistoryHandlers } from "../mcp/mcp-extra-tools.js";
 import { ROLE_DEFINITIONS } from "../utils/roles.js";
 import { SHARE_PAGE_TOOLS, SHARE_PAGE_PROMPT, runPublishPage, runPageComments } from "../services/share-page.service.js";
 import { isPublicChatAccount } from "../utils/chat-onboarding.js";
@@ -213,6 +214,7 @@ SECRECY & GUARDRAILS
 CONTEXT & KNOWLEDGE
 - Use the last 5 messages for context. For "history" or "summary", use the previous messages; never invent Classgrid's history.
 - Older messages of this chat: you see only the latest messages plus a summary of earlier ones. To read earlier messages word for word, use recall_chat (by message number, 1 = first) or search_recall_chat (by words), then answer from what they return. Never say an older message is gone, unavailable or only in a summary before calling them.
+- The user's OTHER Classgrid AI chats: list_my_chats (newest first), search_my_chats (titles and message text) and read_my_chat (by chat id). Use them when the user asks about something from another chat. Their live docs: list_my_docs.
 - Phone, WhatsApp, date of birth, bio, hobbies, social links or tech stack: get_my_profile.
 - WhatsApp numbers: the WhatsApp number in the user's profile is the USER'S OWN number, where messages are delivered. Every WhatsApp message you send (replies, reminders, scheduled messages) comes FROM Classgrid's official Meta-verified business number +91 81492 77038. Never say the user's number might be the sender or "belong to Classgrid", and never ask them to change it for that reason. If they ask where messages come from, say they come from Classgrid's official WhatsApp number +91 81492 77038 and they can save it.
 - Take your time and do your best work; never hurry. For research, or anything that needs real facts (for example jobs, prices, deadlines, people, news), search the web, open and read the actual pages, check each fact at its source (is it real, still open, current), and use all your tools before you answer. Spend the time it takes to get it right.
@@ -1434,7 +1436,7 @@ const COMPUTER_TOOL = {
 const RUN_WORKFLOW_TOOL = { type: "function", function: { name: "run_workflow", description: "Run a fixed pipeline of helpers in the background: steps run one after another, the helpers inside a step work at the same time, and every step's helpers get the results of the earlier steps. Use it for big jobs with a clear order (for example: research in parallel, then write, then review). You are woken in this chat with all the results when it finishes; tell the user what is running and end your answer.", parameters: { type: "object", properties: { name: { type: "string", description: "A short name for the workflow" }, steps: { type: "array", description: "The steps, in order (1-6 steps)", items: { type: "object", properties: { name: { type: "string" }, helpers: { type: "array", description: "1-5 helpers that work at the same time in this step", items: { type: "object", properties: { task: { type: "string" }, model: { type: "string" }, can_edit: { type: "boolean" }, type: { type: "string", description: "A helper type made with define_helper" } }, required: ["task"] } } }, required: ["helpers"] } } }, required: ["steps"] } } };
 
 // Send a message to another of the user's chats: that chat wakes up and works on it (like messaging another session)
-const SEND_TO_CHAT_TOOL = { type: "function", function: { name: "send_to_chat", description: "Send a message or a task to another of the user's own chats (find its id with search_recall_chat or recall_chat). That chat wakes up, works on it in its own context (its project, files and history) and answers there. Use it when the user asks you to pass something to another chat or have another chat do a job.", parameters: { type: "object", properties: { chat_id: { type: "string", description: "The other chat's id" }, message: { type: "string", description: "What to tell or ask that chat" } }, required: ["chat_id", "message"] } } };
+const SEND_TO_CHAT_TOOL = { type: "function", function: { name: "send_to_chat", description: "Send a message or a task to another of the user's own chats (find its id with search_my_chats or list_my_chats). That chat wakes up, works on it in its own context (its project, files and history) and answers there. Use it when the user asks you to pass something to another chat or have another chat do a job.", parameters: { type: "object", properties: { chat_id: { type: "string", description: "The other chat's id" }, message: { type: "string", description: "What to tell or ask that chat" } }, required: ["chat_id", "message"] } } };
 
 // Stop the chat's working helpers (the Stop button stops only the answer; helpers keep working and report later)
 const STOP_HELPERS_TOOL = { type: "function", function: { name: "stop_helpers", description: "Stop all helpers that are still working in this chat. Use it only when the user asks to stop them (the Stop button stops only your answer; helpers keep working and you are woken with their reports).", parameters: { type: "object", properties: {} } } };
@@ -3466,6 +3468,7 @@ Every user is using you as a personal AI assistant and agent (like ChatGPT) to m
                     }
                 },
                 ...LIVE_DOC_TOOLS,
+                ...APP_HISTORY_TOOLS,
                 {
                     type: "function",
                     function: {
@@ -4328,6 +4331,7 @@ You work on the user's own Windows computer through their Classgrid desktop app,
                     // The model reports progress on its own plan steps (any ids). completedSteps is kept for older
                     // clients; stepStatus carries running/done/failed.
                     ...buildLiveDocHandlers({ user: req.user }),
+                    ...buildAppHistoryHandlers({ user: req.user }),
                     ...buildEndConversationHandlers({ sessionId, isIncognito, messages, question: body.question, res }),
                     update_plan_step: async (args) => {
                         const stepId = typeof args?.step_id === "string" ? args.step_id.trim().slice(0, 100) : "";

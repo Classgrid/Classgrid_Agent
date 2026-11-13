@@ -128,8 +128,14 @@ export const TOOL_GROUPS = [
     {
         id: "live_docs",
         description: "Live docs: write a document the user keeps editing, shares and comments on (plans, reports, essays, notes, drafts); read it, edit it and answer its comments.",
-        tools: ["create_doc", "read_doc", "edit_doc", "doc_comments"],
+        tools: ["create_doc", "read_doc", "edit_doc", "doc_comments", "list_my_docs"],
         pattern: /\b(docs?|documents?|draft\w*|notes?|essays?|reports?|plans?|comments?|live\s*docs?)\b|chat\.classgrid\.in\/docs\//i,
+    },
+    {
+        id: "chat_history",
+        description: "The user's other Classgrid AI chats: list them, search their titles and messages, and read one.",
+        tools: ["list_my_chats", "search_my_chats", "read_my_chat"],
+        pattern: /\b(chats?|conversations?|history|earlier|previous(ly)?|last\s+time|before|discuss\w*|talked|told\s+you|said|pichl\w*|pehle)\b|पिछल|पहले/i,
     },
     {
         id: "image_media",

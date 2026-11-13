@@ -502,6 +502,28 @@ async function listMyDocs(ctx, args) {
     return JSON.stringify({ ...meta, docs: page.map((d) => ({ doc_id: String(d._id), title: d.title, link: docLink(d._id), last_changed: d.updatedAt || null })) }, null, 2);
 }
 
+// ---------------------------------------------------------------------------------------------------------
+// The same chat-history and doc-list tools for Classgrid AI's own chat (OpenAI function format), so it can find the
+// user's other chats and their docs too. user = the chat's signed-in user.
+
+const APP_TOOL_NAMES = ["list_my_chats", "search_my_chats", "read_my_chat", "list_my_docs"];
+export const APP_HISTORY_TOOLS = MCP_EXTRA_TOOLS.filter((t) => APP_TOOL_NAMES.includes(t.name))
+    .map((t) => ({ type: "function", function: { name: t.name, description: t.description, parameters: t.inputSchema } }));
+
+export function buildAppHistoryHandlers({ user }) {
+    const ctx = { userId: user?._id ? String(user._id) : "", userEmail: String(user?.email || "") };
+    const run = (fn) => async (args) => {
+        if (!ctx.userId || !ctx.userEmail) return "Error: sign in first.";
+        try {
+            const out = await fn(ctx, args && typeof args === "object" ? args : {});
+            return out && typeof out === "object" && out.error ? `Error: ${out.error}` : String(out ?? "");
+        } catch (e) {
+            return `Error: ${e.message}`;
+        }
+    };
+    return { list_my_chats: run(listMyChats), search_my_chats: run(searchMyChats), read_my_chat: run(readMyChat), list_my_docs: run(listMyDocs) };
+}
+
 const DOC_PAGE_TOOLS = new Set([...LIVE_DOC_TOOLS, ...SHARE_PAGE_TOOLS].map((t) => t.function.name));
 
 async function runDocOrPageTool(name, ctx, args) {

@@ -114,3 +114,21 @@ describe("clear errors before any database or GitHub call", () => {
         assert.equal(r.isError, true);
     });
 });
+
+describe("Classgrid AI's own chat gets the chat-history and doc-list tools", () => {
+    test("four tools in the chat's function format, with working handlers", async () => {
+        assert.deepEqual(extra.APP_HISTORY_TOOLS.map((t) => t.function.name).sort(), ["list_my_chats", "list_my_docs", "read_my_chat", "search_my_chats"]);
+        for (const t of extra.APP_HISTORY_TOOLS) assert.equal(t.type, "function");
+        const h = extra.buildAppHistoryHandlers({ user: USER });
+        assert.match(await h.read_my_chat({ chat_id: "bad id!" }), /^Error: chat_id is not valid/);
+        assert.match(await h.search_my_chats({ query: "" }), /^Error:/);
+        assert.match(await extra.buildAppHistoryHandlers({ user: null }).list_my_chats({}), /^Error: sign in first/);
+    });
+    test("every tool in the chat_history and live_docs groups exists", async () => {
+        const { TOOL_GROUPS } = await import("../../src/services/ai-tool-groups.js");
+        const history = TOOL_GROUPS.find((g) => g.id === "chat_history");
+        assert.deepEqual(history.tools.sort(), ["list_my_chats", "read_my_chat", "search_my_chats"]);
+        assert.ok(TOOL_GROUPS.find((g) => g.id === "live_docs").tools.includes("list_my_docs"));
+        assert.ok(history.pattern.test("what did we discuss in my other chat"));
+    });
+});
