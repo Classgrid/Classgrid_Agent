@@ -325,7 +325,8 @@ export function AppSidebar({ role, user }: AppSidebarProps) {
   const gridsItem = gridsDashboard ? (config?.sections ?? []).flatMap((s) => s.items).find(isGridsItem) : undefined;
   // Desktop app, Studio (not the super admin's long menu): no back button; the other pages (Grids, Requests, Audit Logs)
   // are listed under Library instead
-  const studioPages = listEverywhere
+  // (website: Grids, Requests and Audit Logs only in Agent mode's list, not in Studio's, owner 2026-11-13)
+  const studioPages = studioEverywhere || (listEverywhere && !location.pathname.split("/").includes("studio"))
     ? sectionsWithBadges.flatMap((s) => s.items).filter((item) => !isAgentItem(item.label) && item.label !== "Log out" && item.to)
     : null;
   // (the popup is in the sidebar, so it works on every page; the Grids page's own address is where it opens a chat)
