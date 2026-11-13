@@ -459,6 +459,8 @@ export function SupportTicketsPage() {
         const p = JSON.parse(draftContent);
         if (p.text || p.content) parsed = p.content || p.text;
       } catch(e) {}
+      // The AI's draft signs as "[ADMIN_NAME]": the signed-in admin's own name goes there (2026-11-13)
+      if (parsed.includes("[ADMIN_NAME]")) parsed = parsed.replace(/\[ADMIN_NAME\]/g, currentUser?.name || "Classgrid Support Team");
       
       setReplyBody(parsed);
       replyEditorRef.current?.setHTML(parsed);
@@ -470,7 +472,7 @@ export function SupportTicketsPage() {
       setIsAiDraft(false);
       draftLoadedForTicketId.current = selectedTicket._id;
     }
-  }, [selectedTicket?._id, draftData?.draft?.draftContent, isDraftLoading]);
+  }, [selectedTicket?._id, draftData?.draft?.draftContent, isDraftLoading, currentUser?.name]);
 
   // Debounced auto-save
   useEffect(() => {
