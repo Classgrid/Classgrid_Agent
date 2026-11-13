@@ -7,8 +7,12 @@
 
 const KEY = "classgrid:editorSignIn";
 const MAX_AGE_MS = 15 * 60 * 1000;
-// Only real editors, only our extension's link
-const SCHEMES = new Set(["classgrid-code", "vscode", "vscode-insiders", "cursor", "windsurf", "vscodium"]);
+// Only an editor's own link scheme (never a web, file or script scheme), and only our extension's link in it. Any
+// editor built on VS Code has its own scheme (classgrid-code, vscode, cursor, windsurf, antigravity, trae, kiro...),
+// and the link always points at our extension (classgrid.classgrid/login): a fixed list left Antigravity out, so a
+// sign-in started there ended on the chat page instead of going back to the editor (owner, 2026-11-13).
+const WEB_SCHEMES = new Set(["http", "https", "file", "javascript", "data", "blob", "about", "ftp", "mailto", "tel", "sms", "ws", "wss", "chrome", "edge", "ms-settings", "ms-windows-store"]);
+const isEditorScheme = (scheme: string) => /^[a-z][a-z0-9+.-]{1,40}$/.test(scheme) && !WEB_SCHEMES.has(scheme);
 
 export type EditorSignIn = { state: string; challenge: string; callback: string; at: number };
 
@@ -19,7 +23,7 @@ export function isAllowedEditorCallback(raw: string): boolean {
     const u = new URL(raw);
     const scheme = u.protocol.replace(/:$/, "").toLowerCase();
     // Parsed as an opaque URL in some browsers: check the text as well
-    return SCHEMES.has(scheme) && /^[a-z-]+:\/\/classgrid\.classgrid\/login$/i.test(`${scheme}://${u.host}${u.pathname}`) && !u.search && !u.hash;
+    return isEditorScheme(scheme) && /^[a-z0-9+.-]+:\/\/classgrid\.classgrid\/login$/i.test(`${scheme}://${u.host}${u.pathname}`) && !u.search && !u.hash;
   } catch {
     return false;
   }
