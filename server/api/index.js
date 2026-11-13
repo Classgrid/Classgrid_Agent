@@ -343,6 +343,14 @@ app.get("/", (req, res, next) => {
   next();
 });
 
+// Classgrid's icon on the API host itself: Claude's directory and apps show the favicon of the MCP server's URL
+// (api.classgrid.in/mcp), and the website build is not on this server
+const serverPublic = path.join(__dirname, "../public");
+app.get(["/favicon.ico", "/apple-touch-icon.png"], (req, res) => {
+  res.set("Cache-Control", "public, max-age=86400");
+  res.sendFile(path.join(serverPublic, req.path.slice(1)));
+});
+
 /* ---------- STATIC FILES ---------- */
 const isProduction = process.env.NODE_ENV === "production";
 const clientDistPath = path.join(__dirname, "../../client/dist");
