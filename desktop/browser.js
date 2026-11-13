@@ -129,6 +129,8 @@ async function useChat(id) {
   // A new chat's screen (no id yet) while the AI works in that chat: the page stays (it's the AI's page)
   if (id === null && agentChat && agentChat === currentChat) return;
   const wc = ensureView().webContents;
+  // A page the AI is opening at this very moment is never replaced by Google (the screens' call came late)
+  if (id === null && pendingUrl) return;
   const url = wc.getURL();
   if (currentChat === null && id) { // the new chat just got its id: it keeps its page
     currentChat = id;
@@ -195,7 +197,7 @@ function ensureView() {
     setImmediate(() => {
       if (view !== thisView || !win || win.isDestroyed()) return;
       ensureView();
-      if (shownRect) view.webContents.loadURL(back).catch(() => {});
+      view.webContents.loadURL(back).catch(() => {}).finally(() => tell(navInfo()));
     });
   });
   wc.setAudioMuted(false);
@@ -224,7 +226,10 @@ function ensureView() {
     if (!/warn|error|^[23]$/.test(level) || /^Electron Security Warning/.test(String(e?.message ?? old[1] ?? ""))) return;
     logPush(pageLog.console, { level: /error|^3$/.test(level) ? "error" : "warning", message: String(e?.message ?? old[1] ?? "").slice(0, 1000), source: `${e?.sourceId ?? old[3] ?? ""}${(e?.lineNumber ?? old[2]) ? `:${e?.lineNumber ?? old[2]}` : ""}`, at: Date.now() });
   });
-  wc.on("render-process-gone", (_e, d) => logPush(pageLog.console, { level: "error", message: `The page crashed (${d?.reason || "unknown"})`, source: "", at: Date.now() }));
+  wc.on("render-process-gone", (_e, d) => {
+    logPush(pageLog.console, { level: "error", message: `The page crashed (${d?.reason || "unknown"})`, source: "", at: Date.now() });
+    if (d?.reason !== "clean-exit" && d?.reason !== "killed") setTimeout(() => { if (view === thisView && live()) wc.reload(); }, 500);
+  });
   const fromThisPage = (d) => d.webContentsId === wc.id;
   wc.session.webRequest.onCompleted({ urls: ["*://*/*"] }, (d) => {
     if (fromThisPage(d) && d.statusCode >= 400) logPush(pageLog.network, { status: d.statusCode, method: d.method, url: d.url.slice(0, 500), type: d.resourceType, at: Date.now() });
@@ -465,7 +470,10 @@ const jsInPage = (code) => `(async () => { try { const v = await (async () => {\
 async function act(a, byAgent) {
   ensureView();
   const wc = view.webContents;
-  if (byAgent && a.chat) await useChat(a.chat);
+  // (the AI's step says which chat it works in: that chat takes the page; the screens' useChat clears agentChat
+  // only once they show that chat. A step that cleared it itself, as until 2026-11-13, let a new chat's screen,
+  // which has no id yet, load Google right over the page the AI had just opened.)
+  if (byAgent && a.chat) adoptChat(a.chat);
   applyZoom();
   const g = geometry();
   let note = null; // what a step found out, told to the AI with the screenshot
@@ -676,6 +684,19 @@ ipcMain.on("cg:browserChat", (e, id) => {
   queue = queue.then(() => useChat(id)).catch(() => {});
 });
 ipcMain.handle("cg:browserState", (e) => (fromApp(e) ? { ...navInfo(), pointerAt } : null));
+// The Browser tab just opened with nothing in it: Google, but only when nothing is open or on its way. The screen used
+// to open Google itself the moment it found no page, which raced the AI's own "open" of the same moment: the AI's page
+// showed, then Google replaced it a moment later (owner, 2026-11-12 and 13). The check runs here, in the same queue as
+// the AI's steps, so an "open" already queued or loading always wins.
+ipcMain.handle("cg:browserHome", async (e) => {
+  if (!fromApp(e)) return false;
+  await (queue = queue.then(async () => {
+    const wc = ensureView().webContents;
+    const fresh = !/^https?:/.test(wc.getURL()) && !pendingUrl && !wc.isLoading();
+    if (fresh) await runAct({ action: "open", url: HOME, screenshot: false }, false);
+  }).catch(() => {}));
+  return true;
+});
 // The toolbar: back, forward, reload, open (no picture needed)
 ipcMain.handle("cg:browserAct", async (e, step) => {
   if (!fromApp(e) || !step || !["open", "back", "forward", "reload"].includes(step.action)) return { ok: false };

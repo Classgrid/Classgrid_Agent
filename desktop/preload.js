@@ -91,6 +91,7 @@ contextBridge.exposeInMainWorld("classgridDesktop", {
   browserShow: (rect) => ipcRenderer.send("cg:browserShow", rect),
   browserHide: () => ipcRenderer.send("cg:browserHide"),
   browserChat: (id) => ipcRenderer.send("cg:browserChat", id),
+  browserHome: () => ipcRenderer.invoke("cg:browserHome"), // (the tab opened with nothing in it: Google, unless a page is on its way)
   browserState: () => ipcRenderer.invoke("cg:browserState"),
   browserAct: (step) => ipcRenderer.invoke("cg:browserAct", step),
   browserShot: () => ipcRenderer.invoke("cg:browserShot"),

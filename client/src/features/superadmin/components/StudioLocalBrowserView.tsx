@@ -18,6 +18,7 @@ type DesktopBrowser = {
   browserShow: (rect: Rect) => void;
   browserHide: () => void;
   browserChat: (id: string | null) => void;
+  browserHome?: () => Promise<boolean>; // (nothing open: Google, unless the AI's page is on its way; older apps lack it)
   browserState: () => Promise<(Nav & { pointerAt: number }) | null>;
   browserAct: (step: { action: string; url?: string }) => Promise<{ ok: boolean; error?: string }>;
   browserShot: () => Promise<string | null>;
@@ -65,7 +66,14 @@ export function StudioLocalBrowserView({ paused = false }: { paused?: boolean })
     const d = desktop();
     if (!d?.onBrowser) return;
     // Nothing open yet: Google
-    d.browserState?.().then((s) => { if (s) setNav(s); if (!s?.url) d.browserAct?.({ action: "open", url: "https://www.google.com/" }).catch(() => {}); }).catch(() => {});
+    // (nothing open yet: the app decides whether Google is needed, so an "open" the AI is making at this very moment
+    // is never replaced by Google; an older app without browserHome opens Google here as before)
+    d.browserState?.().then((s) => {
+      if (s) setNav(s);
+      if (s?.url) return;
+      if (d.browserHome) d.browserHome().catch(() => {});
+      else d.browserAct?.({ action: "open", url: "https://www.google.com/" }).catch(() => {});
+    }).catch(() => {});
     return d.onBrowser((m) => {
       if (!m || typeof m !== "object") return;
       if (m.type === "nav") setNav(m);
