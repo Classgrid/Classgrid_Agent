@@ -1535,3 +1535,11 @@
 .dark .chat-scrollbar::-webkit-scrollbar-button:single-button:vertical:increment {
   background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='16' height='16' fill='%23aaa'><path d='M4 6l4 4 4-4'/></svg>");
 }
+
+/* Google reCAPTCHA v3's badge is never shown, on any page (owner, 2026-11-13: it stayed at the bottom right after
+ * signing in, on the super admin dashboard and the profile). The check itself still runs at sign-in (features/auth/recaptcha.ts). */
+.grecaptcha-badge {
+  visibility: hidden !important;
+  opacity: 0 !important;
+  pointer-events: none !important;
+}

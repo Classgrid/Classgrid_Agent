@@ -42,30 +42,8 @@
                 linear-gradient(45deg, rgba(40, 53, 147, 0.05) 0%, transparent 100%);
         }
 
-        .grecaptcha-badge {
-            visibility: visible !important;
-            display: block !important;
-            position: fixed !important;
-            bottom: 14px !important;
-            right: 14px !important;
-            z-index: 99999 !important;
-            opacity: 1 !important;
-            width: 256px !important;
-            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4) !important;
-            border-radius: 3px !important;
-            background: white !important;
-        }
-
-        @media (min-width: 769px) {
-            .grecaptcha-badge {
-                width: 70px !important;
-                transition: width 0.3s ease !important;
-            }
-
-            .grecaptcha-badge:hover {
-                width: 256px !important;
-            }
-        }
+        /* (the reCAPTCHA badge is never shown: hidden for every page in styles/global.css, owner 2026-11-13; this
+           sheet stays loaded after the super admin login, so it no longer forces the badge back onto other pages) */
 
         /* ── Layout ── */
         .container {
