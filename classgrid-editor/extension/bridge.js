@@ -171,7 +171,9 @@
     var dark = b.classList.contains("vscode-dark") || b.classList.contains("vscode-high-contrast");
     var light = b.classList.contains("vscode-light") || b.classList.contains("vscode-high-contrast-light");
     if (!dark && !light) return;
-    root.classList.add("cg-editor-theme");
+    // (the editor's own colors only in VS Code, Cursor, Windsurf...: Classgrid Code keeps Classgrid's colors, owner
+    // 2026-11-13; light or dark follows the editor everywhere)
+    if (cfg.stockEditor) root.classList.add("cg-editor-theme");
     var want = dark ? "dark" : "light";
     var now = null;
     try { now = localStorage.getItem("theme"); } catch (err) { /* storage blocked */ }

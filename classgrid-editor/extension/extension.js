@@ -217,7 +217,8 @@ function holdScreens(webview, startPath) {
   const fileBases = Object.fromEntries(drives.map((l) => [l.toLowerCase(), slash(webview.asWebviewUri(vscode.Uri.file(`${l}:\\`)))]));
   // (folder: the folder open in the editor, the Agent's project)
   const folder = (vscode.workspace.workspaceFolders || [])[0]?.uri.fsPath || null;
-  const cfg = { version: parts.version, deviceId: computerId(), startPath, base, fileBases, storage, folder };
+  // (stockEditor: VS Code, Cursor, Windsurf... rather than Classgrid Code; only there our screens take the editor's colors)
+  const cfg = { version: parts.version, deviceId: computerId(), startPath, base, fileBases, storage, folder, stockEditor: !/classgrid/i.test(vscode.env.appName || "") };
   const bridge = fs.readFileSync(path.join(__dirname, "bridge.js"), "utf8");
   const src = webview.cspSource;
   const csp = [
