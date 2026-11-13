@@ -20,6 +20,24 @@ import crypto from "node:crypto";
 let mongoose, routes, db, call;
 before(async () => { ({ mongoose, routes, db, call } = await setupOAuth()); });
 
+describe("isVerifiedVendorClient (consent page shows the app as verified)", () => {
+    const client = (name, ...redirectUris) => ({ name, redirectUris });
+    test("ChatGPT and Claude on their own hosts are verified", () => {
+        assert.equal(routes.isVerifiedVendorClient(client("ChatGPT", "https://chatgpt.com/connector_platform_oauth_redirect")), true);
+        assert.equal(routes.isVerifiedVendorClient(client("Claude", "https://claude.ai/api/mcp/auth_callback")), true);
+        assert.equal(routes.isVerifiedVendorClient(client("Claude", "https://claude.com/api/mcp/auth_callback")), true);
+    });
+    test("a borrowed name, another host, plain http or a localhost redirect is not", () => {
+        assert.equal(routes.isVerifiedVendorClient(client("Claude", "https://evil.example/api/mcp/auth_callback")), false);
+        assert.equal(routes.isVerifiedVendorClient(client("Claude", "https://claude.ai.evil.example/cb")), false);
+        assert.equal(routes.isVerifiedVendorClient(client("Claude", "http://claude.ai/api/mcp/auth_callback")), false);
+        assert.equal(routes.isVerifiedVendorClient(client("Claude Code", "http://localhost:53682/callback")), false);
+        assert.equal(routes.isVerifiedVendorClient(client("Claude", "https://chatgpt.com/connector_platform_oauth_redirect")), false);
+        assert.equal(routes.isVerifiedVendorClient(client("My App", "https://claude.ai/api/mcp/auth_callback")), false);
+        assert.equal(routes.isVerifiedVendorClient(client("Claude")), false);
+    });
+});
+
 describe("isSafeRedirectUri", () => {
     test("accepts the known MCP client callbacks and loopback", () => {
         for (const u of [

@@ -516,15 +516,23 @@ const isRequestIdShape = (value) => typeof value === "string" && value.length > 
 // The app's name is self-chosen (a DCR client can call itself "Classgrid Official"), so the consent page
 // also shows where the code is really sent and flags apps nobody at Classgrid registered.
 // Apps Classgrid trusts: the name must match AND every redirect must go to the vendor's own hosts.
-function isVerifiedVendorClient(client, redirectUri) {
-    if (!client || !/chatgpt|openai/i.test(client.name || "")) return false;
+// ChatGPT (chatgpt.com / openai.com) and Claude (claude.ai / claude.com / anthropic.com). Claude Code on a
+// computer signs in through a localhost redirect, which any program can use, so it stays unverified.
+const VERIFIED_VENDORS = [
+    { name: /chatgpt|openai/i, hosts: ["chatgpt.com", "openai.com"] },
+    { name: /claude|anthropic/i, hosts: ["claude.ai", "claude.com", "anthropic.com"] },
+];
+export function isVerifiedVendorClient(client, redirectUri) {
+    const vendor = client && VERIFIED_VENDORS.find((v) => v.name.test(client.name || ""));
+    if (!vendor) return false;
     // On the consent screen, judge the redirect actually used (it is already checked against the registered list)
     const uris = redirectUri ? [redirectUri] : (client.redirectUris || []);
     if (!uris.length) return false;
     return uris.every((u) => {
         try {
-            const h = new URL(u).hostname.toLowerCase();
-            return h === "chatgpt.com" || h.endsWith(".chatgpt.com") || h === "openai.com" || h.endsWith(".openai.com");
+            const url = new URL(u);
+            const h = url.hostname.toLowerCase();
+            return url.protocol === "https:" && vendor.hosts.some((host) => h === host || h.endsWith(`.${host}`));
         } catch { return false; }
     });
 }
