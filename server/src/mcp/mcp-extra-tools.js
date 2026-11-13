@@ -185,7 +185,49 @@ const EXTRA_NAMES = new Set(MCP_EXTRA_TOOLS.map((t) => t.name));
 
 // The tool list for /mcp: tools.js plus these (one of these replaces a tools.js tool of the same name, which is
 // the AI chat's "open project" version)
-export const getRemoteMcpTools = () => [...getMcpTools().filter((t) => !EXTRA_NAMES.has(t.name)), ...MCP_EXTRA_TOOLS];
+// Descriptions written for Classgrid AI's own chat name internal systems (databases, storage, other tools that
+// MCP never has); MCP clients get plain ones
+const MCP_DESCRIPTIONS = {
+    search_users_for_chat: "Find Classgrid users by name or email, to get the user id needed to start or send a direct chat message.",
+    list_group_chats: "List the Grid group chats the user is a member of: name, description, type, last message and its time.",
+    read_group_chat_details: "Read a group chat's name, description, type and whether it is private.",
+    read_group_chat_messages: "Read the latest messages of a group chat the user is in: who sent each, when, the text and any attachments. Deleted messages are left out.",
+    read_chat_messages: "Read the latest messages of one of the user's 1:1 direct chats: who sent each, when, the text and any attachments. Deleted messages are left out.",
+    get_chat_attachment_url: "Get the download link of a file sent in a 1:1 direct chat message.",
+    get_group_chat_attachment_url: "Get the download link of a file sent in a group chat message.",
+    upload_file_to_group_chat: "Send a file to a group chat from an https link.",
+    list_grids: "List the user's 1:1 direct chats (Grids). Same as list_chat_threads.",
+};
+
+export const getRemoteMcpTools = () => [
+    ...getMcpTools().filter((t) => !EXTRA_NAMES.has(t.name)).map((t) => (MCP_DESCRIPTIONS[t.name] ? { ...t, description: MCP_DESCRIPTIONS[t.name] } : t)),
+    ...MCP_EXTRA_TOOLS,
+];
+
+// Grid answers over MCP keep only what the user would see in the app: no other people's emails, no search
+// indexes, moderation or storage fields, no organization ids or policy settings
+const pick = (obj, keys) => Object.fromEntries(keys.filter((k) => obj?.[k] !== undefined && obj?.[k] !== null).map((k) => [k, obj[k]]));
+const cleanAttachments = (list) => (Array.isArray(list) ? list.map((a) => pick(a, ["file_name", "file_type", "file_size", "file_url"])) : []);
+const cleanMessage = (m) => ({ ...pick(m, ["id", "senderName", "message", "created_at", "reply_to", "is_pinned", "is_sent_by_current_user"]), attachments: cleanAttachments(m.attachments) });
+const GROUP_FIELDS = ["id", "name", "description", "group_type", "is_private", "is_official", "created_at", "threadId", "last_message", "last_message_at"];
+const GRID_CLEANERS = {
+    list_group_chats: (j) => (Array.isArray(j) ? j.map((g) => pick(g, GROUP_FIELDS)) : j),
+    read_group_chat_details: (j) => (j && !Array.isArray(j) && j.id ? pick(j, GROUP_FIELDS) : j),
+    read_group_chat_messages: (j) => (Array.isArray(j) ? j.map(cleanMessage) : j),
+    read_chat_messages: (j) => (Array.isArray(j) ? j.map(cleanMessage) : j),
+    list_group_members: (j) => (Array.isArray(j) ? j.map((m) => pick(m, ["userId", "name", "groupRole", "joinedAt"])) : j),
+    list_group_polls: (j) => (Array.isArray(j) ? j.map((p) => pick(p, ["id", "question", "options", "allow_multiple", "is_anonymous", "closes_at", "created_at", "vote_counts", "total_votes"])) : j),
+};
+
+// Applies the cleaner to a tools.js answer whose text is JSON; any other answer goes back unchanged
+export function cleanGridResult(name, result) {
+    const clean = GRID_CLEANERS[name];
+    const text = result?.content?.[0]?.text;
+    if (!clean || result?.isError || typeof text !== "string") return result;
+    let json;
+    try { json = JSON.parse(text); } catch { return result; }
+    return { ...result, content: [{ type: "text", text: JSON.stringify(clean(json), null, 2) }, ...result.content.slice(1)] };
+}
 
 // ---------------------------------------------------------------------------------------------------------
 // Projects
@@ -559,7 +601,7 @@ function asResult(out) {
 
 // tools/call for /mcp: these tools here, everything else through tools.js
 export async function handleRemoteToolCall(name, args, ctx) {
-    if (!EXTRA_NAMES.has(name)) return handleToolCall(name, args, ctx);
+    if (!EXTRA_NAMES.has(name)) return cleanGridResult(name, await handleToolCall(name, args, ctx));
     if (!ctx?.userId) return asResult({ error: "No signed-in Classgrid user." });
     const input = args && typeof args === "object" ? args : {};
     if (HANDLERS[name]) return asResult(await HANDLERS[name](ctx, input));

@@ -132,3 +132,27 @@ describe("Classgrid AI's own chat gets the chat-history and doc-list tools", () 
         assert.ok(history.pattern.test("what did we discuss in my other chat"));
     });
 });
+
+describe("Grid answers and descriptions over MCP", () => {
+    test("internal fields and other people's emails are dropped", () => {
+        const msg = { id: "m1", thread_id: "t", sender_id: "u", senderName: "Asha", senderEmail: "asha@x.in", message: "hi", created_at: "2026-11-13", search_vector: "'hi':1", approved_by: null, deleted_for: [], is_sent_by_current_user: false, attachments: [{ file_name: "a.pdf", file_type: "pdf", file_size: 9, file_url: "https://cdn/a.pdf", r2_key: "k" }], ai_hint: "x" };
+        const out = JSON.parse(extra.cleanGridResult("read_group_chat_messages", { content: [{ type: "text", text: JSON.stringify([msg]) }] }).content[0].text);
+        assert.deepEqual(Object.keys(out[0]).sort(), ["attachments", "created_at", "id", "is_sent_by_current_user", "message", "senderName"]);
+        assert.deepEqual(Object.keys(out[0].attachments[0]).sort(), ["file_name", "file_size", "file_type", "file_url"]);
+        const group = { id: "g", name: "A2", org_id: "o", send_message_policy: "all", admin_roles: [], is_private: true, threadId: "t" };
+        const g = JSON.parse(extra.cleanGridResult("list_group_chats", { content: [{ type: "text", text: JSON.stringify([group]) }] }).content[0].text);
+        assert.deepEqual(Object.keys(g[0]).sort(), ["id", "is_private", "name", "threadId"]);
+        const members = JSON.parse(extra.cleanGridResult("list_group_members", { content: [{ type: "text", text: JSON.stringify([{ userId: "u", name: "Asha", email: "asha@x.in", groupRole: "admin" }]) }] }).content[0].text);
+        assert.equal(members[0].email, undefined);
+    });
+    test("errors and plain-text answers pass through unchanged", () => {
+        const err = { content: [{ type: "text", text: "Error: Group thread not found." }], isError: true };
+        assert.equal(extra.cleanGridResult("read_group_chat_messages", err), err);
+        const text = { content: [{ type: "text", text: "not json" }] };
+        assert.equal(extra.cleanGridResult("list_group_chats", text), text);
+    });
+    test("tool descriptions over MCP name no internal systems", () => {
+        // only the tools MCP clients can see (a tool with a scope); the rest are never listed
+        for (const t of extra.getRemoteMcpTools().filter((x) => scopes.requiredScopeForTool(x.name))) assert.doesNotMatch(t.description || "", /mongo|supabase|unified_db_query|\bR2\b/i, t.name);
+    });
+});
