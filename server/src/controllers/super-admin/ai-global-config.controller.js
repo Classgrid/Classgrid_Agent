@@ -63,7 +63,7 @@ export const getGlobalAiConfig = async (req, res) => {
 
         // (today's Cloudflare Neurons, per model, beside the cap: the super admin sees what a day costs)
         const neurons = await usageToday();
-        const cfNeurons = { ...neurons, cap: Number(config.cf_neuron_cap_per_day) > 0 ? Number(config.cf_neuron_cap_per_day) : DEFAULT_CAP, enabled: config.cf_neuron_cap_enabled === true };
+        const cfNeurons = { ...neurons, cap: DEFAULT_CAP, enabled: config.cf_neuron_cap_enabled === true };
         res.status(200).json({ success: true, config: { ...config.toObject(), cfNeurons }, resetPeriods: effectiveGlobalPeriods(config) });
     } catch (error) {
         console.error("[getGlobalAiConfig] Error:", error);
@@ -86,8 +86,7 @@ export const updateGlobalAiConfig = async (req, res) => {
             cf_input_cost_per_million,
             cf_output_cost_per_million,
             cf_image_cost_per_unit,
-            cf_neuron_cap_enabled,
-            cf_neuron_cap_per_day
+            cf_neuron_cap_enabled
         } = req.body;
 
         const resetPeriods = {};
@@ -115,11 +114,6 @@ export const updateGlobalAiConfig = async (req, res) => {
         if (cf_output_cost_per_million !== undefined) config.cf_output_cost_per_million = cf_output_cost_per_million;
         if (cf_image_cost_per_unit !== undefined) config.cf_image_cost_per_unit = cf_image_cost_per_unit;
         if (cf_neuron_cap_enabled !== undefined) config.cf_neuron_cap_enabled = cf_neuron_cap_enabled === true;
-        if (cf_neuron_cap_per_day !== undefined) {
-            const cap = Number(cf_neuron_cap_per_day);
-            if (!Number.isFinite(cap) || cap < 1) return res.status(400).json({ success: false, message: "The Cloudflare Neuron cap must be a number of Neurons per day, at least 1." });
-            config.cf_neuron_cap_per_day = Math.round(cap);
-        }
         for (const [feature, p] of Object.entries(resetPeriods)) {
             config[`global_${feature}_reset_value`] = p.value;
             config[`global_${feature}_reset_unit`] = p.unit;

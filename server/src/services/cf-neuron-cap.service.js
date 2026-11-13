@@ -13,7 +13,11 @@
 import redis from "../config/redis.js";
 import GlobalAiConfig from "../models/GlobalAiConfig.js";
 
-export const DEFAULT_CAP = 10000;
+// The cap is fixed: Cloudflare's free 10,000 Neurons a day, less a margin of 500 because this meter is an estimate
+// (owner, 2026-11-13: never a number anyone can raise, and always under the free amount, so nothing is ever billed)
+export const FREE_NEURONS_PER_DAY = 10000;
+export const SAFETY_MARGIN = 500;
+export const DEFAULT_CAP = FREE_NEURONS_PER_DAY - SAFETY_MARGIN;
 const CONFIG_TTL_MS = 15000;
 const KEEP_DAYS = 10;
 
@@ -75,8 +79,8 @@ let cached = { at: 0, enabled: false, cap: DEFAULT_CAP };
 export async function capSettings() {
     if (Date.now() - cached.at < CONFIG_TTL_MS) return cached;
     try {
-        const c = await GlobalAiConfig.findOne({ key: "singleton" }).select("cf_neuron_cap_enabled cf_neuron_cap_per_day").lean();
-        cached = { at: Date.now(), enabled: c?.cf_neuron_cap_enabled === true, cap: Number(c?.cf_neuron_cap_per_day) > 0 ? Number(c.cf_neuron_cap_per_day) : DEFAULT_CAP };
+        const c = await GlobalAiConfig.findOne({ key: "singleton" }).select("cf_neuron_cap_enabled").lean();
+        cached = { at: Date.now(), enabled: c?.cf_neuron_cap_enabled === true, cap: DEFAULT_CAP };
     } catch {
         cached = { ...cached, at: Date.now() };
     }

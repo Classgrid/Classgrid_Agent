@@ -117,8 +117,8 @@ const globalAiConfigSchema = new mongoose.Schema(
         // (services/cf-neuron-cap.service.js). On: once today's Neurons (UTC day) reach the cap, every Cloudflare model
         // is refused until midnight UTC. Off: nothing is refused, the meter still counts. Off unless the super admin
         // turns it on in Global AI Config (owner, 2026-11-13: Cloudflare bills above 10,000 Neurons a day from Dec 1).
+        // The cap itself is fixed in the service (the free 10,000 less a margin of 500), never a setting.
         cf_neuron_cap_enabled: { type: Boolean, default: false },
-        cf_neuron_cap_per_day: { type: Number, default: 10000 },
         metadata: {
             type: mongoose.Schema.Types.Mixed,
             default: {},
