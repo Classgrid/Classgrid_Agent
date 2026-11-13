@@ -103,6 +103,7 @@
 
 import fs from 'fs';
 import path from 'path';
+import { cfAiFetch } from "../cf-neuron-cap.service.js";
 
 /**
  * transcribeAudio
@@ -120,7 +121,7 @@ export const transcribeAudio = async (buffer, mimetype = 'audio/webm') => {
         const cfUrl = `https://api.cloudflare.com/client/v4/accounts/${cfAccountId}/ai/run/@cf/openai/whisper-large-v3-turbo`;
         const cleanMime = mimetype.split(';')[0]; // e.g. 'audio/webm' instead of 'audio/webm;codecs=opus'
 
-        const response = await fetch(cfUrl, {
+        const response = await cfAiFetch(cfUrl, {
             method: 'POST',
             headers: {
                 'Authorization': `Bearer ${cfToken}`,

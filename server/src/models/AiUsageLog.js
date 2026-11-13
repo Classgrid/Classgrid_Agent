@@ -150,4 +150,15 @@ aiUsageLogSchema.index({ organization_id: 1, createdAt: -1 });
 aiUsageLogSchema.index({ provider: 1, createdAt: -1 });
 aiUsageLogSchema.index({ userId: 1, createdAt: -1 });
 
+// Cloudflare Workers AI Neurons (services/cf-neuron-cap.service.js): every Cloudflare text answer logged here counts
+// towards the account's daily Neuron cap, once, from its tokens. Voice, speech and image requests are counted where
+// they are made (cfAiFetch), so their logs are left out here.
+aiUsageLogSchema.post("save", function (doc) {
+    const model = String(doc?.model || "");
+    if (!model.startsWith("@cf/") || /flux|whisper|aura|nova-3|stable-diffusion|dreamshaper|melotts/.test(model)) return;
+    import("../services/cf-neuron-cap.service.js")
+        .then(({ meterText }) => meterText(model, { prompt_tokens: doc.promptTokens, completion_tokens: doc.completionTokens, cached_tokens: doc.metadata?.cachedTokens }))
+        .catch(() => {});
+});
+
 export default mongoose.models.AiUsageLog || mongoose.model("AiUsageLog", aiUsageLogSchema);

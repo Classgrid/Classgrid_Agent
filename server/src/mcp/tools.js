@@ -91,6 +91,7 @@ async function projectMountFor(sessionId) {
 import Handlebars from 'handlebars';
 
 import { Readable } from 'stream';
+import { cfAiFetch } from "../services/cf-neuron-cap.service.js";
 
 const execPromise = util.promisify(exec);
 
@@ -3971,7 +3972,7 @@ export const handleToolCall = async (name, args, context = {}) => {
 
         // Send to Cloudflare Workers AI Whisper
         const cfUrl = `https://api.cloudflare.com/client/v4/accounts/${cfAccountId}/ai/run/@cf/openai/whisper-large-v3-turbo`;
-        const aiResponse = await fetch(cfUrl, {
+        const aiResponse = await cfAiFetch(cfUrl, {
           method: 'POST',
           headers: {
             'Authorization': `Bearer ${cfToken}`,

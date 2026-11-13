@@ -41,6 +41,7 @@ import { toWhatsappText, splitWhatsappText } from "./ai-feature-limits.js";
 import { BUSY_KEY, markLastIn } from "./whatsapp-inbox.service.js";
 import { BUDGET_STOP_NOTE } from "./llm-stream.js";
 import * as record from "./call-record.service.js";
+import { cfAiFetch } from "./cf-neuron-cap.service.js";
 
 const GRAPH = "https://graph.facebook.com/v22.0";
 const CALL_MODEL = "claude-haiku-5-5"; // fastest Claude, so the voice replies come quickly
@@ -212,7 +213,7 @@ const cfUrl = (model) => `https://api.cloudflare.com/client/v4/accounts/${proces
 const cfHeaders = (type) => ({ Authorization: `Bearer ${process.env.CLOUDFLARE_WORKERS_AI_TOKEN}`, "Content-Type": type });
 
 async function speechToText(chunks) {
-    const res = await fetch(cfUrl("@cf/openai/whisper-large-v3-turbo"), {
+    const res = await cfAiFetch(cfUrl("@cf/openai/whisper-large-v3-turbo"), {
         method: "POST", headers: cfHeaders("audio/wav"), body: wav16k(chunks), signal: AbortSignal.timeout(15000),
     });
     if (!res.ok) throw new Error(`speech to text ${res.status}`);
@@ -224,7 +225,7 @@ async function textToSpeech(text, retried = false) {
     // Raw 16-bit 48 kHz mono, the call's own format
     let res;
     try {
-        res = await fetch(cfUrl("@cf/deepgram/aura-2-en"), {
+        res = await cfAiFetch(cfUrl("@cf/deepgram/aura-2-en"), {
             method: "POST",
             headers: cfHeaders("application/json"),
             body: JSON.stringify({ text, encoding: "linear16", sample_rate: SAMPLE_RATE, container: "none" }),

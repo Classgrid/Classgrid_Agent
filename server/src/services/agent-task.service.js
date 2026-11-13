@@ -45,6 +45,7 @@ import {
     sendWhatsappText, markWhatsappRead, findCaller, numberInUse, runAgentTask, openProject, keepProjectOpen,
 } from "./whatsapp-call.service.js";
 import * as record from "./call-record.service.js";
+import { cfAiFetch } from "./cf-neuron-cap.service.js";
 
 const MAX_WORK_MS = 48 * 60 * 60 * 1000;
 const ALARM_MS = 5 * 60 * 1000;
@@ -71,7 +72,7 @@ const notRunning = () => ({ $or: [{ heartbeat_at: null }, { heartbeat_at: { $lt:
 async function smallModel(user, system, text) {
     const tokens = await hasEnoughTokens(user._id, user.organization_id || null, 1500).catch(() => ({ allowed: false }));
     if (!tokens.allowed) return null;
-    const res = await fetch(`https://api.cloudflare.com/client/v4/accounts/${process.env.CLOUDFLARE_ACCOUNT_ID}/ai/v1/chat/completions`, {
+    const res = await cfAiFetch(`https://api.cloudflare.com/client/v4/accounts/${process.env.CLOUDFLARE_ACCOUNT_ID}/ai/v1/chat/completions`, {
         method: "POST",
         headers: { Authorization: `Bearer ${process.env.CLOUDFLARE_WORKERS_AI_TOKEN}`, "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -79,7 +80,7 @@ async function smallModel(user, system, text) {
             messages: [{ role: "system", content: system }, { role: "user", content: text }],
         }),
         signal: AbortSignal.timeout(45000),
-    });
+    }, { meter: false }); // (its usage goes to AiUsageLog below, which counts it)
     const data = await res.json().catch(() => ({}));
     const usage = data.usage || {};
     if (usage.total_tokens || usage.prompt_tokens) {

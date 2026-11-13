@@ -35,6 +35,7 @@
 // already streams live, and a thought-tool call costs a whole extra model round before the answer.
 // A call to it is still handled if the model makes one anyway.
 import { cfSwapProvider } from "./cf-retired-models.js";
+import { cfAiFetch, isCfNeuronCapError } from "./cf-neuron-cap.service.js";
 
 // Cloudflare refuses a whole request with too many pictures in it ("too many images in request"), and a long task
 // with screenshots (computer tool, browser) keeps adding them: only the newest ones stay, older ones become a note
@@ -189,7 +190,9 @@ async function streamOneRound({ provider, messages, tools, temperature, maxToken
     signal?.addEventListener("abort", onOuterAbort, { once: true });
 
     try {
-        const response = await fetch(provider.url, {
+        // (a Cloudflare address: the daily Neuron cap is checked first, cf-neuron-cap.service.js; the round's usage is
+        // logged to AiUsageLog by the caller, which counts it, so it is not counted here as well)
+        const response = await cfAiFetch(provider.url, {
             method: "POST",
             signal: controller.signal,
             // (provider.headers: e.g. Cloudflare's x-session-affinity, so a chat's requests reach the machine that keeps
@@ -206,7 +209,7 @@ async function streamOneRound({ provider, messages, tools, temperature, maxToken
                 // A quick round: the model's thinking is switched off (each model has its own switch, noThinkingFor)
                 ...(quick ? noThinkingFor(provider.model) : {})
             })
-        });
+        }, { meter: false });
 
         if (!response.ok || !response.body) {
             const body = await response.text().catch(() => "");
@@ -411,6 +414,15 @@ export async function streamChat({
                     });
                     break;
                 } catch (e) {
+                    // The Cloudflare daily Neuron cap is reached (Global AI Config): no retry on that model; the next
+                    // model that is not on Cloudflare takes over at once, and with none the answer stops
+                    if (isCfNeuronCapError(e)) {
+                        const next = roundProviders.findIndex((p, i) => i > at && !String(p?.model || "").startsWith("@cf/"));
+                        if (signal?.aborted || next === -1) throw e;
+                        console.warn(`[AI-STREAM] ${roundProviders[at].model}: ${e.message}; moving to ${roundProviders[next].model}`);
+                        at = next;
+                        continue;
+                    }
                     // "Too many requests per minute" (many helpers on one model): wait it out longer instead of giving up
                     const busy = e?.rateLimited || /HTTP 429|rate limit/i.test(String(e?.message || ""));
                     const maxTries = busy ? 9 : 5;

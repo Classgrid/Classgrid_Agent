@@ -113,6 +113,12 @@ const globalAiConfigSchema = new mongoose.Schema(
         // ID) share one free limit, so more accounts don't give more free usage. Off: every account has its own free
         // limit. The super admin dashboard's switch (Global AI Fallback Limits); off unless turned on there.
         free_limit_per_computer: { type: Boolean, default: false },
+        // Cloudflare Workers AI: a daily Neuron cap for the whole account, every Cloudflare model together
+        // (services/cf-neuron-cap.service.js). On: once today's Neurons (UTC day) reach the cap, every Cloudflare model
+        // is refused until midnight UTC. Off: nothing is refused, the meter still counts. Off unless the super admin
+        // turns it on in Global AI Config (owner, 2026-11-13: Cloudflare bills above 10,000 Neurons a day from Dec 1).
+        cf_neuron_cap_enabled: { type: Boolean, default: false },
+        cf_neuron_cap_per_day: { type: Number, default: 10000 },
         metadata: {
             type: mongoose.Schema.Types.Mixed,
             default: {},

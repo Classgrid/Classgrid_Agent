@@ -239,6 +239,8 @@ async function summarizeWithFlash(input, desktop = false) {
         maxToolDepth: 0,
         timeoutMs: 90000
     });
+    // (its tokens are not written to AiUsageLog: counted here towards the Cloudflare daily Neuron cap)
+    if (result.usage) meterCfNeurons(desktop ? DESKTOP_MEMORY_FLASH_MODEL : MEMORY_FLASH_MODEL, result.usage);
     return String(result.answer || "").trim();
 }
 
@@ -489,6 +491,7 @@ async function readSessionRow(sessionId) {
 // ─────────────────────────────────────────────────
 
 import crypto from 'crypto';
+import { meterText as meterCfNeurons } from "./cf-neuron-cap.service.js";
 
 /**
  * Generates a short, URL-safe share ID (10 chars).

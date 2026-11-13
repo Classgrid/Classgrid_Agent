@@ -30,6 +30,7 @@
 // CLASSGRID USES CLOUDFLARE USAGE TO CALCULATE TOKENS, NOT GPT-TOKENIZER (WHICH IS ONLY A FALLBACK)
 import GlobalAiConfig from "../../models/GlobalAiConfig.js";
 import { resolveResetPeriod, parseResetPeriodInput } from "../../services/ai-feature-limits.js";
+import { usageToday, forgetCapSettings, DEFAULT_CAP } from "../../services/cf-neuron-cap.service.js";
 
 const effectiveGlobalPeriods = (config) => ({
     tokens: resolveResetPeriod("tokens", null, config, "global"),
@@ -60,7 +61,10 @@ export const getGlobalAiConfig = async (req, res) => {
             await config.save();
         }
 
-        res.status(200).json({ success: true, config, resetPeriods: effectiveGlobalPeriods(config) });
+        // (today's Cloudflare Neurons, per model, beside the cap: the super admin sees what a day costs)
+        const neurons = await usageToday();
+        const cfNeurons = { ...neurons, cap: Number(config.cf_neuron_cap_per_day) > 0 ? Number(config.cf_neuron_cap_per_day) : DEFAULT_CAP, enabled: config.cf_neuron_cap_enabled === true };
+        res.status(200).json({ success: true, config: { ...config.toObject(), cfNeurons }, resetPeriods: effectiveGlobalPeriods(config) });
     } catch (error) {
         console.error("[getGlobalAiConfig] Error:", error);
         res.status(500).json({ success: false, message: "Server error fetching global config." });
@@ -81,7 +85,9 @@ export const updateGlobalAiConfig = async (req, res) => {
             image_generation_token_cost,
             cf_input_cost_per_million,
             cf_output_cost_per_million,
-            cf_image_cost_per_unit
+            cf_image_cost_per_unit,
+            cf_neuron_cap_enabled,
+            cf_neuron_cap_per_day
         } = req.body;
 
         const resetPeriods = {};
@@ -108,12 +114,19 @@ export const updateGlobalAiConfig = async (req, res) => {
         if (cf_input_cost_per_million !== undefined) config.cf_input_cost_per_million = cf_input_cost_per_million;
         if (cf_output_cost_per_million !== undefined) config.cf_output_cost_per_million = cf_output_cost_per_million;
         if (cf_image_cost_per_unit !== undefined) config.cf_image_cost_per_unit = cf_image_cost_per_unit;
+        if (cf_neuron_cap_enabled !== undefined) config.cf_neuron_cap_enabled = cf_neuron_cap_enabled === true;
+        if (cf_neuron_cap_per_day !== undefined) {
+            const cap = Number(cf_neuron_cap_per_day);
+            if (!Number.isFinite(cap) || cap < 1) return res.status(400).json({ success: false, message: "The Cloudflare Neuron cap must be a number of Neurons per day, at least 1." });
+            config.cf_neuron_cap_per_day = Math.round(cap);
+        }
         for (const [feature, p] of Object.entries(resetPeriods)) {
             config[`global_${feature}_reset_value`] = p.value;
             config[`global_${feature}_reset_unit`] = p.unit;
         }
 
         await config.save();
+        forgetCapSettings(); // (the Cloudflare cap and switch are read again on the next request)
 
         const io = req.app.get("io");
         if (io) {

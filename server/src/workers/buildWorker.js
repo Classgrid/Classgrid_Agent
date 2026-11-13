@@ -33,6 +33,7 @@ import Trajectory from '../models/Trajectory.js';
 import Artifact from '../models/Artifact.js';
 import { createLLMClient } from '@classgrid/ai/core';
 import dotenv from 'dotenv';
+import { providersWithoutCappedCloudflare } from '../services/cf-neuron-cap.service.js';
 dotenv.config();
 
 const redisOptions = {
@@ -47,7 +48,8 @@ export const buildWorker = new Worker('build-steps', async (job) => {
 
   try {
     const client = createLLMClient({
-        providers: [
+        // (while the Cloudflare daily Neuron cap is reached, the list without the Cloudflare models)
+        providers: await providersWithoutCappedCloudflare([
             {
                 name: "mistral",
                 url: "https://api.mistral.ai/v1/chat/completions",
@@ -60,7 +62,7 @@ export const buildWorker = new Worker('build-steps', async (job) => {
                 apiKey: process.env.CLOUDFLARE_WORKERS_AI_TOKEN || "",
                 model: "@cf/deepseek-ai/deepseek-v4.1-flash-1017"
             }
-        ]
+        ])
     });
 
     const strictPrompt = `Execute step: ${stepTitle}. Output ONLY the code for ${stepId}. Do not output any other steps, preamble, markdown formatting ticks (unless it is exactly the code block), or explanations.`;

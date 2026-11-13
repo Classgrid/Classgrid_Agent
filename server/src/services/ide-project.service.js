@@ -36,6 +36,7 @@ import { guideFiles, GUIDE_PROJECT_DIR } from "./classgrid-guide.service.js";
 import { githubAppReady, githubAppInstallUrl, repoAppToken, classgridAuthor, userCoAuthorLine } from "./github-app.service.js";
 import connectDB from "../../config/db.js";
 import redis from "../config/redis.js";
+import { cfAiFetch } from "./cf-neuron-cap.service.js";
 
 // File tools for a Project Mode project (the code the user and the AI share). Everything runs on the sandbox as
 // the normal user, inside the project folder only. Pushing adds the owner's GitHub key just for that one command,
@@ -840,7 +841,7 @@ async function embedTexts(texts) {
     while (next < batches.length) {
       const n = next++;
       for (let attempt = 1; ; attempt++) {
-        const res = await fetch(`https://api.cloudflare.com/client/v4/accounts/${process.env.CLOUDFLARE_ACCOUNT_ID}/ai/run/${SEM_MODEL}`, {
+        const res = await cfAiFetch(`https://api.cloudflare.com/client/v4/accounts/${process.env.CLOUDFLARE_ACCOUNT_ID}/ai/run/${SEM_MODEL}`, {
           method: "POST",
           headers: { Authorization: `Bearer ${process.env.CLOUDFLARE_WORKERS_AI_TOKEN}`, "Content-Type": "application/json" },
           body: JSON.stringify({ text: batches[n] }),

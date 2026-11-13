@@ -75,6 +75,8 @@ import {
 import { getHistory, getHistoryCount, appendToHistory, invalidateHistoryCache, getChatTranscript } from "../services/ai-chat-history.service.js";
 import { canAccessSession, gridLabelMap, gridProfilesText, getSharedSessionsFor, leaveSharedChat, sharedChatIdsFor } from "../services/ai-chat-grid.service.js";
 import { editorContextFor, rememberProjectSnapshot, sandboxDataDir, startCheckpoint, finishCheckpoint, linkChatToProject, forgetChatScreenProject, touchStudio, pcChatIds, masteroAutoPush, pullMastero } from "../services/ide-project.service.js";
+// Cloudflare Workers AI daily Neuron cap and meter (Global AI Config): every Cloudflare request goes through cfAiFetch
+import { cfAiFetch, providersWithoutCappedCloudflare } from "../services/cf-neuron-cap.service.js";
 import { PLANNER_BROWSER_TOOLS, PLANNER_BLIND_TOOLS, WORKER_BROWSER_TOOLS, BROWSER_TOOL_NAMES, makeBrowserHandlers, BROWSER_WORKER_SYSTEM } from "../services/studio-browser-tools.js";
 import { ensureBrowser } from "../services/studio-browser.service.js";
 import { gateHandlers, askPermission, PERMISSION_MODES } from "../services/permission-gate.js";
@@ -4758,7 +4760,7 @@ You work on the user's own Windows computer through their Classgrid desktop app,
                             // Converting to base64 string keeps it small enough to pass the 10MB API Gateway limit!
                             const base64String = buffer.toString('base64');
 
-                            const visionResponse = await fetch(cfUrl, {
+                            const visionResponse = await cfAiFetch(cfUrl, {
                                 method: 'POST',
                                 headers: {
                                     'Authorization': `Bearer ${cfToken}`,
@@ -6396,7 +6398,8 @@ If a tool fails, never show the error message; say only: "Something went wrong o
             messages[0] = { role: "system", content: filterPromptBlocks(dynamicSystemPrompt, promptCtx) + filterPromptBlocks(volatilePrompt, promptCtx) + strictRule + whereYouWork };
         };
 
-        const client = createLLMClient(llmConfig);
+        // (while the Cloudflare daily Neuron cap is reached, the shared client gets the list without the Cloudflare models)
+        const client = createLLMClient({ ...llmConfig, providers: await providersWithoutCappedCloudflare(llmConfig.providers) });
 
         let requestAborted = false;
         const streamAbort = new AbortController();
@@ -8239,7 +8242,7 @@ export const generateImage = async (req, res) => {
         let enhancedPrompt = prompt;
         try {
             const llmUrl = `https://api.cloudflare.com/client/v4/accounts/${cfAccountId}/ai/run/@cf/deepseek-ai/deepseek-v4.1-flash-1017`;
-            const llmRes = await fetch(llmUrl, {
+            const llmRes = await cfAiFetch(llmUrl, {
                 method: 'POST',
                 headers: {
                     'Authorization': `Bearer ${cfToken}`,
@@ -8273,7 +8276,7 @@ export const generateImage = async (req, res) => {
                 const controller = new AbortController();
                 const timeoutId = setTimeout(() => controller.abort(), 60000); // 60 second timeout
 
-                imageRes = await fetch(cfUrl, {
+                imageRes = await cfAiFetch(cfUrl, {
                     method: 'POST',
                     headers: {
                         'Authorization': `Bearer ${cfToken}`,

@@ -64,6 +64,9 @@ export function GlobalAiConfigPanel({ grantCreditsNode }: { grantCreditsNode?: R
     }
   });
 
+  // Cloudflare Workers AI: the daily Neuron cap (every Cloudflare model together), typed here and saved with its button
+  const [cfCap, setCfCap] = useState("10000");
+  useEffect(() => { if (data?.cf_neuron_cap_per_day) setCfCap(String(data.cf_neuron_cap_per_day)); }, [data?.cf_neuron_cap_per_day]);
   useEffect(() => {
     if (data) {
       setOrgPool(data.global_pro_pool_limit ?? 0);
@@ -327,6 +330,43 @@ export function GlobalAiConfigPanel({ grantCreditsNode }: { grantCreditsNode?: R
               })}
             />
           </div>
+        </div>
+      </div>
+
+      {/* Cloudflare Workers AI: the account's daily Neuron cap (owner, 2026-11-13: Cloudflare bills above 10,000 a day from Dec 1) */}
+      <div className="border border-border rounded-xl shadow-sm bg-card mb-6">
+        <div className="p-5 flex items-start justify-between gap-4">
+          <div className="flex flex-col gap-1">
+            <Label htmlFor="cf-neuron-cap" className="text-sm font-medium text-foreground">Cloudflare daily Neuron cap</Label>
+            <p className="text-xs text-muted-foreground">
+              On: once today's Neurons reach the cap, every Cloudflare model (chat, voice, speech, images) pauses until 00:00 UTC (5:30 AM IST); the chat uses its other models where it has them.
+              Off: nothing pauses, the meter still counts. Cloudflare gives 10,000 Neurons a day free; above that is billed from 1 December 2026.
+            </p>
+            <p className="text-xs text-foreground mt-1">
+              Today, {data?.cfNeurons?.day || "UTC"}: <strong>{Math.round(data?.cfNeurons?.used || 0).toLocaleString()}</strong> of {(data?.cfNeurons?.cap || 10000).toLocaleString()} Neurons
+              {data?.cfNeurons?.byModel?.length ? (
+                <span className="text-muted-foreground"> · {data.cfNeurons.byModel.map((m: { model: string; neurons: number; requests: number }) => `${m.model.replace("@cf/", "")}: ${m.neurons.toLocaleString()} (${m.requests} requests)`).join(", ")}</span>
+              ) : null}
+            </p>
+          </div>
+          <Switch
+            id="cf-neuron-cap"
+            checked={!!data?.cf_neuron_cap_enabled}
+            disabled={updateConfigMutation.isPending}
+            onCheckedChange={(on) => updateConfigMutation.mutate({ cf_neuron_cap_enabled: on }, {
+              onSuccess: () => toast.success(on ? "Cloudflare daily Neuron cap is on" : "Cloudflare daily Neuron cap is off"),
+            })}
+          />
+        </div>
+        <div className="p-4 bg-muted/20 border-t border-border flex items-center justify-end gap-3">
+          <Label htmlFor="cf-neuron-cap-value" className="text-xs text-muted-foreground">Cap per day, in Neurons</Label>
+          <Input id="cf-neuron-cap-value" type="number" min={1} className="w-32 h-8" value={cfCap} onChange={(e) => setCfCap(e.target.value)} disabled={updateConfigMutation.isPending} />
+          <Button size="sm" disabled={updateConfigMutation.isPending || !(Number(cfCap) > 0)} onClick={() => updateConfigMutation.mutate({ cf_neuron_cap_per_day: Number(cfCap) }, {
+            onSuccess: () => toast.success("Cloudflare daily Neuron cap saved"),
+          })}>
+            {updateConfigMutation.isPending && <Spinner className="w-4 h-4 mr-2" />}
+            Save cap
+          </Button>
         </div>
       </div>
 
