@@ -606,12 +606,14 @@ export function AgentNestedMenu({ searchQuery = "", pages }: { searchQuery?: str
 
   // Schedule and Library: under New Chat in Agent mode on the website; in the desktop app (no Agent mode) they are
   // in Studio's sidebar and open inside Studio, and Project mode (which opens Classgrid Code) has neither
-  const showSchedule = DESKTOP_APP ? isStudioMode && !IN_EDITOR : !isProjectMode && !isStudioMode;
-  const showLibrary = DESKTOP_APP ? isStudioMode && !IN_EDITOR : !isStudioMode;
+  // (website: in Agent and Studio mode alike, owner 2026-11-13)
+  const showSchedule = DESKTOP_APP ? isStudioMode && !IN_EDITOR : !isProjectMode;
+  const showLibrary = DESKTOP_APP ? isStudioMode && !IN_EDITOR : !isProjectMode;
   // Calls (owner, 2026-11-09): the user's calls with Classgrid AI and what it did after each, read-only. Same place
   // as Schedule: Studio's sidebar in the desktop app, Agent mode on the website
   const showCalls = showSchedule;
-  const toolsBase = DESKTOP_APP ? baseAgentPath : baseAgentPath.replace("/project", "/agent");
+  // (they open inside the mode they are picked in: Studio's at /c/studio/schedule, Agent's at /agent/schedule)
+  const toolsBase = DESKTOP_APP || isStudioMode ? baseAgentPath : baseAgentPath.replace("/project", "/agent");
 
   const handleNewChat = () => {
     navigate(baseAgentPath);

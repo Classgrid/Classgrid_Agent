@@ -303,7 +303,7 @@ export function AppRouter() {
           <Route path="/superadmin/studio" element={<StudioModePage />} />
           <Route path="/superadmin/studio/:sessionId" element={<StudioModePage />} />
           {/* (desktop: Schedule's pages live in Studio, /superadmin/studio/schedule/<id>) */}
-          {DESKTOP && <Route path="/superadmin/studio/:sessionId/*" element={<StudioModePage />} />}
+          <Route path="/superadmin/studio/:sessionId/*" element={<StudioModePage />} />
           <Route path="/superadmin/agent/:sessionId" element={agentPage} />
           <Route path="/superadmin/agent/:sessionId/*" element={agentPage} />
           <Route path="/superadmin/agent-reviews" element={<AgentReviewsPage />} />
@@ -400,7 +400,7 @@ export function AppRouter() {
           <Route path="/c/project/:sessionId" element={<ProjectModePage />} />
           <Route path="/c/studio" element={<StudioModePage />} />
           <Route path="/c/studio/:sessionId" element={<StudioModePage />} />
-          {DESKTOP && <Route path="/c/studio/:sessionId/*" element={<StudioModePage />} />}
+          <Route path="/c/studio/:sessionId/*" element={<StudioModePage />} />
           <Route path="/c/agent/:sessionId" element={agentPage} />
           <Route path="/c/agent/:sessionId/*" element={agentPage} />
           <Route path="/c" element={agentPage} />

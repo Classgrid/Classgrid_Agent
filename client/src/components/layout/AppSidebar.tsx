@@ -195,6 +195,9 @@ export function AppSidebar({ role, user }: AppSidebarProps) {
   // Requests and Audit Logs under Library, and no main menu
   const studioEverywhere = DESKTOP_APP && import.meta.env.VITE_EDITOR !== "1" && role !== "super_admin" && !location.pathname.split("/").includes("project");
   const isStudio = location.pathname.split("/").includes("studio") || studioEverywhere;
+  // Website, chat.classgrid.in (Agent and Studio, not Project): the chat list on every page too, with Schedule, Library,
+  // Calls, Grids, Requests and Audit Logs in it and no back button, like the desktop app (owner, 2026-11-13)
+  const listEverywhere = studioEverywhere || (!DESKTOP_APP && import.meta.env.VITE_EDITOR !== "1" && role === "public_chat" && !location.pathname.split("/").includes("project"));
   // Settings (website and desktop app): its own sidebar, with its sections and a search box (SettingsNav)
   const onSettings = isSettingsPath(location.pathname) && import.meta.env.VITE_EDITOR !== "1";
   const [searchQuery, setSearchQuery] = useState("");
@@ -267,8 +270,8 @@ export function AppSidebar({ role, user }: AppSidebarProps) {
   useEffect(() => {
     setShowStorageMenu(location.pathname.includes("/storage"));
     // (desktop app: no Agent mode, so an /agent page such as Grids shows the main menu, not a chat list)
-    setShowAgentMenu((!DESKTOP_APP && location.pathname.includes("/agent") && !location.pathname.includes("/agent-reviews")) || location.pathname.split("/").includes("project") || location.pathname.split("/").includes("studio") || studioEverywhere);
-  }, [location.pathname, agentItem, studioEverywhere]);
+    setShowAgentMenu((!DESKTOP_APP && location.pathname.includes("/agent") && !location.pathname.includes("/agent-reviews")) || location.pathname.split("/").includes("project") || location.pathname.split("/").includes("studio") || listEverywhere);
+  }, [location.pathname, agentItem, listEverywhere]);
 
   // Auto-open Agent menu when first question is sent
   useEffect(() => {
@@ -322,7 +325,7 @@ export function AppSidebar({ role, user }: AppSidebarProps) {
   const gridsItem = gridsDashboard ? (config?.sections ?? []).flatMap((s) => s.items).find(isGridsItem) : undefined;
   // Desktop app, Studio (not the super admin's long menu): no back button; the other pages (Grids, Requests, Audit Logs)
   // are listed under Library instead
-  const studioPages = studioEverywhere
+  const studioPages = listEverywhere
     ? sectionsWithBadges.flatMap((s) => s.items).filter((item) => !isAgentItem(item.label) && item.label !== "Log out" && item.to)
     : null;
   // (the popup is in the sidebar, so it works on every page; the Grids page's own address is where it opens a chat)
