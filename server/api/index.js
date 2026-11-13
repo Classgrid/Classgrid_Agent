@@ -348,6 +348,7 @@ app.get("/", (req, res, next) => {
 const serverPublic = path.join(__dirname, "../public");
 app.get(["/favicon.ico", "/apple-touch-icon.png"], (req, res) => {
   res.set("Cache-Control", "public, max-age=86400");
+  res.set("Cross-Origin-Resource-Policy", "cross-origin"); // helmet's same-origin would stop claude.ai showing it
   res.sendFile(path.join(serverPublic, req.path.slice(1)));
 });
 
