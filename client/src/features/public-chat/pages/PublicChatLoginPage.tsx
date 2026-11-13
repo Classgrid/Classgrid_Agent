@@ -47,6 +47,22 @@ const RETURNING_GREETINGS = [
   { title: "Good to see you again!", subtitle: "Log in to access your chats, schedules and files in one place." },
 ];
 const FIRST_GREETING = { title: "Welcome to Classgrid", subtitle: "Sign in with your email to pick up where you left off." };
+// The desktop app's own sign-in (its screens are built with VITE_DESKTOP=1)
+const DESKTOP_GREETING = { title: "Sign in to the Classgrid app", subtitle: "Your chats, Studio, projects and files, on this computer and online." };
+// A sign-in started from an editor (features/auth/editorHandoff.ts): the page says which editor it is for
+const EDITOR_NAMES: Record<string, string> = {
+  "classgrid-code": "Classgrid Code", vscode: "VS Code", "vscode-insiders": "VS Code Insiders", cursor: "Cursor",
+  windsurf: "Windsurf", vscodium: "VSCodium", antigravity: "Antigravity", trae: "Trae", kiro: "Kiro",
+};
+function editorGreeting(): { title: string; subtitle: string } | null {
+  const req = pendingEditorSignIn();
+  if (!req) return null;
+  const scheme = req.callback.split("://")[0]?.toLowerCase() || "";
+  const name = EDITOR_NAMES[scheme] || "your editor";
+  return scheme === "classgrid-code"
+    ? { title: "Sign in to Classgrid Code", subtitle: "The Classgrid Agent then works beside your code: it reads and edits your project and runs commands in your terminal." }
+    : { title: `Sign in to Classgrid for ${name}`, subtitle: `The Classgrid Agent then works beside your code in ${name}: it reads and edits your project and runs commands in your terminal.` };
+}
 
 function LastUsedTag({ className = "" }: { className?: string }) {
   return (
@@ -341,7 +357,8 @@ function LoginContent() {
 
   // Read once per visit: the "Last used" tag and a first-time vs welcome-back greeting
   const [lastMethod] = useState<LoginMethod | null>(() => readLastLoginMethod());
-  const [greeting] = useState(() => (readLastLoginMethod() ? RETURNING_GREETINGS[Math.floor(Math.random() * RETURNING_GREETINGS.length)]! : FIRST_GREETING));
+  // (the editor's sign-in and the desktop app have their own words; the website greets a returning or a new visitor)
+  const [greeting] = useState(() => editorGreeting() || (import.meta.env.VITE_DESKTOP === "1" ? DESKTOP_GREETING : readLastLoginMethod() ? RETURNING_GREETINGS[Math.floor(Math.random() * RETURNING_GREETINGS.length)]! : FIRST_GREETING));
 
   // Opened from the MCP/OAuth consent page: the server sends every role straight back to it after login
   const consentNextParam = () => {
