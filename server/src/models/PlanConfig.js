@@ -146,7 +146,7 @@ export const DEFAULT_PLANS = [
         projects_max: -1, coding_runs_per_month: 300, premium_runs_per_month: 15, sandbox_hours_per_month: 25, sandbox_sessions: 1,
         uploads_per_window: 150, upload_max_mb: 200, library_storage_mb: 5120, devices_max: 10,
         priority: true, support_level: "named contact",
-        features_text: ["Classgrid AI for every student and teacher, not an ERP", "Priced per seat, billed yearly, from 50 seats", "One shared AI credit pool for the whole institution", "Admin controls, roles, branding and SSO", "A named contact and a 45-day free pilot"],
+        features_text: ["Classgrid AI for everyone in your institution, not an ERP", "Priced per seat, billed yearly, from 50 seats", "One shared AI credit pool for the whole institution", "Admin controls, roles, branding and SSO", "A named contact and a 45-day free pilot"],
     },
 ];
 
