@@ -2316,7 +2316,7 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
         } catch (e: any) {
           if (e?.response?.data?.code === "student_not_verified") {
             // Confirm the school email on Settings > Billing; the payment starts there right after
-            goToSettings("billing", `&student=verify&buy=${encodeURIComponent(wishKey)}&term=${wishTerm}${buyWish.back === "pricing" ? "&back=pricing" : ""}`);
+            goToSettings("billing", `&student=verify&student_plan=${encodeURIComponent(wishKey)}&student_term=${wishTerm}${buyWish.back === "pricing" ? "&student_back=pricing" : ""}`);
             return;
           }
           toast.error(e?.response?.data?.error || e?.message || "Could not start the payment. Please try again.");

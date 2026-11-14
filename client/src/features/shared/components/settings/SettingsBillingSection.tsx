@@ -152,7 +152,7 @@ function StudentDialog({ open, onClose, state, then }: { open: boolean; onClose:
     if (!open) return;
     setErr(""); setCode("");
     if (state?.pending_email) { setEmail(state.pending_email); setStep("code"); } else { setStep("email"); }
-  }, [open]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [open, state?.pending_email]); // eslint-disable-line react-hooks/exhaustive-deps
   const send = async () => {
     setErr("");
     try { await start.mutateAsync(email.trim()); setStep("code"); toast.success(`Code sent to ${email.trim()}`); }
@@ -234,10 +234,12 @@ export function SettingsBillingSection() {
   const [studentThen, setStudentThen] = useState<(() => void) | null>(null);
   // A plan picked at the student price before the school email was confirmed: confirm it here, then the payment starts
   useEffect(() => {
+    // (a purchase saved from the pricing page is done here, never again by the chat)
+    try { sessionStorage.removeItem("classgrid:buy-plan"); } catch { /* storage blocked */ }
     if (params.get("student") !== "verify") return;
-    const key = String(params.get("buy") || "").toLowerCase();
-    const term: "month" | "year" = params.get("term") === "year" ? "year" : "month";
-    const back = params.get("back") === "pricing" ? "pricing" as const : undefined;
+    const key = String(params.get("student_plan") || "").toLowerCase();
+    const term: "month" | "year" = params.get("student_term") === "year" ? "year" : "month";
+    const back = params.get("student_back") === "pricing" ? "pricing" as const : undefined;
     if (/^[a-z]{2,20}$/.test(key)) {
       setStudentThen(() => async () => {
         try { toast.message("Taking you to the payment page"); await openCheckout(await startPlanPayment(key, term, back, true)); }
@@ -245,7 +247,7 @@ export function SettingsBillingSection() {
       });
     }
     setStudentOpen(true);
-    const p = new URLSearchParams(params); ["student", "buy", "term", "back"].forEach((k) => p.delete(k)); setParams(p, { replace: true });
+    const p = new URLSearchParams(params); ["student", "student_plan", "student_term", "student_back"].forEach((k) => p.delete(k)); setParams(p, { replace: true });
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
   // From the automatic top-up email (?topup=500): the Buy credits popup opens with the amount filled in
   const topupStart = useMemo(() => { const v = parseInt(params.get("topup") || "", 10); return Number.isFinite(v) && v > 0 ? v : null; }, [params]);

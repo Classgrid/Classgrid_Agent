@@ -26,7 +26,11 @@ const billingUrl = () => `${String(process.env.CHAT_APP_URL || "https://chat.cla
 async function sendReminders(names) {
     const now = new Date();
     const soon = new Date(now.getTime() + 3 * DAY);
-    const users = await User.find({ "plan.id": { $in: PAID }, "plan.status": { $in: ["active", "past_due", null] }, "plan.expires_at": { $gt: now, $lte: soon } })
+    const users = await User.find({
+        "plan.id": { $in: PAID }, "plan.status": { $in: ["active", "past_due", null] }, "plan.expires_at": { $gt: now, $lte: soon },
+        // not those already reminded for this end date
+        $expr: { $ne: [{ $ifNull: ["$plan.reminder_sent_for", ""] }, { $dateToString: { date: "$plan.expires_at", format: "%Y-%m-%dT%H:%M:%S.%LZ" } }] },
+    })
         .select("_id email name plan").limit(500).lean();
     for (const u of users) {
         const expIso = new Date(u.plan.expires_at).toISOString();
@@ -53,7 +57,7 @@ async function sendReminders(names) {
 async function sendEnded(names) {
     const now = new Date();
     const since = new Date(now.getTime() - 3 * DAY);
-    const users = await User.find({ "plan.id": { $in: PAID }, "plan.expires_at": { $gte: since, $lte: now }, "plan.status": { $ne: "cancelled" } })
+    const users = await User.find({ "plan.id": { $in: PAID }, "plan.expires_at": { $gte: since, $lte: now }, "plan.status": { $nin: ["cancelled", "expired"] } })
         .select("_id email name plan").limit(500).lean();
     for (const u of users) {
         const expIso = new Date(u.plan.expires_at).toISOString();

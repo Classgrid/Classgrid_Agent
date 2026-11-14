@@ -125,8 +125,8 @@ export const updateGlobalAiConfig = async (req, res) => {
         }
         if (student_email_domains !== undefined) {
             const list = (Array.isArray(student_email_domains) ? student_email_domains : String(student_email_domains).split(/[\s,]+/))
-                .map((d) => String(d || "").trim().toLowerCase()).filter((d) => /^\.?[a-z0-9-]+(\.[a-z0-9-]+)*$/.test(d))
-                .map((d) => (d.startsWith(".") ? d : `.${d}`));
+                .map((d) => String(d || "").trim().toLowerCase()).filter((d) => /^\.?[a-z0-9-]+(\.[a-z0-9-]+)*$/.test(d));
+            // ".edu" = any address ending in .edu; "iitb.ac.in" = that school and its sub-addresses (cse.iitb.ac.in)
             config.student_email_domains = [...new Set(list)].slice(0, 200);
         }
         if (student_verification_months !== undefined) config.student_verification_months = Math.min(48, Math.max(1, Math.trunc(Number(student_verification_months)) || 12));

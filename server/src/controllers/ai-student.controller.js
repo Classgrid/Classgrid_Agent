@@ -6,7 +6,7 @@
 //   POST /api/ai/student/confirm  { code }   confirms it (five tries per code, the code lasts 15 minutes)
 import crypto from "crypto";
 import User from "../models/User.js";
-import GlobalAiConfig from "../models/GlobalAiConfig.js";
+import GlobalAiConfig, { STUDENT_EMAIL_DOMAINS_DEFAULT } from "../models/GlobalAiConfig.js";
 import { enqueueEmail } from "../services/email-queue.service.js";
 import { baseTemplate } from "../services/email-templates.service.js";
 import { dayKey } from "../services/plan-usage.service.js";
@@ -15,7 +15,6 @@ const CODE_TTL_MS = 15 * 60 * 1000;
 const RESEND_MS = 60 * 1000;
 const CODES_PER_DAY = 5;
 const MAX_TRIES = 5;
-const DEFAULT_DOMAINS = [".edu", ".edu.in", ".ac.in", ".ac.uk", ".edu.au"];
 
 const hashCode = (userId, code) => crypto.createHash("sha256").update(`${userId}:${code}`).digest("hex");
 const cleanEmail = (v) => String(v || "").trim().toLowerCase();
@@ -23,7 +22,7 @@ const looksLikeEmail = (v) => /^[^\s@]{1,64}@[a-z0-9-]+(\.[a-z0-9-]+)+$/.test(v)
 
 async function settings() {
     const cfg = await GlobalAiConfig.findOne({ key: "singleton" }).select("student_email_domains student_verification_months").lean().catch(() => null);
-    const domains = Array.isArray(cfg?.student_email_domains) && cfg.student_email_domains.length ? cfg.student_email_domains : DEFAULT_DOMAINS;
+    const domains = Array.isArray(cfg?.student_email_domains) && cfg.student_email_domains.length ? cfg.student_email_domains : STUDENT_EMAIL_DOMAINS_DEFAULT;
     const months = Number(cfg?.student_verification_months) > 0 ? Number(cfg.student_verification_months) : 12;
     return { domains: domains.map((d) => String(d).toLowerCase()), months };
 }
@@ -70,15 +69,27 @@ export const startStudentVerification = async (req, res) => {
         const taken = await User.findOne({ _id: { $ne: req.user._id }, "student_verification.email": email, "student_verification.verified_at": { $ne: null } }).select("_id").lean();
         if (taken) return res.status(409).json({ success: false, error: "This school email already confirmed another Classgrid account." });
 
-        const user = await User.findById(req.user._id).select("student_verification name email").lean();
-        const sv = user?.student_verification || {};
         const now = Date.now();
-        if (sv.code_sent_at && now - new Date(sv.code_sent_at).getTime() < RESEND_MS) {
-            return res.status(429).json({ success: false, error: "A code was just sent. Wait a minute before asking for a new one." });
-        }
         const today = dayKey();
+        // Claimed in one step (several requests at once get one code): not within a minute of the last code, and under
+        // five codes today
+        const before = await User.findOneAndUpdate(
+            { _id: req.user._id, $and: [
+                { $or: [{ "student_verification.code_sent_at": null }, { "student_verification.code_sent_at": { $lt: new Date(now - RESEND_MS) } }] },
+                { $or: [{ "student_verification.codes_day": { $ne: today } }, { "student_verification.codes_today": { $lt: CODES_PER_DAY } }] },
+            ] },
+            { $set: { "student_verification.code_sent_at": new Date(now) } },
+            { projection: { student_verification: 1, name: 1 }, returnDocument: "before" }
+        ).lean();
+        if (!before) {
+            const cur = await User.findById(req.user._id).select("student_verification").lean();
+            const s = cur?.student_verification || {};
+            const tooSoon = s.code_sent_at && now - new Date(s.code_sent_at).getTime() < RESEND_MS;
+            return res.status(429).json({ success: false, error: tooSoon ? "A code was just sent. Wait a minute before asking for a new one." : "Too many codes today. Try again tomorrow." });
+        }
+        const user = before;
+        const sv = user?.student_verification || {};
         const sentToday = sv.codes_day === today ? Number(sv.codes_today) || 0 : 0;
-        if (sentToday >= CODES_PER_DAY) return res.status(429).json({ success: false, error: "Too many codes today. Try again tomorrow." });
 
         const code = String(crypto.randomInt(100000, 1000000));
         await User.updateOne({ _id: req.user._id }, { $set: {
@@ -116,14 +127,18 @@ export const confirmStudentVerification = async (req, res) => {
         if (!sv.code_hash || !sv.pending_email || !sv.code_expires_at || new Date(sv.code_expires_at).getTime() < Date.now()) {
             return res.status(400).json({ success: false, error: "This code has run out. Ask for a new one." });
         }
-        if ((Number(sv.code_attempts) || 0) >= MAX_TRIES) {
-            return res.status(429).json({ success: false, error: "Too many wrong tries. Ask for a new code." });
-        }
+        // Each try is counted in one step before the code is compared, so tries sent all at once still stop at five
+        const counted = await User.findOneAndUpdate(
+            { _id: req.user._id, $or: [{ "student_verification.code_attempts": null }, { "student_verification.code_attempts": { $lt: MAX_TRIES } }] },
+            { $inc: { "student_verification.code_attempts": 1 } },
+            { projection: { _id: 1 } }
+        );
+        if (!counted) return res.status(429).json({ success: false, error: "Too many wrong tries. Ask for a new code." });
         const ok = crypto.timingSafeEqual(Buffer.from(hashCode(req.user._id, code)), Buffer.from(String(sv.code_hash)));
-        if (!ok) {
-            await User.updateOne({ _id: req.user._id }, { $inc: { "student_verification.code_attempts": 1 } });
-            return res.status(400).json({ success: false, error: "That code is not right. Check the email and try again." });
-        }
+        if (!ok) return res.status(400).json({ success: false, error: "That code is not right. Check the email and try again." });
+        // The same school email confirms one account only (checked again: two accounts may have asked at once)
+        const taken = await User.findOne({ _id: { $ne: req.user._id }, "student_verification.email": sv.pending_email, "student_verification.verified_at": { $ne: null } }).select("_id").lean();
+        if (taken) return res.status(409).json({ success: false, error: "This school email already confirmed another Classgrid account." });
         const { months } = await settings();
         const now = new Date();
         const expires = new Date(now); expires.setMonth(expires.getMonth() + months);

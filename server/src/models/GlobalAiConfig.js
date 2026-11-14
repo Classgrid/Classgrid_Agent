@@ -38,6 +38,9 @@
 
 import mongoose from "mongoose";
 
+// Student prices: the email endings that count as a school or university until the super admin changes them
+export const STUDENT_EMAIL_DOMAINS_DEFAULT = Object.freeze([".edu", ".edu.in", ".ac.in", ".ac.uk", ".edu.au", ".ac.nz", ".edu.sg", ".ac.jp", ".edu.pk", ".ac.bd", ".edu.np", ".ac.lk", ".ac.za", ".edu.my", ".ac.id", ".edu.ph", ".ac.ae", ".edu.cn", ".ac.kr", ".edu.br", ".edu.mx", ".edu.tr", ".ac.il"]);
+
 const globalAiConfigSchema = new mongoose.Schema(
     {
         key: {
@@ -78,7 +81,7 @@ const globalAiConfigSchema = new mongoose.Schema(
         extra_voice_reply_credits: { type: Number, default: 3000 },
         extra_voice_input_credits_per_minute: { type: Number, default: 2000 },
         // Student prices: the email endings that count as a school or university, and how long a verification lasts
-        student_email_domains: { type: [String], default: [".edu", ".edu.in", ".ac.in", ".ac.uk", ".edu.au", ".ac.nz", ".edu.sg", ".ac.jp", ".edu.pk", ".ac.bd", ".edu.np", ".ac.lk", ".ac.za", ".edu.my", ".ac.id", ".edu.ph", ".ac.ae", ".edu.cn", ".ac.kr", ".edu.br", ".edu.mx", ".edu.tr", ".ac.il"] },
+        student_email_domains: { type: [String], default: () => [...STUDENT_EMAIL_DOMAINS_DEFAULT] },
         student_verification_months: { type: Number, default: 12 },
         classgrid_custom_limits_enabled: { type: Boolean, default: false },
         classgrid_pro_pool_limit: { type: Number },
