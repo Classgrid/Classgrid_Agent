@@ -30,7 +30,7 @@
 // CLASSGRID USES CLOUDFLARE USAGE TO CALCULATE TOKENS, NOT GPT-TOKENIZER (WHICH IS ONLY A FALLBACK)
 import express from "express";
 import { isAuthenticated } from "../middleware/auth.middleware.js";
-import { createTopupOrder } from "../controllers/ai-credits-topup.controller.js";
+import { createTopupOrder, buyPlan } from "../controllers/ai-credits-topup.controller.js";
 import { generalLimiter } from "../middleware/rateLimiter.js";
 
 const router = express.Router();
@@ -42,6 +42,8 @@ const router = express.Router();
 
 // Initiates the top-up process and hands off to billing.classgrid.in
 router.post("/initiate", generalLimiter, isAuthenticated, createTopupOrder);
+// A plan (Pro, Max) for a month or a year, paid once; the same hand-off to billing.classgrid.in
+router.post("/plan", generalLimiter, isAuthenticated, buyPlan);
 
 // The plan mentions verifyTopupPayment, but the actual fulfillment is via razorpay-webhook.routes.js
 // We expose this as a polling endpoint for the frontend to check if their top-up succeeded.

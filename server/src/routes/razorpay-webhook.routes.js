@@ -618,6 +618,72 @@ router.post("/razorpay", express.raw({ type: "application/json" }), async (req, 
                     console.log(`[Razorpay Webhook] ✅ AI Top-Up successful! ${creditsAdded} credits added to User ${userId}`);
                 }
 
+                // ── A plan bought for a month or a year (ai-credits-topup.controller.js buyPlan) ──
+                else if (paymentType === "AI_PLAN") {
+                    const userId = notes?.user_id;
+                    const planKey = String(notes?.plan_key || "");
+                    const term = notes?.plan_term === "year" ? "year" : "month";
+                    if (!userId || !["pro", "max", "enterprise"].includes(planKey)) {
+                        console.error("[Razorpay Webhook] AI plan payment without user_id or plan_key");
+                        break;
+                    }
+                    const AiCreditTransaction = (await import("../models/AiCreditTransaction.js")).default;
+                    const existing = await AiCreditTransaction.findOne({ razorpay_payment_id: paymentId });
+                    if (existing) {
+                        console.log(`[Razorpay Webhook] Duplicate AI plan payment ${paymentId}, skipping`);
+                        break;
+                    }
+                    const User = (await import("../models/User.js")).default;
+                    const user = await User.findById(userId).populate("organization_id");
+                    if (!user) { console.error("[Razorpay Webhook] AI plan payment for an unknown user", userId); break; }
+                    // The new period starts now, or when the same plan's paid period ends (a renewal bought early)
+                    const now = new Date();
+                    const current = user.plan || {};
+                    const sameActive = current.id === planKey && current.status === "active" && current.expires_at && new Date(current.expires_at) > now && current.billing !== "granted";
+                    const from = sameActive ? new Date(current.expires_at) : now;
+                    const expiresAt = new Date(from.getTime() + (term === "year" ? 365 : 30) * 24 * 60 * 60 * 1000);
+                    try {
+                        await AiCreditTransaction.create({
+                            userId, orgId: organizationId, amount_inr: amountInr, credits_added: 0,
+                            razorpay_payment_id: paymentId, razorpay_order_id: orderId,
+                            type: "plan", status: "success",
+                            plan_key: planKey, plan_term: term, plan_period_start: from, plan_period_end: expiresAt,
+                            userName: user.name || "Unknown", userEmail: paymentEntity.email || user.email || "",
+                            userMobile: paymentEntity.contact || user.phoneNumber || "", userRole: user.role || "",
+                            organizationName: user.organization_id?.name || "", paymentMethod: paymentEntity.method || "",
+                            paymentTime: paymentEntity.created_at ? new Date(paymentEntity.created_at * 1000) : new Date(),
+                        });
+                    } catch (dupErr) {
+                        if (dupErr.code === 11000) { console.log(`[Razorpay Webhook] Concurrent duplicate AI plan payment ${paymentId}, skipping`); break; }
+                        throw dupErr;
+                    }
+                    await User.updateOne({ _id: userId }, { $set: { plan: {
+                        id: planKey, status: "active", billing: term === "year" ? "prepaid_yearly" : "manual_monthly",
+                        started_at: sameActive ? current.started_at || now : now, expires_at: expiresAt, cancel_at_period_end: false,
+                        last_payment_id: paymentId, source: "web", set_by: "", note: notes?.plan_student === "1" ? "student price" : "",
+                    } } });
+                    const PaymentOrder = (await import("../models/PaymentOrder.js")).default;
+                    await PaymentOrder.findOneAndUpdate({ providerOrderId: orderId }, { status: "PAID" });
+                    const PlatformTransaction = (await import("../models/PlatformTransaction.js")).default;
+                    await PlatformTransaction.create({
+                        organizationId: organizationId || null, organizationName: user.organization_id?.name || "",
+                        type: "razorpay", paymentFlow: "ai_plan", amount: amountInr, currency, status: "success",
+                        razorpayOrderId: orderId, razorpayPaymentId: paymentId,
+                        note: `Classgrid ${planKey} plan, ${term === "year" ? "1 year" : "1 month"}`,
+                        userName: user.name || "Unknown", userEmail: paymentEntity.email || user.email || "",
+                        userMobile: paymentEntity.contact || user.phoneNumber || "", userId, userRole: user.role || "",
+                        paymentMethod: paymentEntity.method || "",
+                        paymentTime: paymentEntity.created_at ? new Date(paymentEntity.created_at * 1000) : new Date(),
+                    }).catch((e) => console.error("[Razorpay Webhook] PlatformTransaction for the plan failed:", e.message));
+                    const io = req.app.get("io");
+                    if (io) {
+                        io.to(userId.toString()).emit("ai_token_update");
+                        io.to(userId.toString()).emit("plan_update", { plan: planKey });
+                        io.to("superadmin:ai_usage").emit("ai_usage_updated");
+                    }
+                    console.log(`[Razorpay Webhook] ✅ Plan ${planKey} (${term}) on user ${userId} until ${expiresAt.toISOString()}`);
+                }
+
                 else if (paymentType === "marketplace_order") {
                     console.log(`[Razorpay Webhook] ✅ Marketplace order received (No-op as marketplace is direct file access)`);
                 }

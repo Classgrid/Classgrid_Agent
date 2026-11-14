@@ -64,9 +64,14 @@ const aiCreditTransactionSchema = new mongoose.Schema(
         },
         type: {
             type: String,
-            enum: ["topup", "grant", "refund", "adjustment", "pause", "resume", "extend", "revoke"],
+            enum: ["topup", "grant", "refund", "adjustment", "pause", "resume", "extend", "revoke", "plan"],
             default: "topup",
         },
+        // A plan bought for a month or a year (type "plan")
+        plan_key: { type: String },
+        plan_term: { type: String },
+        plan_period_start: { type: Date },
+        plan_period_end: { type: Date },
         status: {
             type: String,
             enum: ["success", "failed", "pending", "paused", "revoked", "expired", "active"],

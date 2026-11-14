@@ -63,19 +63,14 @@ function checkoutUrl(rawToken) {
     return url.toString();
 }
 
-export const createTopupOrder = async (req, res) => {
+// One payment through the platform Razorpay account and billing.classgrid.in: a Razorpay order, the billing rows, an
+// OTP email, and the checkout link. Used by AI top-ups (payment_type AI_TOPUP) and plan purchases (AI_PLAN).
+async function startPlatformPayment(req, res, { amountInr, paymentType, label, notes: extraNotes = {}, otpKeyPrefix }) {
     let paymentOrder;
     let paymentAttempt;
     let handoff;
-    
     try {
-        const { amount_inr } = req.body;
         let organizationId = req.user.organization_id;
-
-        const minInr = topupMinFor(req.user.email);
-        if (!amount_inr || amount_inr < minInr || amount_inr > TOPUP_MAX_INR) {
-            return res.status(400).json({ success: false, error: `Amount must be between ₹${minInr} and ₹10,000` });
-        }
 
         // Fallback for Super Admins who don't have an organization_id attached directly
         let organization = null;
@@ -87,18 +82,19 @@ export const createTopupOrder = async (req, res) => {
                 organizationId = organization._id;
             }
         }
-            
+
         if (!organization) {
             return res.status(404).json({ success: false, error: "Organization not found" });
         }
 
         // Amount in paise
-        const amountPaise = amount_inr * 100;
+        const amountPaise = Math.round(amountInr * 100);
         const receiptId = `ai_${crypto.randomBytes(12).toString("hex")}`;
         const notes = {
-            payment_type: "AI_TOPUP",
+            payment_type: paymentType,
             organization_id: String(organizationId),
-            user_id: String(req.user._id)
+            user_id: String(req.user._id),
+            ...extraNotes,
         };
 
         // Create Razorpay Order on Platform Account
@@ -132,7 +128,7 @@ export const createTopupOrder = async (req, res) => {
 
         const otp = crypto.randomInt(100000, 1000000).toString();
         const rawToken = crypto.randomBytes(64).toString("base64url");
-        
+
         handoff = await BillingHandoff.create({
             token: hashHandoffToken(rawToken),
             email: billingEmail,
@@ -146,7 +142,7 @@ export const createTopupOrder = async (req, res) => {
             amountPaise: amountPaise,
             currency: "INR",
             razorpay_key_id: process.env.RAZORPAY_KEY_ID, // Platform Key
-            payment_type: "AI_TOPUP",
+            payment_type: paymentType,
             // From the desktop app (its screens are served at 127.0.0.1:47821): after paying, the browser opens the
             // app again with a classgrid:// link instead of loading the app's screens in a browser tab
             return_url: /^http:\/\/(127\.0\.0\.1|localhost):47821$/.test(String(req.headers.origin || "")) || req.body?.clientApp === "desktop"
@@ -154,7 +150,7 @@ export const createTopupOrder = async (req, res) => {
                 : `${req.headers.origin || "https://app.classgrid.in"}?ai_payment=success`,
             clientIp: req.ip,
             userAgent: String(req.headers["user-agent"] || "").slice(0, 300),
-            context: { label: "AI Credits Top-Up", payerName: payerName, phone: organization.billing_settings?.phone || "" },
+            context: { label, payerName: payerName, phone: organization.billing_settings?.phone || "" },
             expiresAt: new Date(Date.now() + HANDOFF_TTL_MS),
         });
 
@@ -163,13 +159,13 @@ export const createTopupOrder = async (req, res) => {
             to: handoff.email,
             userId: req.user._id,
             organizationId: organization._id,
-            idempotencyKey: `ai-topup-otp:${handoff._id}`,
+            idempotencyKey: `${otpKeyPrefix}:${handoff._id}`,
             data: {
                 payer_name: payerName,
                 otp,
                 otp_expiry_minutes: 10,
                 organization_name: organization.name,
-                fee_name: "AI Credits Top-Up",
+                fee_name: label,
                 amount: formatPaise(handoff.amountPaise, handoff.currency),
             },
         });
@@ -182,11 +178,46 @@ export const createTopupOrder = async (req, res) => {
             },
         });
     } catch (error) {
-        console.error("AI Top-Up Error:", error);
+        console.error(`${label} payment error:`, error);
         if (handoff) await BillingHandoff.findByIdAndUpdate(handoff._id, { expiresAt: new Date() }).catch(() => {});
         if (paymentAttempt) await PaymentAttempt.findByIdAndUpdate(paymentAttempt._id, { stage: PAYMENT_ATTEMPT_STAGE.FAILED }).catch(() => {});
         if (paymentOrder) await PaymentOrder.findByIdAndUpdate(paymentOrder._id, { status: "CANCELLED" }).catch(() => {});
-        
-        return res.status(500).json({ success: false, error: "Failed to initiate AI Top-Up" });
+
+        return res.status(500).json({ success: false, error: `Failed to start the ${label} payment` });
+    }
+}
+
+export const createTopupOrder = async (req, res) => {
+    const { amount_inr } = req.body;
+    const minInr = topupMinFor(req.user.email);
+    if (!amount_inr || amount_inr < minInr || amount_inr > TOPUP_MAX_INR) {
+        return res.status(400).json({ success: false, error: `Amount must be between ₹${minInr} and ₹10,000` });
+    }
+    return startPlatformPayment(req, res, { amountInr: amount_inr, paymentType: "AI_TOPUP", label: "AI Credits Top-Up", otpKeyPrefix: "ai-topup-otp" });
+};
+
+// A plan bought for one month or one year, paid once (no autopay): the webhook (AI_PLAN) puts the plan on the user.
+// Plans must be on, the plan must be public and not "coming soon", and its price for the term must be above zero.
+export const buyPlan = async (req, res) => {
+    try {
+        const { plansEnabled } = await import("../services/plan-limits.service.js");
+        const { default: PlanConfig } = await import("../models/PlanConfig.js");
+        if (!(await plansEnabled())) return res.status(400).json({ success: false, error: "Plans are not open yet." });
+        const key = String(req.body?.plan || "").toLowerCase();
+        const term = req.body?.term === "year" ? "year" : "month";
+        const student = req.body?.student === true;
+        const plan = await PlanConfig.findOne({ key }).lean();
+        if (!plan || !plan.is_public || plan.coming_soon || key === "free") return res.status(400).json({ success: false, error: "This plan can't be bought here." });
+        const priceField = (student ? "student_" : "") + (term === "year" ? "price_inr_yearly" : "price_inr_monthly");
+        const amountInr = Number(plan[priceField]);
+        if (!Number.isFinite(amountInr) || amountInr <= 0) return res.status(400).json({ success: false, error: "This plan has no price for that term." });
+        const label = `Classgrid ${plan.name} plan (${term === "year" ? "1 year" : "1 month"})`;
+        return startPlatformPayment(req, res, {
+            amountInr, paymentType: "AI_PLAN", label, otpKeyPrefix: "ai-plan-otp",
+            notes: { plan_key: key, plan_term: term, plan_student: student ? "1" : "0", amount_inr: String(amountInr) },
+        });
+    } catch (error) {
+        console.error("buyPlan error:", error);
+        return res.status(500).json({ success: false, error: "Failed to start the plan payment" });
     }
 };

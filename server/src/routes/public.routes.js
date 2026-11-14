@@ -87,6 +87,7 @@ import { resolveFeatureLimit, resolveResetPeriod } from "../services/ai-feature-
 import { FABLE_UNLOCK_INR } from "../services/model-access.service.js";
 import { TOPUP_MIN_INR, TOPUP_MAX_INR } from "../controllers/ai-credits-topup.controller.js";
 import { CHAT_PUBLIC_ORG_ID } from "../utils/chat-onboarding.js";
+import { planTable } from "../services/plan-limits.service.js";
 
 const router = express.Router();
 const TURNSTILE_VERIFY_URL = "https://challenges.cloudflare.com/turnstile/v0/siteverify";
@@ -514,10 +515,19 @@ const positiveNumber = (value) => (typeof value === "number" && Number.isFinite(
 router.get("/ai-pricing", async (req, res) => {
   try {
     if (!aiPricingCache || aiPricingCache.expiresAt <= Date.now()) {
-      const [globalConfig, chatOrg] = await Promise.all([
+      const [globalConfig, chatOrg, plansNow] = await Promise.all([
         GlobalAiConfig.findOne({ key: "singleton" }).lean(),
         Organization.findById(CHAT_PUBLIC_ORG_ID).select("ai_config").lean(),
+        planTable().catch(() => ({ enabled: false, plans: {} })),
       ]);
+      // The plans as the super admin set them (prices, taglines, pricing-page lines); only public ones
+      const plans = Object.values(plansNow.plans || {}).filter((p) => p.is_public !== false).sort((a, b) => (a.sort ?? 0) - (b.sort ?? 0)).map((p) => ({
+        key: p.key, name: p.name, tagline: p.tagline, comingSoon: !!p.coming_soon,
+        priceInrMonthly: p.price_inr_monthly, priceInrYearly: p.price_inr_yearly,
+        studentPriceInrMonthly: p.student_price_inr_monthly, studentPriceInrYearly: p.student_price_inr_yearly,
+        features: p.features_text || [],
+        limits: { everydayMessagesPerWindow: p.everyday_messages_per_window, everydayMessagesPerWeek: p.everyday_messages_per_week, windowHours: p.window_reset_unit === "hour" ? p.window_reset_value : null, claudeCreditsPerWeek: p.claude_credits_per_week, fableSharePercent: p.fable_share_percent, contextTokens: p.context_tokens, helpersPerChat: p.helpers_per_chat, imagesPerPeriod: p.images_per_period, imagesPeriod: `${p.images_reset_value} ${p.images_reset_unit}`, voiceRepliesPerDay: p.voice_replies_per_day, voiceInputMinutesPerDay: p.voice_input_minutes_per_day, callMinutesPerPeriod: p.call_minutes_per_period, callsPerDay: p.calls_per_day, callMaxMinutes: p.call_max_minutes, whatsappPerDay: p.whatsapp_per_day, projectsMax: p.projects_max, codingRunsPerMonth: p.coding_runs_per_month, premiumRunsPerMonth: p.premium_runs_per_month, sandboxHoursPerMonth: p.sandbox_hours_per_month, uploadMaxMb: p.upload_max_mb, libraryStorageMb: p.library_storage_mb, devicesMax: p.devices_max, support: p.support_level },
+      }));
       const config = globalConfig || {};
       const org = chatOrg || null;
       const tokens = resolveResetPeriod("tokens", org, config, CHAT_PUBLIC_ORG_ID);
@@ -536,6 +546,8 @@ router.get("/ai-pricing", async (req, res) => {
           topupMaxInr: TOPUP_MAX_INR,
           creditValidityDays: 30,
           premiumUnlockInr: FABLE_UNLOCK_INR,
+          plansEnabled: plansNow.enabled === true,
+          plans,
           updatedAt: new Date(config.updatedAt || Date.now()).toISOString(),
         },
       };

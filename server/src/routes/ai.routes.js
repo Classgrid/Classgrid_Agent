@@ -164,6 +164,38 @@ router.get("/model-access", isAuthenticated, async (req, res) => {
     }
 });
 
+// The plans (what each gives and costs) and the user's own plan with this week's counts
+router.get("/plans", isAuthenticated, async (req, res) => {
+    try {
+        const { planTable } = await import("../services/plan-limits.service.js");
+        const t = await planTable();
+        const plans = Object.values(t.plans).filter((p) => p.is_public !== false).sort((a, b) => (a.sort ?? 0) - (b.sort ?? 0))
+            .map((p) => ({ key: p.key, name: p.name, tagline: p.tagline, coming_soon: !!p.coming_soon, price_inr_monthly: p.price_inr_monthly, price_inr_yearly: p.price_inr_yearly, student_price_inr_monthly: p.student_price_inr_monthly, student_price_inr_yearly: p.student_price_inr_yearly, features_text: p.features_text || [] }));
+        res.json({ enabled: t.enabled, plans });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+router.get("/plan", isAuthenticated, async (req, res) => {
+    try {
+        const { planOf, planKeyOf, plansEnabled } = await import("../services/plan-limits.service.js");
+        const { weekCounters } = await import("../services/ai-credits.service.js");
+        const [enabled, plan] = await Promise.all([plansEnabled(), planOf(req.user)]);
+        const counters = enabled ? await weekCounters(req.user._id, req.user.ai_tokens) : null;
+        const mine = req.user.plan || {};
+        res.json({
+            enabled,
+            key: enabled ? planKeyOf(req.user) : "free",
+            name: plan?.name || "Free",
+            status: mine.status || "active", billing: mine.billing || "none", expires_at: mine.expires_at || null, started_at: mine.started_at || null,
+            limits: plan ? { tokens_per_window: plan.tokens_per_window, window_reset_value: plan.window_reset_value, window_reset_unit: plan.window_reset_unit, tokens_per_week: plan.tokens_per_week, claude_credits_per_week: plan.claude_credits_per_week, fable_share_percent: plan.fable_share_percent, images_per_period: plan.images_per_period, call_minutes_per_period: plan.call_minutes_per_period, projects_max: plan.projects_max, helpers_per_chat: plan.helpers_per_chat } : null,
+            week: counters ? { used: counters.week_used, claude_used: counters.claude_week_used, fable_used: counters.fable_week_used, ends_at: counters.weekEnd } : null,
+        });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
 // Token Usage Tracking
 router.get("/my-usage", isAuthenticated, getMyUsage);
 router.get("/org-usage", isAuthenticated, getOrgUsage);
