@@ -112,7 +112,7 @@ export const getUserAiDetail = async (req, res) => {
         }
 
         const user = await User.findById(userId)
-            .select("name email role ai_tokens organization_id profilePicture ai_image_free_weekly_used ai_image_reset_date plan")
+            .select("name email role ai_tokens organization_id profilePicture ai_image_free_weekly_used ai_image_reset_date plan student_verification")
             .populate("organization_id", "name")
             .lean();
 
@@ -245,6 +245,12 @@ export const getUserAiDetail = async (req, res) => {
                 name: user.name,
                 email: user.email,
                 role: user.role,
+                // The plan (the Plan card) and the student verification (never the code itself)
+                plan: user.plan && user.plan.id ? user.plan : { id: "free", status: "active", billing: "none" },
+                student: user.student_verification?.verified_at ? {
+                    email: user.student_verification.email || null, method: user.student_verification.method || "email",
+                    verified_at: user.student_verification.verified_at, expires_at: user.student_verification.expires_at || null,
+                } : null,
                 profilePicture: user.profilePicture || null,
                 orgName: user.organization_id?.name || "Classgrid (Platform Team)",
                 isBlocked: user.ai_tokens?.is_ai_blocked || false,

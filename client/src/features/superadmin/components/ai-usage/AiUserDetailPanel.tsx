@@ -373,7 +373,7 @@ export function AiUserDetailPanel({ userDetail }: { userDetail: any }) {
       </div>
 
       {/* The user's plan, set by hand */}
-      <UserPlanCard userId={String(userDetail._id || userDetail.id || userDetail.userId || "")} plan={userDetail.plan} />
+      <UserPlanCard userId={String(userDetail._id || userDetail.id || userDetail.userId || "")} plan={userDetail.plan} student={userDetail.student} />
 
       {/* Billing Summary */}
       <Card>

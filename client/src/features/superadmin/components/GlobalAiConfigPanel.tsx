@@ -51,6 +51,10 @@ export function GlobalAiConfigPanel({ grantCreditsNode }: { grantCreditsNode?: R
   const [extraVoiceReply, setExtraVoiceReply] = useState(3000);
   const [extraVoiceInput, setExtraVoiceInput] = useState(2000);
   const [openExtra, setOpenExtra] = useState(false);
+  // Student prices: the school email endings and how long a verification lasts
+  const [studentDomains, setStudentDomains] = useState("");
+  const [studentMonths, setStudentMonths] = useState(12);
+  const [openStudent, setOpenStudent] = useState(false);
   const [creditsPerInr, setCreditsPerInr] = useState(0);
   const [imageCost, setImageCost] = useState(0);
   const [tokenReset, setTokenReset] = useState<ResetPeriod>(toResetPeriod());
@@ -473,6 +477,51 @@ export function GlobalAiConfigPanel({ grantCreditsNode }: { grantCreditsNode?: R
                 onSuccess: () => toast.success(on ? "One free limit per computer is on" : "Every account has its own free limit now"),
               })}
             />
+          </div>
+
+          {/* Student prices: who counts as a student (Settings > Billing confirms a school email with a code) */}
+          <div className="p-5 border-t border-border flex items-start justify-between gap-4">
+            <div className="flex flex-col gap-1 min-w-0">
+              <span className="text-sm font-medium text-foreground">Student prices</span>
+              <p className="text-xs text-muted-foreground">
+                A user gets the student price of Pro and Max after confirming a school or university email ending in one of these, with a code sent to it.
+                It lasts {data?.student_verification_months ?? 12} months, then they confirm again. You can also confirm a student by hand on their page.
+              </p>
+              <p className="text-xs text-foreground mt-1 break-words">{(data?.student_email_domains || []).join("  ") || ".edu  .edu.in  .ac.in  .ac.uk  .edu.au"}</p>
+            </div>
+            <Dialog open={openStudent} onOpenChange={(open) => {
+              if (open) {
+                setStudentDomains((data?.student_email_domains || []).join("\n"));
+                setStudentMonths(data?.student_verification_months ?? 12);
+              }
+              setOpenStudent(open);
+            }}>
+              <DialogTrigger asChild>
+                <Button variant="outline" size="sm" className="shrink-0">Edit</Button>
+              </DialogTrigger>
+              <DialogContent className="sm:max-w-md">
+                <DialogHeader>
+                  <DialogTitle>Edit student prices</DialogTitle>
+                  <DialogDescription>Email endings that count as a school or university, one per line (for example .edu, .ac.in, .edu.in, or a whole address like iitb.ac.in). The prices themselves are set on each plan.</DialogDescription>
+                </DialogHeader>
+                <div className="flex flex-col gap-2 py-2">
+                  <Label htmlFor="student-domains" className="text-sm font-medium">Email endings</Label>
+                  <textarea id="student-domains" rows={8} value={studentDomains} onChange={(e) => setStudentDomains(e.target.value)} disabled={updateConfigMutation.isPending}
+                    className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm font-mono" />
+                  <Label htmlFor="student-months" className="text-sm font-medium mt-2">Months a confirmation lasts</Label>
+                  <Input id="student-months" type="number" min={1} max={48} value={studentMonths} onChange={(e) => setStudentMonths(Number(e.target.value))} disabled={updateConfigMutation.isPending} />
+                </div>
+                <DialogFooter>
+                  <Button type="button" disabled={updateConfigMutation.isPending} onClick={() => updateConfigMutation.mutate(
+                    { student_email_domains: studentDomains.split(/[\s,]+/).filter(Boolean), student_verification_months: studentMonths },
+                    { onSuccess: () => { toast.success("Student prices saved"); setOpenStudent(false); } }
+                  )}>
+                    {updateConfigMutation.isPending && <Spinner className="w-4 h-4 mr-2" />}
+                    Save changes
+                  </Button>
+                </DialogFooter>
+              </DialogContent>
+            </Dialog>
           </div>
         </div>
       </div>

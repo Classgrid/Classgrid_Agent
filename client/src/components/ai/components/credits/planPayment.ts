@@ -5,9 +5,10 @@ import { apiClient as api } from "@/lib/apiClient";
 export type Term = "month" | "year";
 const desktop = () => ((window as any).classgridDesktop?.isDesktop ? { clientApp: "desktop" } : {});
 
-/** Starts the payment of a plan for a month or a year and returns the checkout link */
-export async function startPlanPayment(key: string, term: Term, returnTo?: "pricing"): Promise<string> {
-  const data = (await api.post("/api/ai/topup/plan", { plan: key, term, ...(returnTo ? { returnTo } : {}), ...desktop() })).data?.data;
+/** Starts the payment of a plan for a month or a year (at the student price with `student`) and returns the checkout
+ * link. A student price without a confirmed school email fails with code "student_not_verified". */
+export async function startPlanPayment(key: string, term: Term, returnTo?: "pricing", student = false): Promise<string> {
+  const data = (await api.post("/api/ai/topup/plan", { plan: key, term, ...(returnTo ? { returnTo } : {}), ...(student ? { student: true } : {}), ...desktop() })).data?.data;
   if (!data?.checkout_url) throw new Error("Could not start the payment. Please try again.");
   return data.checkout_url as string;
 }

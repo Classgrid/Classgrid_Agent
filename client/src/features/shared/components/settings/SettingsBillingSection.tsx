@@ -9,9 +9,9 @@ import { Skeleton } from "@/components/marketing_ui/skeleton";
 import { Switch } from "@/components/marketing_ui/switch";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/marketing_ui/dialog";
 import { useMyAiHistory, useInitiateAiTopUp } from "@/components/ai/queries/useAiCredits";
-import { openCheckout } from "@/components/ai/components/credits/planPayment";
+import { openCheckout, startPlanPayment } from "@/components/ai/components/credits/planPayment";
 import { useCurrentUser } from "@/features/auth/queries/useCurrentUser";
-import { usePlanOverview, useAutoTopup, useSaveAutoTopup, n, inr, dayText, type AutoTopup } from "@/features/shared/queries/usePlanOverview";
+import { usePlanOverview, useAutoTopup, useSaveAutoTopup, useStudent, useStartStudent, useConfirmStudent, n, inr, dayText, type AutoTopup, type StudentState } from "@/features/shared/queries/usePlanOverview";
 
 const PRICING_URL = "https://classgrid.in/pricing";
 const TOPUP_MAX = 10000;
@@ -139,6 +139,74 @@ function AutoTopupDialog({ open, onClose, perInr, saved }: { open: boolean; onCl
   );
 }
 
+/** Student prices: confirm a school or university email with the code sent to it. `then` runs once confirmed (a plan
+ * picked at the student price on the pricing page starts its payment). */
+function StudentDialog({ open, onClose, state, then }: { open: boolean; onClose: () => void; state?: StudentState; then?: (() => void) | null }) {
+  const start = useStartStudent();
+  const confirm = useConfirmStudent();
+  const [email, setEmail] = useState("");
+  const [code, setCode] = useState("");
+  const [step, setStep] = useState<"email" | "code">("email");
+  const [err, setErr] = useState("");
+  useEffect(() => {
+    if (!open) return;
+    setErr(""); setCode("");
+    if (state?.pending_email) { setEmail(state.pending_email); setStep("code"); } else { setStep("email"); }
+  }, [open]); // eslint-disable-line react-hooks/exhaustive-deps
+  const send = async () => {
+    setErr("");
+    try { await start.mutateAsync(email.trim()); setStep("code"); toast.success(`Code sent to ${email.trim()}`); }
+    catch (e: any) { setErr(e?.response?.data?.error || "Couldn't send the code. Please try again."); }
+  };
+  const check = async () => {
+    setErr("");
+    try {
+      await confirm.mutateAsync(code.trim());
+      toast.success("You're confirmed as a student");
+      onClose();
+      then?.();
+    } catch (e: any) { setErr(e?.response?.data?.error || "Couldn't confirm the code. Please try again."); }
+  };
+  const examples = (state?.domains || [".edu", ".ac.in", ".edu.in"]).slice(0, 3).join(", ");
+  return (
+    <Dialog open={open} onOpenChange={(o) => { if (!o) onClose(); }}>
+      <DialogContent className="sm:max-w-[440px] p-6" overlayClassName="supports-backdrop-filter:backdrop-blur-none !backdrop-blur-none !bg-black/40">
+        <DialogHeader>
+          <DialogTitle className="text-lg font-semibold">Student prices</DialogTitle>
+          <DialogDescription>
+            {step === "email"
+              ? `Confirm your school or university email to get student prices on Pro and Max. It must end in a school domain, for example ${examples}.`
+              : `Enter the 6-digit code we sent to ${email.trim()}. It works for 15 minutes.`}
+          </DialogDescription>
+        </DialogHeader>
+        {step === "email" ? (
+          <div>
+            <div className="text-[13px] font-medium">School email</div>
+            <div className={`${field} mt-2`}>
+              <input data-no-ring="true" className={input} type="email" autoComplete="email" placeholder="you@college.ac.in" value={email} onChange={(e) => setEmail(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" && email.trim()) send(); }} autoFocus />
+            </div>
+          </div>
+        ) : (
+          <div>
+            <div className="text-[13px] font-medium">Code</div>
+            <div className={`${field} mt-2`}>
+              <input data-no-ring="true" className={`${input} tracking-[0.3em]`} inputMode="numeric" maxLength={6} placeholder="123456" value={code} onChange={(e) => setCode(e.target.value.replace(/\D/g, "").slice(0, 6))} onKeyDown={(e) => { if (e.key === "Enter" && code.length === 6) check(); }} autoFocus />
+            </div>
+            <button type="button" className="text-xs text-muted-foreground underline mt-2 cursor-pointer" onClick={() => { setStep("email"); setErr(""); }}>Use another email or send a new code</button>
+          </div>
+        )}
+        <div className="text-xs text-red-500 min-h-[14px]">{err}</div>
+        <DialogFooter>
+          <button type="button" className={btnGrey} onClick={onClose}>Cancel</button>
+          {step === "email"
+            ? <button type="button" className={btnWhite} disabled={!email.trim() || start.isPending} onClick={send}>{start.isPending ? "Sending" : "Send code"}</button>
+            : <button type="button" className={btnWhite} disabled={code.length !== 6 || confirm.isPending} onClick={check}>{confirm.isPending ? "Checking" : "Confirm"}</button>}
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 const typeText = (t: any) => {
   if (t.type === "plan") return `${(t.plan_key ? t.plan_key.charAt(0).toUpperCase() + t.plan_key.slice(1) : "Plan")} plan, ${t.plan_term === "year" ? "1 year" : "1 month"}`;
   if (t.type === "grant") return "Credits granted by Classgrid";
@@ -161,6 +229,24 @@ export function SettingsBillingSection() {
   const [tab, setTab] = useState<"overview" | "invoices">("overview");
   const [buyOpen, setBuyOpen] = useState(false);
   const [autoOpen, setAutoOpen] = useState(false);
+  const { data: student } = useStudent();
+  const [studentOpen, setStudentOpen] = useState(false);
+  const [studentThen, setStudentThen] = useState<(() => void) | null>(null);
+  // A plan picked at the student price before the school email was confirmed: confirm it here, then the payment starts
+  useEffect(() => {
+    if (params.get("student") !== "verify") return;
+    const key = String(params.get("buy") || "").toLowerCase();
+    const term: "month" | "year" = params.get("term") === "year" ? "year" : "month";
+    const back = params.get("back") === "pricing" ? "pricing" as const : undefined;
+    if (/^[a-z]{2,20}$/.test(key)) {
+      setStudentThen(() => async () => {
+        try { toast.message("Taking you to the payment page"); await openCheckout(await startPlanPayment(key, term, back, true)); }
+        catch (e: any) { toast.error(e?.response?.data?.error || "Could not start the payment. Please try again."); }
+      });
+    }
+    setStudentOpen(true);
+    const p = new URLSearchParams(params); ["student", "buy", "term", "back"].forEach((k) => p.delete(k)); setParams(p, { replace: true });
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
   // From the automatic top-up email (?topup=500): the Buy credits popup opens with the amount filled in
   const topupStart = useMemo(() => { const v = parseInt(params.get("topup") || "", 10); return Number.isFinite(v) && v > 0 ? v : null; }, [params]);
   useEffect(() => {
@@ -220,12 +306,15 @@ export function SettingsBillingSection() {
   const planName = data.enabled ? data.plan.name : "Free";
   const lim = data.plan.limits || {};
   const yearly = data.plan.billing === "prepaid_yearly";
-  const price = data.enabled && data.plan.key !== "free" ? Number(yearly ? lim.price_inr_yearly : lim.price_inr_monthly) : 0;
+  const studentPaid = !!data.plan.student_price;
+  const price = data.enabled && data.plan.key !== "free"
+    ? Number(studentPaid ? (yearly ? lim.student_price_inr_yearly : lim.student_price_inr_monthly) : (yearly ? lim.price_inr_yearly : lim.price_inr_monthly))
+    : 0;
   const priceLine = data.plan.key === "free" || !data.enabled
     ? "Free, no payment needed"
     : data.plan.billing === "granted"
       ? `Given to you${data.plan.expires_at ? ` · until ${dayText(data.plan.expires_at)}` : ""}`
-      : `${price > 0 ? `${inr(price)} per ${yearly ? "year" : "month"}` : planName}${data.plan.expires_at ? ` · paid until ${dayText(data.plan.expires_at)}` : ""}`;
+      : `${price > 0 ? `${inr(price)} per ${yearly ? "year" : "month"}${studentPaid ? " (student price)" : ""}` : planName}${data.plan.expires_at ? ` · paid until ${dayText(data.plan.expires_at)}` : ""}`;
   const rows = Array.isArray(history) ? history : [];
 
   const pill = (text: string, on: boolean) => <span className={`inline-flex items-center h-[22px] px-2.5 rounded-full text-xs font-medium ${on ? "bg-emerald-500/15 text-emerald-500" : "bg-black/[0.06] dark:bg-white/[0.09] text-muted-foreground"}`}>{text}</span>;
@@ -255,6 +344,19 @@ export function SettingsBillingSection() {
               </div>
               <div className="text-[28px] font-semibold mt-2">{planName}</div>
               <div className="flex justify-between gap-4 text-[13px] text-muted-foreground mt-3.5"><span>{priceLine}</span>{data.enabled && data.plan.key !== "free" && data.plan.billing !== "granted" && <span>Does not renew by itself</span>}</div>
+              <div className="flex justify-between gap-4 text-[13px] text-muted-foreground mt-1.5">
+                {student?.verified ? (
+                  <>
+                    <span className="flex items-center gap-2">{pill("Student", true)}<span>Student prices until {dayText(student.expires_at)}</span></span>
+                    <a className="underline hover:text-foreground" href={`${PRICING_URL}?student=1`} target="_blank" rel="noopener noreferrer">See student prices</a>
+                  </>
+                ) : (
+                  <>
+                    <span>{student?.expired ? "Your student confirmation has run out" : "Student? Pro and Max cost less"}</span>
+                    <button type="button" className="underline hover:text-foreground cursor-pointer" onClick={() => { setStudentThen(null); setStudentOpen(true); }}>{student?.expired ? "Confirm again" : "Confirm student email"}</button>
+                  </>
+                )}
+              </div>
             </div>
             <div className="rounded-xl border border-border bg-card p-5">
               <div className="flex items-center justify-between gap-2">
@@ -311,6 +413,7 @@ export function SettingsBillingSection() {
 
       <BuyCreditsDialog open={buyOpen} onClose={() => setBuyOpen(false)} perInr={perInr} start={topupStart} />
       <AutoTopupDialog open={autoOpen} onClose={() => setAutoOpen(false)} perInr={perInr} saved={auto} />
+      <StudentDialog open={studentOpen} onClose={() => setStudentOpen(false)} state={student} then={studentThen} />
     </div>
   );
 }

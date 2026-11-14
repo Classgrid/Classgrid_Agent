@@ -2293,7 +2293,7 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
 
     // Handle post-payment redirect
     const searchParams = new URLSearchParams(window.location.search);
-    let buyWish: { plan?: string; term?: string; back?: string } | null = null;
+    let buyWish: { plan?: string; term?: string; back?: string; student?: boolean } | null = null;
     try {
       const raw = sessionStorage.getItem("classgrid:buy-plan");
       if (raw) { buyWish = JSON.parse(raw); sessionStorage.removeItem("classgrid:buy-plan"); }
@@ -2302,7 +2302,7 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
       // From a plan's button on classgrid.in/pricing (main.tsx kept it through sign-in): the payment of that plan
       // starts right away, as if its button here was pressed
       if (searchParams.has("buy")) {
-        searchParams.delete("buy"); searchParams.delete("term"); searchParams.delete("back");
+        searchParams.delete("buy"); searchParams.delete("term"); searchParams.delete("back"); searchParams.delete("student");
         const rest = searchParams.toString();
         window.history.replaceState({}, '', window.location.pathname + (rest ? `?${rest}` : ""));
       }
@@ -2312,8 +2312,13 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
         try {
           const { startPlanPayment, openCheckout } = await import("./credits/planPayment");
           toast.message("Taking you to the payment page");
-          await openCheckout(await startPlanPayment(wishKey, wishTerm, buyWish.back === "pricing" ? "pricing" : undefined));
+          await openCheckout(await startPlanPayment(wishKey, wishTerm, buyWish.back === "pricing" ? "pricing" : undefined, !!buyWish.student));
         } catch (e: any) {
+          if (e?.response?.data?.code === "student_not_verified") {
+            // Confirm the school email on Settings > Billing; the payment starts there right after
+            goToSettings("billing", `&student=verify&buy=${encodeURIComponent(wishKey)}&term=${wishTerm}${buyWish.back === "pricing" ? "&back=pricing" : ""}`);
+            return;
+          }
           toast.error(e?.response?.data?.error || e?.message || "Could not start the payment. Please try again.");
         }
       })();

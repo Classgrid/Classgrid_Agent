@@ -11,7 +11,9 @@ import { Spinner } from "@/components/marketing_ui/spinner";
 
 const PLAN_NAMES: Record<string, string> = { free: "Free", pro: "Pro", max: "Max", enterprise: "Enterprise" };
 
-export function UserPlanCard({ userId, plan }: { userId: string; plan?: { id?: string; status?: string; billing?: string; expires_at?: string | null; note?: string; set_by?: string } }) {
+type StudentInfo = { email?: string | null; method?: string; verified_at?: string; expires_at?: string | null } | null;
+
+export function UserPlanCard({ userId, plan, student }: { userId: string; plan?: { id?: string; status?: string; billing?: string; expires_at?: string | null; note?: string; set_by?: string }; student?: StudentInfo }) {
   const queryClient = useQueryClient();
   const [planId, setPlanId] = useState(plan?.id || "free");
   const [expiresAt, setExpiresAt] = useState("");
@@ -28,6 +30,15 @@ export function UserPlanCard({ userId, plan }: { userId: string; plan?: { id?: s
     onSuccess: () => { toast.success(`Plan set to ${PLAN_NAMES[planId] || planId}`); queryClient.invalidateQueries({ queryKey: ["ai-usage-user"] }); },
     onError: (e: any) => toast.error(e?.response?.data?.message || "Could not set the plan"),
   });
+
+  // Student prices: confirmed by a school email, or by hand here (for a student without one)
+  const setStudent = useMutation({
+    mutationFn: async (verified: boolean) => (await api.put(`/api/super-admin/ai-usage/users/${userId}/student`, { verified })).data,
+    onSuccess: (_d, verified) => { toast.success(verified ? "Confirmed as a student" : "Student price removed"); queryClient.invalidateQueries({ queryKey: ["ai-usage-user"] }); },
+    onError: (e: any) => toast.error(e?.response?.data?.error || "Could not change the student price"),
+  });
+  const studentOn = !!student?.verified_at && !(student.expires_at && new Date(student.expires_at).getTime() < Date.now());
+  const day = (iso?: string | null) => (iso ? new Date(iso).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" }) : "");
 
   const current = plan?.id || "free";
   const expired = plan?.expires_at ? new Date(plan.expires_at).getTime() < Date.now() : false;
@@ -65,6 +76,20 @@ export function UserPlanCard({ userId, plan }: { userId: string; plan?: { id?: s
           <Button onClick={() => save.mutate()} disabled={save.isPending}>
             {save.isPending && <Spinner className="w-4 h-4 mr-2" />}
             Set plan
+          </Button>
+        </div>
+        <div className="flex items-center justify-between gap-3 pt-3 border-t border-border">
+          <div className="text-sm">
+            <div className="font-medium text-foreground">Student price</div>
+            <div className="text-xs text-muted-foreground">
+              {studentOn
+                ? `Confirmed${student?.method === "admin" ? " by hand" : student?.email ? ` with ${student.email}` : ""}, until ${day(student?.expires_at)}`
+                : "Not confirmed. The user confirms a school or university email in Settings > Billing, or you confirm them here."}
+            </div>
+          </div>
+          <Button variant="outline" size="sm" onClick={() => setStudent.mutate(!studentOn)} disabled={setStudent.isPending}>
+            {setStudent.isPending && <Spinner className="w-4 h-4 mr-2" />}
+            {studentOn ? "Remove" : "Confirm as student"}
           </Button>
         </div>
       </CardContent>
