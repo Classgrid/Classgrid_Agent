@@ -139,8 +139,8 @@ export const TOOL_GROUPS = [
     },
     {
         id: "image_media",
-        description: "Generate images and analyze images by URL.",
-        tools: ["generate_image", "analyze_image"],
+        description: "Generate images, edit a given image (image to image) and analyze images by URL.",
+        tools: ["generate_image", "edit_image", "analyze_image"],
         pattern: /\b(images?|photos?|pictures?|pics?|poster|banner|logo|thumbnail|illustrat\w*|draw\w*|art|screenshot|tasve?e?r|tasvir)\b|फोटो|तस्वीर|चित्र/i,
         // Any attachment: an image can arrive with an empty or unusual type (e.g. HEIC).
         onAttachment: true,

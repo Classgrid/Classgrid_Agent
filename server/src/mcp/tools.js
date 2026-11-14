@@ -327,7 +327,6 @@ export const getMcpTools = () => [
       required: ['prompt']
     }
   },
-  /*
   {
     name: 'edit_image',
     description: 'Edits an existing image based on a prompt (Image-to-Image). Use this when the user asks to modify, apply a style, or edit an image they uploaded. DO NOT use this to generate a new image from scratch.',
@@ -340,7 +339,6 @@ export const getMcpTools = () => [
       required: ['imageUrl', 'prompt']
     }
   },
-  */
   {
     name: 'run_code',
     description: 'Execute Python or JavaScript code securely in the AWS EC2 Docker Sandbox. Use this for calculations, data analysis, or executing scripts. CRITICAL: DO NOT use this tool to generate PDFs (no ReportLab). ALWAYS use the native generate_pdf tool instead. Files are in /data (this chat\x27s folder; /data/scratch is for test and trial files and is cleaned automatically). In a Project Mode chat, /data is the user\x27s project itself (the same files their code editor shows at /home/workspace/projects/<id>, which also works as a path) and commands start there.',

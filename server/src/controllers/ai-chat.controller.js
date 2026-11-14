@@ -4882,6 +4882,35 @@ You work on the user's own Windows computer through their Classgrid desktop app,
                             return `FAILED to generate image: ${e.message}`;
                         }
                     },
+                    // Image to image (ElevenLabs, the grant, 2026-11-14): the same endpoint as generate_image, with the picture
+                    edit_image: async (args) => {
+                        try {
+                            const port = process.env.PORT || 3000;
+                            const url = `http://127.0.0.1:${port}/api/ai/generate-image`;
+                            let token = '';
+                            if (req.headers.authorization) token = req.headers.authorization;
+                            else if (req.cookies && (req.cookies.token || req.cookies.jwt)) token = `Bearer ${req.cookies.token || req.cookies.jwt}`;
+                            const resData = await fetch(url, {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json', 'Authorization': token },
+                                body: JSON.stringify({ prompt: args.prompt, imageUrl: args.imageUrl, sessionId, userEmail, isIncognito, isInternalCall: true })
+                            });
+                            const text = await resData.text();
+                            let json;
+                            try { json = JSON.parse(text); } catch { return `FAILED to edit image: Non-JSON error response from internal server.`; }
+                            if (json.imageUrl) {
+                                generatedImages.push({ prompt: String(args.prompt || ""), url: json.imageUrl });
+                                if (!res.writableEnded) res.write(`data: ${JSON.stringify({ type: "generated_image", prompt: String(args.prompt || ""), url: json.imageUrl })}\n\n`);
+                                return `The edited image is ready and the app already shows it to the user at the top of your reply. Do not write its link or any marker; just tell the user what was changed.`;
+                            }
+                            if (json.code === 'IMAGE_LIMIT_REACHED') {
+                                return `IMAGE LIMIT REACHED. ${json.error}${req.user?.role === "super_admin" ? "" : " (share the reset time only if the user asks)"}\n\nDo NOT call edit_image or generate_image again in this answer.`;
+                            }
+                            return `FAILED to edit image: ${json.error || json.message || text}`;
+                        } catch (e) {
+                            return `FAILED to edit image: ${e.message}`;
+                        }
+                    },
 
                     get_timezone_time: async (args) => {
                         try {
@@ -8142,6 +8171,11 @@ export const generateImage = async (req, res) => {
     let imageTokenCharge = null;
     try {
         const { prompt, sessionId, isIncognito } = req.body;
+        // imageUrl: a picture the new one is made from (the chat's edit_image tool: an edit, a new style, a variation).
+        // Only an https link; it is fetched and handed to ElevenLabs with the prompt (Flux cannot do this, so there is
+        // no Cloudflare fallback for an edit).
+        const imageUrl = typeof req.body.imageUrl === "string" && /^https:\/\/\S+$/.test(req.body.imageUrl.trim()) ? req.body.imageUrl.trim() : "";
+        if (req.body.imageUrl && !imageUrl) return res.status(400).json({ error: "The picture to edit must be an https link." });
         // isInternalCall (the chat's generate_image tool) only skips saving to a chat session: the chat saves it itself.
         const isInternalCall = req.body.isInternalCall === true;
         // The image limit is checked and counted on the signed-in account, never on body.userEmail, and body flags
@@ -8243,9 +8277,10 @@ export const generateImage = async (req, res) => {
         const cfAccountId = process.env.CLOUDFLARE_ACCOUNT_ID;
         const cfToken = process.env.CLOUDFLARE_WORKERS_AI_TOKEN;
 
-        // Step 1: Prompt Upsampling (Enhancement) via LLM
+        // Step 1: Prompt Upsampling (Enhancement) via LLM (not for an edit: the picture is given, and the prompt says
+        // what to change in it, in the user's own words)
         let enhancedPrompt = prompt;
-        try {
+        if (!imageUrl) try {
             const llmUrl = `https://api.cloudflare.com/client/v4/accounts/${cfAccountId}/ai/run/@cf/deepseek-ai/deepseek-v4.1-flash-1017`;
             const llmRes = await cfAiFetch(llmUrl, {
                 method: 'POST',
@@ -8273,7 +8308,13 @@ export const generateImage = async (req, res) => {
 
         if (eleven.elevenLabsEnabled()) {
             try {
-                const made = await eleven.generateImage(enhancedPrompt);
+                let references = [];
+                if (imageUrl) {
+                    const src = await fetch(imageUrl, { signal: AbortSignal.timeout(30000) });
+                    if (!src.ok) throw new Error(`The picture to edit could not be fetched (${src.status})`);
+                    references = [{ buffer: Buffer.from(await src.arrayBuffer()), mimeType: src.headers.get("content-type") || "" }];
+                }
+                const made = await eleven.generateImage(imageUrl ? prompt : enhancedPrompt, { references });
                 imageBuffer = made.buffer;
                 imageMime = made.mimeType;
                 imageModel = `elevenlabs/${made.model}`;
@@ -8284,6 +8325,8 @@ export const generateImage = async (req, res) => {
                 console.error("[ElevenLabs Image] failed, using Cloudflare Flux:", err.message);
             }
         }
+
+        if (imageUrl && !success) throw lastError || new Error("The picture could not be edited.");
 
         for (let attempt = 1; attempt <= 3 && !success; attempt++) {
             try {

@@ -90,16 +90,27 @@ export async function speechToText(audio, { mimeType = "audio/webm", fileName, l
     return { text: String(first?.text || "").trim(), languageCode: first?.language_code || null, seconds: Number(json?.audio_duration_secs ?? first?.audio_duration_secs) || 0 };
 }
 
+const IMAGE_MIME_OK = new Set(["image/jpeg", "image/png", "image/webp", "image/heic", "image/heif"]);
+const MAX_REFERENCE_BYTES = 25 * 1024 * 1024;
+
 /**
  * A picture from a prompt: the generation is started, then asked for until it is done (a few seconds to a minute),
  * and the finished picture is downloaded. Returns { buffer, mimeType, model }.
  * `aspectRatio` like "1:1", "16:9", "9:16", "4:3", "3:4"; `quality` low | medium | high (GPT Image).
+ * `references`: pictures the new one is made from (image to image: an edit, a new style, a variation), each
+ * { buffer, mimeType } (JPEG, PNG, WebP or HEIC, up to 25 MB), at most 10.
  */
-export async function generateImage(prompt, { modelId = IMAGE_MODEL, aspectRatio = "1:1", quality = "medium", resolution = "1K", timeoutMs = 120000 } = {}) {
+export async function generateImage(prompt, { modelId = IMAGE_MODEL, aspectRatio = "1:1", quality = "medium", resolution = "1K", references = [], timeoutMs = 120000 } = {}) {
     const text = String(prompt || "").trim();
     if (!text) throw new ElevenLabsError("image: no prompt", { code: "no_prompt" });
     const isGpt = /^gpt-image/.test(modelId);
-    const body = { model_id: modelId, prompt: text, aspect_ratio: aspectRatio, ...(isGpt ? { quality } : {}), ...(/^(gpt-image-2|gemini-3)/.test(modelId) ? { resolution } : {}) };
+    const images = (Array.isArray(references) ? references : []).slice(0, 10).map((r) => {
+        const mime = String(r?.mimeType || "").split(";")[0].trim().toLowerCase();
+        if (!IMAGE_MIME_OK.has(mime)) throw new ElevenLabsError(`image: a reference picture must be JPEG, PNG, WebP or HEIC (got ${mime || "nothing"})`, { code: "bad_reference" });
+        if (!r.buffer?.length || r.buffer.length > MAX_REFERENCE_BYTES) throw new ElevenLabsError("image: a reference picture is empty or over 25 MB", { code: "bad_reference" });
+        return { type: "inline_base64", content_base64: Buffer.from(r.buffer).toString("base64"), mime_type: mime };
+    });
+    const body = { model_id: modelId, prompt: text, aspect_ratio: aspectRatio, ...(isGpt ? { quality } : {}), ...(/^(gpt-image-2|gemini-3)/.test(modelId) ? { resolution } : {}), ...(images.length ? { images } : {}) };
     let key = null;
     const created = await withKeys("image", (k) => { key = k; return fetch(`${BASE}/flows/image`, { method: "POST", headers: { "xi-api-key": k, "Content-Type": "application/json" }, body: JSON.stringify(body), signal: AbortSignal.timeout(30000) }); });
     const { id } = await created.json();
