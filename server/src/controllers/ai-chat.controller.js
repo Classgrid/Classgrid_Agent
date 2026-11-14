@@ -2181,6 +2181,25 @@ export const streamAskAi = async (req, res) => {
                 initialTitle = initialTitle.length > 50 ? initialTitle.substring(0, 47) + "..." : initialTitle;
             }
             
+            // Plans on: the plan's number of new chats per window and per week (a chat itself has no message limit)
+            {
+                const chatPlan = await planOf(req.user).catch(() => null);
+                if (chatPlan) {
+                    const perWindow = Number(chatPlan.chats_per_window), perWeek = Number(chatPlan.chats_per_week);
+                    const windowMs = Math.max(1000, (Number(chatPlan.window_reset_value) || 5) * ({ second: 1000, minute: 60000, hour: 3600000, day: 86400000, week: 604800000, month: 2592000000 }[chatPlan.window_reset_unit] || 3600000));
+                    const { chatsStartedSince } = await import("../services/ai-chat.service.js");
+                    const [inWindow, inWeek] = await Promise.all([
+                        perWindow >= 0 ? chatsStartedSince(userEmail, Date.now() - windowMs) : Promise.resolve(0),
+                        perWeek >= 0 ? chatsStartedSince(userEmail, Date.now() - 7 * 86400000) : Promise.resolve(0),
+                    ]);
+                    const hit = (perWindow >= 0 && inWindow >= perWindow) ? { n: perWindow, when: `${chatPlan.window_reset_value} ${chatPlan.window_reset_unit}${chatPlan.window_reset_value === 1 ? "" : "s"}` } : (perWeek >= 0 && inWeek >= perWeek) ? { n: perWeek, when: "week" } : null;
+                    if (hit) {
+                        res.writeHead(429, { "Content-Type": "application/json" });
+                        res.end(JSON.stringify({ error: `You've started all ${hit.n} new chats your ${chatPlan.name} plan allows per ${hit.when}. Keep going in one of your chats (a chat has no limit), or upgrade your plan.`, code: "chats_cap_reached", plan: chatPlan.key }));
+                        return;
+                    }
+                }
+            }
             const session = await createSession(userEmail, initialTitle, hideFromUser);
             if (session) {
                 sessionId = session.id;

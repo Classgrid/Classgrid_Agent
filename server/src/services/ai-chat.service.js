@@ -59,6 +59,17 @@ export async function createSession(userEmail, title, isIncognito = false) {
     return data;
 }
 
+/** How many chats the user started since `sinceMs` (the plan's chats per window / per week; incognito chats count too) */
+export async function chatsStartedSince(userEmail, sinceMs) {
+    const { count, error } = await primarySupabaseClient
+        .from('ai_chat_sessions')
+        .select('id', { count: 'exact', head: true })
+        .eq('user_email', userEmail)
+        .gte('created_at', new Date(sinceMs).toISOString());
+    if (error) { console.error("chatsStartedSince:", error.message); return 0; } // (a count that fails never blocks a chat)
+    return count || 0;
+}
+
 /**
  * Titles of the same user's other recent chats (newest first), so a new title doesn't repeat one of them.
  */

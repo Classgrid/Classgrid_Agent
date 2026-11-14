@@ -7,7 +7,7 @@ import { forgetPlans } from "../../services/plan-limits.service.js";
 
 const NUMBER_FIELDS = [
     "sort", "price_inr_monthly", "price_inr_yearly", "student_price_inr_monthly", "student_price_inr_yearly",
-    "tokens_per_window", "window_reset_value", "tokens_per_week", "everyday_messages_per_window", "everyday_messages_per_week",
+    "tokens_per_window", "window_reset_value", "tokens_per_week", "chats_per_window", "chats_per_week",
     "claude_credits_per_week", "fable_share_percent", "context_tokens", "helpers_per_chat",
     "images_per_period", "images_reset_value", "voice_replies_per_day", "voice_input_minutes_per_day",
     "call_minutes_per_period", "call_reset_value", "calls_per_day", "call_max_minutes",
