@@ -64,6 +64,8 @@ process.env.AWS_SDK_JS_SUPPRESS_MAINTENANCE_MODE_MESSAGE = "1";
 
 import util from "util";
 import "./env.js"; // 🔥 Load env first so MONGODB_URI is available
+// The Cloudflare daily Neuron cap: installs the gated fetch for Cloudflare AI before any module makes a client
+import "./src/services/cf-neuron-cap.service.js";
 import accessLogger from "./src/config/logger.js";
 
 

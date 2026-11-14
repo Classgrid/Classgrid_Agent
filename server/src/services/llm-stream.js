@@ -190,8 +190,8 @@ async function streamOneRound({ provider, messages, tools, temperature, maxToken
     signal?.addEventListener("abort", onOuterAbort, { once: true });
 
     try {
-        // (a Cloudflare address: the daily Neuron cap is checked first, cf-neuron-cap.service.js; the round's usage is
-        // logged to AiUsageLog by the caller, which counts it, so it is not counted here as well)
+        // (a Cloudflare address: the daily Neuron cap is checked first and the round's usage is counted after,
+        // cf-neuron-cap.service.js; any other address goes straight through)
         const response = await cfAiFetch(provider.url, {
             method: "POST",
             signal: controller.signal,
@@ -209,7 +209,7 @@ async function streamOneRound({ provider, messages, tools, temperature, maxToken
                 // A quick round: the model's thinking is switched off (each model has its own switch, noThinkingFor)
                 ...(quick ? noThinkingFor(provider.model) : {})
             })
-        }, { meter: false });
+        });
 
         if (!response.ok || !response.body) {
             const body = await response.text().catch(() => "");

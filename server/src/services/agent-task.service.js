@@ -80,7 +80,7 @@ async function smallModel(user, system, text) {
             messages: [{ role: "system", content: system }, { role: "user", content: text }],
         }),
         signal: AbortSignal.timeout(45000),
-    }, { meter: false }); // (its usage goes to AiUsageLog below, which counts it)
+    }); // (the daily Neuron cap is checked first and the usage counted after, cf-neuron-cap.service.js)
     const data = await res.json().catch(() => ({}));
     const usage = data.usage || {};
     if (usage.total_tokens || usage.prompt_tokens) {

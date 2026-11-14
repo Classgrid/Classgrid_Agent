@@ -78,9 +78,10 @@ const require = createRequire(import.meta.url);
 const pdf = require('pdf-parse');
 import axios from "axios";
 import OpenAI from "openai";
+import { cfAiFetch } from "../services/cf-neuron-cap.service.js";
 import { generateStudentPersona } from "../services/ai/persona.service.js";
 
-const openai = new OpenAI({ apiKey: process.env.CLOUDFLARE_WORKERS_AI_TOKEN, baseURL: `https://api.cloudflare.com/client/v4/accounts/${process.env.CLOUDFLARE_ACCOUNT_ID}/ai/v1` });
+const openai = new OpenAI({ apiKey: process.env.CLOUDFLARE_WORKERS_AI_TOKEN, baseURL: `https://api.cloudflare.com/client/v4/accounts/${process.env.CLOUDFLARE_ACCOUNT_ID}/ai/v1`, fetch: cfAiFetch }) // (fetch: the Cloudflare daily Neuron cap is checked before each request and the answer counted after);
 
 /**
  * indexMaterial

@@ -78,14 +78,14 @@ import accessLogger from '../config/logger.js';
 import { asyncContext } from '../utils/async-context.js';
 import AiUsageLog from '../models/AiUsageLog.js';
 import { getIO } from './socket.service.js';
-import { cfAiFetchGateOnly } from "./cf-neuron-cap.service.js";
+import { cfAiFetch } from "./cf-neuron-cap.service.js";
 
-const groq = new Groq({ apiKey: process.env.CLOUDFLARE_WORKERS_AI_TOKEN, baseURL: `https://api.cloudflare.com/client/v4/accounts/${process.env.CLOUDFLARE_ACCOUNT_ID}/ai/v1`, fetch: cfAiFetchGateOnly }); // (fetch: the Cloudflare daily Neuron cap is checked before each request; the answers are logged to AiUsageLog, which counts them)
+const groq = new Groq({ apiKey: process.env.CLOUDFLARE_WORKERS_AI_TOKEN, baseURL: `https://api.cloudflare.com/client/v4/accounts/${process.env.CLOUDFLARE_ACCOUNT_ID}/ai/v1`, fetch: cfAiFetch }); // (fetch: the Cloudflare daily Neuron cap is checked before each request and the answer counted after)
 
 const openai = new OpenAI({ 
     apiKey: process.env.CLOUDFLARE_WORKERS_AI_TOKEN, 
     baseURL: `https://api.cloudflare.com/client/v4/accounts/${process.env.CLOUDFLARE_ACCOUNT_ID}/ai/v1`,
-    fetch: cfAiFetchGateOnly 
+    fetch: cfAiFetch
 });
 
 const SYSTEM_PROMPT = () => {

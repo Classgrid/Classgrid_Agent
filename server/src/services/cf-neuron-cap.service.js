@@ -1,15 +1,20 @@
 // Cloudflare Workers AI: a daily Neuron cap for the whole account, and the meter behind it (owner, 2026-11-13).
 //
 // From 2026-12-01 Cloudflare bills Workers AI above 10,000 Neurons a day (every model of the account together: chat,
-// voice to text, text to speech, images, embeddings). The super admin's Global AI Config has a switch and a cap: with
-// the switch on, once today's Neurons (UTC day, like Cloudflare's) reach the cap, every Cloudflare model is refused
-// until midnight UTC; the chat falls back to its non-Cloudflare models where it has them. With the switch off nothing
-// is refused, but the meter still counts, so the super admin sees what a day costs.
+// voice to text, text to speech, images, embeddings). The super admin's Global AI Config has a switch: with the switch
+// on, no request goes to Cloudflare once today's Neurons (UTC day, like Cloudflare's) plus what that request is
+// expected to cost would pass the cap; every Cloudflare model is refused until midnight UTC, and the chat falls back
+// to its non-Cloudflare models where it has them. With the switch off nothing is refused, but the meter still counts,
+// so the super admin sees what a day costs.
 //
 // Neurons are counted here from Cloudflare's own price list (developers.cloudflare.com/workers-ai/platform/pricing):
-// text models by tokens, Whisper by audio minutes, Aura by characters, Flux by tiles and steps. Every request to
-// Cloudflare AI goes through cfAiFetch() (or, where a shared client makes the request, through assertCloudflareAiAllowed
-// and the AiUsageLog meter), so the count and the cap cover all of them.
+// text models by tokens, Whisper by audio minutes, Aura by characters, Flux by tiles and steps.
+//
+// Every request to Cloudflare AI goes through cfAiFetch(): this module also installs it as the process's fetch for
+// Cloudflare AI addresses (globalThis.fetch), so the SDK clients (openai, groq-sdk), the @classgrid/ai client and any
+// plain fetch() are gated and counted too, once each, without every call site having to remember it. Nothing is
+// counted twice: cfAiFetch sends with the fetch that was there before it was installed. (owner, 2026-11-14: the cap
+// was untested; no request may ever slip past it, and a count that cannot be read refuses rather than lets through.)
 import redis from "../config/redis.js";
 import GlobalAiConfig from "../models/GlobalAiConfig.js";
 
@@ -20,6 +25,8 @@ export const SAFETY_MARGIN = 500;
 export const DEFAULT_CAP = FREE_NEURONS_PER_DAY - SAFETY_MARGIN;
 const CONFIG_TTL_MS = 15000;
 const KEEP_DAYS = 10;
+// What a text request is expected to answer with, for the check before it is sent (its real usage is counted after)
+const ASSUMED_OUTPUT_TOKENS = 1024;
 
 // Neurons per model: per million input / cached-input / output tokens, or per unit (minute, 1k characters, image)
 const PER_M_TOKENS = {
@@ -60,12 +67,16 @@ const PER_1K_CHARS = { "@cf/deepgram/aura-2-en": 2727.27, "@cf/deepgram/aura-2-e
 // Flux: schnell by 512x512 tiles and steps; klein 9B by the first megapixel (1024x1024) and the next ones
 const FLUX_SCHNELL = { tile: 4.8, step: 9.6, defaultSteps: 4 };
 const FLUX_KLEIN_9B = { firstMp: 1363.64, nextMp: 181.82 };
-// A text model that is not in the list is counted like DeepSeek V4.1 Flash, the main chat model
-const UNKNOWN_TEXT = PER_M_TOKENS["@cf/deepseek-ai/deepseek-v4.1-flash-1017"];
+// A text model that is not in the list is counted like DeepSeek V4 Pro, the dearest chat model (an unknown model
+// must never be counted too low)
+const UNKNOWN_TEXT = PER_M_TOKENS["@cf/deepseek-ai/deepseek-v4-pro-0813"];
+const WAV_BYTES_PER_SECOND = 16000; // (16 kHz 16-bit mono WAV, what the voice features upload)
 
 export class CfNeuronCapError extends Error {
-    constructor(used, cap) {
-        super(`Cloudflare AI is paused for today: ${Math.round(used)} of ${cap} Neurons used (the cap in Global AI Config; it resets at 00:00 UTC)`);
+    constructor(used, cap, reason) {
+        super(reason === "unreadable"
+            ? "Cloudflare AI is paused: today's Neuron count could not be read, so nothing is sent to Cloudflare while the daily cap is on"
+            : `Cloudflare AI is paused for today: ${Math.round(used)} of ${cap} Neurons used (the cap in Global AI Config; it resets at 00:00 UTC)`);
         this.name = "CfNeuronCapError";
         this.code = "cf_neuron_cap";
         this.status = 429;
@@ -94,8 +105,9 @@ const totalKey = (day) => `cf:neurons:${day}`;
 const modelsKey = (day) => `cf:neurons:${day}:models`;
 const requestsKey = (day) => `cf:neurons:${day}:requests`;
 
+/** Today's Neurons so far. Throws when Redis cannot answer: the gate then refuses (it never guesses zero). */
 export async function usedToday(day = utcDay()) {
-    try { return Number(await redis.get(totalKey(day))) || 0; } catch { return 0; }
+    return Number(await redis.get(totalKey(day))) || 0;
 }
 export async function usageToday(day = utcDay()) {
     const out = { day, used: 0, byModel: [] };
@@ -142,29 +154,72 @@ export function neuronsForImage(model, { width = 1024, height = 1024, steps } = 
     const tiles = Math.ceil(w / 512) * Math.ceil(h / 512);
     return tiles * FLUX_SCHNELL.tile + (Number(steps) || FLUX_SCHNELL.defaultSteps) * FLUX_SCHNELL.step;
 }
-/** Counts a text answer (also used by the AiUsageLog meter) */
+/** Counts a text answer from its usage */
 export const meterText = (model, usage) => addNeurons(model, neuronsForText(model, {
     promptTokens: usage?.prompt_tokens ?? usage?.promptTokens,
     cachedTokens: usage?.prompt_tokens_details?.cached_tokens ?? usage?.cached_tokens ?? usage?.cachedTokens,
     completionTokens: usage?.completion_tokens ?? usage?.completionTokens,
 }));
 
+const kindOf = (model) => PER_1K_CHARS[model] ? "speech" : /flux/.test(model) ? "image" : PER_AUDIO_MINUTE[model] ? "audio" : "text";
+const bodyBytes = (init) => Number(init?.body?.byteLength ?? init?.body?.size ?? init?.body?.length) || 0;
+const requestText = (body) => {
+    if (!body) return "";
+    if (Array.isArray(body.messages)) return JSON.stringify(body.messages);
+    const t = body.text ?? body.input ?? body.prompt ?? "";
+    return Array.isArray(t) ? t.join(" ") : String(t || "");
+};
+/**
+ * What a request is expected to cost, before it is sent: Aura by its text, Flux by its size, Whisper by the upload's
+ * length, a text model by its prompt (four characters to a token) plus the answer it may write (max_tokens, at most
+ * ASSUMED_OUTPUT_TOKENS). The gate refuses the request when today's count plus this would pass the cap.
+ */
+export function estimateRequestNeurons(model, body, init) {
+    switch (kindOf(model)) {
+        case "speech": return neuronsForSpeech(model, String(body?.text || "").length);
+        case "image": return neuronsForImage(model, { width: body?.width, height: body?.height, steps: body?.steps ?? body?.num_steps });
+        case "audio": return neuronsForAudio(model, bodyBytes(init) / WAV_BYTES_PER_SECOND);
+        default: {
+            const promptTokens = Math.ceil(requestText(body).length / 4);
+            const wanted = Number(body?.max_tokens ?? body?.max_completion_tokens) || ASSUMED_OUTPUT_TOKENS;
+            const r = PER_M_TOKENS[model] || UNKNOWN_TEXT;
+            const completionTokens = r.output ? Math.min(wanted, ASSUMED_OUTPUT_TOKENS) : 0;
+            return neuronsForText(model, { promptTokens, completionTokens });
+        }
+    }
+}
+
 // ── The gate ─────────────────────────────────────────────────────────────────────────────────────────────────────
-/** Throws CfNeuronCapError when the cap is on and today's Neurons have reached it */
-export async function assertCloudflareAiAllowed(model = "") {
+/**
+ * Throws CfNeuronCapError when the cap is on and today's Neurons plus `expected` (what the request is about to cost)
+ * would pass it, or when today's count cannot be read (Redis away): with the cap on, nothing is sent on a guess.
+ */
+export async function assertCloudflareAiAllowed(model = "", expected = 0) {
     const s = await capSettings();
     if (!s.enabled) return;
-    const used = await usedToday();
-    if (used >= s.cap) {
-        console.warn(`[cf-neurons] refused ${model || "a request"}: ${Math.round(used)} / ${s.cap} Neurons today`);
+    let used;
+    try {
+        used = await usedToday();
+    } catch (e) {
+        console.warn(`[cf-neurons] refused ${model || "a request"}: today's count could not be read (${e.message})`);
+        throw new CfNeuronCapError(0, s.cap, "unreadable");
+    }
+    const want = Number(expected) || 0;
+    if (used + want > s.cap) {
+        console.warn(`[cf-neurons] refused ${model || "a request"}: ${Math.round(used)} used + ${Math.round(want)} expected > ${s.cap} Neurons today`);
         throw new CfNeuronCapError(used, s.cap);
     }
 }
-/** For the shared LLM client: its provider list without the Cloudflare ones while the cap is reached */
+/** For the @classgrid/ai client's provider list: without the Cloudflare ones while the cap is reached (or unreadable) */
 export async function providersWithoutCappedCloudflare(providers) {
     const list = Array.isArray(providers) ? providers : [];
     const s = await capSettings();
-    if (!s.enabled || (await usedToday()) < s.cap) return list;
+    if (!s.enabled) return list;
+    try {
+        if ((await usedToday()) < s.cap) return list;
+    } catch (e) {
+        console.warn(`[cf-neurons] today's count could not be read (${e.message}): Cloudflare left out`);
+    }
     const kept = list.filter((p) => !isCloudflareAiUrl(p?.url));
     if (kept.length < list.length) console.warn(`[cf-neurons] the cap is reached: ${list.length - kept.length} Cloudflare provider(s) left out of this request`);
     return kept;
@@ -173,6 +228,7 @@ export async function providersWithoutCappedCloudflare(providers) {
 // ── cfAiFetch: fetch, with the gate before and the meter after, for every Cloudflare AI request ─────────────────
 const CF_AI_RE = /^https:\/\/api\.cloudflare\.com\/client\/v4\/accounts\/[^/]+\/ai\/(run\/(.+?)(?:\?.*)?$|v1\/)/;
 export const isCloudflareAiUrl = (url) => CF_AI_RE.test(String(url || ""));
+const addressOf = (url) => typeof url === "string" ? url : String(url?.url || url?.href || url || "");
 const modelFromUrl = (url) => { const m = CF_AI_RE.exec(String(url || "")); return m && m[2] ? decodeURIComponent(m[2]) : null; };
 const parseBody = (init) => {
     try { return init && typeof init.body === "string" ? JSON.parse(init.body) : null; } catch { return null; }
@@ -189,48 +245,59 @@ const parseSseUsage = (text) => {
     return usage;
 };
 
+// The fetch that was there before this module installed its own (below): what cfAiFetch sends with
+const nativeFetch = globalThis.fetch;
+
 /**
  * fetch() for Cloudflare AI. Any other address goes straight through. For a Cloudflare AI address: the cap is checked
- * first (CfNeuronCapError when reached), and the answer is metered: text by its usage (JSON or SSE), Whisper by the
- * audio's duration (or the upload's size when the answer has none), Aura by the text's characters, Flux by the image.
- * `meter: false` for a request whose usage is written to AiUsageLog by the caller (that log meters it, once).
+ * first, with what the request is expected to cost (CfNeuronCapError when it would pass the cap), and the answer is
+ * metered: text by its usage (JSON or SSE), Whisper by the audio's duration (or the upload's size when the answer has
+ * none), Aura by the text's characters, Flux by the image. An answer whose usage cannot be read (the stream was
+ * stopped, or the body was not JSON) is counted at the expected cost, so a request is never counted as free.
  */
-/** cfAiFetch for an SDK client whose answers are logged to AiUsageLog (the log counts them): the gate only */
-export const cfAiFetchGateOnly = (url, init) => cfAiFetch(url, init, { meter: false });
-export async function cfAiFetch(url, init = {}, { meter = true } = {}) {
-    const address = typeof url === "string" ? url : String(url?.url || url || "");
-    if (!isCloudflareAiUrl(address)) return fetch(url, init);
+export async function cfAiFetch(url, init = {}) {
+    const address = addressOf(url);
+    if (!isCloudflareAiUrl(address)) return nativeFetch(url, init);
     const body = parseBody(init);
     const model = modelFromUrl(address) || body?.model || "";
-    await assertCloudflareAiAllowed(model);
-    const response = await fetch(url, init);
-    if (!meter || !response.ok) return response;
+    const expected = estimateRequestNeurons(model, body, init);
+    await assertCloudflareAiAllowed(model, expected);
+    const response = await nativeFetch(url, init);
+    if (!response.ok) return response;
     try {
-        if (PER_1K_CHARS[model]) {
-            addNeurons(model, neuronsForSpeech(model, String(body?.text || "").length));
-        } else if (/flux/.test(model)) {
-            addNeurons(model, neuronsForImage(model, { width: body?.width, height: body?.height, steps: body?.steps ?? body?.num_steps }));
-        } else if (PER_AUDIO_MINUTE[model]) {
-            const bytes = init?.body?.byteLength ?? init?.body?.length ?? 0;
-            response.clone().json().then((j) => {
-                const r = j?.result || {};
-                const seconds = Number(r.transcription_info?.duration) || Number(r.segments?.at?.(-1)?.end) || (r.words?.length ? Number(r.words.at(-1)?.end) : 0) || bytes / 16000; // (16 kB/s is 16 kHz 16-bit mono WAV)
-                addNeurons(model, neuronsForAudio(model, seconds));
-            }).catch(() => addNeurons(model, neuronsForAudio(model, bytes / 16000)));
-        } else {
-            const type = response.headers.get("content-type") || "";
-            const clone = response.clone();
-            (type.includes("text/event-stream") ? clone.text().then(parseSseUsage) : clone.json().then((j) => j?.usage || j?.result?.usage || null))
-                .then((usage) => {
-                    if (usage) return meterText(model, usage);
-                    // No usage in the answer (embeddings): the request's text, four characters to a token
-                    const text = Array.isArray(body?.text) ? body.text.join(" ") : String(body?.text || body?.input || body?.prompt || "");
-                    if (text) return addNeurons(model, neuronsForText(model, { promptTokens: Math.ceil(text.length / 4) }));
-                })
-                .catch(() => {});
+        const counted = (n) => addNeurons(model, n);
+        switch (kindOf(model)) {
+            case "speech":
+            case "image":
+                counted(expected);
+                break;
+            case "audio": {
+                const bytes = bodyBytes(init);
+                response.clone().json().then((j) => {
+                    const r = j?.result || {};
+                    const seconds = Number(r.transcription_info?.duration) || Number(r.segments?.at?.(-1)?.end) || (r.words?.length ? Number(r.words.at(-1)?.end) : 0) || bytes / WAV_BYTES_PER_SECOND;
+                    counted(neuronsForAudio(model, seconds));
+                }).catch(() => counted(expected));
+                break;
+            }
+            default: {
+                const type = response.headers.get("content-type") || "";
+                const clone = response.clone();
+                (type.includes("text/event-stream") ? clone.text().then(parseSseUsage) : clone.json().then((j) => j?.usage || j?.result?.usage || null))
+                    .then((usage) => usage ? meterText(model, usage) : counted(expected))
+                    .catch(() => counted(expected));
+            }
         }
     } catch (e) {
         console.warn("[cf-neurons] could not meter:", e.message);
+        addNeurons(model, expected);
     }
     return response;
+}
+// Installed as the process's fetch: a Cloudflare AI request from anywhere (an SDK client, the @classgrid/ai client, a
+// plain fetch) is gated and counted; every other address goes to the fetch that was there before.
+if (!globalThis.fetch?.cfNeuronCap) {
+    const gatedFetch = (url, init) => isCloudflareAiUrl(addressOf(url)) ? cfAiFetch(url, init) : nativeFetch(url, init);
+    gatedFetch.cfNeuronCap = true;
+    globalThis.fetch = gatedFetch;
 }

@@ -94,9 +94,10 @@ import { createRequire } from 'module';
 const require = createRequire(import.meta.url);
 const pdfParse = require('pdf-parse');
 import { Groq } from "groq-sdk";
+import { cfAiFetch } from "../services/cf-neuron-cap.service.js";
 
 const router = express.Router();
-const groq = new Groq({ apiKey: process.env.CLOUDFLARE_WORKERS_AI_TOKEN, baseURL: `https://api.cloudflare.com/client/v4/accounts/${process.env.CLOUDFLARE_ACCOUNT_ID}/ai/v1` });
+const groq = new Groq({ apiKey: process.env.CLOUDFLARE_WORKERS_AI_TOKEN, baseURL: `https://api.cloudflare.com/client/v4/accounts/${process.env.CLOUDFLARE_ACCOUNT_ID}/ai/v1`, fetch: cfAiFetch }) // (fetch: the Cloudflare daily Neuron cap is checked before each request and the answer counted after);
 
 // Supabase Client — centralized via supabaseClient.js
 // getChatSb() is imported from config, no local createClient needed.
