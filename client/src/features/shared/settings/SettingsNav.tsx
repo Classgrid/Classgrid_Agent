@@ -34,6 +34,7 @@ export function SettingsNav() {
             <SidebarMenuButton
               isActive={s.id === section}
               onClick={() => go(s.id)}
+              tooltip={s.label}
               className="cursor-pointer"
               render={
                 <div className="flex items-center gap-3 w-full">

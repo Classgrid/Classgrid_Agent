@@ -141,13 +141,13 @@ export function SettingsUsageSection() {
             {hist.pages > 1 && (
               <div className="flex items-center justify-between px-4 py-3 border-t border-border">
                 <div className="flex items-center gap-1.5">
-                  <button type="button" aria-label="Previous page" disabled={page <= 1 || histLoading} onClick={() => setPage((p) => Math.max(1, p - 1))} className="h-8 w-9 rounded-lg border border-border flex items-center justify-center text-foreground disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer hover:bg-black/[0.04] dark:hover:bg-white/[0.06]"><ChevronLeft className="w-4 h-4" /></button>
-                  <button type="button" aria-label="Next page" disabled={page >= hist.pages || histLoading} onClick={() => setPage((p) => Math.min(hist.pages, p + 1))} className="h-8 w-9 rounded-lg border border-border flex items-center justify-center text-foreground disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer hover:bg-black/[0.04] dark:hover:bg-white/[0.06]"><ChevronRight className="w-4 h-4" /></button>
+                  <button type="button" aria-label="Previous page" title="Previous page" disabled={page <= 1 || histLoading} onClick={() => setPage((p) => Math.max(1, p - 1))} className="h-8 w-9 rounded-lg border border-border flex items-center justify-center text-foreground disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer hover:bg-black/[0.04] dark:hover:bg-white/[0.06]"><ChevronLeft className="w-4 h-4" /></button>
+                  <button type="button" aria-label="Next page" title="Next page" disabled={page >= hist.pages || histLoading} onClick={() => setPage((p) => Math.min(hist.pages, p + 1))} className="h-8 w-9 rounded-lg border border-border flex items-center justify-center text-foreground disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer hover:bg-black/[0.04] dark:hover:bg-white/[0.06]"><ChevronRight className="w-4 h-4" /></button>
                   <span className="text-xs text-muted-foreground ml-2">Page {page} of {hist.pages}</span>
                 </div>
                 <div className="flex items-center gap-2 text-xs text-muted-foreground">
                   <span>As of {asOf}</span>
-                  <button type="button" aria-label="Refresh" onClick={() => refetchHist()} className="h-7 w-7 rounded-md flex items-center justify-center hover:bg-black/[0.04] dark:hover:bg-white/[0.06] cursor-pointer"><RefreshCw className={`w-3.5 h-3.5 ${histLoading ? "animate-spin" : ""}`} /></button>
+                  <button type="button" aria-label="Refresh" title="Refresh" onClick={() => refetchHist()} className="h-7 w-7 rounded-md flex items-center justify-center hover:bg-black/[0.04] dark:hover:bg-white/[0.06] cursor-pointer"><RefreshCw className={`w-3.5 h-3.5 ${histLoading ? "animate-spin" : ""}`} /></button>
                 </div>
               </div>
             )}
