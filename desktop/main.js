@@ -480,7 +480,8 @@ async function handleDeepLink(link) {
     win.show();
     win.focus();
     const status = url.searchParams.get("ai_payment") === "failed" ? "failed" : "success";
-    win.webContents.executeJavaScript(`window.dispatchEvent(new CustomEvent("classgrid:payment", { detail: ${JSON.stringify(status)} }))`).catch(() => {});
+    const plan = String(url.searchParams.get("plan") || "").toLowerCase().replace(/[^a-z]/g, "").slice(0, 20); // a plan bought (pro, max): the app says Subscribed
+    win.webContents.executeJavaScript(`window.dispatchEvent(new CustomEvent("classgrid:payment", { detail: ${JSON.stringify(plan ? { status, plan } : status)} }))`).catch(() => {});
     return;
   }
   // classgrid://github-app: the Classgrid app was installed on GitHub in the browser; bring the app back (Project Mode

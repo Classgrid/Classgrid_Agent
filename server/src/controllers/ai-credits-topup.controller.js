@@ -145,8 +145,10 @@ async function startPlatformPayment(req, res, { amountInr, paymentType, label, n
             payment_type: paymentType,
             // From the desktop app (its screens are served at 127.0.0.1:47821): after paying, the browser opens the
             // app again with a classgrid:// link instead of loading the app's screens in a browser tab
-            return_url: /^http:\/\/(127\.0\.0\.1|localhost):47821$/.test(String(req.headers.origin || "")) || req.body?.clientApp === "desktop"
-                ? "classgrid://payment"
+            // The desktop app (its screens are served at 127.0.0.1:47821) and the Android app own the classgrid://
+            // scheme: after paying, the browser opens the app again (a plan adds its key so the app says Subscribed)
+            return_url: /^http:\/\/(127\.0\.0\.1|localhost):47821$/.test(String(req.headers.origin || "")) || ["desktop", "android", "mobile", "ios"].includes(String(req.body?.clientApp || ""))
+                ? `classgrid://payment?ai_payment=success${extraNotes.plan_key ? `&plan=${encodeURIComponent(extraNotes.plan_key)}` : ""}`
                 : (returnUrl || `${req.headers.origin || "https://app.classgrid.in"}?ai_payment=success`),
             clientIp: req.ip,
             userAgent: String(req.headers["user-agent"] || "").slice(0, 300),

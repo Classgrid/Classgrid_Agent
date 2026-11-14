@@ -240,6 +240,7 @@ type PageContext = {
 
 
 import { usePostHog } from 'posthog-js/react';
+import { useQueryClient } from "@tanstack/react-query";
 import { fetchWithRescue } from "@/lib/rescue";
 
 import { LOCAL_IMAGE_MISSING, jpegName, keepLocalImage, loadLocalImages, readAsDataUrl, sendsInline, shrinkForAi, showLocalImages } from "@/lib/desktopImages";
@@ -2271,6 +2272,7 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
   const [showGridPanel, setShowGridPanel] = useState(false);
   const [isAiHubOpen, setIsAiHubOpen] = useState(false);
   const [aiHubInitialTab, setAiHubInitialTab] = useState<string>("plugins");
+  const queryClient = useQueryClient(); // (the Plan page is read again after a payment)
   const aiHubQuiet = useRef(false);
 
   useEffect(() => {
@@ -2338,7 +2340,18 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
 
     // Desktop app: a top-up paid in the browser brings the app back with the result
     const onDesktopPayment = (e: Event) => {
-      const ok = (e as CustomEvent).detail !== "failed";
+      const detail = (e as CustomEvent).detail as string | { status?: string; plan?: string } | undefined;
+      const status = typeof detail === "string" ? detail : detail?.status || "success";
+      const paidPlan = typeof detail === "object" && detail?.plan ? String(detail.plan) : "";
+      const ok = status !== "failed";
+      if (ok && paidPlan) {
+        setAiHubInitialTab("plan");
+        setIsAiHubOpen(true);
+        queryClient.invalidateQueries({ queryKey: ["ai-plan-overview"] });
+        queryClient.invalidateQueries({ queryKey: ["my-ai-plan"] });
+        toast.success(`You're subscribed to ${paidPlan.charAt(0).toUpperCase() + paidPlan.slice(1)}. The receipt is in your email.`);
+        return;
+      }
       setAiHubInitialTab(ok ? "credits" : "upgrade");
       setIsAiHubOpen(true);
       if (ok) toast.success("Payment successful! AI Credits have been added to your account.");
