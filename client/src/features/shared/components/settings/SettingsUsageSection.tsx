@@ -74,7 +74,7 @@ export function SettingsUsageSection() {
           <H3>This period</H3>
           <Card>
             <Bar title="Images and photo edits" m={u.images} desc={resetOf(u.images)} />
-            <Bar title="Free WhatsApp call time" m={u.call_minutes} unit="minutes" desc={`After the free minutes a call is paid from your credits.${resetOf(u.call_minutes) ? ` ${resetOf(u.call_minutes).charAt(0).toUpperCase()}${resetOf(u.call_minutes).slice(1)}.` : ""}`} />
+            <Bar title="WhatsApp call time" m={u.call_minutes} unit="minutes" desc={`After these minutes a call is paid from your credits.${resetOf(u.call_minutes) ? ` ${resetOf(u.call_minutes).charAt(0).toUpperCase()}${resetOf(u.call_minutes).slice(1)}.` : ""}`} />
           </Card>
         </>
       )}
@@ -94,17 +94,23 @@ export function SettingsUsageSection() {
           <span className="text-sm text-foreground">Files</span>
           <span className="text-sm text-muted-foreground tabular-nums">{mbText(u.storage.files.mb)} · {n(u.storage.files.count)} file{u.storage.files.count === 1 ? "" : "s"}</span>
         </div>
-        <div className="flex items-center justify-between gap-6 px-5 py-3.5 border-b border-border">
+        <div className="flex items-center justify-between gap-6 px-5 py-3.5">
           <span className="text-sm text-foreground">Images</span>
           <span className="text-sm text-muted-foreground tabular-nums">{mbText(u.storage.images.mb)} · {n(u.storage.images.count)} in the Library{u.storage.generatedImages ? `, ${n(u.storage.generatedImages)} made in chats` : ""}</span>
         </div>
-        {u.projects && (
-          <div className="flex items-baseline justify-between gap-6 px-5 py-3.5">
-            <span className="text-sm font-medium text-foreground">Cloud projects</span>
-            <span className="text-sm text-foreground tabular-nums">{u.projects.limit === null || u.projects.limit < 0 ? `${n(u.projects.used)} · Unlimited` : `${n(u.projects.used)} of ${n(u.projects.limit)}`}</span>
-          </div>
-        )}
       </Card>
+
+      {u.projects && (
+        <>
+          <H3>Projects</H3>
+          <Card>
+            <div className="flex items-baseline justify-between gap-6 px-5 py-3.5">
+              <span className="text-sm font-medium text-foreground">Cloud projects</span>
+              <span className="text-sm text-foreground tabular-nums">{u.projects.limit === null || u.projects.limit < 0 ? `${n(u.projects.used)} · Unlimited` : `${n(u.projects.used)} of ${n(u.projects.limit)}`}</span>
+            </div>
+          </Card>
+        </>
+      )}
     </div>
   );
 }

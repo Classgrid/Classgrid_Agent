@@ -83,7 +83,7 @@ export function SettingsPlanSection() {
             <R t="Images and photo edits" v={`${limitText(L.images_per_period)} ${every(L.images_reset_value, L.images_reset_unit)}`} />
             <R t="Talking with the AI" v={`${limitText(L.voice_input_minutes_per_day, "minutes")} a day`} />
             <R t="Answers read aloud" v={`${limitText(L.voice_replies_per_day)} a day`} />
-            <R t="Free WhatsApp call time" v={`${limitText(L.call_minutes_per_period, "minutes")} ${every(L.call_reset_value, L.call_reset_unit)}`} />
+            <R t="WhatsApp call time" v={`${limitText(L.call_minutes_per_period, "minutes")} ${every(L.call_reset_value, L.call_reset_unit)}`} />
             <R t="WhatsApp calls in a day" v={`Up to ${limitText(L.calls_per_day)}`} />
             <R t="One call can last" v={`Up to ${n(L.call_max_minutes)} minutes`} />
             <R t="Cloud projects" v={limitText(L.projects_max)} />
