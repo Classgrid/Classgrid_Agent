@@ -2402,7 +2402,7 @@ You are currently talking to Nikhil Shinde (nikhil.shinde@classgrid.in), the CRE
             // chat's project was looked up while its history loaded, so the answer starts meanwhile)
             const linked = linkChatToProject(req.user._id, body.projectId, sessionId, body.clientApp === "desktop" ? body.deviceId : null, { website: fromWebsite, desktop: !fromWebsite && body.clientApp === "desktop" }).catch(() => {});
             if (!contextP) await linked;
-        } else if (sessionId && !isIncognito && !incognitoHere && !gridSender && body.appMode === "studio" && body.taskOrigin !== "whatsapp" && req.user?._id) {
+        } else if (sessionId && !isIncognito && !incognitoHere && !gridSender && body.appMode === "studio" && body.phone !== true && body.taskOrigin !== "whatsapp" && req.user?._id) {
             // Studio with no project open: the chat is kept in Studio's own chat list (not waited for)
             User.updateOne({ _id: req.user._id }, { $addToSet: { studio_chat_ids: sessionId } }).catch(() => {});
             await forgetChatScreenProject(sessionId);
@@ -2432,7 +2432,11 @@ You are currently talking to Nikhil Shinde (nikhil.shinde@classgrid.in), the CRE
         tailPrompt += projectContext; // (the editor notes change with every message)
         // The three modes of the app and the one the user is in now, so the AI knows what the user can see and do
         const appMode = ["agent", "project", "studio"].includes(body.appMode) ? body.appMode : null;
-        if (appMode && body.taskOrigin !== 'whatsapp') {
+        // The Android app (body.phone, owner 2026-11-14): one chat with every tool of Agent mode and Studio (the live
+        // browser too), sent as Studio with no project open; it has no mode switcher and no project screens
+        if (body.phone === true && appMode === "studio" && body.taskOrigin !== 'whatsapp') {
+            volatilePrompt += "\n\n--- WHERE THE USER IS ---\nThe user is using the Classgrid phone app (Android). It has one chat with every tool of Agent mode and Studio: web search, images, files, the cloud sandbox and terminal, the CDN, email, schedules, plugins and the live browser. There is no mode switcher, no project open and no code editor on the phone; projects are only viewed there. Do the work yourself with your tools, and keep answers easy to read on a small screen.";
+        } else if (appMode && body.taskOrigin !== 'whatsapp') {
             volatilePrompt += `
 
 --- CLASSGRID MODES ---
