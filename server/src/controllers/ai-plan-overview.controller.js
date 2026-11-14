@@ -145,21 +145,25 @@ export const getPlanOverview = async (req, res) => {
     }
 };
 
-// The Usage page's history (GET /api/ai/plan/usage-history?days=14): credits per day (India time) for the last days,
-// the totals, and the last 50 AI requests with their model and credits (from AiUsageLog)
+// The Usage page's history (GET /api/ai/plan/usage-history?days=14&page=1&limit=15): credits per day (India time)
+// for the last days, the totals, and the AI requests with their model and credits (from AiUsageLog), newest first,
+// one page at a time
 export const getUsageHistory = async (req, res) => {
     try {
         const days = Math.min(90, Math.max(1, parseInt(req.query.days, 10) || 14));
+        const limit = Math.min(50, Math.max(1, parseInt(req.query.limit, 10) || 15));
+        const page = Math.max(1, parseInt(req.query.page, 10) || 1);
         const since = new Date(Date.now() - days * 86400000);
         const match = { userId: req.user._id, createdAt: { $gte: since }, success: { $ne: false } };
-        const [perDay, events, totals] = await Promise.all([
+        const [perDay, events, totals, eventsTotal] = await Promise.all([
             AiUsageLog.aggregate([
                 { $match: match },
                 { $group: { _id: { $dateToString: { format: "%Y-%m-%d", date: "$createdAt", timezone: "Asia/Kolkata" } }, credits: { $sum: "$totalTokens" }, requests: { $sum: 1 } } },
                 { $sort: { _id: 1 } },
             ]),
-            AiUsageLog.find(match).sort({ createdAt: -1 }).limit(50).select("createdAt provider model feature totalTokens metadata").lean(),
+            AiUsageLog.find(match).sort({ createdAt: -1 }).skip((page - 1) * limit).limit(limit).select("createdAt provider model feature totalTokens metadata").lean(),
             AiUsageLog.aggregate([{ $match: match }, { $group: { _id: null, credits: { $sum: "$totalTokens" }, requests: { $sum: 1 } } }]),
+            AiUsageLog.countDocuments(match),
         ]);
         const byDay = new Map(perDay.map((d) => [d._id, d]));
         const list = [];
@@ -181,6 +185,7 @@ export const getUsageHistory = async (req, res) => {
             total: { credits: totals[0]?.credits || 0, requests: totals[0]?.requests || 0 },
             perDay: list,
             events: events.map((e) => ({ at: e.createdAt, model: e.model, provider: e.provider, what: what(e), credits: e.totalTokens || 0 })),
+            page, limit, eventsTotal, pages: Math.max(1, Math.ceil(eventsTotal / limit)), asOf: new Date().toISOString(),
         });
     } catch (err) {
         console.error("[usage history]", err);

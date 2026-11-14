@@ -2,6 +2,8 @@
 // top, the percent used on the right, the bar under it and one line under the bar saying what it counts and when
 // it resets. Then the usage history: credits per day and the last requests. No credits or buying here: that is
 // Settings > Billing.
+import { useState } from "react";
+import { ChevronLeft, ChevronRight, RefreshCw } from "lucide-react";
 import { Skeleton } from "@/components/marketing_ui/skeleton";
 import { usePlanOverview, useUsageHistory, whenText, inText, timeText, dayText, n, type Meter } from "@/features/shared/queries/usePlanOverview";
 import { MODEL_GROUPS } from "@/components/ai/components/ModelPicker";
@@ -48,7 +50,9 @@ function Bar({ name, m, line }: { name: string; m: Meter; line: string }) {
 
 export function SettingsUsageSection() {
   const { data, isLoading } = usePlanOverview();
-  const { data: hist } = useUsageHistory(14);
+  const [page, setPage] = useState(1);
+  const { data: hist, refetch: refetchHist, isFetching: histLoading } = useUsageHistory(14, page);
+  const asOf = hist?.asOf ? new Date(hist.asOf).toLocaleTimeString("en-IN", { hour: "numeric", minute: "2-digit", timeZone: "Asia/Kolkata" }) : "";
   if (isLoading || !data) {
     const row = (name: string, w: string) => (
       <div className="px-5 py-4 border-b border-border last:border-b-0">
@@ -117,7 +121,10 @@ export function SettingsUsageSection() {
             <div className="flex justify-between text-[11px] text-muted-foreground mt-1.5"><span>{dayText(hist.perDay[0]?.day)}</span><span>{dayText(hist.perDay[hist.perDay.length - 1]?.day)}</span></div>
           </div>
 
-          <div className="text-lg font-semibold text-foreground mt-8 mb-2">Usage events</div>
+          <div className="flex items-center justify-between mt-8 mb-2">
+            <div className="text-lg font-semibold text-foreground">Usage events</div>
+            <div className="text-xs text-muted-foreground">{n(hist.eventsTotal)} requests in {hist.days} days</div>
+          </div>
           <div className="rounded-xl border border-border bg-card overflow-x-auto">
             {hist.events.length ? (
               <table className="w-full text-sm">
@@ -130,6 +137,19 @@ export function SettingsUsageSection() {
               </table>
             ) : (
               <div className="p-8 text-center text-sm text-muted-foreground">No requests in the last {hist.days} days.</div>
+            )}
+            {hist.pages > 1 && (
+              <div className="flex items-center justify-between px-4 py-3 border-t border-border">
+                <div className="flex items-center gap-1.5">
+                  <button type="button" aria-label="Previous page" disabled={page <= 1 || histLoading} onClick={() => setPage((p) => Math.max(1, p - 1))} className="h-8 w-9 rounded-lg border border-border flex items-center justify-center text-foreground disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer hover:bg-black/[0.04] dark:hover:bg-white/[0.06]"><ChevronLeft className="w-4 h-4" /></button>
+                  <button type="button" aria-label="Next page" disabled={page >= hist.pages || histLoading} onClick={() => setPage((p) => Math.min(hist.pages, p + 1))} className="h-8 w-9 rounded-lg border border-border flex items-center justify-center text-foreground disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer hover:bg-black/[0.04] dark:hover:bg-white/[0.06]"><ChevronRight className="w-4 h-4" /></button>
+                  <span className="text-xs text-muted-foreground ml-2">Page {page} of {hist.pages}</span>
+                </div>
+                <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                  <span>As of {asOf}</span>
+                  <button type="button" aria-label="Refresh" onClick={() => refetchHist()} className="h-7 w-7 rounded-md flex items-center justify-center hover:bg-black/[0.04] dark:hover:bg-white/[0.06] cursor-pointer"><RefreshCw className={`w-3.5 h-3.5 ${histLoading ? "animate-spin" : ""}`} /></button>
+                </div>
+              </div>
             )}
           </div>
         </>

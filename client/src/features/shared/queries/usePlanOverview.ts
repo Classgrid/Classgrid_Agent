@@ -27,6 +27,7 @@ export type UsageHistory = {
   total: { credits: number; requests: number };
   perDay: { day: string; credits: number; requests: number }[];
   events: { at: string; model: string; provider: string; what: string; credits: number }[];
+  page: number; limit: number; eventsTotal: number; pages: number; asOf: string;
 };
 
 export type AutoTopup = { enabled: boolean; below_inr: number; amount_inr: number };
@@ -37,10 +38,11 @@ export const usePlanOverview = () => useQuery({
   staleTime: 15_000,
 });
 
-export const useUsageHistory = (days = 14) => useQuery({
-  queryKey: ["ai-usage-history", days],
-  queryFn: async () => (await api.get(`/api/ai/plan/usage-history?days=${days}`)).data as UsageHistory,
+export const useUsageHistory = (days = 14, page = 1) => useQuery({
+  queryKey: ["ai-usage-history", days, page],
+  queryFn: async () => (await api.get(`/api/ai/plan/usage-history?days=${days}&page=${page}&limit=15`)).data as UsageHistory,
   staleTime: 30_000,
+  placeholderData: (prev) => prev, // the table keeps its rows while the next page loads
 });
 
 export const useAutoTopup = () => useQuery({
