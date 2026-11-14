@@ -68,7 +68,7 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/comp
 import JSON5 from 'json5';
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 
-import { ArrowUp, BarChart3, Bot, Check, ClipboardList, Copy, CreditCard, ChevronRight, ArrowDown, File, FileImage, FileText, FileSpreadsheet, FileIcon, Globe2, HelpCircle, LayoutDashboard, MessageCircleMore, Paperclip, School, Search, Sparkles, Square, Mic, ThumbsDown, ThumbsUp, Trash2, UserRound, X, Plus, Pencil, Share, MoreHorizontal, Pin, Info, Lightbulb, MessageSquareWarning, AlertTriangle, OctagonAlert, Server, Mail, Calendar, HardDrive, Users, Video, Music, CornerDownRight, Layers, ListTodo, type LucideIcon } from "lucide-react";
+import { ArrowUp, BarChart3, Bot, Check, ClipboardList, Copy, CreditCard, ChevronRight, ArrowDown, File, FileImage, FileText, FileSpreadsheet, FileIcon, Globe2, HelpCircle, LayoutDashboard, MessageCircleMore, Paperclip, School, Search, Sparkles, Square, Mic, ThumbsDown, ThumbsUp, Trash2, Volume2, Loader2, UserRound, X, Plus, Pencil, Share, MoreHorizontal, Pin, Info, Lightbulb, MessageSquareWarning, AlertTriangle, OctagonAlert, Server, Mail, Calendar, HardDrive, Users, Video, Music, CornerDownRight, Layers, ListTodo, type LucideIcon } from "lucide-react";
 
 const CustomSlidersIcon = ({ className }: { className?: string }) => (
   <svg
@@ -959,8 +959,104 @@ function renderInlineText(rawText: string) {
   return nodes;
 }
 
+// The answer's words without markdown (copy, and the words the voice reads)
+function answerPlainText(content: string): string {
+  return content
+    .replace(/^#{1,6}\s+/gm, "")           // headings
+    .replace(/\*\*(.+?)\*\*/g, "$1")        // bold
+    .replace(/\*(.+?)\*/g, "$1")            // italic
+    .replace(/`([^`]+)`/g, "$1")            // inline code
+    .replace(/```[\s\S]*?```/g, "")          // code blocks
+    .replace(/\[([^\]]+)\]\([^)]+\)/g, "$1") // links
+    .replace(/^[\-\*]\s+/gm, "• ")          // bullets → clean bullet
+    .replace(/^\d+\.\s+/gm, (m) => m)       // keep numbered lists
+    .replace(/^>\s+/gm, "")                 // blockquotes
+    .replace(/\|[^\n]+\|/g, "")             // table rows
+    .replace(/^[\-:| ]+$/gm, "")            // table separators
+    .replace(/\n{3,}/g, "\n\n")             // collapse blank lines
+    .trim();
+}
+
+// Read aloud (owner, 2026-11-14): the speaker button beside the thumbs plays the answer in Classgrid's voice
+// (POST /api/ai/speak, ElevenLabs). Website only: not in the desktop app, not in Classgrid Code.
+const READ_ALOUD = import.meta.env.VITE_DESKTOP !== "1" && import.meta.env.VITE_EDITOR !== "1";
+let readingNow: { audio: HTMLAudioElement; stop: () => void } | null = null; // one answer plays at a time
+const readingCache = new Map<string, string>(); // messageId → audio URL, so a second listen costs nothing
+function stopReading() {
+  const r = readingNow;
+  readingNow = null;
+  if (!r) return;
+  r.audio.pause();
+  r.audio.src = "";
+  r.stop();
+}
+
 function MessageActions({ content, messageId, onReply, time }: { content: string; messageId: string, onReply?: () => void, time?: number }) {
   const [copied, setCopied] = useState(false);
+  const [reading, setReading] = useState<"idle" | "loading" | "playing">("idle");
+  const readAbort = useRef<AbortController | null>(null);
+  const readingMine = useRef(false);
+
+  useEffect(() => () => { // leaving the chat stops this answer's reading
+    readAbort.current?.abort();
+    if (readingMine.current) stopReading();
+  }, []);
+
+  async function handleReadAloud() {
+    if (reading !== "idle") { // reading (or fetching) this answer: stop it
+      readAbort.current?.abort();
+      readAbort.current = null;
+      stopReading();
+      setReading("idle");
+      readingMine.current = false;
+      return;
+    }
+    stopReading(); // another answer was playing
+    const abort = new AbortController();
+    readAbort.current = abort;
+    setReading("loading");
+    try {
+      let url = readingCache.get(messageId);
+      if (!url) {
+        const endpointPrefix = import.meta.env.VITE_API_URL || "https://api.classgrid.in";
+        const token = localStorage.getItem("token");
+        const res = await fetchWithRescue(`${endpointPrefix}/api/ai/speak`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", ...(token ? { "Authorization": `Bearer ${token}` } : {}) },
+          body: JSON.stringify({ messageId, text: answerPlainText(content) }),
+          signal: abort.signal,
+        });
+        if (!res.ok) {
+          const body = await res.json().catch(() => ({}));
+          throw new Error(body?.error || "The voice could not read this answer right now. Try again in a moment.");
+        }
+        url = URL.createObjectURL(await res.blob());
+        if (readingCache.size >= 20) { // (the oldest cached reading goes)
+          const oldest = readingCache.keys().next().value as string;
+          URL.revokeObjectURL(readingCache.get(oldest)!);
+          readingCache.delete(oldest);
+        }
+        readingCache.set(messageId, url);
+      }
+      if (abort.signal.aborted) return;
+      const audio = new Audio(url);
+      const done = () => { if (readingNow?.audio === audio) readingNow = null; readingMine.current = false; setReading("idle"); };
+      audio.onended = done;
+      audio.onerror = () => { done(); toast.error("The voice could not play this answer. Try again."); };
+      readingNow = { audio, stop: () => { readingMine.current = false; setReading("idle"); } };
+      readingMine.current = true;
+      await audio.play();
+      setReading("playing");
+      posthog?.capture("ai_message_read_aloud", { message_id: messageId });
+    } catch (e: any) {
+      if (abort.signal.aborted) return;
+      readingMine.current = false;
+      setReading("idle");
+      toast.error(e?.message || "The voice could not read this answer right now. Try again in a moment.");
+    } finally {
+      if (readAbort.current === abort) readAbort.current = null;
+    }
+  }
   const [feedback, setFeedback] = useState<"up" | "down" | null>(null);
   const [isFeedbackModalOpen, setIsFeedbackModalOpen] = useState(false);
   const [isSubmittingFeedback, setIsSubmittingFeedback] = useState(false);
@@ -981,20 +1077,7 @@ function MessageActions({ content, messageId, onReply, time }: { content: string
   async function handleCopy() {
     try {
       // Strip ALL markdown for clean plain-text copy (like Notion)
-      const plainText = content
-        .replace(/^#{1,6}\s+/gm, "")           // headings
-        .replace(/\*\*(.+?)\*\*/g, "$1")        // bold
-        .replace(/\*(.+?)\*/g, "$1")            // italic
-        .replace(/`([^`]+)`/g, "$1")            // inline code
-        .replace(/```[\s\S]*?```/g, "")          // code blocks
-        .replace(/\[([^\]]+)\]\([^)]+\)/g, "$1") // links
-        .replace(/^[\-\*]\s+/gm, "• ")          // bullets → clean bullet
-        .replace(/^\d+\.\s+/gm, (m) => m)       // keep numbered lists
-        .replace(/^>\s+/gm, "")                 // blockquotes
-        .replace(/\|[^\n]+\|/g, "")             // table rows
-        .replace(/^[\-:| ]+$/gm, "")            // table separators
-        .replace(/\n{3,}/g, "\n\n")             // collapse blank lines
-        .trim();
+      const plainText = answerPlainText(content);
       await navigator.clipboard.writeText(plainText);
       toast.success("Message copied to clipboard!");
       posthog?.capture("ai_message_copied", {
@@ -1174,6 +1257,22 @@ function MessageActions({ content, messageId, onReply, time }: { content: string
         >
           <ThumbsDown className="h-3.5 w-3.5" />
         </button>
+        {READ_ALOUD && (
+          <button
+            type="button"
+            onClick={handleReadAloud}
+            className={cn(
+              "flex h-7 w-7 items-center justify-center rounded-lg transition-all duration-200 cursor-pointer",
+              reading !== "idle"
+                ? "bg-primary/15 text-primary"
+                : "text-muted-foreground/60 hover:bg-muted hover:text-foreground"
+            )}
+            title={reading === "playing" ? "Stop reading" : reading === "loading" ? "Getting the voice…" : "Read aloud"}
+            aria-label={reading === "playing" ? "Stop reading" : "Read aloud"}
+          >
+            {reading === "loading" ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : reading === "playing" ? <Square className="h-3 w-3" /> : <Volume2 className="h-3.5 w-3.5" />}
+          </button>
+        )}
       </div>
 
       {isFeedbackModalOpen && (

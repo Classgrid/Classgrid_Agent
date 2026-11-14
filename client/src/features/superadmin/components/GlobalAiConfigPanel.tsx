@@ -43,6 +43,9 @@ export function GlobalAiConfigPanel({ grantCreditsNode }: { grantCreditsNode?: R
   const [images, setImages] = useState(0);
   const [whatsapp, setWhatsapp] = useState(0); // Added for UI parity
   const [callMinutes, setCallMinutes] = useState(0);
+  const [voiceReplies, setVoiceReplies] = useState(20);
+  const [voiceMaxChars, setVoiceMaxChars] = useState(4000);
+  const [openVoiceReplies, setOpenVoiceReplies] = useState(false);
   const [creditsPerInr, setCreditsPerInr] = useState(0);
   const [imageCost, setImageCost] = useState(0);
   const [tokenReset, setTokenReset] = useState<ResetPeriod>(toResetPeriod());
@@ -74,6 +77,8 @@ export function GlobalAiConfigPanel({ grantCreditsNode }: { grantCreditsNode?: R
       setImages(data.global_image_weekly_limit ?? 0);
       setWhatsapp(data.global_whatsapp_scheduling_limit ?? 0);
       setCallMinutes(data.global_call_minutes_limit ?? 0);
+      setVoiceReplies(data.global_voice_replies_per_day ?? 20);
+      setVoiceMaxChars(data.voice_reply_max_chars ?? 4000);
       if (data.credits_per_inr !== undefined) setCreditsPerInr(data.credits_per_inr);
       if (data.image_generation_token_cost !== undefined) setImageCost(data.image_generation_token_cost);
       setTokenReset(toResetPeriod(data.resetPeriods?.tokens));
@@ -106,6 +111,8 @@ export function GlobalAiConfigPanel({ grantCreditsNode }: { grantCreditsNode?: R
       global_image_weekly_limit: images,
       global_whatsapp_scheduling_limit: whatsapp,
       global_call_minutes_limit: callMinutes,
+      global_voice_replies_per_day: voiceReplies,
+      voice_reply_max_chars: voiceMaxChars,
       credits_per_inr: creditsPerInr,
       image_generation_token_cost: imageCost,
       global_token_reset_value: tokenReset.value,
@@ -351,6 +358,40 @@ export function GlobalAiConfigPanel({ grantCreditsNode }: { grantCreditsNode?: R
                 </div>
                 <DialogFooter>
                   <Button type="button" onClick={() => handleSave(setOpenCalls, "Global voice call limit saved successfully!")} disabled={updateConfigMutation.isPending}>
+                    {updateConfigMutation.isPending && <Spinner className="w-4 h-4 mr-2" />}
+                    Save changes
+                  </Button>
+                </DialogFooter>
+              </DialogContent>
+            </Dialog>
+
+            {/* Voice replies: answers read aloud with the speaker button (web app only). Plans on: each plan's own number applies. */}
+            <Dialog open={openVoiceReplies} onOpenChange={(open) => {
+              if (!open) { setVoiceReplies(data?.global_voice_replies_per_day ?? 20); setVoiceMaxChars(data?.voice_reply_max_chars ?? 4000); }
+              setOpenVoiceReplies(open);
+            }}>
+              <DialogTrigger asChild>
+                <button className="bg-card hover:bg-muted/30 p-5 flex flex-col gap-2 text-left transition-colors">
+                  <span className="text-sm font-medium text-muted-foreground">Voice replies</span>
+                  <span className="text-xl font-bold text-foreground">
+                    {(data?.global_voice_replies_per_day ?? 20) < 0 ? "Unlimited" : (data?.global_voice_replies_per_day ?? 20).toLocaleString()} <span className="text-sm font-normal text-muted-foreground ml-1">a day</span>
+                  </span>
+                  <span className="text-xs text-muted-foreground">Up to {(data?.voice_reply_max_chars ?? 4000).toLocaleString()} characters a reading</span>
+                </button>
+              </DialogTrigger>
+              <DialogContent className="sm:max-w-sm">
+                <DialogHeader>
+                  <DialogTitle>Edit voice replies</DialogTitle>
+                  <DialogDescription>Answers read aloud in Classgrid's voice (the speaker button on an answer). The number a day applies while plans are off; with plans on, each plan's own number applies. -1 means unlimited, 0 means off.</DialogDescription>
+                </DialogHeader>
+                <div className="flex flex-col gap-2 py-4">
+                  <Label htmlFor="voice-replies" className="text-sm font-medium">Voice replies a day</Label>
+                  <Input id="voice-replies" type="number" min={-1} value={voiceReplies} onChange={(e) => setVoiceReplies(Number(e.target.value))} disabled={updateConfigMutation.isPending} />
+                  <Label htmlFor="voice-max-chars" className="text-sm font-medium mt-2">Most characters one reading says</Label>
+                  <Input id="voice-max-chars" type="number" min={200} value={voiceMaxChars} onChange={(e) => setVoiceMaxChars(Number(e.target.value))} disabled={updateConfigMutation.isPending} />
+                </div>
+                <DialogFooter>
+                  <Button type="button" onClick={() => handleSave(setOpenVoiceReplies, "Voice replies saved")} disabled={updateConfigMutation.isPending}>
                     {updateConfigMutation.isPending && <Spinner className="w-4 h-4 mr-2" />}
                     Save changes
                   </Button>

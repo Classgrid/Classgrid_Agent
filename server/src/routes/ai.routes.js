@@ -81,6 +81,7 @@ import {
 import { streamAskAi, clientToolResult, pcToolResult, localJobDone, turnEvents, turnCommand, getWorkingChats, getChatHelpers, getChatSessions, getChatSession, getChatSessionMessages, uploadChatImage, takeChatOnline, updateChatSession, archiveChatSession, deleteChatSession, shareChatSession, reopenChatSession, createPublicShare, getPublicShare, submitAiFeedback, getAgentReviews, updateAgentReviewStatus, processAgentReviewsCron, deleteAgentReview, bulkDeleteAgentReviews, generateImage, getMyGeneratedImages, deleteGeneratedImage, getMyUsage, getOrgUsage, getSkills, createSkill, updateSkill, deleteSkill, getPreferences, updatePreferences } from "../controllers/ai-chat.controller.js";
 
 import { getFavicon } from "../controllers/ai-favicon.controller.js";
+import { speakAnswer } from "../controllers/ai-speak.controller.js";
 import { importChatSession } from "../controllers/ai-chat-import.controller.js";
 import { listStudioShots } from "../services/studio-browser-tools.js";
 import { answerPermission, listBrowserSites, setBrowserSite } from "../services/permission-gate.js";
@@ -125,6 +126,8 @@ router.get("/turn/:id/events", isAuthenticated, turnEvents);
 // The desktop app driving an answer's loop: which tool calls run, in what order, or stop
 router.post("/turn/:id/cmd", isAuthenticated, turnCommand);
 router.post("/feedback", isAuthenticated, submitAiFeedback);
+// An answer read aloud in Classgrid's voice (web app only); counted as a voice reply of the day
+router.post("/speak", isAuthenticated, requireChatOnboarding, speakAnswer);
 router.get("/agent-reviews", isAuthenticated, getAgentReviews);
 router.put("/agent-reviews/:id/status", isAuthenticated, updateAgentReviewStatus);
 router.delete("/agent-reviews/:id", isAuthenticated, deleteAgentReview);

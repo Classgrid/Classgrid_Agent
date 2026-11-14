@@ -68,6 +68,10 @@ const globalAiConfigSchema = new mongoose.Schema(
             type: Number,
             default: 150
         },
+        // Answers read aloud (the speaker button on an answer, web app only): voice replies per user per day while
+        // plans are off (plans on: the plan's voice_replies_per_day), and the most characters one reading says
+        global_voice_replies_per_day: { type: Number, default: 20 },
+        voice_reply_max_chars: { type: Number, default: 4000 },
         classgrid_custom_limits_enabled: { type: Boolean, default: false },
         classgrid_pro_pool_limit: { type: Number },
         classgrid_user_weekly_limit: { type: Number },
