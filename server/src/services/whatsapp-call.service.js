@@ -39,7 +39,7 @@ import { hasEnoughTokens, deductTokens } from "./ai-credits.service.js";
 import { chargeableTokens } from "./ai-token-pricing.js";
 import { toWhatsappText, splitWhatsappText } from "./ai-feature-limits.js";
 import { BUSY_KEY, markLastIn } from "./whatsapp-inbox.service.js";
-import { BUDGET_STOP_NOTE } from "./llm-stream.js";
+import { BUDGET_STOP_NOTE, noThinkingFor } from "./llm-stream.js";
 import * as record from "./call-record.service.js";
 import { cfAiFetch } from "./cf-neuron-cap.service.js";
 import * as eleven from "./elevenlabs.service.js";
@@ -412,23 +412,28 @@ function fromOpenAiAnswer(message) {
     return content;
 }
 
-async function fallbackTurn(call, { noTools = false } = {}) {
+async function fallbackTurn(call, { noTools = false, onSentence = null } = {}) {
     const res = await cfAiFetch(`https://api.cloudflare.com/client/v4/accounts/${process.env.CLOUDFLARE_ACCOUNT_ID}/ai/v1/chat/completions`, {
         method: "POST",
         headers: cfHeaders("application/json"),
         body: JSON.stringify({
             model: FALLBACK_MODEL,
             max_tokens: 1024,
+            stream: true,
+            stream_options: { include_usage: true },
+            // (a call needs the first words at once: the model's thinking is off, it answered in half a second in the test)
+            ...noThinkingFor(FALLBACK_MODEL),
             messages: toOpenAiMessages(systemPrompt(call.user), call.messages),
             tools: [ASK_CLASSGRID_TOOL, START_TASK_TOOL, END_CALL_TOOL, ...PROJECT_TOOLS].map(toOpenAiTool),
             tool_choice: noTools ? "none" : "auto",
         }),
-        signal: AbortSignal.timeout(30000),
+        signal: AbortSignal.timeout(45000),
     });
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok) throw new Error(`${FALLBACK_MODEL} ${res.status}: ${JSON.stringify(data.errors || data.error || data).slice(0, 300)}`);
-    const choice = data.choices?.[0] || {};
-    const u = data.usage || {};
+    if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(`${FALLBACK_MODEL} ${res.status}: ${JSON.stringify(err.errors || err.error || err).slice(0, 300)}`);
+    }
+    const { choice, usage: u } = await readOpenAiStream(res, onSentence);
     deductTokens(call.user._id, call.user.organization_id || null, chargeableTokens({ prompt_tokens: u.prompt_tokens || 0, completion_tokens: u.completion_tokens || 0 }, FALLBACK_MODEL), call.tokenSource)
         .catch((e) => console.error("[WA call] token charge failed:", e.message));
     const content = fromOpenAiAnswer(choice.message);
@@ -438,23 +443,97 @@ async function fallbackTurn(call, { noTools = false } = {}) {
     return { text, tools, cutOff: choice.finish_reason === "length" };
 }
 
-async function claudeTurn(call, { noTools = false } = {}) {
+async function claudeTurn(call, { noTools = false, onSentence = null } = {}) {
     try {
-        return await claudeOnlyTurn(call, { noTools });
+        return await claudeOnlyTurn(call, { noTools, onSentence });
     } catch (e) {
         // Claude is out (its monthly limit, an outage): the call goes on with GLM 5.3, same conversation and tools
         console.warn(`[WA call] Claude failed (${e.message.slice(0, 160)}); answering with ${FALLBACK_MODEL}`);
-        return fallbackTurn(call, { noTools });
+        return fallbackTurn(call, { noTools, onSentence });
     }
 }
 
-async function claudeOnlyTurn(call, { noTools = false } = {}) {
+// Sentences from a stream of text pieces: `push(piece)` hands each complete sentence to `onSentence` (also in
+// Hindi and Marathi, ending with "।"); `flush()` hands over whatever is left.
+function sentenceTaker(onSentence) {
+    let unsaid = "";
+    const say = (text) => { if (onSentence && text.trim()) onSentence(text.trim()); };
+    return {
+        push(piece) {
+            unsaid += piece || "";
+            for (;;) {
+                const m = unsaid.match(/^([\s\S]*?[.!?।]["')\]]*)(\s+)(?=\S)/);
+                if (!m) return;
+                say(m[1]);
+                unsaid = unsaid.slice(m[0].length);
+            }
+        },
+        flush() { say(unsaid); unsaid = ""; },
+    };
+}
+
+// Reads a server-sent-events body, calling `onData` with each parsed `data:` JSON
+async function readSse(res, onData) {
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buf = "";
+    for (;;) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        buf += decoder.decode(value, { stream: true });
+        let at;
+        while ((at = buf.indexOf("\n\n")) !== -1) {
+            const chunk = buf.slice(0, at);
+            buf = buf.slice(at + 2);
+            for (const l of chunk.split("\n")) {
+                if (!l.startsWith("data:")) continue;
+                const raw = l.slice(5).trim();
+                if (!raw || raw === "[DONE]") continue;
+                try { onData(JSON.parse(raw)); } catch { /* a keep-alive or a partial line */ }
+            }
+        }
+    }
+}
+
+// An OpenAI-style stream (Cloudflare), put back together: { choice: { message: { content, tool_calls }, finish_reason },
+// usage }. Text goes to `onSentence` one complete sentence at a time as it arrives.
+export async function readOpenAiStream(res, onSentence) {
+    const taker = sentenceTaker(onSentence);
+    const message = { content: "", tool_calls: [] };
+    let finishReason = null;
+    let usage = {};
+    await readSse(res, (d) => {
+        if (d.usage) usage = d.usage;
+        const c = d.choices?.[0];
+        if (!c) return;
+        if (c.finish_reason) finishReason = c.finish_reason;
+        const delta = c.delta || {};
+        if (delta.content) { message.content += delta.content; taker.push(delta.content); }
+        for (const t of delta.tool_calls || []) {
+            const i = Number.isInteger(t.index) ? t.index : message.tool_calls.length;
+            const cur = message.tool_calls[i] || (message.tool_calls[i] = { id: "", type: "function", function: { name: "", arguments: "" } });
+            if (t.id) cur.id = t.id;
+            if (t.function?.name) cur.function.name += t.function.name;
+            if (t.function?.arguments) cur.function.arguments += t.function.arguments;
+        }
+    });
+    taker.flush();
+    message.tool_calls = message.tool_calls.filter(Boolean);
+    if (!message.tool_calls.length) delete message.tool_calls;
+    return { choice: { message, finish_reason: finishReason }, usage };
+}
+
+// The answer comes as a stream (owner, 2026-11-14: the 2-3 s wait before the AI spoke felt like it would not answer):
+// `onSentence` gets each sentence the moment it is complete, so the first one is being made into voice while
+// Claude is still writing the rest. The whole answer is still returned, in Claude's content-block shape.
+async function claudeOnlyTurn(call, { noTools = false, onSentence = null } = {}) {
     const ask = () => fetch("https://api.anthropic.com/v1/messages", {
         method: "POST",
         headers: { "x-api-key": process.env.ANTHROPIC_API_KEY, "anthropic-version": "2023-06-01", "content-type": "application/json" },
         body: JSON.stringify({
             model: CALL_MODEL,
             max_tokens: 1024,
+            stream: true,
             system: systemPrompt(call.user),
             // ask_classgrid is back (owner's choice, 2026-10-24 evening): the AI can work during the call, so it opens
             // or makes the project right away and the tasks are saved with it
@@ -462,15 +541,18 @@ async function claudeOnlyTurn(call, { noTools = false } = {}) {
             ...(noTools ? { tool_choice: { type: "none" } } : {}),
             messages: call.messages,
         }),
-        signal: AbortSignal.timeout(30000),
+        signal: AbortSignal.timeout(45000),
     });
     let res = await ask();
     if (res.status === 429 || res.status >= 500) {
         await new Promise((r) => setTimeout(r, 1500));
         res = await ask();
     }
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok) throw new Error(`Claude ${res.status}: ${JSON.stringify(data.error || data).slice(0, 300)}`);
+    if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(`Claude ${res.status}: ${JSON.stringify(err.error || err).slice(0, 300)}`);
+    }
+    const data = await readClaudeStream(res, onSentence);
     const u = data.usage || {};
     const usage = {
         prompt_tokens: (u.input_tokens || 0) + (u.cache_read_input_tokens || 0) + (u.cache_creation_input_tokens || 0),
@@ -485,6 +567,38 @@ async function claudeOnlyTurn(call, { noTools = false } = {}) {
     const text = (data.content || []).filter((b) => b.type === "text").map((b) => b.text).join(" ").trim();
     const tools = (data.content || []).filter((b) => b.type === "tool_use");
     return { text, tools, cutOff: data.stop_reason === "max_tokens" };
+}
+
+// Claude's stream, put back together: { content: [text and tool_use blocks], stop_reason, usage }. Text is handed
+// to `onSentence` one complete sentence at a time as it arrives.
+export async function readClaudeStream(res, onSentence) {
+    const taker = sentenceTaker(onSentence);
+    const blocks = [];
+    const partialJson = new Map(); // block index -> the tool input's JSON so far
+    const usage = {};
+    let stopReason = null;
+    await readSse(res, (ev) => {
+        if (ev.type === "message_start") Object.assign(usage, ev.message?.usage || {});
+        else if (ev.type === "content_block_start") {
+            const cb = ev.content_block || {};
+            blocks[ev.index] = cb.type === "tool_use" ? { type: "tool_use", id: cb.id, name: cb.name, input: {} } : { type: "text", text: cb.text || "" };
+            if (cb.type === "tool_use") partialJson.set(ev.index, "");
+        }
+        else if (ev.type === "content_block_delta") {
+            const b = blocks[ev.index];
+            if (!b) return;
+            if (ev.delta?.type === "text_delta") { b.text += ev.delta.text || ""; taker.push(ev.delta.text); }
+            else if (ev.delta?.type === "input_json_delta") partialJson.set(ev.index, (partialJson.get(ev.index) || "") + (ev.delta.partial_json || ""));
+        }
+        else if (ev.type === "content_block_stop") {
+            const b = blocks[ev.index];
+            if (b?.type === "tool_use") { try { b.input = JSON.parse(partialJson.get(ev.index) || "{}"); } catch { b.input = {}; } }
+            if (b?.type === "text") taker.flush();
+        }
+        else if (ev.type === "message_delta") { if (ev.delta?.stop_reason) stopReason = ev.delta.stop_reason; Object.assign(usage, ev.usage || {}); }
+    });
+    taker.flush();
+    return { content: blocks.filter(Boolean).filter((b) => b.type !== "text" || b.text), stop_reason: stopReason, usage };
 }
 
 // ─── Call life ────────────────────────────────────────────────
@@ -503,26 +617,35 @@ function speechParts(text) {
     return parts;
 }
 
+// One part of speech: its voice is requested at once (parts are made in parallel) and queued to play in the order
+// the parts were said. `gen` is the reply this part belongs to: when the caller talks over the AI, speakGen moves
+// on and the parts still being made are dropped.
+function sayPart(call, part, gen) {
+    if (!part || call.ended) return Promise.resolve();
+    const audio = textToSpeech(part).catch((e) => { console.error("[WA call] TTS failed:", e.message); return null; });
+    // The AI counts as talking from the moment a part is requested, also in the short gaps between parts (else its
+    // own voice coming back from the phone in a gap would be taken as the caller speaking)
+    call.speakingParts = (call.speakingParts || 0) + 1;
+    const prev = call.sayChain || Promise.resolve();
+    call.sayChain = prev.then(async () => {
+        try {
+            const pcm = await audio;
+            if (call.ended || (call.speakGen || 0) !== gen) return;
+            if (pcm) call.outQueue.push(pcm);
+        } finally {
+            call.speakingParts--;
+        }
+    });
+    return call.sayChain;
+}
+
 // Spoken part by part: every part is made into voice at the same time and played in order as soon as it is
 // ready, so the first words come quickly and a long reply never hits the voice service's time limit
 async function speak(call, text) {
     if (!text || call.ended) return;
     const gen = call.speakGen || 0;
-    const audio = speechParts(text).map((part) =>
-        textToSpeech(part).catch((e) => { console.error("[WA call] TTS failed:", e.message); return null; }));
-    // The AI counts as talking for the whole reply, also in the short gaps between its parts (else its own
-    // voice coming back from the phone in a gap would be taken as the caller speaking)
-    call.speakingParts = (call.speakingParts || 0) + 1;
-    try {
-        for (const next of audio) {
-            const pcm = await next;
-            // The caller talked over the AI: the rest of this reply is dropped
-            if (call.ended || (call.speakGen || 0) !== gen) return;
-            if (pcm) call.outQueue.push(pcm);
-        }
-    } finally {
-        call.speakingParts--;
-    }
+    for (const part of speechParts(text)) sayPart(call, part, gen);
+    await call.sayChain;
 }
 
 const aiIsTalking = (call) => !!call.outCurrent || call.outQueue.length > 0 || (call.speakingParts || 0) > 0;
@@ -589,9 +712,11 @@ async function runTool(call, t, cutOff, { canHangUp = true } = {}) {
 async function reply(call) {
     // A few rounds, so the AI can use a tool and then talk about the result
     for (let round = 0; round < 4 && !call.ended; round++) {
-        const { text, tools, cutOff } = await claudeTurn(call);
+        const gen = call.speakGen || 0;
+        let spoken = false;
+        const { text, tools, cutOff } = await claudeTurn(call, { onSentence: (sentence) => { spoken = true; sayPart(call, sentence, gen); } });
         if (text) line(call, "ai", "speech", text);
-        await speak(call, text);
+        if (spoken) await call.sayChain; else await speak(call, text);
         if (!tools.length || call.ended) return;
         // Every tool the AI asked for gets its answer in one message, even when a tool fails
         // (a request without its answer would make every later turn of the call fail)
@@ -612,9 +737,11 @@ async function reply(call) {
     }
     // Still using tools after 4 rounds: one last answer without tools, so the results are said
     if (!call.ended) {
-        const { text } = await claudeTurn(call, { noTools: true });
+        const gen = call.speakGen || 0;
+        let spoken = false;
+        const { text } = await claudeTurn(call, { noTools: true, onSentence: (sentence) => { spoken = true; sayPart(call, sentence, gen); } });
         if (text) line(call, "ai", "speech", text);
-        await speak(call, text);
+        if (spoken) await call.sayChain; else await speak(call, text);
     }
 }
 
@@ -685,7 +812,7 @@ async function callSummary(call) {
         const alt = await cfAiFetch(`https://api.cloudflare.com/client/v4/accounts/${process.env.CLOUDFLARE_ACCOUNT_ID}/ai/v1/chat/completions`, {
             method: "POST",
             headers: cfHeaders("application/json"),
-            body: JSON.stringify({ model: FALLBACK_MODEL, max_tokens: 300, messages: [{ role: "system", content: RECAP_PROMPT }, { role: "user", content: lines }] }),
+            body: JSON.stringify({ model: FALLBACK_MODEL, max_tokens: 300, ...noThinkingFor(FALLBACK_MODEL), messages: [{ role: "system", content: RECAP_PROMPT }, { role: "user", content: lines }] }),
             signal: AbortSignal.timeout(20000),
         });
         const altData = await alt.json().catch(() => ({}));
@@ -1202,7 +1329,7 @@ export async function answerCall({ id, from, sdp, user, tokenSource, callsLine =
     return true;
 }
 
-// Simple voice detection: a turn starts when the caller gets loud and ends after 0.8 s of quiet.
+// Simple voice detection: a turn starts when the caller gets loud and ends after 0.6 s of quiet.
 // While the AI is talking (and a moment after) the caller's audio is ignored, so the AI never hears itself.
 function listen(call, samples) {
     if (call.ended) return;
@@ -1211,14 +1338,15 @@ function listen(call, samples) {
     // Right after the AI stops, a short tail of its own voice can still come back: skip it
     if (!aiTalking && !s.active && Date.now() - call.speechEndedAt < 300) { s.loud = 0; s.chunks = []; return; }
     const ms = (samples.length / SAMPLE_RATE) * 1000;
-    // While the AI talks, only a clearly louder voice for a moment counts (not an echo of the AI)
-    const loud = rms(samples) > (aiTalking ? 1500 : 700);
+    // While the AI talks, only a clearly louder voice for a moment counts (not an echo of the AI). Owner, 2026-11-14:
+    // talking over the AI was too hard to do (1500 / 250 ms), so a little less loudness, a little less time.
+    const loud = rms(samples) > (aiTalking ? 1150 : 700);
     if (!s.active) {
         // Loud time adds up, quiet gaps (between words) take it down slowly, so a voice is noticed quickly
         s.loud = loud ? s.loud + ms : Math.max(0, s.loud - ms / 2);
         s.chunks.push(samples);
         if (s.chunks.length > 100) s.chunks.shift(); // keep 1 s of audio from just before the speech is noticed
-        if (s.loud >= (aiTalking ? 250 : 60)) {
+        if (s.loud >= (aiTalking ? 160 : 60)) {
             s.active = true; s.ms = 0; s.quiet = 0; s.loudMs = s.loud;
             // Caller talks over the AI: it stops (also the parts of its reply still being made)
             if (aiTalking) { call.outQueue = []; call.outCurrent = null; call.speechEndedAt = Date.now(); call.speakGen = (call.speakGen || 0) + 1; }
@@ -1229,7 +1357,7 @@ function listen(call, samples) {
     s.ms += ms;
     s.quiet = loud ? 0 : s.quiet + ms;
     if (loud) s.loudMs += ms;
-    if (s.quiet >= 800 || s.ms >= 15000) {
+    if (s.quiet >= 600 || s.ms >= 15000) {
         const chunks = s.chunks;
         const realSpeech = s.loudMs >= 150; // a short burst of noise is not sent (Whisper "hears" words in noise)
         s.active = false; s.chunks = []; s.loud = 0; s.quiet = 0; s.ms = 0; s.loudMs = 0;

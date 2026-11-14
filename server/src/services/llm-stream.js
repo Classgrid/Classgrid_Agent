@@ -177,7 +177,9 @@ export const toolFailed = (text) => /^\s*(error\b|tool error|failed\b|not run\b|
 export function noThinkingFor(model) {
     const m = String(model || "");
     if (/deepseek|kimi|moonshot/i.test(m)) return { chat_template_kwargs: { thinking: false } };
-    if (/glm/i.test(m)) return { reasoning_effort: "low" };
+    // GLM 5.3 (measured 2026-11-14): reasoning_effort low alone still thinks for ~13 s before the first word, and
+    // thinking:false alone makes it write its thinking as the answer; both together answer in half a second
+    if (/glm/i.test(m)) return { reasoning_effort: "low", chat_template_kwargs: { thinking: false } };
     return {};
 }
 
