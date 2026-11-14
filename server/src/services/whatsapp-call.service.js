@@ -46,6 +46,9 @@ import * as eleven from "./elevenlabs.service.js";
 
 const GRAPH = "https://graph.facebook.com/v22.0";
 const CALL_MODEL = "claude-haiku-5-5"; // fastest Claude, so the voice replies come quickly
+// When Claude cannot answer (its monthly spend limit is reached, an outage, a bad key), the same call goes on with
+// GLM 5.3 on Cloudflare: the same conversation, the same tools (owner, 2026-11-14)
+const FALLBACK_MODEL = "@cf/zai-org/glm-5.3";
 const MAX_CALL_MS = 15 * 60 * 1000;
 const WRAP_UP_MS = MAX_CALL_MS - 15 * 1000; // 15 s before the end the AI is told the time is almost up
 const OVERTIME_MS = 30 * 1000; // at the limit, a sentence or answer in progress may finish (up to 30 s more)
@@ -371,7 +374,81 @@ function systemPrompt(user) {
     ].join("\n");
 }
 
+// ─── The fallback model (GLM 5.3 on Cloudflare, OpenAI-style messages and tools) ────────────────────────────
+// The conversation is kept in Claude's shape (text, tool_use and tool_result blocks) whichever model answered, so
+// a call can move between the two at any turn.
+
+const toOpenAiTool = (t) => ({ type: "function", function: { name: t.name, description: t.description, parameters: t.input_schema } });
+
+function toOpenAiMessages(system, messages) {
+    const out = [{ role: "system", content: system }];
+    for (const m of messages) {
+        if (typeof m.content === "string") { out.push({ role: m.role, content: m.content }); continue; }
+        const blocks = Array.isArray(m.content) ? m.content : [];
+        if (m.role === "assistant") {
+            const text = blocks.filter((b) => b.type === "text").map((b) => b.text).join(" ").trim();
+            const calls = blocks.filter((b) => b.type === "tool_use").map((b) => ({ id: b.id, type: "function", function: { name: b.name, arguments: JSON.stringify(b.input || {}) } }));
+            out.push({ role: "assistant", content: text || (calls.length ? null : ""), ...(calls.length ? { tool_calls: calls } : {}) });
+            continue;
+        }
+        const results = blocks.filter((b) => b.type === "tool_result");
+        for (const r of results) out.push({ role: "tool", tool_call_id: r.tool_use_id, content: typeof r.content === "string" ? r.content : JSON.stringify(r.content) });
+        const text = blocks.filter((b) => b.type === "text").map((b) => b.text).join(" ").trim();
+        if (text || !results.length) out.push({ role: "user", content: text });
+    }
+    return out;
+}
+
+// GLM's answer in Claude's shape: a text block and a tool_use block per function call
+function fromOpenAiAnswer(message) {
+    const content = [];
+    const text = String(message?.content || "").trim();
+    if (text) content.push({ type: "text", text });
+    for (const c of message?.tool_calls || []) {
+        let input = {};
+        try { input = JSON.parse(c.function?.arguments || "{}"); } catch { input = {}; }
+        content.push({ type: "tool_use", id: c.id || `call_${crypto.randomBytes(8).toString("hex")}`, name: c.function?.name, input });
+    }
+    return content;
+}
+
+async function fallbackTurn(call, { noTools = false } = {}) {
+    const res = await cfAiFetch(`https://api.cloudflare.com/client/v4/accounts/${process.env.CLOUDFLARE_ACCOUNT_ID}/ai/v1/chat/completions`, {
+        method: "POST",
+        headers: cfHeaders("application/json"),
+        body: JSON.stringify({
+            model: FALLBACK_MODEL,
+            max_tokens: 1024,
+            messages: toOpenAiMessages(systemPrompt(call.user), call.messages),
+            tools: [ASK_CLASSGRID_TOOL, START_TASK_TOOL, END_CALL_TOOL, ...PROJECT_TOOLS].map(toOpenAiTool),
+            tool_choice: noTools ? "none" : "auto",
+        }),
+        signal: AbortSignal.timeout(30000),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(`${FALLBACK_MODEL} ${res.status}: ${JSON.stringify(data.errors || data.error || data).slice(0, 300)}`);
+    const choice = data.choices?.[0] || {};
+    const u = data.usage || {};
+    deductTokens(call.user._id, call.user.organization_id || null, chargeableTokens({ prompt_tokens: u.prompt_tokens || 0, completion_tokens: u.completion_tokens || 0 }, FALLBACK_MODEL), call.tokenSource)
+        .catch((e) => console.error("[WA call] token charge failed:", e.message));
+    const content = fromOpenAiAnswer(choice.message);
+    if (content.length) call.messages.push({ role: "assistant", content });
+    const text = content.filter((b) => b.type === "text").map((b) => b.text).join(" ").trim();
+    const tools = content.filter((b) => b.type === "tool_use");
+    return { text, tools, cutOff: choice.finish_reason === "length" };
+}
+
 async function claudeTurn(call, { noTools = false } = {}) {
+    try {
+        return await claudeOnlyTurn(call, { noTools });
+    } catch (e) {
+        // Claude is out (its monthly limit, an outage): the call goes on with GLM 5.3, same conversation and tools
+        console.warn(`[WA call] Claude failed (${e.message.slice(0, 160)}); answering with ${FALLBACK_MODEL}`);
+        return fallbackTurn(call, { noTools });
+    }
+}
+
+async function claudeOnlyTurn(call, { noTools = false } = {}) {
     const ask = () => fetch("https://api.anthropic.com/v1/messages", {
         method: "POST",
         headers: { "x-api-key": process.env.ANTHROPIC_API_KEY, "anthropic-version": "2023-06-01", "content-type": "application/json" },
@@ -586,6 +663,7 @@ export function endCall(callId, why = "ended") {
 }
 
 // A 2-3 line recap of a call with no saved task, written by the call model from the conversation
+const RECAP_PROMPT = "Write a short WhatsApp recap (2-3 lines, no title, plain text, WhatsApp *bold* allowed) of this Classgrid AI phone call for the caller, talking to them as \"you\". Include any answers they were given.";
 async function callSummary(call) {
     const lines = call.transcript.filter((l) => l.startsWith("Caller:") || l.startsWith("AI:")).join("\n").slice(-6000);
     if (!lines) return "";
@@ -595,12 +673,27 @@ async function callSummary(call) {
         body: JSON.stringify({
             model: CALL_MODEL,
             max_tokens: 300,
-            system: "Write a short WhatsApp recap (2-3 lines, no title, plain text, WhatsApp *bold* allowed) of this Classgrid AI phone call for the caller, talking to them as \"you\". Include any answers they were given.",
+            system: RECAP_PROMPT,
             messages: [{ role: "user", content: lines }],
         }),
         signal: AbortSignal.timeout(20000),
     });
     const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+        // Claude is out (its monthly limit, an outage): GLM 5.3 on Cloudflare writes the recap
+        console.warn(`[WA call] Claude ${res.status} for the recap; writing it with ${FALLBACK_MODEL}`);
+        const alt = await cfAiFetch(`https://api.cloudflare.com/client/v4/accounts/${process.env.CLOUDFLARE_ACCOUNT_ID}/ai/v1/chat/completions`, {
+            method: "POST",
+            headers: cfHeaders("application/json"),
+            body: JSON.stringify({ model: FALLBACK_MODEL, max_tokens: 300, messages: [{ role: "system", content: RECAP_PROMPT }, { role: "user", content: lines }] }),
+            signal: AbortSignal.timeout(20000),
+        });
+        const altData = await alt.json().catch(() => ({}));
+        if (!alt.ok) return "";
+        const au = altData.usage || {};
+        deductTokens(call.user._id, call.user.organization_id || null, chargeableTokens({ prompt_tokens: au.prompt_tokens || 0, completion_tokens: au.completion_tokens || 0 }, FALLBACK_MODEL), call.tokenSource).catch((e) => console.error("[WA call] token charge failed:", e.message));
+        return String(altData.choices?.[0]?.message?.content || "").trim();
+    }
     const u = data.usage || {};
     deductTokens(call.user._id, call.user.organization_id || null, chargeableTokens({ prompt_tokens: u.input_tokens || 0, completion_tokens: u.output_tokens || 0 }, CALL_MODEL), call.tokenSource).catch(() => {});
     return (data.content || []).filter((b) => b.type === "text").map((b) => b.text).join(" ").trim();
