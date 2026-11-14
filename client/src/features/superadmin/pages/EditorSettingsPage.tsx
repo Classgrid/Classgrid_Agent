@@ -1,13 +1,10 @@
 // Classgrid Code's Settings tab (the gear in its title bar): its own small settings, not the Classgrid app's page.
 // Profile (your photo, name and email), Appearance (light, dark, or the same as your computer: it changes the whole
-// editor, and our screens follow it), Plan and Billing (the same pages as the Classgrid app's Settings), the AI Hub's
-// pages (Plugins, Images, Skills, Connected apps, Usage: here instead of a window over the editor) and Docs.
+// editor, and our screens follow it), the AI Hub's pages (Plugins, Images, Skills, Connected apps, Usage, AI Credits,
+// Upgrade: here instead of a window over the editor) and Docs.
 import { useEffect, useState } from "react";
-import { useSearchParams } from "react-router-dom";
-import { BadgeCheck, BookOpen, Bell, CreditCard, LogOut, Monitor, Moon, Palette, Sun, User } from "lucide-react";
+import { BookOpen, Bell, LogOut, Monitor, Moon, Palette, Sun, User } from "lucide-react";
 import { SettingsDesktopNotificationsCard } from "@/features/shared/components/settings/SettingsDesktopNotificationsCard";
-import { SettingsPlanSection } from "@/features/shared/components/settings/SettingsPlanSection";
-import { SettingsBillingSection } from "@/features/shared/components/settings/SettingsBillingSection";
 import { useTheme } from "next-themes";
 import { useUserProfile } from "@/features/shared/queries/useUserProfile";
 import { AnimatePresence } from "framer-motion";
@@ -29,9 +26,6 @@ const SECTIONS = [
   { id: "profile", label: "Profile", icon: User },
   { id: "appearance", label: "Appearance", icon: Palette },
   { id: "notifications", label: "Notifications", icon: Bell },
-  // The plan and billing (plans, upgrade, credits, payments), the same pages as the Classgrid app's Settings
-  { id: "plan", label: "Plan", icon: BadgeCheck },
-  { id: "billing", label: "Billing", icon: CreditCard },
 ] as const;
 type Section = string;
 const known = (s: string | null): s is Section => !!s && [...SECTIONS, ...AI_HUB_TABS].some((x) => x.id === s);
@@ -100,9 +94,6 @@ export function EditorSettingsPage() {
     return known(s) ? s : "profile";
   });
   useEffect(() => desk()?.onSettingsSection?.((s) => { if (known(s)) setSection(s); }), []);
-  // The Plan and Billing pages move between sections through ?section= (as the Classgrid app's Settings do)
-  const [params] = useSearchParams();
-  useEffect(() => { const s = params.get("section"); if (known(s) && s !== section) setSection(s); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [params]);
   const [mode, setMode] = useState<Mode>(() => {
     try { const m = localStorage.getItem(MODE_KEY); return m === "light" || m === "dark" || m === "system" ? m : "system"; } catch { return "system"; }
   });
@@ -211,8 +202,6 @@ export function EditorSettingsPage() {
           {section === "notifications" && (
             <div className="max-w-2xl"><SettingsDesktopNotificationsCard /></div>
           )}
-          {section === "plan" && <div className="max-w-3xl"><SettingsPlanSection /></div>}
-          {section === "billing" && <div className="max-w-4xl"><SettingsBillingSection /></div>}
           {section === "appearance" && (
             <>
               <h1 className="text-xl font-semibold mb-5">Appearance</h1>

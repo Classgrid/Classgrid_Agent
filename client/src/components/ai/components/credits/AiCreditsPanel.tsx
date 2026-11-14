@@ -28,7 +28,7 @@ import { NikhilTimeCalendar } from "@/components/marketing_ui/nikhil_time_calend
 import { getSocket } from "@/lib/socketClient";
 import { useQueryClient } from "@tanstack/react-query";
 
-export function AiCreditsPanel({ embedded = false }: { embedded?: boolean } = {}) {
+export function AiCreditsPanel() {
   const queryClient = useQueryClient();
   const { data: balance, isLoading: balanceLoading } = useMyAiBalance();
   const { data: history, isLoading: historyLoading } = useMyAiHistory();
@@ -83,15 +83,13 @@ export function AiCreditsPanel({ embedded = false }: { embedded?: boolean } = {}
   });
 
   return (
-    <div className={embedded ? "flex flex-col" : "flex flex-col h-full animate-in fade-in duration-300"}>
-      {!embedded && (
-        <div className="p-6 border-b border-border">
-          <h2 className="text-2xl font-bold mb-2">AI Credits</h2>
-          <p className="text-muted-foreground text-sm">Manage your token balance and top-up your account.</p>
-        </div>
-      )}
+    <div className="flex flex-col h-full animate-in fade-in duration-300">
+      <div className="p-6 border-b border-border">
+        <h2 className="text-2xl font-bold mb-2">AI Credits</h2>
+        <p className="text-muted-foreground text-sm">Manage your token balance and top-up your account.</p>
+      </div>
 
-      <div className={embedded ? "p-5 space-y-8" : "flex-1 overflow-y-auto p-6 space-y-8 custom-scrollbar"}>
+      <div className="flex-1 overflow-y-auto p-6 space-y-8 custom-scrollbar">
         {isBlocked && (
           <div className="bg-red-50 dark:bg-red-950/20 text-red-800 dark:text-red-400 p-4 rounded-lg flex items-start gap-3 border border-red-200 dark:border-red-900/50">
             <AlertCircle className="w-5 h-5 shrink-0 mt-0.5" />
@@ -317,7 +315,7 @@ export function AiCreditsPanel({ embedded = false }: { embedded?: boolean } = {}
                         <TableCell className="whitespace-nowrap">
                           {format(new Date(txn.createdAt), "MMM dd, yyyy h:mm a")}
                         </TableCell>                          <TableCell className="font-medium">
-                            {txn.type === "topup" ? "Top-Up" : txn.type === "plan" ? "Plan" : "Credit Grant"}
+                            {txn.type === "topup" ? "Top-Up" : "Credit Grant"}
                           </TableCell>
                         <TableCell className="text-muted-foreground">
                           {txn.amount_inr ? `₹${formatNumber(txn.amount_inr)}` : "-"}
