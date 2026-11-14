@@ -52,7 +52,7 @@ const PLAN_PERIOD_FIELDS = { image: "images_reset", whatsapp: "whatsapp_reset", 
 
 export function resolveFeatureLimit(feature, org, globalConfig, orgId = org?._id, plan = null) {
     // With plans on, the plan's number (a super admin's per-org custom limit still wins; -1 = unlimited)
-    if (plan && PLAN_LIMIT_FIELDS[feature] && !(org && org.ai_config?.custom_limits_enabled && isSet(org.ai_config[FIELDS[feature].org]))) {
+    if (plan && PLAN_LIMIT_FIELDS[feature]) { // (plans on: the plan's number, never an org's old custom limit)
         const v = Number(plan[PLAN_LIMIT_FIELDS[feature]]);
         return v === -1 ? Infinity : (Number.isFinite(v) ? v : 0);
     }
@@ -95,7 +95,7 @@ const readPeriod = (src, prefix) => {
 };
 
 export function resolveResetPeriod(feature, org, globalConfig, orgId = org?._id, plan = null) {
-    if (plan && PLAN_PERIOD_FIELDS[feature] && !(org && org.ai_config?.custom_limits_enabled && readPeriod(org.ai_config, PERIOD_FIELDS[feature].org))) {
+    if (plan && PLAN_PERIOD_FIELDS[feature]) {
         const pp = readPeriod(plan, PLAN_PERIOD_FIELDS[feature]);
         if (pp) return { value: pp.value, unit: pp.unit, ms: pp.value * RESET_UNITS[pp.unit], label: formatResetPeriod(pp) };
     }
