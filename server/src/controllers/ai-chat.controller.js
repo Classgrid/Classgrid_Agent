@@ -2432,10 +2432,10 @@ You are currently talking to Nikhil Shinde (nikhil.shinde@classgrid.in), the CRE
         tailPrompt += projectContext; // (the editor notes change with every message)
         // The three modes of the app and the one the user is in now, so the AI knows what the user can see and do
         const appMode = ["agent", "project", "studio"].includes(body.appMode) ? body.appMode : null;
-        // The Android app (body.phone, owner 2026-11-14): one chat with every tool of Agent mode and Studio (the live
-        // browser too), sent as Studio with no project open; it has no mode switcher and no project screens
-        if (body.phone === true && appMode === "studio" && body.taskOrigin !== 'whatsapp') {
-            volatilePrompt += "\n\n--- WHERE THE USER IS ---\nThe user is using the Classgrid phone app (Android). It has one chat with every tool of Agent mode and Studio: web search, images, files, the cloud sandbox and terminal, the CDN, email, schedules, plugins and the live browser. There is no mode switcher, no project open and no code editor on the phone; projects are only viewed there. Do the work yourself with your tools, and keep answers easy to read on a small screen.";
+        // The Android app (body.phone, owner 2026-11-14): Agent mode with every cloud sandbox and terminal tool and the sharing
+        // tools; no live browser, no project changes (projects read only), nothing on the user's computer
+        if (body.phone === true && body.taskOrigin !== 'whatsapp') {
+            volatilePrompt += "\n\n--- WHERE THE USER IS ---\nThe user is using the Classgrid phone app (Android). It is Agent mode with every cloud sandbox and terminal tool, web search, images, documents and document writing, the CDN, email, schedules, plugins, and sharing (share links, shared documents, inviting people). On the phone there is no live browser, no code editor, no changes to projects (a project can only be read) and nothing runs on the user's own computer: do that work in the cloud sandbox, or tell the user it needs the website or the desktop app. Keep answers easy to read on a small screen.";
         } else if (appMode && body.taskOrigin !== 'whatsapp') {
             volatilePrompt += `
 
