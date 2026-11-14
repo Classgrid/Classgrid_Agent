@@ -110,9 +110,6 @@ export const updateGlobalAiConfig = async (req, res) => {
         if (global_image_weekly_limit !== undefined) config.global_image_weekly_limit = global_image_weekly_limit;
         if (global_whatsapp_scheduling_limit !== undefined) config.global_whatsapp_scheduling_limit = global_whatsapp_scheduling_limit;
         if (global_call_minutes_limit !== undefined) config.global_call_minutes_limit = Math.max(0, Number(global_call_minutes_limit) || 0);
-        if (global_call_minutes_limit !== undefined) config.global_call_minutes_limit = Math.max(0, Number(global_call_minutes_limit) || 0);
-        if (global_call_minutes_limit !== undefined) config.global_call_minutes_limit = Math.max(0, Number(global_call_minutes_limit) || 0);
-        if (global_call_minutes_limit !== undefined) config.global_call_minutes_limit = Math.max(0, Number(global_call_minutes_limit) || 0);
         if (global_ai_blocked !== undefined) config.global_ai_blocked = global_ai_blocked;
         if (free_limit_per_computer !== undefined) config.free_limit_per_computer = free_limit_per_computer === true;
         if (credits_per_inr !== undefined) config.credits_per_inr = credits_per_inr;
