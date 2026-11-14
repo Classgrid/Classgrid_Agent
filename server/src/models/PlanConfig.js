@@ -98,7 +98,7 @@ export const DEFAULT_PLANS = [
         projects_max: 3, coding_runs_per_month: 30, premium_runs_per_month: 0, sandbox_hours_per_month: 3, sandbox_sessions: 1,
         uploads_per_window: 3, upload_max_mb: 10, library_storage_mb: 600, devices_max: 2,
         priority: false, support_level: "community",
-        features_text: ["40 chats every 5 hours, no limit inside a chat", "Claude models: no", "4 images and photo edits a week", "20 voice replies a day", "30 free WhatsApp call minutes a month", "3 projects, unlimited on your own PC", "Grids, Schedule, Library, Calls, desktop and Android apps"],
+        features_text: ["40 new chats every 5 hours, no limit inside a chat", "Claude models: no", "4 images and photo edits a week", "30 free WhatsApp call minutes a month", "3 cloud projects", "Grids, Schedule, Library, Calls, desktop and Android apps"],
     },
     {
         key: "pro", name: "Pro", tagline: "Claude, pictures, calls and projects for one person", sort: 1,
@@ -114,7 +114,7 @@ export const DEFAULT_PLANS = [
         projects_max: 25, coding_runs_per_month: 500, premium_runs_per_month: 30, sandbox_hours_per_month: 30, sandbox_sessions: 1,
         uploads_per_window: 50, upload_max_mb: 50, library_storage_mb: 5120, devices_max: 5,
         priority: false, support_level: "email",
-        features_text: ["2,000 chats every 5 hours, no limit inside a chat", "Claude models: yes (Sonnet, Opus, and a share of Fable)", "100 images and photo edits a month", "150 free WhatsApp call minutes a month", "25 projects, 500 coding runs, 30 cloud sandbox hours", "Deep thinking, 128K context, 3 helpers per chat"],
+        features_text: ["2,000 new chats every 5 hours, no limit inside a chat", "Claude Sonnet, Opus and Haiku, and a share of Fable", "100 images and photo edits a month", "150 free WhatsApp call minutes a month", "25 cloud projects", "128K context window, deep thinking"],
     },
     {
         key: "max", name: "Max", tagline: "Five times Pro, with Claude Fable", sort: 2,
@@ -130,7 +130,7 @@ export const DEFAULT_PLANS = [
         projects_max: -1, coding_runs_per_month: 1500, premium_runs_per_month: 100, sandbox_hours_per_month: 100, sandbox_sessions: 2,
         uploads_per_window: 150, upload_max_mb: 200, library_storage_mb: 20480, devices_max: 10,
         priority: true, support_level: "priority email",
-        features_text: ["Unlimited chats, no limit inside a chat", "Claude models: 5x the usage of Pro", "Claude Fable up to half of your weekly credits", "300 images and photo edits a month", "400 free WhatsApp call minutes a month, 15-minute calls", "Unlimited projects, 1,500 coding runs, 100 sandbox hours", "400K context, 5 helpers per chat, priority at peak"],
+        features_text: ["Unlimited chats, no limit inside a chat", "Claude models: 5x the usage of Pro", "Claude Fable up to half of your Claude credits", "300 images and photo edits a month", "400 free WhatsApp call minutes a month, 15-minute calls", "Unlimited cloud projects", "400K context window, priority at peak"],
     },
     {
         key: "enterprise", name: "Enterprise", tagline: "Classgrid AI for your whole company", sort: 3, coming_soon: true,

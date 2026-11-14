@@ -41,8 +41,7 @@ import { SanityConfigModal } from "./SanityConfigModal";
 
 import { AiImagesGallery } from "./AiImagesGallery";
 import { AiUsageBar } from "./AiUsageBar";
-import { AiCreditsPanel } from "./credits/AiCreditsPanel";
-import { AiUpgradePanel } from "./credits/AiUpgradePanel";
+import { ClaudeUsageBar } from "./credits/ClaudeUsageBar";
 import { AiSkillsPanel } from "./skills/AiSkillsPanel";
 import { AiConnectedAppsPanel } from "./connected-apps/AiConnectedAppsPanel";
 import { AddConnectorModal } from "./custom-mcp/AddConnectorModal";
@@ -67,9 +66,8 @@ export const AI_HUB_TABS = [
   { id: "skills", label: "Skills", icon: Zap },
   // Outside apps (Claude, Cursor, ChatGPT) allowed through the Classgrid OAuth consent page
   { id: "connected-apps", label: "Connected apps", icon: KeyRound },
+  // Usage only: the models' usage. Plan, credits and upgrading live in Settings (owner, 2026-11-14)
   { id: "usage", label: "Usage", icon: Activity },
-  { id: "credits", label: "AI Credits", icon: CreditCard },
-  { id: "upgrade", label: "Upgrade", icon: ArrowUpCircle },
 ];
 
 const KEEP_LISTS = import.meta.env.VITE_DESKTOP === "1";
@@ -86,7 +84,7 @@ export function AiHubModal({ isOpen, onClose, onSendPrompt, initialTab = "plugin
   React.useEffect(() => {
     const handleMessage = (event: MessageEvent) => {
       if (event.data?.type === "CLASSGRID_PAYMENT_SUCCESS") {
-        setActiveTab("credits");
+        setActiveTab("usage");
       }
     };
     window.addEventListener("message", handleMessage);
@@ -616,14 +614,9 @@ export function AiHubModal({ isOpen, onClose, onSendPrompt, initialTab = "plugin
                     <div className="w-full max-w-2xl bg-card border border-border rounded-xl p-6 shadow-sm">
                         <AiUsageBar showExactTokens={false} />
                     </div>
-                  </div>
-                ) : tab === "credits" ? (
-                  <div className="h-full flex-1 -m-8">
-                    <AiCreditsPanel />
-                  </div>
-                ) : tab === "upgrade" ? (
-                  <div className="h-full flex-1 -m-8">
-                    <AiUpgradePanel />
+                    <div className="w-full max-w-2xl bg-card border border-border rounded-xl p-6 shadow-sm mt-4">
+                        <ClaudeUsageBar />
+                    </div>
                   </div>
                 ) : tab === "skills" ? (
                   <div className="h-full flex-1">
