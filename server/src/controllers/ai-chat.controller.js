@@ -1677,6 +1677,9 @@ async function keepMasteroPictures(userId, sessionId, messageId, images) {
     await invalidateHistoryCache(sessionId).catch(() => {});
 }
 
+// Tools the phone app never gets (see the phone gate in streamAskAi): changing projects, the browser, the computer
+const PHONE_BLOCKED_TOOLS = new Set(["write_project_file", "write_project_file_from_spec", "edit_project_file", "push_project_to_github", "create_github_repo_for_project", "update_project_github_repo", "rename_project", "make_project", "run_project_helpers", "use_worktree", "execute_project_command", "delete_project_file", "move_project_file"]);
+
 export const streamAskAi = async (req, res) => {
     const requestStartedAt = Date.now();
     const body = req.body || {};
@@ -6400,6 +6403,18 @@ If a tool fails, never show the error message; say only: "Something went wrong o
         for (const name of [...COMPUTER_TERMINAL_TOOLS, "run_code", "computer_terminal", "computer"]) {
             const fn = llmConfig.toolHandlers[name];
             if (typeof fn === "function" && !stepWrapped.has(fn)) llmConfig.toolHandlers[name] = showStep(name === "computer_terminal" ? "execute_terminal_command" : name, fn);
+        }
+        // The phone app (body.phone, owner 2026-11-14): a project can only be read and talked about there. Changing a
+        // project, the live browser and the user's computer are for the website and the desktop app, so those tools are
+        // taken out of the list, and if one is still called it answers that it can't be done from the phone.
+        if (body.phone === true) {
+            const blocked = (name) => PHONE_BLOCKED_TOOLS.has(name) || /^browser_/.test(name) || /^computer/.test(name);
+            for (const list of [fullToolList, activeToolList]) {
+                for (let k = list.length - 1; k >= 0; k--) if (blocked(list[k]?.function?.name || "")) list.splice(k, 1);
+            }
+            for (const name of Object.keys(llmConfig.toolHandlers)) {
+                if (blocked(name)) llmConfig.toolHandlers[name] = async () => "This can't be done from the Classgrid phone app: changing a project, the live browser and the user's computer are only on the website and the desktop app. Reading the project works here.";
+            }
         }
         console.log(`[AI-TOOLS] groups=[${toolPlan.activeGroupIds.join(",")}] sent=${activeToolList.length}/${fullToolList.length} tools staff=${toolPlan.staff}`);
 
