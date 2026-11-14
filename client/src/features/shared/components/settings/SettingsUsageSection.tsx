@@ -51,7 +51,7 @@ export function SettingsUsageSection() {
 
       {(u.credits_week || u.claude_week) && (
         <>
-          <H3 note={weekEnd ? `ends ${whenText(weekEnd)}` : undefined}>This week</H3>
+          <H3 note={weekEnd ? `resets ${whenText(weekEnd)}` : undefined}>Weekly limits</H3>
           <Card>
             <Bar title="DeepSeek, GLM and other models" m={u.credits_week} unit="credits" />
             <Bar title="Claude models" m={u.claude_week} unit="credits" desc={u.fable_week && u.fable_week.limit && u.fable_week.limit > 0 ? `Haiku, Sonnet, Opus and Fable. Fable may use up to ${n(u.fable_week.limit)} of these.` : "Haiku, Sonnet, Opus and Fable."} />
