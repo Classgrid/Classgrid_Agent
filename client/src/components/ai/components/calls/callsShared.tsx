@@ -230,7 +230,7 @@ export function between(a: string | Date | null | undefined, b: string | Date | 
 // ─── Models ───────────────────────────────────────────────────
 
 const MODEL_NAMES: Array<[RegExp, string]> = [
-  [/claude-fable-5-1/i, "Claude Fable 5.1"], [/claude-opus-5-5/i, "Claude Opus 5.5"], [/claude-sonnet-5-5/i, "Claude Sonnet 5.5"], [/claude-haiku-5-5/i, "Claude Haiku 5.5"],
+  [/claude-fable-5-2/i, "Claude Fable 5.2"], [/claude-fable-5-1/i, "Claude Fable 5.1"], [/claude-opus-5-5/i, "Claude Opus 5.5"], [/claude-sonnet-5-5/i, "Claude Sonnet 5.5"], [/claude-haiku-5-5/i, "Claude Haiku 5.5"],
   [/claude-opus/i, "Claude Opus"], [/claude-sonnet/i, "Claude Sonnet"], [/claude-haiku/i, "Claude Haiku"], [/claude/i, "Claude"],
   [/deepseek.*v4.*flash/i, "DeepSeek V4.1 Flash"], [/deepseek.*v4.*pro/i, "DeepSeek V4 Pro"], [/deepseek/i, "DeepSeek"],
   [/glm-4\.7-flash/i, "GLM-4.7 Flash"], [/glm/i, "GLM"], [/gpt-5/i, "GPT-5"], [/gpt-4/i, "GPT-4"], [/gemini/i, "Gemini"], [/llama/i, "Llama"], [/whisper/i, "Whisper"],

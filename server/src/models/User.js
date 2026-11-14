@@ -786,7 +786,10 @@ const userSchema = new mongoose.Schema(
 
       ai_image_free_weekly_limit: { type: Number, default: 20 },
       ai_image_free_weekly_used: { type: Number, default: 0 },
-      total_ai_tokens_used: { type: Number, default: 0 }
+      total_ai_tokens_used: { type: Number, default: 0 },
+      // The plan's weekly ceiling (services/plan-limits.service.js): credits used in the current 7-day stretch
+      week_used: { type: Number, default: 0 },
+      week_start: { type: Date }
     },
     ai_image_free_weekly_used: { type: Number },
     ai_image_reset_date: { type: Date },

@@ -34,6 +34,7 @@ import jwt from "jsonwebtoken";
 import User from "../models/User.js";
 import redis from "../config/redis.js";
 import { normalizeWhatsappNumber, resolveFeatureLimit, resolveResetPeriod } from "./ai-feature-limits.js";
+import { planOf, isUnlimited } from "./plan-limits.service.js";
 import Organization from "../models/Organization.js";
 import GlobalAiConfig from "../models/GlobalAiConfig.js";
 import { isSharedTestWhatsapp } from "../utils/chat-onboarding.js";
@@ -68,8 +69,10 @@ async function freeCallSeconds(user) {
         orgId ? Organization.findById(orgId).select("ai_config").lean().catch(() => null) : null,
         GlobalAiConfig.findOne({ key: "singleton" }).lean().catch(() => null),
     ]);
-    const limitMinutes = Math.max(0, Number(resolveFeatureLimit("calls", org, globalConfig, orgId)) || 0);
-    const period = resolveResetPeriod("calls", org, globalConfig, orgId);
+    const plan = await planOf(user).catch(() => null);
+    const rawLimit = resolveFeatureLimit("calls", org, globalConfig, orgId, plan);
+    const limitMinutes = rawLimit === Infinity ? 1e9 : Math.max(0, Number(rawLimit) || 0);
+    const period = resolveResetPeriod("calls", org, globalConfig, orgId, plan);
     const now = Date.now();
     let used = Number(user.ai_call_seconds_used) || 0;
     let resetAt = user.ai_call_reset_date ? new Date(user.ai_call_reset_date) : null;
@@ -798,7 +801,7 @@ function timeUp(call) {
         if (call.ended) return;
         const talking = call.speech.active || call.busy || aiIsTalking(call);
         if (talking && Date.now() < limit) call.hardStop = setTimeout(check, 500);
-        else endCall(call.id, maxMs < MAX_CALL_MS ? "free minutes used" : "15 minute limit");
+        else endCall(call.id, call.freeUntil && maxMs <= Math.max(10000, call.freeUntil - call.startedAt) + 1000 && !call.paidOk ? "free minutes used" : "time limit");
     };
     check();
 }
@@ -1279,12 +1282,12 @@ function filterAnswerSdp(sdp, publicIpv4) {
 const candidateSummary = (sdp) => sdp.split("\r\n").filter((l) => l.startsWith("a=candidate:"))
     .map((l) => { const p = l.split(" "); return `${p[7] || "?"} ${p[2]} ${p[4]}:${p[5]}`; }).join(", ") || "none";
 
-export async function answerCall({ id, from, sdp, user, tokenSource, callsLine = "", maxMs = MAX_CALL_MS, freeUntil = 0 }) {
+export async function answerCall({ id, from, sdp, user, tokenSource, callsLine = "", maxMs = MAX_CALL_MS, freeUntil = 0, paidOk = true }) {
     const { RTCPeerConnection, nonstandard } = await loadWrtc();
     const pc = new RTCPeerConnection({ iceServers: [{ urls: "stun:stun.l.google.com:19302" }], portRange: { min: 10000, max: 60000 } });
     const source = new nonstandard.RTCAudioSource();
     const call = {
-        id, from, user, pc, source, tokenSource, callsLine, maxMs, freeUntil,
+        id, from, user, pc, source, tokenSource, callsLine, maxMs, freeUntil, paidOk,
         startedAt: Date.now(), ended: false, busy: false, tasks: [],
         messages: [], transcript: [],
         outQueue: [], outCurrent: null, outPos: 0, speechEndedAt: 0,
@@ -1448,21 +1451,25 @@ export async function handleCallsWebhook(value) {
                     : "Classgrid AI can't take calls for your account right now. Please try again later.");
                 continue;
             }
-            // 50 calls per number in 24 hours (if the count can't be read, the call is answered)
+            // Calls per number in 24 hours: the plan's number (plans on), never above the 50 the owner set; and the
+            // plan's longest call, never above 15 minutes (if the count can't be read, the call is answered)
+            const callPlan = await planOf(user).catch(() => null);
+            const callsCap = callPlan && !isUnlimited(callPlan.calls_per_day) ? Math.max(0, Math.min(MAX_CALLS_PER_DAY, Number(callPlan.calls_per_day) || 0)) : MAX_CALLS_PER_DAY;
+            const planMaxMs = callPlan && !isUnlimited(callPlan.call_max_minutes) ? Math.min(MAX_CALL_MS, Math.max(60000, (Number(callPlan.call_max_minutes) || 0) * 60000)) : MAX_CALL_MS;
             const number = normalizeWhatsappNumber(from);
             const today = await callsToday(number).catch(() => null);
-            if (today && today.count >= MAX_CALLS_PER_DAY) {
+            if (today && today.count >= callsCap) {
                 await callAction(c.id, "reject").catch(() => {});
                 const next = new Date(today.nextAt).toLocaleString("en-IN", { timeZone: "Asia/Kolkata", dateStyle: "medium", timeStyle: "short" });
-                await sendWhatsappText(from, `You've used all ${MAX_CALLS_PER_DAY} Classgrid AI calls for the last 24 hours. You can call again after ${next} (India time).`);
+                await sendWhatsappText(from, `You've used all ${callsCap} Classgrid AI calls for the last 24 hours. You can call again after ${next} (India time).`);
                 continue;
             }
             // With no tokens to pay with, the call ends when the free minutes do
-            const maxMs = enough?.allowed ? MAX_CALL_MS : Math.min(MAX_CALL_MS, Math.max(10000, free.left * 1000));
+            const maxMs = enough?.allowed ? planMaxMs : Math.min(planMaxMs, Math.max(10000, free.left * 1000));
             const freeUntil = free.left > 0 ? Date.now() + free.left * 1000 : 0;
             markBusy(number, maxMs / 1000 + 120);
-            const callsLine = `(Call ${(today?.count || 0) + 1} of ${MAX_CALLS_PER_DAY} you can make in 24 hours.)`;
-            const answered = await answerCall({ id: c.id, from, sdp: c.session.sdp, user, tokenSource: enough?.source || "personal", callsLine, maxMs, freeUntil });
+            const callsLine = `(Call ${(today?.count || 0) + 1} of ${callsCap} you can make in 24 hours.)`;
+            const answered = await answerCall({ id: c.id, from, sdp: c.session.sdp, user, tokenSource: enough?.source || "personal", callsLine, maxMs, freeUntil, paidOk: !!enough?.allowed });
             if (answered) redis.zadd(CALLS_KEY(number), Date.now(), c.id).then(() => redis.expire(CALLS_KEY(number), 2 * 24 * 60 * 60)).catch(() => {});
         } catch (e) {
             console.error(`[WA call] ${c.id} failed:`, e.message);

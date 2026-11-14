@@ -370,6 +370,13 @@ router.post("/projects", isAuthenticated, async (req, res) => {
   if (!name) return res.status(400).json({ error: "Give the project a name" });
   await connectDB();
   if (await nameTaken(req.user._id, name)) return res.status(409).json({ error: `You already have a project called "${name}". Pick another name.` });
+  // Plans on: the plan's number of projects (folder projects on the user's own computer are not counted)
+  const { planOf, isUnlimited } = await import("../services/plan-limits.service.js");
+  const plan = await planOf(req.user).catch(() => null);
+  if (plan && !isUnlimited(plan.projects_max)) {
+    const have = await IdeProject.countDocuments({ owner: req.user._id, location: { $ne: "local" } });
+    if (have >= Number(plan.projects_max)) return res.status(403).json({ error: `Your ${plan.name} plan allows ${plan.projects_max} project${Number(plan.projects_max) === 1 ? "" : "s"}. Upgrade your plan to make more, or work in a folder on your own computer.`, code: "plan_limit", plan: plan.key });
+  }
   const logo = req.body?.logo !== undefined ? projectLogo(req.body.logo, req.user._id) : null;
   if (logo === undefined) return res.status(400).json({ error: "Could not use this logo. Upload it again." });
   const project = await IdeProject.create({ owner: req.user._id, name, logo });

@@ -46,7 +46,16 @@ const FIELDS = {
 const isSet = (v) => v !== undefined && v !== null;
 const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
 
-export function resolveFeatureLimit(feature, org, globalConfig, orgId = org?._id) {
+// The plan's own field for each feature (plans on: services/plan-limits.service.js gives the plan row)
+const PLAN_LIMIT_FIELDS = { image: "images_per_period", whatsapp: "whatsapp_per_period", calls: "call_minutes_per_period" };
+const PLAN_PERIOD_FIELDS = { image: "images_reset", whatsapp: "whatsapp_reset", calls: "call_reset" };
+
+export function resolveFeatureLimit(feature, org, globalConfig, orgId = org?._id, plan = null) {
+    // With plans on, the plan's number (a super admin's per-org custom limit still wins; -1 = unlimited)
+    if (plan && PLAN_LIMIT_FIELDS[feature] && !(org && org.ai_config?.custom_limits_enabled && isSet(org.ai_config[FIELDS[feature].org]))) {
+        const v = Number(plan[PLAN_LIMIT_FIELDS[feature]]);
+        return v === -1 ? Infinity : (Number.isFinite(v) ? v : 0);
+    }
     const f = FIELDS[feature];
     let limit = isSet(globalConfig?.[f.global]) ? globalConfig[f.global] : f.fallback;
     const classgridLimit = globalConfig?.classgrid_custom_limits_enabled && isSet(globalConfig[f.classgrid]) ? globalConfig[f.classgrid] : null;
@@ -85,7 +94,11 @@ const readPeriod = (src, prefix) => {
     return isValidResetPeriod(value, unit) ? { value, unit } : null;
 };
 
-export function resolveResetPeriod(feature, org, globalConfig, orgId = org?._id) {
+export function resolveResetPeriod(feature, org, globalConfig, orgId = org?._id, plan = null) {
+    if (plan && PLAN_PERIOD_FIELDS[feature] && !(org && org.ai_config?.custom_limits_enabled && readPeriod(org.ai_config, PERIOD_FIELDS[feature].org))) {
+        const pp = readPeriod(plan, PLAN_PERIOD_FIELDS[feature]);
+        if (pp) return { value: pp.value, unit: pp.unit, ms: pp.value * RESET_UNITS[pp.unit], label: formatResetPeriod(pp) };
+    }
     const f = PERIOD_FIELDS[feature];
     let period = readPeriod(globalConfig, f.global) || DEFAULT_RESET_PERIOD;
     const classgridPeriod = globalConfig?.classgrid_custom_limits_enabled ? readPeriod(globalConfig, f.classgrid) : null;
@@ -166,9 +179,13 @@ export async function checkWhatsappLimit(user, { includeUpcomingRepeats = false 
     const globalConfig = await GlobalAiConfig.findOne({ key: "singleton" }).lean();
     const orgId = user.organization_id || null;
     const org = orgId ? await Organization.findById(orgId).select("ai_config").lean() : null;
-    const limit = resolveFeatureLimit("whatsapp", org, globalConfig, orgId);
-    const period = resolveResetPeriod("whatsapp", org, globalConfig, orgId);
+    const { planOf } = await import("./plan-limits.service.js");
+    const plan = await planOf(user);
+    const limit = resolveFeatureLimit("whatsapp", org, globalConfig, orgId, plan);
+    const period = resolveResetPeriod("whatsapp", org, globalConfig, orgId, plan);
     const periodMs = period.ms;
+    // The plan's per-day limit as well (plans on; -1 = none)
+    const dayLimit = plan && Number(plan.whatsapp_per_day) >= 0 ? Number(plan.whatsapp_per_day) : null;
 
     // Only messages still waiting to go out or actually sent count; failed or undelivered ones don't.
     const since = new Date(Date.now() - periodMs);
@@ -203,8 +220,20 @@ export async function checkWhatsappLimit(user, { includeUpcomingRepeats = false 
         if (direct > 0 && periodMs > EIGHT_DAYS_S * 1000) await redis.expire(key, Math.ceil(periodMs / 1000) + 24 * 60 * 60);
     } catch (e) { /* Redis down: count only the scheduled ones */ }
 
-    const used = scheduled + direct + upcoming;
-    const allowed = used < limit;
+    let used = scheduled + direct + upcoming;
+    let allowed = used < limit;
+    let shownLimit = limit;
+    if (allowed && dayLimit !== null) {
+        const daySince = new Date(Date.now() - 24 * 60 * 60 * 1000);
+        const dayScheduled = await AiSchedule.countDocuments({
+            user_id: user._id, createdAt: { $gte: daySince }, status: { $in: ["pending", "sent"] },
+            repeat: { $nin: ["daily", "weekly", "custom"] }, whatsapp_failed: { $ne: true },
+            whatsapp_phone_number: { $exists: true, $ne: "" }, whatsapp_message: { $exists: true, $ne: "" },
+        });
+        let dayDirect = 0;
+        try { dayDirect = await redis.zcount(directSendKey(user._id), Date.now() - 24 * 60 * 60 * 1000, "+inf"); } catch (e) { /* Redis down */ }
+        if (dayScheduled + dayDirect >= dayLimit) { allowed = false; used = dayScheduled + dayDirect; shownLimit = dayLimit; }
+    }
 
     let resetText = null;
     let resetAt = null;
@@ -227,7 +256,7 @@ export async function checkWhatsappLimit(user, { includeUpcomingRepeats = false 
         resetAt = new Date(Number.isFinite(oldestMs) ? oldestMs + periodMs : Date.now() + periodMs);
         if (!allowed) resetText = formatResetTime(resetAt);
     }
-    return { allowed, limit, used, periodMs, periodText: formatPeriodLength(period), resetText, resetAt };
+    return { allowed, limit: shownLimit, used, periodMs, periodText: shownLimit === limit ? formatPeriodLength(period) : "24 hours", resetText, resetAt };
 }
 
 const messageOwnerKey = (messageId) => `ai:wa-msg:${messageId}`;

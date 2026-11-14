@@ -68,7 +68,7 @@ export const MODEL_GROUPS: { label: string; models: ChatModelOption[] }[] = [
       { id: "claude-haiku-5-5", name: "Claude Haiku 5.5", description: "Fastest, for quick everyday answers", provider: "anthropic", logo: LOGOS.claude },
       { id: "claude-sonnet-5-5", name: "Claude Sonnet 5.5", description: "Best mix of speed and intelligence", provider: "anthropic", logo: LOGOS.claude },
       { id: "claude-opus-5-5", name: "Claude Opus 5.5", description: "Complex projects, coding and agents", provider: "anthropic", logo: LOGOS.claude },
-      { id: "claude-fable-5-1", name: "Claude Fable 5.1", description: "Most capable, for the hardest reasoning", provider: "anthropic", logo: LOGOS.claude },
+      { id: "claude-fable-5-2", name: "Claude Fable 5.2", description: "Most capable, for the hardest reasoning", provider: "anthropic", logo: LOGOS.claude },
     ],
   },
   {
@@ -154,7 +154,7 @@ const THINKING_LEVELS: { id: ThinkingLevel; label: string; hint: string }[] = [
 ];
 
 // Claude Fable 5.1 is locked until the person has topped up ₹299 in total (server enforces it too)
-const FABLE_ID = "claude-fable-5-1";
+const FABLE_ID = "claude-fable-5-2";
 
 export function ModelPicker({ value, onChange, disabled }: ModelPickerProps) {
   const selected = ALL_MODELS.find((m) => m.id === value);

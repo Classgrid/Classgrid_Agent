@@ -45,7 +45,7 @@ export async function disabledModels() {
 }
 export function forgetDisabledModels() { disabledCache.at = 0; }
 
-export const FABLE_MODEL = "claude-fable-5-1";
+export const FABLE_MODEL = "claude-fable-5-2"; // (5.2 since 2026-11-14: $8/$40 instead of $10/$50)
 export const FABLE_UNLOCK_INR = 299;
 
 // userId -> { unlocked, toppedUpInr, at }. Unlocked is permanent, so it's cached long; locked is re-checked

@@ -146,11 +146,19 @@ router.delete("/skills/:id", isAuthenticated, deleteSkill);
 router.get("/preferences", isAuthenticated, getPreferences);
 router.put("/preferences", isAuthenticated, updatePreferences);
 
-// Premium model access (model picker lock for Claude Fable 5.1)
+// Premium model access (model picker lock for Claude Fable) and, with plans on, the user's plan: its models, its
+// Fable share and its helpers, so the picker and the app show what the plan allows
 router.get("/model-access", isAuthenticated, async (req, res) => {
     try {
         const { fableAccess, disabledModels } = await import("../services/model-access.service.js");
-        res.json({ fable: await fableAccess(req.user), disabledModels: await disabledModels() });
+        const { planOf } = await import("../services/plan-limits.service.js");
+        const [fable, disabled, plan] = await Promise.all([fableAccess(req.user), disabledModels(), planOf(req.user).catch(() => null)]);
+        const byPlan = !!plan && Number(plan.fable_share_percent) > 0;
+        res.json({
+            fable: byPlan ? { ...fable, unlocked: true, byPlan: true } : fable,
+            disabledModels: disabled,
+            plan: plan ? { key: plan.key, name: plan.name, modelsAllowed: plan.models_allowed || [], fableSharePercent: plan.fable_share_percent || 0, helpersPerChat: plan.helpers_per_chat, thinkingModes: plan.thinking_modes || [], contextTokens: plan.context_tokens } : null,
+        });
     } catch (err) {
         res.status(500).json({ error: err.message });
     }

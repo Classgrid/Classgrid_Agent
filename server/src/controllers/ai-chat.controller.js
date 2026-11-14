@@ -78,6 +78,7 @@ import { editorContextFor, rememberProjectSnapshot, sandboxDataDir, startCheckpo
 // Cloudflare Workers AI daily Neuron cap and meter (Global AI Config): every Cloudflare request goes through cfAiFetch
 import { cfAiFetch, providersWithoutCappedCloudflare } from "../services/cf-neuron-cap.service.js";
 import * as eleven from "../services/elevenlabs.service.js";
+import { planOf, isUnlimited } from "../services/plan-limits.service.js";
 import { PLANNER_BROWSER_TOOLS, PLANNER_BLIND_TOOLS, WORKER_BROWSER_TOOLS, BROWSER_TOOL_NAMES, makeBrowserHandlers, BROWSER_WORKER_SYSTEM } from "../services/studio-browser-tools.js";
 import { ensureBrowser } from "../services/studio-browser.service.js";
 import { gateHandlers, askPermission, PERMISSION_MODES } from "../services/permission-gate.js";
@@ -1314,6 +1315,7 @@ const MODEL_DISPLAY_NAMES = {
     "claude-sonnet-5-5": "Claude Sonnet 5.5",
     "claude-opus-5-5": "Claude Opus 5.5",
     "claude-fable-5-1": "Claude Fable 5.1",
+    "claude-fable-5-2": "Claude Fable 5.2",
     "@cf/deepseek-ai/deepseek-v4.1-flash-1017": "DeepSeek V4.1 Flash",
     "@cf/openai/gpt-oss-120b": "GPT-OSS 120B",
     "@cf/openai/gpt-oss-20b": "GPT-OSS 20B",
@@ -1779,15 +1781,26 @@ export const streamAskAi = async (req, res) => {
     };
     // A model Cloudflare removed (an older app, a saved chat) goes to its replacement (services/cf-retired-models.js)
     if (typeof body.selectedModel === "string") body.selectedModel = cfModel(body.selectedModel);
+    if (body.selectedModel === "claude-fable-5-1") body.selectedModel = "claude-fable-5-2"; // (Fable 5.2 since 2026-11-14: 20% cheaper, same access)
     // A model turned off in the super admin Model manager is not used: the message goes to Auto instead
     if (typeof body.selectedModel === "string" && body.selectedModel !== "auto") {
         const { disabledModels } = await import("../services/model-access.service.js");
         if ((await disabledModels().catch(() => [])).includes(body.selectedModel)) body.selectedModel = "auto";
     }
     let fablePaidOnly = false;
-    // Claude Fable 5.1 (most expensive model) is locked until the person has topped up ₹299 in total.
-    // 402, not 403: the chat page treats 403 as a ban.
-    if (body.selectedModel === "claude-fable-5-1") {
+    // Plans on: a model outside the user's plan is not used (402, not 403: the chat page treats 403 as a ban), and
+    // Fable comes with the plan when the plan has a Fable share (then it is paid from the plan's credits, not from
+    // paid credits only)
+    const planRow = await planOf(req.user).catch(() => null);
+    if (planRow && typeof body.selectedModel === "string" && body.selectedModel !== "auto" && Array.isArray(planRow.models_allowed) && planRow.models_allowed.length && !planRow.models_allowed.includes(body.selectedModel)) {
+        res.writeHead(402, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: `${MODEL_DISPLAY_NAMES[body.selectedModel] || body.selectedModel} is not in your ${planRow.name} plan. Upgrade your plan, or pick another model.`, code: "model_locked", plan: planRow.key }));
+        return;
+    }
+    const fableByPlan = !!planRow && Number(planRow.fable_share_percent) > 0;
+    // Claude Fable (most expensive model) is locked until the person has topped up ₹299 in total, unless their plan
+    // includes it. 402, not 403: the chat page treats 403 as a ban.
+    if (body.selectedModel === "claude-fable-5-2" && !fableByPlan) {
         try {
             const { fableAccess, FABLE_UNLOCK_INR } = await import("../services/model-access.service.js");
             const access = await fableAccess(req.user);
@@ -3955,8 +3968,12 @@ Every user is using you as a personal AI assistant and agent (like ChatGPT) to m
                         const board = helperBoard(sessionId);
                         board.userId = userId ? String(userId) : board.userId; // whose helpers these are (Agents board)
                         board.helpers = board.helpers.filter((h) => h.state === "running" || !h.reportTaken);
-                        const room = Math.max(0, 5 - board.helpers.filter((h) => h.state === "running").length);
-                        if (!room) return "Error: 5 helpers are already working. Use check_helpers to wait for one to finish first.";
+                        // (plans on: the plan says how many helpers may work at once, up to the 5 the board holds)
+                        const helperPlan = await planOf(req.user).catch(() => null);
+                        const maxHelpers = helperPlan && !isUnlimited(helperPlan.helpers_per_chat) ? Math.max(0, Math.min(5, Number(helperPlan.helpers_per_chat) || 0)) : 5;
+                        if (!maxHelpers) return `Error: helpers are not included in the ${helperPlan?.name || ""} plan. Do the work yourself in this chat.`;
+                        const room = Math.max(0, maxHelpers - board.helpers.filter((h) => h.state === "running").length);
+                        if (!room) return `Error: ${maxHelpers} helper${maxHelpers === 1 ? " is" : "s are"} already working. Use check_helpers to wait for one to finish first.`;
                         // Helpers stop only when the user stops the chat (the request is cut). If the answer itself ends or
                         // breaks, they keep working; when they finish, a waiting background task is woken to read their reports.
                         // Stop only stops the answer: helpers keep working and the chat is woken with their reports
@@ -3967,7 +3984,7 @@ Every user is using you as a personal AI assistant and agent (like ChatGPT) to m
                         const { disabledModels } = await import("../services/model-access.service.js");
                         const offModels = await disabledModels().catch(() => []);
                         const pickModel = (wanted, i) => {
-                            const allowed = [...CF_PICKER_MODELS.keys(), ...[...CLAUDE_CHAT_MODELS].filter((m) => m !== "claude-fable-5-1")].filter((m) => !offModels.includes(m));
+                            const allowed = [...CF_PICKER_MODELS.keys(), ...[...CLAUDE_CHAT_MODELS].filter((m) => !/claude-fable/.test(m))].filter((m) => !offModels.includes(m));
                             const w = wanted.toLowerCase();
                             const byName = Object.entries(MODEL_DISPLAY_NAMES).find(([, name]) => name.toLowerCase() === w)?.[0];
                             const id = allowed.find((m) => m.toLowerCase() === w) || (byName && allowed.includes(byName) ? byName : "");
@@ -7363,6 +7380,11 @@ export const uploadChatImage = async (req, res) => {
         if (!fileName || !mimeType) {
             return res.status(400).json({ error: "fileName and mimeType required" });
         }
+        // Plans on: the plan's largest upload (the app sends the size before uploading)
+        const uploadPlan = await planOf(req.user).catch(() => null);
+        if (uploadPlan && !isUnlimited(uploadPlan.upload_max_mb) && Number(size) > Number(uploadPlan.upload_max_mb) * 1024 * 1024) {
+            return res.status(413).json({ error: `This file is bigger than the ${uploadPlan.upload_max_mb} MB per upload of your ${uploadPlan.name} plan. Upgrade your plan, or pick a smaller file.`, code: "plan_limit", plan: uploadPlan.key });
+        }
 
         const safeFileName = fileName.replace(/[^a-zA-Z0-9.-]/g, '_');
         const fileKey = `ai-chat-uploads/${Date.now()}-${safeFileName}`;
@@ -8205,8 +8227,9 @@ export const generateImage = async (req, res) => {
             const imageOrgId = authUserForImage.organization_id || null;
             const imageOrg = imageOrgId ? await Organization.findById(imageOrgId).select('ai_config').lean() : null;
             const imageGlobalConfig = await GlobalAiConfig.findOne({ key: 'singleton' }).lean();
-            const imageLimit = resolveFeatureLimit('image', imageOrg, imageGlobalConfig, imageOrgId);
-            const imagePeriod = resolveResetPeriod('image', imageOrg, imageGlobalConfig, imageOrgId);
+            const imagePlan = await planOf(authUserForImage);
+            const imageLimit = resolveFeatureLimit('image', imageOrg, imageGlobalConfig, imageOrgId, imagePlan);
+            const imagePeriod = resolveResetPeriod('image', imageOrg, imageGlobalConfig, imageOrgId, imagePlan);
             const tokenPeriodMs = resolveResetPeriod('tokens', imageOrg, imageGlobalConfig, imageOrgId).ms;
             const resetNow = Date.now();
             const nextImageReset = new Date(resetNow + imagePeriod.ms);

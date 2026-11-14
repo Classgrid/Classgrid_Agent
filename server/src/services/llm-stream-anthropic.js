@@ -50,16 +50,18 @@ export const CLAUDE_CHAT_MODELS = new Set([
     "claude-sonnet-5-5",
     "claude-opus-5-5",
     "claude-fable-5-1",
+    "claude-fable-5-2",
 ]);
 
 // Models that accept the server-side refusal fallback in its "default" form on the Claude API.
-const FALLBACK_MODELS = new Set(["claude-sonnet-5-5", "claude-opus-5-5", "claude-fable-5-1"]);
+const FALLBACK_MODELS = new Set(["claude-sonnet-5-5", "claude-opus-5-5", "claude-fable-5-2"]);
 
 const DEFAULT_EFFORT = {
     "claude-haiku-5-5": "low",
     "claude-sonnet-5-5": "medium",
     "claude-opus-5-5": "medium",
     "claude-fable-5-1": "medium",
+    "claude-fable-5-2": "medium",
 };
 
 // Thinking tokens count toward max_tokens, so Claude gets more room than the Cloudflare default -

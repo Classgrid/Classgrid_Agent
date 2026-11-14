@@ -90,6 +90,7 @@ const MODEL_PRICING_USD_PER_M = {
     "claude-sonnet-5-5": { prompt: 2,   completion: 10,  cacheRead: 0.1,  cacheWrite: 2.5 },
     "claude-opus-5-5":   { prompt: 4,   completion: 20,  cacheRead: 0.2,  cacheWrite: 5 },
     "claude-fable-5-1":  { prompt: 10,  completion: 50,  cacheRead: 0.25, cacheWrite: 12.5 },
+    "claude-fable-5-2":  { prompt: 8,   completion: 40,  cacheRead: 0.20, cacheWrite: 10 },
     // Targets of the server-side refusal fallback; logged when one of them actually answered
     "claude-opus-5":     { prompt: 5,   completion: 25,  cacheRead: 0.5,  cacheWrite: 6.25 },
     "claude-opus-4-8":   { prompt: 5,   completion: 25,  cacheRead: 0.5,  cacheWrite: 6.25 },

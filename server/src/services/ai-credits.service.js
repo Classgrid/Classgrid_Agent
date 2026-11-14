@@ -41,7 +41,8 @@ import Organization from "../models/Organization.js";
 
 import GlobalAiConfig from "../models/GlobalAiConfig.js";
 import { enqueueEmail } from "./email-queue.service.js";
-import { resetPeriodMs } from "./ai-feature-limits.js";
+import { resetPeriodMs, RESET_UNITS } from "./ai-feature-limits.js";
+import { planOf, isUnlimited } from "./plan-limits.service.js";
 import redis from "../config/redis.js";
 import { getGrantedCreditsLowEmailHtml, getTopUpCreditsLowEmailHtml, getFreeLimitsExhaustedEmailHtml, getGrantedCreditsExhaustedEmailHtml, getTopUpCreditsExhaustedEmailHtml } from "./email-templates.service.js";
 
@@ -93,6 +94,27 @@ export function resolveWeeklyLimit(user, org, globalConfig, orgId = org?._id) {
     return weeklyLimit;
 }
 
+// The free window and the weekly ceiling: with plans on, from the user's plan (tokens_per_window per window of
+// window_reset_value/unit, and tokens_per_week per 7 days); with plans off, the dashboard's global / org / user limit
+// and its reset period as before. A super admin's per-user custom limit always wins over the plan's window.
+const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
+export async function freeWindow(user, org, globalConfig, orgId = org?._id) {
+    const plan = await planOf(user);
+    if (!plan) return { limit: resolveWeeklyLimit(user, org, globalConfig, orgId), periodMs: resetPeriodMs("tokens", org, globalConfig, orgId), weekCap: null, planKey: null };
+    let limit = isUnlimited(plan.tokens_per_window) ? Infinity : Number(plan.tokens_per_window) || 0;
+    if (user?.ai_tokens?.custom_limits_enabled && user.ai_tokens.free_weekly_limit !== undefined && user.ai_tokens.free_weekly_limit !== null) limit = user.ai_tokens.free_weekly_limit;
+    const periodMs = Math.max(1000, (Number(plan.window_reset_value) || 5) * (RESET_UNITS[plan.window_reset_unit] || RESET_UNITS.hour));
+    const weekCap = isUnlimited(plan.tokens_per_week) ? Infinity : Number(plan.tokens_per_week) || 0;
+    return { limit, periodMs, weekCap, planKey: plan.key };
+}
+// The weekly counter, restarted when its 7 days are over (returns what is used in the current stretch)
+async function weekUsed(userId, tokens, nowMs = Date.now()) {
+    const start = tokens?.week_start ? new Date(tokens.week_start).getTime() : 0;
+    if (start && nowMs < start + WEEK_MS) return tokens?.week_used || 0;
+    await User.updateOne({ _id: userId }, { $set: { "ai_tokens.week_used": 0, "ai_tokens.week_start": new Date(nowMs) } }).catch(() => {});
+    return 0;
+}
+
 // One computer, one free limit (desktop app): the free tokens used by every account on the same Windows computer
 // count together, so making more accounts doesn't give more free usage. Paid and granted credits are not affected.
 // The app sends the computer's scrambled Windows ID; an account stays tied to its last computer for 90 days.
@@ -127,7 +149,7 @@ export const hasEnoughTokens = async (userId, orgId, requiredTokens = 1, { paidO
     // The three reads (user, global settings, organization) are 150 ms away each; they run together, not one after
     // another (measured 2026-11-10: 450 ms -> 150 ms)
     const [user, globalConfig, org] = await Promise.all([
-        User.findById(userId).select('ai_tokens role status'),
+        User.findById(userId).select('ai_tokens role status plan'),
         GlobalAiConfig.findOne({ key: "singleton" }).select("global_user_weekly_limit global_ai_blocked free_limit_per_computer classgrid_custom_limits_enabled classgrid_user_weekly_limit global_token_reset_value global_token_reset_unit classgrid_token_reset_value classgrid_token_reset_unit global_image_reset_value global_image_reset_unit classgrid_image_reset_value classgrid_image_reset_unit").lean() || {},
         orgId ? Organization.findById(orgId).select('ai_config status').lean() : null,
     ]);
@@ -176,13 +198,15 @@ export const hasEnoughTokens = async (userId, orgId, requiredTokens = 1, { paidO
         }
     }
 
-    // Global -> org (or Classgrid) -> user custom limit, as set in the super admin dashboard.
-    const weeklyLimit = resolveWeeklyLimit(user, org, globalConfig, orgId);
+    // The window limit and its period: the user's plan when plans are on, else global -> org (or Classgrid) -> user
+    // custom limit, as set in the super admin dashboard.
+    const window = await freeWindow(user, org, globalConfig, orgId);
+    const weeklyLimit = window.limit;
 
     // 2. Check free weekly limit FIRST (Always use free before touching paid/promo)
     let usedThisWeek = user.ai_tokens?.used_this_week || 0;
     // Reset follows the dashboard timing live (see tokenWindowEnd)
-    const tokenPeriodMs = resetPeriodMs("tokens", org, globalConfig, orgId);
+    const tokenPeriodMs = window.periodMs;
     const nowMs = Date.now();
     const windowEndMs = tokenWindowEnd(user.ai_tokens, tokenPeriodMs, nowMs);
     const savedResetMs = user.ai_tokens?.week_reset_date ? new Date(user.ai_tokens.week_reset_date).getTime() : 0;
@@ -210,7 +234,9 @@ export const hasEnoughTokens = async (userId, orgId, requiredTokens = 1, { paidO
     // The free limit is shared by all accounts on the same computer, when the super admin dashboard's switch is on
     // (the computer's count is kept either way, so turning the switch on later counts what was already used)
     const usedOnComputer = globalConfig.free_limit_per_computer === true ? await deviceFreeUsed(userId) : null;
-    const freeLeft = Math.min(weeklyLimit - usedThisWeek, usedOnComputer === null ? Infinity : weeklyLimit - usedOnComputer);
+    // The plan's weekly ceiling (plans on): what is left of it this week caps the window too
+    const weekLeft = window.weekCap === null ? Infinity : Math.max(0, window.weekCap - (await weekUsed(userId, user.ai_tokens, nowMs)));
+    const freeLeft = Math.min(weeklyLimit - usedThisWeek, usedOnComputer === null ? Infinity : weeklyLimit - usedOnComputer, weekLeft);
     // The credit pools (granted / promotion and paid / top-up), without the expired ones.
     // Note: paused/revoked credits are already subtracted from balance by the per-transaction controllers
     const now = new Date().getTime();
@@ -437,14 +463,16 @@ export const deductTokens = async (userId, orgId, tokenAmount, source, { noSpill
 
         } else if (source === "weekly_free") {
             // Free tier, with the same dashboard limit the pre-request check uses.
-            const user = await User.findById(userId).select("ai_tokens");
+            const user = await User.findById(userId).select("ai_tokens plan");
             const org = orgId ? await Organization.findById(orgId).select("ai_config").lean() : null;
             const globalConfig = await GlobalAiConfig.findOne({ key: "singleton" }).select("global_user_weekly_limit free_limit_per_computer classgrid_custom_limits_enabled classgrid_user_weekly_limit global_token_reset_value global_token_reset_unit classgrid_token_reset_value classgrid_token_reset_unit").lean() || {};
-            const weeklyLimit = resolveWeeklyLimit(user, org, globalConfig, orgId);
+            const window = await freeWindow(user, org, globalConfig, orgId);
+            const weeklyLimit = window.limit;
             const currentUsed = user?.ai_tokens?.used_this_week || 0;
             // The free limit is shared by all accounts on the same computer, when the dashboard's switch is on
             const usedOnComputer = globalConfig.free_limit_per_computer === true ? await deviceFreeUsed(userId) : null;
-            const headroom = Math.max(0, Math.min(weeklyLimit - currentUsed, usedOnComputer === null ? Infinity : weeklyLimit - usedOnComputer));
+            const weekLeft = window.weekCap === null ? Infinity : Math.max(0, window.weekCap - (await weekUsed(userId, user?.ai_tokens)));
+            const headroom = Math.max(0, Math.min(weeklyLimit - currentUsed, usedOnComputer === null ? Infinity : weeklyLimit - usedOnComputer, weekLeft));
             const actualDeduction = Math.min(tokenAmount, headroom);
             const overflow = tokenAmount - actualDeduction;
 
@@ -452,11 +480,12 @@ export const deductTokens = async (userId, orgId, tokenAmount, source, { noSpill
                 const updatedUser = await User.findByIdAndUpdate(userId, {
                     $inc: {
                         "ai_tokens.used_this_week": actualDeduction,
+                        "ai_tokens.week_used": actualDeduction,
                         "ai_tokens.total_ai_tokens_used": actualDeduction
                     }
                 }, { returnDocument: 'after' });
                 result = { success: true, remaining: Math.max(0, weeklyLimit - updatedUser.ai_tokens.used_this_week), limit: weeklyLimit, type: "free" };
-                await addDeviceFree(userId, actualDeduction, resetPeriodMs("tokens", org, globalConfig, orgId));
+                await addDeviceFree(userId, actualDeduction, window.periodMs);
                 triggerEmailAlerts(userId, orgId, "free", headroom, result.remaining, weeklyLimit);
             } else {
                 result = { success: true, remaining: 0, limit: weeklyLimit, type: "free" };
