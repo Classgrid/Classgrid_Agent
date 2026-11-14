@@ -394,7 +394,7 @@ router.post("/clients/register", isAuthenticated, async (req, res) => {
 router.post("/register", oauthRegisterLimiter, async (req, res) => {
     try {
         await connectDB();
-        const { client_name, redirect_uris, token_endpoint_auth_method, grant_types, response_types, scope } = req.body || {};
+        const { client_name, redirect_uris, token_endpoint_auth_method, grant_types, response_types, scope, logo_uri, client_uri } = req.body || {};
         const badMetadata = (description) => res.status(400).json({ error: "invalid_client_metadata", error_description: description });
 
         if (!validRedirectUriList(redirect_uris)) {
@@ -437,6 +437,8 @@ router.post("/register", oauthRegisterLimiter, async (req, res) => {
             scope: registeredScope,
             name: String(client_name || "").trim().slice(0, 100) || "Dynamic Custom Connector",
             redirectUris: redirect_uris,
+            logoUri: httpsUrlOrNull(logo_uri),
+            clientUri: httpsUrlOrNull(client_uri),
             createdBy: null,
             unusedExpiresAt: new Date(Date.now() + UNUSED_DCR_CLIENT_TTL_MS) // cleared when it first gets a token
         });
@@ -453,6 +455,8 @@ router.post("/register", oauthRegisterLimiter, async (req, res) => {
             response_types: client.responseTypes,
             scope: registeredScope || scopesToString(SUPPORTED_SCOPES)
         };
+        if (client.logoUri) response.logo_uri = client.logoUri;
+        if (client.clientUri) response.client_uri = client.clientUri;
         if (clientSecret) {
             response.client_secret = clientSecret;
             response.client_secret_expires_at = 0; // never expires
@@ -711,6 +715,34 @@ async function authorizePendingRequest(req, res, body) {
 // ─────────────────────────────────────────────
 const MAX_GRANT_TOKENS = 500; // live tokens read per user; one app holds a handful
 
+// An https address of at most 512 characters, or null (logo_uri / client_uri from RFC 7591 registration)
+function httpsUrlOrNull(value) {
+    if (typeof value !== "string" || !value || value.length > 512) return null;
+    try { const u = new URL(value); return u.protocol === "https:" ? u.toString() : null; } catch { return null; }
+}
+
+// Logos of the apps people connect (the same files the AI hub's integrations list uses). invert: "light" = a white
+// logo that is inverted in light mode; "dark" = a black logo inverted in dark mode.
+const CDN_LOGOS = "https://cdn.classgrid.in/classgrid_intgration";
+const KNOWN_APP_LOGOS = [
+    { test: /claude|anthropic/i, logo: `${CDN_LOGOS}/claude-ai-icon.svg`, invert: null },
+    { test: /chatgpt|openai|codex/i, logo: `${CDN_LOGOS}/chatgpt-light_(1).svg`, invert: "light" },
+    { test: /cursor/i, logo: `${CDN_LOGOS}/cursor.svg`, invert: "light" },
+    { test: /github|copilot/i, logo: `${CDN_LOGOS}/github-icon.svg`, invert: "dark" },
+    { test: /notion/i, logo: `${CDN_LOGOS}/Notion-logo.svg`, invert: null },
+    { test: /slack/i, logo: `${CDN_LOGOS}/slack-new-logo-logo-svgrepo-com.svg`, invert: null },
+    { test: /canva/i, logo: `${CDN_LOGOS}/canva.svg`, invert: null },
+    { test: /zoom/i, logo: `${CDN_LOGOS}/zoom-communications-icon_(1).svg`, invert: null },
+    { test: /vercel/i, logo: `${CDN_LOGOS}/vercel-icon-svgrepo-com.svg`, invert: "dark" },
+];
+function logoForClient(client) {
+    const known = client && KNOWN_APP_LOGOS.find((k) => k.test.test(client.name || ""));
+    if (known) return { logo: known.logo, logoInvert: known.invert };
+    return { logo: client?.logoUri || null, logoInvert: null };
+}
+const hostOf = (u) => { try { return new URL(u).host || null; } catch { return null; } };
+const isLoopbackHost = (host) => /^(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$/i.test(String(host || ""));
+
 // One row per app that still holds a live token for this user. "Last active" = the newest token the app
 // got (sign-in or refresh), since access checks don't write anything per call.
 router.get("/grants", requireConsentPageOrigin, isAuthenticated, async (req, res) => {
@@ -737,16 +769,23 @@ router.get("/grants", requireConsentPageOrigin, isAuthenticated, async (req, res
         }
 
         const clients = byClient.size
-            ? await OAuthClient.find({ clientId: { $in: [...byClient.keys()] } }).select("clientId name createdBy redirectUris").lean()
+            ? await OAuthClient.find({ clientId: { $in: [...byClient.keys()] } }).select("clientId name createdBy redirectUris logoUri clientUri createdAt").lean()
             : [];
         const clientById = new Map(clients.map((c) => [c.clientId, c]));
 
         const grants = [...byClient.entries()].map(([clientId, row]) => {
             const client = clientById.get(clientId);
+            const redirectHosts = [...new Set((client?.redirectUris || []).map(hostOf).filter(Boolean))];
+            const verified = !!(client?.createdBy || isVerifiedVendorClient(client));
             return {
                 clientId,
                 name: client?.name || "Removed app",
-                clientKind: (client?.createdBy || isVerifiedVendorClient(client)) ? "registered" : "dynamic",
+                clientKind: verified ? "registered" : "dynamic",
+                verified,
+                ...logoForClient(client),
+                website: client?.clientUri || null,
+                redirectHosts,
+                returnsToThisComputer: redirectHosts.length > 0 && redirectHosts.every(isLoopbackHost),
                 scopes: describeScopes([...row.scopes]).map(({ scope, label, sensitive }) => ({ scope, label, sensitive })),
                 connectedAt: row.connectedAt,
                 lastUsedAt: row.lastUsedAt

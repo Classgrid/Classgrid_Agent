@@ -46,6 +46,9 @@ const OAuthClientSchema = new mongoose.Schema({
   tokenEndpointAuthMethod: { type: String, enum: ["none", "client_secret_post", "client_secret_basic"] },
   responseTypes: { type: [String], default: undefined },
   scope: { type: String, default: null }, // space separated scopes the client registered for (null = any)
+  // RFC 7591 logo_uri and client_uri (https only): shown on the Connected apps page
+  logoUri: { type: String, default: null },
+  clientUri: { type: String, default: null },
   createdBy: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
   lastUsedAt: { type: Date },
   // Set only for dynamically registered (DCR) clients, cleared when they first get a token.
