@@ -111,16 +111,27 @@ import * as eleven from "../elevenlabs.service.js";
  * Audio to text: ElevenLabs Scribe (the grant, 2026-11-14), and Cloudflare Workers AI Whisper Large v3 Turbo when
  * ElevenLabs is not set up or fails
  */
-export const transcribeAudio = async (buffer, mimetype = 'audio/webm') => {
+export const transcribeAudio = async (buffer, mimetype = 'audio/webm') => (await transcribeAudioDetailed(buffer, mimetype)).text;
+
+// A rough length when the service gives none: compressed voice (webm/opus, ogg, m4a) runs about 4 KB a second,
+// WAV 16 kHz 16-bit mono 32 KB a second
+const guessSeconds = (buffer, mimetype) => Math.max(1, Math.round((buffer?.length || 0) / (/wav/i.test(String(mimetype)) ? 32000 : 4000)));
+
+/** { text, seconds }: the words and how long the audio was (the plan's voice input minutes count the seconds) */
+export const transcribeAudioDetailed = async (buffer, mimetype = 'audio/webm') => {
     if (eleven.elevenLabsEnabled()) {
         try {
-            const { text } = await eleven.speechToText(buffer, { mimeType: mimetype });
-            if (text) return text;
+            const { text, seconds } = await eleven.speechToText(buffer, { mimeType: mimetype });
+            if (text) return { text, seconds: seconds || guessSeconds(buffer, mimetype) };
             console.warn("[Voice Service] ElevenLabs heard nothing; trying Cloudflare");
         } catch (err) {
             console.error("[Voice Service] ElevenLabs transcription failed, using Cloudflare:", err.message);
         }
     }
+    return { text: await transcribeAudioCloudflare(buffer, mimetype), seconds: guessSeconds(buffer, mimetype) };
+};
+
+const transcribeAudioCloudflare = async (buffer, mimetype = 'audio/webm') => {
     try {
         const cfAccountId = process.env.CLOUDFLARE_ACCOUNT_ID;
         const cfToken = process.env.CLOUDFLARE_WORKERS_AI_TOKEN;

@@ -83,6 +83,20 @@ import { uploadBufferToR2, deleteFromR2, getPresignedUploadUrl } from "../config
 
 
 const router = express.Router();
+
+// Plans on: the plan's voice input minutes per day (India time); a count that cannot be read never blocks
+import { planOf } from "../services/plan-limits.service.js";
+import { usedToday, addToday, nextDayText } from "../services/plan-usage.service.js";
+async function voiceInputAllowed(user) {
+    const plan = await planOf(user).catch(() => null);
+    if (!plan) return { allowed: true };
+    const cap = Number(plan.voice_input_minutes_per_day);
+    if (cap < 0) return { allowed: true };
+    if (cap === 0) return { allowed: false, error: `Voice input is not included in the ${plan.name} plan. Upgrade your plan, or type instead.` };
+    const used = await usedToday(String(user._id), "voiceinput");
+    if (used / 60 >= cap) return { allowed: false, error: `You've used the ${cap} minutes of voice input a day of your ${plan.name} plan. It refills on ${nextDayText()}. Upgrade your plan, or type instead.` };
+    return { allowed: true };
+}
 const sb = primarySupabaseClient;
 const upload = multer({
     storage: multer.memoryStorage(),
@@ -190,8 +204,13 @@ router.post('/send', isAuthenticated, upload.single('audio'), async (req, res) =
 
         const storageContext = await getVoiceStorageContext(thread, threadId);
 
-        // 1. Transcribe AI instantly
-        const transcription = await transcribeAudio(file.buffer, file.mimetype || 'audio/webm');
+        // 1. Transcribe AI instantly (the plan's voice input minutes per day, plans on)
+        const voiceGate = await voiceInputAllowed(req.user);
+        if (!voiceGate.allowed) return res.status(429).json({ error: voiceGate.error, code: "voice_input_cap_reached" });
+        const { transcribeAudioDetailed } = await import("../services/ai/voice.service.js");
+        const heard = await transcribeAudioDetailed(file.buffer, file.mimetype || 'audio/webm');
+        const transcription = heard.text;
+        addToday(String(req.user._id), "voiceinput", heard.seconds).catch(() => {});
 
         // 2. Upload voice note to Cloudflare R2 under org/chat/audio folders
         const storagePath = buildVoiceStoragePath(file, storageContext);
@@ -240,11 +259,16 @@ router.post('/transcribe', isAuthenticated, upload.single('audio'), async (req, 
         const file = req.file;
         if (!file) return res.status(400).json({ error: "No audio file provided" });
 
-        const transcription = await transcribeAudio(file.buffer, file.mimetype || 'audio/webm');
+        // The plan's voice input minutes per day (plans on)
+        const voiceGate = await voiceInputAllowed(req.user);
+        if (!voiceGate.allowed) return res.status(429).json({ error: voiceGate.error, code: "voice_input_cap_reached" });
+        const { transcribeAudioDetailed } = await import("../services/ai/voice.service.js");
+        const heard = await transcribeAudioDetailed(file.buffer, file.mimetype || 'audio/webm');
+        addToday(String(req.user._id), "voiceinput", heard.seconds).catch(() => {});
 
-        res.status(200).json({ 
-            success: true, 
-            text: transcription 
+        res.status(200).json({
+            success: true,
+            text: heard.text
         });
 
     } catch (err) {
