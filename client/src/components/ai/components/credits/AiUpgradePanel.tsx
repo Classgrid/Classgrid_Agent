@@ -10,81 +10,42 @@
  * super admin dashboard are live.
  * ─────────────────────────────────────────────────────────
  */
-// The Upgrade page of the AI hub (rebuilt, owner 2026-11-14): the user's plan with this week's use, the plans
-// (Free, Pro, Max, Enterprise) with a monthly / yearly switch and buy buttons, then the credits top-up. The same page
-// in the website, the desktop app and Classgrid Code; the payment itself opens on billing.classgrid.in.
+// CLASSGRID USES CLOUDFLARE USAGE TO CALCULATE TOKENS, NOT GPT-TOKENIZER (WHICH IS ONLY A FALLBACK)
 import React, { useState } from "react";
 import { useMyAiBalance, useInitiateAiTopUp } from "@/components/ai/queries/useAiCredits";
 import { useQueryClient } from "@tanstack/react-query";
 import { formatNumber } from "@/lib/utils";
-import { ArrowUpCircle, Wallet, AlertCircle, BadgeCheck, ExternalLink } from "lucide-react";
+import { Zap, ArrowUpCircle, Wallet, AlertCircle } from "lucide-react";
 import { Skeleton } from "@/components/marketing_ui/skeleton";
 import { Button } from "@/components/marketing_ui/button";
 import { BlueSlider } from "@/components/marketing_ui/BlueSlider";
 import { toast } from "sonner";
 import { useCurrentUser } from "@/features/auth/queries/useCurrentUser";
-import { PlanCards, useMyPlan, usePlans, inr, type Term } from "./PlanCards";
-import { CheckCircle2 } from "lucide-react";
-
-const WEBSITE = import.meta.env.VITE_DESKTOP !== "1" && import.meta.env.VITE_EDITOR !== "1";
-const PRICING_URL = import.meta.env.VITE_PRICING_URL || "https://classgrid.in/pricing";
-
-/** The payment page (billing.classgrid.in), for a top-up or a plan, in the app's light or dark look */
-export async function openCheckout(checkoutUrl: string) {
-  // Classgrid Code: the payment page opens in the computer's browser (the editor's tab can't show it)
-  const editorDesk = import.meta.env.VITE_EDITOR === "1" ? (window as unknown as { classgridDesktop?: { openExternal?: (url: string) => Promise<unknown> } }).classgridDesktop : undefined;
-  let url = checkoutUrl;
-  try {
-    const u = new URL(checkoutUrl);
-    u.searchParams.set("theme", document.documentElement.classList.contains("dark") ? "dark" : "light");
-    url = u.toString();
-  } catch { /* the link as it came */ }
-  if (editorDesk?.openExternal) { await editorDesk.openExternal(url); return; }
-  window.location.href = url;
-}
-
-const dateText = (iso?: string | null) => (iso ? new Date(iso).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" }) : null);
-const pct = (used: number, cap: number) => (cap > 0 ? Math.min(100, Math.round((used / cap) * 100)) : 0);
-
-function Meter({ label, used, cap }: { label: string; used: number; cap: number }) {
-  if (!(cap > 0)) return null;
-  return (
-    <div>
-      <div className="flex justify-between text-xs mb-1">
-        <span className="text-muted-foreground">{label}</span>
-        <span className="text-foreground font-medium">{formatNumber(used)} / {formatNumber(cap)}</span>
-      </div>
-      <div className="h-1.5 rounded-full bg-muted overflow-hidden">
-        <div className="h-full rounded-full bg-foreground/70" style={{ width: `${pct(used, cap)}%` }} />
-      </div>
-    </div>
-  );
-}
 
 export function AiUpgradePanel() {
   const queryClient = useQueryClient();
   const { data: balance, isLoading: balanceLoading } = useMyAiBalance();
-  const { data: plans } = usePlans();
-  const { data: mine } = useMyPlan();
   const topUpMutation = useInitiateAiTopUp();
-  const [term, setTerm] = useState<Term>("month");
 
   React.useEffect(() => {
     const handleMessage = (event: MessageEvent) => {
       if (event.data?.type === "CLASSGRID_PAYMENT_SUCCESS") {
         toast.success("Payment successful! AI Credits have been added to your account.");
-        queryClient.invalidateQueries({ queryKey: ["my-ai-balance"] });
-        queryClient.invalidateQueries({ queryKey: ["my-ai-plan"] });
+        queryClient.invalidateQueries({ queryKey: ["myAiBalance"] });
       }
     };
     window.addEventListener("message", handleMessage);
     return () => window.removeEventListener("message", handleMessage);
   }, [queryClient]);
 
+
+
   // Owner's order: this one account can top up from ₹1 (everyone else starts at ₹299). The server checks it too.
   const { data: currentUser } = useCurrentUser();
   const minInr = String(currentUser?.email || "").trim().toLowerCase() === "nikhilsubsun123@gmail.com" ? 1 : 299;
+
   const [customAmountStr, setCustomAmountStr] = useState<string>("299");
+
   const customAmount = parseInt(customAmountStr) || 0;
   const creditsPerInr = balance?.credits_per_inr ?? 5000;
   const expectedTokens = customAmount * creditsPerInr;
@@ -94,9 +55,26 @@ export function AiUpgradePanel() {
     if (!isValidAmount) return;
     try {
       const response = await topUpMutation.mutateAsync(customAmount);
-      if (response && response.checkout_url) await openCheckout(response.checkout_url);
-    } catch (error: any) {
-      toast.error(error?.response?.data?.error || error?.message || "Could not start the payment. Please try again.");
+      if (response && response.checkout_url) {
+        // Classgrid Code: the payment page opens in the computer's browser (the editor's tab can't show it)
+        const editorDesk = import.meta.env.VITE_EDITOR === "1" ? (window as unknown as { classgridDesktop?: { openExternal?: (url: string) => Promise<unknown> } }).classgridDesktop : undefined;
+        if (editorDesk?.openExternal) {
+          const urlObj = new URL(response.checkout_url);
+          urlObj.searchParams.set("theme", document.documentElement.classList.contains("dark") ? "dark" : "light");
+          await editorDesk.openExternal(urlObj.toString());
+          return;
+        }
+        try {
+          const urlObj = new URL(response.checkout_url);
+          const theme = document.documentElement.classList.contains("dark") ? "dark" : "light";
+          urlObj.searchParams.set("theme", theme);
+          window.location.href = urlObj.toString();
+        } catch (e) {
+          window.location.href = response.checkout_url;
+        }
+      }
+    } catch (error) {
+      toast.error("Failed to initiate top-up. Please try again.");
     }
   };
 
@@ -105,27 +83,12 @@ export function AiUpgradePanel() {
   }
 
   const isBlocked = balance?.ai_access_blocked;
-  const plansOn = !!plans?.enabled && (plans?.plans?.length || 0) > 0;
-  const planName = mine?.name || "Free";
-  const until = dateText(mine?.expires_at);
-  const weekEnds = dateText(mine?.week?.ends_at);
-  const lim = mine?.limits;
-  const yearlyPlan = plans?.plans?.find((p) => p.price_inr_yearly > 0 && p.price_inr_monthly > 0);
-  // The biggest plan that can be bought: on it there is nothing to upgrade to, only time to add
-  const buyable = (plans?.plans || []).filter((p) => !p.coming_soon && p.key !== "free" && p.price_inr_monthly > 0);
-  const onTopPlan = !!mine?.key && mine.key !== "free" && buyable.length > 0 && buyable[buyable.length - 1]?.key === mine.key;
-  const nextPlan = mine?.key && mine.key !== "free" ? buyable[buyable.findIndex((p) => p.key === mine.key) + 1] : buyable[0];
-  const yearlySaving = yearlyPlan ? Math.max(0, Math.round(100 - (yearlyPlan.price_inr_yearly / (yearlyPlan.price_inr_monthly * 12)) * 100)) : 0;
 
   return (
     <div className="flex flex-col h-full animate-in fade-in duration-300">
-      <div className="p-6 border-b border-border flex items-start justify-between gap-4 flex-wrap">
-        <div>
-          <h2 className="text-2xl font-bold mb-1">{plansOn ? "Plans and credits" : "Upgrade AI Credits"}</h2>
-          <p className="text-muted-foreground text-sm">
-            {plansOn ? "Your plan, and credits you can add any time." : "Purchase additional AI Credits to continue using the assistant seamlessly."}
-          </p>
-        </div>
+      <div className="p-6 border-b border-border">
+        <h2 className="text-2xl font-bold mb-2">Upgrade AI Credits</h2>
+        <p className="text-muted-foreground text-sm">Purchase additional AI Credits to continue using the assistant seamlessly.</p>
       </div>
 
       <div className="flex-1 overflow-y-auto p-6 space-y-8 custom-scrollbar">
@@ -139,93 +102,26 @@ export function AiUpgradePanel() {
           </div>
         ) : (
           <>
-            {/* The user's plan, this week's use and the credit balance */}
-            <div className="bg-muted/30 border border-border rounded-xl p-5 grid grid-cols-1 md:grid-cols-3 gap-5">
+            {/* Balance Overview Mini */}
+            <div className="bg-muted/30 border border-border rounded-xl p-4 flex items-center justify-between">
               <div className="flex items-center gap-3">
-                <div className="bg-amber-500/10 p-2 rounded-lg"><BadgeCheck className="w-5 h-5 text-emerald-500" /></div>
+                <div className="bg-indigo-500/10 p-2 rounded-lg">
+                  <Wallet className="w-5 h-5 text-indigo-500" />
+                </div>
                 <div>
-                  <div className="text-sm text-muted-foreground">Your plan</div>
-                  <div className="font-bold text-foreground">{plansOn ? planName : "Free"}</div>
-                  {until && <div className="text-xs text-muted-foreground">until {until}</div>}
+                  <div className="text-sm text-muted-foreground">Current Balance</div>
+                  <div className="font-bold text-foreground">{formatNumber(balance?.ai_credits_balance || 0)} Credits</div>
                 </div>
               </div>
-              <div className="flex items-center gap-3">
-                <div className="bg-indigo-500/10 p-2 rounded-lg"><Wallet className="w-5 h-5 text-indigo-500" /></div>
-                <div>
-                  <div className="text-sm text-muted-foreground">Top-up credits</div>
-                  <div className="font-bold text-foreground">{formatNumber(balance?.ai_credits_balance || 0)}</div>
-                  <div className="text-xs text-muted-foreground">Spent only after the plan's limits</div>
-                </div>
-              </div>
-              {plansOn && lim && mine?.week ? (
-                <div className="space-y-2">
-                  <Meter label="Cloudflare models this week" used={mine.week.used} cap={lim.tokens_per_week} />
-                  <Meter label="Claude models this week" used={mine.week.claude_used} cap={lim.claude_credits_per_week} />
-                  {weekEnds && <div className="text-[11px] text-muted-foreground">Week ends {weekEnds}</div>}
-                </div>
-              ) : null}
             </div>
 
-            {/* The plans (only while the super admin has plans on) */}
-            {plansOn && (
-              <div>
-                <div className="flex items-center justify-between gap-3 mb-4 flex-wrap">
-                  <h3 className="text-lg font-semibold flex items-center gap-2"><BadgeCheck className="w-5 h-5 text-emerald-500" /> Plans</h3>
-                  <div className="inline-flex rounded-lg border border-border p-0.5 text-sm">
-                    <button type="button" onClick={() => setTerm("month")} className={`px-3 py-1 rounded-md ${term === "month" ? "bg-foreground text-background" : "text-muted-foreground"}`}>Monthly</button>
-                    <button type="button" onClick={() => setTerm("year")} className={`px-3 py-1 rounded-md ${term === "year" ? "bg-foreground text-background" : "text-muted-foreground"}`}>
-                      Yearly{yearlySaving > 0 ? ` (save ${yearlySaving}%)` : ""}
-                    </button>
-                  </div>
-                </div>
-                {!WEBSITE && mine && mine.key !== "free" && (
-                  <p className="text-sm text-muted-foreground mb-4">
-                    You are on <span className="font-medium text-foreground">{planName}</span>{until ? ` until ${until}` : ""}. Buying again adds the time after that.
-                  </p>
-                )}
-                {WEBSITE ? (
-                  // The website: the plans live on classgrid.in/pricing; a plan picked there starts its payment back here
-                  <div className="rounded-xl border border-border bg-card p-5">
-                    <div className="flex items-start justify-between gap-4 flex-wrap">
-                      <div className="min-w-0">
-                        <div className="flex items-center gap-2 text-base font-semibold text-foreground">
-                          {mine?.key && mine.key !== "free" ? <CheckCircle2 className="w-4 h-4 text-emerald-500" /> : <BadgeCheck className="w-4 h-4 text-muted-foreground" />}
-                          {mine?.key && mine.key !== "free" ? `${planName}: subscribed${until ? ` until ${until}` : ""}` : "Free plan"}
-                        </div>
-                        <p className="text-sm text-muted-foreground mt-1">
-                          {mine?.key && mine.key !== "free"
-                            ? onTopPlan
-                              ? `${planName} is the biggest plan. Need more time? Add a ${term} to it.`
-                              : `Move up to ${nextPlan?.name || "a bigger plan"}, or add a ${term} to ${planName}.`
-                            : `Pro gives Claude, more pictures, calls and projects. Max gives five times Pro with Claude Fable.`}
-                        </p>
-                      </div>
-                      <Button size="sm" onClick={() => { window.location.href = PRICING_URL; }}>
-                        {mine?.key && mine.key !== "free" ? (onTopPlan ? `Add 1 ${term}` : `Upgrade to ${nextPlan?.name || "a bigger plan"}`) : "See plans"}
-                        <ExternalLink className="w-3.5 h-3.5 ml-1.5" />
-                      </Button>
-                    </div>
-                    <a href={PRICING_URL} className="inline-block mt-3 text-xs text-muted-foreground hover:text-foreground">All plans and prices on classgrid.in/pricing</a>
-                  </div>
-                ) : (
-                  <PlanCards term={term} onCheckout={openCheckout} />
-                )}
-                <p className="text-xs text-muted-foreground mt-3">Prices in ₹, GST included. A plan is paid once for its month or year; nothing renews by itself.</p>
-              </div>
-            )}
-
-            {/* Top-up */}
+            {/* Top-up Form */}
             <div>
-              <h3 className="text-lg font-semibold mb-1 flex items-center gap-2">
+              <h3 className="text-lg font-semibold mb-4 flex items-center gap-2">
                 <ArrowUpCircle className="w-5 h-5 text-amber-500" />
-                {plansOn ? "Top up credits" : "Custom Top-Up Amount"}
+                Custom Top-Up Amount
               </h3>
-              {plansOn && (
-                <p className="text-sm text-muted-foreground mb-4">
-                  Top-up credits are spent only after your plan's limits: more chat, and extra images, WhatsApp messages, voice replies and voice input.
-                </p>
-              )}
-
+              
               <div className="bg-card border border-border rounded-xl p-6 shadow-sm mb-6">
                 <label className="block text-sm font-medium text-foreground mb-3">
                   Enter Amount (₹{minInr} - ₹10,000)
@@ -245,10 +141,10 @@ export function AiUpgradePanel() {
                     </div>
                   </div>
                   <div className="shrink-0 w-24 text-right">
-                    <span className="text-2xl font-bold text-foreground">{inr(customAmount)}</span>
+                    <span className="text-2xl font-bold text-foreground">₹{formatNumber(customAmount)}</span>
                   </div>
                 </div>
-
+                
                 <div className="mt-6 p-4 bg-muted border border-border rounded-lg flex items-center justify-between">
                   <span className="text-sm text-muted-foreground">You will receive:</span>
                   <span className="text-lg font-bold text-foreground flex items-center gap-1.5">
@@ -263,10 +159,10 @@ export function AiUpgradePanel() {
                 )}
               </div>
 
-              <div className="flex justify-start pt-2">
-                <Button
+              <div className="flex justify-start pt-4 mt-2">
+                <Button 
                   variant="ghost"
-                  onClick={handleTopUp}
+                  onClick={handleTopUp} 
                   disabled={!isValidAmount || topUpMutation.isPending}
                   className="text-muted-foreground hover:text-foreground border border-border/50 shadow-sm px-6"
                 >
@@ -280,3 +176,5 @@ export function AiUpgradePanel() {
     </div>
   );
 }
+
+

@@ -2308,8 +2308,7 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
       const wishTerm: "month" | "year" = buyWish.term === "year" ? "year" : "month";
       (async () => {
         try {
-          const { startPlanPayment } = await import("./credits/PlanCards");
-          const { openCheckout } = await import("./credits/AiUpgradePanel");
+          const { startPlanPayment, openCheckout } = await import("./credits/planPayment");
           toast.message("Opening the payment page...");
           await openCheckout(await startPlanPayment(wishKey, wishTerm, buyWish.back === "pricing" ? "pricing" : undefined));
         } catch (e: any) {
@@ -2319,7 +2318,7 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
     } else if (searchParams.get("ai_payment") === "success" && searchParams.get("plan")) {
       // A plan paid on billing.classgrid.in: the Plan page shows "Subscribed"
       const paidPlan = String(searchParams.get("plan"));
-      setAiHubInitialTab("plan");
+      setAiHubInitialTab("credits");
       setIsAiHubOpen(true);
       toast.success(`You're subscribed to ${paidPlan.charAt(0).toUpperCase() + paidPlan.slice(1)}. The receipt is in your email.`);
       window.history.replaceState({}, '', window.location.pathname);
@@ -2345,7 +2344,7 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
       const paidPlan = typeof detail === "object" && detail?.plan ? String(detail.plan) : "";
       const ok = status !== "failed";
       if (ok && paidPlan) {
-        setAiHubInitialTab("plan");
+        setAiHubInitialTab("credits");
         setIsAiHubOpen(true);
         queryClient.invalidateQueries({ queryKey: ["ai-plan-overview"] });
         queryClient.invalidateQueries({ queryKey: ["my-ai-plan"] });
