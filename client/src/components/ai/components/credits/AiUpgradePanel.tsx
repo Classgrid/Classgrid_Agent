@@ -113,7 +113,8 @@ export function AiUpgradePanel() {
   const yearlyPlan = plans?.plans?.find((p) => p.price_inr_yearly > 0 && p.price_inr_monthly > 0);
   // The biggest plan that can be bought: on it there is nothing to upgrade to, only time to add
   const buyable = (plans?.plans || []).filter((p) => !p.coming_soon && p.key !== "free" && p.price_inr_monthly > 0);
-  const onTopPlan = !!mine?.key && mine.key !== "free" && buyable.length > 0 && buyable[buyable.length - 1].key === mine.key;
+  const onTopPlan = !!mine?.key && mine.key !== "free" && buyable.length > 0 && buyable[buyable.length - 1]?.key === mine.key;
+  const nextPlan = mine?.key && mine.key !== "free" ? buyable[buyable.findIndex((p) => p.key === mine.key) + 1] : buyable[0];
   const yearlySaving = yearlyPlan ? Math.max(0, Math.round(100 - (yearlyPlan.price_inr_yearly / (yearlyPlan.price_inr_monthly * 12)) * 100)) : 0;
 
   return (
@@ -125,11 +126,6 @@ export function AiUpgradePanel() {
             {plansOn ? "Pick a plan for a month or a year, or top up credits any time." : "Purchase additional AI Credits to continue using the assistant seamlessly."}
           </p>
         </div>
-        {plansOn && WEBSITE && (
-          <a href={PRICING_URL} className="text-sm text-muted-foreground hover:text-foreground inline-flex items-center gap-1">
-            Compare on classgrid.in <ExternalLink className="w-3.5 h-3.5" />
-          </a>
-        )}
       </div>
 
       <div className="flex-1 overflow-y-auto p-6 space-y-8 custom-scrollbar">
@@ -182,30 +178,34 @@ export function AiUpgradePanel() {
                     </button>
                   </div>
                 </div>
-                {mine && mine.key !== "free" && (
+                {!WEBSITE && mine && mine.key !== "free" && (
                   <p className="text-sm text-muted-foreground mb-4">
                     You are on <span className="font-medium text-foreground">{planName}</span>{until ? ` until ${until}` : ""}. Buying again adds the time after that.
                   </p>
                 )}
                 {WEBSITE ? (
                   // The website: the plans live on classgrid.in/pricing; a plan picked there starts its payment back here
-                  <div className="rounded-2xl border border-border bg-card p-6 flex flex-col sm:flex-row sm:items-center gap-5">
-                    <div className="flex-1">
-                      <div className="flex items-center gap-2 font-semibold text-foreground text-lg">
-                        {mine?.key && mine.key !== "free" ? <CheckCircle2 className="w-5 h-5 text-emerald-500" /> : <BadgeCheck className="w-5 h-5 text-emerald-500" />}
-                        {mine?.key && mine.key !== "free" ? `Subscribed to ${planName}` : "You are on the Free plan"}
+                  <div className="rounded-xl border border-border bg-card p-5">
+                    <div className="flex items-start justify-between gap-4 flex-wrap">
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-2 text-base font-semibold text-foreground">
+                          {mine?.key && mine.key !== "free" ? <CheckCircle2 className="w-4 h-4 text-emerald-500" /> : <BadgeCheck className="w-4 h-4 text-muted-foreground" />}
+                          {mine?.key && mine.key !== "free" ? `${planName}: subscribed${until ? ` until ${until}` : ""}` : "Free plan"}
+                        </div>
+                        <p className="text-sm text-muted-foreground mt-1">
+                          {mine?.key && mine.key !== "free"
+                            ? onTopPlan
+                              ? `${planName} is the biggest plan. Need more time? Add a ${term} to it.`
+                              : `Move up to ${nextPlan?.name || "a bigger plan"}, or add a ${term} to ${planName}.`
+                            : `Pro gives Claude, more pictures, calls and projects. Max gives five times Pro with Claude Fable.`}
+                        </p>
                       </div>
-                      <p className="text-sm text-muted-foreground mt-1">
-                        {mine?.key && mine.key !== "free"
-                          ? onTopPlan
-                            ? `${until ? `Until ${until}. ` : ""}${planName} is the biggest plan, so there is nothing to upgrade to. You can add another ${term} to it on the pricing page.`
-                            : `${until ? `Until ${until}. ` : ""}Upgrade to a bigger plan, or add another ${term} to this one, on the pricing page.`
-                          : "Pro gives Claude, more pictures, calls and projects; Max gives five times Pro with Claude Fable. Pick one on the pricing page and the payment opens here."}
-                      </p>
+                      <Button size="sm" onClick={() => { window.location.href = PRICING_URL; }}>
+                        {mine?.key && mine.key !== "free" ? (onTopPlan ? `Add 1 ${term}` : `Upgrade to ${nextPlan?.name || "a bigger plan"}`) : "See plans"}
+                        <ExternalLink className="w-3.5 h-3.5 ml-1.5" />
+                      </Button>
                     </div>
-                    <Button size="lg" onClick={() => { window.location.href = PRICING_URL; }}>
-                      {mine?.key && mine.key !== "free" ? (onTopPlan ? `Add 1 ${term}` : "Upgrade") : "See plans and buy"} <ExternalLink className="w-4 h-4 ml-2" />
-                    </Button>
+                    <a href={PRICING_URL} className="inline-block mt-3 text-xs text-muted-foreground hover:text-foreground">All plans and prices on classgrid.in/pricing</a>
                   </div>
                 ) : (
                   <PlanCards term={term} onCheckout={openCheckout} />
