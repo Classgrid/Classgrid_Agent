@@ -78,14 +78,14 @@ export function SettingsPlanSection() {
           <Card>
             <R t="New chats you can start" v={`${limitText(L.chats_per_window)} ${every(L.window_reset_value, L.window_reset_unit)}`} />
             <R t="Messages inside a chat" v="No limit" />
-            <R t="DeepSeek, GLM and other models" v={`${limitText(L.tokens_per_window, "credits")} ${every(L.window_reset_value, L.window_reset_unit)} · ${limitText(L.tokens_per_week)} a week`} />
+            <R t="All models except Claude" v={`${limitText(L.tokens_per_window, "credits")} ${every(L.window_reset_value, L.window_reset_unit)} · ${limitText(L.tokens_per_week)} a week`} />
             <R t="Claude models" v={L.claude_credits_per_week === 0 ? "Not included" : `${limitText(L.claude_credits_per_week, "credits")} a week${L.fable_share_percent > 0 ? ` · Fable up to ${L.fable_share_percent}% of it` : ""}`} />
-            <R t="Images and photo edits" v={`${limitText(L.images_per_period)} ${every(L.images_reset_value, L.images_reset_unit)}`} />
-            <R t="Talking with the AI" v={`${limitText(L.voice_input_minutes_per_day, "minutes")} a day`} />
-            <R t="Answers read aloud" v={`${limitText(L.voice_replies_per_day)} a day`} />
-            <R t="WhatsApp call time" v={`${limitText(L.call_minutes_per_period, "minutes")} ${every(L.call_reset_value, L.call_reset_unit)}`} />
-            <R t="WhatsApp calls in a day" v={`Up to ${limitText(L.calls_per_day)}`} />
-            <R t="One call can last" v={`Up to ${n(L.call_max_minutes)} minutes`} />
+            <R t="Images" v={`${limitText(L.images_per_period)} ${every(L.images_reset_value, L.images_reset_unit)}`} />
+            <R t="Voice input (minutes you speak)" v={`${limitText(L.voice_input_minutes_per_day, "minutes")} a day`} />
+            <R t="Read aloud" v={`${limitText(L.voice_replies_per_day)} a day`} />
+            <R t="WhatsApp call minutes" v={`${limitText(L.call_minutes_per_period, "minutes")} ${every(L.call_reset_value, L.call_reset_unit)}`} />
+            <R t="Calls a day" v={`Up to ${limitText(L.calls_per_day)}`} />
+            <R t="Longest call" v={`Up to ${n(L.call_max_minutes)} minutes`} />
             <R t="Cloud projects" v={limitText(L.projects_max)} />
             <R t="Context window" v={`${n(L.context_tokens / 1000)}K tokens`} />
             <R t="Thinking" v={(L.thinking_modes || []).map((m: string) => m.charAt(0).toUpperCase() + m.slice(1)).join(", ")} />
