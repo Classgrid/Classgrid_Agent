@@ -178,7 +178,10 @@ export const getUsageHistory = async (req, res) => {
             if (kind === "image") return "Image";
             if (kind === "whatsapp") return "WhatsApp";
             if (kind === "call") return "WhatsApp call";
-            return e.feature === "chat_ai" ? "Chat" : "Other";
+            if (e.feature === "chat_ai") return "Chat";
+            // feature "other": a picture (image models), else the chat's title (a few hundred credits)
+            if (/image|flux|dall|imagen|stable-diffusion|sdxl/i.test(String(e.model || ""))) return "Image";
+            return (e.totalTokens || 0) <= 2000 ? "Chat title" : "Chat";
         };
         res.json({
             days, since: since.toISOString(),

@@ -268,7 +268,7 @@ export function SettingsBillingSection() {
               <div className="flex justify-between gap-4 text-[13px] text-muted-foreground mt-3.5"><span>Credit balance</span><span>Used after your included usage</span></div>
               <div className="flex justify-between gap-4 text-[13px] text-muted-foreground mt-1.5">
                 <span className="flex items-center gap-2">{auto?.enabled ? <>{pill("Auto top-up on", true)}<span>{inr(auto.amount_inr)} when below {inr(auto.below_inr)}</span></> : pill("Auto top-up off", false)}</span>
-                <span>Bought credits last 30 days</span>
+                <span>Bought credits last 30 days from purchase</span>
               </div>
             </div>
           </div>
