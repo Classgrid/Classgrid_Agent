@@ -21,6 +21,7 @@ import { Button } from "@/components/marketing_ui/button";
 import { BlueSlider } from "@/components/marketing_ui/BlueSlider";
 import { toast } from "sonner";
 import { useCurrentUser } from "@/features/auth/queries/useCurrentUser";
+import { PlanCards } from "./PlanCards";
 
 export function AiUpgradePanel() {
   const queryClient = useQueryClient();
@@ -51,28 +52,31 @@ export function AiUpgradePanel() {
   const expectedTokens = customAmount * creditsPerInr;
   const isValidAmount = customAmount >= minInr && customAmount <= 10000;
 
+  // The payment page (billing.classgrid.in), for a top-up or a plan
+  const openCheckout = async (checkoutUrl: string) => {
+    // Classgrid Code: the payment page opens in the computer's browser (the editor's tab can't show it)
+    const editorDesk = import.meta.env.VITE_EDITOR === "1" ? (window as unknown as { classgridDesktop?: { openExternal?: (url: string) => Promise<unknown> } }).classgridDesktop : undefined;
+    if (editorDesk?.openExternal) {
+      const urlObj = new URL(checkoutUrl);
+      urlObj.searchParams.set("theme", document.documentElement.classList.contains("dark") ? "dark" : "light");
+      await editorDesk.openExternal(urlObj.toString());
+      return;
+    }
+    try {
+      const urlObj = new URL(checkoutUrl);
+      const theme = document.documentElement.classList.contains("dark") ? "dark" : "light";
+      urlObj.searchParams.set("theme", theme);
+      window.location.href = urlObj.toString();
+    } catch (e) {
+      window.location.href = checkoutUrl;
+    }
+  };
+
   const handleTopUp = async () => {
     if (!isValidAmount) return;
     try {
       const response = await topUpMutation.mutateAsync(customAmount);
-      if (response && response.checkout_url) {
-        // Classgrid Code: the payment page opens in the computer's browser (the editor's tab can't show it)
-        const editorDesk = import.meta.env.VITE_EDITOR === "1" ? (window as unknown as { classgridDesktop?: { openExternal?: (url: string) => Promise<unknown> } }).classgridDesktop : undefined;
-        if (editorDesk?.openExternal) {
-          const urlObj = new URL(response.checkout_url);
-          urlObj.searchParams.set("theme", document.documentElement.classList.contains("dark") ? "dark" : "light");
-          await editorDesk.openExternal(urlObj.toString());
-          return;
-        }
-        try {
-          const urlObj = new URL(response.checkout_url);
-          const theme = document.documentElement.classList.contains("dark") ? "dark" : "light";
-          urlObj.searchParams.set("theme", theme);
-          window.location.href = urlObj.toString();
-        } catch (e) {
-          window.location.href = response.checkout_url;
-        }
-      }
+      if (response && response.checkout_url) await openCheckout(response.checkout_url);
     } catch (error) {
       toast.error("Failed to initiate top-up. Please try again.");
     }
@@ -114,6 +118,9 @@ export function AiUpgradePanel() {
                 </div>
               </div>
             </div>
+
+            {/* The plans (only while the super admin has plans on) */}
+            <PlanCards onCheckout={openCheckout} />
 
             {/* Top-up Form */}
             <div>
