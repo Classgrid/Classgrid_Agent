@@ -39,10 +39,12 @@ export function planKeyOf(user) {
     return p.id;
 }
 
-/** The plan row for a user (null while plans are off) */
+/** The plan row for a user (null while plans are off, and null for Classgrid staff: super admins and @classgrid.in
+ * accounts keep the dashboard's global limits, no plan gate applies to them) */
 export async function planOf(user) {
     const t = await planTable();
     if (!t.enabled) return null;
+    if (user?.role === "super_admin" || String(user?.email || "").toLowerCase().endsWith("@classgrid.in")) return null;
     return t.plans[planKeyOf(user)] || t.plans.free || null;
 }
 
