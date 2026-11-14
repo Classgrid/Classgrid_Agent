@@ -9,6 +9,7 @@ import { textToSpeech, elevenLabsEnabled, TTS_MODEL } from "../services/elevenla
 import { planOf } from "../services/plan-limits.service.js";
 import { usedToday, addToday, nextDayText } from "../services/plan-usage.service.js";
 import { canPayExtra, chargeExtra, extraOfferText } from "../services/extra-usage.service.js";
+import { VOICE_CHOICES, voiceIdFor, publicVoiceChoices } from "../services/voice-choices.js";
 
 const KIND = "voicereply"; // the per-day counter's name (plan-usage.service.js)
 
@@ -41,8 +42,29 @@ function cutToSentence(text, max) {
     return { text: (end > max * 0.5 ? head.slice(0, end + 1) : head).trim(), cut: true };
 }
 
+// GET /api/ai/voices: the voices the user can pick (voice-choices.js)
+export const listVoices = (req, res) => res.json({ voices: publicVoiceChoices(), enabled: elevenLabsEnabled() });
+
+// A voice's short sample for the picker: a fixed sentence, made once per voice and kept in memory, not counted as a
+// voice reply (the app plays it when a voice is tapped)
+const samples = new Map();
+async function voiceSample(req, res) {
+    const choice = VOICE_CHOICES.find((v) => v.key === String(req.body?.sample || ""));
+    if (!choice) return res.status(400).json({ error: "Unknown voice.", code: "unknown_voice" });
+    if (!elevenLabsEnabled()) return res.status(503).json({ error: "Voice is not set up right now. Try again later.", code: "voice_unavailable" });
+    let audio = samples.get(choice.key);
+    if (!audio) {
+        audio = await textToSpeech(`Hi, I'm ${choice.name}. This is how I'll sound when we talk in Classgrid.`, { voiceId: voiceIdFor(choice.key), outputFormat: "mp3_44100_128", timeoutMs: 30000 });
+        if (!audio?.length) return res.status(502).json({ error: "This voice could not be played right now.", code: "voice_failed" });
+        samples.set(choice.key, audio);
+    }
+    res.set({ "Content-Type": "audio/mpeg", "Content-Length": String(audio.length), "Cache-Control": "private, max-age=86400" });
+    return res.send(audio);
+}
+
 export const speakAnswer = async (req, res) => {
     try {
+        if (req.body?.sample) return await voiceSample(req, res);
         const text = spokenText(req.body?.text);
         if (!text) return res.status(400).json({ error: "There is nothing to read in this answer.", code: "nothing_to_read" });
         if (!elevenLabsEnabled()) return res.status(503).json({ error: "Voice is not set up right now. Try again later.", code: "voice_unavailable" });
@@ -65,8 +87,16 @@ export const speakAnswer = async (req, res) => {
         const { text: spoken, cut } = cutToSentence(text, maxChars);
         const started = Date.now();
         let audio;
+        // The voice the user picked (voice-choices.js); if ElevenLabs refuses that voice, Classgrid's own voice reads it
+        const voiceId = voiceIdFor(String(req.body?.voice || ""));
         try {
-            audio = await textToSpeech(spoken, { outputFormat: "mp3_44100_128", timeoutMs: 60000 });
+            try {
+                audio = await textToSpeech(spoken, { voiceId, outputFormat: "mp3_44100_128", timeoutMs: 60000 });
+            } catch (voiceErr) {
+                if (voiceId === voiceIdFor("classgrid")) throw voiceErr;
+                console.error(`[speak] voice ${req.body?.voice} failed, using Classgrid's voice:`, voiceErr.message);
+                audio = await textToSpeech(spoken, { outputFormat: "mp3_44100_128", timeoutMs: 60000 });
+            }
         } catch (e) {
             console.error("[speak] ElevenLabs failed:", e.message);
             AiUsageLog.create({ organization_id: req.user.organization_id || null, userId: req.user._id, provider: "elevenlabs", model: TTS_MODEL, feature: "chat_ai", success: false, error: String(e.message).slice(0, 500), latencyMs: Date.now() - started, metadata: { characters: spoken.length, messageId: String(req.body?.messageId || "") } }).catch(() => {});
