@@ -100,7 +100,9 @@ async function applyReferencePayment(handoff, payment, session) {
     const amountPaise = handoff.amountPaise;
     const organizationId = handoff.organization_id;
 
-    if (handoff.payment_type === "AI_TOPUP") { return { type: "AiTopUp", amountPaise }; } if (handoff.referenceModel === "Invoice") {
+    if (handoff.payment_type === "AI_TOPUP") { return { type: "AiTopUp", amountPaise }; }
+    if (handoff.payment_type === "AI_PLAN") { return { type: "AiPlan", amountPaise }; }
+    if (handoff.referenceModel === "Invoice") {
         const invoice = await Invoice.findOne({ _id: handoff.referenceId, organizationId }).session(session);
         if (!invoice) throw conflict("Invoice no longer exists");
         const due = invoice.amountDuePaise ?? (invoice.totalAmountPaise - (invoice.amountPaidPaise || 0));

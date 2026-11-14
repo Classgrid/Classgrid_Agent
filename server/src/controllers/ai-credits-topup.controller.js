@@ -72,11 +72,13 @@ async function startPlatformPayment(req, res, { amountInr, paymentType, label, n
     try {
         let organizationId = req.user.organization_id;
 
-        // Fallback for Super Admins who don't have an organization_id attached directly
+        // Users without an organization of their own (every chat.classgrid.in account, and super admins) pay through
+        // the Classgrid organization: the billing rows need one
         let organization = null;
         if (organizationId) {
             organization = await Organization.findById(organizationId).select("name billing_settings").lean();
-        } else if (req.user.role === "super_admin") {
+        }
+        if (!organization) {
             organization = await Organization.findOne({ name: /Classgrid/i, status: "active" }).sort({ createdAt: 1 }).select("name billing_settings").lean();
             if (organization) {
                 organizationId = organization._id;
@@ -123,7 +125,8 @@ async function startPlatformPayment(req, res, { amountInr, paymentType, label, n
             createdBy: req.user._id,
         });
 
-        const billingEmail = organization.billing_settings?.invoice_email || req.user.email;
+        // The payer's own email (an organization's invoice address only when the payer belongs to that organization)
+        const billingEmail = (req.user.organization_id && organization.billing_settings?.invoice_email) || req.user.email;
         const payerName = req.user.name || "Payer";
 
         const otp = crypto.randomInt(100000, 1000000).toString();

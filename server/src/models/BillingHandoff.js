@@ -101,7 +101,7 @@ const billingHandoffSchema = new mongoose.Schema(
         razorpay_key_id: { type: String, required: true }, // So frontend knows which key to use
         
         // Context
-        payment_type: { type: String, required: true, enum: ["saas_invoice", "fee_payment", "admission_fee", "canteen_order", "AI_TOPUP"] },
+        payment_type: { type: String, required: true, enum: ["saas_invoice", "fee_payment", "admission_fee", "canteen_order", "AI_TOPUP", "AI_PLAN"] },
         return_url: { type: String, required: true }, // Where to redirect after success
         
         // Additional context (e.g., studentId, invoiceId, etc.) stored as a flexible object if needed
