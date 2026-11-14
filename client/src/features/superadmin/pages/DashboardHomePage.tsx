@@ -19,18 +19,12 @@
  * =========================================================================================
  */
 
-import { useEffect } from "react";
 import { AskAiPanel } from "@/components/ai/components/AskAiPanel";
 import { useResumeGridInvite } from "@/components/ai/components/share-grid/GridJoinPage";
 
 export function DashboardHomePage() {
   // Back from login with a Share Grid invite: open it
   useResumeGridInvite();
-  // Studio Mode's colors (styles/global.css, html.studio-colors), only while Agent mode is open
-  useEffect(() => {
-    document.documentElement.classList.add("studio-colors");
-    return () => document.documentElement.classList.remove("studio-colors");
-  }, []);
   return (
     <div className="flex flex-col w-full h-full relative bg-background">
       <AskAiPanel 

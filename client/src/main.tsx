@@ -72,8 +72,10 @@ import "@/styles/global.css";
 // Local testing and the desktop app (never the website build): the API calls also send the saved login token, so the
 // app stays logged in when it talks to the live server (whose login cookie is made for .classgrid.in, not localhost)
 const isDesktopApp = import.meta.env.VITE_DESKTOP === "1";
-// Desktop app only: Studio Mode's colors everywhere (global.css, html.desktop-app)
+// Studio Mode's colors everywhere (global.css): the desktop app through html.desktop-app, the website through
+// html.studio-colors (owner, 2026-11-14: Agent mode, Project mode, Settings and every other page)
 if (isDesktopApp) document.documentElement.classList.add("desktop-app");
+else document.documentElement.classList.add("studio-colors");
 // Desktop app: the sidebar's back and forward arrows count every place (lib/desktopHistory.ts), before the router starts
 installDesktopHistory();
 // Website only: /login?editor=1&... from the Classgrid extension (Classgrid Code, VS Code, Cursor) is kept for after sign-in

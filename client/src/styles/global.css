@@ -267,10 +267,9 @@
   html.studio-mode:not(.dark) .studio-chat [class*="!bg-[#fafafa]"] {
     background-color: #ffffff !important;
   }
-  /* Studio Mode's colors in Agent and Project Mode (grey sidebar, Studio's chat colors for the chat): everywhere in
-     the desktop app (html.desktop-app), and on the web while Agent or Project Mode is open (html.studio-colors, set by
-     DashboardHomePage and ProjectModePage). The built-in code editor gets Studio's code colors from its theme.
-     Incognito keeps its own colors. */
+  /* Studio Mode's colors on every page (grey sidebar, Studio's chat greys): the desktop app through html.desktop-app,
+     the website through html.studio-colors (both set in main.tsx). The built-in code editor gets Studio's code colors
+     from its theme. Incognito keeps its own colors. */
   html.desktop-app,
   html.studio-colors {
     --sidebar-background: #f5f5f5;
