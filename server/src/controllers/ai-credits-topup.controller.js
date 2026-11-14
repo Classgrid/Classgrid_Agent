@@ -215,6 +215,14 @@ export const buyPlan = async (req, res) => {
         const key = String(req.body?.plan || "").toLowerCase();
         const term = req.body?.term === "year" ? "year" : "month";
         const student = req.body?.student === true;
+        if (student) {
+            // Student prices only for a confirmed student (Settings > Billing), until the verification runs out
+            const me = await User.findById(req.user._id).select("student_verification").lean();
+            const sv = me?.student_verification;
+            if (!sv?.verified_at || (sv.expires_at && new Date(sv.expires_at).getTime() < Date.now())) {
+                return res.status(400).json({ success: false, code: "student_not_verified", error: "Confirm your student email in Settings > Billing to get the student price." });
+            }
+        }
         const plan = await PlanConfig.findOne({ key }).lean();
         if (!plan || !plan.is_public || plan.coming_soon || key === "free") return res.status(400).json({ success: false, error: "This plan can't be bought here." });
         const priceField = (student ? "student_" : "") + (term === "year" ? "price_inr_yearly" : "price_inr_monthly");

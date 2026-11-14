@@ -56,7 +56,14 @@ const autoTopupEmail = async (user, orgId, remaining) => {
     const perInr = Number(cfg?.credits_per_inr) > 0 ? Number(cfg.credits_per_inr) : 3000;
     const threshold = Math.max(1, Number(a.below_inr) || 100) * perInr;
     if (remaining >= threshold) return;
-    if (a.last_notified_at && Date.now() - new Date(a.last_notified_at).getTime() < 24 * 3600000) return;
+    // Claimed in one step, so two answers ending at once (or two server copies) send one email
+    const dayAgo = new Date(Date.now() - 24 * 3600000);
+    const claimed = await User.findOneAndUpdate(
+        { _id: user._id, "ai_auto_topup.enabled": true, $or: [{ "ai_auto_topup.last_notified_at": null }, { "ai_auto_topup.last_notified_at": { $lt: dayAgo } }] },
+        { $set: { "ai_auto_topup.last_notified_at": new Date() } },
+        { projection: { _id: 1 } }
+    );
+    if (!claimed) return;
     const amount = Math.max(1, Math.floor(Number(a.amount_inr) || 500));
     const chatApp = String(process.env.CHAT_APP_URL || "https://chat.classgrid.in").replace(/\/$/, "");
     const link = `${chatApp}/agent/settings?section=billing&topup=${amount}`;
@@ -71,7 +78,6 @@ const autoTopupEmail = async (user, orgId, remaining) => {
             <p><a href="${link}" style="display:inline-block;padding:10px 20px;background:#111111;color:#ffffff;text-decoration:none;border-radius:6px;font-weight:bold">Top up ₹${inr(amount)}</a></p>
             <p style="color:#666;font-size:13px">You get this email at most once a day while automatic top-ups are on. Turn them off in Settings &rsaquo; Billing.</p>`,
     });
-    await User.updateOne({ _id: user._id }, { $set: { "ai_auto_topup.last_notified_at": new Date() } });
     await enqueueEmail({ to: user.email, subject: `Your credits are low: top up ₹${inr(amount)} in one click`, html, type: "billing_alert", userId: user._id, organizationId: orgId });
 };
 

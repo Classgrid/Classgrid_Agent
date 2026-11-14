@@ -88,6 +88,8 @@ export const updateGlobalAiConfig = async (req, res) => {
             extra_whatsapp_credits,
             extra_voice_reply_credits,
             extra_voice_input_credits_per_minute,
+            student_email_domains,
+            student_verification_months,
             global_ai_blocked,
             free_limit_per_computer,
             credits_per_inr,
@@ -121,6 +123,13 @@ export const updateGlobalAiConfig = async (req, res) => {
         for (const [key, value] of Object.entries({ extra_image_credits, extra_whatsapp_credits, extra_voice_reply_credits, extra_voice_input_credits_per_minute })) {
             if (value !== undefined) config[key] = Math.max(0, Math.trunc(Number(value)) || 0);
         }
+        if (student_email_domains !== undefined) {
+            const list = (Array.isArray(student_email_domains) ? student_email_domains : String(student_email_domains).split(/[\s,]+/))
+                .map((d) => String(d || "").trim().toLowerCase()).filter((d) => /^\.?[a-z0-9-]+(\.[a-z0-9-]+)*$/.test(d))
+                .map((d) => (d.startsWith(".") ? d : `.${d}`));
+            config.student_email_domains = [...new Set(list)].slice(0, 200);
+        }
+        if (student_verification_months !== undefined) config.student_verification_months = Math.min(48, Math.max(1, Math.trunc(Number(student_verification_months)) || 12));
         if (global_ai_blocked !== undefined) config.global_ai_blocked = global_ai_blocked;
         if (free_limit_per_computer !== undefined) config.free_limit_per_computer = free_limit_per_computer === true;
         if (credits_per_inr !== undefined) config.credits_per_inr = credits_per_inr;

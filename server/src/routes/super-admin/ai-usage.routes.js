@@ -34,6 +34,7 @@ import * as orgController from "../../controllers/super-admin/ai-usage-orgs.cont
 import * as userController from "../../controllers/super-admin/ai-usage-users.controller.js";
 import * as adminController from "../../controllers/super-admin/ai-credits-admin.controller.js";
 import { setUserPlan, listSubscribers } from "../../controllers/super-admin/ai-plans.controller.js";
+import { adminSetStudent } from "../../controllers/ai-student.controller.js";
 
 const router = express.Router();
 
@@ -68,6 +69,7 @@ router.put("/users/:userId/credits/extend", adminController.extendGrantedCredits
 router.post("/orgs/:orgId/grant", adminController.grantOrgCredits);
 router.delete("/users/:userId/data", adminController.deleteUserAiData);
 router.put("/users/:userId/plan", setUserPlan);
+router.put("/users/:userId/student", adminSetStudent); // confirm a student by hand, or remove it
 router.get("/plans/subscribers", listSubscribers); // (the Plans & Billing page: who is on a paid plan, and the plan payments)
 
 router.get("/global/granted-credits", globalController.listActiveGrantedCredits);

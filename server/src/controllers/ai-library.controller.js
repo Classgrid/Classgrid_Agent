@@ -56,6 +56,13 @@ export const uploadToLibrary = async (req, res) => {
     const organizationId = req.user.organization_id;
     const fileSizeBytes = file.size;
 
+    // Plans on: the plan's upload limits (largest file, files per session window, Library storage)
+    const { checkUploadAllowed } = await import('../services/plan-limits.service.js');
+    const uploadCheck = await checkUploadAllowed(req.user, fileSizeBytes).catch(() => ({ ok: true }));
+    if (!uploadCheck.ok) {
+      return res.status(uploadCheck.status).json({ error: uploadCheck.error, code: uploadCheck.code, plan: uploadCheck.plan });
+    }
+
     let quota = await UserStorageQuota.findOne({ user_id: userId });
     if (!quota) {
       quota = new UserStorageQuota({ user_id: userId, user_email: userEmail });

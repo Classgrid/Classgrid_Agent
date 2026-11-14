@@ -7482,10 +7482,12 @@ export const uploadChatImage = async (req, res) => {
         if (!fileName || !mimeType) {
             return res.status(400).json({ error: "fileName and mimeType required" });
         }
-        // Plans on: the plan's largest upload (the app sends the size before uploading)
-        const uploadPlan = await planOf(req.user).catch(() => null);
-        if (uploadPlan && !isUnlimited(uploadPlan.upload_max_mb) && Number(size) > Number(uploadPlan.upload_max_mb) * 1024 * 1024) {
-            return res.status(413).json({ error: `This file is bigger than the ${uploadPlan.upload_max_mb} MB per upload of your ${uploadPlan.name} plan. Upgrade your plan, or pick a smaller file.`, code: "plan_limit", plan: uploadPlan.key });
+        // Plans on: the plan's upload limits (largest file, files per session window, Library storage; the app sends
+        // the size before uploading)
+        const { checkUploadAllowed } = await import("../services/plan-limits.service.js");
+        const uploadCheck = await checkUploadAllowed(req.user, size).catch(() => ({ ok: true }));
+        if (!uploadCheck.ok) {
+            return res.status(uploadCheck.status).json({ error: uploadCheck.error, code: uploadCheck.code, plan: uploadCheck.plan });
         }
 
         const safeFileName = fileName.replace(/[^a-zA-Z0-9.-]/g, '_');

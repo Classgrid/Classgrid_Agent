@@ -529,6 +529,9 @@ router.get("/ai-pricing", async (req, res) => {
       const plans = Object.values(plansNow.plans || {}).filter((p) => p.is_public !== false).sort((a, b) => (a.sort ?? 0) - (b.sort ?? 0)).map((p) => ({
         key: p.key, name: p.name, tagline: p.tagline, comingSoon: !!p.coming_soon,
         buyUrlMonthly: buyUrl(p, "month"), buyUrlYearly: buyUrl(p, "year"), startUrl: p.key === "free" ? `${chatApp}/` : null,
+        // The same at the student price (the chat asks the visitor to confirm a student email first if needed)
+        studentBuyUrlMonthly: (!p.coming_soon && p.key !== "free" && Number(p.student_price_inr_monthly) > 0) ? `${chatApp}/agent?buy=${encodeURIComponent(p.key)}&term=month&student=1&back=pricing` : null,
+        studentBuyUrlYearly: (!p.coming_soon && p.key !== "free" && Number(p.student_price_inr_yearly) > 0) ? `${chatApp}/agent?buy=${encodeURIComponent(p.key)}&term=year&student=1&back=pricing` : null,
         priceInrMonthly: p.price_inr_monthly, priceInrYearly: p.price_inr_yearly,
         studentPriceInrMonthly: p.student_price_inr_monthly, studentPriceInrYearly: p.student_price_inr_yearly,
         features: p.features_text || [],

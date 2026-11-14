@@ -814,6 +814,23 @@ const userSchema = new mongoose.Schema(
       source: { type: String },
       set_by: { type: String },
       note: { type: String },
+      // The plan-end emails (workers/plan-expiry.worker.js): the expires_at each one was sent for, so each goes once
+      reminder_sent_for: { type: String },
+      ended_sent_for: { type: String },
+    },
+    // Student prices (Settings > Billing): a school or university email confirmed with a code, or set by a super admin
+    student_verification: {
+      email: { type: String },
+      verified_at: { type: Date },
+      expires_at: { type: Date },
+      method: { type: String, enum: ["email", "admin"] },
+      pending_email: { type: String },
+      code_hash: { type: String },
+      code_expires_at: { type: Date },
+      code_attempts: { type: Number, default: 0 },
+      code_sent_at: { type: Date },
+      codes_day: { type: String },
+      codes_today: { type: Number, default: 0 },
     },
     // 🧠 AI Chat Customization & Defaults
     // Chats this user archived: left out of their chat lists, shown under "Archived chats"

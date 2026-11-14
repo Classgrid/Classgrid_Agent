@@ -115,7 +115,7 @@ export const getPlanOverview = async (req, res) => {
             plan: {
                 key: enabled ? planKeyOf(user) : "free", name: plan?.name || "Free", tagline: plan?.tagline || "",
                 status: mine.status || "active", billing: mine.billing || "none", started_at: mine.started_at || null, expires_at: mine.expires_at || null,
-                subscribed, limits: plan ? limits : null,
+                subscribed, limits: plan ? limits : null, student_price: mine.note === "student price",
             },
             balance: {
                 topup: paidOk ? (user.ai_tokens?.ai_credits_balance || 0) : 0,

@@ -82,12 +82,14 @@ import { initScheduledNotificationWorker } from './scheduled-notification.worker
 import { initBillingExportWorker } from './billing-export.worker.js';
 import { initMarketingEmailWorker } from './marketing-email-blast.worker.js';
 import { initCronLinkJobs } from './cron-links.worker.js';
+import { initPlanExpiryWorker } from './plan-expiry.worker.js';
 
 initCronJobs();
 initScheduledNotificationWorker();
 initBillingExportWorker();
 initMarketingEmailWorker();
 initCronLinkJobs(); // agent review emails, ticket auto-close, expired messages (were cron-job.org links)
+initPlanExpiryWorker(); // plan-end reminder and "your plan has ended" emails
 // import './analytics.worker.js';
 
 console.log('👷 Background Workers Initialized');
