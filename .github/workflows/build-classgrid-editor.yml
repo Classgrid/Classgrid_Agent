@@ -17,6 +17,13 @@ on:
     paths:
       - 'classgrid-editor/**'
       - '.github/workflows/build-classgrid-editor.yml'
+  # Called by release-all.yml (one run releases Classgrid Code, the extension and the desktop app); it gets the
+  # release's tag back so the desktop app ships exactly this build
+  workflow_call:
+    outputs:
+      tag:
+        description: "The editor-<version> release made by this run"
+        value: ${{ jobs.build.outputs.tag }}
 
 permissions:
   contents: write
@@ -45,6 +52,8 @@ jobs:
   build:
     runs-on: windows-2022
     timeout-minutes: 360
+    outputs:
+      tag: ${{ steps.release.outputs.tag }}
     defaults:
       run:
         shell: bash
@@ -185,6 +194,7 @@ jobs:
           echo "PROOF OK: Classgrid Code $(node -p "require('./$APP/resources/app/product.json').version") with the Classgrid AI inside (Agent on the right, our screens, the AI's runner)."
 
       - name: Put the editor in a release
+        id: release
         working-directory: repo/classgrid-editor/vscodium
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -197,3 +207,4 @@ jobs:
           gh release create "$TAG" "../Classgrid-Code-win32-x64-${RELEASE_VERSION}.zip" \
             --repo "${{ github.repository }}" --title "$TITLE" \
             --notes "Classgrid Code: our editor (VS Code ${MS_TAG}, built with VSCodium's scripts) with the Classgrid AI inside: the Agent on the right, our Classgrid screens, the AI's terminal, files and memory on the computer."
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"

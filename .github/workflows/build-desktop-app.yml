@@ -18,6 +18,15 @@ on:
         description: "Classgrid Code release to ship (editor-<version>); empty = the newest published one"
         type: string
         default: ""
+  # Called by release-all.yml (one run releases Classgrid Code, the extension and the desktop app)
+  workflow_call:
+    inputs:
+      publish:
+        type: boolean
+        default: false
+      editor_tag:
+        type: string
+        default: ""
 
 permissions:
   contents: read

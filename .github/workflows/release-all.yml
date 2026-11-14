@@ -1,0 +1,51 @@
+name: Release everything (Classgrid Code, the extension, the desktop app)
+
+# One run releases all three (owner, 2026-11-14: one workflow, never one piece at a time):
+# 1. Classgrid Code is built from classgrid-editor/ and saved as an editor-<version> release (build-classgrid-editor.yml);
+# 2. the Classgrid extension for VS Code, Cursor, Windsurf and VSCodium is packed and, with "publish" on, sent to the
+#    VS Code Marketplace and Open VSX (publish-extension.yml);
+# 3. the desktop app is built with that Classgrid Code inside, passes its two crash checks, and with "publish" on goes
+#    to R2 and the CDN so installed apps update themselves (build-desktop-app.yml).
+# Before running: raise "version" in desktop/package.json and in classgrid-editor/extension/package.json.
+# "publish" off = everything is built and kept as artifacts, nothing reaches anyone. "skip_editor" on = the desktop
+# app ships the newest Classgrid Code already released (saves the 2-3 hour editor build when classgrid-editor/ is unchanged).
+on:
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: "Publish: the extension to the stores, the desktop app to R2 and the CDN"
+        type: boolean
+        default: false
+      skip_editor:
+        description: "Skip the Classgrid Code build and ship the newest editor-* release already there"
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+  actions: write
+
+jobs:
+  editor:
+    name: 1. Classgrid Code
+    if: ${{ !inputs.skip_editor }}
+    uses: ./.github/workflows/build-classgrid-editor.yml
+    secrets: inherit
+
+  extension:
+    name: 2. The extension (VS Code, Cursor, Windsurf, VSCodium)
+    uses: ./.github/workflows/publish-extension.yml
+    with:
+      publish: ${{ inputs.publish }}
+    secrets: inherit
+
+  desktop:
+    name: 3. The desktop app
+    needs: [editor]
+    # (runs after the editor, and also when the editor was skipped)
+    if: ${{ always() && (needs.editor.result == 'success' || needs.editor.result == 'skipped') }}
+    uses: ./.github/workflows/build-desktop-app.yml
+    with:
+      publish: ${{ inputs.publish }}
+      editor_tag: ${{ needs.editor.outputs.tag || '' }}
+    secrets: inherit

@@ -16,6 +16,12 @@ on:
         description: 'Publish to the stores (otherwise only build the .vsix)'
         type: boolean
         default: false
+  # Called by release-all.yml (one run releases Classgrid Code, the extension and the desktop app)
+  workflow_call:
+    inputs:
+      publish:
+        type: boolean
+        default: false
 
 permissions:
   contents: write
