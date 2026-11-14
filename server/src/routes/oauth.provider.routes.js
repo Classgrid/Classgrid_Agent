@@ -138,6 +138,16 @@ const requireConsentPageOrigin = (req, res, next) => {
     next();
 };
 
+// The Connected apps list (GET /grants, DELETE /grants/:clientId) is also shown in the Classgrid phone app, which
+// signs its requests with its own Bearer token and has no web origin. A Bearer header is never sent by a browser on
+// its own, so another website cannot use it the way it could use the login cookie: those requests pass, and every
+// cookie request still has to come from the consent page. (isAuthenticated reads the Bearer header before the cookie.)
+const requireConsentPageOriginOrBearer = (req, res, next) => {
+    const auth = req.headers.authorization;
+    if (typeof auth === "string" && auth.startsWith("Bearer ")) return next();
+    return requireConsentPageOrigin(req, res, next);
+};
+
 // ─────────────────────────────────────────────
 // OAuth / MCP configuration (also used by the discovery documents in api/index.js)
 // ─────────────────────────────────────────────
@@ -745,7 +755,7 @@ const isLoopbackHost = (host) => /^(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$/i.te
 
 // One row per app that still holds a live token for this user. "Last active" = the newest token the app
 // got (sign-in or refresh), since access checks don't write anything per call.
-router.get("/grants", requireConsentPageOrigin, isAuthenticated, async (req, res) => {
+router.get("/grants", requireConsentPageOriginOrBearer, isAuthenticated, async (req, res) => {
     res.set("Cache-Control", "no-store");
     try {
         await connectDB();
@@ -800,7 +810,7 @@ router.get("/grants", requireConsentPageOrigin, isAuthenticated, async (req, res
 });
 
 // Disconnects one app: every token and unused code it holds for this user stops working at once
-router.delete("/grants/:clientId", requireConsentPageOrigin, isAuthenticated, async (req, res) => {
+router.delete("/grants/:clientId", requireConsentPageOriginOrBearer, isAuthenticated, async (req, res) => {
     res.set("Cache-Control", "no-store");
     try {
         const clientId = req.params.clientId;
