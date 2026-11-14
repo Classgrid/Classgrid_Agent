@@ -3,6 +3,7 @@
 import GlobalAiConfig from "../../models/GlobalAiConfig.js";
 import PlanConfig, { PLAN_KEYS, RESET_UNIT_ENUM, ensurePlanRows } from "../../models/PlanConfig.js";
 import User from "../../models/User.js";
+import AiCreditTransaction from "../../models/AiCreditTransaction.js";
 import { forgetPlans } from "../../services/plan-limits.service.js";
 
 const NUMBER_FIELDS = [
@@ -120,5 +121,19 @@ export const setUserPlan = async (req, res) => {
     } catch (error) {
         console.error("[setUserPlan]", error);
         res.status(500).json({ success: false, message: "Server error setting the plan." });
+    }
+};
+
+// Everyone on a paid plan (Pro, Max, Enterprise: bought or granted), newest first, and the plan payments
+export const listSubscribers = async (req, res) => {
+    try {
+        const [users, payments] = await Promise.all([
+            User.find({ "plan.id": { $in: PLAN_KEYS.filter((k) => k !== "free") } }).select("email name role plan").sort({ "plan.started_at": -1 }).limit(500).lean(),
+            AiCreditTransaction.find({ type: "plan" }).select("userEmail userName plan_key plan_term amount_inr status razorpay_payment_id plan_period_start plan_period_end paymentTime createdAt").sort({ createdAt: -1 }).limit(300).lean(),
+        ]);
+        res.json({ success: true, users, payments });
+    } catch (error) {
+        console.error("[listSubscribers]", error);
+        res.status(500).json({ success: false, message: "Server error reading the subscribers." });
     }
 };

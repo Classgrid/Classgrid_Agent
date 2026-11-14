@@ -109,7 +109,6 @@ import {
 } from "../controllers/support-communication.controller.js";
 
 import notificationRoutes from "./super-admin/notification.routes.js";
-import billingCatalogRoutes from "./super-admin/billing-catalog.routes.js";
 import billingDiscountsTaxesRoutes from "./super-admin/billing-discounts-taxes.routes.js";
 import billingEligibilityPricingRoutes from "./super-admin/billing-eligibility-pricing.routes.js";
 import billingFailuresRoutes from "./super-admin/billing-failures.routes.js";
@@ -199,7 +198,6 @@ router.get("/billing/organizations", async (req, res) => {
         res.status(500).json({ success: false, message: error.message });
     }
 });
-router.use("/billing", billingCatalogRoutes);
 router.use("/billing", billingDiscountsTaxesRoutes);
 router.use("/billing", billingEligibilityPricingRoutes);
 router.use("/billing/failed-payments", billingFailuresRoutes);
@@ -210,7 +208,6 @@ router.use("/billing/transactions", billingTransactionsRoutes);
 router.use("/billing/export-jobs", billingExportsRoutes);
 
 // Backward-compatible aliases for older deployed clients.
-router.use("/billing/catalog", billingCatalogRoutes);
 router.use("/billing/discounts-taxes", billingDiscountsTaxesRoutes);
 router.use("/billing/eligibility-pricing", billingEligibilityPricingRoutes);
 router.use("/billing/failures", billingFailuresRoutes);

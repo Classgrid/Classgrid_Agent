@@ -10,228 +10,170 @@
  * super admin dashboard are live.
  * ─────────────────────────────────────────────────────────
  */
-// CLASSGRID USES CLOUDFLARE USAGE TO CALCULATE TOKENS, NOT GPT-TOKENIZER (WHICH IS ONLY A FALLBACK)
-/*
- * =========================================================================================
- * 🚨 CRITICAL AI & SYSTEM RULE 🚨
- * NO FRONTEND GITHUB ACTIONS: NEVER create yaml files that build/deploy the frontend to EC2.
- * The frontend is hosted 100% on Vercel. EC2 is only for the backend.
- * =========================================================================================
- */
-
-/**
- * ==============================================================================
- * 🚨 AI AGENT WARNING: BREADCRUMB POLICY 🚨
- * ==============================================================================
- * NEVER hardcode "Super Admin Dashboard /" as a breadcrumb on any deep dive page.
- * Deep dive pages or sub-pages MUST accurately reflect the actual parent pages 
- * they were opened from (e.g., Organizations / [Name] / Configuration / ...).
- * DO NOT use generic dashboard text for breadcrumbs.
- * ==============================================================================
- */
-
-/*
- * =========================================================================================
- * STRICT SECURITY POLICY:
- * NO ONE CAN EVER CHANGE THE ORGANIZATION TYPE FROM THE FRONTEND OR BACKEND.
- * NEVER ADD A DROPDOWN OR OPTION TO CHANGE IT ANYWHERE IN THE CODEBASE.
- * NO MEANS NO. THIS IS A FIXED PLATFORM RULE.
- * =========================================================================================
- */
-
-/*
- * ─────────────────────────────────────────────────────────
- * 🚨 CRITICAL AI AND SYSTEM RULES 🚨
- * 1. NEVER DELETE ANY ENVIRONMENT VARIABLES.
- * 2. LOCALHOST TESTING IS STRICTLY BANNED. NO AI WILL EVER TRY TO WORK LOCALLY.
- * 3. THIS REPO IS PRODUCTION-FIRST. DO NOT TOUCH OR REMOVE KEYS.
- * ─────────────────────────────────────────────────────────
- */
-
-/*
- * ─────────────────────────────────────────────────────────
- * 🚨 NAMING CONVENTION RULE 🚨
- * 1. "CLASSGRID PLATFORM" is strictly the REPO NAME.
- * 2. chat.classgrid.in (Classgrid AI) is the actual PRODUCT. The ERP is shut down.
- * 3. NEVER use "Classgrid Platform" anywhere in the frontend UI or user-facing text.
- * ─────────────────────────────────────────────────────────
- */
-
-/*
- * ─────────────────────────────────────────────────────────
- * 🚨 HOSTING & ARCHITECTURE RULE 🚨
- * 1. BACKEND IS HOSTED ON AWS EC2 AT API.CLASSGRID.IN
- * 2. FRONTEND IS HOSTED ON VERCEL
- * ─────────────────────────────────────────────────────────
- */
-
-import React, { useState } from 'react';
-import { Button } from '@/components/marketing_ui/button';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/marketing_ui/card';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/marketing_ui/select';
+// Plans & Billing (rebuilt, owner 2026-11-14): the Classgrid AI plans. The old versioned catalog (modules, organisation
+// subscriptions, overrides, invoice rules, taxes) is gone with the ERP. Three tabs: the plan table (every limit and
+// price, the on/off switch), who is on a paid plan (and setting a plan by hand), and the plan payments.
+import React, { useMemo, useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/marketing_ui/tabs';
-import { AsyncBillingState } from '../components/shared/BillingStateComponents';
-import { OrganizationSelector } from '../components/shared/BillingFilterComponents';
-import {
-  InvoiceRulesPanel,
-  OrganizationCreditLedger,
-  UsageMetricTable,
-} from '../components/catalog/PlansBillingComponents';
-import {
-  PlanCatalogTable,
-  PlanEditorDrawer,
-} from '../components/catalog/PlanCatalogComponents';
-import {
-  ModuleCatalogTable,
-  ModuleEditorDrawer,
-} from '../components/catalog/ModuleCatalogComponents';
-import {
-  OrganizationSubscriptionDrawer,
-  OrganizationSubscriptionTable,
-} from '../components/catalog/SubscriptionComponents';
-import { OrganizationPricingOverrideTable } from '../components/catalog/OverrideAndProrationComponents';
-import {
-  CreditGrantDialog,
-  DiscountCatalogTable,
-  DiscountEditorDrawer,
-  TaxRuleEditorDrawer,
-  TaxRuleTable,
-} from '../components/catalog/DiscountTaxesComponents';
-import { useBillingMetrics, useBillingPlans } from '../hooks/useBillingCatalog';
+import { Input } from '@/components/marketing_ui/input';
+import { Skeleton } from '@/components/marketing_ui/skeleton';
+import { apiClient as api } from '@/lib/apiClient';
+import { PlanConfigPanel } from '@/features/superadmin/components/PlanConfigPanel';
+import { UserPlanCard } from '@/features/superadmin/components/ai-usage/UserPlanCard';
+
+type Subscriber = {
+  _id: string; email: string; name?: string; role?: string;
+  plan: { id?: string; status?: string; billing?: string; started_at?: string | null; expires_at?: string | null; note?: string; set_by?: string };
+};
+type Payment = {
+  _id: string; userEmail?: string; userName?: string; plan_key?: string; plan_term?: string; amount_inr?: number; status?: string;
+  razorpay_payment_id?: string; plan_period_start?: string | null; plan_period_end?: string | null; paymentTime?: string | null; createdAt?: string;
+};
+
+const PLAN_NAMES: Record<string, string> = { free: 'Free', pro: 'Pro', max: 'Max', enterprise: 'Enterprise' };
+const date = (iso?: string | null) => (iso ? new Date(iso).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }) : '');
+const inr = (n?: number) => (typeof n === 'number' ? `₹${Math.round(n).toLocaleString('en-IN')}` : '');
+const billingText = (b?: string) => (b === 'prepaid_yearly' ? 'Paid, 1 year' : b === 'manual_monthly' ? 'Paid, 1 month' : b === 'granted' ? 'Granted' : b || '');
+
+const useSubscribers = () => useQuery({
+  queryKey: ['ai-plan-subscribers'],
+  queryFn: async () => (await api.get('/api/super-admin/ai-usage/plans/subscribers')).data as { users: Subscriber[]; payments: Payment[] },
+});
+
+function Subscribers() {
+  const { data, isLoading } = useSubscribers();
+  const [q, setQ] = useState('');
+  const [open, setOpen] = useState<string | null>(null);
+  const users = useMemo(() => {
+    const list = data?.users || [];
+    const needle = q.trim().toLowerCase();
+    return needle ? list.filter((u) => `${u.email} ${u.name || ''}`.toLowerCase().includes(needle)) : list;
+  }, [data, q]);
+  if (isLoading) return <Skeleton className="h-64 w-full" />;
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between gap-3 flex-wrap">
+        <p className="text-sm text-muted-foreground">{data?.users.length || 0} on a paid plan. Click a row to change the plan by hand.</p>
+        <Input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search by email or name" className="h-9 max-w-xs" />
+      </div>
+      <div className="bg-card border border-border rounded-xl overflow-hidden">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="bg-muted/30 text-left text-muted-foreground">
+              <th className="p-3 font-medium">User</th>
+              <th className="p-3 font-medium">Plan</th>
+              <th className="p-3 font-medium">How</th>
+              <th className="p-3 font-medium">Since</th>
+              <th className="p-3 font-medium">Until</th>
+              <th className="p-3 font-medium">Set by</th>
+            </tr>
+          </thead>
+          <tbody>
+            {users.length === 0 && (
+              <tr><td colSpan={6} className="p-8 text-center text-muted-foreground">No one is on a paid plan yet.</td></tr>
+            )}
+            {users.map((u) => {
+              const expired = u.plan?.expires_at ? new Date(u.plan.expires_at).getTime() < Date.now() : false;
+              return (
+                <React.Fragment key={u._id}>
+                  <tr onClick={() => setOpen(open === u._id ? null : u._id)} className="border-t border-border/60 cursor-pointer hover:bg-muted/20">
+                    <td className="p-3">
+                      <div className="font-medium text-foreground">{u.name || u.email}</div>
+                      {u.name && <div className="text-xs text-muted-foreground">{u.email}</div>}
+                    </td>
+                    <td className="p-3">
+                      <span className="inline-flex rounded-full bg-foreground text-background px-2 py-0.5 text-xs font-medium">{PLAN_NAMES[u.plan?.id || ''] || u.plan?.id}</span>
+                      {expired && <span className="ml-2 text-xs text-red-500">expired</span>}
+                    </td>
+                    <td className="p-3 text-muted-foreground">{billingText(u.plan?.billing)}</td>
+                    <td className="p-3 text-muted-foreground">{date(u.plan?.started_at)}</td>
+                    <td className="p-3 text-muted-foreground">{u.plan?.expires_at ? date(u.plan.expires_at) : 'No end'}</td>
+                    <td className="p-3 text-muted-foreground">{u.plan?.set_by || (u.plan?.billing === 'granted' ? '' : 'payment')}</td>
+                  </tr>
+                  {open === u._id && (
+                    <tr className="border-t border-border/60 bg-muted/10">
+                      <td colSpan={6} className="p-3"><UserPlanCard userId={u._id} plan={u.plan} /></td>
+                    </tr>
+                  )}
+                </React.Fragment>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+function Payments() {
+  const { data, isLoading } = useSubscribers();
+  if (isLoading) return <Skeleton className="h-64 w-full" />;
+  const payments = data?.payments || [];
+  const total = payments.filter((p) => p.status === 'success').reduce((s, p) => s + (p.amount_inr || 0), 0);
+  return (
+    <div className="space-y-4">
+      <p className="text-sm text-muted-foreground">{payments.length} plan payment{payments.length === 1 ? '' : 's'}, {inr(total)} in all. Top-ups are under Transactions.</p>
+      <div className="bg-card border border-border rounded-xl overflow-hidden">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="bg-muted/30 text-left text-muted-foreground">
+              <th className="p-3 font-medium">Paid on</th>
+              <th className="p-3 font-medium">User</th>
+              <th className="p-3 font-medium">Plan</th>
+              <th className="p-3 font-medium">Term</th>
+              <th className="p-3 font-medium">Amount</th>
+              <th className="p-3 font-medium">Period</th>
+              <th className="p-3 font-medium">Payment id</th>
+            </tr>
+          </thead>
+          <tbody>
+            {payments.length === 0 && (
+              <tr><td colSpan={7} className="p-8 text-center text-muted-foreground">No plan has been paid for yet.</td></tr>
+            )}
+            {payments.map((p) => (
+              <tr key={p._id} className="border-t border-border/60">
+                <td className="p-3 text-muted-foreground">{date(p.paymentTime || p.createdAt)}</td>
+                <td className="p-3">
+                  <div className="font-medium text-foreground">{p.userName || p.userEmail}</div>
+                  {p.userName && <div className="text-xs text-muted-foreground">{p.userEmail}</div>}
+                </td>
+                <td className="p-3">{PLAN_NAMES[p.plan_key || ''] || p.plan_key}</td>
+                <td className="p-3 text-muted-foreground">{p.plan_term === 'year' ? '1 year' : '1 month'}</td>
+                <td className="p-3 font-medium">{inr(p.amount_inr)}{p.status && p.status !== 'success' ? <span className="ml-2 text-xs text-red-500">{p.status}</span> : null}</td>
+                <td className="p-3 text-muted-foreground">{date(p.plan_period_start)} to {date(p.plan_period_end)}</td>
+                <td className="p-3 text-xs font-mono text-muted-foreground">{p.razorpay_payment_id}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
 
 const PlansAndBillingPage = () => {
   const [activeTab, setActiveTab] = useState('plans');
-  const [planEditorOpen, setPlanEditorOpen] = useState(false);
-  const [moduleEditorOpen, setModuleEditorOpen] = useState(false);
-  const [discountEditorOpen, setDiscountEditorOpen] = useState(false);
-  const [taxEditorOpen, setTaxEditorOpen] = useState(false);
-  const [creditGrantOpen, setCreditGrantOpen] = useState(false);
-  const [selectedOrganizationId, setSelectedOrganizationId] = useState('');
-  const [managedOrganizationId, setManagedOrganizationId] = useState('');
-  const [selectedPlanId, setSelectedPlanId] = useState('');
-  const { data: plans = [] } = useBillingPlans();
-  const { data: metrics = [], isLoading: metricsLoading, error: metricsError } = useBillingMetrics();
-
   return (
     <div className="flex h-full flex-col bg-background text-foreground">
       <div className="border-b border-border bg-card p-6">
         <h2 className="text-xl font-semibold tracking-tight">Plans & Billing</h2>
         <p className="mt-1 text-sm text-muted-foreground">
-          Manage the versioned catalog and organization billing configuration.
+          The Classgrid AI plans: every limit and price, who is on a paid plan, and what was paid.
         </p>
       </div>
-
       <div className="p-6">
         <Tabs value={activeTab} onValueChange={setActiveTab}>
           <TabsList className="flex h-auto w-full flex-wrap justify-start gap-1">
             <TabsTrigger value="plans">Plans</TabsTrigger>
-            <TabsTrigger value="modules">Modules</TabsTrigger>
-            <TabsTrigger value="subscriptions">Organization Subscriptions</TabsTrigger>
-            <TabsTrigger value="overrides">Pricing Overrides</TabsTrigger>
-            <TabsTrigger value="metrics">Usage Metrics</TabsTrigger>
-            <TabsTrigger value="invoice-rules">Invoice Rules</TabsTrigger>
-            <TabsTrigger value="discounts">Discounts</TabsTrigger>
-            <TabsTrigger value="credits">Credits</TabsTrigger>
-            <TabsTrigger value="taxes">Taxes</TabsTrigger>
+            <TabsTrigger value="subscribers">Subscribers</TabsTrigger>
+            <TabsTrigger value="payments">Plan payments</TabsTrigger>
           </TabsList>
-
-          <TabsContent value="plans" className="mt-6 space-y-4">
-            <div className="flex justify-end">
-              <Button onClick={() => setPlanEditorOpen(true)}>Create plan</Button>
-            </div>
-            <PlanCatalogTable />
-          </TabsContent>
-
-          <TabsContent value="modules" className="mt-6 space-y-4">
-            <div className="flex justify-end">
-              <Button onClick={() => setModuleEditorOpen(true)}>Create module</Button>
-            </div>
-            <ModuleCatalogTable />
-          </TabsContent>
-
-          <TabsContent value="subscriptions" className="mt-6">
-            <OrganizationSubscriptionTable onManage={setManagedOrganizationId} />
-          </TabsContent>
-
-          <TabsContent value="overrides" className="mt-6 space-y-4">
-            <OrganizationSelector selectedId={selectedOrganizationId} onSelect={setSelectedOrganizationId} />
-            <Card>
-              <CardHeader><CardTitle>Organization pricing overrides</CardTitle></CardHeader>
-              <CardContent>
-                {selectedOrganizationId
-                  ? <OrganizationPricingOverrideTable orgId={selectedOrganizationId} />
-                  : <p className="text-sm text-muted-foreground">Select an organization to inspect its active price overrides.</p>}
-              </CardContent>
-            </Card>
-          </TabsContent>
-
-          <TabsContent value="metrics" className="mt-6">
-            <Card>
-              <CardHeader><CardTitle>Billing metric definitions</CardTitle></CardHeader>
-              <CardContent>
-                <AsyncBillingState loading={metricsLoading} error={metricsError} skeletonType="table">
-                  <UsageMetricTable data={metrics} />
-                </AsyncBillingState>
-              </CardContent>
-            </Card>
-          </TabsContent>
-
-          <TabsContent value="invoice-rules" className="mt-6 space-y-4">
-            <Select value={selectedPlanId} onValueChange={(value) => value && setSelectedPlanId(value)}>
-              <SelectTrigger className="w-full max-w-sm"><SelectValue placeholder="Select a plan" /></SelectTrigger>
-              <SelectContent>
-                {plans.map((plan: any) => (
-                  <SelectItem key={plan._id} value={plan._id}>{plan.name}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            {selectedPlanId
-              ? <InvoiceRulesPanel planId={selectedPlanId} />
-              : <p className="text-sm text-muted-foreground">Select a plan to view its authoritative invoice rules.</p>}
-          </TabsContent>
-
-          <TabsContent value="discounts" className="mt-6 space-y-4">
-            <div className="flex justify-end">
-              <Button onClick={() => setDiscountEditorOpen(true)}>Create discount</Button>
-            </div>
-            <DiscountCatalogTable />
-          </TabsContent>
-
-          <TabsContent value="credits" className="mt-6 space-y-4">
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <OrganizationSelector selectedId={selectedOrganizationId} onSelect={setSelectedOrganizationId} />
-              <Button disabled={!selectedOrganizationId} onClick={() => setCreditGrantOpen(true)}>Grant credit</Button>
-            </div>
-            {selectedOrganizationId
-              ? <OrganizationCreditLedger orgId={selectedOrganizationId} />
-              : <p className="text-sm text-muted-foreground">Select an organization to view its credit ledger.</p>}
-          </TabsContent>
-
-          <TabsContent value="taxes" className="mt-6 space-y-4">
-            <div className="flex justify-end">
-              <Button onClick={() => setTaxEditorOpen(true)}>Create tax rule</Button>
-            </div>
-            <TaxRuleTable />
-          </TabsContent>
+          <TabsContent value="plans" className="mt-6"><PlanConfigPanel /></TabsContent>
+          <TabsContent value="subscribers" className="mt-6"><Subscribers /></TabsContent>
+          <TabsContent value="payments" className="mt-6"><Payments /></TabsContent>
         </Tabs>
       </div>
-
-      <PlanEditorDrawer isOpen={planEditorOpen} onClose={() => setPlanEditorOpen(false)} mode="create" />
-      <ModuleEditorDrawer isOpen={moduleEditorOpen} onClose={() => setModuleEditorOpen(false)} />
-      <DiscountEditorDrawer isOpen={discountEditorOpen} onClose={() => setDiscountEditorOpen(false)} />
-      <TaxRuleEditorDrawer isOpen={taxEditorOpen} onClose={() => setTaxEditorOpen(false)} />
-      <CreditGrantDialog
-        orgId={selectedOrganizationId}
-        isOpen={creditGrantOpen}
-        onClose={() => setCreditGrantOpen(false)}
-      />
-      {managedOrganizationId && (
-        <OrganizationSubscriptionDrawer
-          isOpen
-          orgId={managedOrganizationId}
-          onClose={() => setManagedOrganizationId('')}
-        />
-      )}
     </div>
   );
 };
