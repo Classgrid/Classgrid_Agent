@@ -4,7 +4,7 @@
 // storage meter. Fed by GET /api/ai/plan/overview.
 import React from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { RefreshCw, Image as ImageIcon, FileText, Wallet, Crown, Cpu, Sparkles, MessageSquare, Mic, Volume2, Phone, Send, FolderKanban, HardDrive } from "lucide-react";
+import { RefreshCw, Image as ImageIcon, FileText, Wallet, BadgeCheck, Cpu, Sparkles, MessageSquare, Mic, Volume2, Phone, Send, FolderKanban, HardDrive } from "lucide-react";
 import { Skeleton } from "@/components/marketing_ui/skeleton";
 import { Button } from "@/components/marketing_ui/button";
 import { usePlanOverview, type Meter, n, limitText, dateText, mbText } from "./planOverview";
@@ -81,7 +81,7 @@ export function UsageTab({ onUpgrade }: { onUpgrade?: () => void }) {
           <Button variant="outline" size="sm" onClick={() => queryClient.invalidateQueries({ queryKey: ["ai-plan-overview"] })} disabled={isFetching}>
             <RefreshCw className={`w-3.5 h-3.5 mr-1.5 ${isFetching ? "animate-spin" : ""}`} /> Refresh
           </Button>
-          {onUpgrade && <Button size="sm" onClick={onUpgrade}><Crown className="w-3.5 h-3.5 mr-1.5" /> Upgrade</Button>}
+          {onUpgrade && <Button size="sm" onClick={onUpgrade}><BadgeCheck className="w-3.5 h-3.5 mr-1.5" /> Upgrade</Button>}
         </div>
       </div>
 

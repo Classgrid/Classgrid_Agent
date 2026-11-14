@@ -17,7 +17,7 @@ import React, { useState } from "react";
 import { useMyAiBalance, useInitiateAiTopUp } from "@/components/ai/queries/useAiCredits";
 import { useQueryClient } from "@tanstack/react-query";
 import { formatNumber } from "@/lib/utils";
-import { ArrowUpCircle, Wallet, AlertCircle, Crown, ExternalLink } from "lucide-react";
+import { ArrowUpCircle, Wallet, AlertCircle, BadgeCheck, ExternalLink } from "lucide-react";
 import { Skeleton } from "@/components/marketing_ui/skeleton";
 import { Button } from "@/components/marketing_ui/button";
 import { BlueSlider } from "@/components/marketing_ui/BlueSlider";
@@ -143,7 +143,7 @@ export function AiUpgradePanel() {
             {/* The user's plan, this week's use and the credit balance */}
             <div className="bg-muted/30 border border-border rounded-xl p-5 grid grid-cols-1 md:grid-cols-3 gap-5">
               <div className="flex items-center gap-3">
-                <div className="bg-amber-500/10 p-2 rounded-lg"><Crown className="w-5 h-5 text-amber-500" /></div>
+                <div className="bg-amber-500/10 p-2 rounded-lg"><BadgeCheck className="w-5 h-5 text-emerald-500" /></div>
                 <div>
                   <div className="text-sm text-muted-foreground">Your plan</div>
                   <div className="font-bold text-foreground">{plansOn ? planName : "Free"}</div>
@@ -171,7 +171,7 @@ export function AiUpgradePanel() {
             {plansOn && (
               <div>
                 <div className="flex items-center justify-between gap-3 mb-4 flex-wrap">
-                  <h3 className="text-lg font-semibold flex items-center gap-2"><Crown className="w-5 h-5 text-amber-500" /> Plans</h3>
+                  <h3 className="text-lg font-semibold flex items-center gap-2"><BadgeCheck className="w-5 h-5 text-emerald-500" /> Plans</h3>
                   <div className="inline-flex rounded-lg border border-border p-0.5 text-sm">
                     <button type="button" onClick={() => setTerm("month")} className={`px-3 py-1 rounded-md ${term === "month" ? "bg-foreground text-background" : "text-muted-foreground"}`}>Monthly</button>
                     <button type="button" onClick={() => setTerm("year")} className={`px-3 py-1 rounded-md ${term === "year" ? "bg-foreground text-background" : "text-muted-foreground"}`}>
@@ -189,7 +189,7 @@ export function AiUpgradePanel() {
                   <div className="rounded-2xl border border-border bg-card p-6 flex flex-col sm:flex-row sm:items-center gap-5">
                     <div className="flex-1">
                       <div className="flex items-center gap-2 font-semibold text-foreground text-lg">
-                        {mine?.key && mine.key !== "free" ? <CheckCircle2 className="w-5 h-5 text-emerald-500" /> : <Crown className="w-5 h-5 text-amber-500" />}
+                        {mine?.key && mine.key !== "free" ? <CheckCircle2 className="w-5 h-5 text-emerald-500" /> : <BadgeCheck className="w-5 h-5 text-emerald-500" />}
                         {mine?.key && mine.key !== "free" ? `Subscribed to ${planName}` : "You are on the Free plan"}
                       </div>
                       <p className="text-sm text-muted-foreground mt-1">

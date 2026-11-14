@@ -2203,8 +2203,19 @@ export const streamAskAi = async (req, res) => {
                     ]);
                     const hit = (perWindow >= 0 && inWindow >= perWindow) ? { n: perWindow, when: `${chatPlan.window_reset_value} ${chatPlan.window_reset_unit}${chatPlan.window_reset_value === 1 ? "" : "s"}` } : (perWeek >= 0 && inWeek >= perWeek) ? { n: perWeek, when: "week" } : null;
                     if (hit) {
-                        res.writeHead(429, { "Content-Type": "application/json" });
-                        res.end(JSON.stringify({ error: `You've started all ${hit.n} new chats your ${chatPlan.name} plan allows per ${hit.when}. Keep going in one of your chats (a chat has no limit), or upgrade your plan.`, code: "chats_cap_reached", plan: chatPlan.key }));
+                        // The answer's stream has already started here (its headers are sent), so the refusal goes
+                        // down the stream as an error event, never as a second set of headers (that threw
+                        // ERR_HTTP_HEADERS_SENT and the chat showed "The AI took too long", 2026-11-14)
+                        const refusal = { error: `You've started all ${hit.n} new chats your ${chatPlan.name} plan allows per ${hit.when}. Keep going in one of your chats (a chat has no limit), or upgrade your plan.`, code: "chats_cap_reached", plan: chatPlan.key };
+                        if (res.headersSent) {
+                            res.write(`data: ${JSON.stringify({ type: "error", ...refusal })}
+
+`);
+                            res.end();
+                        } else {
+                            res.writeHead(429, { "Content-Type": "application/json" });
+                            res.end(JSON.stringify(refusal));
+                        }
                         return;
                     }
                 }

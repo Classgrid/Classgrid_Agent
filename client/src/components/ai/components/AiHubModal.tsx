@@ -29,7 +29,7 @@ import {
   KeyRound,
   Search,
   Plus,
-  Crown
+  BadgeCheck
 } from "lucide-react";
 import { Spinner } from "@/components/marketing_ui/spinner";
 import { cn } from "@/lib/utils";
@@ -70,7 +70,7 @@ export const AI_HUB_TABS = [
   // Outside apps (Claude, Cursor, ChatGPT) allowed through the Classgrid OAuth consent page
   { id: "connected-apps", label: "Connected apps", icon: KeyRound },
   // The plan (everything inside it, "Subscribed"), what is used of it, the credits, and Upgrade (owner, 2026-11-14)
-  { id: "plan", label: "Plan", icon: Crown },
+  { id: "plan", label: "Plan", icon: BadgeCheck },
   { id: "usage", label: "Usage", icon: Activity },
   { id: "credits", label: "AI Credits", icon: CreditCard },
   { id: "upgrade", label: "Upgrade", icon: ArrowUpCircle },
