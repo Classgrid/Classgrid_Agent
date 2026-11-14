@@ -817,6 +817,14 @@ const userSchema = new mongoose.Schema(
     },
     // 🧠 AI Chat Customization & Defaults
     // Chats this user archived: left out of their chat lists, shown under "Archived chats"
+    // Automatic top-ups (Settings > Billing): when the bought credits fall below `below_inr` worth, the user gets one
+    // email a day with a one-click link to buy `amount_inr` of credits (no card is kept, so nothing is charged by itself)
+    ai_auto_topup: {
+      enabled: { type: Boolean, default: false },
+      below_inr: { type: Number, default: 100 },
+      amount_inr: { type: Number, default: 500 },
+      last_notified_at: { type: Date, default: null },
+    },
     archived_chat_ids: { type: [String], default: [] },
     // Studio chats sent with no project open: listed in Studio, not in Agent mode
     studio_chat_ids: { type: [String], default: [] },

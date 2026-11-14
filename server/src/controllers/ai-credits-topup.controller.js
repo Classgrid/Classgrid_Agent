@@ -195,7 +195,11 @@ export const createTopupOrder = async (req, res) => {
     if (!amount_inr || amount_inr < minInr || amount_inr > TOPUP_MAX_INR) {
         return res.status(400).json({ success: false, error: `Amount must be between ₹${minInr} and ₹10,000` });
     }
-    return startPlatformPayment(req, res, { amountInr: amount_inr, paymentType: "AI_TOPUP", label: "AI Credits Top-Up", otpKeyPrefix: "ai-topup-otp" });
+    // Started from Settings > Billing (returnTo "billing"): after paying, back to that page (the desktop and Android
+    // apps come back through their classgrid:// link, chosen in startPlatformPayment)
+    const origin = String(req.headers.origin || "https://chat.classgrid.in");
+    const returnUrl = req.body?.returnTo === "billing" ? `${origin}/agent/settings?section=billing&ai_payment=success` : null;
+    return startPlatformPayment(req, res, { amountInr: amount_inr, paymentType: "AI_TOPUP", label: "AI Credits Top-Up", otpKeyPrefix: "ai-topup-otp", returnUrl });
 };
 
 // A plan bought for one month or one year, paid once (no autopay): the webhook (AI_PLAN) puts the plan on the user.

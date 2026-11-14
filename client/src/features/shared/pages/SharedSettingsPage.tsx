@@ -79,6 +79,8 @@ import { SettingsVerifiedDomainCard } from "../components/settings/SettingsVerif
 import { SettingsDesktopNotificationsCard } from "../components/settings/SettingsDesktopNotificationsCard";
 import { isChatHost } from "@/lib/chatHost";
 import { SettingsBrowserSection } from "../components/settings/SettingsBrowserSection";
+import { SettingsUsageSection } from "../components/settings/SettingsUsageSection";
+import { SettingsBillingSection } from "../components/settings/SettingsBillingSection";
 import { SettingsEditorExtensionCard } from "../components/settings/SettingsEditorExtensionCard";
 import { settingsSections, useSettingsSection } from "../settings/settingsSections";
 
@@ -234,6 +236,10 @@ export function SharedSettingsPage() {
       {section === "browser" && <SettingsBrowserSection role={role} />}
 
       {section === "mastero" && <SettingsMasteroSection />}
+
+      {section === "usage" && <SettingsUsageSection />}
+
+      {section === "billing" && <SettingsBillingSection />}
 
       {section === "platform" && role === "super_admin" && (
         <>

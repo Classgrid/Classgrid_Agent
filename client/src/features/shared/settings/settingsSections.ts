@@ -1,11 +1,11 @@
 // Settings, divided into sections (like ChatGPT's settings): the left sidebar lists them (SettingsNav) and the page
 // shows the one picked (?section=...). Each section says who sees it and the words search finds it by.
 import { useSearchParams } from "react-router-dom";
-import { Bell, Globe, Lock, Palette, Settings2, UserRound, type LucideIcon } from "lucide-react";
+import { Activity, Bell, CreditCard, Globe, Lock, Palette, Settings2, UserRound, type LucideIcon } from "lucide-react";
 import { isChatHost } from "@/lib/chatHost";
 import { MasteroMark } from "@/components/icons/MasteroMark";
 
-export type SettingsSectionId = "general" | "notifications" | "privacy" | "account" | "browser" | "mastero" | "platform";
+export type SettingsSectionId = "general" | "notifications" | "privacy" | "account" | "browser" | "mastero" | "usage" | "billing" | "platform";
 export type SettingsSection = { id: SettingsSectionId; label: string; icon: LucideIcon | typeof MasteroMark; words: string };
 type Who = { role?: string | null };
 
@@ -22,6 +22,8 @@ export function settingsSections({ role }: Who): SettingsSection[] {
     { id: "account" as const, label: "Account", icon: UserRound, words: "account password delete role request security" },
     { id: "browser" as const, label: "Browser", icon: Globe, words: "browser history downloads cookies logins site data cache camera microphone location notifications websites permissions block allow" },
     { id: "mastero" as const, label: "Mastero", icon: MasteroMark, words: "mastero projects github push commit revert undo cloud computer node python" },
+    { id: "usage" as const, label: "Usage", icon: Activity, words: "usage limits session weekly claude fable deepseek glm whatsapp calls voice credits history" },
+    { id: "billing" as const, label: "Billing", icon: CreditCard, words: "billing invoices plan upgrade pro max credits buy top-up auto top-up payment razorpay receipt" },
     ...(role === "super_admin" ? [{ id: "platform" as const, label: "Platform", icon: Palette, words: "platform branding name logo" }] : []),
   ];
 }

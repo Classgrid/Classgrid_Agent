@@ -6,6 +6,7 @@ import Organization from "../models/Organization.js";
 import GlobalAiConfig from "../models/GlobalAiConfig.js";
 import AiLibraryFile from "../models/AiLibraryFile.js";
 import IdeProject from "../models/IdeProject.js";
+import AiUsageLog from "../models/AiUsageLog.js";
 import { planOf, planKeyOf, plansEnabled } from "../services/plan-limits.service.js";
 import { freeWindow, weekCounters, tokenWindowEnd } from "../services/ai-credits.service.js";
 import { resolveFeatureLimit, resolveResetPeriod, checkWhatsappLimit, formatPeriodLength } from "../services/ai-feature-limits.js";
@@ -140,6 +141,49 @@ export const getPlanOverview = async (req, res) => {
         });
     } catch (err) {
         console.error("[plan overview]", err);
+        res.status(500).json({ error: err.message });
+    }
+};
+
+// The Usage page's history (GET /api/ai/plan/usage-history?days=14): credits per day (India time) for the last days,
+// the totals, and the last 50 AI requests with their model and credits (from AiUsageLog)
+export const getUsageHistory = async (req, res) => {
+    try {
+        const days = Math.min(90, Math.max(1, parseInt(req.query.days, 10) || 14));
+        const since = new Date(Date.now() - days * 86400000);
+        const match = { userId: req.user._id, createdAt: { $gte: since }, success: { $ne: false } };
+        const [perDay, events, totals] = await Promise.all([
+            AiUsageLog.aggregate([
+                { $match: match },
+                { $group: { _id: { $dateToString: { format: "%Y-%m-%d", date: "$createdAt", timezone: "Asia/Kolkata" } }, credits: { $sum: "$totalTokens" }, requests: { $sum: 1 } } },
+                { $sort: { _id: 1 } },
+            ]),
+            AiUsageLog.find(match).sort({ createdAt: -1 }).limit(50).select("createdAt provider model feature totalTokens metadata").lean(),
+            AiUsageLog.aggregate([{ $match: match }, { $group: { _id: null, credits: { $sum: "$totalTokens" }, requests: { $sum: 1 } } }]),
+        ]);
+        const byDay = new Map(perDay.map((d) => [d._id, d]));
+        const list = [];
+        for (let i = days - 1; i >= 0; i--) {
+            const key = new Date(Date.now() - i * 86400000 + 5.5 * 3600000).toISOString().slice(0, 10);
+            const d = byDay.get(key);
+            list.push({ day: key, credits: d?.credits || 0, requests: d?.requests || 0 });
+        }
+        const what = (e) => {
+            if (e.provider === "elevenlabs") return "Read aloud";
+            const kind = e.metadata?.kind;
+            if (kind === "image") return "Image";
+            if (kind === "whatsapp") return "WhatsApp";
+            if (kind === "call") return "WhatsApp call";
+            return e.feature === "chat_ai" ? "Chat" : "Other";
+        };
+        res.json({
+            days, since: since.toISOString(),
+            total: { credits: totals[0]?.credits || 0, requests: totals[0]?.requests || 0 },
+            perDay: list,
+            events: events.map((e) => ({ at: e.createdAt, model: e.model, provider: e.provider, what: what(e), credits: e.totalTokens || 0 })),
+        });
+    } catch (err) {
+        console.error("[usage history]", err);
         res.status(500).json({ error: err.message });
     }
 };

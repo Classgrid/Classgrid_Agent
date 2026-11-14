@@ -18,7 +18,7 @@ export const aiCreditsApi = {
   getMyBalance: () => api.get("/api/ai/credits/balance").then(res => res.data.data),
   getMyHistory: () => api.get("/api/ai/credits/history").then(res => res.data.data),
   // The desktop app says so, so the payment page sends the user back to the app afterwards
-  initiateTopUp: (amount_inr: number) => api.post("/api/ai/topup/initiate", { amount_inr, ...((window as any).classgridDesktop?.isDesktop ? { clientApp: "desktop" } : {}) }).then(res => res.data.data),
+  initiateTopUp: (amount_inr: number, returnTo?: "billing") => api.post("/api/ai/topup/initiate", { amount_inr, ...(returnTo ? { returnTo } : {}), ...((window as any).classgridDesktop?.isDesktop ? { clientApp: "desktop" } : {}) }).then(res => res.data.data),
 };
 
 export const useMyAiBalance = () => useQuery({
@@ -31,8 +31,8 @@ export const useMyAiHistory = () => useQuery({
   queryFn: aiCreditsApi.getMyHistory,
 });
 
-export const useInitiateAiTopUp = () => {
+export const useInitiateAiTopUp = (returnTo?: "billing") => {
   return useMutation({
-    mutationFn: (amount_inr: number) => aiCreditsApi.initiateTopUp(amount_inr),
+    mutationFn: (amount_inr: number) => aiCreditsApi.initiateTopUp(amount_inr, returnTo),
   });
 };

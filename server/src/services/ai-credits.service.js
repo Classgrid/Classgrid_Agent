@@ -44,7 +44,36 @@ import { enqueueEmail } from "./email-queue.service.js";
 import { resetPeriodMs, RESET_UNITS } from "./ai-feature-limits.js";
 import { planOf, isUnlimited } from "./plan-limits.service.js";
 import redis from "../config/redis.js";
-import { getGrantedCreditsLowEmailHtml, getTopUpCreditsLowEmailHtml, getFreeLimitsExhaustedEmailHtml, getGrantedCreditsExhaustedEmailHtml, getTopUpCreditsExhaustedEmailHtml } from "./email-templates.service.js";
+import { getGrantedCreditsLowEmailHtml, getTopUpCreditsLowEmailHtml, getFreeLimitsExhaustedEmailHtml, getGrantedCreditsExhaustedEmailHtml, getTopUpCreditsExhaustedEmailHtml, baseTemplate } from "./email-templates.service.js";
+
+// Automatic top-ups (Settings > Billing): once the bought credits fall below the amount the user set, one email a day
+// with a one-click link that opens Billing with the top-up amount filled in. No payment method is kept, so the user
+// still presses Pay; nothing is charged by itself.
+const autoTopupEmail = async (user, orgId, remaining) => {
+    const a = user?.ai_auto_topup;
+    if (!a?.enabled || !user?.email) return;
+    const cfg = await GlobalAiConfig.findOne({ key: "singleton" }).select("credits_per_inr").lean().catch(() => null);
+    const perInr = Number(cfg?.credits_per_inr) > 0 ? Number(cfg.credits_per_inr) : 3000;
+    const threshold = Math.max(1, Number(a.below_inr) || 100) * perInr;
+    if (remaining >= threshold) return;
+    if (a.last_notified_at && Date.now() - new Date(a.last_notified_at).getTime() < 24 * 3600000) return;
+    const amount = Math.max(1, Math.floor(Number(a.amount_inr) || 500));
+    const chatApp = String(process.env.CHAT_APP_URL || "https://chat.classgrid.in").replace(/\/$/, "");
+    const link = `${chatApp}/agent/settings?section=billing&topup=${amount}`;
+    const name = String(user.name || user.first_name || "there").replace(/[<>&]/g, "");
+    const inr = (v) => Number(v).toLocaleString("en-IN");
+    const html = baseTemplate({
+        title: "Your credits are low",
+        content: `
+            <h2 style="margin:0 0 12px">Your credits are low</h2>
+            <p>Hi ${name}, your credit balance is ${inr(Math.max(0, Math.round(remaining)))} credits, below the ₹${inr(Number(a.below_inr) || 100)} you set for automatic top-ups.</p>
+            <p>Press the button to buy ₹${inr(amount)} of credits (${inr(amount * perInr)} credits). The amount is filled in; you only confirm the payment.</p>
+            <p><a href="${link}" style="display:inline-block;padding:10px 20px;background:#111111;color:#ffffff;text-decoration:none;border-radius:6px;font-weight:bold">Top up ₹${inr(amount)}</a></p>
+            <p style="color:#666;font-size:13px">You get this email at most once a day while automatic top-ups are on. Turn them off in Settings &rsaquo; Billing.</p>`,
+    });
+    await User.updateOne({ _id: user._id }, { $set: { "ai_auto_topup.last_notified_at": new Date() } });
+    await enqueueEmail({ to: user.email, subject: `Your credits are low: top up ₹${inr(amount)} in one click`, html, type: "billing_alert", userId: user._id, organizationId: orgId });
+};
 
 
 
@@ -293,8 +322,9 @@ export const hasEnoughTokens = async (userId, orgId, requiredTokens = 1, { paidO
 // HELPER TO TRIGGER ALERTS
 const triggerEmailAlerts = async (userId, orgId, type, oldBalance, currentBalance, totalLimit) => {
     try {
-        const user = await User.findById(userId).select('email name first_name last_name ai_tokens');
+        const user = await User.findById(userId).select('email name first_name last_name ai_tokens ai_auto_topup');
         if (!user || !user.email) return;
+        if (type === 'personal') autoTopupEmail(user, orgId, currentBalance).catch((e) => console.error("[auto top-up email]", e.message));
 
         let subdomain = '';
         if (orgId) {

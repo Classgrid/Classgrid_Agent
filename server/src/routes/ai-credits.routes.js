@@ -30,7 +30,7 @@
 // CLASSGRID USES CLOUDFLARE USAGE TO CALCULATE TOKENS, NOT GPT-TOKENIZER (WHICH IS ONLY A FALLBACK)
 import express from "express";
 import { isAuthenticated } from "../middleware/auth.middleware.js";
-import { getMyCredits, getMyPurchaseHistory, getMyUsage } from "../controllers/ai-credits.controller.js";
+import { getMyCredits, getMyPurchaseHistory, getMyUsage, getAutoTopup, setAutoTopup } from "../controllers/ai-credits.controller.js";
 
 const router = express.Router();
 
@@ -42,5 +42,8 @@ const router = express.Router();
 router.get("/balance", isAuthenticated, getMyCredits);
 router.get("/history", isAuthenticated, getMyPurchaseHistory);
 router.get("/usage", isAuthenticated, getMyUsage);
+// Automatic top-ups (Settings > Billing)
+router.get("/auto-topup", isAuthenticated, getAutoTopup);
+router.put("/auto-topup", isAuthenticated, setAutoTopup);
 
 export default router;
