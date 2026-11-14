@@ -1,9 +1,9 @@
 // The plans (Free, Pro, Max, Enterprise) as the super admin set them, with the user's current plan and a buy button
 // for a month or a year. Shown only while plans are on.
-import React, { useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { Check, Crown } from "lucide-react";
+import { Check, Crown, ExternalLink } from "lucide-react";
 import { apiClient as api } from "@/lib/apiClient";
 import { Button } from "@/components/marketing_ui/button";
 import { Skeleton } from "@/components/marketing_ui/skeleton";
@@ -16,6 +16,10 @@ type Plan = {
 type MyPlan = { enabled: boolean; key: string; name: string; status: string; billing: string; expires_at: string | null };
 
 const inr = (n: number) => `₹${Math.round(n).toLocaleString("en-IN")}`;
+// The website sends people to the pricing page for the plans (owner, 2026-11-14); the desktop app and Classgrid Code
+// show the cards and buy in the app
+const WEBSITE = import.meta.env.VITE_DESKTOP !== "1" && import.meta.env.VITE_EDITOR !== "1";
+const PRICING_URL = import.meta.env.VITE_PRICING_URL || "https://classgrid.in/pricing";
 const desktop = () => ((window as any).classgridDesktop?.isDesktop ? { clientApp: "desktop" } : {});
 
 export function PlanCards({ onCheckout }: { onCheckout: (url: string) => Promise<void> | void }) {
@@ -23,16 +27,57 @@ export function PlanCards({ onCheckout }: { onCheckout: (url: string) => Promise
   const { data: plans, isLoading } = useQuery({ queryKey: ["ai-plans"], queryFn: async () => (await api.get("/api/ai/plans")).data as { enabled: boolean; plans: Plan[] } });
   const { data: mine } = useQuery({ queryKey: ["my-ai-plan"], queryFn: async () => (await api.get("/api/ai/plan")).data as MyPlan });
   const buy = useMutation({
-    mutationFn: async (key: string) => (await api.post("/api/ai/topup/plan", { plan: key, term, ...desktop() })).data?.data,
+    mutationFn: async ({ key, term: t }: { key: string; term: "month" | "year" }) => (await api.post("/api/ai/topup/plan", { plan: key, term: t, ...desktop() })).data?.data,
     onSuccess: async (data) => { if (data?.checkout_url) await onCheckout(data.checkout_url); },
     onError: (e: any) => toast.error(e?.response?.data?.error || "Could not start the payment. Please try again."),
   });
+
+  // A plan chosen on classgrid.in/pricing (main.tsx keeps it in sessionStorage through sign-in): the payment starts
+  // by itself once the plans are known, as if the card's button was pressed; a plan that cannot be bought only shows
+  const wishDone = useRef(false);
+  useEffect(() => {
+    if (wishDone.current || isLoading || !plans || !mine) return;
+    let wish: { plan?: string; term?: string } | null = null;
+    try { const raw = sessionStorage.getItem("classgrid:buy-plan"); if (raw) wish = JSON.parse(raw); sessionStorage.removeItem("classgrid:buy-plan"); } catch { /* storage blocked */ }
+    if (!wish?.plan) return;
+    wishDone.current = true;
+    const wantTerm = wish.term === "year" ? "year" : "month";
+    const plan = plans.enabled ? plans.plans.find((p) => p.key === wish!.plan) : undefined;
+    if (!plan) return;
+    setTerm(wantTerm);
+    const price = wantTerm === "year" ? plan.price_inr_yearly : plan.price_inr_monthly;
+    if (plan.coming_soon || plan.key === "free" || !(price > 0)) return;
+    buy.mutate({ key: plan.key, term: wantTerm });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isLoading, plans, mine]);
 
   if (isLoading) return <Skeleton className="h-64 w-full" />;
   if (!plans?.enabled || !plans.plans?.length) return null;
 
   const current = mine?.key || "free";
   const until = mine?.expires_at ? new Date(mine.expires_at).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" }) : null;
+
+  if (WEBSITE) {
+    // The website: the user's plan, and the pricing page for the rest (a plan chosen there comes back as /c?buy=...)
+    return (
+      <div className="rounded-xl border border-border bg-card p-5 flex flex-col gap-3">
+        <h3 className="text-lg font-semibold flex items-center gap-2"><Crown className="w-5 h-5 text-amber-500" /> Plans</h3>
+        {buy.isPending ? (
+          <p className="text-sm text-muted-foreground">Opening payment...</p>
+        ) : (
+          <>
+            <p className="text-sm text-muted-foreground">
+              You are on <span className="font-medium text-foreground">{mine?.name || "Free"}</span>{until ? ` until ${until}` : ""}.
+              {current !== "free" ? " Buying again adds the time after that." : ""}
+            </p>
+            <Button className="w-full sm:w-auto self-start" onClick={() => { window.location.href = PRICING_URL; }}>
+              See plans and prices <ExternalLink className="w-4 h-4 ml-2" />
+            </Button>
+          </>
+        )}
+      </div>
+    );
+  }
 
   return (
     <div>
@@ -76,8 +121,8 @@ export function PlanCards({ onCheckout }: { onCheckout: (url: string) => Promise
               {p.coming_soon ? (
                 <Button variant="outline" disabled className="w-full">Coming soon</Button>
               ) : buyable ? (
-                <Button className="w-full" onClick={() => buy.mutate(p.key)} disabled={buy.isPending}>
-                  {buy.isPending && buy.variables === p.key ? "Opening payment..." : isCurrent ? `Add 1 ${term}` : `Get ${p.name}`}
+                <Button className="w-full" onClick={() => buy.mutate({ key: p.key, term })} disabled={buy.isPending}>
+                  {buy.isPending && buy.variables?.key === p.key ? "Opening payment..." : isCurrent ? `Add 1 ${term}` : `Get ${p.name}`}
                 </Button>
               ) : (
                 <Button variant="outline" disabled className="w-full">{isCurrent ? "Your plan" : "Included"}</Button>

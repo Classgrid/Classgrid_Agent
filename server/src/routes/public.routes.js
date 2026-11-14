@@ -520,9 +520,15 @@ router.get("/ai-pricing", async (req, res) => {
         Organization.findById(CHAT_PUBLIC_ORG_ID).select("ai_config").lean(),
         planTable().catch(() => ({ enabled: false, plans: {} })),
       ]);
-      // The plans as the super admin set them (prices, taglines, pricing-page lines); only public ones
+      // The plans as the super admin set them (prices, taglines, pricing-page lines); only public ones.
+      // buyUrlMonthly / buyUrlYearly: where a plan's button on classgrid.in/pricing sends the visitor. The chat
+      // (chat.classgrid.in) keeps the wish through sign-in, opens the plans and starts the payment on
+      // billing.classgrid.in. Free: the chat itself. Not buyable (coming soon, contact us): null.
+      const chatApp = String(process.env.CHAT_APP_URL || "https://chat.classgrid.in").replace(/\/$/, "");
+      const buyUrl = (p, term) => (!p.coming_soon && p.key !== "free" && Number(term === "year" ? p.price_inr_yearly : p.price_inr_monthly) > 0) ? `${chatApp}/c?buy=${encodeURIComponent(p.key)}&term=${term}` : null;
       const plans = Object.values(plansNow.plans || {}).filter((p) => p.is_public !== false).sort((a, b) => (a.sort ?? 0) - (b.sort ?? 0)).map((p) => ({
         key: p.key, name: p.name, tagline: p.tagline, comingSoon: !!p.coming_soon,
+        buyUrlMonthly: buyUrl(p, "month"), buyUrlYearly: buyUrl(p, "year"), startUrl: p.key === "free" ? `${chatApp}/` : null,
         priceInrMonthly: p.price_inr_monthly, priceInrYearly: p.price_inr_yearly,
         studentPriceInrMonthly: p.student_price_inr_monthly, studentPriceInrYearly: p.student_price_inr_yearly,
         features: p.features_text || [],

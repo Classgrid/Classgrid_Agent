@@ -133,7 +133,7 @@ export const DEFAULT_PLANS = [
         features_text: ["Unlimited chats, no limit inside a chat", "Claude models: 5x the usage of Pro", "Claude Fable up to half of your weekly credits", "300 images and photo edits a month", "400 free WhatsApp call minutes a month, 15-minute calls", "Unlimited projects, 1,500 coding runs, 100 sandbox hours", "400K context, 5 helpers per chat, priority at peak"],
     },
     {
-        key: "enterprise", name: "Enterprise", tagline: "Classgrid AI for schools, colleges and coaching institutes. Not an ERP.", sort: 3, coming_soon: true,
+        key: "enterprise", name: "Enterprise", tagline: "Classgrid AI for your whole company", sort: 3, coming_soon: true,
         price_inr_monthly: -1, price_inr_yearly: -1, student_price_inr_monthly: -1, student_price_inr_yearly: -1,
         tokens_per_window: 1000000, window_reset_value: 5, window_reset_unit: "hour", tokens_per_week: 3000000,
         chats_per_window: 1000, chats_per_week: 6000,
@@ -146,7 +146,7 @@ export const DEFAULT_PLANS = [
         projects_max: -1, coding_runs_per_month: 300, premium_runs_per_month: 15, sandbox_hours_per_month: 25, sandbox_sessions: 1,
         uploads_per_window: 150, upload_max_mb: 200, library_storage_mb: 5120, devices_max: 10,
         priority: true, support_level: "named contact",
-        features_text: ["Classgrid AI for everyone in your institution, not an ERP", "Priced per seat, billed yearly, from 50 seats", "One shared AI credit pool for the whole institution", "Admin controls, roles, branding and SSO", "A named contact and a 45-day free pilot"],
+        features_text: ["Classgrid AI for everyone on your team", "Priced per seat, billed yearly, from 50 seats", "One shared AI credit pool", "Admin controls, roles, SSO and your branding", "A named contact and a 45-day free pilot"],
     },
 ];
 

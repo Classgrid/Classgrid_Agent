@@ -2287,7 +2287,18 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
 
     // Handle post-payment redirect
     const searchParams = new URLSearchParams(window.location.search);
-    if (searchParams.get("ai_payment") === "success") {
+    let buyWish = false;
+    try { buyWish = !!sessionStorage.getItem("classgrid:buy-plan"); } catch { /* storage blocked */ }
+    if (buyWish) {
+      // From a plan's button on classgrid.in/pricing (main.tsx kept it): the plans open and PlanCards starts the payment
+      setAiHubInitialTab("upgrade");
+      setIsAiHubOpen(true);
+      if (searchParams.has("buy")) {
+        searchParams.delete("buy"); searchParams.delete("term");
+        const rest = searchParams.toString();
+        window.history.replaceState({}, '', window.location.pathname + (rest ? `?${rest}` : ""));
+      }
+    } else if (searchParams.get("ai_payment") === "success") {
       setAiHubInitialTab("credits");
       setIsAiHubOpen(true);
       // Let the AiUpgradePanel handle the toast via another mechanism, or just show it here:

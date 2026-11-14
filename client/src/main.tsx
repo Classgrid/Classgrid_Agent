@@ -78,6 +78,15 @@ if (isDesktopApp) document.documentElement.classList.add("desktop-app");
 installDesktopHistory();
 // Website only: /login?editor=1&... from the Classgrid extension (Classgrid Code, VS Code, Cursor) is kept for after sign-in
 if (!isDesktopApp && import.meta.env.VITE_EDITOR !== "1") captureEditorSignIn();
+// Website only: a plan's button on classgrid.in/pricing opens chat.classgrid.in/c?buy=pro&term=month. The wish is kept
+// through sign-in (same tab); the chat then opens the plans and starts the payment (AskAiPanel, PlanCards)
+if (!isDesktopApp && import.meta.env.VITE_EDITOR !== "1") {
+  try {
+    const q = new URLSearchParams(window.location.search);
+    const buy = String(q.get("buy") || "").toLowerCase();
+    if (/^[a-z]{2,20}$/.test(buy)) sessionStorage.setItem("classgrid:buy-plan", JSON.stringify({ plan: buy, term: q.get("term") === "year" ? "year" : "month" }));
+  } catch { /* storage blocked: the visitor picks the plan in the chat */ }
+}
 // Desktop app: Google Sans, for Studio's new-chat greeting (AskAiPanel)
 if (isDesktopApp) {
   const font = document.createElement("link");
