@@ -92,6 +92,7 @@ import Handlebars from 'handlebars';
 
 import { Readable } from 'stream';
 import { cfAiFetch } from "../services/cf-neuron-cap.service.js";
+import * as eleven from "../services/elevenlabs.service.js";
 
 const execPromise = util.promisify(exec);
 
@@ -3969,6 +3970,16 @@ export const handleToolCall = async (name, args, context = {}) => {
         const mimeType = audioResponse.headers.get('content-type') || 'audio/webm';
         const cleanMime = mimeType.split(';')[0];
         const audioBuffer = await audioResponse.arrayBuffer();
+
+        // ElevenLabs Scribe first (the grant, 2026-11-14); Cloudflare's Whisper when it is not set up or fails
+        if (eleven.elevenLabsEnabled()) {
+          try {
+            const { text } = await eleven.speechToText(Buffer.from(audioBuffer), { mimeType: cleanMime });
+            if (text) return { content: [{ type: 'text', text }] };
+          } catch (e) {
+            console.error("[transcribe_audio] ElevenLabs failed, using Cloudflare:", e.message);
+          }
+        }
 
         // Send to Cloudflare Workers AI Whisper
         const cfUrl = `https://api.cloudflare.com/client/v4/accounts/${cfAccountId}/ai/run/@cf/openai/whisper-large-v3-turbo`;

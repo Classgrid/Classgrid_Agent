@@ -42,6 +42,7 @@ import { BUSY_KEY, markLastIn } from "./whatsapp-inbox.service.js";
 import { BUDGET_STOP_NOTE } from "./llm-stream.js";
 import * as record from "./call-record.service.js";
 import { cfAiFetch } from "./cf-neuron-cap.service.js";
+import * as eleven from "./elevenlabs.service.js";
 
 const GRAPH = "https://graph.facebook.com/v22.0";
 const CALL_MODEL = "claude-haiku-5-5"; // fastest Claude, so the voice replies come quickly
@@ -212,7 +213,19 @@ function rms(samples) {
 const cfUrl = (model) => `https://api.cloudflare.com/client/v4/accounts/${process.env.CLOUDFLARE_ACCOUNT_ID}/ai/run/${model}`;
 const cfHeaders = (type) => ({ Authorization: `Bearer ${process.env.CLOUDFLARE_WORKERS_AI_TOKEN}`, "Content-Type": type });
 
+// Voice to text: ElevenLabs Scribe (the grant, 2026-11-14); Cloudflare's Whisper when ElevenLabs is not set up or fails
 async function speechToText(chunks) {
+    if (eleven.elevenLabsEnabled()) {
+        try {
+            const { text } = await eleven.speechToText(wav16k(chunks), { mimeType: "audio/wav", timeoutMs: 15000 });
+            return text;
+        } catch (e) {
+            console.error("[WA call] ElevenLabs speech to text failed, using Cloudflare:", e.message);
+        }
+    }
+    return cfSpeechToText(chunks);
+}
+async function cfSpeechToText(chunks) {
     const res = await cfAiFetch(cfUrl("@cf/openai/whisper-large-v3-turbo"), {
         method: "POST", headers: cfHeaders("audio/wav"), body: wav16k(chunks), signal: AbortSignal.timeout(15000),
     });
@@ -221,8 +234,20 @@ async function speechToText(chunks) {
     return String(json?.result?.text || "").trim();
 }
 
-async function textToSpeech(text, retried = false) {
-    // Raw 16-bit 48 kHz mono, the call's own format
+// Text to voice: Classgrid's ElevenLabs voice (the grant, 2026-11-14); Cloudflare's Aura when ElevenLabs is not set up
+// or fails. Raw 16-bit 48 kHz mono, the call's own format.
+async function textToSpeech(text) {
+    if (eleven.elevenLabsEnabled()) {
+        try {
+            const buf = await eleven.textToSpeech(text, { outputFormat: `pcm_${SAMPLE_RATE}`, timeoutMs: 20000 });
+            if (buf.length >= 2) return new Int16Array(buf.buffer, buf.byteOffset, Math.floor(buf.length / 2));
+        } catch (e) {
+            console.error("[WA call] ElevenLabs text to speech failed, using Cloudflare:", e.message);
+        }
+    }
+    return cfTextToSpeech(text);
+}
+async function cfTextToSpeech(text, retried = false) {
     let res;
     try {
         res = await cfAiFetch(cfUrl("@cf/deepgram/aura-2-en"), {
@@ -232,11 +257,11 @@ async function textToSpeech(text, retried = false) {
             signal: AbortSignal.timeout(20000),
         });
     } catch (e) {
-        if (!retried) return textToSpeech(text, true);
+        if (!retried) return cfTextToSpeech(text, true);
         throw e;
     }
     if (!res.ok) {
-        if (!retried) return textToSpeech(text, true);
+        if (!retried) return cfTextToSpeech(text, true);
         throw new Error(`TTS ${res.status}`);
     }
     const buf = Buffer.from(await res.arrayBuffer());

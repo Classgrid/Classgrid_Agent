@@ -104,12 +104,23 @@
 import fs from 'fs';
 import path from 'path';
 import { cfAiFetch } from "../cf-neuron-cap.service.js";
+import * as eleven from "../elevenlabs.service.js";
 
 /**
  * transcribeAudio
- * Converts audio file to text using Cloudflare Workers AI Whisper Large v3 Turbo
+ * Audio to text: ElevenLabs Scribe (the grant, 2026-11-14), and Cloudflare Workers AI Whisper Large v3 Turbo when
+ * ElevenLabs is not set up or fails
  */
 export const transcribeAudio = async (buffer, mimetype = 'audio/webm') => {
+    if (eleven.elevenLabsEnabled()) {
+        try {
+            const { text } = await eleven.speechToText(buffer, { mimeType: mimetype });
+            if (text) return text;
+            console.warn("[Voice Service] ElevenLabs heard nothing; trying Cloudflare");
+        } catch (err) {
+            console.error("[Voice Service] ElevenLabs transcription failed, using Cloudflare:", err.message);
+        }
+    }
     try {
         const cfAccountId = process.env.CLOUDFLARE_ACCOUNT_ID;
         const cfToken = process.env.CLOUDFLARE_WORKERS_AI_TOKEN;

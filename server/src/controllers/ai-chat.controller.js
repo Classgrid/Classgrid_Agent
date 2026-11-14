@@ -77,6 +77,7 @@ import { canAccessSession, gridLabelMap, gridProfilesText, getSharedSessionsFor,
 import { editorContextFor, rememberProjectSnapshot, sandboxDataDir, startCheckpoint, finishCheckpoint, linkChatToProject, forgetChatScreenProject, touchStudio, pcChatIds, masteroAutoPush, pullMastero } from "../services/ide-project.service.js";
 // Cloudflare Workers AI daily Neuron cap and meter (Global AI Config): every Cloudflare request goes through cfAiFetch
 import { cfAiFetch, providersWithoutCappedCloudflare } from "../services/cf-neuron-cap.service.js";
+import * as eleven from "../services/elevenlabs.service.js";
 import { PLANNER_BROWSER_TOOLS, PLANNER_BLIND_TOOLS, WORKER_BROWSER_TOOLS, BROWSER_TOOL_NAMES, makeBrowserHandlers, BROWSER_WORKER_SYSTEM } from "../services/studio-browser-tools.js";
 import { ensureBrowser } from "../services/studio-browser.service.js";
 import { gateHandlers, askPermission, PERMISSION_MODES } from "../services/permission-gate.js";
@@ -8229,9 +8230,13 @@ export const generateImage = async (req, res) => {
             imageSlotUserId = authUserForImage._id;
             if (imageTokenCost > 0) imageTokenCharge = { userId: authUserForImage._id, orgId: imageOrgId, amount: imageTokenCost, source: tokenCheck.source };
         }
-        // Call Cloudflare Workers AI (Flux-1-Schnell)
+        // The picture: ElevenLabs' image API (GPT Image 2.5, the grant, 2026-11-14) first; Cloudflare's Flux when
+        // ElevenLabs is not set up or fails
         let imageRes;
         let imageBuffer;
+        let imageMime = 'image/jpeg';
+        let imageModel = "@cf/black-forest-labs/flux-1-schnell";
+        let imageProvider = "cloudflare";
         let success = false;
         let lastError = null;
 
@@ -8266,7 +8271,21 @@ export const generateImage = async (req, res) => {
             console.error("Prompt enhancement failed, falling back to original prompt:", enhanceErr.message);
         }
 
-        for (let attempt = 1; attempt <= 3; attempt++) {
+        if (eleven.elevenLabsEnabled()) {
+            try {
+                const made = await eleven.generateImage(enhancedPrompt);
+                imageBuffer = made.buffer;
+                imageMime = made.mimeType;
+                imageModel = `elevenlabs/${made.model}`;
+                imageProvider = "elevenlabs";
+                success = true;
+            } catch (err) {
+                lastError = err;
+                console.error("[ElevenLabs Image] failed, using Cloudflare Flux:", err.message);
+            }
+        }
+
+        for (let attempt = 1; attempt <= 3 && !success; attempt++) {
             try {
                 // Ensure prompt is not too long
                 const safePrompt = enhancedPrompt.length > 800 ? enhancedPrompt.substring(0, 800) : enhancedPrompt;
@@ -8319,11 +8338,12 @@ export const generateImage = async (req, res) => {
         }
 
         // Upload to Cloudflare R2
+        const imageExt = /png/.test(imageMime) ? 'png' : /webp/.test(imageMime) ? 'webp' : 'jpg';
         const r2Url = await uploadBufferToR2(
             imageBuffer,
-            `generated-${Date.now()}.jpg`,
-            'image/jpeg',
-            `ai-generated/image-${Date.now()}.jpg`
+            `generated-${Date.now()}.${imageExt}`,
+            imageMime,
+            `ai-generated/image-${Date.now()}.${imageExt}`
         );
 
         let activeSessionId = sessionId;
@@ -8368,8 +8388,8 @@ export const generateImage = async (req, res) => {
                     await AiUsageLog.create({
                         organization_id: user.organization_id || null,
                         userId: user._id,
-                        provider: "cloudflare",
-                        model: "@cf/black-forest-labs/flux-1-schnell",
+                        provider: imageProvider,
+                        model: imageModel,
                         feature: "other",
                         promptTokens: 1, // Store as 1 token for simple accounting
                         completionTokens: 0,

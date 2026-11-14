@@ -94,7 +94,7 @@ const aiUsageLogSchema = new mongoose.Schema(
         },
         provider: {
             type: String,
-            enum: ["openai", "groq", "cloudflare", "anthropic"],
+            enum: ["openai", "groq", "cloudflare", "anthropic", "elevenlabs"],
             required: true,
             index: true,
         },
