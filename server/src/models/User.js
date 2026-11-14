@@ -793,6 +793,21 @@ const userSchema = new mongoose.Schema(
     // WhatsApp call time used in the current period (seconds), against the free call minutes
     ai_call_seconds_used: { type: Number },
     ai_call_reset_date: { type: Date },
+    // The user's plan (Free, Pro, Max, Enterprise; services/plan-limits.service.js). No plan = free.
+    plan: {
+      id: { type: String, enum: ["free", "pro", "max", "enterprise"], default: "free" },
+      status: { type: String, enum: ["active", "past_due", "cancelled", "expired"], default: "active" },
+      billing: { type: String, enum: ["none", "granted", "upi_autopay", "manual_monthly", "prepaid_yearly", "org_seat", "play"], default: "none" },
+      started_at: { type: Date },
+      expires_at: { type: Date },
+      cancel_at_period_end: { type: Boolean, default: false },
+      razorpay_customer_id: { type: String },
+      razorpay_subscription_id: { type: String },
+      last_payment_id: { type: String },
+      source: { type: String },
+      set_by: { type: String },
+      note: { type: String },
+    },
     // 🧠 AI Chat Customization & Defaults
     // Chats this user archived: left out of their chat lists, shown under "Archived chats"
     archived_chat_ids: { type: [String], default: [] },

@@ -90,6 +90,7 @@ export const listUsersInOrg = async (req, res) => {
                 profilePicture: finalProfilePicture,
                 totalUsage: user.ai_tokens?.total_ai_tokens_used || 0,
                 isBlocked: user.ai_tokens?.is_ai_blocked || false,
+                plan: user.plan && user.plan.id ? user.plan : { id: "free", status: "active", billing: "none" },
                 recentTopUp: topUpMap[user._id.toString()] ? topUpMap[user._id.toString()].amount : null
             });
         });
@@ -111,7 +112,7 @@ export const getUserAiDetail = async (req, res) => {
         }
 
         const user = await User.findById(userId)
-            .select("name email role ai_tokens organization_id profilePicture ai_image_free_weekly_used ai_image_reset_date")
+            .select("name email role ai_tokens organization_id profilePicture ai_image_free_weekly_used ai_image_reset_date plan")
             .populate("organization_id", "name")
             .lean();
 

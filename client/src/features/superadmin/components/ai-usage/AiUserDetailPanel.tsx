@@ -26,6 +26,7 @@ import { PauseUserGrantedCredits } from "./PauseUserGrantedCredits";
 import { RemoveUserGrantedCredits } from "./RemoveUserGrantedCredits";
 import { ExtendUserGrantedCredits } from "./ExtendUserGrantedCredits";
 import { ViewGrantedCreditsDetails } from "./ViewGrantedCreditsDetails";
+import { UserPlanCard } from "./UserPlanCard";
 import socketClient from "@/lib/socketClient";
 import { useQueryClient } from "@tanstack/react-query";
 
@@ -370,6 +371,9 @@ export function AiUserDetailPanel({ userDetail }: { userDetail: any }) {
           </CardContent>
         </Card>
       </div>
+
+      {/* The user's plan, set by hand */}
+      <UserPlanCard userId={String(userDetail._id || userDetail.id || userDetail.userId || "")} plan={userDetail.plan} />
 
       {/* Billing Summary */}
       <Card>

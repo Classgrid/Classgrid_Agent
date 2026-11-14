@@ -48,6 +48,7 @@ import { useCurrentUser } from "@/features/auth/queries/useCurrentUser";
 import { useQuery } from "@tanstack/react-query";
 import { apiClient } from "@/lib/apiClient";
 import { GlobalAiConfigPanel } from "@/features/superadmin/components/GlobalAiConfigPanel";
+import { PlanConfigPanel } from "@/features/superadmin/components/PlanConfigPanel";
 import { ResetOrganizationDailyLimit } from "@/features/superadmin/components/ResetOrganizationDailyLimit";
 import { EditOrganizationDailyLimit } from "@/features/superadmin/components/EditOrganizationDailyLimit";
 import { BlockOrganizationAiUsage } from "@/features/superadmin/components/BlockOrganizationAiUsage";
@@ -362,6 +363,9 @@ export function AiUsageDashboardPage() {
               <div className="p-4 bg-muted/20 border-t border-border flex items-center justify-end">
                 <Button variant="outline" onClick={() => setIsGlobalGrantCreditsOpen(true)}>
                   <LayoutTemplate className="w-4 h-4 mr-2" />
+
+        {/* The plans: Free, Pro, Max, Enterprise (every limit editable, with the on/off switch) */}
+        <PlanConfigPanel />
                   Open Global Grant Panel
                 </Button>
               </div>

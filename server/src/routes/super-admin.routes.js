@@ -129,6 +129,7 @@ const PRIMARY_SUPER_ADMIN_EMAIL = (process.env.SUPER_ADMIN_EMAIL || "support@cla
 router.use(isAuthenticated, requireRole("super_admin"));
 
 import { getGlobalAiConfig, updateGlobalAiConfig } from "../controllers/super-admin/ai-global-config.controller.js";
+import { getPlans, updatePlan, setPlansEnabled } from "../controllers/super-admin/ai-plans.controller.js";
 import GlobalAiConfig from "../models/GlobalAiConfig.js";
 import { forgetDisabledModels } from "../services/model-access.service.js";
 
@@ -136,6 +137,10 @@ router.use("/notifications-sys", notificationRoutes);
 router.use("/ai-usage", aiUsageRoutes);
 router.get("/ai-global-config", getGlobalAiConfig);
 router.put("/ai-global-config", updateGlobalAiConfig);
+// The plans table (Free, Pro, Max, Enterprise): every limit and price, and the switch that turns plans on
+router.get("/ai-plans", getPlans);
+router.put("/ai-plans/:key", updatePlan);
+router.put("/ai-plans-enabled", setPlansEnabled);
 // Model manager: turn chat models on or off for everyone
 router.get("/ai-models", async (req, res) => {
     try {

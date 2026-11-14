@@ -33,6 +33,7 @@ import * as globalController from "../../controllers/super-admin/ai-usage-global
 import * as orgController from "../../controllers/super-admin/ai-usage-orgs.controller.js";
 import * as userController from "../../controllers/super-admin/ai-usage-users.controller.js";
 import * as adminController from "../../controllers/super-admin/ai-credits-admin.controller.js";
+import { setUserPlan } from "../../controllers/super-admin/ai-plans.controller.js";
 
 const router = express.Router();
 
@@ -66,6 +67,7 @@ router.post("/users/:userId/credits/:transactionId/pause", adminController.pause
 router.put("/users/:userId/credits/extend", adminController.extendGrantedCredits);
 router.post("/orgs/:orgId/grant", adminController.grantOrgCredits);
 router.delete("/users/:userId/data", adminController.deleteUserAiData);
+router.put("/users/:userId/plan", setUserPlan);
 
 router.get("/global/granted-credits", globalController.listActiveGrantedCredits);
 

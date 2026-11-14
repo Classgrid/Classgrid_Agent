@@ -129,6 +129,8 @@ const globalAiConfigSchema = new mongoose.Schema(
         // turns it on in Global AI Config (owner, 2026-11-13: Cloudflare bills above 10,000 Neurons a day from Dec 1).
         // The cap itself is fixed in the service (the free 10,000 less a margin of 500), never a setting.
         cf_neuron_cap_enabled: { type: Boolean, default: false },
+        // The plans (Free, Pro, Max, Enterprise; models/PlanConfig.js): off = every limit stays as set above
+        plans_enabled: { type: Boolean, default: false },
         metadata: {
             type: mongoose.Schema.Types.Mixed,
             default: {},
