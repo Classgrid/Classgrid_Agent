@@ -206,6 +206,11 @@ export function ProjectModePage() {
     try { return sessionStorage.getItem(OPEN_PROJECT_KEY) || localStorage.getItem(OPEN_PROJECT_KEY); } catch { return null; }
   });
   useEffect(() => { reloadedInProject = false; }, []); // only the first visit after the refresh counts
+  // Studio Mode's colors (styles/global.css, html.studio-colors), only while Project Mode is open
+  useEffect(() => {
+    document.documentElement.classList.add("studio-colors");
+    return () => document.documentElement.classList.remove("studio-colors");
+  }, []);
   const [folder, setFolder] = useState<string | null>(null);
   // Desktop app: the open project is a folder on this computer (no cloud editor; the AI works on it through the app)
   const [localFolder, setLocalFolder] = useState<string | null>(null);
