@@ -63,8 +63,8 @@ export function SettingsUsageSection() {
         <>
           <H3 note="resets at midnight">Today</H3>
           <Card>
-            <Bar title="Talking with the AI" m={u.voice_input_minutes} unit="minutes" />
-            <Bar title="Answers read aloud" m={u.voice_replies} />
+            <Bar title="Voice input" m={u.voice_input_minutes} unit="minutes" />
+            <Bar title="Read aloud" m={u.voice_replies} unit="answers" />
           </Card>
         </>
       )}
