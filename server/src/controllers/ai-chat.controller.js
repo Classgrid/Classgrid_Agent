@@ -5268,7 +5268,7 @@ You work on the user's own Windows computer through their Classgrid desktop app,
                             const { checkWhatsappLimit, recordDirectWhatsappSend, normalizeWhatsappNumber, formatResetTime } = await import('../services/ai-feature-limits.js');
                             const waLimit = await checkWhatsappLimit(req.user);
                             if (!waLimit.allowed) {
-                                return `FAILED: This user has used ${waLimit.used} of ${waLimit.limit} WhatsApp messages allowed in the last ${waLimit.periodText || "7 days"} (the limit is set by Classgrid admins). No message was sent.${waLimit.resetText ? ` Reset time: ${waLimit.resetText}${req.user?.role === "super_admin" ? "" : " (share only if the user asks)"}.` : ""} Tell the user exactly this; do not guess other reasons.`;
+                                return `FAILED: This user has used ${waLimit.used} of ${waLimit.limit} WhatsApp messages allowed in the last ${waLimit.periodText || "7 days"} (the limit is set by Classgrid admins). No message was sent.${waLimit.resetText ? ` Reset time: ${waLimit.resetText}${req.user?.role === "super_admin" ? "" : " (share only if the user asks)"}.` : ""}${waLimit.extraOffer || ""} Tell the user exactly this; do not guess other reasons.`;
                             }
                             const recipient = normalizeWhatsappNumber(toPhoneNumber);
                             if (recipient.length < 11 || recipient.length > 15) {
@@ -8326,19 +8326,32 @@ export const generateImage = async (req, res) => {
                 { _id: authUserForImage._id, $expr: { $lt: [{ $ifNull: ["$ai_image_free_weekly_used", 0] }, imageLimit] } },
                 [{ $set: { ai_image_free_weekly_used: { $add: [{ $ifNull: ["$ai_image_free_weekly_used", 0] }, 1] } } }]
             );
+            let extraImage = null; // past the period's number: paid from top-up credits (extra-usage.service.js)
             if (!slot.modifiedCount) {
-                const { formatResetTime } = await import('../services/ai-feature-limits.js');
-                const imageUser = await User.findById(authUserForImage._id).select('ai_image_reset_date').lean();
-                const resetText = formatResetTime(imageUser?.ai_image_reset_date || nextImageReset);
-                return res.status(403).json({
-                    code: "IMAGE_LIMIT_REACHED",
-                    limit: imageLimit,
-                    resetPeriod: imagePeriod.label,
-                    error: `Image generation limit reached: you've used all ${imageLimit} image${imageLimit === 1 ? "" : "s"} for this period. You can create more images after the limit resets (it resets ${imagePeriod.label}). Reset time: ${resetText}.`,
-                });
+                const { canPayExtra, extraOfferText } = await import('../services/extra-usage.service.js');
+                const extra = await canPayExtra(authUserForImage, "image");
+                if (extra.allowed) {
+                    extraImage = extra;
+                } else {
+                    const { formatResetTime } = await import('../services/ai-feature-limits.js');
+                    const imageUser = await User.findById(authUserForImage._id).select('ai_image_reset_date').lean();
+                    const resetText = formatResetTime(imageUser?.ai_image_reset_date || nextImageReset);
+                    return res.status(403).json({
+                        code: "IMAGE_LIMIT_REACHED",
+                        limit: imageLimit,
+                        resetPeriod: imagePeriod.label,
+                        extraCredits: extra.price || 0,
+                        error: `Image generation limit reached: you've used all ${imageLimit} image${imageLimit === 1 ? "" : "s"} for this period. You can create more images after the limit resets (it resets ${imagePeriod.label}). Reset time: ${resetText}.${extraOfferText("image", extra.price)}`,
+                    });
+                }
             }
-            imageSlotUserId = authUserForImage._id;
-            if (imageTokenCost > 0) imageTokenCharge = { userId: authUserForImage._id, orgId: imageOrgId, amount: imageTokenCost, source: tokenCheck.source };
+            if (extraImage) {
+                // The extra image's price replaces the usual per-image credits and comes from the top-up credits only
+                imageTokenCharge = { userId: authUserForImage._id, orgId: imageOrgId, amount: extraImage.price, source: "personal", noSpill: true };
+            } else {
+                imageSlotUserId = authUserForImage._id;
+                if (imageTokenCost > 0) imageTokenCharge = { userId: authUserForImage._id, orgId: imageOrgId, amount: imageTokenCost, source: tokenCheck.source };
+            }
         }
         // The picture: ElevenLabs' image API (GPT Image 2.5, the grant, 2026-11-14) first; Cloudflare's Flux when
         // ElevenLabs is not set up or fails
@@ -8493,7 +8506,7 @@ export const generateImage = async (req, res) => {
         imageSlotUserId = null;
 
         if (imageTokenCharge) {
-            await deductTokens(imageTokenCharge.userId, imageTokenCharge.orgId, imageTokenCharge.amount, imageTokenCharge.source).catch((e) => console.error("Image token deduction error:", e));
+            await deductTokens(imageTokenCharge.userId, imageTokenCharge.orgId, imageTokenCharge.amount, imageTokenCharge.source, { noSpill: !!imageTokenCharge.noSpill }).catch((e) => console.error("Image token deduction error:", e));
         }
 
         // Log it for dashboard analytics (every call, chat tool included).

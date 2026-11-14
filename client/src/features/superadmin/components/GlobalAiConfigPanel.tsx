@@ -46,6 +46,11 @@ export function GlobalAiConfigPanel({ grantCreditsNode }: { grantCreditsNode?: R
   const [voiceReplies, setVoiceReplies] = useState(20);
   const [voiceMaxChars, setVoiceMaxChars] = useState(4000);
   const [openVoiceReplies, setOpenVoiceReplies] = useState(false);
+  const [extraImage, setExtraImage] = useState(5000);
+  const [extraWhatsapp, setExtraWhatsapp] = useState(2000);
+  const [extraVoiceReply, setExtraVoiceReply] = useState(3000);
+  const [extraVoiceInput, setExtraVoiceInput] = useState(2000);
+  const [openExtra, setOpenExtra] = useState(false);
   const [creditsPerInr, setCreditsPerInr] = useState(0);
   const [imageCost, setImageCost] = useState(0);
   const [tokenReset, setTokenReset] = useState<ResetPeriod>(toResetPeriod());
@@ -79,6 +84,10 @@ export function GlobalAiConfigPanel({ grantCreditsNode }: { grantCreditsNode?: R
       setCallMinutes(data.global_call_minutes_limit ?? 0);
       setVoiceReplies(data.global_voice_replies_per_day ?? 20);
       setVoiceMaxChars(data.voice_reply_max_chars ?? 4000);
+      setExtraImage(data.extra_image_credits ?? 5000);
+      setExtraWhatsapp(data.extra_whatsapp_credits ?? 2000);
+      setExtraVoiceReply(data.extra_voice_reply_credits ?? 3000);
+      setExtraVoiceInput(data.extra_voice_input_credits_per_minute ?? 2000);
       if (data.credits_per_inr !== undefined) setCreditsPerInr(data.credits_per_inr);
       if (data.image_generation_token_cost !== undefined) setImageCost(data.image_generation_token_cost);
       setTokenReset(toResetPeriod(data.resetPeriods?.tokens));
@@ -113,6 +122,10 @@ export function GlobalAiConfigPanel({ grantCreditsNode }: { grantCreditsNode?: R
       global_call_minutes_limit: callMinutes,
       global_voice_replies_per_day: voiceReplies,
       voice_reply_max_chars: voiceMaxChars,
+      extra_image_credits: extraImage,
+      extra_whatsapp_credits: extraWhatsapp,
+      extra_voice_reply_credits: extraVoiceReply,
+      extra_voice_input_credits_per_minute: extraVoiceInput,
       credits_per_inr: creditsPerInr,
       image_generation_token_cost: imageCost,
       global_token_reset_value: tokenReset.value,
@@ -392,6 +405,49 @@ export function GlobalAiConfigPanel({ grantCreditsNode }: { grantCreditsNode?: R
                 </div>
                 <DialogFooter>
                   <Button type="button" onClick={() => handleSave(setOpenVoiceReplies, "Voice replies saved")} disabled={updateConfigMutation.isPending}>
+                    {updateConfigMutation.isPending && <Spinner className="w-4 h-4 mr-2" />}
+                    Save changes
+                  </Button>
+                </DialogFooter>
+              </DialogContent>
+            </Dialog>
+
+            {/* Extra usage: once a limit is used up, each further one is paid from top-up credits at these prices (0 = off) */}
+            <Dialog open={openExtra} onOpenChange={(open) => {
+              if (!open) {
+                setExtraImage(data?.extra_image_credits ?? 5000); setExtraWhatsapp(data?.extra_whatsapp_credits ?? 2000);
+                setExtraVoiceReply(data?.extra_voice_reply_credits ?? 3000); setExtraVoiceInput(data?.extra_voice_input_credits_per_minute ?? 2000);
+              }
+              setOpenExtra(open);
+            }}>
+              <DialogTrigger asChild>
+                <button className="bg-card hover:bg-muted/30 p-5 flex flex-col gap-2 text-left transition-colors">
+                  <span className="text-sm font-medium text-muted-foreground">Extra usage from top-up credits</span>
+                  <span className="text-xl font-bold text-foreground">
+                    {(data?.extra_image_credits ?? 5000).toLocaleString()} <span className="text-sm font-normal text-muted-foreground ml-1">credits an image</span>
+                  </span>
+                  <span className="text-xs text-muted-foreground">
+                    WhatsApp message {(data?.extra_whatsapp_credits ?? 2000).toLocaleString()} · voice reply {(data?.extra_voice_reply_credits ?? 3000).toLocaleString()} · voice input minute {(data?.extra_voice_input_credits_per_minute ?? 2000).toLocaleString()}
+                  </span>
+                </button>
+              </DialogTrigger>
+              <DialogContent className="sm:max-w-sm">
+                <DialogHeader>
+                  <DialogTitle>Edit extra usage prices</DialogTitle>
+                  <DialogDescription>Once a user has used the images, WhatsApp messages, voice replies or voice input minutes of their plan, each further one is paid from their top-up credits at these prices. 0 turns the extra off for that feature (the limit is then a hard stop). WhatsApp calls past the free minutes are already paid per turn from credits.</DialogDescription>
+                </DialogHeader>
+                <div className="flex flex-col gap-2 py-4">
+                  <Label htmlFor="extra-image" className="text-sm font-medium">Credits per extra image</Label>
+                  <Input id="extra-image" type="number" min={0} value={extraImage} onChange={(e) => setExtraImage(Number(e.target.value))} disabled={updateConfigMutation.isPending} />
+                  <Label htmlFor="extra-whatsapp" className="text-sm font-medium mt-2">Credits per extra WhatsApp message</Label>
+                  <Input id="extra-whatsapp" type="number" min={0} value={extraWhatsapp} onChange={(e) => setExtraWhatsapp(Number(e.target.value))} disabled={updateConfigMutation.isPending} />
+                  <Label htmlFor="extra-voice-reply" className="text-sm font-medium mt-2">Credits per extra voice reply</Label>
+                  <Input id="extra-voice-reply" type="number" min={0} value={extraVoiceReply} onChange={(e) => setExtraVoiceReply(Number(e.target.value))} disabled={updateConfigMutation.isPending} />
+                  <Label htmlFor="extra-voice-input" className="text-sm font-medium mt-2">Credits per extra minute of voice input</Label>
+                  <Input id="extra-voice-input" type="number" min={0} value={extraVoiceInput} onChange={(e) => setExtraVoiceInput(Number(e.target.value))} disabled={updateConfigMutation.isPending} />
+                </div>
+                <DialogFooter>
+                  <Button type="button" onClick={() => handleSave(setOpenExtra, "Extra usage prices saved")} disabled={updateConfigMutation.isPending}>
                     {updateConfigMutation.isPending && <Spinner className="w-4 h-4 mr-2" />}
                     Save changes
                   </Button>

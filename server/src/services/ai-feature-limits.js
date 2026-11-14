@@ -235,6 +235,21 @@ export async function checkWhatsappLimit(user, { includeUpcomingRepeats = false 
         if (dayScheduled + dayDirect >= dayLimit) { allowed = false; used = dayScheduled + dayDirect; shownLimit = dayLimit; }
     }
 
+    // Past the number: a single message (not a repeat) is paid from top-up credits (extra-usage.service.js); the
+    // credits are taken here, right before the send or the schedule row is made
+    let extraCredits = 0;
+    let extraOffer = "";
+    if (!allowed) {
+        const { canPayExtra, chargeExtra, extraOfferText } = await import("./extra-usage.service.js");
+        const extra = await canPayExtra(user, "whatsapp");
+        if (extra.allowed && !includeUpcomingRepeats) {
+            extraCredits = await chargeExtra(user, "whatsapp", 1, extra.price);
+            allowed = true;
+        } else {
+            extraOffer = extraOfferText("whatsapp", extra.price);
+        }
+    }
+
     let resetText = null;
     let resetAt = null;
     if (used > 0) {
@@ -256,7 +271,7 @@ export async function checkWhatsappLimit(user, { includeUpcomingRepeats = false 
         resetAt = new Date(Number.isFinite(oldestMs) ? oldestMs + periodMs : Date.now() + periodMs);
         if (!allowed) resetText = formatResetTime(resetAt);
     }
-    return { allowed, limit: shownLimit, used, periodMs, periodText: shownLimit === limit ? formatPeriodLength(period) : "24 hours", resetText, resetAt };
+    return { allowed, limit: shownLimit, used, periodMs, periodText: shownLimit === limit ? formatPeriodLength(period) : "24 hours", resetText, resetAt, extraCredits, extraOffer };
 }
 
 const messageOwnerKey = (messageId) => `ai:wa-msg:${messageId}`;

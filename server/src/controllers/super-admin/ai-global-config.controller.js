@@ -84,6 +84,10 @@ export const updateGlobalAiConfig = async (req, res) => {
             global_call_minutes_limit,
             global_voice_replies_per_day,
             voice_reply_max_chars,
+            extra_image_credits,
+            extra_whatsapp_credits,
+            extra_voice_reply_credits,
+            extra_voice_input_credits_per_minute,
             global_ai_blocked,
             free_limit_per_computer,
             credits_per_inr,
@@ -114,6 +118,9 @@ export const updateGlobalAiConfig = async (req, res) => {
         if (global_call_minutes_limit !== undefined) config.global_call_minutes_limit = Math.max(0, Number(global_call_minutes_limit) || 0);
         if (global_voice_replies_per_day !== undefined) config.global_voice_replies_per_day = Math.max(-1, Math.trunc(Number(global_voice_replies_per_day)) || 0);
         if (voice_reply_max_chars !== undefined) config.voice_reply_max_chars = Math.max(200, Math.trunc(Number(voice_reply_max_chars)) || 4000);
+        for (const [key, value] of Object.entries({ extra_image_credits, extra_whatsapp_credits, extra_voice_reply_credits, extra_voice_input_credits_per_minute })) {
+            if (value !== undefined) config[key] = Math.max(0, Math.trunc(Number(value)) || 0);
+        }
         if (global_ai_blocked !== undefined) config.global_ai_blocked = global_ai_blocked;
         if (free_limit_per_computer !== undefined) config.free_limit_per_computer = free_limit_per_computer === true;
         if (credits_per_inr !== undefined) config.credits_per_inr = credits_per_inr;

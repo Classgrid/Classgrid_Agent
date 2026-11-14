@@ -2536,10 +2536,10 @@ export const handleToolCall = async (name, args, context = {}) => {
             dropWhatsapp('the user is not signed in.');
           } else {
             const { checkWhatsappLimit, normalizeWhatsappNumber } = await import('../services/ai-feature-limits.js');
-            const { allowed, limit, used, periodMs, periodText = '7 days', resetText } = await checkWhatsappLimit(user, { includeUpcomingRepeats: rep.repeat !== 'once' });
+            const { allowed, limit, used, periodMs, periodText = '7 days', resetText, extraOffer = '' } = await checkWhatsappLimit(user, { includeUpcomingRepeats: rep.repeat !== 'once' });
             const weekRuns = rep.repeat !== 'once' ? runsWithin(rep, rep.first, periodMs || 7 * 24 * 60 * 60 * 1000) : 1;
             if (!allowed) {
-              dropWhatsapp(`the user has used ${used} of ${limit} WhatsApp messages allowed in the last ${periodText} (limit set by Classgrid admins).${resetText ? ` Reset time: ${resetText}${user.role === 'super_admin' ? '' : ' (share only if the user asks)'}.` : ''}`);
+              dropWhatsapp(`the user has used ${used} of ${limit} WhatsApp messages allowed in the last ${periodText} (limit set by Classgrid admins).${resetText ? ` Reset time: ${resetText}${user.role === 'super_admin' ? '' : ' (share only if the user asks)'}.` : ''}${extraOffer}`);
             } else if (rep.repeat !== 'once' && used + weekRuns > limit) {
               // A repeat must fit its first week of WhatsApp messages into what is left of the weekly limit
               dropWhatsapp(`this repeat would send ${weekRuns} WhatsApp messages in its first ${periodText} but only ${Math.max(0, limit - used)} of ${limit} WhatsApp messages per ${periodText} are left (limit set by Classgrid admins).`);

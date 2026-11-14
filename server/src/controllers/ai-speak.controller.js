@@ -8,6 +8,7 @@ import AiUsageLog from "../models/AiUsageLog.js";
 import { textToSpeech, elevenLabsEnabled, TTS_MODEL } from "../services/elevenlabs.service.js";
 import { planOf } from "../services/plan-limits.service.js";
 import { usedToday, addToday, nextDayText } from "../services/plan-usage.service.js";
+import { canPayExtra, chargeExtra, extraOfferText } from "../services/extra-usage.service.js";
 
 const KIND = "voicereply"; // the per-day counter's name (plan-usage.service.js)
 
@@ -52,10 +53,13 @@ export const speakAnswer = async (req, res) => {
         const plan = await planOf(req.user).catch(() => null);
         const cap = plan ? Number(plan.voice_replies_per_day) : (config?.global_voice_replies_per_day === undefined ? 20 : Number(config.global_voice_replies_per_day));
         const who = plan ? `the ${plan.name} plan` : "your account";
-        if (cap === 0) return res.status(402).json({ error: `Voice replies are not included in ${who}. Upgrade your plan to have answers read aloud.`, code: "voice_not_included", plan: plan?.key });
-        if (cap > 0) {
-            const used = await usedToday(userId, KIND);
-            if (used >= cap) return res.status(429).json({ error: `You've used the ${cap} voice replies a day of ${who}. They refill on ${nextDayText()}.`, code: "voice_cap_reached", plan: plan?.key });
+        // Past the day's number (or with none included): a reading is paid from top-up credits (extra-usage.service.js)
+        let extra = null;
+        if (cap === 0 || (cap > 0 && (await usedToday(userId, KIND)) >= cap)) {
+            const pay = await canPayExtra(req.user, KIND);
+            if (pay.allowed) extra = pay;
+            else if (cap === 0) return res.status(402).json({ error: `Voice replies are not included in ${who}. Upgrade your plan to have answers read aloud.${extraOfferText(KIND, pay.price)}`, code: "voice_not_included", plan: plan?.key, extraCredits: pay.price });
+            else return res.status(429).json({ error: `You've used the ${cap} voice replies a day of ${who}. They refill on ${nextDayText()}.${extraOfferText(KIND, pay.price)}`, code: "voice_cap_reached", plan: plan?.key, extraCredits: pay.price });
         }
 
         const { text: spoken, cut } = cutToSentence(text, maxChars);
@@ -71,6 +75,7 @@ export const speakAnswer = async (req, res) => {
         if (!audio?.length) return res.status(502).json({ error: "The voice could not read this answer right now. Try again in a moment.", code: "voice_failed" });
 
         addToday(userId, KIND, 1).catch(() => {});
+        if (extra) chargeExtra(req.user, KIND, 1, extra.price).catch(() => {});
         AiUsageLog.create({ organization_id: req.user.organization_id || null, userId: req.user._id, provider: "elevenlabs", model: TTS_MODEL, feature: "chat_ai", success: true, latencyMs: Date.now() - started, metadata: { characters: spoken.length, cut, messageId: String(req.body?.messageId || "") } }).catch(() => {});
         console.log(`[speak] ${spoken.length} characters${cut ? " (cut)" : ""} in ${Date.now() - started} ms for ${req.user.email || userId}`);
 
