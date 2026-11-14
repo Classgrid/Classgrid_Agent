@@ -33,7 +33,28 @@ function Bar({ name, m, line }: { name: string; m: Meter; line: string }) {
 export function SettingsUsageSection() {
   const { data, isLoading } = usePlanOverview();
   const { data: hist } = useUsageHistory(14);
-  if (isLoading || !data) return <div className="flex flex-col gap-4"><Skeleton className="h-24 w-full rounded-xl" /><Skeleton className="h-64 w-full rounded-xl" /></div>;
+  if (isLoading || !data) {
+    const row = (name: string, w: string) => (
+      <div className="px-5 py-4 border-b border-border last:border-b-0">
+        <div className="flex items-baseline justify-between gap-4"><span className="text-[15px] text-foreground">{name}</span><Skeleton className="h-4 w-16 rounded" /></div>
+        <div className="h-2 rounded-full bg-black/[0.07] dark:bg-white/[0.1] mt-2.5" />
+        <Skeleton className={`h-3 ${w} rounded mt-2.5`} />
+      </div>
+    );
+    return (
+      <div className="max-w-[860px]">
+        <h2 className="text-xl font-semibold text-foreground">Usage</h2>
+        <Skeleton className="h-4 w-72 rounded mt-3" />
+        <div className="rounded-xl border border-border bg-card mt-5">
+          {row("Session limit", "w-96")}{row("Mid models limit", "w-80")}{row("Claude limit", "w-72")}{row("Fable limit", "w-80")}
+        </div>
+        <div className="text-[13px] font-semibold text-foreground mt-7 mb-2">WhatsApp and voice</div>
+        <div className="rounded-xl border border-border bg-card">
+          {row("WhatsApp messages limit", "w-80")}{row("WhatsApp calls limit", "w-80")}{row("Voice limit", "w-72")}
+        </div>
+      </div>
+    );
+  }
   const u = data.usage;
   const weekEnd = u.credits_week?.resetAt || u.claude_week?.resetAt || null;
   const weekLine = weekEnd ? `Resets ${whenText(weekEnd)}` : "";

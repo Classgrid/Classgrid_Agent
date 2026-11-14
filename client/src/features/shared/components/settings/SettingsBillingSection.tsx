@@ -57,7 +57,7 @@ function BuyCreditsDialog({ open, onClose, perInr, start }: { open: boolean; onC
           <div className="text-[13px] font-medium">Amount</div>
           <div className={`${field} mt-2`}>
             <span className="text-muted-foreground">₹</span>
-            <input className={input} type="number" min={minInr} max={TOPUP_MAX} step={1} value={amountStr} onChange={(e) => setAmountStr(e.target.value)} autoFocus />
+            <input data-no-ring="true" className={input} type="number" min={minInr} max={TOPUP_MAX} step={1} value={amountStr} onChange={(e) => setAmountStr(e.target.value)} autoFocus />
             <span className="text-xs text-muted-foreground whitespace-nowrap">{inr(minInr)} to {inr(TOPUP_MAX)}</span>
           </div>
           <div className="text-xs text-red-500 mt-2 min-h-[14px]">{err}</div>
@@ -112,13 +112,13 @@ function AutoTopupDialog({ open, onClose, perInr, saved }: { open: boolean; onCl
             <div className="text-[13px] font-medium">Top up when balance is below</div>
             <div className={`${field} mt-2`}>
               <span className="text-muted-foreground">₹</span>
-              <input className={input} type="number" min={1} step={1} value={belowStr} onChange={(e) => setBelowStr(e.target.value)} />
+              <input data-no-ring="true" className={input} type="number" min={1} step={1} value={belowStr} onChange={(e) => setBelowStr(e.target.value)} />
               <span className="text-xs text-muted-foreground whitespace-nowrap">{below > 0 ? `= ${n(below * perInr)} credits` : ""}</span>
             </div>
             <div className="text-[13px] font-medium mt-4">Top up amount</div>
             <div className={`${field} mt-2`}>
               <span className="text-muted-foreground">₹</span>
-              <input className={input} type="number" min={minInr} max={TOPUP_MAX} step={1} value={amountStr} onChange={(e) => setAmountStr(e.target.value)} />
+              <input data-no-ring="true" className={input} type="number" min={minInr} max={TOPUP_MAX} step={1} value={amountStr} onChange={(e) => setAmountStr(e.target.value)} />
               <span className="text-xs text-muted-foreground whitespace-nowrap">{inr(minInr)} to {inr(TOPUP_MAX)}</span>
             </div>
             <div className="text-xs text-red-500 mt-2 min-h-[14px]">{err}</div>
@@ -186,7 +186,34 @@ export function SettingsBillingSection() {
     return () => window.removeEventListener("message", onMsg);
   }, [qc]);
 
-  if (isLoading || !data) return <div className="flex flex-col gap-4"><Skeleton className="h-10 w-64 rounded-xl" /><Skeleton className="h-40 w-full rounded-xl" /></div>;
+  if (isLoading || !data) {
+    return (
+      <div className="max-w-[860px]">
+        <h2 className="text-[26px] font-semibold text-foreground">Billing &amp; invoices</h2>
+        <div className="flex gap-1.5 mt-5">
+          <span className="h-9 px-5 rounded-full text-[15px] inline-flex items-center bg-black/[0.07] dark:bg-white/[0.1] text-foreground">Overview</span>
+          <span className="h-9 px-5 rounded-full text-[15px] inline-flex items-center text-muted-foreground">Invoices</span>
+        </div>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mt-5">
+          <div className="rounded-xl border border-border bg-card p-5">
+            <div className="flex items-center justify-between gap-3"><div className="text-sm text-muted-foreground">Current plan</div><Skeleton className="h-8 w-20 rounded-full" /></div>
+            <Skeleton className="h-8 w-24 rounded mt-3" />
+            <Skeleton className="h-3 w-64 rounded mt-4" />
+          </div>
+          <div className="rounded-xl border border-border bg-card p-5">
+            <div className="flex items-center justify-between gap-3"><div className="text-sm text-muted-foreground">Additional usage</div><div className="flex gap-2"><Skeleton className="h-8 w-24 rounded-full" /><Skeleton className="h-8 w-24 rounded-full" /></div></div>
+            <Skeleton className="h-8 w-32 rounded mt-3" />
+            <Skeleton className="h-3 w-56 rounded mt-4" />
+          </div>
+        </div>
+        <div className="text-lg font-semibold text-foreground mt-8 mb-2">Payment details</div>
+        <div className="rounded-xl border border-border bg-card px-6 py-10 text-center">
+          <div className="text-base font-semibold">Payments go through Razorpay</div>
+          <div className="text-sm text-muted-foreground mt-2 max-w-[520px] mx-auto">UPI, cards and net banking. You pay once for a month or a year, or for credits. Nothing is charged by itself.</div>
+        </div>
+      </div>
+    );
+  }
 
   const perInr = data.balance.credits_per_inr || 3000;
   const balance = (data.balance.topup || 0) + (data.balance.promotion || 0);
