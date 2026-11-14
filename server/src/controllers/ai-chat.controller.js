@@ -1798,10 +1798,16 @@ export const streamAskAi = async (req, res) => {
         return;
     }
     const fableByPlan = !!planRow && Number(planRow.fable_share_percent) > 0;
+    // Claude is separate from the other models (owner, 2026-11-14): with a plan that includes Claude, a Claude answer
+    // is checked against and counted on the plan's weekly Claude credits only, never the window / weekly credits
+    const claudePooled = (model) => !!planRow && typeof model === "string" && CLAUDE_CHAT_MODELS.has(model) && Number(planRow.claude_credits_per_week) !== 0;
+    let claudeSeparate = false; // this request picked a Claude model the plan includes
+    let claudePoolLeft; // what is left of the plan's weekly Claude credits (undefined = unlimited)
     // The plan's weekly Claude pool, and Fable's share of it (a Claude model picked by name; -1 = unlimited)
     if (planRow && typeof body.selectedModel === "string" && CLAUDE_CHAT_MODELS.has(body.selectedModel)) {
         const pool = Number(planRow.claude_credits_per_week);
         const wantsFable = /claude-fable/.test(body.selectedModel);
+        claudeSeparate = pool !== 0;
         if (pool === 0 || (wantsFable && !fableByPlan)) {
             if (!wantsFable || pool === 0) {
                 res.writeHead(402, { "Content-Type": "application/json" });
@@ -1822,6 +1828,7 @@ export const streamAskAi = async (req, res) => {
                 res.end(JSON.stringify({ error: `You've used this week's Claude Fable share of your ${planRow.name} plan. It refills on ${when} (India time). Upgrade your plan, or pick Sonnet or Opus.`, code: "fable_cap_reached", plan: planRow.key }));
                 return;
             }
+            claudePoolLeft = Math.max(1, wantsFable ? Math.min(pool - counters.claude_week_used, Math.round(pool * Number(planRow.fable_share_percent) / 100) - counters.fable_week_used) : pool - counters.claude_week_used);
         }
     }
     // Claude Fable (most expensive model) is locked until the person has topped up ₹299 in total, unless their plan
@@ -1859,8 +1866,10 @@ export const streamAskAi = async (req, res) => {
         // balance is always checked for real)
         // (the database is 150 ms away per read, measured 2026-11-10; this check alone is three reads)
         const quotaKey = `quota:${userId}:${orgId || "-"}:${fablePaidOnly ? 1 : 0}`;
-        const check = await keptFor(quotaKey, 30000, () => hasEnoughTokens(userId, orgId, estimatePromptTokens([body.question || ""]) + MIN_PROMPT_TOKENS + REPLY_TOKEN_ALLOWANCE, { paidOnly: fablePaidOnly }));
-        if (!check.allowed || ((check.spendable ?? check.remaining) !== undefined && (check.spendable ?? check.remaining) < 50000)) forgetKept(quotaKey);
+        const check = claudeSeparate && !fablePaidOnly
+            ? { allowed: true, source: "weekly_free", remaining: claudePoolLeft, spendable: claudePoolLeft, claudePool: true } // (the Claude credits were checked above)
+            : await keptFor(quotaKey, 30000, () => hasEnoughTokens(userId, orgId, estimatePromptTokens([body.question || ""]) + MIN_PROMPT_TOKENS + REPLY_TOKEN_ALLOWANCE, { paidOnly: fablePaidOnly }));
+        if (!check.claudePool && (!check.allowed || ((check.spendable ?? check.remaining) !== undefined && (check.spendable ?? check.remaining) < 50000))) forgetKept(quotaKey);
         firstCheck = check;
         if (deviceNoted) await deviceNoted;
         if (!check.allowed && check.paidOnly) {
@@ -6387,7 +6396,8 @@ If a tool fails, never show the error message; say only: "Something went wrong o
             // The check made seconds ago is reused when it clearly covers this estimate too (a second database round
             // trip in front of every answer otherwise); a tight balance is checked again for real
             const firstSpendable = firstCheck?.allowed ? (firstCheck.spendable ?? firstCheck.remaining) : undefined;
-            const check = firstCheck?.allowed && (firstSpendable === undefined || firstSpendable >= estimatedCost) ? firstCheck : await hasEnoughTokens(userId, orgId, estimatedCost, { paidOnly: fablePaidOnly });
+            const check = firstCheck?.claudePool ? firstCheck // (a Claude request on a plan: its Claude credits, already checked)
+                : firstCheck?.allowed && (firstSpendable === undefined || firstSpendable >= estimatedCost) ? firstCheck : await hasEnoughTokens(userId, orgId, estimatedCost, { paidOnly: fablePaidOnly });
             if (!check.allowed && check.paidOnly) {
                 res.write(`data: ${JSON.stringify({ type: "error", error: "Claude Fable 5.1 runs on paid AI credits only, and you don't have enough left for this message. Top up AI credits, or pick another model (your free weekly tokens work with every other model)." })}\n\n`);
                 return;
@@ -6657,8 +6667,14 @@ If a tool fails, never show the error message; say only: "Something went wrong o
                     // Cloudflare answered instead, or the user left mid-answer) is charged and logged on its own.
                     const chargeDetachedClaudeUsage = (claudeUsage, claudeModel, errorMessage) => {
                         if (!userId || !(claudeUsage?.total_tokens > 0)) return;
-                        deductTokens(userId, orgId, chargeableTokens(claudeUsage, claudeModel), tokenSource)
-                            .catch(err => console.error("[AI-TOKEN] Failed to deduct detached Claude usage:", err));
+                        const detachedTokens = chargeableTokens(claudeUsage, claudeModel);
+                        if (claudePooled(claudeModel)) {
+                            User.updateOne({ _id: userId }, { $inc: { "ai_tokens.claude_week_used": detachedTokens, ...(/claude-fable/.test(claudeModel) ? { "ai_tokens.fable_week_used": detachedTokens } : {}) } })
+                                .catch((err) => console.error("[AI-TOKEN] Claude week count (detached) failed:", err.message));
+                        } else {
+                            deductTokens(userId, orgId, detachedTokens, tokenSource)
+                                .catch(err => console.error("[AI-TOKEN] Failed to deduct detached Claude usage:", err));
+                        }
                         AiUsageLog.create({
                             organization_id: orgId || null,
                             userId,
@@ -6985,12 +7001,16 @@ If a tool fails, never show the error message; say only: "Something went wrong o
                     const User = (await import("../models/User.js")).default;
                     const Organization = (await import("../models/Organization.js")).default;
 
-                    // The tokenSource was determined earlier via hasEnoughTokens
-                    const deductionResult = await deductTokens(userId, orgId, poolTokens, tokenSource);
-                    // A Claude answer counts against the plan's weekly Claude pool (and Fable's share of it)
-                    if (CLAUDE_CHAT_MODELS.has(usedModel) && poolTokens > 0) {
-                        User.updateOne({ _id: userId }, { $inc: { "ai_tokens.claude_week_used": poolTokens, ...(/claude-fable/.test(usedModel) ? { "ai_tokens.fable_week_used": poolTokens } : {}) } })
+                    // A Claude answer on a plan that includes Claude counts only against the plan's weekly Claude
+                    // credits (and Fable's share of them): separate from the other models' credits. Every other
+                    // answer is paid from the credits (the tokenSource was determined earlier via hasEnoughTokens).
+                    let deductionResult = null;
+                    if (claudePooled(usedModel) && poolTokens > 0) {
+                        await User.updateOne({ _id: userId }, { $inc: { "ai_tokens.claude_week_used": poolTokens, ...(/claude-fable/.test(usedModel) ? { "ai_tokens.fable_week_used": poolTokens } : {}) } })
                             .catch((err) => console.error("[AI-TOKEN] Claude week count failed:", err.message));
+                        deductionResult = { success: true, uncharged: 0, type: "claude_pool" };
+                    } else {
+                        deductionResult = await deductTokens(userId, orgId, poolTokens, tokenSource);
                     }
                     flushPlaygroundText();
                     playground("end", {
