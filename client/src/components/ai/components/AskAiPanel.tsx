@@ -2311,7 +2311,7 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
       (async () => {
         try {
           const { startPlanPayment, openCheckout } = await import("./credits/planPayment");
-          toast.message("Opening the payment page...");
+          toast.message("Taking you to the payment page");
           await openCheckout(await startPlanPayment(wishKey, wishTerm, buyWish.back === "pricing" ? "pricing" : undefined));
         } catch (e: any) {
           toast.error(e?.response?.data?.error || e?.message || "Could not start the payment. Please try again.");

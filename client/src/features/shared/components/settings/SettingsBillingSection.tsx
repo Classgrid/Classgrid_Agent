@@ -40,7 +40,7 @@ function BuyCreditsDialog({ open, onClose, perInr, start }: { open: boolean; onC
     try {
       const r = await topUp.mutateAsync(amount);
       if (!r?.checkout_url) throw new Error("no checkout link");
-      toast.message("Opening the payment page...");
+      toast.message("Taking you to the payment page");
       await openCheckout(r.checkout_url);
     } catch (e: any) {
       toast.error(e?.response?.data?.error || "Could not start the payment. Please try again.");
@@ -66,7 +66,7 @@ function BuyCreditsDialog({ open, onClose, perInr, start }: { open: boolean; onC
         </div>
         <DialogFooter className="mt-2">
           <button type="button" className={btnGrey} onClick={onClose}>Cancel</button>
-          <button type="button" className={btnWhite} disabled={!!err || topUp.isPending} onClick={pay}>{topUp.isPending ? "Opening..." : `Pay ${inr(Math.max(0, amount))}`}</button>
+          <button type="button" className={btnWhite} disabled={!!err || topUp.isPending} onClick={pay}>{topUp.isPending ? "One moment" : `Pay ${inr(Math.max(0, amount))}`}</button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
@@ -132,7 +132,7 @@ function AutoTopupDialog({ open, onClose, perInr, saved }: { open: boolean; onCl
         </div>
         <DialogFooter className="mt-1">
           <button type="button" className={btnGrey} onClick={onClose}>Cancel</button>
-          <button type="button" className={btnWhite} disabled={!!err || save.isPending} onClick={submit}>{save.isPending ? "Saving..." : "Save"}</button>
+          <button type="button" className={btnWhite} disabled={!!err || save.isPending} onClick={submit}>{save.isPending ? "Saving" : "Save"}</button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
