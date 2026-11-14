@@ -162,12 +162,12 @@ export function ModelPicker({ value, onChange, disabled }: ModelPickerProps) {
   const { data: access } = useQuery({
     queryKey: ["model-access"],
     queryFn: async () => {
-      const data = (await apiClient.get("/api/ai/model-access")).data as { fable?: { unlocked: boolean; exempt?: boolean; toppedUpInr: number; requiredInr: number }; disabledModels?: string[] };
+      const data = (await apiClient.get("/api/ai/model-access")).data as { fable?: { unlocked: boolean; exempt?: boolean; toppedUpInr: number; requiredInr: number }; disabledModels?: string[]; plan?: { name: string; thinkingModes?: string[] } | null };
       // An answer without "fable" is not this call's answer (in Classgrid Code, before bridge.js numbered each page's
       // calls apart, a reloaded panel got another call's answer here and crashed with "reading 'unlocked'"): it is
       // asked again instead of being shown
       if (!data || typeof data !== "object" || !data.fable) throw new Error("model access not available");
-      return data as { fable: { unlocked: boolean; exempt?: boolean; toppedUpInr: number; requiredInr: number }; disabledModels?: string[] };
+      return data as { fable: { unlocked: boolean; exempt?: boolean; toppedUpInr: number; requiredInr: number }; disabledModels?: string[]; plan?: { name: string; thinkingModes?: string[] } | null };
     },
     staleTime: 60 * 1000,
     retry: 3,
@@ -191,6 +191,11 @@ export function ModelPicker({ value, onChange, disabled }: ModelPickerProps) {
     setThinkingState(id);
     try { localStorage.setItem(THINKING_KEY, id); } catch { /* storage blocked: this message only */ }
   };
+  // The plan's thinking levels (plans on); a saved level outside them goes back to Normal
+  const planModes = access?.plan?.thinkingModes;
+  React.useEffect(() => {
+    if (planModes && planModes.length && !planModes.includes(thinking)) setThinking("normal");
+  }, [planModes, thinking]); // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
     <DropdownMenu>
@@ -217,22 +222,28 @@ export function ModelPicker({ value, onChange, disabled }: ModelPickerProps) {
       >
         <DropdownMenuLabel className="px-2 pt-1.5 pb-1">Thinking</DropdownMenuLabel>
         <div className="flex gap-1 px-1 pb-1" role="radiogroup" aria-label="Thinking">
-          {THINKING_LEVELS.map((t) => (
-            <button
-              key={t.id}
-              type="button"
-              role="radio"
-              aria-checked={thinking === t.id}
-              title={t.hint}
-              onClick={() => setThinking(t.id)}
-              className={cn(
-                "flex-1 h-8 rounded-lg text-[13px] font-medium transition-colors cursor-pointer",
-                thinking === t.id ? "bg-slate-100 dark:bg-white/10 text-foreground" : "text-muted-foreground hover:text-foreground hover:bg-slate-50 dark:hover:bg-white/5",
-              )}
-            >
-              {t.label}
-            </button>
-          ))}
+          {THINKING_LEVELS.map((t) => {
+            // Plans on: a level outside the plan (Deep on Free) can't be picked
+            const locked = !!planModes && planModes.length > 0 && !planModes.includes(t.id);
+            return (
+              <button
+                key={t.id}
+                type="button"
+                role="radio"
+                aria-checked={thinking === t.id}
+                aria-disabled={locked}
+                title={locked ? `${t.label} is not in your ${access?.plan?.name || "current"} plan. Upgrade your plan for it.` : t.hint}
+                onClick={() => { if (!locked) setThinking(t.id); }}
+                className={cn(
+                  "flex-1 h-8 rounded-lg text-[13px] font-medium transition-colors",
+                  locked ? "text-muted-foreground/50 cursor-not-allowed" : "cursor-pointer",
+                  !locked && (thinking === t.id ? "bg-slate-100 dark:bg-white/10 text-foreground" : "text-muted-foreground hover:text-foreground hover:bg-slate-50 dark:hover:bg-white/5"),
+                )}
+              >
+                {t.label}
+              </button>
+            );
+          })}
         </div>
         <DropdownMenuSeparator className="bg-slate-100 dark:bg-white/10 my-1" />
         <DropdownMenuItem onClick={() => onChange(AUTO_MODEL_ID)} className="gap-2.5 cursor-pointer py-2 items-start">

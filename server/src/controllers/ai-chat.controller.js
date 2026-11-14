@@ -1693,7 +1693,7 @@ export const streamAskAi = async (req, res) => {
     // A "/" command from the chat box (Project Mode and Studio only; the live browser is only in Studio)
     const slashCommand = (body.appMode === "project" || body.appMode === "studio") && Object.hasOwn(SLASH_COMMAND_LINES, String(body.command || "")) && (body.command !== "browser" || body.appMode === "studio") ? body.command : null;
     // How hard to think, picked in the model menu: Fast, Normal or Deep (/boost is Deep for one message)
-    const thinking = slashCommand === "boost" ? "high" : ["low", "high"].includes(body.effort) ? body.effort : null;
+    let thinking = slashCommand === "boost" ? "high" : ["low", "high"].includes(body.effort) ? body.effort : null;
     let compacted = false;
 
     // Identity comes only from the auth middleware (the route requires a login), never from the body.
@@ -1795,6 +1795,11 @@ export const streamAskAi = async (req, res) => {
     // Fable comes with the plan when the plan has a Fable share (then it is paid from the plan's credits, not from
     // paid credits only)
     const planRow = await planOf(req.user).catch(() => null);
+    // Plans on: a thinking level outside the plan (Deep on Free) answers at Normal instead
+    if (planRow && Array.isArray(planRow.thinking_modes) && planRow.thinking_modes.length) {
+        const mode = thinking === "high" ? "deep" : thinking === "low" ? "fast" : "normal";
+        if (!planRow.thinking_modes.includes(mode)) thinking = null;
+    }
     if (planRow && typeof body.selectedModel === "string" && body.selectedModel !== "auto" && Array.isArray(planRow.models_allowed) && planRow.models_allowed.length && !planRow.models_allowed.includes(body.selectedModel)) {
         res.writeHead(402, { "Content-Type": "application/json" });
         res.end(JSON.stringify({ error: `${MODEL_DISPLAY_NAMES[body.selectedModel] || body.selectedModel} is not in your ${planRow.name} plan. Upgrade your plan, or pick another model.`, code: "model_locked", plan: planRow.key }));
@@ -2154,6 +2159,18 @@ export const streamAskAi = async (req, res) => {
                 // Older messages no longer fit: bring the summary up to date now (at most every 10 minutes), so what was
                 // left out is in it, like Claude Code's compaction
                 if (dropped && (await redis.set(`compact:auto:${sessionId}`, "1", "EX", 600, "NX").catch(() => null))) {
+                    import("../services/ai-chat.service.js").then((m) => m.triggerMemoryAgent(sessionId, { force: true })).catch(() => {});
+                }
+            }
+            // Plans on: the plan's context window (context_tokens, about 4 characters a token) caps the chat history
+            // sent with each message; older messages stay covered by the chat's summary and recall
+            const ctxTokens = planRow ? Number(planRow.context_tokens) : NaN;
+            if (planRow && Number.isFinite(ctxTokens) && ctxTokens > 0 && !isUnlimited(ctxTokens)) {
+                const size = (m) => (typeof m?.content === "string" ? m.content.length : JSON.stringify(m?.content ?? "").length);
+                let total = messages.reduce((n, m) => n + size(m), 0);
+                let droppedForPlan = 0;
+                while (total > ctxTokens * 4 && messages.length > 2) { total -= size(messages.shift()); droppedForPlan++; }
+                if (droppedForPlan && (await redis.set(`compact:auto:${sessionId}`, "1", "EX", 600, "NX").catch(() => null))) {
                     import("../services/ai-chat.service.js").then((m) => m.triggerMemoryAgent(sessionId, { force: true })).catch(() => {});
                 }
             }
