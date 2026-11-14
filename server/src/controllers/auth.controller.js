@@ -2028,43 +2028,7 @@ export const oauthCallback = async (req, res) => {
                 return `${TARGET_URL}${portalPath}?${query}`;
             };
             try {
-                // Rate limit: check if OTP was sent within last 60 seconds
-                const existingVerification = await DeviceVerification.findOne({ email: userEmail });
-                if (existingVerification && existingVerification.lastResentAt && Date.now() - existingVerification.lastResentAt.getTime() < 45000) {
-                    // OTP was sent recently, just redirect to the verify page
-                    return res.redirect(deviceVerifyRedirect());
-                }
-
-                const otp = Math.floor(100000 + Math.random() * 900000).toString();
-                await DeviceVerification.findOneAndUpdate(
-                    { email: userEmail },
-                    {
-                        organization_id: req.user.organization_id || null,
-                        deviceFingerprint: serverFingerprint,
-                        rememberMe: false,
-                        otp,
-                        isUsed: false,
-                        failedAttempts: 0,
-                        resendCount: 0,
-                        lastResentAt: new Date(),
-                        expiresAt: new Date(Date.now() + 10 * 60 * 1000) // 10 minutes, same as password login and the email
-                    },
-                    { upsert: true, returnDocument: 'after', setDefaultsOnInsert: true, sort: { createdAt: -1 } }
-                );
-
-                const { getNewDeviceOtpHtml, getNewDeviceOtpPlainText } = await import("../services/email-templates.service.js");
-                const loginDetails = await getLoginDetails(req, `Sign in with ${String(provider || 'Google').replace(/^./, (c) => c.toUpperCase())}`, req.user.email);
-                try {
-                    await sendEmail({
-                        to: userEmail,
-                        subject: "Security Alert: New Device Detected",
-                        html: getNewDeviceOtpHtml ? getNewDeviceOtpHtml(req.user.name, otp, loginDetails) : `<p>Your Classgrid verification code is: <strong>${otp}</strong></p>`,
-                        text: getNewDeviceOtpPlainText ? getNewDeviceOtpPlainText(req.user.name, otp, loginDetails) : `Your Classgrid verification code is: ${otp}`,
-                    });
-                } catch (emailErr) {
-                    console.error("Failed to send OAuth device OTP:", emailErr);
-                }
-
+                await sendNewDeviceCode(req.user, req, `Sign in with ${String(provider || 'Google').replace(/^./, (c) => c.toUpperCase())}`);
                 return res.redirect(deviceVerifyRedirect());
             } catch (deviceErr) {
                 console.error("OAuth device check error (non-blocking):", deviceErr);
@@ -3698,5 +3662,115 @@ export const chatVerifyWhatsAppOtp = async (req, res) => {
         res.status(200).json({ message: "WhatsApp phone verified successfully!" });
     } catch (error) {
         res.status(500).json({ message: "Server error verifying OTP." });
+    }
+};
+
+// The new-device email code, for a sign-in from a device the account has not used before (Google / GitHub in the
+// browser, and the native Google sign-in of the Android app). A code sent in the last 45 seconds is not sent again.
+// `how` names the sign-in in the email ("Sign in with Google").
+async function sendNewDeviceCode(user, req, how) {
+    const email = user.email;
+    const { fingerprint } = getDeviceFingerprint(req);
+    const existing = await DeviceVerification.findOne({ email });
+    if (existing && existing.lastResentAt && Date.now() - existing.lastResentAt.getTime() < 45000) return;
+    const otp = Math.floor(100000 + Math.random() * 900000).toString();
+    await DeviceVerification.findOneAndUpdate(
+        { email },
+        {
+            organization_id: user.organization_id || null,
+            deviceFingerprint: fingerprint,
+            rememberMe: false,
+            otp,
+            isUsed: false,
+            failedAttempts: 0,
+            resendCount: 0,
+            lastResentAt: new Date(),
+            expiresAt: new Date(Date.now() + 10 * 60 * 1000) // 10 minutes, same as password login and the email
+        },
+        { upsert: true, returnDocument: 'after', setDefaultsOnInsert: true, sort: { createdAt: -1 } }
+    );
+    const { getNewDeviceOtpHtml, getNewDeviceOtpPlainText } = await import("../services/email-templates.service.js");
+    const loginDetails = await getLoginDetails(req, how, email);
+    try {
+        await sendEmail({
+            to: email,
+            subject: "Security Alert: New Device Detected",
+            html: getNewDeviceOtpHtml ? getNewDeviceOtpHtml(user.name, otp, loginDetails) : `<p>Your Classgrid verification code is: <strong>${otp}</strong></p>`,
+            text: getNewDeviceOtpPlainText ? getNewDeviceOtpPlainText(user.name, otp, loginDetails) : `Your Classgrid verification code is: ${otp}`,
+        });
+    } catch (emailErr) {
+        console.error("Failed to send the new-device code:", emailErr);
+    }
+}
+
+// ─────────────────────────────────────────────
+// Native Google sign-in (the Classgrid Android app): POST /api/auth/chat/google-native { idToken }
+// The phone's own Google account picker gives an ID token made out to Classgrid's web client; google.service.js
+// verifies it against GOOGLE_CLIENT_ID. The account must already exist. On a device the account has not used
+// before, the same new-device email code as the browser sign-in applies: the answer is 202 { code: "DEVICE_VERIFY",
+// email }, the app shows its code screen and posts /api/auth/verify-device { email, otp }, which signs it in.
+// Otherwise the answer is { token, user } and the app is signed in (2026-11-14, with the Android app).
+// ─────────────────────────────────────────────
+export const googleNativeLogin = async (req, res) => {
+    try {
+        await connectDB();
+        const idToken = String(req.body?.idToken || "").trim();
+        if (!idToken) return res.status(400).json({ message: "Missing idToken." });
+
+        const { verifyGoogleToken } = await import("../services/google.service.js");
+        const profile = await verifyGoogleToken(idToken);
+        const email = String(profile?.email || "").toLowerCase().trim();
+        if (!email) return res.status(400).json({ message: "Google did not return an email." });
+        if (profile.email_verified === false) return res.status(403).json({ message: "This Google account's email is not verified." });
+
+        const user = await User.findOne({ email });
+        if (!user) {
+            return res.status(404).json({ code: "NO_ACCOUNT", email, message: "There is no Classgrid account for that email." });
+        }
+        if (["suspended", "blocked", "deleted"].includes(user.status)) {
+            return res.status(403).json({ message: "This account is suspended." });
+        }
+
+        // A device the account has not used before gets the email code (not on the first-ever login, for sandbox
+        // accounts, or for @classgrid.in team accounts: the same rules as the browser sign-in)
+        const isFirstLogin = !user.lastLoginAt;
+        const isInternal = email.endsWith("@classgrid.in");
+        if (!isFirstLogin && !user.isSandbox && !isInternal) {
+            const { fingerprint } = getDeviceFingerprint(req);
+            const known = Array.isArray(user.trustedDevices) && user.trustedDevices.some((d) => d.fingerprint === fingerprint);
+            if (!known) {
+                await sendNewDeviceCode(user, req, "Sign in with Google");
+                return res.status(202).json({ code: "DEVICE_VERIFY", email, message: "New device detected. We sent a 6-digit code to your email." });
+            }
+        }
+
+        try {
+            await checkAndRegisterDevice(user, req);
+        } catch (deviceErr) {
+            console.error("Native Google sign-in device check (non-blocking):", deviceErr.message);
+        }
+
+        if (user.status === "pending") user.status = "active";
+        user.lastLoginAt = new Date();
+        if (!user.profilePicture && profile.picture) user.profilePicture = profile.picture;
+        await user.save();
+
+        const token = generateToken(user, req, true);
+        setTokenCookie(res, token, req, true);
+
+        return res.json({
+            token,
+            user: {
+                id: user._id,
+                name: user.name,
+                email: user.email,
+                role: user.role,
+                profilePicture: user.profilePicture || "",
+                organization_id: user.organization_id || null,
+            },
+        });
+    } catch (err) {
+        console.error("Native Google sign-in error:", err.message);
+        return res.status(401).json({ message: "Google sign-in could not be verified." });
     }
 };

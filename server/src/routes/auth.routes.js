@@ -119,6 +119,9 @@ router.post("/resend-activation", authController.resendActivation);
 router.post("/manual-activation-link", authController.resolveManualActivationLink);
 
 router.post("/login", loginLimiter, authController.login);
+
+// Native Google sign-in from the Classgrid Android app (ID token from the phone's account picker).
+router.post("/chat/google-native", loginLimiter, authController.googleNativeLogin);
 router.post("/request-login-otp", loginLimiter, authController.requestLoginOtp);
 router.post("/resend-device-otp", otpSendLimiter, authController.resendDeviceOtp);
 router.post("/verify-device", authController.verifyDeviceOtp);
