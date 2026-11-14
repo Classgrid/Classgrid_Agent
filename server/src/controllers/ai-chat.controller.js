@@ -1798,6 +1798,32 @@ export const streamAskAi = async (req, res) => {
         return;
     }
     const fableByPlan = !!planRow && Number(planRow.fable_share_percent) > 0;
+    // The plan's weekly Claude pool, and Fable's share of it (a Claude model picked by name; -1 = unlimited)
+    if (planRow && typeof body.selectedModel === "string" && CLAUDE_CHAT_MODELS.has(body.selectedModel)) {
+        const pool = Number(planRow.claude_credits_per_week);
+        const wantsFable = /claude-fable/.test(body.selectedModel);
+        if (pool === 0 || (wantsFable && !fableByPlan)) {
+            if (!wantsFable || pool === 0) {
+                res.writeHead(402, { "Content-Type": "application/json" });
+                res.end(JSON.stringify({ error: `Claude models are not in your ${planRow.name} plan. Upgrade your plan, or pick another model.`, code: "model_locked", plan: planRow.key }));
+                return;
+            }
+        } else if (pool > 0) {
+            const { weekCounters } = await import("../services/ai-credits.service.js");
+            const counters = await weekCounters(userId, req.user.ai_tokens);
+            const when = counters.weekEnd.toLocaleString("en-IN", { timeZone: "Asia/Kolkata", day: "numeric", month: "short", hour: "numeric", minute: "2-digit" });
+            if (counters.claude_week_used >= pool) {
+                res.writeHead(402, { "Content-Type": "application/json" });
+                res.end(JSON.stringify({ error: `You've used this week's Claude credits of your ${planRow.name} plan. They refill on ${when} (India time). Upgrade your plan, or pick a DeepSeek model.`, code: "claude_cap_reached", plan: planRow.key }));
+                return;
+            }
+            if (wantsFable && counters.fable_week_used >= pool * Number(planRow.fable_share_percent) / 100) {
+                res.writeHead(402, { "Content-Type": "application/json" });
+                res.end(JSON.stringify({ error: `You've used this week's Claude Fable share of your ${planRow.name} plan. It refills on ${when} (India time). Upgrade your plan, or pick Sonnet or Opus.`, code: "fable_cap_reached", plan: planRow.key }));
+                return;
+            }
+        }
+    }
     // Claude Fable (most expensive model) is locked until the person has topped up ₹299 in total, unless their plan
     // includes it. 402, not 403: the chat page treats 403 as a ban.
     if (body.selectedModel === "claude-fable-5-2" && !fableByPlan) {
@@ -6942,6 +6968,11 @@ If a tool fails, never show the error message; say only: "Something went wrong o
 
                     // The tokenSource was determined earlier via hasEnoughTokens
                     const deductionResult = await deductTokens(userId, orgId, poolTokens, tokenSource);
+                    // A Claude answer counts against the plan's weekly Claude pool (and Fable's share of it)
+                    if (CLAUDE_CHAT_MODELS.has(usedModel) && poolTokens > 0) {
+                        User.updateOne({ _id: userId }, { $inc: { "ai_tokens.claude_week_used": poolTokens, ...(/claude-fable/.test(usedModel) ? { "ai_tokens.fable_week_used": poolTokens } : {}) } })
+                            .catch((err) => console.error("[AI-TOKEN] Claude week count failed:", err.message));
+                    }
                     flushPlaygroundText();
                     playground("end", {
                         model: usedModel,

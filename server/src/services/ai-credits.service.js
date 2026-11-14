@@ -107,13 +107,16 @@ export async function freeWindow(user, org, globalConfig, orgId = org?._id) {
     const weekCap = isUnlimited(plan.tokens_per_week) ? Infinity : Number(plan.tokens_per_week) || 0;
     return { limit, periodMs, weekCap, planKey: plan.key };
 }
-// The weekly counter, restarted when its 7 days are over (returns what is used in the current stretch)
-async function weekUsed(userId, tokens, nowMs = Date.now()) {
+// The weekly counters (credits, Claude credits, Fable credits), restarted together when their 7 days are over
+export async function weekCounters(userId, tokens, nowMs = Date.now()) {
     const start = tokens?.week_start ? new Date(tokens.week_start).getTime() : 0;
-    if (start && nowMs < start + WEEK_MS) return tokens?.week_used || 0;
-    await User.updateOne({ _id: userId }, { $set: { "ai_tokens.week_used": 0, "ai_tokens.week_start": new Date(nowMs) } }).catch(() => {});
-    return 0;
+    if (start && nowMs < start + WEEK_MS) {
+        return { week_used: tokens?.week_used || 0, claude_week_used: tokens?.claude_week_used || 0, fable_week_used: tokens?.fable_week_used || 0, weekEnd: new Date(start + WEEK_MS) };
+    }
+    await User.updateOne({ _id: userId }, { $set: { "ai_tokens.week_used": 0, "ai_tokens.claude_week_used": 0, "ai_tokens.fable_week_used": 0, "ai_tokens.week_start": new Date(nowMs) } }).catch(() => {});
+    return { week_used: 0, claude_week_used: 0, fable_week_used: 0, weekEnd: new Date(nowMs + WEEK_MS) };
 }
+const weekUsed = async (userId, tokens, nowMs = Date.now()) => (await weekCounters(userId, tokens, nowMs)).week_used;
 
 // One computer, one free limit (desktop app): the free tokens used by every account on the same Windows computer
 // count together, so making more accounts doesn't give more free usage. Paid and granted credits are not affected.

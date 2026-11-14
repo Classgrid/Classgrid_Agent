@@ -789,7 +789,11 @@ const userSchema = new mongoose.Schema(
       total_ai_tokens_used: { type: Number, default: 0 },
       // The plan's weekly ceiling (services/plan-limits.service.js): credits used in the current 7-day stretch
       week_used: { type: Number, default: 0 },
-      week_start: { type: Date }
+      week_start: { type: Date },
+      // Credits spent on Claude models (and on Fable within them) in the same 7-day stretch: the plan's Claude pool
+      // and its Fable share
+      claude_week_used: { type: Number, default: 0 },
+      fable_week_used: { type: Number, default: 0 }
     },
     ai_image_free_weekly_used: { type: Number },
     ai_image_reset_date: { type: Date },
