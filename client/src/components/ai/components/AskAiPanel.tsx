@@ -2287,10 +2287,14 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
 
     // Handle post-payment redirect
     const searchParams = new URLSearchParams(window.location.search);
-    let buyWish = false;
-    try { buyWish = !!sessionStorage.getItem("classgrid:buy-plan"); } catch { /* storage blocked */ }
-    if (buyWish) {
-      // From a plan's button on classgrid.in/pricing (main.tsx kept it): the plans open and PlanCards starts the payment
+    let buyWish: { plan?: string; term?: string } | null = null;
+    try {
+      const raw = sessionStorage.getItem("classgrid:buy-plan");
+      if (raw) { buyWish = JSON.parse(raw); sessionStorage.removeItem("classgrid:buy-plan"); }
+    } catch { /* storage blocked */ }
+    if (buyWish?.plan) {
+      // From a plan's button on classgrid.in/pricing (main.tsx kept it through sign-in): the Upgrade page opens and
+      // the payment of that plan starts right away, as if its button here was pressed
       setAiHubInitialTab("upgrade");
       setIsAiHubOpen(true);
       if (searchParams.has("buy")) {
@@ -2298,6 +2302,18 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
         const rest = searchParams.toString();
         window.history.replaceState({}, '', window.location.pathname + (rest ? `?${rest}` : ""));
       }
+      const wishKey = String(buyWish.plan);
+      const wishTerm: "month" | "year" = buyWish.term === "year" ? "year" : "month";
+      (async () => {
+        try {
+          const { startPlanPayment } = await import("./credits/PlanCards");
+          const { openCheckout } = await import("./credits/AiUpgradePanel");
+          toast.message("Opening the payment page...");
+          await openCheckout(await startPlanPayment(wishKey, wishTerm));
+        } catch (e: any) {
+          toast.error(e?.response?.data?.error || e?.message || "Could not start the payment. Please try again.");
+        }
+      })();
     } else if (searchParams.get("ai_payment") === "success") {
       setAiHubInitialTab("credits");
       setIsAiHubOpen(true);
