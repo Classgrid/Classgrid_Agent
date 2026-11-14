@@ -111,6 +111,9 @@ export function AiUpgradePanel() {
   const weekEnds = dateText(mine?.week?.ends_at);
   const lim = mine?.limits;
   const yearlyPlan = plans?.plans?.find((p) => p.price_inr_yearly > 0 && p.price_inr_monthly > 0);
+  // The biggest plan that can be bought: on it there is nothing to upgrade to, only time to add
+  const buyable = (plans?.plans || []).filter((p) => !p.coming_soon && p.key !== "free" && p.price_inr_monthly > 0);
+  const onTopPlan = !!mine?.key && mine.key !== "free" && buyable.length > 0 && buyable[buyable.length - 1].key === mine.key;
   const yearlySaving = yearlyPlan ? Math.max(0, Math.round(100 - (yearlyPlan.price_inr_yearly / (yearlyPlan.price_inr_monthly * 12)) * 100)) : 0;
 
   return (
@@ -194,12 +197,14 @@ export function AiUpgradePanel() {
                       </div>
                       <p className="text-sm text-muted-foreground mt-1">
                         {mine?.key && mine.key !== "free"
-                          ? `${until ? `Until ${until}. ` : ""}Upgrade to a bigger plan, or add another ${term} to this one, on the pricing page.`
+                          ? onTopPlan
+                            ? `${until ? `Until ${until}. ` : ""}${planName} is the biggest plan, so there is nothing to upgrade to. You can add another ${term} to it on the pricing page.`
+                            : `${until ? `Until ${until}. ` : ""}Upgrade to a bigger plan, or add another ${term} to this one, on the pricing page.`
                           : "Pro gives Claude, more pictures, calls and projects; Max gives five times Pro with Claude Fable. Pick one on the pricing page and the payment opens here."}
                       </p>
                     </div>
                     <Button size="lg" onClick={() => { window.location.href = PRICING_URL; }}>
-                      {mine?.key && mine.key !== "free" ? "Upgrade" : "See plans and buy"} <ExternalLink className="w-4 h-4 ml-2" />
+                      {mine?.key && mine.key !== "free" ? (onTopPlan ? `Add 1 ${term}` : "Upgrade") : "See plans and buy"} <ExternalLink className="w-4 h-4 ml-2" />
                     </Button>
                   </div>
                 ) : (

@@ -81,7 +81,7 @@ export function UsageTab({ onUpgrade }: { onUpgrade?: () => void }) {
           <Button variant="outline" size="sm" onClick={() => queryClient.invalidateQueries({ queryKey: ["ai-plan-overview"] })} disabled={isFetching}>
             <RefreshCw className={`w-3.5 h-3.5 mr-1.5 ${isFetching ? "animate-spin" : ""}`} /> Refresh
           </Button>
-          {onUpgrade && <Button size="sm" onClick={onUpgrade}><BadgeCheck className="w-3.5 h-3.5 mr-1.5" /> Upgrade</Button>}
+          {onUpgrade && <Button size="sm" onClick={onUpgrade}><BadgeCheck className="w-3.5 h-3.5 mr-1.5" /> {data.plan.subscribed ? "Plans" : "Upgrade"}</Button>}
         </div>
       </div>
 
