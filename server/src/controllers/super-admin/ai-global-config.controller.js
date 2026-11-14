@@ -36,6 +36,7 @@ const effectiveGlobalPeriods = (config) => ({
     tokens: resolveResetPeriod("tokens", null, config, "global"),
     image: resolveResetPeriod("image", null, config, "global"),
     whatsapp: resolveResetPeriod("whatsapp", null, config, "global"),
+    calls: resolveResetPeriod("calls", null, config, "global"),
 });
 
 // Fetch Global AI Configuration
@@ -51,6 +52,7 @@ export const getGlobalAiConfig = async (req, res) => {
                 global_user_weekly_limit: 100000,
                 global_image_weekly_limit: 20,
                 global_whatsapp_scheduling_limit: 10,
+                global_call_minutes_limit: 150,
                 global_ai_blocked: false,
                 credits_per_inr: 3000,
                 image_generation_token_cost: 5000,
@@ -79,6 +81,7 @@ export const updateGlobalAiConfig = async (req, res) => {
             global_user_weekly_limit, 
             global_image_weekly_limit,
             global_whatsapp_scheduling_limit, 
+            global_call_minutes_limit,
             global_ai_blocked,
             free_limit_per_computer,
             credits_per_inr,
@@ -90,7 +93,7 @@ export const updateGlobalAiConfig = async (req, res) => {
         } = req.body;
 
         const resetPeriods = {};
-        for (const feature of ["token", "image", "whatsapp"]) {
+        for (const feature of ["token", "image", "whatsapp", "call"]) {
             const { set, error } = parseResetPeriodInput(req.body, `global_${feature}_reset`);
             if (error) return res.status(400).json({ success: false, message: error, error });
             if (set) resetPeriods[feature] = set;
@@ -106,6 +109,10 @@ export const updateGlobalAiConfig = async (req, res) => {
         if (global_user_weekly_limit !== undefined) config.global_user_weekly_limit = global_user_weekly_limit;
         if (global_image_weekly_limit !== undefined) config.global_image_weekly_limit = global_image_weekly_limit;
         if (global_whatsapp_scheduling_limit !== undefined) config.global_whatsapp_scheduling_limit = global_whatsapp_scheduling_limit;
+        if (global_call_minutes_limit !== undefined) config.global_call_minutes_limit = Math.max(0, Number(global_call_minutes_limit) || 0);
+        if (global_call_minutes_limit !== undefined) config.global_call_minutes_limit = Math.max(0, Number(global_call_minutes_limit) || 0);
+        if (global_call_minutes_limit !== undefined) config.global_call_minutes_limit = Math.max(0, Number(global_call_minutes_limit) || 0);
+        if (global_call_minutes_limit !== undefined) config.global_call_minutes_limit = Math.max(0, Number(global_call_minutes_limit) || 0);
         if (global_ai_blocked !== undefined) config.global_ai_blocked = global_ai_blocked;
         if (free_limit_per_computer !== undefined) config.free_limit_per_computer = free_limit_per_computer === true;
         if (credits_per_inr !== undefined) config.credits_per_inr = credits_per_inr;

@@ -790,6 +790,9 @@ const userSchema = new mongoose.Schema(
     },
     ai_image_free_weekly_used: { type: Number },
     ai_image_reset_date: { type: Date },
+    // WhatsApp call time used in the current period (seconds), against the free call minutes
+    ai_call_seconds_used: { type: Number },
+    ai_call_reset_date: { type: Date },
     // 🧠 AI Chat Customization & Defaults
     // Chats this user archived: left out of their chat lists, shown under "Archived chats"
     archived_chat_ids: { type: [String], default: [] },

@@ -42,11 +42,14 @@ export function GlobalAiConfigPanel({ grantCreditsNode }: { grantCreditsNode?: R
   const [orgPool, setOrgPool] = useState(0);
   const [images, setImages] = useState(0);
   const [whatsapp, setWhatsapp] = useState(0); // Added for UI parity
+  const [callMinutes, setCallMinutes] = useState(0);
   const [creditsPerInr, setCreditsPerInr] = useState(0);
   const [imageCost, setImageCost] = useState(0);
   const [tokenReset, setTokenReset] = useState<ResetPeriod>(toResetPeriod());
   const [imageReset, setImageReset] = useState<ResetPeriod>(toResetPeriod());
   const [whatsappReset, setWhatsappReset] = useState<ResetPeriod>(toResetPeriod());
+  const [callReset, setCallReset] = useState<ResetPeriod>(toResetPeriod());
+  const [openCalls, setOpenCalls] = useState(false);
 
   // Loading States
   const [openIndividual, setOpenIndividual] = useState(false);
@@ -70,11 +73,13 @@ export function GlobalAiConfigPanel({ grantCreditsNode }: { grantCreditsNode?: R
       setIndividualUsage(data.global_user_weekly_limit ?? 0);
       setImages(data.global_image_weekly_limit ?? 0);
       setWhatsapp(data.global_whatsapp_scheduling_limit ?? 0);
+      setCallMinutes(data.global_call_minutes_limit ?? 0);
       if (data.credits_per_inr !== undefined) setCreditsPerInr(data.credits_per_inr);
       if (data.image_generation_token_cost !== undefined) setImageCost(data.image_generation_token_cost);
       setTokenReset(toResetPeriod(data.resetPeriods?.tokens));
       setImageReset(toResetPeriod(data.resetPeriods?.image));
       setWhatsappReset(toResetPeriod(data.resetPeriods?.whatsapp));
+      setCallReset(toResetPeriod(data.resetPeriods?.calls));
     }
   }, [data]);
 
@@ -100,6 +105,7 @@ export function GlobalAiConfigPanel({ grantCreditsNode }: { grantCreditsNode?: R
       global_user_weekly_limit: individualUsage,
       global_image_weekly_limit: images,
       global_whatsapp_scheduling_limit: whatsapp,
+      global_call_minutes_limit: callMinutes,
       credits_per_inr: creditsPerInr,
       image_generation_token_cost: imageCost,
       global_token_reset_value: tokenReset.value,
@@ -107,7 +113,9 @@ export function GlobalAiConfigPanel({ grantCreditsNode }: { grantCreditsNode?: R
       global_image_reset_value: imageReset.value,
       global_image_reset_unit: imageReset.unit,
       global_whatsapp_reset_value: whatsappReset.value,
-      global_whatsapp_reset_unit: whatsappReset.unit
+      global_whatsapp_reset_unit: whatsappReset.unit,
+      global_call_reset_value: callReset.value,
+      global_call_reset_unit: callReset.unit
     }, {
       onSuccess: () => {
         toast.success(successMessage);
@@ -301,6 +309,48 @@ export function GlobalAiConfigPanel({ grantCreditsNode }: { grantCreditsNode?: R
                 </div>
                 <DialogFooter>
                   <Button type="button" onClick={() => handleSave(setOpenWhatsapp, "Global WhatsApp limit saved successfully!")} disabled={updateConfigMutation.isPending}>
+                    {updateConfigMutation.isPending && <Spinner className="w-4 h-4 mr-2" />}
+                    Save changes
+                  </Button>
+                </DialogFooter>
+              </DialogContent>
+            </Dialog>
+
+            {/* Voice Calls: free WhatsApp call minutes per user; past them a call is paid with tokens */}
+            <Dialog open={openCalls} onOpenChange={(open) => {
+              if (!open) setCallMinutes(data?.global_call_minutes_limit ?? 0);
+              if (!open) setCallReset(toResetPeriod(data?.resetPeriods?.calls));
+              setOpenCalls(open);
+            }}>
+              <DialogTrigger asChild>
+                <button className="bg-card hover:bg-muted/30 p-5 flex flex-col gap-2 text-left transition-colors">
+                  <span className="text-sm font-medium text-muted-foreground">Voice Calls</span>
+                  <span className="text-xl font-bold text-foreground">
+                    {(data?.global_call_minutes_limit ?? 0).toLocaleString()} <span className="text-sm font-normal text-muted-foreground ml-1">Free minutes</span>
+                  </span>
+                  <span className="text-xs text-muted-foreground">{formatResetPeriod(data?.resetPeriods?.calls)}</span>
+                </button>
+              </DialogTrigger>
+              <DialogContent className="sm:max-w-sm">
+                <DialogHeader>
+                  <DialogTitle>Edit Global Voice Call Limits</DialogTitle>
+                  <DialogDescription>Free WhatsApp call minutes per user. Past them, a call is paid with AI credits.</DialogDescription>
+                </DialogHeader>
+                <div className="flex flex-col gap-2 py-4">
+                  <Label htmlFor="call-minutes" className="text-sm font-medium">Free call minutes</Label>
+                  <Input
+                    id="call-minutes"
+                    type="number"
+                    min={0}
+                    value={callMinutes}
+                    onChange={(e) => setCallMinutes(Number(e.target.value))}
+                    placeholder="e.g. 150"
+                    disabled={updateConfigMutation.isPending}
+                  />
+                  <ResetPeriodInput id="global-calls" value={callReset} onChange={setCallReset} disabled={updateConfigMutation.isPending} />
+                </div>
+                <DialogFooter>
+                  <Button type="button" onClick={() => handleSave(setOpenCalls, "Global voice call limit saved successfully!")} disabled={updateConfigMutation.isPending}>
                     {updateConfigMutation.isPending && <Spinner className="w-4 h-4 mr-2" />}
                     Save changes
                   </Button>

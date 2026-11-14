@@ -38,6 +38,9 @@ import { CHAT_PUBLIC_ORG_ID } from "../utils/chat-onboarding.js";
 const FIELDS = {
     whatsapp: { global: "global_whatsapp_scheduling_limit", org: "whatsapp_scheduling_limit", classgrid: "classgrid_whatsapp_scheduling_limit", fallback: 10 },
     image: { global: "global_image_weekly_limit", org: "image_generation_limit", classgrid: "classgrid_image_weekly_limit", fallback: 20 },
+    // Free WhatsApp call minutes (owner, 2026-11-14): within them a call costs the user no tokens; past them a call
+    // is charged per turn like the chat, and a user with no tokens is cut off when the free minutes end
+    calls: { global: "global_call_minutes_limit", org: "call_minutes_limit", classgrid: "classgrid_call_minutes_limit", fallback: 150 },
 };
 
 const isSet = (v) => v !== undefined && v !== null;
@@ -65,6 +68,7 @@ const PERIOD_FIELDS = {
     tokens: { global: "global_token_reset", org: "token_reset", classgrid: "classgrid_token_reset", classgridForPublicOrg: false },
     image: { global: "global_image_reset", org: "image_reset", classgrid: "classgrid_image_reset", classgridForPublicOrg: true },
     whatsapp: { global: "global_whatsapp_reset", org: "whatsapp_reset", classgrid: "classgrid_whatsapp_reset", classgridForPublicOrg: true },
+    calls: { global: "global_call_reset", org: "call_reset", classgrid: "classgrid_call_reset", classgridForPublicOrg: true },
 };
 export const RESET_PERIOD_FEATURES = Object.keys(PERIOD_FIELDS);
 

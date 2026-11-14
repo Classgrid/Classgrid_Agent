@@ -63,23 +63,33 @@ const globalAiConfigSchema = new mongoose.Schema(
             type: Number,
             default: 10
         },
+        // Free WhatsApp call minutes per user per period (0 = every call is paid with tokens)
+        global_call_minutes_limit: {
+            type: Number,
+            default: 150
+        },
         classgrid_custom_limits_enabled: { type: Boolean, default: false },
         classgrid_pro_pool_limit: { type: Number },
         classgrid_user_weekly_limit: { type: Number },
         classgrid_image_weekly_limit: { type: Number },
         classgrid_whatsapp_scheduling_limit: { type: Number },
+        classgrid_call_minutes_limit: { type: Number },
         global_token_reset_value: { type: Number },
         global_token_reset_unit: { type: String },
         global_image_reset_value: { type: Number },
         global_image_reset_unit: { type: String },
         global_whatsapp_reset_value: { type: Number },
         global_whatsapp_reset_unit: { type: String },
+        global_call_reset_value: { type: Number, default: 1 },
+        global_call_reset_unit: { type: String, default: "month" },
         classgrid_token_reset_value: { type: Number },
         classgrid_token_reset_unit: { type: String },
         classgrid_image_reset_value: { type: Number },
         classgrid_image_reset_unit: { type: String },
         classgrid_whatsapp_reset_value: { type: Number },
         classgrid_whatsapp_reset_unit: { type: String },
+        classgrid_call_reset_value: { type: Number },
+        classgrid_call_reset_unit: { type: String },
         // --- Pricing & Cost Config ---
         // Models turned off in the super admin Model manager: nobody can pick or use them
         disabled_models: { type: [String], default: [] },

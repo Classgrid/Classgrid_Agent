@@ -33,7 +33,9 @@ import crypto from "crypto";
 import jwt from "jsonwebtoken";
 import User from "../models/User.js";
 import redis from "../config/redis.js";
-import { normalizeWhatsappNumber } from "./ai-feature-limits.js";
+import { normalizeWhatsappNumber, resolveFeatureLimit, resolveResetPeriod } from "./ai-feature-limits.js";
+import Organization from "../models/Organization.js";
+import GlobalAiConfig from "../models/GlobalAiConfig.js";
 import { isSharedTestWhatsapp } from "../utils/chat-onboarding.js";
 import { hasEnoughTokens, deductTokens } from "./ai-credits.service.js";
 import { chargeableTokens } from "./ai-token-pricing.js";
@@ -57,6 +59,35 @@ const OVERTIME_MS = 30 * 1000; // at the limit, a sentence or answer in progress
 const MAX_CALLS_PER_DAY = 50;
 const DAY_MS = 24 * 60 * 60 * 1000;
 const CALLS_KEY = (number) => `wa:calls:${number}`;
+
+// Free call minutes (Global AI Config, "Voice Calls"; owner, 2026-11-14): the seconds a user still has in the current
+// period, the period's end, and the limit. The period is started or restarted here when it has run out.
+async function freeCallSeconds(user) {
+    const orgId = user.organization_id || null;
+    const [org, globalConfig] = await Promise.all([
+        orgId ? Organization.findById(orgId).select("ai_config").lean().catch(() => null) : null,
+        GlobalAiConfig.findOne({ key: "singleton" }).lean().catch(() => null),
+    ]);
+    const limitMinutes = Math.max(0, Number(resolveFeatureLimit("calls", org, globalConfig, orgId)) || 0);
+    const period = resolveResetPeriod("calls", org, globalConfig, orgId);
+    const now = Date.now();
+    let used = Number(user.ai_call_seconds_used) || 0;
+    let resetAt = user.ai_call_reset_date ? new Date(user.ai_call_reset_date) : null;
+    if (!resetAt || resetAt.getTime() <= now) {
+        used = 0;
+        resetAt = new Date(now + period.ms);
+        await User.updateOne({ _id: user._id }, { $set: { ai_call_seconds_used: 0, ai_call_reset_date: resetAt } }).catch(() => {});
+    }
+    return { left: Math.max(0, limitMinutes * 60 - used), limitMinutes, resetAt };
+}
+
+// Tokens for one model answer of the call: nothing while the call is within the caller's free minutes
+function chargeCall(call, usage, model) {
+    const at = call.endedAt || Date.now();
+    if (call.freeUntil && at < call.freeUntil) return;
+    deductTokens(call.user._id, call.user.organization_id || null, chargeableTokens(usage, model), call.tokenSource)
+        .catch((e) => console.error("[WA call] token charge failed:", e.message));
+}
 
 // How many calls this number had in the last 24 h, and when the oldest of them stops counting
 async function callsToday(number) {
@@ -434,8 +465,7 @@ async function fallbackTurn(call, { noTools = false, onSentence = null } = {}) {
         throw new Error(`${FALLBACK_MODEL} ${res.status}: ${JSON.stringify(err.errors || err.error || err).slice(0, 300)}`);
     }
     const { choice, usage: u } = await readOpenAiStream(res, onSentence);
-    deductTokens(call.user._id, call.user.organization_id || null, chargeableTokens({ prompt_tokens: u.prompt_tokens || 0, completion_tokens: u.completion_tokens || 0 }, FALLBACK_MODEL), call.tokenSource)
-        .catch((e) => console.error("[WA call] token charge failed:", e.message));
+    chargeCall(call, { prompt_tokens: u.prompt_tokens || 0, completion_tokens: u.completion_tokens || 0 }, FALLBACK_MODEL);
     const content = fromOpenAiAnswer(choice.message);
     if (content.length) call.messages.push({ role: "assistant", content });
     const text = content.filter((b) => b.type === "text").map((b) => b.text).join(" ").trim();
@@ -560,8 +590,7 @@ async function claudeOnlyTurn(call, { noTools = false, onSentence = null } = {})
         cache_read_input_tokens: u.cache_read_input_tokens || 0,
         cache_creation_input_tokens: u.cache_creation_input_tokens || 0,
     };
-    deductTokens(call.user._id, call.user.organization_id || null, chargeableTokens(usage, CALL_MODEL), call.tokenSource)
-        .catch((e) => console.error("[WA call] token charge failed:", e.message));
+    chargeCall(call, usage, CALL_MODEL);
     // An empty answer is not kept (the API refuses a conversation with an empty message in it)
     if (data.content?.length) call.messages.push({ role: "assistant", content: data.content });
     const text = (data.content || []).filter((b) => b.type === "text").map((b) => b.text).join(" ").trim();
@@ -763,12 +792,13 @@ function wrapUp(call) {
 
 // The time limit: if the caller is talking or the AI is answering right now, let it finish first
 function timeUp(call) {
-    const limit = call.startedAt + MAX_CALL_MS + OVERTIME_MS;
+    const maxMs = call.maxMs || MAX_CALL_MS;
+    const limit = call.startedAt + maxMs + OVERTIME_MS;
     const check = () => {
         if (call.ended) return;
         const talking = call.speech.active || call.busy || aiIsTalking(call);
         if (talking && Date.now() < limit) call.hardStop = setTimeout(check, 500);
-        else endCall(call.id, "15 minute limit");
+        else endCall(call.id, maxMs < MAX_CALL_MS ? "free minutes used" : "15 minute limit");
     };
     check();
 }
@@ -777,6 +807,7 @@ export function endCall(callId, why = "ended") {
     const call = calls.get(callId);
     if (!call || call.ended) return;
     call.ended = true;
+    call.endedAt = Date.now();
     calls.delete(callId);
     clearInterval(call.ticker);
     clearTimeout(call.wrapTimer);
@@ -786,6 +817,9 @@ export function endCall(callId, why = "ended") {
     if (why !== "remote") callAction(callId, "terminate").catch(() => { /* call already over */ });
     console.log(`[WA call] ${callId} ended (${why}) after ${Math.round((Date.now() - call.startedAt) / 1000)}s`);
     record.callEnded(callId, { why, startedAt: call.startedAt, tasks: call.tasks });
+    // The call's time counts against the caller's free minutes
+    User.updateOne({ _id: call.user._id }, { $inc: { ai_call_seconds_used: Math.ceil((call.endedAt - call.startedAt) / 1000) } })
+        .catch((e) => console.error("[WA call] could not count the call's minutes:", e.message));
     afterCall(call, why).catch((e) => console.error("[WA call] after-call work failed:", e.message));
 }
 
@@ -818,17 +852,22 @@ async function callSummary(call) {
         const altData = await alt.json().catch(() => ({}));
         if (!alt.ok) return "";
         const au = altData.usage || {};
-        deductTokens(call.user._id, call.user.organization_id || null, chargeableTokens({ prompt_tokens: au.prompt_tokens || 0, completion_tokens: au.completion_tokens || 0 }, FALLBACK_MODEL), call.tokenSource).catch((e) => console.error("[WA call] token charge failed:", e.message));
+        chargeCall(call, { prompt_tokens: au.prompt_tokens || 0, completion_tokens: au.completion_tokens || 0 }, FALLBACK_MODEL);
         return String(altData.choices?.[0]?.message?.content || "").trim();
     }
     const u = data.usage || {};
-    deductTokens(call.user._id, call.user.organization_id || null, chargeableTokens({ prompt_tokens: u.input_tokens || 0, completion_tokens: u.output_tokens || 0 }, CALL_MODEL), call.tokenSource).catch(() => {});
+    chargeCall(call, { prompt_tokens: u.input_tokens || 0, completion_tokens: u.output_tokens || 0 }, CALL_MODEL);
     return (data.content || []).filter((b) => b.type === "text").map((b) => b.text).join(" ").trim();
 }
 
 async function afterCall(call, why) {
     if (why === "error" || /^connection/.test(why)) {
         const text = `Sorry, the call dropped${call.tasks.length ? ", but your request is saved and Classgrid AI is working on it" : ""}. You can call again anytime.`;
+        record.noteSentForCall(call.id, text);
+        await sendWhatsappText(call.from, text);
+    }
+    if (why === "free minutes used") {
+        const text = `Your free Classgrid AI call minutes for this period are used up${call.tasks.length ? ", but your request is saved and Classgrid AI is working on it" : ""}. Top up AI credits on ${CHAT_URL} to keep calling, or call again when your minutes reset.`;
         record.noteSentForCall(call.id, text);
         await sendWhatsappText(call.from, text);
     }
@@ -1240,12 +1279,12 @@ function filterAnswerSdp(sdp, publicIpv4) {
 const candidateSummary = (sdp) => sdp.split("\r\n").filter((l) => l.startsWith("a=candidate:"))
     .map((l) => { const p = l.split(" "); return `${p[7] || "?"} ${p[2]} ${p[4]}:${p[5]}`; }).join(", ") || "none";
 
-export async function answerCall({ id, from, sdp, user, tokenSource, callsLine = "" }) {
+export async function answerCall({ id, from, sdp, user, tokenSource, callsLine = "", maxMs = MAX_CALL_MS, freeUntil = 0 }) {
     const { RTCPeerConnection, nonstandard } = await loadWrtc();
     const pc = new RTCPeerConnection({ iceServers: [{ urls: "stun:stun.l.google.com:19302" }], portRange: { min: 10000, max: 60000 } });
     const source = new nonstandard.RTCAudioSource();
     const call = {
-        id, from, user, pc, source, tokenSource, callsLine,
+        id, from, user, pc, source, tokenSource, callsLine, maxMs, freeUntil,
         startedAt: Date.now(), ended: false, busy: false, tasks: [],
         messages: [], transcript: [],
         outQueue: [], outCurrent: null, outPos: 0, speechEndedAt: 0,
@@ -1317,8 +1356,8 @@ export async function answerCall({ id, from, sdp, user, tokenSource, callsLine =
         }
     }, 10);
 
-    call.wrapTimer = setTimeout(() => wrapUp(call), WRAP_UP_MS);
-    call.hardStop = setTimeout(() => timeUp(call), MAX_CALL_MS);
+    call.wrapTimer = setTimeout(() => wrapUp(call), Math.max(5000, call.maxMs - (MAX_CALL_MS - WRAP_UP_MS)));
+    call.hardStop = setTimeout(() => timeUp(call), call.maxMs);
 
     // Greeting
     const first = String(user.name || "").split(" ")[0];
@@ -1398,9 +1437,11 @@ export async function handleCallsWebhook(value) {
                 await sendWhatsappText(from, "This WhatsApp number is not linked to a Classgrid account. Sign in on https://chat.classgrid.in and verify this number, then call again.");
                 continue;
             }
-            // Same credit check as the chat; if the check itself fails the call is not answered
+            // Free call minutes first (Global AI Config, "Voice Calls"); past them, the same credit check as the chat
+            // (a call within the free minutes costs no tokens; a paid call is charged per turn)
+            const free = await freeCallSeconds(user).catch(() => ({ left: 0, limitMinutes: 0, resetAt: null }));
             const enough = await hasEnoughTokens(user._id, user.organization_id || null, 1).catch(() => null);
-            if (!enough?.allowed) {
+            if (!enough?.allowed && free.left <= 0) {
                 await callAction(c.id, "reject").catch(() => {});
                 await sendWhatsappText(from, /insufficient/i.test(enough?.reason || "")
                     ? `You're out of Classgrid AI credits right now. Top up on ${CHAT_URL} to use calls.`
@@ -1416,9 +1457,12 @@ export async function handleCallsWebhook(value) {
                 await sendWhatsappText(from, `You've used all ${MAX_CALLS_PER_DAY} Classgrid AI calls for the last 24 hours. You can call again after ${next} (India time).`);
                 continue;
             }
-            markBusy(number, MAX_CALL_MS / 1000 + 120);
+            // With no tokens to pay with, the call ends when the free minutes do
+            const maxMs = enough?.allowed ? MAX_CALL_MS : Math.min(MAX_CALL_MS, Math.max(10000, free.left * 1000));
+            const freeUntil = free.left > 0 ? Date.now() + free.left * 1000 : 0;
+            markBusy(number, maxMs / 1000 + 120);
             const callsLine = `(Call ${(today?.count || 0) + 1} of ${MAX_CALLS_PER_DAY} you can make in 24 hours.)`;
-            const answered = await answerCall({ id: c.id, from, sdp: c.session.sdp, user, tokenSource: enough.source || "personal", callsLine });
+            const answered = await answerCall({ id: c.id, from, sdp: c.session.sdp, user, tokenSource: enough?.source || "personal", callsLine, maxMs, freeUntil });
             if (answered) redis.zadd(CALLS_KEY(number), Date.now(), c.id).then(() => redis.expire(CALLS_KEY(number), 2 * 24 * 60 * 60)).catch(() => {});
         } catch (e) {
             console.error(`[WA call] ${c.id} failed:`, e.message);
