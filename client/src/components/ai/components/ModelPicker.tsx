@@ -14,6 +14,7 @@
 // The list mirrors docs/AI_MODEL_PICKER_LIST.md (models checked live on 8 Oct 2026).
 // The chosen id is sent to /api/ai/ask as `selectedModel`; "auto" lets the backend router decide.
 
+import { goToSettings } from "@/lib/settingsPath";
 import React from "react";
 import { Check, ChevronDown, Sparkles, Lock } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
@@ -184,7 +185,7 @@ export function ModelPicker({ value, onChange, disabled }: ModelPickerProps) {
     if (access?.disabledModels?.includes(value)) onChange(AUTO_MODEL_ID);
   }, [fableLocked, access, value, onChange]);
 
-  const openTopUp = () => window.dispatchEvent(new CustomEvent("open-ai-hub", { detail: { tab: "upgrade" } }));
+  const openTopUp = () => goToSettings("billing");
   const [thinking, setThinkingState] = React.useState<ThinkingLevel>(getThinkingLevel);
   const setThinking = (id: ThinkingLevel) => {
     setThinkingState(id);

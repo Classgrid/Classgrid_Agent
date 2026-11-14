@@ -37,6 +37,7 @@ import { newTerminalOutput } from "@/features/superadmin/components/LocalTermina
 import "highlight.js/styles/github-dark.css";
 import { ExpandedInputModal } from './ExpandedInputModal';
 import { AiHubModal } from "./AiHubModal";
+import { goToSettings } from "@/lib/settingsPath";
 
 import { SlashCommandMenu, slashCommandsFor, leadingSlashCommand, type SlashCommand } from "./SlashCommandMenu";
 
@@ -2278,6 +2279,9 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
   useEffect(() => {
     const handleOpenAiHub = (e: Event) => {
       const customEvent = e as CustomEvent;
+      // Usage and billing are Settings pages now (one place only)
+      if (customEvent.detail?.tab === "usage") { goToSettings("usage"); return; }
+      if (customEvent.detail?.tab === "credits" || customEvent.detail?.tab === "upgrade") { goToSettings("billing"); return; }
       if (customEvent.detail?.tab) {
         setAiHubInitialTab(customEvent.detail.tab);
       }
@@ -2295,10 +2299,8 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
       if (raw) { buyWish = JSON.parse(raw); sessionStorage.removeItem("classgrid:buy-plan"); }
     } catch { /* storage blocked */ }
     if (buyWish?.plan) {
-      // From a plan's button on classgrid.in/pricing (main.tsx kept it through sign-in): the Upgrade page opens and
-      // the payment of that plan starts right away, as if its button here was pressed
-      setAiHubInitialTab("upgrade");
-      setIsAiHubOpen(true);
+      // From a plan's button on classgrid.in/pricing (main.tsx kept it through sign-in): the payment of that plan
+      // starts right away, as if its button here was pressed
       if (searchParams.has("buy")) {
         searchParams.delete("buy"); searchParams.delete("term"); searchParams.delete("back");
         const rest = searchParams.toString();
@@ -2315,26 +2317,12 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
           toast.error(e?.response?.data?.error || e?.message || "Could not start the payment. Please try again.");
         }
       })();
-    } else if (searchParams.get("ai_payment") === "success" && searchParams.get("plan")) {
-      // A plan paid on billing.classgrid.in: the Plan page shows "Subscribed"
-      const paidPlan = String(searchParams.get("plan"));
-      setAiHubInitialTab("credits");
-      setIsAiHubOpen(true);
-      toast.success(`You're subscribed to ${paidPlan.charAt(0).toUpperCase() + paidPlan.slice(1)}. The receipt is in your email.`);
-      window.history.replaceState({}, '', window.location.pathname);
-    } else if (searchParams.get("ai_payment") === "success") {
-      setAiHubInitialTab("credits");
-      setIsAiHubOpen(true);
-      // Let the AiUpgradePanel handle the toast via another mechanism, or just show it here:
-      toast.success("Payment successful! AI Credits have been added to your account.");
-      const newUrl = window.location.pathname;
-      window.history.replaceState({}, '', newUrl);
-    } else if (searchParams.get("ai_payment") === "failed") {
-      setAiHubInitialTab("upgrade");
-      setIsAiHubOpen(true);
-      toast.error("Payment failed or was cancelled.");
-      const newUrl = window.location.pathname;
-      window.history.replaceState({}, '', newUrl);
+    } else if (searchParams.get("ai_payment")) {
+      // Back from billing.classgrid.in at the chat's address: Settings > Billing shows the result (and "Subscribed"
+      // for a plan)
+      const paidPlan = String(searchParams.get("plan") || "");
+      goToSettings("billing", `&ai_payment=${searchParams.get("ai_payment") === "success" ? "success" : "failed"}${paidPlan ? `&plan=${encodeURIComponent(paidPlan)}` : ""}`);
+      return;
     }
 
     // Desktop app: a top-up paid in the browser brings the app back with the result
@@ -2343,18 +2331,10 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
       const status = typeof detail === "string" ? detail : detail?.status || "success";
       const paidPlan = typeof detail === "object" && detail?.plan ? String(detail.plan) : "";
       const ok = status !== "failed";
-      if (ok && paidPlan) {
-        setAiHubInitialTab("credits");
-        setIsAiHubOpen(true);
-        queryClient.invalidateQueries({ queryKey: ["ai-plan-overview"] });
-        queryClient.invalidateQueries({ queryKey: ["my-ai-plan"] });
-        toast.success(`You're subscribed to ${paidPlan.charAt(0).toUpperCase() + paidPlan.slice(1)}. The receipt is in your email.`);
-        return;
-      }
-      setAiHubInitialTab(ok ? "credits" : "upgrade");
-      setIsAiHubOpen(true);
-      if (ok) toast.success("Payment successful! AI Credits have been added to your account.");
-      else toast.error("Payment failed or was cancelled.");
+      queryClient.invalidateQueries({ queryKey: ["ai-plan-overview"] });
+      queryClient.invalidateQueries({ queryKey: ["my-ai-plan"] });
+      // Settings > Billing shows the result
+      goToSettings("billing", `&ai_payment=${ok ? "success" : "failed"}${paidPlan ? `&plan=${encodeURIComponent(paidPlan)}` : ""}`);
     };
     window.addEventListener('classgrid:payment', onDesktopPayment);
 
@@ -6215,10 +6195,7 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
                                       setMessages(prev => prev.filter(m => m.id !== message.id));
                                     }}
                                     onDismiss={() => setMessages(prev => prev.filter(m => m.id !== message.id))}
-                                    onUpgrade={() => {
-                                      setAiHubInitialTab("upgrade");
-                                      setIsAiHubOpen(true);
-                                    }}
+                                    onUpgrade={() => goToSettings("billing")}
                                   />
                                 </div>
                               ) : message.content.trim() === "ai_blocked" ? (

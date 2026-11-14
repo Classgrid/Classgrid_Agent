@@ -172,10 +172,12 @@ export function SettingsBillingSection() {
   useEffect(() => {
     const r = params.get("ai_payment");
     if (!r) return;
-    if (r === "success") { toast.success("Payment successful! AI Credits have been added to your account."); setTab("invoices"); }
+    const paidPlan = params.get("plan") || "";
+    if (r === "success" && paidPlan) toast.success(`You're subscribed to ${paidPlan.charAt(0).toUpperCase() + paidPlan.slice(1)}. The receipt is in your email.`);
+    else if (r === "success") { toast.success("Payment successful! AI Credits have been added to your account."); setTab("invoices"); }
     else toast.error("Payment failed or was cancelled.");
     qc.invalidateQueries({ queryKey: ["ai-plan-overview"] }); qc.invalidateQueries({ queryKey: ["my-ai-history"] }); qc.invalidateQueries({ queryKey: ["my-ai-balance"] });
-    const p = new URLSearchParams(params); p.delete("ai_payment"); setParams(p, { replace: true });
+    const p = new URLSearchParams(params); p.delete("ai_payment"); p.delete("plan"); setParams(p, { replace: true });
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
     // A payment finished somewhere else (the payment page sends this to its opener)
@@ -218,7 +220,11 @@ export function SettingsBillingSection() {
             <div className="rounded-xl border border-border bg-card p-5">
               <div className="flex items-center justify-between gap-3">
                 <div className="text-sm text-muted-foreground">Current plan</div>
-                <a className={btnWhite} href={PRICING_URL} target="_blank" rel="noopener noreferrer">Upgrade</a>
+                <a className={btnWhite} href={PRICING_URL} target="_blank" rel="noopener noreferrer" onClick={(e) => {
+                  // Classgrid Code shows the pricing page in the computer's browser
+                  const desk = import.meta.env.VITE_EDITOR === "1" ? (window as unknown as { classgridDesktop?: { openExternal?: (url: string) => Promise<unknown> } }).classgridDesktop : undefined;
+                  if (desk?.openExternal) { e.preventDefault(); void desk.openExternal(PRICING_URL); }
+                }}>Upgrade</a>
               </div>
               <div className="text-[28px] font-semibold mt-2">{planName}</div>
               <div className="flex justify-between gap-4 text-[13px] text-muted-foreground mt-3.5"><span>{priceLine}</span>{data.enabled && data.plan.key !== "free" && data.plan.billing !== "granted" && <span>Does not renew by itself</span>}</div>

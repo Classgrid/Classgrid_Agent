@@ -14,15 +14,14 @@
 import React, { useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { 
-  X, Plug, Zap, TerminalSquare, Settings,  Activity, 
-  Coins,  
-  ArrowUpCircle,
+  X, Plug, Zap, TerminalSquare, Settings, Coins,  
+
   ChevronRight,
   ChevronLeft,
   CheckCircle2,
   Settings2,
   Sparkles,
-  CreditCard,
+
   MessageSquare,
   Wand2,
   Image as ImageIcon,
@@ -40,9 +39,6 @@ import { WhatsappConfigModal } from "./WhatsappConfigModal";
 import { SanityConfigModal } from "./SanityConfigModal";
 
 import { AiImagesGallery } from "./AiImagesGallery";
-import { AiUsageBar } from "./AiUsageBar";
-import { AiCreditsPanel } from "./credits/AiCreditsPanel";
-import { AiUpgradePanel } from "./credits/AiUpgradePanel";
 import { AiSkillsPanel } from "./skills/AiSkillsPanel";
 import { AiConnectedAppsPanel } from "./connected-apps/AiConnectedAppsPanel";
 import { AddConnectorModal } from "./custom-mcp/AddConnectorModal";
@@ -67,9 +63,7 @@ export const AI_HUB_TABS = [
   { id: "skills", label: "Skills", icon: Zap },
   // Outside apps (Claude, Cursor, ChatGPT) allowed through the Classgrid OAuth consent page
   { id: "connected-apps", label: "Connected apps", icon: KeyRound },
-  { id: "usage", label: "Usage", icon: Activity },
-  { id: "credits", label: "AI Credits", icon: CreditCard },
-  { id: "upgrade", label: "Upgrade", icon: ArrowUpCircle },
+  // (Usage and billing are Settings > Usage and Settings > Billing, owner 2026-11-14: one place only)
 ];
 
 const KEEP_LISTS = import.meta.env.VITE_DESKTOP === "1";
@@ -83,15 +77,6 @@ export function AiHubModal({ isOpen, onClose, onSendPrompt, initialTab = "plugin
     }
   }, [isOpen, initialTab]);
 
-  React.useEffect(() => {
-    const handleMessage = (event: MessageEvent) => {
-      if (event.data?.type === "CLASSGRID_PAYMENT_SUCCESS") {
-        setActiveTab("credits");
-      }
-    };
-    window.addEventListener("message", handleMessage);
-    return () => window.removeEventListener("message", handleMessage);
-  }, []);
 
   const [selectedPlugin, setSelectedPlugin] = useState<any>(null);
   const [connectedPlugins, setConnectedPlugins] = useState<string[]>([]);
@@ -606,24 +591,6 @@ export function AiHubModal({ isOpen, onClose, onSendPrompt, initialTab = "plugin
                     <div className="flex-1 overflow-y-auto custom-scrollbar">
                       <AiImagesGallery backendUrl={backendUrl} />
                     </div>
-                  </div>
-                ) : tab === "usage" ? (
-                  <div className="animate-in fade-in slide-in-from-bottom-4 duration-500 h-full flex flex-col">
-                    <h3 className="text-2xl font-bold text-foreground mb-2">AI Usage</h3>
-                    <p className="text-sm text-muted-foreground mb-8 max-w-xl">
-                      Monitor your AI token usage and limits across your personal account and organization.
-                    </p>
-                    <div className="w-full max-w-2xl bg-card border border-border rounded-xl p-6 shadow-sm">
-                        <AiUsageBar showExactTokens={false} />
-                    </div>
-                  </div>
-                ) : tab === "credits" ? (
-                  <div className="h-full flex-1 -m-8">
-                    <AiCreditsPanel />
-                  </div>
-                ) : tab === "upgrade" ? (
-                  <div className="h-full flex-1 -m-8">
-                    <AiUpgradePanel />
                   </div>
                 ) : tab === "skills" ? (
                   <div className="h-full flex-1">
