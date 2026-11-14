@@ -233,7 +233,7 @@ TOOLS & ERRORS
 - At most 5 searches/page reads per question (web, knowledge base, our site). Then stop, say it isn't available, give your best assessment, never fabricate.
 - Integrations (Zoom, Google Workspace, Notion, Slack, GitHub, etc.): connected means its tool is in your list, it is in the connected-integrations list, or its group is offered by load_tools. If connected, use it now (load it first if needed); never ask to connect or call open_integration_panel. Only if not connected: call open_integration_panel and say "I've opened the AI Hub for you. Please connect your account so I can automate this."
 
-ROUTING (right after brief thinking; load the tool's group first if needed): uploaded image you cannot already see: analyze_image with the URL; uploaded image the user wants changed, restyled or redrawn (a new style, an edit, a variation): edit_image with the image URL and what to change, never generate_image for that; uploaded document/PDF you cannot already read: parse_document with the URL; send email: send_email; PDF: generate_pdf; Word, Excel, PowerPoint or CSV file: write a Python script and run it with run_code (python-docx, openpyxl, python-pptx, csv), then share it with upload_sandbox_file_to_cdn; run code: run_code.
+ROUTING (right after brief thinking; load the tool's group first if needed): uploaded image you cannot already see: analyze_image with the URL; uploaded image the user wants changed, restyled or redrawn (a new style, an edit, a variation, a person from one picture put into another): edit_image with EVERY picture that matters in imageUrls (the scene first, then the people to add) and a prompt that says which picture is which ("the man in the second picture"), never generate_image for that; uploaded document/PDF you cannot already read: parse_document with the URL; send email: send_email; PDF: generate_pdf; Word, Excel, PowerPoint or CSV file: write a Python script and run it with run_code (python-docx, openpyxl, python-pptx, csv), then share it with upload_sandbox_file_to_cdn; run code: run_code.
 
 ${promptBlock("cf", `SAFETY: never give a plan or dose to stop, cut or change a prescription medicine, never help anyone hide things from their doctor, and in an emergency say to call 112 (India) or 911 (US) first. Fuller safety rules are added at the end when a message needs them.
 `)}
@@ -4893,7 +4893,7 @@ You work on the user's own Windows computer through their Classgrid desktop app,
                             const resData = await fetch(url, {
                                 method: 'POST',
                                 headers: { 'Content-Type': 'application/json', 'Authorization': token },
-                                body: JSON.stringify({ prompt: args.prompt, imageUrl: args.imageUrl, sessionId, userEmail, isIncognito, isInternalCall: true })
+                                body: JSON.stringify({ prompt: args.prompt, imageUrl: args.imageUrl, imageUrls: Array.isArray(args.imageUrls) ? args.imageUrls : undefined, sessionId, userEmail, isIncognito, isInternalCall: true })
                             });
                             const text = await resData.text();
                             let json;
@@ -8171,11 +8171,14 @@ export const generateImage = async (req, res) => {
     let imageTokenCharge = null;
     try {
         const { prompt, sessionId, isIncognito } = req.body;
-        // imageUrl: a picture the new one is made from (the chat's edit_image tool: an edit, a new style, a variation).
-        // Only an https link; it is fetched and handed to ElevenLabs with the prompt (Flux cannot do this, so there is
-        // no Cloudflare fallback for an edit).
-        const imageUrl = typeof req.body.imageUrl === "string" && /^https:\/\/\S+$/.test(req.body.imageUrl.trim()) ? req.body.imageUrl.trim() : "";
-        if (req.body.imageUrl && !imageUrl) return res.status(400).json({ error: "The picture to edit must be an https link." });
+        // imageUrl / imageUrls: the pictures the new one is made from (the chat's edit_image tool: an edit, a new
+        // style, a variation, a person from one picture put into the scene of another), up to 10, in the order the
+        // prompt names them ("the first picture", "the second picture"). Only https links; they are fetched and handed
+        // to ElevenLabs with the prompt (Flux cannot do this, so there is no Cloudflare fallback for an edit).
+        const givenUrls = [req.body.imageUrl, ...(Array.isArray(req.body.imageUrls) ? req.body.imageUrls : [])].filter((u) => typeof u === "string" && u.trim());
+        const imageUrls = [...new Set(givenUrls.map((u) => u.trim()).filter((u) => /^https:\/\/\S+$/.test(u)))].slice(0, 10);
+        if (givenUrls.length && imageUrls.length !== new Set(givenUrls.map((u) => u.trim())).size) return res.status(400).json({ error: "Every picture to edit must be an https link." });
+        const imageUrl = imageUrls[0] || "";
         // isInternalCall (the chat's generate_image tool) only skips saving to a chat session: the chat saves it itself.
         const isInternalCall = req.body.isInternalCall === true;
         // The image limit is checked and counted on the signed-in account, never on body.userEmail, and body flags
@@ -8308,11 +8311,11 @@ export const generateImage = async (req, res) => {
 
         if (eleven.elevenLabsEnabled()) {
             try {
-                let references = [];
-                if (imageUrl) {
-                    const src = await fetch(imageUrl, { signal: AbortSignal.timeout(30000) });
-                    if (!src.ok) throw new Error(`The picture to edit could not be fetched (${src.status})`);
-                    references = [{ buffer: Buffer.from(await src.arrayBuffer()), mimeType: src.headers.get("content-type") || "" }];
+                const references = [];
+                for (const u of imageUrls) {
+                    const src = await fetch(u, { signal: AbortSignal.timeout(30000) });
+                    if (!src.ok) throw new Error(`A picture to edit could not be fetched (${src.status})`);
+                    references.push({ buffer: Buffer.from(await src.arrayBuffer()), mimeType: src.headers.get("content-type") || "" });
                 }
                 const made = await eleven.generateImage(imageUrl ? prompt : enhancedPrompt, { references });
                 imageBuffer = made.buffer;

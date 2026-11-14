@@ -329,14 +329,15 @@ export const getMcpTools = () => [
   },
   {
     name: 'edit_image',
-    description: 'Edits an existing image based on a prompt (Image-to-Image). Use this when the user asks to modify, apply a style, or edit an image they uploaded. DO NOT use this to generate a new image from scratch.',
+    description: 'Makes a new image from one or more given images (image to image): an edit, a new style, a variation, a scene recreated, or a person from one picture put into another picture. Use this whenever the user uploaded a picture and wants something made from it. Give EVERY picture that matters in imageUrls, in the order you name them in the prompt (the scene or main picture first, then the people or things to add), and say in the prompt which is which ("add the man from the second picture to the first picture, standing on the right, keep his face exactly"). DO NOT use this to make a picture from words alone.',
     inputSchema: {
       type: 'object',
       properties: {
-        imageUrl: { type: 'string', description: 'The absolute URL of the original image to edit.' },
-        prompt: { type: 'string', description: 'The highly detailed prompt describing how the image should be edited.' }
+        imageUrls: { type: 'array', items: { type: 'string' }, description: 'The absolute URLs of every picture the new image is made from, up to 10, in the order the prompt names them.' },
+        imageUrl: { type: 'string', description: 'One picture (the same as a one-item imageUrls).' },
+        prompt: { type: 'string', description: 'What to make from the pictures: what to change, what to keep exactly (faces, clothes, pose), the style, and which picture is which.' }
       },
-      required: ['imageUrl', 'prompt']
+      required: ['prompt']
     }
   },
   {

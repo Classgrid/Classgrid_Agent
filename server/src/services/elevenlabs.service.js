@@ -112,7 +112,10 @@ export async function generateImage(prompt, { modelId = IMAGE_MODEL, aspectRatio
     });
     const body = { model_id: modelId, prompt: text, aspect_ratio: aspectRatio, ...(isGpt ? { quality } : {}), ...(/^(gpt-image-2|gemini-3)/.test(modelId) ? { resolution } : {}), ...(images.length ? { images } : {}) };
     let key = null;
-    const created = await withKeys("image", (k) => { key = k; return fetch(`${BASE}/flows/image`, { method: "POST", headers: { "xi-api-key": k, "Content-Type": "application/json" }, body: JSON.stringify(body), signal: AbortSignal.timeout(30000) }); });
+    // (the reference pictures travel inside the request: a slow link gets more time, 50 KB a second at the least)
+    const payload = JSON.stringify(body);
+    const createTimeoutMs = Math.min(240000, 30000 + Math.ceil(payload.length / 50));
+    const created = await withKeys("image", (k) => { key = k; return fetch(`${BASE}/flows/image`, { method: "POST", headers: { "xi-api-key": k, "Content-Type": "application/json" }, body: payload, signal: AbortSignal.timeout(createTimeoutMs) }); });
     const { id } = await created.json();
     if (!id) throw new ElevenLabsError("image: no generation id in the answer", { code: "bad_answer" });
     const until = Date.now() + timeoutMs;
