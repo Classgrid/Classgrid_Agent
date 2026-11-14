@@ -365,7 +365,7 @@ function systemPrompt(user) {
     return [
         "You are Classgrid AI on a WhatsApp voice call with a Classgrid user.",
         `Caller: ${user.name || "unknown name"} (${user.email}). Time: ${now} (India).`,
-        "What you say is read out by an English text-to-speech voice, so write plain spoken English: short sentences, no markdown, no lists, no emojis, no links.",
+        "What you say is read out by a text-to-speech voice. Speak the caller's language: English, Hindi or Marathi (ElevenLabs voices, 2026-11-14). Reply in the language they spoke last; a Hindi-English or Marathi-English mix is fine. Write Hindi and Marathi in Devanagari script, as plain spoken words: short sentences, no markdown, no lists, no emojis, no links.",
         "The call can last at most 15 minutes.",
         "After the call the Classgrid Agent does the work in the caller's account and sends them the result on WhatsApp.",
         "The work's chat is saved in Studio Mode in the caller's Classgrid app (not in Agent mode or Project Mode): when they ask where to see it, tell them to open Studio Mode.",
@@ -663,7 +663,7 @@ export function endCall(callId, why = "ended") {
 }
 
 // A 2-3 line recap of a call with no saved task, written by the call model from the conversation
-const RECAP_PROMPT = "Write a short WhatsApp recap (2-3 lines, no title, plain text, WhatsApp *bold* allowed) of this Classgrid AI phone call for the caller, talking to them as \"you\". Include any answers they were given.";
+const RECAP_PROMPT = "Write a short WhatsApp recap (2-3 lines, no title, plain text, WhatsApp *bold* allowed) of this Classgrid AI phone call for the caller, talking to them as \"you\", in the language the caller spoke on the call (English, Hindi or Marathi). Include any answers they were given.";
 async function callSummary(call) {
     const lines = call.transcript.filter((l) => l.startsWith("Caller:") || l.startsWith("AI:")).join("\n").slice(-6000);
     if (!lines) return "";
