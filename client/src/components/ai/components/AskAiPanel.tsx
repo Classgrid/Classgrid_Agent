@@ -2287,7 +2287,7 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
 
     // Handle post-payment redirect
     const searchParams = new URLSearchParams(window.location.search);
-    let buyWish: { plan?: string; term?: string } | null = null;
+    let buyWish: { plan?: string; term?: string; back?: string } | null = null;
     try {
       const raw = sessionStorage.getItem("classgrid:buy-plan");
       if (raw) { buyWish = JSON.parse(raw); sessionStorage.removeItem("classgrid:buy-plan"); }
@@ -2298,7 +2298,7 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
       setAiHubInitialTab("upgrade");
       setIsAiHubOpen(true);
       if (searchParams.has("buy")) {
-        searchParams.delete("buy"); searchParams.delete("term");
+        searchParams.delete("buy"); searchParams.delete("term"); searchParams.delete("back");
         const rest = searchParams.toString();
         window.history.replaceState({}, '', window.location.pathname + (rest ? `?${rest}` : ""));
       }
@@ -2309,11 +2309,18 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
           const { startPlanPayment } = await import("./credits/PlanCards");
           const { openCheckout } = await import("./credits/AiUpgradePanel");
           toast.message("Opening the payment page...");
-          await openCheckout(await startPlanPayment(wishKey, wishTerm));
+          await openCheckout(await startPlanPayment(wishKey, wishTerm, buyWish.back === "pricing" ? "pricing" : undefined));
         } catch (e: any) {
           toast.error(e?.response?.data?.error || e?.message || "Could not start the payment. Please try again.");
         }
       })();
+    } else if (searchParams.get("ai_payment") === "success" && searchParams.get("plan")) {
+      // A plan paid on billing.classgrid.in: the Plan page shows "Subscribed"
+      const paidPlan = String(searchParams.get("plan"));
+      setAiHubInitialTab("plan");
+      setIsAiHubOpen(true);
+      toast.success(`You're subscribed to ${paidPlan.charAt(0).toUpperCase() + paidPlan.slice(1)}. The receipt is in your email.`);
+      window.history.replaceState({}, '', window.location.pathname);
     } else if (searchParams.get("ai_payment") === "success") {
       setAiHubInitialTab("credits");
       setIsAiHubOpen(true);

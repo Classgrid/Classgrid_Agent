@@ -84,7 +84,7 @@ if (!isDesktopApp && import.meta.env.VITE_EDITOR !== "1") {
   try {
     const q = new URLSearchParams(window.location.search);
     const buy = String(q.get("buy") || "").toLowerCase();
-    if (/^[a-z]{2,20}$/.test(buy)) sessionStorage.setItem("classgrid:buy-plan", JSON.stringify({ plan: buy, term: q.get("term") === "year" ? "year" : "month" }));
+    if (/^[a-z]{2,20}$/.test(buy)) sessionStorage.setItem("classgrid:buy-plan", JSON.stringify({ plan: buy, term: q.get("term") === "year" ? "year" : "month", back: q.get("back") === "pricing" ? "pricing" : "" }));
   } catch { /* storage blocked: the visitor picks the plan in the chat */ }
 }
 // Desktop app: Google Sans, for Studio's new-chat greeting (AskAiPanel)

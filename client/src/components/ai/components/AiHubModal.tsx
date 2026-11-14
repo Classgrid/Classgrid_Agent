@@ -28,7 +28,8 @@ import {
   Image as ImageIcon,
   KeyRound,
   Search,
-  Plus
+  Plus,
+  Crown
 } from "lucide-react";
 import { Spinner } from "@/components/marketing_ui/spinner";
 import { cn } from "@/lib/utils";
@@ -40,8 +41,9 @@ import { WhatsappConfigModal } from "./WhatsappConfigModal";
 import { SanityConfigModal } from "./SanityConfigModal";
 
 import { AiImagesGallery } from "./AiImagesGallery";
-import { AiUsageBar } from "./AiUsageBar";
 import { AiCreditsPanel } from "./credits/AiCreditsPanel";
+import { PlanTab } from "./credits/PlanTab";
+import { UsageTab } from "./credits/UsageTab";
 import { AiUpgradePanel } from "./credits/AiUpgradePanel";
 import { AiSkillsPanel } from "./skills/AiSkillsPanel";
 import { AiConnectedAppsPanel } from "./connected-apps/AiConnectedAppsPanel";
@@ -67,6 +69,8 @@ export const AI_HUB_TABS = [
   { id: "skills", label: "Skills", icon: Zap },
   // Outside apps (Claude, Cursor, ChatGPT) allowed through the Classgrid OAuth consent page
   { id: "connected-apps", label: "Connected apps", icon: KeyRound },
+  // The plan (everything inside it, "Subscribed"), what is used of it, the credits, and Upgrade (owner, 2026-11-14)
+  { id: "plan", label: "Plan", icon: Crown },
   { id: "usage", label: "Usage", icon: Activity },
   { id: "credits", label: "AI Credits", icon: CreditCard },
   { id: "upgrade", label: "Upgrade", icon: ArrowUpCircle },
@@ -607,16 +611,10 @@ export function AiHubModal({ isOpen, onClose, onSendPrompt, initialTab = "plugin
                       <AiImagesGallery backendUrl={backendUrl} />
                     </div>
                   </div>
+                ) : tab === "plan" ? (
+                  <PlanTab onUpgrade={() => setActiveTab("upgrade")} />
                 ) : tab === "usage" ? (
-                  <div className="animate-in fade-in slide-in-from-bottom-4 duration-500 h-full flex flex-col">
-                    <h3 className="text-2xl font-bold text-foreground mb-2">AI Usage</h3>
-                    <p className="text-sm text-muted-foreground mb-8 max-w-xl">
-                      Monitor your AI token usage and limits across your personal account and organization.
-                    </p>
-                    <div className="w-full max-w-2xl bg-card border border-border rounded-xl p-6 shadow-sm">
-                        <AiUsageBar showExactTokens={false} />
-                    </div>
-                  </div>
+                  <UsageTab onUpgrade={() => setActiveTab("upgrade")} />
                 ) : tab === "credits" ? (
                   <div className="h-full flex-1 -m-8">
                     <AiCreditsPanel />

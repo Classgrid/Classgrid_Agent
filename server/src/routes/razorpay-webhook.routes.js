@@ -675,6 +675,35 @@ router.post("/razorpay", express.raw({ type: "application/json" }), async (req, 
                         paymentMethod: paymentEntity.method || "",
                         paymentTime: paymentEntity.created_at ? new Date(paymentEntity.created_at * 1000) : new Date(),
                     }).catch((e) => console.error("[Razorpay Webhook] PlatformTransaction for the plan failed:", e.message));
+                    // The receipt, by email
+                    try {
+                        const { sendEmail } = await import("../services/aws-ses.service.js");
+                        const { baseTemplate } = await import("../services/email-templates.service.js");
+                        const PlanConfig = (await import("../models/PlanConfig.js")).default;
+                        const planRow = await PlanConfig.findOne({ key: planKey }).lean().catch(() => null);
+                        const planName = planRow?.name || planKey.charAt(0).toUpperCase() + planKey.slice(1);
+                        const to = paymentEntity.email || user.email;
+                        const fmt = (d) => new Date(d).toLocaleDateString("en-IN", { day: "numeric", month: "long", year: "numeric", timeZone: "Asia/Kolkata" });
+                        const lines = (planRow?.features_text || []).map((l) => `<li style="margin:4px 0">${String(l).replace(/[<>&]/g, (c) => ({ "<": "&lt;", ">": "&gt;", "&": "&amp;" }[c]))}</li>`).join("");
+                        const html = baseTemplate({
+                            title: `You're subscribed to Classgrid ${planName}`,
+                            content: `
+                                <h2 style="margin:0 0 12px">You're subscribed to Classgrid ${planName}</h2>
+                                <p>Hi ${String(user.name || "there").replace(/[<>&]/g, "")}, thank you. Your ${planName} plan is on from ${fmt(from)} to ${fmt(expiresAt)}.</p>
+                                <table style="border-collapse:collapse;margin:16px 0" cellpadding="6">
+                                    <tr><td style="color:#666">Plan</td><td><strong>Classgrid ${planName}</strong> (${term === "year" ? "1 year" : "1 month"})</td></tr>
+                                    <tr><td style="color:#666">Amount paid</td><td><strong>₹${Number(amountInr).toLocaleString("en-IN")}</strong> (GST included)</td></tr>
+                                    <tr><td style="color:#666">Payment id</td><td>${String(paymentId)}</td></tr>
+                                    <tr><td style="color:#666">Paid on</td><td>${fmt(new Date())}</td></tr>
+                                </table>
+                                ${lines ? `<p style="margin:0 0 4px">What ${planName} gives you:</p><ul style="margin:0 0 16px;padding-left:20px">${lines}</ul>` : ""}
+                                <p>Nothing renews by itself: when the period ends, buy it again from the Upgrade page. Questions: reply to this email.</p>
+                                <p><a href="https://chat.classgrid.in/c" style="display:inline-block;background:#111;color:#fff;padding:10px 18px;border-radius:8px;text-decoration:none">Open Classgrid</a></p>`,
+                        });
+                        if (to) await sendEmail({ to, subject: `Receipt: Classgrid ${planName} plan, ₹${Number(amountInr).toLocaleString("en-IN")}`, html, fromName: "Classgrid Billing", fromEmail: "billing@classgrid.in", userId });
+                    } catch (mailErr) {
+                        console.error("[Razorpay Webhook] plan receipt email failed:", mailErr.message);
+                    }
                     const io = req.app.get("io");
                     if (io) {
                         io.to(userId.toString()).emit("ai_token_update");

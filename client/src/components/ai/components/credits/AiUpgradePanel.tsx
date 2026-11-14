@@ -24,6 +24,7 @@ import { BlueSlider } from "@/components/marketing_ui/BlueSlider";
 import { toast } from "sonner";
 import { useCurrentUser } from "@/features/auth/queries/useCurrentUser";
 import { PlanCards, useMyPlan, usePlans, inr, type Term } from "./PlanCards";
+import { CheckCircle2 } from "lucide-react";
 
 const WEBSITE = import.meta.env.VITE_DESKTOP !== "1" && import.meta.env.VITE_EDITOR !== "1";
 const PRICING_URL = import.meta.env.VITE_PRICING_URL || "https://classgrid.in/pricing";
@@ -183,7 +184,27 @@ export function AiUpgradePanel() {
                     You are on <span className="font-medium text-foreground">{planName}</span>{until ? ` until ${until}` : ""}. Buying again adds the time after that.
                   </p>
                 )}
-                <PlanCards term={term} onCheckout={openCheckout} />
+                {WEBSITE ? (
+                  // The website: the plans live on classgrid.in/pricing; a plan picked there starts its payment back here
+                  <div className="rounded-2xl border border-border bg-card p-6 flex flex-col sm:flex-row sm:items-center gap-5">
+                    <div className="flex-1">
+                      <div className="flex items-center gap-2 font-semibold text-foreground text-lg">
+                        {mine?.key && mine.key !== "free" ? <CheckCircle2 className="w-5 h-5 text-emerald-500" /> : <Crown className="w-5 h-5 text-amber-500" />}
+                        {mine?.key && mine.key !== "free" ? `Subscribed to ${planName}` : "You are on the Free plan"}
+                      </div>
+                      <p className="text-sm text-muted-foreground mt-1">
+                        {mine?.key && mine.key !== "free"
+                          ? `${until ? `Until ${until}. ` : ""}Upgrade to a bigger plan, or add another ${term} to this one, on the pricing page.`
+                          : "Pro gives Claude, more pictures, calls and projects; Max gives five times Pro with Claude Fable. Pick one on the pricing page and the payment opens here."}
+                      </p>
+                    </div>
+                    <Button size="lg" onClick={() => { window.location.href = PRICING_URL; }}>
+                      {mine?.key && mine.key !== "free" ? "Upgrade" : "See plans and buy"} <ExternalLink className="w-4 h-4 ml-2" />
+                    </Button>
+                  </div>
+                ) : (
+                  <PlanCards term={term} onCheckout={openCheckout} />
+                )}
                 <p className="text-xs text-muted-foreground mt-3">Prices in ₹, GST included. A plan is paid once for its month or year; nothing renews by itself.</p>
               </div>
             )}

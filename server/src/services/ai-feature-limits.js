@@ -170,7 +170,7 @@ const directSendKey = (userId) => `ai:wa-direct:${userId}`;
  * in the next 7 days count too, so several repeats can't together go over the limit.
  * Returns { allowed, limit, used }.
  */
-export async function checkWhatsappLimit(user, { includeUpcomingRepeats = false } = {}) {
+export async function checkWhatsappLimit(user, { includeUpcomingRepeats = false, readOnly = false } = {}) {
     const [{ default: GlobalAiConfig }, { default: Organization }, { default: AiSchedule }] = await Promise.all([
         import("../models/GlobalAiConfig.js"),
         import("../models/Organization.js"),
@@ -242,7 +242,7 @@ export async function checkWhatsappLimit(user, { includeUpcomingRepeats = false 
     if (!allowed) {
         const { canPayExtra, chargeExtra, extraOfferText } = await import("./extra-usage.service.js");
         const extra = await canPayExtra(user, "whatsapp");
-        if (extra.allowed && !includeUpcomingRepeats) {
+        if (extra.allowed && !includeUpcomingRepeats && !readOnly) {
             extraCredits = await chargeExtra(user, "whatsapp", 1, extra.price);
             allowed = true;
         } else {

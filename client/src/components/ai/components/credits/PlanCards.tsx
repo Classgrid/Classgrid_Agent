@@ -29,8 +29,8 @@ export const usePlans = () => useQuery({ queryKey: ["ai-plans"], queryFn: async 
 export const useMyPlan = () => useQuery({ queryKey: ["my-ai-plan"], queryFn: async () => (await api.get("/api/ai/plan")).data as MyPlan });
 
 /** Starts the payment of a plan for a month or a year and returns the checkout link (billing.classgrid.in) */
-export async function startPlanPayment(key: string, term: Term): Promise<string> {
-  const data = (await api.post("/api/ai/topup/plan", { plan: key, term, ...desktop() })).data?.data;
+export async function startPlanPayment(key: string, term: Term, returnTo?: "pricing"): Promise<string> {
+  const data = (await api.post("/api/ai/topup/plan", { plan: key, term, ...(returnTo ? { returnTo } : {}), ...desktop() })).data?.data;
   if (!data?.checkout_url) throw new Error("Could not start the payment. Please try again.");
   return data.checkout_url as string;
 }

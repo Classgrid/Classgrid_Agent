@@ -82,6 +82,7 @@ import { streamAskAi, clientToolResult, pcToolResult, localJobDone, turnEvents, 
 
 import { getFavicon } from "../controllers/ai-favicon.controller.js";
 import { speakAnswer } from "../controllers/ai-speak.controller.js";
+import { getPlanOverview } from "../controllers/ai-plan-overview.controller.js";
 import { importChatSession } from "../controllers/ai-chat-import.controller.js";
 import { listStudioShots } from "../services/studio-browser-tools.js";
 import { answerPermission, listBrowserSites, setBrowserSite } from "../services/permission-gate.js";
@@ -179,6 +180,8 @@ router.get("/plans", isAuthenticated, async (req, res) => {
         res.status(500).json({ error: err.message });
     }
 });
+// The plan and every usage count, for the AI hub's Plan and Usage pages
+router.get("/plan/overview", isAuthenticated, getPlanOverview);
 router.get("/plan", isAuthenticated, async (req, res) => {
     try {
         const { planOf, planKeyOf, plansEnabled } = await import("../services/plan-limits.service.js");

@@ -65,7 +65,7 @@ function checkoutUrl(rawToken) {
 
 // One payment through the platform Razorpay account and billing.classgrid.in: a Razorpay order, the billing rows, an
 // OTP email, and the checkout link. Used by AI top-ups (payment_type AI_TOPUP) and plan purchases (AI_PLAN).
-async function startPlatformPayment(req, res, { amountInr, paymentType, label, notes: extraNotes = {}, otpKeyPrefix }) {
+async function startPlatformPayment(req, res, { amountInr, paymentType, label, notes: extraNotes = {}, otpKeyPrefix, returnUrl = null }) {
     let paymentOrder;
     let paymentAttempt;
     let handoff;
@@ -147,7 +147,7 @@ async function startPlatformPayment(req, res, { amountInr, paymentType, label, n
             // app again with a classgrid:// link instead of loading the app's screens in a browser tab
             return_url: /^http:\/\/(127\.0\.0\.1|localhost):47821$/.test(String(req.headers.origin || "")) || req.body?.clientApp === "desktop"
                 ? "classgrid://payment"
-                : `${req.headers.origin || "https://app.classgrid.in"}?ai_payment=success`,
+                : (returnUrl || `${req.headers.origin || "https://app.classgrid.in"}?ai_payment=success`),
             clientIp: req.ip,
             userAgent: String(req.headers["user-agent"] || "").slice(0, 300),
             context: { label, payerName: payerName, phone: organization.billing_settings?.phone || "" },
@@ -212,8 +212,15 @@ export const buyPlan = async (req, res) => {
         const amountInr = Number(plan[priceField]);
         if (!Number.isFinite(amountInr) || amountInr <= 0) return res.status(400).json({ success: false, error: "This plan has no price for that term." });
         const label = `Classgrid ${plan.name} plan (${term === "year" ? "1 year" : "1 month"})`;
+        // After paying: back to classgrid.in/pricing when the plan was picked there (returnTo "pricing"), else to the
+        // chat that started it, with the plan's key so the chat can say "Subscribed"
+        const pricingUrl = String(process.env.PRICING_PAGE_URL || "https://classgrid.in/pricing");
+        const origin = String(req.headers.origin || "https://chat.classgrid.in");
+        const returnUrl = req.body?.returnTo === "pricing"
+            ? `${pricingUrl}?subscribed=${encodeURIComponent(key)}&term=${term}`
+            : `${origin}?ai_payment=success&plan=${encodeURIComponent(key)}`;
         return startPlatformPayment(req, res, {
-            amountInr, paymentType: "AI_PLAN", label, otpKeyPrefix: "ai-plan-otp",
+            amountInr, paymentType: "AI_PLAN", label, otpKeyPrefix: "ai-plan-otp", returnUrl,
             notes: { plan_key: key, plan_term: term, plan_student: student ? "1" : "0", amount_inr: String(amountInr) },
         });
     } catch (error) {
