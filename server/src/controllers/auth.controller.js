@@ -3707,9 +3707,8 @@ async function sendNewDeviceCode(user, req, how) {
 // Native Google sign-in (the Classgrid Android app): POST /api/auth/chat/google-native { idToken }
 // The phone's own Google account picker gives an ID token made out to Classgrid's web client; google.service.js
 // verifies it against GOOGLE_CLIENT_ID. The account must already exist. On a device the account has not used
-// before, the same new-device email code as the browser sign-in applies: the answer is 202 { code: "DEVICE_VERIFY",
-// email }, the app shows its code screen and posts /api/auth/verify-device { email, otp }, which signs it in.
-// Otherwise the answer is { token, user } and the app is signed in (2026-11-14, with the Android app).
+// before, the phone is trusted without an email code (Google's own picker has proved the account). The answer
+// is { token, user } and the app is signed in (2026-11-14, with the Android app).
 // ─────────────────────────────────────────────
 export const googleNativeLogin = async (req, res) => {
     try {
@@ -3731,18 +3730,9 @@ export const googleNativeLogin = async (req, res) => {
             return res.status(403).json({ message: "This account is suspended." });
         }
 
-        // A device the account has not used before gets the email code (not on the first-ever login, for sandbox
-        // accounts, or for @classgrid.in team accounts: the same rules as the browser sign-in)
-        const isFirstLogin = !user.lastLoginAt;
-        const isInternal = email.endsWith("@classgrid.in");
-        if (!isFirstLogin && !user.isSandbox && !isInternal) {
-            const { fingerprint } = getDeviceFingerprint(req);
-            const known = Array.isArray(user.trustedDevices) && user.trustedDevices.some((d) => d.fingerprint === fingerprint);
-            if (!known) {
-                await sendNewDeviceCode(user, req, "Sign in with Google");
-                return res.status(202).json({ code: "DEVICE_VERIFY", email, message: "New device detected. We sent a 6-digit code to your email." });
-            }
-        }
+        // No new-device email code here: the phone's own Google account picker has already proved the account is
+        // this person's, so the phone is added to the trusted devices and signed in (2026-11-14, Nikhil: one tap,
+        // like other apps; the code made every phone sign-in stop at "no login came back").
 
         try {
             await checkAndRegisterDevice(user, req);
