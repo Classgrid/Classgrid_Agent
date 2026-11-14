@@ -8317,7 +8317,8 @@ export const generateImage = async (req, res) => {
                     if (!src.ok) throw new Error(`A picture to edit could not be fetched (${src.status})`);
                     references.push({ buffer: Buffer.from(await src.arrayBuffer()), mimeType: src.headers.get("content-type") || "" });
                 }
-                const made = await eleven.generateImage(imageUrl ? prompt : enhancedPrompt, { references });
+                // (an edit with given pictures is made at high quality: faces and details from the pictures are kept better)
+                const made = await eleven.generateImage(imageUrl ? prompt : enhancedPrompt, { references, quality: references.length ? "high" : "medium" });
                 imageBuffer = made.buffer;
                 imageMime = made.mimeType;
                 imageModel = `elevenlabs/${made.model}`;
