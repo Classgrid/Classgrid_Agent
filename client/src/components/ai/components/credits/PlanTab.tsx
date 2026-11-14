@@ -115,7 +115,7 @@ export function PlanTab({ onUpgrade }: { onUpgrade: () => void }) {
           </p>
         </div>
         <Button onClick={onUpgrade}>
-          {subscribed ? "Add time or change plan" : "Upgrade"} <ArrowUpRight className="w-4 h-4 ml-1.5" />
+          {subscribed ? "Manage plan" : "Upgrade"} <ArrowUpRight className="w-4 h-4 ml-1.5" />
         </Button>
       </div>
 

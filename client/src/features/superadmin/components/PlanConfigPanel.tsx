@@ -160,7 +160,7 @@ export function PlanConfigPanel() {
       <div className="p-5 border-b border-border flex items-start justify-between gap-4 flex-wrap">
         <div>
           <h2 className="text-lg font-semibold text-foreground">Plans</h2>
-          <p className="text-sm text-muted-foreground">Free, Pro, Max and Enterprise: every limit and price, editable any time. -1 means unlimited, 0 means not included. With the switch off, the global limits above apply to everyone.</p>
+          <p className="text-sm text-muted-foreground">Free, Pro, Max and Enterprise: every limit and price, editable any time. -1 means unlimited, 0 means not included. With the switch off, the global limits on the AI Usage page apply to everyone.</p>
         </div>
         <div className="flex items-center gap-3">
           <Label htmlFor="plans-enabled" className="text-sm font-medium">{data.enabled ? "Plans are on" : "Plans are off"}</Label>

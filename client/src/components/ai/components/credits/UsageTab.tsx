@@ -74,7 +74,7 @@ export function UsageTab({ onUpgrade }: { onUpgrade?: () => void }) {
         <div>
           <h3 className="text-2xl font-bold text-foreground mb-1">Usage</h3>
           <p className="text-sm text-muted-foreground max-w-xl">
-            Each limit of your {data.enabled ? data.plan.name : "account"} plan is separate and tracked on its own: Cloudflare models, Claude models, chats, images, voice, WhatsApp, projects and storage.
+            Every limit of your {data.enabled ? data.plan.name : "account"} plan, each tracked on its own.
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -95,22 +95,22 @@ export function UsageTab({ onUpgrade }: { onUpgrade?: () => void }) {
           <div className="bg-muted/30 border border-border rounded-xl p-4">
             <div className="text-xs text-muted-foreground flex items-center gap-1"><Wallet className="w-3.5 h-3.5" /> Top-up credits</div>
             <div className="text-lg font-bold text-foreground">{n(data.balance.topup)}</div>
-            <div className="text-[11px] text-muted-foreground">for chat past the limits and for extra images, messages and voice</div>
+            <div className="text-[11px] text-muted-foreground">Spent only after the plan's limits</div>
           </div>
           <div className="bg-muted/30 border border-border rounded-xl p-4">
             <div className="text-xs text-muted-foreground">Granted credits</div>
             <div className="text-lg font-bold text-foreground">{n(data.balance.promotion)}</div>
-            <div className="text-[11px] text-muted-foreground">{n(data.balance.credits_per_inr)} credits per ₹1 on top-up</div>
+            <div className="text-[11px] text-muted-foreground">Given by Classgrid</div>
           </div>
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-          <Card icon={Cpu} title="Cloudflare models" note="DeepSeek, GLM, Gemma, Llama, GPT-OSS, Mistral and Auto. Their own credits; Claude is not counted here.">
+          <Card icon={Cpu} title="Cloudflare models" note="DeepSeek, GLM, Gemma, Llama, GPT-OSS, Mistral and Auto. Claude is not counted here.">
             <Line label={`Credits this window${u.credits_window?.periodText ? ` (${u.credits_window.periodText})` : ""}`} meter={u.credits_window} resetLabel="Refills" />
             <Line label="Credits this week" meter={u.credits_week} resetLabel="Week ends" />
           </Card>
 
-          <Card icon={Sparkles} title="Claude models" note="Haiku, Sonnet, Opus and Fable. Their own weekly credits, separate from the Cloudflare models.">
+          <Card icon={Sparkles} title="Claude models" note="Haiku, Sonnet, Opus and Fable. Their own weekly credits.">
             <Line label="Claude credits this week" meter={u.claude_week} resetLabel="Week ends" />
             <Line label="Claude Fable share (inside the Claude credits)" meter={u.fable_week} resetLabel="Week ends" />
           </Card>

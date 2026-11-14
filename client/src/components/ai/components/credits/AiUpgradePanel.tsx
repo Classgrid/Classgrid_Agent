@@ -123,7 +123,7 @@ export function AiUpgradePanel() {
         <div>
           <h2 className="text-2xl font-bold mb-1">{plansOn ? "Plans and credits" : "Upgrade AI Credits"}</h2>
           <p className="text-muted-foreground text-sm">
-            {plansOn ? "Pick a plan for a month or a year, or top up credits any time." : "Purchase additional AI Credits to continue using the assistant seamlessly."}
+            {plansOn ? "Your plan, and credits you can add any time." : "Purchase additional AI Credits to continue using the assistant seamlessly."}
           </p>
         </div>
       </div>
@@ -153,14 +153,14 @@ export function AiUpgradePanel() {
                 <div className="bg-indigo-500/10 p-2 rounded-lg"><Wallet className="w-5 h-5 text-indigo-500" /></div>
                 <div>
                   <div className="text-sm text-muted-foreground">Top-up credits</div>
-                  <div className="font-bold text-foreground">{formatNumber(balance?.ai_credits_balance || 0)} Credits</div>
-                  <div className="text-xs text-muted-foreground">also pay for extra images, messages and voice</div>
+                  <div className="font-bold text-foreground">{formatNumber(balance?.ai_credits_balance || 0)}</div>
+                  <div className="text-xs text-muted-foreground">Spent only after the plan's limits</div>
                 </div>
               </div>
               {plansOn && lim && mine?.week ? (
                 <div className="space-y-2">
-                  <Meter label="Credits this week" used={mine.week.used} cap={lim.tokens_per_week} />
-                  <Meter label="Claude credits this week" used={mine.week.claude_used} cap={lim.claude_credits_per_week} />
+                  <Meter label="Cloudflare models this week" used={mine.week.used} cap={lim.tokens_per_week} />
+                  <Meter label="Claude models this week" used={mine.week.claude_used} cap={lim.claude_credits_per_week} />
                   {weekEnds && <div className="text-[11px] text-muted-foreground">Week ends {weekEnds}</div>}
                 </div>
               ) : null}
@@ -222,7 +222,7 @@ export function AiUpgradePanel() {
               </h3>
               {plansOn && (
                 <p className="text-sm text-muted-foreground mb-4">
-                  Credits for more chat on any plan. Once your plan's images, WhatsApp messages, voice replies or voice input are used up, each extra one is paid from these credits too.
+                  Top-up credits are spent only after your plan's limits: more chat, and extra images, WhatsApp messages, voice replies and voice input.
                 </p>
               )}
 
