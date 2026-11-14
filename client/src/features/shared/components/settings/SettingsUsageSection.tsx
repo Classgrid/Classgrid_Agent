@@ -4,6 +4,22 @@
 // Settings > Billing.
 import { Skeleton } from "@/components/marketing_ui/skeleton";
 import { usePlanOverview, useUsageHistory, whenText, inText, timeText, dayText, n, type Meter } from "@/features/shared/queries/usePlanOverview";
+import { MODEL_GROUPS } from "@/components/ai/components/ModelPicker";
+
+// The model's name as the model picker shows it ("GLM 5.3"), never the provider path ("@cf/zai-org/glm-5.3"). A model
+// the picker does not list gets its last part written out ("deepseek-v4.1-flash-1017" -> "Deepseek V4.1 Flash")
+const MODEL_NAMES = new Map(MODEL_GROUPS.flatMap((g) => g.models.map((m) => [m.id, m.name] as const)));
+function modelName(id: string) {
+  const known = MODEL_NAMES.get(id);
+  if (known) return known;
+  const last = String(id || "").split("/").pop() || id;
+  return last
+    .replace(/-\d{3,}$/, "") // a date or build number at the end
+    .split(/[-_]+/)
+    .filter(Boolean)
+    .map((w) => (/^v?\d/.test(w) ? w.toUpperCase() : w.charAt(0).toUpperCase() + w.slice(1)))
+    .join(" ");
+}
 
 function pctOf(m: Meter) {
   if (!m || m.limit === null || m.limit <= 0) return 0;
@@ -108,7 +124,7 @@ export function SettingsUsageSection() {
                 <thead><tr className="text-xs text-muted-foreground text-left"><th className="font-medium px-5 py-3 border-b border-border">Time</th><th className="font-medium px-5 py-3 border-b border-border">Model</th><th className="font-medium px-5 py-3 border-b border-border">What</th><th className="font-medium px-5 py-3 border-b border-border text-right">Credits</th></tr></thead>
                 <tbody>
                   {hist.events.map((e, i) => (
-                    <tr key={i}><td className="px-5 py-3 border-b border-border last:border-b-0 whitespace-nowrap">{timeText(e.at)}</td><td className="px-5 py-3 border-b border-border">{e.model}</td><td className="px-5 py-3 border-b border-border">{e.what}</td><td className="px-5 py-3 border-b border-border text-right tabular-nums">{n(e.credits)}</td></tr>
+                    <tr key={i}><td className="px-5 py-3 border-b border-border last:border-b-0 whitespace-nowrap">{timeText(e.at)}</td><td className="px-5 py-3 border-b border-border">{modelName(e.model)}</td><td className="px-5 py-3 border-b border-border">{e.what}</td><td className="px-5 py-3 border-b border-border text-right tabular-nums">{n(e.credits)}</td></tr>
                   ))}
                 </tbody>
               </table>
