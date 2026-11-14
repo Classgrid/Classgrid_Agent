@@ -282,6 +282,21 @@ router.get("/desktop-done", (req, res) => {
 <a href="${link}" style="display:inline-block;background:#ededed;color:#0a0a0a;border-radius:999px;padding:10px 20px;font-size:14px;font-weight:600;text-decoration:none">Open Classgrid</a></div>
 <script>location.href=${JSON.stringify(link)};</script></body>`);
 });
+// The same sign-in on a device the account has not used before: the server has emailed a code; this page hands the
+// code step to the app (classgrid://login?device_verify=true), which shows it and posts /api/auth/verify-device.
+router.get("/desktop-verify", (req, res) => {
+    const email = String(req.query.email || "").trim().slice(0, 254);
+    const provider = String(req.query.provider || "").replace(/[^a-z0-9_-]/gi, "").slice(0, 32);
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return res.status(400).send("Missing email.");
+    const shown = email.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+    const link = `classgrid://login?device_verify=true&email=${encodeURIComponent(email)}&provider=${encodeURIComponent(provider)}`;
+    res.set("Content-Type", "text/html").send(`<!doctype html><meta charset="utf-8"><title>Classgrid</title>
+<body style="margin:0;height:100vh;display:flex;align-items:center;justify-content:center;background:#0a0a0a;color:#ededed;font-family:system-ui,sans-serif">
+<div style="text-align:center;max-width:380px;padding:24px"><h1 style="font-size:22px;font-weight:600;margin:0 0 8px">New device detected</h1>
+<p style="color:#a1a1a1;font-size:14px;line-height:1.6;margin:0 0 20px">We emailed a 6-digit code to ${shown}. Go back to the Classgrid app and enter it there. If the app didn't open, click the button.</p>
+<a href="${link}" style="display:inline-block;background:#ededed;color:#0a0a0a;border-radius:999px;padding:10px 20px;font-size:14px;font-weight:600;text-decoration:none">Open Classgrid</a></div>
+<script>location.href=${JSON.stringify(link)};</script></body>`);
+});
 // Classgrid Code (the full editor): the Classgrid app hands its login to the editor with a one-time code (60 seconds,
 // single use) that the editor swaps through /desktop-exchange, so the editor never shows a login of its own
 router.post("/editor-code", isAuthenticated, async (req, res) => {

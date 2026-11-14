@@ -497,6 +497,17 @@ async function handleDeepLink(link) {
     return;
   }
   if (url.hostname !== "login") return;
+  if (win.isMinimized()) win.restore();
+  win.show();
+  win.focus();
+  // classgrid://login?device_verify=true&email=...&provider=...: the sign-in ran in the browser on a device the
+  // account has not used before, and the server emailed a code; the in-app login page shows the code step (it reads
+  // these same parameters) and finishes the sign-in here, in the app
+  if (url.searchParams.get("device_verify") === "true") {
+    const q = new URLSearchParams({ device_verify: "true", email: url.searchParams.get("email") || "", provider: url.searchParams.get("provider") || "" });
+    win.loadURL(`${APP_URL}/login?${q}`);
+    return;
+  }
   const code = url.searchParams.get("code") || "";
   try {
     const res = await fetch("https://api.classgrid.in/api/auth/desktop-exchange", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ code }) });

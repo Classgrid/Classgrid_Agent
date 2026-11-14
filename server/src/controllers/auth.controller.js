@@ -2013,17 +2013,26 @@ export const oauthCallback = async (req, res) => {
         if (!isKnownDevice) {
             // Unknown device — send OTP and redirect to verification page
             const userEmail = req.user.email;
-            try {
-                // Rate limit: check if OTP was sent within last 60 seconds
-                const existingVerification = await DeviceVerification.findOne({ email: userEmail });
+            // Where the code is typed. On the website: its login page (?device_verify=true shows the code step). A
+            // sign-in started from the Classgrid app (desktop=1: the desktop app, or the Android app) runs in the
+            // user's browser, so the website's code page would sign the browser in and the app would never hear of
+            // it; the app gets a page that opens classgrid://login?device_verify=true instead, and the app shows the
+            // code step itself and posts /api/auth/verify-device (2026-11-14, found by the Android app).
+            const deviceVerifyRedirect = () => {
+                const query = `device_verify=true&email=${encodeURIComponent(userEmail)}&provider=${encodeURIComponent(provider)}`;
+                if (req.oauthState?.desktop) return `/api/auth/desktop-verify?${query}`;
                 let portalPath = getLoginPortalPath(loginTab);
                 if (host && host.startsWith('chat.')) {
                     portalPath = '/login';
                 }
-
+                return `${TARGET_URL}${portalPath}?${query}`;
+            };
+            try {
+                // Rate limit: check if OTP was sent within last 60 seconds
+                const existingVerification = await DeviceVerification.findOne({ email: userEmail });
                 if (existingVerification && existingVerification.lastResentAt && Date.now() - existingVerification.lastResentAt.getTime() < 45000) {
                     // OTP was sent recently, just redirect to the verify page
-                    return res.redirect(`${TARGET_URL}${portalPath}?device_verify=true&email=${encodeURIComponent(userEmail)}&provider=${provider}`);
+                    return res.redirect(deviceVerifyRedirect());
                 }
 
                 const otp = Math.floor(100000 + Math.random() * 900000).toString();
@@ -2056,12 +2065,7 @@ export const oauthCallback = async (req, res) => {
                     console.error("Failed to send OAuth device OTP:", emailErr);
                 }
 
-                let finalPortalPath = getLoginPortalPath(loginTab);
-                if (host && host.startsWith('chat.')) {
-                    finalPortalPath = '/login';
-                }
-
-                return res.redirect(`${TARGET_URL}${finalPortalPath}?device_verify=true&email=${encodeURIComponent(userEmail)}&provider=${provider}`);
+                return res.redirect(deviceVerifyRedirect());
             } catch (deviceErr) {
                 console.error("OAuth device check error (non-blocking):", deviceErr);
                 // If device check fails, STILL allow login rather than breaking OAuth entirely
