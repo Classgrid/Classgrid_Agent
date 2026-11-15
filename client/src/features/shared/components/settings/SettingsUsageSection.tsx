@@ -70,7 +70,7 @@ export function SettingsUsageSection() {
         </div>
         <div className="text-[13px] font-semibold text-foreground mt-7 mb-2">WhatsApp and voice</div>
         <div className="rounded-xl border border-border bg-card">
-          {row("WhatsApp messages limit", "w-80")}{row("WhatsApp calls limit", "w-80")}{row("Voice limit", "w-72")}
+          {row("WhatsApp messages limit", "w-80")}{row("WhatsApp calls limit", "w-80")}{row("Voice limit", "w-72")}{row("Read-aloud limit", "w-80")}
         </div>
       </div>
     );
@@ -98,6 +98,7 @@ export function SettingsUsageSection() {
         {u.whatsapp && <Bar name="WhatsApp messages limit" m={u.whatsapp} line={`Messages the AI sends · ${ofText(u.whatsapp, "messages")} ${u.whatsapp.periodText ? `this ${u.whatsapp.periodText.replace(/^1 /, "")}` : ""} · ${u.whatsapp.resetAt ? `Resets ${dayText(u.whatsapp.resetAt)}` : ""}`} />}
         {u.call_minutes && <Bar name="WhatsApp calls limit" m={u.call_minutes} line={`Call minutes with the AI · ${ofText(u.call_minutes, "minutes")} ${u.call_minutes.periodText ? `this ${u.call_minutes.periodText.replace(/^1 /, "")}` : ""} · ${u.call_minutes.resetAt ? `Resets ${dayText(u.call_minutes.resetAt)}` : ""}`} />}
         {u.voice_input_minutes && <Bar name="Voice limit" m={u.voice_input_minutes} line={`Minutes talking with the AI · ${ofText(u.voice_input_minutes, "minutes")} today · Resets at midnight`} />}
+        {u.voice_replies && <Bar name="Read-aloud limit" m={u.voice_replies} line={`Answers the AI reads out loud · ${ofText(u.voice_replies, "replies")} today · Resets at midnight`} />}
       </div>
       <p className="text-xs text-muted-foreground mt-2.5">Last updated: less than a minute ago</p>
 
