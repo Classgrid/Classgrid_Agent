@@ -77,6 +77,7 @@ import User from "../models/User.js";
 import Organization from "../models/Organization.js";
 import connectDB from "../../config/db.js";
 import { isAuthenticated } from "../middleware/auth.middleware.js";
+import { listAccountEmails, addAccountEmail, confirmAccountEmail, removeAccountEmail } from "../controllers/account-emails.controller.js";
 import { attachInstitutionProfile } from "../middleware/institution-profile.middleware.js";
 import { getChatSb } from "../config/supabaseClient.js";
 import { generateR2UploadUrl } from "../services/r2.service.js";
@@ -89,6 +90,12 @@ import { isSharedTestWhatsapp } from "../utils/chat-onboarding.js";
 import { normalizeDomain, newVerificationToken, dnsInstructions, hasVerificationRecord } from "../services/user-domain.service.js";
 
 const router = express.Router();
+
+// Settings > Account > Emails: up to three emails per account, each confirmed with a code (sign in with any of them)
+router.get("/emails", isAuthenticated, listAccountEmails);
+router.post("/emails", isAuthenticated, addAccountEmail);
+router.post("/emails/confirm", isAuthenticated, confirmAccountEmail);
+router.delete("/emails/:email", isAuthenticated, removeAccountEmail);
 
 // =======================
 // GET PROFILE SCHEMA

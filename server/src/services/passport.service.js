@@ -71,6 +71,7 @@
  * ─────────────────────────────────────────────────────────
  */
 
+import { findByAnyEmail } from "../utils/account-email.js";
 import passport from "passport";
 import { Strategy as GoogleStrategy } from "passport-google-oauth20";
 import { Strategy as GitHubStrategy } from "passport-github2";
@@ -165,9 +166,8 @@ const passportConfig = () => {
                         const email = profile.emails[0].value.toLowerCase();
 
                         // Step 1: Find by googleId OR email (to allow linking)
-                        let user = await User.findOne({
-                            $or: [{ googleId: profile.id }, { email: email }]
-                        });
+                        // (the Google account, else the account with this email: its main one first, then an added one)
+                        let user = (await User.findOne({ googleId: profile.id })) || (await findByAnyEmail(User, email));
 
                         if (user) {
                             console.log("✅ Google: Updating existing user");
@@ -225,9 +225,8 @@ const passportConfig = () => {
                 async (req, accessToken, refreshToken, profile, done) => {
                     try {
                         const email = profile.emails[0].value;
-                        let user = await User.findOne({
-                            $or: [{ googleId: profile.id }, { email: email.toLowerCase() }]
-                        });
+                        // (the Google account, else the account with this email: its main one first, then an added one)
+                        let user = (await User.findOne({ googleId: profile.id })) || (await findByAnyEmail(User, email));
 
                         if (user) {
                             if (!user.googleId) {

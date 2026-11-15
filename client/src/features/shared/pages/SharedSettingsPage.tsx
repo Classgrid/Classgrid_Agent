@@ -71,6 +71,7 @@ import { PlatformBrandingCard } from "../components/settings/PlatformBrandingCar
 import { Skeleton } from "@/components/marketing_ui/skeleton";
 import { DeleteOrgCard } from "../../org/components/settings/DeleteOrgCard";
 import { SettingsChangePasswordCard } from "../components/settings/SettingsChangePasswordCard";
+import { SettingsEmailsCard } from "../components/settings/SettingsEmailsCard";
 import { SettingsDeleteAccountCard } from "../components/settings/SettingsDeleteAccountCard";
 import { SettingsRoleRequestCard } from "../components/settings/SettingsRoleRequestCard";
 import { SettingsIdentityCard } from "../components/settings/SettingsIdentityCard";
@@ -227,6 +228,7 @@ export function SharedSettingsPage() {
         ) : (
           <>
             {role !== "super_admin" && role !== "user" && !isChatApp && <SettingsRoleRequestCard />}
+            <SettingsEmailsCard />
             <SettingsChangePasswordCard />
             {role !== "super_admin" && <SettingsDeleteAccountCard />}
           </>

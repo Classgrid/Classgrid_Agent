@@ -841,12 +841,37 @@ const userSchema = new mongoose.Schema(
       reminder_sent_for: { type: String },
       ended_sent_for: { type: String },
     },
-    // Student prices (Settings > Billing): a school or university email confirmed with a code, or set by a super admin
+    // The account's added emails (Settings > Account > Emails; owner, 2026-11-15): up to two besides the main email,
+    // each confirmed with a code sent to it. Signing in works with any confirmed one and the same password
+    // (utils/account-email.js). `school` = it ends in a school domain.
+    account_emails: {
+      type: [{
+        _id: false,
+        email: { type: String, lowercase: true, trim: true },
+        verified_at: { type: Date },
+        added_at: { type: Date },
+        school: { type: Boolean, default: false },
+      }],
+      default: undefined,
+    },
+    // The email being added: its code (one at a time; at most one code a minute and five a day)
+    account_email_pending: {
+      email: { type: String },
+      code_hash: { type: String },
+      code_expires_at: { type: Date },
+      code_attempts: { type: Number, default: 0 },
+      code_sent_at: { type: Date },
+      codes_day: { type: String },
+      codes_today: { type: Number, default: 0 },
+    },
+    // Student prices (Settings > Billing): an approved student application (method "review"), set by a super admin
+    // ("admin"), or an earlier school email confirmed with a code ("email", before 2026-11-15)
     student_verification: {
       email: { type: String },
       verified_at: { type: Date },
       expires_at: { type: Date },
-      method: { type: String, enum: ["email", "admin"] },
+      method: { type: String, enum: ["email", "admin", "review"] },
+      application_id: { type: mongoose.Schema.Types.ObjectId, ref: "StudentApplication" },
       pending_email: { type: String },
       code_hash: { type: String },
       code_expires_at: { type: Date },
@@ -919,6 +944,7 @@ userSchema.index({ resetPasswordToken: 1 }, { sparse: true }); // fast reset-tok
 userSchema.index({ activationToken: 1 }, { sparse: true }); // fast activation-token lookups
 userSchema.index({ activationCodeHash: 1 }, { sparse: true });
 userSchema.index({ blocked_users: 1 }, { sparse: true }); // "who blocked me" lookups for Grid blocking
+userSchema.index({ "account_emails.email": 1 }, { sparse: true }); // sign-in with an added email (utils/account-email.js)
 userSchema.index({ "fcmDevices.token": 1 }, { sparse: true }); // a push token moving to the account that registered it last
 userSchema.index({ fcmTokens: 1 }, { sparse: true }); // the same lookup in the older list of bare tokens (both are searched together)
 // PRN unique per organization (same PRN cannot exist twice in one org)

@@ -194,6 +194,7 @@ import { DynamicRoleLayout } from "@/components/layout/DynamicRoleLayout";
 import { AgentReviewsPage } from "@/features/superadmin/pages/AgentReviewsPage";
 import { AiUsageDashboardPage } from "@/features/superadmin/pages/AiUsageDashboardPage";
 import { AiModelsPage } from "@/features/superadmin/pages/AiModelsPage";
+import { StudentApplicationsPage } from "@/features/superadmin/pages/StudentApplicationsPage";
 import { PlaygroundPage } from "@/features/superadmin/pages/PlaygroundPage";
 import { LiveDocPage } from "@/features/live-docs/LiveDocPage";
 import { isChatHost } from "@/lib/chatHost";
@@ -309,6 +310,7 @@ export function AppRouter() {
           <Route path="/superadmin/agent-reviews" element={<AgentReviewsPage />} />
           <Route path="/superadmin/ai-usage" element={<AiUsageDashboardPage />} />
           <Route path="/superadmin/ai-usage/models" element={<AiModelsPage />} />
+          <Route path="/superadmin/students" element={<StudentApplicationsPage />} />
           <Route path="/superadmin/playground" element={<PlaygroundPage />} />
           <Route path="/superadmin/analytics" element={<SuperadminChatAnalyticsPage />} />
           <Route path="/superadmin/audit-logs" element={<AuditLogsPage />} />

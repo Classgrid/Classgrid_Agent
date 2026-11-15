@@ -9,9 +9,10 @@ import { Skeleton } from "@/components/marketing_ui/skeleton";
 import { Switch } from "@/components/marketing_ui/switch";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/marketing_ui/dialog";
 import { useMyAiHistory, useInitiateAiTopUp } from "@/components/ai/queries/useAiCredits";
-import { openCheckout, startPlanPayment } from "@/components/ai/components/credits/planPayment";
+import { openCheckout } from "@/components/ai/components/credits/planPayment";
+import { StudentApplyDialog } from "./StudentApplyDialog";
 import { useCurrentUser } from "@/features/auth/queries/useCurrentUser";
-import { usePlanOverview, useAutoTopup, useSaveAutoTopup, useStudent, useStartStudent, useConfirmStudent, n, inr, dayText, type AutoTopup, type StudentState } from "@/features/shared/queries/usePlanOverview";
+import { usePlanOverview, useAutoTopup, useSaveAutoTopup, useStudent, n, inr, dayText, type AutoTopup } from "@/features/shared/queries/usePlanOverview";
 
 const PRICING_URL = "https://classgrid.in/pricing";
 const TOPUP_MAX = 10000;
@@ -139,74 +140,6 @@ function AutoTopupDialog({ open, onClose, perInr, saved }: { open: boolean; onCl
   );
 }
 
-/** Student prices: confirm a school or university email with the code sent to it. `then` runs once confirmed (a plan
- * picked at the student price on the pricing page starts its payment). */
-function StudentDialog({ open, onClose, state, then }: { open: boolean; onClose: () => void; state?: StudentState; then?: (() => void) | null }) {
-  const start = useStartStudent();
-  const confirm = useConfirmStudent();
-  const [email, setEmail] = useState("");
-  const [code, setCode] = useState("");
-  const [step, setStep] = useState<"email" | "code">("email");
-  const [err, setErr] = useState("");
-  useEffect(() => {
-    if (!open) return;
-    setErr(""); setCode("");
-    if (state?.pending_email) { setEmail(state.pending_email); setStep("code"); } else { setStep("email"); }
-  }, [open, state?.pending_email]); // eslint-disable-line react-hooks/exhaustive-deps
-  const send = async () => {
-    setErr("");
-    try { await start.mutateAsync(email.trim()); setStep("code"); toast.success(`Code sent to ${email.trim()}`); }
-    catch (e: any) { setErr(e?.response?.data?.error || "Couldn't send the code. Please try again."); }
-  };
-  const check = async () => {
-    setErr("");
-    try {
-      await confirm.mutateAsync(code.trim());
-      toast.success("You're confirmed as a student");
-      onClose();
-      then?.();
-    } catch (e: any) { setErr(e?.response?.data?.error || "Couldn't confirm the code. Please try again."); }
-  };
-  const examples = (state?.domains || [".edu", ".ac.in", ".edu.in"]).slice(0, 3).join(", ");
-  return (
-    <Dialog open={open} onOpenChange={(o) => { if (!o) onClose(); }}>
-      <DialogContent className="sm:max-w-[440px] p-6" overlayClassName="supports-backdrop-filter:backdrop-blur-none !backdrop-blur-none !bg-black/40">
-        <DialogHeader>
-          <DialogTitle className="text-lg font-semibold">Student prices</DialogTitle>
-          <DialogDescription>
-            {step === "email"
-              ? `Confirm your school or university email to get student prices on Pro and Max. It must end in a school domain, for example ${examples}.`
-              : `Enter the 6-digit code we sent to ${email.trim()}. It works for 15 minutes.`}
-          </DialogDescription>
-        </DialogHeader>
-        {step === "email" ? (
-          <div>
-            <div className="text-[13px] font-medium">School email</div>
-            <div className={`${field} mt-2`}>
-              <input data-no-ring="true" className={input} type="email" autoComplete="email" placeholder="you@college.ac.in" value={email} onChange={(e) => setEmail(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" && email.trim()) send(); }} autoFocus />
-            </div>
-          </div>
-        ) : (
-          <div>
-            <div className="text-[13px] font-medium">Code</div>
-            <div className={`${field} mt-2`}>
-              <input data-no-ring="true" className={`${input} tracking-[0.3em]`} inputMode="numeric" maxLength={6} placeholder="123456" value={code} onChange={(e) => setCode(e.target.value.replace(/\D/g, "").slice(0, 6))} onKeyDown={(e) => { if (e.key === "Enter" && code.length === 6) check(); }} autoFocus />
-            </div>
-            <button type="button" className="text-xs text-muted-foreground underline mt-2 cursor-pointer" onClick={() => { setStep("email"); setErr(""); }}>Use another email or send a new code</button>
-          </div>
-        )}
-        <div className="text-xs text-red-500 min-h-[14px]">{err}</div>
-        <DialogFooter>
-          <button type="button" className={btnGrey} onClick={onClose}>Cancel</button>
-          {step === "email"
-            ? <button type="button" className={btnWhite} disabled={!email.trim() || start.isPending} onClick={send}>{start.isPending ? "Sending" : "Send code"}</button>
-            : <button type="button" className={btnWhite} disabled={code.length !== 6 || confirm.isPending} onClick={check}>{confirm.isPending ? "Checking" : "Confirm"}</button>}
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
-  );
-}
-
 const typeText = (t: any) => {
   if (t.type === "plan") return `${(t.plan_key ? t.plan_key.charAt(0).toUpperCase() + t.plan_key.slice(1) : "Plan")} plan, ${t.plan_term === "year" ? "1 year" : "1 month"}`;
   if (t.type === "grant") return "Credits granted by Classgrid";
@@ -231,21 +164,12 @@ export function SettingsBillingSection() {
   const [autoOpen, setAutoOpen] = useState(false);
   const { data: student } = useStudent();
   const [studentOpen, setStudentOpen] = useState(false);
-  const [studentThen, setStudentThen] = useState<(() => void) | null>(null);
-  // A plan picked at the student price before the school email was confirmed: confirm it here, then the payment starts
+  // A plan picked at the student price before the student was approved (?student=verify): the application opens
+  // here; once it is approved (within 2 days, by email) the student buys at the student price
   useEffect(() => {
-    // (a purchase saved from the pricing page is done here, never again by the chat)
+    // (a purchase saved from the pricing page is handled here, never again by the chat)
     try { sessionStorage.removeItem("classgrid:buy-plan"); } catch { /* storage blocked */ }
     if (params.get("student") !== "verify") return;
-    const key = String(params.get("student_plan") || "").toLowerCase();
-    const term: "month" | "year" = params.get("student_term") === "year" ? "year" : "month";
-    const back = params.get("student_back") === "pricing" ? "pricing" as const : undefined;
-    if (/^[a-z]{2,20}$/.test(key)) {
-      setStudentThen(() => async () => {
-        try { toast.message("Taking you to the payment page"); await openCheckout(await startPlanPayment(key, term, back, true)); }
-        catch (e: any) { toast.error(e?.response?.data?.error || "Could not start the payment. Please try again."); }
-      });
-    }
     setStudentOpen(true);
     const p = new URLSearchParams(params); ["student", "student_plan", "student_term", "student_back"].forEach((k) => p.delete(k)); setParams(p, { replace: true });
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
@@ -352,10 +276,15 @@ export function SettingsBillingSection() {
                     <span className="flex items-center gap-2">{pill("Student", true)}<span>Student prices until {dayText(student.expires_at)}</span></span>
                     <a className="underline hover:text-foreground" href={`${PRICING_URL}?student=1`} target="_blank" rel="noopener noreferrer">See student prices</a>
                   </>
+                ) : student?.application?.status === "pending" ? (
+                  <>
+                    <span className="flex items-center gap-2">{pill("Under review", false)}<span>Student application sent on {dayText(student.application.submitted_at)}</span></span>
+                    <span>We reply within {student.review_days || 2} days</span>
+                  </>
                 ) : (
                   <>
-                    <span>{student?.expired ? "Your student confirmation has run out" : "Student? Pro and Max cost less"}</span>
-                    <button type="button" className="underline hover:text-foreground cursor-pointer" onClick={() => { setStudentThen(null); setStudentOpen(true); }}>{student?.expired ? "Confirm again" : "Confirm student email"}</button>
+                    <span className="min-w-0">{student?.expired ? "Your student confirmation has run out" : student?.application?.status === "rejected" ? `Your student application was not approved: ${student.application.reject_reason}` : "Student? Pro and Max cost less"}</span>
+                    <button type="button" className="underline hover:text-foreground cursor-pointer shrink-0" onClick={() => setStudentOpen(true)}>{student?.expired ? "Apply again" : student?.application?.status === "rejected" ? "Apply again" : "Apply for student prices"}</button>
                   </>
                 )}
               </div>
@@ -415,7 +344,7 @@ export function SettingsBillingSection() {
 
       <BuyCreditsDialog open={buyOpen} onClose={() => setBuyOpen(false)} perInr={perInr} start={topupStart} />
       <AutoTopupDialog open={autoOpen} onClose={() => setAutoOpen(false)} perInr={perInr} saved={auto} />
-      <StudentDialog open={studentOpen} onClose={() => setStudentOpen(false)} state={student} then={studentThen} />
+      <StudentApplyDialog open={studentOpen} onClose={() => setStudentOpen(false)} state={student} />
     </div>
   );
 }

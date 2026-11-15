@@ -32,27 +32,38 @@ export type UsageHistory = {
 
 export type AutoTopup = { enabled: boolean; below_inr: number; amount_inr: number };
 
+export type StudentApplication = {
+  id: string; status: "pending" | "approved" | "rejected"; school: string; school_email: string | null;
+  submitted_at: string; decided_at: string | null; reject_reason: string;
+};
 export type StudentState = {
   verified: boolean; email: string | null; method: string | null; verified_at: string | null; expires_at: string | null;
-  expired: boolean; pending_email: string | null; domains?: string[];
+  expired: boolean; application: StudentApplication | null; endings: string[]; review_days: number;
+  kinds: string[]; sizes: string[]; max_document_mb: number;
 };
+export type SchoolMatch = { id: string; name: string; domains: string[]; city: string; country: string };
 
-/** Student prices: the user's confirmed school email (GET /api/ai/student) */
+/** Student prices: the user's student status and latest application (GET /api/ai/student) */
 export const useStudent = () => useQuery({
   queryKey: ["ai-student"],
   queryFn: async () => (await api.get("/api/ai/student")).data?.data as StudentState,
   staleTime: 60_000,
 });
 
-export const useStartStudent = () => useMutation({
-  mutationFn: async (email: string) => (await api.post("/api/ai/student/start", { email })).data?.data as { pending_email: string; expires_in_minutes: number },
+/** The school picker (two characters at least) */
+export const useSchoolSearch = (q: string) => useQuery({
+  queryKey: ["student-schools", q.trim().toLowerCase()],
+  queryFn: async () => (await api.get("/api/ai/student/schools", { params: { q: q.trim() } })).data?.data as SchoolMatch[],
+  enabled: q.trim().length >= 2,
+  staleTime: 60_000,
 });
 
-export const useConfirmStudent = () => {
+/** Sends the application: the school, the school email, and the document (multipart) */
+export const useApplyStudent = () => {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async (code: string) => (await api.post("/api/ai/student/confirm", { code })).data?.data as StudentState,
-    onSuccess: (data) => qc.setQueryData(["ai-student"], (prev: StudentState | undefined) => ({ ...(prev || {}), ...data })),
+    mutationFn: async (form: FormData) => (await api.post("/api/ai/student/apply", form, { headers: { "Content-Type": "multipart/form-data" }, timeout: 120_000 })).data?.data as StudentApplication,
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["ai-student"] }),
   });
 };
 

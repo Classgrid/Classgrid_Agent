@@ -55,6 +55,7 @@ import { getJwtSecret } from "../utils/jwt-secret.js";
  * ─────────────────────────────────────────────────────────
  */
 
+import { findByAnyEmail, cleanEmail as cleanAccountEmail } from "../utils/account-email.js";
 import User from "../models/User.js";
 import DemoRequest from "../models/DemoRequest.js";
 import Verification from "../models/Verification.js";
@@ -518,6 +519,10 @@ export const initiateSignup = async (req, res) => {
         // Check if a VERIFIED user already exists with this email
         const existingUser = await User.findOne({ email });
         if (existingUser && existingUser.isEmailVerified) {
+            return res.status(400).json({ message: "Email already registered. Please login." });
+        }
+        // An email added to an account (Settings > Account > Emails) is registered too: never redone or deleted here
+        if (!existingUser && await User.exists({ account_emails: { $elemMatch: { email: cleanAccountEmail(email), verified_at: { $ne: null } } } })) {
             return res.status(400).json({ message: "Email already registered. Please login." });
         }
 
@@ -1469,7 +1474,8 @@ export const login = async (req, res) => {
         }
 
         // Explicitly select password and mustResetPassword
-        const user = await User.findOne({ email }).select("+password +mustResetPassword +isSandbox +loginAttempts +lockUntil");
+        // (any confirmed email of the account signs in: its main one or an added one, Settings > Account > Emails)
+        const user = await findByAnyEmail(User, email, "+password +mustResetPassword +isSandbox +loginAttempts +lockUntil");
 
         if (user?.lockUntil && user.lockUntil > new Date()) {
             const retryAfterSeconds = Math.ceil((user.lockUntil.getTime() - Date.now()) / 1000);
@@ -1737,12 +1743,13 @@ export const requestLoginOtp = async (req, res) => {
         }
 
         const normalizedEmail = email.toLowerCase().trim();
-        const user = await User.findOne({ email: normalizedEmail });
+        const user = await findByAnyEmail(User, normalizedEmail);
 
         if (!user) {
             return res.status(404).json({ message: "User not found." });
         }
-        const existingVerification = await DeviceVerification.findOne({ email: normalizedEmail });
+        // (kept under the account's main email, so an added email signs in the same way: verifyDeviceOtp reads it there)
+        const existingVerification = await DeviceVerification.findOne({ email: user.email });
         // Rate limit: Check if requested within last 60s (synced with frontend UI timer)
         if (existingVerification && existingVerification.lastResentAt && Date.now() - existingVerification.lastResentAt.getTime() < 60000) {
             const timeLeft = Math.ceil((60000 - (Date.now() - existingVerification.lastResentAt.getTime())) / 1000);
@@ -1769,7 +1776,7 @@ export const requestLoginOtp = async (req, res) => {
         const otp = Math.floor(100000 + Math.random() * 900000).toString();
         
         await DeviceVerification.findOneAndUpdate(
-            { email: normalizedEmail },
+            { email: user.email },
             {
                 organization_id: user.organization_id || null,
                 deviceFingerprint,
@@ -1871,6 +1878,11 @@ export const completeSignup = async (req, res) => {
         if (!updatedVerification) {
             // Document is invalid, already used, or expired
             return res.status(400).json({ message: "Token is invalid, expired, or has already been used" });
+        }
+
+        // An email that is already an account's (its main or an added one) is not signed up a second time
+        if (await findByAnyEmail(User, updatedVerification.email, "_id")) {
+            return res.status(400).json({ message: "Email already registered. Please login." });
         }
 
         // Hash Password
@@ -2092,7 +2104,7 @@ export const forgotPassword = async (req, res) => {
             return res.status(400).json({ message: "Email is required." });
         }
 
-        const user = await User.findOne({ email: email.toLowerCase().trim() });
+        const user = await findByAnyEmail(User, email);
 
         // Security: always return the same message to prevent user enumeration
         const safeResponse = () => res.json({ message: "If the email is registered, a password reset link has been sent." });
@@ -2534,7 +2546,7 @@ export const resendDeviceOtp = async (req, res) => {
         const { email } = req.body;
         if (!email) return res.status(400).json({ message: "Email is required" });
 
-        const user = await User.findOne({ email: email.toLowerCase().trim() });
+        const user = await findByAnyEmail(User, email);
         if (!user) return res.status(404).json({ message: "User not found" });
 
         const existingVerification = await DeviceVerification.findOne({ email: user.email }).sort({ createdAt: -1 });
@@ -2612,8 +2624,11 @@ export const verifyDeviceOtp = async (req, res) => {
             return res.status(400).json({ message: "Missing required fields." });
         }
 
+        // The code is kept under the account's main email (signing in with an added email sends it there too)
+        const owner = await findByAnyEmail(User, email, "email");
+        const ownerEmail = owner?.email || email.toLowerCase().trim();
         const verification = await DeviceVerification.findOne({
-            email: email.toLowerCase().trim()
+            email: ownerEmail
         }).sort({ createdAt: -1 }); // get most recent OTP for this email
 
         if (!verification) {
@@ -2647,7 +2662,7 @@ export const verifyDeviceOtp = async (req, res) => {
             return res.status(400).json({ message: "OTP Expired" });
         }
 
-        const user = await User.findOne({ email: email.toLowerCase().trim() });
+        const user = await User.findOne({ email: ownerEmail });
         if (!user) return res.status(404).json({ message: "User not found." });
 
         // Capture isFirstLogin BEFORE updating lastLoginAt
@@ -2762,7 +2777,7 @@ export const checkEmailForLogin = async (req, res) => {
         if (!email) return res.status(400).json({ message: "Email is required." });
 
         const normalizedEmail = email.toLowerCase().trim();
-        const user = await User.findOne({ email: normalizedEmail }).select("+password");
+        const user = await findByAnyEmail(User, normalizedEmail, "+password");
 
         if (user) {
             // Only a real (bcrypt) password counts; older chat sign-ups stored a random placeholder.
@@ -3091,11 +3106,12 @@ export const chatOnboard = async (req, res) => {
         
         // One email = one whatsapp number validation
         const existingPhoneUser = isSharedTestWhatsapp(whatsappPhone) ? null : await User.findOne({ "metadata.whatsappPhone": whatsappPhone });
-        if (existingPhoneUser && existingPhoneUser.email !== email.toLowerCase()) {
+        const emailOwner = existingPhoneUser ? await findByAnyEmail(User, email, "_id") : null;
+        if (existingPhoneUser && String(existingPhoneUser._id) !== String(emailOwner?._id || "")) {
             return res.status(400).json({ message: "This WhatsApp number is already linked to another email." });
         }
         
-        let user = await User.findOne({ email: email.toLowerCase() });
+        let user = await findByAnyEmail(User, email);
         const orgId = '6ac4b95e0f8a97f45e98b0ff';
 
         if (!user) {
@@ -3231,8 +3247,8 @@ export const chatVerifyEmailOtp = async (req, res) => {
         }
         await OnboardingOTP.deleteOne({ _id: record._id });
 
-        // Find or create user
-        let user = await User.findOne({ email: email.toLowerCase() });
+        // Find or create user (an added email of an account is that account)
+        let user = await findByAnyEmail(User, email);
         let isNewAccount = false;
         if (!user) {
             isNewAccount = true;
@@ -3262,7 +3278,7 @@ export const chatVerifyEmailOtp = async (req, res) => {
         // Short-lived proof that this email was verified, required by chatFinalizeOnboarding.
         // No `id` claim, so it can never be used as a login token.
         const emailVerifiedTicket = jwt.sign(
-            { purpose: CHAT_EMAIL_TICKET_PURPOSE, email: user.email, uid: user._id.toString(), newAccount: isNewAccount },
+            { purpose: CHAT_EMAIL_TICKET_PURPOSE, email: String(email).toLowerCase().trim(), uid: user._id.toString(), newAccount: isNewAccount },
             JWT_SECRET,
             { expiresIn: '30m' }
         );
@@ -3308,7 +3324,7 @@ export const chatSavePassword = async (req, res) => {
             return res.status(401).json({ message: 'Email verification expired. Please verify your email again.', code: 'TICKET_EXPIRED' });
         }
 
-        const user = await User.findOne({ email: email.toLowerCase() }).select('+password');
+        const user = await findByAnyEmail(User, email, '+password');
         if (!user || user._id.toString() !== ticket.uid) {
             return res.status(401).json({ message: 'Email verification expired. Please verify your email again.', code: 'TICKET_EXPIRED' });
         }
@@ -3334,7 +3350,8 @@ export const chatSendWhatsappOtp = async (req, res) => {
         const User = (await import('../models/User.js')).default;
         const existingPhoneUser = isSharedTestWhatsapp(phoneNumber) ? null : await User.findOne({ "metadata.whatsappPhone": phoneNumber });
         if (existingPhoneUser) {
-            if (!email || (email && existingPhoneUser.email !== email.toLowerCase())) {
+            const emailOwner = email ? await findByAnyEmail(User, email, "_id") : null;
+            if (!email || String(existingPhoneUser._id) !== String(emailOwner?._id || "")) {
                  return res.status(400).json({ message: "This WhatsApp number is already linked to another email." });
             }
         }
@@ -3484,7 +3501,7 @@ export const chatFinalizeOnboarding = async (req, res) => {
         const bcrypt = (await import('bcryptjs')).default;
 
         // +password: the check below must see whether a real password is already set
-        let user = await User.findOne({ email: email.toLowerCase() }).select('+password');
+        let user = await findByAnyEmail(User, email, '+password');
         const orgId = CHAT_PUBLIC_ORG_ID;
         let passwordSet = true; // false when a chosen password was not applied to an existing account
 
@@ -3494,7 +3511,7 @@ export const chatFinalizeOnboarding = async (req, res) => {
 
         // One WhatsApp number per email (the send-OTP check is only an early warning; its email isn't proven)
         const existingPhoneUser = isSharedTestWhatsapp(whatsappPhone) ? null : await User.findOne({ 'metadata.whatsappPhone': whatsappPhone }).select('email');
-        if (existingPhoneUser && existingPhoneUser.email !== email.toLowerCase()) {
+        if (existingPhoneUser && String(existingPhoneUser._id) !== String(user?._id || "")) {
             return res.status(400).json({ message: 'This WhatsApp number is already linked to another account.' });
         }
 
@@ -3722,7 +3739,7 @@ export const googleNativeLogin = async (req, res) => {
         if (!email) return res.status(400).json({ message: "Google did not return an email." });
         if (profile.email_verified === false) return res.status(403).json({ message: "This Google account's email is not verified." });
 
-        const user = await User.findOne({ email });
+        const user = await findByAnyEmail(User, email);
         if (!user) {
             return res.status(404).json({ code: "NO_ACCOUNT", email, message: "There is no Classgrid account for that email." });
         }

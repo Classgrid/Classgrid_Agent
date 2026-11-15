@@ -2316,8 +2316,8 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
           await openCheckout(await startPlanPayment(wishKey, wishTerm, buyWish.back === "pricing" ? "pricing" : undefined, !!buyWish.student));
         } catch (e: any) {
           if (e?.response?.data?.code === "student_not_verified") {
-            // Confirm the school email on Settings > Billing; the payment starts there right after
-            goToSettings("billing", `&student=verify&student_plan=${encodeURIComponent(wishKey)}&student_term=${wishTerm}${buyWish.back === "pricing" ? "&student_back=pricing" : ""}`);
+            // Not an approved student yet: the student application opens on Settings > Billing
+            goToSettings("billing", "&student=verify");
             return;
           }
           toast.error(e?.response?.data?.error || e?.message || "Could not start the payment. Please try again.");

@@ -118,6 +118,7 @@ import billingSubscriptionRoutes from "./super-admin/billing-subscription.routes
 import billingTransactionsRoutes from "./super-admin/billing-transactions.routes.js";
 import billingExportsRoutes from "./super-admin/billing-exports.routes.js";
 import aiUsageRoutes from "./super-admin/ai-usage.routes.js";
+import studentAdminRoutes from "./super-admin/student.routes.js";
 import { requireSuperAdminBillingAccess } from "../middlewares/billingPermissions.js";
 import { validateBillingRequest } from "../middlewares/billingValidation.js";
 
@@ -134,6 +135,7 @@ import { forgetDisabledModels } from "../services/model-access.service.js";
 
 router.use("/notifications-sys", notificationRoutes);
 router.use("/ai-usage", aiUsageRoutes);
+router.use("/students", studentAdminRoutes); // student applications and the school list
 router.get("/ai-global-config", getGlobalAiConfig);
 router.put("/ai-global-config", updateGlobalAiConfig);
 // The plans table (Free, Pro, Max, Enterprise): every limit and price, and the switch that turns plans on
