@@ -37,6 +37,9 @@
 import { cfSwapProvider } from "./cf-retired-models.js";
 import { cfAiFetch, isCfNeuronCapError } from "./cf-neuron-cap.service.js";
 
+/** The text without U+FFFD, the replacement character a provider sends for a character it could not decode */
+const withoutBroken = (piece) => (typeof piece === "string" && piece.includes("\uFFFD") ? piece.replace(/\uFFFD/g, "") : piece);
+
 // Cloudflare refuses a whole request with too many pictures in it ("too many images in request"), and a long task
 // with screenshots (computer tool, browser) keeps adding them: only the newest ones stay, older ones become a note
 const MAX_CF_IMAGES_PER_REQUEST = 24; // Cloudflare allows 32; some room is left for the pictures of the next step
@@ -314,9 +317,13 @@ async function streamOneRound({ provider, messages, tools, temperature, maxToken
                 const delta = chunk.choices?.[0]?.delta;
                 if (!delta) continue;
 
-                const reasoningPiece = delta.reasoning_content ?? delta.reasoning;
+                // A character the provider could not put together (an emoji sent in pieces) arrives as U+FFFD, the
+                // "?" in a black diamond: it is never part of a real answer, so it is dropped before it is shown or
+                // saved (owner, 2026-11-15: three of them at the top of an answer)
+                const reasoningPiece = withoutBroken(delta.reasoning_content ?? delta.reasoning);
                 if (reasoningPiece) emitReasoning(reasoningPiece);
-                if (delta.content) splitter.push(delta.content);
+                const contentPiece = withoutBroken(delta.content);
+                if (contentPiece) splitter.push(contentPiece);
                 for (const tc of delta.tool_calls || []) {
                     const index = tc.index ?? toolCalls.length;
                     const call = (toolCalls[index] ??= { id: "", type: "function", function: { name: "", arguments: "" } });
