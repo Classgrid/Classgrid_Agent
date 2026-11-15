@@ -1843,26 +1843,19 @@ export const streamAskAi = async (req, res) => {
             claudePoolLeft = Math.max(1, wantsFable ? Math.min(pool - counters.claude_week_used, Math.round(pool * Number(planRow.fable_share_percent) / 100) - counters.fable_week_used) : pool - counters.claude_week_used);
         }
     }
-    // Claude Fable (most expensive model) is locked until the person has topped up ₹299 in total, unless their plan
-    // includes it. 402, not 403: the chat page treats 403 as a ban.
+    // Claude Fable (the family: 5.1, 5.2 and later) comes with the plan only (Pro and Max give it a share; owner,
+    // 2026-11-15: no Rs 299 unlock any more). Super admins and @classgrid.in accounts can always use it.
+    // 402, not 403: the chat page treats 403 as a ban.
     if (isFableModel(body.selectedModel) && !fableByPlan) {
-        try {
-            const { fableAccess, FABLE_UNLOCK_INR } = await import("../services/model-access.service.js");
-            const access = await fableAccess(req.user);
-            if (!access.unlocked) {
-                res.writeHead(402, { "Content-Type": "application/json" });
-                res.end(JSON.stringify({
-                    error: `${fableName} unlocks after you top up ₹${FABLE_UNLOCK_INR} or more in total (you have topped up ₹${access.toppedUpInr} so far). Top up AI credits, or pick another model to continue.`,
-                    code: "fable_locked",
-                }));
-                return;
-            }
-            // Once unlocked, Fable is paid from paid credits only (super admins / @classgrid.in are exempt)
-            fablePaidOnly = !access.exempt;
-        } catch (err) {
-            console.error("Fable access check error:", err);
-            res.writeHead(503, { "Content-Type": "application/json" });
-            res.end(JSON.stringify({ error: `We couldn't check access to ${fableName} right now. Please try again or pick another model.` }));
+        const { fableAccess } = await import("../services/model-access.service.js");
+        const access = await fableAccess(req.user);
+        if (!access.unlocked) {
+            res.writeHead(402, { "Content-Type": "application/json" });
+            res.end(JSON.stringify({
+                error: `${fableName} is not in your ${planRow?.name ? `${planRow.name} plan` : "plan"}. It comes with the plans that include Claude Fable: upgrade on classgrid.in/pricing, or pick another model.`,
+                code: "model_locked",
+                plan: planRow?.key,
+            }));
             return;
         }
     }

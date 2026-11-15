@@ -27,11 +27,10 @@
  * super admin dashboard are live.
  * ─────────────────────────────────────────────────────────
  */
-// Premium model access: Claude Fable (the most expensive family: Fable 5.1 and Fable 5.2) unlocks once a person's successful
-// top-ups add up to at least ₹299, and then stays unlocked. Super admins and Classgrid team accounts
+// Premium model access: Claude Fable (the most expensive family: Fable 5.1, Fable 5.2 and later ones) comes with the
+// plan only (the plans that give Fable a share: Pro and Max today). There is no top-up unlock any more (owner,
+// 2026-11-15: "Fable comes with the Pro and Max plans, not with Rs 299"). Super admins and Classgrid team accounts
 // (@classgrid.in) can always use it.
-import mongoose from "mongoose";
-import AiCreditTransaction from "../models/AiCreditTransaction.js";
 import GlobalAiConfig from "../models/GlobalAiConfig.js";
 
 // Models the super admin turned off in Model manager (AI Usage & Credits -> Models). Nobody can use them,
@@ -48,7 +47,7 @@ export function forgetDisabledModels() { disabledCache.at = 0; }
 export const FABLE_MODEL = "claude-fable-5-2"; // the newest Fable (5.2 since 2026-11-14: $8/$40 instead of $10/$50)
 
 // Claude Fable is a family, not one model (owner, 2026-11-15): Fable 5.1 and Fable 5.2 are both picked by name and
-// share one unlock, one plan share and one weekly Fable count
+// share one plan share and one weekly Fable count (Fable 5.5 and later join the same family)
 export const isFableModel = (model) => typeof model === "string" && /^claude-fable-/.test(model);
 
 // Whether a plan's models_allowed lets a person pick a model (empty = every model). A plan that lists any Fable
@@ -58,34 +57,17 @@ export function planAllowsModel(modelsAllowed, model) {
     if (!list.length || list.includes(model)) return true;
     return isFableModel(model) && list.some(isFableModel);
 }
-export const FABLE_UNLOCK_INR = 299;
-
-// userId -> { unlocked, toppedUpInr, at }. Unlocked is permanent, so it's cached long; locked is re-checked
-// after a minute so a fresh top-up unlocks quickly.
-const cache = new Map();
-const LOCKED_TTL_MS = 60 * 1000;
 
 function isExempt(user) {
     return user?.role === "super_admin" || String(user?.email || "").toLowerCase().endsWith("@classgrid.in");
 }
 
-/** @returns {Promise<{ unlocked: boolean, exempt: boolean, toppedUpInr: number, requiredInr: number }>} */
+/**
+ * Fable outside the plan: only the exempt accounts. A plan that gives Fable a share unlocks it (GET
+ * /api/ai/model-access and POST /api/ai/ask check the plan). toppedUpInr / requiredInr stay 0 for older apps.
+ * @returns {{ unlocked: boolean, exempt: boolean, toppedUpInr: number, requiredInr: number }}
+ */
 export async function fableAccess(user) {
-    if (isExempt(user)) return { unlocked: true, exempt: true, toppedUpInr: 0, requiredInr: FABLE_UNLOCK_INR };
-    const id = String(user?._id || "");
-    if (!id) return { unlocked: false, exempt: false, toppedUpInr: 0, requiredInr: FABLE_UNLOCK_INR };
-
-    const hit = cache.get(id);
-    if (hit && (hit.unlocked || Date.now() - hit.at < LOCKED_TTL_MS)) {
-        return { unlocked: hit.unlocked, exempt: false, toppedUpInr: hit.toppedUpInr, requiredInr: FABLE_UNLOCK_INR };
-    }
-    const [row] = await AiCreditTransaction.aggregate([
-        { $match: { userId: new mongoose.Types.ObjectId(id), type: "topup", status: "success" } },
-        { $group: { _id: null, total: { $sum: { $ifNull: ["$amount_inr", 0] } } } },
-    ]);
-    const toppedUpInr = Number(row?.total || 0);
-    const unlocked = toppedUpInr >= FABLE_UNLOCK_INR;
-    if (cache.size > 5000) cache.delete(cache.keys().next().value);
-    cache.set(id, { unlocked, toppedUpInr, at: Date.now() });
-    return { unlocked, exempt: false, toppedUpInr, requiredInr: FABLE_UNLOCK_INR };
+    const exempt = isExempt(user);
+    return { unlocked: exempt, exempt, toppedUpInr: 0, requiredInr: 0 };
 }

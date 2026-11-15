@@ -84,7 +84,7 @@ import { sendPushToRole } from "../services/push.service.js";
 import GlobalAiConfig from "../models/GlobalAiConfig.js";
 import { resolveWeeklyLimit } from "../services/ai-credits.service.js";
 import { resolveFeatureLimit, resolveResetPeriod } from "../services/ai-feature-limits.js";
-import { FABLE_UNLOCK_INR, planAllowsModel, isFableModel } from "../services/model-access.service.js";
+import { planAllowsModel, isFableModel } from "../services/model-access.service.js";
 import { TOPUP_MIN_INR, TOPUP_MAX_INR } from "../controllers/ai-credits-topup.controller.js";
 import { CHAT_PUBLIC_ORG_ID } from "../utils/chat-onboarding.js";
 import { planTable } from "../services/plan-limits.service.js";
@@ -571,7 +571,6 @@ router.get("/ai-pricing", async (req, res) => {
           topupMinInr: TOPUP_MIN_INR,
           topupMaxInr: TOPUP_MAX_INR,
           creditValidityDays: 30,
-          premiumUnlockInr: FABLE_UNLOCK_INR,
           plansEnabled: plansNow.enabled === true,
           plans,
           modelPlans,
