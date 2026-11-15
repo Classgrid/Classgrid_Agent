@@ -88,7 +88,7 @@ import { CLAUDE_CHAT_MODELS } from "../services/llm-stream-anthropic.js";
 import { disabledModels, fableAccess, isFableModel } from "../services/model-access.service.js";
 import { voiceModelRefusal } from "../services/voice-model.service.js";
 import { weekCounters } from "../services/ai-credits.service.js";
-import { voiceInputAllowed, countVoiceInput, pcmToWav } from "../services/voice-input-limit.service.js";
+import { voiceInputAllowed, countVoiceInput, pcmToWav, voiceGapSeconds, setVoiceClock } from "../services/voice-input-limit.service.js";
 import { transcribeAudioDetailed } from "../services/ai/voice.service.js";
 
 // What "Auto" means in voice mode: GLM 5.3 (first words in about half a second with its thinking off). It answers
@@ -220,6 +220,10 @@ export const voiceTurn = async (req, res) => {
     } else if (!heard) {
         return refusal(res, 400, "I didn't catch that. Say it again.", "nothing_said");
     }
+    // The quiet time the phone listened before this turn: from the end of the last turn's reading until the user
+    // began to speak (their words are counted on their own, when heard), at most VOICE_GAP_MAX_S. Counted on the
+    // day's voice minutes when the turn is over
+    const gapSeconds = voiceGapSeconds(userId, startedAt - audioSeconds * 1000);
     let sessionId = body.sessionId ? String(body.sessionId).trim() : "";
     const isNew = !sessionId;
     const wantsVoice = body.speak !== false;
@@ -523,8 +527,14 @@ export const voiceTurn = async (req, res) => {
         touchChat(userEmail, sessionId);
         const spoke = turn.spoken.sentences > 0;
         if (spoke) countVoiceReply(user, gate);
-        // The AI's talking time counts on the day's voice minutes too (the user's own time was counted when heard)
-        if (spokenSeconds > 0) countVoiceInput(user, inputGate, spokenSeconds);
+        // The whole turn counts on the day's voice minutes (the user's own words were counted when heard): the quiet
+        // time before it, and from the moment it arrived until its reading ends on the phone (the reading starts with
+        // the first voice and lasts as long as the sound sent, which can outlast the stream)
+        const now = Date.now();
+        const readingEnds = marks.audio !== undefined ? Math.max(now, startedAt + marks.audio + spokenSeconds * 1000) : now;
+        const turnSeconds = (await gapSeconds) + (readingEnds - startedAt) / 1000;
+        setVoiceClock(userId, readingEnds);
+        if (turnSeconds > 0) countVoiceInput(user, inputGate, turnSeconds);
         if (spoke || turn.spoken.failed) {
             AiUsageLog.create({
                 organization_id: orgId || null, userId: user._id, provider: "elevenlabs", model: TTS_MODEL, feature: "chat_ai", success: spoke, ...(spoke ? {} : { error: voiceError || "no sentence could be voiced" }), latencyMs: Date.now() - voiceStartedAt,

@@ -5,6 +5,7 @@
 import { planOf } from "./plan-limits.service.js";
 import { usedToday, addToday, nextDayText } from "./plan-usage.service.js";
 import { canPayExtra, chargeExtra, extraOfferText } from "./extra-usage.service.js";
+import redis from "../config/redis.js";
 
 /** { allowed: true, extra?, price? } or { allowed: false, error } */
 export async function voiceInputAllowed(user) {
@@ -24,6 +25,30 @@ export async function voiceInputAllowed(user) {
 export function countVoiceInput(user, gate, seconds) {
     addToday(String(user._id), "voiceinput", seconds).catch(() => {});
     if (gate?.extra) chargeExtra(user, "voiceinput", Math.max(1, Math.ceil((Number(seconds) || 0) / 60)), gate.price).catch(() => {});
+}
+
+// Voice mode counts the whole time it is in use, like a call (owner, 2026-11-15: "talked 45 minutes, it shows 1%";
+// only the seconds of speech counted, so pauses, listening and waiting for the answer were free). Each turn counts
+// from the end of the previous turn's reading to the end of its own: the quiet time the phone listened, the user's
+// words, the answer and its reading. A quiet time longer than VOICE_GAP_MAX_S is taken as voice mode having been
+// closed in between, and counts as VOICE_GAP_MAX_S.
+export const VOICE_GAP_MAX_S = 120;
+const clockKey = (userId) => `plan:voiceclock:${userId}`;
+
+/** Seconds of quiet time before a turn that began at startedAtMs (0 for the first turn of a while) */
+export async function voiceGapSeconds(userId, startedAtMs) {
+    try {
+        const last = Number(await redis.get(clockKey(userId)));
+        if (!last || startedAtMs <= last) return 0;
+        return Math.min((startedAtMs - last) / 1000, VOICE_GAP_MAX_S);
+    } catch {
+        return 0;
+    }
+}
+
+/** A turn's reading ends at endMs: the next turn's quiet time is measured from there */
+export async function setVoiceClock(userId, endMs) {
+    try { await redis.set(clockKey(userId), String(Math.round(endMs)), "EX", 6 * 3600); } catch (e) { console.warn("[voice clock] could not set:", e.message); }
 }
 
 /** Raw 16-bit little-endian mono PCM as a WAV file (what the speech-to-text services take) */
