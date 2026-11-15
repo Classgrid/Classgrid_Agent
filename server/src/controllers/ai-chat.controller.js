@@ -1692,6 +1692,13 @@ export const streamAskAi = async (req, res) => {
     // here and replaced by a short placeholder, so they are never stored (messages, history, logs) and no tool gets
     // the base64. They go only to the AI for this answer. Website requests can't send them (removed).
     const inlineImages = takeInlineImages(body, { allowed: !fromWebsite });
+    // Only files, no words (the phone app sends this; the website fills the same words in itself, AskAiPanel.tsx
+    // "If user only attached files with no text"): with no question no user message reached the AI at all, and
+    // DeepSeek then answered with stray tool markup ("</DSML parameter> </DSML invoke> </DSML calls>"; owner,
+    // 2026-11-15). The website's default question stands in.
+    if (!String(body.question || "").trim() && ((Array.isArray(body.attachments) && body.attachments.length > 0) || (Array.isArray(body.fileUrls) && body.fileUrls.length > 0))) {
+        body.question = "Please analyze the attached file(s).";
+    }
     // A "/" command from the chat box (Project Mode and Studio only; the live browser is only in Studio)
     const slashCommand = (body.appMode === "project" || body.appMode === "studio") && Object.hasOwn(SLASH_COMMAND_LINES, String(body.command || "")) && (body.command !== "browser" || body.appMode === "studio") ? body.command : null;
     // How hard to think, picked in the model menu: Fast, Normal or Deep (/boost is Deep for one message)
