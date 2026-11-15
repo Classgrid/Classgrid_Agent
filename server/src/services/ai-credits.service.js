@@ -52,6 +52,9 @@ import { getGrantedCreditsLowEmailHtml, getTopUpCreditsLowEmailHtml, getFreeLimi
 const autoTopupEmail = async (user, orgId, remaining) => {
     const a = user?.ai_auto_topup;
     if (!a?.enabled || !user?.email) return;
+    // Top-ups are for paid plans: a Free user gets no top-up email
+    const { topupBlockedByPlan } = await import("../controllers/ai-credits-topup.controller.js");
+    if (await topupBlockedByPlan(user)) return;
     const cfg = await GlobalAiConfig.findOne({ key: "singleton" }).select("credits_per_inr").lean().catch(() => null);
     const perInr = Number(cfg?.credits_per_inr) > 0 ? Number(cfg.credits_per_inr) : 3000;
     const threshold = Math.max(1, Number(a.below_inr) || 100) * perInr;
@@ -328,7 +331,7 @@ export const hasEnoughTokens = async (userId, orgId, requiredTokens = 1, { paidO
 // HELPER TO TRIGGER ALERTS
 const triggerEmailAlerts = async (userId, orgId, type, oldBalance, currentBalance, totalLimit) => {
     try {
-        const user = await User.findById(userId).select('email name first_name last_name ai_tokens ai_auto_topup');
+        const user = await User.findById(userId).select('email name first_name last_name ai_tokens ai_auto_topup role plan');
         if (!user || !user.email) return;
         if (type === 'personal') autoTopupEmail(user, orgId, currentBalance).catch((e) => console.error("[auto top-up email]", e.message));
 

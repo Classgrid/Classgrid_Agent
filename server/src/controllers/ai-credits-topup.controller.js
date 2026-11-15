@@ -192,8 +192,17 @@ async function startPlatformPayment(req, res, { amountInr, paymentType, label, n
     }
 }
 
+export const TOPUP_NEEDS_PLAN = "Top-ups are for the Pro and Max plans. Upgrade your plan first.";
+/** With plans on, a user on the Free plan cannot top up (staff and plans-off keep top-ups) */
+export async function topupBlockedByPlan(user) {
+    const { planOf } = await import("../services/plan-limits.service.js");
+    const plan = await planOf(user).catch(() => null);
+    return !!plan && plan.key === "free";
+}
+
 export const createTopupOrder = async (req, res) => {
     const { amount_inr } = req.body;
+    if (await topupBlockedByPlan(req.user)) return res.status(403).json({ success: false, code: "topup_needs_plan", error: TOPUP_NEEDS_PLAN });
     const minInr = topupMinFor(req.user.email);
     if (!amount_inr || amount_inr < minInr || amount_inr > TOPUP_MAX_INR) {
         return res.status(400).json({ success: false, error: `Amount must be between ₹${minInr} and ₹10,000` });

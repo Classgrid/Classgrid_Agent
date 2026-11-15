@@ -233,6 +233,8 @@ export function SettingsBillingSection() {
   const lim = data.plan.limits || {};
   const yearly = data.plan.billing === "prepaid_yearly";
   const studentPaid = !!data.plan.student_price;
+  // Top-ups are for paid plans (owner, 2026-11-15): on Free the tile offers Upgrade instead
+  const freePlan = data.enabled && data.plan.key === "free";
   const price = data.enabled && data.plan.key !== "free"
     ? Number(studentPaid ? (yearly ? lim.student_price_inr_yearly : lim.student_price_inr_monthly) : (yearly ? lim.price_inr_yearly : lim.price_inr_monthly))
     : 0;
@@ -292,16 +294,26 @@ export function SettingsBillingSection() {
             <div className="rounded-xl border border-border bg-card p-5">
               <div className="flex items-center justify-between gap-2">
                 <div className="text-sm text-muted-foreground">Additional usage</div>
-                <div className="flex gap-2">
-                  <button type="button" className={btnGrey} onClick={() => setAutoOpen(true)}>Auto top-up</button>
-                  <button type="button" className={btnWhite} onClick={() => setBuyOpen(true)}>Buy credits</button>
-                </div>
+                {freePlan ? (
+                  <a className={btnWhite} href={PRICING_URL} target="_blank" rel="noopener noreferrer">Upgrade</a>
+                ) : (
+                  <div className="flex gap-2">
+                    <button type="button" className={btnGrey} onClick={() => setAutoOpen(true)}>Auto top-up</button>
+                    <button type="button" className={btnWhite} onClick={() => setBuyOpen(true)}>Buy credits</button>
+                  </div>
+                )}
               </div>
               <div className="text-[28px] font-semibold mt-2">{n(balance)}<span className="text-sm font-normal text-muted-foreground ml-1.5">credits</span></div>
               <div className="flex justify-between gap-4 text-[13px] text-muted-foreground mt-3.5"><span>Credit balance</span><span>Used after your included usage</span></div>
               <div className="flex justify-between gap-4 text-[13px] text-muted-foreground mt-1.5">
-                <span className="flex items-center gap-2">{auto?.enabled ? <>{pill("Auto top-up on", true)}<span>{inr(auto.amount_inr)} when below {inr(auto.below_inr)}</span></> : pill("Auto top-up off", false)}</span>
-                <span>Bought credits last 30 days from purchase</span>
+                {freePlan ? (
+                  <span>Top-ups are for the Pro and Max plans. Upgrade your plan first.</span>
+                ) : (
+                  <>
+                    <span className="flex items-center gap-2">{auto?.enabled ? <>{pill("Auto top-up on", true)}<span>{inr(auto.amount_inr)} when below {inr(auto.below_inr)}</span></> : pill("Auto top-up off", false)}</span>
+                    <span>Bought credits last 30 days from purchase</span>
+                  </>
+                )}
               </div>
             </div>
           </div>

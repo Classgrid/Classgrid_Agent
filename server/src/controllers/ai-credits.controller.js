@@ -178,8 +178,9 @@ export const getAutoTopup = async (req, res) => {
 
 export const setAutoTopup = async (req, res) => {
     try {
-        const { TOPUP_MAX_INR, topupMinFor } = await import("./ai-credits-topup.controller.js");
+        const { TOPUP_MAX_INR, topupMinFor, topupBlockedByPlan, TOPUP_NEEDS_PLAN } = await import("./ai-credits-topup.controller.js");
         const enabled = req.body?.enabled === true;
+        if (enabled && await topupBlockedByPlan(req.user)) return res.status(403).json({ success: false, code: "topup_needs_plan", error: TOPUP_NEEDS_PLAN });
         const below = Math.floor(Number(req.body?.below_inr));
         const amount = Math.floor(Number(req.body?.amount_inr));
         const minInr = topupMinFor(req.user.email);

@@ -38,6 +38,7 @@ import "highlight.js/styles/github-dark.css";
 import { ExpandedInputModal } from './ExpandedInputModal';
 import { AiHubModal } from "./AiHubModal";
 import { goToSettings } from "@/lib/settingsPath";
+import { PlanPill } from "./planInfo";
 
 import { SlashCommandMenu, slashCommandsFor, leadingSlashCommand, type SlashCommand } from "./SlashCommandMenu";
 
@@ -7307,6 +7308,9 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
                       </h2>
                     </div>
                   )}
+
+                  {/* The user's plan ("Free plan · Upgrade"), like Claude's app */}
+                  {!isIncognito && !isToolPage(sessionId) && <PlanPill />}
 
                   {/* Inline input form â€” not using panelInput */}
                   <div className="w-full max-w-[640px] mt-auto sm:mt-0 @max-[18rem]:hidden">

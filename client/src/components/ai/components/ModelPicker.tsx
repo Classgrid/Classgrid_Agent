@@ -14,7 +14,8 @@
 // The list mirrors docs/AI_MODEL_PICKER_LIST.md (models checked live on 8 Oct 2026).
 // The chosen id is sent to /api/ai/ask as `selectedModel`; "auto" lets the backend router decide.
 
-import { goToSettings } from "@/lib/settingsPath";
+import { useModelPlans, openPricing } from "./planInfo";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/marketing_ui/dialog";
 import React from "react";
 import { Check, ChevronDown, Sparkles, Lock } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
@@ -70,6 +71,7 @@ export const MODEL_GROUPS: { label: string; models: ChatModelOption[] }[] = [
       { id: "claude-sonnet-5-5", name: "Claude Sonnet 5.5", description: "Best mix of speed and intelligence", provider: "anthropic", logo: LOGOS.claude },
       { id: "claude-opus-5-5", name: "Claude Opus 5.5", description: "Complex projects, coding and agents", provider: "anthropic", logo: LOGOS.claude },
       { id: "claude-fable-5-2", name: "Claude Fable 5.2", description: "Most capable, for the hardest reasoning", provider: "anthropic", logo: LOGOS.claude },
+      { id: "claude-fable-5-1", name: "Claude Fable 5.1", description: "The earlier Fable, for the hardest reasoning", provider: "anthropic", logo: LOGOS.claude },
     ],
   },
   {
@@ -154,20 +156,22 @@ const THINKING_LEVELS: { id: ThinkingLevel; label: string; hint: string }[] = [
   { id: "deep", label: "Deep", hint: "Thinks longer, checks its work twice" },
 ];
 
-// Claude Fable 5.1 is locked until the person has topped up ₹299 in total (server enforces it too)
+// Claude Fable (a family: 5.2, 5.1, and later ones) comes with the plan only (Pro and Max; owner, 2026-11-15: no
+// top-up unlock any more); every Fable shares the one Fable limit. The server enforces it too.
 const FABLE_ID = "claude-fable-5-2";
+const isFable = (id: string) => /^claude-fable-/.test(id);
 
 export function ModelPicker({ value, onChange, disabled }: ModelPickerProps) {
   const selected = ALL_MODELS.find((m) => m.id === value);
   const { data: access } = useQuery({
     queryKey: ["model-access"],
     queryFn: async () => {
-      const data = (await apiClient.get("/api/ai/model-access")).data as { fable?: { unlocked: boolean; exempt?: boolean; toppedUpInr: number; requiredInr: number }; disabledModels?: string[]; plan?: { name: string; thinkingModes?: string[] } | null };
+      const data = (await apiClient.get("/api/ai/model-access")).data as { fable?: { unlocked: boolean; exempt?: boolean; toppedUpInr: number; requiredInr: number }; disabledModels?: string[]; plan?: { key?: string; name: string; thinkingModes?: string[] } | null };
       // An answer without "fable" is not this call's answer (in Classgrid Code, before bridge.js numbered each page's
       // calls apart, a reloaded panel got another call's answer here and crashed with "reading 'unlocked'"): it is
       // asked again instead of being shown
       if (!data || typeof data !== "object" || !data.fable) throw new Error("model access not available");
-      return data as { fable: { unlocked: boolean; exempt?: boolean; toppedUpInr: number; requiredInr: number }; disabledModels?: string[]; plan?: { name: string; thinkingModes?: string[] } | null };
+      return data as { fable: { unlocked: boolean; exempt?: boolean; toppedUpInr: number; requiredInr: number }; disabledModels?: string[]; plan?: { key?: string; name: string; thinkingModes?: string[] } | null };
     },
     staleTime: 60 * 1000,
     retry: 3,
@@ -175,17 +179,20 @@ export function ModelPicker({ value, onChange, disabled }: ModelPickerProps) {
   });
   const fable = access?.fable;
   const fableLocked = fable ? !fable.unlocked : false;
-  const fableLeft = fable ? Math.max(0, fable.requiredInr - fable.toppedUpInr) : 0;
   // Models the super admin turned off (Model manager) are not shown
   const offModels = new Set(access?.disabledModels || []);
+  // The plans each model is in ("Pro, Max or Enterprise"); a model the user's plan lacks opens "Upgrade to use"
+  const modelPlans = useModelPlans(access?.plan?.key ?? null);
+  const [upgradeFor, setUpgradeFor] = React.useState<{ model: string; plan: string } | null>(null);
 
   // A locked Fable that is still selected (e.g. saved from before) falls back to Auto
   React.useEffect(() => {
-    if (fableLocked && value === FABLE_ID) onChange(AUTO_MODEL_ID);
+    if (fableLocked && isFable(value)) onChange(AUTO_MODEL_ID);
     if (access?.disabledModels?.includes(value)) onChange(AUTO_MODEL_ID);
-  }, [fableLocked, access, value, onChange]);
+    // a saved model the user's plan does not have goes back to Auto
+    if (modelPlans(value)?.locked) onChange(AUTO_MODEL_ID);
+  }, [fableLocked, access, value, onChange]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const openTopUp = () => goToSettings("billing");
   const [thinking, setThinkingState] = React.useState<ThinkingLevel>(getThinkingLevel);
   const setThinking = (id: ThinkingLevel) => {
     setThinkingState(id);
@@ -198,6 +205,7 @@ export function ModelPicker({ value, onChange, disabled }: ModelPickerProps) {
   }, [planModes, thinking]); // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
+    <>
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
         <button
@@ -259,13 +267,16 @@ export function ModelPicker({ value, onChange, disabled }: ModelPickerProps) {
             <DropdownMenuSeparator className="bg-slate-100 dark:bg-white/10 my-1" />
             <DropdownMenuLabel className="px-2 pt-1.5 pb-1">{group.label}</DropdownMenuLabel>
             {group.models.map((model) => {
-              const locked = model.id === FABLE_ID && fableLocked;
+              const info = modelPlans(model.id);
+              // (a Fable the user cannot use is locked the same way as any model outside the plan)
+              const planLocked = !!info?.locked || (isFable(model.id) && fableLocked);
+              const locked = planLocked;
               return (
                 <DropdownMenuItem
                   key={model.id}
-                  onClick={() => (locked ? openTopUp() : onChange(model.id))}
+                  onClick={() => (planLocked ? setUpgradeFor({ model: model.name, plan: info?.lowest || "Pro" }) : onChange(model.id))}
                   className="gap-2.5 cursor-pointer py-1.5 items-start"
-                  title={locked ? `Top up ₹${access?.fable.requiredInr ?? 299} in total to unlock` : undefined}
+
                 >
                   <ModelLogoImg logo={model.logo} className={cn("mt-0.5", locked && "opacity-50")} />
                   <div className="flex flex-col flex-1 min-w-0">
@@ -274,18 +285,38 @@ export function ModelPicker({ value, onChange, disabled }: ModelPickerProps) {
                       {isNewModel(model) && (
                         <span className="shrink-0 rounded-full border border-border px-1.5 py-px text-[10px] font-medium leading-4 text-foreground">New</span>
                       )}
+                      {info?.label && (
+                        <span className="shrink-0 rounded-full bg-blue-500/10 text-blue-700 dark:text-blue-300 px-1.5 py-px text-[10px] font-medium leading-4">{info.label}</span>
+                      )}
                     </span>
                     <span className="text-xs text-muted-foreground whitespace-normal break-words">
-                      {locked ? (access?.fable.toppedUpInr ? `Top up ₹${fableLeft} more to unlock` : `Top up ₹${access?.fable.requiredInr ?? 299} to unlock`) : model.id === FABLE_ID && access && !access.fable.exempt ? "Most capable · uses paid credits only" : model.description}
+                      {model.description}
                     </span>
                   </div>
                   {locked ? <Lock className="h-4 w-4 mt-0.5 text-muted-foreground" /> : value === model.id && <Check className="h-4 w-4 mt-0.5" />}
                 </DropdownMenuItem>
               );
             })}
+            {/* Under Claude: which plans have Fable */}
+            {group.label === "Claude" && modelPlans(FABLE_ID)?.label && (
+              <div className="px-2 pt-0.5 pb-1.5 text-[11px] leading-4 text-muted-foreground">Fable is included in the {modelPlans(FABLE_ID)!.label.replace(/ or ([^ ]+)$/, " and $1")} plans.</div>
+            )}
           </React.Fragment>
         ))}
       </DropdownMenuContent>
     </DropdownMenu>
+    <Dialog open={!!upgradeFor} onOpenChange={(o) => { if (!o) setUpgradeFor(null); }}>
+      <DialogContent className="sm:max-w-[400px] p-6" overlayClassName="supports-backdrop-filter:backdrop-blur-none !backdrop-blur-none !bg-black/40">
+        <DialogHeader>
+          <DialogTitle className="text-lg font-semibold">Upgrade to use {upgradeFor?.model}</DialogTitle>
+          <DialogDescription>This model needs the {upgradeFor?.plan} plan.</DialogDescription>
+        </DialogHeader>
+        <DialogFooter className="gap-2">
+          <button type="button" className="inline-flex items-center h-8 px-3.5 rounded-full text-[13px] font-medium cursor-pointer bg-black/[0.06] dark:bg-white/[0.09] text-foreground hover:bg-black/[0.1] dark:hover:bg-white/[0.14]" onClick={() => setUpgradeFor(null)}>Cancel</button>
+          <button type="button" className="inline-flex items-center h-8 px-3.5 rounded-full text-[13px] font-medium cursor-pointer bg-foreground text-background hover:bg-foreground/90" onClick={() => { setUpgradeFor(null); openPricing(); }}>Upgrade</button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+    </>
   );
 }
