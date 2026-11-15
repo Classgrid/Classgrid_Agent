@@ -12,12 +12,10 @@
 // answer's text as it is written and the voice of every sentence as soon as that sentence is ready.
 //
 // It is fast for the same reasons the call is (whatsapp-call.service.js), and uses the call's own functions:
-// - a fast model is asked directly and streamed, with its thinking off and a short spoken prompt (owner, 2026-11-15:
-//   voice mode answers with GLM 5.3, and with DeepSeek Flash when GLM fails; Claude is not used here, so voice mode
-//   never touches a plan's Claude limit). Both go through the call's fallbackVoiceAnswer. Since 2026-11-15 the user
-//   can pick the model in voice mode (owner: "let people choose the text model, from the dropdown"): a Claude model
+// - the model is asked directly and streamed, with its thinking off and a short spoken prompt. The user picks the
+//   model in voice mode (owner: "let people choose the text model, from the dropdown"): a Claude model
 //   answers through the call's claudeVoiceAnswer (thinking off) and counts on the plan's Claude credits (Fable also
-//   on Fable's share), any other model through fallbackVoiceAnswer; nothing picked keeps GLM 5.3 then DeepSeek Flash.
+//   on Fable's share), any other model through fallbackVoiceAnswer; nothing picked (Auto) is GLM 5.3. One model answers a turn: there is no backup model (owner, 2026-11-15).
 //   The full Agent
 //   (memory, every tool, the long rulebook) is not in the way of the first word: the model reaches it through
 //   ask_classgrid only when it needs the user's account or the web.
@@ -41,7 +39,7 @@
 //   speak      false for a turn with no voice (the app's voice is switched off): text only, no voice reply counted
 //   model      the model picked in voice mode's dropdown (the chat picker's ids). The answer AND ask_classgrid's
 //              Agent work use that model only. Left out, "auto", unknown or turned off by the super admin: GLM 5.3,
-//              then DeepSeek Flash, and the Agent on Auto
+//              alone (no backup model), and the Agent on Auto
 //
 // Refused before the answer starts (plain JSON, { error, message, code }): 400 nothing_said, 401 not_signed_in,
 // 402 model_locked / claude_cap_reached (the picked model is not in the plan, or its weekly Claude or Fable credits
@@ -84,10 +82,9 @@ import { disabledModels, fableAccess, isFableModel } from "../services/model-acc
 import { voiceModelRefusal } from "../services/voice-model.service.js";
 import { weekCounters } from "../services/ai-credits.service.js";
 
-// Voice mode's models, in the order they are asked: GLM 5.3 (first words in about half a second with its thinking
-// off), then DeepSeek Flash when GLM fails (the same DeepSeek Flash the chat uses: ai-chat.controller.js CF_FLASH_MODEL)
+// What "Auto" means in voice mode: GLM 5.3 (first words in about half a second with its thinking off). It answers
+// alone, like a picked model: voice mode has no backup model (owner, 2026-11-15)
 const VOICE_MODEL = FALLBACK_MODEL; // "@cf/zai-org/glm-5.3"
-const VOICE_BACKUP_MODEL = "@cf/deepseek-ai/deepseek-v4.1-flash-1017";
 import { runVoiceTurn, toVoiceMessages, VOICE_AUDIO } from "../services/voice-turn.service.js";
 
 const MAX_HEARD_CHARS = 4000; // one spoken turn (the recogniser gives a sentence or two)
@@ -214,7 +211,7 @@ export const voiceTurn = async (req, res) => {
         return refusal(res, 503, "We couldn't check your AI usage balance right now, so this was not sent. Please try again in a minute.", "usage_check_failed");
     }
     // The picked model (the voice dropdown): one the chat picker has and the super admin has not turned off, else
-    // the default GLM 5.3 / DeepSeek Flash. A Claude model on a plan with Claude counts on the plan's Claude credits
+    // Auto's GLM 5.3 (alone, no backup). A Claude model on a plan with Claude counts on the plan's Claude credits
     // (and Fable's share), not the credits, as in a typed chat.
     const picked = isVoiceModel(askedModel) && !(offModels || []).includes(askedModel) ? askedModel : "";
     const claudePooled = (model) => !!plan && CLAUDE_CHAT_MODELS.has(model) && Number(plan.claude_credits_per_week) !== 0;
@@ -332,39 +329,24 @@ export const voiceTurn = async (req, res) => {
     // The chat could not be made: the model is stopped at once (the error is sent below)
     setup.catch(() => { closed = true; abort.abort(); });
 
-    // ── The model: the picked one alone, or (nothing picked) GLM 5.3 with DeepSeek Flash when GLM fails ──
+    // ── The model: ONE model answers the whole turn, the one the user picked in voice mode's dropdown (owner,
+    // 2026-11-15: "I said pick the model, not fallback. The user decides, as per their plan"). There is no backup
+    // model and no switch: if it fails, the turn ends with model_failed and the user says it again or picks another.
+    // Nothing sent, "auto" or a model turned off: Auto's voice model (GLM 5.3), alone too. ──
     const system = voiceSystemPrompt(user, { language: body.language, memory: session?.long_term_memory ? memoryText(session.long_term_memory).slice(0, 6000) : "", voiceOn });
     const messages = toVoiceMessages(trimHistory(history), said);
-    // Nothing picked (Auto): GLM 5.3, and DeepSeek Flash for the rest of the turn once GLM failed
-    const firstModel = VOICE_MODEL;
-    let firstOut = false;
-    let pickedFailed = false; // the picked model could not answer (the turn ends with model_failed)
+    const answerModel = picked || VOICE_MODEL;
+    let modelFailed = false; // the model could not answer (the turn ends with model_failed)
     const askModel = async ({ messages: conversation, noTools, onSentence, onText }) => {
-        let wrote = false;
-        const ask = { system, tools: VOICE_TOOLS, messages: conversation, noTools, onSentence, onText: (piece) => { wrote = true; onText(piece); }, signal: abort.signal };
-        // A picked model answers alone: no silent switch to another model (owner, 2026-11-15: "the picked model, and
-        // only that model"). If it fails, the turn ends with model_failed so the user can say it again or pick another.
-        if (picked) {
-            try {
-                return CLAUDE_CHAT_MODELS.has(picked)
-                    ? await claudeVoiceAnswer({ ...ask, model: picked })
-                    : await fallbackVoiceAnswer({ ...ask, model: picked });
-            } catch (e) {
-                if (!closed) pickedFailed = true;
-                throw e;
-            }
+        const ask = { system, tools: VOICE_TOOLS, messages: conversation, noTools, onSentence, onText, signal: abort.signal };
+        try {
+            return CLAUDE_CHAT_MODELS.has(answerModel)
+                ? await claudeVoiceAnswer({ ...ask, model: answerModel })
+                : await fallbackVoiceAnswer({ ...ask, model: answerModel });
+        } catch (e) {
+            if (!closed) modelFailed = true;
+            throw e;
         }
-        if (!firstOut) {
-            try {
-                return await fallbackVoiceAnswer({ ...ask, model: firstModel });
-            } catch (e) {
-                // (an answer that had already started is not written a second time by the other model)
-                if (closed || wrote) throw e;
-                firstOut = true;
-                console.warn(`[voice turn] ${firstModel} failed (${String(e.message).slice(0, 160)}); answering with ${VOICE_BACKUP_MODEL}`);
-            }
-        }
-        return fallbackVoiceAnswer({ ...ask, model: VOICE_BACKUP_MODEL });
     };
 
     // Every model answer is charged to the user's credits the moment its real usage is known (as each answer of a
@@ -516,8 +498,8 @@ export const voiceTurn = async (req, res) => {
         if (!res.writableEnded && !res.destroyed) {
             const event = chatFailed
                 ? { type: "error", message: "The chat could not be started. Please try again.", code: "chat_not_started" }
-                : pickedFailed
-                    ? { type: "error", message: `${MODEL_DISPLAY_NAMES[picked] || picked} could not answer just now. Say it again, or pick another model.`, code: "model_failed", model: picked }
+                : modelFailed
+                    ? { type: "error", message: `${picked ? (MODEL_DISPLAY_NAMES[picked] || picked) : "Auto"} could not answer just now. Say it again, or pick another model.`, code: "model_failed", model: picked || "auto" }
                     : { type: "error", message: "Classgrid AI could not answer just now. Say it again in a moment.", code: "voice_turn_failed" };
             try { res.write(`data: ${JSON.stringify(event)}\n\n`); } catch { /* the phone has gone */ }
         }
