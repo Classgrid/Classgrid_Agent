@@ -84,7 +84,7 @@ import { sendPushToRole } from "../services/push.service.js";
 import GlobalAiConfig from "../models/GlobalAiConfig.js";
 import { resolveWeeklyLimit } from "../services/ai-credits.service.js";
 import { resolveFeatureLimit, resolveResetPeriod } from "../services/ai-feature-limits.js";
-import { FABLE_UNLOCK_INR } from "../services/model-access.service.js";
+import { FABLE_UNLOCK_INR, planAllowsModel, isFableModel } from "../services/model-access.service.js";
 import { TOPUP_MIN_INR, TOPUP_MAX_INR } from "../controllers/ai-credits-topup.controller.js";
 import { CHAT_PUBLIC_ORG_ID } from "../utils/chat-onboarding.js";
 import { planTable } from "../services/plan-limits.service.js";
@@ -544,14 +544,13 @@ router.get("/ai-pricing", async (req, res) => {
       // weekly Claude credits are not 0, and Claude Fable only when the plan gives Fable a share. The model
       // pickers on the website, the desktop app and the phone draw their "Pro, Max or Ultra" tags from this.
       const pickable = Object.values(plansNow.plans || {}).filter((p) => p.is_public !== false && !p.coming_soon).sort((a, b) => (a.sort ?? 0) - (b.sort ?? 0));
-      const everyModel = [...new Set(pickable.flatMap((p) => (Array.isArray(p.models_allowed) ? p.models_allowed : [])))].filter((m) => m !== "auto");
+      const everyModel = [...new Set([...pickable.flatMap((p) => (Array.isArray(p.models_allowed) ? p.models_allowed : [])), "claude-fable-5-1", "claude-fable-5-2"])].filter((m) => m !== "auto");
       const modelPlans = {};
       for (const model of everyModel) {
         modelPlans[model] = pickable.filter((p) => {
-          const list = Array.isArray(p.models_allowed) ? p.models_allowed : [];
-          if (list.length && !list.includes(model)) return false;
+          if (!planAllowsModel(p.models_allowed, model)) return false;
           if (/^claude-/.test(model) && Number(p.claude_credits_per_week) === 0) return false;
-          if (/^claude-fable/.test(model) && !(Number(p.fable_share_percent) > 0)) return false;
+          if (isFableModel(model) && !(Number(p.fable_share_percent) > 0)) return false;
           return true;
         }).map((p) => ({ key: p.key, name: p.name }));
       }

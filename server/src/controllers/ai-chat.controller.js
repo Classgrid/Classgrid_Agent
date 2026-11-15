@@ -49,6 +49,7 @@ import { usageStorage } from "../utils/fetch-interceptor.js";
 import { createLLMClient } from "@classgrid/ai/core";
 import { streamChat, TERMINAL_RULE } from "../services/llm-stream.js";
 import { streamClaudeChat, CLAUDE_CHAT_MODELS, toImageUrlParts } from "../services/llm-stream-anthropic.js";
+import { isFableModel, planAllowsModel } from "../services/model-access.service.js";
 import { planToolsForMessage, buildLoadToolsTool, orderTools, groupOfTool, ageSticky, stickyKey, LOAD_TOOLS_NAME, promptBlock, filterPromptBlocks, promptBlocksForGroups, isStaffRole } from "../services/ai-tool-groups.js";
 import { safetyRulesFor } from "../services/ai-safety-rules.js";
 import { cfModel } from "../services/cf-retired-models.js";
@@ -1785,7 +1786,9 @@ export const streamAskAi = async (req, res) => {
     };
     // A model Cloudflare removed (an older app, a saved chat) goes to its replacement (services/cf-retired-models.js)
     if (typeof body.selectedModel === "string") body.selectedModel = cfModel(body.selectedModel);
-    if (body.selectedModel === "claude-fable-5-1") body.selectedModel = "claude-fable-5-2"; // (Fable 5.2 since 2026-11-14: 20% cheaper, same access)
+    // Claude Fable is a family (Fable 5.1 and Fable 5.2 are both picked by name): one unlock, one plan share and one
+    // weekly Fable count for all its members (owner, 2026-11-15)
+    const fableName = isFableModel(body.selectedModel) ? (MODEL_DISPLAY_NAMES[body.selectedModel] || "Claude Fable") : "Claude Fable";
     // A model turned off in the super admin Model manager is not used: the message goes to Auto instead
     if (typeof body.selectedModel === "string" && body.selectedModel !== "auto") {
         const { disabledModels } = await import("../services/model-access.service.js");
@@ -1801,7 +1804,7 @@ export const streamAskAi = async (req, res) => {
         const mode = thinking === "high" ? "deep" : thinking === "low" ? "fast" : "normal";
         if (!planRow.thinking_modes.includes(mode)) thinking = null;
     }
-    if (planRow && typeof body.selectedModel === "string" && body.selectedModel !== "auto" && Array.isArray(planRow.models_allowed) && planRow.models_allowed.length && !planRow.models_allowed.includes(body.selectedModel)) {
+    if (planRow && typeof body.selectedModel === "string" && body.selectedModel !== "auto" && !planAllowsModel(planRow.models_allowed, body.selectedModel)) {
         res.writeHead(402, { "Content-Type": "application/json" });
         res.end(JSON.stringify({ error: `${MODEL_DISPLAY_NAMES[body.selectedModel] || body.selectedModel} is not in your ${planRow.name} plan. Upgrade your plan, or pick another model.`, code: "model_locked", plan: planRow.key }));
         return;
@@ -1842,14 +1845,14 @@ export const streamAskAi = async (req, res) => {
     }
     // Claude Fable (most expensive model) is locked until the person has topped up ₹299 in total, unless their plan
     // includes it. 402, not 403: the chat page treats 403 as a ban.
-    if (body.selectedModel === "claude-fable-5-2" && !fableByPlan) {
+    if (isFableModel(body.selectedModel) && !fableByPlan) {
         try {
             const { fableAccess, FABLE_UNLOCK_INR } = await import("../services/model-access.service.js");
             const access = await fableAccess(req.user);
             if (!access.unlocked) {
                 res.writeHead(402, { "Content-Type": "application/json" });
                 res.end(JSON.stringify({
-                    error: `Claude Fable 5.2 unlocks after you top up ₹${FABLE_UNLOCK_INR} or more in total (you have topped up ₹${access.toppedUpInr} so far). Top up AI credits, or pick another model to continue.`,
+                    error: `${fableName} unlocks after you top up ₹${FABLE_UNLOCK_INR} or more in total (you have topped up ₹${access.toppedUpInr} so far). Top up AI credits, or pick another model to continue.`,
                     code: "fable_locked",
                 }));
                 return;
@@ -1859,7 +1862,7 @@ export const streamAskAi = async (req, res) => {
         } catch (err) {
             console.error("Fable access check error:", err);
             res.writeHead(503, { "Content-Type": "application/json" });
-            res.end(JSON.stringify({ error: "We couldn't check access to Claude Fable 5.2 right now. Please try again or pick another model." }));
+            res.end(JSON.stringify({ error: `We couldn't check access to ${fableName} right now. Please try again or pick another model.` }));
             return;
         }
     }
@@ -1883,7 +1886,7 @@ export const streamAskAi = async (req, res) => {
         if (deviceNoted) await deviceNoted;
         if (!check.allowed && check.paidOnly) {
             res.writeHead(402, { "Content-Type": "application/json" });
-            res.end(JSON.stringify({ error: "Claude Fable 5.2 runs on paid AI credits only, and you have none left. Top up AI credits to keep using it, or pick another model (your free weekly tokens work with every other model).", code: "fable_needs_paid_credits" }));
+            res.end(JSON.stringify({ error: `${fableName} runs on paid AI credits only, and you have none left. Top up AI credits to keep using it, or pick another model (your free weekly tokens work with every other model).`, code: "fable_needs_paid_credits" }));
             return;
         }
         if (!check.allowed) {
@@ -6464,7 +6467,7 @@ If a tool fails, never show the error message; say only: "Something went wrong o
             const check = firstCheck?.claudePool ? firstCheck // (a Claude request on a plan: its Claude credits, already checked)
                 : firstCheck?.allowed && (firstSpendable === undefined || firstSpendable >= estimatedCost) ? firstCheck : await hasEnoughTokens(userId, orgId, estimatedCost, { paidOnly: fablePaidOnly });
             if (!check.allowed && check.paidOnly) {
-                res.write(`data: ${JSON.stringify({ type: "error", error: "Claude Fable 5.2 runs on paid AI credits only, and you don't have enough left for this message. Top up AI credits, or pick another model (your free weekly tokens work with every other model)." })}\n\n`);
+                res.write(`data: ${JSON.stringify({ type: "error", error: `${fableName} runs on paid AI credits only, and you don't have enough left for this message. Top up AI credits, or pick another model (your free weekly tokens work with every other model).` })}\n\n`);
                 return;
             }
             if (!check.allowed) {

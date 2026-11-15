@@ -39,7 +39,7 @@ Where a user changes how Classgrid AI looks, talks, thinks, spends credits and a
 -   You can switch model for any message, even mid-chat. The new model sees the whole chat.
 -   Your pick is remembered in this browser until you change it.
 -   The model changes how the agent thinks and writes, not which tools it can use.
--   **Claude Fable 5.2** (the most capable model) is locked with a padlock until your total top-ups reach a set
+-   **Claude Fable** (Fable 5.2 and Fable 5.1, the most capable models) is locked with a padlock until your total top-ups reach a set
     amount; the picker shows how much more is needed, and clicking it opens **Upgrade**. Once unlocked it stays
     unlocked. Fable runs on bought credits only; free tokens work with every other model.
 -   Classgrid can turn a model off. Turned-off models disappear from the picker; if one was your pick, the picker goes

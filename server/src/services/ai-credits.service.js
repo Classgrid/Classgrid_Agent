@@ -207,7 +207,7 @@ export const hasEnoughTokens = async (userId, orgId, requiredTokens = 1, { paidO
         return { allowed: false, reason: "AI access is globally blocked by administrators." };
     }
 
-    // Premium models (Claude Fable 5.2): paid credits only, never free weekly, promotion or org-pool tokens
+    // Premium models (the Claude Fable family: Fable 5.1 and 5.2): paid credits only, never free weekly, promotion or org-pool tokens
     if (paidOnly) {
         let paid = user.ai_tokens?.ai_credits_balance || 0;
         if (user.ai_tokens?.ai_credits_end_date && new Date(user.ai_tokens.ai_credits_end_date).getTime() < Date.now()) paid = 0;

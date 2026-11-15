@@ -27,7 +27,7 @@
  * super admin dashboard are live.
  * ─────────────────────────────────────────────────────────
  */
-// Premium model access: Claude Fable 5.2 (the most expensive model) unlocks once a person's successful
+// Premium model access: Claude Fable (the most expensive family: Fable 5.1 and Fable 5.2) unlocks once a person's successful
 // top-ups add up to at least ₹299, and then stays unlocked. Super admins and Classgrid team accounts
 // (@classgrid.in) can always use it.
 import mongoose from "mongoose";
@@ -45,7 +45,19 @@ export async function disabledModels() {
 }
 export function forgetDisabledModels() { disabledCache.at = 0; }
 
-export const FABLE_MODEL = "claude-fable-5-2"; // (5.2 since 2026-11-14: $8/$40 instead of $10/$50)
+export const FABLE_MODEL = "claude-fable-5-2"; // the newest Fable (5.2 since 2026-11-14: $8/$40 instead of $10/$50)
+
+// Claude Fable is a family, not one model (owner, 2026-11-15): Fable 5.1 and Fable 5.2 are both picked by name and
+// share one unlock, one plan share and one weekly Fable count
+export const isFableModel = (model) => typeof model === "string" && /^claude-fable-/.test(model);
+
+// Whether a plan's models_allowed lets a person pick a model (empty = every model). A plan that lists any Fable
+// includes the whole Fable family, so a plan saved before a new Fable came out includes it too.
+export function planAllowsModel(modelsAllowed, model) {
+    const list = Array.isArray(modelsAllowed) ? modelsAllowed : [];
+    if (!list.length || list.includes(model)) return true;
+    return isFableModel(model) && list.some(isFableModel);
+}
 export const FABLE_UNLOCK_INR = 299;
 
 // userId -> { unlocked, toppedUpInr, at }. Unlocked is permanent, so it's cached long; locked is re-checked
