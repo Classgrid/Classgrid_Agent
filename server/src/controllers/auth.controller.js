@@ -119,6 +119,7 @@ import { syncDerivedOnboardingProgress } from "../services/onboarding-progress.s
 import { sendSMS } from "../services/sms.service.js";
 import { RecaptchaVerificationError, verifyRecaptchaToken } from "../services/recaptcha.service.js";
 import { isPublicChatAccount, needsChatOnboarding, isSharedTestWhatsapp, readableJobRole } from "../utils/chat-onboarding.js";
+import { isWebsiteOrigin } from "../utils/client-app.js";
 
 const JWT_SECRET = getJwtSecret();
 const getFrontendUrl = () => {
@@ -126,6 +127,21 @@ const getFrontendUrl = () => {
 };
 
 const FRONTEND_URL = getFrontendUrl();
+
+// Where a password reset link points. The request may name the page it came from (chat.classgrid.in, a tenant
+// portal) so the link opens there, but ONLY one of Classgrid's own sites is used: any other origin (or none, or
+// the desktop app's localhost page) gets the default site. Taking the request's origin as it was let anyone
+// send a user a real reset email whose link (and its token) went to their own site.
+const resetLinkBase = (origin) => {
+    try {
+        const o = new URL(String(origin || "")).origin;
+        if (isWebsiteOrigin(o)) return o;
+        if (process.env.NODE_ENV !== "production" && /^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(o)) return o;
+    } catch {
+        // not a URL: the default site
+    }
+    return getFrontendUrl().replace(/\/$/, "");
+};
 
 const INSTITUTION_ADMIN_ROLES = new Set([
     "org_admin",
@@ -2137,18 +2153,7 @@ export const forgotPassword = async (req, res) => {
         user.resetPasswordExpires = Date.now() + 5 * 60 * 1000; // 5 minutes
         await user.save();
 
-        let baseUrl = getFrontendUrl();
-        if (origin) {
-            try {
-                // Ensure the origin is a valid URL to prevent injection attacks
-                const parsedUrl = new URL(origin);
-                baseUrl = parsedUrl.origin;
-            } catch (e) {
-                // Fallback to default if invalid
-            }
-        }
-
-        const resetLink = `${baseUrl}/reset-password?token=${rawToken}`;
+        const resetLink = `${resetLinkBase(origin)}/reset-password?token=${rawToken}`;
 
         sendEmail({
             to: email,
