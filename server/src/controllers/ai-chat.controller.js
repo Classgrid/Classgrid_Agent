@@ -7981,12 +7981,18 @@ export const getPublicShare = async (req, res) => {
 
 export const submitAiFeedback = async (req, res) => {
     try {
-        const { messageId, text, fileUrl } = req.body;
+        const { messageId, fileUrl } = req.body;
         const userEmail = req.user?.email || "Unknown User";
-        const type = "down";
+        // Thumbs up and thumbs down both come here (the phone app's "Submit feedback" sheet opens for either, as the
+        // Claude app's does). Before, every call was saved as "down", so a thumbs-up became a bad review.
+        const positive = req.body?.type === "positive";
+        const type = positive ? "up" : "down";
+        const kind = positive ? "positive" : "negative";
+        // The thumbs-down sheet's optional "What type of issue?" pick goes in front of the text
+        const issueType = !positive && typeof req.body?.issueType === "string" ? req.body.issueType.trim().slice(0, 60) : "";
+        const typed = typeof req.body?.text === "string" ? req.body.text : "";
+        const text = [issueType ? `Issue: ${issueType}` : "", typed].filter(Boolean).join("\n") || null;
 
-        // Save to Supabase ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â this endpoint only handles negative (thumbs-down) feedback.
-        // Thumbs-up is tracked in PostHog only and never hits this endpoint.
         const { data: dbData, error: dbError } = await supabase
             .from('ai_agent_reviews')
             .insert([{
@@ -8034,8 +8040,8 @@ export const submitAiFeedback = async (req, res) => {
         if (process.env.SLACK_WEBHOOK_URL) {
             const axios = (await import("axios")).default;
 
-            const emoji = type === "positive" ? "👍" : type === "negative" ? "👎" : "💬";
-            const color = type === "positive" ? "#36a64f" : type === "negative" ? "#e01e5a" : "#439fe0";
+            const emoji = kind === "positive" ? "👍" : "👎";
+            const color = kind === "positive" ? "#36a64f" : "#e01e5a";
 
             const blocks = [
                 {
