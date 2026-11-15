@@ -85,6 +85,17 @@ function createThinkSplitter(emitText, emitThought) {
     const CLOSE = "</think>";
     let inThink = false;
     let pending = "";
+    // Some models (DeepSeek, GLM) sometimes write their planning straight into the answer and close it with a lone
+    // "</think>" (the opening tag was in their prompt template), e.g. "The user sent a screenshot... I should ask
+    // briefly.</think>That looks like..." (seen 2026-11-15 on a picture sent without words). The start of an answer
+    // that reads like such planning is held back until a lone "</think>" shows it was thinking (it then goes to the
+    // thinking stream), or until it is clearly a real answer (no "</think>" within HOLD_MAX characters, or the
+    // answer ends), so planning never shows as the answer and real answers are not held for long.
+    const HOLD_MAX = 1200;
+    const DECIDE_AT = 24;
+    const LOOKS_LIKE_PLANNING = /^(?:the user\b|user (?:sent|is|has|asked|wants|said|just)\b|okay,? (?:so|the user)\b|ok,? (?:so|the user)\b|alright,? (?:so|the user)\b|so the user\b|we need to\b|i should\b|i need to (?:answer|reply|respond|ask)\b)/i;
+    let decided = false;
+    let holding = false;
 
     const partialTagLength = (str, tag) => {
         for (let len = Math.min(tag.length - 1, str.length); len > 0; len--) {
@@ -95,6 +106,25 @@ function createThinkSplitter(emitText, emitThought) {
 
     const push = (piece) => {
         pending += piece;
+        if (!decided) {
+            const head = pending.trimStart();
+            if (head.length < DECIDE_AT && !head.includes(CLOSE) && !head.startsWith(OPEN)) return;
+            decided = true;
+            holding = !head.startsWith(OPEN) && LOOKS_LIKE_PLANNING.test(head);
+        }
+        if (holding) {
+            const close = pending.indexOf(CLOSE);
+            if (close >= 0) {
+                // It was planning: it goes to the thinking stream, the rest is the answer
+                if (close > 0) emitThought(pending.slice(0, close));
+                pending = pending.slice(close + CLOSE.length).replace(/^\s+/, "");
+                holding = false;
+            } else if (pending.length > HOLD_MAX || pending.includes(OPEN)) {
+                holding = false; // a real answer after all
+            } else {
+                return;
+            }
+        }
         for (;;) {
             const tag = inThink ? CLOSE : OPEN;
             const emit = inThink ? emitThought : emitText;
@@ -105,7 +135,12 @@ function createThinkSplitter(emitText, emitThought) {
                 inThink = !inThink;
                 continue;
             }
-            const hold = partialTagLength(pending, tag);
+            // A lone "</think>" in the answer is never shown
+            if (!inThink && pending.includes(CLOSE)) {
+                pending = pending.split(CLOSE).join("");
+                continue;
+            }
+            const hold = Math.max(partialTagLength(pending, tag), inThink ? 0 : partialTagLength(pending, CLOSE));
             const ready = pending.slice(0, pending.length - hold);
             if (ready) emit(ready);
             pending = pending.slice(pending.length - hold);
@@ -114,7 +149,9 @@ function createThinkSplitter(emitText, emitThought) {
     };
 
     const flush = () => {
-        if (pending) (inThink ? emitThought : emitText)(pending);
+        holding = false;
+        decided = true;
+        if (pending) (inThink ? emitThought : emitText)(pending.split(CLOSE).join(""));
         pending = "";
     };
 
