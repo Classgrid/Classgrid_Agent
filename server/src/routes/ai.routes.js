@@ -78,10 +78,11 @@ import {
     chatWithSyllabus, 
     getMyPersona 
 } from "../controllers/ai.controller.js";
-import { streamAskAi, clientToolResult, pcToolResult, localJobDone, turnEvents, turnCommand, getWorkingChats, getChatHelpers, getChatSessions, getChatSession, getChatSessionMessages, uploadChatImage, takeChatOnline, updateChatSession, archiveChatSession, deleteChatSession, shareChatSession, reopenChatSession, createPublicShare, getPublicShare, submitAiFeedback, getAgentReviews, updateAgentReviewStatus, processAgentReviewsCron, deleteAgentReview, bulkDeleteAgentReviews, generateImage, getMyGeneratedImages, deleteGeneratedImage, getMyUsage, getOrgUsage, getSkills, createSkill, updateSkill, deleteSkill, getPreferences, updatePreferences } from "../controllers/ai-chat.controller.js";
+import { streamAskAi, clientToolResult, pcToolResult, localJobDone, turnEvents, turnCommand, turnStop, getWorkingChats, getChatHelpers, getChatSessions, getChatSession, getChatSessionMessages, uploadChatImage, takeChatOnline, updateChatSession, archiveChatSession, deleteChatSession, shareChatSession, reopenChatSession, createPublicShare, getPublicShare, submitAiFeedback, getAgentReviews, updateAgentReviewStatus, processAgentReviewsCron, deleteAgentReview, bulkDeleteAgentReviews, generateImage, getMyGeneratedImages, deleteGeneratedImage, getMyUsage, getOrgUsage, getSkills, createSkill, updateSkill, deleteSkill, getPreferences, updatePreferences } from "../controllers/ai-chat.controller.js";
 
 import { getFavicon } from "../controllers/ai-favicon.controller.js";
 import { speakAnswer, listVoices } from "../controllers/ai-speak.controller.js";
+import { voiceTurn } from "../controllers/ai-voice.controller.js";
 import { getPlanOverview, getUsageHistory } from "../controllers/ai-plan-overview.controller.js";
 import { getStudentStatus, startStudentVerification, confirmStudentVerification } from "../controllers/ai-student.controller.js";
 import { importChatSession } from "../controllers/ai-chat-import.controller.js";
@@ -127,11 +128,16 @@ router.post("/local-job-done", isAuthenticated, localJobDone);
 router.get("/turn/:id/events", isAuthenticated, turnEvents);
 // The desktop app driving an answer's loop: which tool calls run, in what order, or stop
 router.post("/turn/:id/cmd", isAuthenticated, turnCommand);
+// The phone app stops an answer that goes on without the app (body.keepRunning on /ask)
+router.post("/turn/:id/stop", isAuthenticated, turnStop);
 router.post("/feedback", isAuthenticated, submitAiFeedback);
 // An answer read aloud in Classgrid's voice (web app only); counted as a voice reply of the day
 router.post("/speak", isAuthenticated, requireChatOnboarding, speakAnswer);
 // The voices a user can pick for answers read aloud (voice mode in the phone app)
 router.get("/voices", isAuthenticated, listVoices);
+// The phone app's fast voice mode: what the user said in, one stream out with the answer's text and the voice of
+// every sentence as soon as it is ready (as fast as the WhatsApp voice call; ai-voice.controller.js)
+router.post("/voice/turn", isAuthenticated, requireChatOnboarding, voiceTurn);
 router.get("/agent-reviews", isAuthenticated, getAgentReviews);
 router.put("/agent-reviews/:id/status", isAuthenticated, updateAgentReviewStatus);
 router.delete("/agent-reviews/:id", isAuthenticated, deleteAgentReview);

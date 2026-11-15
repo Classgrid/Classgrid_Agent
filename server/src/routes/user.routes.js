@@ -955,22 +955,83 @@ router.put("/email-preferences", isAuthenticated, async (req, res) => {
 });
 
 // =======================
-// SAVE FCM TOKEN
+// PUSH NOTIFICATIONS (the phone app): this device, and the user's settings
+// (services/user-push.service.js; for every user)
 // =======================
+// POST /api/user/fcm-token  { token, platform?: "android", deviceId?, appVersion? }
+// The app sends this after sign-in and whenever FCM gives it a new token. The device is listed once on this
+// account, and the token leaves any other account it was on.
 router.post("/fcm-token", isAuthenticated, async (req, res) => {
   try {
-    const { token } = req.body;
-    if (!token) return res.status(400).json({ message: "Token is required" });
+    const { token, platform, deviceId, appVersion } = req.body || {};
+    if (!token || typeof token !== "string") return res.status(400).json({ message: "Token is required" });
 
-    // Store unique device tokens so users can receive pushes on multiple devices
-    await User.findByIdAndUpdate(req.user._id, {
-      $addToSet: { fcmTokens: token }
+    const { registerPushDevice } = await import("../services/user-push.service.js");
+    const saved = await registerPushDevice(req.user._id, {
+      token,
+      platform: platform || req.headers["x-platform-app"] || "android",
+      deviceId,
+      appVersion,
     });
+    if (!saved.ok) return res.status(400).json({ message: saved.error });
 
-    res.json({ message: "FCM token registered successfully" });
+    res.json({ success: true, message: "FCM token registered successfully", devices: saved.devices });
   } catch (error) {
     console.error("FCM TOKEN REGISTRATION ERROR:", error.message);
     res.status(500).json({ message: "Server error registering token" });
+  }
+});
+
+// DELETE /api/user/fcm-token  { token?, deviceId? }  (or ?token=...&deviceId=...)
+// On sign-out: this device stops getting the account's notifications.
+router.delete("/fcm-token", isAuthenticated, async (req, res) => {
+  try {
+    const token = req.body?.token || req.query?.token;
+    const deviceId = req.body?.deviceId || req.query?.deviceId;
+    if ((!token || typeof token !== "string") && (!deviceId || typeof deviceId !== "string")) {
+      return res.status(400).json({ message: "Token or deviceId is required" });
+    }
+
+    const { removePushDevice } = await import("../services/user-push.service.js");
+    const removed = await removePushDevice(req.user._id, {
+      token: typeof token === "string" ? token : "",
+      deviceId: typeof deviceId === "string" ? deviceId : "",
+    });
+    if (!removed.ok) return res.status(400).json({ message: removed.error });
+
+    res.json({ success: true, message: "FCM token removed", devices: removed.devices });
+  } catch (error) {
+    console.error("FCM TOKEN REMOVAL ERROR:", error.message);
+    res.status(500).json({ message: "Server error removing token" });
+  }
+});
+
+// GET /api/user/push-preferences
+// -> { preferences: { enabled, answers, images, schedules, calls, sharedChats, productUpdates } } (all true until
+// the user turns one off). "enabled" is the master switch (User.pushNotifications.global).
+router.get("/push-preferences", isAuthenticated, async (req, res) => {
+  try {
+    const { getPushPreferences } = await import("../services/user-push.service.js");
+    res.json({ preferences: await getPushPreferences(req.user._id) });
+  } catch (error) {
+    console.error("GET PUSH PREFS ERROR:", error.message);
+    res.status(500).json({ message: "Server error fetching notification settings" });
+  }
+});
+
+// PUT /api/user/push-preferences  { preferences: { answers: false, ... } }  (or the switches at the top level)
+// Only the switches sent are changed. -> { message, preferences } (the settings after the change)
+router.put("/push-preferences", isAuthenticated, async (req, res) => {
+  try {
+    const given = req.body?.preferences && typeof req.body.preferences === "object" ? req.body.preferences : req.body;
+    const { savePushPreferences } = await import("../services/user-push.service.js");
+    const preferences = await savePushPreferences(req.user._id, given || {});
+    if (!preferences) return res.status(400).json({ message: "No valid notification settings provided" });
+
+    res.json({ message: "Notification settings updated", preferences });
+  } catch (error) {
+    console.error("UPDATE PUSH PREFS ERROR:", error.message);
+    res.status(500).json({ message: "Server error updating notification settings" });
   }
 });
 

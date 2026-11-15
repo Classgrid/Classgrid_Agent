@@ -235,4 +235,35 @@ export async function sendPushToMultiple(fcmTokens, title, body, data = {}) {
   }
 }
 
-export default { sendPushToDevice, sendPushToMultiple, getFirebaseAdmin };
+/**
+ * The FCM sender (HTTP v1, through firebase-admin), or null when Firebase is not set up on this server.
+ * Used by user-push.service.js (the phone app's push notifications), which builds its own messages.
+ */
+// The phone app (com.classgrid.mobile) is registered in its own Firebase project, whose key is
+// FIREBASE_APP_SERVICE_ACCOUNT_JSON: FCM only delivers to an app from the project that app belongs to, so the
+// phone's pushes are sent through a second, named firebase-admin app. FIREBASE_SERVICE_ACCOUNT_JSON (the older
+// project) stays as it is for everything that already uses it, and is the fallback when the app's key is not set.
+let phoneApp = null;
+let phoneAppTried = false;
+function getPhoneFirebaseApp() {
+  if (phoneApp || phoneAppTried) return phoneApp;
+  phoneAppTried = true;
+  const json = process.env.FIREBASE_APP_SERVICE_ACCOUNT_JSON;
+  if (!json) return null;
+  try {
+    phoneApp = admin.initializeApp({ credential: admin.credential.cert(JSON.parse(json)) }, "classgrid-phone-app");
+    console.log("✅ Firebase Admin SDK initialized for the phone app");
+  } catch (err) {
+    console.error("❌ Firebase Admin init for the phone app failed:", err.message);
+    phoneApp = null;
+  }
+  return phoneApp;
+}
+
+export function getFirebaseMessaging() {
+  const phone = getPhoneFirebaseApp();
+  if (phone) return admin.messaging(phone);
+  return getFirebaseAdmin() ? admin.messaging() : null;
+}
+
+export default { sendPushToDevice, sendPushToMultiple, getFirebaseAdmin, getFirebaseMessaging };

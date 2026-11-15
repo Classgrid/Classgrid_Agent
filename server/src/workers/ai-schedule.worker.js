@@ -70,6 +70,11 @@ cron.schedule('* * * * *', async () => {
           console.error("Failed to emit socket update", socErr);
         }
 
+        // The phone app: a push that this schedule ran (user-push.service.js; the user's "schedules" setting)
+        import('../services/user-push.service.js')
+          .then((m) => m.pushScheduleRan(schedule))
+          .catch((pushErr) => console.warn(`[AiSchedule Worker] Push failed: ${pushErr.message}`));
+
         // Fire and forget AWS SES if email fields exist
         if (schedule.email_subject && schedule.email_body) {
           sendEmail({

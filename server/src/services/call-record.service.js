@@ -57,6 +57,17 @@ async function notify(where, kind) {
 // Runs an update, then tells the app
 const write = (where, update, kind) => Call.updateOne(where, update).then(() => notify(where, kind)).catch(warn(kind));
 
+// The phone app: a push when a record gets its summary (the recap of a call, or the result of the work done after
+// it), with the record's name and the first words of the summary (user-push.service.js; the user's "calls" setting)
+async function pushSummary(where) {
+    try {
+        const doc = await Call.findOne(where).select("_id user_id name summary").lean();
+        if (!doc?.summary) return;
+        const { pushCallSummary } = await import("./user-push.service.js");
+        await pushCallSummary({ userId: doc.user_id, callId: doc._id, name: doc.name, summary: doc.summary, url: callUrl(doc._id) });
+    } catch (e) { warn("push")(e); }
+}
+
 // A plain name for the work from its first words, used until the AI names the chat
 export function nameFrom(text, fallback = "Call") {
     const words = String(text || "").replace(/\[[^\]]*\]/g, " ").replace(/\s+/g, " ").trim().split(" ").filter(Boolean).slice(0, 9).join(" ");
@@ -104,7 +115,8 @@ export function callEnded(callId, { why = "", startedAt, tasks = [] }) {
 // A call with no task: the recap the caller got on WhatsApp is the record's summary
 export function callRecap(callId, text) {
     if (!callId || !text) return Promise.resolve();
-    return write({ call_id: callId }, { $set: { summary: cut(text, 3000), status: "answered" }, $push: { sent: { kind: "whatsapp", by: "classgrid", text: cut(text) } } }, "recap");
+    return write({ call_id: callId }, { $set: { summary: cut(text, 3000), status: "answered" }, $push: { sent: { kind: "whatsapp", by: "classgrid", text: cut(text) } } }, "recap")
+        .then(() => pushSummary({ call_id: callId }));
 }
 
 // Work the AI did live during the call (ask_classgrid)
@@ -268,6 +280,8 @@ export function runRecorder(taskId, { reason = "", attempt = 1 } = {}) {
                 ...(model ? { $addToSet: { "work.models": model } } : {}),
             }, "run_ended");
             await nameFromChat(taskId, doc?.session_id);
+            // The work ended with its result (not asleep, stopped, out of credits or failed): the user is told
+            if (outcome === "answer" && result.answer) await pushSummary(where);
         },
     };
 }

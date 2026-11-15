@@ -62,6 +62,37 @@ async function voiceSample(req, res) {
     return res.send(audio);
 }
 
+/**
+ * May this user have one more voice reply now? The day's number comes from the plan (voice_replies_per_day) while
+ * plans are on, otherwise from the global setting; past it (or with none included) a reply is paid from top-up
+ * credits when extras are on (extra-usage.service.js). Returns { allowed: true, extra, maxChars } or
+ * { allowed: false, status, body } (the answer for the app: 402 voice_not_included or 429 voice_cap_reached).
+ * Nothing is counted here: call countVoiceReply once a reply was really read. Used by the speaker button (below)
+ * and by the phone app's fast voice mode (ai-voice.controller.js), so both count against the same number.
+ */
+export async function voiceReplyGate(user) {
+    const config = await GlobalAiConfig.findOne({ key: "singleton" }).lean().catch(() => null);
+    const maxChars = Math.max(200, Number(config?.voice_reply_max_chars) || 4000);
+    const plan = await planOf(user).catch(() => null);
+    const cap = plan ? Number(plan.voice_replies_per_day) : (config?.global_voice_replies_per_day === undefined ? 20 : Number(config.global_voice_replies_per_day));
+    const who = plan ? `the ${plan.name} plan` : "your account";
+    // Past the day's number (or with none included): a reading is paid from top-up credits (extra-usage.service.js)
+    let extra = null;
+    if (cap === 0 || (cap > 0 && (await usedToday(String(user._id), KIND)) >= cap)) {
+        const pay = await canPayExtra(user, KIND);
+        if (pay.allowed) extra = pay;
+        else if (cap === 0) return { allowed: false, status: 402, body: { error: `Voice replies are not included in ${who}. Upgrade your plan to have answers read aloud.${extraOfferText(KIND, pay.price)}`, code: "voice_not_included", plan: plan?.key, extraCredits: pay.price } };
+        else return { allowed: false, status: 429, body: { error: `You've used the ${cap} voice replies a day of ${who}. They refill on ${nextDayText()}.${extraOfferText(KIND, pay.price)}`, code: "voice_cap_reached", plan: plan?.key, extraCredits: pay.price } };
+    }
+    return { allowed: true, extra, maxChars };
+}
+
+/** One voice reply was read: it counts for the day, and an extra one (past the day's number) is paid from top-up credits */
+export function countVoiceReply(user, gate) {
+    addToday(String(user._id), KIND, 1).catch(() => {});
+    if (gate?.extra) chargeExtra(user, KIND, 1, gate.extra.price).catch(() => {});
+}
+
 export const speakAnswer = async (req, res) => {
     try {
         if (req.body?.sample) return await voiceSample(req, res);
@@ -70,19 +101,9 @@ export const speakAnswer = async (req, res) => {
         if (!elevenLabsEnabled()) return res.status(503).json({ error: "Voice is not set up right now. Try again later.", code: "voice_unavailable" });
 
         const userId = String(req.user._id);
-        const config = await GlobalAiConfig.findOne({ key: "singleton" }).lean().catch(() => null);
-        const maxChars = Math.max(200, Number(config?.voice_reply_max_chars) || 4000);
-        const plan = await planOf(req.user).catch(() => null);
-        const cap = plan ? Number(plan.voice_replies_per_day) : (config?.global_voice_replies_per_day === undefined ? 20 : Number(config.global_voice_replies_per_day));
-        const who = plan ? `the ${plan.name} plan` : "your account";
-        // Past the day's number (or with none included): a reading is paid from top-up credits (extra-usage.service.js)
-        let extra = null;
-        if (cap === 0 || (cap > 0 && (await usedToday(userId, KIND)) >= cap)) {
-            const pay = await canPayExtra(req.user, KIND);
-            if (pay.allowed) extra = pay;
-            else if (cap === 0) return res.status(402).json({ error: `Voice replies are not included in ${who}. Upgrade your plan to have answers read aloud.${extraOfferText(KIND, pay.price)}`, code: "voice_not_included", plan: plan?.key, extraCredits: pay.price });
-            else return res.status(429).json({ error: `You've used the ${cap} voice replies a day of ${who}. They refill on ${nextDayText()}.${extraOfferText(KIND, pay.price)}`, code: "voice_cap_reached", plan: plan?.key, extraCredits: pay.price });
-        }
+        const gate = await voiceReplyGate(req.user);
+        if (!gate.allowed) return res.status(gate.status).json(gate.body);
+        const { maxChars } = gate;
 
         const { text: spoken, cut } = cutToSentence(text, maxChars);
         const started = Date.now();
@@ -104,8 +125,7 @@ export const speakAnswer = async (req, res) => {
         }
         if (!audio?.length) return res.status(502).json({ error: "The voice could not read this answer right now. Try again in a moment.", code: "voice_failed" });
 
-        addToday(userId, KIND, 1).catch(() => {});
-        if (extra) chargeExtra(req.user, KIND, 1, extra.price).catch(() => {});
+        countVoiceReply(req.user, gate);
         AiUsageLog.create({ organization_id: req.user.organization_id || null, userId: req.user._id, provider: "elevenlabs", model: TTS_MODEL, feature: "chat_ai", success: true, latencyMs: Date.now() - started, metadata: { characters: spoken.length, cut, messageId: String(req.body?.messageId || "") } }).catch(() => {});
         console.log(`[speak] ${spoken.length} characters${cut ? " (cut)" : ""} in ${Date.now() - started} ms for ${req.user.email || userId}`);
 

@@ -14,9 +14,10 @@ const turns = new Map(); // turnId -> DurableTurn
 const SSE_HEADERS = { "Content-Type": "text/event-stream", "Cache-Control": "no-cache, no-transform", "Connection": "keep-alive", "X-Accel-Buffering": "no" };
 
 class DurableTurn {
-    constructor(realRes, userId) {
+    constructor(realRes, userId, { graceMs = GRACE_MS } = {}) {
         this.id = crypto.randomBytes(12).toString("hex");
         this.userId = String(userId);
+        this.graceMs = graceMs; // how long this answer goes on with no app on its stream
         this.events = []; // every `data:` chunk written, in order
         this.dropped = 0; // how many oldest events were trimmed away
         this.ended = false;
@@ -76,7 +77,7 @@ class DurableTurn {
         if (this.ended) return;
         this.live = null;
         if (this.timer) clearTimeout(this.timer);
-        this.timer = setTimeout(() => this.abort(), GRACE_MS);
+        this.timer = setTimeout(() => this.abort(), this.graceMs);
         this.timer.unref?.();
     }
     // The app is back: it gets everything from event number `from` on, then the live stream
@@ -100,11 +101,13 @@ class DurableTurn {
         this.end();
     }
     onAbort(fn) { if (this.aborted) fn(); else this.abortHandlers.push(fn); }
+    // An app is on the stream right now (false: its connection went away and it has not come back)
+    get watched() { return !!this.live && !this.live.destroyed && !this.live.writableEnded; }
 }
 
 /** Start keeping an answer's events; returns the turn (use `turn.res` in place of the response from here on) */
-export function startDurableTurn(realRes, userId) {
-    const turn = new DurableTurn(realRes, userId);
+export function startDurableTurn(realRes, userId, options = {}) {
+    const turn = new DurableTurn(realRes, userId, options);
     turns.set(turn.id, turn);
     return turn;
 }
@@ -114,4 +117,16 @@ export function attachToTurn(turnId, userId, res, from) {
     const turn = turns.get(String(turnId || ""));
     if (!turn || turn.userId !== String(userId)) return false;
     return turn.attach(res, from);
+}
+
+/**
+ * The user stops an answer that goes on without its app (the phone's Stop button, POST /api/ai/turn/:id/stop):
+ * "stopped", "ended" (it had already ended) or "unknown" (not here, or another user's)
+ */
+export function stopTurn(turnId, userId) {
+    const turn = turns.get(String(turnId || ""));
+    if (!turn || turn.userId !== String(userId)) return "unknown";
+    if (turn.ended) return "ended";
+    turn.abort();
+    return "stopped";
 }

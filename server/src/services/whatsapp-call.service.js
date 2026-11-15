@@ -46,12 +46,16 @@ import { BUDGET_STOP_NOTE, noThinkingFor } from "./llm-stream.js";
 import * as record from "./call-record.service.js";
 import { cfAiFetch } from "./cf-neuron-cap.service.js";
 import * as eleven from "./elevenlabs.service.js";
+import { readOpenAiStream, readClaudeStream, toOpenAiTool, toOpenAiMessages, fromOpenAiAnswer } from "./voice-stream.js";
+
+// (kept under their old names here for anything that reads a model's stream through this file)
+export { readOpenAiStream, readClaudeStream };
 
 const GRAPH = "https://graph.facebook.com/v22.0";
-const CALL_MODEL = "claude-haiku-5-5"; // fastest Claude, so the voice replies come quickly
+export const CALL_MODEL = "claude-haiku-5-5"; // fastest Claude, so the voice replies come quickly
 // When Claude cannot answer (its monthly spend limit is reached, an outage, a bad key), the same call goes on with
 // GLM 5.3 on Cloudflare: the same conversation, the same tools (owner, 2026-11-14)
-const FALLBACK_MODEL = "@cf/zai-org/glm-5.3";
+export const FALLBACK_MODEL = "@cf/zai-org/glm-5.3";
 const MAX_CALL_MS = 15 * 60 * 1000;
 const WRAP_UP_MS = MAX_CALL_MS - 15 * 1000; // 15 s before the end the AI is told the time is almost up
 const OVERTIME_MS = 30 * 1000; // at the limit, a sentence or answer in progress may finish (up to 30 s more)
@@ -307,7 +311,7 @@ async function cfTextToSpeech(text, retried = false) {
 
 // ─── Claude (the talking part) ────────────────────────────────
 
-const START_TASK_TOOL = {
+export const START_TASK_TOOL = {
     name: "start_task",
     description: "Save a task for the Classgrid Agent. When the call ends, the Agent does all saved tasks, in order, in the caller's Classgrid account (it has their chats, projects, GitHub, Vercel, Google and other connected apps) and sends them the result on WhatsApp. The call goes on after this.",
     input_schema: {
@@ -321,7 +325,7 @@ const START_TASK_TOOL = {
     },
 };
 
-const ASK_CLASSGRID_TOOL = {
+export const ASK_CLASSGRID_TOOL = {
     name: "ask_classgrid",
     description: "Ask the Classgrid Agent right now, during the call, and get its answer back to tell the caller. It has everything in the caller's account: classrooms, chats, schedules, files, connected apps (Gmail, Google Calendar, Google Drive, Notion and more), web search and all other Classgrid tools. Use it for anything to look up or do while the caller is on the line. With project_name it first opens that project (as the editor does) so the Agent can read and change its files. It can take from a few seconds to a minute (longer when a project has to be opened).",
     input_schema: {
@@ -410,43 +414,30 @@ function systemPrompt(user) {
 
 // ─── The fallback model (GLM 5.3 on Cloudflare, OpenAI-style messages and tools) ────────────────────────────
 // The conversation is kept in Claude's shape (text, tool_use and tool_result blocks) whichever model answered, so
-// a call can move between the two at any turn.
+// a call can move between the two at any turn. (The two shapes, the sentence cutting and the stream readers are in
+// voice-stream.js: the phone app's voice mode uses them too.)
 
-const toOpenAiTool = (t) => ({ type: "function", function: { name: t.name, description: t.description, parameters: t.input_schema } });
+// The tools of a call, in the order the models get them
+const CALL_TOOLS = [ASK_CLASSGRID_TOOL, START_TASK_TOOL, END_CALL_TOOL, ...PROJECT_TOOLS];
 
-function toOpenAiMessages(system, messages) {
-    const out = [{ role: "system", content: system }];
-    for (const m of messages) {
-        if (typeof m.content === "string") { out.push({ role: m.role, content: m.content }); continue; }
-        const blocks = Array.isArray(m.content) ? m.content : [];
-        if (m.role === "assistant") {
-            const text = blocks.filter((b) => b.type === "text").map((b) => b.text).join(" ").trim();
-            const calls = blocks.filter((b) => b.type === "tool_use").map((b) => ({ id: b.id, type: "function", function: { name: b.name, arguments: JSON.stringify(b.input || {}) } }));
-            out.push({ role: "assistant", content: text || (calls.length ? null : ""), ...(calls.length ? { tool_calls: calls } : {}) });
-            continue;
-        }
-        const results = blocks.filter((b) => b.type === "tool_result");
-        for (const r of results) out.push({ role: "tool", tool_call_id: r.tool_use_id, content: typeof r.content === "string" ? r.content : JSON.stringify(r.content) });
-        const text = blocks.filter((b) => b.type === "text").map((b) => b.text).join(" ").trim();
-        if (text || !results.length) out.push({ role: "user", content: text });
-    }
-    return out;
+// A model request stops after `ms`, and also when `signal` fires (the listener stopped the answer)
+function stopAfter(ms, signal = null) {
+    const timeout = AbortSignal.timeout(ms);
+    if (!signal) return timeout;
+    if (typeof AbortSignal.any === "function") return AbortSignal.any([signal, timeout]);
+    const both = new AbortController();
+    const stop = (s) => () => both.abort(s.reason);
+    for (const s of [signal, timeout]) { if (s.aborted) both.abort(s.reason); else s.addEventListener("abort", stop(s), { once: true }); }
+    return both.signal;
 }
 
-// GLM's answer in Claude's shape: a text block and a tool_use block per function call
-function fromOpenAiAnswer(message) {
-    const content = [];
-    const text = String(message?.content || "").trim();
-    if (text) content.push({ type: "text", text });
-    for (const c of message?.tool_calls || []) {
-        let input = {};
-        try { input = JSON.parse(c.function?.arguments || "{}"); } catch { input = {}; }
-        content.push({ type: "tool_use", id: c.id || `call_${crypto.randomBytes(8).toString("hex")}`, name: c.function?.name, input });
-    }
-    return content;
-}
-
-async function fallbackTurn(call, { noTools = false, onSentence = null } = {}) {
+// One spoken answer from the fallback model, streamed, for any conversation in Claude's shape (the call's, and the
+// phone app's voice mode: ai-voice.controller.js). Returns { model, content, text, tools, cutOff, usage, aborted }.
+// `onSentence` gets each complete sentence as it arrives, `onText` every piece of text. `signal` stops the answer:
+// what had arrived by then is returned with `aborted: true` and its tokens estimated (the model reports them only
+// at the end).
+export async function fallbackVoiceAnswer({ system, tools, messages, noTools = false, onSentence = null, onText = null, signal = null }) {
+    const sent = toOpenAiMessages(system, messages);
     const res = await cfAiFetch(`https://api.cloudflare.com/client/v4/accounts/${process.env.CLOUDFLARE_ACCOUNT_ID}/ai/v1/chat/completions`, {
         method: "POST",
         headers: cfHeaders("application/json"),
@@ -457,23 +448,40 @@ async function fallbackTurn(call, { noTools = false, onSentence = null } = {}) {
             stream_options: { include_usage: true },
             // (a call needs the first words at once: the model's thinking is off, it answered in half a second in the test)
             ...noThinkingFor(FALLBACK_MODEL),
-            messages: toOpenAiMessages(systemPrompt(call.user), call.messages),
-            tools: [ASK_CLASSGRID_TOOL, START_TASK_TOOL, END_CALL_TOOL, ...PROJECT_TOOLS].map(toOpenAiTool),
+            messages: sent,
+            tools: tools.map(toOpenAiTool),
             tool_choice: noTools ? "none" : "auto",
         }),
-        signal: AbortSignal.timeout(45000),
+        signal: stopAfter(45000, signal),
     });
     if (!res.ok) {
         const err = await res.json().catch(() => ({}));
         throw new Error(`${FALLBACK_MODEL} ${res.status}: ${JSON.stringify(err.errors || err.error || err).slice(0, 300)}`);
     }
-    const { choice, usage: u } = await readOpenAiStream(res, onSentence);
-    chargeCall(call, { prompt_tokens: u.prompt_tokens || 0, completion_tokens: u.completion_tokens || 0 }, FALLBACK_MODEL);
+    let read, aborted = false;
+    try {
+        read = await readOpenAiStream(res, onSentence, onText);
+    } catch (e) {
+        if (!signal?.aborted || !e?.partial) throw e;
+        read = e.partial;
+        aborted = true;
+    }
+    const { choice, usage: u } = read;
     const content = fromOpenAiAnswer(choice.message);
-    if (content.length) call.messages.push({ role: "assistant", content });
     const text = content.filter((b) => b.type === "text").map((b) => b.text).join(" ").trim();
-    const tools = content.filter((b) => b.type === "tool_use");
-    return { text, tools, cutOff: choice.finish_reason === "length" };
+    const usage = { prompt_tokens: u.prompt_tokens || 0, completion_tokens: u.completion_tokens || 0 };
+    if (aborted) {
+        usage.prompt_tokens ||= Math.ceil(JSON.stringify(sent).length / 4);
+        usage.completion_tokens = Math.max(usage.completion_tokens, Math.ceil(text.length / 4));
+    }
+    return { model: FALLBACK_MODEL, content, text, tools: content.filter((b) => b.type === "tool_use"), cutOff: choice.finish_reason === "length", usage, aborted };
+}
+
+async function fallbackTurn(call, { noTools = false, onSentence = null } = {}) {
+    const answer = await fallbackVoiceAnswer({ system: systemPrompt(call.user), tools: CALL_TOOLS, messages: call.messages, noTools, onSentence });
+    chargeCall(call, answer.usage, FALLBACK_MODEL);
+    if (answer.content.length) call.messages.push({ role: "assistant", content: answer.content });
+    return { text: answer.text, tools: answer.tools, cutOff: answer.cutOff };
 }
 
 async function claudeTurn(call, { noTools = false, onSentence = null } = {}) {
@@ -486,80 +494,14 @@ async function claudeTurn(call, { noTools = false, onSentence = null } = {}) {
     }
 }
 
-// Sentences from a stream of text pieces: `push(piece)` hands each complete sentence to `onSentence` (also in
-// Hindi and Marathi, ending with "।"); `flush()` hands over whatever is left.
-function sentenceTaker(onSentence) {
-    let unsaid = "";
-    const say = (text) => { if (onSentence && text.trim()) onSentence(text.trim()); };
-    return {
-        push(piece) {
-            unsaid += piece || "";
-            for (;;) {
-                const m = unsaid.match(/^([\s\S]*?[.!?।]["')\]]*)(\s+)(?=\S)/);
-                if (!m) return;
-                say(m[1]);
-                unsaid = unsaid.slice(m[0].length);
-            }
-        },
-        flush() { say(unsaid); unsaid = ""; },
-    };
-}
-
-// Reads a server-sent-events body, calling `onData` with each parsed `data:` JSON
-async function readSse(res, onData) {
-    const reader = res.body.getReader();
-    const decoder = new TextDecoder();
-    let buf = "";
-    for (;;) {
-        const { value, done } = await reader.read();
-        if (done) break;
-        buf += decoder.decode(value, { stream: true });
-        let at;
-        while ((at = buf.indexOf("\n\n")) !== -1) {
-            const chunk = buf.slice(0, at);
-            buf = buf.slice(at + 2);
-            for (const l of chunk.split("\n")) {
-                if (!l.startsWith("data:")) continue;
-                const raw = l.slice(5).trim();
-                if (!raw || raw === "[DONE]") continue;
-                try { onData(JSON.parse(raw)); } catch { /* a keep-alive or a partial line */ }
-            }
-        }
-    }
-}
-
-// An OpenAI-style stream (Cloudflare), put back together: { choice: { message: { content, tool_calls }, finish_reason },
-// usage }. Text goes to `onSentence` one complete sentence at a time as it arrives.
-export async function readOpenAiStream(res, onSentence) {
-    const taker = sentenceTaker(onSentence);
-    const message = { content: "", tool_calls: [] };
-    let finishReason = null;
-    let usage = {};
-    await readSse(res, (d) => {
-        if (d.usage) usage = d.usage;
-        const c = d.choices?.[0];
-        if (!c) return;
-        if (c.finish_reason) finishReason = c.finish_reason;
-        const delta = c.delta || {};
-        if (delta.content) { message.content += delta.content; taker.push(delta.content); }
-        for (const t of delta.tool_calls || []) {
-            const i = Number.isInteger(t.index) ? t.index : message.tool_calls.length;
-            const cur = message.tool_calls[i] || (message.tool_calls[i] = { id: "", type: "function", function: { name: "", arguments: "" } });
-            if (t.id) cur.id = t.id;
-            if (t.function?.name) cur.function.name += t.function.name;
-            if (t.function?.arguments) cur.function.arguments += t.function.arguments;
-        }
-    });
-    taker.flush();
-    message.tool_calls = message.tool_calls.filter(Boolean);
-    if (!message.tool_calls.length) delete message.tool_calls;
-    return { choice: { message, finish_reason: finishReason }, usage };
-}
-
 // The answer comes as a stream (owner, 2026-11-14: the 2-3 s wait before the AI spoke felt like it would not answer):
 // `onSentence` gets each sentence the moment it is complete, so the first one is being made into voice while
 // Claude is still writing the rest. The whole answer is still returned, in Claude's content-block shape.
-async function claudeOnlyTurn(call, { noTools = false, onSentence = null } = {}) {
+// One spoken answer from Claude (the fast call model, no thinking), for any conversation in Claude's shape (the
+// call's, and the phone app's voice mode: ai-voice.controller.js). Returns { model, content, text, tools, cutOff,
+// usage, aborted }. `onText` gets every piece of text as it is written. `signal` stops the answer: what had
+// arrived by then is returned with `aborted: true` (its text only, no tool request), with the tokens used so far.
+export async function claudeVoiceAnswer({ system, tools, messages, noTools = false, onSentence = null, onText = null, signal = null }) {
     const ask = () => fetch("https://api.anthropic.com/v1/messages", {
         method: "POST",
         headers: { "x-api-key": process.env.ANTHROPIC_API_KEY, "anthropic-version": "2023-06-01", "content-type": "application/json" },
@@ -567,14 +509,12 @@ async function claudeOnlyTurn(call, { noTools = false, onSentence = null } = {})
             model: CALL_MODEL,
             max_tokens: 1024,
             stream: true,
-            system: systemPrompt(call.user),
-            // ask_classgrid is back (owner's choice, 2026-10-24 evening): the AI can work during the call, so it opens
-            // or makes the project right away and the tasks are saved with it
-            tools: [ASK_CLASSGRID_TOOL, START_TASK_TOOL, END_CALL_TOOL, ...PROJECT_TOOLS],
+            system,
+            tools,
             ...(noTools ? { tool_choice: { type: "none" } } : {}),
-            messages: call.messages,
+            messages,
         }),
-        signal: AbortSignal.timeout(45000),
+        signal: stopAfter(45000, signal),
     });
     let res = await ask();
     if (res.status === 429 || res.status >= 500) {
@@ -585,52 +525,36 @@ async function claudeOnlyTurn(call, { noTools = false, onSentence = null } = {})
         const err = await res.json().catch(() => ({}));
         throw new Error(`Claude ${res.status}: ${JSON.stringify(err.error || err).slice(0, 300)}`);
     }
-    const data = await readClaudeStream(res, onSentence);
+    let data, aborted = false;
+    try {
+        data = await readClaudeStream(res, onSentence, onText);
+    } catch (e) {
+        if (!signal?.aborted || !e?.partial) throw e;
+        data = e.partial;
+        aborted = true;
+    }
     const u = data.usage || {};
+    const content = data.content || [];
+    const text = content.filter((b) => b.type === "text").map((b) => b.text).join(" ").trim();
     const usage = {
         prompt_tokens: (u.input_tokens || 0) + (u.cache_read_input_tokens || 0) + (u.cache_creation_input_tokens || 0),
         completion_tokens: u.output_tokens || 0,
         cache_read_input_tokens: u.cache_read_input_tokens || 0,
         cache_creation_input_tokens: u.cache_creation_input_tokens || 0,
     };
-    chargeCall(call, usage, CALL_MODEL);
-    // An empty answer is not kept (the API refuses a conversation with an empty message in it)
-    if (data.content?.length) call.messages.push({ role: "assistant", content: data.content });
-    const text = (data.content || []).filter((b) => b.type === "text").map((b) => b.text).join(" ").trim();
-    const tools = (data.content || []).filter((b) => b.type === "tool_use");
-    return { text, tools, cutOff: data.stop_reason === "max_tokens" };
+    // (a stopped answer never got its final count: what it wrote is counted by its length)
+    if (aborted) usage.completion_tokens = Math.max(usage.completion_tokens, Math.ceil(text.length / 4));
+    return { model: CALL_MODEL, content, text, tools: content.filter((b) => b.type === "tool_use"), cutOff: data.stop_reason === "max_tokens", usage, aborted };
 }
 
-// Claude's stream, put back together: { content: [text and tool_use blocks], stop_reason, usage }. Text is handed
-// to `onSentence` one complete sentence at a time as it arrives.
-export async function readClaudeStream(res, onSentence) {
-    const taker = sentenceTaker(onSentence);
-    const blocks = [];
-    const partialJson = new Map(); // block index -> the tool input's JSON so far
-    const usage = {};
-    let stopReason = null;
-    await readSse(res, (ev) => {
-        if (ev.type === "message_start") Object.assign(usage, ev.message?.usage || {});
-        else if (ev.type === "content_block_start") {
-            const cb = ev.content_block || {};
-            blocks[ev.index] = cb.type === "tool_use" ? { type: "tool_use", id: cb.id, name: cb.name, input: {} } : { type: "text", text: cb.text || "" };
-            if (cb.type === "tool_use") partialJson.set(ev.index, "");
-        }
-        else if (ev.type === "content_block_delta") {
-            const b = blocks[ev.index];
-            if (!b) return;
-            if (ev.delta?.type === "text_delta") { b.text += ev.delta.text || ""; taker.push(ev.delta.text); }
-            else if (ev.delta?.type === "input_json_delta") partialJson.set(ev.index, (partialJson.get(ev.index) || "") + (ev.delta.partial_json || ""));
-        }
-        else if (ev.type === "content_block_stop") {
-            const b = blocks[ev.index];
-            if (b?.type === "tool_use") { try { b.input = JSON.parse(partialJson.get(ev.index) || "{}"); } catch { b.input = {}; } }
-            if (b?.type === "text") taker.flush();
-        }
-        else if (ev.type === "message_delta") { if (ev.delta?.stop_reason) stopReason = ev.delta.stop_reason; Object.assign(usage, ev.usage || {}); }
-    });
-    taker.flush();
-    return { content: blocks.filter(Boolean).filter((b) => b.type !== "text" || b.text), stop_reason: stopReason, usage };
+async function claudeOnlyTurn(call, { noTools = false, onSentence = null } = {}) {
+    // ask_classgrid is back (owner's choice, 2026-10-24 evening): the AI can work during the call, so it opens
+    // or makes the project right away and the tasks are saved with it
+    const answer = await claudeVoiceAnswer({ system: systemPrompt(call.user), tools: CALL_TOOLS, messages: call.messages, noTools, onSentence });
+    chargeCall(call, answer.usage, CALL_MODEL);
+    // An empty answer is not kept (the API refuses a conversation with an empty message in it)
+    if (answer.content.length) call.messages.push({ role: "assistant", content: answer.content });
+    return { text: answer.text, tools: answer.tools, cutOff: answer.cutOff };
 }
 
 // ─── Call life ────────────────────────────────────────────────
@@ -1193,7 +1117,9 @@ async function runAgentTaskOnce(user, question, projectId, onSession, sessionId,
     const res = await fetch(`http://127.0.0.1:${port}/api/ai/ask`, {
         ...(signal ? { signal } : {}),
         method: "POST",
-        headers: { Authorization: `Bearer ${userToken(user)}`, "Content-Type": "application/json" },
+        // (phone: true in extraBody: the work is for the Classgrid phone app, so the request says so the way the app
+        // itself does, and the chat is filed and answered by the phone's rules: utils/client-app.js)
+        headers: { Authorization: `Bearer ${userToken(user)}`, "Content-Type": "application/json", ...(extraBody?.phone === true ? { "X-Platform-App": "android" } : {}) },
         // projectId: the chat is saved inside that Project Mode project
         // allTools: every tool and plugin is loaded from the start (owner's rule)
         body: JSON.stringify({ question, allTools: true, ...(sessionId ? { sessionId } : {}), ...(projectId ? { projectId: String(projectId) } : {}), ...extraBody }),

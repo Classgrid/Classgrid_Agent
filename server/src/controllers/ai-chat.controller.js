@@ -775,9 +775,10 @@ async function generateShortTitleText(instruction, text) {
 
 // The chat title is refreshed every TITLE_REFRESH_EVERY user messages from the recent ones, so a chat
 // that opened with "hi" doesn't stay "Simple Greeting" forever.
-const TITLE_REFRESH_EVERY = 5;
+export const TITLE_REFRESH_EVERY = 5;
 
-async function generateSessionTitle(sessionId, question, userId = null) {
+// (exported: the phone app's voice mode titles its chats with it too, ai-voice.controller.js)
+export async function generateSessionTitle(sessionId, question, userId = null) {
     try {
         // The user's other chat titles, so this one doesn't repeat them (e.g. three "PM2 Log Search" chats)
         const taken = await otherChatTitles(sessionId).catch(() => []);
@@ -1628,7 +1629,7 @@ const cloudflareStreamProvider = (model, affinity) => ({
 // "/" commands from the chat box (Project Mode and Studio): what each one asks for, sent for that message only
 // When each chat last had a message (Studio's list sorts by it and marks unread chats); one Redis hash per user
 const CHAT_TOUCHED = (email) => `ai:chatTouched:${String(email || "").toLowerCase()}`;
-const touchChat = (email, sessionId) => { if (email && sessionId) redis.hset(CHAT_TOUCHED(email), String(sessionId), String(Date.now())).catch(() => {}); };
+export const touchChat = (email, sessionId) => { if (email && sessionId) redis.hset(CHAT_TOUCHED(email), String(sessionId), String(Date.now())).catch(() => {}); };
 
 const SLASH_COMMAND_LINES = {
     "classgrid-guide": `Answer from Classgrid AI's own guide: read .classgrid/classgrid_guide/SKILL.md with view_project_file, then the page in its references/ folder that matches the question, and answer from them.`,
@@ -1936,6 +1937,16 @@ export const streamAskAi = async (req, res) => {
             send: (event) => { if (!alive()) return false; res.write(`data: ${JSON.stringify(event)}\n\n`); return true; },
         };
         unregisterPcExecutor = registerPcExecutor(pcExecutor);
+    } else if (body.keepRunning === true && !body.taskOrigin && !body.wakeUp && userId) {
+        // The phone app (any app that asks for it, body.keepRunning): the answer goes on when the app is put in the
+        // background or its connection drops, for up to 30 minutes. The app comes back for it the same way as the
+        // desktop app (turn_info gives the id; GET /api/ai/turn/:id/events?from=N), stops it with
+        // POST /api/ai/turn/:id/stop, and an answer that ends with no app on its stream is sent to the user's
+        // phone as a push notification (user-push.service.js, where the answer is saved below)
+        const { startDurableTurn } = await import("../services/durable-turn.service.js");
+        durableTurn = startDurableTurn(res, userId, { graceMs: 30 * 60 * 1000 });
+        res = durableTurn.res;
+        res.write(`data: ${JSON.stringify({ type: "turn_info", turnId: durableTurn.id })}\n\n`);
     }
 
     let keepAliveInterval = null;
@@ -2293,6 +2304,11 @@ export const streamAskAi = async (req, res) => {
                     if (inlineImages.length) keepMasteroPictures(req.user?._id, sessionId, saved?.id, inlineImages).catch((e) => console.error("[Mastero] Keeping pictures failed:", e.message));
                 })
                 .catch(err => console.error("Failed to save user message:", err));
+            // Share Grid: the others in the chat get it marked unread, and a push when they don't have it open.
+            // Only for a message a person wrote: a message that is for the AI only ("[SYSTEM: ...]": a woken chat,
+            // a task going on, voice mode's live question) is never shown as a person's message, so it is not
+            // pushed as one either (the answer to it is pushed where the answer is saved, below)
+            if (gridSender && !body.wakeUp && !body.taskOrigin && !String(body.question).trim().startsWith("[SYSTEM:")) import("../services/user-push.service.js").then((m) => m.pushSharedChat({ sessionId, fromEmail: gridSender.email, fromName: gridSender.name, text: body.question })).catch(() => {});
             // The file links go into the AI's history too, so follow-ups can re-open an uploaded file.
             appendToHistory(sessionId, "user", gridSender ? `${gridSender.name}: ${body.question}` : body.question, body.fileUrls || []).catch(err => console.error("Failed to append user msg to Redis:", err));
 
@@ -7158,6 +7174,20 @@ If a tool fails, never show the error message; say only: "Something went wrong o
                     .then(() => { if (gridSender) req.app.get("io")?.to(`aigrid:${sessionId}`).emit("aigrid:update", { sessionId, kind: "messages", by: gridSender.email }); })
                     .catch(err => console.error("Failed to save assistant message:", err));
                 appendToHistory(sessionId, "assistant", savedContent).catch(err => console.error("Failed to append assistant reply to Redis:", err));
+                // Push notifications to the phone (user-push.service.js). The asker gets one only when no app is on
+                // this answer's stream: the chat was woken by background work, a task the agent set for itself in this
+                // chat went on (sleep_until, agent-task.service.js), or the app's connection went away before the end
+                // (an answer that goes on without its app). Never while the stream is still connected. The work of a
+                // WhatsApp call or message is told by its record (call-record.service.js). In a shared chat the
+                // others get the answer marked unread, and a push when they don't have the chat open.
+                if (userId && body.taskOrigin !== "whatsapp" && typeof answer === "string" && answer.trim()) {
+                    const background = body.wakeUp === true || body.taskOrigin === "chat";
+                    const nobodyOnStream = background || (!!durableTurn && !durableTurn.watched);
+                    import("../services/user-push.service.js").then((m) => {
+                        if (nobodyOnStream) m.pushAnswerFinished({ userId, sessionId, answer, images: generatedImages, woken: background });
+                        if (gridSender) m.pushSharedChat({ sessionId, fromEmail: gridSender.email, text: answer, answer: true });
+                    }).catch(() => {});
+                }
                 // Project Mode: remember the project's state now, so the next turn can show what the user changed themselves
                 rememberProjectSnapshot(sessionId).catch(() => {});
                 // Helpers still working keep changing files after the answer ends: the "after" picture for Review is
@@ -7641,6 +7671,20 @@ export const turnEvents = async (req, res) => {
     const { forwardToSibling } = await import("../services/sibling-process.js");
     if (await forwardToSibling(req, res)) return;
     res.status(404).json({ error: "This answer isn't here any more" });
+};
+
+// The phone app's Stop button for an answer that goes on without the app (body.keepRunning on /ask): the answer is
+// stopped and what it wrote so far is kept in the chat (durable-turn.service.js)
+export const turnStop = async (req, res) => {
+    const { stopTurn } = await import("../services/durable-turn.service.js");
+    const state = stopTurn(String(req.params?.id || ""), String(req.user?.id));
+    if (state === "unknown") {
+        // The answer may be running in the other copy of this server (sibling-process.js)
+        const { forwardToSibling } = await import("../services/sibling-process.js");
+        if (await forwardToSibling(req, res)) return;
+        return res.status(404).json({ error: "This answer isn't here any more" });
+    }
+    res.json({ ok: true, stopped: state === "stopped" });
 };
 
 // A background command on the user's computer finished (the desktop app tells it over HTTP, like every other step
@@ -8312,6 +8356,10 @@ export const generateImage = async (req, res) => {
     // Set once this request has taken one of the user's image slots; given back if the image then fails
     let imageSlotUserId = null;
     let imageTokenCharge = null;
+    // The app that asked went away before the picture was ready (closed, or its connection dropped): the picture is
+    // still made and saved in the chat, and the user's phone gets a push (user-push.service.js)
+    let askerGone = false;
+    res.on("close", () => { if (!res.writableEnded) askerGone = true; });
     try {
         const { prompt, sessionId, isIncognito } = req.body;
         // imageUrl / imageUrls: the pictures the new one is made from (the chat's edit_image tool: an edit, a new
@@ -8609,6 +8657,12 @@ export const generateImage = async (req, res) => {
             } catch (logErr) {
                 console.error("Failed to log image generation usage:", logErr);
             }
+        }
+
+        if (activeSessionId && !isIncognito && !isInternalCall) {
+            // The chat list: this chat just had a message (its time, and the unread dot when it isn't open)
+            touchChat(userEmail, activeSessionId);
+            if (askerGone) import("../services/user-push.service.js").then((m) => m.pushImageReady({ userId: req.user._id, sessionId: activeSessionId, prompt, imageUrl: r2Url })).catch(() => {});
         }
 
         res.json({ imageUrl: r2Url, sessionId: activeSessionId });

@@ -481,11 +481,34 @@ const userSchema = new mongoose.Schema(
     // Legacy push notification preferences
     pushNotifications: {
       global: { type: Boolean, default: true },
-      sidebarPanelEnabled: { type: Boolean, default: true }
+      sidebarPanelEnabled: { type: Boolean, default: true },
+      // The phone app's push notifications, one switch per kind (services/user-push.service.js); "global" above
+      // is the master switch for all of them. Read and saved with GET / PUT /api/user/push-preferences.
+      answers: { type: Boolean, default: true },        // an answer (or a file) that finished while the chat was not open
+      images: { type: Boolean, default: true },         // an image that finished generating
+      schedules: { type: Boolean, default: true },      // a schedule that ran
+      calls: { type: Boolean, default: true },          // a call's summary
+      sharedChats: { type: Boolean, default: true },    // a message or an answer in a chat shared with the user
+      productUpdates: { type: Boolean, default: true }  // news about Classgrid AI
     },
 
     fcmTokens: {
       type: [String],
+      default: []
+    },
+
+    // The phone app's devices for push notifications, one entry per device (POST / DELETE /api/user/fcm-token,
+    // services/user-push.service.js). A token is on one account only: the one that registered it last.
+    // (fcmTokens above is the older list of bare tokens; it is still sent to and cleaned up.)
+    fcmDevices: {
+      type: [{
+        _id: false,
+        token: { type: String, required: true },
+        platform: { type: String, default: "android" },
+        deviceId: { type: String, default: "" },
+        appVersion: { type: String, default: "" },
+        updatedAt: { type: Date, default: Date.now }
+      }],
       default: []
     },
 
@@ -896,6 +919,8 @@ userSchema.index({ resetPasswordToken: 1 }, { sparse: true }); // fast reset-tok
 userSchema.index({ activationToken: 1 }, { sparse: true }); // fast activation-token lookups
 userSchema.index({ activationCodeHash: 1 }, { sparse: true });
 userSchema.index({ blocked_users: 1 }, { sparse: true }); // "who blocked me" lookups for Grid blocking
+userSchema.index({ "fcmDevices.token": 1 }, { sparse: true }); // a push token moving to the account that registered it last
+userSchema.index({ fcmTokens: 1 }, { sparse: true }); // the same lookup in the older list of bare tokens (both are searched together)
 // PRN unique per organization (same PRN cannot exist twice in one org)
 // partialFilterExpression ensures null PRNs don't conflict
 userSchema.index(
