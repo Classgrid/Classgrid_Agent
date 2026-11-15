@@ -98,7 +98,7 @@ export const DEFAULT_PLANS = [
         call_minutes_per_period: 30, call_reset_value: 1, call_reset_unit: "month", calls_per_day: 3, call_max_minutes: 5,
         whatsapp_per_day: 10, whatsapp_per_period: 100, whatsapp_reset_value: 1, whatsapp_reset_unit: "month",
         projects_max: 3, coding_runs_per_month: 30, premium_runs_per_month: 0, sandbox_hours_per_month: 3, sandbox_sessions: 1,
-        uploads_per_window: 30, upload_max_mb: 10, library_storage_mb: 600, devices_max: 2,
+        uploads_per_window: 30, upload_max_mb: 30, library_storage_mb: 600, devices_max: 2,
         priority: false, support_level: "community",
         features_text: ["40 new chats every 5 hours, no limit inside a chat", "Claude models: no", "4 images and photo edits a week", "30 free WhatsApp call minutes a month", "3 cloud projects", "Grids, Schedule, Library, Calls, desktop and Android apps"],
     },
