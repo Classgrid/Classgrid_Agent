@@ -432,6 +432,9 @@ export const voiceTurn = async (req, res) => {
     let voiceId = voiceIdFor(String(body.voice || ""));
     const voiceStartedAt = Date.now();
     let voiceError = "";
+    // How long the AI spoke in this turn: it counts on the day's voice minutes with the time the user spoke (owner,
+    // 2026-11-15: "I talked 30 minutes and it still shows the full 300 minutes"), so the minutes are the talk
+    let spokenSeconds = 0;
     const speak = async (sentence) => {
         const words = spokenText(sentence);
         if (!words) return null;
@@ -451,7 +454,9 @@ export const voiceTurn = async (req, res) => {
             throw e;
         }
         // (16-bit samples: a whole number of them)
-        return pcm.length % 2 ? pcm.subarray(0, pcm.length - 1) : pcm;
+        const whole = pcm.length % 2 ? pcm.subarray(0, pcm.length - 1) : pcm;
+        spokenSeconds += whole.length / 2 / VOICE_AUDIO.sampleRate;
+        return whole;
     };
 
     // ── The tools: the full Agent, as this user, through the normal chat route (its own checks, credits and saved
@@ -518,6 +523,8 @@ export const voiceTurn = async (req, res) => {
         touchChat(userEmail, sessionId);
         const spoke = turn.spoken.sentences > 0;
         if (spoke) countVoiceReply(user, gate);
+        // The AI's talking time counts on the day's voice minutes too (the user's own time was counted when heard)
+        if (spokenSeconds > 0) countVoiceInput(user, inputGate, spokenSeconds);
         if (spoke || turn.spoken.failed) {
             AiUsageLog.create({
                 organization_id: orgId || null, userId: user._id, provider: "elevenlabs", model: TTS_MODEL, feature: "chat_ai", success: spoke, ...(spoke ? {} : { error: voiceError || "no sentence could be voiced" }), latencyMs: Date.now() - voiceStartedAt,
