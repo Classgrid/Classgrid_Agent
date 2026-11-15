@@ -84,28 +84,9 @@ import { uploadBufferToR2, deleteFromR2, getPresignedUploadUrl } from "../config
 
 const router = express.Router();
 
-// Plans on: the plan's voice input minutes per day (India time); a count that cannot be read never blocks
-import { planOf } from "../services/plan-limits.service.js";
-import { usedToday, addToday, nextDayText } from "../services/plan-usage.service.js";
-// Past the day's minutes, each started minute is paid from top-up credits (extra-usage.service.js): the check says
-// so with { extra: true } and countVoiceInput charges once the audio was heard
-import { canPayExtra, chargeExtra, extraOfferText } from "../services/extra-usage.service.js";
-async function voiceInputAllowed(user) {
-    const plan = await planOf(user).catch(() => null);
-    if (!plan) return { allowed: true };
-    const cap = Number(plan.voice_input_minutes_per_day);
-    if (cap < 0) return { allowed: true };
-    const used = await usedToday(String(user._id), "voiceinput");
-    if (cap > 0 && used / 60 < cap) return { allowed: true };
-    const extra = await canPayExtra(user, "voiceinput");
-    if (extra.allowed) return { allowed: true, extra: true, price: extra.price };
-    if (cap === 0) return { allowed: false, error: `Voice input is not included in the ${plan.name} plan. Upgrade your plan, or type instead.${extraOfferText("voiceinput", extra.price)}` };
-    return { allowed: false, error: `You've used the ${cap} minutes of voice input a day of your ${plan.name} plan. It refills on ${nextDayText()}. Upgrade your plan, or type instead.${extraOfferText("voiceinput", extra.price)}` };
-}
-function countVoiceInput(user, gate, seconds) {
-    addToday(String(user._id), "voiceinput", seconds).catch(() => {});
-    if (gate?.extra) chargeExtra(user, "voiceinput", Math.max(1, Math.ceil((Number(seconds) || 0) / 60)), gate.price).catch(() => {});
-}
+// Plans on: the plan's voice input minutes per day (services/voice-input-limit.service.js, shared with the
+// phone's voice mode)
+import { voiceInputAllowed, countVoiceInput } from "../services/voice-input-limit.service.js";
 const sb = primarySupabaseClient;
 const upload = multer({
     storage: multer.memoryStorage(),

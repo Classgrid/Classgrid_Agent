@@ -31,8 +31,13 @@
 // turn that was read aloud counts as one voice reply of the day (ai-speak.controller.js), exactly like the
 // speaker button.
 //
-// What the phone sends: { text, sessionId?, voice?, language?, speak?, model? }
-//   text       what the phone's recogniser heard (required)
+// What the phone sends: { text | audio, sampleRate?, sessionId?, voice?, language?, speak?, model? }
+//   text       what was said, as text (the phone's own recogniser heard it)
+//   audio      OR what was said, as sound: base64 of 16-bit little-endian mono PCM at `sampleRate` (16000), one
+//              spoken turn recorded by the phone. The server turns it into text (the same speech to text as voice
+//              notes: ElevenLabs Scribe, Cloudflare Whisper behind it), counted on the plan's voice input minutes,
+//              so the talk does not depend on the phone's speech recogniser (owner, 2026-11-15: it disconnects on
+//              some phones; the WhatsApp call listens on the server too). The words come back in a `heard` event.
 //   sessionId  the chat to go on in; left out, a new chat is started
 //   voice      the picked voice's key (GET /api/ai/voices); unknown or left out: Classgrid's voice
 //   language   the recogniser's language (BCP-47, like "hi-IN"), so the AI knows what the user speaks
@@ -42,12 +47,14 @@
 //              alone (no backup model), and the Agent on Auto
 //
 // Refused before the answer starts (plain JSON, { error, message, code }): 400 nothing_said, 401 not_signed_in,
+// 429 voice_input_cap_reached (the day's voice input minutes are used), 413 audio_too_long,
 // 402 model_locked / claude_cap_reached (the picked model is not in the plan, or its weekly Claude or Fable credits
 // are used up), 403 not_your_chat, 404 chat_not_found, 409 chat_ended, 429 ai_quota_exceeded / ai_blocked / chats_cap_reached,
 // 503 usage_check_failed.
 //
 // The stream (text/event-stream, each event one `data: {json}` line, `data: [DONE]` last):
 //   { type: "session", sessionId, isNew }
+//   { type: "heard", text }                     what the server heard in the sent audio (only for an audio turn)
 //   { type: "notice", code, message }            the answer comes as text only: the day's voice replies are used
 //                                                 up (voice_cap_reached, voice_not_included) or the voice is not
 //                                                 set up (voice_unavailable). Not sent with speak: false.
@@ -81,6 +88,8 @@ import { CLAUDE_CHAT_MODELS } from "../services/llm-stream-anthropic.js";
 import { disabledModels, fableAccess, isFableModel } from "../services/model-access.service.js";
 import { voiceModelRefusal } from "../services/voice-model.service.js";
 import { weekCounters } from "../services/ai-credits.service.js";
+import { voiceInputAllowed, countVoiceInput, pcmToWav } from "../services/voice-input-limit.service.js";
+import { transcribeAudioDetailed } from "../services/ai/voice.service.js";
 
 // What "Auto" means in voice mode: GLM 5.3 (first words in about half a second with its thinking off). It answers
 // alone, like a picked model: voice mode has no backup model (owner, 2026-11-15)
@@ -88,6 +97,11 @@ const VOICE_MODEL = FALLBACK_MODEL; // "@cf/zai-org/glm-5.3"
 import { runVoiceTurn, toVoiceMessages, VOICE_AUDIO } from "../services/voice-turn.service.js";
 
 const MAX_HEARD_CHARS = 4000; // one spoken turn (the recogniser gives a sentence or two)
+// One spoken turn sent as sound: at most a minute, at least a fifth of a second (shorter is a click, not a word)
+const MAX_AUDIO_SECONDS = 60;
+const MIN_AUDIO_SECONDS = 0.2;
+// What speech-to-text writes for sound with no words in it
+const NO_WORDS = /^[\s.,!?…\-]*$|^\(?\[?(silence|music|noise|background noise|blank[_ ]audio|inaudible|no speech)\]?\)?\.?$/i;
 // The usage check before the answer: what the user said plus the short prompt, the tools and a spoken reply
 const MIN_TURN_TOKENS = 1500;
 const HISTORY_DEPTH = 30; // every message after the chat's summary (it is rewritten every 8 messages)
@@ -181,8 +195,31 @@ export const voiceTurn = async (req, res) => {
     const userId = String(user._id);
     const orgId = user.organization_id || null;
     const userEmail = user.email || "";
-    const heard = String(body.text || "").replace(/\s+/g, " ").trim().slice(0, MAX_HEARD_CHARS);
-    if (!heard) return refusal(res, 400, "I didn't catch that. Say it again.", "nothing_said");
+    const cleanHeard = (t) => String(t || "").replace(/\s+/g, " ").trim().slice(0, MAX_HEARD_CHARS);
+    let heard = cleanHeard(body.text);
+    // The turn as sound (no text): its length is known now, its words once the speech to text has answered (it runs
+    // at the same time as the checks below, so listening on the server costs the answer no extra wait)
+    let pcm = null, audioSeconds = 0, inputGate = null, heardText = null, heardMs = null;
+    if (!heard && typeof body.audio === "string" && body.audio) {
+        const rate = Number(body.sampleRate) === 24000 ? 24000 : Number(body.sampleRate) === 48000 ? 48000 : 16000;
+        pcm = Buffer.from(body.audio, "base64");
+        audioSeconds = pcm.length / 2 / rate;
+        if (audioSeconds > MAX_AUDIO_SECONDS + 1) return refusal(res, 413, "That was too long for one turn. Say it in shorter parts.", "audio_too_long");
+        if (audioSeconds < MIN_AUDIO_SECONDS) return refusal(res, 400, "I didn't catch that. Say it again.", "nothing_said");
+        try {
+            inputGate = await voiceInputAllowed(user);
+        } catch (e) {
+            console.error("[voice turn] voice input check failed:", e.message);
+            inputGate = { allowed: true }; // (a count that cannot be read never blocks)
+        }
+        if (!inputGate.allowed) return refusal(res, 429, inputGate.error, "voice_input_cap_reached");
+        const sttStartedAt = Date.now();
+        heardText = transcribeAudioDetailed(pcmToWav(pcm, rate), "audio/wav")
+            .then((r) => { heardMs = Date.now() - sttStartedAt; return cleanHeard(r?.text); })
+            .catch((e) => { console.error("[voice turn] speech to text failed:", e.message); return null; });
+    } else if (!heard) {
+        return refusal(res, 400, "I didn't catch that. Say it again.", "nothing_said");
+    }
     let sessionId = body.sessionId ? String(body.sessionId).trim() : "";
     const isNew = !sessionId;
     const wantsVoice = body.speak !== false;
@@ -193,7 +230,8 @@ export const voiceTurn = async (req, res) => {
     try {
         [check, session, gate, chatsRefusal, history, grid, offModels, plan] = await Promise.all([
             // Fails closed: if the usage check itself errors, the turn is not run
-            hasEnoughTokens(userId, orgId, Math.ceil(heard.length / 4) + MIN_TURN_TOKENS),
+            // (a turn sent as sound: about three words a second, before its words are known)
+            hasEnoughTokens(userId, orgId, (pcm ? Math.ceil(audioSeconds * 5) : Math.ceil(heard.length / 4)) + MIN_TURN_TOKENS),
             isNew ? null : getSessionById(sessionId).catch(() => null),
             // The day's voice replies (a count that cannot be read leaves this turn without voice, never without an answer)
             wantsVoice && elevenLabsEnabled()
@@ -206,6 +244,15 @@ export const voiceTurn = async (req, res) => {
             isVoiceModel(askedModel) ? disabledModels().catch(() => []) : [],
             isVoiceModel(askedModel) ? planOf(user).catch(() => null) : null,
         ]);
+        // The words of a turn sent as sound (asked for above, while these checks ran)
+        if (pcm) {
+            const text = await heardText;
+            if (text === null) return refusal(res, 503, "I couldn't hear that just now. Say it again.", "speech_to_text_failed");
+            // The seconds that were listened to count on the day's voice input minutes, words or not
+            countVoiceInput(user, inputGate, audioSeconds);
+            if (!text || NO_WORDS.test(text)) return refusal(res, 400, "I didn't catch that. Say it again.", "nothing_said");
+            heard = text;
+        }
     } catch (err) {
         console.error("[voice turn] usage check error:", err);
         return refusal(res, 503, "We couldn't check your AI usage balance right now, so this was not sent. Please try again in a minute.", "usage_check_failed");
@@ -300,6 +347,8 @@ export const voiceTurn = async (req, res) => {
             if (isWebsite(req)) User.updateOne({ _id: user._id, desktop_chat_ids: { $ne: sessionId }, web_chat_ids: { $ne: sessionId } }, { $addToSet: { web_chat_ids: sessionId } }).catch(() => {});
         }
         write({ type: "session", sessionId, isNew });
+        // (a turn sent as sound: the phone shows what was heard as the user's line)
+        if (pcm) write({ type: "heard", text: heard });
         if (notice) write(notice);
         const waiting = held;
         held = null;
@@ -475,7 +524,7 @@ export const voiceTurn = async (req, res) => {
                 metadata: { characters: turn.spoken.characters, sentences: turn.spoken.sentences, failed: turn.spoken.failed, cut: turn.spoken.cut, voiceTurn: true, messageId: String(messageId || "") },
             }).catch(() => {});
         }
-        console.log(`[voice turn] ${used.model || "no model"} for ${userEmail || userId}: first text +${marks.text ?? "-"} ms, first voice +${marks.audio ?? "-"} ms, ${turn.spoken.sentences} sentence(s), ${turn.steps.length} tool(s), ${used.credits} credits, ${Date.now() - startedAt} ms${turn.aborted ? " (stopped)" : failed ? " (failed)" : ""}`);
+        console.log(`[voice turn] ${used.model || "no model"} for ${userEmail || userId}: ${pcm ? `heard ${audioSeconds.toFixed(1)} s of sound in ${heardMs ?? "-"} ms, ` : ""}first text +${marks.text ?? "-"} ms, first voice +${marks.audio ?? "-"} ms, ${turn.spoken.sentences} sentence(s), ${turn.steps.length} tool(s), ${used.credits} credits, ${Date.now() - startedAt} ms${turn.aborted ? " (stopped)" : failed ? " (failed)" : ""}`);
         return {
             sessionId, messageId,
             usage: { model: used.model, inputTokens: used.input, outputTokens: used.output, credits: used.credits, rounds: turn.rounds.length, spokenSentences: turn.spoken.sentences, spokenCharacters: turn.spoken.characters, voiceReply: spoke, ms: Date.now() - startedAt },
