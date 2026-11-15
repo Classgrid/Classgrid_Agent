@@ -2919,8 +2919,17 @@ export const deleteAccount = async (req, res) => {
             }).catch(console.error);
         } catch(e) {}
 
+        // The person's data goes with the account (chats, files, projects, skills, schedules...; payments and invoices
+        // are kept by law): services/account-deletion.service.js. The files in storage are removed after the reply.
+        const { deleteAccountData, deleteStoredFiles } = await import("../services/account-deletion.service.js");
+        const { report, files } = await deleteAccountData(user, { io: req.app.get("io") });
+        console.log(`[account delete] ${user._id} data:`, JSON.stringify(report));
+
         // Delete user
         await User.findByIdAndDelete(user._id);
+        deleteStoredFiles(String(user._id), files)
+            .then((n) => console.log(`[account delete] ${user._id}: ${n} stored file(s) deleted`))
+            .catch((e) => console.error(`[account delete] ${user._id}: stored files failed:`, e.message));
 
         // Clear both token cookies, like logout (a leftover one for the deleted account made the next sign-up 401)
         const isProdEnv = process.env.NODE_ENV === "production";

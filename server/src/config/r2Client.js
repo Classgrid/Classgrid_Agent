@@ -71,7 +71,7 @@
  * ─────────────────────────────────────────────────────────
  */
 
-import { S3Client, PutObjectCommand, GetObjectCommand, DeleteObjectCommand } from '@aws-sdk/client-s3';
+import { S3Client, PutObjectCommand, GetObjectCommand, DeleteObjectCommand, ListObjectsV2Command, DeleteObjectsCommand } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { v4 as uuidv4 } from 'uuid';
 import path from 'path';
@@ -188,6 +188,27 @@ export async function deleteFromR2(fileIdentifier) {
 
     await r2Client.send(command);
     return true;
+}
+
+/**
+ * Deletes every object whose key starts with `prefix` (a deleted account's own folder, "<userId>/"), 1000 at a time.
+ * Resolves the number of objects deleted. The prefix must name a folder (end in "/"), so a short prefix can never
+ * empty the bucket.
+ */
+export async function deletePrefixFromR2(prefix) {
+    if (typeof prefix !== 'string' || prefix.length < 3 || !prefix.endsWith('/')) throw new Error('deletePrefixFromR2 needs a folder prefix');
+    let deleted = 0;
+    let token;
+    do {
+        const page = await r2Client.send(new ListObjectsV2Command({ Bucket: R2_BUCKET_NAME, Prefix: prefix, ContinuationToken: token }));
+        const keys = (page.Contents || []).map((o) => ({ Key: o.Key })).filter((o) => o.Key);
+        if (keys.length) {
+            await r2Client.send(new DeleteObjectsCommand({ Bucket: R2_BUCKET_NAME, Delete: { Objects: keys, Quiet: true } }));
+            deleted += keys.length;
+        }
+        token = page.IsTruncated ? page.NextContinuationToken : undefined;
+    } while (token);
+    return deleted;
 }
 
 /**
