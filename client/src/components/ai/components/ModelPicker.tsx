@@ -308,8 +308,8 @@ export function ModelPicker({ value, onChange, disabled }: ModelPickerProps) {
     <Dialog open={!!upgradeFor} onOpenChange={(o) => { if (!o) setUpgradeFor(null); }}>
       <DialogContent className="sm:max-w-[400px] p-6" overlayClassName="supports-backdrop-filter:backdrop-blur-none !backdrop-blur-none !bg-black/40">
         <DialogHeader>
-          <DialogTitle className="text-lg font-semibold">Upgrade to use {upgradeFor?.model}</DialogTitle>
-          <DialogDescription>This model needs the {upgradeFor?.plan} plan.</DialogDescription>
+          <DialogTitle className="text-lg font-semibold">Upgrade to use {upgradeFor?.plan}</DialogTitle>
+          <DialogDescription>{upgradeFor?.model} requires a {upgradeFor?.plan} plan.</DialogDescription>
         </DialogHeader>
         <DialogFooter className="gap-2">
           <button type="button" className="inline-flex items-center h-8 px-3.5 rounded-full text-[13px] font-medium cursor-pointer bg-black/[0.06] dark:bg-white/[0.09] text-foreground hover:bg-black/[0.1] dark:hover:bg-white/[0.14]" onClick={() => setUpgradeFor(null)}>Cancel</button>

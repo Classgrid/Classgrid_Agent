@@ -229,16 +229,19 @@ export function SettingsBillingSection() {
 
   const perInr = data.balance.credits_per_inr || 3000;
   const balance = (data.balance.topup || 0) + (data.balance.promotion || 0);
-  const planName = data.enabled ? data.plan.name : "Free";
+  // Classgrid staff accounts (super admins, @classgrid.in) have no plan and no plan limits: shown as Staff, never as
+  // Free (owner, 2026-11-15: Free, Pro, Max and staff are never shown as the same)
+  const staff = data.enabled && !data.plan.limits;
+  const planName = staff ? "Staff" : data.enabled ? data.plan.name : "Free";
   const lim = data.plan.limits || {};
   const yearly = data.plan.billing === "prepaid_yearly";
   const studentPaid = !!data.plan.student_price;
   // Top-ups are for paid plans (owner, 2026-11-15): on Free the tile offers Upgrade instead
-  const freePlan = data.enabled && data.plan.key === "free";
+  const freePlan = data.enabled && !!data.plan.limits && data.plan.key === "free"; // (staff: no plan limits, top-ups stay)
   const price = data.enabled && data.plan.key !== "free"
     ? Number(studentPaid ? (yearly ? lim.student_price_inr_yearly : lim.student_price_inr_monthly) : (yearly ? lim.price_inr_yearly : lim.price_inr_monthly))
     : 0;
-  const priceLine = data.plan.key === "free" || !data.enabled
+  const priceLine = staff ? "Classgrid team account · no plan limits" : data.plan.key === "free" || !data.enabled
     ? "Free, no payment needed"
     : data.plan.billing === "granted"
       ? `Given to you${data.plan.expires_at ? ` · until ${dayText(data.plan.expires_at)}` : ""}`

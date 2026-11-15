@@ -27,20 +27,20 @@ export function openPricing() {
 }
 
 /**
- * For each model: the names of the plans that include it (no label when every plan does, or plans are off), and
- * whether the user's own plan lacks it (`myPlanKey` null = no plan limits apply to this user).
+ * For a model the user's own plan does not include: the plans that do ("Pro or Max") and the lowest of them; null
+ * when the user can use it (their plan has it, plans are off, or no plan limits apply to them: `myPlanKey` null).
+ * Owner, 2026-11-15: the tag shows only to people who need to upgrade for that model, never on models they have.
  */
 export function useModelPlans(myPlanKey: string | null | undefined) {
   const { data } = usePricingFeed();
   const on = !!data?.plansEnabled && !!data.modelPlans;
-  const buyable = (data?.plans || []).filter((p) => !p.comingSoon);
   return (modelId: string) => {
-    if (!on || modelId === "auto") return null;
+    if (!on || !myPlanKey || modelId === "auto") return null;
     const list = data!.modelPlans![modelId];
     if (!list) return null; // a model no plan lists: every plan has it
-    if (list.length >= buyable.length) return null;
+    if (list.some((p) => p.key === myPlanKey)) return null; // the user's plan has it
     const names = list.map((p) => p.name);
-    return { label: planList(names), lowest: names[0] || "", locked: !!myPlanKey && !list.some((p) => p.key === myPlanKey) };
+    return { label: planList(names), lowest: names[0] || "", locked: true };
   };
 }
 
@@ -48,7 +48,8 @@ export function useModelPlans(myPlanKey: string | null | undefined) {
 export function PlanPill() {
   const { data } = usePlanOverview();
   const { data: feed } = usePricingFeed();
-  if (!data?.enabled || !data.plan?.name) return null;
+  // (staff accounts have no plan limits: limits is null, nothing to show)
+  if (!data?.enabled || !data.plan?.name || !data.plan.limits) return null;
   const buyable = (feed?.plans || []).filter((p) => !p.comingSoon);
   const top = buyable.length > 0 && buyable[buyable.length - 1]?.key === data.plan.key;
   return (
