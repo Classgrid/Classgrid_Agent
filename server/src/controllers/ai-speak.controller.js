@@ -10,6 +10,7 @@ import { planOf } from "../services/plan-limits.service.js";
 import { usedToday, addToday, nextDayText } from "../services/plan-usage.service.js";
 import { canPayExtra, chargeExtra, extraOfferText } from "../services/extra-usage.service.js";
 import { VOICE_CHOICES, voiceIdFor, publicVoiceChoices } from "../services/voice-choices.js";
+import { speakPieces } from "../services/speak-pieces.service.js";
 
 const KIND = "voicereply"; // the per-day counter's name (plan-usage.service.js)
 
@@ -93,6 +94,101 @@ export function countVoiceReply(user, gate) {
     if (gate?.extra) chargeExtra(user, KIND, 1, gate.extra.price).catch(() => {});
 }
 
+// How many pieces are being voiced at the same time (they are always sent in their order)
+const PIECES_AHEAD = 3;
+const STREAM_AUDIO = { format: "pcm_24000", sampleRate: 24000 }; // what the phone's speaker plays as it arrives
+
+// The reading as a stream (text/event-stream, each event one `data: {json}` line, `data: [DONE]` last):
+//   { type: "audio", index, text, format: "pcm_24000", sampleRate: 24000, data }   data: base64 of 16-bit little-
+//                                 endian mono PCM of that piece; "" with failed: true when it could not be voiced
+//   { type: "done", cut, pieces }  every piece was sent (cut: the answer was longer than one reading may be)
+//   { type: "error", message, code }  the first piece could not be voiced: nothing was read
+// The same events voice mode sends (ai-voice.controller.js), so the phone plays them with the same speaker.
+// The reading counts as one voice reply once its first piece is voiced. When the phone closes the stream (the
+// user tapped stop), no more pieces are made.
+async function speakStream(req, res, { spoken, cut, gate }) {
+    const pieces = speakPieces(spoken);
+    const classgridVoice = voiceIdFor("classgrid");
+    let voiceId = voiceIdFor(String(req.body?.voice || ""));
+    const started = Date.now();
+    const userId = String(req.user._id);
+
+    res.writeHead(200, {
+        "Content-Type": "text/event-stream",
+        "Cache-Control": "no-cache, no-transform",
+        "Connection": "keep-alive",
+        "X-Accel-Buffering": "no", // tells NGINX to pass every event on at once instead of buffering
+    });
+    // 2 KB of padding makes NGINX and the load balancer pass the headers on and start the stream at once
+    res.write(":" + Array(2048).join(" ") + "\n\n");
+    res.flushHeaders?.();
+    res.socket?.setNoDelay?.(true);
+
+    let closed = false;
+    res.on("close", () => { closed = true; });
+    const send = (event) => {
+        if (closed || res.writableEnded) return;
+        try { res.write(`data: ${JSON.stringify(event)}\n\n`); } catch { /* the phone left */ }
+    };
+
+    // One piece as PCM: the picked voice; if ElevenLabs refuses that voice, Classgrid's own voice reads on
+    const voice = async (words) => {
+        const make = (id) => textToSpeech(words, { voiceId: id, outputFormat: STREAM_AUDIO.format, timeoutMs: 20000 });
+        let pcm;
+        try {
+            pcm = await make(voiceId);
+        } catch (voiceErr) {
+            if (voiceId === classgridVoice) throw voiceErr;
+            console.error(`[speak] voice ${req.body?.voice} failed, using Classgrid's voice:`, voiceErr.message);
+            voiceId = classgridVoice; // (the pieces after this one too)
+            pcm = await make(classgridVoice);
+        }
+        return pcm.length % 2 ? pcm.subarray(0, pcm.length - 1) : pcm; // (16-bit samples: a whole number of them)
+    };
+
+    const jobs = new Map();
+    const begin = (i) => {
+        if (i < pieces.length && !jobs.has(i) && !closed) jobs.set(i, voice(pieces[i]).then((pcm) => ({ pcm }), (error) => ({ error })));
+    };
+
+    let sent = 0;
+    let firstMs = null;
+    let lastError = "";
+    for (let i = 0; i < pieces.length && !closed; i++) {
+        for (let k = i; k < i + PIECES_AHEAD; k++) begin(k);
+        const { pcm, error } = await jobs.get(i);
+        jobs.delete(i);
+        if (closed) break;
+        if (error || !pcm?.length) {
+            lastError = String(error?.message || "no sound came back").slice(0, 500);
+            console.error(`[speak] piece ${i + 1}/${pieces.length} failed:`, lastError);
+            if (sent === 0) {
+                send({ type: "error", message: "The voice could not read this answer right now. Try again in a moment.", code: "voice_failed" });
+                break;
+            }
+            send({ type: "audio", index: i, text: pieces[i], ...STREAM_AUDIO, data: "", failed: true });
+            continue;
+        }
+        if (sent === 0) {
+            firstMs = Date.now() - started;
+            countVoiceReply(req.user, gate);
+        }
+        send({ type: "audio", index: i, text: pieces[i], ...STREAM_AUDIO, data: pcm.toString("base64") });
+        sent++;
+    }
+
+    if (!closed && !res.writableEnded) {
+        if (sent > 0) send({ type: "done", cut, pieces: pieces.length });
+        try { res.write("data: [DONE]\n\n"); res.end(); } catch { /* the phone left */ }
+    }
+    AiUsageLog.create({
+        organization_id: req.user.organization_id || null, userId: req.user._id, provider: "elevenlabs", model: TTS_MODEL, feature: "chat_ai",
+        success: sent > 0, ...(sent > 0 ? {} : { error: lastError || "stopped before the first piece" }), latencyMs: Date.now() - started,
+        metadata: { characters: spoken.length, cut, stream: true, pieces: pieces.length, sent, firstMs, stopped: closed, messageId: String(req.body?.messageId || "") },
+    }).catch(() => {});
+    console.log(`[speak] stream: ${sent}/${pieces.length} pieces of ${spoken.length} characters${cut ? " (cut)" : ""}, first voice in ${firstMs ?? "-"} ms, ${Date.now() - started} ms in all${closed ? " (stopped by the phone)" : ""} for ${req.user.email || userId}`);
+}
+
 export const speakAnswer = async (req, res) => {
     try {
         if (req.body?.sample) return await voiceSample(req, res);
@@ -106,6 +202,9 @@ export const speakAnswer = async (req, res) => {
         const { maxChars } = gate;
 
         const { text: spoken, cut } = cutToSentence(text, maxChars);
+        // The phone app asks for the reading as a stream (stream: true): sentence by sentence, the first one on its
+        // way while the others are still being made. Without it (the website) the whole reading is one mp3, as before.
+        if (req.body?.stream === true) return await speakStream(req, res, { spoken, cut, gate });
         const started = Date.now();
         let audio;
         // The voice the user picked (voice-choices.js); if ElevenLabs refuses that voice, Classgrid's own voice reads it
