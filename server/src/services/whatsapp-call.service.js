@@ -435,19 +435,20 @@ function stopAfter(ms, signal = null) {
 // phone app's voice mode: ai-voice.controller.js). Returns { model, content, text, tools, cutOff, usage, aborted }.
 // `onSentence` gets each complete sentence as it arrives, `onText` every piece of text. `signal` stops the answer:
 // what had arrived by then is returned with `aborted: true` and its tokens estimated (the model reports them only
-// at the end).
-export async function fallbackVoiceAnswer({ system, tools, messages, noTools = false, onSentence = null, onText = null, signal = null }) {
+// at the end). `model` is the Workers AI model to ask (the call's fallback model unless the caller names another:
+// the phone's voice mode asks GLM 5.3 first and DeepSeek Flash when GLM fails).
+export async function fallbackVoiceAnswer({ system, tools, messages, noTools = false, onSentence = null, onText = null, signal = null, model = FALLBACK_MODEL }) {
     const sent = toOpenAiMessages(system, messages);
     const res = await cfAiFetch(`https://api.cloudflare.com/client/v4/accounts/${process.env.CLOUDFLARE_ACCOUNT_ID}/ai/v1/chat/completions`, {
         method: "POST",
         headers: cfHeaders("application/json"),
         body: JSON.stringify({
-            model: FALLBACK_MODEL,
+            model,
             max_tokens: 1024,
             stream: true,
             stream_options: { include_usage: true },
             // (a call needs the first words at once: the model's thinking is off, it answered in half a second in the test)
-            ...noThinkingFor(FALLBACK_MODEL),
+            ...noThinkingFor(model),
             messages: sent,
             tools: tools.map(toOpenAiTool),
             tool_choice: noTools ? "none" : "auto",
@@ -456,7 +457,7 @@ export async function fallbackVoiceAnswer({ system, tools, messages, noTools = f
     });
     if (!res.ok) {
         const err = await res.json().catch(() => ({}));
-        throw new Error(`${FALLBACK_MODEL} ${res.status}: ${JSON.stringify(err.errors || err.error || err).slice(0, 300)}`);
+        throw new Error(`${model} ${res.status}: ${JSON.stringify(err.errors || err.error || err).slice(0, 300)}`);
     }
     let read, aborted = false;
     try {
@@ -474,7 +475,7 @@ export async function fallbackVoiceAnswer({ system, tools, messages, noTools = f
         usage.prompt_tokens ||= Math.ceil(JSON.stringify(sent).length / 4);
         usage.completion_tokens = Math.max(usage.completion_tokens, Math.ceil(text.length / 4));
     }
-    return { model: FALLBACK_MODEL, content, text, tools: content.filter((b) => b.type === "tool_use"), cutOff: choice.finish_reason === "length", usage, aborted };
+    return { model, content, text, tools: content.filter((b) => b.type === "tool_use"), cutOff: choice.finish_reason === "length", usage, aborted };
 }
 
 async function fallbackTurn(call, { noTools = false, onSentence = null } = {}) {

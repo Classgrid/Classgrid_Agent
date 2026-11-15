@@ -12,10 +12,14 @@
 // answer's text as it is written and the voice of every sentence as soon as that sentence is ready.
 //
 // It is fast for the same reasons the call is (whatsapp-call.service.js), and uses the call's own functions:
-// - the fast call model is asked directly and streamed (claudeVoiceAnswer: Haiku, no thinking, a short spoken
-//   prompt), with GLM on Cloudflare as the fallback when Claude is out (fallbackVoiceAnswer). The full Agent
+// - a fast model is asked directly and streamed, with its thinking off and a short spoken prompt (owner, 2026-11-15:
+//   voice mode answers with GLM 5.3, and with DeepSeek Flash when GLM fails; Claude is not used here, so voice mode
+//   never touches a plan's Claude limit). Both go through the call's fallbackVoiceAnswer. The full Agent
 //   (memory, every tool, the long rulebook) is not in the way of the first word: the model reaches it through
-//   ask_classgrid only when it needs the user's account or the web, and start_task hands it a longer job.
+//   ask_classgrid only when it needs the user's account or the web.
+// - voice mode is only a talk (owner, 2026-11-15: "voice mode is just voice; when they close it, it closes"): nothing
+//   goes on in the background. Closing voice mode or leaving the app stops the model, the voice and any ask_classgrid
+//   still running, and there is no start_task here (after-call tasks are the WhatsApp call's own feature).
 // - every sentence is made into voice the moment it is written, several at the same time, and sent in order
 //   (voice-turn.service.js), as raw PCM the phone plays at once (VOICE_AUDIO there says why).
 //
@@ -45,8 +49,7 @@
 //   { type: "audio", index, text, format: "pcm_24000", sampleRate: 24000, data }   data: base64 of 16-bit
 //                                                 little-endian mono PCM; "" with failed: true when that sentence's
 //                                                 voice could not be made
-//   { type: "tool", name, status }               name: ask_classgrid | start_task; status: start | done | error;
-//                                                 start_task's "done" carries the new chat's sessionId
+//   { type: "tool", name, status }               name: ask_classgrid; status: start | done | error
 //   { type: "done", text, sessionId, messageId, usage, stopped? }
 //   { type: "error", message, code }             the turn failed part-way (voice_turn_failed, chat_not_started)
 // The phone closing the stream (the user talks over the answer, or leaves) stops the model at once; sentences not
@@ -65,7 +68,12 @@ import { voiceIdFor } from "../services/voice-choices.js";
 import { isWebsite } from "../utils/client-app.js";
 import { spokenText, voiceReplyGate, countVoiceReply } from "./ai-speak.controller.js";
 import { generateSessionTitle, touchChat, TITLE_REFRESH_EVERY } from "./ai-chat.controller.js";
-import { claudeVoiceAnswer, fallbackVoiceAnswer, runAgentTask, ASK_CLASSGRID_TOOL, START_TASK_TOOL, FALLBACK_MODEL } from "../services/whatsapp-call.service.js";
+import { fallbackVoiceAnswer, runAgentTask, ASK_CLASSGRID_TOOL, FALLBACK_MODEL } from "../services/whatsapp-call.service.js";
+
+// Voice mode's models, in the order they are asked: GLM 5.3 (first words in about half a second with its thinking
+// off), then DeepSeek Flash when GLM fails (the same DeepSeek Flash the chat uses: ai-chat.controller.js CF_FLASH_MODEL)
+const VOICE_MODEL = FALLBACK_MODEL; // "@cf/zai-org/glm-5.3"
+const VOICE_BACKUP_MODEL = "@cf/deepseek-ai/deepseek-v4.1-flash-1017";
 import { runVoiceTurn, toVoiceMessages, VOICE_AUDIO } from "../services/voice-turn.service.js";
 
 const MAX_HEARD_CHARS = 4000; // one spoken turn (the recogniser gives a sentence or two)
@@ -74,7 +82,6 @@ const MIN_TURN_TOKENS = 1500;
 const HISTORY_DEPTH = 30; // every message after the chat's summary (it is rewritten every 8 messages)
 const HISTORY_MAX_CHARS = 60000;
 const LIVE_WAIT_MS = 90 * 1000; // how long the talk waits for ask_classgrid (as on the call)
-const TASK_START_WAIT_MS = 8 * 1000; // how long start_task waits to hear that the task's chat exists
 const PING_MS = 10 * 1000;
 // The same notes the chat saves on an answer that did not finish (ai-chat.controller.js keepUnfinishedAnswer); the
 // chat history tells the AI about them on the next turn (ai-chat-history.service.js)
@@ -85,19 +92,15 @@ const FAILED_NOTE = "_(This answer stopped because of an error. Say \"continue\"
 // Agent mode by the phone's rules, in the phone's chat list
 const PHONE_BODY = { phone: true, appMode: "agent", clientApp: "web", subdomain: "chat.classgrid.in", selectedModel: "auto" };
 
-// The call's two tools, said for the phone: the same names and the same work (the full Agent, as this user), but
-// there is no call to end, and a task starts at once instead of when a call ends. Projects are left to the Agent:
-// on the phone it can read them and nothing more (its own rule), so the voice model does not pick one.
+// The call's ask_classgrid, said for the phone: the same name and the same work (the full Agent, as this user),
+// answered while the user waits. There is no call to end and no start_task: voice mode starts nothing that goes on
+// after it is closed. Projects are left to the Agent: on the phone it can read them and nothing more (its own
+// rule), so the voice model does not pick one.
 const VOICE_TOOLS = [
     {
         name: ASK_CLASSGRID_TOOL.name,
         description: "Ask the Classgrid Agent right now and get its answer back to tell the user. It has everything in the user's account: chats, schedules, files, connected apps (Gmail, Google Calendar, Google Drive, Notion and more), web search, pictures, documents and all other Classgrid tools. Use it for anything to look up or do while the user waits. It can take from a few seconds to a minute. What it does is saved in this chat.",
         input_schema: { type: "object", properties: { request: ASK_CLASSGRID_TOOL.input_schema.properties.request }, required: ["request"] },
-    },
-    {
-        name: START_TASK_TOOL.name,
-        description: "Hand a longer job to the Classgrid Agent. It starts at once in the background, in a new chat in the user's Classgrid app, and the result is in that chat when it is done; the talk goes on meanwhile. Use it for work that takes more than about a minute (a document, slides, research, a job with many steps).",
-        input_schema: { type: "object", properties: { task: { type: "string", description: "The complete task with every detail the user gave, written for the Agent." } }, required: ["task"] },
     },
 ];
 
@@ -120,7 +123,7 @@ function voiceSystemPrompt(user, { language = "", memory = "", voiceOn = true } 
             : "The user is speaking to you and reads your answer on the screen (the voice is switched off). Answer like a person on a call: short, natural sentences (usually one to three), no markdown, no lists, no code, no emojis, no links. Ask at most one question at a time.",
         `${spoken ? `The phone is listening for ${spoken}. ` : ""}Reply in the language the user spoke last; a mix with English is fine. Write Hindi and Marathi in Devanagari script, as plain spoken words.`,
         "What you get is what the phone's speech recogniser heard, so a word can be wrong: go by what the user most likely meant, and ask when it is unclear.",
-        "Answer from what you know whenever you can: that is the fastest. For anything in the user's account or on the web (their chats, files, schedules, email and other connected apps, a search, a picture) use ask_classgrid. For a longer job use start_task. Before you call a tool, say one short sentence first (like \"Let me check that.\"), so the user is not left in silence.",
+        "Answer from what you know whenever you can: that is the fastest. For anything in the user's account or on the web (their chats, files, schedules, email and other connected apps, a search, a picture) use ask_classgrid. Before you call a tool, say one short sentence first (like \"Let me check that.\"), so the user is not left in silence.",
         "If something needs a long or visual answer (code, a table, a document), say so in a sentence and offer to put it in the chat.",
         "This talk is saved as a chat in the user's Classgrid app, where they can read it afterwards.",
         memory ? `Earlier in this chat (a summary of its older messages):\n${memory}` : "",
@@ -288,24 +291,24 @@ export const voiceTurn = async (req, res) => {
     // The chat could not be made: the model is stopped at once (the error is sent below)
     setup.catch(() => { closed = true; abort.abort(); });
 
-    // ── The model: Claude's fast call model, and the fallback model when Claude is out (as on the call) ──
+    // ── The model: GLM 5.3, and DeepSeek Flash when GLM is out ──
     const system = voiceSystemPrompt(user, { language: body.language, memory: session?.long_term_memory ? memoryText(session.long_term_memory).slice(0, 6000) : "", voiceOn });
     const messages = toVoiceMessages(trimHistory(history), said);
-    let claudeOut = false; // Claude failed once in this turn: the rest of it is answered by the fallback model
+    let firstOut = false; // GLM failed once in this turn: the rest of it is answered by DeepSeek Flash
     const askModel = async ({ messages: conversation, noTools, onSentence, onText }) => {
         let wrote = false;
         const ask = { system, tools: VOICE_TOOLS, messages: conversation, noTools, onSentence, onText: (piece) => { wrote = true; onText(piece); }, signal: abort.signal };
-        if (!claudeOut) {
+        if (!firstOut) {
             try {
-                return await claudeVoiceAnswer(ask);
+                return await fallbackVoiceAnswer({ ...ask, model: VOICE_MODEL });
             } catch (e) {
                 // (an answer that had already started is not written a second time by the other model)
                 if (closed || wrote) throw e;
-                claudeOut = true;
-                console.warn(`[voice turn] Claude failed (${String(e.message).slice(0, 160)}); answering with ${FALLBACK_MODEL}`);
+                firstOut = true;
+                console.warn(`[voice turn] ${VOICE_MODEL} failed (${String(e.message).slice(0, 160)}); answering with ${VOICE_BACKUP_MODEL}`);
             }
         }
-        return fallbackVoiceAnswer(ask);
+        return fallbackVoiceAnswer({ ...ask, model: VOICE_BACKUP_MODEL });
     };
 
     // Every model answer is charged to the user's credits the moment its real usage is known (as each answer of a
@@ -360,15 +363,6 @@ export const voiceTurn = async (req, res) => {
         return pcm.length % 2 ? pcm.subarray(0, pcm.length - 1) : pcm;
     };
 
-    // Work the Agent finished after the talk had moved on (a task started with start_task, or a live question that
-    // took longer than the talk could wait): no app is on that answer's stream, so the user's phone gets a push
-    // (user-push.service.js pushAnswerFinished: an image, a file or an answer, by what was made). Never throws.
-    const pushWhenDone = (chatId, answer) => {
-        import("../services/user-push.service.js")
-            .then((m) => m.pushAnswerFinished({ userId, sessionId: String(chatId), answer }))
-            .catch((e) => console.error("[voice turn] push failed:", e.message));
-    };
-
     // ── The tools: the full Agent, as this user, through the normal chat route (its own checks, credits and saved
     // chat), as on the call ──
     const runTool = async (tool, { cutOff }) => {
@@ -382,8 +376,9 @@ export const voiceTurn = async (req, res) => {
             // Asked in this same chat, so the Agent knows what was said and its work is kept here. The note is a
             // "[SYSTEM: ...]" message: for the AI only, the app does not show it as something the user wrote.
             const question = `[SYSTEM: Live question from this chat's voice mode in the Classgrid phone app. The user is waiting and your answer is read out to them, so keep it short and spoken; no tables or links.]\n${request}`;
-            // The Agent's work stops with the turn (the user talked over it, or left) only while the turn is waiting
-            // for it: it has its own stop, tied to the turn's for that time
+            // The Agent's work never outlives the talk: it stops when the turn stops (the user talked over it, closed
+            // voice mode or left the app), and when it takes longer than the talk can wait. Nothing goes on in the
+            // background from voice mode.
             const stop = new AbortController();
             const stopWithTurn = () => stop.abort();
             if (abort.signal.aborted) stop.abort(); else abort.signal.addEventListener("abort", stopWithTurn, { once: true });
@@ -392,41 +387,14 @@ export const voiceTurn = async (req, res) => {
             const result = await Promise.race([work, new Promise((resolve) => { waitTimer = setTimeout(() => resolve(null), LIVE_WAIT_MS); })]);
             clearTimeout(waitTimer);
             abort.signal.removeEventListener("abort", stopWithTurn);
-            // Taking longer than the talk can wait: the Agent goes on by itself from here (the user is told the
-            // answer will be in the chat, so talking over that sentence must not stop it), its answer is saved in
-            // this chat, and the user's phone gets a push when it lands (user-push.service.js; their "answers" setting)
             if (!result) {
-                work.then((late) => { if (late?.answer && !late.aborted) pushWhenDone(sessionId, late.answer); }).catch(() => {});
-                return { content: "Still working on it. The answer will be in this chat in the Classgrid app when it is ready." };
+                stop.abort();
+                return { content: "It took too long, so it was stopped and nothing more is being done. Tell the user this one is a longer job: they can ask for it by typing in the chat.", is_error: true };
             }
             if (result.aborted) return { content: "Stopped.", is_error: true };
             if (result.quota) return { content: "Classgrid could not do it: the user's AI credits are used up. They can top up AI credits, or wait until they refill.", is_error: true };
             if (!result.answer) return { content: `Classgrid could not answer${result.error ? `: ${result.error}` : "."}`, is_error: true };
             return { content: result.answer.slice(0, 4000) };
-        }
-        if (tool.name === "start_task") {
-            const task = String(tool.input?.task || "").trim();
-            if (!task) return { content: "Nothing was started: the task text was empty. Call start_task again with the full task.", is_error: true };
-            // A new chat of its own, started now and not stopped when this turn ends or the user talks on
-            const question = `${task}\n\n(Started from the user's voice mode in the Classgrid phone app. The user is not waiting on this chat: do the whole task, and put the result in your answer here.)`;
-            const started = await new Promise((resolve) => {
-                runAgentTask(user, question, null, (id) => resolve({ sessionId: id }), null, null, PHONE_BODY)
-                    .then((r) => {
-                        if (r.error && !r.answer) console.error(`[voice turn] task for ${userEmail || userId} did not finish: ${r.error}`);
-                        // The task is done and nobody is on its chat (the user was talking, or has left the app):
-                        // their phone gets a push that opens it (user-push.service.js)
-                        if (r.answer && r.sessionId) pushWhenDone(r.sessionId, r.answer);
-                        resolve({ sessionId: r.sessionId, error: r.answer ? "" : r.error, quota: r.quota });
-                    })
-                    .catch((e) => { console.error(`[voice turn] task for ${userEmail || userId} failed:`, e.message); resolve({ sessionId: null, error: e.message }); });
-                setTimeout(() => resolve({ sessionId: null }), TASK_START_WAIT_MS);
-            });
-            if (!started.sessionId && started.quota) return { content: "The task could not be started: the user's AI credits are used up. They can top up AI credits, or wait until they refill.", is_error: true };
-            if (!started.sessionId && started.error) return { content: `The task could not be started: ${started.error}`, is_error: true };
-            return {
-                content: "Task started. The Classgrid Agent is working on it now in a new chat in the user's Classgrid app; the result will be in that chat when it is done.",
-                event: started.sessionId ? { sessionId: String(started.sessionId) } : {},
-            };
         }
         return { content: "This tool is not available.", is_error: true };
     };
@@ -442,7 +410,7 @@ export const voiceTurn = async (req, res) => {
         if (turn.text || turn.steps.length) {
             const content = note ? `${turn.text}${turn.text ? "\n\n" : ""}${note}` : turn.text;
             // (with the tools it used, the chat screen shows them as steps, as for any answer)
-            const steps = turn.steps.map((s, i) => ({ id: `${Date.now()}-${i}`, type: "tool", tool: s.tool, title: s.tool === "ask_classgrid" ? "Asked the Classgrid Agent" : s.tool === "start_task" ? "Started a task" : s.tool, details: String(s.args?.request || s.args?.task || ""), args: s.args, status: s.error ? "error" : "success", result: s.result }));
+            const steps = turn.steps.map((s, i) => ({ id: `${Date.now()}-${i}`, type: "tool", tool: s.tool, title: s.tool === "ask_classgrid" ? "Asked the Classgrid Agent" : s.tool, details: String(s.args?.request || s.args?.task || ""), args: s.args, status: s.error ? "error" : "success", result: s.result }));
             const saved = steps.length || note ? JSON.stringify({ classgrid_ai_message: true, content, thought: "", steps, worked_ms: Date.now() - startedAt }) : content;
             const [row] = await Promise.all([
                 saveMessage(sessionId, "assistant", saved, []).catch((err) => { console.error("[voice turn] Failed to save assistant message:", err); return null; }),
