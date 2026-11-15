@@ -1,7 +1,15 @@
 // Read aloud sentence by sentence (services/speak-pieces.service.js). Run: node --test tests/speak-pieces.test.mjs
 import test from "node:test";
 import assert from "node:assert/strict";
-import { speakPieces } from "../src/services/speak-pieces.service.js";
+import { speakPieces, streamAudioFor } from "../src/services/speak-pieces.service.js";
+
+test("a phone that asks for mp3 gets compressed pieces, every other phone the raw sound it already plays", () => {
+    assert.deepEqual(streamAudioFor("mp3"), { format: "mp3_24000_48", sampleRate: 24000, encoding: "mp3" });
+    assert.deepEqual(streamAudioFor(" MP3 "), { format: "mp3_24000_48", sampleRate: 24000, encoding: "mp3" });
+    for (const asked of [undefined, null, "", "pcm", "opus", 7, {}]) {
+        assert.deepEqual(streamAudioFor(asked), { format: "pcm_24000", sampleRate: 24000, encoding: "pcm" });
+    }
+});
 
 test("nothing to read gives no pieces", () => {
     assert.deepEqual(speakPieces(""), []);

@@ -10,7 +10,7 @@ import { planOf } from "../services/plan-limits.service.js";
 import { usedToday, addToday, nextDayText } from "../services/plan-usage.service.js";
 import { canPayExtra, chargeExtra, extraOfferText } from "../services/extra-usage.service.js";
 import { VOICE_CHOICES, voiceIdFor, publicVoiceChoices } from "../services/voice-choices.js";
-import { speakPieces } from "../services/speak-pieces.service.js";
+import { speakPieces, streamAudioFor } from "../services/speak-pieces.service.js";
 
 const KIND = "voicereply"; // the per-day counter's name (plan-usage.service.js)
 
@@ -96,11 +96,15 @@ export function countVoiceReply(user, gate) {
 
 // How many pieces are being voiced at the same time (they are always sent in their order)
 const PIECES_AHEAD = 3;
-const STREAM_AUDIO = { format: "pcm_24000", sampleRate: 24000 }; // what the phone's speaker plays as it arrives
 
 // The reading as a stream (text/event-stream, each event one `data: {json}` line, `data: [DONE]` last):
-//   { type: "audio", index, text, format: "pcm_24000", sampleRate: 24000, data }   data: base64 of 16-bit little-
-//                                 endian mono PCM of that piece; "" with failed: true when it could not be voiced
+//   { type: "audio", index, text, format, sampleRate: 24000, encoding, data }   data: base64 of that piece's sound;
+//                                 "" with failed: true when it could not be voiced. The sound is what the request's
+//                                 `audio` asked for (speak-pieces.service.js streamAudioFor):
+//                                   (nothing)  encoding "pcm", format "pcm_24000": 16-bit little-endian mono PCM
+//                                   "mp3"      encoding "mp3", format "mp3_24000_48": one whole mp3 per piece,
+//                                              about a tenth of the size, so the first word is not kept waiting
+//                                              by its download
 //   { type: "done", cut, pieces }  every piece was sent (cut: the answer was longer than one reading may be)
 //   { type: "error", message, code }  the first piece could not be voiced: nothing was read
 // The same events voice mode sends (ai-voice.controller.js), so the phone plays them with the same speaker.
@@ -108,6 +112,7 @@ const STREAM_AUDIO = { format: "pcm_24000", sampleRate: 24000 }; // what the pho
 // user tapped stop), no more pieces are made.
 async function speakStream(req, res, { spoken, cut, gate }) {
     const pieces = speakPieces(spoken);
+    const audio = streamAudioFor(req.body?.audio);
     const classgridVoice = voiceIdFor("classgrid");
     let voiceId = voiceIdFor(String(req.body?.voice || ""));
     const started = Date.now();
@@ -131,9 +136,9 @@ async function speakStream(req, res, { spoken, cut, gate }) {
         try { res.write(`data: ${JSON.stringify(event)}\n\n`); } catch { /* the phone left */ }
     };
 
-    // One piece as PCM: the picked voice; if ElevenLabs refuses that voice, Classgrid's own voice reads on
+    // One piece's sound: the picked voice; if ElevenLabs refuses that voice, Classgrid's own voice reads on
     const voice = async (words) => {
-        const make = (id) => textToSpeech(words, { voiceId: id, outputFormat: STREAM_AUDIO.format, timeoutMs: 20000 });
+        const make = (id) => textToSpeech(words, { voiceId: id, outputFormat: audio.format, timeoutMs: 20000 });
         let pcm;
         try {
             pcm = await make(voiceId);
@@ -143,6 +148,7 @@ async function speakStream(req, res, { spoken, cut, gate }) {
             voiceId = classgridVoice; // (the pieces after this one too)
             pcm = await make(classgridVoice);
         }
+        if (audio.encoding !== "pcm") return pcm; // (a whole mp3: every byte of it)
         return pcm.length % 2 ? pcm.subarray(0, pcm.length - 1) : pcm; // (16-bit samples: a whole number of them)
     };
 
@@ -166,14 +172,14 @@ async function speakStream(req, res, { spoken, cut, gate }) {
                 send({ type: "error", message: "The voice could not read this answer right now. Try again in a moment.", code: "voice_failed" });
                 break;
             }
-            send({ type: "audio", index: i, text: pieces[i], ...STREAM_AUDIO, data: "", failed: true });
+            send({ type: "audio", index: i, text: pieces[i], ...audio, data: "", failed: true });
             continue;
         }
         if (sent === 0) {
             firstMs = Date.now() - started;
             countVoiceReply(req.user, gate);
         }
-        send({ type: "audio", index: i, text: pieces[i], ...STREAM_AUDIO, data: pcm.toString("base64") });
+        send({ type: "audio", index: i, text: pieces[i], ...audio, data: pcm.toString("base64") });
         sent++;
     }
 
@@ -184,7 +190,7 @@ async function speakStream(req, res, { spoken, cut, gate }) {
     AiUsageLog.create({
         organization_id: req.user.organization_id || null, userId: req.user._id, provider: "elevenlabs", model: TTS_MODEL, feature: "chat_ai",
         success: sent > 0, ...(sent > 0 ? {} : { error: lastError || "stopped before the first piece" }), latencyMs: Date.now() - started,
-        metadata: { characters: spoken.length, cut, stream: true, pieces: pieces.length, sent, firstMs, stopped: closed, messageId: String(req.body?.messageId || "") },
+        metadata: { characters: spoken.length, cut, stream: true, audio: audio.format, pieces: pieces.length, sent, firstMs, stopped: closed, messageId: String(req.body?.messageId || "") },
     }).catch(() => {});
     console.log(`[speak] stream: ${sent}/${pieces.length} pieces of ${spoken.length} characters${cut ? " (cut)" : ""}, first voice in ${firstMs ?? "-"} ms, ${Date.now() - started} ms in all${closed ? " (stopped by the phone)" : ""} for ${req.user.email || userId}`);
 }

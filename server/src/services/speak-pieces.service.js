@@ -8,6 +8,19 @@
 // - a very long sentence is cut at a comma, else at a space;
 // - short sentences after the first two pieces are joined, so a list of one-word lines is not a request each.
 
+// The sound of a piece, by what the phone asked for in the request's `audio`:
+//   (nothing)  raw sound, pcm_24000: what the first phone builds with read aloud as a stream play (1.0.24, 1.0.25)
+//   "mp3"      compressed, mp3_24000_48: about a tenth of the raw sound's size. The raw first sentence was about
+//              174 KB on the wire and the line to a phone in India carried about 40 KB a second, so the first word
+//              waited 4 to 5 seconds for its download (owner, 2026-11-15: "aloud still takes 4-5 sec"). The phone
+//              decodes each piece and plays it on the same speaker.
+// Both are 24 kHz mono, so the phone's speaker is the same for the two.
+const STREAM_AUDIO = {
+    pcm: { format: "pcm_24000", sampleRate: 24000, encoding: "pcm" },
+    mp3: { format: "mp3_24000_48", sampleRate: 24000, encoding: "mp3" },
+};
+export const streamAudioFor = (asked) => (String(asked || "").trim().toLowerCase() === "mp3" ? STREAM_AUDIO.mp3 : STREAM_AUDIO.pcm);
+
 const FIRST_MAX = 140;
 const PIECE_MAX = 320;
 const JOIN_UP_TO = 160;
