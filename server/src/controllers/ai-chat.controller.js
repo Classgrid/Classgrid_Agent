@@ -1849,7 +1849,7 @@ export const streamAskAi = async (req, res) => {
             if (!access.unlocked) {
                 res.writeHead(402, { "Content-Type": "application/json" });
                 res.end(JSON.stringify({
-                    error: `Claude Fable 5.1 unlocks after you top up ₹${FABLE_UNLOCK_INR} or more in total (you have topped up ₹${access.toppedUpInr} so far). Top up AI credits, or pick another model to continue.`,
+                    error: `Claude Fable 5.2 unlocks after you top up ₹${FABLE_UNLOCK_INR} or more in total (you have topped up ₹${access.toppedUpInr} so far). Top up AI credits, or pick another model to continue.`,
                     code: "fable_locked",
                 }));
                 return;
@@ -1859,7 +1859,7 @@ export const streamAskAi = async (req, res) => {
         } catch (err) {
             console.error("Fable access check error:", err);
             res.writeHead(503, { "Content-Type": "application/json" });
-            res.end(JSON.stringify({ error: "We couldn't check access to Claude Fable 5.1 right now. Please try again or pick another model." }));
+            res.end(JSON.stringify({ error: "We couldn't check access to Claude Fable 5.2 right now. Please try again or pick another model." }));
             return;
         }
     }
@@ -1883,7 +1883,7 @@ export const streamAskAi = async (req, res) => {
         if (deviceNoted) await deviceNoted;
         if (!check.allowed && check.paidOnly) {
             res.writeHead(402, { "Content-Type": "application/json" });
-            res.end(JSON.stringify({ error: "Claude Fable 5.1 runs on paid AI credits only, and you have none left. Top up AI credits to keep using it, or pick another model (your free weekly tokens work with every other model).", code: "fable_needs_paid_credits" }));
+            res.end(JSON.stringify({ error: "Claude Fable 5.2 runs on paid AI credits only, and you have none left. Top up AI credits to keep using it, or pick another model (your free weekly tokens work with every other model).", code: "fable_needs_paid_credits" }));
             return;
         }
         if (!check.allowed) {
@@ -6464,7 +6464,7 @@ If a tool fails, never show the error message; say only: "Something went wrong o
             const check = firstCheck?.claudePool ? firstCheck // (a Claude request on a plan: its Claude credits, already checked)
                 : firstCheck?.allowed && (firstSpendable === undefined || firstSpendable >= estimatedCost) ? firstCheck : await hasEnoughTokens(userId, orgId, estimatedCost, { paidOnly: fablePaidOnly });
             if (!check.allowed && check.paidOnly) {
-                res.write(`data: ${JSON.stringify({ type: "error", error: "Claude Fable 5.1 runs on paid AI credits only, and you don't have enough left for this message. Top up AI credits, or pick another model (your free weekly tokens work with every other model)." })}\n\n`);
+                res.write(`data: ${JSON.stringify({ type: "error", error: "Claude Fable 5.2 runs on paid AI credits only, and you don't have enough left for this message. Top up AI credits, or pick another model (your free weekly tokens work with every other model)." })}\n\n`);
                 return;
             }
             if (!check.allowed) {

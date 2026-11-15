@@ -535,8 +535,26 @@ router.get("/ai-pricing", async (req, res) => {
         priceInrMonthly: p.price_inr_monthly, priceInrYearly: p.price_inr_yearly,
         studentPriceInrMonthly: p.student_price_inr_monthly, studentPriceInrYearly: p.student_price_inr_yearly,
         features: p.features_text || [],
+        // The models the plan lets a person pick (empty = every model); the picker's plan tags come from modelPlans below
+        modelsAllowed: Array.isArray(p.models_allowed) ? p.models_allowed : [],
         limits: { chatsPerWindow: p.chats_per_window, chatsPerWeek: p.chats_per_week, windowHours: p.window_reset_unit === "hour" ? p.window_reset_value : null, claudeCreditsPerWeek: p.claude_credits_per_week, fableSharePercent: p.fable_share_percent, contextTokens: p.context_tokens, helpersPerChat: p.helpers_per_chat, imagesPerPeriod: p.images_per_period, imagesPeriod: `${p.images_reset_value} ${p.images_reset_unit}`, voiceRepliesPerDay: p.voice_replies_per_day, voiceInputMinutesPerDay: p.voice_input_minutes_per_day, callMinutesPerPeriod: p.call_minutes_per_period, callsPerDay: p.calls_per_day, callMaxMinutes: p.call_max_minutes, whatsappPerDay: p.whatsapp_per_day, projectsMax: p.projects_max, codingRunsPerMonth: p.coding_runs_per_month, premiumRunsPerMonth: p.premium_runs_per_month, sandboxHoursPerMonth: p.sandbox_hours_per_month, uploadMaxMb: p.upload_max_mb, libraryStorageMb: p.library_storage_mb, devicesMax: p.devices_max, support: p.support_level },
       }));
+      // For every model, the plans (in plan order) that include it, by the same rules POST /api/ai/ask uses
+      // (ai-chat.controller.js): the plan's models_allowed (empty = all), a Claude model only when the plan's
+      // weekly Claude credits are not 0, and Claude Fable only when the plan gives Fable a share. The model
+      // pickers on the website, the desktop app and the phone draw their "Pro, Max or Ultra" tags from this.
+      const pickable = Object.values(plansNow.plans || {}).filter((p) => p.is_public !== false && !p.coming_soon).sort((a, b) => (a.sort ?? 0) - (b.sort ?? 0));
+      const everyModel = [...new Set(pickable.flatMap((p) => (Array.isArray(p.models_allowed) ? p.models_allowed : [])))].filter((m) => m !== "auto");
+      const modelPlans = {};
+      for (const model of everyModel) {
+        modelPlans[model] = pickable.filter((p) => {
+          const list = Array.isArray(p.models_allowed) ? p.models_allowed : [];
+          if (list.length && !list.includes(model)) return false;
+          if (/^claude-/.test(model) && Number(p.claude_credits_per_week) === 0) return false;
+          if (/^claude-fable/.test(model) && !(Number(p.fable_share_percent) > 0)) return false;
+          return true;
+        }).map((p) => ({ key: p.key, name: p.name }));
+      }
       const config = globalConfig || {};
       const org = chatOrg || null;
       const tokens = resolveResetPeriod("tokens", org, config, CHAT_PUBLIC_ORG_ID);
@@ -557,6 +575,7 @@ router.get("/ai-pricing", async (req, res) => {
           premiumUnlockInr: FABLE_UNLOCK_INR,
           plansEnabled: plansNow.enabled === true,
           plans,
+          modelPlans,
           updatedAt: new Date(config.updatedAt || Date.now()).toISOString(),
         },
       };

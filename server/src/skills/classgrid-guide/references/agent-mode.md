@@ -53,10 +53,10 @@ Type **@** in the box to open a quick menu:
 ### The model picker
 
 -   It sits next to the mic and starts on **Auto** ("Picks the best model for each message").
--   Groups: **Claude** (Haiku 5.5, Sonnet 5.5, Opus 5.5, Fable 5.1), **DeepSeek** (V4.1 Flash, V4 Pro, V4 Flash) and
+-   Groups: **Claude** (Haiku 5.5, Sonnet 5.5, Opus 5.5, Fable 5.2), **DeepSeek** (V4.1 Flash, V4 Pro, V4 Flash) and
     **More models** (GPT-OSS, Kimi, GLM, Qwen, Gemma, Nemotron, Llama, Mistral). New models show a **New** badge.
 -   Classgrid can turn any model off. A model that is off is not shown; if it was picked, the chat goes back to Auto.
--   **Claude Fable 5.1** has a lock until your total top-ups reach a set amount; the picker shows how much more is
+-   **Claude Fable 5.2** has a lock until your total top-ups reach a set amount; the picker shows how much more is
     needed, and clicking it opens **Upgrade**. Once open, it uses paid credits only.
 -   The pick is remembered, and you can change it for any message mid-chat. Every model keeps the same tools.
 
