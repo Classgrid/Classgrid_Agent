@@ -1217,7 +1217,7 @@ const stopHelpers = (sessionId) => {
     for (const h of board.helpers) if (h.state === "running") h.abort.abort(new Error("The chat answer ended"));
     HELPER_BOARDS.delete(String(sessionId || "none"));
 };
-const CF_PICKER_MODELS = new Map([
+export const CF_PICKER_MODELS = new Map([
     ["@cf/deepseek-ai/deepseek-v4.1-flash-1017", "native"],
     ["@cf/openai/gpt-oss-120b", "native"],
     ["@cf/openai/gpt-oss-20b", "native"],
@@ -1312,7 +1312,7 @@ ${sees ? STUDIO_BROWSER_SEES : STUDIO_BROWSER_BLIND}` }, ...msgs.slice(1)]
 const CF_NATIVE_VISION_NOTE = "\n\nNATIVE VISION: You can see images yourself, like Claude. Images attached to the user's message are in it: answer from them right away. To look at an image you made in the Sandbox (video frames, charts, screenshots), use view_image. Images from Classgrid links in tool results are shown to you after the tool result, and analyze_image on a Classgrid image link shows you the image itself.";
 
 // Names as the model dropdown shows them (client/.../ModelPicker.tsx), for telling the model which one it is.
-const MODEL_DISPLAY_NAMES = {
+export const MODEL_DISPLAY_NAMES = {
     "claude-haiku-5-5": "Claude Haiku 5.5",
     "claude-sonnet-5-5": "Claude Sonnet 5.5",
     "claude-opus-5-5": "Claude Opus 5.5",

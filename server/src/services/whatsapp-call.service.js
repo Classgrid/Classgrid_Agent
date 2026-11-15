@@ -502,12 +502,12 @@ async function claudeTurn(call, { noTools = false, onSentence = null } = {}) {
 // call's, and the phone app's voice mode: ai-voice.controller.js). Returns { model, content, text, tools, cutOff,
 // usage, aborted }. `onText` gets every piece of text as it is written. `signal` stops the answer: what had
 // arrived by then is returned with `aborted: true` (its text only, no tool request), with the tokens used so far.
-export async function claudeVoiceAnswer({ system, tools, messages, noTools = false, onSentence = null, onText = null, signal = null }) {
+export async function claudeVoiceAnswer({ system, tools, messages, noTools = false, onSentence = null, onText = null, signal = null, model = CALL_MODEL }) {
     const ask = () => fetch("https://api.anthropic.com/v1/messages", {
         method: "POST",
         headers: { "x-api-key": process.env.ANTHROPIC_API_KEY, "anthropic-version": "2023-06-01", "content-type": "application/json" },
         body: JSON.stringify({
-            model: CALL_MODEL,
+            model,
             max_tokens: 1024,
             stream: true,
             system,
@@ -545,7 +545,7 @@ export async function claudeVoiceAnswer({ system, tools, messages, noTools = fal
     };
     // (a stopped answer never got its final count: what it wrote is counted by its length)
     if (aborted) usage.completion_tokens = Math.max(usage.completion_tokens, Math.ceil(text.length / 4));
-    return { model: CALL_MODEL, content, text, tools: content.filter((b) => b.type === "tool_use"), cutOff: data.stop_reason === "max_tokens", usage, aborted };
+    return { model, content, text, tools: content.filter((b) => b.type === "tool_use"), cutOff: data.stop_reason === "max_tokens", usage, aborted };
 }
 
 async function claudeOnlyTurn(call, { noTools = false, onSentence = null } = {}) {
