@@ -68,6 +68,7 @@ import { installDesktopHistory } from "@/lib/desktopHistory";
 import { captureEditorSignIn } from "@/features/auth/editorHandoff";
 import { queryClient } from "@/lib/queryClient";
 import "@/styles/global.css";
+import { applyFontChoice } from "./lib/fontChoice";
 
 // Local testing and the desktop app (never the website build): the API calls also send the saved login token, so the
 // app stays logged in when it talks to the live server (whose login cookie is made for .classgrid.in, not localhost)
@@ -89,6 +90,8 @@ if (!isDesktopApp && import.meta.env.VITE_EDITOR !== "1") {
     if (/^[a-z]{2,20}$/.test(buy) && !/\/settings\/?$/.test(window.location.pathname)) sessionStorage.setItem("classgrid:buy-plan", JSON.stringify({ plan: buy, term: q.get("term") === "year" ? "year" : "month", back: q.get("back") === "pricing" ? "pricing" : "", student: q.get("student") === "1" }));
   } catch { /* storage blocked: the visitor picks the plan in the chat */ }
 }
+// The font style picked in Settings (lib/fontChoice.ts), set before the first paint so nothing changes font on load
+applyFontChoice();
 // Desktop app: Google Sans, for Studio's new-chat greeting (AskAiPanel)
 if (isDesktopApp) {
   const font = document.createElement("link");

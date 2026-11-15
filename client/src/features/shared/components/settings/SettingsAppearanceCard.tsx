@@ -55,11 +55,13 @@
  */
 
 import React from "react";
-import { Moon, Eye } from "lucide-react";
+import { Moon, Eye, Type } from "lucide-react";
 import { useTheme } from "next-themes";
 import { Switch } from "@/components/marketing_ui/switch";
 import { useUserProfile, useUpdateProfile } from "../../queries/useUserProfile";
 import { toast } from "sonner";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/marketing_ui/select";
+import { FONT_CHOICES, FontChoice, getFontChoice, setFontChoice } from "@/lib/fontChoice";
 
 export function SettingsAppearanceCard() {
   const { theme, setTheme, resolvedTheme } = useTheme();
@@ -69,6 +71,14 @@ export function SettingsAppearanceCard() {
 
   // If metadata.show_role_in_sidebar is explicitly false, it is hidden. Otherwise true.
   const showRole = (userProfile as any)?.metadata?.show_role_in_sidebar !== false;
+  // Font style: Default, Web, System or Serif, kept in this browser (lib/fontChoice.ts)
+  const [font, setFont] = React.useState<FontChoice>(() => getFontChoice());
+  const pickFont = (value: FontChoice | string | null) => {
+    const choice = FONT_CHOICES.find((c) => c.id === value)?.id;
+    if (!choice) return;
+    setFont(choice);
+    setFontChoice(choice);
+  };
 
   const handleToggleRole = (checked: boolean) => {
     updateProfile.mutate(
@@ -102,6 +112,26 @@ export function SettingsAppearanceCard() {
           />
         </div>
         
+        <div className="flex items-center justify-between gap-4 p-5 border-b border-border">
+          <div className="flex flex-col gap-1 min-w-0">
+            <span className="font-semibold text-sm text-foreground flex items-center gap-1.5">
+              <Type size={14} className="text-muted-foreground" /> Font
+            </span>
+            <span className="text-xs text-muted-foreground">{FONT_CHOICES.find((c) => c.id === font)?.hint}</span>
+          </div>
+          <Select value={font} onValueChange={pickFont}>
+            <SelectTrigger className="w-[140px] shrink-0" aria-label="Font">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {FONT_CHOICES.map((c) => (
+                <SelectItem key={c.id} value={c.id}>
+                  {c.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
         <div className="flex items-center justify-between p-5">
           <div className="flex flex-col gap-1">
             <span className="font-semibold text-sm text-foreground">Show Role in Sidebar</span>
