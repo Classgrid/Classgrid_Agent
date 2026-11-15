@@ -190,7 +190,15 @@ export const winstonMiddleware = (req, res, next) => {
             // A full copy, so redacting never changes the request itself. A file sent inside the request as a data
             // URL (e.g. a desktop app chat picture) is never written to the logs.
             try {
-                safeBody = JSON.parse(JSON.stringify(req.body, (k, v) => (typeof v === "string" && v.length > 1000 && /^\s*data:/i.test(v) ? `[data URL, ${Math.round(v.length / 1024)} KB, not logged]` : v)));
+                // Media sent inside the request is never written to the logs: a data URL, the user's voice in voice mode
+                // (POST /api/ai/voice/turn `audio`) and any other long base64 value (a recording, a picture, a file)
+                const isBase64 = (v) => /^[A-Za-z0-9+/=_-]+$/.test(v.slice(0, 400));
+                safeBody = JSON.parse(JSON.stringify(req.body, (k, v) => {
+                    if (typeof v !== "string" || v.length <= 1000) return v;
+                    if (/^\s*data:/i.test(v)) return `[data URL, ${Math.round(v.length / 1024)} KB, not logged]`;
+                    if (k === "audio" || isBase64(v)) return `[${k === "audio" ? "audio" : "base64 data"}, ${Math.round(v.length / 1024)} KB, not logged]`;
+                    return v;
+                }));
             } catch {
                 safeBody = { ...req.body };
             }
