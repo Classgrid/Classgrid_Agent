@@ -79,8 +79,10 @@ const planConfigSchema = new mongoose.Schema(
     { timestamps: true }
 );
 
-const FREE_MODELS = ["auto", "@cf/deepseek-ai/deepseek-v4.1-flash-1017", "@cf/zai-org/glm-5.3-flash", "claude-haiku-5-5", "@cf/google/gemma-4-26b-a4b-it", "@cf/zai-org/glm-4.7-flash", "@cf/openai/gpt-oss-20b", "@cf/meta/llama-4-scout-17b-16e-instruct"];
-const PRO_MODELS = [...FREE_MODELS, "claude-sonnet-5-5", "claude-opus-5-5", "claude-fable-5-1", "claude-fable-5-2", "@cf/zai-org/glm-5.3", "@cf/openai/gpt-oss-120b", "@cf/qwen/qwen3.8-27b", "@cf/mistralai/mistral-small-3.1-24b-instruct"];
+// Every model that is not Claude is on Free (owner, 2026-11-15: "all of them on the Free plan, everywhere"); Claude
+// stays Pro and Max (Free has no weekly Claude credits)
+const FREE_MODELS = ["auto", "@cf/deepseek-ai/deepseek-v4.1-flash-1017", "@cf/zai-org/glm-5.3-flash", "claude-haiku-5-5", "@cf/google/gemma-4-26b-a4b-it", "@cf/zai-org/glm-4.7-flash", "@cf/openai/gpt-oss-20b", "@cf/meta/llama-4-scout-17b-16e-instruct", "@cf/zai-org/glm-5.3", "@cf/openai/gpt-oss-120b", "@cf/qwen/qwen3.8-27b", "@cf/mistralai/mistral-small-3.1-24b-instruct"];
+const PRO_MODELS = [...FREE_MODELS, "claude-sonnet-5-5", "claude-opus-5-5", "claude-fable-5-1", "claude-fable-5-2"];
 
 // The first fill of the table (the proposal of 2026-11-14); the super admin changes any of it at any time
 export const DEFAULT_PLANS = [
