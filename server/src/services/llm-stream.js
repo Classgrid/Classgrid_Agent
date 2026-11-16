@@ -530,6 +530,13 @@ export async function streamChat({
                     conversation.push({ role: "user", content: EMPTY_ANSWER_PROMPT });
                     continue;
                 }
+                // Cut at its length limit, or still without a word, and the user has nothing left to go on with: the
+                // answer ends as a stop for the limit (its note and the limit card), not as a silently cut answer or
+                // no answer at all
+                if (!roomLeft && (round.finishReason === "length" || !(continuedText + round.rawText).trim())) {
+                    const leftNow = tokensLeft?.();
+                    if (leftNow !== undefined && leftNow !== null && leftNow <= 0) return budgetStop("cut short with nothing left to continue");
+                }
                 return { answer: (continuedText + round.rawText).trim() || null, usage, toolsRun };
             }
 

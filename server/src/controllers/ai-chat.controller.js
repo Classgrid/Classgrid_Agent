@@ -54,7 +54,7 @@ import { planToolsForMessage, buildLoadToolsTool, orderTools, groupOfTool, ageSt
 import { safetyRulesFor } from "../services/ai-safety-rules.js";
 import { cfModel } from "../services/cf-retired-models.js";
 import { chargeableTokens, pricesFor } from "../services/ai-token-pricing.js";
-import { REPLY_TOKEN_ALLOWANCE, addRound, roundTokensLeft, roundMaxOutput, roundInputTooBig } from "../services/answer-meter.js";
+import { FIRST_ROUND_OUTPUT, addRound, roundTokensLeft, roundMaxOutput, roundInputTooBig, answerOutputRoom } from "../services/answer-meter.js";
 import { getPresignedUploadUrl, uploadBufferToR2 } from "../config/r2Client.js";
 import { primarySupabaseClient as supabase } from "../config/supabaseClient.js";
 import {
@@ -1708,8 +1708,8 @@ export const streamAskAi = async (req, res) => {
     // when the provider reports it; a round may write at most what the user has left (at the model's output price);
     // a round whose real input (sent before anything is written) uses up what is left is cut; with nothing left
     // the answer stops. spendable is set by the quota check (undefined = no limit).
-    // The answer's own first round is never cut and may always write a normal reply (services/answer-meter.js): a
-    // message that was allowed to start gets its answer, and the limit ends at 100 percent.
+    // The answer's own first round is a normal round, never cut to the credits left (services/answer-meter.js): a
+    // message that was allowed to start is answered like any other, and the limit ends at 100 percent.
     const liveMeter = { spent: 0, spendable: undefined, stopped: false, firstRoundDone: false };
     // Playground (super admins): this answer's rounds, tool calls and live words go to the super admin's own live
     // channel, so the Playground page can show them next to the chat. Nothing is sent for other users.
@@ -1897,7 +1897,7 @@ export const streamAskAi = async (req, res) => {
         }
         tokenSource = check.source;
         if (check.remaining !== undefined) {
-            availableTokensToGenerate = Math.max(REPLY_TOKEN_ALLOWANCE, Math.min(8192, check.remaining));
+            availableTokensToGenerate = Math.max(FIRST_ROUND_OUTPUT, Math.min(8192, check.remaining));
         }
     } catch (err) {
         console.error("Quota check error:", err);
@@ -6477,9 +6477,10 @@ If a tool fails, never show the error message; say only: "Something went wrong o
             // (deductTokens moves from one to the next as each runs out). The answer goes on across them and stops
             // only when all of it is used up, never in the middle just because one pool ended.
             const spendable = check.spendable ?? check.remaining;
-            // (never less than a normal reply: the first round of the answer may always write that much)
-            if (spendable !== undefined) llmConfig.defaultMaxTokens = Math.max(REPLY_TOKEN_ALLOWANCE, Math.min(8192, spendable));
-            quotaRemaining = spendable;
+            // (never less than one normal round: the first round of the answer is not squeezed when little is left;
+            // the rounds after it may write only what is really left, see meterHooks)
+            if (spendable !== undefined) llmConfig.defaultMaxTokens = Math.max(FIRST_ROUND_OUTPUT, Math.min(8192, spendable));
+            quotaRemaining = answerOutputRoom(spendable);
             liveMeter.spendable = spendable;
             playground("start", { question: String(body.question || "").slice(0, 300), model: typeof body.selectedModel === "string" ? body.selectedModel : "auto", spendable: liveMeter.spendable ?? null });
         } catch (err) {
@@ -7232,7 +7233,10 @@ If a tool fails, never show the error message; say only: "Something went wrong o
             // Everything is used up (free limit, granted and top-up credits): the chat shows the limit card under the
             // answer, with the reset time and the top-up button
             if (limitEnded) {
-                const blocked = await quotaBlocked({ reason: "Insufficient tokens." }).catch(() => null);
+                // (which limit ran out, the session window or the week, decides the time the card shows: asked
+                // again now that this answer is charged)
+                const now = await hasEnoughTokens(userId, orgId, 1).catch(() => null);
+                const blocked = await quotaBlocked({ reason: "Insufficient tokens.", resetAt: now && !now.allowed ? now.resetAt : undefined }).catch(() => null);
                 res.write(`data: ${JSON.stringify({ type: "limit_ended", resetDate: blocked?.resetDate || null })}\n\n`);
             }
         }

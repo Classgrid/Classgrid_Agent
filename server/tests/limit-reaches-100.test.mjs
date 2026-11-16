@@ -17,9 +17,14 @@ test("the first round of an answer always runs, even with 1 credit left", () => 
     // (the old rule: an input that alone costs more than what is left was cut before a word was written)
     assert.equal(meter.roundInputTooBig(m, "Agent", 5000), false);
     assert.equal(meter.roundTokensLeft(m, "Agent"), 1);
-    // it may write a normal reply, not 1 credit's worth of words
-    assert.equal(meter.roundMaxOutput(m, "Agent", 0.303), meter.REPLY_TOKEN_ALLOWANCE);
-    assert.equal(meter.REPLY_TOKEN_ALLOWANCE, 2000);
+    // it is a normal round: what it may write is not cut to 1 credit's worth of words (cut to a small number, an
+    // answer with thinking could end with no words at all)
+    assert.equal(meter.roundMaxOutput(m, "Agent", 0.303), undefined);
+    // the room the streams get for the whole answer is never less than one normal round
+    assert.equal(meter.answerOutputRoom(1), meter.FIRST_ROUND_OUTPUT);
+    assert.equal(meter.FIRST_ROUND_OUTPUT, 8192);
+    assert.equal(meter.answerOutputRoom(500000), 500000);
+    assert.equal(meter.answerOutputRoom(undefined), undefined);
 });
 
 test("after the first round only what is really left may be used, and with nothing left the answer stops", () => {

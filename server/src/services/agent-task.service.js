@@ -70,8 +70,7 @@ const notRunning = () => ({ $or: [{ heartbeat_at: null }, { heartbeat_at: { $lt:
 // ─── The small model (charged to the user) ────────────────────
 
 async function smallModel(user, system, text) {
-    // (anything left is enough to start: no fixed amount is asked for in advance; owner, 2026-11-16)
-    const tokens = await hasEnoughTokens(user._id, user.organization_id || null, 1).catch(() => ({ allowed: false }));
+    const tokens = await hasEnoughTokens(user._id, user.organization_id || null, 1500).catch(() => ({ allowed: false }));
     if (!tokens.allowed) return null;
     const res = await cfAiFetch(`https://api.cloudflare.com/client/v4/accounts/${process.env.CLOUDFLARE_ACCOUNT_ID}/ai/v1/chat/completions`, {
         method: "POST",
@@ -549,7 +548,7 @@ export async function wakeTask(taskId, reason) {
             await putBack();
             return endTask(task);
         }
-        const tokens = await hasEnoughTokens(user._id, user.organization_id || null, 1).catch(() => ({ allowed: false }));
+        const tokens = await hasEnoughTokens(user._id, user.organization_id || null, 3000).catch(() => ({ allowed: false }));
         if (!tokens.allowed) return pauseForTokens(task, user, null);
 
         const newest = Math.max(task.last_seen_msg_at || 0, ...msgs.map((m) => m.at));
@@ -723,7 +722,7 @@ export async function runAlarm() {
     }
     // Tokens are back
     for (const t of await AgentTask.find({ status: "waiting_tokens", ...notRunning() }).limit(100)) {
-        const check = await hasEnoughTokens(t.user_id, t.organization_id || null, 1).catch(() => ({ allowed: false }));
+        const check = await hasEnoughTokens(t.user_id, t.organization_id || null, 3000).catch(() => ({ allowed: false }));
         if (check.allowed) wakeTask(t._id, "tokens").catch((e) => console.error("[agent task] wake failed:", e.message));
     }
 }

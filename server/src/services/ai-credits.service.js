@@ -334,6 +334,13 @@ export const hasEnoughTokens = async (userId, orgId, requiredTokens = 1, { paidO
 
 
 // HELPER TO TRIGGER ALERTS
+const limitEmailDue = async (userId) => {
+    try {
+        return (await redis.set(`ai:limit-email:${userId}`, "1", "EX", 24 * 3600, "NX")) === "OK";
+    } catch {
+        return false;
+    }
+};
 const triggerEmailAlerts = async (userId, orgId, type, oldBalance, currentBalance, totalLimit) => {
     try {
         const user = await User.findById(userId).select('email name first_name last_name ai_tokens ai_auto_topup role plan');
@@ -403,7 +410,11 @@ const triggerEmailAlerts = async (userId, orgId, type, oldBalance, currentBalanc
 
         // Free Limits Alert
         if (type === 'free') {
-            if (oldBalance > 0 && currentBalance <= 0) {
+            // At most once a day per person. A limit now ends at 100 percent every time it is used up (a message
+            // starts whenever anything is left), so without this a person who uses up each session window would get
+            // this email every few hours; before, a window reached exactly 0 only now and then. When Redis can't be
+            // asked, the email is not sent.
+            if (oldBalance > 0 && currentBalance <= 0 && (await limitEmailDue(userId))) {
                 await enqueueEmail({
                     to: user.email,
                     subject: "Action Required: You have reached 100% of your Free AI Usage",

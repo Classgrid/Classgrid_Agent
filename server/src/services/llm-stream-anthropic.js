@@ -822,6 +822,16 @@ export async function streamClaudeChat({
                     conversation.push({ role: "user", content: THINKING_CUT_PROMPT });
                     continue;
                 }
+                // Cut at max_tokens, or still without a word, and the user has nothing left to go on with: the answer
+                // ends as a stop for the limit (its note and the limit card), not as a silently cut answer or no
+                // answer at all
+                if (!roomLeft && (message.stop_reason === "max_tokens" || !(continuedText + piece).trim())) {
+                    const leftNow = tokensLeft?.();
+                    if (leftNow !== undefined && leftNow !== null && leftNow <= 0) {
+                        lastRoundText = piece;
+                        return budgetStop("cut short with nothing left to continue");
+                    }
+                }
                 return { answer: (continuedText + piece).trim() || null, usage, toolsRun, servedModel };
             }
             if (depth >= maxToolDepth) {
