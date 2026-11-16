@@ -118,7 +118,7 @@ import { trackOnboardingEvent } from "../services/onboarding-event.service.js";
 import { syncDerivedOnboardingProgress } from "../services/onboarding-progress.service.js";
 import { sendSMS } from "../services/sms.service.js";
 import { RecaptchaVerificationError, verifyRecaptchaToken } from "../services/recaptcha.service.js";
-import { isPublicChatAccount, needsChatOnboarding, isSharedTestWhatsapp, readableJobRole } from "../utils/chat-onboarding.js";
+import { isPublicChatAccount, needsChatOnboarding, isSharedTestWhatsapp, readableJobRole, whatsappStepDone } from "../utils/chat-onboarding.js";
 import { isWebsiteOrigin } from "../utils/client-app.js";
 
 const JWT_SECRET = getJwtSecret();
@@ -2088,7 +2088,7 @@ export const oauthCallback = async (req, res) => {
     let qs = isFirstLogin ? `?welcome=true&token=${token}` : `?token=${token}`;
     
     if (host && host.startsWith('chat.')) {
-        if (!req.user.metadata?.whatsappPhone || !req.user.metadata?.age) {
+        if (!whatsappStepDone(req.user) || !req.user.metadata?.age) {
             target = '/login';
             qs = `?token=${token}&onboard=true&email=${encodeURIComponent(req.user.email)}`;
         } else if (consentReturn) {
@@ -3276,7 +3276,7 @@ export const chatVerifyEmailOtp = async (req, res) => {
             });
         }
 
-        const needsOnboarding = (!user.metadata || !user.metadata.whatsappPhone || !user.metadata.age);
+        const needsOnboarding = !whatsappStepDone(user) || !user.metadata?.age;
 
         let token = null;
         if (!needsOnboarding) {
@@ -3476,9 +3476,13 @@ export const chatFinalizeOnboarding = async (req, res) => {
     try {
         const connectDB = (await import('../../config/db.js')).default;
         await connectDB();
-        const { email, name, password, age, role: rawRole, whatsappPhone, whatsappOtp, emailVerifiedTicket } = req.body;
+        const { email, name, password, age, role: rawRole, whatsappOtp, emailVerifiedTicket } = req.body;
         const role = readableJobRole(rawRole); // "software_engineer" -> "Software Engineer"
-        if (!email || !whatsappPhone || !whatsappOtp) {
+        // Skip on the WhatsApp step (owner, 2026-11-16): the account is finished without a number; it can be verified
+        // later from Settings > Verify WhatsApp number (POST /api/user/send-whatsapp-otp, /verify-whatsapp-otp)
+        const skipWhatsapp = req.body.skipWhatsapp === true;
+        const whatsappPhone = skipWhatsapp ? null : req.body.whatsappPhone;
+        if (!email || (!skipWhatsapp && (!whatsappPhone || !whatsappOtp))) {
             return res.status(400).json({ message: 'Email, WhatsApp number and OTP are required' });
         }
 
@@ -3500,16 +3504,18 @@ export const chatFinalizeOnboarding = async (req, res) => {
             return res.status(401).json({ message: 'Email verification expired. Please verify your email again.' });
         }
 
-        const OnboardingOTP = (await import('../models/OnboardingOTP.js')).default;
-        const record = await OnboardingOTP.findOne({ target: whatsappPhone, type: 'phone' });
-        if (!record || record.otp !== whatsappOtp) {
-            return res.status(400).json({ message: 'Invalid WhatsApp OTP' });
-        }
-        if (record.expires_at && record.expires_at < new Date()) {
+        if (!skipWhatsapp) {
+            const OnboardingOTP = (await import('../models/OnboardingOTP.js')).default;
+            const record = await OnboardingOTP.findOne({ target: whatsappPhone, type: 'phone' });
+            if (!record || record.otp !== whatsappOtp) {
+                return res.status(400).json({ message: 'Invalid WhatsApp OTP' });
+            }
+            if (record.expires_at && record.expires_at < new Date()) {
+                await OnboardingOTP.deleteOne({ _id: record._id });
+                return res.status(400).json({ message: 'OTP has expired. Please request a new one.' });
+            }
             await OnboardingOTP.deleteOne({ _id: record._id });
-            return res.status(400).json({ message: 'OTP has expired. Please request a new one.' });
         }
-        await OnboardingOTP.deleteOne({ _id: record._id });
 
         const User = (await import('../models/User.js')).default;
         const bcrypt = (await import('bcryptjs')).default;
@@ -3524,13 +3530,15 @@ export const chatFinalizeOnboarding = async (req, res) => {
         }
 
         // One WhatsApp number per email (the send-OTP check is only an early warning; its email isn't proven)
-        const existingPhoneUser = isSharedTestWhatsapp(whatsappPhone) ? null : await User.findOne({ 'metadata.whatsappPhone': whatsappPhone }).select('email');
+        const existingPhoneUser = skipWhatsapp || isSharedTestWhatsapp(whatsappPhone) ? null : await User.findOne({ 'metadata.whatsappPhone': whatsappPhone }).select('email');
         if (existingPhoneUser && String(existingPhoneUser._id) !== String(user?._id || "")) {
             return res.status(400).json({ message: 'This WhatsApp number is already linked to another account.' });
         }
 
-        // Welcome WhatsApp goes out only the first time an account finishes setup
-        const firstSetup = !user || !user.metadata?.whatsappPhone;
+        // The welcome messages go out only the first time an account finishes setup
+        const firstSetup = !user || !whatsappStepDone(user);
+        // The WhatsApp part of the account: the verified number, or the Skip mark (a number already there is kept)
+        const whatsappMeta = skipWhatsapp ? { whatsappSkipped: true } : { whatsappPhone, whatsapp_number: whatsappPhone };
 
         if (!user) {
             user = new User({
@@ -3539,19 +3547,18 @@ export const chatFinalizeOnboarding = async (req, res) => {
                 password: await bcrypt.hash(password || crypto.randomBytes(16).toString('hex'), 10),
                 role: 'user',
                 organization_id: orgId,
-                metadata: { age, job_role: role, whatsappPhone, whatsapp_number: whatsappPhone },
+                metadata: { age, job_role: role, ...whatsappMeta },
                 isEmailVerified: true
             });
         } else {
-            if (user.metadata?.whatsappPhone && user.metadata.whatsappPhone !== whatsappPhone) {
+            if (!skipWhatsapp && user.metadata?.whatsappPhone && user.metadata.whatsappPhone !== whatsappPhone) {
                  return res.status(400).json({ message: "You have already linked a different WhatsApp number to this email." });
             }
             user.metadata = { 
                 ...(user.metadata || {}), 
                 age: age || user.metadata?.age, 
                 job_role: role || user.metadata?.job_role, 
-                whatsappPhone, 
-                whatsapp_number: whatsappPhone 
+                ...whatsappMeta,
             };
             user.markModified("metadata");
             
@@ -3594,7 +3601,7 @@ export const chatFinalizeOnboarding = async (req, res) => {
         // After the reply: a failed WhatsApp send never affects the sign-up. The user just messaged our
         // number to get the OTP, so a normal text message is allowed (inside Meta's 24-hour window).
         if (firstSetup) {
-            sendChatWelcomeWhatsapp(whatsappPhone, user.name).catch((err) => console.error('Welcome WhatsApp failed:', err.message));
+            if (whatsappPhone) sendChatWelcomeWhatsapp(whatsappPhone, user.name).catch((err) => console.error('Welcome WhatsApp failed:', err.message));
             // Welcome email, also after the reply (the general sendWelcomeEmail stays disabled; this one is chat-only)
             (async () => {
                 const { getChatWelcomeEmailHtml, getChatWelcomeEmailPlainText } = await import('../services/email-templates.service.js');

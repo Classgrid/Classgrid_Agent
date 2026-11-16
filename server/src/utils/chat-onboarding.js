@@ -41,11 +41,19 @@ export function isPublicChatAccount(user) {
     return orgId === CHAT_PUBLIC_ORG_ID && (user.role === "user" || user.role === "student");
 }
 
+// The WhatsApp step of sign-up is done: the number is verified, or the person chose Skip (owner, 2026-11-16: WhatsApp
+// verification is optional; it can be done later from Settings > Verify WhatsApp number). Without a number the
+// WhatsApp features (messages, calls, replies) stay off for that account.
+export function whatsappStepDone(user) {
+    const meta = user?.metadata || {};
+    return !!meta.whatsappPhone || meta.whatsappSkipped === true;
+}
+
 export function needsChatOnboarding(user) {
     if (!isPublicChatAccount(user)) return false;
     if (String(user.email || "").toLowerCase().endsWith("@classgrid.in")) return false;
     const meta = user.metadata || {};
-    return !meta.whatsappPhone || !meta.age;
+    return !whatsappStepDone(user) || !meta.age;
 }
 
 // The same rule as needsChatOnboarding, as a MongoDB match: chat sign-ups that stopped before the last
@@ -55,7 +63,8 @@ export function unfinishedChatSignupMatch() {
         organization_id: new mongoose.Types.ObjectId(CHAT_PUBLIC_ORG_ID),
         role: { $in: ["user", "student"] },
         email: { $not: /@classgrid\.in$/i },
-        $or: [{ "metadata.whatsappPhone": { $in: [null, ""] } }, { "metadata.age": { $in: [null, ""] } }],
+        // (no WhatsApp number and Skip not chosen, or no age)
+        $or: [{ "metadata.whatsappPhone": { $in: [null, ""] }, "metadata.whatsappSkipped": { $ne: true } }, { "metadata.age": { $in: [null, ""] } }],
     };
 }
 

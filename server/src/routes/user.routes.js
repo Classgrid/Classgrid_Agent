@@ -373,8 +373,10 @@ router.post("/verify-whatsapp-otp", isAuthenticated, async (req, res) => {
     }
 
     // Valid OTP: save the number in both fields
+    // (the Skip mark of sign-up goes: the account has a verified number now)
     await User.findByIdAndUpdate(req.user._id, {
-      $set: { "metadata.whatsapp_number": phoneNumber, "metadata.whatsappPhone": phoneNumber }
+      $set: { "metadata.whatsapp_number": phoneNumber, "metadata.whatsappPhone": phoneNumber },
+      $unset: { "metadata.whatsappSkipped": "" },
     });
 
     await redis.del(key);
@@ -457,6 +459,8 @@ router.put("/update", isAuthenticated, attachInstitutionProfile({ required: fals
       // The WhatsApp number only changes through a verified code (/send-whatsapp-otp + /verify-whatsapp-otp)
       delete req.body.metadata["whatsapp_number"];
       delete req.body.metadata["whatsappPhone"];
+      // (the Skip mark is set only by sign-up's Skip and cleared by a verified number)
+      delete req.body.metadata["whatsappSkipped"];
       // SAFE MERGE: Prevent wiping out backend-only metadata (like integrations, whatsapp credentials)
       for (const key of Object.keys(req.body.metadata)) {
         updateData[`metadata.${key}`] = req.body.metadata[key];

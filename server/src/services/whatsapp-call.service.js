@@ -1364,7 +1364,7 @@ export async function handleCallsWebhook(value) {
                 if (!callsForAll()) continue; // owner-only mode: other calls stay unanswered
                 console.log(`[WA call] ${c.id} from an unlinked number, not answered`);
                 await callAction(c.id, "reject").catch(() => {});
-                await sendWhatsappText(from, "This WhatsApp number is not linked to a Classgrid account. Sign in on https://chat.classgrid.in and verify this number, then call again.");
+                await sendWhatsappText(from, "This WhatsApp number is not linked to a Classgrid account. Sign in to Classgrid (the phone app, the desktop app or https://chat.classgrid.in), verify this number in Settings, then call again.");
                 continue;
             }
             // Free call minutes first (Global AI Config, "Voice Calls"); past them, the same credit check as the chat

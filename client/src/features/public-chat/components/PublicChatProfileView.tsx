@@ -230,6 +230,8 @@ export function PublicChatProfileView({ profileData, isReadOnly }: { profileData
               <input className="w-full h-10 px-3 rounded-md border border-input bg-background text-sm focus:outline-none focus:ring-2 focus:ring-ring disabled:cursor-not-allowed placeholder:text-muted-foreground/30 disabled:text-foreground disabled:bg-muted/10" value={formData["hobby"] || formData.hobby || ""} onChange={e => handleInputChange("hobby", e.target.value)} disabled={!isEditing} placeholder="e.g. Reading, Coding, Travel" />
             </div>
           )}
+          {/* Shown only once a number is verified; an account without one verifies it in Settings > Account */}
+          {!!profileData?.metadata?.whatsapp_number && (
           <div className="space-y-1.5 md:col-span-2">
             <label className="text-sm font-medium text-foreground flex items-center gap-2">
               WhatsApp Number
@@ -279,6 +281,7 @@ export function PublicChatProfileView({ profileData, isReadOnly }: { profileData
             )}
             <p className="text-xs text-muted-foreground">Used for AI scheduling and important platform notifications.</p>
           </div>
+          )}
         </div>
       </div>
 

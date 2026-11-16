@@ -31,6 +31,7 @@ import { API_BASE_URL, apiClient } from "@/lib/apiClient";
 import { fetchWithRescue, navigateWithRescue } from "@/lib/rescue";
 import { LoginGridBackground } from "../components/LoginGridBackground";
 import { peekOAuthConsentReturn } from "@/features/oauth/lib/oauthReturn";
+import { WHATSAPP_HELLO_TEXT, WHATSAPP_HELP_NUMBER_SHOWN, whatsappHelloLink } from "@/lib/whatsappVerify";
 
 // How this browser last logged in (shown as a "Last used" tag) and whether it has logged in before (greeting).
 // The server sets this cookie only after a login really succeeded, so a click that never finished doesn't count.
@@ -463,6 +464,8 @@ function LoginContent() {
   const [whatsappPhone, setWhatsappPhone] = useState("");
   const [whatsappCountryCode, setWhatsappCountryCode] = useState("");
   const [whatsappOtp, setWhatsappOtp] = useState("");
+  // Skip on the WhatsApp step: the account is finished without a number (verified later in Settings > Account)
+  const [skipWhatsapp, setSkipWhatsapp] = useState(false);
   const [emailVerifiedTicket, setEmailVerifiedTicket] = useState("");
   const [whatsappCountdown, setWhatsappCountdown] = useState(0);
   const [whatsappOtpExpired, setWhatsappOtpExpired] = useState(false);
@@ -999,6 +1002,7 @@ function LoginContent() {
         phone: `+${code}${whatsappPhone}`,
         otp: whatsappOtp
       });
+      setSkipWhatsapp(false);
       setStep("age");
     } catch (err: any) {
       setError(err?.response?.data?.message || err?.message || "Failed to verify OTP.");
@@ -1023,8 +1027,7 @@ function LoginContent() {
         name: `${firstName} ${lastName}`.trim(),
         age: Number(age),
         role,
-        whatsappPhone: `+${code}${whatsappPhone}`,
-        whatsappOtp,
+        ...(skipWhatsapp ? { skipWhatsapp: true } : { whatsappPhone: `+${code}${whatsappPhone}`, whatsappOtp }),
         emailVerifiedTicket,
       });
       if (res.data?.token) {
@@ -1279,7 +1282,7 @@ function LoginContent() {
                      <span className="font-bold">Step 1:</span> You MUST send a message to our WhatsApp bot to open the chat window before receiving your OTP.
                    </p>
                    <a 
-                      href="https://wa.me/918149277038?text=Hi%20Classgrid" 
+                      href={whatsappHelloLink()} 
                       target="_blank" 
                       rel="noopener noreferrer"
                       className="flex items-center justify-center w-full bg-emerald-600 text-white rounded-md py-2 text-[13px] font-bold mb-2 hover:bg-emerald-700 transition-colors"
@@ -1287,7 +1290,7 @@ function LoginContent() {
                      Click Here to Open WhatsApp
                    </a>
                    <p className="text-center text-[11px] text-emerald-800/80 dark:text-emerald-300/80 font-medium mb-3 mt-1">
-                     (Or send 'Hi' manually to <span className="font-bold">+91 81492 77038</span>)
+                     (Or send '{WHATSAPP_HELLO_TEXT}' manually to <span className="font-bold">{WHATSAPP_HELP_NUMBER_SHOWN}</span>)
                    </p>
                    <p className="text-[13px] text-emerald-800 dark:text-emerald-300 font-medium">
                      <span className="font-bold">Step 2:</span> Enter your number below and click Send OTP!
@@ -1318,6 +1321,23 @@ function LoginContent() {
               >
                 {loading ? <><Spinner className="w-4 h-4 text-inherit mr-2" /> Sending...</> : "Send OTP"}
               </button>
+
+              {/* WhatsApp verification is optional: Skip goes on without a number */}
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.preventDefault();
+                  setSkipWhatsapp(true);
+                  setError("");
+                  setStep("age");
+                }}
+                className="h-12 w-full flex items-center justify-center rounded-xl border border-slate-200 bg-white text-sm font-medium text-slate-900 transition-all duration-200 hover:bg-slate-50 active:scale-[0.98] dark:border-[#2a2a2a] dark:bg-[#161616] dark:text-[#f1f1f1] dark:hover:bg-[#222]"
+              >
+                Skip for now
+              </button>
+              <p className="text-center text-[12px] font-medium text-slate-500 dark:text-[#888888]">
+                You can verify your WhatsApp number later in Settings.
+              </p>
             </form>
           ) : step === "whatsapp_otp" ? (
             <form key="whatsapp_otp" onSubmit={handleVerifyWhatsappOtp} className="space-y-5 animate-in slide-in-from-right-4 duration-300">

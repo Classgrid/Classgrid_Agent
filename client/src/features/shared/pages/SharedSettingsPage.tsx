@@ -59,6 +59,7 @@ import React, { useState, useEffect } from "react";
 import { Save } from "lucide-react";
 import { Button } from "@/components/marketing_ui/button";
 import { SettingsAppearanceCard } from "../components/settings/SettingsAppearanceCard";
+import { SettingsWhatsappCard } from "../components/settings/SettingsWhatsappCard";
 import { SettingsPushCard } from "../components/settings/SettingsPushCard";
 import { useEmailPreferences, useUpdateEmailPreferences, EmailPrefs } from "../queries/useSettingsQueries";
 import { useUserProfile, useUpdateProfile } from "../queries/useUserProfile";
@@ -228,6 +229,8 @@ export function SharedSettingsPage() {
         ) : (
           <>
             {role !== "super_admin" && role !== "user" && !isChatApp && <SettingsRoleRequestCard />}
+            {/* No verified WhatsApp number (Skip at sign-up): it is verified here; the card hides itself once done */}
+            {isChatApp && role !== "super_admin" && <SettingsWhatsappCard />}
             <SettingsEmailsCard />
             <SettingsChangePasswordCard />
             {role !== "super_admin" && <SettingsDeleteAccountCard />}

@@ -77,7 +77,7 @@ import User from "../models/User.js";
 import SystemSettings from "../models/SystemSettings.js";
 import Organization from "../models/Organization.js";
 import connectDB from "../../config/db.js";
-import { needsChatOnboarding } from "../utils/chat-onboarding.js";
+import { needsChatOnboarding, whatsappStepDone } from "../utils/chat-onboarding.js";
 
 const JWT_SECRET = getJwtSecret();
 
@@ -280,7 +280,8 @@ export const isAuthenticated = async (req, res, next) => {
             const isAuthOrOnboardingRoute = req.originalUrl.startsWith('/api/auth');
             // (a Classgrid extension login, client: "editor", needs no WhatsApp number: the extension has no WhatsApp or
             // schedules; the website and the desktop app still ask for it)
-            if (user.role === 'user' && decoded.client !== 'editor' && (!user.metadata || !user.metadata.whatsappPhone) && !isAuthOrOnboardingRoute) {
+            // (a person who chose Skip on the WhatsApp step is through: utils/chat-onboarding.js whatsappStepDone)
+            if (user.role === 'user' && decoded.client !== 'editor' && !whatsappStepDone(user) && !isAuthOrOnboardingRoute) {
                 return res.status(403).json({
                     success: false,
                     message: 'Account onboarding incomplete. You must verify your WhatsApp number.',
