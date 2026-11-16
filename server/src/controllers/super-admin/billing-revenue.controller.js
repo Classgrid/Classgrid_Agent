@@ -278,7 +278,7 @@ export const reconcileRevenue = async (req, res) => {
         return res.status(503).json({
             success: false,
             code: "PAYMENT_PROVIDER_NOT_CONFIGURED",
-            message: "Razorpay reconciliation is not configured",
+            message: "Payment reconciliation is not configured",
         });
     }
 

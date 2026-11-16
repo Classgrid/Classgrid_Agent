@@ -135,7 +135,7 @@ export default function TransactionDetailsPage() {
               {tx.status || 'SUCCESS'}
             </div>
             <span className="text-xs text-muted-foreground font-medium uppercase tracking-widest bg-background/50 px-3 py-1.5 rounded-md border border-border/50 shadow-sm backdrop-blur-sm">
-              {tx.paymentFlow === 'ai_topup' ? '🤖 AI Top-Up' : tx.paymentFlow === 'subscription' ? '🏢 Subscription' : tx.type || '💳 Razorpay'}
+              {tx.paymentFlow === 'ai_topup' ? '🤖 AI Top-Up' : tx.paymentFlow === 'subscription' ? '🏢 Subscription' : tx.type || '💳 Online payment'}
             </span>
           </div>
         </div>
@@ -292,7 +292,7 @@ export default function TransactionDetailsPage() {
             </CardHeader>
             <CardContent className="pt-3 pb-3 px-4 space-y-2">
               <div className="flex justify-between items-center text-sm">
-                <span className="text-muted-foreground">Razorpay Fee</span>
+                <span className="text-muted-foreground">Gateway Fee</span>
                 <span className="font-medium text-red-500/80">{tx.feePaise != null ? `-₹${(tx.feePaise / 100).toFixed(2)}` : '₹0.00'}</span>
               </div>
               <div className="flex justify-between items-center text-sm">

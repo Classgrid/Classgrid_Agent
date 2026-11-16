@@ -363,7 +363,7 @@ export const TransactionDetailDrawer: React.FC<{
                   <div className="flex flex-col items-end gap-2">
                     <TransactionStatusBadge status={tx.status || 'unknown'} />
                     <span className="text-[10px] text-muted-foreground uppercase tracking-wider">
-                      {tx.paymentFlow === 'ai_topup' ? 'AI Top-Up' : tx.paymentFlow === 'subscription' ? 'Subscription' : tx.type || 'Razorpay'}
+                      {tx.paymentFlow === 'ai_topup' ? 'AI Top-Up' : tx.paymentFlow === 'subscription' ? 'Subscription' : tx.type || 'Online payment'}
                     </span>
                   </div>
                 </div>
@@ -417,7 +417,7 @@ export const TransactionDetailDrawer: React.FC<{
 
                 {/* ── SECTION 5: Fees & Processing ── */}
                 <SectionCard icon={<Receipt className="h-3.5 w-3.5" />} title="Fees & Processing">
-                  <DetailRow label="Razorpay Fee" value={tx.feePaise != null ? `₹${(tx.feePaise / 100).toFixed(2)}` : '₹0.00'} />
+                  <DetailRow label="Gateway Fee" value={tx.feePaise != null ? `₹${(tx.feePaise / 100).toFixed(2)}` : '₹0.00'} />
                   <DetailRow label="GST on Fee" value={tx.taxPaise != null ? `₹${(tx.taxPaise / 100).toFixed(2)}` : '₹0.00'} />
                   <DetailRow label="Net Received" value={
                     tx.amount != null

@@ -252,7 +252,7 @@ export const ReconciliationDialog: React.FC = () => {
       <DialogContent>
         <DialogHeader><DialogTitle>Provider reconciliation</DialogTitle></DialogHeader>
         <div className="space-y-3">
-          <p className="flex gap-2 text-sm text-muted-foreground"><HelpCircle className="h-4 w-4 shrink-0" />Compare captured Razorpay payments with the Classgrid ledger for one date.</p>
+          <p className="flex gap-2 text-sm text-muted-foreground"><HelpCircle className="h-4 w-4 shrink-0" />Compare captured online payments with the Classgrid ledger for one date.</p>
           <Input type="date" value={targetDate} onChange={(event) => setTargetDate(event.target.value)} />
           {reconciliation.error && <p className="text-sm text-destructive">{(reconciliation.error as Error).message}</p>}
         </div>

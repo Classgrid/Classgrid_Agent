@@ -80,7 +80,7 @@ const normalizeTransaction = (transaction: any) => ({
   organization: typeof transaction.organizationId === "object" ? transaction.organizationId : undefined,
   type: transaction.type || transaction.paymentFlow,
   amountPaise: transaction.amountCapturedPaise || (transaction.amount ? transaction.amount * 100 : 0),
-  provider: "Razorpay",
+  provider: "Online payment",
   providerTxId: transaction.providerPaymentId || transaction.razorpayPaymentId,
   paymentMethod: transaction.method || transaction.paymentMethod
     ? { type: transaction.method || transaction.paymentMethod, last4: transaction.cardInfo?.last4 }

@@ -101,7 +101,7 @@ const STATUS_BADGE: Record<string, any> = {
 };
 
 const TYPE_BADGE: Record<string, any> = {
-  razorpay: { variant: "info", label: "Razorpay" },
+  razorpay: { variant: "info", label: "Online payment" },
   manual: { variant: "neutral", label: "Manual" },
   refund: { variant: "warning", label: "Refund" },
   credit: { variant: "success", label: "Credit" },
@@ -195,7 +195,7 @@ export function TransactionsPage() {
       cell: ({ getValue }) => { const s = STATUS_BADGE[getValue<string>()] ?? { variant: "neutral", label: getValue<string>() }; return <Badge variant={s.variant} dot>{s.label}</Badge>; },
     },
     {
-      accessorKey: "razorpayPaymentId", header: "Razorpay ID", size: 170,
+      accessorKey: "razorpayPaymentId", header: "Payment ID", size: 170,
       cell: ({ getValue }) => <span >{getValue<string>() || "—"}</span>,
     },
     {
@@ -240,7 +240,7 @@ export function TransactionsPage() {
                 { label: "Refunded", value: "refunded" }, { label: "Failed", value: "failed" },
               ]} />
               <div value={typeFilter} onValueChange={setTypeFilter} options={[
-                { label: "All Types", value: "" }, { label: "Razorpay", value: "razorpay" },
+                { label: "All Types", value: "" }, { label: "Online payment", value: "razorpay" },
                 { label: "Manual", value: "manual" }, { label: "Refund", value: "refund" },
               ]} />
             </div>
@@ -250,7 +250,7 @@ export function TransactionsPage() {
             <div searchValue={search} onSearchChange={setSearch} searchPlaceholder="Search org, payment ID, note…" />
           </div>
           <DataTable columns={columns} data={filtered} isLoading={isLoading} pageSize={50}
-            emptyIcon={<IndianRupee size={32} />} emptyTitle="No transactions yet" emptyDescription="Payments recorded via Razorpay or manually will appear here." emptyMessage="No transactions." />
+            emptyIcon={<IndianRupee size={32} />} emptyTitle="No transactions yet" emptyDescription="Payments made online or recorded manually will appear here." emptyMessage="No transactions." />
         </SectionPanel>
       </div>
 
@@ -279,7 +279,7 @@ export function TransactionsPage() {
         <DialogContent className="max-w-md">
           <DialogHeader>
             <DialogTitle>Record Manual Payment</DialogTitle>
-            <DialogDescription>Log a payment that was collected outside of Razorpay (e.g., bank transfer, cash).</DialogDescription>
+            <DialogDescription>Log a payment that was collected outside the online payment gateway (e.g., bank transfer, cash).</DialogDescription>
           </DialogHeader>
           <div >
             <div>

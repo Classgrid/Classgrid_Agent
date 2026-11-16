@@ -309,7 +309,7 @@ export function BackupPage() {
               { label: "Codebase (Git)", status: "Version Controlled ✓", desc: "All code committed — push to GitHub before each deploy", ok: true },
               { label: "Email Templates (Brevo)", status: "Cloud ✓", desc: "Templates live on Brevo — not locally stored", ok: true },
               { label: "Environment Config (.env)", status: "⚠️ Manual", desc: "Not backed up automatically — store in Bitwarden/1Password", ok: false },
-              { label: "Razorpay Keys", status: "⚠️ Manual", desc: "Per-org keys stored in DB — make sure DB backup is running", ok: false },
+              { label: "Payment gateway keys", status: "⚠️ Manual", desc: "Per-org keys stored in DB — make sure DB backup is running", ok: false },
             ].map(({ label, status, desc, ok }) => (
               <div key={label} >
                 <div>

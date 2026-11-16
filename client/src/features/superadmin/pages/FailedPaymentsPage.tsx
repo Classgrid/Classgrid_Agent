@@ -248,7 +248,7 @@ export function FailedPaymentsPage() {
               onValueChange={setTypeFilter}
               options={[
                 { label: "All Types", value: "" },
-                { label: "Razorpay", value: "razorpay" },
+                { label: "Online payment", value: "razorpay" },
                 { label: "Manual", value: "manual" },
               ]}
             />
