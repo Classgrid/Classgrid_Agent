@@ -90,6 +90,8 @@ import { voiceModelRefusal } from "../services/voice-model.service.js";
 import { weekCounters } from "../services/ai-credits.service.js";
 import { voiceInputAllowed, countVoiceInput, pcmToWav, voiceGapSeconds, setVoiceClock } from "../services/voice-input-limit.service.js";
 import { transcribeAudioDetailed } from "../services/ai/voice.service.js";
+import { spokenWords } from "../services/voice-heard.js";
+import SystemLog from "../models/SystemLog.js";
 
 // What "Auto" means in voice mode: GLM 5.3 (first words in about half a second with its thinking off). It answers
 // alone, like a picked model: voice mode has no backup model (owner, 2026-11-15)
@@ -100,6 +102,8 @@ const MAX_HEARD_CHARS = 4000; // one spoken turn (the recogniser gives a sentenc
 // One spoken turn sent as sound: at most a minute, at least a fifth of a second (shorter is a click, not a word)
 const MAX_AUDIO_SECONDS = 60;
 const MIN_AUDIO_SECONDS = 0.2;
+// How long ElevenLabs may take to hear a turn before Cloudflare's Whisper is tried (it answers in under a second)
+const STT_WAIT_MS = 12000;
 // What speech-to-text writes for sound with no words in it
 const NO_WORDS = /^[\s.,!?…\-]*$|^\(?\[?(silence|music|noise|background noise|blank[_ ]audio|inaudible|no speech)\]?\)?\.?$/i;
 // The usage check before the answer: what the user said plus the short prompt, the tools and a spoken reply
@@ -199,13 +203,21 @@ export const voiceTurn = async (req, res) => {
     let heard = cleanHeard(body.text);
     // The turn as sound (no text): its length is known now, its words once the speech to text has answered (it runs
     // at the same time as the checks below, so listening on the server costs the answer no extra wait)
-    let pcm = null, audioSeconds = 0, inputGate = null, heardText = null, heardMs = null;
+    let pcm = null, audioSeconds = 0, inputGate = null, heardText = null, heardMs = null, heardBy = null;
+    // A turn that was not answered leaves a line in the system log (how long its sound was, what was decided), so a
+    // talk that "stopped answering" can be read afterwards: the usage log only has the turns that were answered
+    const noteNotAnswered = (code) => {
+        SystemLog.create({
+            userId: user._id, level: "info", context: "voice_turn", message: `voice turn not answered: ${code}`,
+            metadata: { code, audioSeconds: Math.round(audioSeconds * 10) / 10, heardMs, heardBy },
+        }).catch(() => {});
+    };
     if (!heard && typeof body.audio === "string" && body.audio) {
         const rate = Number(body.sampleRate) === 24000 ? 24000 : Number(body.sampleRate) === 48000 ? 48000 : 16000;
         pcm = Buffer.from(body.audio, "base64");
         audioSeconds = pcm.length / 2 / rate;
-        if (audioSeconds > MAX_AUDIO_SECONDS + 1) return refusal(res, 413, "That was too long for one turn. Say it in shorter parts.", "audio_too_long");
-        if (audioSeconds < MIN_AUDIO_SECONDS) return refusal(res, 400, "I didn't catch that. Say it again.", "nothing_said");
+        if (audioSeconds > MAX_AUDIO_SECONDS + 1) { noteNotAnswered("audio_too_long"); return refusal(res, 413, "That was too long for one turn. Say it in shorter parts.", "audio_too_long"); }
+        if (audioSeconds < MIN_AUDIO_SECONDS) { noteNotAnswered("nothing_said"); return refusal(res, 400, "I didn't catch that. Say it again.", "nothing_said"); }
         try {
             inputGate = await voiceInputAllowed(user);
         } catch (e) {
@@ -214,9 +226,12 @@ export const voiceTurn = async (req, res) => {
         }
         if (!inputGate.allowed) return refusal(res, 429, inputGate.error, "voice_input_cap_reached");
         const sttStartedAt = Date.now();
-        heardText = transcribeAudioDetailed(pcmToWav(pcm, rate), "audio/wav")
-            .then((r) => { heardMs = Date.now() - sttStartedAt; return cleanHeard(r?.text); })
-            .catch((e) => { console.error("[voice turn] speech to text failed:", e.message); return null; });
+        // Only spoken words count (services/voice-heard.js): noise and silence come back as nothing said, never as a
+        // sound tag or an invented "Thank you." that the AI would answer. ElevenLabs gets STT_WAIT_MS before Whisper
+        // is tried, so a slow speech service does not leave the phone waiting a minute
+        heardText = transcribeAudioDetailed(pcmToWav(pcm, rate), "audio/wav", { speechOnly: true, timeoutMs: STT_WAIT_MS })
+            .then((r) => { heardMs = Date.now() - sttStartedAt; heardBy = r?.by || null; return cleanHeard(spokenWords(r?.text, r?.by)); })
+            .catch((e) => { heardMs = Date.now() - sttStartedAt; console.error("[voice turn] speech to text failed:", e.message); return null; });
     } else if (!heard) {
         return refusal(res, 400, "I didn't catch that. Say it again.", "nothing_said");
     }
@@ -251,10 +266,10 @@ export const voiceTurn = async (req, res) => {
         // The words of a turn sent as sound (asked for above, while these checks ran)
         if (pcm) {
             const text = await heardText;
-            if (text === null) return refusal(res, 503, "I couldn't hear that just now. Say it again.", "speech_to_text_failed");
+            if (text === null) { noteNotAnswered("speech_to_text_failed"); return refusal(res, 503, "I couldn't hear that just now. Say it again.", "speech_to_text_failed"); }
             // The seconds that were listened to count on the day's voice input minutes, words or not
             countVoiceInput(user, inputGate, audioSeconds);
-            if (!text || NO_WORDS.test(text)) return refusal(res, 400, "I didn't catch that. Say it again.", "nothing_said");
+            if (!text || NO_WORDS.test(text)) { noteNotAnswered("nothing_said"); return refusal(res, 400, "I didn't catch that. Say it again.", "nothing_said"); }
             heard = text;
         }
     } catch (err) {

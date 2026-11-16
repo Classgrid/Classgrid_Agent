@@ -117,21 +117,35 @@ export const transcribeAudio = async (buffer, mimetype = 'audio/webm') => (await
 // WAV 16 kHz 16-bit mono 32 KB a second
 const guessSeconds = (buffer, mimetype) => Math.max(1, Math.round((buffer?.length || 0) / (/wav/i.test(String(mimetype)) ? 32000 : 4000)));
 
-/** { text, seconds }: the words and how long the audio was (the plan's voice input minutes count the seconds) */
-export const transcribeAudioDetailed = async (buffer, mimetype = 'audio/webm') => {
+/**
+ * { text, seconds, by }: the words, how long the audio was (the plan's voice input minutes count the seconds) and
+ * which service heard them.
+ *
+ * speechOnly (a voice-mode turn: sound that may hold no words at all; tested 2026-11-16 with bus noise, a crowd and
+ * silence): only spoken words count. ElevenLabs is asked for no sound tags, and when it has listened and heard no
+ * words that is the answer: Cloudflare's Whisper is not asked, because for silence it writes "Thank you." and the AI
+ * then answered a question nobody asked. Whisper is used only when ElevenLabs itself fails; an empty result from it
+ * is "no words" too, not an error. timeoutMs: how long ElevenLabs may take before Whisper is tried.
+ */
+export const transcribeAudioDetailed = async (buffer, mimetype = 'audio/webm', { speechOnly = false, timeoutMs } = {}) => {
     if (eleven.elevenLabsEnabled()) {
         try {
-            const { text, seconds } = await eleven.speechToText(buffer, { mimeType: mimetype });
-            if (text) return { text, seconds: seconds || guessSeconds(buffer, mimetype) };
+            const { text, seconds } = await eleven.speechToText(buffer, {
+                mimeType: mimetype,
+                ...(speechOnly ? { tagAudioEvents: false } : {}),
+                ...(timeoutMs ? { timeoutMs } : {}),
+            });
+            if (text) return { text, seconds: seconds || guessSeconds(buffer, mimetype), by: "elevenlabs" };
+            if (speechOnly) return { text: "", seconds: seconds || guessSeconds(buffer, mimetype), by: "elevenlabs" };
             console.warn("[Voice Service] ElevenLabs heard nothing; trying Cloudflare");
         } catch (err) {
             console.error("[Voice Service] ElevenLabs transcription failed, using Cloudflare:", err.message);
         }
     }
-    return { text: await transcribeAudioCloudflare(buffer, mimetype), seconds: guessSeconds(buffer, mimetype) };
+    return { text: await transcribeAudioCloudflare(buffer, mimetype, { emptyOk: speechOnly }), seconds: guessSeconds(buffer, mimetype), by: "cloudflare" };
 };
 
-const transcribeAudioCloudflare = async (buffer, mimetype = 'audio/webm') => {
+const transcribeAudioCloudflare = async (buffer, mimetype = 'audio/webm', { emptyOk = false } = {}) => {
     try {
         const cfAccountId = process.env.CLOUDFLARE_ACCOUNT_ID;
         const cfToken = process.env.CLOUDFLARE_WORKERS_AI_TOKEN;
@@ -158,7 +172,10 @@ const transcribeAudioCloudflare = async (buffer, mimetype = 'audio/webm') => {
         }
 
         const json = await response.json();
-        
+
+        // (a voice turn: Whisper answered and heard no words)
+        if (emptyOk && json.success && json.result && !json.result.text) return "";
+
         if (!json.success || !json.result || !json.result.text) {
              throw new Error(`Unexpected response format from Cloudflare: ${JSON.stringify(json)}`);
         }

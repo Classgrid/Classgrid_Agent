@@ -73,7 +73,9 @@ export async function textToSpeech(text, { voiceId = classgridVoiceId(), modelId
  * Text from audio (any common audio or video format; `mimeType` and `fileName` only help the upload). `language` is an
  * ISO 639-1/639-3 code; without it the language is detected. Returns { text, languageCode, seconds }.
  */
-export async function speechToText(audio, { mimeType = "audio/webm", fileName, language, timeoutMs = 60000 } = {}) {
+// tagAudioEvents false: only spoken words come back. Left on (the default), noise is written as a tag
+// ("[static noise]", "[laughs]", also in other languages), which a voice turn would take for a question.
+export async function speechToText(audio, { mimeType = "audio/webm", fileName, language, timeoutMs = 60000, tagAudioEvents } = {}) {
     const bytes = Buffer.isBuffer(audio) ? audio : Buffer.from(audio);
     if (!bytes.length) return { text: "", languageCode: null, seconds: 0 };
     const clean = String(mimeType || "audio/webm").split(";")[0].trim();
@@ -83,6 +85,7 @@ export async function speechToText(audio, { mimeType = "audio/webm", fileName, l
         form.append("file", new Blob([bytes], { type: clean }), fileName || `audio.${ext}`);
         form.append("model_id", STT_MODEL);
         if (language) form.append("language_code", language);
+        if (tagAudioEvents === false) form.append("tag_audio_events", "false");
         return fetch(`${BASE}/speech-to-text`, { method: "POST", headers: { "xi-api-key": key }, body: form, signal: AbortSignal.timeout(timeoutMs) });
     });
     const json = await res.json().catch(() => ({}));
