@@ -28,9 +28,13 @@ import { DesktopMenuBar, editAction, type MenuEntry, type MenuSpec } from "@/com
 import { listLocalFiles, localFolderOf } from "../utils/localProject";
 import { PROJECT_PLACE_EVENT, listenProjectSaved, onDesktop, thisComputerCopy, thisDeviceId } from "../utils/projectCopies";
 import { Spinner } from "@/components/marketing_ui/spinner";
+import { LiveDocView } from "@/features/live-docs/LiveDocView";
+import { OPEN_DOC_EVENT } from "@/features/live-docs/docContext";
 
-type TabKind = "browser" | "review" | "files" | "terminal" | "project" | "shots" | "uploads" | "file" | "agents";
-type Tab = { id: string; kind: TabKind; path?: string }; // path: a "file" tab's file on this computer (desktop app)
+type TabKind = "browser" | "review" | "files" | "terminal" | "project" | "shots" | "uploads" | "file" | "agents" | "doc";
+// path: a "file" tab's file on this computer (desktop app). docId, title: a "doc" tab's live doc (owner, 2026-11-16:
+// a doc opens beside the chat, where the AI is asked to change it)
+type Tab = { id: string; kind: TabKind; path?: string; docId?: string; title?: string };
 
 const TAB_INFO: Record<TabKind, { label: string; Icon: typeof Globe }> = {
   browser: { label: "Browser", Icon: Globe },
@@ -42,6 +46,7 @@ const TAB_INFO: Record<TabKind, { label: string; Icon: typeof Globe }> = {
   uploads: { label: "Uploads", Icon: Upload },
   file: { label: "File", Icon: FileText },
   agents: { label: "Agents", Icon: Bot },
+  doc: { label: "Doc", Icon: FileText },
 };
 
 // One easing for every slide in Studio: fast start, soft stop
@@ -56,11 +61,11 @@ const MIN_CHAT = 320;
 
 // The pane's tabs and the selected one, kept across a refresh
 const TABS_KEY = "cg_studio_tabs";
-const TAB_KINDS = new Set<TabKind>(["browser", "review", "files", "terminal", "project", "shots", "uploads", "file", "agents"]);
+const TAB_KINDS = new Set<TabKind>(["browser", "review", "files", "terminal", "project", "shots", "uploads", "file", "agents", "doc"]);
 function readTabs(): { tabs: Tab[]; active: string | null } {
   try {
     const saved = JSON.parse(localStorage.getItem(TABS_KEY) || "null");
-    const tabs = Array.isArray(saved?.tabs) ? (saved.tabs as Tab[]).filter((t) => t && typeof t.id === "string" && TAB_KINDS.has(t.kind) && (t.kind !== "file" || typeof t.path === "string")) : [];
+    const tabs = Array.isArray(saved?.tabs) ? (saved.tabs as Tab[]).filter((t) => t && typeof t.id === "string" && TAB_KINDS.has(t.kind) && (t.kind !== "file" || typeof t.path === "string") && (t.kind !== "doc" || /^[0-9a-f]{24}$/i.test(String(t.docId || "")))) : [];
     if (tabs.length) return { tabs, active: tabs.some((t) => t.id === saved.active) ? saved.active : tabs[0]!.id };
   } catch { /* storage blocked */ }
   return { tabs: [{ id: "browser-1", kind: "browser" }], active: "browser-1" };
@@ -299,6 +304,38 @@ export function StudioModePage() {
     };
     window.addEventListener(OPEN_LOCAL_FILE_EVENT, onOpen);
     return () => { window.removeEventListener(OPEN_LOCAL_FILE_EVENT, onOpen); (window as unknown as { __cgStudioFiles?: boolean }).__cgStudioFiles = false; };
+  }, []);
+
+  // A live doc opens in its own tab beside the chat (the same doc opens in the tab it already has): from the chat's
+  // "Open" on a doc the AI made, from a doc's own page ("Chat"), or from the address (?doc=<id>, with ?ask=<message>
+  // to send the AI a message about it, e.g. a comment sent to Classgrid AI)
+  useEffect(() => {
+    const show = (docId: string) => {
+      if (!/^[0-9a-f]{24}$/i.test(docId)) return;
+      setPane((p) => (p.open ? p : { ...p, open: true }));
+      setTabs((t) => {
+        const same = t.find((x) => x.kind === "doc" && x.docId === docId);
+        if (same) { setActive(same.id); return t; }
+        const id = `doc-${docId}`;
+        setActive(id);
+        return [...t, { id, kind: "doc", docId }];
+      });
+    };
+    const onOpen = (e: Event) => show(String((e as CustomEvent<{ id?: string }>).detail?.id || ""));
+    window.addEventListener(OPEN_DOC_EVENT, onOpen);
+    const query = new URLSearchParams(window.location.search);
+    const fromAddress = query.get("doc");
+    let asking: ReturnType<typeof setTimeout> | undefined;
+    if (fromAddress) {
+      show(fromAddress);
+      const ask = query.get("ask");
+      query.delete("doc");
+      query.delete("ask");
+      window.history.replaceState(window.history.state, "", `${window.location.pathname}${query.toString() ? `?${query.toString()}` : ""}`);
+      // (the chat is given a moment to open before the message is handed to it)
+      if (ask) asking = setTimeout(() => window.dispatchEvent(new CustomEvent("agent:ask", { detail: { text: ask } })), 900);
+    }
+    return () => { window.removeEventListener(OPEN_DOC_EVENT, onOpen); if (asking) clearTimeout(asking); };
   }, []);
 
   // Desktop app: the browser tab shows the open page's name and icon
@@ -712,7 +749,7 @@ export function StudioModePage() {
                       {tabs.map((t) => {
                         const info = TAB_INFO[t.kind];
                         const Icon = info.Icon;
-                        const label = t.kind === "file" && t.path ? baseName(t.path) : t.kind === "browser" && browserPage.url ? browserPage.title || hostOf(browserPage.url) : info.label;
+                        const label = t.kind === "file" && t.path ? baseName(t.path) : t.kind === "doc" ? tabTitle(t.title) || info.label : t.kind === "browser" && browserPage.url ? browserPage.title || hostOf(browserPage.url) : info.label;
                         const on = t.id === active;
                         return (
                           <motion.div
@@ -730,7 +767,7 @@ export function StudioModePage() {
                             {t.kind === "file" && t.path
                               ? <span className="relative flex"><FileBadge path={t.path} /></span>
                               : t.kind === "browser" && browserPage.url ? <SiteIcon url={browserPage.url} /> : <Icon className="relative size-4 shrink-0" />}
-                            {!compactTabs && <span className={`relative ${t.kind === "file" || t.kind === "browser" ? "max-w-[160px] truncate" : ""}`}>{label}</span>}
+                            {!compactTabs && <span className={`relative ${t.kind === "file" || t.kind === "browser" ? "max-w-[160px] truncate" : t.kind === "doc" ? "whitespace-nowrap" : ""}`}>{label}</span>}
                             <button
                               onClick={(e) => { e.stopPropagation(); closeTab(t.id); }}
                               className={`relative flex items-center justify-center size-5 rounded hover:bg-foreground/10 transition-[opacity,background-color] duration-150 ${on ? "opacity-100" : "opacity-0 group-hover:opacity-100"}`}
@@ -820,6 +857,15 @@ export function StudioModePage() {
                     {activeTab?.kind === "uploads" && <StudioUploadsView />}
                     {activeTab?.kind === "file" && activeTab.path && <StudioLocalFileView path={activeTab.path} />}
                     {activeTab?.kind === "agents" && <StudioAgentsView />}
+                    {activeTab?.kind === "doc" && activeTab.docId && (
+                      <LiveDocView
+                        key={activeTab.docId}
+                        id={activeTab.docId}
+                        inStudio
+                        onGone={() => closeTab(activeTab.id)}
+                        onTitle={(title) => setTabs((all) => all.map((x) => (x.id === activeTab.id && x.title !== title ? { ...x, title } : x)))}
+                      />
+                    )}
                     {activeTab?.kind === "review" && <StudioReviewView projectId={studioProject} onChanged={() => setFilesReload((n) => n + 1)} />}
                     {!activeTab && <Launcher onOpen={openTab} />}
                   </motion.div>}
@@ -844,6 +890,15 @@ export function StudioModePage() {
 
 const hostOf = (u: string) => { try { return new URL(u).host; } catch { return u; } };
 
+// A doc tab's name: the doc's title, up to a whole word when it is long (never cut with dots; the whole title is
+// in the doc's own bar under the tabs)
+const tabTitle = (title?: string) => {
+  const text = String(title || "").replace(/\s+/g, " ").trim();
+  if (text.length <= 24) return text;
+  const head = text.slice(0, 24);
+  return head.slice(0, Math.max(head.lastIndexOf(" "), 12)).replace(/[\s(,:;-]+$/, "");
+};
+
 // A browser tab's site icon (the globe when there is none, or no internet)
 function SiteIcon({ url }: { url: string }) {
   const [failed, setFailed] = useState(false);
@@ -858,7 +913,7 @@ function Launcher({ onOpen }: { onOpen: (kind: TabKind) => void }) {
   const reduce = useReducedMotion();
   const [q, setQ] = useState("");
   const items = useMemo(
-    () => (Object.keys(TAB_INFO) as TabKind[]).filter((k) => k !== "file" && TAB_INFO[k].label.toLowerCase().includes(q.trim().toLowerCase())),
+    () => (Object.keys(TAB_INFO) as TabKind[]).filter((k) => k !== "file" && k !== "doc" && TAB_INFO[k].label.toLowerCase().includes(q.trim().toLowerCase())),
     [q],
   );
   return (

@@ -1,5 +1,7 @@
 // Chat steps for the live doc tools: "Created Trip plan [Open]", "Edited Trip plan [Open]", "Read ...", "Replied to a comment"
 import { FileText } from "lucide-react";
+import { useNavigate } from "react-router-dom";
+import { onStudio, openDocInStudio, studioDocPath } from "./docContext";
 import { Spinner } from "@/components/marketing_ui/spinner";
 import { Row } from "@/components/ai/components/stepper/ProjectToolSteps";
 import { ShimmerText } from "@/components/ai/components/stepper/ShimmerText";
@@ -19,6 +21,7 @@ const WORDS: Record<string, [string, string, string]> = {
 };
 
 export function LiveDocStep({ step }: { step: Step }) {
+  const navigate = useNavigate();
   const loading = step.status === "loading";
   const result = String(step.result || "").trim();
   const failed = !loading && /^error/i.test(result);
@@ -47,14 +50,15 @@ export function LiveDocStep({ step }: { step: Step }) {
           {loading && <Spinner className="size-3.5 shrink-0" />}
         </Row>
         {showOpen && (
-          <a
-            href={import.meta.env.VITE_DESKTOP === "1" ? `https://chat.classgrid.in/docs/${id}` : `/docs/${id}`}
-            target="_blank"
-            rel="noreferrer"
+          // The doc opens beside this chat: in Studio as a tab of the right pane; from Agent mode the same chat opens in
+          // Studio with the doc (owner, 2026-11-16: "for all use Studio mode")
+          <button
+            type="button"
+            onClick={() => (onStudio() ? openDocInStudio(id) : navigate(studioDocPath(id)))}
             className="relative z-10 -ml-1 shrink-0 inline-flex items-center h-6 rounded-md border border-border px-2 text-xs font-medium text-foreground hover:bg-accent"
           >
             Open
-          </a>
+          </button>
         )}
       </div>
       {failed && <div className="ml-10 -mt-1 mb-1 text-xs text-red-600 dark:text-red-500">{result.replace(/^error:\s*/i, "")}</div>}

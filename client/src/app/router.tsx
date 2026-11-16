@@ -197,6 +197,7 @@ import { AiModelsPage } from "@/features/superadmin/pages/AiModelsPage";
 import { StudentApplicationsPage } from "@/features/superadmin/pages/StudentApplicationsPage";
 import { PlaygroundPage } from "@/features/superadmin/pages/PlaygroundPage";
 import { LiveDocPage } from "@/features/live-docs/LiveDocPage";
+import { DocsHomePage } from "@/features/live-docs/DocsHomePage";
 import { isChatHost } from "@/lib/chatHost";
 
 
@@ -292,6 +293,7 @@ export function AppRouter() {
       <Route element={<RequireAuth />}>
         <Route path="/required-password-reset" element={<RequiredPasswordResetPage />} />
         <Route path="/oauth/authorize" element={<OAuthConsentPage />} />
+        <Route path="/docs" element={<DocsHomePage />} />
         <Route path="/docs/:id" element={<LiveDocPage />} />
 
 

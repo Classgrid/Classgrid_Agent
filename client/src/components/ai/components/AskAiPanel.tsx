@@ -246,6 +246,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { fetchWithRescue } from "@/lib/rescue";
 import { ANSWER_FEEDBACK_ASK, ANSWER_FEEDBACK_SET, closeReading, getReading, startReading, useReadingOf, useReadingOn } from "../reading";
 import { ReadingBar } from "./ReadingBar";
+import { docContextLine, getOpenDoc, openDocInStudio, splitDocContext, type OpenDoc } from "@/features/live-docs/docContext";
 
 import { LOCAL_IMAGE_MISSING, jpegName, keepLocalImage, loadLocalImages, readAsDataUrl, sendsInline, shrinkForAi, showLocalImages } from "@/lib/desktopImages";
 
@@ -520,6 +521,8 @@ export type ChatMessage = {
   senderEmail?: string;
   /** Studio: comments and quotes on code sent with this message (shown as chips; the code went to the AI) */
   codeNotes?: CodeNoteChip[];
+  /** The live doc that was open beside the chat when this was sent (Studio). */
+  besideDoc?: OpenDoc;
 };
 
 export type QueuedMessage = {
@@ -1369,7 +1372,7 @@ function quoteLabel(children: any): string | undefined {
   return m ? m[1]!.toLowerCase() : undefined;
 }
 
-const MarkdownComponents = {
+export const MarkdownComponents = {
   blockquote({ className, children, ...props }: any) {
     // Alerts keep the normal quote look; only the bar (and the label) take the alert's colour, like GitHub:
     // "> [!TIP]" alerts, and plain quotes that start with a NOTE / TIP / IMPORTANT / WARNING / CAUTION label
@@ -1631,7 +1634,7 @@ function toChatMessage(m: any): ChatMessage {
 
 // The user's own message bubble: markdown they pasted (links, bold, inline code, lists) shows formatted.
 // Plain markdown only: raw HTML is skipped and unsafe links are removed by react-markdown.
-const USER_MD_COMPONENTS: any = {
+export const USER_MD_COMPONENTS: any = {
   p: ({ children }: any) => <p className="m-0 [&+p]:mt-2">{children}</p>,
   a: ({ href, children }: any) => (
     <a href={href} target="_blank" rel="noreferrer" className="underline underline-offset-2 text-blue-600 dark:text-blue-400 break-all">{children}</a>
@@ -4581,6 +4584,11 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
       apiQuestion = `${apiQuestion}\n\n${sentPasted.map((pt, i) => `[PASTED TEXT ${i + 1}]:\n${pt}`).join("\n\n")}`;
     }
 
+    // Studio: a live doc is open beside the chat. The AI is told which one ("this doc" means it); the chat shows it
+    // as a small chip on the message. (A hidden message, and one that already names a doc, go as they are.)
+    const besideDoc: OpenDoc | null = isStudio && !hiddenSend && apiQuestion && !/chat\.classgrid\.in\/docs\//.test(apiQuestion) ? getOpenDoc() : null;
+    if (besideDoc) apiQuestion = `${apiQuestion}\n\n${docContextLine(besideDoc)}`;
+
     if (isDocsContextActive && pageContext?.path && filesToUpload.length === 0) {
       const docsUrl = `https://classgrid.in${pageContext.path}`;
       setLastSentDocsPath(pageContext.path);
@@ -4661,6 +4669,7 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
         attachments: allAttachments.length > 0 ? allAttachments : undefined,
         hidden: options?.hidden,
         codeNotes: sentCodeNotes.length > 0 ? sentCodeNotes.map(toChip) : undefined,
+        besideDoc: besideDoc || undefined,
       },
       {
         id: createMessageId("assistant"),
@@ -5847,6 +5856,16 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
                 }
               }
 
+              // Studio: the line that told the AI which doc was open comes off the shown message; the doc shows as a chip
+              if (message.role === "user" && !message.besideDoc) {
+                const split = splitDocContext(displayContent);
+                if (split.doc) {
+                  displayContent = split.text;
+                  message.content = split.text;
+                  message.besideDoc = split.doc;
+                }
+              }
+
               const isUser = message.role === "user";
 
               let showDateHeader = false;
@@ -5891,6 +5910,17 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
 
                       {/* Studio: the code comments and quotes sent with it, above the text (its time and buttons show under the text) */}
                       {isUser && message.codeNotes && message.codeNotes.length > 0 && <CodeNoteChips notes={message.codeNotes} />}
+                      {isUser && message.besideDoc && (
+                        <button
+                          type="button"
+                          onClick={() => openDocInStudio(message.besideDoc!.id)}
+                          title="Open this doc beside the chat"
+                          className="inline-flex max-w-full items-center gap-1.5 rounded-lg border border-border bg-background px-2 py-1 text-[12.5px] text-muted-foreground hover:text-foreground"
+                        >
+                          <FileText className="size-3.5 shrink-0" />
+                          <span className="truncate">{message.besideDoc.title}</span>
+                        </button>
+                      )}
 
                       {/* ── Text Bubble ── */}
                       {(message.content || (message.steps && message.steps.length > 0) || (message.thought && message.thought.trim().length > 0) || (message.attachments && message.attachments.length > 0) || (!isUser && index === messages.length - 1 && thinking)) && (
