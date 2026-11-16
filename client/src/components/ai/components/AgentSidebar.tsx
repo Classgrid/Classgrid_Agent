@@ -22,7 +22,7 @@
 import { MasteroMark } from "@/components/icons/MasteroMark";
 import React from "react";
 import { createPortal } from "react-dom";
-import { Archive, Plus, Search, Pin, PinOff, MoreHorizontal, Pencil, Trash2, Share, Copy, Mail, Check, Link2, X, SquarePen, Calendar, Library, FolderInput, FolderPlus, Folder, Star, ChevronDown, ListFilter, Laptop, Cloud, Phone } from "lucide-react";
+import { Archive, Plus, Search, Pin, PinOff, MoreHorizontal, Pencil, Trash2, Share, Copy, Mail, Check, Link2, X, SquarePen, Calendar, Library, FolderInput, FolderPlus, Folder, Star, ChevronDown, ListFilter, Laptop, Cloud, Phone, CodeXml } from "lucide-react";
 import { format } from "date-fns";
 import { NikhilDateCalendar } from "@/components/marketing_ui/nikhil_date_calendar";
 import { useNavigate, useLocation } from "react-router-dom";
@@ -614,6 +614,14 @@ export function AgentNestedMenu({ searchQuery = "", pages }: { searchQuery?: str
   const showCalls = showSchedule;
   // (they open inside the mode they are picked in: Studio's at /c/studio/schedule, Agent's at /agent/schedule)
   const toolsBase = DESKTOP_APP || isStudioMode ? baseAgentPath : baseAgentPath.replace("/project", "/agent");
+  // Project (owner, 2026-11-16): taken out of the mode menu at the top and put in Studio's sidebar under Calls, on the
+  // website and in the desktop app. Like the mode menu did, it keeps the open chat (Project and Studio share chats).
+  const showProject = isStudioMode && !IN_EDITOR;
+  const goToProjectMode = () => {
+    const studioChat = pathParts[pathParts.indexOf("studio") + 1] || "";
+    const chat = pathParts.includes("studio") && /^[0-9a-f-]{36}$/i.test(studioChat) ? `/${studioChat}` : "";
+    navigate(`${location.pathname.startsWith("/superadmin") ? "/superadmin/project" : "/c/project"}${chat}`);
+  };
 
   const handleNewChat = () => {
     navigate(baseAgentPath);
@@ -1481,6 +1489,21 @@ export function AgentNestedMenu({ searchQuery = "", pages }: { searchQuery?: str
             </SidebarMenuItem>
             )}
 
+            {showProject && (
+            <SidebarMenuItem>
+              <SidebarMenuButton
+                tooltip="Project"
+                onClick={goToProjectMode}
+                render={
+                  <div className="flex items-center gap-3 w-full cursor-pointer">
+                    <CodeXml size={20} />
+                    <span className="truncate font-medium">Project</span>
+                  </div>
+                }
+              />
+            </SidebarMenuItem>
+            )}
+
             {pages?.map((page) => (
               <SidebarMenuItem key={page.label}>
                 <SidebarMenuButton
@@ -1634,6 +1657,20 @@ export function AgentNestedMenu({ searchQuery = "", pages }: { searchQuery?: str
                   <div className="flex items-center gap-3 w-full cursor-pointer">
                     <Phone size={20} />
                     <span className="font-medium text-sm">Calls</span>
+                  </div>
+                }
+              />
+            </SidebarMenuItem>
+            )}
+
+            {showProject && (
+            <SidebarMenuItem>
+              <SidebarMenuButton
+                onClick={goToProjectMode}
+                render={
+                  <div className="flex items-center gap-3 w-full cursor-pointer">
+                    <CodeXml size={20} />
+                    <span className="font-medium text-sm">Project</span>
                   </div>
                 }
               />

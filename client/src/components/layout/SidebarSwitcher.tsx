@@ -91,7 +91,6 @@ export function SidebarSwitcher({ user }: { user: { role?: string; name?: string
   const { pathname } = useLocation();
   const isSuperAdminArea = pathname.startsWith("/superadmin");
   const agentPath = isSuperAdminArea ? "/superadmin/agent" : "/c/agent";
-  const projectPath = isSuperAdminArea ? "/superadmin/project" : "/c/project";
   const studioPath = isSuperAdminArea ? "/superadmin/studio" : "/c/studio";
   // (the desktop app has no Agent mode: only Project and Studio, and any other page counts as Studio)
   const DESKTOP = import.meta.env.VITE_DESKTOP === "1";
@@ -198,9 +197,9 @@ export function SidebarSwitcher({ user }: { user: { role?: string; name?: string
             <DropdownMenuLabel className="text-xs text-muted-foreground font-semibold uppercase tracking-wider py-2">
               Switch Mode
             </DropdownMenuLabel>
+            {/* (Project is not in this menu: it is in Studio's left sidebar, under Calls; owner, 2026-11-16) */}
             {[
               ...(DESKTOP ? [] : [{ key: "agent", label: "Agent", to: agentPath }]),
-              { key: "project", label: "Project", to: projectPath + openChat },
               { key: "studio", label: "Studio", to: studioPath + openChat },
             ].map((mode) => (
               <DropdownMenuItem
