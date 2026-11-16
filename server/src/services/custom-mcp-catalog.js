@@ -36,7 +36,7 @@ export const MCP_CATALOG = [
     { id: "calendly", name: "Calendly", description: "Meetings and booking links", url: "https://mcp.calendly.com", auth: "oauth", logo: si("calendly") },
     { id: "gitlab", name: "GitLab", description: "Projects, issues and merge requests", url: "https://gitlab.com/api/v4/mcp", auth: "oauth", logo: si("gitlab") },
     { id: "postman", name: "Postman", description: "APIs, collections and workspaces", url: "https://mcp.postman.com/mcp", auth: "oauth", logo: si("postman") },
-    { id: "razorpay", name: "Razorpay", description: "Payments, orders and refunds", url: "https://mcp.razorpay.com/mcp", auth: "oauth", logo: si("razorpay"), invertInDarkMode: true },
+    { id: "razorpay", name: "Razorpay", description: "Payments, orders and refunds", url: "https://mcp.razorpay.com/mcp", auth: "oauth", logo: si("razorpay/3395FF") },
     { id: "attio", name: "Attio", description: "CRM contacts, companies and deals", url: "https://mcp.attio.com/mcp", auth: "oauth", logo: fav("attio.com") },
     { id: "klaviyo", name: "Klaviyo", description: "Email and SMS marketing", url: "https://mcp.klaviyo.com/mcp", auth: "oauth", logo: fav("klaviyo.com") },
     { id: "semrush", name: "Semrush", description: "SEO, keywords and traffic", url: "https://mcp.semrush.com/v1/mcp", auth: "oauth", logo: si("semrush") },
