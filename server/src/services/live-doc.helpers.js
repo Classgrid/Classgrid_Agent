@@ -6,6 +6,11 @@ export const MAX_VERSION_BYTES = 8 * 1024 * 1024; // all kept versions together 
 export const MAX_TITLE = 200;
 export const MAX_COMMENT = 5000;
 export const MAX_QUOTE = 2000;
+export const MAX_MEMBERS = 100; // people one doc can be shared with by name
+export const MAX_REQUESTS = 100; // access requests one doc keeps waiting
+export const MAX_INVITES_AT_ONCE = 20;
+export const MAX_REPORT = 2000;
+export const REQUEST_EMAIL_EVERY_MS = 24 * 60 * 60 * 1000; // the owner gets one email a day from the same person
 export const DOC_BASE_URL = "https://chat.classgrid.in/docs";
 
 export const docLink = (id) => `${DOC_BASE_URL}/${id}`;
@@ -15,12 +20,83 @@ export const tooBig = (m) => Buffer.byteLength(String(m ?? ""), "utf8") > MAX_MA
 
 const idOf = (v) => (v && typeof v === "object" && v._id ? String(v._id) : v == null ? "" : String(v));
 
-// Who may do what. Every route needs a signed-in user; "link" docs can be seen by any signed-in user with the link.
-export const isOwner = (doc, userId) => !!doc && !!userId && idOf(doc.owner) === idOf(userId);
-export const canView = (doc, userId) => !!doc && (isOwner(doc, userId) || (doc.visibility === "link" && !!userId));
-export const canComment = canView;
-export const canEdit = isOwner;
-export const canResolve = (doc, comment, userId) => isOwner(doc, userId) || (!!comment && !!userId && idOf(comment.userId) === idOf(userId));
+// ── Who may do what ──
+// Every route needs a signed-in user. A doc is opened by its owner, by the people it was shared with by email
+// (members: viewer, commenter or editor) and, when its general access is "link", by any signed-in user with the
+// link (as the link's role: linkRole, "commenter" for the docs made before roles existed, which is what a link gave
+// then). The highest of a person's roles counts.
+//   viewer     reads, exports, makes a copy
+//   commenter  + comments and replies
+//   editor     + changes the text and the title, restores a version, resolves any comment, and shares the doc
+//                (adds people up to editor, changes their role, answers access requests, sets the link)
+//   owner      + deletes the doc, and can make another person its owner
+// `who` is a user id, or the signed-in user ({ _id, email }): a person invited by email before they had an account
+// is known by that email.
+export const ROLES = ["viewer", "commenter", "editor"];
+const RANK = { viewer: 1, commenter: 2, editor: 3, owner: 4 };
+export const cleanRole = (role, fallback = "viewer") => (ROLES.includes(role) ? role : fallback);
+export const normEmail = (email) => String(email ?? "").trim().toLowerCase();
+export const isEmail = (s) => typeof s === "string" && s.length <= 254 && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(s);
+
+// (an account's id is 24 hex characters: anything else, like an empty object, is nobody)
+const accountId = (v) => { const id = idOf(v); return /^[0-9a-f]{24}$/i.test(id) ? id.toLowerCase() : ""; };
+const whoOf = (who) => (who && typeof who === "object" && typeof who.email === "string"
+    ? { id: accountId(who._id), email: normEmail(who.email) }
+    : { id: accountId(who), email: "" });
+
+/** The member entry of this person (by id, or by the email they were invited with), or null. */
+export function memberOf(doc, who) {
+    const { id, email } = whoOf(who);
+    if (!doc || (!id && !email)) return null;
+    return (doc.members || []).find((m) => (id && accountId(m.userId) === id) || (email && normEmail(m.email) === email)) || null;
+}
+
+/** "owner", "editor", "commenter", "viewer", or null when this person can't open the doc. */
+export function roleOf(doc, who) {
+    const { id, email } = whoOf(who);
+    if (!doc || (!id && !email)) return null;
+    if (id && accountId(doc.owner) === id) return "owner";
+    const roles = [];
+    const member = memberOf(doc, who);
+    if (member) roles.push(cleanRole(member.role));
+    if (doc.visibility === "link") roles.push(cleanRole(doc.linkRole, "commenter"));
+    roles.sort((a, b) => RANK[b] - RANK[a]);
+    return roles[0] || null;
+}
+const atLeast = (doc, who, role) => (RANK[roleOf(doc, who)] || 0) >= RANK[role];
+export const isOwner = (doc, who) => roleOf(doc, who) === "owner";
+export const canView = (doc, who) => atLeast(doc, who, "viewer");
+export const canComment = (doc, who) => atLeast(doc, who, "commenter");
+export const canEdit = (doc, who) => atLeast(doc, who, "editor");
+export const canShare = canEdit;
+export const canManage = isOwner;
+export const canResolve = (doc, comment, who) =>
+    canEdit(doc, who) || (canComment(doc, who) && !!comment && !!whoOf(who).id && accountId(comment.userId) === whoOf(who).id);
+
+/** Whether `role` (or null: no access) already gives what `wanted` gives. */
+export const roleCovers = (role, wanted) => (RANK[role] || 0) >= (RANK[cleanRole(wanted)] || 1);
+
+/** What a role lets a person do, in words for an email or a message. */
+export const roleWords = (role) => (role === "editor" ? "read, comment and edit" : role === "commenter" ? "read and comment" : "read");
+
+/** The request this person has waiting on the doc, or null. */
+export function requestOf(doc, who) {
+    const { id, email } = whoOf(who);
+    if (!doc || (!id && !email)) return null;
+    return (doc.requests || []).find((r) => (id && accountId(r.userId) === id) || (email && normEmail(r.email) === email)) || null;
+}
+
+/**
+ * Emails typed into "Add people" (a list, or one text with commas, spaces or new lines between them): cleaned,
+ * each once, split into the ones that are emails and the ones that are not.
+ */
+export function splitEmails(input) {
+    const parts = (Array.isArray(input) ? input : [input]).flatMap((x) => String(x ?? "").split(/[\s,;]+/)).map(normEmail).filter(Boolean);
+    const good = [];
+    const bad = [];
+    for (const part of [...new Set(parts)]) (isEmail(part) ? good : bad).push(part);
+    return { good, bad };
+}
 
 // Applies exact-match edits. Each old_text must be found exactly once; if any edit fails nothing changes.
 export function applyDocEdits(markdown, edits) {
@@ -76,26 +152,77 @@ export function commentsForAI(comments) {
     return lines.join("\n");
 }
 
-// What the client gets for a doc (versions without their text)
-export function docForClient(doc, userId) {
+// What the client gets for a doc (versions without their text). `who` is the signed-in user (or their id).
+// `profiles` gives people's current name and photo: { byId: { <userId>: { name, photo } }, byEmail: { <email>: ... } }
+// (the service fills it; without it the names saved on the doc are used and there are no photos).
+// Only the people who can share the doc (its owner and its editors) get the list of people it is shared with and
+// the access requests.
+export function docForClient(doc, who, profiles = {}) {
+    const role = roleOf(doc, who);
+    const owner = role === "owner";
+    const me = whoOf(who);
+    const byId = profiles.byId || {};
+    const byEmail = profiles.byEmail || {};
+    const person = (userId, email) => byId[idOf(userId)] || byEmail[normEmail(email)] || null;
+    const ownerProfile = person(doc.owner);
     return {
         id: String(doc._id),
         title: doc.title,
         markdown: doc.markdown,
         visibility: doc.visibility,
+        linkRole: cleanRole(doc.linkRole, "commenter"),
         rev: doc.rev || 0,
         lastBy: doc.lastBy || "user",
-        isOwner: isOwner(doc, userId),
-        ownerName: doc.ownerName || "",
+        isOwner: owner,
+        role,
+        can: { comment: canComment(doc, who), edit: canEdit(doc, who), share: canShare(doc, who), manage: owner },
+        ownerName: ownerProfile?.name || doc.ownerName || "",
+        ownerPhoto: ownerProfile?.photo || "",
+        views: doc.views || 0,
+        pinned: !!me.id && (doc.pinnedBy || []).some((id) => accountId(id) === me.id),
+        // What this person asked the owner for and is still waiting on ("editor": they asked to edit), or null
+        asked: owner ? null : (requestOf(doc, who) ? cleanRole(requestOf(doc, who).wants) : null),
         comments: (doc.comments || []).map((c) => ({
-            id: c.id, userId: idOf(c.userId), name: c.name, text: c.text, quote: c.quote, at: c.at, resolved: !!c.resolved,
-            replies: (c.replies || []).map((r) => ({ name: r.name, text: r.text, at: r.at, byAI: !!r.byAI })),
+            id: c.id, userId: idOf(c.userId), name: c.name, photo: person(c.userId)?.photo || "", text: c.text, quote: c.quote, at: c.at, resolved: !!c.resolved,
+            replies: (c.replies || []).map((r) => ({ name: r.name, photo: r.byAI ? "" : person(r.userId)?.photo || "", text: r.text, at: r.at, byAI: !!r.byAI })),
         })),
         versions: (doc.versions || []).map((v) => ({ id: idOf(v._id), at: v.at, by: v.by })).reverse(),
+        ...(canShare(doc, who) ? {
+            people: (doc.members || []).map((m) => {
+                const p = person(m.userId, m.email);
+                return { id: m.id, email: normEmail(m.email), name: p?.name || m.name || "", photo: p?.photo || "", role: cleanRole(m.role), joined: !!p, me: !!memberOf({ members: [m] }, who), addedAt: m.addedAt };
+            }),
+            requests: (doc.requests || []).map((r) => {
+                const p = person(r.userId, r.email);
+                return { id: r.id, email: normEmail(r.email), name: p?.name || r.name || "", photo: p?.photo || "", wants: cleanRole(r.wants), has: roleOf(doc, { _id: r.userId, email: r.email }), at: r.at };
+            }),
+        } : {}),
         createdAt: doc.createdAt,
         updatedAt: doc.updatedAt,
     };
 }
+
+/** A doc's row in a list (no text). */
+export function docRow(doc, who, profiles = {}) {
+    const me = whoOf(who);
+    const ownerProfile = (profiles.byId || {})[idOf(doc.owner)];
+    return {
+        id: String(doc._id),
+        title: doc.title,
+        visibility: doc.visibility,
+        role: roleOf(doc, who),
+        shared: (doc.members || []).length > 0 || doc.visibility === "link",
+        ownerName: ownerProfile?.name || doc.ownerName || "",
+        ownerPhoto: ownerProfile?.photo || "",
+        pinned: !!me.id && (doc.pinnedBy || []).some((id) => accountId(id) === me.id),
+        lastBy: doc.lastBy || "user",
+        createdAt: doc.createdAt,
+        updatedAt: doc.updatedAt,
+    };
+}
+
+/** "Plan" -> "Copy of Plan" (inside the title's length). */
+export const copyTitle = (title) => cleanTitle(`Copy of ${cleanTitle(title)}`);
 
 // "Monthly plan" -> "Monthly-plan" for file names
 export const fileBase = (title) => String(title || "").replace(/[^\p{L}\p{N} _-]+/gu, " ").trim().replace(/\s+/g, "-").slice(0, 80) || "document";

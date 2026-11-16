@@ -69,6 +69,14 @@ export async function setResolved(doc, commentId, resolved = true) {
     return comment;
 }
 
+/** Removes a comment with its replies. */
+export async function removeComment(doc, commentId) {
+    const before = doc.comments.length;
+    doc.comments = doc.comments.filter((c) => c.id !== String(commentId));
+    if (doc.comments.length === before) throw new Error("That comment was not found.");
+    await doc.save();
+}
+
 // A first "# Title" line already shows the title, so it isn't added twice
 const startsWithTitle = (md) => /^\s*#\s+\S/.test(String(md || ""));
 
@@ -84,8 +92,9 @@ export async function exportDocx(doc) {
 
 const escapeHtml = (s) => String(s || "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 
-// Markdown -> clean HTML page (scripts and odd tags removed) for the PDF
-export async function docHtml(doc) {
+// Markdown -> clean HTML page (scripts and odd tags removed) for the PDF. With `screen` it is a page to read in a
+// browser (the downloaded web page): the text in a column with room around it.
+export async function docHtml(doc, { screen = false } = {}) {
     const { marked } = await import("marked");
     const sanitizeHtml = (await import("sanitize-html")).default;
     const body = sanitizeHtml(marked.parse(doc.markdown || "", { gfm: true }), {
@@ -95,8 +104,8 @@ export async function docHtml(doc) {
         allowedSchemesByTag: { img: ["https", "data"] },
     });
     const title = startsWithTitle(doc.markdown) ? "" : `<h1>${escapeHtml(doc.title)}</h1>`;
-    return `<!DOCTYPE html><html><head><meta charset="utf-8"><title>${escapeHtml(doc.title)}</title><style>
-body { font-family: Arial, 'Noto Sans Devanagari', 'Noto Color Emoji', sans-serif; color: #1f2328; font-size: 12pt; line-height: 1.55; margin: 0; }
+    return `<!DOCTYPE html><html><head><meta charset="utf-8">${screen ? '<meta name="viewport" content="width=device-width, initial-scale=1">' : ""}<title>${escapeHtml(doc.title)}</title><style>
+body { font-family: Arial, 'Noto Sans Devanagari', 'Noto Color Emoji', sans-serif; color: #1f2328; font-size: 12pt; line-height: 1.55; margin: ${screen ? "0 auto; max-width: 820px; padding: 40px 24px 80px" : "0"}; }
 h1, h2, h3, h4 { color: #111; line-height: 1.25; margin: 1.2em 0 0.5em; }
 h1 { font-size: 22pt; } h2 { font-size: 17pt; } h3 { font-size: 14pt; }
 p, ul, ol, table, pre, blockquote { margin: 0 0 0.8em; }
@@ -110,6 +119,17 @@ blockquote { border-left: 3px solid #d0d7de; padding-left: 12px; color: #555; }
 img { max-width: 100%; }
 a { color: #0969da; }
 </style></head><body>${title}${body}</body></html>`;
+}
+
+// The doc's own text, as a .md file
+export async function exportMarkdown(doc) {
+    const text = startsWithTitle(doc.markdown) ? doc.markdown || "" : `# ${doc.title}\n\n${doc.markdown || ""}`;
+    return { buffer: Buffer.from(text, "utf8"), fileName: `${fileBase(doc.title)}.md`, mime: "text/markdown; charset=utf-8" };
+}
+
+// One web page that opens by itself in any browser
+export async function exportHtml(doc) {
+    return { buffer: Buffer.from(await docHtml(doc, { screen: true }), "utf8"), fileName: `${fileBase(doc.title)}.html`, mime: "text/html; charset=utf-8" };
 }
 
 export async function exportPdf(doc) {

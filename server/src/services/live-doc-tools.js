@@ -1,6 +1,6 @@
 // AI tools for live docs: create_doc, read_doc, edit_doc, doc_comments (group "live_docs" in ai-tool-groups.js)
 import { findDoc, createDoc, saveDoc, addReply, setResolved } from "./live-doc.service.js";
-import { applyDocEdits, canView, canEdit, isOwner, docLink, numberLines, commentsForAI } from "./live-doc.helpers.js";
+import { applyDocEdits, canView, canEdit, canComment, canResolve, roleOf, roleWords, docLink, numberLines, commentsForAI } from "./live-doc.helpers.js";
 
 const fn = (name, description, properties, required) => ({ type: "function", function: { name, description, parameters: { type: "object", properties, required } } });
 
@@ -49,7 +49,8 @@ export const LIVE_DOC_PROMPT = `\n\nLIVE DOCS:
 2. To change a doc, read it with read_doc first, then use edit_doc with small exact edits (old_text copied without line numbers). Keep the markdown clean: headings, short paragraphs, lists and tables.
 3. When the user asks about comments, read them with read_doc, make the asked changes, then answer each one with doc_comments (reply) and resolve the ones that are done.`;
 
-const ownerOnly = "Only the owner of this doc can change it.";
+const cantEdit = "The user can read this doc but not change it (only its owner and the people it was shared with as editors can).";
+const cantComment = "The user can read this doc but not comment on it.";
 const notFound = "Error: this doc was not found, or the user can't open it.";
 
 // Handlers for the chat's tool loop. user = req.user of the chat.
@@ -57,7 +58,7 @@ export function buildLiveDocHandlers({ user }) {
     const uid = user?._id;
     const open = async (id) => {
         const doc = await findDoc(String(id || "").trim().replace(/^.*\/docs\//, "").replace(/[/?#].*$/, ""));
-        return doc && canView(doc, uid) ? doc : null;
+        return doc && canView(doc, user) ? doc : null;
     };
     return {
         create_doc: async (args) => {
@@ -78,7 +79,7 @@ export function buildLiveDocHandlers({ user }) {
                 const LIMIT = 120000;
                 if (text.length > LIMIT) text = `${text.slice(0, LIMIT)}\n... (cut here: read more with start_line/end_line)`;
                 return [
-                    `Doc "${doc.title}" (doc_id ${doc._id}), ${isOwner(doc, uid) ? "owned by the user" : "shared with the user (read and comment only)"}. Link: ${docLink(doc._id)}`,
+                    `Doc "${doc.title}" (doc_id ${doc._id}), ${roleOf(doc, user) === "owner" ? "owned by the user" : `shared with the user (they can ${roleWords(roleOf(doc, user))} it)`}. Link: ${docLink(doc._id)}`,
                     `Lines ${lines.start}-${lines.end} of ${lines.total}:`,
                     text,
                     "",
@@ -92,7 +93,7 @@ export function buildLiveDocHandlers({ user }) {
             try {
                 const doc = await open(args?.doc_id);
                 if (!doc) return notFound;
-                if (!canEdit(doc, uid)) return `Error: ${ownerOnly}`;
+                if (!canEdit(doc, user)) return `Error: ${cantEdit}`;
                 let markdown;
                 let what;
                 let edits = args?.edits;
@@ -121,11 +122,12 @@ export function buildLiveDocHandlers({ user }) {
                 const comment = doc.comments.find((c) => c.id === String(args?.comment_id || "").trim());
                 if (!comment) return "Error: that comment_id was not found. Read the doc with read_doc to see the comments.";
                 if (args?.action === "reply") {
+                    if (!canComment(doc, user)) return `Error: ${cantComment}`;
                     await addReply(doc, comment.id, { user, text: args?.text, byAI: true });
                     return `Replied to the comment on "${doc.title}".`;
                 }
                 if (args?.action === "resolve") {
-                    if (!isOwner(doc, uid)) return `Error: ${ownerOnly}`;
+                    if (!canResolve(doc, comment, user)) return "Error: only an editor of this doc or the person who wrote the comment can resolve it.";
                     await setResolved(doc, comment.id, true);
                     return `Resolved the comment on "${doc.title}".`;
                 }

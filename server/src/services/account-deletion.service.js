@@ -9,6 +9,7 @@
 //   - skills (the AI's memory of them), schedules, agent tasks, calls, chat folders, custom plugins, live docs,
 //     published pages, sign-ins they gave other apps, push and in-app notifications, profile, onboarding,
 //     usage logs, email jobs, the plan counters kept in Redis
+//   - their place in other people's live docs (shared with them, or asked for), and their pins
 // Kept on purpose: payments, invoices, credit and platform transactions (the business must keep them by law).
 //
 // Each part is tried on its own; one that fails is logged and the rest still run, so a storage hiccup never leaves
@@ -173,6 +174,17 @@ export async function deleteAccountData(user, { io = null } = {}) {
     for (const [name, Model, filter] of byUser) {
         await step(name, async () => (await Model.deleteMany(filter)).deletedCount || 0);
     }
+
+    // Other people's live docs this person was let into, or asked to be let into: their place and their requests go
+    await step("docAccess", async () => {
+        const mine = { $or: [{ userId: user._id }, ...(emails.length ? [{ email: { $in: emails.map((e) => e.toLowerCase()) } }] : [])] };
+        const r = await LiveDoc.updateMany(
+            { $or: [{ "members.userId": user._id }, { "requests.userId": user._id }, { pinnedBy: user._id }, ...(emails.length ? [{ "members.email": { $in: emails.map((e) => e.toLowerCase()) } }] : [])] },
+            { $pull: { members: mine, requests: mine, pinnedBy: user._id } },
+            { timestamps: false },
+        );
+        return r.modifiedCount || 0;
+    });
 
     await step("phoneTokens", async () => {
         const { error } = await sb.from("device_tokens").delete().eq("user_id", userId);
