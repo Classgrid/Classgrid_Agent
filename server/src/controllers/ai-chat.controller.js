@@ -6656,6 +6656,36 @@ If a tool fails, never show the error message; say only: "Something went wrong o
             const provider = conversation.some((m) => m?.role === "system" || Array.isArray(m?.tool_calls) || m?.role === "tool") ? "cf" : "claude";
             await saveTurnState(durableTurn.id, { userId: String(userId), sessionId: String(sessionId), provider, conversation, usage, steps: accSteps, thought: accThought, at: Date.now() });
         } : null;
+        // The user pressed Stop: what the answer really used up to then is charged, like a finished answer (owner,
+        // 2026-11-17: a stopped answer on a non-Claude model was not charged at all, so with a message allowed to
+        // start whenever anything is left, Send and Stop could be repeated with the bar never moving). Real numbers
+        // only: the answering call (usageStore.usage), the attempts that failed before it, and the usage that came
+        // with the stop (`stoppedUsage` of `stoppedModel`). Nothing is guessed: a stop before the provider reported
+        // any usage charges nothing. Claude's own stop is charged by chargeDetachedClaudeUsage.
+        let stoppedCharged = false;
+        const chargeStoppedAnswer = async (stoppedUsage = null, stoppedModel = usedModel) => {
+            if (stoppedCharged || !userId) return;
+            stoppedCharged = true;
+            const parts = [
+                ...(usageStore.usage?.total_tokens > 0 ? [{ usage: usageStore.usage, model: usedModel }] : []),
+                ...usageStore.failedAttempts,
+                ...(stoppedUsage?.total_tokens > 0 ? [{ usage: stoppedUsage, model: stoppedModel }] : []),
+            ];
+            for (const { usage: u, model: m } of parts) {
+                const cost = chargeableTokens(u, m);
+                if (!(cost > 0)) continue;
+                try {
+                    if (claudePooled(m)) {
+                        await User.updateOne({ _id: userId }, { $inc: { "ai_tokens.claude_week_used": cost, ...(/claude-fable/.test(m) ? { "ai_tokens.fable_week_used": cost } : {}) } });
+                    } else {
+                        await deductTokens(userId, orgId, cost, tokenSource);
+                    }
+                    console.log(`[AI-TOKEN] Stopped answer charged: ${cost} (${m}, real tokens ${u.total_tokens})`);
+                } catch (err) {
+                    console.error("[AI-TOKEN] Charging a stopped answer failed:", err?.message || err);
+                }
+            }
+        };
         let unfinishedKept = false;
         const keepUnfinishedAnswer = (note) => {
             if (unfinishedKept || isIncognito || !sessionId) return;
@@ -6908,7 +6938,10 @@ If a tool fails, never show the error message; say only: "Something went wrong o
                             console.log(`[AI-STREAM] ${model} streamed answer in ${((Date.now() - generateStartTime) / 1000).toFixed(1)}s, toolsRun=${streamed.toolsRun}, input=${streamed.usage.prompt_tokens}, cacheRead=${streamed.usage.cached_tokens || 0}`);
                             break;
                         } catch (streamErr) {
-                            if (requestAborted) return keepUnfinishedAnswer(STOPPED_NOTE);
+                            if (requestAborted) {
+                                await chargeStoppedAnswer(streamErr.usage, model);
+                                return keepUnfinishedAnswer(STOPPED_NOTE);
+                            }
                             // Not retried when a tool already ran (it could repeat side effects) or answer text was
                             // already shown (the retry would add a second answer below it).
                             if (streamErr.toolsRun > 0 || shownAnswerText) {
@@ -6946,7 +6979,10 @@ If a tool fails, never show the error message; say only: "Something went wrong o
                 console.log(`[AI-DEBUG] accSteps tools called: ${accSteps.map(s => s.tool).join(', ') || 'NONE'}`);                
 
 
-                if (requestAborted) return keepUnfinishedAnswer(STOPPED_NOTE);
+                if (requestAborted) {
+                    await chargeStoppedAnswer();
+                    return keepUnfinishedAnswer(STOPPED_NOTE);
+                }
 
                 // The model wrote its answer before a step and then ended without more text: what it wrote (already
                 // on the user's screen) is the answer, not a failure (it used to be retried and marked as cut off)
@@ -6987,7 +7023,10 @@ If a tool fails, never show the error message; say only: "Something went wrong o
             }
         }
 
-        if (requestAborted) return keepUnfinishedAnswer(STOPPED_NOTE);
+        if (requestAborted) {
+            await chargeStoppedAnswer();
+            return keepUnfinishedAnswer(STOPPED_NOTE);
+        }
 
         // Remember this turn's tool groups (matched, loaded, or used) so follow-ups in the same chat keep them.
         if (sessionId && !isIncognito) {
@@ -7233,10 +7272,20 @@ If a tool fails, never show the error message; say only: "Something went wrong o
             // Everything is used up (free limit, granted and top-up credits): the chat shows the limit card under the
             // answer, with the reset time and the top-up button
             if (limitEnded) {
-                // (which limit ran out, the session window or the week, decides the time the card shows: asked
-                // again now that this answer is charged)
-                const now = await hasEnoughTokens(userId, orgId, 1).catch(() => null);
-                const blocked = await quotaBlocked({ reason: "Insufficient tokens.", resetAt: now && !now.allowed ? now.resetAt : undefined }).catch(() => null);
+                // (which limit ran out decides the time the card shows. A Claude answer on a plan with Claude stops
+                // when the week's Claude credits are used up: they come back at the end of the Claude week. Any other
+                // answer: the session window or the week, asked again now that this answer is charged.)
+                let resetAt;
+                if (claudePooled(usedModel)) {
+                    const fresh = await User.findById(userId).select("ai_tokens").lean().catch(() => null);
+                    const { weekCounters } = await import("../services/ai-credits.service.js");
+                    const counters = await weekCounters(userId, fresh?.ai_tokens).catch(() => null);
+                    if (counters?.weekEnd) resetAt = new Date(counters.weekEnd).toISOString();
+                } else {
+                    const now = await hasEnoughTokens(userId, orgId, 1).catch(() => null);
+                    if (now && !now.allowed) resetAt = now.resetAt;
+                }
+                const blocked = await quotaBlocked({ reason: "Insufficient tokens.", resetAt }).catch(() => null);
                 res.write(`data: ${JSON.stringify({ type: "limit_ended", resetDate: blocked?.resetDate || null })}\n\n`);
             }
         }

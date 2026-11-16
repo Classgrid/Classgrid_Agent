@@ -287,7 +287,16 @@ async function streamOneRound({ provider, messages, tools, temperature, maxToken
                 reader.cancel().catch(() => {});
                 break;
             }
-            const { done, value } = await reader.read();
+            let piece;
+            try {
+                piece = await reader.read();
+            } catch (e) {
+                // Stopped or broken mid-round (the user pressed Stop): the real usage Cloudflare sent so far goes with
+                // the error, so what was used is charged (it sends the running count on every chunk)
+                if (e && typeof e === "object" && usage) e.partialUsage = usage;
+                throw e;
+            }
+            const { done, value } = piece;
             if (done) break;
             buffer += decoder.decode(value, { stream: true });
             const lines = buffer.split("\n");
@@ -728,7 +737,15 @@ export async function streamChat({
     } catch (err) {
         const wrapped = err instanceof StreamChatError ? err : new StreamChatError(err?.message || String(err));
         wrapped.toolsRun = toolsRun;
-        wrapped.usage = usage;
+        // (the finished rounds, plus what the round in progress had really used when it stopped)
+        const part = err?.partialUsage;
+        wrapped.usage = part?.total_tokens > 0 ? {
+            ...usage,
+            prompt_tokens: usage.prompt_tokens + (part.prompt_tokens || 0),
+            completion_tokens: usage.completion_tokens + (part.completion_tokens || 0),
+            total_tokens: usage.total_tokens + (part.total_tokens || 0),
+            cached_tokens: usage.cached_tokens + (part.prompt_tokens_details?.cached_tokens || part.cached_tokens || 0),
+        } : usage;
         throw wrapped;
     }
 }
