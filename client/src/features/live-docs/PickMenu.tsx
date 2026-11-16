@@ -3,6 +3,7 @@
 import { Menu } from "@base-ui/react/menu";
 import { Check, ChevronDown } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { boxLine, menuCard, menuSep } from "./docLook";
 
 export type PickChoice<T extends string> = {
   value: T;
@@ -33,8 +34,8 @@ export function PickMenu<T extends string>({ label, value, shown, choices, onPic
         aria-label={label}
         disabled={disabled}
         className={cn(
-          "inline-flex h-8 max-w-full shrink-0 items-center gap-1 rounded-lg text-[13px] font-medium text-foreground outline-none transition-colors focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-default disabled:opacity-60",
-          quiet ? "-ml-1.5 px-1.5 hover:bg-accent data-[popup-open]:bg-accent" : "bg-black/[0.05] pl-2.5 pr-2 hover:bg-black/[0.09] data-[popup-open]:bg-black/[0.09] dark:bg-white/[0.09] dark:hover:bg-white/[0.14] dark:data-[popup-open]:bg-white/[0.14]",
+          "inline-flex h-8 max-w-full shrink-0 cursor-pointer items-center gap-1 rounded-md text-[13px] font-medium text-foreground outline-none transition-colors hover:bg-black/[0.04] focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-default disabled:opacity-60 data-[popup-open]:bg-black/[0.04] dark:hover:bg-white/[0.05] dark:data-[popup-open]:bg-white/[0.05]",
+          quiet ? "-ml-2 px-2" : cn("border pl-2.5 pr-2", boxLine),
         )}
       >
         <span className="[overflow-wrap:anywhere]">{shown ?? picked?.name ?? ""}</span>
@@ -42,20 +43,20 @@ export function PickMenu<T extends string>({ label, value, shown, choices, onPic
       </Menu.Trigger>
       <Menu.Portal>
         <Menu.Positioner align={align} side="bottom" sideOffset={6} className="isolate z-[10010] outline-none">
-          <Menu.Popup className="w-[min(300px,calc(100vw-24px))] origin-(--transform-origin) rounded-2xl bg-popover p-1.5 text-popover-foreground shadow-xl ring-1 ring-foreground/10 outline-none">
+          <Menu.Popup className={cn("w-[min(280px,calc(100vw-24px))] origin-(--transform-origin) outline-none", menuCard)}>
             {choices.map((choice) => (
               <div key={choice.value}>
-                {choice.danger && <div className="mx-2 my-1.5 h-px bg-border" />}
+                {choice.danger && <div className={cn("-mx-2 h-px", menuSep)} />}
                 <Menu.Item
                   onClick={() => onPick(choice.value)}
                   className={cn(
-                    "flex cursor-pointer items-start gap-3 rounded-xl px-2.5 py-2 text-left outline-none select-none data-[highlighted]:bg-accent",
-                    choice.danger && "text-red-600 dark:text-red-400",
+                    "flex cursor-pointer items-start gap-3 rounded-xl px-3 py-2 text-left outline-none select-none transition-colors data-[highlighted]:bg-slate-100 dark:data-[highlighted]:bg-[#343541]",
+                    choice.danger && "text-[#ef4444] data-[highlighted]:bg-red-50 dark:data-[highlighted]:bg-red-500/10",
                   )}
                 >
                   <span className="min-w-0 flex-1">
-                    <span className="block text-[14px] font-medium leading-5">{choice.name}</span>
-                    {choice.about && <span className="mt-0.5 block text-[12.5px] leading-[17px] text-muted-foreground">{choice.about}</span>}
+                    <span className="block text-[14px] leading-5">{choice.name}</span>
+                    {choice.about && <span className="mt-0.5 block text-[12.5px] leading-[17px] text-slate-500 dark:text-white/60">{choice.about}</span>}
                   </span>
                   {choice.value === value && <Check aria-hidden className="mt-0.5 size-4 shrink-0" />}
                 </Menu.Item>

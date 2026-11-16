@@ -8,17 +8,19 @@
 // comment box right there. Each open comment is pinned in the doc with its writer's photo. A comment, a reply and a
 // resolve show at once and are saved behind (no spinner; owner: "like Grids"); if saving fails they are taken back.
 // Messages show in a small bar at the bottom of the doc itself (the desktop app has no toasts).
+// The top bar is the one the owner showed (2026-11-16): Home, the doc's name with its menu, who is here now, the
+// comment button, Chat and Share. Its buttons, its menus and its boxes are the chat's own (docLook.ts).
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type MouseEvent as ReactMouseEvent } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import "katex/dist/katex.min.css";
 import { formatDistanceToNow, format } from "date-fns";
 import {
-  ArrowLeft, ArrowUp, Check, ChevronDown, Copy, Download, Edit3, Flag, History, ListFilter, MessageCircle, MoreHorizontal, Pencil, Pin, PinOff, RefreshCw, RotateCcw, Share2, Trash2, X,
+  ArrowUp, Check, ChevronDown, Copy, Download, Edit3, FileCode2, FileText, FileType2, Flag, Globe2, History, Home, ListFilter, Maximize2, MessageCircle, MoreHorizontal, Pencil, Pin, RefreshCw, RotateCcw, Share, Trash2, X,
 } from "lucide-react";
 import { Button } from "@/components/marketing_ui/button";
 import { Spinner } from "@/components/marketing_ui/spinner";
 import {
-  DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger,
+  DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuSub, DropdownMenuSubContent, DropdownMenuSubTrigger, DropdownMenuTrigger,
 } from "@/components/marketing_ui/dropdown-menu";
 import { useCurrentUser } from "@/features/auth/queries/useCurrentUser";
 import { cn } from "@/lib/utils";
@@ -26,41 +28,28 @@ import * as api from "./liveDocsApi";
 import type { DocReader, LiveDoc, LiveDocComment } from "./liveDocsApi";
 import { PersonPhoto, ReadersRow } from "./DocPeople";
 import { ShareDialog, type ShareTab } from "./ShareDialog";
-import { DeleteDocDialog, PrivateDoc, ReportDocDialog } from "./DocDialogs";
+import { DeleteDocDialog, PrivateDoc, RenameDocDialog, ReportDocDialog } from "./DocDialogs";
+import { shareCalls, type ExportChoice } from "./shareApi";
+import { barButton, barIcon, menuCard, menuDanger, menuIcon, menuItem, menuNote, menuSep } from "./docLook";
 import { commentAsk, openDocInStudio, setOpenDoc, studioDocPath } from "./docContext";
 import { MARK, MARK_ACTIVE, MARK_STYLE, blockAt, quoteRange, tint } from "./docMarks";
 import { DocMarkdown, NoteText } from "./DocText";
 import { DocEditor } from "./DocEditor";
-import RichChatInput from "@/components/ai/components/RichChatInput";
+import { CommentBox, CommentsPanel, NoticeBar, isNew, type CommentFilter, type Composer } from "./DocComments";
 import { ClassgridLogoIcon } from "@/components/layout/ClassgridLogoIcon";
 
 const POLL_MS = 10000;
 const ago = (d: string) => { try { return formatDistanceToNow(new Date(d), { addSuffix: true }); } catch { return ""; } };
-const shortAgo = (d: string) => {
-  const s = Math.max(0, Math.round((Date.now() - new Date(d).getTime()) / 1000));
-  if (!Number.isFinite(s) || s < 45) return "now";
-  if (s < 3600) return `${Math.round(s / 60)}m`;
-  if (s < 86400) return `${Math.round(s / 3600)}h`;
-  return `${Math.round(s / 86400)}d`;
-};
-/** The words a comment is on, for a small line: all of them when short, else up to a whole word (never dots). */
-const shortQuote = (quote: string) => {
-  const text = quote.replace(/\s+/g, " ").trim();
-  if (text.length <= 160) return text;
-  const head = text.slice(0, 160);
-  return head.slice(0, Math.max(head.lastIndexOf(" "), 80));
-};
-// (a comment shown before the server has saved it)
-const isNew = (id: string) => id.startsWith("new-");
-
 
 type Notice = { text: string; bad: boolean; n: number };
-type CommentFilter = "open" | "resolved" | "all";
-type Composer = { quote: string; text: string; top: number; left: number; toAI: boolean };
 type PinMark = { id: string; top: number; left: number; name: string; photo: string };
-const headerButton = "inline-flex h-9 shrink-0 items-center justify-center gap-1.5 rounded-lg px-2.5 text-[13.5px] font-medium text-foreground transition-colors hover:bg-accent disabled:opacity-60";
-// (a filled header button: Chat, Share, Ask to edit)
-const pill = "bg-black/[0.05] hover:bg-black/[0.09] dark:bg-white/[0.09] dark:hover:bg-white/[0.14]";
+// (the sharing calls of /api/docs, for the Share box)
+const DOC_SHARE = shareCalls<LiveDoc>("doc", "/api/docs", "doc", "docs");
+const EXPORT_ICONS = { docx: FileText, pdf: FileType2, md: FileCode2, html: Globe2 };
+// (the comment button while comments are on)
+const COMMENTS_ON = "bg-sky-500/15 text-sky-600 hover:bg-sky-500/20 hover:text-sky-600 dark:text-sky-400 dark:hover:bg-sky-500/20 dark:hover:text-sky-400";
+// (the desktop app has no page of its own for a doc: there a doc is always beside the chat)
+const ON_WEBSITE = import.meta.env.VITE_DESKTOP !== "1";
 const BOX_WIDTH = 340;
 
 export function LiveDocView({ id, inStudio = false, front = true, onGone, onTitle }: {
@@ -85,7 +74,7 @@ export function LiveDocView({ id, inStudio = false, front = true, onGone, onTitl
   const [saving, setSaving] = useState(false);
   const [aiNote, setAiNote] = useState(""); // "Updated by the AI"
   const [changedWhileEditing, setChangedWhileEditing] = useState(false);
-  const [titleEdit, setTitleEdit] = useState<string | null>(null);
+  const [renaming, setRenaming] = useState(false);
   const [oldVersion, setOldVersion] = useState<{ id: string; at: string; by: string; markdown: string } | null>(null);
   const [commentsOn, setCommentsOn] = useState(false);
   const [filter, setFilter] = useState<CommentFilter>("open");
@@ -102,7 +91,6 @@ export function LiveDocView({ id, inStudio = false, front = true, onGone, onTitl
   const pageRef = useRef<HTMLDivElement>(null);
   const articleRef = useRef<HTMLDivElement>(null);
   const composerRef = useRef<HTMLDivElement>(null);
-  const composerFocused = useRef(false);
   const docRef = useRef<LiveDoc | null>(null);
   const editingRef = useRef(false);
   const noticeCount = useRef(0);
@@ -252,11 +240,9 @@ export function LiveDocView({ id, inStudio = false, front = true, onGone, onTitl
     } finally { setSaving(false); }
   };
 
-  const saveTitle = async () => {
-    if (!doc || titleEdit === null) return;
-    const t = titleEdit.trim();
-    setTitleEdit(null);
-    if (!t || t === doc.title) return;
+  // (the new name shows at once and is saved behind it)
+  const saveTitle = async (t: string) => {
+    if (!doc || !t || t === doc.title) return;
     const before = doc.title;
     setDoc((d) => (d ? { ...d, title: t } : d));
     if (!inStudio) document.title = `${t} · Classgrid`;
@@ -364,7 +350,7 @@ export function LiveDocView({ id, inStudio = false, front = true, onGone, onTitl
 
   // The comment box closes with Escape, or a click outside it
   useEffect(() => {
-    if (!composer) { composerFocused.current = false; return; }
+    if (!composer) return;
     const outside = (e: MouseEvent) => { if (!composerRef.current?.contains(e.target as Node)) setComposer(null); };
     document.addEventListener("mousedown", outside);
     return () => document.removeEventListener("mousedown", outside);
@@ -409,7 +395,7 @@ export function LiveDocView({ id, inStudio = false, front = true, onGone, onTitl
     setTimeout(() => document.getElementById(`doc-comment-${commentId}`)?.scrollIntoView({ block: "nearest", behavior: "smooth" }), 60);
   };
 
-  if (locked) return <PrivateDoc docId={id} asked={locked.asked} email={me?.email} compact={inStudio} />;
+  if (locked) return <PrivateDoc asked={locked.asked} email={me?.email} compact={inStudio} ask={() => api.requestAccess(id)} />;
   if (error) {
     return (
       <div className={cn("flex flex-col items-center justify-center gap-4 bg-background px-4 text-center", inStudio ? "h-full" : "min-h-dvh")}>
@@ -423,120 +409,154 @@ export function LiveDocView({ id, inStudio = false, front = true, onGone, onTitl
   if (!doc) return <div className={cn("flex items-center justify-center bg-background", inStudio ? "h-full" : "min-h-dvh")}><Spinner className="size-6" /></div>;
 
   const openComments = doc.comments.filter((c) => !c.resolved);
-  const resolvedComments = doc.comments.filter((c) => c.resolved);
-  const shownComments = filter === "all" ? doc.comments : filter === "resolved" ? resolvedComments : openComments;
   const waiting = doc.can.share ? (doc.requests || []).length : 0;
   const sentRequest = doc.asked === "editor";
+  const exports: ExportChoice[] = api.EXPORTS.map(({ format, name, about }) => ({ id: format, name, about, icon: EXPORT_ICONS[format], run: () => api.exportDoc(doc.id, format, doc.title) }));
+  const showComments = (which: CommentFilter) => { setFilter(which); setCommentsOn(true); setPick(null); setComposer(null); };
 
   return (
     <div ref={rootRef} className={cn("relative flex flex-col bg-background text-foreground", inStudio ? "h-full min-h-0" : "h-dvh")}>
       <style>{MARK_STYLE}</style>
-      {/* Title bar */}
-      <header className="z-30 shrink-0 border-b border-border bg-background">
-        {/* (when the title and the buttons don't fit on one line, the buttons take a line of their own) */}
-        <div className={cn("flex min-h-14 flex-wrap items-center gap-x-1.5 gap-y-1 py-1.5", inStudio ? "px-2.5" : "px-3 sm:px-5")}>
+      {/* Top bar */}
+      <header className="z-30 shrink-0 border-b border-border/50 bg-background">
+        {/* (when the name and the buttons don't fit on one line, the buttons take a line of their own) */}
+        <div className={cn("flex min-h-12 flex-wrap items-center gap-x-1 gap-y-0.5 py-2", inStudio ? "px-2" : "px-2 sm:px-3")}>
           {!inStudio && (
-            <Link to="/docs" onClick={(e) => { if (!leaveEdits()) e.preventDefault(); }} className="inline-flex size-9 shrink-0 items-center justify-center rounded-lg text-muted-foreground hover:bg-accent hover:text-foreground" title="Your docs" aria-label="Your docs">
-              <ArrowLeft className="size-4" />
+            <Link to="/agent" onClick={(e) => { if (!leaveEdits()) e.preventDefault(); }} className={barIcon} title="Home" aria-label="Home">
+              <Home className="h-4 w-4" />
             </Link>
           )}
-          <div className="min-w-0 flex-[1_1_13rem]">
-            {titleEdit !== null ? (
-              <input
-                autoFocus
-                value={titleEdit}
-                maxLength={200}
-                aria-label="Doc title"
-                onChange={(e) => setTitleEdit(e.target.value)}
-                onBlur={saveTitle}
-                onKeyDown={(e) => { if (e.key === "Enter") void saveTitle(); if (e.key === "Escape") setTitleEdit(null); }}
-                data-no-ring
-                className="w-full max-w-md rounded-md border border-border bg-transparent px-2 py-1 text-[15px] font-semibold outline-none focus:border-foreground/40"
-              />
-            ) : (
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <button type="button" className="group -ml-1.5 flex max-w-full items-start gap-1 rounded-md px-1.5 py-0.5 text-left hover:bg-accent" title="Doc menu">
-                    <span className="min-w-0 break-words text-[15px] font-semibold leading-5">{doc.title}</span>
-                    <ChevronDown className="mt-0.5 size-4 shrink-0 text-muted-foreground group-hover:text-foreground" />
-                  </button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="start" className="w-64">
-                  <DropdownMenuLabel className="pb-0 text-[12.5px] font-normal">Doc by {doc.isOwner ? "you" : doc.ownerName || "someone"}</DropdownMenuLabel>
-                  <DropdownMenuLabel className="pt-0.5 text-[12.5px] font-normal">Created {ago(doc.createdAt)} · {doc.views} {doc.views === 1 ? "view" : "views"}</DropdownMenuLabel>
-                  <DropdownMenuSeparator />
-                  <DropdownMenuItem onClick={() => setShare({ open: true, tab: "share" })}><Share2 className="mr-1 size-4" />Share</DropdownMenuItem>
-                  <DropdownMenuItem onClick={() => setShare({ open: true, tab: "export" })}><Download className="mr-1 size-4" />Export</DropdownMenuItem>
-                  <DropdownMenuSeparator />
-                  <DropdownMenuItem onClick={togglePin}>{doc.pinned ? <PinOff className="mr-1 size-4" /> : <Pin className="mr-1 size-4" />}{doc.pinned ? "Unpin" : "Pin"}</DropdownMenuItem>
-                  {doc.can.edit && <DropdownMenuItem onClick={() => setTitleEdit(doc.title)}><Pencil className="mr-1 size-4" />Rename</DropdownMenuItem>}
-                  <DropdownMenuItem onClick={duplicate}><Copy className="mr-1 size-4" />Duplicate</DropdownMenuItem>
-                  <DropdownMenuItem onClick={async () => { if (await load()) say("Up to date."); }}><RefreshCw className="mr-1 size-4" />Refresh</DropdownMenuItem>
-                  <DropdownMenuSeparator />
-                  {!doc.isOwner && <DropdownMenuItem onClick={() => setReporting({ comment: null })}><Flag className="mr-1 size-4" />Report doc</DropdownMenuItem>}
-                  {doc.can.manage && <DropdownMenuItem variant="destructive" onClick={() => setDeleting(true)}><Trash2 className="mr-1 size-4" />Delete</DropdownMenuItem>}
-                </DropdownMenuContent>
-              </DropdownMenu>
-            )}
-            <div className="break-words text-xs leading-4 text-muted-foreground">
-              {aiNote ? <span className="inline-flex items-center gap-1 text-foreground"><ClassgridLogoIcon size={16} />{aiNote}</span>
-                : `${doc.isOwner ? "Edited" : `By ${doc.ownerName || "someone"} · edited`} ${ago(doc.updatedAt)}${doc.lastBy === "ai" ? " by the AI" : ""}`}
-            </div>
-          </div>
-
-          <div className="ml-auto flex shrink-0 items-center gap-0.5 sm:gap-1">
-            <div className="mr-1"><ReadersRow readers={readers} max={inStudio ? 3 : 4} /></div>
-
-            <button
-              type="button"
-              onClick={() => { setCommentsOn((on) => !on); setPick(null); setComposer(null); setActiveComment(null); }}
-              aria-pressed={commentsOn}
-              title={commentsOn ? "Hide comments" : "Show comments"}
-              aria-label={commentsOn ? "Hide comments" : "Show comments"}
-              className={cn(headerButton, "relative w-9 px-0", commentsOn && "bg-sky-500/15 text-sky-600 hover:bg-sky-500/20 dark:text-sky-400")}
-            >
-              <MessageCircle className="size-[18px]" fill={commentsOn ? "currentColor" : "none"} />
-              {openComments.length > 0 && !commentsOn && <span className="absolute -right-0.5 -top-0.5 inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-foreground px-1 text-[10px] font-semibold text-background">{openComments.length}</span>}
-            </button>
-
+          <div className="min-w-0 flex-[1_1_12rem]">
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
-                <button type="button" className={cn(headerButton, "w-9 px-0")} title="Version history" aria-label="Version history"><History className="size-[18px]" /></button>
+                <button type="button" title="Doc menu" className="flex max-w-full cursor-pointer items-start gap-1 rounded-md px-2 py-1.5 text-left text-foreground transition-colors hover:bg-black/5 dark:hover:bg-white/10">
+                  <span className="min-w-0 text-[14px] font-medium leading-5 [overflow-wrap:anywhere]">{doc.title}</span>
+                  <ChevronDown className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
+                </button>
               </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="max-h-80 w-64 overflow-y-auto">
-                <DropdownMenuLabel>Versions</DropdownMenuLabel>
-                {doc.versions.length === 0 && <div className="px-2 py-1.5 text-sm text-muted-foreground">No versions yet</div>}
-                {doc.versions.map((v, i) => (
-                  <DropdownMenuItem key={v.id} onClick={() => (i === 0 ? setOldVersion(null) : void viewVersion(v.id))} className="flex items-center justify-between gap-2">
-                    <span>{format(new Date(v.at), "d MMM, h:mm a")}</span>
-                    <span className="shrink-0 text-xs text-muted-foreground">{i === 0 ? "Current" : v.by === "ai" ? "by AI" : "by a person"}</span>
+              <DropdownMenuContent align="start" sideOffset={6} className={`w-[230px] ${menuCard}`}>
+                <div className={menuNote}>
+                  {!doc.isOwner && <div>By {doc.ownerName || "someone"}</div>}
+                  <div>Updated {ago(doc.updatedAt)}{doc.lastBy === "ai" ? " by the AI" : ""}</div>
+                  <div>{doc.views} {doc.views === 1 ? "view" : "views"}</div>
+                </div>
+                <DropdownMenuItem className={menuItem} onClick={() => setShare({ open: true, tab: "share" })}>
+                  <Share className={menuIcon} strokeWidth={2} /> Share
+                </DropdownMenuItem>
+                <DropdownMenuItem className={menuItem} onClick={() => setShare({ open: true, tab: "export" })}>
+                  <Download className={menuIcon} strokeWidth={2} /> Export
+                </DropdownMenuItem>
+                <DropdownMenuSeparator className={menuSep} />
+                <DropdownMenuItem className={menuItem} onClick={togglePin}>
+                  <Pin className={menuIcon} strokeWidth={2} /> {doc.pinned ? "Unpin" : "Pin"}
+                </DropdownMenuItem>
+                {doc.can.edit && (
+                  <DropdownMenuItem className={menuItem} onClick={() => setRenaming(true)}>
+                    <Pencil className={menuIcon} strokeWidth={2} /> Rename
                   </DropdownMenuItem>
-                ))}
+                )}
+                <DropdownMenuItem className={menuItem} onClick={duplicate}>
+                  <Copy className={menuIcon} strokeWidth={2} /> Duplicate
+                </DropdownMenuItem>
+                <DropdownMenuItem className={menuItem} onClick={async () => { if (await load()) say("Up to date."); }}>
+                  <RefreshCw className={menuIcon} strokeWidth={2} /> Refresh
+                </DropdownMenuItem>
+                <DropdownMenuSub>
+                  <DropdownMenuSubTrigger className={menuItem}>
+                    <History className={menuIcon} strokeWidth={2} /> Version history
+                  </DropdownMenuSubTrigger>
+                  <DropdownMenuSubContent className={`max-h-80 w-[250px] overflow-y-auto ${menuCard}`}>
+                    {doc.versions.length === 0 && <div className={menuNote}>No versions yet</div>}
+                    {doc.versions.map((v, i) => (
+                      <DropdownMenuItem key={v.id} className={`${menuItem} justify-between`} onClick={() => (i === 0 ? setOldVersion(null) : void viewVersion(v.id))}>
+                        <span>{format(new Date(v.at), "d MMM, h:mm a")}</span>
+                        <span className="shrink-0 text-[12.5px] text-slate-500 dark:text-white/60">{i === 0 ? "Current" : v.by === "ai" ? "by AI" : "by a person"}</span>
+                      </DropdownMenuItem>
+                    ))}
+                  </DropdownMenuSubContent>
+                </DropdownMenuSub>
+                {!inStudio && (
+                  <DropdownMenuItem className={menuItem} onClick={() => { if (leaveEdits()) navigate("/docs"); }}>
+                    <FileText className={menuIcon} strokeWidth={2} /> All docs
+                  </DropdownMenuItem>
+                )}
+                {(!doc.isOwner || doc.can.manage) && <DropdownMenuSeparator className={menuSep} />}
+                {!doc.isOwner && (
+                  <DropdownMenuItem className={menuItem} onClick={() => setReporting({ comment: null })}>
+                    <Flag className={menuIcon} strokeWidth={2} /> Report doc
+                  </DropdownMenuItem>
+                )}
+                {doc.can.manage && (
+                  <DropdownMenuItem className={menuDanger} onClick={() => setDeleting(true)}>
+                    <Trash2 className="w-4 h-4" strokeWidth={2} /> Delete
+                  </DropdownMenuItem>
+                )}
               </DropdownMenuContent>
             </DropdownMenu>
+            {aiNote && <div className="flex items-center gap-1 px-2 text-xs leading-4 text-foreground [overflow-wrap:anywhere]"><ClassgridLogoIcon size={16} />{aiNote}</div>}
+          </div>
+
+          <div className="ml-auto flex shrink-0 items-center gap-1 text-muted-foreground">
+            <div className="mr-1"><ReadersRow readers={readers} max={inStudio ? 3 : 4} /></div>
+
+            {/* Comments: the button turns them on and off; the small arrow picks which ones show */}
+            <div className="flex items-center">
+              <button
+                type="button"
+                onClick={() => { setCommentsOn((on) => !on); setPick(null); setComposer(null); setActiveComment(null); }}
+                aria-pressed={commentsOn}
+                title={commentsOn ? "Hide comments" : "Show comments"}
+                aria-label={commentsOn ? "Hide comments" : "Show comments"}
+                className={cn(barIcon, "relative", commentsOn && COMMENTS_ON)}
+              >
+                <MessageCircle className="h-4 w-4" fill={commentsOn ? "currentColor" : "none"} />
+                {openComments.length > 0 && !commentsOn && <span className="absolute -right-0.5 -top-0.5 inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-foreground px-1 text-[10px] font-semibold text-background">{openComments.length}</span>}
+              </button>
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <button type="button" title="Which comments to show" aria-label="Which comments to show" className="flex h-8 w-4 cursor-pointer items-center justify-center rounded-md text-muted-foreground transition-colors hover:text-foreground">
+                    <ChevronDown className="h-3 w-3" />
+                  </button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" sideOffset={6} className={`w-[210px] ${menuCard}`}>
+                  {(["open", "resolved", "all"] as CommentFilter[]).map((f) => (
+                    <DropdownMenuItem key={f} className={`${menuItem} justify-between`} onClick={() => showComments(f)}>
+                      {f === "open" ? "Open comments" : f === "resolved" ? "Resolved comments" : "All comments"}
+                      {commentsOn && filter === f && <Check className={menuIcon} strokeWidth={2} />}
+                    </DropdownMenuItem>
+                  ))}
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </div>
 
             {doc.can.edit && !editing && (
-              <button type="button" onClick={startEdit} className={cn(headerButton, "w-9 px-0 md:w-auto md:px-2.5", inStudio && "md:w-9 md:px-0")} title="Edit the text yourself" aria-label="Edit">
-                <Edit3 className="size-4" />{!inStudio && <span className="hidden md:inline">Edit</span>}
+              <button type="button" onClick={startEdit} className={barButton} title="Edit the text yourself" aria-label="Edit">
+                <Edit3 className="h-4 w-4" /><span className={cn("hidden", !inStudio && "md:inline")}>Edit</span>
               </button>
             )}
 
             {!doc.can.edit && (
-              <button type="button" onClick={askToEdit} disabled={sentRequest} title={sentRequest ? "The owner has not answered yet" : "Ask the owner to let you edit"} className={cn(headerButton, pill, sentRequest && "text-muted-foreground")}>
+              <button type="button" onClick={askToEdit} disabled={sentRequest} title={sentRequest ? "The owner has not answered yet" : "Ask the owner to let you edit"} className={barButton}>
                 {sentRequest ? "Request sent" : "Ask to edit"}
               </button>
             )}
 
             {!inStudio && (
-              <button type="button" onClick={() => { if (leaveEdits()) navigate(studioDocPath(doc.id)); }} title="Open this doc beside the chat and ask Classgrid AI about it" aria-label="Chat" className={cn(headerButton, pill, "w-9 px-0 sm:w-auto sm:px-2.5")}>
-                <ClassgridLogoIcon size={22} className="-mx-0.5" /><span className="hidden sm:inline">Chat</span>
+              <button type="button" onClick={() => { if (leaveEdits()) navigate(studioDocPath(doc.id)); }} title="Open this doc beside the chat and ask Classgrid AI about it" aria-label="Chat" className={barButton}>
+                <ClassgridLogoIcon size={18} /><span className="hidden sm:inline">Chat</span>
               </button>
             )}
 
-            <button type="button" onClick={() => setShare({ open: true, tab: "share" })} className={cn(headerButton, pill, "relative w-9 px-0 sm:w-auto sm:px-2.5", inStudio && "sm:w-9 sm:px-0")} aria-label="Share" title="Share">
-              <Share2 className="size-4" /><span className={cn(inStudio ? "hidden" : "hidden sm:inline")}>Share</span>
-              {waiting > 0 && <span title={`${waiting} access ${waiting === 1 ? "request" : "requests"}`} className="absolute -right-1 -top-1 size-3 rounded-full border-2 border-background bg-sky-500" />}
+            <button type="button" onClick={() => setShare({ open: true, tab: "share" })} className={cn(barButton, "relative")} aria-label="Share" title="Share">
+              <Share className="h-4 w-4" /><span className={cn("hidden", !inStudio && "sm:inline")}>Share</span>
+              {waiting > 0 && <span title={`${waiting} access ${waiting === 1 ? "request" : "requests"}`} className="absolute -right-0.5 -top-0.5 size-2.5 rounded-full border-2 border-background bg-sky-500" />}
             </button>
+
+            {inStudio && ON_WEBSITE && (
+              <button type="button" onClick={() => { if (leaveEdits()) navigate(`/docs/${doc.id}`); }} className={barIcon} title="Open the doc on its own page" aria-label="Open the doc on its own page">
+                <Maximize2 className="h-4 w-4" />
+              </button>
+            )}
           </div>
         </div>
       </header>
@@ -600,61 +620,27 @@ export function LiveDocView({ id, inStudio = false, front = true, onGone, onTitl
 
         {/* Comments */}
         {commentsOn && (
-          <aside
-            aria-label="Comments"
-            className={cn(
-              "absolute right-3 top-3 z-20 flex max-h-[calc(100%-1.5rem)] w-80 max-w-[calc(100%-1.5rem)] flex-col rounded-2xl border border-border bg-background shadow-xl",
-              !inStudio && "xl:static xl:max-h-none xl:max-w-none xl:shrink-0 xl:rounded-none xl:border-0 xl:border-l xl:shadow-none",
-            )}
-          >
-            <div className="flex h-12 shrink-0 items-center gap-1 pl-4 pr-2">
-              <span className="flex-1 text-[14px] font-semibold">{filter === "resolved" ? "Resolved comments" : filter === "all" ? "All comments" : "Comments"}</span>
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <button type="button" className="inline-flex size-8 items-center justify-center rounded-lg text-muted-foreground hover:bg-accent hover:text-foreground" title="Which comments to show" aria-label="Which comments to show"><ListFilter className="size-4" /></button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="end" className="w-44">
-                  {(["open", "resolved", "all"] as CommentFilter[]).map((f) => (
-                    <DropdownMenuItem key={f} onClick={() => setFilter(f)} className="flex items-center justify-between">
-                      {f === "open" ? "Open" : f === "resolved" ? "Resolved" : "All"}
-                      {filter === f && <Check className="size-4" />}
-                    </DropdownMenuItem>
-                  ))}
-                </DropdownMenuContent>
-              </DropdownMenu>
-              <button type="button" className="inline-flex size-8 items-center justify-center rounded-lg text-muted-foreground hover:bg-accent hover:text-foreground" onClick={() => { setCommentsOn(false); setComposer(null); setActiveComment(null); }} title="Hide comments" aria-label="Hide comments"><X className="size-4" /></button>
-            </div>
-            <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-2">
-              {shownComments.length === 0 && (
-                <div className="px-3 pb-6 pt-4 text-center">
-                  {filter === "open" && resolvedComments.length > 0 ? (
-                    <p className="text-[13.5px] text-muted-foreground">
-                      No open comments. <button type="button" onClick={() => setFilter("resolved")} className="underline underline-offset-2 hover:text-foreground">Show {resolvedComments.length} resolved</button>
-                    </p>
-                  ) : (
-                    <>
-                      <p className="text-[14px] font-medium text-muted-foreground">{filter === "resolved" ? "No resolved comments" : "No comments yet"}</p>
-                      {filter !== "resolved" && <p className="mt-1 text-[12.5px] leading-5 text-muted-foreground">{doc.can.comment ? "Click any part of the doc, or pick some words, to comment on it." : "Your role lets you read the comments, not add one."}</p>}
-                    </>
-                  )}
-                </div>
-              )}
-              {shownComments.map((c) => (
-                <CommentCard
-                  key={c.id}
-                  c={c}
-                  doc={doc}
-                  me={me ? { id: String(me._id), name: me.name || "You", photo: me.profilePicture || "" } : null}
-                  active={activeComment === c.id}
-                  onActive={(on) => setActiveComment((now) => (on ? c.id : now === c.id ? null : now))}
-                  setDoc={setDoc}
-                  withComments={withComments}
-                  onReport={() => setReporting({ comment: { id: c.id, name: c.name, text: c.text } })}
-                  say={say}
-                />
-              ))}
-            </div>
-          </aside>
+          <CommentsPanel
+            comments={doc.comments}
+            filter={filter}
+            onFilter={setFilter}
+            canComment={doc.can.comment}
+            canEdit={doc.can.edit}
+            me={me ? { id: String(me._id), name: me.name || "You", photo: me.profilePicture || "" } : null}
+            active={activeComment}
+            onActive={setActiveComment}
+            floating={inStudio}
+            onClose={() => { setCommentsOn(false); setComposer(null); setActiveComment(null); }}
+            calls={{
+              reply: (cid, text) => api.addReply(doc.id, cid, text).then(setDoc),
+              resolve: (cid, resolved) => api.resolveComment(doc.id, cid, resolved).then(setDoc),
+              remove: (cid) => api.deleteComment(doc.id, cid).then(setDoc),
+            }}
+            change={withComments}
+            onReport={(c) => setReporting({ comment: { id: c.id, name: c.name, text: c.text } })}
+            say={say}
+            hint="Click any part of the doc, or pick some words, to comment on it."
+          />
         )}
       </div>
 
@@ -671,66 +657,16 @@ export function LiveDocView({ id, inStudio = false, front = true, onGone, onTitl
         </button>
       )}
 
-      {/* The comment box, where the click or the picked words are */}
       {composer && !editing && (
-        <div
-          ref={composerRef}
-          role="dialog"
-          aria-label="Add a comment"
-          style={{ top: composer.top, left: composer.left }}
-          className="fixed z-40 w-[min(340px,calc(100vw-24px))] rounded-2xl border border-sky-500/50 bg-popover p-3.5 text-popover-foreground shadow-xl ring-4 ring-sky-500/10"
-        >
-          <div className="border-l-2 border-sky-500/60 pl-2 text-[12.5px] leading-[18px] text-muted-foreground">{shortQuote(composer.quote)}</div>
-          {composer.toAI && <span className="mt-2 inline-flex items-center gap-1 rounded-md bg-sky-500/15 px-1.5 py-0.5 text-[12.5px] font-medium text-sky-600 dark:text-sky-400"><ClassgridLogoIcon size={14} />Classgrid AI</span>}
-          <RichChatInput
-            ref={(el: { focus?: () => void } | null) => { if (el && !composerFocused.current) { composerFocused.current = true; setTimeout(() => el.focus?.(), 0); } }}
-            value={composer.text}
-            onChange={(e) => setComposer((now) => (now ? { ...now, text: String(e.target.value || "").slice(0, 5000) } : now))}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendComment(); }
-              if (e.key === "Escape") setComposer(null);
-            }}
-            placeholder="Add a comment"
-            className="mt-2 max-h-40 min-h-[44px] w-full overflow-y-auto bg-transparent text-[14.5px] leading-[21px] text-foreground outline-none"
-          />
-          <div className="mt-1.5 flex items-center gap-2">
-            <button
-              type="button"
-              role="checkbox"
-              aria-checked={composer.toAI}
-              onClick={() => setComposer({ ...composer, toAI: !composer.toAI })}
-              className="flex min-w-0 flex-1 items-center gap-2 text-left text-[13.5px]"
-            >
-              <span className={cn("inline-flex size-[18px] shrink-0 items-center justify-center rounded-[6px] border", composer.toAI ? "border-sky-500 bg-sky-500 text-white" : "border-muted-foreground/60")}>
-                {composer.toAI && <Check className="size-3" strokeWidth={3} />}
-              </span>
-              <span>Send to Classgrid AI</span>
-            </button>
-            <button
-              type="button"
-              onClick={sendComment}
-              disabled={!composer.text.trim()}
-              title="Add the comment"
-              aria-label="Add the comment"
-              className="inline-flex size-8 shrink-0 items-center justify-center rounded-full bg-foreground text-background transition-opacity disabled:opacity-30"
-            >
-              <ArrowUp className="size-4" />
-            </button>
-          </div>
-        </div>
+        <CommentBox key={`${composer.top}:${composer.left}`} boxRef={composerRef} composer={composer} onChange={setComposer} onSend={sendComment} onClose={() => setComposer(null)} />
       )}
 
-      {/* Messages */}
-      {notice && (
-        <div className="pointer-events-none absolute inset-x-0 bottom-5 z-50 flex justify-center px-4">
-          <div role="status" className={cn("pointer-events-auto max-w-md rounded-xl border px-4 py-2.5 text-[13.5px] leading-5 shadow-lg", notice.bad ? "border-red-500/40 bg-background text-red-600 dark:text-red-400" : "border-transparent bg-foreground text-background")}>
-            {notice.text}
-          </div>
-        </div>
-      )}
+      <NoticeBar notice={notice} />
 
       <ShareDialog
-        doc={doc}
+        item={doc}
+        calls={DOC_SHARE}
+        exports={exports}
         meName={me?.name || ""}
         meEmail={me?.email || ""}
         mePhoto={me?.profilePicture || ""}
@@ -738,117 +674,19 @@ export function LiveDocView({ id, inStudio = false, front = true, onGone, onTitl
         tab={share.tab}
         onTab={(tab) => setShare({ open: true, tab })}
         onClose={() => setShare((s) => ({ ...s, open: false }))}
-        onDoc={setDoc}
+        onItem={setDoc}
         onLeft={() => { if (inStudio) onGone?.(); else navigate("/docs"); }}
         say={say}
       />
       <DeleteDocDialog title={doc.title} open={deleting} onClose={() => setDeleting(false)} onDelete={remove} />
-      <ReportDocDialog docId={doc.id} comment={reporting?.comment} open={!!reporting} onClose={() => setReporting(null)} say={say} />
-    </div>
-  );
-}
-
-function CommentCard({ c, doc, me, active, onActive, setDoc, withComments, onReport, say }: {
-  c: LiveDocComment;
-  doc: LiveDoc;
-  me: { id: string; name: string; photo: string } | null;
-  active: boolean;
-  onActive: (on: boolean) => void;
-  setDoc: (d: LiveDoc) => void;
-  withComments: (change: (comments: LiveDocComment[]) => LiveDocComment[]) => void;
-  onReport: () => void;
-  say: (text: string, bad?: boolean) => void;
-}) {
-  const [reply, setReply] = useState("");
-  const saved = !isNew(c.id);
-  const mine = !!me && me.id === c.userId;
-  const canResolve = saved && (doc.can.edit || (doc.can.comment && mine));
-  const canDelete = saved && (doc.can.edit || mine);
-  const change = (next: (comment: LiveDocComment) => LiveDocComment) => withComments((all) => all.map((x) => (x.id === c.id ? next(x) : x)));
-
-  // Shown at once, saved behind; taken back if saving fails
-  const send = () => {
-    const text = reply.trim();
-    if (!text || !saved) return;
-    const before = c.replies;
-    change((x) => ({ ...x, replies: [...x.replies, { name: me?.name || "You", photo: me?.photo || "", text, at: new Date().toISOString(), byAI: false }] }));
-    setReply("");
-    api.addReply(doc.id, c.id, text).then(setDoc).catch((e) => { change((x) => ({ ...x, replies: before })); setReply(text); say(api.errorText(e, "The reply could not be sent."), true); });
-  };
-  const toggle = () => {
-    const resolved = !c.resolved;
-    change((x) => ({ ...x, resolved }));
-    api.resolveComment(doc.id, c.id, resolved).then(setDoc).catch((e) => { change((x) => ({ ...x, resolved: !resolved })); say(api.errorText(e), true); });
-  };
-  const remove = () => {
-    let taken: LiveDocComment[] = [];
-    withComments((all) => { taken = all; return all.filter((x) => x.id !== c.id); });
-    api.deleteComment(doc.id, c.id).then(setDoc).catch((e) => { withComments(() => taken); say(api.errorText(e, "The comment could not be deleted."), true); });
-  };
-
-  return (
-    <div
-      id={`doc-comment-${c.id}`}
-      onMouseEnter={() => onActive(true)}
-      onMouseLeave={() => onActive(false)}
-      className={cn("group/comment space-y-1.5 rounded-xl px-2.5 py-2.5 transition-colors", active ? "bg-muted" : "hover:bg-muted/60", c.resolved && "opacity-70")}
-    >
-      <div className="flex items-center gap-2">
-        <PersonPhoto name={c.name || "Someone"} photo={c.photo} size="sm" />
-        <span className="min-w-0 break-words text-[13.5px] font-semibold leading-4">{c.name || "Someone"}</span>
-        <span className="shrink-0 text-[12px] text-muted-foreground">{shortAgo(c.at)}</span>
-        <span className="flex-1" />
-        {c.resolved && <span className="inline-flex size-5 shrink-0 items-center justify-center rounded-full bg-sky-500 text-white" title="Resolved"><Check className="size-3" strokeWidth={3} /></span>}
-        {canResolve && !c.resolved && (
-          <button type="button" onClick={toggle} title="Resolve" aria-label="Resolve" className="inline-flex size-7 shrink-0 items-center justify-center rounded-lg text-muted-foreground opacity-0 hover:bg-accent hover:text-foreground focus-visible:opacity-100 group-hover/comment:opacity-100">
-            <Check className="size-4" />
-          </button>
-        )}
-        {saved && (
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <button type="button" title="More" aria-label="More" className="inline-flex size-7 shrink-0 items-center justify-center rounded-lg text-muted-foreground opacity-0 hover:bg-accent hover:text-foreground focus-visible:opacity-100 group-hover/comment:opacity-100 data-[popup-open]:opacity-100">
-                <MoreHorizontal className="size-4" />
-              </button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="w-48">
-              {canResolve && <DropdownMenuItem onClick={toggle}>{c.resolved ? <RotateCcw className="mr-1 size-4" /> : <Check className="mr-1 size-4" />}{c.resolved ? "Reopen" : "Resolve"}</DropdownMenuItem>}
-              {!mine && <DropdownMenuItem onClick={onReport}><Flag className="mr-1 size-4" />Report comment</DropdownMenuItem>}
-              {canDelete && <DropdownMenuItem variant="destructive" onClick={remove}><Trash2 className="mr-1 size-4" />Delete thread</DropdownMenuItem>}
-            </DropdownMenuContent>
-          </DropdownMenu>
-        )}
-      </div>
-      {c.quote && <div className="border-l-2 border-sky-500/60 pl-2 text-[12.5px] leading-[18px] text-muted-foreground">{shortQuote(c.quote)}</div>}
-      <NoteText text={c.text} />
-      {c.replies.map((r, i) => (
-        <div key={i} className="pt-1">
-          <div className="flex items-center gap-1.5">
-            {r.byAI
-              ? <span className="inline-flex size-5 shrink-0 items-center justify-center rounded-full bg-foreground text-background"><ClassgridLogoIcon size={16} /></span>
-              : <PersonPhoto name={r.name || "Someone"} photo={r.photo} size="xs" />}
-            <span className="min-w-0 break-words text-[13px] font-semibold leading-4">{r.name || "Someone"}</span>
-            <span className="shrink-0 text-[12px] text-muted-foreground">{shortAgo(r.at)}</span>
-          </div>
-          <div className="mt-0.5 pl-[26px]"><NoteText text={r.text} /></div>
-        </div>
-      ))}
-      {!c.resolved && doc.can.comment && saved && (
-        <div className="flex items-end gap-2 pt-1">
-          <RichChatInput
-            value={reply}
-            onChange={(e) => setReply(String(e.target.value || "").slice(0, 5000))}
-            onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); } }}
-            placeholder="Reply"
-            className="max-h-32 !min-h-[34px] min-w-0 flex-1 overflow-y-auto rounded-lg border border-border bg-background px-2.5 py-1.5 text-[13.5px] leading-5 text-foreground outline-none focus:border-foreground/40"
-          />
-          {reply.trim() && (
-            <button type="button" onClick={send} title="Send the reply" aria-label="Send the reply" className="inline-flex size-8 shrink-0 items-center justify-center rounded-full bg-foreground text-background">
-              <ArrowUp className="size-4" />
-            </button>
-          )}
-        </div>
-      )}
+      <RenameDocDialog title={doc.title} open={renaming} onClose={() => setRenaming(false)} onSave={saveTitle} />
+      <ReportDocDialog
+        comment={reporting?.comment}
+        open={!!reporting}
+        onClose={() => setReporting(null)}
+        send={(reason, more) => (reporting?.comment ? api.reportComment(doc.id, reporting.comment.id, reason, more) : api.reportDoc(doc.id, reason, more))}
+        say={say}
+      />
     </div>
   );
 }

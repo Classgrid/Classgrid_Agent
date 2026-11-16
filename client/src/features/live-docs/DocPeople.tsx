@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { cn } from "@/lib/utils";
 import type { DocReader } from "./liveDocsApi";
+import { menuCard, menuNote } from "./docLook";
 
 const SIZES = { xs: "size-5 text-[10px]", sm: "size-6 text-[11px]", md: "size-8 text-[13px]", lg: "size-10 text-[15px]" } as const;
 
@@ -46,9 +47,9 @@ export function ReadersRow({ readers, max = 4 }: { readers: DocReader[]; max?: n
         type="button"
         onClick={() => setOpen((o) => !o)}
         aria-expanded={open}
-        aria-label={`${readers.length} ${readers.length === 1 ? "person has" : "people have"} this doc open`}
-        title="Who has this doc open"
-        className="flex items-center -space-x-1.5 rounded-full p-0.5 outline-none hover:bg-accent focus-visible:ring-1 focus-visible:ring-ring"
+        aria-label={`${readers.length} ${readers.length === 1 ? "person is" : "people are"} here now`}
+        title="Who is here now"
+        className="flex cursor-pointer items-center -space-x-1.5 rounded-full p-0.5 outline-none transition-colors hover:bg-black/5 focus-visible:ring-1 focus-visible:ring-ring dark:hover:bg-white/10"
       >
         {shown.map((r) => (
           <span key={r.id} className="inline-flex rounded-full ring-2 ring-background">
@@ -60,13 +61,13 @@ export function ReadersRow({ readers, max = 4 }: { readers: DocReader[]; max?: n
         )}
       </button>
       {open && (
-        <div role="dialog" aria-label="Reading now" className="absolute right-0 top-full z-40 mt-2 w-60 rounded-2xl bg-popover p-1.5 text-popover-foreground shadow-xl ring-1 ring-foreground/10">
-          <div className="px-2.5 pb-1 pt-1.5 text-[12px] font-medium text-muted-foreground">Reading now</div>
+        <div role="dialog" aria-label="Here now" className={cn("absolute right-0 top-full mt-1.5 w-[230px]", menuCard)}>
+          <div className={menuNote}>Here now</div>
           <ul className="max-h-64 overflow-y-auto">
             {readers.map((r) => (
-              <li key={r.id} className="flex items-center gap-2.5 rounded-xl px-2.5 py-1.5">
+              <li key={r.id} className="flex items-center gap-3 rounded-xl px-3 py-1.5">
                 <PersonPhoto name={r.name} photo={r.photo} size="sm" />
-                <span className="min-w-0 flex-1 [overflow-wrap:anywhere] text-[13.5px]">{r.name || "Someone"}{r.me && <span className="text-muted-foreground"> (you)</span>}</span>
+                <span className="min-w-0 flex-1 [overflow-wrap:anywhere] text-[14px]">{r.name || "Someone"}{r.me && <span className="text-slate-500 dark:text-white/60"> (you)</span>}</span>
               </li>
             ))}
           </ul>

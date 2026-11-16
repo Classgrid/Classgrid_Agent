@@ -4586,7 +4586,7 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
 
     // Studio: a live doc is open beside the chat. The AI is told which one ("this doc" means it); the chat shows it
     // as a small chip on the message. (A hidden message, and one that already names a doc, go as they are.)
-    const besideDoc: OpenDoc | null = isStudio && !hiddenSend && apiQuestion && !/chat\.classgrid\.in\/docs\//.test(apiQuestion) ? getOpenDoc() : null;
+    const besideDoc: OpenDoc | null = isStudio && !hiddenSend && apiQuestion && !/chat\.classgrid\.in\/(?:docs|p)\//.test(apiQuestion) ? getOpenDoc() : null;
     if (besideDoc) apiQuestion = `${apiQuestion}\n\n${docContextLine(besideDoc)}`;
 
     if (isDocsContextActive && pageContext?.path && filesToUpload.length === 0) {
@@ -5913,12 +5913,12 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
                       {isUser && message.besideDoc && (
                         <button
                           type="button"
-                          onClick={() => openDocInStudio(message.besideDoc!.id)}
-                          title="Open this doc beside the chat"
-                          className="inline-flex max-w-full items-center gap-1.5 rounded-lg border border-border bg-background px-2 py-1 text-[12.5px] text-muted-foreground hover:text-foreground"
+                          onClick={() => openDocInStudio(message.besideDoc!.id, message.besideDoc!.kind)}
+                          title={message.besideDoc.kind === "page" ? "Open this page beside the chat" : "Open this doc beside the chat"}
+                          className="inline-flex max-w-full items-center gap-1.5 rounded-lg border border-border bg-background px-2 py-1 text-left text-[12.5px] text-muted-foreground hover:text-foreground"
                         >
                           <FileText className="size-3.5 shrink-0" />
-                          <span className="truncate">{message.besideDoc.title}</span>
+                          <span className="min-w-0 [overflow-wrap:anywhere]">{message.besideDoc.title}</span>
                         </button>
                       )}
 

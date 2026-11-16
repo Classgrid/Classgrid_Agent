@@ -49,9 +49,20 @@ export function LiveDocStep({ step }: { step: Step }) {
           {title && step.tool !== "doc_comments" && <span className="font-medium text-foreground/90 truncate">{title}</span>}
           {loading && <Spinner className="size-3.5 shrink-0" />}
         </Row>
-        {showOpen && (
-          // The doc opens beside this chat: in Studio as a tab of the right pane; from Agent mode the same chat opens in
-          // Studio with the doc (owner, 2026-11-16: "for all use Studio mode")
+        {showOpen && (import.meta.env.VITE_EDITOR === "1" ? (
+          // Classgrid Code and the extension: the Agent panel has no Studio beside it, so the doc opens on the
+          // website, in the browser (as it always did there)
+          <a
+            href={`https://chat.classgrid.in/docs/${id}`}
+            target="_blank"
+            rel="noreferrer"
+            className="relative z-10 -ml-1 shrink-0 inline-flex items-center h-6 rounded-md border border-border px-2 text-xs font-medium text-foreground hover:bg-accent"
+          >
+            Open
+          </a>
+        ) : (
+          // The doc opens beside this chat: in Studio (the website's, and the desktop app's) as a tab of the right
+          // pane; from Agent mode the same chat opens in Studio with the doc (owner, 2026-11-16: "for all use Studio mode")
           <button
             type="button"
             onClick={() => (onStudio() ? openDocInStudio(id) : navigate(studioDocPath(id)))}
@@ -59,7 +70,7 @@ export function LiveDocStep({ step }: { step: Step }) {
           >
             Open
           </button>
-        )}
+        ))}
       </div>
       {failed && <div className="ml-10 -mt-1 mb-1 text-xs text-red-600 dark:text-red-500">{result.replace(/^error:\s*/i, "")}</div>}
     </div>

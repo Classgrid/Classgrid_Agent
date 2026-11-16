@@ -28,12 +28,13 @@ function pctOf(m: Meter) {
   return Math.min(100, Math.round((m.used / m.limit) * 100));
 }
 
+// (a limit the plan does not have at all, limit 0, is not shown: owner, 2026-11-16, "if it is not in the plan why show it")
+const inPlan = (m: Meter | null | undefined): m is NonNullable<Meter> => !!m && m.limit !== 0;
 function Bar({ name, m, line }: { name: string; m: Meter; line: string }) {
-  if (!m) return null;
+  if (!inPlan(m)) return null;
   const unlimited = m.limit === null || (m.limit !== null && m.limit < 0);
-  const none = m.limit === 0;
   const pct = pctOf(m);
-  const right = none ? "Not in your plan" : unlimited ? "No limit" : `${pct}% used`;
+  const right = unlimited ? "No limit" : `${pct}% used`;
   return (
     <div className="px-5 py-4 border-b border-border last:border-b-0">
       <div className="flex items-baseline justify-between gap-4">
@@ -41,7 +42,7 @@ function Bar({ name, m, line }: { name: string; m: Meter; line: string }) {
         <span className={`text-sm tabular-nums whitespace-nowrap ${pct >= 100 ? "text-red-500" : "text-foreground/80"}`}>{right}</span>
       </div>
       <div className="h-2 rounded-full bg-black/[0.07] dark:bg-white/[0.1] overflow-hidden mt-2.5">
-        {!unlimited && !none && <div className={`h-full rounded-full ${pct >= 100 ? "bg-red-500" : pct >= 80 ? "bg-amber-400" : "bg-[#7aa7ff]"}`} style={{ width: `${pct}%` }} />}
+        {!unlimited && <div className={`h-full rounded-full ${pct >= 100 ? "bg-red-500" : pct >= 80 ? "bg-amber-400" : "bg-[#7aa7ff]"}`} style={{ width: `${pct}%` }} />}
       </div>
       <div className="text-[13px] text-muted-foreground mt-2">{line}</div>
     </div>
@@ -93,13 +94,17 @@ export function SettingsUsageSection() {
         {u.fable_week && <Bar name="Fable limit" m={u.fable_week} line={`Up to ${data.plan.limits?.fable_share_percent ?? 50}% of your Claude limit · Weekly · ${weekLine}`} />}
       </div>
 
-      <div className="text-[13px] font-semibold text-foreground mt-7 mb-2">WhatsApp and voice</div>
-      <div className="rounded-xl border border-border bg-card">
-        {u.whatsapp && <Bar name="WhatsApp messages limit" m={u.whatsapp} line={`Messages the AI sends · ${ofText(u.whatsapp, "messages")} ${u.whatsapp.periodText ? `this ${u.whatsapp.periodText.replace(/^1 /, "")}` : ""} · ${u.whatsapp.resetAt ? `Resets ${dayText(u.whatsapp.resetAt)}` : ""}`} />}
-        {u.call_minutes && <Bar name="WhatsApp calls limit" m={u.call_minutes} line={`Call minutes with the AI · ${ofText(u.call_minutes, "minutes")} ${u.call_minutes.periodText ? `this ${u.call_minutes.periodText.replace(/^1 /, "")}` : ""} · ${u.call_minutes.resetAt ? `Resets ${dayText(u.call_minutes.resetAt)}` : ""}`} />}
-        {u.voice_input_minutes && <Bar name="Voice limit" m={u.voice_input_minutes} line={`Minutes talking with the AI · ${ofText(u.voice_input_minutes, "minutes")} today · Resets at midnight`} />}
-        {u.voice_replies && <Bar name="Read-aloud limit" m={u.voice_replies} line={`Answers the AI reads out loud · ${ofText(u.voice_replies, "replies")} today · Resets at midnight`} />}
-      </div>
+      {[u.whatsapp, u.call_minutes, u.voice_input_minutes, u.voice_replies].some(inPlan) && (
+        <>
+          <div className="text-[13px] font-semibold text-foreground mt-7 mb-2">WhatsApp and voice</div>
+          <div className="rounded-xl border border-border bg-card">
+            {u.whatsapp && <Bar name="WhatsApp messages limit" m={u.whatsapp} line={`Messages the AI sends · ${ofText(u.whatsapp, "messages")} ${u.whatsapp.periodText ? `this ${u.whatsapp.periodText.replace(/^1 /, "")}` : ""} · ${u.whatsapp.resetAt ? `Resets ${dayText(u.whatsapp.resetAt)}` : ""}`} />}
+            {u.call_minutes && <Bar name="WhatsApp calls limit" m={u.call_minutes} line={`Call minutes with the AI · ${ofText(u.call_minutes, "minutes")} ${u.call_minutes.periodText ? `this ${u.call_minutes.periodText.replace(/^1 /, "")}` : ""} · ${u.call_minutes.resetAt ? `Resets ${dayText(u.call_minutes.resetAt)}` : ""}`} />}
+            {u.voice_input_minutes && <Bar name="Voice limit" m={u.voice_input_minutes} line={`Minutes talking with the AI · ${ofText(u.voice_input_minutes, "minutes")} today · Resets at midnight`} />}
+            {u.voice_replies && <Bar name="Read-aloud limit" m={u.voice_replies} line={`Answers the AI reads out loud · ${ofText(u.voice_replies, "replies")} today · Resets at midnight`} />}
+          </div>
+        </>
+      )}
       <p className="text-xs text-muted-foreground mt-2.5">Last updated: less than a minute ago</p>
 
       {hist && (

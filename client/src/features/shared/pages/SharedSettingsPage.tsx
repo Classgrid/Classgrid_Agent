@@ -173,7 +173,10 @@ export function SharedSettingsPage() {
   // One section at a time (the left sidebar lists them: SettingsNav); on phones, where the sidebar is hidden, a row of
   // section buttons on top
   const role = profileData?.role;
+  // The page scrolls by itself: under /agent the layout around it does not scroll (the chat fills it), so a long
+  // section (Usage, Billing) could not be scrolled at all (owner, 2026-11-16: "this page has no scrollbar")
   return (
+    <div className="flex-1 min-h-0 w-full overflow-y-auto chat-scrollbar">
     <div className="flex flex-col gap-6 w-full max-w-4xl mx-auto p-4 sm:p-6 lg:p-8 pb-12">
       <div className="md:hidden flex gap-1.5 overflow-x-auto [scrollbar-width:none] -mx-1 px-1">
         {sections.map((s) => (
@@ -252,6 +255,7 @@ export function SharedSettingsPage() {
           <PlatformNameCard />
         </>
       )}
+    </div>
     </div>
   );
 }
