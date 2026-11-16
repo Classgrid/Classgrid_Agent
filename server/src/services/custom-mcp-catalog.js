@@ -12,7 +12,7 @@ export const MCP_CATALOG = [
     { id: "atlassian", name: "Jira & Confluence", description: "Atlassian issues and pages", url: "https://mcp.atlassian.com/v1/mcp", auth: "oauth", logo: si("atlassian") },
     { id: "sentry", name: "Sentry", description: "Errors and performance issues", url: "https://mcp.sentry.dev/mcp", auth: "oauth", logo: si("sentry"), invertInDarkMode: true },
     { id: "stripe", name: "Stripe", description: "Payments, customers and invoices", url: "https://mcp.stripe.com", auth: "oauth", logo: si("stripe") },
-    { id: "paypal", name: "PayPal", description: "Invoices, orders and payments", url: "https://mcp.paypal.com/mcp", auth: "oauth", logo: si("paypal") },
+    { id: "paypal", name: "PayPal", description: "Invoices, orders and payments", url: "https://mcp.paypal.com/mcp", auth: "oauth", logo: si("paypal/0070E0") },
     { id: "square", name: "Square", description: "Payments, orders and catalog", url: "https://mcp.squareup.com/mcp", auth: "oauth", logo: si("square"), invertInDarkMode: true },
     { id: "intercom", name: "Intercom", description: "Customer conversations and contacts", url: "https://mcp.intercom.com/mcp", auth: "oauth", logo: si("intercom") },
     { id: "monday", name: "monday.com", description: "Boards, items and updates", url: "https://mcp.monday.com/mcp", auth: "oauth", logo: fav("monday.com") },
