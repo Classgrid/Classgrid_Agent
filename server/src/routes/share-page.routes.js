@@ -1,63 +1,106 @@
 // Share pages API (mounted at /api/pages): pages the AI publishes, their comments and their small data store.
+// A page is shared like a live doc (owner, 2026-11-16): people added by email with a role, access requests, a link
+// with a role, who has it open now, views, pin, a copy and reports. The sharing itself is the live docs' service
+// (services/live-doc-share.service.js), which works on a doc or a page; who may do what is in
+// services/share-page.helpers.js. The answers the phone app already reads (GET /:id, PATCH /:id, the comment
+// routes) keep their old fields.
 import express from "express";
 import { isAuthenticated } from "../middleware/auth.middleware.js";
 import SharePage from "../models/SharePage.js";
+import User from "../models/User.js";
 import {
-    pageLink, isOwner, canView, canWriteData, canComment, canResolveComment, cleanTitle, checkVisibility, checkCommentText, DATA_KEY_RE,
+    pageLink, isOwner, canView, canWriteData, canComment, canShare, canRename, canResolveComment, canDeleteComment, cleanTitle, checkVisibility,
+    checkCommentText, pageRow, DATA_KEY_RE,
 } from "../services/share-page.helpers.js";
-import { findPage, commentView, summaryView, addComment, setCommentResolved, writeData, dataObject } from "../services/share-page.service.js";
+import {
+    findPage, commentView, summaryView, addComment, setCommentResolved, removeComment, writeData, dataObject, pageFor, duplicatePage, pagesOf,
+} from "../services/share-page.service.js";
+import { requestOf } from "../services/live-doc.helpers.js";
+import {
+    readingNow, stoppedReading, countView, claimMembership, inviteMembers, setMemberRole, removeMember, setGeneralAccess, requestAccess,
+    answerRequest, makeOwner, setPinned, reportDoc, reportComment,
+} from "../services/live-doc-share.service.js";
 
 const router = express.Router();
-const fail = (res, status, message) => res.status(status).json({ message });
+const fail = (res, status, message, more = {}) => res.status(status).json({ message, ...more });
 const NOT_FOUND = "This page doesn't exist or you don't have access to it.";
+const CANT_SHARE = "Only the owner and the editors of this page can share it.";
+const CANT_COMMENT = "You can open this page, but not comment on it.";
+// (everything of a page but its HTML and its saved data: enough to know who may do what, and to send it back)
+const LIGHT = "-html -data";
 
 const wrap = (fn) => async (req, res) => {
     try {
         await fn(req, res);
     } catch (err) {
         console.error("[share-pages]", err?.message || err);
-        if (!res.headersSent) fail(res, 500, "Something went wrong. Please try again.");
+        // (the sharing service says what went wrong in words for the person: "Type an email address first.")
+        if (!res.headersSent) fail(res, 400, err?.message || "Something went wrong. Please try again.");
     }
 };
 
-// The owner's pages, newest first
+// Loads the page and checks access; sends the error itself and answers null when not allowed. A page this person
+// can't open answers 403 with private: true (and whether they already asked for access), so the screen can offer
+// "Request access"; a page that does not exist answers 404.
+async function load(req, res, { check = canView, refused = "Only the owner can change this page.", select = LIGHT } = {}) {
+    const page = await findPage(req.params.id, select);
+    if (!page) { fail(res, 404, NOT_FOUND); return null; }
+    if (!canView(page, req.user)) {
+        fail(res, 403, "This page is private. Ask its owner for access.", { code: "private", private: true, requested: !!requestOf(page, req.user) });
+        return null;
+    }
+    if (!check(page, req.user)) { fail(res, 403, refused); return null; }
+    return page;
+}
+// (the page as it is now, after a change made with updateOne)
+const fresh = async (req) => pageFor(await findPage(req.params.id, LIGHT), req.user);
+
+// The person's pages, newest first: `pages` are their own (as before), `shared` the ones shared with them by name
 router.get("/", isAuthenticated, wrap(async (req, res) => {
-    const pages = await SharePage.find({ owner: req.user._id })
-        .select("title visibility versions comments.resolved createdAt updatedAt")
-        .sort({ updatedAt: -1 })
-        .limit(200)
-        .lean();
-    res.json({ pages: pages.map(summaryView) });
+    const { mine, shared, profiles } = await pagesOf(req.user);
+    res.json({ pages: mine.map((p) => ({ ...summaryView(p), ...pageRow(p, req.user) })), shared: shared.map((p) => pageRow(p, req.user, profiles)) });
 }));
 
 router.get("/:id", isAuthenticated, wrap(async (req, res) => {
-    const page = await findPage(req.params.id, "-data");
-    if (!page || !canView(page, req.user._id)) return fail(res, 404, NOT_FOUND);
-    await page.populate("owner", "name email");
+    const page = await load(req, res, { select: "-data" });
+    if (!page) return;
+    const reading = await readingNow(page, req.user);
+    // Polling: nothing changed since the time the screen already has (who has it open is told every time)
+    if (req.query.known && new Date(String(req.query.known)).getTime() === new Date(page.updatedAt).getTime()) return res.json({ unchanged: true, reading });
+    // Opening the page (not a poll): it counts as a view, and an invite by email is tied to this account
+    let views = page.views || 0;
+    if (!req.query.known) {
+        await claimMembership(page, req.user);
+        views = await countView(page, req.user);
+    }
+    const full = await pageFor(page, req.user, { views });
+    const owner = await User.findById(page.owner).select("name email").lean().catch(() => null);
     res.json({
-        page: {
-            id: String(page._id),
-            title: page.title,
-            html: page.html,
-            visibility: page.visibility,
-            versions: page.versions,
-            owner: { name: page.owner?.name || "", email: page.owner?.email || "" },
-            createdAt: page.createdAt,
-            updatedAt: page.updatedAt,
-        },
-        isOwner: isOwner(page, req.user._id),
+        page: { ...full, owner: { name: owner?.name || "", email: owner?.email || "" } },
+        isOwner: full.isOwner,
         link: pageLink(page._id),
         comments: (page.comments || []).map(commentView),
+        reading,
     });
 }));
 
+// The screen was closed: this person is no longer shown as having the page open
+router.post("/:id/leave", isAuthenticated, wrap(async (req, res) => {
+    await stoppedReading(String(req.params.id), req.user);
+    res.json({ ok: true });
+}));
+
+// { title } (the owner and the editors), { visibility } (the people who share the page)
 router.patch("/:id", isAuthenticated, wrap(async (req, res) => {
-    const page = await findPage(req.params.id, "owner visibility");
-    if (!page || !canView(page, req.user._id)) return fail(res, 404, NOT_FOUND);
-    if (!isOwner(page, req.user._id)) return fail(res, 403, "Only the owner can change this page.");
+    const page = await load(req, res);
+    if (!page) return;
     const set = {};
-    if (req.body?.title !== undefined) set.title = cleanTitle(req.body.title);
+    if (req.body?.title !== undefined) {
+        if (!canRename(page, req.user)) return fail(res, 403, "Only the owner and the editors of this page can rename it.");
+        set.title = cleanTitle(req.body.title);
+    }
     if (req.body?.visibility !== undefined) {
+        if (!canShare(page, req.user)) return fail(res, 403, CANT_SHARE);
         const v = checkVisibility(req.body.visibility);
         if (!v.ok) return fail(res, 400, v.error);
         set.visibility = v.value;
@@ -67,54 +110,159 @@ router.patch("/:id", isAuthenticated, wrap(async (req, res) => {
 }));
 
 router.delete("/:id", isAuthenticated, wrap(async (req, res) => {
-    const page = await findPage(req.params.id, "owner visibility");
-    if (!page || !canView(page, req.user._id)) return fail(res, 404, NOT_FOUND);
-    if (!isOwner(page, req.user._id)) return fail(res, 403, "Only the owner can delete this page.");
+    const page = await load(req, res, { check: isOwner, refused: "Only the owner can delete this page." });
+    if (!page) return;
     await SharePage.deleteOne({ _id: page._id });
     res.json({ ok: true });
 }));
 
+// ── Sharing ──
+
+// General access: { visibility: "private" | "link", linkRole }
+router.patch("/:id/visibility", isAuthenticated, wrap(async (req, res) => {
+    const page = await load(req, res, { check: canShare, refused: CANT_SHARE });
+    if (!page) return;
+    if (req.body?.visibility === undefined && req.body?.linkRole === undefined) return fail(res, 400, 'visibility must be "private" or "link".');
+    await setGeneralAccess(page, { visibility: req.body?.visibility, linkRole: req.body?.linkRole });
+    res.json({ page: await pageFor(page, req.user) });
+}));
+
+// { emails: ["a@b.c"] or "a@b.c, d@e.f", role, notify }: one result line per email
+router.post("/:id/members", isAuthenticated, wrap(async (req, res) => {
+    const page = await load(req, res, { check: canShare, refused: CANT_SHARE });
+    if (!page) return;
+    const results = await inviteMembers(page, { by: req.user, emails: req.body?.emails ?? req.body?.email, role: req.body?.role, notify: req.body?.notify !== false });
+    res.json({ results, page: await pageFor(page, req.user) });
+}));
+
+// { role: "viewer" | "commenter" | "editor" }, or { role: "owner" } (the owner only): the page becomes that person's
+router.patch("/:id/members/:mid", isAuthenticated, wrap(async (req, res) => {
+    const toOwner = req.body?.role === "owner";
+    const page = toOwner
+        ? await load(req, res, { check: isOwner, refused: "Only the owner can make someone else the owner." })
+        : await load(req, res, { check: canShare, refused: CANT_SHARE });
+    if (!page) return;
+    if (toOwner) await makeOwner(page, req.params.mid, req.user);
+    else await setMemberRole(page, req.params.mid, req.body?.role);
+    res.json({ page: await pageFor(page, req.user) });
+}));
+
+// (a person may always take themselves off a page; removing someone else needs the right to share it)
+router.delete("/:id/members/:mid", isAuthenticated, wrap(async (req, res) => {
+    const page = await load(req, res);
+    if (!page) return;
+    const myEmail = String(req.user.email || "").trim().toLowerCase();
+    const mine = (page.members || []).find((m) => m.id === String(req.params.mid) && (String(m.userId || "") === String(req.user._id) || (!!myEmail && String(m.email || "") === myEmail)));
+    if (!mine && !canShare(page, req.user)) return fail(res, 403, CANT_SHARE);
+    await removeMember(page, req.params.mid);
+    if (mine && !canView(page, req.user)) return res.json({ ok: true, left: true });
+    res.json({ page: await pageFor(page, req.user) });
+}));
+
+// A signed-in person asks the page's owner for access: to open it, or ({ wants }) for more than they have
+router.post("/:id/access-requests", isAuthenticated, wrap(async (req, res) => {
+    const page = await findPage(req.params.id, LIGHT);
+    if (!page) return fail(res, 404, NOT_FOUND);
+    res.json({ status: await requestAccess(page, req.user, req.body?.wants) });
+}));
+
+// The answer: { action: "approve" | "decline", role }
+router.post("/:id/access-requests/:rid", isAuthenticated, wrap(async (req, res) => {
+    const page = await load(req, res, { check: canShare, refused: "Only the owner and the editors of this page can answer access requests." });
+    if (!page) return;
+    const action = String(req.body?.action || "");
+    if (!["approve", "decline"].includes(action)) return fail(res, 400, 'action must be "approve" or "decline".');
+    await answerRequest(page, req.params.rid, { approve: action === "approve", role: req.body?.role, by: req.user });
+    res.json({ page: await pageFor(page, req.user) });
+}));
+
+// ── The page's own menu ──
+
+router.post("/:id/duplicate", isAuthenticated, wrap(async (req, res) => {
+    const page = await load(req, res, { select: "-data" });
+    if (!page) return;
+    const copy = await duplicatePage(page, req.user);
+    res.json({ id: String(copy._id), title: copy.title });
+}));
+
+router.post("/:id/pin", isAuthenticated, wrap(async (req, res) => {
+    const page = await load(req, res);
+    if (!page) return;
+    res.json({ pinned: await setPinned(page, req.user, req.body?.pinned !== false) });
+}));
+
+router.post("/:id/report", isAuthenticated, wrap(async (req, res) => {
+    const page = await load(req, res);
+    if (!page) return;
+    await reportDoc(page, req.user, { reason: String(req.body?.reason || ""), description: req.body?.description });
+    res.json({ ok: true });
+}));
+
+// ── Comments ──
+
+// { text, replyTo, quote }: `quote` is the words of the page the comment is on
 router.post("/:id/comments", isAuthenticated, wrap(async (req, res) => {
-    const page = await findPage(req.params.id, "owner visibility comments.id");
-    if (!page || !canComment(page, req.user._id)) return fail(res, 404, NOT_FOUND);
+    const page = await load(req, res, { check: canComment, refused: CANT_COMMENT, select: "owner visibility linkRole members requests comments.id" });
+    if (!page) return;
     const text = checkCommentText(req.body?.text);
     if (!text.ok) return fail(res, 400, text.error);
     const replyTo = req.body?.replyTo ? String(req.body.replyTo) : null;
     if (replyTo && !(page.comments || []).some((c) => c.id === replyTo)) return fail(res, 400, "That comment was not found.");
-    const comment = await addComment(page._id, { user: req.user, text: text.value, replyTo });
+    const comment = await addComment(page._id, { user: req.user, text: text.value, replyTo, quote: req.body?.quote });
     if (!comment) return fail(res, 400, "This page has too many comments.");
-    res.status(201).json({ comment: commentView(comment) });
+    res.status(201).json({ comment: commentView(comment), page: await fresh(req) });
 }));
 
 router.patch("/:id/comments/:cid", isAuthenticated, wrap(async (req, res) => {
-    const page = await findPage(req.params.id, "owner visibility comments");
-    if (!page || !canView(page, req.user._id)) return fail(res, 404, NOT_FOUND);
+    const page = await load(req, res);
+    if (!page) return;
     const comment = (page.comments || []).find((c) => c.id === req.params.cid);
     if (!comment) return fail(res, 404, "That comment was not found.");
-    if (!canResolveComment(page, comment, req.user._id)) return fail(res, 403, "Only the page owner or the person who wrote it can do this.");
+    if (!canResolveComment(page, comment, req.user)) return fail(res, 403, "Only the page's owner, its editors or the person who wrote it can do this.");
     const resolved = req.body?.resolved === undefined ? true : !!req.body.resolved;
     await setCommentResolved(page._id, comment.id, resolved);
-    res.json({ comment: { ...commentView(comment), resolved } });
+    res.json({ comment: { ...commentView(comment), resolved }, page: await fresh(req) });
 }));
 
-// Page data: everyone who can view the page can read and write it
+// Removes a comment with its replies (its writer, or an editor of the page)
+router.delete("/:id/comments/:cid", isAuthenticated, wrap(async (req, res) => {
+    const page = await load(req, res);
+    if (!page) return;
+    const comment = (page.comments || []).find((c) => c.id === req.params.cid);
+    if (!comment) return fail(res, 404, "That comment was not found.");
+    if (!canDeleteComment(page, comment, req.user)) return fail(res, 403, "Only the page's owner, its editors or the person who wrote it can delete this.");
+    await removeComment(page._id, comment.id);
+    res.json({ page: await fresh(req) });
+}));
+
+router.post("/:id/comments/:cid/report", isAuthenticated, wrap(async (req, res) => {
+    const page = await load(req, res);
+    if (!page) return;
+    const comment = (page.comments || []).find((c) => c.id === req.params.cid);
+    if (!comment) return fail(res, 404, "That comment was not found.");
+    await reportComment(page, comment, req.user, { reason: String(req.body?.reason || ""), description: req.body?.description });
+    res.json({ ok: true });
+}));
+
+// ── Page data: everyone who can open the page can read and write it ──
+
 router.get("/:id/data", isAuthenticated, wrap(async (req, res) => {
-    const page = await findPage(req.params.id, "owner visibility data");
-    if (!page || !canView(page, req.user._id)) return fail(res, 404, NOT_FOUND);
+    const page = await findPage(req.params.id, "owner visibility linkRole members data");
+    if (!page || !canView(page, req.user)) return fail(res, 404, NOT_FOUND);
     res.json({ data: dataObject(page) });
 }));
 
 router.get("/:id/data/:key", isAuthenticated, wrap(async (req, res) => {
-    const page = await findPage(req.params.id, "owner visibility data");
-    if (!page || !canView(page, req.user._id)) return fail(res, 404, NOT_FOUND);
+    const page = await findPage(req.params.id, "owner visibility linkRole members data");
+    if (!page || !canView(page, req.user)) return fail(res, 404, NOT_FOUND);
     if (!DATA_KEY_RE.test(req.params.key)) return fail(res, 400, "Key must be 1-100 letters, numbers, _ - or :.");
     const value = page.data?.get(req.params.key);
     res.json({ key: req.params.key, value: value === undefined ? null : value });
 }));
 
 router.put("/:id/data/:key", isAuthenticated, wrap(async (req, res) => {
-    const page = await findPage(req.params.id, "owner visibility data");
-    if (!page || !canWriteData(page, req.user._id)) return fail(res, 404, NOT_FOUND);
+    const page = await findPage(req.params.id, "owner visibility linkRole members data");
+    if (!page || !canWriteData(page, req.user)) return fail(res, 404, NOT_FOUND);
     if (!req.body || !("value" in req.body)) return fail(res, 400, "Send { value }.");
     // null deletes the key
     const value = req.body.value === null ? undefined : req.body.value;

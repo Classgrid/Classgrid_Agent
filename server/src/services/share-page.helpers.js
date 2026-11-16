@@ -1,4 +1,7 @@
 // Share pages (chat.classgrid.in/p/<id>): small checks with no database, so they can be tested on their own.
+import {
+    roleOf, canView as roleCanView, canComment as roleCanComment, canEdit as roleCanEdit, canResolve as roleCanResolve, docForClient, cleanRole,
+} from "./live-doc.helpers.js";
 
 export const PAGE_APP_URL = "https://chat.classgrid.in";
 export const PAGE_HTML_MAX_BYTES = 2 * 1024 * 1024;
@@ -8,6 +11,7 @@ export const DATA_MAX_BYTES = 500 * 1024;
 export const DATA_KEY_RE = /^[A-Za-z0-9_\-:]{1,100}$/;
 export const COMMENT_MAX_CHARS = 5000;
 export const COMMENTS_MAX = 1000;
+export const QUOTE_MAX_CHARS = 2000;
 export const VISIBILITIES = ["private", "link"];
 
 export const pageLink = (id) => `${PAGE_APP_URL}/p/${id}`;
@@ -17,25 +21,105 @@ export const jsonSize = (v) => (v === undefined ? 0 : byteSize(JSON.stringify(v)
 
 const idOf = (v) => (v && typeof v === "object" && v._id ? String(v._id) : v == null ? "" : String(v));
 
-export function isOwner(page, userId) {
-    return !!page && !!userId && idOf(page.owner) === idOf(userId);
+// ── Who may do what ──
+// A page is shared like a live doc (owner, 2026-11-16; the rules are live-doc.helpers.js's): its owner, the people
+// it was shared with by email (viewer, commenter or editor) and, when its general access is "link", any signed-in
+// user with the link (as the link's role; a page from before roles gives "commenter", as its link always did).
+//   viewer     opens the page and uses it (the page's own saved data is the page working, so every viewer writes it)
+//   commenter  + comments and replies
+//   editor     + renames the page, resolves any comment, and shares the page (people, requests, the link)
+//   owner      + deletes the page, and can make another person its owner; only the owner's AI changes the page
+// `who` is a user id, or the signed-in user ({ _id, email }): a person invited by email before they had an account
+// is known by that email.
+export const isOwner = (page, who) => roleOf(page, who) === "owner";
+export const canView = roleCanView;
+export const canWriteData = roleCanView;
+export const canComment = roleCanComment;
+export const canShare = roleCanEdit;
+export const canRename = roleCanEdit;
+// Resolve or reopen a comment: an editor, or a commenter on their own comment
+export const canResolveComment = roleCanResolve;
+// Delete a comment with its replies: an editor, or the person who wrote it
+export const canDeleteComment = (page, comment, who) =>
+    roleCanEdit(page, who) || (roleCanView(page, who) && !!comment?.userId && !comment.byAi && idOf(comment.userId) === idOf(who));
+
+/** The words of the page a comment is on, cleaned (empty: the comment is on the page as a whole). */
+export const cleanQuote = (quote) => String(quote ?? "").replace(/\s+/g, " ").trim().slice(0, QUOTE_MAX_CHARS);
+
+/**
+ * The page's comments as threads, the way a live doc's are sent: each comment with its replies under it (a reply
+ * to a reply goes under the same comment). `photoOf(userId)` gives a person's photo.
+ */
+export function commentThreads(comments, photoOf = () => "") {
+    const list = comments || [];
+    const top = new Map();
+    const parent = new Map(list.map((c) => [c.id, c.replyTo || null]));
+    const threads = [];
+    for (const c of list) {
+        if (c.replyTo && parent.has(c.replyTo)) continue;
+        const thread = {
+            id: c.id, userId: idOf(c.userId), name: c.byAi ? "Classgrid AI" : c.name || "", photo: c.byAi ? "" : photoOf(c.userId), text: c.text,
+            quote: c.quote || "", at: c.at, resolved: !!c.resolved, byAI: !!c.byAi, replies: [],
+        };
+        top.set(c.id, thread);
+        threads.push(thread);
+    }
+    for (const c of list) {
+        if (!c.replyTo || !parent.has(c.replyTo)) continue;
+        let at = c.replyTo;
+        for (let i = 0; i < 20 && at && !top.has(at); i++) at = parent.get(at);
+        const thread = top.get(at);
+        if (thread) thread.replies.push({ id: c.id, userId: idOf(c.userId), name: c.byAi ? "Classgrid AI" : c.name || "", photo: c.byAi ? "" : photoOf(c.userId), text: c.text, at: c.at, byAI: !!c.byAi });
+    }
+    return threads;
 }
 
-// Owner always; anyone signed in when the page is shared by link
-export function canView(page, userId) {
-    if (!page || !userId) return false;
-    return isOwner(page, userId) || page.visibility === "link";
+/**
+ * What a signed-in person is sent for a page: the page, what they may do with it and, for the people who share it
+ * (its owner and its editors), the people it is shared with and the access requests. `profiles` gives people's
+ * current name and photo ({ byId, byEmail }).
+ */
+export function pageForClient(page, who, profiles = {}) {
+    const shared = docForClient({
+        _id: page._id, title: page.title, owner: page.owner, visibility: page.visibility, linkRole: page.linkRole, members: page.members,
+        requests: page.requests, views: page.views, pinnedBy: page.pinnedBy, comments: [], versions: [], createdAt: page.createdAt, updatedAt: page.updatedAt,
+    }, who, profiles);
+    const byId = profiles.byId || {};
+    const { markdown: _m, rev: _r, lastBy: _l, ...rest } = shared;
+    return {
+        ...rest,
+        html: page.html,
+        versions: page.versions || 1,
+        link: pageLink(page._id),
+        // (a page has no text to edit by hand: "edit" is renaming it, and it comes with sharing)
+        comments: commentThreads(page.comments, (userId) => byId[idOf(userId)]?.photo || ""),
+    };
 }
 
-// The page's shared data and comments: everyone who can view the page
-export const canWriteData = canView;
-export const canComment = canView;
-
-// Resolve or reopen a comment: the page owner or the person who wrote it
-export function canResolveComment(page, comment, userId) {
-    if (!page || !comment || !userId) return false;
-    return isOwner(page, userId) || idOf(comment.userId) === idOf(userId);
+/** A page's row in a list (no HTML). */
+export function pageRow(page, who, profiles = {}) {
+    const ownerProfile = (profiles.byId || {})[idOf(page.owner)];
+    const me = idOf(who);
+    return {
+        id: String(page._id),
+        title: page.title,
+        visibility: page.visibility,
+        role: roleOf(page, who),
+        shared: (page.members || []).length > 0 || page.visibility === "link",
+        ownerName: ownerProfile?.name || "",
+        ownerPhoto: ownerProfile?.photo || "",
+        pinned: !!me && (page.pinnedBy || []).some((id) => idOf(id) === me),
+        versions: page.versions || 1,
+        openComments: (page.comments || []).filter((c) => !c.resolved && !c.replyTo).length,
+        link: pageLink(page._id),
+        createdAt: page.createdAt,
+        updatedAt: page.updatedAt,
+    };
 }
+
+/** "Plan" -> "Copy of Plan" (inside the title's length). */
+export const copyPageTitle = (title) => cleanTitle(`Copy of ${cleanTitle(title)}`);
+export { cleanRole };
 
 export function cleanTitle(title) {
     const t = String(title ?? "").replace(/\s+/g, " ").trim().slice(0, PAGE_TITLE_MAX);

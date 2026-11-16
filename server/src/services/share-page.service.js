@@ -2,9 +2,13 @@
 import crypto from "crypto";
 import mongoose from "mongoose";
 import SharePage from "../models/SharePage.js";
+import User from "../models/User.js";
 import {
     pageLink, isOwner, cleanTitle, checkHtml, checkVisibility, checkCommentText, checkDataWrite, dataEntries, COMMENTS_MAX,
+    cleanQuote, pageForClient, copyPageTitle,
 } from "./share-page.helpers.js";
+import { profilesOf } from "./live-doc-share.service.js";
+import { normEmail } from "./live-doc.helpers.js";
 
 export const newCommentId = () => crypto.randomBytes(8).toString("hex");
 
@@ -16,7 +20,37 @@ export async function findPage(id, select) {
 }
 
 export function commentView(c) {
-    return { id: c.id, userId: c.userId ? String(c.userId) : null, name: c.name, email: c.email, text: c.text, at: c.at, resolved: !!c.resolved, replyTo: c.replyTo || null, byAi: !!c.byAi };
+    return { id: c.id, userId: c.userId ? String(c.userId) : null, name: c.name, email: c.email, text: c.text, quote: c.quote || "", at: c.at, resolved: !!c.resolved, replyTo: c.replyTo || null, byAi: !!c.byAi };
+}
+
+/** The page as the signed-in user gets it, with everyone's current name and photo. */
+export async function pageFor(page, user, extra = {}) {
+    const profiles = await profilesOf(page).catch(() => ({}));
+    return { ...pageForClient(page, user, profiles), ...extra };
+}
+
+/** Removes a comment with its replies. Answers whether it was there. */
+export async function removeComment(pageId, commentId) {
+    const res = await SharePage.updateOne({ _id: pageId, "comments.id": commentId }, { $pull: { comments: { $or: [{ id: commentId }, { replyTo: commentId }] } } }, { timestamps: false });
+    return res.modifiedCount > 0;
+}
+
+/** A copy of the page for this person: theirs, private, with the same HTML (not its comments or its saved data). */
+export const duplicatePage = (page, user) => SharePage.create({ owner: user._id, title: copyPageTitle(page.title), html: page.html, visibility: "private" });
+
+/** The pages this person owns and the pages shared with them by name (not the ones only a link opens). */
+export async function pagesOf(user) {
+    const email = normEmail(user.email);
+    const fields = "title visibility linkRole owner members pinnedBy versions comments.resolved comments.replyTo createdAt updatedAt";
+    const [mine, shared] = await Promise.all([
+        SharePage.find({ owner: user._id }).select(fields).sort({ updatedAt: -1 }).limit(200).lean(),
+        SharePage.find({ owner: { $ne: user._id }, $or: [{ "members.userId": user._id }, ...(email ? [{ "members.email": email }] : [])] }).select(fields).sort({ updatedAt: -1 }).limit(200).lean(),
+    ]);
+    const owners = [...new Set(shared.map((p) => String(p.owner)))];
+    const people = owners.length ? await User.find({ _id: { $in: owners } }).select("name email profilePicture").lean() : [];
+    const byId = {};
+    for (const u of people) byId[String(u._id)] = { name: u.name || u.email || "", photo: u.profilePicture || "" };
+    return { mine, shared, profiles: { byId } };
 }
 
 export function summaryView(p) {
@@ -24,13 +58,14 @@ export function summaryView(p) {
     return { id: String(p._id), title: p.title, visibility: p.visibility, versions: p.versions, openComments: open, link: pageLink(p._id), createdAt: p.createdAt, updatedAt: p.updatedAt };
 }
 
-export async function addComment(pageId, { user, text, replyTo = null, byAi = false }) {
+export async function addComment(pageId, { user, text, replyTo = null, byAi = false, quote = "" }) {
     const comment = {
         id: newCommentId(),
         userId: user?._id,
         name: byAi ? "Classgrid AI" : String(user?.name || ""),
         email: byAi ? "" : String(user?.email || ""),
         text,
+        quote: replyTo ? "" : cleanQuote(quote),
         at: new Date(),
         resolved: false,
         replyTo: replyTo || null,
@@ -54,7 +89,9 @@ export async function writeData(page, key, value) {
     const check = checkDataWrite(page.data, key, value);
     if (!check.ok) return check;
     const update = value === undefined ? { $unset: { [`data.${key}`]: "" } } : { $set: { [`data.${key}`]: value } };
-    await SharePage.updateOne({ _id: page._id }, update);
+    // (the page working is not the page changing: its "updated" time stays, so the people who have it open are
+    // not sent the whole page again each time it saves something)
+    await SharePage.updateOne({ _id: page._id }, update, { timestamps: false });
     return { ok: true };
 }
 
@@ -145,7 +182,7 @@ export async function runPageComments(user, args = {}) {
         const list = (page.comments || []).map(commentView);
         if (!list.length) return `"${page.title}" has no comments yet.`;
         return `Comments on "${page.title}" (${list.length}):\n` + list.map((c) =>
-            `- [${c.id}]${c.replyTo ? ` (reply to ${c.replyTo})` : ""} ${c.byAi ? "Classgrid AI" : `${c.name || "Someone"} <${c.email}>`}, ${new Date(c.at).toISOString()}${c.resolved ? ", resolved" : ""}: ${c.text}`
+            `- [${c.id}]${c.replyTo ? ` (reply to ${c.replyTo})` : ""} ${c.byAi ? "Classgrid AI" : `${c.name || "Someone"} <${c.email}>`}, ${new Date(c.at).toISOString()}${c.resolved ? ", resolved" : ""}${c.quote ? `, on "${String(c.quote).slice(0, 300)}"` : ""}: ${c.text}`
         ).join("\n");
     }
     const cid = String(args.comment_id || "").trim();

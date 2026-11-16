@@ -186,6 +186,17 @@ export async function deleteAccountData(user, { io = null } = {}) {
         return r.modifiedCount || 0;
     });
 
+    // The same for other people's published pages
+    await step("pageAccess", async () => {
+        const mine = { $or: [{ userId: user._id }, ...(emails.length ? [{ email: { $in: emails.map((e) => e.toLowerCase()) } }] : [])] };
+        const r = await SharePage.updateMany(
+            { $or: [{ "members.userId": user._id }, { "requests.userId": user._id }, { pinnedBy: user._id }, ...(emails.length ? [{ "members.email": { $in: emails.map((e) => e.toLowerCase()) } }] : [])] },
+            { $pull: { members: mine, requests: mine, pinnedBy: user._id } },
+            { timestamps: false },
+        );
+        return r.modifiedCount || 0;
+    });
+
     await step("phoneTokens", async () => {
         const { error } = await sb.from("device_tokens").delete().eq("user_id", userId);
         if (error) throw error;

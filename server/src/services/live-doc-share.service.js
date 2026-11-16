@@ -1,6 +1,9 @@
 // Live docs: sharing with people, access requests, who is reading now, views, copies, pins and reports
 // (owner, 2026-11-16: the share box, "request access" for a private doc, and the doc's own menu).
 // Who may do what is in live-doc.helpers.js; the emails are in live-doc-emails.js.
+// A published page (models/SharePage.js, /api/pages) is shared the same way, with the same fields (members,
+// requests, linkRole, views, pinnedBy), so the functions here take a doc or a page: what is saved goes to the
+// model the thing came from, and the words say "doc" or "page" (owner, 2026-11-16).
 import crypto from "crypto";
 import LiveDoc from "../models/LiveDoc.js";
 import User from "../models/User.js";
@@ -15,6 +18,10 @@ import { accessRequestEmail, docInviteEmail, accessGrantedEmail, sendDocEmail } 
 const newId = () => crypto.randomBytes(6).toString("hex");
 const idOf = (v) => (v == null ? "" : String(v._id || v));
 const quiet = { timestamps: false }; // (a change the readers need not be told about: the doc's "edited" time stays)
+// The model a doc or a page is saved in, and the word for it
+const isPage = (doc) => doc?.constructor?.modelName === "SharePage";
+const modelOf = (doc) => (typeof doc?.constructor?.updateOne === "function" ? doc.constructor : LiveDoc);
+const kindOf = (doc) => (isPage(doc) ? "page" : "doc");
 
 // ── People's names and photos ──
 
@@ -103,7 +110,7 @@ export async function countView(doc, user) {
     try {
         const first = await redis.set(`livedoc:view:${doc._id}:${user._id}`, "1", "EX", 1800, "NX");
         if (first !== "OK") return views;
-        await LiveDoc.updateOne({ _id: doc._id }, { $inc: { views: 1 } }, quiet);
+        await modelOf(doc).updateOne({ _id: doc._id }, { $inc: { views: 1 } }, quiet);
         return views + 1;
     } catch {
         return views;
@@ -116,7 +123,7 @@ export async function claimMembership(doc, user) {
     if (!member || member.userId || idOf(doc.owner) === String(user._id)) return;
     member.userId = user._id;
     member.name = userName(user);
-    await LiveDoc.updateOne({ _id: doc._id, "members.id": member.id }, { $set: { "members.$.userId": user._id, "members.$.name": member.name } }, quiet).catch(() => {});
+    await modelOf(doc).updateOne({ _id: doc._id, "members.id": member.id }, { $set: { "members.$.userId": user._id, "members.$.name": member.name } }, quiet).catch(() => {});
 }
 
 // ── Sharing with people ──
@@ -139,14 +146,14 @@ export async function inviteMembers(doc, { by, emails, role, notify = true }) {
     const added = [];
     for (const email of good) {
         const account = accounts.get(email);
-        if (email === normEmail(by.email) || (account && String(account._id) === ownerId)) { results.push({ email, error: "This is the doc's owner." }); continue; }
+        if (email === normEmail(by.email) || (account && String(account._id) === ownerId)) { results.push({ email, error: `This is the ${kindOf(doc)}'s owner.` }); continue; }
         const existing = (doc.members || []).find((m) => normEmail(m.email) === email || (account && idOf(m.userId) === String(account._id)));
         if (existing) {
             existing.role = wanted;
             results.push({ email, ok: true, already: true });
             continue;
         }
-        if (doc.members.length >= MAX_MEMBERS) { results.push({ email, error: `A doc can be shared with up to ${MAX_MEMBERS} people.` }); continue; }
+        if (doc.members.length >= MAX_MEMBERS) { results.push({ email, error: `A ${kindOf(doc)} can be shared with up to ${MAX_MEMBERS} people.` }); continue; }
         doc.members.push({ id: newId(), userId: account?._id || null, email, name: account?.name || "", role: wanted, addedAt: new Date(), addedBy: by._id });
         doc.requests = (doc.requests || []).filter((r) => normEmail(r.email) !== email && !(account && idOf(r.userId) === String(account._id)));
         added.push(email);
@@ -157,7 +164,7 @@ export async function inviteMembers(doc, { by, emails, role, notify = true }) {
     if (notify) {
         for (const email of added) {
             try {
-                await sendDocEmail(email, docInviteEmail({ docId: doc._id, title: doc.title, inviterName: userName(by), inviterEmail: normEmail(by.email), role: wanted }));
+                await sendDocEmail(email, docInviteEmail({ docId: doc._id, title: doc.title, inviterName: userName(by), inviterEmail: normEmail(by.email), role: wanted, kind: kindOf(doc) }));
             } catch (e) {
                 console.error("[live-docs] invite email failed:", e?.message);
                 const line = results.find((r) => r.email === email);
@@ -170,7 +177,7 @@ export async function inviteMembers(doc, { by, emails, role, notify = true }) {
 
 export async function setMemberRole(doc, memberId, role) {
     const member = (doc.members || []).find((m) => m.id === String(memberId));
-    if (!member) throw new Error("That person was not found on this doc.");
+    if (!member) throw new Error(`That person was not found on this ${kindOf(doc)}.`);
     member.role = cleanRole(role);
     await doc.save();
     return member;
@@ -179,7 +186,7 @@ export async function setMemberRole(doc, memberId, role) {
 export async function removeMember(doc, memberId) {
     const before = doc.members.length;
     doc.members = doc.members.filter((m) => m.id !== String(memberId));
-    if (doc.members.length === before) throw new Error("That person was not found on this doc.");
+    if (doc.members.length === before) throw new Error(`That person was not found on this ${kindOf(doc)}.`);
     await doc.save();
 }
 
@@ -200,15 +207,15 @@ export async function setGeneralAccess(doc, { visibility, linkRole }) {
  */
 export async function makeOwner(doc, memberId, by) {
     const member = (doc.members || []).find((m) => m.id === String(memberId));
-    if (!member) throw new Error("That person was not found on this doc.");
+    if (!member) throw new Error(`That person was not found on this ${kindOf(doc)}.`);
     const account = member.userId
         ? await User.findById(member.userId).select("name email").lean()
         : await User.findOne({ email: normEmail(member.email) }).select("name email").lean();
-    if (!account) throw new Error("This person has no Classgrid account yet, so the doc can't be made theirs.");
+    if (!account) throw new Error(`This person has no Classgrid account yet, so the ${kindOf(doc)} can't be made theirs.`);
     doc.members = doc.members.filter((m) => m.id !== member.id && idOf(m.userId) !== String(by._id) && normEmail(m.email) !== normEmail(by.email));
     doc.members.push({ id: newId(), userId: by._id, email: normEmail(by.email), name: userName(by), role: "editor", addedAt: new Date(), addedBy: by._id });
     doc.owner = account._id;
-    doc.ownerName = userName(account);
+    if (!isPage(doc)) doc.ownerName = userName(account);
     await doc.save();
 }
 
@@ -230,7 +237,7 @@ export async function requestAccess(doc, user, wants = "viewer") {
     const asksMore = request && !roleCovers(request.wants, wanted);
     if (request && !asksMore && request.emailedAt && now - new Date(request.emailedAt).getTime() < REQUEST_EMAIL_EVERY_MS) return "pending";
     if (!request) {
-        if ((doc.requests || []).length >= MAX_REQUESTS) throw new Error("This doc has too many requests waiting. Try again later.");
+        if ((doc.requests || []).length >= MAX_REQUESTS) throw new Error(`This ${kindOf(doc)} has too many requests waiting. Try again later.`);
         request = { id: newId(), userId: user._id, email, name: userName(user), wants: wanted, at: new Date(), emailedAt: null };
         doc.requests.push(request);
         await doc.save();
@@ -241,8 +248,8 @@ export async function requestAccess(doc, user, wants = "viewer") {
     const owner = await User.findById(doc.owner).select("email").lean();
     if (owner?.email) {
         try {
-            await sendDocEmail(owner.email, accessRequestEmail({ docId: doc._id, title: doc.title, requesterName: userName(user), requesterEmail: email, wants: cleanRole(request.wants) }));
-            await LiveDoc.updateOne({ _id: doc._id, "requests.id": request.id }, { $set: { "requests.$.emailedAt": new Date() } }, quiet);
+            await sendDocEmail(owner.email, accessRequestEmail({ docId: doc._id, title: doc.title, requesterName: userName(user), requesterEmail: email, wants: cleanRole(request.wants), kind: kindOf(doc) }));
+            await modelOf(doc).updateOne({ _id: doc._id, "requests.id": request.id }, { $set: { "requests.$.emailedAt": new Date() } }, quiet);
         } catch (e) {
             // (the request still waits in the owner's share box)
             console.error("[live-docs] access request email failed:", e?.message);
@@ -265,14 +272,14 @@ export async function answerRequest(doc, requestId, { approve, role, by }) {
         const existing = (doc.members || []).find((m) => idOf(m.userId) === idOf(request.userId) || normEmail(m.email) === normEmail(request.email));
         if (existing) existing.role = wanted;
         else {
-            if (doc.members.length >= MAX_MEMBERS) throw new Error(`A doc can be shared with up to ${MAX_MEMBERS} people.`);
+            if (doc.members.length >= MAX_MEMBERS) throw new Error(`A ${kindOf(doc)} can be shared with up to ${MAX_MEMBERS} people.`);
             doc.members.push({ id: newId(), userId: request.userId, email: normEmail(request.email), name: request.name || "", role: wanted, addedAt: new Date(), addedBy: by._id });
         }
     }
     await doc.save();
     if (approve) {
         try {
-            await sendDocEmail(request.email, accessGrantedEmail({ docId: doc._id, title: doc.title, ownerName: userName(by), role: wanted }));
+            await sendDocEmail(request.email, accessGrantedEmail({ docId: doc._id, title: doc.title, ownerName: userName(by), role: wanted, kind: kindOf(doc) }));
         } catch (e) {
             console.error("[live-docs] access granted email failed:", e?.message);
         }
@@ -286,7 +293,7 @@ export const duplicateDoc = (doc, user) => createDoc({ user, title: copyTitle(do
 
 /** Pins the doc in this person's own list, or takes the pin off. */
 export async function setPinned(doc, user, pinned) {
-    await LiveDoc.updateOne({ _id: doc._id }, pinned ? { $addToSet: { pinnedBy: user._id } } : { $pull: { pinnedBy: user._id } }, quiet);
+    await modelOf(doc).updateOne({ _id: doc._id }, pinned ? { $addToSet: { pinnedBy: user._id } } : { $pull: { pinnedBy: user._id } }, quiet);
     return !!pinned;
 }
 
@@ -294,7 +301,7 @@ export const REPORT_REASONS = ["spam", "harassment", "hate_speech", "inappropria
 
 /** Reports the doc to the Classgrid team: it shows in the super admin's Content Moderation. */
 export async function reportDoc(doc, user, { reason, description }) {
-    if (!REPORT_REASONS.includes(reason)) throw new Error("Pick what is wrong with this doc.");
+    if (!REPORT_REASONS.includes(reason)) throw new Error(`Pick what is wrong with this ${kindOf(doc)}.`);
     const ContentReport = (await import("../models/ContentReport.js")).default;
     const already = await ContentReport.exists({ reportedBy: user._id, contentId: String(doc._id), status: "pending" });
     if (already) return;
@@ -303,8 +310,10 @@ export async function reportDoc(doc, user, { reason, description }) {
         reportedByName: userName(user),
         contentType: "other",
         contentId: String(doc._id),
-        contentPreview: `Live doc "${doc.title}": ${String(doc.markdown || "").replace(/\s+/g, " ").slice(0, 240)}`,
-        reportedUser: doc.owner,
+        contentPreview: isPage(doc)
+            ? `Published page "${doc.title}": https://chat.classgrid.in/p/${doc._id}`
+            : `Live doc "${doc.title}": ${String(doc.markdown || "").replace(/\s+/g, " ").slice(0, 240)}`,
+        reportedUser: idOf(doc.owner) || null,
         reportedUserName: doc.ownerName || "",
         reason,
         description: String(description || "").trim().slice(0, MAX_REPORT),
@@ -322,7 +331,7 @@ export async function reportComment(doc, comment, user, { reason, description })
         reportedByName: userName(user),
         contentType: "other",
         contentId,
-        contentPreview: `Comment on the live doc "${doc.title}": ${String(comment.text || "").replace(/\s+/g, " ").slice(0, 240)}`,
+        contentPreview: `Comment on the ${isPage(doc) ? "published page" : "live doc"} "${doc.title}": ${String(comment.text || "").replace(/\s+/g, " ").slice(0, 240)}`,
         reportedUser: comment.userId || null,
         reportedUserName: comment.name || "",
         reason,

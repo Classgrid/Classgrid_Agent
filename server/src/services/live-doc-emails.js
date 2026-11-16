@@ -3,30 +3,37 @@
 //   - to the owner, when someone asks for access to a private doc ("Review request")
 //   - to a person the owner shared the doc with ("Open the doc")
 //   - to the person who asked, when the owner let them in
+// A published page (chat.classgrid.in/p/<id>) is shared the same way: with kind "page" the same three emails say
+// "page" and link to the page (owner, 2026-11-16).
 // The words are made here with nothing else in them (so they are tested on their own: tests/live-doc.test.mjs);
 // sending is at the bottom. Our standard Classgrid email design (baseTemplate), sent from hello@classgrid.in like
 // the chat invites.
 import { docLink, roleWords } from "./live-doc.helpers.js";
+
+/** Where a doc or a page opens. */
+export const sharedLink = (kind, id) => (kind === "page" ? `https://chat.classgrid.in/p/${id}` : docLink(id));
+// (what a role lets a person do with a page: it is opened, not read)
+const can = (kind, role) => (kind === "page" ? (role === "editor" ? "open it, comment on it and share it" : role === "commenter" ? "open it and comment on it" : "open it") : `${roleWords(role)} it`);
 
 const escapeHtml = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
 // (a subject is one line)
 const oneLine = (s) => String(s ?? "").replace(/\s+/g, " ").trim();
 
 /** The page the owner answers requests on: the doc, with its share box open. */
-export const reviewLink = (docId) => `${docLink(docId)}?share=requests`;
+export const reviewLink = (docId, kind = "doc") => `${sharedLink(kind, docId)}?share=requests`;
 
 /** Someone asked for access: the email to the owner. */
-export function accessRequestEmail({ docId, title, requesterName, requesterEmail, wants = "viewer" }) {
-    const link = reviewLink(docId);
+export function accessRequestEmail({ docId, title, requesterName, requesterEmail, wants = "viewer", kind = "doc" }) {
+    const link = reviewLink(docId, kind);
     const name = oneLine(requesterName) || requesterEmail;
     // (someone who can already read it asks for more: to comment, or to edit)
-    const more = wants === "editor" ? "edit" : wants === "commenter" ? "comment on" : "";
+    const more = wants === "editor" ? (kind === "page" ? "share" : "edit") : wants === "commenter" ? "comment on" : "";
     const asks = more ? `asked to ${more}` : "asked to open";
     return {
         subject: oneLine(more ? `${name} asked to ${more} "${title}"` : `${name} asked for access to "${title}"`),
-        heading: more ? `Someone asked to ${more} your doc` : "Someone asked for access to your doc",
+        heading: more ? `Someone asked to ${more} your ${kind}` : `Someone asked for access to your ${kind}`,
         content: `
-    <p><strong>${escapeHtml(requesterEmail)}</strong> ${asks} your doc <strong>"${escapeHtml(title)}"</strong> on Classgrid.</p>
+    <p><strong>${escapeHtml(requesterEmail)}</strong> ${asks} your ${kind} <strong>"${escapeHtml(title)}"</strong> on Classgrid.</p>
     <div class="box">
       <p class="meta">Who is asking</p>
       <p><strong>${escapeHtml(requesterEmail)}</strong></p>
@@ -36,44 +43,44 @@ export function accessRequestEmail({ docId, title, requesterName, requesterEmail
     <a href="${link}" class="btn">Review request</a>
     <p>Or open this link: <a href="${link}">${link}</a></p>
   `,
-        ignoreText: `You are getting this because someone asked for access to a doc you own on Classgrid. ${more ? "Nothing changes until you answer." : "Nobody can open it until you let them in."} You can decline the request in the doc's Share box.`,
-        text: `${requesterEmail} (name they use: ${name}) ${asks} your doc "${title}" on Classgrid. Go by the email address when you decide. Review the request: ${link}`,
+        ignoreText: `You are getting this because someone asked for access to a ${kind} you own on Classgrid. ${more ? "Nothing changes until you answer." : "Nobody can open it until you let them in."} You can decline the request in the ${kind}'s Share box.`,
+        text: `${requesterEmail} (name they use: ${name}) ${asks} your ${kind} "${title}" on Classgrid. Go by the email address when you decide. Review the request: ${link}`,
     };
 }
 
 /** The owner shared the doc with a person: the email to that person. */
-export function docInviteEmail({ docId, title, inviterName, inviterEmail, role }) {
-    const link = docLink(docId);
+export function docInviteEmail({ docId, title, inviterName, inviterEmail, role, kind = "doc" }) {
+    const link = sharedLink(kind, docId);
     const who = `${oneLine(inviterName) || inviterEmail} (${inviterEmail})`;
     return {
-        subject: oneLine(`${oneLine(inviterName) || inviterEmail} shared a doc with you: "${title}"`),
-        heading: "A doc was shared with you",
+        subject: oneLine(`${oneLine(inviterName) || inviterEmail} shared a ${kind} with you: "${title}"`),
+        heading: `A ${kind} was shared with you`,
         content: `
-    <p><strong>${escapeHtml(who)}</strong> shared the doc <strong>"${escapeHtml(title)}"</strong> with you on Classgrid.</p>
-    <p>You can ${roleWords(role)} it. Sign in with this email address to open it.</p>
-    <a href="${link}" class="btn">Open the doc</a>
+    <p><strong>${escapeHtml(who)}</strong> shared the ${kind} <strong>"${escapeHtml(title)}"</strong> with you on Classgrid.</p>
+    <p>You can ${can(kind, role)}. Sign in with this email address to open it.</p>
+    <a href="${link}" class="btn">Open the ${kind}</a>
     <p>Or open this link: <a href="${link}">${link}</a></p>
   `,
         ignoreText: `If you don't know ${escapeHtml(who)}, you can ignore this email.`,
-        text: `${who} shared the doc "${title}" with you on Classgrid. You can ${roleWords(role)} it. Sign in with this email address to open it: ${link}`,
+        text: `${who} shared the ${kind} "${title}" with you on Classgrid. You can ${can(kind, role)}. Sign in with this email address to open it: ${link}`,
     };
 }
 
 /** The owner let the person in: the email to the person who asked. */
-export function accessGrantedEmail({ docId, title, ownerName, role }) {
-    const link = docLink(docId);
+export function accessGrantedEmail({ docId, title, ownerName, role, kind = "doc" }) {
+    const link = sharedLink(kind, docId);
     const owner = oneLine(ownerName) || "The owner";
     return {
         subject: oneLine(`You can now open "${title}"`),
-        heading: "You have access to the doc",
+        heading: `You have access to the ${kind}`,
         content: `
-    <p><strong>${escapeHtml(owner)}</strong> let you into the doc <strong>"${escapeHtml(title)}"</strong> on Classgrid.</p>
-    <p>You can ${roleWords(role)} it.</p>
-    <a href="${link}" class="btn">Open the doc</a>
+    <p><strong>${escapeHtml(owner)}</strong> let you into the ${kind} <strong>"${escapeHtml(title)}"</strong> on Classgrid.</p>
+    <p>You can ${can(kind, role)}.</p>
+    <a href="${link}" class="btn">Open the ${kind}</a>
     <p>Or open this link: <a href="${link}">${link}</a></p>
   `,
         ignoreText: null,
-        text: `${owner} let you into the doc "${title}" on Classgrid. You can ${roleWords(role)} it. Open it: ${link}`,
+        text: `${owner} let you into the ${kind} "${title}" on Classgrid. You can ${can(kind, role)}. Open it: ${link}`,
     };
 }
 
