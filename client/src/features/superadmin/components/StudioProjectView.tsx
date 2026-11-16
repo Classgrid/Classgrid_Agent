@@ -289,7 +289,7 @@ export function StudioProjectView({ projectId, reloadKey = 0 }: { projectId: str
             <button onClick={() => setSwitching((s) => !s)} className={`shrink-0 h-8 px-2.5 inline-flex items-center gap-1.5 rounded-md border border-black/10 dark:border-white/10 text-[12px] hover:text-foreground hover:bg-black/[0.04] dark:hover:bg-white/[0.05] transition-colors ${switching ? "text-foreground bg-black/[0.04] dark:bg-white/[0.05]" : "text-muted-foreground"}`}>
               <ArrowLeftRight className="size-3.5" /> Switch
             </button>
-            <Link to={window.location.pathname.startsWith("/superadmin") ? "/superadmin/project" : "/c/project"} className="shrink-0 h-8 px-2.5 inline-flex items-center gap-1.5 rounded-md border border-black/10 dark:border-white/10 text-[12px] text-muted-foreground hover:text-foreground hover:bg-black/[0.04] dark:hover:bg-white/[0.05] transition-colors">
+            <Link to={window.location.pathname.startsWith("/superadmin") ? "/superadmin/studio/project" : "/c/studio/project"} className="shrink-0 h-8 px-2.5 inline-flex items-center gap-1.5 rounded-md border border-black/10 dark:border-white/10 text-[12px] text-muted-foreground hover:text-foreground hover:bg-black/[0.04] dark:hover:bg-white/[0.05] transition-colors">
               Open in Project Mode
             </Link>
             <button onClick={load} className="shrink-0 flex items-center justify-center size-8 rounded-md text-muted-foreground hover:text-foreground hover:bg-black/[0.05] dark:hover:bg-white/[0.06] transition-colors" title="Refresh" aria-label="Refresh">
@@ -322,7 +322,7 @@ export function StudioProjectView({ projectId, reloadKey = 0 }: { projectId: str
           {githubMissing ? (
             <div className="mt-2 flex items-center justify-between gap-3">
               <p className="text-[12px] text-muted-foreground">GitHub is not connected. Set it up in Project Mode first.</p>
-              <Link to={window.location.pathname.startsWith("/superadmin") ? "/superadmin/project" : "/c/project"} className="shrink-0 h-7 px-2.5 inline-flex items-center rounded-md bg-foreground text-background text-[12px] font-medium hover:opacity-90">Go to Project Mode</Link>
+              <Link to={window.location.pathname.startsWith("/superadmin") ? "/superadmin/studio/project" : "/c/studio/project"} className="shrink-0 h-7 px-2.5 inline-flex items-center rounded-md bg-foreground text-background text-[12px] font-medium hover:opacity-90">Go to Project Mode</Link>
             </div>
           ) : !project?.repo && folderRepo ? (
             <div className="mt-2 flex flex-col gap-1.5 text-[12px] text-foreground/80">

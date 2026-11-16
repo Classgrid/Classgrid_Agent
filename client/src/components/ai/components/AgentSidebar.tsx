@@ -589,7 +589,10 @@ export function AgentNestedMenu({ searchQuery = "", pages }: { searchQuery?: str
 
   const navigate = useNavigate();
   const location = useLocation();
-  const isProjectMode = location.pathname.split("/").includes("project");
+  // Project is part of Studio now (owner, 2026-11-16): its page, /c/studio/project, has Studio's sidebar, so only the
+  // old Project mode address (Classgrid Code's Agent panel, /editor/project) still counts as Project mode here
+  const isProjectMode = location.pathname.split("/").includes("project") && !location.pathname.split("/").includes("studio");
+  const onProjectPage = location.pathname.split("/").includes("project") && location.pathname.split("/").includes("studio");
   // (desktop app: Studio's list on every page but Project mode, such as Grids, Requests and Audit Logs)
   const isStudioMode = IN_EDITOR || location.pathname.split("/").includes("studio") || (DESKTOP_APP && !isProjectMode);
   // Switching between Agent and Project mode shows that mode's own chats
@@ -597,7 +600,8 @@ export function AgentNestedMenu({ searchQuery = "", pages }: { searchQuery?: str
 
   // Extract base path robustly by finding the 'agent' segment
   const pathParts = location.pathname.split('/');
-  const agentIndex = pathParts.indexOf('agent') !== -1 ? pathParts.indexOf('agent') : pathParts.indexOf('project') !== -1 ? pathParts.indexOf('project') : pathParts.indexOf('studio');
+  // (Studio before project: on Studio's Project page, /c/studio/project, chats and New Chat open in Studio)
+  const agentIndex = pathParts.indexOf('agent') !== -1 ? pathParts.indexOf('agent') : pathParts.indexOf('studio') !== -1 ? pathParts.indexOf('studio') : pathParts.indexOf('project');
   const baseAgentPath = DESKTOP_APP && !IN_EDITOR && isStudioMode && !pathParts.includes("studio")
     ? (location.pathname.startsWith("/superadmin") ? "/superadmin/studio" : "/c/studio") // (desktop app, Grids and other pages: chats open in Studio)
     : agentIndex !== -1
@@ -614,13 +618,14 @@ export function AgentNestedMenu({ searchQuery = "", pages }: { searchQuery?: str
   const showCalls = showSchedule;
   // (they open inside the mode they are picked in: Studio's at /c/studio/schedule, Agent's at /agent/schedule)
   const toolsBase = DESKTOP_APP || isStudioMode ? baseAgentPath : baseAgentPath.replace("/project", "/agent");
-  // Project (owner, 2026-11-16): taken out of the mode menu at the top and put in Studio's sidebar under Calls, on the
-  // website and in the desktop app. Like the mode menu did, it keeps the open chat (Project and Studio share chats).
+  // Project (owner, 2026-11-16): part of Studio, no longer a mode of its own. It is in Studio's sidebar under Calls (website
+  // and desktop app) and opens Studio's Project page, /c/studio/project. Like the mode menu did, it keeps the open chat
+  // (Project and Studio share chats).
   const showProject = isStudioMode && !IN_EDITOR;
   const goToProjectMode = () => {
     const studioChat = pathParts[pathParts.indexOf("studio") + 1] || "";
-    const chat = pathParts.includes("studio") && /^[0-9a-f-]{36}$/i.test(studioChat) ? `/${studioChat}` : "";
-    navigate(`${location.pathname.startsWith("/superadmin") ? "/superadmin/project" : "/c/project"}${chat}`);
+    const chat = !onProjectPage && pathParts.includes("studio") && /^[0-9a-f-]{36}$/i.test(studioChat) ? `/${studioChat}` : "";
+    navigate(`${location.pathname.startsWith("/superadmin") ? "/superadmin/studio/project" : "/c/studio/project"}${chat}`);
   };
 
   const handleNewChat = () => {
@@ -855,7 +860,7 @@ export function AgentNestedMenu({ searchQuery = "", pages }: { searchQuery?: str
       }
       // Go straight to Project Mode with this chat. No project is marked open, so the editor does not start;
       // the user opens the editor from the project when they want it.
-      const projectPath = baseAgentPath.replace(/\/agent$/, "/project");
+      const projectPath = location.pathname.startsWith("/superadmin") ? "/superadmin/studio/project" : "/c/studio/project";
       toast.success(`Moved to ${project.name}`);
       try { localStorage.removeItem("cg_project_open"); sessionStorage.removeItem("cg_project_open"); } catch { /* storage blocked */ }
       navigate(`${projectPath}/${sessionId}`);
@@ -1434,7 +1439,7 @@ export function AgentNestedMenu({ searchQuery = "", pages }: { searchQuery?: str
               <SidebarMenuButton 
                 tooltip="New Chat" 
                 onClick={handleNewChat}
-                isActive={!activeSessionId}
+                isActive={!activeSessionId && !onProjectPage}
                 render={
                   <div className="flex items-center gap-3 w-full cursor-pointer">
                     <SquarePen size={20} />
@@ -1494,6 +1499,7 @@ export function AgentNestedMenu({ searchQuery = "", pages }: { searchQuery?: str
               <SidebarMenuButton
                 tooltip="Project"
                 onClick={goToProjectMode}
+                isActive={onProjectPage}
                 render={
                   <div className="flex items-center gap-3 w-full cursor-pointer">
                     <CodeXml size={20} />
@@ -1611,7 +1617,7 @@ export function AgentNestedMenu({ searchQuery = "", pages }: { searchQuery?: str
             <SidebarMenuItem>
               <SidebarMenuButton 
                 onClick={handleNewChat}
-                isActive={!activeSessionId}
+                isActive={!activeSessionId && !onProjectPage}
                 render={
                   <div className="flex items-center gap-3 w-full cursor-pointer">
                     <SquarePen size={20} />
@@ -1667,6 +1673,7 @@ export function AgentNestedMenu({ searchQuery = "", pages }: { searchQuery?: str
             <SidebarMenuItem>
               <SidebarMenuButton
                 onClick={goToProjectMode}
+                isActive={onProjectPage}
                 render={
                   <div className="flex items-center gap-3 w-full cursor-pointer">
                     <CodeXml size={20} />

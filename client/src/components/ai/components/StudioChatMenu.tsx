@@ -318,7 +318,7 @@ function ArchivedChatsDialog({ open, onClose }: { open: boolean; onClose: () => 
   );
 }
 
-// Studio: open this same chat in Project Mode (the same project and chat, with the code editor)
+// Studio: open this same chat on Studio's Project page, /c/studio/project (the same project and chat, with the code editor)
 export function OpenInProjectButton({ sessionId }: { sessionId: string }) {
   const open = async () => {
     // The chat's own project opens (not just the projects list): ask which project this chat belongs to
@@ -329,7 +329,7 @@ export function OpenInProjectButton({ sessionId }: { sessionId: string }) {
     }
     const parts = window.location.pathname.split("/");
     const at = parts.indexOf("studio");
-    const base = at !== -1 ? [...parts.slice(0, at), "project"].join("/") : "/c/project";
+    const base = at !== -1 ? [...parts.slice(0, at + 1), "project"].join("/") : "/c/studio/project";
     window.history.pushState({}, "", `${base}/${sessionId}`);
     window.dispatchEvent(new PopStateEvent("popstate"));
   };

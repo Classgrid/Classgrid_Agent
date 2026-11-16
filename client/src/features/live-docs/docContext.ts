@@ -17,7 +17,8 @@ export const OPEN_DOC_EVENT = "classgrid:open-live-doc";
 export const openDocInStudio = (id: string, kind?: "page") => window.dispatchEvent(new CustomEvent(OPEN_DOC_EVENT, { detail: { id, kind } }));
 
 /** Whether this screen is Studio (where a doc opens beside the chat). */
-export const onStudio = () => window.location.pathname.split("/").includes("studio");
+// (Studio itself: its Project page, /c/studio/project, has the code editor, not Studio's right pane)
+export const onStudio = () => window.location.pathname.split("/").includes("studio") && !window.location.pathname.split("/").includes("project");
 
 /**
  * The address that opens Studio with this doc beside the chat (and, with `ask`, sends that message to the AI).

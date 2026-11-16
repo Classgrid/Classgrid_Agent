@@ -89,6 +89,15 @@ function ToStudio() {
   return <Navigate to={{ pathname: base + rest, search }} replace />;
 }
 const agentPage = DESKTOP ? <ToStudio /> : <DashboardHomePage />;
+// Project is part of Studio (owner, 2026-11-16): its page is /c/studio/project (super admins /superadmin/studio/project),
+// with Studio's sidebar, search and icon. An old /c/project link (a bookmark, an email, the phone app, the desktop app's
+// saved place) opens it there, keeping its chat and its query (?github_app=, ?openFolder=)
+function ToStudioProject() {
+  const { pathname, search } = useLocation();
+  const base = pathname.startsWith("/superadmin") ? "/superadmin/studio/project" : "/c/studio/project";
+  const chat = pathname.match(/\/project\/([^/]+)/)?.[1];
+  return <Navigate to={{ pathname: chat ? `${base}/${chat}` : base, search }} replace />;
+}
 
 // The link sent on WhatsApp after a call (chat.classgrid.in/calls/<id>) opens the call's read-only record under
 // Calls: in Studio in the desktop app, in Agent mode on the website (owner, 2026-11-09)
@@ -301,8 +310,10 @@ export function AppRouter() {
         <Route element={<SuperAdminLayout />}>
           <Route path="/superadmin/dashboard" element={<NavigateWithQuery to={DESKTOP ? "/superadmin/studio" : "/superadmin/agent"} replace />} />
           <Route path="/superadmin/agent" element={agentPage} />
-          <Route path="/superadmin/project" element={<ProjectModePage />} />
-          <Route path="/superadmin/project/:sessionId" element={<ProjectModePage />} />
+          <Route path="/superadmin/project" element={<ToStudioProject />} />
+          <Route path="/superadmin/project/:sessionId" element={<ToStudioProject />} />
+          <Route path="/superadmin/studio/project" element={<ProjectModePage />} />
+          <Route path="/superadmin/studio/project/:sessionId" element={<ProjectModePage />} />
           <Route path="/superadmin/studio" element={<StudioModePage />} />
           <Route path="/superadmin/studio/:sessionId" element={<StudioModePage />} />
           {/* (desktop: Schedule's pages live in Studio, /superadmin/studio/schedule/<id>) */}
@@ -400,8 +411,10 @@ export function AppRouter() {
           <Route path="/agent/:sessionId" element={agentPage} />
           <Route path="/agent/:sessionId/*" element={agentPage} />
           <Route path="/c/agent" element={agentPage} />
-          <Route path="/c/project" element={<ProjectModePage />} />
-          <Route path="/c/project/:sessionId" element={<ProjectModePage />} />
+          <Route path="/c/project" element={<ToStudioProject />} />
+          <Route path="/c/project/:sessionId" element={<ToStudioProject />} />
+          <Route path="/c/studio/project" element={<ProjectModePage />} />
+          <Route path="/c/studio/project/:sessionId" element={<ProjectModePage />} />
           <Route path="/c/studio" element={<StudioModePage />} />
           <Route path="/c/studio/:sessionId" element={<StudioModePage />} />
           <Route path="/c/studio/:sessionId/*" element={<StudioModePage />} />

@@ -1929,7 +1929,8 @@ const AssistantMessageContent = memo(({ content, sources, createdAt, isTyping, o
                     inProject = (parts.includes("project") && !!(sessionStorage.getItem("cg_project_open") || localStorage.getItem("cg_project_open")))
                       || (parts.includes("studio") && !!(sessionStorage.getItem("cg_project_open") || localStorage.getItem("cg_project_open"))); // Studio: the plan opens in its Files tab
                   } catch { /* storage blocked */ }
-                  const inStudio = window.location.pathname.split("/").includes("studio");
+                  // (Studio itself, not its Project page, /c/studio/project, which has no Files tab)
+                  const inStudio = window.location.pathname.split("/").includes("studio") && !window.location.pathname.split("/").includes("project");
                   if (inProject || inStudio) window.dispatchEvent(new CustomEvent("classgrid:open-project-file", { detail: { plan: true, planTitle: parsedProps.planTitle } }));
                   else window.dispatchEvent(new Event("classgrid:open-plan-panel"));
                 }}
@@ -2437,7 +2438,7 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
 
   // The plan card's "View Plan" button opens the side panel (outside Project Mode)
   useEffect(() => {
-    const open = () => { if (window.location.pathname.split("/").includes("studio")) return; setShowFilesPanel(true); };
+    const open = () => { if (window.location.pathname.split("/").includes("studio") && !window.location.pathname.split("/").includes("project")) return; setShowFilesPanel(true); };
     window.addEventListener("classgrid:open-plan-panel", open);
     return () => window.removeEventListener("classgrid:open-plan-panel", open);
   }, []);
@@ -2667,7 +2668,8 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
         // Go back to the base agent path to clear the chat view
         const currentPath = window.location.pathname;
         const pathParts = currentPath.split('/');
-        const agentIndex = pathParts.indexOf('agent') !== -1 ? pathParts.indexOf('agent') : pathParts.indexOf('studio');
+        // (Studio's Project page, /c/studio/project, stays where it is, as Project Mode did)
+        const agentIndex = pathParts.includes('project') ? -1 : pathParts.indexOf('agent') !== -1 ? pathParts.indexOf('agent') : pathParts.indexOf('studio');
         if (agentIndex !== -1) {
           const baseAgentPath = pathParts.slice(0, agentIndex + 1).join('/');
           if (currentPath !== baseAgentPath) {
@@ -3455,17 +3457,18 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
           savedDetails = sData;
           // Website: a folder project's chat (This PC) opens as a plain chat; that project is never opened here
           const chatProject: string | null = chatProjectOf(sData);
-          // A project's chat opened from Agent mode (Library, an old link...): open it in Project Mode, in its project
+          // A project's chat opened from Agent mode (Library, an old link...): open it on Studio's Project page
+          // (/c/studio/project, Project is part of Studio since 2026-11-16), in its project
           const parts = window.location.pathname.split("/");
           const agentAt = parts.indexOf("agent");
           if (chatProject && agentAt !== -1) {
             try { localStorage.setItem("cg_project_open", chatProject); sessionStorage.setItem("cg_project_open", chatProject); } catch { /* storage blocked */ }
-            parts[agentAt] = "project";
-            window.location.assign(parts.slice(0, agentAt + 1).join("/") + `/${id}`);
+            window.location.assign(`${window.location.pathname.startsWith("/superadmin") ? "/superadmin/studio/project" : "/c/studio/project"}/${id}`);
             return;
           }
-          // Studio: opening a chat opens its project too (or no project, for a chat sent without one)
-          if (parts.includes("studio")) {
+          // Studio: opening a chat opens its project too (or no project, for a chat sent without one). Not on Studio's
+          // Project page: that page opens and links its project itself
+          if (parts.includes("studio") && !parts.includes("project")) {
             const want: string | null = chatProject;
             let now: string | null = null;
             try { now = sessionStorage.getItem("cg_project_open") || localStorage.getItem("cg_project_open"); } catch { /* storage blocked */ }
@@ -3634,7 +3637,7 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
             // opens its project too (or no project), as opening it any other way does, so the Project, Files and
             // Terminal tabs are that project's. The website used to skip this, so a Mastero project's chat opened there
             // said "No project picked". Same rule as handleLoadChat (a folder project's chat stays a plain chat online).
-            if (sData?.session && window.location.pathname.split("/").includes("studio")) {
+            if (sData?.session && window.location.pathname.split("/").includes("studio") && !window.location.pathname.split("/").includes("project")) {
               const want: string | null = chatProjectOf(sData);
               let now: string | null = null;
               try { now = sessionStorage.getItem("cg_project_open") || localStorage.getItem("cg_project_open"); } catch { /* storage blocked */ }
@@ -4999,12 +5002,13 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
           // Which mode the user is in (Agent, Project or Studio), so the AI knows what the user can see and do
           appMode: (() => {
             const parts = window.location.pathname.split("/");
-            return parts.includes("studio") ? "studio" : parts.includes("project") ? "project" : "agent";
+            // (Studio's Project page, /c/studio/project, is the code editor: "project", as Project Mode was)
+            return parts.includes("project") ? "project" : parts.includes("studio") ? "studio" : "agent";
           })(),
           // A "/" command at the start of the message (Project Mode and Studio)
           command: (() => {
             const parts = window.location.pathname.split("/");
-            return parts.includes("studio") || parts.includes("project") ? leadingSlashCommand(question, parts.includes("studio")) : undefined;
+            return parts.includes("studio") || parts.includes("project") ? leadingSlashCommand(question, parts.includes("studio") && !parts.includes("project")) : undefined;
           })(),
           // How hard the AI thinks (model menu): Fast, Normal or Deep
           effort: getThinkingLevel() === "normal" ? undefined : getThinkingLevel() === "fast" ? "low" : "high",

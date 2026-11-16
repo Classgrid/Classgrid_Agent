@@ -41,11 +41,12 @@ router.get("/events", isAuthenticated, async (req, res) => {
   res.json({ events: await repoEvents(repo) });
 });
 
-// GitHub's "Setup URL": after installing the app, the user goes straight back into Project Mode
+// GitHub's "Setup URL": after installing the app, the user goes straight back to Studio's Project page (Project is part
+// of Studio since 2026-11-16; the old /c/project address is sent there too)
 router.get("/installed", (req, res) => {
   // Installed from the desktop app: GitHub hands back our "desktop" note, and the browser opens the app again
   if (req.query.state === "desktop") return res.type("html").send(DESKTOP_DONE_PAGE);
-  res.redirect("https://chat.classgrid.in/c/project?github_app=installed");
+  res.redirect("https://chat.classgrid.in/c/studio/project?github_app=installed");
 });
 
 // GitHub webhook (raw body, signed with GITHUB_APP_WEBHOOK_SECRET)

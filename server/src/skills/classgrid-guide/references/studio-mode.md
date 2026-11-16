@@ -6,7 +6,8 @@ Studio Mode is Classgrid AI's agent workspace: you chat on the left, and a pane 
 
 - The agent does the work itself: it browses websites, writes and changes code, runs commands and checks the result. There is no code editor in Studio.
 - Good for: using websites for you (open, click, fill forms, compare), testing your running app, building or fixing a project by chat, reviewing a site's design.
-- To switch: on chat.classgrid.in, click your name at the top of the sidebar, then under **Switch Mode** choose **Studio**. Choose **Agent** or **Project** to go back.
+- To switch: on chat.classgrid.in, click your name at the top of the sidebar, then under **Switch Mode** choose **Studio**. Choose **Agent** to go back.
+- **Project** (Project Mode, the code editor) is part of Studio: click **Project** in Studio's left sidebar, under Calls. It has Studio's sidebar and search.
 - Switching between Project and Studio keeps the open chat. Any signed-in Classgrid AI user can use Studio.
 - Studio and Project Mode share the same projects and chats.
 

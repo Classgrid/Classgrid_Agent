@@ -94,7 +94,8 @@ export function SidebarSwitcher({ user }: { user: { role?: string; name?: string
   const studioPath = isSuperAdminArea ? "/superadmin/studio" : "/c/studio";
   // (the desktop app has no Agent mode: only Project and Studio, and any other page counts as Studio)
   const DESKTOP = import.meta.env.VITE_DESKTOP === "1";
-  const currentMode = pathname.split("/").includes("project") ? "project" : pathname.split("/").includes("studio") || DESKTOP ? "studio" : "agent";
+  // (Project is part of Studio: its page, /c/studio/project, shows Studio as the mode; owner, 2026-11-16)
+  const currentMode = pathname.split("/").some((x) => x === "studio" || x === "project") || DESKTOP ? "studio" : "agent";
   // Project Mode and Studio share the project and its chats: switching between them keeps the open chat
   const openChat = (() => {
     if (currentMode === "agent") return "";
@@ -234,7 +235,8 @@ function ModeIcon({ kind }: { kind: "agent" | "project" | "studio" | "docs" }) {
   if (kind === "studio") {
     return (
       <svg viewBox="0 0 24 24" className="size-7 shrink-0" aria-hidden="true">
-        <rect width="24" height="24" rx="6" fill="#3b82f6" />
+        {/* Classgrid orange (owner, 2026-11-16: Agent green, Studio orange; Project is part of Studio now) */}
+        <rect width="24" height="24" rx="6" fill="#f97316" />
         <rect x="5.5" y="6.5" width="13" height="11" rx="2" fill="none" stroke="#ffffff" strokeWidth="1.6" />
         <path d="M5.5 9.6h13" stroke="#ffffff" strokeWidth="1.6" />
         <circle cx="7.6" cy="8.05" r=".55" fill="#ffffff" />

@@ -193,11 +193,14 @@ export function AppSidebar({ role, user }: AppSidebarProps) {
   const navigate = useNavigate();
   // Desktop app (not the super admin's long menu, not Project mode): every page has Studio's sidebar, with Grids,
   // Requests and Audit Logs under Library, and no main menu
-  const studioEverywhere = DESKTOP_APP && import.meta.env.VITE_EDITOR !== "1" && role !== "super_admin" && !location.pathname.split("/").includes("project");
+  // (Studio's Project page, /c/studio/project, is part of Studio and has its sidebar; only an old /c/project address,
+  // which is sent there at once, is left out)
+  const oldProjectPath = location.pathname.split("/").includes("project") && !location.pathname.split("/").includes("studio");
+  const studioEverywhere = DESKTOP_APP && import.meta.env.VITE_EDITOR !== "1" && role !== "super_admin" && !oldProjectPath;
   const isStudio = location.pathname.split("/").includes("studio") || studioEverywhere;
   // Website, chat.classgrid.in (Agent and Studio, not Project): the chat list on every page too, with Schedule, Library,
   // Calls, Grids, Requests and Audit Logs in it and no back button, like the desktop app (owner, 2026-11-13)
-  const listEverywhere = studioEverywhere || (!DESKTOP_APP && import.meta.env.VITE_EDITOR !== "1" && role === "public_chat" && !location.pathname.split("/").includes("project"));
+  const listEverywhere = studioEverywhere || (!DESKTOP_APP && import.meta.env.VITE_EDITOR !== "1" && role === "public_chat" && !oldProjectPath);
   // Settings (website and desktop app): its own sidebar, with its sections and a search box (SettingsNav)
   const onSettings = isSettingsPath(location.pathname) && import.meta.env.VITE_EDITOR !== "1";
   const [searchQuery, setSearchQuery] = useState("");

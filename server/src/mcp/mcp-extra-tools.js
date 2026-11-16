@@ -258,7 +258,7 @@ async function listProjects(ctx, args) {
         .sort({ lastOpenedAt: -1, updatedAt: -1 })
         .lean();
     if (words) all = all.filter((p) => `${p.name} ${p.repo || ""}`.toLowerCase().includes(words));
-    if (!all.length) return words ? `No project matches "${args.query}".` : "The user has no Classgrid projects yet. They make one in Project Mode at chat.classgrid.in.";
+    if (!all.length) return words ? `No project matches "${args.query}".` : "The user has no Classgrid projects yet. They make one in Studio at chat.classgrid.in (Project in Studio's left sidebar).";
     const { page, ...meta } = paged(all, clampInt(args.offset, 0, 100000, 0), clampInt(args.limit, 1, 100, 50));
     return JSON.stringify({ ...meta, projects: page.map(projectRow) }, null, 2);
 }

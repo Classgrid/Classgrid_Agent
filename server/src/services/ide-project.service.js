@@ -144,7 +144,7 @@ function resolveInProject(project, givenPath = "") {
 
 async function withProject(sessionId, fn) {
   const project = await projectForChat(sessionId);
-  if (!project) return "No project is open in this chat. The user opens one in Project Mode.";
+  if (!project) return "No project is open in this chat. The user opens one in Studio (Project in Studio's left sidebar, or the project picker above the chat box).";
   let ssh;
   try {
     ssh = await sandboxSsh();
@@ -403,7 +403,7 @@ export const projectTools = {
   // The Classgrid project's own name (what the user sees in Project Mode); same check as renaming it on the website
   rename_project: async (sessionId, { new_name }) => {
     const project = await projectForChat(sessionId);
-    if (!project) return "No project is open in this chat. The user opens one in Project Mode.";
+    if (!project) return "No project is open in this chat. The user opens one in Studio (Project in Studio's left sidebar, or the project picker above the chat box).";
     const name = String(new_name || "").trim().slice(0, 80);
     if (!name) return "Error: give the new project name.";
     const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -618,7 +618,7 @@ export async function pushProject(project, ssh, message, { direct: askedDirect =
 
   const dir = projectHostDir(project);
   const { stdout: isRepo } = await ssh.execCommand(`[ -d ${q(dir)}/.git ] && echo yes`);
-  if (!isRepo.trim()) return "The project code is not downloaded. Open the project in Project Mode first.";
+  if (!isRepo.trim()) return "The project code is not downloaded. Open the project in Studio first (Project in Studio's left sidebar).";
 
   await ssh.execCommand(`${excludeGuide(dir)}; git -C ${q(dir)} add -A`);
   const { stdout: staged } = await ssh.execCommand(`git -C ${q(dir)} diff --cached --stat | tail -1`);
@@ -873,7 +873,7 @@ async function searchByMeaningNow(project, ssh, query, maxResults) {
   const k = Math.min(Math.max(Number(maxResults) || 8, 1), 15);
   const dir = projectHostDir(project);
   const { stdout: hasCode } = await ssh.execCommand(`[ -n "$(ls -A ${q(dir)} 2>/dev/null)" ] && echo yes`);
-  if (!hasCode.trim()) return "The project's code is not downloaded right now. The user opens the project in Project Mode first.";
+  if (!hasCode.trim()) return "The project's code is not downloaded right now. The user opens the project in Studio first (Project in Studio's left sidebar).";
   const index = `/home/ubuntu/ide_users/${project.owner}/.classgrid/semindex/${project._id}.json`;
 
   const planned = await ssh.execCommand(`python3 ${SEM_SCRIPT} plan ${q(dir)} ${q(index)}`);

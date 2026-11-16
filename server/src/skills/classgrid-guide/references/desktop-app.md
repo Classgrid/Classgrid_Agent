@@ -1,7 +1,7 @@
 # The Classgrid desktop app (Windows)
 
 The Classgrid desktop app is Classgrid AI as a real Windows app ("Classgrid Setup x.y.z.exe", it updates itself).
-It has the same Agent Mode, Project Mode and Studio Mode as chat.classgrid.in, plus work on the user's own computer.
+It has the same Studio Mode (with its Project page, **Project** in Studio's left sidebar) as chat.classgrid.in, plus work on the user's own computer.
 Your thinking still runs on Classgrid's servers; the app does the work on the computer and sends back the result.
 
 ## What the agent can do on the user's computer (in the desktop app)

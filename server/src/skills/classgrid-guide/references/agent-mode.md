@@ -6,10 +6,10 @@ Agent Mode is the main AI chat at chat.classgrid.in: you ask in plain words, and
 
 -   Agent Mode is the home screen of chat.classgrid.in. It is an agent, not just a chatbot: it can search the web, read
     files, run code, make files and images, publish websites, send email, use connected apps and work in the background.
--   There are three modes: **Agent**, **Project** (code editor on a GitHub repo) and **Studio** (watch the agent work
-    in a live browser).
+-   There are two modes: **Agent** and **Studio** (watch the agent work in a live browser). **Project** (the code editor
+    on a GitHub repo) is part of Studio: click **Project** in Studio's left sidebar, under Calls.
 -   To switch, open the menu at the top of the sidebar (the name with the up/down arrows). Under **Switch Mode**, pick
-    **Agent**, **Project** or **Studio**. The same menu has a **Docs** link.
+    **Agent** or **Studio**. The same menu has a **Docs** link.
 -   No special commands are needed. While it works, the agent shows each step (searching, reading a file, running code),
     then replies with text, files, links or answer cards.
 

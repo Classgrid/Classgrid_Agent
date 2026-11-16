@@ -283,10 +283,10 @@ export function DashboardLayout({ children, role, user }: DashboardLayoutProps) 
               {/* Studio's Schedule, Library and Calls (desktop app and website): the sidebar button is in their own top bar
                   (AskAiPanel); a second one here sat on top of it (website, 2026-11-13) */}
               {isFullBleed && !location.pathname.includes("/agent") && !(import.meta.env.VITE_DESKTOP === "1" && location.pathname.split("/").includes("project")) && !(import.meta.env.VITE_EDITOR !== "1" && /\/studio\/(schedule|library|calls)(\/|$)/.test(location.pathname)) && (
-                <div className={`absolute z-50 ${location.pathname.split("/").includes("studio") ? "studio-sidebar-btn top-2 left-3 right-3 flex items-center gap-1 pointer-events-none [&>*]:pointer-events-auto" : "top-4 left-4"}`}>
+                <div className={`absolute z-50 ${location.pathname.split("/").includes("studio") && !location.pathname.split("/").includes("project") ? "studio-sidebar-btn top-2 left-3 right-3 flex items-center gap-1 pointer-events-none [&>*]:pointer-events-auto" : "top-4 left-4"}`}>
                   <SidebarTrigger />
                   {/* Studio: "project / chat" next to the button (the chat's name switches between the project's chats) */}
-                  {location.pathname.split("/").includes("studio") && !/\/studio\/(schedule|library|calls)(\/|$)/.test(location.pathname) && <StudioChatCrumb />}
+                  {location.pathname.split("/").includes("studio") && !/\/studio\/(schedule|library|calls|project)(\/|$)/.test(location.pathname) && <StudioChatCrumb />}
                 </div>
               )}
               {children}

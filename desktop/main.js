@@ -155,13 +155,13 @@ function editorLinks(w) {
     w.webContents.send("cg:openFolderProject", next);
   });
 }
-// The built-in editor's "New Window": a new Classgrid window in Project Mode (with the folder it picked, if any),
+// The built-in editor's "New Window": a new Classgrid window on Studio's Project page (with the folder it picked, if any),
 // never a bare editor window
 function openAppWindow(folder) {
   if (folder && fs.existsSync(folder)) runner.allowFolder(folder);
   else folder = "";
-  let base = "/c/project";
-  try { if (new URL(win.webContents.getURL()).pathname.startsWith("/superadmin")) base = "/superadmin/project"; } catch { /* no main window */ }
+  let base = "/c/studio/project"; // (Project is part of Studio since 2026-11-16)
+  try { if (new URL(win.webContents.getURL()).pathname.startsWith("/superadmin")) base = "/superadmin/studio/project"; } catch { /* no main window */ }
   const w = new BrowserWindow({ width: 1300, height: 850, ...appWindowOptions() });
   w.webContents.setWindowOpenHandler(({ url }) => {
     const fromEditor = editorFolder(url);

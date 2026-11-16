@@ -5,7 +5,7 @@ Project Mode (Classgrid Code) is a VS Code editor in the browser with the Classg
 ## 1. Switch to Project Mode
 
 - Go to chat.classgrid.in and sign in.
-- Click your name at the top of the sidebar, then under **Switch Mode** pick **Project**. Pick **Agent** to go back to normal chat, or **Studio** for Studio Mode.
+- Project Mode is part of Studio: switch to **Studio** (click your name at the top of the sidebar, then under **Switch Mode** pick **Studio**), then click **Project** in Studio's left sidebar, under Calls. Its address is chat.classgrid.in/c/studio/project. The left sidebar is Studio's, with Studio's search.
 - A chat started in Agent mode can be moved in: open the chat's menu, choose **Move to project**, then pick a project or make a new one. Each project keeps its own chats.
 
 ## 2. GitHub is required
