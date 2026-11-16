@@ -5390,6 +5390,8 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
                 setPriorityMessage(null);
               } else if (event.type === "limit_ended") {
                 limitEndedReset = event.resetDate || new Date().toISOString();
+                // (the Usage page shows the limit as used up at once, not its numbers from before this answer)
+                queryClient.invalidateQueries({ queryKey: ["ai-plan-overview"] });
               } else if (event.type === "error") {
                 streamError = event.error || "Unable to answer right now. Please try again.";
               }
@@ -5506,6 +5508,8 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
       setThinking(false);
 
       if (fallback.trim().startsWith("ai_quota_exceeded")) {
+        // (the Usage page shows the limit as used up at once, not its numbers from before this message)
+        queryClient.invalidateQueries({ queryKey: ["ai-plan-overview"] });
         setMessages((prev) => {
           const lastMsg = prev[prev.length - 1];
           if (!lastMsg || lastMsg.role !== "assistant") return prev;

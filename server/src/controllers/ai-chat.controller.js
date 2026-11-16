@@ -54,6 +54,7 @@ import { planToolsForMessage, buildLoadToolsTool, orderTools, groupOfTool, ageSt
 import { safetyRulesFor } from "../services/ai-safety-rules.js";
 import { cfModel } from "../services/cf-retired-models.js";
 import { chargeableTokens, pricesFor } from "../services/ai-token-pricing.js";
+import { REPLY_TOKEN_ALLOWANCE, addRound, roundTokensLeft, roundMaxOutput, roundInputTooBig } from "../services/answer-meter.js";
 import { getPresignedUploadUrl, uploadBufferToR2 } from "../config/r2Client.js";
 import { primarySupabaseClient as supabase } from "../config/supabaseClient.js";
 import {
@@ -885,8 +886,6 @@ async function buildDeepContext(userEmail) {
     }
 }
 
-// Pre-request quota estimate: ~4 characters per token over everything sent (rules, history, message, tools),
-// plus room for the reply. MIN_PROMPT_TOKENS is the smallest real request (rules + core tools, "hi" ~3.8k).
 // Tavily keys (owner's choice): TAVILY_API_KEY, then TAVILY_API_KEY_2 and TAVILY_API_KEY_3. When a key's monthly
 // limit is used up (432, or 429), the next key is tried, and later calls start from the key that last worked.
 const tavilyKeys = () => [process.env.TAVILY_API_KEY, process.env.TAVILY_API_KEY_2, process.env.TAVILY_API_KEY_3].map((k) => k?.trim()).filter(Boolean);
@@ -964,8 +963,6 @@ const officialDomainsFor = (query) => {
     return [...new Set(OFFICIAL_DOMAINS.filter(([re]) => re.test(q)).flatMap(([, domains]) => domains))].slice(0, 10);
 };
 
-const MIN_PROMPT_TOKENS = 3000;
-const REPLY_TOKEN_ALLOWANCE = 2000;
 
 // open_url backup reader: fetches the page straight from this server (like curl) when Tavily can't read it.
 // Only public addresses: never localhost, private networks or the cloud metadata address.
@@ -1096,7 +1093,6 @@ async function readPageDirect(startUrl, pageLinks = []) {
         return [visible, strings.join("\n")].filter(Boolean).join("\n\n").trim();
     } catch { return ""; }
 }
-const estimatePromptTokens = (parts) => Math.ceil(parts.reduce((n, p) => n + (typeof p === "string" ? p.length : (JSON.stringify(p ?? "") || "").length), 0) / 4);
 
 // The per-message notes (time, editor notes, the user's terminal) travel beside the user's message (perMessageNote)
 // so the message text stays byte-identical in the history of later turns (prompt cache). Models that take plain
@@ -1712,7 +1708,9 @@ export const streamAskAi = async (req, res) => {
     // when the provider reports it; a round may write at most what the user has left (at the model's output price);
     // a round whose real input (sent before anything is written) uses up what is left is cut; with nothing left
     // the answer stops. spendable is set by the quota check (undefined = no limit).
-    const liveMeter = { spent: 0, spendable: undefined, stopped: false };
+    // The answer's own first round is never cut and may always write a normal reply (services/answer-meter.js): a
+    // message that was allowed to start gets its answer, and the limit ends at 100 percent.
+    const liveMeter = { spent: 0, spendable: undefined, stopped: false, firstRoundDone: false };
     // Playground (super admins): this answer's rounds, tool calls and live words go to the super admin's own live
     // channel, so the Playground page can show them next to the chat. Nothing is sent for other users.
     const playgroundRun = req.user?.role === "super_admin" && userId
@@ -1739,12 +1737,10 @@ export const streamAskAi = async (req, res) => {
     };
     const meterHooks = (model, who = "Agent") => {
         const outputWeight = chargeableTokens({ prompt_tokens: 0, completion_tokens: 1000 }, model) / 1000;
-        const left = () => liveMeter.spendable === undefined ? undefined : liveMeter.spendable - liveMeter.spent;
         return {
             onRoundUsage: (u, { cut } = {}) => {
                 const cost = chargeableTokens(u, model);
-                liveMeter.spent += cost;
-                if (cut) liveMeter.stopped = true;
+                addRound(liveMeter, who, cost, !!cut);
                 if (playgroundRun) {
                     flushPlaygroundText();
                     const round = (playgroundRun.rounds[who] = (playgroundRun.rounds[who] || 0) + 1);
@@ -1760,18 +1756,15 @@ export const streamAskAi = async (req, res) => {
                 }
             },
             tokensLeft: () => {
-                const l = left();
+                const l = roundTokensLeft(liveMeter, who);
                 if (l !== undefined && l <= 0 && !liveMeter.stopped) {
                     liveMeter.stopped = true;
                     playground("stop", { who, spent: liveMeter.spent, spendable: liveMeter.spendable });
                 }
                 return l;
             },
-            maxOutputTokens: () => {
-                const l = left();
-                return l === undefined ? undefined : Math.max(0, l) / outputWeight;
-            },
-            inputTooBig: (u) => liveMeter.spendable !== undefined && liveMeter.spent + chargeableTokens(u, model) >= liveMeter.spendable,
+            maxOutputTokens: () => roundMaxOutput(liveMeter, who, outputWeight),
+            inputTooBig: (u) => roundInputTooBig(liveMeter, who, chargeableTokens(u, model)),
         };
     };
     let availableTokensToGenerate = 8192;
@@ -1783,12 +1776,17 @@ export const streamAskAi = async (req, res) => {
         return;
     }
 
-    // Quota check, part 1 (before anything is saved): the user's message plus a minimum for the rules and the
-    // reply. Part 2 (quotaCheckForPrompt, below) re-checks with the real prompt size once the prompt is built.
-    // Both fail closed: if the check itself errors, the request is not run.
+    // Quota check, part 1 (before anything is saved): a message starts whenever the user has anything left. Nothing
+    // is guessed here: the answer itself is metered with the provider's real numbers (liveMeter), and the message
+    // that takes the limit to its end still gets its answer (owner, 2026-11-16: the old check asked for a guess of
+    // the whole message, about 5,000 credits or more, so a limit stopped at 93 to 97 percent and never reached 100).
+    // Part 2 (below, before the model call) reuses it. Both fail closed: if the check itself errors, the request is
+    // not run.
     const quotaBlocked = async (check) => {
         const user = await User.findById(userId).select("ai_tokens").lean().catch(() => null);
-        const resetDate = user?.ai_tokens?.week_reset_date ? new Date(user.ai_tokens.week_reset_date) : new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
+        // When the limit comes back: the check says which limit ran out (the session window, or the week)
+        const resetDate = check.resetAt ? new Date(check.resetAt)
+            : user?.ai_tokens?.week_reset_date ? new Date(user.ai_tokens.week_reset_date) : new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
         return { error: check.reason === "Insufficient tokens." ? "ai_quota_exceeded" : "ai_blocked", message: check.reason, resetDate: resetDate.toISOString() };
     };
     // A model Cloudflare removed (an older app, a saved chat) goes to its replacement (services/cf-retired-models.js)
@@ -1880,7 +1878,7 @@ export const streamAskAi = async (req, res) => {
         const quotaKey = `quota:${userId}:${orgId || "-"}:${fablePaidOnly ? 1 : 0}`;
         const check = claudeSeparate && !fablePaidOnly
             ? { allowed: true, source: "weekly_free", remaining: claudePoolLeft, spendable: claudePoolLeft, claudePool: true } // (the Claude credits were checked above)
-            : await keptFor(quotaKey, 30000, () => hasEnoughTokens(userId, orgId, estimatePromptTokens([body.question || ""]) + MIN_PROMPT_TOKENS + REPLY_TOKEN_ALLOWANCE, { paidOnly: fablePaidOnly }));
+            : await keptFor(quotaKey, 30000, () => hasEnoughTokens(userId, orgId, 1, { paidOnly: fablePaidOnly }));
         if (!check.claudePool && (!check.allowed || ((check.spendable ?? check.remaining) !== undefined && (check.spendable ?? check.remaining) < 50000))) forgetKept(quotaKey);
         firstCheck = check;
         if (deviceNoted) await deviceNoted;
@@ -1891,13 +1889,15 @@ export const streamAskAi = async (req, res) => {
         }
         if (!check.allowed) {
             const blocked = await quotaBlocked(check);
+            // (logged like the refusal before the model call, so a refusal can be traced to its reason)
+            console.warn(`[AI-TOKEN] Refused before the answer: reason="${check.reason}" back=${blocked.resetDate}`);
             res.writeHead(429, { "Content-Type": "application/json" });
             res.end(JSON.stringify(blocked));
             return;
         }
         tokenSource = check.source;
         if (check.remaining !== undefined) {
-            availableTokensToGenerate = Math.min(8192, check.remaining);
+            availableTokensToGenerate = Math.max(REPLY_TOKEN_ALLOWANCE, Math.min(8192, check.remaining));
         }
     } catch (err) {
         console.error("Quota check error:", err);
@@ -6454,30 +6454,21 @@ If a tool fails, never show the error message; say only: "Something went wrong o
         }
         console.log(`[AI-TOOLS] groups=[${toolPlan.activeGroupIds.join(",")}] sent=${activeToolList.length}/${fullToolList.length} tools staff=${toolPlan.staff}`);
 
-        // Quota check, part 2: the real prompt (rules + history + message + loaded tools, ~4 chars per token) plus
-        // room for the reply, priced like the deduction after the answer (V4 Pro unless a Claude model was picked).
+        // Quota check, part 2 (before the model call): the check of part 1, made seconds ago, is the answer; it is
+        // made again only when there is none. No guess of the prompt's size refuses a message any more (see part 1).
         // Fails closed like part 1.
         let quotaRemaining; // the user's tokens left (undefined = no limit); long answers continue only within it
         try {
-            const estimatedPromptTokens = estimatePromptTokens([...messages.map(m => m.content), activeToolList]);
-            const estimatedCost = chargeableTokens({ prompt_tokens: estimatedPromptTokens, completion_tokens: REPLY_TOKEN_ALLOWANCE }, isClaudeRequest ? body.selectedModel : CF_PRO_MODEL);
-            // The check made seconds ago is reused when it clearly covers this estimate too (a second database round
-            // trip in front of every answer otherwise); a tight balance is checked again for real
-            const firstSpendable = firstCheck?.allowed ? (firstCheck.spendable ?? firstCheck.remaining) : undefined;
-            const check = firstCheck?.claudePool ? firstCheck // (a Claude request on a plan: its Claude credits, already checked)
-                : firstCheck?.allowed && (firstSpendable === undefined || firstSpendable >= estimatedCost) ? firstCheck : await hasEnoughTokens(userId, orgId, estimatedCost, { paidOnly: fablePaidOnly });
+            const check = firstCheck?.allowed ? firstCheck : await hasEnoughTokens(userId, orgId, 1, { paidOnly: fablePaidOnly });
             if (!check.allowed && check.paidOnly) {
                 res.write(`data: ${JSON.stringify({ type: "error", error: `${fableName} runs on paid AI credits only, and you don't have enough left for this message. Top up AI credits, or pick another model (your free weekly tokens work with every other model).` })}\n\n`);
                 return;
             }
             if (!check.allowed) {
                 const blocked = await quotaBlocked(check);
-                console.warn(`[AI-TOKEN] Blocked before the model call: estimate=${estimatedCost} (prompt ~${estimatedPromptTokens}) reason="${check.reason}"`);
-                // Same error text the client gets from the 429 response of part 1. When a Claude model's price is what
-                // pushed the estimate over, its id is added ("ai_quota_exceeded|<reset>|<model>") so the card can offer Auto.
-                const quotaError = blocked.error === "ai_quota_exceeded"
-                    ? `${blocked.error}|${blocked.resetDate}${isClaudeRequest ? `|${body.selectedModel}` : ""}`
-                    : blocked.error;
+                console.warn(`[AI-TOKEN] Blocked before the model call: nothing left, reason="${check.reason}"`);
+                // Same error text the client gets from the 429 response of part 1 ("ai_quota_exceeded|<reset>")
+                const quotaError = blocked.error === "ai_quota_exceeded" ? `${blocked.error}|${blocked.resetDate}` : blocked.error;
                 res.write(`data: ${JSON.stringify({ type: "error", error: quotaError, message: blocked.message })}\n\n`);
                 return;
             }
@@ -6486,7 +6477,8 @@ If a tool fails, never show the error message; say only: "Something went wrong o
             // (deductTokens moves from one to the next as each runs out). The answer goes on across them and stops
             // only when all of it is used up, never in the middle just because one pool ended.
             const spendable = check.spendable ?? check.remaining;
-            if (spendable !== undefined) llmConfig.defaultMaxTokens = Math.max(1, Math.min(8192, spendable));
+            // (never less than a normal reply: the first round of the answer may always write that much)
+            if (spendable !== undefined) llmConfig.defaultMaxTokens = Math.max(REPLY_TOKEN_ALLOWANCE, Math.min(8192, spendable));
             quotaRemaining = spendable;
             liveMeter.spendable = spendable;
             playground("start", { question: String(body.question || "").slice(0, 300), model: typeof body.selectedModel === "string" ? body.selectedModel : "auto", spendable: liveMeter.spendable ?? null });

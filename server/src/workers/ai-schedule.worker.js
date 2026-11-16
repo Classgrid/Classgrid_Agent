@@ -30,6 +30,7 @@
 // CLASSGRID USES CLOUDFLARE USAGE TO CALCULATE TOKENS, NOT GPT-TOKENIZER (WHICH IS ONLY A FALLBACK)
 import cron from 'node-cron';
 import AiSchedule from '../models/AiSchedule.js';
+import User from '../models/User.js';
 import { sendEmail } from '../services/aws-ses.service.js';
 import { normalizeWhatsappNumber, checkWhatsappLimit, recordDirectWhatsappSend } from '../services/ai-feature-limits.js';
 import { nextRun } from '../utils/schedule-repeat.js';
@@ -91,7 +92,10 @@ cron.schedule('* * * * *', async () => {
         let whatsappAllowed = true;
         if (isRepeat && schedule.whatsapp_phone_number && schedule.whatsapp_message && schedule.user_id) {
           try {
-            const { allowed, used, limit, periodText = '7 days' } = await checkWhatsappLimit({ _id: schedule.user_id, organization_id: schedule.organization_id });
+            // The limit of the person's own plan: with only their id here, a paid person's repeats were checked
+            // against the Free plan's numbers (the plan is read from the account)
+            const owner = await User.findById(schedule.user_id).select('plan role email organization_id').lean().catch(() => null);
+            const { allowed, used, limit, periodText = '7 days' } = await checkWhatsappLimit(owner || { _id: schedule.user_id, organization_id: schedule.organization_id });
             if (!allowed) {
               whatsappAllowed = false;
               await AiSchedule.updateOne({ _id: schedule._id }, { error_message: `WhatsApp skipped: limit reached (${used}/${limit} in the last ${periodText})` });

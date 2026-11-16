@@ -276,7 +276,8 @@ export const hasEnoughTokens = async (userId, orgId, requiredTokens = 1, { paidO
     // (the computer's count is kept either way, so turning the switch on later counts what was already used)
     const usedOnComputer = globalConfig.free_limit_per_computer === true ? await deviceFreeUsed(userId) : null;
     // The plan's weekly ceiling (plans on): what is left of it this week caps the window too
-    const weekLeft = window.weekCap === null ? Infinity : Math.max(0, window.weekCap - (await weekUsed(userId, user.ai_tokens, nowMs)));
+    const week = window.weekCap === null ? null : await weekCounters(userId, user.ai_tokens, nowMs);
+    const weekLeft = week ? Math.max(0, window.weekCap - week.week_used) : Infinity;
     const freeLeft = Math.min(weeklyLimit - usedThisWeek, usedOnComputer === null ? Infinity : weeklyLimit - usedOnComputer, weekLeft);
     // The credit pools (granted / promotion and paid / top-up), without the expired ones.
     // Note: paused/revoked credits are already subtracted from balance by the per-transaction controllers
@@ -324,7 +325,11 @@ export const hasEnoughTokens = async (userId, orgId, requiredTokens = 1, { paidO
         if (first) return { allowed: true, source: first, remaining: spendable, spendable };
     }
 
-    return { allowed: false, reason: "Insufficient tokens." };
+    // When the limit comes back, for the message the person is shown: the week's end when the weekly limit is what
+    // ran out, else the end of the session window (the card used to show the window's end for both)
+    const windowBack = nowMs >= windowEndMs ? nowMs + tokenPeriodMs : windowEndMs;
+    const resetAt = new Date(week && weekLeft <= 0 ? week.weekEnd : windowBack).toISOString();
+    return { allowed: false, reason: "Insufficient tokens.", resetAt };
 };
 
 

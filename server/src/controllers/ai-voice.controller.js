@@ -106,8 +106,6 @@ const MIN_AUDIO_SECONDS = 0.2;
 const STT_WAIT_MS = 12000;
 // What speech-to-text writes for sound with no words in it
 const NO_WORDS = /^[\s.,!?…\-]*$|^\(?\[?(silence|music|noise|background noise|blank[_ ]audio|inaudible|no speech)\]?\)?\.?$/i;
-// The usage check before the answer: what the user said plus the short prompt, the tools and a spoken reply
-const MIN_TURN_TOKENS = 1500;
 const HISTORY_DEPTH = 30; // every message after the chat's summary (it is rewritten every 8 messages)
 const HISTORY_MAX_CHARS = 60000;
 const LIVE_WAIT_MS = 90 * 1000; // how long the talk waits for ask_classgrid (as on the call)
@@ -249,8 +247,9 @@ export const voiceTurn = async (req, res) => {
     try {
         [check, session, gate, chatsRefusal, history, grid, offModels, plan] = await Promise.all([
             // Fails closed: if the usage check itself errors, the turn is not run
-            // (a turn sent as sound: about three words a second, before its words are known)
-            hasEnoughTokens(userId, orgId, (pcm ? Math.ceil(audioSeconds * 5) : Math.ceil(heard.length / 4)) + MIN_TURN_TOKENS),
+            // A turn starts whenever anything is left: no guess of its size refuses it (owner, 2026-11-16: limits
+            // stopped at 93 to 97 percent). The turn is charged its real usage, up to the limit.
+            hasEnoughTokens(userId, orgId, 1),
             isNew ? null : getSessionById(sessionId).catch(() => null),
             // The day's voice replies (a count that cannot be read leaves this turn without voice, never without an answer)
             wantsVoice && elevenLabsEnabled()
