@@ -857,16 +857,23 @@ export function parseFileMention(text: string) {
   return { path: m[1], startLine: start, endLine: end, label: String(text).trim() };
 }
 
+// The website's own pages (the first part of each address in client/src/app/router.tsx)
+const SITE_PAGES = /^\/(p|docs|shared|share|grid|c|superadmin|agent|chat|calls|work|drive|forum|marketplace|notifications|requests|my-requests|join-requests|whats-new|login|logout|oauth|checkout|activate|analytics|audit|editor|tools|organization|dept|student|super-admin|public-chat-login|reset-password|required-password-reset|virtual-id|platform-feedback|classgrid-ai|sandbox|demo)(\/|$)/;
+
 // A link the AI wrote to a project file or folder ([App.tsx](src/App.tsx), /data/src, the editor path, or this
 // site's own address with a file path): opens in the editor instead of going to a web page.
 export function parseProjectLink(href?: string) {
   if (!href || !fileChipsOn()) return null;
   let p = String(href).trim();
   if (/^(mailto:|tel:|#)/i.test(p)) return null;
+  if (/^\/(p|docs)\/[0-9a-f]{24}(\/|$|[?#])/i.test(p)) return null; // (this site's published page or live doc, written as /p/<id>)
   if (/^https?:\/\//i.test(p)) {
     try {
       const u = new URL(p);
       if (u.host !== window.location.host) return null; // a real website
+      // A page of this site (a published page /p/<id>, a live doc /docs/<id>, a shared chat, a Grid...) is a real link,
+      // not a project file: it was shown as a folder chip that opened nothing (owner, 2026-11-16, a page's link in Studio)
+      if (SITE_PAGES.test(u.pathname)) return null;
       p = decodeURIComponent(u.pathname) + u.hash;
     } catch { return null; }
   }
