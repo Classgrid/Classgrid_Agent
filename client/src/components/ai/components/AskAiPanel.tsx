@@ -244,6 +244,8 @@ type PageContext = {
 import { usePostHog } from 'posthog-js/react';
 import { useQueryClient } from "@tanstack/react-query";
 import { fetchWithRescue } from "@/lib/rescue";
+import { ANSWER_FEEDBACK_ASK, ANSWER_FEEDBACK_SET, closeReading, getReading, startReading, useReadingOf, useReadingOn } from "../reading";
+import { ReadingBar } from "./ReadingBar";
 
 import { LOCAL_IMAGE_MISSING, jpegName, keepLocalImage, loadLocalImages, readAsDataUrl, sendsInline, shrinkForAi, showLocalImages } from "@/lib/desktopImages";
 
@@ -982,83 +984,28 @@ function answerPlainText(content: string): string {
 
 // Read aloud (owner, 2026-11-14): the speaker button beside the thumbs plays the answer in Classgrid's voice
 // (POST /api/ai/speak, ElevenLabs). Website only: not in the desktop app, not in Classgrid Code.
+// The reading itself, with its player (pause, back and forward, speed, play again), is ../reading.ts; the bar
+// above the chat box is ReadingBar.tsx (the phone app's player, on the website too from 2026-11-16).
 const READ_ALOUD = import.meta.env.VITE_DESKTOP !== "1" && import.meta.env.VITE_EDITOR !== "1";
-let readingNow: { audio: HTMLAudioElement; stop: () => void } | null = null; // one answer plays at a time
-const readingCache = new Map<string, string>(); // messageId → audio URL, so a second listen costs nothing
-function stopReading() {
-  const r = readingNow;
-  readingNow = null;
-  if (!r) return;
-  r.audio.pause();
-  r.audio.src = "";
-  r.stop();
-}
 
 function MessageActions({ content, messageId, onReply, time }: { content: string; messageId: string, onReply?: () => void, time?: number }) {
   const [copied, setCopied] = useState(false);
-  const [reading, setReading] = useState<"idle" | "loading" | "playing">("idle");
-  const readAbort = useRef<AbortController | null>(null);
-  const readingMine = useRef(false);
+  // This answer's reading, while it is on (a reading heard to its end is over for this button: the bar offers "play again")
+  const reading = useReadingOf(messageId);
+  const readingId = useRef(messageId);
+  readingId.current = messageId;
 
   useEffect(() => () => { // leaving the chat stops this answer's reading
-    readAbort.current?.abort();
-    if (readingMine.current) stopReading();
+    if (getReading()?.messageId === readingId.current) closeReading();
   }, []);
 
   async function handleReadAloud() {
     if (reading !== "idle") { // reading (or fetching) this answer: stop it
-      readAbort.current?.abort();
-      readAbort.current = null;
-      stopReading();
-      setReading("idle");
-      readingMine.current = false;
+      closeReading();
       return;
     }
-    stopReading(); // another answer was playing
-    const abort = new AbortController();
-    readAbort.current = abort;
-    setReading("loading");
-    try {
-      let url = readingCache.get(messageId);
-      if (!url) {
-        const endpointPrefix = import.meta.env.VITE_API_URL || "https://api.classgrid.in";
-        const token = localStorage.getItem("token");
-        const res = await fetchWithRescue(`${endpointPrefix}/api/ai/speak`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json", ...(token ? { "Authorization": `Bearer ${token}` } : {}) },
-          body: JSON.stringify({ messageId, text: answerPlainText(content) }),
-          signal: abort.signal,
-        });
-        if (!res.ok) {
-          const body = await res.json().catch(() => ({}));
-          throw new Error(body?.error || "The voice could not read this answer right now. Try again in a moment.");
-        }
-        url = URL.createObjectURL(await res.blob());
-        if (readingCache.size >= 20) { // (the oldest cached reading goes)
-          const oldest = readingCache.keys().next().value as string;
-          URL.revokeObjectURL(readingCache.get(oldest)!);
-          readingCache.delete(oldest);
-        }
-        readingCache.set(messageId, url);
-      }
-      if (abort.signal.aborted) return;
-      const audio = new Audio(url);
-      const done = () => { if (readingNow?.audio === audio) readingNow = null; readingMine.current = false; setReading("idle"); };
-      audio.onended = done;
-      audio.onerror = () => { done(); toast.error("The voice could not play this answer. Try again."); };
-      readingNow = { audio, stop: () => { readingMine.current = false; setReading("idle"); } };
-      readingMine.current = true;
-      await audio.play();
-      setReading("playing");
-      posthog?.capture("ai_message_read_aloud", { message_id: messageId });
-    } catch (e: any) {
-      if (abort.signal.aborted) return;
-      readingMine.current = false;
-      setReading("idle");
-      toast.error(e?.message || "The voice could not read this answer right now. Try again in a moment.");
-    } finally {
-      if (readAbort.current === abort) readAbort.current = null;
-    }
+    const result = await startReading(answerPlainText(content), messageId, () => posthog?.capture("ai_message_read_aloud", { message_id: messageId }));
+    if (!result.ok && !result.stopped) toast.error(result.message);
   }
   const [feedback, setFeedback] = useState<"up" | "down" | null>(null);
   const [isFeedbackModalOpen, setIsFeedbackModalOpen] = useState(false);
@@ -1076,6 +1023,21 @@ function MessageActions({ content, messageId, onReply, time }: { content: string
       }
     } catch (e) { }
   }, [messageId]);
+
+  // The read aloud bar's thumbs (ReadingBar.tsx) act through this row, and are told this answer's mark
+  const feedbackAsked = useRef<(type: "up" | "down") => void>(() => {});
+  feedbackAsked.current = handleFeedback;
+  useEffect(() => {
+    const onAsk = (event: Event) => {
+      const detail = (event as CustomEvent).detail;
+      if (detail?.messageId === messageId && (detail.type === "up" || detail.type === "down")) feedbackAsked.current(detail.type);
+    };
+    window.addEventListener(ANSWER_FEEDBACK_ASK, onAsk);
+    return () => window.removeEventListener(ANSWER_FEEDBACK_ASK, onAsk);
+  }, [messageId]);
+  useEffect(() => {
+    window.dispatchEvent(new CustomEvent(ANSWER_FEEDBACK_SET, { detail: { messageId, feedback } }));
+  }, [messageId, feedback]);
 
   async function handleCopy() {
     try {
@@ -1270,7 +1232,7 @@ function MessageActions({ content, messageId, onReply, time }: { content: string
                 ? "bg-primary/15 text-primary"
                 : "text-muted-foreground/60 hover:bg-muted hover:text-foreground"
             )}
-            title={reading === "playing" ? "Stop reading" : reading === "loading" ? "Getting the voice…" : "Read aloud"}
+            title={reading === "playing" ? "Stop reading" : reading === "loading" ? "Getting the voice" : "Read aloud"}
             aria-label={reading === "playing" ? "Stop reading" : "Read aloud"}
           >
             {reading === "loading" ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : reading === "playing" ? <Square className="h-3 w-3" /> : <Volume2 className="h-3.5 w-3.5" />}
@@ -2203,6 +2165,7 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
     const urls = messages.flatMap(m => (m.attachments || []).map(a => a.url));
     loadLocalImages(urls).then(found => { if (found) setLocalImagesFound(n => n + 1); }).catch(() => { /* shown as a chip */ });
   }, [messages]);
+  const readingOn = useReadingOn(); // read aloud's player is above the chat box: the list leaves room for it
   const [replyToMessage, setReplyToMessage] = useState<ChatMessage | null>(null);
   const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
   const [editContent, setEditContent] = useState<string>("");
@@ -5771,7 +5734,7 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
     <div ref={variant !== "full-page" ? chatScrollRef : undefined} className={cn("relative overscroll-contain chat-scrollbar [scrollbar-gutter:stable]", variant === "full-page" ? "w-full" : centerEmptyInput ? "shrink-0" : "flex-1 min-h-0 overflow-y-auto")}>
 
 
-      <div className={cn("flex flex-col gap-4 px-4 py-4 transition-all duration-300 ease-[cubic-bezier(0.22,1,0.36,1)]", variant === "full-page" && "max-w-[48rem] mx-auto w-full pb-48", variant === "full-page" && masteroAsk && "pb-[25rem]")}>
+      <div className={cn("flex flex-col gap-4 px-4 py-4 transition-all duration-300 ease-[cubic-bezier(0.22,1,0.36,1)]", variant === "full-page" && "max-w-[48rem] mx-auto w-full pb-48", variant === "full-page" && readingOn && "pb-[17rem]", variant === "full-page" && masteroAsk && "pb-[25rem]")}>
         {offlineCopyOf && offlineCopyOf === sessionId && !isLoadingChat && (
           <div className="self-center rounded-full border border-border/60 px-3 py-1 text-xs text-muted-foreground">{OFFLINE_CHAT_NOTE}</div>
         )}
@@ -6580,6 +6543,8 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
                   )}
                 </>
               )}
+              {/* Read aloud's player (pause, back and forward, speed, close), just above the chat box while an answer is read */}
+              <ReadingBar className={cn(variant === "overlay" ? "w-full" : "sm:w-[80%]", "w-full mx-auto mb-2")} />
               <form onSubmit={handleSubmit} className={cn("@container space-y-2", endedView && "hidden")}>
                 {/* Mastero: the AI asks for the project's name, photo or Finish; its card sits just above the chat box.
                     Locked while the AI is still answering (its words still being typed out too, so nothing mixes) */}
