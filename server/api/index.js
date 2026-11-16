@@ -262,10 +262,17 @@ app.use((req, res, next) => {
 // auth codes issued. The cookie-free endpoints (token, register) stay callable from browser-based MCP
 // clients, but without credentials. Anything else gets no CORS headers (the browser blocks it).
 const OAUTH_PUBLIC_CORS_PATHS = new Set(["/oauth/token", "/oauth/register"]);
+// The Connected apps list (GET /oauth/grants, DELETE /oauth/grants/<app>) is also shown in the desktop app, whose
+// screens come from a localhost origin: with no CORS for it there, the app said "Couldn't load your connected apps"
+// (owner, 2026-11-16). The desktop app gets CORS for those two addresses only. A request from there counts only when
+// it carries the app's own Bearer token: the OAuth routes (requireConsentPageOriginOrBearer) refuse the login cookie
+// from every origin but the consent page's, so another page on localhost still can't use the cookie.
+const isConnectedAppsPath = (path) => /^\/oauth\/grants(\/[^/]+)?\/?$/i.test(String(path || ""));
 app.use(
   cors((req, callback) => {
     if (!isOAuthProviderPath(req.path)) return callback(null, { origin: false });
     if (isConsentPageOrigin(req.headers.origin)) return callback(null, { origin: true, credentials: true });
+    if (isConnectedAppsPath(req.path) && DESKTOP_APP_ORIGIN.test(String(req.headers.origin || ""))) return callback(null, { origin: true, credentials: true, maxAge: 7200 });
     if (OAUTH_PUBLIC_CORS_PATHS.has(req.path.toLowerCase())) return callback(null, { origin: "*", credentials: false });
     return callback(null, { origin: false });
   })
