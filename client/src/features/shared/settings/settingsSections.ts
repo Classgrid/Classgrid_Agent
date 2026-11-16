@@ -19,11 +19,11 @@ export function settingsSections({ role }: Who): SettingsSection[] {
     { id: "general" as const, label: "General", icon: Settings2, words: "appearance theme dark mode light role sidebar code editors vs code cursor windsurf extension" },
     ...(DESKTOP || push ? [{ id: "notifications" as const, label: "Notifications", icon: Bell, words: "notifications sound volume agent grids alerts push" }] : []),
     { id: "privacy" as const, label: "Privacy", icon: Lock, words: "privacy data domain verified identity" },
-    { id: "account" as const, label: "Account", icon: UserRound, words: "account password delete role request security" },
+    { id: "account" as const, label: "Account", icon: UserRound, words: "account password delete role request security whatsapp number verify" },
     { id: "browser" as const, label: "Browser", icon: Globe, words: "browser history downloads cookies logins site data cache camera microphone location notifications websites permissions block allow" },
     { id: "mastero" as const, label: "Mastero", icon: MasteroMark, words: "mastero projects github push commit revert undo cloud computer node python" },
     { id: "usage" as const, label: "Usage", icon: Activity, words: "usage limits session weekly claude fable deepseek glm whatsapp calls voice credits history" },
-    { id: "billing" as const, label: "Billing", icon: CreditCard, words: "billing invoices plan upgrade pro max credits buy top-up auto top-up payment razorpay receipt" },
+    { id: "billing" as const, label: "Billing", icon: CreditCard, words: "billing invoices plan upgrade pro max credits buy top-up auto top-up payment receipt pricing" },
     ...(role === "super_admin" ? [{ id: "platform" as const, label: "Platform", icon: Palette, words: "platform branding name logo" }] : []),
   ];
 }

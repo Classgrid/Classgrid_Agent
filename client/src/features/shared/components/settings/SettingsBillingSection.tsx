@@ -220,7 +220,7 @@ export function SettingsBillingSection() {
         </div>
         <div className="text-lg font-semibold text-foreground mt-8 mb-2">Payment details</div>
         <div className="rounded-xl border border-border bg-card px-6 py-10 text-center">
-          <div className="text-base font-semibold">Payments go through Razorpay</div>
+          <div className="text-base font-semibold">Payments go through classgrid.in/pricing</div>
           <div className="text-sm text-muted-foreground mt-2 max-w-[520px] mx-auto">UPI, cards and net banking. You pay once for a month or a year, or for credits. Nothing is charged by itself.</div>
         </div>
       </div>
@@ -323,7 +323,7 @@ export function SettingsBillingSection() {
 
           <div className="text-lg font-semibold text-foreground mt-8 mb-2">Payment details</div>
           <div className="rounded-xl border border-border bg-card px-6 py-10 text-center">
-            <div className="text-base font-semibold">Payments go through Razorpay</div>
+            <div className="text-base font-semibold">Payments go through classgrid.in/pricing</div>
             <div className="text-sm text-muted-foreground mt-2 max-w-[520px] mx-auto">UPI, cards and net banking. You pay once for a month or a year, or for credits. Nothing is charged by itself.</div>
           </div>
           <p className="text-xs text-muted-foreground mt-2.5">Receipts are sent to your email. Prices include GST.</p>
