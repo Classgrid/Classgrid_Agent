@@ -294,7 +294,11 @@ export const voiceTurn = async (req, res) => {
     // Auto's GLM 5.3 (alone, no backup). A Claude model on a plan with Claude counts on the plan's Claude credits
     // (and Fable's share), not the credits, as in a typed chat.
     const picked = isVoiceModel(askedModel) && !(offModels || []).includes(askedModel) ? askedModel : "";
-    const claudePooled = (model) => !!plan && CLAUDE_CHAT_MODELS.has(model) && Number(plan.claude_credits_per_week) !== 0;
+    // Cloudflare's free Neurons of the day are used up (the cap switch is on): Claude Haiku answers in place of a
+    // Cloudflare model (services/cap-fallback.service.js). The system's choice, so it is counted on the person's
+    // normal limits, never on the plan's weekly Claude credits.
+    let claudeByCap = false;
+    const claudePooled = (model) => !claudeByCap && !!plan && CLAUDE_CHAT_MODELS.has(model) && Number(plan.claude_credits_per_week) !== 0;
     if (picked) {
         const claudeLimited = !!plan && CLAUDE_CHAT_MODELS.has(picked) && Number(plan.claude_credits_per_week) > 0;
         const counters = claudeLimited ? await weekCounters(userId, user.ai_tokens).catch(() => null) : null;
@@ -419,7 +423,11 @@ export const voiceTurn = async (req, res) => {
     // Nothing sent, "auto" or a model turned off: Auto's voice model (GLM 5.3), alone too. ──
     const system = voiceSystemPrompt(user, { language: body.language, memory: session?.long_term_memory ? memoryText(session.long_term_memory).slice(0, 6000) : "", voiceOn });
     const messages = toVoiceMessages(trimHistory(history), said);
-    const answerModel = picked || VOICE_MODEL;
+    let answerModel = picked || VOICE_MODEL;
+    if (!CLAUDE_CHAT_MODELS.has(answerModel)) {
+        const stand = await import("../services/cap-fallback.service.js").then((m) => m.claudeWhenCapped("simple", { disabled: offModels || [] })).catch(() => null);
+        if (stand) { answerModel = stand; claudeByCap = true; }
+    }
     let modelFailed = false; // the model could not answer (the turn ends with model_failed)
     const askModel = async ({ messages: conversation, noTools, onSentence, onText }) => {
         const ask = { system, tools: VOICE_TOOLS, messages: conversation, noTools, onSentence, onText, signal: abort.signal };

@@ -763,18 +763,27 @@ If the user asks you to make a file public, or you need to provide a public down
 // rulebook: one tiny request to DeepSeek V4 Flash, the light model of the approved DeepSeek family
 // (owner-approved 2026-10-08 in place of V4 Pro with full thinking for this job).
 async function generateShortTitleText(instruction, text) {
+    const messages = [
+        { role: "system", content: instruction },
+        { role: "user", content: String(text || "").slice(0, 2000) }
+    ];
+    // Cloudflare's free Neurons of the day are used up (the cap switch is on): Claude Haiku writes it
+    // (services/cap-fallback.service.js)
+    const { claudeWhenCapped } = await import("../services/cap-fallback.service.js");
+    const stand = await claudeWhenCapped("small").catch(() => null);
+    if (stand) {
+        const result = await streamClaudeChat({ model: stand, messages, tools: [], maxTokens: 2000, maxToolDepth: 0, timeoutMs: 30000 });
+        return { answer: result.answer || "", usage: result.usage, model: stand, provider: "anthropic" };
+    }
     const result = await streamChat({
         provider: cloudflareStreamProvider(CF_FLASH_MODEL),
-        messages: [
-            { role: "system", content: instruction },
-            { role: "user", content: String(text || "").slice(0, 2000) }
-        ],
+        messages,
         tools: [],
         maxTokens: 1200, // Flash reasons first; leave room for the title after the reasoning
         maxToolDepth: 0,
         timeoutMs: 30000
     });
-    return { answer: result.answer || "", usage: result.usage };
+    return { answer: result.answer || "", usage: result.usage, model: CF_FLASH_MODEL, provider: "cloudflare" };
 }
 
 // The chat title is refreshed every TITLE_REFRESH_EVERY user messages from the recent ones, so a chat
@@ -1850,13 +1859,18 @@ export const streamAskAi = async (req, res) => {
     // Claude is separate from the other models (owner, 2026-11-14): with a plan that includes Claude, a Claude answer
     // is checked against and counted on the plan's weekly Claude credits only, never the window / weekly credits
     // (not while this answer is paid from the person's credits: see claudeOnCredits)
-    const claudePooled = (model) => !claudeOnCredits && !!planRow && typeof model === "string" && CLAUDE_CHAT_MODELS.has(model) && Number(planRow.claude_credits_per_week) !== 0;
+    const claudePooled = (model) => !claudeOnCredits && !claudeByCap && !!planRow && typeof model === "string" && CLAUDE_CHAT_MODELS.has(model) && Number(planRow.claude_credits_per_week) !== 0;
     let claudeSeparate = false; // this request picked a Claude model the plan includes
     // The plan's weekly Claude credits (or Fable's share of them) are used up and the person has credits: this answer
     // is paid from the credits (gifted or bought) at the model's own rate, like any other use past a plan limit
     // (owner, 2026-11-17: "Claude and Fable take from credits when their limit is over")
     let claudeOnCredits = false;
     let claudeCreditSource = null; // "promotion" or "personal": the credit pool used first
+    // Cloudflare's free Neurons of the day are used up (the cap switch is on), so this answer is written by Claude in
+    // place of the Cloudflare model it would have used (services/cap-fallback.service.js). The system's choice, not the
+    // person's pick: no plan gate, counted on the person's normal limits, never on a plan's weekly Claude credits.
+    let claudeByCap = false;
+    let selectedBeforeCap = null; // what the person had picked ("auto" or a Cloudflare model), for what is remembered
     let claudePoolLeft; // what is left of the plan's weekly Claude credits (undefined = unlimited)
     // The plan's weekly Claude pool, and Fable's share of it (a Claude model picked by name; -1 = unlimited)
     if (planRow && typeof body.selectedModel === "string" && CLAUDE_CHAT_MODELS.has(body.selectedModel)) {
@@ -1914,6 +1928,27 @@ export const streamAskAi = async (req, res) => {
     // below, not in front of them (answers must start at once, owner 2026-11-09)
     const deviceNoted = body.clientApp === "desktop" && body.deviceId ? rememberDevice(userId, body.deviceId).catch((e) => console.error("rememberDevice:", e?.message)) : null;
     // The chat's row is read while the usage check runs (it is needed right after it), not after it
+    // Sonnet for a longer or harder message, Haiku for a short simple one (the same split Auto makes between its two
+    // Cloudflare models). After the plan checks above on purpose: they are about what the person picked.
+    if (!CLAUDE_CHAT_MODELS.has(typeof body.selectedModel === "string" ? body.selectedModel : "")) {
+        try {
+            const { claudeWhenCapped } = await import("../services/cap-fallback.service.js");
+            const { disabledModels } = await import("../services/model-access.service.js");
+            const stand = await claudeWhenCapped(pickChatModel(body) === CF_PRO_MODEL ? "hard" : "simple", {
+                claudeOff: flagsOff.has(modelFlagKey("claude-haiku-5-5")),
+                disabled: await disabledModels().catch(() => []),
+            });
+            if (stand) {
+                selectedBeforeCap = typeof body.selectedModel === "string" ? body.selectedModel : "auto";
+                body.selectedModel = stand;
+                claudeByCap = true;
+                console.log(`[AI-STREAM] Cloudflare's daily Neurons are used up: ${stand} answers in place of ${selectedBeforeCap}`);
+            }
+        } catch (e) {
+            console.warn("[AI-STREAM] the Claude stand-in for capped Cloudflare could not be decided:", e.message);
+        }
+    }
+
     const sessionRowP = body.sessionId && !body.isIncognito ? getSessionById(body.sessionId).catch(() => null) : null;
     let firstCheck = null; // the usage check before the answer; the one before the model call reuses it when nothing changed
     try {
@@ -2022,20 +2057,20 @@ export const streamAskAi = async (req, res) => {
         if (isMessageSummaryRequest) {
             const text = String(body.question || "").replace(/^Create a 3 to 5 word summary title for this message\.[^:]*:\s*/, "");
             try {
-                const { answer, usage } = await generateShortTitleText(
+                const { answer, usage, model: titleModel, provider: titleProvider } = await generateShortTitleText(
                     "Write a 3 to 5 word summary title for the user's message. Output ONLY the raw words, no quotes, no preamble.",
                     text
                 );
                 const summary = answer.replace(/["'*]/g, "").trim().slice(0, 60);
                 if (!res.writableEnded) res.write(`data: ${JSON.stringify({ type: "answer", answer: summary })}\n\n`);
                 if (userId && usage?.total_tokens > 0) {
-                    deductTokens(userId, orgId, chargeableTokens(usage, CF_FLASH_MODEL), tokenSource).catch(() => {});
+                    deductTokens(userId, orgId, chargeableTokens(usage, titleModel), tokenSource).catch(() => {});
                     AiUsageLog.create({
-                        organization_id: orgId || null, userId, provider: 'cloudflare', model: CF_FLASH_MODEL, feature: 'other',
+                        organization_id: orgId || null, userId, provider: titleProvider, model: titleModel, feature: 'other',
                         promptTokens: usage.prompt_tokens || 0, completionTokens: usage.completion_tokens || 0, totalTokens: usage.total_tokens, success: true
                     }).catch(err => console.error("AiUsageLog Error:", err));
                 }
-                console.log(`[AI-TOKEN] message summary via ${CF_FLASH_MODEL}: total=${usage?.total_tokens || 0}`);
+                console.log(`[AI-TOKEN] message summary via ${titleModel}: total=${usage?.total_tokens || 0}`);
             } catch (e) {
                 console.error("[AI] message summary failed:", e.message);
             }
@@ -2524,7 +2559,7 @@ You are currently talking to Nikhil Shinde (nikhil.shinde@classgrid.in), the CRE
         // Like the refusal above, the answer has started streaming, so it ends with the error.
         if (isProjectChat && planRow) {
             const { takeCodingRun } = await import("../services/coding-run-limit.service.js");
-            const run = await takeCodingRun(userId, planRow, { premium: CLAUDE_CHAT_MODELS.has(typeof body.selectedModel === "string" ? body.selectedModel : "") });
+            const run = await takeCodingRun(userId, planRow, { premium: !claudeByCap && CLAUDE_CHAT_MODELS.has(typeof body.selectedModel === "string" ? body.selectedModel : "") });
             if (!run.allowed) {
                 res.write(`data: ${JSON.stringify({ type: "error", error: run.error, code: run.code, plan: planRow.key })}\n\n`);
                 res.end();
@@ -3952,7 +3987,8 @@ Every user is using you as a personal AI assistant and agent (like ChatGPT) to m
                 // file from a short spec, go to a low-cost model, so the main model gets only its short answer, never
                 // the whole files. When the main model costs more than the reader, a whole read of a big file (or a
                 // cat of it) is sent to the reader instead.
-                const READER_MODELS = ["@cf/deepseek-ai/deepseek-v4.1-flash-1017", HELPER_GLM_MODEL];
+                // (while Cloudflare is capped, see claudeByCap: Claude Haiku reads)
+                const READER_MODELS = claudeByCap ? ["claude-haiku-5-5"] : ["@cf/deepseek-ai/deepseek-v4.1-flash-1017", HELPER_GLM_MODEL];
                 const READER_MIN_LINES = Number(process.env.READER_MIN_LINES) || 350;
                 const readerOn = pricesFor(typeof body.selectedModel === "string" ? body.selectedModel : "auto").input > pricesFor(READER_MODELS[0]).input;
                 const READER_PIECE_LINES = 150;
@@ -3994,17 +4030,18 @@ Every user is using you as a personal AI assistant and agent (like ChatGPT) to m
                     let lastError = "";
                     for (const model of READER_MODELS) {
                         try {
-                            const r = await streamChat({
-                                provider: cloudflareStreamProvider(model),
+                            const readerArgs = {
                                 messages: [{ role: "system", content: system }, { role: "user", content: input }],
                                 tools: [],
                                 maxToolDepth: 0,
-                                temperature: 0.2,
                                 maxTokens: 8192,
                                 maxContinuations: 4,
                                 timeoutMs: 120000,
                                 ...meterHooks(model, "File reader")
-                            });
+                            };
+                            const r = CLAUDE_CHAT_MODELS.has(model)
+                                ? await streamClaudeChat({ ...readerArgs, model })
+                                : await streamChat({ ...readerArgs, provider: cloudflareStreamProvider(model), temperature: 0.2 });
                             if (userId && r.usage?.total_tokens) deductTokens(userId, orgId, chargeableTokens(r.usage, model), tokenSource).catch(() => {});
                             const answer = String(r.answer || "").trim();
                             if (answer) return { answer, model };
@@ -4286,7 +4323,12 @@ You work on the user's own Windows computer through their Classgrid desktop app,
                             emitHelper({ helper: i, state: "running" });
                             // The picked model first; if it fails, Claude Sonnet 5.5 takes over, then GLM 5.3
                             // The Browser worker has to see the page: a model that can't see images is swapped for DeepSeek V4.1 Flash
-                            const firstModel = h.browser && !CLAUDE_CHAT_MODELS.has(h.model) && !CF_VISION_MODELS.has(h.model) ? "@cf/deepseek-ai/deepseek-v4.1-flash-1017" : h.model;
+                            const pickedFirst = h.browser && !CLAUDE_CHAT_MODELS.has(h.model) && !CF_VISION_MODELS.has(h.model) ? "@cf/deepseek-ai/deepseek-v4.1-flash-1017" : h.model;
+                            // Cloudflare's free Neurons of the day are used up: a helper on a Cloudflare model works on Claude
+                            // Sonnet instead (services/cap-fallback.service.js; asked per helper, the cap can be reached mid-answer)
+                            const helperStand = CLAUDE_CHAT_MODELS.has(pickedFirst) ? null
+                                : await import("../services/cap-fallback.service.js").then((m) => m.claudeWhenCapped("helper", { claudeOff: familyOff.has(modelFlagKey("claude-sonnet-5-5")), disabled: offModels })).catch(() => null);
+                            const firstModel = helperStand || pickedFirst;
                             const models = [...new Set([firstModel, CLAUDE_CHAT_MODELS.has(firstModel) ? HELPER_GLM_MODEL : "claude-sonnet-5-5", HELPER_GLM_MODEL])].filter((m, k) => k === 0 || !offModels.includes(m));
                             let lastError = "";
                             // When every model failed, the helper restarts by itself (up to 2 more times), carrying on from
@@ -6603,7 +6645,7 @@ If a tool fails, never show the error message; say only: "Something went wrong o
             res.on("close", () => {
                 markChatWorking(userId, sessionId, false).then(() => import("../services/chat-wake.service.js")).then((m) => m.wakeIfPending(userId, sessionId)).catch(() => {});
             });
-            import("../services/chat-wake.service.js").then((m) => m.rememberChatMeta(sessionId, { clientApp: body.clientApp || "", appMode: body.appMode || "", permissionMode: body.permissionMode || "", ...(typeof body.selectedModel === "string" && !body.wakeUp ? { selectedModel: body.selectedModel } : {}), ...(body.effort && !body.wakeUp ? { effort: body.effort } : {}) })).catch(() => {});
+            import("../services/chat-wake.service.js").then((m) => m.rememberChatMeta(sessionId, { clientApp: body.clientApp || "", appMode: body.appMode || "", permissionMode: body.permissionMode || "", ...(typeof body.selectedModel === "string" && !body.wakeUp ? { selectedModel: selectedBeforeCap ?? body.selectedModel } : {}), ...(body.effort && !body.wakeUp ? { effort: body.effort } : {}) })).catch(() => {});
         }
         const permissionCtx = {
             mode: PERMISSION_MODES.has(body.permissionMode) && body.taskOrigin !== "whatsapp" ? body.permissionMode : "turbo",

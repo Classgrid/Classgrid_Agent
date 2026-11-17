@@ -374,7 +374,9 @@ export async function triggerMemoryAgent(sessionId, { force = false } = {}) {
         console.log(`[Memory Agent] Updating memory for session ${sessionId} (messages ${covered + 1}-${total})...`);
         let summary = "";
         let usedModel = MEMORY_FLASH_MODEL;
-        if (haikuWritesSummary()) {
+        // (also before December whenever Cloudflare's free Neurons of the day are used up: cap-fallback.service.js)
+        const capped = await import('./cap-fallback.service.js').then((m) => m.claudeWhenCapped("small")).catch(() => null);
+        if (haikuWritesSummary() || capped) {
             // Claude Haiku first; DeepSeek Flash only when Haiku fails or writes nothing
             usedModel = MEMORY_HAIKU_MODEL;
             try {
