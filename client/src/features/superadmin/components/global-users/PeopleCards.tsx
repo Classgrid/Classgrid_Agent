@@ -26,8 +26,8 @@ export function PeopleCards({ rows, isLoading, onOpen }: { rows: PersonRow[]; is
               <div className="flex items-center gap-3 min-w-0">
                 <PersonAvatar name={u.name} email={u.email} src={u.profilePicture} />
                 <div className="flex flex-col min-w-0">
-                  <span className="font-medium text-sm text-foreground truncate">{u.name || u.email}</span>
-                  <span className="text-xs text-muted-foreground truncate">{u.email}</span>
+                  <span className="font-medium text-sm text-foreground break-words">{u.name || u.email}</span>
+                  <span className="text-xs text-muted-foreground break-all">{u.email}</span>
                 </div>
               </div>
               <div className="flex flex-wrap items-center gap-2 mt-3">

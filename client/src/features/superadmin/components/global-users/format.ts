@@ -112,3 +112,71 @@ export function errorText(error: unknown): string {
 }
 
 export const httpStatus = (error: unknown): number | undefined => (error as any)?.response?.status;
+
+// A saved browser as "Chrome on Windows 10/11". For many sign-ins the whole browser string was saved
+// ("Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/..."), so it is read here and never shown raw.
+export function deviceName(browser: string | null | undefined, os: string | null | undefined): { browser: string; os: string } {
+  const ua = browser || "";
+  // (the phone app signs in as "Classgrid-Android")
+  if (/Classgrid-Android/i.test(ua)) return { browser: "Classgrid phone app", os: "Android" };
+  if (/Classgrid-(iOS|iPhone)/i.test(ua)) return { browser: "Classgrid phone app", os: "iPhone" };
+  if (!/Mozilla\/|AppleWebKit|Gecko\//i.test(ua)) return { browser: ua || "Browser", os: os || "" };
+  let b = "Browser";
+  if (/Classgrid|Electron\//i.test(ua)) b = "Classgrid desktop app";
+  else if (/Edg(e|A|iOS)?\//.test(ua)) b = "Edge";
+  else if (/OPR\/|Opera/.test(ua)) b = "Opera";
+  else if (/SamsungBrowser\//.test(ua)) b = "Samsung Internet";
+  else if (/Firefox\/|FxiOS\//.test(ua)) b = "Firefox";
+  else if (/Chrome\/|CriOS\//.test(ua)) b = "Chrome";
+  else if (/Safari\//.test(ua)) b = "Safari";
+  let o = os || "";
+  if (/Android/i.test(ua)) o = "Android";
+  else if (/iPhone|iPod/.test(ua)) o = "iPhone";
+  else if (/iPad/.test(ua)) o = "iPad";
+  else if (/Windows NT 10/.test(ua)) o = "Windows 10/11";
+  else if (/Windows/.test(ua)) o = "Windows";
+  else if (/Mac OS X|Macintosh/.test(ua)) o = "Mac";
+  else if (/CrOS/.test(ua)) o = "Chromebook";
+  else if (/Linux|X11/.test(ua)) o = "Linux";
+  return { browser: b, os: o };
+}
+
+export interface BrowserLine { name: string; times: number; firstAt: string | null; lastAt: string | null }
+
+// The same browser saved many times becomes one line, with how many times and from when to when; newest first
+export function mergeBrowsers(list: { browser: string; os: string; addedAt: string | null }[]): BrowserLine[] {
+  const byName = new Map<string, BrowserLine>();
+  for (const item of list || []) {
+    const d = deviceName(item.browser, item.os);
+    const name = d.os ? `${d.browser} on ${d.os}` : d.browser;
+    const line = byName.get(name) || { name, times: 0, firstAt: null, lastAt: null };
+    line.times += 1;
+    if (item.addedAt) {
+      if (!line.firstAt || item.addedAt < line.firstAt) line.firstAt = item.addedAt;
+      if (!line.lastAt || item.addedAt > line.lastAt) line.lastAt = item.addedAt;
+    }
+    byName.set(name, line);
+  }
+  return [...byName.values()].sort((x, y) => (y.lastAt || "").localeCompare(x.lastAt || ""));
+}
+
+// "added 6 Oct 2026", or "added 5 times, 12 Oct 2026 to 27 Oct 2026"
+export function browserWhenText(line: BrowserLine): string {
+  if (!line.firstAt) return line.times > 1 ? `added ${num(line.times)} times` : "";
+  const first = dateText(line.firstAt);
+  const last = dateText(line.lastAt);
+  if (line.times <= 1) return `added ${first}`;
+  return first === last ? `added ${num(line.times)} times on ${first}` : `added ${num(line.times)} times, ${first} to ${last}`;
+}
+
+// The same phone app version registered many times becomes one line with its newest "last seen"; newest first
+export function mergePhoneApps(list: { platform: string; appVersion: string; updatedAt: string | null }[]): { platform: string; appVersion: string; updatedAt: string | null }[] {
+  const byKey = new Map<string, { platform: string; appVersion: string; updatedAt: string | null }>();
+  for (const item of list || []) {
+    const key = `${(item.platform || "").toLowerCase()}|${item.appVersion || ""}`;
+    const line = byKey.get(key);
+    if (!line) byKey.set(key, { ...item });
+    else if (item.updatedAt && (!line.updatedAt || item.updatedAt > line.updatedAt)) line.updatedAt = item.updatedAt;
+  }
+  return [...byKey.values()].sort((x, y) => (y.updatedAt || "").localeCompare(x.updatedAt || ""));
+}

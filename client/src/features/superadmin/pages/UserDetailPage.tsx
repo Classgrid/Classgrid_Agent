@@ -69,8 +69,7 @@
 // sign in, what they've made, what they've paid, and the account actions. Everything comes from one request
 // (GET /api/super-admin/users/:id/overview) and refreshes live when an admin changes the account or someone buys.
 import { useEffect, type ReactNode } from "react";
-import { useLocation, useNavigate, useParams } from "react-router-dom";
-import { ArrowLeft } from "lucide-react";
+import { useNavigate, useParams } from "react-router-dom";
 
 import { Button } from "@/components/marketing_ui/button";
 import { Skeleton } from "@/components/marketing_ui/skeleton";
@@ -91,7 +90,6 @@ const LIST_PATH = "/superadmin/global-users";
 export function UserDetailPage() {
   const { userId = "" } = useParams<{ userId: string }>();
   const navigate = useNavigate();
-  const location = useLocation();
   const { data, isLoading, isError, error, refetch } = usePerson(userId);
   usePersonLive(userId);
 
@@ -105,19 +103,6 @@ export function UserDetailPage() {
     ]);
     return () => setBreadcrumbs([]);
   }, [setBreadcrumbs, name]);
-
-  // Back returns to the list as it was (filters, page) when the list opened this page; a link opened straight
-  // here has nothing to go back to, so it goes to the list
-  const goBack = () => (location.key !== "default" ? navigate(-1) : navigate(LIST_PATH));
-
-  const backButton = (
-    <div>
-      <Button variant="ghost" size="sm" onClick={goBack} className="-ml-2 gap-2">
-        <ArrowLeft className="w-4 h-4" />
-        Back to users
-      </Button>
-    </div>
-  );
 
   let body: ReactNode;
   if (isLoading) {
@@ -153,21 +138,21 @@ export function UserDetailPage() {
     body = (
       <>
         <PersonHeader overview={data} />
-        {/* (Account is the tallest card, so on wide screens it spans the height of Plan and Activity beside it) */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 items-start min-w-0">
+        {/* Two columns that fill evenly (owner, 2026-11-17: a tall card "cut the page in half" and left the other
+            side empty): each card goes under the one before it and the two sides end at about the same height */}
+        <div className="lg:columns-2 gap-6 min-w-0 -mb-6 [&>*]:mb-6 [&>*]:break-inside-avoid">
           <PlanCard userId={data.person._id} plan={data.plan} name={data.person.name || data.person.email} />
-          <AccountCard account={data.account} person={data.person} className="lg:row-span-2" />
           <ActivityCard activity={data.activity} />
           <PaymentsCard userId={data.person._id} payments={data.payments} />
-          <ActionsCard key={data.person._id} overview={data} />
+          <AccountCard account={data.account} person={data.person} />
         </div>
+        <ActionsCard key={data.person._id} overview={data} />
       </>
     );
   }
 
   return (
     <div className="w-full max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-6 flex flex-col gap-6 min-w-0">
-      {backButton}
       {body}
     </div>
   );

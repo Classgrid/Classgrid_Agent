@@ -4,7 +4,7 @@
 import { UserRound } from "lucide-react";
 import { SectionCard } from "./SectionCard";
 import { InfoList, InfoRow } from "./InfoRow";
-import { dateText, dateTimeText, phonePlatformLabel, relativeText, signupLabel } from "./format";
+import { browserWhenText, dateText, dateTimeText, mergeBrowsers, mergePhoneApps, phonePlatformLabel, relativeText, signupLabel } from "./format";
 import type { PersonOverview } from "./types";
 
 export function AccountCard({ account, person, className }: { account: PersonOverview["account"]; person: PersonOverview["person"]; className?: string }) {
@@ -17,8 +17,9 @@ export function AccountCard({ account, person, className }: { account: PersonOve
   ].filter(Boolean) as string[];
   const hasAge = person.age !== null && person.age !== undefined && String(person.age).trim() !== "";
   const addedEmails = person.addedEmails || [];
-  const browsers = account.browsers || [];
-  const phoneApps = account.phoneApps || [];
+  // (one line per browser and per app version: the same one saved many times is merged)
+  const browsers = mergeBrowsers(account.browsers || []);
+  const phoneApps = mergePhoneApps(account.phoneApps || []);
 
   return (
     <SectionCard icon={UserRound} title="Account" note="How and when they sign in." className={className}>
@@ -58,12 +59,15 @@ export function AccountCard({ account, person, className }: { account: PersonOve
           <h3 className="text-sm font-medium text-foreground">Browsers</h3>
           {browsers.length ? (
             <ul className="mt-2 flex flex-col gap-1.5">
-              {browsers.map((b, i) => (
-                <li key={`${b.browser}-${b.os}-${i}`} className="text-sm text-foreground break-words">
-                  {`${b.browser || "Browser"} on ${b.os || "an unknown system"}`}
-                  {b.addedAt && <span className="text-muted-foreground">{` · added ${dateText(b.addedAt)}`}</span>}
-                </li>
-              ))}
+              {browsers.map((b) => {
+                const when = browserWhenText(b);
+                return (
+                  <li key={b.name} className="text-sm text-foreground break-words">
+                    {b.name}
+                    {when && <span className="text-muted-foreground">{` · ${when}`}</span>}
+                  </li>
+                );
+              })}
             </ul>
           ) : (
             <p className="mt-2 text-sm text-muted-foreground">None saved</p>

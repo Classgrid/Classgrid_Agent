@@ -27,8 +27,8 @@ export function PeopleTable({ rows, isLoading, onOpen }: { rows: PersonRow[]; is
         <div className="flex items-center gap-3 py-1 min-w-0">
           <PersonAvatar name={u.name} email={u.email} src={u.profilePicture} />
           <div className="flex flex-col min-w-0">
-            <span className="font-medium text-sm text-foreground truncate">{u.name || u.email}</span>
-            <span className="text-xs text-muted-foreground truncate">{u.email}</span>
+            <span className="font-medium text-sm text-foreground break-words">{u.name || u.email}</span>
+            <span className="text-xs text-muted-foreground break-all">{u.email}</span>
           </div>
         </div>
       ),
@@ -42,7 +42,7 @@ export function PeopleTable({ rows, isLoading, onOpen }: { rows: PersonRow[]; is
         return (
           <div className="flex flex-col items-start gap-1 min-w-0">
             <PlanBadge plan={u.plan} />
-            {sub && <span className="text-xs text-muted-foreground truncate max-w-full">{sub}</span>}
+            {sub && <span className="text-xs text-muted-foreground break-words max-w-full">{sub}</span>}
           </div>
         );
       },

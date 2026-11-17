@@ -14,7 +14,7 @@ function Tile({ label, value, title }: { label: string; value: string; title?: s
   return (
     <div className="rounded-lg border border-border bg-muted/30 p-3 min-w-0">
       <div className="text-xs text-muted-foreground">{label}</div>
-      <div className="text-lg font-semibold text-foreground truncate" title={title}>{value}</div>
+      <div className="text-lg font-semibold text-foreground break-words leading-snug" title={title}>{value}</div>
     </div>
   );
 }
