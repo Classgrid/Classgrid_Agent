@@ -95,7 +95,9 @@ export interface NoteStats {
 }
 
 export interface GetNotesParams {
-  date?: string; // ISO string for specific date
+  date?: string; // ISO string for specific date (server day)
+  from?: string; // ISO start of a day in the admin's time zone (inclusive)
+  to?: string; // ISO end of that day (exclusive)
   tag?: string;
   category?: string;
   visibility?: string;

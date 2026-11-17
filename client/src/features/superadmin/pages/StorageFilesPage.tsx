@@ -66,14 +66,15 @@
  */
 
 import React, { useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import {
   Folder, FileText, Image as ImageIcon, Video, FileArchive,
-  File as FileIcon, UploadCloud, FolderPlus, MoreHorizontal, Download,
-  Trash2, Edit2, Link as LinkIcon, Search, RefreshCw, Columns, X,
+  File as FileIcon, UploadCloud, FolderPlus, FolderInput, FolderOpen, MoreHorizontal, Download,
+  Trash2, Edit2, Link as LinkIcon, Search, Columns, X,
   ChevronRight, List, Check, Maximize
 } from "lucide-react";
 import { toast } from "sonner";
-import { formatDistanceToNow, format } from "date-fns";
+import { format } from "date-fns";
 
 import { motion } from "framer-motion";
 
@@ -88,39 +89,42 @@ import {
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuSeparator,
-  DropdownMenuSub,
-  DropdownMenuSubTrigger,
-  DropdownMenuSubContent,
-  DropdownMenuPortal
 } from "@/components/marketing_ui/dropdown-menu";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/marketing_ui/dialog";
 import { DangerConfirmDialog } from "@/components/marketing_ui/danger-confirm-dialog";
 import { Spinner } from "@/components/marketing_ui/spinner";
+import { cn } from "@/lib/utils";
 
 import {
   useStorageObjects,
-  useUploadFile,
   useCreateFolder,
   useDeleteObject,
   useDeleteObjects,
   useRenameObject,
   storageKeys
 } from "../queries/useStorage";
-import { storageApi } from "../services/storageApi";
-import { useQueryClient } from "@tanstack/react-query";
+import { storageApi, type ListObjectsResponse } from "../services/storageApi";
+import { useQueryClient, type QueryKey } from "@tanstack/react-query";
 import {
   getSocket,
   joinSuperadminStorage,
   leaveSuperadminStorage
 } from "@/lib/socketClient";
+import {
+  storageMenuCard,
+  storageMenuDangerItem,
+  storageMenuIcon,
+  storageMenuItem,
+  storageMenuSeparator,
+} from "../components/storage/storageMenuStyles";
 
 import FilePreviewModal, { type FilePreviewSource } from "@/app/support/components/FilePreviewModal";
 
 function formatBytes(bytes: number) {
-  if (bytes === 0) return '0 Bytes';
+  if (!Number.isFinite(bytes) || bytes <= 0) return '0 Bytes';
   const k = 1024;
   const sizes = ['Bytes', 'KB', 'MB', 'GB', 'TB'];
-  const i = Math.floor(Math.log(bytes) / Math.log(k));
+  const i = Math.min(Math.floor(Math.log(bytes) / Math.log(k)), sizes.length - 1);
   return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
 }
 
@@ -136,24 +140,185 @@ function getFileIcon(type?: string) {
   return <div className={`${baseWrapper} bg-muted/50 border-border/50 text-muted-foreground`}><FileIcon size={size} /></div>;
 }
 
-// Global upload state to share between the page and columns
+/** One row of a folder listing (a folder or a file). */
+interface StorageItem {
+  id: string;
+  isFolder: boolean;
+  key: string;
+  name: string;
+  size: number | null;
+  type: string;
+  lastModified?: string | null;
+  createdAt?: string | null;
+  cdnUrl: string;
+}
+
+function toStorageItems(data?: ListObjectsResponse): StorageItem[] {
+  return [
+    ...(data?.folders || []).map((folder) => ({
+      id: folder.prefix,
+      isFolder: true,
+      key: folder.prefix,
+      name: folder.name,
+      size: null,
+      type: "Folder",
+      lastModified: null,
+      createdAt: null,
+      cdnUrl: "",
+    })),
+    ...(data?.files || []).map((file) => ({
+      id: file.key,
+      isFolder: false,
+      key: file.key,
+      name: file.name,
+      size: file.size,
+      type: file.contentType,
+      lastModified: file.lastModified,
+      createdAt: file.createdAt,
+      cdnUrl: file.cdnUrl,
+    })),
+  ];
+}
+
+/** "a/b/" or "a/b" -> ["", "a/", "a/b/"], the open columns for that folder. */
+function prefixToOpenFolders(prefix: string): string[] {
+  const result = [""];
+  let current = "";
+  for (const part of prefix.split("/").filter(Boolean)) {
+    current += part + "/";
+    result.push(current);
+  }
+  return result;
+}
+
+/** The folder a key lives in: "a/b/c.png" -> "a/b/", "a/b/" -> "a/". */
+function parentPrefixOf(key: string) {
+  const trimmed = key.endsWith("/") ? key.slice(0, -1) : key;
+  const slash = trimmed.lastIndexOf("/");
+  return slash >= 0 ? trimmed.substring(0, slash + 1) : "";
+}
+
+/** ".png" for "photo.png", "" for folders and names without an extension. */
+function extensionOf(name: string, isFolder: boolean) {
+  if (isFolder) return "";
+  const dot = name.lastIndexOf(".");
+  return dot > 0 ? name.substring(dot) : "";
+}
+
+function baseNameOf(name: string, isFolder: boolean) {
+  const extension = extensionOf(name, isFolder);
+  return extension ? name.substring(0, name.length - extension.length) : name;
+}
+
+function encodeKey(key: string) {
+  return key.split("/").map((segment) => encodeURIComponent(segment)).join("/");
+}
+
+/** Points a CDN URL at a renamed key, keeping the CDN base (host and any base path) as it is. */
+function swapCdnKey(cdnUrl: string, oldKey: string, newKey: string) {
+  if (!cdnUrl) return cdnUrl;
+  const encodedOld = encodeKey(oldKey);
+  return cdnUrl.endsWith(encodedOld)
+    ? cdnUrl.substring(0, cdnUrl.length - encodedOld.length) + encodeKey(newKey)
+    : cdnUrl;
+}
+
+async function downloadObject(key: string, name: string, cdnUrl?: string) {
+  const toastId = "storage-download";
+  try {
+    toast.loading("Preparing download", { id: toastId });
+    const data = await storageApi.getPresignedUrl(key);
+    const link = document.createElement("a");
+    link.href = data.downloadUrl;
+    link.download = name;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    toast.success("Download started", { id: toastId });
+  } catch {
+    if (cdnUrl) {
+      toast.dismiss(toastId);
+      window.open(cdnUrl, "_blank", "noopener,noreferrer");
+    } else {
+      toast.error("Could not start the download", { id: toastId });
+    }
+  }
+}
+
+async function copyUrl(url: string) {
+  try {
+    await navigator.clipboard.writeText(url);
+    toast.success("URL copied");
+  } catch {
+    toast.error("Could not copy the URL");
+  }
+}
+
+// Upload state shown inline in the columns and in the floating progress box
 export interface UploadingFile {
   id: string;
   file: File;
   name: string;
   prefix: string;
   progress: number;
-  status: 'uploading' | 'completed' | 'error';
-  xhr?: XMLHttpRequest; // For cancellation, although fetch/axios cancellation is usually AbortController. We'll just fake cancellation for UI purposes if needed, or implement it if API supports it.
+  status: 'uploading' | 'completed' | 'error' | 'cancelled';
 }
 
-const FilePreviewPane = ({ activeFile, onClose, onDelete, onRename, onFullScreen }: { activeFile: any, onClose: () => void, onDelete: () => void, onRename?: () => void, onFullScreen: () => void }) => {
+interface ItemActions {
+  onRename: (item: StorageItem) => void;
+  onMove: (item: StorageItem) => void;
+  onDelete: (key: string) => void;
+}
+
+/** The three-dot menu of a file or folder row (same look as the chat menu). */
+function ItemActionsMenu({ item, actions, triggerClassName }: { item: StorageItem; actions: ItemActions; triggerClassName?: string }) {
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button variant="ghost" size="icon" className={cn("h-7 w-7 text-muted-foreground hover:text-foreground", triggerClassName)} aria-label={`Actions for ${item.name}`}>
+          <MoreHorizontal className="h-4 w-4" />
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" sideOffset={6} className={`w-[200px] ${storageMenuCard}`}>
+        <DropdownMenuItem className={storageMenuItem} onClick={() => actions.onRename(item)}>
+          <Edit2 className={storageMenuIcon} /> Rename
+        </DropdownMenuItem>
+        <DropdownMenuItem className={storageMenuItem} onClick={() => actions.onMove(item)}>
+          <FolderInput className={storageMenuIcon} /> Move
+        </DropdownMenuItem>
+        {!item.isFolder && (
+          <>
+            <DropdownMenuItem className={storageMenuItem} onClick={() => void copyUrl(item.cdnUrl)}>
+              <LinkIcon className={storageMenuIcon} /> Copy URL
+            </DropdownMenuItem>
+            <DropdownMenuItem className={storageMenuItem} onClick={() => void downloadObject(item.key, item.name, item.cdnUrl)}>
+              <Download className={storageMenuIcon} /> Download
+            </DropdownMenuItem>
+          </>
+        )}
+        <DropdownMenuSeparator className={storageMenuSeparator} />
+        <DropdownMenuItem className={`${storageMenuItem} ${storageMenuDangerItem}`} onClick={() => actions.onDelete(item.key)}>
+          <Trash2 className="w-4 h-4" /> Delete
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
+const FilePreviewPane = ({ activeFile, onClose, onDelete, onRename, onFullScreen, className }: {
+  activeFile: StorageItem | null;
+  onClose: () => void;
+  onDelete: () => void;
+  onRename: () => void;
+  onFullScreen: () => void;
+  className?: string;
+}) => {
   if (!activeFile) return null;
   return (
-    <div className="w-[320px] sm:w-[350px] shrink-0 border-l border-border bg-card flex flex-col h-full animate-in slide-in-from-right-2">
+    <div className={cn("w-[320px] sm:w-[350px] shrink-0 border-l border-border bg-card flex flex-col h-full animate-in slide-in-from-right-2", className)}>
       <div className="p-3 border-b border-border flex items-center justify-between">
-        <span className="font-semibold text-sm">File Preview</span>
-        <Button variant="ghost" size="icon" className="h-7 w-7" onClick={onClose}>
+        <span className="font-semibold text-sm">File preview</span>
+        <Button variant="ghost" size="icon" className="h-7 w-7" onClick={onClose} aria-label="Close preview">
           <X className="h-4 w-4" />
         </Button>
       </div>
@@ -167,65 +332,45 @@ const FilePreviewPane = ({ activeFile, onClose, onDelete, onRename, onFullScreen
           ) : (
             <div className="flex flex-col items-center justify-center text-muted-foreground">
               <FileIcon className="h-16 w-16 mb-2 opacity-50" />
-              <span className="text-sm font-medium">No preview available</span>
+              <span className="text-sm font-medium">No preview for this file type</span>
             </div>
           )}
         </div>
-        
+
         {/* Details */}
         <div className="space-y-4 border border-border/60 bg-muted/20 rounded-xl p-4">
           <div>
             <h3 className="font-semibold text-base break-all">{activeFile.name}</h3>
-            <p className="text-sm text-muted-foreground">{activeFile.type || "Unknown"} - {formatBytes(activeFile.size || 0)}</p>
+            <p className="text-sm text-muted-foreground">{activeFile.type || "Unknown type"} - {formatBytes(activeFile.size || 0)}</p>
           </div>
-          
+
           <div className="space-y-1">
             <p className="text-xs text-muted-foreground">Added on</p>
             <p className="text-sm">{activeFile.createdAt ? new Date(activeFile.createdAt).toLocaleString() : "-"}</p>
           </div>
-          
+
           <div className="space-y-1">
             <p className="text-xs text-muted-foreground">Last modified</p>
             <p className="text-sm">{activeFile.lastModified ? new Date(activeFile.lastModified).toLocaleString() : "-"}</p>
           </div>
-          
+
           <div className="flex flex-wrap gap-2 pt-2">
-            <Button variant="outline" className="text-xs h-9 px-4" onClick={async () => {
-              try {
-                toast.loading("Starting download...", { id: "downloading" });
-                const data = await storageApi.getPresignedUrl(activeFile.key);
-                const link = document.createElement('a');
-                link.href = data.downloadUrl;
-                link.download = activeFile.name;
-                document.body.appendChild(link);
-                link.click();
-                document.body.removeChild(link);
-                toast.success("Download complete", { id: "downloading" });
-              } catch (e) {
-                toast.dismiss("downloading");
-                window.open(activeFile.cdnUrl, '_blank'); // fallback if blocked by CORS
-              }
-            }}>
+            <Button variant="outline" className="text-xs h-9 px-4" onClick={() => void downloadObject(activeFile.key, activeFile.name, activeFile.cdnUrl)}>
               <Download className="mr-2 h-3.5 w-3.5" /> Download
             </Button>
             <Button variant="outline" className="text-xs h-9 px-4" onClick={onFullScreen}>
-              <Maximize className="mr-2 h-3.5 w-3.5" /> Full Screen
+              <Maximize className="mr-2 h-3.5 w-3.5" /> Full screen
             </Button>
-            <Button variant="outline" className="text-xs h-9 px-4" onClick={() => {
-              navigator.clipboard.writeText(activeFile.cdnUrl);
-              toast.success("URL copied to clipboard");
-            }}>
-              <LinkIcon className="mr-2 h-3.5 w-3.5" /> Get URL
+            <Button variant="outline" className="text-xs h-9 px-4" onClick={() => void copyUrl(activeFile.cdnUrl)}>
+              <LinkIcon className="mr-2 h-3.5 w-3.5" /> Copy URL
             </Button>
-            {onRename && (
-              <Button variant="outline" className="text-xs h-9 px-4" onClick={onRename}>
-                <Edit2 className="mr-2 h-3.5 w-3.5" /> Rename
-              </Button>
-            )}
+            <Button variant="outline" className="text-xs h-9 px-4" onClick={onRename}>
+              <Edit2 className="mr-2 h-3.5 w-3.5" /> Rename
+            </Button>
           </div>
-          
+
           <div className="h-px bg-border w-full my-4" />
-          
+
           <div>
             <Button variant="outline" className="text-xs h-9 px-4 border-destructive/20 text-destructive hover:bg-destructive hover:text-destructive-foreground" onClick={onDelete}>
               <Trash2 className="mr-2 h-3.5 w-3.5" /> Delete file
@@ -237,10 +382,32 @@ const FilePreviewPane = ({ activeFile, onClose, onDelete, onRename, onFullScreen
   );
 };
 
+interface StorageColumnProps {
+  prefix: string;
+  search: string;
+  selectedChildKey?: string;
+  selectedKeys: Set<string>;
+  toggleSelection: (e: React.MouseEvent, key: string) => void;
+  onSelectFolder: (key: string) => void;
+  onSelectFile: (file: StorageItem) => void;
+  creatingFolderIn: string | null;
+  setCreatingFolderIn: (prefix: string | null) => void;
+  isCreatingFolderPending: boolean;
+  handleCreateFolder: (folderName: string, targetPrefix: string) => void;
+  uploadingFiles: UploadingFile[];
+  handleUploadClick: (prefix: string) => void;
+  fileToRename: { key: string; name: string } | null;
+  setFileToRename: (value: { key: string; name: string } | null) => void;
+  newFileName: string;
+  setNewFileName: (value: string) => void;
+  handleRenameFile: () => void;
+  isRenamingPending: boolean;
+  actions: ItemActions;
+}
+
 const StorageColumn = ({
   prefix,
   search,
-  isLastColumn,
   selectedChildKey,
   selectedKeys,
   toggleSelection,
@@ -252,51 +419,31 @@ const StorageColumn = ({
   handleCreateFolder,
   uploadingFiles,
   handleUploadClick,
-  setFileToDelete,
   fileToRename,
   setFileToRename,
   newFileName,
   setNewFileName,
   handleRenameFile,
   isRenamingPending,
-}: any) => {
+  actions,
+}: StorageColumnProps) => {
   const { data, isLoading } = useStorageObjects(prefix, search);
-  
-  const items = [
-    ...(data?.folders || []).map((folder: any) => ({
-      isFolder: true,
-      key: folder.prefix,
-      name: folder.name,
-      size: null,
-      type: "Folder",
-      lastModified: null,
-      cdnUrl: ""
-    })),
-    ...(data?.files || []).map((file: any) => ({
-      isFolder: false,
-      key: file.key,
-      name: file.name,
-      size: file.size,
-      type: file.contentType,
-      lastModified: file.lastModified,
-      createdAt: file.createdAt,
-      cdnUrl: file.cdnUrl
-    }))
-  ];
+  const folderInputRef = React.useRef<HTMLInputElement>(null);
+  const items = toStorageItems(data);
+  const columnUploads = uploadingFiles.filter((u) => u.prefix === prefix);
 
-  
   return (
-    <div className="w-[280px] sm:w-[320px] shrink-0 border-r border-border flex flex-col bg-background/50 h-full group relative">
-      {/* Sticky Column Header with Hover Actions */}
+    <div className="group/col w-[280px] sm:w-[320px] shrink-0 border-r border-border flex flex-col bg-background/50 h-full relative">
+      {/* Sticky column header with the folder's quick actions */}
       <div className="sticky top-0 z-10 bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60 p-2 flex items-center justify-between border-b border-border shadow-sm">
         <span className="text-xs font-semibold text-muted-foreground truncate px-1">
           {prefix === "" ? "Root" : prefix.split('/').slice(-2, -1)[0]}
         </span>
-        <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-          <Button variant="ghost" size="icon" className="h-6 w-6 rounded-md text-muted-foreground hover:text-foreground" onClick={() => setCreatingFolderIn(prefix)} title="New Folder">
+        <div className="flex items-center gap-1 md:opacity-0 md:group-hover/col:opacity-100 transition-opacity">
+          <Button variant="ghost" size="icon" className="h-6 w-6 rounded-md text-muted-foreground hover:text-foreground" onClick={() => setCreatingFolderIn(prefix)} title="New folder" aria-label="New folder">
             <FolderPlus className="h-3.5 w-3.5" />
           </Button>
-          <Button variant="ghost" size="icon" className="h-6 w-6 rounded-md text-muted-foreground hover:text-foreground" onClick={() => handleUploadClick(prefix)} title="Upload Files">
+          <Button variant="ghost" size="icon" className="h-6 w-6 rounded-md text-muted-foreground hover:text-foreground" onClick={() => handleUploadClick(prefix)} title="Upload files" aria-label="Upload files">
             <UploadCloud className="h-3.5 w-3.5" />
           </Button>
         </div>
@@ -304,15 +451,17 @@ const StorageColumn = ({
 
       <div className="flex-1 overflow-y-auto p-2 space-y-0.5">
         {creatingFolderIn === prefix && (
-          <div className="flex items-center gap-3 p-2 px-3 border-b border-border bg-primary/5">
+          <div className="flex items-center gap-3 p-2 px-3 border-b border-border bg-muted/40">
             <div className="shrink-0 w-4 h-4" />
             <Folder size={16} className="text-yellow-500 fill-yellow-500/20 shrink-0" />
-            <input 
+            <input
+              ref={folderInputRef}
               type="text"
               autoFocus
               defaultValue="Untitled folder"
+              aria-label="Folder name"
               onFocus={(e) => e.target.select()}
-              className="flex-1 bg-background border border-primary text-sm px-1.5 py-0.5 outline-none focus:ring-1 focus:ring-primary h-6"
+              className="flex-1 min-w-0 bg-background border border-border text-sm px-1.5 py-0.5 outline-none focus:ring-1 focus:ring-foreground/30 h-6"
               onKeyDown={(e) => {
                 if (e.key === 'Enter') {
                   e.preventDefault();
@@ -333,14 +482,12 @@ const StorageColumn = ({
             <Button
               variant="ghost"
               size="icon"
-              className="h-6 w-6 shrink-0 text-emerald-500 hover:text-emerald-600 hover:bg-emerald-500/10"
+              className="h-6 w-6 shrink-0 text-foreground hover:bg-muted"
               disabled={isCreatingFolderPending}
-              onClick={() => {
-                const inputElement = document.getElementById("inline-create-folder-input") as HTMLInputElement;
-                if (inputElement) {
-                  handleCreateFolder(inputElement.value);
-                }
-              }}
+              aria-label="Create folder"
+              // Keep the focus in the name box, so its blur does not cancel the new folder before this click runs
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => handleCreateFolder(folderInputRef.current?.value ?? "", prefix)}
             >
               <Check size={14} />
             </Button>
@@ -353,141 +500,111 @@ const StorageColumn = ({
               <Skeleton key={i} className="h-10 w-full rounded-md bg-muted/60" />
             ))}
           </div>
-        ) : items.length === 0 && (creatingFolderIn !== prefix) && uploadingFiles.filter((u: any) => u.prefix === prefix).length === 0 ? (
+        ) : items.length === 0 && creatingFolderIn !== prefix && columnUploads.length === 0 ? (
           <div className="p-8 text-center text-muted-foreground flex flex-col items-center gap-3">
             <Folder className="h-10 w-10 opacity-20" />
-            <span className="text-sm">This folder is empty.</span>
-            <Button variant="outline" size="sm" className="mt-2 text-xs" onClick={() => handleUploadClick(prefix)}>
-              <UploadCloud className="mr-2 h-3.5 w-3.5" /> Upload files
-            </Button>
+            <span className="text-sm">{search ? "No files match this search." : "This folder is empty."}</span>
+            {!search && (
+              <Button variant="outline" size="sm" className="mt-2 text-xs" onClick={() => handleUploadClick(prefix)}>
+                <UploadCloud className="mr-2 h-3.5 w-3.5" /> Upload files
+              </Button>
+            )}
           </div>
         ) : (
           <>
-            {/* INLINE UPLOADING FILES */}
-            {uploadingFiles.filter((u: any) => u.prefix === prefix).map((u: any) => {
-              // If it's completed and already fetched into the list, don't show the inline duplicate
-              if (u.status === 'completed' && items.some((item: any) => item.name === u.name)) return null;
-              
+            {/* Files still uploading into this folder */}
+            {columnUploads.map((u) => {
+              // Once it is in the listing, the inline copy is not needed
+              if (u.status === 'completed' && items.some((item) => item.name === u.name)) return null;
+              if (u.status === 'cancelled') return null;
+
               return (
-                <div 
+                <div
                   key={u.id}
                   className="flex items-center justify-between p-2 px-3 rounded-md text-sm opacity-70"
                 >
                   <div className="flex items-center gap-3 overflow-hidden">
-                    <div className="shrink-0 w-4 h-4" /> {/* Empty checkbox space */}
+                    <div className="shrink-0 w-4 h-4" />
                     {getFileIcon(u.file.type)}
                     <span className="truncate">{u.name}</span>
                   </div>
                   <div className="shrink-0 flex items-center justify-center">
-                    <Spinner className="text-muted-foreground" />
+                    {u.status === 'error'
+                      ? <span className="text-xs text-destructive">Failed</span>
+                      : <Spinner className="text-muted-foreground" />}
                   </div>
                 </div>
               );
             })}
-            
-            {/* EXISTING FILES */}
-            {items.map((item: any) => {
-              if (item.isUpDir) return null;
-            
-            const isSelected = selectedKeys.has(item.key);
-            const isActive = selectedChildKey === item.key; // Is this the folder/file that is currently clicked and opened to the right?
 
-            return (
-              <div 
-                key={item.key}
-                onClick={() => {
-                  if (fileToRename?.key === item.key) return; // Prevent navigation while renaming
-                  item.isFolder ? onSelectFolder(item.key) : onSelectFile(item);
-                }}
-                className={`flex items-center justify-between p-2 px-3 rounded-md cursor-pointer text-sm group ${isActive ? 'bg-accent text-accent-foreground font-medium' : 'hover:bg-muted/50'}`}
-              >
-                <div className="flex items-center gap-3 overflow-hidden flex-1">
-                  <div onClick={(e) => { e.stopPropagation(); toggleSelection(e, item.key); }} className="shrink-0">
-                    <div className={`w-4 h-4 rounded border flex items-center justify-center transition-colors ${isSelected ? 'bg-primary border-primary text-primary-foreground' : 'border-muted-foreground/40 group-hover:border-foreground/40'}`}>
-                      {isSelected && <svg width="10" height="8" viewBox="0 0 10 8" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M1 4L3.5 6.5L9 1" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" /></svg>}
+            {items.map((item) => {
+              const isSelected = selectedKeys.has(item.key);
+              const isActive = selectedChildKey === item.key; // the folder or file opened to the right
+
+              return (
+                <div
+                  key={item.key}
+                  onClick={() => {
+                    if (fileToRename?.key === item.key) return; // no navigation while renaming
+                    if (item.isFolder) onSelectFolder(item.key);
+                    else onSelectFile(item);
+                  }}
+                  className={cn(
+                    "group/row flex items-center justify-between gap-1 p-2 px-3 rounded-md cursor-pointer text-sm",
+                    isActive ? "bg-accent text-accent-foreground font-medium" : "hover:bg-muted/50"
+                  )}
+                >
+                  <div className="flex items-center gap-3 overflow-hidden flex-1">
+                    <div onClick={(e) => { e.stopPropagation(); toggleSelection(e, item.key); }} className="shrink-0">
+                      <div className={cn(
+                        "w-4 h-4 rounded border flex items-center justify-center transition-colors",
+                        isSelected ? "bg-primary border-primary text-primary-foreground" : "border-muted-foreground/40 group-hover/row:border-foreground/40"
+                      )}>
+                        {isSelected && <svg width="10" height="8" viewBox="0 0 10 8" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M1 4L3.5 6.5L9 1" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" /></svg>}
+                      </div>
                     </div>
+
+                    {getFileIcon(item.isFolder ? "Folder" : item.type)}
+
+                    {fileToRename?.key === item.key ? (
+                      <div className="flex items-center flex-1 min-w-0 max-w-full" onClick={e => e.stopPropagation()}>
+                        <Input
+                          className="h-7 text-sm py-0 px-2 rounded-[4px] bg-background border-border min-w-[50px] w-full"
+                          autoFocus
+                          value={newFileName}
+                          aria-label="New name"
+                          onChange={e => setNewFileName(e.target.value)}
+                          onBlur={() => setFileToRename(null)}
+                          onKeyDown={e => {
+                            if (e.key === 'Enter') handleRenameFile();
+                            if (e.key === 'Escape') setFileToRename(null);
+                          }}
+                          disabled={isRenamingPending}
+                        />
+                        {extensionOf(item.name, item.isFolder) && (
+                          <span className="text-muted-foreground ml-0.5 shrink-0">
+                            {extensionOf(item.name, item.isFolder)}
+                          </span>
+                        )}
+                      </div>
+                    ) : (
+                      <span className="truncate selection:bg-transparent">{item.name}</span>
+                    )}
                   </div>
-                  
-                  {getFileIcon(item.isFolder ? "Folder" : item.type)}
-                  
-                  {fileToRename?.key === item.key ? (
-                    <div className="flex items-center flex-1 min-w-0 max-w-full" onClick={e => e.stopPropagation()}>
-                      <Input
-                        className="h-7 text-sm py-0 px-2 rounded-[4px] bg-background border-primary min-w-[50px] w-full"
-                        autoFocus
-                        value={newFileName}
-                        onChange={e => setNewFileName(e.target.value)}
-                        onBlur={() => setFileToRename(null)}
-                        onKeyDown={e => {
-                          if (e.key === 'Enter') handleRenameFile();
-                          if (e.key === 'Escape') setFileToRename(null);
-                        }}
-                        disabled={isRenamingPending}
-                      />
-                      {!item.isFolder && item.name.lastIndexOf('.') > 0 && (
-                        <span className="text-muted-foreground ml-0.5 shrink-0">
-                          {item.name.substring(item.name.lastIndexOf('.'))}
-                        </span>
-                      )}
-                    </div>
-                  ) : (
-                    <span className="truncate selection:bg-transparent">{item.name}</span>
+
+                  <div
+                    className="shrink-0 md:opacity-0 md:group-hover/row:opacity-100 has-[[aria-expanded=true]]:opacity-100"
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    <ItemActionsMenu item={item} actions={actions} triggerClassName="h-6 w-6" />
+                  </div>
+
+                  {item.isFolder && (
+                    <ChevronRight size={14} className={cn("shrink-0", isActive ? "opacity-100" : "opacity-0 group-hover/row:opacity-50")} />
                   )}
                 </div>
-
-                <div className="opacity-0 group-hover:opacity-100 shrink-0" onClick={(e) => e.stopPropagation()}>
-                  <DropdownMenu>
-                    <DropdownMenuTrigger asChild>
-                      <Button variant="ghost" size="icon" className="h-6 w-6 text-muted-foreground hover:text-foreground">
-                        <MoreHorizontal className="h-4 w-4" />
-                      </Button>
-                    </DropdownMenuTrigger>
-                    <DropdownMenuContent align="end" className="w-48">
-                      <DropdownMenuItem onClick={() => {
-                        const event = new CustomEvent('rename-file', { detail: { key: item.key, name: item.name } });
-                        window.dispatchEvent(event);
-                      }}>
-                        <Edit2 className="mr-2 h-4 w-4" /> Rename
-                      </DropdownMenuItem>
-                      <DropdownMenuItem onClick={() => {
-                        const event = new CustomEvent('move-file', { detail: { key: item.key, name: item.name } });
-                        window.dispatchEvent(event);
-                      }}>
-                        <FolderPlus className="mr-2 h-4 w-4" /> Move
-                      </DropdownMenuItem>
-                      {!item.isFolder && (
-                        <>
-                          <DropdownMenuItem onClick={() => {
-                            navigator.clipboard.writeText(item.cdnUrl);
-                            toast.success("URL copied to clipboard");
-                          }}>
-                            <LinkIcon className="mr-2 h-4 w-4" /> Get URL
-                          </DropdownMenuItem>
-                          <DropdownMenuItem onClick={() => {
-                            const event = new CustomEvent('download-file', { detail: { key: item.key, name: item.name, cdnUrl: item.cdnUrl } });
-                            window.dispatchEvent(event);
-                          }}>
-                            <Download className="mr-2 h-4 w-4" /> Download
-                          </DropdownMenuItem>
-                        </>
-                      )}
-                      <DropdownMenuSeparator />
-                      <DropdownMenuItem className="text-destructive focus:text-destructive" onClick={() => {
-                        const event = new CustomEvent('delete-file', { detail: item.key });
-                        window.dispatchEvent(event);
-                      }}>
-                        <Trash2 className="mr-2 h-4 w-4" /> Delete
-                      </DropdownMenuItem>
-                    </DropdownMenuContent>
-                  </DropdownMenu>
-                </div>
-
-                {item.isFolder && (
-                  <ChevronRight size={14} className={`shrink-0 ${isActive ? 'opacity-100' : 'opacity-0 group-hover:opacity-50'}`} />
-                )}
-              </div>
-            );
-          })}
+              );
+            })}
           </>
         )}
       </div>
@@ -496,73 +613,83 @@ const StorageColumn = ({
 };
 
 export function StorageFilesPage() {
-  const [searchInput, setSearchInput] = useState("");
-  const [debouncedSearch, setDebouncedSearch] = useState("");
-  
+  // "Locate in Files" (Storage Analytics) opens this page with ?prefix=<folder>&search=<file name>
+  const [searchParams, setSearchParams] = useSearchParams();
+  const [initialLink] = useState(() => ({
+    prefix: searchParams.get("prefix") || "",
+    search: searchParams.get("search") || "",
+  }));
+
+  const [searchInput, setSearchInput] = useState(initialLink.search);
+  const [debouncedSearch, setDebouncedSearch] = useState(initialLink.search);
+
   const [selectedKeys, setSelectedKeys] = useState<Set<string>>(new Set());
   const [viewMode, setViewMode] = useState<'columns' | 'list'>('columns');
-  const [activeFile, setActiveFile] = useState<any | null>(null);
+  const [activeFile, setActiveFile] = useState<StorageItem | null>(null);
 
   const [creatingFolderIn, setCreatingFolderIn] = useState<string | null>(null);
   const [activeUploadPrefix, setActiveUploadPrefix] = useState<string>("");
 
   const [fileToRename, setFileToRename] = useState<{ key: string, name: string } | null>(null);
   const [newFileName, setNewFileName] = useState("");
-  
+
   const [fileToMove, setFileToMove] = useState<{ key: string, name: string } | null>(null);
   const [moveDestinationPrefix, setMoveDestinationPrefix] = useState("");
   const [fileToDelete, setFileToDelete] = useState<string | null>(null);
   const [isBulkDeleteModalOpen, setIsBulkDeleteModalOpen] = useState(false);
-  
+
   const [isNavigateModalOpen, setIsNavigateModalOpen] = useState(false);
   const [navigatePath, setNavigatePath] = useState("");
-  
-  // Custom upload state
+
   const [uploadingFiles, setUploadingFiles] = useState<UploadingFile[]>([]);
   const fileInputRef = React.useRef<HTMLInputElement>(null);
   const scrollContainerRef = React.useRef<HTMLDivElement>(null);
   const hasActiveUploadsRef = React.useRef<boolean>(false);
   const batchUploadInProgressRef = React.useRef<boolean>(false);
+  const uploadControllersRef = React.useRef<Map<string, AbortController>>(new Map());
+  const uploadsCancelledRef = React.useRef<boolean>(false);
 
-  // Drag-to-scroll state for Miller Columns
+  // Drag-to-scroll state for the columns
   const isDraggingRef = React.useRef(false);
   const startXRef = React.useRef(0);
   const scrollLeftRef = React.useRef(0);
 
-  // Miller Columns state
-  const [openFolders, setOpenFolders] = useState<string[]>([""]); // "" is root
-  
-  // Full-screen file preview modal
+  // Open columns: "" is the root, then one entry per opened folder
+  const [openFolders, setOpenFolders] = useState<string[]>(() => prefixToOpenFolders(initialLink.prefix));
+
+  // Full-screen file preview
   const [previewFile, setPreviewFile] = useState<FilePreviewSource | null>(null);
 
-  // The effective prefix is the last opened folder
-  const currentPrefix = openFolders[openFolders.length - 1];
+  // The current folder is the last opened one
+  const currentPrefix = openFolders[openFolders.length - 1] ?? "";
 
   const queryClient = useQueryClient();
-  const { data, isLoading, isFetching, refetch } = useStorageObjects(currentPrefix, debouncedSearch);
+  const { data, isLoading } = useStorageObjects(currentPrefix, debouncedSearch);
   const createFolderMutation = useCreateFolder();
   const deleteObjectMutation = useDeleteObject();
   const deleteObjectsMutation = useDeleteObjects();
   const renameObjectMutation = useRenameObject();
-  const uploadFileMutation = useUploadFile();
 
-  // Auto-scroll to the rightmost edge whenever a folder or file is opened
+  // The link parameters are read once; take them off the address so a later reload starts clean
   React.useEffect(() => {
-    // Request browser notification permission for background uploads
-    if ('Notification' in window && Notification.permission === 'default') {
-      Notification.requestPermission();
+    if (searchParams.has("prefix") || searchParams.has("search")) {
+      setSearchParams({}, { replace: true });
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
+  // Scroll to the right edge whenever a folder or file is opened
+  React.useEffect(() => {
     if (viewMode === 'columns' && scrollContainerRef.current) {
-      setTimeout(() => {
-        if (scrollContainerRef.current) {
-          scrollContainerRef.current.scrollTo({
-            left: scrollContainerRef.current.scrollWidth,
-            behavior: 'smooth'
-          });
-        }
+      const timer = window.setTimeout(() => {
+        scrollContainerRef.current?.scrollTo({
+          left: scrollContainerRef.current.scrollWidth,
+          behavior: 'smooth'
+        });
       }, 50);
+      return () => window.clearTimeout(timer);
     }
+    return undefined;
   }, [openFolders.length, activeFile, viewMode]);
 
   React.useEffect(() => {
@@ -591,250 +718,214 @@ export function StorageFilesPage() {
 
   React.useEffect(() => {
     const handler = setTimeout(() => {
-      setDebouncedSearch(searchInput);
+      setDebouncedSearch(searchInput.trim());
     }, 500);
-
-    const handleRenameFileEvent = (e: any) => {
-      const { key, name } = e.detail;
-      const isFolder = key.endsWith('/');
-      const lastDotIndex = !isFolder && name.lastIndexOf('.') > 0 ? name.lastIndexOf('.') : -1;
-      const baseName = lastDotIndex > 0 ? name.substring(0, lastDotIndex) : name;
-      setFileToRename({ key, name });
-      setNewFileName(baseName);
-    };
-
-    const handleMoveFileEvent = (e: any) => {
-      setFileToMove({ key: e.detail.key, name: e.detail.name });
-      setMoveDestinationPrefix(e.detail.key.substring(0, e.detail.key.lastIndexOf('/') + 1));
-    };
-
-    const handleDownloadFileEvent = async (e: any) => {
-      const { key, name, cdnUrl } = e.detail;
-      try {
-        toast.loading("Starting download...", { id: "downloading" });
-        const data = await storageApi.getPresignedUrl(key);
-        const link = document.createElement('a');
-        link.href = data.downloadUrl;
-        link.download = name;
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
-        toast.success("Download complete", { id: "downloading" });
-      } catch (error) {
-        toast.dismiss("downloading");
-        if (cdnUrl) window.open(cdnUrl, '_blank');
-      }
-    };
-
-    const handleDeleteFileEvent = (e: any) => {
-      setFileToDelete(e.detail);
-    };
-
-    window.addEventListener('rename-file', handleRenameFileEvent);
-    window.addEventListener('move-file', handleMoveFileEvent);
-    window.addEventListener('download-file', handleDownloadFileEvent);
-    window.addEventListener('delete-file', handleDeleteFileEvent);
-
-    return () => {
-      clearTimeout(handler);
-      window.removeEventListener('rename-file', handleRenameFileEvent);
-      window.removeEventListener('move-file', handleMoveFileEvent);
-      window.removeEventListener('download-file', handleDownloadFileEvent);
-      window.removeEventListener('delete-file', handleDeleteFileEvent);
-    };
+    return () => clearTimeout(handler);
   }, [searchInput]);
 
+  /** The cached listings of a folder that are on screen (with and without the search). */
+  const listCacheKeys = (prefix: string): QueryKey[] => {
+    const keys: QueryKey[] = [storageKeys.list(prefix, "")];
+    if (debouncedSearch) keys.push(storageKeys.list(prefix, debouncedSearch));
+    return keys;
+  };
+
+  /** Closes the columns of folders that no longer exist (deleted or moved). */
+  const closeRemovedFolders = (removedKeys: string[]) => {
+    const removedFolders = removedKeys.filter((key) => key.endsWith("/"));
+    if (removedFolders.length === 0) return;
+    setOpenFolders((prev) => {
+      const index = prev.findIndex((prefix) => removedFolders.some((folder) => prefix.startsWith(folder)));
+      return index > 0 ? prev.slice(0, index) : prev;
+    });
+  };
+
   const handleUploadClick = (prefix: string) => {
+    // Asked on a click, so the browser can show its prompt; used for the "upload finished" notice
+    if ('Notification' in window && Notification.permission === 'default') {
+      void Notification.requestPermission();
+    }
     setActiveUploadPrefix(prefix);
     fileInputRef.current?.click();
   };
 
-    const handleFilesSelected = (e: React.ChangeEvent<HTMLInputElement>) => {
-      if (!e.target.files || e.target.files.length === 0) return;
-      
-      const files = Array.from(e.target.files);
+  const handleCancelUploads = () => {
+    uploadsCancelledRef.current = true;
+    uploadControllersRef.current.forEach((controller) => controller.abort());
+    uploadControllersRef.current.clear();
+  };
 
-      if (files.length > 25000) {
-        toast.error("You can only upload a maximum of 25,000 files at once.");
-        if (fileInputRef.current) fileInputRef.current.value = "";
-        return;
-      }
-      
-      const MAX_FILE_SIZE = 500 * 1024 * 1024 * 1024; // 500 GB
-      const validFiles = files.filter(f => f.size <= MAX_FILE_SIZE).map(f => {
-        // Sanitize filename to replace spaces with underscores to avoid %20 in URLs
-        const sanitizedName = f.name.replace(/\s+/g, '_');
-        return sanitizedName === f.name ? f : new File([f], sanitizedName, { type: f.type, lastModified: f.lastModified });
-      });
-      const invalidFiles = files.filter(f => f.size > MAX_FILE_SIZE);
+  const handleFilesSelected = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (!e.target.files || e.target.files.length === 0) return;
 
-      if (invalidFiles.length > 0) {
-        toast.error(`Skipped ${invalidFiles.length} file(s) that exceed the 500 GB limit.`);
-      }
+    const files = Array.from(e.target.files);
+    if (fileInputRef.current) fileInputRef.current.value = "";
 
-      if (validFiles.length === 0) {
-        if (fileInputRef.current) fileInputRef.current.value = "";
-        return;
-      }
-      
-      // Flag entire batch as in-progress to prevent socket events from wiping cache
-      hasActiveUploadsRef.current = true;
-      batchUploadInProgressRef.current = true;
-      
-      const newUploads = validFiles.map(file => ({
-        id: Math.random().toString(36).substring(7),
-        file,
-        name: file.name,
-        prefix: activeUploadPrefix,
-        progress: 0,
-        status: 'uploading' as const
-      }));
-
-      setUploadingFiles(prev => [...prev, ...newUploads]);
-      
-        let successCount = 0;
-        let errorCount = 0;
-        
-        const MAX_RETRIES = 3;
-
-        const uploadWithRetry = async (upload: typeof newUploads[0], attempt = 0): Promise<any> => {
-          try {
-            return await storageApi.uploadFile(upload.file, upload.prefix, (progressEvent) => {
-              if (progressEvent.total) {
-                const percentCompleted = Math.round((progressEvent.loaded * 100) / progressEvent.total);
-                setUploadingFiles(prev => prev.map(u => u.id === upload.id ? { ...u, progress: Math.max(u.progress, percentCompleted) } : u));
-              }
-            });
-          } catch (error) {
-            if (attempt < MAX_RETRIES) {
-              // We do NOT reset progress to 0 here to ensure the overall progress bar never moves backwards.
-              // Exponential backoff: 1s, 2s, 4s
-              const delay = Math.pow(2, attempt) * 1000;
-              await new Promise(resolve => setTimeout(resolve, delay));
-              return uploadWithRetry(upload, attempt + 1);
-            }
-            throw error;
-          }
-        };
-
-        const processUpload = async (upload: typeof newUploads[0]) => {
-          try {
-            const result = await uploadWithRetry(upload);
-            
-            successCount++;
-            
-            // Instantly inject THIS file into the cache so it shows up without waiting for other files!
-            const newFile = {
-              key: result.key || `${upload.prefix}${upload.name}`,
-              name: upload.name,
-              size: result.size || upload.file.size,
-              contentType: result.contentType || upload.file.type,
-              lastModified: new Date().toISOString(),
-              createdAt: new Date().toISOString(),
-              cdnUrl: result.cdnUrl || ""
-            };
-            
-            const updateCache = (oldData: any) => {
-              if (!oldData) return oldData;
-              const existingKeys = new Set(oldData.files.map((f: any) => f.key));
-              if (existingKeys.has(newFile.key)) {
-                return {
-                  ...oldData,
-                  files: oldData.files.map((f: any) => f.key === newFile.key ? newFile : f)
-                };
-              }
-              return {
-                ...oldData,
-                files: [...oldData.files, newFile].sort((a: any, b: any) => a.name.localeCompare(b.name))
-              };
-            };
-
-            // Always update the cache for the current view (whether search is empty or not)
-            queryClient.setQueryData(storageKeys.list(upload.prefix, debouncedSearch), updateCache);
-
-            // Set to completed so it can be filtered out from inline display
-            setUploadingFiles(prev => prev.map(u => u.id === upload.id ? { ...u, progress: 100, status: 'completed' } : u));
-            
-            // Note: We DO NOT remove it from uploadingFiles here, otherwise the overall progress percentage will jump backwards!
-
-          } catch (error) {
-            errorCount++;
-            setUploadingFiles(prev => prev.map(u => u.id === upload.id ? { ...u, status: 'error' } : u));
-
-          }
-        };
-
-        // Upload files in batches of 5 concurrently to drastically improve speed for bulk uploads
-        const uploadInBatches = async () => {
-          const BATCH_SIZE = 5;
-          for (let i = 0; i < newUploads.length; i += BATCH_SIZE) {
-            const batch = newUploads.slice(i, i + BATCH_SIZE);
-            await Promise.all(batch.map(upload => processUpload(upload)));
-          }
-        };
-
-        uploadInBatches().then(() => {
-          // Mark batch as complete so socket events can refetch again
-          batchUploadInProgressRef.current = false;
-          hasActiveUploadsRef.current = false;
-
-          // Delay global invalidation to allow S3 eventual consistency to settle, preventing disappearing files
-          setTimeout(() => {
-            queryClient.invalidateQueries({ queryKey: storageKeys.lists() });
-            queryClient.invalidateQueries({ queryKey: storageKeys.analytics() });
-          }, 3000);
-        
-        // Single unified toast notification
-        if (successCount > 0 && errorCount === 0) {
-          toast.success(`Successfully uploaded ${successCount} file${successCount > 1 ? 's' : ''}.`);
-        } else if (successCount > 0 && errorCount > 0) {
-          toast.warning(`Uploaded ${successCount} file(s), but ${errorCount} failed.`);
-        } else if (errorCount > 0) {
-          toast.error(`Failed to upload ${errorCount} file(s).`);
-        }
-
-        // Send browser push notification if supported and granted
-        if ('Notification' in window && Notification.permission === 'granted') {
-          try {
-            new Notification('Classgrid Storage Upload', {
-              body: successCount > 0 && errorCount === 0 
-                ? `Successfully uploaded ${successCount} files.` 
-                : (successCount > 0 ? `Uploaded ${successCount} files, ${errorCount} failed.` : `Failed to upload ${errorCount} files.`),
-              icon: '/favicon.ico'
-            });
-          } catch (e) {
-            // Some browsers require service workers for notifications, fallback gracefully
-            console.error("Failed to send push notification", e);
-          }
-        }
-
-        // Clear the upload toast after 3 seconds
-        setTimeout(() => {
-          setUploadingFiles([]);
-        }, 3000);
-      });
-      
-      // Clear input
-      if (fileInputRef.current) fileInputRef.current.value = "";
-    };
-
-  const handleNavigateToFolder = () => {
-    if (!navigatePath) {
-      setIsNavigateModalOpen(false);
+    if (files.length > 25000) {
+      toast.error("You can upload at most 25,000 files at once.");
       return;
     }
-    
-    // Convert a path like "assignments/math" into openFolders ["", "assignments/", "assignments/math/"]
-    const parts = navigatePath.split("/").filter(Boolean);
-    const newOpenFolders = [""];
-    let current = "";
-    
-    parts.forEach(part => {
-      current += part + "/";
-      newOpenFolders.push(current);
+
+    const MAX_FILE_SIZE = 500 * 1024 * 1024 * 1024; // 500 GB, the server limit
+    const validFiles = files.filter(f => f.size <= MAX_FILE_SIZE).map(f => {
+      // Spaces become underscores so the file URLs have no %20
+      const sanitizedName = f.name.replace(/\s+/g, '_');
+      return sanitizedName === f.name ? f : new File([f], sanitizedName, { type: f.type, lastModified: f.lastModified });
     });
-    
-    setOpenFolders(newOpenFolders);
+    const skipped = files.length - validFiles.length;
+    if (skipped > 0) {
+      toast.error(`Skipped ${skipped} file${skipped === 1 ? "" : "s"} above the 500 GB limit.`);
+    }
+    if (validFiles.length === 0) return;
+
+    // The whole batch counts as in progress, so socket events do not wipe the cache mid-upload
+    hasActiveUploadsRef.current = true;
+    batchUploadInProgressRef.current = true;
+    uploadsCancelledRef.current = false;
+    const searchAtStart = debouncedSearch;
+
+    const newUploads: UploadingFile[] = validFiles.map(file => ({
+      id: Math.random().toString(36).substring(2, 10),
+      file,
+      name: file.name,
+      prefix: activeUploadPrefix,
+      progress: 0,
+      status: 'uploading' as const
+    }));
+
+    setUploadingFiles(prev => [...prev, ...newUploads]);
+
+    let successCount = 0;
+    let errorCount = 0;
+    let cancelledCount = 0;
+    const MAX_RETRIES = 3;
+
+    const uploadWithRetry = async (upload: UploadingFile, attempt = 0): Promise<Awaited<ReturnType<typeof storageApi.uploadFile>>> => {
+      const controller = new AbortController();
+      uploadControllersRef.current.set(upload.id, controller);
+      try {
+        return await storageApi.uploadFile(upload.file, upload.prefix, (progressEvent) => {
+          if (progressEvent.total) {
+            const percentCompleted = Math.round((progressEvent.loaded * 100) / progressEvent.total);
+            setUploadingFiles(prev => prev.map(u => u.id === upload.id ? { ...u, progress: Math.max(u.progress, percentCompleted) } : u));
+          }
+        }, controller.signal);
+      } catch (error) {
+        if (!uploadsCancelledRef.current && attempt < MAX_RETRIES) {
+          // Progress is not reset, so the overall bar never moves backwards. Backoff: 1s, 2s, 4s
+          await new Promise(resolve => setTimeout(resolve, Math.pow(2, attempt) * 1000));
+          if (!uploadsCancelledRef.current) return uploadWithRetry(upload, attempt + 1);
+        }
+        throw error;
+      } finally {
+        uploadControllersRef.current.delete(upload.id);
+      }
+    };
+
+    const processUpload = async (upload: UploadingFile) => {
+      if (uploadsCancelledRef.current) {
+        cancelledCount++;
+        setUploadingFiles(prev => prev.map(u => u.id === upload.id ? { ...u, status: 'cancelled' } : u));
+        return;
+      }
+      try {
+        const result = await uploadWithRetry(upload);
+        successCount++;
+
+        // Show this file right away, without waiting for the rest of the batch
+        const newFile = {
+          key: result.key || `${upload.prefix}${upload.name}`,
+          name: upload.name,
+          size: result.size || upload.file.size,
+          contentType: result.contentType || upload.file.type,
+          lastModified: new Date().toISOString(),
+          createdAt: new Date().toISOString(),
+          cdnUrl: result.cdnUrl || ""
+        };
+        const updateCache = (oldData: ListObjectsResponse | undefined) => {
+          if (!oldData) return oldData;
+          if (oldData.files.some((f) => f.key === newFile.key)) {
+            return { ...oldData, files: oldData.files.map((f) => f.key === newFile.key ? newFile : f) };
+          }
+          return {
+            ...oldData,
+            files: [...oldData.files, newFile].sort((a, b) => a.name.localeCompare(b.name))
+          };
+        };
+        const cacheKeys: QueryKey[] = [storageKeys.list(upload.prefix, "")];
+        if (searchAtStart) cacheKeys.push(storageKeys.list(upload.prefix, searchAtStart));
+        cacheKeys.forEach((key) => queryClient.setQueryData<ListObjectsResponse>(key, updateCache));
+
+        // Kept in the list as completed, so the overall percentage does not jump back
+        setUploadingFiles(prev => prev.map(u => u.id === upload.id ? { ...u, progress: 100, status: 'completed' } : u));
+      } catch {
+        if (uploadsCancelledRef.current) {
+          cancelledCount++;
+          setUploadingFiles(prev => prev.map(u => u.id === upload.id ? { ...u, status: 'cancelled' } : u));
+        } else {
+          errorCount++;
+          setUploadingFiles(prev => prev.map(u => u.id === upload.id ? { ...u, status: 'error' } : u));
+        }
+      }
+    };
+
+    // 5 uploads at a time
+    const uploadInBatches = async () => {
+      const BATCH_SIZE = 5;
+      for (let i = 0; i < newUploads.length; i += BATCH_SIZE) {
+        const batch = newUploads.slice(i, i + BATCH_SIZE);
+        await Promise.all(batch.map(upload => processUpload(upload)));
+      }
+    };
+
+    void uploadInBatches().then(() => {
+      batchUploadInProgressRef.current = false;
+      hasActiveUploadsRef.current = false;
+
+      // A short wait lets S3 settle before the listings are fetched again
+      setTimeout(() => {
+        queryClient.invalidateQueries({ queryKey: storageKeys.lists() });
+        queryClient.invalidateQueries({ queryKey: storageKeys.analytics() });
+      }, 3000);
+
+      const fileCount = (n: number) => `${n} file${n === 1 ? "" : "s"}`;
+      let summary: string;
+      if (cancelledCount > 0) {
+        summary = successCount > 0
+          ? `Upload cancelled. ${fileCount(successCount)} uploaded before that.`
+          : "Upload cancelled.";
+        toast.info(summary);
+      } else if (successCount > 0 && errorCount === 0) {
+        summary = `Uploaded ${fileCount(successCount)}.`;
+        toast.success(summary);
+      } else if (successCount > 0) {
+        summary = `Uploaded ${fileCount(successCount)}, ${errorCount} failed.`;
+        toast.warning(summary);
+      } else {
+        summary = `Could not upload ${fileCount(errorCount)}.`;
+        toast.error(summary);
+      }
+
+      // Browser notice, for when the admin is on another tab
+      if ('Notification' in window && Notification.permission === 'granted' && cancelledCount === 0) {
+        try {
+          new Notification('Classgrid storage upload', { body: summary, icon: '/favicon.ico' });
+        } catch (error) {
+          // Some browsers only allow notifications from a service worker
+          console.error("Failed to show the upload notification", error);
+        }
+      }
+
+      setTimeout(() => setUploadingFiles([]), 3000);
+    });
+  };
+
+  const handleNavigateToFolder = () => {
+    const path = navigatePath.trim().replace(/\\/g, "/");
+    if (path) {
+      setOpenFolders(prefixToOpenFolders(path));
+      setActiveFile(null);
+    }
     setIsNavigateModalOpen(false);
     setNavigatePath("");
   };
@@ -858,250 +949,203 @@ export function StorageFilesPage() {
     if (!isDraggingRef.current || !scrollContainerRef.current) return;
     e.preventDefault();
     const x = e.pageX - scrollContainerRef.current.offsetLeft;
-    const walk = (x - startXRef.current) * 1.5; // Scroll speed multiplier
+    const walk = (x - startXRef.current) * 1.5;
     scrollContainerRef.current.scrollLeft = scrollLeftRef.current - walk;
   };
 
   const handleCreateFolder = (folderName: string, targetPrefix: string) => {
     if (createFolderMutation.isPending) return;
     const newFolderName = folderName.trim().replace(/\s+/g, '_');
-    if (!newFolderName) {
-      setCreatingFolderIn(null);
+    setCreatingFolderIn(null);
+    if (!newFolderName) return;
+    if (newFolderName.includes("/") || newFolderName.includes("\\")) {
+      toast.error("A folder name cannot contain a slash.");
       return;
     }
 
     const newPrefix = `${targetPrefix}${newFolderName}/`;
 
-    // Instantly hide the input
-    setCreatingFolderIn(null);
-
-    // Always update the cache for the current view (whether search is empty or not)
-    queryClient.setQueryData(storageKeys.list(targetPrefix, debouncedSearch), (oldData: any) => {
-      if (!oldData) return oldData;
-      return {
-        ...oldData,
-        folders: [
-          ...oldData.folders,
-          { name: newFolderName, prefix: newPrefix }
-        ].sort((a: any, b: any) => a.name.localeCompare(b.name))
-      };
+    // Show the folder at once; the hook shows the success or error message
+    listCacheKeys(targetPrefix).forEach((key) => {
+      queryClient.setQueryData<ListObjectsResponse>(key, (oldData) => {
+        if (!oldData || oldData.folders.some((f) => f.prefix === newPrefix)) return oldData;
+        return {
+          ...oldData,
+          folders: [...oldData.folders, { name: newFolderName, prefix: newPrefix }]
+            .sort((a, b) => a.name.localeCompare(b.name))
+        };
+      });
     });
 
     createFolderMutation.mutate({ folderName: newFolderName, prefix: targetPrefix }, {
-      onSuccess: () => {
-        refetch();
-        toast.success("Folder created");
-      },
-      onError: () => {
-        refetch();
-        toast.error("Failed to create folder");
+      onSettled: () => {
+        queryClient.invalidateQueries({ queryKey: storageKeys.lists() });
       }
     });
+  };
+
+  const startRename = (key: string, name: string) => {
+    const isFolder = key.endsWith("/");
+    setFileToRename({ key, name });
+    setNewFileName(baseNameOf(name, isFolder));
   };
 
   const handleRenameSelection = () => {
     if (selectedKeys.size === 1) {
       const key = Array.from(selectedKeys)[0];
-      const file = data?.files?.find(f => f.key === key);
-      const folder = data?.folders?.find((f: any) => f.prefix === key);
-      if (file) {
-        const lastDotIndex = file.name.lastIndexOf('.') > 0 ? file.name.lastIndexOf('.') : -1;
-        const baseName = lastDotIndex > 0 ? file.name.substring(0, lastDotIndex) : file.name;
-        setFileToRename({ key: file.key, name: file.name });
-        setNewFileName(baseName);
-      } else if (folder) {
-        setFileToRename({ key: folder.prefix, name: folder.name });
-        setNewFileName(folder.name);
-      }
+      const item = toStorageItems(data).find((entry) => entry.key === key);
+      if (item) startRename(item.key, item.name);
     } else if (selectedKeys.size === 0 && activeFile) {
-      // If no checkbox selected but a file is open in preview, rename that
-      const lastDotIndex = activeFile.name.lastIndexOf('.') > 0 ? activeFile.name.lastIndexOf('.') : -1;
-      const baseName = lastDotIndex > 0 ? activeFile.name.substring(0, lastDotIndex) : activeFile.name;
-      setFileToRename({ key: activeFile.key, name: activeFile.name });
-      setNewFileName(baseName);
+      // Nothing ticked but a file is open in the preview: rename that one
+      startRename(activeFile.key, activeFile.name);
     }
   };
 
-  const handleRenameFile = (overrideName?: string) => {
-    if (renameObjectMutation.isPending) return;
-    const nameToUse = overrideName !== undefined ? overrideName : newFileName;
-    
-    if (!fileToRename || !nameToUse.trim()) {
-      if (!nameToUse.trim()) setFileToRename(null);
+  const handleRenameFile = () => {
+    if (renameObjectMutation.isPending || !fileToRename) return;
+    const typedName = newFileName.trim();
+    if (!typedName) {
+      setFileToRename(null);
+      return;
+    }
+    if (typedName.includes("/") || typedName.includes("\\")) {
+      toast.error("A name cannot contain a slash.");
       return;
     }
 
-    const isFolder = fileToRename.key.endsWith('/');
-    const lastDotIndex = !isFolder && fileToRename.name.lastIndexOf('.') > 0 ? fileToRename.name.lastIndexOf('.') : -1;
-    const extension = lastDotIndex > 0 ? fileToRename.name.substring(lastDotIndex) : "";
-    const finalName = nameToUse.trim() + extension;
+    const source = fileToRename;
+    const isFolder = source.key.endsWith('/');
+    const finalName = typedName + extensionOf(source.name, isFolder);
 
-    if (fileToRename.name === finalName) {
+    if (source.name === finalName) {
       setFileToRename(null);
       return;
     }
 
-    let newKey = "";
-    let parentPrefix = "";
-    
-    if (isFolder) {
-      // For folders, key ends with '/'. E.g. 'folderA/' or 'folderA/folderB/'
-      const withoutTrailingSlash = fileToRename.key.slice(0, -1);
-      const lastSlashIndex = withoutTrailingSlash.lastIndexOf('/');
-      if (lastSlashIndex >= 0) {
-        parentPrefix = withoutTrailingSlash.substring(0, lastSlashIndex + 1);
-      } else {
-        parentPrefix = ""; // Root level folder
-      }
-      newKey = parentPrefix + finalName + '/';
-    } else {
-      const lastSlashIndex = fileToRename.key.lastIndexOf('/');
-      if (lastSlashIndex >= 0) {
-        parentPrefix = fileToRename.key.substring(0, lastSlashIndex + 1);
-      } else {
-        parentPrefix = "";
-      }
-      newKey = parentPrefix + finalName;
-    }
-
+    const parentPrefix = parentPrefixOf(source.key);
+    const newKey = parentPrefix + finalName + (isFolder ? "/" : "");
     const nowIso = new Date().toISOString();
 
-    const oldFileToRename = fileToRename;
+    // Show the new name at once and keep what was there, to put it back if the server says no
+    const cacheKeys = listCacheKeys(parentPrefix);
+    const snapshots = cacheKeys.map((key) => [key, queryClient.getQueryData<ListObjectsResponse>(key)] as const);
+    const previousActiveFile = activeFile;
+    const previousOpenFolders = openFolders;
+    const previousSelectedKeys = selectedKeys;
 
-    const generateNewCdnUrl = (oldUrl: string | undefined | null, newKey: string) => {
-      if (!oldUrl) return oldUrl;
-      try {
-        const urlObj = new URL(oldUrl);
-        const encodedNewKey = newKey.split('/').map(segment => encodeURIComponent(segment)).join('/');
-        return `${urlObj.protocol}//${urlObj.host}/${encodedNewKey}`;
-      } catch {
-        return oldUrl;
-      }
-    };
-
-    renameObjectMutation.mutate({ sourceKey: oldFileToRename.key, destinationKey: newKey }, {
-      onMutate: async () => {
-        // Cancel any outgoing refetches so they don't overwrite our optimistic update
-        await queryClient.cancelQueries({ queryKey: storageKeys.list(parentPrefix) });
-        if (debouncedSearch) {
-          await queryClient.cancelQueries({ queryKey: storageKeys.list(parentPrefix, debouncedSearch) });
-        }
-
-        // Snapshot the previous value
-        const previousData = queryClient.getQueryData(storageKeys.list(parentPrefix));
-        const previousSearchData = debouncedSearch ? queryClient.getQueryData(storageKeys.list(parentPrefix, debouncedSearch)) : undefined;
-
-        // Optimistically update to the new value
-        const updateRenamedItem = (oldData: any) => {
-          if (!oldData) return oldData;
-
-          if (isFolder) {
-            return {
-              ...oldData,
-              folders: oldData.folders.map((folder: any) => (
-                folder.prefix === oldFileToRename.key
-                  ? { ...folder, prefix: newKey, name: finalName }
-                  : folder
-              )).sort((a: any, b: any) => a.name.localeCompare(b.name)),
-            };
-          }
-
+    cacheKeys.forEach((key) => {
+      queryClient.setQueryData<ListObjectsResponse>(key, (oldData) => {
+        if (!oldData) return oldData;
+        if (isFolder) {
           return {
             ...oldData,
-            files: oldData.files.map((file: any) => (
-              file.key === oldFileToRename.key
-                ? {
-                    ...file,
-                    key: newKey,
-                    name: finalName,
-                    lastModified: nowIso
-                  }
-                : file
-            )).sort((a: any, b: any) => a.name.localeCompare(b.name)),
+            folders: oldData.folders
+              .map((folder) => folder.prefix === source.key ? { ...folder, prefix: newKey, name: finalName } : folder)
+              .sort((a, b) => a.name.localeCompare(b.name)),
           };
+        }
+        return {
+          ...oldData,
+          files: oldData.files
+            .map((file) => file.key === source.key
+              ? { ...file, key: newKey, name: finalName, lastModified: nowIso, cdnUrl: swapCdnKey(file.cdnUrl, source.key, newKey) }
+              : file)
+            .sort((a, b) => a.name.localeCompare(b.name)),
         };
+      });
+    });
 
-        // Always update the cache for the exact view the user is currently seeing
-        queryClient.setQueryData(storageKeys.list(parentPrefix, debouncedSearch), updateRenamedItem);
+    if (activeFile?.key === source.key) {
+      setActiveFile({
+        ...activeFile,
+        key: newKey,
+        name: finalName,
+        lastModified: nowIso,
+        cdnUrl: swapCdnKey(activeFile.cdnUrl, source.key, newKey),
+      });
+    }
+    if (selectedKeys.has(source.key)) {
+      setSelectedKeys(prev => {
+        const next = new Set(prev);
+        next.delete(source.key);
+        next.add(newKey);
+        return next;
+      });
+    }
+    if (isFolder) {
+      // Open columns inside the renamed folder follow the new name
+      setOpenFolders(prev => prev.map((prefix) => prefix.startsWith(source.key) ? newKey + prefix.substring(source.key.length) : prefix));
+    }
+    setFileToRename(null);
+    setNewFileName("");
 
-        // Keep the active file open in the preview pane
-        if (activeFile?.key === oldFileToRename.key) {
-          setActiveFile({
-            ...activeFile,
-            key: newKey,
-            name: finalName,
-            lastModified: nowIso,
-            cdnUrl: generateNewCdnUrl(activeFile.cdnUrl, newKey)
-          });
-        }
-
-        // Keep the file checked if it was checked
-        if (selectedKeys.has(oldFileToRename.key)) {
-          setSelectedKeys(prev => {
-            const next = new Set(prev);
-            next.delete(oldFileToRename.key);
-            next.add(newKey);
-            return next;
-          });
-        }
-
-        // Clear the renaming UI immediately
-        setFileToRename(null);
-        setNewFileName("");
-
-        return { previousData, previousSearchData };
-      },
-      onError: (err, newTodo, context) => {
-        // Rollback on failure
-        if (context?.previousData) {
-          queryClient.setQueryData(storageKeys.list(parentPrefix, debouncedSearch), context.previousData);
-        }
+    renameObjectMutation.mutate({ sourceKey: source.key, destinationKey: newKey, action: "rename" }, {
+      onError: () => {
+        snapshots.forEach(([key, snapshot]) => queryClient.setQueryData(key, snapshot));
+        setActiveFile(previousActiveFile);
+        setOpenFolders(previousOpenFolders);
+        setSelectedKeys(previousSelectedKeys);
       },
       onSettled: () => {
-        // Always refetch after error or success to ensure sync
-        queryClient.invalidateQueries({ queryKey: storageKeys.list(parentPrefix, debouncedSearch) });
+        queryClient.invalidateQueries({ queryKey: storageKeys.lists() });
       }
     });
   };
 
   const handleMoveFile = () => {
-    if (!fileToMove) return;
-    
-    let destPrefix = moveDestinationPrefix.trim();
+    if (!fileToMove || renameObjectMutation.isPending) return;
+
+    const moved = fileToMove;
+    const isFolder = moved.key.endsWith("/");
+    let destPrefix = moveDestinationPrefix.trim().replace(/\\/g, "/").replace(/^\/+/, "");
     if (destPrefix && !destPrefix.endsWith('/')) {
       destPrefix += '/';
     }
-    
-    const newKey = destPrefix + fileToMove.name;
-    
-    if (fileToMove.key === newKey) {
+
+    // Folders keep their trailing slash, so their contents move with them
+    const newKey = destPrefix + moved.name + (isFolder ? "/" : "");
+
+    if (moved.key === newKey) {
       setFileToMove(null);
       return;
     }
+    if (isFolder && newKey.startsWith(moved.key)) {
+      toast.error("A folder cannot be moved into itself.");
+      return;
+    }
 
-    renameObjectMutation.mutate({ sourceKey: fileToMove.key, destinationKey: newKey }, {
+    renameObjectMutation.mutate({ sourceKey: moved.key, destinationKey: newKey, action: "move" }, {
       onSuccess: () => {
-        queryClient.invalidateQueries({ queryKey: storageKeys.lists() });
         setFileToMove(null);
         setMoveDestinationPrefix("");
-        if (activeFile?.key === fileToMove.key) {
-          setActiveFile(null); 
-        }
-        refetch();
-        toast.success("Moved successfully");
+        if (activeFile?.key === moved.key) setActiveFile(null);
+        setSelectedKeys(prev => {
+          const next = new Set(prev);
+          next.delete(moved.key);
+          return next;
+        });
+        closeRemovedFolders([moved.key]);
+      },
+      onSettled: () => {
+        queryClient.invalidateQueries({ queryKey: storageKeys.lists() });
       }
     });
   };
 
   const handleDeleteFile = () => {
     if (!fileToDelete) return;
-    deleteObjectMutation.mutate(fileToDelete, {
+    const key = fileToDelete;
+    deleteObjectMutation.mutate(key, {
       onSuccess: () => {
         setFileToDelete(null);
-        const newSet = new Set(selectedKeys);
-        newSet.delete(fileToDelete);
-        setSelectedKeys(newSet);
-        if (activeFile?.key === fileToDelete) setActiveFile(null);
+        setSelectedKeys(prev => {
+          const next = new Set(prev);
+          next.delete(key);
+          return next;
+        });
+        if (activeFile?.key === key) setActiveFile(null);
+        closeRemovedFolders([key]);
+        queryClient.invalidateQueries({ queryKey: storageKeys.lists() });
       }
     });
   };
@@ -1113,98 +1157,96 @@ export function StorageFilesPage() {
       onSuccess: () => {
         setIsBulkDeleteModalOpen(false);
         setSelectedKeys(new Set());
-        setActiveFile(null);
+        if (activeFile && keysArray.includes(activeFile.key)) setActiveFile(null);
+        closeRemovedFolders(keysArray);
+        queryClient.invalidateQueries({ queryKey: storageKeys.lists() });
       }
     });
   };
 
-  const copyToClipboard = (url: string, type: string = "URL") => {
-    navigator.clipboard.writeText(url);
-    toast.success(`${type} copied to clipboard`);
-  };
-
-  const toggleSelection = (e: React.MouseEvent, key: string) => {
+  const toggleSelection = (e: React.MouseEvent | React.ChangeEvent, key: string) => {
     e.stopPropagation();
-    const newSet = new Set(selectedKeys);
-    if (newSet.has(key)) newSet.delete(key);
-    else newSet.add(key);
-    setSelectedKeys(newSet);
+    setSelectedKeys(prev => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
   };
 
-  const items = [
-    ...(data?.folders || []).map(folder => ({
-      isFolder: true,
-      key: folder.prefix,
-      name: folder.name,
-      size: null,
-      type: "Folder",
-    })),
-    ...(data?.files || []).map(file => ({
-      isFolder: false,
-      key: file.key,
-      name: file.name,
-      size: file.size,
-      type: file.contentType,
-      lastModified: file.lastModified,
-      createdAt: file.createdAt,
-      cdnUrl: file.cdnUrl
-    }))
-  ];
+  const itemActions: ItemActions = {
+    onRename: (item) => startRename(item.key, item.name),
+    onMove: (item) => {
+      setFileToMove({ key: item.key, name: item.name });
+      setMoveDestinationPrefix(parentPrefixOf(item.key));
+    },
+    onDelete: (key) => setFileToDelete(key),
+  };
 
-    const renderBreadcrumbs = () => {
-      const parts = currentPrefix.split("/").filter(Boolean);
-      let cumulative = "";
-      
-      return (
-        <div className="flex items-center gap-1.5 text-sm font-medium flex-wrap max-w-full overflow-hidden shrink-0">
-          <span 
-            className={`${!currentPrefix ? "text-foreground" : "text-muted-foreground hover:text-foreground cursor-pointer transition-colors"}`}
-            onClick={() => setOpenFolders([""])}
-          >
-            Root
-          </span>
-          {parts.map((part, idx) => {
-            cumulative += part + "/";
-            const isLast = idx === parts.length - 1;
-            
-            const newOpenFolders = [""];
-            let temp = "";
-            for (let i = 0; i <= idx; i++) {
-              temp += parts[i] + "/";
-              newOpenFolders.push(temp);
-            }
-            
-            return (
-              <React.Fragment key={cumulative}>
-                <ChevronRight className="h-4 w-4 text-muted-foreground/50 shrink-0" />
-                <span
-                  className={`truncate max-w-[150px] ${isLast ? "text-foreground" : "text-muted-foreground hover:text-foreground cursor-pointer transition-colors"}`}
-                  onClick={isLast ? undefined : () => setOpenFolders(newOpenFolders)}
-                  title={part}
-                >
-                  {part}
-                </span>
-              </React.Fragment>
-            );
-          })}
-        </div>
-      );
-    };
+  const previewPaneProps = activeFile ? {
+    activeFile,
+    onClose: () => setActiveFile(null),
+    onDelete: () => setFileToDelete(activeFile.key),
+    onRename: () => startRename(activeFile.key, activeFile.name),
+    onFullScreen: () => setPreviewFile({ name: activeFile.name, src: activeFile.cdnUrl, mimeType: activeFile.type }),
+  } : null;
+
+  const items = toStorageItems(data);
+  const deletingFolder = Boolean(fileToDelete?.endsWith("/"));
+  const uploadProgress = uploadingFiles.length
+    ? uploadingFiles.reduce((acc, f) => acc + f.progress, 0) / uploadingFiles.length
+    : 0;
+  const uploadsRunning = uploadingFiles.some((u) => u.status === 'uploading');
+
+  const renderBreadcrumbs = () => {
+    const parts = currentPrefix.split("/").filter(Boolean);
+
+    return (
+      <div className="flex items-center gap-1.5 text-sm font-medium flex-wrap max-w-full overflow-hidden">
+        <button
+          type="button"
+          className={!currentPrefix ? "text-foreground" : "text-muted-foreground hover:text-foreground cursor-pointer transition-colors"}
+          onClick={() => { setOpenFolders([""]); setActiveFile(null); }}
+        >
+          Root
+        </button>
+        {parts.map((part, idx) => {
+          const isLast = idx === parts.length - 1;
+          const target = prefixToOpenFolders(parts.slice(0, idx + 1).join("/"));
+
+          return (
+            <React.Fragment key={target[target.length - 1]}>
+              <ChevronRight className="h-4 w-4 text-muted-foreground/50 shrink-0" />
+              <button
+                type="button"
+                className={cn("truncate max-w-[150px]", isLast ? "text-foreground cursor-default" : "text-muted-foreground hover:text-foreground cursor-pointer transition-colors")}
+                onClick={isLast ? undefined : () => { setOpenFolders(target); setActiveFile(null); }}
+                title={part}
+              >
+                {part}
+              </button>
+            </React.Fragment>
+          );
+        })}
+      </div>
+    );
+  };
 
   return (
     <div className="flex flex-col h-full w-full overflow-hidden">
       <div className="flex flex-col flex-1 min-h-0 w-full border-t border-border bg-card">
-        <div className="flex items-center justify-between p-3 pl-14 border-b border-border bg-muted/20">
-          
-          <div className="flex items-center flex-1 mr-4 overflow-hidden">
+        {/* Toolbar. The left padding of the path row leaves room for the sidebar button (top left of this page) */}
+        <div className="flex flex-col gap-2 px-4 py-3 border-b border-border bg-muted/20 md:flex-row md:items-center md:justify-between">
+          <div className="flex min-h-9 min-w-0 items-center pl-10 md:flex-1 md:mr-4">
             {renderBreadcrumbs()}
           </div>
 
-          <div className="flex items-center gap-1.5 shrink-0">
-            <div className="relative w-[220px] mr-2">
+          <div className="flex flex-wrap items-center gap-1.5 md:flex-nowrap md:shrink-0">
+            <div className="relative w-full md:w-[220px] md:mr-2">
               <Search className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
               <Input
-                placeholder="Search..."
+                placeholder="Search this folder"
+                aria-label="Search this folder"
                 className="pl-9 h-9 bg-background border-border shadow-sm text-sm"
                 value={searchInput}
                 onChange={(e) => setSearchInput(e.target.value)}
@@ -1216,11 +1258,12 @@ export function StorageFilesPage() {
               className="h-9 w-9 bg-background shadow-sm"
               disabled={selectedKeys.size !== 1 && !activeFile}
               onClick={handleRenameSelection}
-              title="Rename selected file"
+              title="Rename"
+              aria-label="Rename"
             >
               <Edit2 size={16} />
             </Button>
-            
+
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <Button
@@ -1228,20 +1271,24 @@ export function StorageFilesPage() {
                   size="icon"
                   className="h-9 w-9 bg-background shadow-sm"
                   title="View options"
+                  aria-label="View options"
                 >
                   {viewMode === 'columns' ? <Columns size={16} /> : <List size={16} />}
                 </Button>
               </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="w-48 shadow-xl">
-                <DropdownMenuItem onClick={() => setViewMode('columns')} className="justify-between">
-                  As columns
-                  {viewMode === 'columns' && <Check size={16} className="text-emerald-500" />}
+              <DropdownMenuContent align="end" sideOffset={6} className={`w-[200px] ${storageMenuCard}`}>
+                <DropdownMenuItem onClick={() => setViewMode('columns')} className={`${storageMenuItem} justify-between`}>
+                  <span className="flex items-center gap-3"><Columns className={storageMenuIcon} /> As columns</span>
+                  {viewMode === 'columns' && <Check className="w-4 h-4 text-foreground" />}
                 </DropdownMenuItem>
-                <DropdownMenuItem onClick={() => setViewMode('list')} className="justify-between">
-                  As list
-                  {viewMode === 'list' && <Check size={16} className="text-emerald-500" />}
+                <DropdownMenuItem onClick={() => setViewMode('list')} className={`${storageMenuItem} justify-between`}>
+                  <span className="flex items-center gap-3"><List className={storageMenuIcon} /> As list</span>
+                  {viewMode === 'list' && <Check className="w-4 h-4 text-foreground" />}
                 </DropdownMenuItem>
-                <DropdownMenuSeparator />
+                <DropdownMenuSeparator className={storageMenuSeparator} />
+                <DropdownMenuItem onClick={() => setIsNavigateModalOpen(true)} className={storageMenuItem}>
+                  <FolderOpen className={storageMenuIcon} /> Go to folder
+                </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
 
@@ -1249,33 +1296,36 @@ export function StorageFilesPage() {
 
             <Button
               variant="outline"
-              className="h-9 bg-background shadow-sm text-sm font-medium"
+              className="h-9 px-3 sm:px-4 bg-background shadow-sm text-sm font-medium"
               onClick={() => setCreatingFolderIn(currentPrefix)}
+              aria-label="Create folder"
             >
-              <FolderPlus className="mr-2 h-4 w-4" /> Create folder
+              <FolderPlus className="h-4 w-4 sm:mr-2" /> <span className="hidden sm:inline">Create folder</span>
             </Button>
             <Button
-              className="h-9 bg-emerald-600 hover:bg-emerald-700 text-white shadow-sm border-0 text-sm font-medium ml-0.5"
+              className="h-9 px-3 sm:px-4 text-sm font-medium ml-0.5"
               onClick={() => handleUploadClick(currentPrefix)}
+              aria-label="Upload files"
             >
-              <UploadCloud className="mr-2 h-4 w-4" />
-              Upload files
+              <UploadCloud className="h-4 w-4 sm:mr-2" />
+              <span className="hidden sm:inline">Upload files</span>
             </Button>
-            <input 
-              type="file" 
-              ref={fileInputRef} 
-              className="hidden" 
-              multiple 
+            <input
+              type="file"
+              ref={fileInputRef}
+              className="hidden"
+              multiple
               onChange={handleFilesSelected}
             />
           </div>
         </div>
 
-        <div 
+        <div
           ref={scrollContainerRef}
-          className={`flex flex-1 min-h-0 bg-background relative ${
+          className={cn(
+            "flex flex-1 min-h-0 bg-background relative",
             viewMode === 'columns' ? 'overflow-x-auto overflow-y-hidden cursor-grab active:cursor-grabbing pb-2' : 'overflow-hidden'
-          }`}
+          )}
           onMouseDown={viewMode === 'columns' ? handleMouseDown : undefined}
           onMouseLeave={viewMode === 'columns' ? handleMouseLeave : undefined}
           onMouseUp={viewMode === 'columns' ? handleMouseUp : undefined}
@@ -1289,15 +1339,14 @@ export function StorageFilesPage() {
                   key={prefix}
                   prefix={prefix}
                   search={i === openFolders.length - 1 ? debouncedSearch : ""}
-                  isLastColumn={i === openFolders.length - 1}
-                  selectedChildKey={openFolders[i + 1]}
+                  selectedChildKey={openFolders[i + 1] ?? (i === openFolders.length - 1 ? activeFile?.key : undefined)}
                   selectedKeys={selectedKeys}
                   toggleSelection={toggleSelection}
                   onSelectFolder={(key: string) => {
                     setOpenFolders([...openFolders.slice(0, i + 1), key]);
                     setActiveFile(null);
                   }}
-                  onSelectFile={(file: any) => {
+                  onSelectFile={(file: StorageItem) => {
                     setOpenFolders(openFolders.slice(0, i + 1));
                     setActiveFile(file);
                   }}
@@ -1307,257 +1356,250 @@ export function StorageFilesPage() {
                   handleCreateFolder={handleCreateFolder}
                   uploadingFiles={uploadingFiles}
                   handleUploadClick={handleUploadClick}
-                  setFileToDelete={setFileToDelete}
                   fileToRename={fileToRename}
                   setFileToRename={setFileToRename}
                   newFileName={newFileName}
                   setNewFileName={setNewFileName}
                   handleRenameFile={handleRenameFile}
                   isRenamingPending={renameObjectMutation.isPending}
+                  actions={itemActions}
                 />
               ))}
 
-              {/* RIGHT SIDE PREVIEW PANE OR EMPTY SPACE */}
+              {/* Preview of the open file, or empty space */}
               <div className="flex-1 bg-background flex relative">
-                <FilePreviewPane 
-                  activeFile={activeFile} 
-                  onClose={() => setActiveFile(null)} 
-                  onDelete={() => setFileToDelete(activeFile.key)}
-                  onRename={() => {
-                    setFileToRename(activeFile);
-                    setNewFileName(activeFile.name);
-                  }}
-                  onFullScreen={() => setPreviewFile({ name: activeFile.name, src: activeFile.cdnUrl, mimeType: activeFile.type })}
-                />
+                {previewPaneProps && <FilePreviewPane {...previewPaneProps} />}
               </div>
             </>
           ) : (
-            <div className="w-full h-full min-h-0 overflow-y-auto p-4 pb-24 bg-card custom-scrollbar">
-              <DataTable
-                columns={[
-                  {
-                    key: "select",
-                    header: "",
-                    width: "w-[5%] min-w-[40px]",
-                    render: (_: any, row: any) => {
-                      if (row.isUpDir) return null;
-                      return (
-                        <input
-                          type="checkbox"
-                          className="w-4 h-4 rounded border-border bg-background"
-                          checked={selectedKeys.has(row.key)}
-                          onChange={(e) => toggleSelection(e as any, row.key)}
-                        />
-                      );
-                    }
-                  },
-                  {
-                    key: "name",
-                    header: "Name",
-                    accent: true,
-                    width: "w-[45%]",
-                    render: (_: any, row: any) => {
-                      const isRenaming = fileToRename?.key === row.key;
-                      return (
-                        <div
-                          className={`flex items-center gap-3 ${row.isFolder || row.isUpDir ? "cursor-pointer hover:underline font-medium" : ""} w-full`}
-                          onClick={() => {
-                            if (isRenaming) return;
-                            if (row.isUpDir) {
-                              // legacy list view up dir
-                            } else if (row.isFolder) {
-                              setOpenFolders([row.key]);
-                            } else {
-                              setActiveFile(row);
-                            }
-                          }}
-                        >
-                          {getFileIcon(row.type)}
-                          {isRenaming ? (
-                            <div className="flex items-center flex-1 min-w-0 max-w-[300px]" onClick={e => e.stopPropagation()}>
-                              <Input
-                                className="h-7 text-sm py-0 px-2 rounded-[4px] bg-background border-primary w-full"
-                                autoFocus
-                                value={newFileName}
-                                onChange={e => setNewFileName(e.target.value)}
-                                onBlur={() => setFileToRename(null)}
-                                onKeyDown={e => {
-                                  if (e.key === 'Enter') handleRenameFile();
-                                  if (e.key === 'Escape') setFileToRename(null);
-                                }}
-                                disabled={renameObjectMutation.isPending}
-                              />
-                              {!row.isFolder && row.name.lastIndexOf('.') > 0 && (
-                                <span className="text-muted-foreground ml-0.5 shrink-0">
-                                  {row.name.substring(row.name.lastIndexOf('.'))}
-                                </span>
+            <>
+              <div className="min-w-0 flex-1 h-full min-h-0 overflow-y-auto p-4 pb-24 bg-card custom-scrollbar">
+                {creatingFolderIn === currentPrefix && (
+                  <div className="mb-3 flex items-center gap-2 rounded-md border border-border bg-background p-2">
+                    <Folder size={16} className="text-yellow-500 fill-yellow-500/20 shrink-0" />
+                    <Input
+                      autoFocus
+                      defaultValue="Untitled folder"
+                      aria-label="Folder name"
+                      onFocus={(e) => e.target.select()}
+                      className="h-8 flex-1 text-sm"
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          e.preventDefault();
+                          handleCreateFolder(e.currentTarget.value, currentPrefix);
+                        } else if (e.key === 'Escape') {
+                          e.preventDefault();
+                          setCreatingFolderIn(null);
+                        }
+                      }}
+                      onBlur={(e) => {
+                        if (e.target.value.trim() && e.target.value !== "Untitled folder") {
+                          handleCreateFolder(e.target.value, currentPrefix);
+                        } else {
+                          setCreatingFolderIn(null);
+                        }
+                      }}
+                    />
+                  </div>
+                )}
+                {/* The table scrolls sideways inside its own box on narrow screens */}
+                <div className="overflow-x-auto">
+                  <DataTable
+                    className={items.length ? "min-w-[640px]" : undefined}
+                    columns={[
+                      {
+                        key: "select",
+                        header: "",
+                        width: "w-[5%] min-w-[40px]",
+                        render: (_: unknown, row: StorageItem) => (
+                          <input
+                            type="checkbox"
+                            className="w-4 h-4 rounded border-border bg-background accent-foreground"
+                            aria-label={`Select ${row.name}`}
+                            checked={selectedKeys.has(row.key)}
+                            onChange={(e) => toggleSelection(e, row.key)}
+                          />
+                        )
+                      },
+                      {
+                        key: "name",
+                        header: "Name",
+                        accent: true,
+                        width: "w-[45%]",
+                        render: (_: unknown, row: StorageItem) => {
+                          const isRenaming = fileToRename?.key === row.key;
+                          return (
+                            <div
+                              className={cn("flex items-center gap-3 w-full cursor-pointer", row.isFolder ? "hover:underline font-medium" : "")}
+                              onClick={() => {
+                                if (isRenaming) return;
+                                if (row.isFolder) {
+                                  setOpenFolders(prefixToOpenFolders(row.key));
+                                  setActiveFile(null);
+                                } else {
+                                  setActiveFile(row);
+                                }
+                              }}
+                            >
+                              {getFileIcon(row.type)}
+                              {isRenaming ? (
+                                <div className="flex items-center flex-1 min-w-0 max-w-[300px]" onClick={e => e.stopPropagation()}>
+                                  <Input
+                                    className="h-7 text-sm py-0 px-2 rounded-[4px] bg-background border-border w-full"
+                                    autoFocus
+                                    value={newFileName}
+                                    aria-label="New name"
+                                    onChange={e => setNewFileName(e.target.value)}
+                                    onBlur={() => setFileToRename(null)}
+                                    onKeyDown={e => {
+                                      if (e.key === 'Enter') handleRenameFile();
+                                      if (e.key === 'Escape') setFileToRename(null);
+                                    }}
+                                    disabled={renameObjectMutation.isPending}
+                                  />
+                                  {extensionOf(row.name, row.isFolder) && (
+                                    <span className="text-muted-foreground ml-0.5 shrink-0">
+                                      {extensionOf(row.name, row.isFolder)}
+                                    </span>
+                                  )}
+                                </div>
+                              ) : (
+                                <span className="break-all flex-1" title={row.name}>{row.name}</span>
                               )}
                             </div>
-                          ) : (
-                            <span className="break-all flex-1" title={row.name}>{row.name}</span>
-                          )}
-                        </div>
-                      );
-                    }
-                  },
-                  {
-                    key: "size",
-                    header: "Size",
-                    width: "w-[10%]",
-                    render: (size: number) => size ? formatBytes(size) : "-"
-                  },
-                  {
-                    key: "type",
-                    header: "Type",
-                    width: "w-[15%]",
-                    render: (type: string, row: any) => {
-                      if (row.isUpDir) return null;
-                      if (type === "Folder") return <Badge variant="neutral" className="max-w-full">Dir</Badge>;
-                      const fileExt = type?.split("/").pop()?.toUpperCase() || "FILE";
-                      const content = <span className="block truncate max-w-full" title={fileExt}>{fileExt}</span>;
-                      if (type?.startsWith("image/")) return <Badge variant="info" className="max-w-full">{content}</Badge>;
-                      if (type?.startsWith("video/")) return <Badge variant="secondary" className="max-w-full">{content}</Badge>;
-                      return <Badge variant="outline" className="max-w-full">{content}</Badge>;
-                    }
-                  },
-                  {
-                    key: "lastModified",
-                    header: "Last Modified",
-                    width: "w-[15%]",
-                    render: (date: string) => date ? format(new Date(date), "MMM d, yyyy h:mm a") : "-"
-                  },
-                  {
-                    key: "actions",
-                    header: "",
-                    width: "w-[10%] text-right pr-6",
-                    render: (_: any, row: any) => {
-                      if (row.isUpDir) return null;
-                      return (
-                        <DropdownMenu>
-                          <DropdownMenuTrigger asChild>
-                            <Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground hover:text-foreground mr-2 float-right">
-                              <MoreHorizontal className="h-4 w-4" />
-                            </Button>
-                          </DropdownMenuTrigger>
-                          <DropdownMenuContent align="end" className="w-48">
-                            <DropdownMenuItem onClick={() => {
-                                const event = new CustomEvent('rename-file', { detail: { key: row.key, name: row.name } });
-                                window.dispatchEvent(event);
-                              }}>
-                                <Edit2 className="mr-2 h-4 w-4" /> Rename
-                              </DropdownMenuItem>
-                              <DropdownMenuItem onClick={() => {
-                                const event = new CustomEvent('move-file', { detail: { key: row.key, name: row.name } });
-                                window.dispatchEvent(event);
-                              }}>
-                                <FolderPlus className="mr-2 h-4 w-4" /> Move
-                              </DropdownMenuItem>
-                              {!row.isFolder && (
-                                <>
-                                  <DropdownMenuItem onClick={() => copyToClipboard(row.cdnUrl, "URL")}>
-                                    <LinkIcon className="mr-2 h-4 w-4" /> Get URL
-                                  </DropdownMenuItem>
-                                  <DropdownMenuItem onClick={() => {
-                                    const event = new CustomEvent('download-file', { detail: { key: row.key, name: row.name, cdnUrl: row.cdnUrl } });
-                                    window.dispatchEvent(event);
-                                  }}>
-                                    <Download className="mr-2 h-4 w-4" /> Download
-                                  </DropdownMenuItem>
-                                </>
-                              )}
-                              <DropdownMenuSeparator />
-                              <DropdownMenuItem className="text-destructive focus:text-destructive" onClick={() => {
-                                const event = new CustomEvent('delete-file', { detail: row.key });
-                                window.dispatchEvent(event);
-                              }}>
-                                <Trash2 className="mr-2 h-4 w-4" /> Delete
-                              </DropdownMenuItem>
-                          </DropdownMenuContent>
-                        </DropdownMenu>
-                      );
-                    }
-                  }
-                ]}
-                rows={items}
-                isLoading={isLoading}
-                emptyMessage="This folder is empty."
-              />
+                          );
+                        }
+                      },
+                      {
+                        key: "size",
+                        header: "Size",
+                        width: "w-[10%]",
+                        render: (size: number | null) => size ? formatBytes(size) : "-"
+                      },
+                      {
+                        key: "type",
+                        header: "Type",
+                        width: "w-[15%]",
+                        render: (type: string) => {
+                          if (type === "Folder") return <Badge variant="neutral" className="max-w-full">Folder</Badge>;
+                          const fileExt = type?.split("/").pop()?.toUpperCase() || "FILE";
+                          const content = <span className="block truncate max-w-full" title={fileExt}>{fileExt}</span>;
+                          if (type?.startsWith("image/")) return <Badge variant="info" className="max-w-full">{content}</Badge>;
+                          if (type?.startsWith("video/")) return <Badge variant="secondary" className="max-w-full">{content}</Badge>;
+                          return <Badge variant="outline" className="max-w-full">{content}</Badge>;
+                        }
+                      },
+                      {
+                        key: "lastModified",
+                        header: "Last modified",
+                        width: "w-[15%]",
+                        render: (date: string | null) => date ? format(new Date(date), "MMM d, yyyy h:mm a") : "-"
+                      },
+                      {
+                        key: "actions",
+                        header: "",
+                        width: "w-[10%] text-right pr-6",
+                        render: (_: unknown, row: StorageItem) => (
+                          <div className="flex justify-end">
+                            <ItemActionsMenu item={row} actions={itemActions} triggerClassName="h-8 w-8" />
+                          </div>
+                        )
+                      }
+                    ]}
+                    rows={items}
+                    isLoading={isLoading}
+                    emptyMessage={debouncedSearch ? "No files match this search." : "This folder is empty."}
+                  />
+                </div>
+              </div>
+              {previewPaneProps && (
+                <FilePreviewPane
+                  {...previewPaneProps}
+                  className="absolute inset-y-0 right-0 z-20 w-full max-w-[350px] shadow-xl md:static md:shadow-none"
+                />
+              )}
+            </>
+          )}
+
+          {/* Selection bar, for both views */}
+          {selectedKeys.size > 0 && (
+            <div className="absolute z-30 bottom-6 left-1/2 -translate-x-1/2 max-w-[calc(100%-2rem)] whitespace-nowrap bg-card border border-border shadow-lg rounded-full px-4 sm:px-6 py-2.5 flex items-center gap-2 sm:gap-4 animate-in slide-in-from-bottom-5">
+              <span className="text-sm font-medium">
+                <span className="text-foreground mr-1">{selectedKeys.size}</span> selected
+              </span>
+              <div className="h-4 w-px bg-border"></div>
+              <Button size="sm" variant="ghost" onClick={() => setSelectedKeys(new Set())}>Cancel</Button>
+              <Button size="sm" variant="destructive" onClick={() => setIsBulkDeleteModalOpen(true)}>
+                <Trash2 className="mr-2 h-4 w-4" /> Delete
+              </Button>
             </div>
           )}
-            
-            {/* Sticky Bulk Action Bar for both views */}
-            {selectedKeys.size > 0 && (
-              <div className="absolute z-50 bottom-6 left-1/2 -translate-x-1/2 bg-card border border-border shadow-lg rounded-full px-6 py-3 flex items-center gap-4 animate-in slide-in-from-bottom-5">
-                <span className="text-sm font-medium">
-                  <span className="text-primary mr-1">{selectedKeys.size}</span> items selected
-                </span>
-                <div className="h-4 w-px bg-border"></div>
-                <Button size="sm" variant="ghost" onClick={() => setSelectedKeys(new Set())}>Cancel</Button>
-                <Button size="sm" variant="destructive" onClick={() => setIsBulkDeleteModalOpen(true)}>
-                  <Trash2 className="mr-2 h-4 w-4" /> Delete Selected
-                </Button>
-              </div>
-            )}
 
-          </div>
         </div>
+      </div>
 
-        {/* Modals */}
-        <Dialog open={isNavigateModalOpen} onOpenChange={setIsNavigateModalOpen}>
-          <DialogContent className="sm:max-w-md">
-            <DialogHeader>
-              <DialogTitle>Navigate to folder</DialogTitle>
-            </DialogHeader>
-            <div className="py-4">
-              <div className="space-y-2">
-                <label className="text-sm font-medium">Path</label>
-                <Input
-                  placeholder="e.g. assignments/math"
-                  value={navigatePath}
-                  onChange={(e) => setNavigatePath(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') {
-                      e.preventDefault();
-                      handleNavigateToFolder();
-                    }
-                  }}
-                  autoFocus
-                />
-                <p className="text-xs text-muted-foreground">Enter a folder path within this bucket.</p>
-              </div>
+      {/* Go to folder */}
+      <Dialog open={isNavigateModalOpen} onOpenChange={setIsNavigateModalOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Go to folder</DialogTitle>
+          </DialogHeader>
+          <div className="py-4">
+            <div className="space-y-2">
+              <label className="text-sm font-medium" htmlFor="storage-go-to-folder">Path</label>
+              <Input
+                id="storage-go-to-folder"
+                placeholder="e.g. uploads/images"
+                value={navigatePath}
+                onChange={(e) => setNavigatePath(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault();
+                    handleNavigateToFolder();
+                  }
+                }}
+                autoFocus
+              />
+              <p className="text-xs text-muted-foreground">A folder path in this bucket. Leave it empty to stay where you are.</p>
             </div>
-            <DialogFooter>
-              <Button variant="outline" onClick={() => setIsNavigateModalOpen(false)}>Cancel</Button>
-              <Button onClick={handleNavigateToFolder} className="bg-emerald-600 hover:bg-emerald-700 text-white">Navigate</Button>
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
-      
-      {/* Rename Dialog Removed - Using Inline Editing */}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setIsNavigateModalOpen(false)}>Cancel</Button>
+            <Button onClick={handleNavigateToFolder}>Go</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
-      {/* Move File Modal */}
+      {/* Move */}
       <Dialog open={!!fileToMove} onOpenChange={(open) => !open && setFileToMove(null)}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
-            <DialogTitle>Move {fileToMove?.name}</DialogTitle>
+            <DialogTitle className="break-all">Move {fileToMove?.name}</DialogTitle>
           </DialogHeader>
           <div className="space-y-4 py-4">
             <div className="space-y-2">
-              <p className="text-sm text-muted-foreground">Destination Folder Path</p>
+              <label className="text-sm text-muted-foreground" htmlFor="storage-move-destination">Destination folder path</label>
               <Input
+                id="storage-move-destination"
                 value={moveDestinationPrefix}
                 onChange={(e) => setMoveDestinationPrefix(e.target.value)}
-                placeholder="e.g., folder1/folder2/"
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault();
+                    handleMoveFile();
+                  }
+                }}
+                placeholder="e.g. folder1/folder2/ (empty for the root)"
                 autoFocus
               />
-              <p className="text-xs text-muted-foreground">Current path: {fileToMove?.key.substring(0, fileToMove?.key.lastIndexOf('/') + 1) || "Root"}</p>
+              <p className="text-xs text-muted-foreground break-all">Now in: {fileToMove ? (parentPrefixOf(fileToMove.key) || "Root") : ""}</p>
             </div>
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setFileToMove(null)}>Cancel</Button>
             <Button onClick={handleMoveFile} disabled={renameObjectMutation.isPending}>
               {renameObjectMutation.isPending && <Spinner className="mr-2" />}
-              {renameObjectMutation.isPending ? "Moving..." : "Move"}
+              {renameObjectMutation.isPending ? "Moving" : "Move"}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -1566,9 +1608,13 @@ export function StorageFilesPage() {
       <DangerConfirmDialog
         open={!!fileToDelete}
         onOpenChange={(open) => !open && setFileToDelete(null)}
-        title="Delete File"
-        description="Are you sure you want to delete this file? This action cannot be undone."
-        warningMessage="This file will be permanently deleted from the servers."
+        title={deletingFolder ? "Delete folder" : "Delete file"}
+        description={deletingFolder
+          ? "This folder and everything inside it will be deleted. This cannot be undone."
+          : "This file will be deleted. This cannot be undone."}
+        warningMessage={deletingFolder
+          ? "Every file in this folder is removed from storage for good."
+          : "The file is removed from storage for good."}
         actionLabel="Delete"
         onConfirm={handleDeleteFile}
         isLoading={deleteObjectMutation.isPending}
@@ -1577,15 +1623,15 @@ export function StorageFilesPage() {
       <DangerConfirmDialog
         open={isBulkDeleteModalOpen}
         onOpenChange={setIsBulkDeleteModalOpen}
-        title={`Delete ${selectedKeys.size} Files`}
-        description={`Are you sure you want to permanently delete these ${selectedKeys.size} items? This action cannot be undone.`}
-        warningMessage="These files will be permanently deleted from the servers."
-        actionLabel="Bulk Delete"
+        title={`Delete ${selectedKeys.size} item${selectedKeys.size === 1 ? "" : "s"}`}
+        description={`The ${selectedKeys.size === 1 ? "selected item" : `${selectedKeys.size} selected items`} will be deleted, including everything inside selected folders. This cannot be undone.`}
+        warningMessage="These files are removed from storage for good."
+        actionLabel="Delete"
         onConfirm={handleBulkDelete}
         isLoading={deleteObjectsMutation.isPending}
       />
 
-      {/* Full-Screen File Preview Modal */}
+      {/* Full-screen file preview */}
       {previewFile && (
         <FilePreviewModal
           file={previewFile}
@@ -1593,33 +1639,45 @@ export function StorageFilesPage() {
         />
       )}
 
-      {/* Floating Upload Progress Toast */}
+      {/* Floating upload progress box */}
       {uploadingFiles.length > 0 && (
-        <motion.div 
+        <motion.div
           drag
           dragMomentum={false}
-          className="absolute top-4 right-4 z-50 w-[380px] bg-card border border-border shadow-xl rounded-md overflow-hidden cursor-grab active:cursor-grabbing"
+          className="absolute top-4 left-4 right-4 sm:left-auto sm:w-[380px] z-50 bg-card border border-border shadow-xl rounded-md overflow-hidden cursor-grab active:cursor-grabbing"
         >
-          <div className="p-4 flex items-center justify-between border-b border-border/50">
-            <div className="flex items-center gap-3 text-sm font-medium">
-              <Spinner className="text-muted-foreground" />
-              Uploading {uploadingFiles.length} file{uploadingFiles.length > 1 ? 's' : ''}...
+          <div className="p-4 flex items-center justify-between gap-3 border-b border-border/50">
+            <div className="flex items-center gap-3 text-sm font-medium min-w-0">
+              {uploadsRunning && <Spinner className="text-muted-foreground" />}
+              <span className="truncate">
+                {uploadsRunning
+                  ? `Uploading ${uploadingFiles.length} file${uploadingFiles.length > 1 ? 's' : ''}`
+                  : "Upload finished"}
+              </span>
             </div>
-            <div className="text-xs text-muted-foreground font-medium">
-              {Math.round(uploadingFiles.reduce((acc, f) => acc + f.progress, 0) / uploadingFiles.length)}%
+            <div className="text-xs text-muted-foreground font-medium tabular-nums">
+              {Math.round(uploadProgress)}%
             </div>
           </div>
-          
+
           <div className="h-1 bg-muted w-full overflow-hidden">
-            <div 
-              className="h-full bg-emerald-500 transition-all duration-300" 
-              style={{ width: `${uploadingFiles.reduce((acc, f) => acc + f.progress, 0) / uploadingFiles.length}%` }} 
+            <div
+              className="h-full bg-foreground transition-all duration-300"
+              style={{ width: `${uploadProgress}%` }}
             />
           </div>
-          
-          <div className="p-3 bg-muted/20 flex items-center justify-between">
-            <span className="text-xs text-muted-foreground">You can drag this around and work in background</span>
-            <Button variant="outline" size="sm" className="h-7 text-xs bg-background">Cancel</Button>
+
+          <div className="p-3 bg-muted/20 flex items-center justify-between gap-3">
+            <span className="text-xs text-muted-foreground">Drag this box anywhere. Uploads keep going while you work.</span>
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-7 px-3 text-xs bg-background shrink-0"
+              disabled={!uploadsRunning}
+              onClick={handleCancelUploads}
+            >
+              Cancel
+            </Button>
           </div>
         </motion.div>
       )}

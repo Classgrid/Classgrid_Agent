@@ -905,24 +905,32 @@ router.patch("/feedback/:id", async (req, res) => {
 router.get("/activity-logs", async (req, res) => {
     try {
         const AdminAuditLog = (await import("../models/AdminAuditLog.js")).default;
-        const { page = 1, limit = 50, action, actorId, targetType } = req.query;
-        const skip = (parseInt(page) - 1) * parseInt(limit);
+        const { action, actorId, targetType, q } = req.query;
+        // Page and size from the URL, kept to sane numbers (a bad value used to give NaN and a 500)
+        const page = Math.max(1, parseInt(req.query.page, 10) || 1);
+        const limit = Math.min(200, Math.max(1, parseInt(req.query.limit, 10) || 50));
+        const skip = (page - 1) * limit;
 
         const filter = {};
-        if (action) filter.action = action;
+        if (action) filter.action = String(action);
         if (actorId) filter.actorId = actorId;
-        if (targetType) filter.targetType = targetType;
+        if (targetType) filter.targetType = String(targetType);
+        // Search (Audit Logs page): the admin's name, the target's name or id. Escaped, so "(" searches for "(".
+        if (q && String(q).trim()) {
+            const rx = new RegExp(String(q).trim().slice(0, 100).replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i");
+            filter.$or = [{ actorName: rx }, { targetName: rx }, { targetId: rx }];
+        }
 
         const [logs, total] = await Promise.all([
             AdminAuditLog.find(filter)
                 .sort({ timestamp: -1 })
                 .skip(skip)
-                .limit(parseInt(limit))
+                .limit(limit)
                 .lean(),
             AdminAuditLog.countDocuments(filter),
         ]);
 
-        res.json({ success: true, logs, total, page: parseInt(page), limit: parseInt(limit) });
+        res.json({ success: true, logs, total, page, limit });
     } catch (err) {
         console.error("[SuperAdmin] activity-logs error:", err.message);
         res.status(500).json({ success: false, message: "Server error" });
@@ -3319,33 +3327,28 @@ router.post("/gdpr/erase/:userId", async (req, res) => {
 // ── ROLLBACK ACTIONS ─────────────────────────────────────────────────────────
 // ══════════════════════════════════════════════════════════════════════════════
 
-// List rollback-eligible audit log entries (recent, destructive actions)
+// The admin actions POST /rollback/:logId can undo (Rollback Actions page). Only these are listed, so every row's
+// Rollback button works.
+const ROLLBACK_ACTIONS = ["user.ban", "user.unban", "user.role_change", "feature_flag.toggle"];
+
+// The undoable admin actions of the last 7 days, newest first, the ones already undone included (the page shows them
+// as done). AdminAuditLog keeps its date in `timestamp` (no createdAt) and the admin in actorId / actorName.
 router.get("/rollback/candidates", async (req, res) => {
     try {
         const AdminAuditLog = (await import("../models/AdminAuditLog.js")).default;
         const since = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000); // last 7 days
 
-        const entries = await AdminAuditLog.find({
-            createdAt: { $gte: since },
-            action: {
-                $in: [
-                    "org.suspend", "org.activate", "org.delete",
-                    "user.ban", "user.unban", "user.role_change", "user.force_logout",
-                    "subscription.update", "feature_flag.toggle",
-                ]
-            },
-            rollbackStatus: { $ne: "rolled_back" },
-        })
-            .sort({ createdAt: -1 })
+        const entries = await AdminAuditLog.find({ timestamp: { $gte: since }, action: { $in: ROLLBACK_ACTIONS } })
+            .select("action actorName actorRole targetId targetName targetType previousState metadata rollbackStatus rolledBackBy rolledBackAt timestamp")
+            .sort({ timestamp: -1 })
             .limit(100)
-            .populate("userId", "name email")
+            .populate("rolledBackBy", "name email")
             .lean();
 
         res.json({ success: true, data: entries, total: entries.length });
     } catch (err) {
         console.error("[SuperAdmin] rollback candidates error:", err.message);
-        // If AdminAuditLog doesn't have these fields yet, return empty
-        res.json({ success: true, data: [], total: 0, note: "Rollback tracking will start from new actions." });
+        res.status(500).json({ success: false, message: "Could not load the actions." });
     }
 });
 
@@ -3354,25 +3357,22 @@ router.post("/rollback/:logId", async (req, res) => {
     try {
         const AdminAuditLog = (await import("../models/AdminAuditLog.js")).default;
 
+        if (!/^[a-f\d]{24}$/i.test(String(req.params.logId || ""))) return res.status(404).json({ success: false, message: "Action not found." });
         const logEntry = await AdminAuditLog.findById(req.params.logId).lean();
-        if (!logEntry) return res.status(404).json({ success: false, message: "Log entry not found" });
+        if (!logEntry) return res.status(404).json({ success: false, message: "Action not found." });
         if (logEntry.rollbackStatus === "rolled_back") {
             return res.status(400).json({ success: false, message: "Already rolled back." });
+        }
+        // The same 7 days the list shows
+        if (!logEntry.timestamp || Date.now() - new Date(logEntry.timestamp).getTime() > 7 * 24 * 60 * 60 * 1000) {
+            return res.status(400).json({ success: false, message: "Only actions from the last 7 days can be rolled back." });
         }
 
         const { action, targetId, previousState } = logEntry;
         let rollbackMessage = "";
 
         // Perform the inverse action
-        if (action === "org.suspend" && targetId) {
-            const Organization = (await import("../models/Organization.js")).default;
-            await Organization.findByIdAndUpdate(targetId, { $set: { status: "active" }, $unset: { suspendedReason: "", suspendedAt: "", suspendedBy: "" } });
-            rollbackMessage = "Organization re-activated.";
-        } else if (action === "org.activate" && targetId) {
-            const Organization = (await import("../models/Organization.js")).default;
-            await Organization.findByIdAndUpdate(targetId, { $set: { status: "suspended" } });
-            rollbackMessage = "Organization suspended (rollback).";
-        } else if ((action === "user.ban" || action === "user.unban") && targetId) {
+        if ((action === "user.ban" || action === "user.unban") && targetId) {
             const User = (await import("../models/User.js")).default;
             const reverseStatus = action === "user.ban" ? "active" : "suspended";
             await User.findByIdAndUpdate(targetId, { $set: { status: reverseStatus } });
@@ -3387,7 +3387,7 @@ router.post("/rollback/:logId", async (req, res) => {
             (await import("../services/feature-flag.service.js")).forgetFeatureFlags(); // (the flags are kept in memory between requests)
             rollbackMessage = "Feature flag toggled back.";
         } else {
-            return res.status(400).json({ success: false, message: `Cannot auto-rollback action type: ${action}. Manual intervention required.` });
+            return res.status(400).json({ success: false, message: "This action cannot be undone from here. Change it by hand." });
         }
 
         // Mark log entry as rolled back

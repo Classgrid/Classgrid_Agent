@@ -87,11 +87,19 @@ function buildErrorResponse(req, message) {
 
 export const getNotes = async (req, res) => {
     try {
-        const { date, tag, search, category, visibility, status } = req.query;
+        const { date, from, to, tag, search, category, visibility, status } = req.query;
         let query = { createdBy: req.user._id };
 
-        // Filter by specific date
-        if (date) {
+        // Filter by one day. The page sends that day's start (from) and end (to) in the admin's own
+        // time zone, so the day matches the calendar they picked; `date` alone uses the server's day.
+        const fromDate = typeof from === "string" ? new Date(from) : null;
+        const toDate = typeof to === "string" ? new Date(to) : null;
+        if (fromDate && toDate && !Number.isNaN(fromDate.getTime()) && !Number.isNaN(toDate.getTime())) {
+            query.createdAt = {
+                $gte: fromDate,
+                $lt: toDate
+            };
+        } else if (date) {
             const startDate = new Date(date);
             startDate.setHours(0, 0, 0, 0);
 
@@ -109,10 +117,13 @@ export const getNotes = async (req, res) => {
         if (visibility) query.visibility = visibility;
         if (status) query.status = status;
 
-        // Text search
-        if (search) {
-            const escapedSearch = search.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-            query.title = { $regex: `^${escapedSearch}`, $options: "i" };
+        // Text search: the words anywhere in the title or the note's text
+        if (typeof search === "string" && search.trim()) {
+            const escapedSearch = search.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+            query.$or = [
+                { title: { $regex: escapedSearch, $options: "i" } },
+                { textContent: { $regex: escapedSearch, $options: "i" } }
+            ];
         }
 
         const notes = await Note.find(query)

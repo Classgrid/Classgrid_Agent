@@ -65,170 +65,227 @@
  * ─────────────────────────────────────────────────────────
  */
 
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { RotateCcw, RefreshCw, Clock, CheckCircle2, AlertTriangle, Info } from "lucide-react";
-import type { ColumnDef } from "@tanstack/react-table";
+import { RotateCcw, RefreshCw } from "lucide-react";
 import { toast } from "sonner";
 
-
-
-import { Badge } from "@/components/marketing_ui/badge";
 import { Button } from "@/components/marketing_ui/button";
-
+import { Skeleton } from "@/components/marketing_ui/skeleton";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/marketing_ui/dialog";
 import { apiClient } from "@/lib/apiClient";
 import { formatDate, formatTime } from "@/utils/dateUtils";
 
-
-const ACTION_LABELS: Record<string, { label: string; variant: any }> = {
-  "org.suspend":         { label: "Suspend Org",       variant: "danger" },
-  "org.activate":        { label: "Activate Org",      variant: "success" },
-  "org.delete":          { label: "Delete Org",        variant: "danger" },
-  "user.ban":            { label: "Ban User",          variant: "danger" },
-  "user.unban":          { label: "Unban User",        variant: "success" },
-  "user.role_change":    { label: "Change Role",       variant: "info" },
-  "user.force_logout":   { label: "Force Logout",      variant: "warning" },
-  "subscription.update": { label: "Update Subscription", variant: "neutral" },
-  "feature_flag.toggle": { label: "Toggle Feature Flag", variant: "neutral" },
+// One admin action from the audit log that the server can undo (GET /api/super-admin/rollback/candidates)
+type RollbackEntry = {
+  _id: string;
+  action: string;
+  actorName?: string;
+  actorRole?: string;
+  targetId?: string | null;
+  targetName?: string;
+  targetType?: string;
+  previousState?: { status?: string; role?: string } | null;
+  metadata?: { reason?: string; newRole?: string } | null;
+  rollbackStatus?: "none" | "rolled_back";
+  rolledBackBy?: { name?: string; email?: string } | null;
+  rolledBackAt?: string | null;
+  timestamp: string;
 };
+
+const roleText = (role?: string) => (role ? role.replace(/_/g, " ") : "");
+
+// What the action was, in plain words
+function actionText(e: RollbackEntry): string {
+  switch (e.action) {
+    case "user.ban": return "Banned a user";
+    case "user.unban": return "Unbanned a user";
+    case "user.role_change": return "Changed a user's role";
+    case "feature_flag.toggle": return "Turned a feature flag on or off";
+    default: return e.action.replace(/[._]/g, " ");
+  }
+}
+
+// What the action changed, in plain words
+function changeText(e: RollbackEntry): string {
+  if (e.action === "user.role_change") {
+    const from = roleText(e.previousState?.role);
+    const to = roleText(e.metadata?.newRole);
+    return from && to ? `From ${from} to ${to}` : to ? `To ${to}` : "";
+  }
+  if (e.action === "user.ban" && e.metadata?.reason) return `Reason: ${e.metadata.reason}`;
+  return "";
+}
+
+// What a rollback will do, in plain words (the inverse the server performs)
+function undoText(e: RollbackEntry): string {
+  switch (e.action) {
+    case "user.ban": return "The user becomes active again.";
+    case "user.unban": return "The user is suspended again.";
+    case "user.role_change":
+      return e.previousState?.role ? `The user's role goes back to ${roleText(e.previousState.role)}.` : "The old role was not saved, so this cannot be undone here.";
+    case "feature_flag.toggle": return "The feature flag is switched back.";
+    default: return "";
+  }
+}
+
+const canUndo = (e: RollbackEntry) =>
+  e.rollbackStatus !== "rolled_back" && (e.action !== "user.role_change" || !!e.previousState?.role);
+
+function StatusChip({ entry }: { entry: RollbackEntry }) {
+  if (entry.rollbackStatus === "rolled_back") {
+    return <span className="inline-flex rounded-full bg-muted px-2 py-0.5 text-xs font-medium text-muted-foreground">Rolled back</span>;
+  }
+  return <span className="inline-flex rounded-full border border-border px-2 py-0.5 text-xs font-medium text-foreground">Can be undone</span>;
+}
+
+function Stat({ label, value }: { label: string; value: string | number }) {
+  return (
+    <div className="rounded-xl border border-border bg-card p-4">
+      <p className="text-xs font-medium text-muted-foreground">{label}</p>
+      <p className="mt-1 text-2xl font-semibold text-foreground">{value}</p>
+    </div>
+  );
+}
 
 export function RollbackPage() {
   const qc = useQueryClient();
-  const [confirmTarget, setConfirmTarget] = useState<any>(null);
+  const [confirmTarget, setConfirmTarget] = useState<RollbackEntry | null>(null);
 
-  const { data, isLoading, refetch, isFetching } = useQuery({
+  const { data, isLoading, isError, refetch, isFetching } = useQuery({
     queryKey: ["rollback-candidates"],
-    queryFn: () => apiClient.get<any>("/api/super-admin/rollback/candidates").then(r => r.data),
+    queryFn: () => apiClient.get<{ success: boolean; data: RollbackEntry[] }>("/api/super-admin/rollback/candidates").then((r) => r.data),
     staleTime: 30_000,
   });
 
-  const candidates: any[] = data?.data ?? [];
-  const rolled = candidates.filter(c => c.rollbackStatus === "rolled_back").length;
+  const entries: RollbackEntry[] = Array.isArray(data?.data) ? data!.data : [];
+  const rolledBack = entries.filter((e) => e.rollbackStatus === "rolled_back").length;
+  const open = entries.length - rolledBack;
 
   const rollbackMut = useMutation({
-    mutationFn: (logId: string) => apiClient.post(`/api/super-admin/rollback/${logId}`).then(r => r.data),
+    mutationFn: (logId: string) => apiClient.post<{ message?: string }>(`/api/super-admin/rollback/${logId}`).then((r) => r.data),
     onSuccess: (res) => {
       qc.invalidateQueries({ queryKey: ["rollback-candidates"] });
-      toast.success(res.message ?? "Action rolled back.");
+      qc.invalidateQueries({ queryKey: ["super-admin", "activity-logs"] });
+      toast.success(res?.message || "Action rolled back.");
       setConfirmTarget(null);
     },
-    onError: (e: any) => toast.error(e?.response?.data?.message ?? "Rollback failed."),
+    onError: (e: any) => toast.error(e?.response?.data?.message || "Rollback failed."),
   });
 
-  const columns: ColumnDef<any>[] = useMemo(() => [
-    {
-      accessorKey: "createdAt", header: "When", size: 140,
-      cell: ({ getValue }) => (
-        <div>
-          <div >{formatDate(getValue<string>())}</div>
-          <div >{formatTime(getValue<string>())}</div>
-        </div>
-      ),
-    },
-    {
-      accessorKey: "action", header: "Action", size: 170,
-      cell: ({ getValue }) => {
-        const a = ACTION_LABELS[getValue<string>()] ?? { label: getValue<string>(), variant: "neutral" };
-        return <Badge variant={a.variant}>{a.label}</Badge>;
-      },
-    },
-    {
-      accessorKey: "userId", header: "Performed By", size: 180,
-      cell: ({ getValue }) => {
-        const u = getValue<any>();
-        if (!u) return <span >System</span>;
-        return (
-          <div>
-            <div >{u.name}</div>
-            <div >{u.email}</div>
-          </div>
-        );
-      },
-    },
-    {
-      accessorKey: "targetId", header: "Target", size: 180,
-      cell: ({ getValue, row }) => {
-        const id = getValue<string>();
-        return <span >{id ?? "—"}</span>;
-      },
-    },
-    {
-      accessorKey: "rollbackStatus", header: "Status", size: 120,
-      cell: ({ getValue }) => {
-        const s = getValue<string>();
-        if (s === "rolled_back") return <Badge variant="success" dot>Rolled Back</Badge>;
-        return <Badge variant="neutral" dot>Eligible</Badge>;
-      },
-    },
-    {
-      id: "rollback", header: "Rollback", size: 120,
-      cell: ({ row }) => {
-        const c = row.original;
-        if (c.rollbackStatus === "rolled_back") {
-          return <span >✓ Done</span>;
-        }
-        return (
-          <Button size="sm" variant="outline" onClick={() => setConfirmTarget(c)} disabled={rollbackMut.isPending}>
-            <RotateCcw size={12} /> Rollback
-          </Button>
-        );
-      },
-    },
-  ], [rollbackMut.isPending]);
-
-  const eligible = candidates.filter(c => c.rollbackStatus !== "rolled_back").length;
-
   return (
-    <div className="flex flex-col gap-6 w-full max-w-7xl mx-auto p-4 sm:p-6 lg:p-8 pb-12">
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-border pb-6">
-        <div>
-          <h1 className="text-2xl font-bold tracking-tight">Rollback Actions</h1>
-          <p className="text-muted-foreground mt-1 text-sm">Undo critical admin actions from the last 7 days. Only destructive/reversible actions are listed here.</p>
-        </div>
-      </div>
-
-      {/* Info */}
-      <div >
-        <Info size={18}  />
-        <div>
-          <div >How Rollback Works</div>
-          <div >
-            Only actions from the last <strong>7 days</strong> can be rolled back. Each rollback performs the <em>inverse operation</em> — e.g., rolling back a "Suspend Org" will re-activate it. Actions that cannot be auto-reversed (e.g., delete) will show an error and require manual action.
+    <div className="flex h-full flex-col bg-background text-foreground">
+      <div className="border-b border-border bg-card px-4 py-5 sm:p-6">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div className="min-w-0">
+            <h2 className="text-xl font-semibold tracking-tight">Rollback Actions</h2>
+            <p className="mt-1 text-sm text-muted-foreground">
+              Undo an admin action from the last 7 days: a ban, an unban, a role change or a feature flag switch.
+            </p>
           </div>
+          <Button variant="outline" size="sm" onClick={() => refetch()} disabled={isFetching}>
+            <RefreshCw size={14} className={isFetching ? "animate-spin" : ""} /> Refresh
+          </Button>
         </div>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-        <div title="Eligible for Rollback" value={isLoading ? "—" : eligible} icon={<RotateCcw size={15} />} />
-        <div title="Already Rolled Back" value={isLoading ? "—" : rolled} icon={<CheckCircle2 size={15} />} />
-        <div title="Total Tracked" value={isLoading ? "—" : candidates.length} icon={<Clock size={15} />} />
-      </div>
-
-      <div >
-        <div title="Rollback Candidates" description="Destructive actions from the last 7 days. Click 'Rollback' to reverse." noPadding>
-          <div columns={columns} data={candidates} isLoading={isLoading} pageSize={50}
-            emptyIcon={<CheckCircle2 size={32} />}
-            emptyTitle="No rollback candidates"
-            emptyDescription={data?.note ?? "No reversible actions found in the last 7 days. Actions will appear here as they are performed."}
-            emptyMessage="Nothing to roll back." />
+      <div className="space-y-4 px-4 py-5 sm:p-6">
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+          <Stat label="Can be undone" value={isLoading ? "-" : open} />
+          <Stat label="Already rolled back" value={isLoading ? "-" : rolledBack} />
+          <Stat label="Actions in the last 7 days" value={isLoading ? "-" : entries.length} />
         </div>
+
+        <p className="text-sm text-muted-foreground">
+          A rollback does the opposite of the action. It is saved on the action with who did it and when.
+        </p>
+
+        {isLoading ? (
+          <Skeleton className="h-64 w-full" />
+        ) : isError ? (
+          <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-border bg-card p-4">
+            <p className="text-sm text-red-500">Could not load the actions.</p>
+            <Button variant="outline" size="sm" onClick={() => refetch()}>Try again</Button>
+          </div>
+        ) : (
+          <div className="overflow-x-auto rounded-xl border border-border bg-card">
+            <table className="w-full min-w-[760px] text-sm">
+              <thead>
+                <tr className="bg-muted/30 text-left text-muted-foreground">
+                  <th className="p-3 font-medium">When</th>
+                  <th className="p-3 font-medium">Action</th>
+                  <th className="p-3 font-medium">On</th>
+                  <th className="p-3 font-medium">By</th>
+                  <th className="p-3 font-medium">Status</th>
+                  <th className="p-3 font-medium text-right">Rollback</th>
+                </tr>
+              </thead>
+              <tbody>
+                {entries.length === 0 && (
+                  <tr>
+                    <td colSpan={6} className="p-8 text-center text-muted-foreground">
+                      No bans, unbans, role changes or feature flag switches in the last 7 days.
+                    </td>
+                  </tr>
+                )}
+                {entries.map((e) => {
+                  const change = changeText(e);
+                  return (
+                    <tr key={e._id} className="border-t border-border/60 align-top">
+                      <td className="whitespace-nowrap p-3">
+                        <div className="text-foreground">{formatDate(e.timestamp)}</div>
+                        <div className="text-xs text-muted-foreground">{formatTime(e.timestamp)}</div>
+                      </td>
+                      <td className="p-3">
+                        <div className="font-medium text-foreground">{actionText(e)}</div>
+                        {change && <div className="text-xs text-muted-foreground">{change}</div>}
+                      </td>
+                      <td className="p-3">
+                        <div className="text-foreground">{e.targetName || "Unknown"}</div>
+                        {e.targetId && <div className="font-mono text-xs text-muted-foreground">{e.targetId}</div>}
+                      </td>
+                      <td className="p-3 text-muted-foreground">{e.actorName || "System"}</td>
+                      <td className="p-3">
+                        <StatusChip entry={e} />
+                        {e.rollbackStatus === "rolled_back" && (
+                          <div className="mt-1 text-xs text-muted-foreground">
+                            {e.rolledBackBy?.name || e.rolledBackBy?.email || "An admin"}
+                            {e.rolledBackAt ? `, ${formatDate(e.rolledBackAt)}` : ""}
+                          </div>
+                        )}
+                      </td>
+                      <td className="p-3 text-right">
+                        {canUndo(e) ? (
+                          <Button size="sm" variant="outline" onClick={() => setConfirmTarget(e)} disabled={rollbackMut.isPending}>
+                            <RotateCcw size={13} /> Rollback
+                          </Button>
+                        ) : e.rollbackStatus === "rolled_back" ? (
+                          <span className="text-xs text-muted-foreground">Done</span>
+                        ) : (
+                          <span className="text-xs text-muted-foreground">Old role not saved</span>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
       </div>
 
-      {/* Confirm Dialog */}
-      <Dialog open={!!confirmTarget} onOpenChange={o => !o && setConfirmTarget(null)}>
+      <Dialog open={!!confirmTarget} onOpenChange={(o) => { if (!o && !rollbackMut.isPending) setConfirmTarget(null); }}>
         <DialogContent className="max-w-md">
           <DialogHeader>
-            <DialogTitle>Confirm Rollback</DialogTitle>
+            <DialogTitle>Roll back this action?</DialogTitle>
             <DialogDescription>
-              Reverse the action: <strong>{ACTION_LABELS[confirmTarget?.action]?.label ?? confirmTarget?.action}</strong>?
-              This will perform the <em>inverse</em> operation on the target. This itself is also logged.
+              {confirmTarget ? `${actionText(confirmTarget)}: ${confirmTarget.targetName || confirmTarget.targetId || "unknown"}. ${undoText(confirmTarget)}` : ""}
             </DialogDescription>
           </DialogHeader>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setConfirmTarget(null)}>Cancel</Button>
-            <Button isLoading={rollbackMut.isPending} onClick={() => rollbackMut.mutate(confirmTarget._id)}>
-              <RotateCcw size={14} /> Yes, Rollback
+          <DialogFooter className="gap-2">
+            <Button variant="outline" onClick={() => setConfirmTarget(null)} disabled={rollbackMut.isPending}>Cancel</Button>
+            <Button isLoading={rollbackMut.isPending} onClick={() => confirmTarget && rollbackMut.mutate(confirmTarget._id)}>
+              <RotateCcw size={14} /> Roll back
             </Button>
           </DialogFooter>
         </DialogContent>

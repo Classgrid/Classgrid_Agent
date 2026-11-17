@@ -212,7 +212,12 @@ export const storageApi = {
     return response.data.data;
   },
 
-  uploadFile: async (file: File, prefix = "", onUploadProgress?: StorageUploadProgressHandler) => {
+  uploadFile: async (
+    file: File,
+    prefix = "",
+    onUploadProgress?: StorageUploadProgressHandler,
+    signal?: AbortSignal,
+  ) => {
     const formData = new FormData();
     formData.append("file", file);
 
@@ -225,6 +230,7 @@ export const storageApi = {
       {
         headers: { "Content-Type": "multipart/form-data" },
         onUploadProgress,
+        signal,
       }
     );
     return response.data.data;

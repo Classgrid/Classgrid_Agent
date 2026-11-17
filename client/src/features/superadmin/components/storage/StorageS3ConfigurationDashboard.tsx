@@ -111,6 +111,9 @@ import type {
 
 type CopyField = "endpoint" | "bucket" | "region" | "cdn";
 
+// "All good" badges: plain foreground tones (the app does not use green)
+const OK_BADGE = "border-transparent bg-foreground/10 text-foreground";
+
 function getErrorMessage(error: unknown, fallback: string) {
   if (error && typeof error === "object" && "message" in error) {
     const message = (error as { message?: unknown }).message;
@@ -200,10 +203,10 @@ function StatusBar({ value, label, tone = "success" }: StatusBarProps) {
         className={cn(
           "h-full w-[var(--storage-status-width)] rounded-sm transition-[width] duration-500",
           safeValue > 0 && "min-w-[2px]",
-          tone === "success" && "bg-emerald-500",
+          tone === "success" && "bg-foreground",
           tone === "warning" && "bg-amber-500",
           tone === "danger" && "bg-red-500",
-          tone === "neutral" && "bg-foreground/70",
+          tone === "neutral" && "bg-foreground/50",
         )}
         style={
           { "--storage-status-width": `${safeValue}%` } as React.CSSProperties
@@ -223,7 +226,7 @@ interface PanelProps {
 
 function Panel({ title, icon, children, action, className }: PanelProps) {
   return (
-    <section className={cn("border border-border bg-card shadow-sm", className)}>
+    <section className={cn("overflow-hidden rounded-xl border border-border bg-card shadow-sm", className)}>
       <header className="flex min-h-12 items-center justify-between gap-3 border-b border-border px-4 py-3 sm:px-5">
         <h2 className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.16em] text-muted-foreground">
           <span aria-hidden="true">{icon}</span>
@@ -307,7 +310,7 @@ interface RuleCardProps {
 
 function RuleCard({ label, value, detail, icon, children }: RuleCardProps) {
   return (
-    <article className="border border-border bg-card p-4 shadow-sm">
+    <article className="rounded-xl border border-border bg-card p-4 shadow-sm">
       <div className="flex items-start justify-between gap-3">
         <p className="text-sm text-muted-foreground">{label}</p>
         <span className="text-muted-foreground" aria-hidden="true">
@@ -378,7 +381,7 @@ function ConfigurationSkeleton() {
 
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         {[1, 2, 3, 4].map((item) => (
-          <div key={item} className="border border-border bg-card p-4">
+          <div key={item} className="rounded-xl border border-border bg-card p-4">
             <Skeleton className="h-4 w-28" />
             <Skeleton className="mt-4 h-7 w-24" />
             <Skeleton className="mt-3 h-4 w-full" />
@@ -387,7 +390,7 @@ function ConfigurationSkeleton() {
       </div>
 
       {[1, 2].map((panel) => (
-        <section key={panel} className="border border-border bg-card">
+        <section key={panel} className="overflow-hidden rounded-xl border border-border bg-card">
           <div className="border-b border-border p-4">
             <Skeleton className="h-4 w-32" />
           </div>
@@ -454,7 +457,7 @@ function ConnectionPanel({
       aria-live="polite"
       className={cn(
         "flex flex-col gap-4 border-b border-border p-5 sm:flex-row sm:items-center sm:justify-between",
-        connection.connected ? "bg-emerald-500/5" : "bg-red-500/5",
+        connection.connected ? "bg-muted/30" : "bg-red-500/5",
       )}
     >
       <div className="flex min-w-0 items-start gap-3">
@@ -462,7 +465,7 @@ function ConnectionPanel({
           className={cn(
             "flex size-10 shrink-0 items-center justify-center rounded-full",
             connection.connected
-              ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
+              ? "bg-foreground text-background"
               : "bg-red-500/10 text-red-600 dark:text-red-400",
           )}
         >
@@ -478,7 +481,7 @@ function ConnectionPanel({
               className={cn(
                 "font-semibold",
                 connection.connected
-                  ? "text-emerald-700 dark:text-emerald-400"
+                  ? "text-foreground"
                   : "text-red-700 dark:text-red-400",
               )}
             >
@@ -502,12 +505,18 @@ function ConnectionPanel({
       </div>
 
       <div className="flex shrink-0 flex-col gap-2 sm:items-end">
-        <Badge variant={connection.connected ? "success" : "danger"} dot>
+        <Badge
+          variant={connection.connected ? "outline" : "danger"}
+          className={connection.connected ? OK_BADGE : undefined}
+          dot
+        >
           {connection.connected ? "Healthy" : "Unavailable"}
         </Badge>
         <div className="text-xs leading-5 text-muted-foreground sm:text-right">
           <p title={checked.absolute}>Checked {checked.relative}</p>
-          <p className="tabular-nums">Latency: {connection.latencyMs.toLocaleString()} ms</p>
+          <p className="tabular-nums">
+            Latency: {Number.isFinite(connection.latencyMs) ? `${connection.latencyMs.toLocaleString()} ms` : "Unavailable"}
+          </p>
         </div>
         {!connection.connected && (
           <Button
@@ -535,6 +544,8 @@ export function StorageS3ConfigurationDashboard() {
 
   const config = configurationQuery.data;
   const connection = latestTest ?? config;
+  const protectedPrefixes = Array.isArray(config?.protectedPrefixes) ? config.protectedPrefixes : [];
+  const uploadLimit = Number(config?.uploadRateLimitPerMinute);
   const fatalError = configurationQuery.isError && !config;
   const isInitialLoading = configurationQuery.isLoading && !config;
 
@@ -616,7 +627,7 @@ export function StorageS3ConfigurationDashboard() {
   if (fatalError) {
     const requestId = getRequestId(configurationQuery.error);
     return (
-      <main className="mx-auto flex w-full max-w-[1600px] flex-col gap-6 p-4 pb-20 sm:p-6 lg:p-8">
+      <div className="mx-auto flex w-full max-w-[1600px] flex-col gap-6 pb-20">
         <header>
           <h1 className="text-2xl font-semibold tracking-tight sm:text-3xl">
             S3 Configuration
@@ -652,12 +663,12 @@ export function StorageS3ConfigurationDashboard() {
             </Button>
           </AlertDescription>
         </Alert>
-      </main>
+      </div>
     );
   }
 
   return (
-    <main className="mx-auto flex w-full max-w-[1600px] flex-col gap-6 p-4 pb-20 sm:p-6 lg:p-8">
+    <div className="mx-auto flex w-full max-w-[1600px] flex-col gap-6 pb-20">
       <header className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight sm:text-3xl">
@@ -690,7 +701,7 @@ export function StorageS3ConfigurationDashboard() {
                 testConnectionMutation.isPending && "animate-pulse",
               )}
             />
-            {testConnectionMutation.isPending ? "Testing..." : "Test connection"}
+            {testConnectionMutation.isPending ? "Testing" : "Test connection"}
           </Button>
         </div>
       </header>
@@ -841,10 +852,12 @@ export function StorageS3ConfigurationDashboard() {
                 detail="Expiry applied to server-generated download links."
                 icon={<Timer className="size-4" />}
               />
+              {/* The server's upload limiter counts over a 2 hour window (storage.routes.js),
+                  even though the field is named "per minute" */}
               <RuleCard
-                label="Upload rate limit"
-                value={`${config.uploadRateLimitPerMinute.toLocaleString()} / min`}
-                detail="Maximum upload requests allowed per minute."
+                label="Upload limit"
+                value={Number.isFinite(uploadLimit) ? `${uploadLimit.toLocaleString()} / 2 h` : "Unavailable"}
+                detail="Most uploads one admin can send in any 2 hour window."
                 icon={<Activity className="size-4" />}
               />
             </div>
@@ -860,7 +873,7 @@ export function StorageS3ConfigurationDashboard() {
                   title="Authentication"
                   description={formatAuthentication(config.authentication)}
                   badge={
-                    <Badge variant="success" icon={<LockKeyhole className="size-3" />}>
+                    <Badge variant="outline" className={OK_BADGE} icon={<LockKeyhole className="size-3" />}>
                       Protected
                     </Badge>
                   }
@@ -870,7 +883,8 @@ export function StorageS3ConfigurationDashboard() {
                   description={config.credentialSource || "Credential source unavailable"}
                   badge={
                     <Badge
-                      variant={config.credentialsConfigured ? "success" : "danger"}
+                      variant={config.credentialsConfigured ? "outline" : "danger"}
+                      className={config.credentialsConfigured ? OK_BADGE : undefined}
                       icon={<KeyRound className="size-3" />}
                     >
                       {config.credentialsConfigured ? "Configured" : "Missing"}
@@ -886,7 +900,8 @@ export function StorageS3ConfigurationDashboard() {
                   }
                   badge={
                     <Badge
-                      variant={config.auditLoggingEnabled ? "success" : "warning"}
+                      variant={config.auditLoggingEnabled ? "outline" : "warning"}
+                      className={config.auditLoggingEnabled ? OK_BADGE : undefined}
                       dot
                     >
                       {config.auditLoggingEnabled ? "Enabled" : "Disabled"}
@@ -895,12 +910,12 @@ export function StorageS3ConfigurationDashboard() {
                 />
                 <SecurityRow
                   title="Protected paths"
-                  description={`${config.protectedPrefixes.length.toLocaleString()} configured ${
-                    config.protectedPrefixes.length === 1 ? "prefix" : "prefixes"
+                  description={`${protectedPrefixes.length.toLocaleString()} configured ${
+                    protectedPrefixes.length === 1 ? "prefix" : "prefixes"
                   }`}
                   badge={
                     <Badge variant="outline">
-                      {config.protectedPrefixes.length.toLocaleString()} paths
+                      {protectedPrefixes.length.toLocaleString()} {protectedPrefixes.length === 1 ? "path" : "paths"}
                     </Badge>
                   }
                   action={
@@ -953,15 +968,15 @@ export function StorageS3ConfigurationDashboard() {
                 </DialogDescription>
               </DialogHeader>
 
-              {config.protectedPrefixes.length ? (
+              {protectedPrefixes.length ? (
                 <ul className="max-h-72 divide-y divide-border overflow-y-auto border-y border-border">
-                  {config.protectedPrefixes.map((prefix) => (
+                  {protectedPrefixes.map((prefix) => (
                     <li
                       key={prefix}
                       className="flex items-start gap-3 px-3 py-3 font-mono text-sm"
                     >
                       <ShieldCheck
-                        className="mt-0.5 size-4 shrink-0 text-emerald-600 dark:text-emerald-400"
+                        className="mt-0.5 size-4 shrink-0 text-foreground"
                         aria-hidden="true"
                       />
                       <span className="break-all">{prefix}</span>
@@ -993,6 +1008,6 @@ export function StorageS3ConfigurationDashboard() {
           </AlertDescription>
         </Alert>
       )}
-    </main>
+    </div>
   );
 }

@@ -594,6 +594,7 @@ export const configApi = {
           osMetrics: h?.osMetrics ?? null,
           warnings: h?.warnings ?? [],
           server: h?.server ?? null,
+          timestamp: (h?.timestamp ?? null) as string | null, // when the server ran the checks (System Config's "Checked")
         };
       }),
 

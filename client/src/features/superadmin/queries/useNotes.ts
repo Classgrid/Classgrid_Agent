@@ -54,7 +54,7 @@
  * ─────────────────────────────────────────────────────────
  */
 
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useQuery, useMutation, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { notesApi, GetNotesParams, Note } from "../services/notesApi";
 
 export const useNotes = (params?: GetNotesParams) => {
@@ -79,46 +79,69 @@ export const useNoteVersions = (noteId: string | undefined) => {
   });
 };
 
+
+// Note lists are cached under ["superadmin-notes", filters]; the counts and the history have their own keys.
+const NOTES_LISTS = ["superadmin-notes"];
+const NOTES_STATS = ["superadmin-notes-stats"];
+
+/** Puts a saved note into every cached list at once, so the page can open it before the lists load again. */
+function putNoteInLists(queryClient: QueryClient, note: Note, { addIfMissing }: { addIfMissing: boolean }) {
+  queryClient.setQueriesData<Note[]>({ queryKey: NOTES_LISTS }, (old) => {
+    if (!Array.isArray(old)) return old;
+    if (old.some((n) => n._id === note._id)) return old.map((n) => (n._id === note._id ? note : n));
+    return addIfMissing ? [note, ...old] : old;
+  });
+}
+
 export const useCreateNote = () => {
   const queryClient = useQueryClient();
-  
+
   return useMutation({
     mutationFn: (noteData: Partial<Note>) => notesApi.createNote(noteData),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["superadmin-notes"] });
+    onSuccess: (note) => {
+      if (note) putNoteInLists(queryClient, note, { addIfMissing: true });
+      queryClient.invalidateQueries({ queryKey: NOTES_LISTS });
+      queryClient.invalidateQueries({ queryKey: NOTES_STATS });
     },
   });
 };
 
 export const useUpdateNote = () => {
   const queryClient = useQueryClient();
-  
+
   return useMutation({
     mutationFn: ({ id, ...noteData }: Partial<Note> & { id: string }) => notesApi.updateNote(id, noteData),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["superadmin-notes"] });
+    onSuccess: (note, { id }) => {
+      if (note) putNoteInLists(queryClient, note, { addIfMissing: false });
+      queryClient.invalidateQueries({ queryKey: NOTES_LISTS });
+      queryClient.invalidateQueries({ queryKey: NOTES_STATS });
+      // Every save keeps the old content as a version
+      queryClient.invalidateQueries({ queryKey: ["superadmin-notes-versions", id] });
     },
   });
 };
 
 export const useDeleteNote = () => {
   const queryClient = useQueryClient();
-  
+
   return useMutation({
     mutationFn: (id: string) => notesApi.deleteNote(id),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["superadmin-notes"] });
+      queryClient.invalidateQueries({ queryKey: NOTES_LISTS });
+      queryClient.invalidateQueries({ queryKey: NOTES_STATS });
     },
   });
 };
 
 export const useTogglePin = () => {
   const queryClient = useQueryClient();
-  
+
   return useMutation({
     mutationFn: (id: string) => notesApi.togglePin(id),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["superadmin-notes"] });
+    onSuccess: (note) => {
+      if (note) putNoteInLists(queryClient, note, { addIfMissing: false });
+      queryClient.invalidateQueries({ queryKey: NOTES_LISTS });
+      queryClient.invalidateQueries({ queryKey: NOTES_STATS });
     },
   });
 };
