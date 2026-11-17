@@ -6126,14 +6126,21 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
                                 // Track whether this specific image has loaded in the browser
                                 const imgKey = `img-loaded-${message.id}-${partIndex}`;
                                 const isImgLoaded = (window as any)[imgKey] === true;
+                                // The picture's own shape (width / height), known once it has loaded: the box takes it, so a
+                                // tall poster or a wide banner is shown whole instead of cut to a square. A square stays
+                                // 320px wide as before; a wide picture is shown wider (up to 520px); a tall one is never
+                                // taller than 480px.
+                                const imgRatio: number = Number((window as any)[`${imgKey}-ratio`]) || 1;
+                                const imgBoxWidth = imgRatio >= 1 ? Math.min(520, Math.round(320 * imgRatio)) : Math.min(320, Math.round(480 * imgRatio));
 
                                 return (
-                                  <div key={`img-${partIndex}`} className="mb-2 mt-1 w-full max-w-[320px]">
+                                  <div key={`img-${partIndex}`} className="mb-2 mt-1 w-full" style={{ maxWidth: imgBoxWidth }}>
                                     <ImageGeneration
                                       status={isError ? "error" : (isComplete && isImgLoaded) ? "complete" : "generating"}
                                       size="fluid"
                                       showStatus={false}
                                       resolution=""
+                                      aspectRatio={imgRatio}
                                     >
                                       {isComplete && url && (
                                         <>
@@ -6143,7 +6150,9 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
                                               src={url}
                                               alt=""
                                               style={{ display: 'none' }}
-                                              onLoad={() => {
+                                              onLoad={(e) => {
+                                                const el = e.currentTarget;
+                                                if (el.naturalWidth > 0 && el.naturalHeight > 0) (window as any)[`${imgKey}-ratio`] = el.naturalWidth / el.naturalHeight;
                                                 (window as any)[imgKey] = true;
                                                 // Force a re-render by dispatching a tiny state update
                                                 setMessages(prev => [...prev]);

@@ -5135,6 +5135,9 @@ You work on the user's own Windows computer through their Classgrid desktop app,
                                 },
                                 body: JSON.stringify({
                                     prompt: args.prompt,
+                                    // (the shape and size the model picked for what the person asked: a poster, a wallpaper, 4K)
+                                    aspectRatio: args.aspect_ratio,
+                                    resolution: args.resolution,
                                     sessionId: sessionId,
                                     userEmail: userEmail,
                                     isIncognito: isIncognito,
@@ -5150,7 +5153,10 @@ You work on the user's own Windows computer through their Classgrid desktop app,
                                     // to copy a marker or a link: some models broke the marker or wrote the raw link instead.
                                     generatedImages.push({ prompt: String(args.prompt || ""), url: json.imageUrl });
                                     if (!res.writableEnded) res.write(`data: ${JSON.stringify({ type: "generated_image", prompt: String(args.prompt || ""), url: json.imageUrl })}\n\n`);
-                                    return `The image is ready and the app already shows it to the user at the top of your reply. Do not write its link, any [IMAGE_GENERATION...] marker or a Markdown image. Continue your answer normally: briefly describe the image, offer changes, and finish any other part of the user's request. If you need to look at this image again later (to describe, check or compare it), open it with analyze_image using this link (for the tool only, never in your reply): ${json.imageUrl}; never say you can't see it.`;
+                                    // (the backup image maker only makes squares: the model is told when the shape it asked for was not made)
+                                    const askedShape = args.aspect_ratio ? eleven.imageShape(args.aspect_ratio) : "";
+                                    const squareNote = askedShape && json.aspectRatio && json.aspectRatio !== askedShape ? `The picture came out square, not ${askedShape}: the usual image maker could not make it this time and the other one only makes squares. Tell the user in a few words. ` : "";
+                                    return `${squareNote}The image is ready and the app already shows it to the user at the top of your reply. Do not write its link, any [IMAGE_GENERATION...] marker or a Markdown image. Continue your answer normally: briefly describe the image, offer changes, and finish any other part of the user's request. If you need to look at this image again later (to describe, check or compare it), open it with analyze_image using this link (for the tool only, never in your reply): ${json.imageUrl}; never say you can't see it.`;
                                 }
                                 if (json.code === 'IMAGE_LIMIT_REACHED') {
                                     // The weekly image limit is final: no retries and no other way of making the picture
@@ -5175,7 +5181,7 @@ You work on the user's own Windows computer through their Classgrid desktop app,
                             const resData = await fetch(url, {
                                 method: 'POST',
                                 headers: { 'Content-Type': 'application/json', 'Authorization': token },
-                                body: JSON.stringify({ prompt: args.prompt, imageUrl: args.imageUrl, imageUrls: Array.isArray(args.imageUrls) ? args.imageUrls : undefined, sessionId, userEmail, isIncognito, isInternalCall: true })
+                                body: JSON.stringify({ prompt: args.prompt, imageUrl: args.imageUrl, imageUrls: Array.isArray(args.imageUrls) ? args.imageUrls : undefined, aspectRatio: args.aspect_ratio, resolution: args.resolution, sessionId, userEmail, isIncognito, isInternalCall: true })
                             });
                             const text = await resData.text();
                             let json;
@@ -8685,6 +8691,14 @@ export const generateImage = async (req, res) => {
         const imageUrls = [...new Set(givenUrls.map((u) => u.trim()).filter((u) => /^https:\/\/\S+$/.test(u)))].slice(0, 10);
         if (givenUrls.length && imageUrls.length !== new Set(givenUrls.map((u) => u.trim())).size) return res.status(400).json({ error: "Every picture to edit must be an https link." });
         const imageUrl = imageUrls[0] || "";
+        // The picture's shape and size (owner, 2026-11-17: "it must support all sizes"; every picture used to be a 1K
+        // square): one of the shapes and sizes the image maker takes (elevenlabs.service.js IMAGE_SHAPES, IMAGE_SIZES).
+        // The chat's tools send what the model picked for the request; with none sent ("@Create image") a new picture
+        // is a square, and an edit keeps the shape the image maker picks from the given picture ("auto"). 1K by default.
+        const imageShape = eleven.imageShape(req.body.aspectRatio, imageUrls.length ? "auto" : "1:1");
+        const imageSize = eleven.imageSize(req.body.resolution);
+        let madeShape = "1:1"; // (the backup, Cloudflare's Flux, only makes squares: it refuses a width and height)
+        let madeSize = "1K";
         // isInternalCall (the chat's generate_image tool) only skips saving to a chat session: the chat saves it itself.
         const isInternalCall = req.body.isInternalCall === true;
         // The image limit is checked and counted on the signed-in account, never on body.userEmail, and body flags
@@ -8814,7 +8828,10 @@ export const generateImage = async (req, res) => {
                 }
                 // Every picture, a new one or an edit, is made at high quality (owner, 2026-11-17: "make it realistic and
                 // high"); new pictures were made at medium and came out plainer than ChatGPT's
-                const made = await eleven.generateImage(prompt, { references, quality: "high" });
+                // (a bigger picture takes longer to make)
+                const made = await eleven.generateImage(prompt, { references, quality: "high", aspectRatio: imageShape, resolution: imageSize, timeoutMs: imageSize === "4K" ? 240000 : imageSize === "2K" ? 180000 : 120000 });
+                madeShape = imageShape;
+                madeSize = imageSize;
                 imageBuffer = made.buffer;
                 imageMime = made.mimeType;
                 imageModel = `elevenlabs/${made.model}`;
@@ -8937,7 +8954,8 @@ export const generateImage = async (req, res) => {
                         promptTokens: 1, // Store as 1 token for simple accounting
                         completionTokens: 0,
                         totalTokens: 1,
-                        success: true
+                        success: true,
+                        metadata: { purpose: "image", shape: madeShape, size: madeSize }
                     });
                     
                     const io = getIO();
@@ -8956,7 +8974,7 @@ export const generateImage = async (req, res) => {
             if (askerGone) import("../services/user-push.service.js").then((m) => m.pushImageReady({ userId: req.user._id, sessionId: activeSessionId, prompt, imageUrl: r2Url })).catch(() => {});
         }
 
-        res.json({ imageUrl: r2Url, sessionId: activeSessionId });
+        res.json({ imageUrl: r2Url, sessionId: activeSessionId, aspectRatio: madeShape, resolution: madeSize });
     } catch (e) {
         console.error("Error generating image:", e);
         // No image was made: give the slot back (never below 0)

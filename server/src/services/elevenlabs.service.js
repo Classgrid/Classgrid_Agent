@@ -15,6 +15,21 @@ export const TTS_MODEL_EXPRESSIVE = "eleven_v3";
 export const STT_MODEL = "scribe_v3";
 export const IMAGE_MODEL = "gpt-image-2.5-flare";
 export const IMAGE_MODEL_FALLBACK = "gemini-3.1-flash-image";
+// The shapes (width:height) and sizes the image API takes for GPT Image 2.5. Read from the API itself on 2026-11-17: a
+// request with a value it does not know is refused with the list of the ones it does. There is no exact paper shape
+// (A4 is 1:1.41): 2:3 is the closest upright one, 3:2 the closest lying one.
+export const IMAGE_SHAPES = ["1:1", "4:5", "5:4", "3:4", "4:3", "2:3", "3:2", "1:2", "2:1", "9:16", "16:9", "21:9", "1:3", "3:1", "auto"];
+export const IMAGE_SIZES = ["1K", "2K", "4K"];
+/** The shape asked for when it is one the image API takes ("16x9", "16/9" and "16 : 9" are read as 16:9), else `fallback` */
+export function imageShape(value, fallback = "1:1") {
+    const v = String(value ?? "").trim().toLowerCase().replace(/\s+/g, "").replace(/[x×/]/g, ":");
+    return IMAGE_SHAPES.includes(v) ? v : fallback;
+}
+/** The size asked for when it is one the image API takes ("2k" is read as 2K), else `fallback` */
+export function imageSize(value, fallback = "1K") {
+    const v = String(value ?? "").trim().toUpperCase();
+    return IMAGE_SIZES.includes(v) ? v : fallback;
+}
 // Classgrid's voice (owner, 2026-11-14), when ELEVENLABS_VOICE_ID is not set
 const DEFAULT_VOICE_ID = "Ms9OTvWb99V6DwRHZn6q";
 
@@ -99,7 +114,8 @@ const MAX_REFERENCE_BYTES = 25 * 1024 * 1024;
 /**
  * A picture from a prompt: the generation is started, then asked for until it is done (a few seconds to a minute),
  * and the finished picture is downloaded. Returns { buffer, mimeType, model }.
- * `aspectRatio` like "1:1", "16:9", "9:16", "4:3", "3:4"; `quality` low | medium | high (GPT Image).
+ * `aspectRatio`: one of IMAGE_SHAPES ("auto": the image model picks, for an edit from the given picture);
+ * `resolution`: one of IMAGE_SIZES; `quality` low | medium | high (GPT Image).
  * `references`: pictures the new one is made from (image to image: an edit, a new style, a variation), each
  * { buffer, mimeType } (JPEG, PNG, WebP or HEIC, up to 25 MB), at most 10.
  */

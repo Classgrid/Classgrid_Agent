@@ -319,11 +319,13 @@ export const getMcpTools = () => [
   },
   {
     name: 'generate_image',
-    description: 'Generates a photorealistic AI image based on a prompt. Use this whenever the user asks to create an image, poster, drawing, graphic, or visualization. Do NOT ask the user to type @Create image; just use this tool directly.',
+    description: 'Generates a photorealistic AI image based on a prompt. Use this whenever the user asks to create an image, poster, drawing, graphic, or visualization. Do NOT ask the user to type @Create image; just use this tool directly. The image model writes text well and makes a finished design in one picture: for a poster, flyer, banner, card, cover or invitation, make the WHOLE design with this tool in the right shape (aspect_ratio), with every word of its text in the prompt, in quotes and spelled exactly, and where each line goes. Do not make only the artwork without its text and then build the layout yourself in code, unless the user asks for a file they can edit (HTML, SVG, PDF, slides).',
     inputSchema: {
       type: 'object',
       properties: {
-        prompt: { type: 'string', description: 'The highly detailed prompt for the image to generate. It is sent to the image model exactly as you write it, so keep exactly who and what the user asked for (a boy stays a boy, the same number of people, the same objects, any text word for word) and add detail only about look, lighting, setting and style.' }
+        prompt: { type: 'string', description: 'The highly detailed prompt for the image to generate. It is sent to the image model exactly as you write it, so keep exactly who and what the user asked for (a boy stays a boy, the same number of people, the same objects, any text word for word) and add detail only about look, lighting, setting and style.' },
+        aspect_ratio: { type: 'string', enum: ['1:1', '4:5', '5:4', '3:4', '4:3', '2:3', '3:2', '1:2', '2:1', '9:16', '16:9', '21:9', '1:3', '3:1'], description: 'The shape of the picture, width:height. Pick the one that fits what the user asked for. "1:1" square (the default when nothing points to another shape: a profile picture, logo, icon, post). "2:3" upright poster, flyer, book cover and paper held upright (A4, A3, letter: there is no exact A4 shape, 2:3 is the closest, so keep a small empty margin around the text). "3:2" the same lying on its side, and a normal photo. "3:4" / "4:3" classic photo, tablet screen. "4:5" / "5:4" social post, portrait. "9:16" phone screen, story, reel. "16:9" slide, video thumbnail, desktop wallpaper, banner. "21:9" very wide banner or header. "1:2" / "2:1" and "1:3" / "3:1" very tall or very wide strip (bookmark, roll-up banner, web header). When the user names a size or shape, use the closest one, and say which you used when it is not exact.' },
+        resolution: { type: 'string', enum: ['1K', '2K', '4K'], description: 'How big the picture is: "1K" (the default), "2K" or "4K". Use 2K or 4K only when the user asks for a big, high-resolution, HD, 4K or print-quality picture: they take longer to make.' }
       },
       required: ['prompt']
     }
@@ -336,7 +338,9 @@ export const getMcpTools = () => [
       properties: {
         imageUrls: { type: 'array', items: { type: 'string' }, description: 'The absolute URLs of every picture the new image is made from, up to 10, in the order the prompt names them.' },
         imageUrl: { type: 'string', description: 'One picture (the same as a one-item imageUrls).' },
-        prompt: { type: 'string', description: 'What to make from the pictures: what to change, what to keep exactly (faces, clothes, pose), the style, and which picture is which.' }
+        prompt: { type: 'string', description: 'What to make from the pictures: what to change, what to keep exactly (faces, clothes, pose), the style, and which picture is which.' },
+        aspect_ratio: { type: 'string', enum: ['1:1', '4:5', '5:4', '3:4', '4:3', '2:3', '3:2', '1:2', '2:1', '9:16', '16:9', '21:9', '1:3', '3:1'], description: 'The shape of the picture, width:height. Pick the one that fits what the user asked for. Leave it out to keep the shape of the given picture; give one only when the user wants another shape. "1:1" square (a profile picture, logo, icon, post). "2:3" upright poster, flyer, book cover and paper held upright (A4, A3, letter: there is no exact A4 shape, 2:3 is the closest, so keep a small empty margin around the text). "3:2" the same lying on its side, and a normal photo. "3:4" / "4:3" classic photo, tablet screen. "4:5" / "5:4" social post, portrait. "9:16" phone screen, story, reel. "16:9" slide, video thumbnail, desktop wallpaper, banner. "21:9" very wide banner or header. "1:2" / "2:1" and "1:3" / "3:1" very tall or very wide strip (bookmark, roll-up banner, web header). When the user names a size or shape, use the closest one, and say which you used when it is not exact.' },
+        resolution: { type: 'string', enum: ['1K', '2K', '4K'], description: 'How big the picture is: "1K" (the default), "2K" or "4K". Use 2K or 4K only when the user asks for a big, high-resolution, HD, 4K or print-quality picture: they take longer to make.' }
       },
       required: ['prompt']
     }
