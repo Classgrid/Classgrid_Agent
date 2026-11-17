@@ -143,6 +143,8 @@ export interface PersonOverview {
     browsers: { browser: string; os: string; addedAt: string | null }[];
     phoneApps: { platform: string; appVersion: string; updatedAt: string | null }[];
     usesOn: { website: boolean; desktop: boolean; phone: boolean; whatsapp: boolean };
+    // The devices signed in now, as in their Settings > Devices (null = couldn't be read; max null = no limit)
+    devices?: { used: number; max: number | null; items: { id: string; kind: string; name: string; signedInAt: string | null; lastUsedAt: string | null }[] } | null;
   };
   activity: {
     chats: number | null;

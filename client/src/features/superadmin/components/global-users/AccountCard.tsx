@@ -4,8 +4,11 @@
 import { UserRound } from "lucide-react";
 import { SectionCard } from "./SectionCard";
 import { InfoList, InfoRow } from "./InfoRow";
-import { browserWhenText, dateText, dateTimeText, mergeBrowsers, mergePhoneApps, phonePlatformLabel, relativeText, signupLabel } from "./format";
+import { browserWhenText, dateText, dateTimeText, mergeBrowsers, mergePhoneApps, num, phonePlatformLabel, relativeText, signupLabel } from "./format";
 import type { PersonOverview } from "./types";
+
+// Where a sign-in is from (UserSession.kind on the server)
+const DEVICE_KINDS: Record<string, string> = { website: "Website", desktop: "Desktop app", phone: "Phone app", editor: "Code editor" };
 
 export function AccountCard({ account, person, className }: { account: PersonOverview["account"]; person: PersonOverview["person"]; className?: string }) {
   const methods = [...new Set((account.signInMethods || []).map(signupLabel))];
@@ -53,6 +56,34 @@ export function AccountCard({ account, person, className }: { account: PersonOve
 
       {account.lockedUntil && (
         <p className="text-sm text-destructive mt-3">Locked after wrong passwords until {dateTimeText(account.lockedUntil)}</p>
+      )}
+
+      {/* The devices signed in now and the plan's device limit (the same list as their Settings > Devices) */}
+      {account.devices !== undefined && (
+        <div className="mt-4 pt-4 border-t border-border min-w-0">
+          <h3 className="text-sm font-medium text-foreground">
+            Signed-in devices
+            {account.devices && (
+              <span className="text-muted-foreground font-normal">
+                {account.devices.max === null ? ` · ${num(account.devices.used)}` : ` · ${num(account.devices.used)} of ${num(account.devices.max)}`}
+              </span>
+            )}
+          </h3>
+          {account.devices === null ? (
+            <p className="mt-2 text-sm text-muted-foreground">Couldn&apos;t read their devices right now.</p>
+          ) : account.devices.items.length ? (
+            <ul className="mt-2 flex flex-col gap-1.5">
+              {account.devices.items.map((dv) => (
+                <li key={dv.id} className="text-sm text-foreground break-words">
+                  {dv.name || "Unknown device"}
+                  <span className="text-muted-foreground">{` · ${DEVICE_KINDS[dv.kind] || "Website"}${dv.lastUsedAt ? ` · last used ${relativeText(dv.lastUsedAt)}` : ""}`}</span>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="mt-2 text-sm text-muted-foreground">No sign-ins since the device list was added.</p>
+          )}
+        </div>
       )}
 
       <div className="mt-4 pt-4 border-t border-border grid grid-cols-1 sm:grid-cols-2 gap-4">

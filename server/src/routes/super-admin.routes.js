@@ -2092,7 +2092,7 @@ router.get("/users/:id/overview", async (req, res) => {
                     account_emails: 1, plan: 1,
                     "student_verification.method": 1, "student_verification.verified_at": 1, "student_verification.expires_at": 1,
                     "metadata.whatsappPhone": 1, "metadata.whatsapp_number": 1, "metadata.whatsappSkipped": 1,
-                    "metadata.age": 1, "metadata.job_role": 1, blocked_until: 1,
+                    "metadata.age": 1, "metadata.job_role": 1, blocked_until: 1, passwordChangedAt: 1,
                     webChats: { $size: { $ifNull: ["$web_chat_ids", []] } },
                     desktopChats: { $size: { $ifNull: ["$desktop_chat_ids", []] } },
                     callChats: { $size: { $ifNull: ["$call_chat_ids", []] } },
@@ -2122,7 +2122,7 @@ router.get("/users/:id/overview", async (req, res) => {
         const ADMIN_ACTIONS = ["user.ban", "user.unban", "user.force_logout", "user.reset_password", "user.role_change", "user.plan_gift", "user.plan_end"];
 
         const [chat, projects, liveDocs, pages, calls, lastAi, payItems, payCount, paySum, logs, planRows,
-            aiDays, aiAnswers, firstAi, skills, schedules, libraryFiles, planCounts, bought] = await Promise.all([
+            aiDays, aiAnswers, firstAi, skills, schedules, libraryFiles, planCounts, bought, signedIn] = await Promise.all([
             safe("chats", () => chatStats(u.email, { newest: true })),
             safe("projects", () => IdeProject.countDocuments({ owner: oid })),
             safe("live docs", () => LiveDoc.countDocuments({ owner: oid })),
@@ -2158,6 +2158,10 @@ router.get("/users/:id/overview", async (req, res) => {
             ])),
             // Plans bought (successful plan payments, each month or year counts once)
             safe("plans bought", () => AiCreditTransaction.countDocuments({ userId: oid, type: "plan", status: "success" })),
+            // Their signed-in devices and the plan's device limit, the same list they see in Settings > Devices
+            // (services/user-session.service.js: counted per account, so every email of it shares one count).
+            // passwordChangedAt goes with it so sign-ins from before "Log out everywhere" are not listed as live.
+            safe("devices", async () => (await import("../services/user-session.service.js")).listDevices({ _id: oid, plan: u.plan, role: u.role, email: u.email, passwordChangedAt: u.passwordChangedAt }, null)),
         ]);
 
         const now = new Date();
@@ -2227,6 +2231,7 @@ router.get("/users/:id/overview", async (req, res) => {
         const ageRaw = meta.age;
         const age = (typeof ageRaw === "number" && Number.isFinite(ageRaw)) || (typeof ageRaw === "string" && ageRaw.trim()) ? ageRaw : null;
         const fcmDevices = Array.isArray(u.fcmDevices) ? u.fcmDevices : [];
+        const signedInKinds = new Set((signedIn?.devices || []).map((dv) => dv.kind));
 
         res.json({
             success: true,
@@ -2279,12 +2284,22 @@ router.get("/users/:id/overview", async (req, res) => {
                     })),
                     // Worked out from what the account holds: web chats are listed only since 2026-11-04, and the
                     // place someone signed up from is not recorded
+                    // (also true for a place they are signed in on now, from the device list)
                     usesOn: {
-                        website: (u.webChats || 0) > 0,
-                        desktop: (u.desktopChats || 0) > 0,
-                        phone: fcmDevices.length > 0 || (u.fcmTokenCount || 0) > 0,
+                        website: (u.webChats || 0) > 0 || signedInKinds.has("website"),
+                        desktop: (u.desktopChats || 0) > 0 || signedInKinds.has("desktop") || signedInKinds.has("editor"),
+                        phone: fcmDevices.length > 0 || (u.fcmTokenCount || 0) > 0 || signedInKinds.has("phone"),
                         whatsapp: (u.callChats || 0) > 0 || !!meta.whatsappPhone,
                     },
+                    // The devices signed in now (null = couldn't be read); max null = no device limit
+                    devices: signedIn ? {
+                        used: signedIn.limit?.used ?? 0,
+                        max: signedIn.limit?.max ?? null,
+                        items: (signedIn.devices || []).slice(0, 50).map((dv) => ({
+                            id: String(dv.id), kind: dv.kind, name: String(dv.device_name || ""),
+                            signedInAt: isoOrNull(dv.created_at), lastUsedAt: isoOrNull(dv.last_seen_at),
+                        })),
+                    } : null,
                 },
                 activity: {
                     chats: chat ? chat.count : null,
