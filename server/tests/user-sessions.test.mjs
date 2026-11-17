@@ -501,7 +501,7 @@ test("logging out one device ends only that one, and only the person's own", asy
     const web = await signIn(userA, reqOf(UA.chromeWin));
     const desk = await signIn(userA, reqOf(UA.desktopApp));
     const deskRow = world.store.rows.find((r) => r.sid === desk);
-    assert.deepEqual(await revokeDevice("u-2", deskRow._id), { found: false, row: null });
+    assert.deepEqual(await revokeDevice("u-2", deskRow._id), { found: false, row: null, rows: [] });
     const { found, row } = await revokeDevice("u-1", deskRow._id);
     assert.equal(found, true);
     assert.equal(row.kind, "desktop");
@@ -661,4 +661,25 @@ test("code editors are told by their user agent; a background poller with no use
     await adoptLegacyToken({ user: userA, req: reqOf(UA.desktopApp), oldToken: "old-desktop", payload: { id: userA._id }, expiresIn: "7d" });
     const row = world.store.rows.find((r) => r._id === "old-row");
     assert.deepEqual([row.kind, row.device_name], ["desktop", "Classgrid desktop app on Windows"]);
+});
+
+test("one device is listed and counted once, however many rows it has; Log out ends all of them", async () => {
+    setup({ limit: FREE });
+    const exp = Math.floor(clock / 1000) + 365 * 24 * 60 * 60;
+    const phone = (sid) => ({ _id: sid, user_id: userA._id, sid, kind: "phone", device_name: "Classgrid phone app on Android", user_agent: UA.phoneApp, device_id: `ua:${sid}x`, legacy_key: "", created_at: new Date(clock), last_seen_at: new Date(clock), expires_at: new Date(exp * 1000), revoked_at: null });
+    // the same phone signed in 4 times without a device id of its own (guessed ids differ only by the test's naming)
+    for (const sid of ["p1", "p2", "p3", "p4"]) { const r = phone(sid); r.device_id = "ua:samephone"; world.store.rows.push(r); }
+    // the same browser: its sign-in with its own id and its older cookie token's row
+    const ua = UA.chromeWin;
+    world.store.rows.push({ _id: "b1", user_id: userA._id, sid: "b1", kind: "website", device_name: "Chrome on Windows", user_agent: ua, device_id: "browser-1", legacy_key: "", created_at: new Date(clock), last_seen_at: new Date(clock), expires_at: new Date(exp * 1000), revoked_at: null });
+    world.store.rows.push({ _id: "b2", user_id: userA._id, sid: "b2", kind: "website", device_name: "Chrome on Windows", user_agent: ua, device_id: "ua:chrome", legacy_key: legacyKeyOf("old-cookie"), created_at: new Date(clock), last_seen_at: new Date(clock), expires_at: new Date(exp * 1000), revoked_at: null });
+    const list = await listDevices(userA, "b1");
+    assert.equal(list.devices.length, 2);
+    assert.equal(list.limit.used, 2);
+    assert.equal(list.devices.find((x) => x.kind === "website").this_device, true);
+    const phoneRow = list.devices.find((x) => x.kind === "phone");
+    const out = await revokeDevice(userA._id, phoneRow.id);
+    assert.equal(out.rows.length, 4);
+    assert.equal(world.store.rows.filter((r) => r.kind === "phone" && !r.revoked_at).length, 0);
+    assert.equal((await listDevices(userA, "b1")).devices.length, 1);
 });

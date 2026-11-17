@@ -73,12 +73,12 @@ router.delete("/:id", ownSiteOnly, isAuthenticated, async (req, res) => {
     try {
         const id = String(req.params.id || "");
         if (!mongoose.isValidObjectId(id)) return res.status(404).json({ message: "Device not found" });
-        const { found, row } = await revokeDevice(req.user._id, id);
+        const { found, row, rows } = await revokeDevice(req.user._id, id);
         if (!found) return res.status(404).json({ message: "Device not found" });
         // Its live connections close, and a phone stops getting the account's notifications (the push device registered
-        // with this sign-in, or the phone's own device id)
-        await afterSessionEnded(req.user._id, row);
-        const thisDevice = !!req.authSid && row.sid === req.authSid;
+        // with this sign-in, or the phone's own device id); every row of that device
+        for (const r of rows.length ? rows : [row]) await afterSessionEnded(req.user._id, r);
+        const thisDevice = !!req.authSid && (rows.length ? rows : [row]).some((r) => r.sid === req.authSid);
         if (thisDevice) clearAuthCookies(res);
         res.json({ success: true, this_device: thisDevice, redirect: thisDevice ? "/login" : null, message: thisDevice ? "Logged out" : "Device logged out" });
     } catch (error) {

@@ -311,9 +311,9 @@ router.delete("/device-limit/devices/:id", deviceTicketLimiter, async (req, res)
         const id = String(req.params.id || "");
         if (!mongoose.isValidObjectId(id)) return res.status(404).json({ message: "Device not found" });
         const { revokeDevice, afterSessionEnded } = await import("../services/user-session.service.js");
-        const { found, row } = await revokeDevice(user._id, id);
+        const { found, row, rows } = await revokeDevice(user._id, id);
         if (!found) return res.status(404).json({ message: "Device not found" });
-        await afterSessionEnded(user._id, row);
+        for (const r of rows.length ? rows : [row]) await afterSessionEnded(user._id, r);
         res.json({ success: true, message: "Device logged out" });
     } catch (error) {
         console.error("DEVICE LIMIT LOGOUT ERROR:", error.message);

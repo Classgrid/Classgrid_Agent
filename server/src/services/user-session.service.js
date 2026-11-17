@@ -468,7 +468,37 @@ async function liveSessions(user) {
 }
 
 /** The sign-ins that count toward the device limit: the live ones used in the last 30 days */
-const countedSessions = (rows, now) => rows.filter((r) => !isUnused(r, now));
+/**
+ * One device can have several rows: an app that signs in again without a device id of its own, an older token adopted
+ * next to a new sign-in, the same browser's cookie token (2026-11-17: 7 rows of one phone). Rows are one device when
+ * they share a device id the client sent, or (a guessed or missing id) the same type and the same user agent; a guessed
+ * row with the same user agent as a sent-id row joins that row. Key per row, for the list, the count and Log out.
+ */
+function deviceGroups(rows) {
+    const keyOf = new Map();
+    const strongByAgent = new Map();
+    for (const r of rows) {
+        if (r.device_id && !isWeakDeviceId(r.device_id)) {
+            keyOf.set(r, `id:${r.device_id}`);
+            const agentKey = `${r.kind}|${r.user_agent || ""}`;
+            if (r.user_agent && !strongByAgent.has(agentKey)) strongByAgent.set(agentKey, `id:${r.device_id}`);
+        }
+    }
+    for (const r of rows) {
+        if (keyOf.has(r)) continue;
+        const agentKey = `${r.kind}|${r.user_agent || ""}`;
+        keyOf.set(r, (r.user_agent && strongByAgent.get(agentKey)) || `ua:${agentKey}|${r.user_agent ? "" : String(r._id)}`);
+    }
+    return keyOf;
+}
+
+/** The devices that count toward the limit: the live ones used in the last 30 days, one per device */
+const countedSessions = (rows, now) => {
+    const used = rows.filter((r) => !isUnused(r, now));
+    const keys = deviceGroups(used);
+    const seen = new Set();
+    return used.filter((r) => { const k = keys.get(r); if (seen.has(k)) return false; seen.add(k); return true; });
+};
 
 /** Closes the live connections (socket.io) of one sign-in ({ sid }) or of every sign-in of a person ({ userId }) */
 export function endSessionSockets({ sid, userId } = {}) {
@@ -740,17 +770,25 @@ export async function listDevices(user, currentSid, currentToken = "") {
     const d = await D();
     const limit = await d.deviceLimit(user);
     const live = await liveSessions(user);
-    const devices = live
-        .slice()
-        .sort((a, b) => lastUsed(b) - lastUsed(a))
-        .map((r) => ({ r, shown: shownDevice(r) }))
-        .map(({ r, shown }) => ({
+    // One row per device (deviceGroups): the most recently used row stands for it; This device when any of its rows is
+    const keys = deviceGroups(live);
+    const isThis = (r) => (!!currentSid && r.sid === currentSid) || (!!currentLegacy && r.legacy_key === currentLegacy);
+    const byKey = new Map();
+    for (const r of live.slice().sort((a, b) => lastUsed(b) - lastUsed(a))) {
+        const k = keys.get(r);
+        const g = byKey.get(k);
+        if (g) { g.rows.push(r); g.created = Math.min(g.created, new Date(r.created_at).getTime()); }
+        else byKey.set(k, { first: r, rows: [r], created: new Date(r.created_at).getTime() });
+    }
+    const devices = [...byKey.values()]
+        .map(({ first: r, rows, created }) => ({ r, rows, created, shown: shownDevice(r) }))
+        .map(({ r, rows, created, shown }) => ({
             id: String(r._id),
             kind: shown.kind,
             device_name: shown.device_name,
-            created_at: r.created_at,
+            created_at: new Date(created),
             last_seen_at: r.last_seen_at || r.created_at,
-            this_device: (!!currentSid && r.sid === currentSid) || (!!currentLegacy && r.legacy_key === currentLegacy),
+            this_device: rows.some(isThis),
         }));
     return { devices, limit: { used: countedSessions(live, d.now()).length, max: limit ? limit.max : null }, note: DEVICES_NOTE };
 }
@@ -759,9 +797,18 @@ export async function listDevices(user, currentSid, currentToken = "") {
 export async function revokeDevice(userId, id) {
     const d = await D();
     const row = await d.store.byId(userId, id);
-    if (!row) return { found: false, row: null };
-    if (!row.revoked_at) await revokeRows([row], "logout");
-    return { found: true, row };
+    if (!row) return { found: false, row: null, rows: [] };
+    // The whole device: every live row the list shows as this one device (deviceGroups)
+    let rows = [row];
+    if (!row.revoked_at) {
+        const live = await d.store.live(userId, new Date(d.now()));
+        const keys = deviceGroups(live.some((r) => String(r._id) === String(row._id)) ? live : [...live, row]);
+        const mine = keys.get(live.find((r) => String(r._id) === String(row._id)) || row);
+        rows = live.filter((r) => keys.get(r) === mine);
+        if (!rows.some((r) => String(r._id) === String(row._id))) rows.push(row);
+        await revokeRows(rows, "logout");
+    }
+    return { found: true, row, rows };
 }
 
 /** Ends the sign-in a token names (the logout route): the row (with sid, kind, device and push device) or null */
