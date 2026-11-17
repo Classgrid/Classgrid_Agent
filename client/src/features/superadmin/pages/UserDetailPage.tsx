@@ -155,7 +155,7 @@ export function UserDetailPage() {
         <PersonHeader overview={data} />
         {/* (Account is the tallest card, so on wide screens it spans the height of Plan and Activity beside it) */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 items-start min-w-0">
-          <PlanCard userId={data.person._id} plan={data.plan} />
+          <PlanCard userId={data.person._id} plan={data.plan} name={data.person.name || data.person.email} />
           <AccountCard account={data.account} person={data.person} className="lg:row-span-2" />
           <ActivityCard activity={data.activity} />
           <PaymentsCard userId={data.person._id} payments={data.payments} />

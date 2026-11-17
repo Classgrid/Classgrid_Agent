@@ -105,9 +105,6 @@ export function phonePlatformLabel(platform: string | null | undefined): string 
   return capitalise(platform);
 }
 
-// Plans are gifted and ended on the AI Usage page, opened at this person
-export const AI_USAGE_PERSON_URL = (id: string) => `/superadmin/ai-usage?user=${encodeURIComponent(id)}`;
-
 // The server's own reason when it gave one, else a plain line
 export function errorText(error: unknown): string {
   const message = (error as any)?.response?.data?.message;
