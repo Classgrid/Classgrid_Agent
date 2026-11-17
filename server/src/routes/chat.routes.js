@@ -648,7 +648,9 @@ async function getStudentPerformanceContext(userId, classroomId) {
  * GET /api/chat/classroom-context/:classroomId
  * Returns recent classroom activity as JSON for the assistant welcome screen
  */
-router.get('/classroom-context/:classroomId', async (req, res) => {
+// (login required: these old routes had none, and the two below call Cloudflare AI, so anyone could use up the
+// day's free Cloudflare use; owner, 2026-11-17)
+router.get('/classroom-context/:classroomId', isAuthenticated, async (req, res) => {
   try {
     const { classroomId } = req.params;
     if (!classroomId) return res.status(400).json({ error: 'classroomId required' });
@@ -696,7 +698,7 @@ router.get('/classroom-context/:classroomId', async (req, res) => {
   }
 });
 
-router.post('/stream', upload.none(), async (req, res) => {
+router.post('/stream', isAuthenticated, upload.none(), async (req, res) => {
   // Set headers for Server-Sent Events
   res.setHeader('Content-Type', 'text/event-stream');
   res.setHeader('Cache-Control', 'no-cache');
@@ -800,7 +802,7 @@ Keep the tone very warm, helpful, and structured.
   }
 });
 
-router.post('/', upload.single('file'), async (req, res) => {
+router.post('/', isAuthenticated, upload.single('file'), async (req, res) => {
   try {
     let message = req.body.message || '';
     const file = req.file;

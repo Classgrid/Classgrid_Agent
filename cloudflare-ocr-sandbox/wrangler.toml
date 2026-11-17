@@ -1,6 +1,0 @@
-name = "id-ocr-sandbox"
-main = "src/index.js"
-compatibility_date = "2026-09-12"
-
-[ai]
-binding = "AI" # Exposes env.AI to your code
