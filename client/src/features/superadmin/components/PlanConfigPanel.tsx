@@ -67,7 +67,13 @@ const SECTIONS: Section[] = [
     { key: "call_minutes_per_period", label: "Free call minutes", type: "number", unlimited: true, none: true },
     { key: "call_reset_value", label: "Every", type: "period", unitKey: "call_reset_unit" },
     { key: "calls_per_day", label: "Calls per day", type: "number", unlimited: true },
+    { key: "calls_per_week", label: "Calls per week", type: "number", unlimited: true, hint: "Answered calls in the last 7 days" },
+    { key: "calls_per_month", label: "Calls per month", type: "number", unlimited: true, hint: "Answered calls in the last 30 days" },
     { key: "call_max_minutes", label: "Longest call", type: "number", unit: "minutes" },
+    // Work a call may start (owner, 2026-11-17: on Free a call is a call plus small tasks, not big work)
+    { key: "call_tasks_per_call", label: "Tasks one call can start", type: "number", unlimited: true, none: true },
+    { key: "call_tasks_at_once", label: "Tasks from calls running at once", type: "number", unlimited: true, none: true, hint: "Per person" },
+    { key: "call_task_max_minutes", label: "Work time for one task from a call", type: "number", unit: "minutes", unlimited: true },
   ] },
   { title: "WhatsApp scheduled messages", icon: MessageCircle, fields: [
     { key: "whatsapp_per_period", label: "Messages", type: "number", unlimited: true, none: true },
@@ -172,13 +178,15 @@ export function PlanConfigPanel() {
   const planName = d.name || plan.name;
 
   const numberControl = (f: Field, id: string, v: any) => {
-    const unlimited = f.unlimited && Number(v) === -1;
+    // (a limit the plan has no value for yet, like a newly added one, works as no limit until a number is saved)
+    const notSet = f.unlimited && (v === undefined || v === null);
+    const unlimited = f.unlimited && (notSet || Number(v) === -1);
     return (
       <div className="flex flex-col gap-1">
         <div className="flex items-center gap-2 flex-wrap">
           {f.unit === "₹" && <span className="text-sm text-muted-foreground">₹</span>}
           {unlimited ? (
-            <div className="h-9 min-w-[140px] px-3 rounded-md border border-border bg-muted/50 text-sm text-foreground flex items-center">Unlimited</div>
+            <div className="h-9 min-w-[140px] px-3 rounded-md border border-border bg-muted/50 text-sm text-foreground flex items-center">{notSet ? "No limit" : "Unlimited"}</div>
           ) : (
             <Input id={id} type="number" min={f.unlimited ? -1 : 0} value={v ?? 0} onChange={(e) => set(plan.key, f.key, Number(e.target.value))} disabled={busy} className="h-9 text-sm w-[160px]" />
           )}
