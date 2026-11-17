@@ -3288,6 +3288,59 @@ export const getPlanSetEmail = ({ userName, plan, start, end = null }) => {
   return { subject, html, text };
 };
 
+// ------------- ACCOUNT BLOCKED, UNBLOCKED OR DELETED BY CLASSGRID (super admin, Global Users) -------------
+const SUPPORT_EMAIL = "support@classgrid.in";
+const blockDay = (d) => new Date(d).toLocaleString("en-IN", { day: "numeric", month: "long", year: "numeric", hour: "numeric", minute: "2-digit", timeZone: "Asia/Kolkata" });
+
+/** The account was blocked; `until` is when it opens again (null: until Classgrid unblocks it) */
+export const getAccountBlockedEmail = ({ userName, until = null }) => {
+  const subject = "Your Classgrid account is blocked";
+  const when = until ? `It opens again on ${blockDay(until)} (India time).` : "It stays blocked until Classgrid opens it again.";
+  const html = baseTemplate({
+    title: escHtml(subject),
+    content: `
+      <p>Hi ${escHtml(userName || "there")},</p>
+      <p>Your Classgrid account has been blocked, so you can't sign in or use Classgrid AI right now. ${escHtml(when)}</p>
+      <p>If you think this is a mistake, write to us at <a href="mailto:${SUPPORT_EMAIL}">${SUPPORT_EMAIL}</a>.</p>
+      ${planSignOff}
+    `,
+  });
+  const text = `Hi ${userName || "there"},\n\nYour Classgrid account has been blocked, so you can't sign in or use Classgrid AI right now. ${when}\n\nIf you think this is a mistake, write to us at ${SUPPORT_EMAIL}.\n\nThanks,\nThe Classgrid Team`;
+  return { subject, html, text };
+};
+
+/** The account was unblocked */
+export const getAccountUnblockedEmail = ({ userName }) => {
+  const subject = "Your Classgrid account is open again";
+  const html = baseTemplate({
+    title: escHtml(subject),
+    content: `
+      <p>Hi ${escHtml(userName || "there")},</p>
+      <p>Your Classgrid account is open again. You can sign in and use Classgrid AI as before; your chats and plan are as they were.</p>
+      ${planButton("https://chat.classgrid.in", "Open Classgrid")}
+      ${planSignOff}
+    `,
+  });
+  const text = `Hi ${userName || "there"},\n\nYour Classgrid account is open again. You can sign in and use Classgrid AI as before; your chats and plan are as they were.\n\nOpen Classgrid: https://chat.classgrid.in\n\nThanks,\nThe Classgrid Team`;
+  return { subject, html, text };
+};
+
+/** The account and its data were deleted by Classgrid */
+export const getAccountDeletedEmail = ({ userName }) => {
+  const subject = "Your Classgrid account has been deleted";
+  const html = baseTemplate({
+    title: escHtml(subject),
+    content: `
+      <p>Hi ${escHtml(userName || "there")},</p>
+      <p>Your Classgrid account and its data have been deleted. You can't sign in with it any more.</p>
+      <p>If you have a question about this, write to us at <a href="mailto:${SUPPORT_EMAIL}">${SUPPORT_EMAIL}</a>.</p>
+      ${planSignOff}
+    `,
+  });
+  const text = `Hi ${userName || "there"},\n\nYour Classgrid account and its data have been deleted. You can't sign in with it any more.\n\nIf you have a question about this, write to us at ${SUPPORT_EMAIL}.\n\nThanks,\nThe Classgrid Team`;
+  return { subject, html, text };
+};
+
 // ------------- WHATSAPP TEXTS WHEN A PLAN'S LIMIT IS USED UP -------------
 // whatsapp-call.service.js and agent-task.service.js. Free: wait, or upgrade (Free cannot buy top-ups). Every other
 // plan, and plans off: wait, or top up. `backAt`: when the limit comes back.

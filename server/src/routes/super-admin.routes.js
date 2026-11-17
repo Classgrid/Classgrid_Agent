@@ -2092,7 +2092,7 @@ router.get("/users/:id/overview", async (req, res) => {
                     account_emails: 1, plan: 1,
                     "student_verification.method": 1, "student_verification.verified_at": 1, "student_verification.expires_at": 1,
                     "metadata.whatsappPhone": 1, "metadata.whatsapp_number": 1, "metadata.whatsappSkipped": 1,
-                    "metadata.age": 1, "metadata.job_role": 1,
+                    "metadata.age": 1, "metadata.job_role": 1, blocked_until: 1,
                     webChats: { $size: { $ifNull: ["$web_chat_ids", []] } },
                     desktopChats: { $size: { $ifNull: ["$desktop_chat_ids", []] } },
                     callChats: { $size: { $ifNull: ["$call_chat_ids", []] } },
@@ -2103,11 +2103,13 @@ router.get("/users/:id/overview", async (req, res) => {
         if (!u) return res.status(404).json({ success: false, message: "User not found." });
 
         const [
-            AiCreditTransaction, AdminAuditLog, PlanConfig, IdeProject, LiveDoc, SharePage, Call, AiUsageLog, planLimits,
+            AiCreditTransaction, AdminAuditLog, PlanConfig, IdeProject, LiveDoc, SharePage, Call, AiUsageLog, AiSkill, AiSchedule,
+            AiLibraryFile, planLimits,
         ] = await Promise.all([
             import("../models/AiCreditTransaction.js"), import("../models/AdminAuditLog.js"), import("../models/PlanConfig.js"),
             import("../models/IdeProject.js"), import("../models/LiveDoc.js"), import("../models/SharePage.js"),
-            import("../models/Call.js"), import("../models/AiUsageLog.js"), import("../services/plan-limits.service.js"),
+            import("../models/Call.js"), import("../models/AiUsageLog.js"), import("../models/AiSkill.js"),
+            import("../models/AiSchedule.js"), import("../models/AiLibraryFile.js"), import("../services/plan-limits.service.js"),
         ]).then((mods) => mods.map((m, i) => (i === mods.length - 1 ? m : m.default)));
         const { planKeyOf } = planLimits;
 
@@ -2119,7 +2121,8 @@ router.get("/users/:id/overview", async (req, res) => {
         const payFilter = { userId: oid, type: { $in: ["plan", "topup"] } };
         const ADMIN_ACTIONS = ["user.ban", "user.unban", "user.force_logout", "user.reset_password", "user.role_change", "user.plan_gift", "user.plan_end"];
 
-        const [chat, projects, liveDocs, pages, calls, lastAi, payItems, payCount, paySum, logs, planRows] = await Promise.all([
+        const [chat, projects, liveDocs, pages, calls, lastAi, payItems, payCount, paySum, logs, planRows,
+            aiDays, aiAnswers, firstAi, skills, schedules, libraryFiles, planCounts, bought] = await Promise.all([
             safe("chats", () => chatStats(u.email, { newest: true })),
             safe("projects", () => IdeProject.countDocuments({ owner: oid })),
             safe("live docs", () => LiveDoc.countDocuments({ owner: oid })),
@@ -2136,6 +2139,25 @@ router.get("/users/:id/overview", async (req, res) => {
             safe("admin log", () => AdminAuditLog.find({ targetType: "user", targetId: id, action: { $in: ADMIN_ACTIONS } })
                 .sort({ timestamp: -1 }).limit(40).select("action actorName metadata timestamp").lean()),
             safe("plan names", () => PlanConfig.find({}).select("key name").lean()),
+            // Days they used Classgrid AI (India days, from the AI usage log; userId + createdAt is indexed)
+            safe("active days", () => AiUsageLog.aggregate([
+                { $match: { userId: oid } },
+                { $group: { _id: { $dateToString: { format: "%Y-%m-%d", date: "$createdAt", timezone: "Asia/Kolkata" } } } },
+                { $count: "n" },
+            ])),
+            safe("AI answers", () => AiUsageLog.countDocuments({ userId: oid })),
+            safe("first AI answer", () => AiUsageLog.findOne({ userId: oid }).sort({ createdAt: 1 }).select("createdAt").lean()),
+            // The skills the person saved for their AI (memories are kept on their own computer, not here)
+            safe("skills", () => AiSkill.find({ userId: oid }).sort({ updatedAt: -1 }).limit(100).select("name instructions is_active is_default createdAt updatedAt").lean()),
+            safe("scheduled tasks", () => AiSchedule.countDocuments({ user_id: oid })),
+            safe("library files", () => AiLibraryFile.countDocuments({ user_id: oid })),
+            // How often an admin gave them a plan or moved them back to Free (all time, not only the last 40 rows)
+            safe("plan changes", () => AdminAuditLog.aggregate([
+                { $match: { targetType: "user", targetId: id, action: { $in: ["user.plan_gift", "user.plan_end"] } } },
+                { $group: { _id: "$action", n: { $sum: 1 } } },
+            ])),
+            // Plans bought (successful plan payments, each month or year counts once)
+            safe("plans bought", () => AiCreditTransaction.countDocuments({ userId: oid, type: "plan", status: "success" })),
         ]);
 
         const now = new Date();
@@ -2154,6 +2176,8 @@ router.get("/users/:id/overview", async (req, res) => {
                 at: isoOrNull(row?.timestamp),
                 reason: emptyToNull(row?.metadata?.reason),
                 by: emptyToNull(row?.actorName),
+                // When the block ends by itself (null = until it is unblocked)
+                until: isoOrNull(u.blocked_until),
             };
         }
 
@@ -2267,7 +2291,26 @@ router.get("/users/:id/overview", async (req, res) => {
                     lastChatAt: chat ? chat.lastAt : null,
                     projects, liveDocs, pages, calls,
                     lastAiUseAt,
+                    firstAiUseAt: isoOrNull(firstAi?.createdAt),
+                    activeDays: aiDays === null ? null : (aiDays?.[0]?.n || 0),
+                    aiAnswers: aiAnswers,
+                    scheduledTasks: schedules,
+                    libraryFiles: libraryFiles,
                 },
+                planCounts: {
+                    bought: bought,
+                    gifted: planCounts === null ? null : (planCounts.find((r) => r._id === "user.plan_gift")?.n || 0),
+                    movedToFree: planCounts === null ? null : (planCounts.find((r) => r._id === "user.plan_end")?.n || 0),
+                },
+                skills: skills === null ? null : skills.map((k) => ({
+                    _id: String(k._id),
+                    name: k.name || "",
+                    instructions: String(k.instructions || "").slice(0, 4000),
+                    active: k.is_active !== false,
+                    isDefault: !!k.is_default,
+                    createdAt: isoOrNull(k.createdAt),
+                    updatedAt: isoOrNull(k.updatedAt),
+                })),
                 payments: {
                     items: (payItems || []).map((t) => paymentRow(t, planNames)),
                     count: payCount || 0,
@@ -2369,14 +2412,47 @@ router.get("/users/:id/full", async (req, res) => {
     }
 });
 
-// Ban / suspend a user (God mode: no org restriction)
+// Sends one of the account emails (blocked, unblocked, deleted) after the reply, so a mail problem never fails or holds
+// up the action; a failure is only logged
+function sendAccountEmail(user, makeMail) {
+    if (!user?.email) return;
+    Promise.resolve().then(async () => {
+        const mail = makeMail(await import("../services/email-templates.service.js"));
+        if (!mail) return;
+        const { sendEmail } = await import("../services/aws-ses.service.js");
+        await sendEmail({ to: user.email, subject: mail.subject, html: mail.html, text: mail.text, fromName: "Classgrid", userId: user._id });
+    }).catch((e) => console.error("[SuperAdmin] account email failed:", e.message));
+}
+
+// When a block ends: { days } (1 to 3650) or { until } (a date in the future); neither means until it is unblocked.
+// Returns { until } (null = no end) or { error }.
+function blockEndFrom(body = {}, now = new Date()) {
+    if (body.days !== undefined && body.days !== null && body.days !== "") {
+        const days = Number(body.days);
+        if (!Number.isInteger(days) || days < 1 || days > 3650) return { error: "The number of days must be from 1 to 3650." };
+        return { until: new Date(now.getTime() + days * 24 * 60 * 60 * 1000) };
+    }
+    if (body.until) {
+        const until = new Date(body.until);
+        if (Number.isNaN(until.getTime())) return { error: "The end date is not a date." };
+        if (until <= now) return { error: "The end date must be in the future." };
+        return { until };
+    }
+    return { until: null };
+}
+
+// Block a user (the owner, 2026-11-17: "instead of ban, block, for a few days or a time"; suspended is the same as
+// blocked). The status stays "suspended", which every sign-in and request already turns away; blocked_until, when set,
+// ends it by itself (utils/account-block.js). The person gets an email saying until when.
 router.patch("/users/:id/ban", async (req, res) => {
     try {
         const id = cleanUserId(req.params.id);
         if (!id) return res.status(400).json({ success: false, message: "Invalid user id." });
         // The reason is typed by the admin: trimmed and kept short; none given -> the usual default
         const typedReason = typeof req.body?.reason === "string" ? req.body.reason.trim().slice(0, 300) : "";
-        const reason = typedReason || "Banned by Super Admin";
+        const reason = typedReason || "Blocked by Super Admin";
+        const { until, error: untilError } = blockEndFrom(req.body || {});
+        if (untilError) return res.status(400).json({ success: false, message: untilError });
         const User = (await import("../models/User.js")).default;
         const AdminAuditLog = (await import("../models/AdminAuditLog.js")).default;
 
@@ -2387,20 +2463,22 @@ router.patch("/users/:id/ban", async (req, res) => {
         // kept in the audit log row below, which the person page reads
         const user = await User.findByIdAndUpdate(
             id,
-            { $set: { status: "suspended", bannedReason: reason, bannedAt: new Date() } },
+            { $set: { status: "suspended", blocked_until: until, bannedReason: reason, bannedAt: new Date() } },
             { returnDocument: 'after' }
-        ).select("name email status").lean();
+        ).select("name email status blocked_until").lean();
 
         await AdminAuditLog.create({
             actorId: req.user._id, actorName: req.user.name, actorRole: "super_admin",
             action: "user.ban", targetId: user._id.toString(), targetName: user.name,
             targetType: "user", previousState: { status: prev.status },
-            metadata: { reason }, rollbackStatus: "none",
+            metadata: { reason, until: until ? until.toISOString() : null }, rollbackStatus: "none",
             ip: req.ip, userAgent: req.headers["user-agent"] ?? "",
         }).catch(e => console.error("[AuditLog] user.ban write failed:", e.message));
 
         announceUserChanged(req, id);
-        res.json({ success: true, message: `User "${user.name}" banned.`, user });
+        const untilText = until ? ` until ${until.toLocaleString("en-IN", { day: "numeric", month: "short", year: "numeric", hour: "numeric", minute: "2-digit", timeZone: "Asia/Kolkata" })}` : "";
+        res.json({ success: true, message: `${user.name || user.email} is blocked${untilText}. They got an email.`, user });
+        if (req.body?.notify !== false) sendAccountEmail(user, (t) => t.getAccountBlockedEmail({ userName: user.name, until }));
     } catch (err) {
         res.status(500).json({ success: false, message: "Server error" });
     }
@@ -2419,7 +2497,7 @@ router.patch("/users/:id/unban", async (req, res) => {
 
         const user = await User.findByIdAndUpdate(
             id,
-            { $set: { status: "active" }, $unset: { bannedReason: "", bannedAt: "" } },
+            { $set: { status: "active" }, $unset: { bannedReason: "", bannedAt: "", blocked_until: "" } },
             { returnDocument: 'after' }
         ).select("name email status").lean();
 
@@ -2431,7 +2509,11 @@ router.patch("/users/:id/unban", async (req, res) => {
         }).catch(e => console.error("[AuditLog] user.unban write failed:", e.message));
 
         announceUserChanged(req, id);
-        res.json({ success: true, message: `User "${user.name}" reactivated.`, user });
+        res.json({ success: true, message: `${user.name || user.email} is unblocked. They got an email.`, user });
+        // (only when it really was blocked: unblocking an account that was already open sends nothing)
+        if (["suspended", "blocked"].includes(prev.status) && req.body?.notify !== false) {
+            sendAccountEmail(user, (t) => t.getAccountUnblockedEmail({ userName: user.name }));
+        }
     } catch (err) {
         res.status(500).json({ success: false, message: "Server error" });
     }
@@ -3321,6 +3403,10 @@ router.post("/gdpr/erase/:userId", async (req, res) => {
         }
 
         const note = oldEmailNote ? ` Note: ${oldEmailNote}.` : "";
+        // The person is told their account was deleted (to the email it had; never to the placeholder of an erased one)
+        if (!failed.length && !erasedEarlier && req.body?.notify !== false) {
+            sendAccountEmail({ _id: user._id, email: user.email }, (t) => t.getAccountDeletedEmail({ userName: user.name }));
+        }
         res.json({
             success: true, failedParts: failed, oldEmailNote,
             message: failed.length ? `Some parts could not be deleted: ${failed.join(", ")}. The account is kept so you can try again.${note}` : `Deleted.${note}`,

@@ -72,6 +72,7 @@ import connectDB from "../../config/db.js";
 import { PutObjectCommand } from "@aws-sdk/client-s3";
 import { s3Client, BUCKET_NAME, CDN_BASE_URL } from "../config/s3Client.js";
 import { checkAndRegisterDevice, getDeviceFingerprint } from "../services/device-fingerprint.service.js";
+import { liftEndedBlock } from "../utils/account-block.js";
 
 export async function uploadBase64ToS3(base64String, folder, filenamePrefix) {
     if (!base64String || typeof base64String !== 'string' || !base64String.startsWith('data:image')) return base64String;
@@ -1572,7 +1573,8 @@ export const login = async (req, res) => {
             return res.status(403).json({ message: `This account is registered as ${userRoleLabel}. Please use the correct portal.`, wrongTab: true, correctTab: 'student' });
         }
 
-        // Status check — block suspended/blocked users
+        // Status check — block suspended/blocked users (a block set for a time ends once that time has passed)
+        await liftEndedBlock(User, user).catch(() => {});
         if (user.status === "suspended" || user.status === "blocked") {
             return res.status(403).json({ message: "Your account is suspended. Please contact support." });
         }
@@ -1968,7 +1970,8 @@ export const oauthCallback = async (req, res) => {
         return res.redirect(`${defaultFrontendUrl}/login?error=AuthFailed`);
     }
 
-    // Status checks
+    // Status checks (a block set for a time ends once that time has passed)
+    await liftEndedBlock(User, req.user).catch(() => {});
     if (req.user.status === "suspended" || req.user.status === "blocked") {
         const defaultFrontendUrl = process.env.FRONTEND_URL?.trim() || (process.env.NODE_ENV === "production" ? "https://classgrid.in" : "https://classgrid.in");
         return res.redirect(`${defaultFrontendUrl}/login?error=account_suspended`);
@@ -3773,6 +3776,7 @@ export const googleNativeLogin = async (req, res) => {
         if (!user) {
             return res.status(404).json({ code: "NO_ACCOUNT", email, message: "There is no Classgrid account for that email." });
         }
+        await liftEndedBlock(User, user).catch(() => {});
         if (["suspended", "blocked", "deleted"].includes(user.status)) {
             return res.status(403).json({ message: "This account is suspended." });
         }

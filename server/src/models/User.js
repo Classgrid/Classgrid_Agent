@@ -215,6 +215,8 @@ const userSchema = new mongoose.Schema(
       enum: ["pending", "active", "suspended", "blocked", "deleted"],
       default: "active",
     },
+    // When a block set by a super admin ends (null = until they unblock it); see utils/account-block.js
+    blocked_until: { type: Date, default: null },
 
     // ðŸ›¡ï¸ Security: Forces self-registered users (Honor Code) into a waitlist until admin approves
     verification_status: {

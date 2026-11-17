@@ -78,6 +78,7 @@ import SystemSettings from "../models/SystemSettings.js";
 import Organization from "../models/Organization.js";
 import connectDB from "../../config/db.js";
 import { needsChatOnboarding, whatsappStepDone } from "../utils/chat-onboarding.js";
+import { liftEndedBlock } from "../utils/account-block.js";
 
 const JWT_SECRET = getJwtSecret();
 
@@ -113,6 +114,9 @@ export async function getUserAccessBlock(user, { issuedAtMs, settings, allowStat
             return { status: 503, body: { success: false, message: "Platform is currently under maintenance. Please try again later.", code: "MAINTENANCE_MODE" } };
         }
     }
+
+    // A block set for a time ends once that time has passed
+    await liftEndedBlock(User, user).catch((e) => console.error("[auth] ending a timed block failed:", e.message));
 
     // Status check — block suspended/blocked users
     const bypassesStatus = allowStatusBypass && ["nikhil.shinde@classgrid.in", "support@classgrid.in"].includes(user.email);
