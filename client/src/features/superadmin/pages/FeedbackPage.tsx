@@ -195,11 +195,6 @@ export function FeedbackPage() {
 
   return (
     <div className="space-y-6">
-      <div
-        title="Platform Feedback"
-        description="Review feature requests, bug reports, and general feedback from platform users."
-      />
-
       <SectionPanel>
         <div className="mb-4 flex items-center justify-between">
           <div className="relative w-72">

@@ -76,7 +76,6 @@ import { Badge } from "@/components/marketing_ui/badge";
 import { Button } from "@/components/marketing_ui/button";
 import { Input } from "@/components/marketing_ui/input";
 import { Textarea } from "@/components/marketing_ui/textarea";
-import { PageHeader } from "@/components/layout/PageHeader";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/marketing_ui/dialog";
 import { apiClient } from "@/lib/apiClient";
 import { formatDate } from "@/utils/dateUtils";
@@ -126,17 +125,6 @@ export function NotificationEnginePage() {
 
   return (
     <div className="flex flex-col gap-6 w-full max-w-7xl mx-auto p-4 sm:p-6 lg:p-8 pb-12">
-      <PageHeader
-        title="Notifications Engine"
-        description="Broadcast instant alerts, schedule communications, and control all platform-wide notifications."
-        actions={
-          <div >
-            
-            <Button variant="outline" onClick={() => setScheduleOpen(true)}><Clock size={14} /> Schedule</Button>
-            <Button onClick={() => setBroadcastOpen(true)}><Zap size={14} /> Instant Broadcast</Button>
-          </div>
-        }
-      />
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
         <div title="Scheduled" value={isLoading ? "—" : pending} icon={<Clock size={15} />} />

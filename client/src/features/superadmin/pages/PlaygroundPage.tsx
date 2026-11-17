@@ -12,7 +12,6 @@
  */
 import React, { useEffect, useMemo, useState } from "react";
 import { FlaskConical, Coins, Repeat, Gauge, Wrench } from "lucide-react";
-import { PageHeader } from "@/components/layout/PageHeader";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/marketing_ui/card";
 import { Badge } from "@/components/marketing_ui/badge";
 import { Button } from "@/components/marketing_ui/button";
@@ -95,9 +94,9 @@ export function PlaygroundPage() {
 
   return (
     <div className="flex flex-col gap-6 w-full max-w-7xl mx-auto p-4 sm:p-6 lg:p-8 pb-12">
-      <PageHeader title="Playground">
+      <div className="flex flex-wrap items-center justify-end gap-2">
         <Button variant="outline" onClick={() => { setRuns([]); setSelectedId(null); }} disabled={!runs.length}>Clear</Button>
-      </PageHeader>
+      </div>
 
       {!run ? (
         <Card>

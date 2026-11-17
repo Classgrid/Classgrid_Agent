@@ -156,12 +156,6 @@ const PlansAndBillingPage = () => {
   const [activeTab, setActiveTab] = useState('plans');
   return (
     <div className="flex h-full flex-col bg-background text-foreground">
-      <div className="border-b border-border bg-card p-6">
-        <h2 className="text-xl font-semibold tracking-tight">Plans & Billing</h2>
-        <p className="mt-1 text-sm text-muted-foreground">
-          The Classgrid AI plans: every limit and price, who is on a paid plan, and what was paid.
-        </p>
-      </div>
       <div className="p-6">
         <Tabs value={activeTab} onValueChange={setActiveTab}>
           <TabsList className="flex h-auto w-full flex-wrap justify-start gap-1">

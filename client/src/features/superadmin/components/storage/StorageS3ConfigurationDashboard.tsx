@@ -617,15 +617,6 @@ export function StorageS3ConfigurationDashboard() {
     const requestId = getRequestId(configurationQuery.error);
     return (
       <main className="mx-auto flex w-full max-w-[1600px] flex-col gap-6 p-4 pb-20 sm:p-6 lg:p-8">
-        <header>
-          <h1 className="text-2xl font-semibold tracking-tight sm:text-3xl">
-            S3 Configuration
-          </h1>
-          <p className="mt-1 text-sm text-muted-foreground">
-            View the active bucket connection, delivery settings, and storage safeguards.
-          </p>
-        </header>
-
         <Alert variant="destructive" className="p-5">
           <AlertCircle className="size-5" />
           <AlertTitle>S3 configuration is temporarily unavailable.</AlertTitle>
@@ -658,42 +649,32 @@ export function StorageS3ConfigurationDashboard() {
 
   return (
     <main className="mx-auto flex w-full max-w-[1600px] flex-col gap-6 p-4 pb-20 sm:p-6 lg:p-8">
-      <header className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight sm:text-3xl">
-            S3 Configuration
-          </h1>
-          <p className="mt-1 text-sm text-muted-foreground">
-            View the active bucket connection, delivery settings, and storage safeguards.
-          </p>
-        </div>
-        <div className="grid grid-cols-2 gap-2 sm:flex sm:items-center">
-          <Button
-            type="button"
-            variant="outline"
-            onClick={() => void handleRefresh()}
-            disabled={
-              configurationQuery.isFetching || testConnectionMutation.isPending
-            }
-          >
-            {configurationQuery.isFetching ? <Spinner className="size-4" /> : <RefreshCw className="size-4" />}
-            Refresh
-          </Button>
-          <Button
-            type="button"
-            onClick={handleTestConnection}
-            disabled={testConnectionMutation.isPending || isInitialLoading}
-          >
-            <Activity
-              className={cn(
-                "size-4",
-                testConnectionMutation.isPending && "animate-pulse",
-              )}
-            />
-            {testConnectionMutation.isPending ? "Testing..." : "Test connection"}
-          </Button>
-        </div>
-      </header>
+      <div className="flex flex-wrap items-center justify-end gap-2">
+        <Button
+          type="button"
+          variant="outline"
+          onClick={() => void handleRefresh()}
+          disabled={
+            configurationQuery.isFetching || testConnectionMutation.isPending
+          }
+        >
+          {configurationQuery.isFetching ? <Spinner className="size-4" /> : <RefreshCw className="size-4" />}
+          Refresh
+        </Button>
+        <Button
+          type="button"
+          onClick={handleTestConnection}
+          disabled={testConnectionMutation.isPending || isInitialLoading}
+        >
+          <Activity
+            className={cn(
+              "size-4",
+              testConnectionMutation.isPending && "animate-pulse",
+            )}
+          />
+          {testConnectionMutation.isPending ? "Testing..." : "Test connection"}
+        </Button>
+      </div>
 
       {isInitialLoading ? (
         <ConfigurationSkeleton />

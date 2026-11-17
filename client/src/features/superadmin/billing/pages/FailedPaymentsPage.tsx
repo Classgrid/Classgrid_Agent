@@ -36,9 +36,7 @@
 // The filters live in the address (q, reason, plan, outcome, from, to, page) so Back from a payment keeps them.
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
-import { RefreshCw } from "lucide-react";
 import { Button } from "@/components/marketing_ui/button";
-import { Spinner } from "@/components/marketing_ui/spinner";
 import { useBreadcrumbStore } from "@/store/useBreadcrumbStore";
 import {
   errorMessage,
@@ -179,29 +177,10 @@ const FailedPaymentsPage = () => {
     navigate(`/super-admin/billing/failed-payments/${id}`, { state: { fromList: location.search } });
   };
 
-  const refreshing = list.isFetching || summary.isFetching;
-  const refresh = () => {
-    list.refetch();
-    summary.refetch();
-  };
-
   const plans = summary.data?.plans?.length ? summary.data.plans : FALLBACK_PLANS;
 
   return (
     <div className="space-y-5 pb-8 min-w-0">
-      {/* 1. Header */}
-      <div className="bg-card border border-border rounded-xl shadow-sm p-5 flex flex-wrap items-start justify-between gap-3">
-        <div className="min-w-0 flex-1">
-          <h2 className="text-lg font-semibold text-foreground">Failed payments</h2>
-          <p className="text-sm text-muted-foreground mt-0.5">
-            Payments for a plan or AI credits that didn't go through on Razorpay. Newest first.
-          </p>
-        </div>
-        <Button variant="outline" size="sm" onClick={refresh} disabled={refreshing}>
-          {refreshing ? <Spinner className="w-4 h-4" /> : <RefreshCw className="w-4 h-4" />}
-          Refresh
-        </Button>
-      </div>
 
       {/* 2. Summary */}
       <FailedPaymentsSummary summary={summary.data} isLoading={summary.isLoading} />

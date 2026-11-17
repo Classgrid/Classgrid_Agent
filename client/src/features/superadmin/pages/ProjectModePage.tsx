@@ -1099,8 +1099,6 @@ export function ProjectModePage() {
           <div className="max-w-5xl mx-auto w-full">
             <div className="flex items-center justify-between gap-4 mb-6">
               <div>
-                <h1 className="text-3xl font-bold tracking-tight mb-2">Projects</h1>
-                <p className="text-muted-foreground text-sm">Your code stays on GitHub. Opening a project downloads it fresh.</p>
                 {githubAccount && (
                   <div className="flex items-center gap-2.5 mt-4">
                     {githubAccount.avatar

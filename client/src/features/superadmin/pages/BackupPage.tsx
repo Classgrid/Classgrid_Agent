@@ -232,22 +232,6 @@ export function BackupPage() {
 
   return (
     <div className="flex flex-col gap-6 w-full max-w-7xl mx-auto p-4 sm:p-6 lg:p-8 pb-12">
-      <div
-        title="Backup & Recovery"
-        description="Export platform data collections, run integrity checks, and monitor system storage health."
-        actions={
-          <div >
-            <div >
-              <TabBtn active={tab === "overview"} onClick={() => setTab("overview")}>Overview</TabBtn>
-              <TabBtn active={tab === "export"} onClick={() => setTab("export")}>Data Export</TabBtn>
-              <TabBtn active={tab === "integrity"} onClick={() => { setTab("integrity"); refetchIntegrity(); }}>Integrity Check</TabBtn>
-            </div>
-            <Button variant="outline" onClick={refetchAll}>
-              <RefreshCw size={14} /> Refresh
-            </Button>
-          </div>
-        }
-      />
 
       {/* Top Metrics */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">

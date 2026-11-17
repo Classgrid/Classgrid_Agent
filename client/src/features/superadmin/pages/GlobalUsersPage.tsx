@@ -218,12 +218,6 @@ export function GlobalUsersPage() {
 
   return (
     <div className="w-full max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 pt-2 pb-6 flex flex-col gap-5 min-w-0">
-      <div className="min-w-0">
-        {/* (the same name as the sidebar and the page's top bar) */}
-        <h1 className="text-2xl font-semibold text-foreground">Global Users</h1>
-        <p className="text-sm text-muted-foreground mt-1">Everyone with a Classgrid account. Open a person to see their plan, payments and activity.</p>
-      </div>
-
       {/* (the filter bar brings its own space underneath, so it sits in a block without the page gap) */}
       <div className="min-w-0">
         <PeopleFilters

@@ -77,7 +77,6 @@ import {
   AlertCircle,
   AlertTriangle,
   ArrowDownToLine,
-  BarChart3,
   ChevronLeft,
   ChevronRight,
   CircleGauge,
@@ -714,10 +713,6 @@ export function StorageAnalyticsDashboard() {
     const requestId = getRequestId(summaryQuery.error);
     return (
       <main className="mx-auto flex w-full max-w-[1600px] flex-col gap-6 p-4 pb-20 sm:p-6 lg:p-8">
-        <header>
-          <h1 className="text-2xl font-semibold tracking-tight sm:text-3xl">Storage Analytics</h1>
-          <p className="mt-1 text-sm text-muted-foreground">Understand current S3 usage.</p>
-        </header>
         <Alert variant="destructive" className="p-5">
           <AlertCircle className="size-5" />
           <AlertTitle>Storage analytics are temporarily unavailable.</AlertTitle>
@@ -741,44 +736,34 @@ export function StorageAnalyticsDashboard() {
 
   return (
     <main className="mx-auto flex w-full max-w-[1600px] flex-col gap-6 p-4 pb-20 sm:p-6 lg:p-8">
-      <header className="flex flex-col justify-between gap-4 border-b border-border pb-5 md:flex-row md:items-end">
-        <div>
-          <div className="mb-2 flex items-center gap-2 text-xs font-medium uppercase tracking-[0.16em] text-emerald-600 dark:text-emerald-400">
-            <BarChart3 className="size-4" />
-            Current bucket snapshot
+      <div className="flex flex-wrap items-center justify-end gap-3">
+        {generatedAt && (
+          <div className="text-right text-xs text-muted-foreground">
+            <p>
+              Last calculated{" "}
+              <span className="font-medium text-foreground">
+                {formatDistanceToNow(generatedAt, { addSuffix: true })}
+              </span>
+            </p>
+            <p className="mt-0.5">
+              {summary?.cacheStatus === "cached"
+                ? "Cached snapshot"
+                : summary?.cacheStatus === "stale"
+                  ? "Stale snapshot"
+                  : "Fresh snapshot"}
+            </p>
           </div>
-          <h1 className="text-2xl font-semibold tracking-tight sm:text-3xl">Storage Analytics</h1>
-          <p className="mt-1 text-sm text-muted-foreground">Understand current S3 usage.</p>
-        </div>
-        <div className="flex flex-wrap items-center gap-3">
-          {generatedAt && (
-            <div className="text-right text-xs text-muted-foreground">
-              <p>
-                Last calculated{" "}
-                <span className="font-medium text-foreground">
-                  {formatDistanceToNow(generatedAt, { addSuffix: true })}
-                </span>
-              </p>
-              <p className="mt-0.5">
-                {summary?.cacheStatus === "cached"
-                  ? "Cached snapshot"
-                  : summary?.cacheStatus === "stale"
-                    ? "Stale snapshot"
-                    : "Fresh snapshot"}
-              </p>
-            </div>
-          )}
-          <Button
-            variant="outline"
-            onClick={() => void handleRefresh()}
-            disabled={isRefreshing || summaryQuery.isLoading}
-            aria-label="Refresh storage analytics"
-          >
-            {isRefreshing ? <Spinner className="mr-2 size-4" /> : <RefreshCw className="mr-2 size-4" />}
-            {isRefreshing ? "Recalculating..." : "Refresh analytics"}
-          </Button>
-        </div>
-      </header>
+        )}
+        <Button
+          variant="outline"
+          onClick={() => void handleRefresh()}
+          disabled={isRefreshing || summaryQuery.isLoading}
+          aria-label="Refresh storage analytics"
+        >
+          {isRefreshing ? <Spinner className="mr-2 size-4" /> : <RefreshCw className="mr-2 size-4" />}
+          {isRefreshing ? "Recalculating..." : "Refresh analytics"}
+        </Button>
+      </div>
 
       {(refreshError || backendRefreshWarning) && (
         <Alert className="border-amber-500/40 bg-amber-500/5 p-4 text-amber-700 dark:text-amber-300">

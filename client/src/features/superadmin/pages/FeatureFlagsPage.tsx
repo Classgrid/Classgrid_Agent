@@ -78,7 +78,6 @@ import {
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 
-import { PageHeader } from "@/components/layout/PageHeader";
 import { Button } from "@/components/marketing_ui/button";
 import { Input } from "@/components/marketing_ui/input";
 import { Switch } from "@/components/marketing_ui/switch";
@@ -175,15 +174,12 @@ export function FeatureFlagsPage() {
 
   return (
     <div className="flex flex-col gap-5 w-full max-w-5xl mx-auto px-4 py-4 sm:p-6 lg:p-8 pb-12">
-      <PageHeader
-        title="Feature flags"
-        description="Turn any Classgrid AI feature off for everyone. A change reaches everyone within a few seconds."
-      >
+      <div className="flex flex-wrap items-center justify-end gap-2">
         <Button variant="outline" size="sm" onClick={() => refetch()} disabled={isFetching}>
           {isFetching ? <Spinner className="w-3.5 h-3.5 mr-2" /> : <RefreshCw className="w-3.5 h-3.5 mr-2" />}
           Refresh
         </Button>
-      </PageHeader>
+      </div>
 
       {/* Counts and search */}
       <div className="bg-card border border-border rounded-xl shadow-sm p-4 sm:p-5 flex flex-col gap-4">

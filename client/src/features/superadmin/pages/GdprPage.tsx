@@ -159,13 +159,6 @@ export function GdprPage() {
 
   return (
     <div className="flex flex-col gap-5 w-full max-w-5xl mx-auto p-4 sm:p-6 lg:p-8 pb-12">
-      <div>
-        <h1 className="text-2xl sm:text-3xl font-bold tracking-tight text-foreground">Privacy requests</h1>
-        <p className="text-sm text-muted-foreground mt-1">
-          When someone asks for a copy of their data, or for their data to be deleted, find them in the list and do it here.
-        </p>
-      </div>
-
       <PrivacyActionCards />
 
       <p className="text-xs text-muted-foreground">

@@ -217,21 +217,12 @@ export function ConfigPage() {
     <>
       <div className="flex flex-col gap-6 w-full mx-auto pb-12">
       
-      {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 border-b border-border pb-6">
-        <div className="flex flex-col">
-          <div className="flex items-center gap-3">
-            <h1 className="text-2xl font-bold tracking-tight text-foreground">System Config</h1>
-            {healthData?.status === 'HEALTHY' ? (
-              <Badge variant="success" dot className="bg-green-500/10 text-green-500 border-green-500/20">All Systems Operational</Badge>
-            ) : (
-              <Badge variant="danger" dot className="bg-destructive/10 text-destructive border-destructive/20">Degraded Performance</Badge>
-            )}
-          </div>
-          <p className="text-muted-foreground mt-1 text-sm">
-            Live hardware metrics, infrastructure health, and feature flags. Auto-refreshes every 5 seconds.
-          </p>
-        </div>
+      <div className="flex flex-wrap items-center justify-end gap-2">
+        {healthData?.status === 'HEALTHY' ? (
+          <Badge variant="success" dot className="bg-green-500/10 text-green-500 border-green-500/20">All Systems Operational</Badge>
+        ) : (
+          <Badge variant="danger" dot className="bg-destructive/10 text-destructive border-destructive/20">Degraded Performance</Badge>
+        )}
       </div>
 
       {/* Warnings Banner */}

@@ -97,9 +97,7 @@ export function JoinRequestPage() {
     return (
       <div className="min-h-screen bg-background flex flex-col">
         <div className="max-w-5xl mx-auto p-4 py-8 w-full flex-1">
-          {user?.role === 'student' ? (
-            <Skeleton className="h-6 w-32 mb-6" />
-          ) : (
+          {user?.role !== 'student' && (
             <div className="flex gap-4 border-b border-border mb-8 pb-3">
               <Skeleton className="h-5 w-36" />
               <Skeleton className="h-5 w-28" />
@@ -192,12 +190,6 @@ export function JoinRequestPage() {
             >
               History
             </button>
-          </div>
-        )}
-
-        {isStudent && (
-          <div className="mb-6">
-            <h2 className="text-lg font-bold">My Requests</h2>
           </div>
         )}
 

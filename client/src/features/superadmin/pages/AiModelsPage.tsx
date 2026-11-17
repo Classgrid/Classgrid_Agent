@@ -1,6 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { PageHeader } from "@/components/layout/PageHeader";
 import { PageBreadcrumbs } from "@/components/layout/PageBreadcrumbs";
 import { Card, CardContent } from "@/components/marketing_ui/card";
 import { Switch } from "@/components/marketing_ui/switch";
@@ -40,10 +39,6 @@ export function AiModelsPage() {
   return (
     <div className="flex flex-col gap-6">
       <PageBreadcrumbs items={[{ label: "Plans & Usage", href: "/superadmin/ai-usage" }, { label: "Models" }]} />
-      <PageHeader
-        title="Models"
-        description="Turn a model off and nobody can use it: it disappears from the model picker, and messages that pick it go to Auto."
-      />
       {MODEL_GROUPS.map((group) => (
         <Card key={group.label}>
           <CardContent className="p-0">

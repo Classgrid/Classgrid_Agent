@@ -39,7 +39,6 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
 import { Download, Receipt, XCircle } from "lucide-react";
 import { Button } from "@/components/marketing_ui/button";
-import { RefreshButton } from "@/components/marketing_ui/refresh-button";
 import { Skeleton } from "@/components/marketing_ui/skeleton";
 import { useBreadcrumbStore } from "@/store/useBreadcrumbStore";
 import { PaymentFilters, type PaymentFilterValues } from "../components/transactions/PaymentFilters";
@@ -214,23 +213,12 @@ const TransactionsPage = () => {
 
   return (
     <div className="flex flex-col gap-4 w-full min-w-0 pb-8">
-      <section className="bg-card border border-border rounded-xl shadow-sm p-5">
-        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-          <div className="min-w-0">
-            <h2 className="text-xl font-semibold text-foreground">Transactions</h2>
-            <p className="text-xs text-muted-foreground mt-1">
-              Every payment for Classgrid AI: plans and credit top-ups, newest first.
-            </p>
-          </div>
-          <div className="flex flex-wrap gap-2 shrink-0">
-            <RefreshButton size="sm" label="Refresh" isFetching={isFetching && !isLoading} onClick={() => refetch()} />
-            <Button variant="outline" size="sm" className="gap-2" onClick={downloadCsv} disabled={downloading}>
-              <Download className="w-4 h-4" />
-              {downloading ? "Making the CSV…" : "Download CSV"}
-            </Button>
-          </div>
-        </div>
-      </section>
+      <div className="flex flex-wrap items-center justify-end gap-2">
+        <Button variant="outline" size="sm" className="gap-2" onClick={downloadCsv} disabled={downloading}>
+          <Download className="w-4 h-4" />
+          {downloading ? "Making the CSV" : "Download CSV"}
+        </Button>
+      </div>
 
       <PaymentSummary summary={summary} loading={isLoading && !data} />
 

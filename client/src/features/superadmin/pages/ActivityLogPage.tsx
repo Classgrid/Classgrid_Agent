@@ -341,19 +341,6 @@ export function ActivityLogPage() {
 
   return (
     <div className="flex flex-col gap-6 w-full max-w-7xl mx-auto p-4 sm:p-6 lg:p-8 pb-12">
-      {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 border-b border-border pb-6">
-        <div className="flex flex-col">
-          <h1 className="text-2xl font-bold tracking-tight">Audit Logs</h1>
-          <p className="text-muted-foreground mt-1">
-            Immutable record of all administrative actions taken on the platform.
-          </p>
-        </div>
-        <div className="flex gap-2">
-          
-        </div>
-      </div>
-
       {/* Metrics */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
         <StatCard title="Total Events" value={isLoading ? "—" : stats.total} icon={<Shield size={16} />} />

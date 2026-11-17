@@ -162,11 +162,6 @@ export function PlatformAnnouncementsPage() {
 
   return (
     <div className="space-y-6">
-      <div
-        title="Platform Announcements"
-        description="Broadcast push notifications and system alerts to all users or specific roles."
-      />
-
       <div>
         <div className="mb-4 flex items-center justify-between">
           <div className="relative w-72">

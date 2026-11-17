@@ -4,7 +4,6 @@
 import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { PageHeader } from "@/components/layout/PageHeader";
 import { Card, CardContent } from "@/components/marketing_ui/card";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/marketing_ui/dialog";
 import { apiClient } from "@/lib/apiClient";
@@ -278,7 +277,6 @@ export function StudentApplicationsPage() {
   ];
   return (
     <div className="flex flex-col gap-6">
-      <PageHeader title="Student applications" description="Students apply for student prices with their school, a confirmed school email and a document. Review each within 2 days: the student gets an email either way." />
       <div className="flex gap-1.5 flex-wrap">
         {tabs.map((t) => (
           <button key={t.id} type="button" onClick={() => setTab(t.id)} className={`h-9 px-5 rounded-full text-[15px] cursor-pointer ${tab === t.id ? "bg-black/[0.07] dark:bg-white/[0.1] text-foreground" : "text-muted-foreground hover:text-foreground"}`}>{t.label}</button>

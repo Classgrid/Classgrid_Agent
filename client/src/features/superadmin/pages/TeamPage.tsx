@@ -455,15 +455,6 @@ export function TeamPage() {
   return (
     <div className="flex flex-col gap-8 w-full max-w-[1000px] mx-auto p-4 sm:p-6 lg:p-8 pb-12">
       
-      {/* Header */}
-      <div className="flex items-center justify-between">
-        <div>
-            <h1 className="text-3xl font-bold tracking-tight text-foreground">Members</h1>
-            <p className="text-sm text-muted-foreground mt-1">Manage team members and invitations</p>
-        </div>
-        
-      </div>
-
       {/* Invite Members Card (Vercel Style) */}
       <Card className="border-border shadow-sm overflow-hidden">
         <CardHeader className="border-b border-border bg-muted/20 pb-4">
