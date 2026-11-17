@@ -4987,6 +4987,22 @@ You work on the user's own Windows computer through their Classgrid desktop app,
                                 buffer = Buffer.from(await response.arrayBuffer());
                             }
 
+                            // Cloudflare's free Neurons of the day are used up (the cap switch is on): Claude Haiku looks at
+                            // the picture in place of Cloudflare's vision model (services/cap-fallback.service.js)
+                            const capFallback = await import("../services/cap-fallback.service.js");
+                            const visionStand = await capFallback.claudeWhenCapped("small").catch(() => null);
+                            if (visionStand) {
+                                const seen = await capFallback.claudeSeesImage(visionStand, buffer, question);
+                                if (userId && seen.usage.total_tokens > 0) {
+                                    AiUsageLog.create({
+                                        organization_id: orgId || null, userId, provider: "anthropic", model: visionStand, feature: "other",
+                                        promptTokens: seen.usage.prompt_tokens, completionTokens: seen.usage.completion_tokens, totalTokens: seen.usage.total_tokens,
+                                        success: true, metadata: { purpose: "analyze_image" },
+                                    }).catch((err) => console.error("AiUsageLog Error:", err));
+                                }
+                                return "VISION AI ANSWER:\n" + (seen.answer || "(no description)");
+                            }
+
                             console.log(`[analyze_image] Using Cloudflare Vision AI. Question: ${question}`);
                             const cfToken = process.env.CLOUDFLARE_WORKERS_AI_TOKEN;
                             const cfAccountId = process.env.CLOUDFLARE_ACCOUNT_ID;
@@ -6944,8 +6960,16 @@ If a tool fails, never show the error message; say only: "Something went wrong o
                         console.log(`[AI-TOKEN] Charged detached ${claudeModel} usage: total=${claudeUsage.total_tokens}`);
                     };
 
-                    if (CLAUDE_CHAT_MODELS.has(requestedModel)) {
-                        console.log(`[AI-STREAM] user selected ${requestedModel}`);
+                    // (while Cloudflare is capped, see claudeByCap: a stand-in that gives nothing before any output is
+                    // followed once by the other Claude model, because the Cloudflare models below are refused by the cap)
+                    const claudeTries = !CLAUDE_CHAT_MODELS.has(requestedModel) ? []
+                        : claudeByCap ? [requestedModel, requestedModel === "claude-sonnet-5-5" ? "claude-haiku-5-5" : "claude-sonnet-5-5"]
+                        : [requestedModel];
+                    for (const claudeModelNow of claudeTries) {
+                        if (streamed) break;
+                        // (the rest of this block names the model it runs as `requestedModel`)
+                        const requestedModel = claudeModelNow; // eslint-disable-line no-shadow
+                        console.log(`[AI-STREAM] ${claudeByCap ? "Cloudflare is capped, answering with" : "user selected"} ${requestedModel}`);
                         modelSeesImages = true;
                         setModelIdentity(requestedModel, isStaffRole(req.user?.role), { selected: requestedModel, previousModel });
                         try {
@@ -7353,11 +7377,17 @@ If a tool fails, never show the error message; say only: "Something went wrong o
             res.write(`data: ${JSON.stringify({ type: "answer", answer: "I'm currently experiencing high traffic and cannot process your request right now." })}\n\n`);
         } else if (!res.writableEnded) {
             // Save Assistant response: to Supabase (source of truth) + Redis (cache) in parallel
+            // Cloudflare was capped and Claude answered in place of the model the person had picked: the chat says so
+            // under the answer ("Answered by Claude Haiku"), live and when the chat is opened again (owner, 2026-11-17:
+            // "users will think it's DeepSeek ... but it's Claude Haiku")
+            const answeredBy = claudeByCap && CLAUDE_CHAT_MODELS.has(usedModel) ? (MODEL_DISPLAY_NAMES[usedModel] || "") : "";
+            if (answeredBy) res.write(`data: ${JSON.stringify({ type: "model_used", model: usedModel, name: answeredBy, reason: "cloudflare_cap" })}\n\n`);
             if (!isIncognito && sessionId) {
                 let savedContent = answer;
-                if (accThought || accSteps.length > 0 || checkpointId) {
+                if (accThought || accSteps.length > 0 || checkpointId || answeredBy) {
                     savedContent = JSON.stringify({
                         classgrid_ai_message: true,
+                        ...(answeredBy ? { answered_by: answeredBy } : {}),
                         ...(checkpointId ? { checkpoint: checkpointId } : {}),
                         content: answer,
                         thought: accThought,

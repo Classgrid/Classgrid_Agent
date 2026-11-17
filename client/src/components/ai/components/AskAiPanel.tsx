@@ -506,6 +506,9 @@ export type ChatMessage = {
   steps?: AgentStep[];
   /** How long the agent worked on this reply (ms), for the "Worked for X sec" summary */
   workedMs?: number;
+  /** The model that wrote this answer when it was not the one picked (Cloudflare's free Neurons of the day were used
+   *  up, so Claude answered): shown as "Answered by Claude Haiku" under the steps */
+  answeredBy?: string;
   checkpoint?: string; // Project Mode: snapshot before this answer (Review / Reject / Undo)
   /** Web pages the answer cites as [n] (search_web) */
   sources?: ChatSource[];
@@ -1597,7 +1600,7 @@ function answerFileLinks(text: string): { url: string; name: string }[] {
 // Share Grid live refresh: a saved message from the server → a chat message (same as the chat loaders)
 function toChatMessage(m: any): ChatMessage {
   let content = m.content;
-  let thought, steps, sources, workedMs: number | undefined, checkpoint: string | undefined;
+  let thought, steps, sources, workedMs: number | undefined, checkpoint: string | undefined, answeredBy: string | undefined;
   if (m.role === "assistant" && typeof m.content === "string") {
     try {
       const parsed = JSON.parse(m.content);
@@ -1608,6 +1611,7 @@ function toChatMessage(m: any): ChatMessage {
         sources = parsed.sources;
         workedMs = typeof parsed.worked_ms === "number" ? parsed.worked_ms : undefined;
         checkpoint = typeof parsed.checkpoint === "string" ? parsed.checkpoint : undefined;
+        answeredBy = typeof parsed.answered_by === "string" ? parsed.answered_by : undefined;
       }
     } catch { /* plain text */ }
   }
@@ -1620,6 +1624,7 @@ function toChatMessage(m: any): ChatMessage {
     sources,
     workedMs,
     checkpoint,
+    answeredBy,
     fileUrls: m.file_urls || undefined,
     senderEmail: m.sender_email || undefined,
     attachments: m.file_urls && m.file_urls.length > 0 ? m.file_urls.map((url: string) => ({
@@ -3497,6 +3502,7 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
             let sources = undefined;
             let workedMs: number | undefined = undefined;
             let checkpoint: string | undefined = undefined;
+            let answeredBy: string | undefined = undefined;
 
             if (m.role === 'assistant') {
               let parsed = m.content;
@@ -3514,6 +3520,7 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
                 sources = parsed.sources;
                 workedMs = typeof parsed.worked_ms === 'number' ? parsed.worked_ms : undefined;
                 checkpoint = typeof parsed.checkpoint === 'string' ? parsed.checkpoint : undefined;
+                answeredBy = typeof parsed.answered_by === 'string' ? parsed.answered_by : undefined;
               }
             }
 
@@ -3525,6 +3532,7 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
               sources: sources,
               workedMs: workedMs,
               checkpoint,
+              answeredBy,
               fileUrls: m.file_urls || undefined,
               senderEmail: m.sender_email || undefined,
               attachments: m.file_urls && m.file_urls.length > 0 ? m.file_urls.map((url: string) => ({
@@ -3670,6 +3678,7 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
             let sources = undefined;
             let workedMs: number | undefined = undefined;
             let checkpoint: string | undefined = undefined;
+            let answeredBy: string | undefined = undefined;
 
             if (m.role === 'assistant') {
               let parsed = m.content;
@@ -3687,6 +3696,7 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
                 sources = parsed.sources;
                 workedMs = typeof parsed.worked_ms === 'number' ? parsed.worked_ms : undefined;
                 checkpoint = typeof parsed.checkpoint === 'string' ? parsed.checkpoint : undefined;
+                answeredBy = typeof parsed.answered_by === 'string' ? parsed.answered_by : undefined;
               }
             }
 
@@ -3699,6 +3709,7 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
               sources: sources,
               workedMs: workedMs,
               checkpoint,
+              answeredBy,
               fileUrls: m.file_urls || undefined,
               senderEmail: m.sender_email || undefined,
               attachments: m.file_urls && m.file_urls.length > 0 ? m.file_urls.map((url: string) => ({
@@ -5388,6 +5399,14 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
                 setChatEnded({ reason: event.reason ?? null, canReopen: !!event.canReopen });
                 setMessageQueue([]);
                 setPriorityMessage(null);
+              } else if (event.type === "model_used") {
+                // Another model than the one picked wrote this answer (Cloudflare's free Neurons of the day were used up)
+                const name = typeof event.name === "string" ? event.name : "";
+                if (name) setMessages((prev) => {
+                  const lastMsg = prev[prev.length - 1];
+                  if (!lastMsg || lastMsg.role !== "assistant") return prev;
+                  return [...prev.slice(0, -1), { ...lastMsg, answeredBy: name }];
+                });
               } else if (event.type === "limit_ended") {
                 limitEndedReset = event.resetDate || new Date().toISOString();
                 // (the Usage page shows the limit as used up at once, not its numbers from before this answer)
@@ -6093,6 +6112,10 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
                                 <div className="mb-4">
                                   <ReplySteps thought={message.thought} steps={message.steps} live={index === messages.length - 1 && (thinking || submitting || !!message.typing)} thinking={index === messages.length - 1 && thinking} workedMs={message.workedMs} />
                                 </div>
+                              )}
+
+                              {message.role === "assistant" && message.answeredBy && (
+                                <div className="mb-2 text-xs text-muted-foreground">Answered by {message.answeredBy}</div>
                               )}
 
                               {/* Old thought accordion removed — CombinedReasoningBlock above stepper handles all thought display now */}

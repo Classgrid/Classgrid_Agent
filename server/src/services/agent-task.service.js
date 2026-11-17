@@ -74,6 +74,24 @@ const notRunning = () => ({ $or: [{ heartbeat_at: null }, { heartbeat_at: { $lt:
 async function smallModel(user, system, text) {
     const tokens = await hasEnoughTokens(user._id, user.organization_id || null, 1500).catch(() => ({ allowed: false }));
     if (!tokens.allowed) return null;
+    // Cloudflare's free Neurons of the day are used up (the cap switch is on): Claude Haiku checks in place of the
+    // Cloudflare model (services/cap-fallback.service.js), charged to the user at its own rate like the other one
+    const stand = await import("./cap-fallback.service.js").then((m) => m.claudeWhenCapped("small")).catch(() => null);
+    if (stand) {
+        const { streamClaudeChat } = await import("./llm-stream-anthropic.js");
+        const r = await streamClaudeChat({
+            model: stand, tools: [], maxTokens: 2000, maxToolDepth: 0, timeoutMs: 45000,
+            messages: [{ role: "system", content: system }, { role: "user", content: text }],
+        });
+        if (r.usage?.total_tokens > 0) {
+            deductTokens(user._id, user.organization_id || null, chargeableTokens(r.usage, stand), tokens.source).catch(() => {});
+            AiUsageLog.create({
+                organization_id: user.organization_id || null, userId: user._id, provider: "anthropic", model: stand, feature: "other",
+                promptTokens: r.usage.prompt_tokens || 0, completionTokens: r.usage.completion_tokens || 0, totalTokens: r.usage.total_tokens, success: true,
+            }).catch((e) => console.error("[agent task] usage log failed:", e.message));
+        }
+        return { answer: String(r.answer || ""), thinking: "" };
+    }
     const res = await cfAiFetch(`https://api.cloudflare.com/client/v4/accounts/${process.env.CLOUDFLARE_ACCOUNT_ID}/ai/v1/chat/completions`, {
         method: "POST",
         headers: { Authorization: `Bearer ${process.env.CLOUDFLARE_WORKERS_AI_TOKEN}`, "Content-Type": "application/json" },

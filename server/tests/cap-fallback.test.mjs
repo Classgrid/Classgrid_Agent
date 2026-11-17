@@ -87,3 +87,13 @@ test("the state is kept for a few seconds, then read again", async () => {
     assert.equal(await cloudflareCapped(), false); // still the kept answer
     assert.equal(await cloudflareCapped(Date.now() + 6000), true); // read again after 5 seconds
 });
+
+test("imageTypeOf: the picture types Claude reads, from the file's first bytes", async () => {
+    const { imageTypeOf } = await import("../src/services/cap-fallback.service.js");
+    assert.equal(imageTypeOf(Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0, 0])), "image/jpeg");
+    assert.equal(imageTypeOf(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0])), "image/png");
+    assert.equal(imageTypeOf(Buffer.from("GIF89a....", "latin1")), "image/gif");
+    assert.equal(imageTypeOf(Buffer.concat([Buffer.from("RIFF", "latin1"), Buffer.from([1, 2, 3, 4]), Buffer.from("WEBPVP8 ", "latin1")])), "image/webp");
+    assert.equal(imageTypeOf(Buffer.from("%PDF-1.7 not a picture")), null);
+    assert.equal(imageTypeOf(null), null);
+});
