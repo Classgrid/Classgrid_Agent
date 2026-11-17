@@ -1185,7 +1185,6 @@ router.get("/admin/tickets", isAuthenticated, requireRole("super_admin"), async 
                 .skip(skip)
                 .limit(parseInt(limit))
                 .populate("submittedBy", "name email role profilePicture")
-                .populate("organization_id", "name slug org_type logo_url")
                 .populate("assignedTo", "name email profilePicture")
                 .lean(),
             SupportTicket.countDocuments(filter)
@@ -1195,18 +1194,16 @@ router.get("/admin/tickets", isAuthenticated, requireRole("super_admin"), async 
         for (let ticket of tickets) {
             ticket.isPlatformUser = !!ticket.submittedBy;
             if (!ticket.submittedBy && ticket.submitterEmail) {
+                // A ticket sent from the website by someone who has a Classgrid account
                 const user = await User.findOne(
                     { email: ticket.submitterEmail.toLowerCase() },
-                    "name email role profilePicture organization_id"
-                ).populate("organization_id", "name org_type").lean();
-                
+                    "name email role profilePicture"
+                ).lean();
+
                 if (user) {
                     ticket.isPlatformUser = true;
                     ticket.submitterRole = user.role;
                     ticket.requesterProfilePicture = user.profilePicture;
-                    if (!ticket.organization_id && user.organization_id) {
-                        ticket.organization_id = user.organization_id;
-                    }
                 }
             }
         }

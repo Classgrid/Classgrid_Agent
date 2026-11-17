@@ -118,10 +118,11 @@ export function useDeleteTicket() {
     mutationFn: (id: string) => supportApi.deleteTicket(id),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: TICKETS_KEY });
-      toast.success("Support ticket deleted successfully");
+      toast.success("Ticket deleted.");
     },
     onError: (err: any) => {
-      toast.error(err.response?.data?.message || "Failed to delete ticket");
+      // apiClient puts the server's message on the error itself
+      toast.error(err?.message || "Couldn't delete the ticket.");
     }
   });
 }

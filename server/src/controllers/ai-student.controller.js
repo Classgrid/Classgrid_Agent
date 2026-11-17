@@ -290,10 +290,10 @@ export const adminDecide = async (req, res) => {
 
         if (approve && current.school_email) {
             const taken = await User.findOne({ _id: { $ne: current.user_id }, "student_verification.email": current.school_email, "student_verification.verified_at": { $ne: null } }).select("_id").lean();
-            if (taken) return res.status(409).json({ success: false, error: "This school email already confirmed another Classgrid account." });
+            if (taken) return res.status(409).json({ success: false, error: "This student email already confirmed another Classgrid account." });
             const applicant = await User.findById(current.user_id).select("email account_emails").lean();
             if (!applicant) return res.status(404).json({ success: false, error: "The student's account no longer exists." });
-            if (!confirmedEmails(applicant).includes(current.school_email)) return res.status(409).json({ success: false, error: "The student removed this school email from their account. Reject it so they can apply again." });
+            if (!confirmedEmails(applicant).includes(current.school_email)) return res.status(409).json({ success: false, error: "They removed this student email from their account. Reject it so they can apply again." });
         }
         const now = new Date();
         // Claimed in one step: two super admins deciding at once decide it once
@@ -419,18 +419,18 @@ export const adminListSchools = async (req, res) => {
         res.json({ success: true, data: { rows: rows.map(schoolRow), total, page, pages: Math.max(1, Math.ceil(total / limit)) } });
     } catch (err) {
         console.error("[student] admin schools", err);
-        res.status(500).json({ success: false, error: "Couldn't load the schools." });
+        res.status(500).json({ success: false, error: "Couldn't load the list of places of study." });
     }
 };
 
 export const adminSaveSchool = async (req, res) => {
     try {
         const f = schoolFields(req.body);
-        if (f.name.length < 3) return res.status(400).json({ success: false, error: "Enter the school's full name." });
+        if (f.name.length < 3) return res.status(400).json({ success: false, error: "Enter its full name (3 characters at least)." });
         let s;
         if (req.params.id) {
             s = await School.findById(req.params.id).catch(() => null);
-            if (!s) return res.status(404).json({ success: false, error: "School not found." });
+            if (!s) return res.status(404).json({ success: false, error: "It is no longer on the list." });
             Object.assign(s, f);
             await s.save();
         } else {
@@ -439,18 +439,18 @@ export const adminSaveSchool = async (req, res) => {
         res.json({ success: true, data: schoolRow(s.toObject()) });
     } catch (err) {
         console.error("[student] admin save school", err);
-        res.status(500).json({ success: false, error: "Couldn't save the school." });
+        res.status(500).json({ success: false, error: "Couldn't save it." });
     }
 };
 
 export const adminDeleteSchool = async (req, res) => {
     try {
         const r = await School.deleteOne({ _id: req.params.id }).catch(() => ({ deletedCount: 0 }));
-        if (!r.deletedCount) return res.status(404).json({ success: false, error: "School not found." });
+        if (!r.deletedCount) return res.status(404).json({ success: false, error: "It is no longer on the list." });
         res.json({ success: true });
     } catch (err) {
         console.error("[student] admin delete school", err);
-        res.status(500).json({ success: false, error: "Couldn't delete the school." });
+        res.status(500).json({ success: false, error: "Couldn't take it off the list." });
     }
 };
 

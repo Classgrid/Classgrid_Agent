@@ -77,7 +77,6 @@ import { randomUUID } from 'crypto';
 import { isAuthenticated } from '../middleware/auth.middleware.js';
 import User from '../models/User.js';
 import Organization from '../models/Organization.js';
-import RoleRequest from '../models/RoleRequest.js';
 import { primarySupabaseClient, studentNotesClient } from '../config/supabaseClient.js';
 import { broadcastToChannel } from '../services/realtimeBroadcast.js';
 import { uploadBufferToR2, deleteFromR2, getPresignedUploadUrl } from "../config/r2Client.js";
@@ -371,112 +370,55 @@ router.get('/explore', isAuthenticated, async (req, res) => {
 });
 
 // ──────────────────────────────────────────────
-// GET /join-requests/unified — Get incoming and outgoing requests
+// GET /join-requests/unified — Join requests for the group chats the person runs (incoming) and the ones they sent
+// (outgoing). Role requests from the shut down ERP are no longer listed.
 // ──────────────────────────────────────────────
 router.get('/join-requests/unified', isAuthenticated, async (req, res) => {
   try {
     const userId = req.user._id.toString();
-    
+
     const { data: outgoing, error: outErr } = await sb.from('chat_group_join_requests')
       .select('*, group:chat_groups(name, avatar_url, description)')
       .eq('user_id', userId)
       .order('created_at', { ascending: false });
-      
     if (outErr) throw outErr;
 
     let incoming = [];
-    if (req.user.role !== 'student') {
-       const { data: adminMemberships } = await sb.from('chat_thread_members')
-         .select('thread_id')
-         .eq('user_id', userId)
-         .in('role', ['admin', 'creator']);
-         
-       if (adminMemberships && adminMemberships.length > 0) {
-          const threadIds = adminMemberships.map(m => m.thread_id);
-          const { data: threads } = await sb.from('chat_threads').select('group_id').in('id', threadIds).not('group_id', 'is', null);
-          const groupIds = threads ? threads.map(t => t.group_id) : [];
-          
-          if (groupIds.length > 0) {
-             const { data: inReqs, error: inErr } = await sb.from("chat_group_join_requests")
-               .select("*, group:chat_groups(name, avatar_url)")
-               .in("group_id", groupIds)
-               .order("created_at", { ascending: false });
-               
-             if (inErr) throw inErr;
-             
-             // Fetch real names/emails from MongoDB
-             const uIds = (inReqs || []).map(r => r.user_id);
-             const mUsers = await User.find({ _id: { $in: uIds } }).select("name email profilePicture").lean();
-             const mUserMap = {};
-             mUsers.forEach(u => { mUserMap[u._id.toString()] = u; });
+    const { data: adminMemberships, error: memErr } = await sb.from('chat_thread_members')
+      .select('thread_id')
+      .eq('user_id', userId)
+      .in('role', ['admin', 'creator']);
+    if (memErr) throw memErr;
 
-             incoming = (inReqs || []).map(r => ({
-               ...r,
-               user_name: mUserMap[r.user_id]?.name || r.user_name || "Unknown",
-               user_email: mUserMap[r.user_id]?.email || "",
-               user_avatar: mUserMap[r.user_id]?.profilePicture || r.user_avatar || null
-             }));
-          }
-       }
-    }
-    
-    // --- Fetch Role Requests from MongoDB ---
-    const orgId = req.user.organization_id;
-    let roleIncoming = [];
-    let roleOutgoing = [];
-    
-    // Outgoing Role Requests
-    const myRoleRequests = await RoleRequest.find({ user_id: userId }).lean();
-    if (myRoleRequests.length > 0) {
-        const orgIds = myRoleRequests.map(r => r.organization_id);
-        const orgs = await Organization.find({ _id: { $in: orgIds } }).select('name logo_url').lean();
-        const orgMap = {};
-        orgs.forEach(o => { orgMap[o._id.toString()] = o; });
-        
-        roleOutgoing = myRoleRequests.map(r => ({
-            id: r._id.toString(), // format it for UI
-            type: 'role_request',
-            group_id: r.organization_id.toString(), // for UI compat
-            status: r.status,
-            created_at: r.createdAt,
-            group: {
-                name: `Role: ${r.role} at ${orgMap[r.organization_id.toString()]?.name || 'Organization'}`,
-                avatar: orgMap[r.organization_id.toString()]?.logo_url || null
-            }
+    if (adminMemberships && adminMemberships.length > 0) {
+      const threadIds = adminMemberships.map(m => m.thread_id);
+      const { data: threads, error: thrErr } = await sb.from('chat_threads').select('group_id').in('id', threadIds).not('group_id', 'is', null);
+      if (thrErr) throw thrErr;
+      const groupIds = threads ? threads.map(t => t.group_id) : [];
+
+      if (groupIds.length > 0) {
+        const { data: inReqs, error: inErr } = await sb.from("chat_group_join_requests")
+          .select("*, group:chat_groups(name, avatar_url)")
+          .in("group_id", groupIds)
+          .order("created_at", { ascending: false });
+        if (inErr) throw inErr;
+
+        // Real names and emails from MongoDB
+        const uIds = [...new Set((inReqs || []).map(r => r.user_id).filter(Boolean))];
+        const mUsers = uIds.length ? await User.find({ _id: { $in: uIds } }).select("name email profilePicture").lean() : [];
+        const mUserMap = {};
+        mUsers.forEach(u => { mUserMap[u._id.toString()] = u; });
+
+        incoming = (inReqs || []).map(r => ({
+          ...r,
+          user_name: mUserMap[r.user_id]?.name || r.user_name || "Unknown",
+          user_email: mUserMap[r.user_id]?.email || "",
+          user_avatar: mUserMap[r.user_id]?.profilePicture || r.user_avatar || null
         }));
+      }
     }
 
-    // Incoming Role Requests (only if org_admin)
-    if (req.user.role === 'org_admin' && orgId) {
-        const pendingRoleRequests = await RoleRequest.find({ organization_id: orgId }).lean();
-        if (pendingRoleRequests.length > 0) {
-            const requesterIds = pendingRoleRequests.map(r => r.user_id);
-            const requesters = await User.find({ _id: { $in: requesterIds } }).select("name email profilePicture").lean();
-            const userMap = {};
-            requesters.forEach(u => { userMap[u._id.toString()] = u; });
-            
-            roleIncoming = pendingRoleRequests.map(r => ({
-                id: r._id.toString(), // format it for UI
-                type: 'role_request',
-                group_id: r.organization_id.toString(),
-                status: r.status,
-                created_at: r.createdAt,
-                user_name: userMap[r.user_id.toString()]?.name || r.email || "Unknown User",
-                user_email: userMap[r.user_id.toString()]?.email || r.email || "",
-                user_avatar: userMap[r.user_id.toString()]?.profilePicture || null,
-                group: {
-                    name: `Role: ${r.role}`,
-                    avatar: null
-                }
-            }));
-        }
-    }
-
-    // Merge and sort
-    const finalIncoming = [...incoming, ...roleIncoming].sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
-    const finalOutgoing = [...(outgoing || []), ...roleOutgoing].sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
-
-    res.json({ incoming: finalIncoming, outgoing: finalOutgoing });
+    res.json({ incoming, outgoing: outgoing || [] });
   } catch (err) {
     console.error('Unified requests error:', err);
     res.status(500).json({ error: err.message });

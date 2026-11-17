@@ -174,12 +174,12 @@ export type SupportTicket = {
   category: string;
   status: TicketStatus;
   priority: TicketPriority;
-  submittedBy?: { _id: string; name: string; email: string; role: string };
+  submittedBy?: { _id: string; name: string; email: string; role: string; profilePicture?: string };
   submitterEmail: string;
   submitterName: string;
   isPlatformUser?: boolean;
   organization_id?: { _id: string; name: string; slug: string };
-  assignedTo?: { _id: string; name: string; email: string };
+  assignedTo?: { _id: string; name: string; email: string; profilePicture?: string };
   lastComment?: string;
   messages?: Array<{
     _id?: string;

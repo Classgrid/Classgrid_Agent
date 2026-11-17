@@ -1391,7 +1391,7 @@ router.post("/team/invite", async (req, res) => {
                     <p style="margin:0 0 24px 0; color:#374151;">Please log in and <strong>change your temporary password</strong> immediately.</p>
                     
                     <!-- Google Account Setup Instructions -->
-                    <div style="background-color:#f0fdf4; border-left:3px solid #34d399; padding:16px 20px; border-radius:4px; margin-bottom:24px;">
+                    <div style="background-color:#f5f5f5; border-left:3px solid #111111; padding:16px 20px; border-radius:4px; margin-bottom:24px;">
                       <h4 style="color:#111111; margin:0 0 12px 0; font-size:16px;">Setup Your Chrome Profile & Workspace</h4>
                       <p style="margin:0 0 12px 0;color:#374151;font-size:15px;">To get the full workspace experience, please register this email as a Google Account. This allows you to create a dedicated Chrome Browser Profile, set your professional profile photo, use "Continue with Google" across our tools, and access Google Services (excluding Gmail). Follow these steps:</p>
                       <ol style="margin:0; padding-left:20px; color:#374151;">
@@ -1403,13 +1403,13 @@ router.post("/team/invite", async (req, res) => {
                     
                     <!-- BUTTONS -->
                     <div style="margin-top:24px;margin-bottom:32px;">
-                      <a href="https://mail.zoho.in/zm/#mail/views/unread" style="display:inline-block; background-color:#34d399; color:#000000; padding:12px 28px; text-decoration:none; border-radius:6px; font-weight:bold; font-size:14px; margin-right:12px; margin-bottom:12px;">Login to Zoho Mailbox</a>
+                      <a href="https://mail.zoho.in/zm/#mail/views/unread" style="display:inline-block; background-color:#ffffff; color:#111111; border:1px solid #111111; padding:12px 28px; text-decoration:none; border-radius:6px; font-weight:bold; font-size:14px; margin-right:12px; margin-bottom:12px;">Login to Zoho Mailbox</a>
                       <a href="https://accounts.google.com/signup" style="display:inline-block; background-color:#111111; color:#ffffff; padding:12px 28px; text-decoration:none; border-radius:6px; font-weight:bold; font-size:14px; margin-bottom:12px;">Setup Google Account</a>
                     </div>
 
                     <!-- NEW: SUPER ADMIN DASHBOARD ACCESS -->
                     <h3 style="color:#111111; margin:0 0 16px 0; text-transform:uppercase; font-size:14px; letter-spacing:1px; border-bottom:1px solid #eaeaea; padding-bottom:8px;">Classgrid Super Admin Dashboard</h3>
-                    <p style="margin:0 0 16px 0; color:#374151;">You have been assigned the role of <strong>${roleName}</strong> on the Classgrid Super Admin Dashboard. This gives you administrative access to manage the entire platform — organizations, users, billing, analytics, and more.</p>
+                    <p style="margin:0 0 16px 0; color:#374151;">You have been assigned the role of <strong>${roleName}</strong> on the Classgrid Super Admin Dashboard. This lets you run Classgrid from the dashboard: users, plans and billing, usage, support and more.</p>
                     <p style="margin:0 0 20px 0; color:#374151;">Use the <strong>same Classgrid email and password</strong> shown above to log in.</p>
                     <div style="margin-bottom:32px;">
                       <a href="https://superadmin.classgrid.in/superadmin/login" style="display:inline-block; background-color:#f9f9f9; color:#111111; padding:12px 28px; text-decoration:none; border-radius:6px; font-weight:bold; font-size:14px; border:1px solid #eaeaea;">Login to Super Admin Dashboard</a>
@@ -1453,14 +1453,22 @@ router.post("/team/invite", async (req, res) => {
             ? personalEmail.toLowerCase().trim() 
             : classgridEmail;
 
-        await sendEmail({
-            to: toEmail,
-            fromEmail: "nikhil.shinde@classgrid.in",
-            fromName: "Nikhil Shinde",
-            subject: "Welcome to Classgrid! Your Account Credentials Inside",
-            html: emailHtml,
-            text: `Welcome to Classgrid, ${name}! Your login email is: ${classgridEmail}. Your temporary password is: ${tempPassword}. Please log in at ${loginUrl} to reset it.`,
-        });
+        // The welcome email carries the only copy of the temporary password: when it can't be sent, the account made
+        // for the invitation is taken back, so the invitation can simply be sent again
+        try {
+            await sendEmail({
+                to: toEmail,
+                fromEmail: "nikhil.shinde@classgrid.in",
+                fromName: "Nikhil Shinde",
+                subject: "Welcome to Classgrid! Your Account Credentials Inside",
+                html: emailHtml,
+                text: `Welcome to Classgrid, ${name}! Your login email is: ${classgridEmail}. Your temporary password is: ${tempPassword}. Please log in at ${loginUrl} to reset it.`,
+            });
+        } catch (mailErr) {
+            console.error("[Team] invite email failed:", mailErr.message);
+            await User.deleteOne({ _id: member._id, status: "pending" }).catch((e) => console.error("[Team] invite rollback failed:", e.message));
+            return res.status(500).json({ success: false, message: `Couldn't send the welcome email to ${toEmail}, so no invitation was made. Try again.` });
+        }
 
         // For now log the temp password in dev
         if (process.env.NODE_ENV !== "production") {
@@ -1488,12 +1496,23 @@ router.post("/team/invite", async (req, res) => {
 router.patch("/team/:id/role", async (req, res) => {
     try {
         const { role } = req.body;
-        const allowedRoles = ["super_admin", "platform_support", "platform_sales", "platform_moderator", "platform_analyst"];
+        const allowedRoles = ["super_admin", "co_super_admin"];
         if (!allowedRoles.includes(role)) {
             return res.status(400).json({ success: false, message: "Invalid platform role" });
         }
         const User = (await import("../models/User.js")).default;
-        await User.findByIdAndUpdate(req.params.id, { $set: { role } });
+        const member = await User.findById(req.params.id).select("role email").lean();
+        if (!member || !allowedRoles.includes(member.role)) {
+            return res.status(404).json({ success: false, message: "Team member not found" });
+        }
+        const PROTECTED_EMAILS = [
+            (process.env.SUPER_ADMIN_EMAIL || "support@classgrid.in").toLowerCase(),
+            "nikhil.shinde@classgrid.in"
+        ];
+        if (PROTECTED_EMAILS.includes(String(member.email || "").toLowerCase())) {
+            return res.status(403).json({ success: false, message: "This is a protected founder account and its role can't be changed." });
+        }
+        await User.updateOne({ _id: member._id }, { $set: { role } });
         
         try {
             const { getIO } = await import("../services/socket.service.js");
@@ -1517,7 +1536,10 @@ router.delete("/team/:id", async (req, res) => {
         }
         const User = (await import("../models/User.js")).default;
         const member = await User.findById(req.params.id).select("role email name").lean();
-        if (!member) return res.status(404).json({ success: false, message: "Team member not found" });
+        // Only platform team accounts are removed here: any other account is never deleted from this page
+        if (!member || !["super_admin", "co_super_admin"].includes(member.role)) {
+            return res.status(404).json({ success: false, message: "Team member not found" });
+        }
 
         // Safety: never delete the god-owner or founder
         const PROTECTED_EMAILS = [
