@@ -3,8 +3,43 @@
 import React from "react";
 import { Button } from "@/components/marketing_ui/button";
 import { ResponsiveSelect } from "@/components/marketing_ui/responsive-select";
+import { NikhilTimeCalendar } from "@/components/marketing_ui/nikhil_time_calendar";
+import { format } from "date-fns";
+import { X } from "lucide-react";
 import type { OutcomeFilter, PlanFilter, PlanKey, ReasonKey } from "./failedPaymentsApi";
 import { REASONS } from "./labels";
+
+// The app's own calendar (owner's rule: never the browser's date box). The filter keeps yyyy-MM-dd; the calendar
+// works with a local Date, so the picked day stays that day.
+const toKey = (date: Date | undefined) => (date ? format(date, "yyyy-MM-dd") : "");
+const toDate = (key: string) =>
+  key ? new Date(Number(key.slice(0, 4)), Number(key.slice(5, 7)) - 1, Number(key.slice(8, 10))) : undefined;
+
+function DateBox({ value, onChange, placeholder }: { value: string; onChange: (key: string) => void; placeholder: string }) {
+  return (
+    <div className="relative w-full overflow-hidden">
+      <NikhilTimeCalendar
+        value={toDate(value)}
+        onChange={(date) => onChange(toKey(date))}
+        placeholder={placeholder}
+        popDirection="down"
+        showTime={false}
+        className="h-9 w-full pr-8"
+      />
+      {value && (
+        <button
+          type="button"
+          onClick={(e) => { e.stopPropagation(); onChange(""); }}
+          className="absolute right-3 top-1/2 -translate-y-1/2 z-10 p-0.5 text-muted-foreground hover:text-foreground rounded-full hover:bg-accent bg-background"
+          title="Clear date"
+          aria-label="Clear date"
+        >
+          <X size={14} />
+        </button>
+      )}
+    </div>
+  );
+}
 
 export type FilterValues = {
   reason: "all" | ReasonKey;
@@ -105,24 +140,10 @@ export function FailedPaymentsFilters({ searchInput, onSearchInput, values, onCh
         {/* The two dates share one cell so they always stay side by side, even on a phone */}
         <div className="grid grid-cols-2 gap-3 sm:col-span-2 lg:col-span-2">
           <Field label="From" htmlFor="fp-from">
-            <input
-              id="fp-from"
-              type="date"
-              value={values.from}
-              max={values.to || undefined}
-              onChange={(e) => onChange("from", e.target.value)}
-              className={`${FIELD} [color-scheme:light] dark:[color-scheme:dark]`}
-            />
+            <DateBox value={values.from} onChange={(key) => onChange("from", key)} placeholder="From" />
           </Field>
           <Field label="To" htmlFor="fp-to">
-            <input
-              id="fp-to"
-              type="date"
-              value={values.to}
-              min={values.from || undefined}
-              onChange={(e) => onChange("to", e.target.value)}
-              className={`${FIELD} [color-scheme:light] dark:[color-scheme:dark]`}
-            />
+            <DateBox value={values.to} onChange={(key) => onChange("to", key)} placeholder="To" />
           </Field>
         </div>
       </div>

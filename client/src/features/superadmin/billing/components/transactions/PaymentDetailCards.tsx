@@ -3,7 +3,7 @@
 // Nothing is guessed: settlement dates, the buyer's IP and organization details are not shown on purpose.
 import React from "react";
 import { useNavigate } from "react-router-dom";
-import { Hash, IndianRupee, Mail, Package, User } from "lucide-react";
+import { Check, Clock, Hash, IndianRupee, ListChecks, Mail, Package, User, X } from "lucide-react";
 import { Button } from "@/components/marketing_ui/button";
 import { CopyId } from "./CopyId";
 import { PersonAvatar } from "./PersonAvatar";
@@ -206,6 +206,49 @@ export function ReceiptCard({ p }: { p: PaymentDetail }) {
       ) : (
         <p className="text-sm text-foreground">No receipt email is sent for credit top-ups.</p>
       )}
+    </SectionCard>
+  );
+}
+
+// The payment's steps, as the page showed them before (owner, 2026-11-17: "the transaction page had steps which show
+// everything"). Only real times from the payment record: when it started, when Razorpay took the money (authorized
+// and captured), or why it failed, and each refund. A step with no time yet shows as waiting.
+type Step = { label: string; sub: string; state: "done" | "failed" | "waiting" };
+
+export function TimelineCard({ p }: { p: PaymentDetail }) {
+  const started = p.payment?.recordedAt || p.date;
+  const paidAt = p.payment?.paidAt || (p.status === "paid" || p.status === "refunded" ? p.date : null);
+  const steps: Step[] = [{ label: "Payment created", sub: dayAndTime(started) || "", state: "done" }];
+  if (p.status === "failed") {
+    steps.push({ label: "Payment failed", sub: p.payment?.errorText || "Not completed", state: "failed" });
+  } else {
+    const got = !!paidAt && (p.status === "paid" || p.status === "refunded");
+    steps.push({ label: "Payment authorized", sub: got ? dayAndTime(paidAt) || "" : "Waiting", state: got ? "done" : "waiting" });
+    steps.push({ label: "Payment captured", sub: got ? dayAndTime(paidAt) || "" : "Waiting", state: got ? "done" : "waiting" });
+  }
+  for (const r of p.refunds || []) {
+    steps.push({ label: `Refunded ${inr(r.amountInr)}`, sub: [dayAndTime(r.date), r.reason].filter(Boolean).join(" · "), state: "done" });
+  }
+  return (
+    <SectionCard icon={ListChecks} title="Timeline" note="Each step of this payment">
+      <div className="flex flex-col">
+        {steps.map((step, i) => (
+          <div key={i} className="relative flex">
+            {i < steps.length - 1 && <div className="absolute left-[11px] top-6 bottom-0 w-[2px] bg-border" />}
+            <div
+              className={`z-10 mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full ${
+                step.state === "failed" ? "bg-red-500/10 text-red-500" : step.state === "waiting" ? "bg-muted text-muted-foreground" : "bg-foreground text-background"
+              }`}
+            >
+              {step.state === "failed" ? <X className="h-3.5 w-3.5" /> : step.state === "waiting" ? <Clock className="h-3.5 w-3.5" /> : <Check className="h-3.5 w-3.5" />}
+            </div>
+            <div className="ml-4 min-w-0 pb-6">
+              <p className={`text-sm font-medium ${step.state === "failed" ? "text-red-500" : "text-foreground"}`}>{step.label}</p>
+              {step.sub && <p className="mt-1 text-xs text-muted-foreground break-words">{step.sub}</p>}
+            </div>
+          </div>
+        ))}
+      </div>
     </SectionCard>
   );
 }

@@ -30,6 +30,7 @@ import {
   PersonCard,
   RazorpayIdsCard,
   ReceiptCard,
+  TimelineCard,
 } from "../components/transactions/PaymentDetailCards";
 
 const LIST_PATH = "/super-admin/billing/transactions";
@@ -135,6 +136,8 @@ export default function TransactionDetailsPage() {
         <RazorpayIdsCard p={p} />
         <ReceiptCard p={p} />
       </div>
+
+      <TimelineCard p={p} />
     </div>
   );
 }
