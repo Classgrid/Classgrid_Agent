@@ -3213,7 +3213,7 @@ export const getPlanLimitReachedEmail = ({ userName, plan, paidNames, which, bac
       ${planSignOff}
     `,
   });
-  const text = `Hello ${userName},\n\n${used}\n\n${more}\n\n${button.label}: ${button.href}\n\nThanks,\nThe Classgrid Team`;
+  const text = `Hello ${userName},\n\n${used}\n\n${more}\n\n${button.label}: ${button.href}\n\nNeed help? The Help Center answers the most common questions: https://classgrid.in/help-center\n\nThanks,\nThe Classgrid Team`;
   return { subject, html, text };
 };
 
@@ -3314,6 +3314,39 @@ export const callMinutesUsedUpText = ({ plan, paidNames, backAt, taskSaved = fal
 export const taskPausedLimitText = ({ plan, paidNames, backAt }) => {
   const next = limitNextStep({ plan, paidNames, backAt, comesBack: "it comes" });
   return `⏸️ You've used ${yourPlansText(plan)} limit for now, so I paused your task. ${backAt ? `I'll continue by myself when ${next}` : `I'll continue by myself when it comes back. ${next}`}`;
+};
+
+// Calls and tasks from calls (owner, 2026-11-17): a top-up adds no calls and no tasks, so the next step is a bigger
+// plan (Free: Pro or Max; Pro: Max) or, on the biggest plan, only waiting
+/** The paid plans above this one: Free gets every paid plan, Pro gets Max, Max, Enterprise and plans off get none */
+export const biggerPlanNames = (plan, paidNames) => {
+  const names = (paidNames || []).filter(Boolean);
+  if (!plan?.name) return [];
+  if (isFreePlan(plan)) return names;
+  const i = names.indexOf(plan.name);
+  return i >= 0 ? names.slice(i + 1) : [];
+};
+const yourPlanText = (plan) => (plan?.name ? `your ${plan.name} plan` : "your plan");
+const CALL_WINDOW_TEXT = { day: "today", week: "this week", month: "this month" };
+
+/** An incoming call refused: the plan's calls for today, this week or this month are used (`which`: day, week or
+ * month, `cap`: that limit, `backAt`: when one more call fits) */
+export const callCountLimitText = ({ plan, paidNames, which = "day", cap = 0, backAt = null }) => {
+  const more = biggerPlanNames(plan, paidNames);
+  if (!cap) {
+    return `Calls with Classgrid AI are not part of ${yourPlanText(plan)}.${more.length ? ` Upgrade to ${paidPlansText(more, "or")} to call: ${PLANS_SITE}` : ""}`;
+  }
+  const used = `You've used all ${cap} call${cap === 1 ? "" : "s"} for ${CALL_WINDOW_TEXT[which] || CALL_WINDOW_TEXT.day}${plan?.name ? ` on your ${plan.name} plan` : ""}, so Classgrid AI can't take this call.`;
+  const upgrade = more.length ? `upgrade to ${paidPlansText(more, "or")} for more calls: ${PLANS_SITE}` : "";
+  if (!backAt) return `${used} ${upgrade ? capitalFirst(upgrade) : "Please call again later."}`;
+  return `${used} You can call again on ${indiaTimeText(backAt)}${upgrade ? `, or ${upgrade}` : "."}`;
+};
+
+/** A task from a call stopped: it used the minutes of work a task from a call gets on the plan. `whereItGot`: the
+ * Agent's last answer (may be empty), `link`: "\n\nWhat it did so far: <url>" (may be empty) */
+export const callTaskTimeUpText = ({ plan, paidNames, minutes, whereItGot = "", link = "" }) => {
+  const more = biggerPlanNames(plan, paidNames);
+  return `Classgrid AI stopped your task: it used the ${minutes} minute${minutes === 1 ? "" : "s"} of work a task from a call gets on ${yourPlanText(plan)}.${more.length ? ` For bigger tasks, upgrade to ${paidPlansText(more, "or")}: ${PLANS_SITE}` : ""}${whereItGot ? `\n\nWhere it got to:\n${whereItGot}` : ""}${link}`;
 };
 
 // ------------- CHAT OTP EMAIL -------------

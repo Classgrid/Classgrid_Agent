@@ -27,7 +27,7 @@ export const PLAN_INFO_TOOLS = [
 ];
 
 const NOTE = "These numbers come from Classgrid's dashboard and can change at any time. Answer only from this result, in plain words.";
-const HOW_TO_READ = "A limit of -1 means no limit, 0 means not included, null means nothing limits it. Prices are in rupees and include GST; a price of -1 means contact Classgrid. Credits are Classgrid's unit of AI use. resetAt is when a limit refills (UTC; tell the user in India time).";
+const HOW_TO_READ = "A limit of -1 means no limit, 0 means not included, null means nothing limits it. Prices are in rupees and include GST; a price of -1 means contact Classgrid. Credits are Classgrid's unit of AI use. resetAt is when a limit refills (UTC; tell the user in India time). The plans list does not show each plan's credit amounts per window or per week: if asked, say how the plans compare from what is here and point to https://classgrid.in/pricing for the exact limits; never quote chats per window as a credit limit.";
 const WHERE = {
     usage: "Settings > Usage on chat.classgrid.in",
     billing: "Settings > Billing on chat.classgrid.in: the current plan, Upgrade, Buy credits, Auto top-up, the student price and invoices",

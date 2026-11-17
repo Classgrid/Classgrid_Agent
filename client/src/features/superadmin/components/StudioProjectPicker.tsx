@@ -712,7 +712,7 @@ export function NewProjectDialog({ open, onOpenChange, onCreated, linkTo = null 
         <div className="flex items-start justify-between gap-4 px-5 pt-4 pb-3">
           <div>
             <DialogTitle className="text-[15px] font-medium">{linkTo ? (linkTo.repo ? "Change repo" : "Link a GitHub repo") : "New project"}</DialogTitle>
-            <DialogDescription className="mt-0.5 text-[13px] text-muted-foreground">{linkTo ? linkTo.name : desktopApp?.isDesktop ? "A folder on this PC, or a project in the cloud." : "Shared with Project."}</DialogDescription>
+            <DialogDescription className="mt-0.5 text-[13px] text-muted-foreground">{linkTo ? linkTo.name : desktopApp?.isDesktop ? "A folder on this PC, or a project in the cloud." : "Shared with the Project page in Studio."}</DialogDescription>
           </div>
           <button
             type="button"
