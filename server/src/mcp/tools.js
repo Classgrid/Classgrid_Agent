@@ -61,6 +61,7 @@ import IdeProject from '../models/IdeProject.js';
 import { ensureFreshGithubToken } from '../services/github-token.service.js';
 import { repoAppToken, classgridAuthor, userCoAuthorLine } from '../services/github-app.service.js';
 import { projectTools, projectForChat, projectSnapshot, projectChangesBetween, formatProjectChanges, sandboxDataDir } from '../services/ide-project.service.js';
+import { cloudComputerGate } from '../services/cloud-computer-limit.service.js';
 import { LOCAL_TOOLS, callLocal, inChatWorktree } from '../services/local-runner.service.js';
 
 // What the sandbox container sees as /data, and where the hidden runner script is.
@@ -4449,7 +4450,14 @@ export const handleToolCall = async (name, args, context = {}) => {
         // In a Project Mode chat, note which project files this run changes (shown under the step)
         const chatProject = projectMount.isProject ? await projectForChat(sessionId) : null;
         const snapBefore = chatProject ? await projectSnapshot(ssh, chatProject) : null;
-        const dockerCommand = `${projectMount.prep}docker run --rm ${envVars} ${projectMount.mount} classgrid-ai-sandbox bash ${projectMount.runnerDir}/${SANDBOX_RUNNER_PREFIX}_terminal.sh`;
+        // The plan's cloud computer hours and how many chats run at once (services/cloud-computer-limit.service.js);
+        // the labels say whose run this is, so its time is counted
+        const cloud = await cloudComputerGate(ssh, { userId: context.userId, sessionId });
+        if (!cloud.allowed) {
+          ssh.dispose();
+          return { content: [{ type: 'text', text: cloud.error }] };
+        }
+        const dockerCommand = `${projectMount.prep}docker run --rm ${cloud.label} ${envVars} ${projectMount.mount} classgrid-ai-sandbox bash ${projectMount.runnerDir}/${SANDBOX_RUNNER_PREFIX}_terminal.sh`;
         const result = await ssh.execCommand(dockerCommand);
         const projectChanges = chatProject ? await projectChangesBetween(ssh, chatProject, snapBefore, await projectSnapshot(ssh, chatProject)) : [];
 
@@ -4553,7 +4561,14 @@ export const handleToolCall = async (name, args, context = {}) => {
         // In a Project Mode chat, note which project files this run changes (shown under the step)
         const chatProject = projectMount.isProject ? await projectForChat(sessionId) : null;
         const snapBefore = chatProject ? await projectSnapshot(ssh, chatProject) : null;
-        const dockerCommand = `${projectMount.prep}docker run --rm ${envVars} ${projectMount.mount} classgrid-ai-sandbox ${execCmd} ${projectMount.runnerDir}/${SANDBOX_RUNNER_PREFIX}.${ext}`;
+        // The plan's cloud computer hours and how many chats run at once (services/cloud-computer-limit.service.js);
+        // the labels say whose run this is, so its time is counted
+        const cloud = await cloudComputerGate(ssh, { userId: context.userId, sessionId });
+        if (!cloud.allowed) {
+          ssh.dispose();
+          return { content: [{ type: 'text', text: cloud.error }] };
+        }
+        const dockerCommand = `${projectMount.prep}docker run --rm ${cloud.label} ${envVars} ${projectMount.mount} classgrid-ai-sandbox ${execCmd} ${projectMount.runnerDir}/${SANDBOX_RUNNER_PREFIX}.${ext}`;
         const result = await ssh.execCommand(dockerCommand);
         const projectChanges = chatProject ? await projectChangesBetween(ssh, chatProject, snapBefore, await projectSnapshot(ssh, chatProject)) : [];
 

@@ -4022,7 +4022,7 @@ Every user is using you as a personal AI assistant and agent (like ChatGPT) to m
                     execute_terminal_command: async (args) => {
                         const blocked = await bigFileCommand(args?.command);
                         if (blocked) return blocked;
-                        const result = await handleToolCall('execute_terminal_command', args, { sessionId, isStaff: isStaffRole(req.user?.role), desktop: !fromWebsite });
+                        const result = await handleToolCall('execute_terminal_command', args, { sessionId, userId: String(req.user?._id || ""), isStaff: isStaffRole(req.user?.role), desktop: !fromWebsite });
                         return result.isError ? result.content[0].text : result.content[0].text;
                     },
                     deploy_to_classgrid_cloud: async (args) => (await handleToolCall('deploy_to_classgrid_cloud', args, { sessionId, userEmail })).content[0].text,
@@ -4469,7 +4469,7 @@ You work on the user's own Windows computer through their Classgrid desktop app,
                         // A project from a folder on the user's computer: the code runs there, in their desktop app
                         const localProject = fromWebsite ? null : await localProjectFor(sessionId);
                         if (localProject) return callLocal(localProject, "run_code", args, sessionId);
-                        const result = await handleToolCall('run_code', args, { sessionId, isStaff: isStaffRole(req.user?.role), desktop: !fromWebsite });
+                        const result = await handleToolCall('run_code', args, { sessionId, userId: String(req.user?._id || ""), isStaff: isStaffRole(req.user?.role), desktop: !fromWebsite });
                         const text = result.isError ? result.content[0].text : result.content[0].text;
 
                         // After execution, read back any website files the sandbox wrote

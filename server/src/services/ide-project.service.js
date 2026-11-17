@@ -941,6 +941,11 @@ async function startBackgroundJob(project, ssh, sessionId, command) {
   const { stdout: freeMb } = await ssh.execCommand(`awk '/^MemAvailable:/ { print int($2 / 1024) }' /proc/meminfo`);
   if (Number(freeMb) < 1200) return "Error: the sandbox is busy right now (not enough free memory). Try again in a few minutes.";
 
+  // The plan's cloud computer hours and how many chats run at once; the labels say whose job this is
+  const { cloudComputerGate } = await import("./cloud-computer-limit.service.js");
+  const cloud = await cloudComputerGate(ssh, { userId: String(project.owner), sessionId });
+  if (!cloud.allowed) return `Error: ${cloud.error}`;
+
   const jobId = Math.random().toString(16).slice(2, 10);
   const userDir = `/home/ubuntu/ide_users/${project.owner}`;
   const dir = `${userDir}/projects/${project._id}`;
@@ -949,7 +954,7 @@ async function startBackgroundJob(project, ssh, sessionId, command) {
   const write = await ssh.execCommand(`mkdir -p ${q(chatDir)} ${q(userDir)}/.cache && cat > ${q(script)}`, { stdin: cmd + "\n" });
   if (write.code) return "Error: could not prepare the command";
   const run = await ssh.execCommand(
-    `docker run -d --name ${bgName(sessionId, jobId)} --label classgrid-bg=1 --memory 1g --memory-swap 1g --cpus 1 --pids-limit 512 ` +
+    `docker run -d --name ${bgName(sessionId, jobId)} --label classgrid-bg=1 ${cloud.label} --memory 1g --memory-swap 1g --cpus 1 --pids-limit 512 ` +
     `-v ${q(dir)}:/data -v ${q(dir)}:/home/workspace/projects/${project._id} -v ${q(chatDir)}:/cg:ro ` +
     `-v ${q(userDir)}/.cache:/home/workspace/.cache -e npm_config_cache=/home/workspace/.cache/npm -e PIP_CACHE_DIR=/home/workspace/.cache/pip ` +
     `-w /data classgrid-ai-sandbox timeout 1800 bash /cg/bg-${jobId}.sh`

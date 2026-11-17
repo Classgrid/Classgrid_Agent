@@ -77,6 +77,10 @@ export async function ensureBrowser(userId) {
       if (!/^\d+$/.test(port)) {
         const { stdout: freeMb } = await ssh.execCommand(`awk '/^MemAvailable:/ { print int($2 / 1024) }' /proc/meminfo`);
         if (Number(freeMb) < MIN_FREE_MB) throw new Error("The sandbox server is busy right now. Try the browser again in a few minutes.");
+        // The plan's cloud computer hours a month: used up = the browser does not start
+        const { cloudHoursGate } = await import("./cloud-computer-limit.service.js");
+        const hours = await cloudHoursGate(userId);
+        if (!hours.allowed) throw new Error(hours.error);
         const dir = `/home/ubuntu/studio_users/${userId}`;
         await ssh.execCommand(`mkdir -p ${dir} && sudo chown 1000:1000 ${dir}`);
         const run = await ssh.execCommand(

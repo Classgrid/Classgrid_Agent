@@ -21,6 +21,8 @@ export type PlanOverview = {
     // Coding agent runs this month, and those with a Claude model (limit 0 = not in the plan, -1 = no limit)
     coding_runs?: Meter;
     premium_runs?: Meter;
+    // Hours the cloud computer ran this month (code runs, projects, the live browser); atOnce: chats that may run at once
+    cloud_hours?: (Meter & { atOnce?: number | null }) | null;
     storage: { usedMb: number; limit: number | null; files: { count: number; mb: number }; images: { count: number; mb: number }; generatedImages: number };
   };
 };

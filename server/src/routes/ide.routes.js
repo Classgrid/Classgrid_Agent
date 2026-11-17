@@ -99,6 +99,12 @@ setInterval(async () => {
     // Background commands that finished more than an hour ago are cleared (running ones stop by themselves at 30 min)
     ssh = await sandboxSsh();
     await ssh.execCommand(`docker container prune -f --filter label=classgrid-bg=1 --filter until=1h >/dev/null 2>&1`);
+    // The plan's cloud computer hours: every account with something running on the sandbox gets this minute, and an
+    // account whose hours are used up has its containers switched off (services/cloud-computer-limit.service.js)
+    await import("../services/cloud-computer-limit.service.js")
+      .then((m) => m.sampleCloudComputers(ssh))
+      .then((r) => { if (r.stopped.length) console.log(`[IDE] Cloud computer hours used up, switched off for: ${r.stopped.join(", ")}`); })
+      .catch((e) => console.error("[IDE] Cloud computer count failed:", e.message));
     const users = await redis.smembers(BOXES);
     for (const userId of users) {
       if (!/^[a-f0-9]{24}$/.test(userId)) { await redis.srem(BOXES, userId); continue; }
@@ -617,7 +623,13 @@ router.post("/projects/:id/open", isAuthenticated, async (req, res) => {
     // Studio Mode downloads the code for the agent only: no code editor box (packages are still installed, below)
     const noEditor = !!req.body?.noEditor;
     if (noEditor) await touchStudio(req.user._id).catch(() => {});
-    if (!noEditor) await ensureBox(ssh, String(req.user._id));
+    if (!noEditor) {
+      // The plan's cloud computer hours a month (services/cloud-computer-limit.service.js): used up = no editor box
+      const { cloudHoursGate } = await import("../services/cloud-computer-limit.service.js");
+      const hours = await cloudHoursGate(req.user._id);
+      if (!hours.allowed) return res.status(403).json({ error: hours.error, code: hours.code });
+      await ensureBox(ssh, String(req.user._id));
+    }
     // A fresh download has no packages, so the editor's type checker marks every file red. Install them in the
     // background for the project folder and each first-level folder with its own package.json (client/, server/...),
     // with the user's package cache. It runs in a separate short-lived box with its own memory: inside the editor

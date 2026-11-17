@@ -96,10 +96,12 @@ export async function planOverviewFor(userId) {
         const callSeconds = callReset && callReset.getTime() > now ? (user.ai_call_seconds_used || 0) : 0;
 
         // Projects and storage (the Library: uploaded files and generated pictures)
-        const [projects, runsUsed, storage, generated] = await Promise.all([
+        const [projects, runsUsed, cloudHours, storage, generated] = await Promise.all([
             IdeProject.countDocuments({ owner: userId, location: { $ne: "local" } }).catch(() => 0),
             // Coding agent runs and runs with a Claude model this month (services/coding-run-limit.service.js)
             import("../services/coding-run-limit.service.js").then((m) => m.codingRunsUsed(userId)).catch(() => ({ runs: 0, premium: 0 })),
+            // Hours of cloud computer this month (services/cloud-computer-limit.service.js)
+            import("../services/cloud-computer-limit.service.js").then((m) => m.cloudHoursUsed(userId)).catch(() => 0),
             AiLibraryFile.aggregate([
                 { $match: { user_id: user._id } },
                 { $group: { _id: { $cond: [{ $eq: ["$file_type", "image"] }, "images", "files"] }, bytes: { $sum: "$size_bytes" }, count: { $sum: 1 } } },
@@ -148,6 +150,7 @@ export async function planOverviewFor(userId) {
                 // (they start again on the 1st of the month, India time)
                 coding_runs: plan ? { used: runsUsed.runs, limit: num(plan.coding_runs_per_month, -1), resetAt: nextIstMonthStart().toISOString() } : null,
                 premium_runs: plan ? { used: runsUsed.premium, limit: num(plan.premium_runs_per_month, -1), resetAt: nextIstMonthStart().toISOString() } : null,
+                cloud_hours: plan ? { used: cloudHours, limit: num(plan.sandbox_hours_per_month, -1), resetAt: nextIstMonthStart().toISOString(), atOnce: num(plan.sandbox_sessions, 1) } : null,
                 storage: { usedMb: mb(files.bytes + images.bytes), limit: storageCap, files: { count: files.count, mb: mb(files.bytes) }, images: { count: images.count, mb: mb(images.bytes) }, generatedImages: generated },
             },
         };
