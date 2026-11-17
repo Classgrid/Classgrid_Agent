@@ -38,7 +38,8 @@ import { planOf, isUnlimited } from "./plan-limits.service.js";
 import Organization from "../models/Organization.js";
 import GlobalAiConfig from "../models/GlobalAiConfig.js";
 import { isSharedTestWhatsapp } from "../utils/chat-onboarding.js";
-import { hasEnoughTokens, deductTokens } from "./ai-credits.service.js";
+import { hasEnoughTokens, deductTokens, planWording } from "./ai-credits.service.js";
+import { callRefusedLimitText, callMinutesUsedUpText } from "./email-templates.service.js";
 import { chargeableTokens } from "./ai-token-pricing.js";
 import { toWhatsappText, splitWhatsappText } from "./ai-feature-limits.js";
 import { BUSY_KEY, markLastIn } from "./whatsapp-inbox.service.js";
@@ -86,6 +87,14 @@ async function freeCallSeconds(user) {
         await User.updateOne({ _id: user._id }, { $set: { ai_call_seconds_used: 0, ai_call_reset_date: resetAt } }).catch(() => {});
     }
     return { left: Math.max(0, limitMinutes * 60 - used), limitMinutes, resetAt };
+}
+
+// When calls can start again once the plan's limit and the call minutes are used up: the earlier of the limit coming
+// back (hasEnoughTokens' resetAt) and the call minutes coming back (a plan with no call minutes: only the limit)
+export function callsBackAt(enough, free, nowMs = Date.now()) {
+    const times = [enough?.resetAt, free?.limitMinutes > 0 ? free?.resetAt : null]
+        .filter(Boolean).map((t) => new Date(t).getTime()).filter((t) => t > nowMs);
+    return times.length ? new Date(Math.min(...times)) : null;
 }
 
 // Tokens for one model answer of the call: nothing while the call is within the caller's free minutes
@@ -795,7 +804,9 @@ async function afterCall(call, why) {
         await sendWhatsappText(call.from, text);
     }
     if (why === "free minutes used") {
-        const text = `Your free Classgrid AI call minutes for this period are used up${call.tasks.length ? ", but your request is saved and Classgrid AI is working on it" : ""}. Top up AI credits on ${CHAT_URL} to keep calling, or call again when your minutes reset.`;
+        // Free: call again when the minutes or the limit come back, or upgrade; other plans: or top up
+        const { plan, paidNames } = await planWording(call.user);
+        const text = callMinutesUsedUpText({ plan, paidNames, backAt: call.limitBackAt, taskSaved: call.tasks.length > 0 });
         record.noteSentForCall(call.id, text);
         await sendWhatsappText(call.from, text);
     }
@@ -1209,12 +1220,12 @@ function filterAnswerSdp(sdp, publicIpv4) {
 const candidateSummary = (sdp) => sdp.split("\r\n").filter((l) => l.startsWith("a=candidate:"))
     .map((l) => { const p = l.split(" "); return `${p[7] || "?"} ${p[2]} ${p[4]}:${p[5]}`; }).join(", ") || "none";
 
-export async function answerCall({ id, from, sdp, user, tokenSource, callsLine = "", maxMs = MAX_CALL_MS, freeUntil = 0, paidOk = true }) {
+export async function answerCall({ id, from, sdp, user, tokenSource, callsLine = "", maxMs = MAX_CALL_MS, freeUntil = 0, paidOk = true, limitBackAt = null }) {
     const { RTCPeerConnection, nonstandard } = await loadWrtc();
     const pc = new RTCPeerConnection({ iceServers: [{ urls: "stun:stun.l.google.com:19302" }], portRange: { min: 10000, max: 60000 } });
     const source = new nonstandard.RTCAudioSource();
     const call = {
-        id, from, user, pc, source, tokenSource, callsLine, maxMs, freeUntil, paidOk,
+        id, from, user, pc, source, tokenSource, callsLine, maxMs, freeUntil, paidOk, limitBackAt,
         startedAt: Date.now(), ended: false, busy: false, tasks: [],
         messages: [], transcript: [],
         outQueue: [], outCurrent: null, outPos: 0, speechEndedAt: 0,
@@ -1373,8 +1384,9 @@ export async function handleCallsWebhook(value) {
             const enough = await hasEnoughTokens(user._id, user.organization_id || null, 1).catch(() => null);
             if (!enough?.allowed && free.left <= 0) {
                 await callAction(c.id, "reject").catch(() => {});
+                const { plan, paidNames } = await planWording(user);
                 await sendWhatsappText(from, /insufficient/i.test(enough?.reason || "")
-                    ? `You're out of Classgrid AI credits right now. Top up on ${CHAT_URL} to use calls.`
+                    ? callRefusedLimitText({ plan, paidNames, backAt: callsBackAt(enough, free) })
                     : "Classgrid AI can't take calls for your account right now. Please try again later.");
                 continue;
             }
@@ -1396,7 +1408,7 @@ export async function handleCallsWebhook(value) {
             const freeUntil = free.left > 0 ? Date.now() + free.left * 1000 : 0;
             markBusy(number, maxMs / 1000 + 120);
             const callsLine = `(Call ${(today?.count || 0) + 1} of ${callsCap} you can make in 24 hours.)`;
-            const answered = await answerCall({ id: c.id, from, sdp: c.session.sdp, user, tokenSource: enough?.source || "personal", callsLine, maxMs, freeUntil, paidOk: !!enough?.allowed });
+            const answered = await answerCall({ id: c.id, from, sdp: c.session.sdp, user, tokenSource: enough?.source || "personal", callsLine, maxMs, freeUntil, paidOk: !!enough?.allowed, limitBackAt: enough?.allowed ? null : callsBackAt(enough, free) });
             if (answered) redis.zadd(CALLS_KEY(number), Date.now(), c.id).then(() => redis.expire(CALLS_KEY(number), 2 * 24 * 60 * 60)).catch(() => {});
         } catch (e) {
             console.error(`[WA call] ${c.id} failed:`, e.message);

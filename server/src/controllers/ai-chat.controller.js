@@ -1884,7 +1884,7 @@ export const streamAskAi = async (req, res) => {
         if (deviceNoted) await deviceNoted;
         if (!check.allowed && check.paidOnly) {
             res.writeHead(402, { "Content-Type": "application/json" });
-            res.end(JSON.stringify({ error: `${fableName} runs on paid AI credits only, and you have none left. Top up AI credits to keep using it, or pick another model (your free weekly tokens work with every other model).`, code: "fable_needs_paid_credits" }));
+            res.end(JSON.stringify({ error: `${fableName} runs on paid AI credits only, and you have none left. Top up AI credits to keep using it, or pick another model (your plan's limits work with every other model).`, code: "fable_needs_paid_credits" }));
             return;
         }
         if (!check.allowed) {
@@ -6461,7 +6461,7 @@ If a tool fails, never show the error message; say only: "Something went wrong o
         try {
             const check = firstCheck?.allowed ? firstCheck : await hasEnoughTokens(userId, orgId, 1, { paidOnly: fablePaidOnly });
             if (!check.allowed && check.paidOnly) {
-                res.write(`data: ${JSON.stringify({ type: "error", error: `${fableName} runs on paid AI credits only, and you don't have enough left for this message. Top up AI credits, or pick another model (your free weekly tokens work with every other model).` })}\n\n`);
+                res.write(`data: ${JSON.stringify({ type: "error", error: `${fableName} runs on paid AI credits only, and you don't have enough left for this message. Top up AI credits, or pick another model (your plan's limits work with every other model).` })}\n\n`);
                 return;
             }
             if (!check.allowed) {

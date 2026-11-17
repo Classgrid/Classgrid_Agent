@@ -2959,7 +2959,7 @@ export const getAiCreditAdminNotificationHtml = (payerName, payerEmail, amountFo
 
 // ------------- AI CREDITS: GRANTED NOTIFICATION -------------
 export const getAiCreditGrantedHtml = (userName, creditsAdded, totalBalance, expireDateStr = "No expiration", dashboardUrl = null) => {
-    const url = dashboardUrl || (getFrontendUrl() + '/student/agent');
+    const url = dashboardUrl || USAGE_URL;
     const content = `
         <p>Hi ${userName},</p>
         <p>Good news! We have successfully added <strong>${creditsAdded} AI credits</strong> to your account.</p>
@@ -2970,7 +2970,7 @@ export const getAiCreditGrantedHtml = (userName, creditsAdded, totalBalance, exp
             <li><strong>Expiration Date:</strong> ${expireDateStr}</li>
         </ul>
         
-        <p>You can now use your credits to generate content, run AI tools, and use all available smart features. To check your current usage at any time, go to your <a href="${url}">AIHUB CREDITS</a>.</p>
+        <p>You can now use your credits to generate content, run AI tools, and use all available smart features. To check your usage at any time, go to <a href="${url}">Settings &gt; Usage</a>.</p>
         <p>If you have any questions or need more credits, just reply to this email.</p>
         
         <p>Best regards,<br>The Classgrid Support Team</p>
@@ -2979,7 +2979,7 @@ export const getAiCreditGrantedHtml = (userName, creditsAdded, totalBalance, exp
 };
 
 export const getAiCreditGrantedPlainText = (userName, creditsAdded, totalBalance, expireDateStr = "No expiration", dashboardUrl = null) => {
-    const url = dashboardUrl || (getFrontendUrl() + '/student/agent');
+    const url = dashboardUrl || USAGE_URL;
     return `Hi ${userName},
 
 Good news! We have successfully added ${creditsAdded} AI credits to your account.
@@ -2988,7 +2988,7 @@ Good news! We have successfully added ${creditsAdded} AI credits to your account
 • New Total Balance: ${totalBalance} Credits
 • Expiration Date: ${expireDateStr}
 
-You can now use your credits to generate content, run AI tools, and use all available smart features. To check your current usage at any time, go to your AI Hub: ${url}
+You can now use your credits to generate content, run AI tools, and use all available smart features. To check your usage at any time, go to Settings > Usage: ${url}
 
 If you have any questions or need more credits, just reply to this email.
 
@@ -3038,7 +3038,7 @@ Security Warning: If you did not request this code, immediately secure your acco
 
 // ------------- GRANTED CREDITS EXTENDED -------------
 export const getGrantedCreditsExtendedHtml = (userName, newExpiryDate, dashboardUrl = null) => {
-  const url = dashboardUrl || (getFrontendUrl() + '/student/agent');
+  const url = dashboardUrl || USAGE_URL;
   const content = `
     <p>Hi <strong>${userName || 'there'}</strong>,</p>
     <p>Good news! Your Classgrid AI granted credits expiration date has been extended.</p>
@@ -3051,7 +3051,7 @@ export const getGrantedCreditsExtendedHtml = (userName, newExpiryDate, dashboard
     <p>You can continue using your AI credits for generating content and accessing smart features until this new date.</p>
     
     <p style="margin-top: 24px;">
-      <a href="${url}" style="display: inline-block; background-color: #111111; color: #ffffff; padding: 12px 24px; text-decoration: none; border-radius: 6px; font-weight: 500; font-size: 14px;">Open AI Hub</a>
+      <a href="${url}" style="display: inline-block; background-color: #111111; color: #ffffff; padding: 12px 24px; text-decoration: none; border-radius: 6px; font-weight: 500; font-size: 14px;">See your usage</a>
     </p>
   `;
   return baseTemplate({
@@ -3062,7 +3062,7 @@ export const getGrantedCreditsExtendedHtml = (userName, newExpiryDate, dashboard
 };
 
 export const getGrantedCreditsExtendedPlainText = (userName, newExpiryDate, dashboardUrl = null) => {
-  const url = dashboardUrl || (getFrontendUrl() + '/student/agent');
+  const url = dashboardUrl || USAGE_URL;
   return `AI Credits Extended
 
 Hi ${userName || 'there'},
@@ -3073,7 +3073,7 @@ New Expiration Date: ${formatDate(newExpiryDate)}
 
 You can continue using your AI credits until this new date.
 
-To view your AI usage, go to: ${url}
+To see your usage, go to Settings > Usage: ${url}
 
 If you have any questions, just reply to this email.
 
@@ -3082,9 +3082,9 @@ The Classgrid Team`;
 };
 
 // ------------- GRANTED CREDITS PAUSED / UNPAUSED -------------
-export const getGrantedCreditsPausedHtml = (userName, isPaused, dashboardUrl = null) => {
+// `plan`: the user's plan row (plan-limits.service.js planOf), or null while plans are off
+export const getGrantedCreditsPausedHtml = (userName, isPaused, dashboardUrl = null, plan = null) => {
   const action = isPaused ? "paused" : "resumed";
-  const url = dashboardUrl || (getFrontendUrl() + '/student/agent');
   const content = `
     <p>Hi <strong>${userName || 'there'}</strong>,</p>
     <p>Your Classgrid AI granted credits have been <strong>${action}</strong> by the administrator.</p>
@@ -3094,22 +3094,23 @@ export const getGrantedCreditsPausedHtml = (userName, isPaused, dashboardUrl = n
       <p style="margin: 8px 0 0; font-size: 13px; color: ${isPaused ? '#a16207' : '#047857'};">${isPaused ? 'Your granted credits are temporarily unavailable.' : 'Your granted credits are now active and ready to use.'}</p>
     </div>
 
-    ${isPaused ? '<p>While paused, you will not be able to use your granted credits. Your free weekly limit still applies.</p>' : '<p>You can now continue using your granted credits as usual.</p>'}
+    ${isPaused ? `<p>While paused, you will not be able to use your granted credits. ${escHtml(planLimitsStillApplyText(plan))}</p>` : '<p>You can now continue using your granted credits as usual.</p>'}
     
     <p>If you have any questions, simply reply to this email.</p>
   `;
   return baseTemplate({ content, title: 'AI Credits ' + (isPaused ? 'Paused' : 'Resumed') });
 };
 
-export const getGrantedCreditsPausedPlainText = (userName, isPaused, dashboardUrl = null) => {
+export const getGrantedCreditsPausedPlainText = (userName, isPaused, dashboardUrl = null, plan = null) => {
   const action = isPaused ? "paused" : "resumed";
-  const url = dashboardUrl || (getFrontendUrl() + '/student/agent');
-  return 'AI Credits ' + (isPaused ? 'Paused' : 'Resumed') + '\n\nHi ' + (userName || 'there') + ',\n\nYour Classgrid AI granted credits have been ' + action + ' by the administrator.\n\n' + (isPaused ? 'While paused, you will not be able to use your granted credits. Your free weekly limit still applies.' : 'You can now continue using your granted credits as usual.') + '\n\nIf you have any questions, just reply to this email.\n\nBest regards,\nThe Classgrid Team';
+  return 'AI Credits ' + (isPaused ? 'Paused' : 'Resumed') + '\n\nHi ' + (userName || 'there') + ',\n\nYour Classgrid AI granted credits have been ' + action + ' by the administrator.\n\n' + (isPaused ? 'While paused, you will not be able to use your granted credits. ' + planLimitsStillApplyText(plan) : 'You can now continue using your granted credits as usual.') + '\n\nIf you have any questions, just reply to this email.\n\nBest regards,\nThe Classgrid Team';
 };
 
 // ------------- GRANTED CREDITS REMOVED (EXPIRED) -------------
-export const getGrantedCreditsRemovedHtml = (userName, dashboardUrl = null) => {
-  const url = dashboardUrl || (getFrontendUrl() + '/student/agent');
+// `plan`: the user's plan row (plan-limits.service.js planOf), or null while plans are off. Top up only for a plan
+// that can buy top-ups (not Free).
+export const getGrantedCreditsRemovedHtml = (userName, dashboardUrl = null, plan = null) => {
+  const url = dashboardUrl || USAGE_URL;
   const content = `
     <p>Hi <strong>${userName || 'there'}</strong>,</p>
     <p>Your Classgrid AI granted credits have been <strong>removed</strong> by the administrator. Your promotional credit balance has been set to zero.</p>
@@ -3119,215 +3120,191 @@ export const getGrantedCreditsRemovedHtml = (userName, dashboardUrl = null) => {
       <p style="margin: 8px 0 0; font-size: 13px; color: #b91c1c;">Your granted credits balance is now 0.</p>
     </div>
 
-    <p>Your free weekly limit is still available. If you need additional credits, you can purchase them from the AI Hub.</p>
+    <p>${escHtml(planLimitsStillApplyText(plan))}${isFreePlan(plan) ? "" : ` You can <a href="${BILLING_URL}">top up</a> any time.`}</p>
     
     <p style="margin-top: 24px;">
-      <a href="${url}" style="display: inline-block; background-color: #111111; color: #ffffff; padding: 12px 24px; text-decoration: none; border-radius: 6px; font-weight: 500; font-size: 14px;">Open AI Hub</a>
+      <a href="${url}" style="display: inline-block; background-color: #111111; color: #ffffff; padding: 12px 24px; text-decoration: none; border-radius: 6px; font-weight: 500; font-size: 14px;">See your usage</a>
     </p>
   `;
   return baseTemplate({ content, title: 'AI Credits Removed' });
 };
 
-export const getGrantedCreditsRemovedPlainText = (userName, dashboardUrl = null) => {
-  const url = dashboardUrl || (getFrontendUrl() + '/student/agent');
-  return 'AI Credits Removed\n\nHi ' + (userName || 'there') + ',\n\nYour Classgrid AI granted credits have been removed by the administrator. Your promotional credit balance has been set to zero.\n\nYour free weekly limit is still available. If you need additional credits, you can purchase them from the AI Hub.\n\nTo view your AI usage, go to: ' + url + '\n\nBest regards,\nThe Classgrid Team';
-};
-
-// ------------- GRANTED CREDITS EXPIRY WARNING (2 days before) -------------
-export const getGrantedCreditsExpiryWarningHtml = (userName, expiryDate, remainingCredits, dashboardUrl = null) => {
-  const url = dashboardUrl || (getFrontendUrl() + '/student/agent');
-  const content = `
-    <p>Hi <strong>${userName || 'there'}</strong>,</p>
-    <p>This is a friendly reminder that your Classgrid AI granted credits are <strong>expiring soon</strong>.</p>
-    
-    <div class="box" style="margin: 24px 0; background-color: #fffbeb; border: 1px solid #fcd34d; border-radius: 8px; padding: 20px;">
-      <h3 style="margin-top: 0; color: #92400e; font-size: 16px; margin-bottom: 12px;">Expiring Soon</h3>
-      <p style="margin: 0 0 8px; font-size: 14px; color: #78350f;"><strong>Expiration Date:</strong> ${formatDate(expiryDate)}</p>
-      <p style="margin: 0; font-size: 14px; color: #78350f;"><strong>Remaining Credits:</strong> ${remainingCredits}</p>
-    </div>
-
-    <p>Make sure to use your remaining credits before they expire. After expiration, your granted credit balance will be set to zero.</p>
-    
-    <p style="margin-top: 24px;">
-      <a href="${url}" style="display: inline-block; background-color: #111111; color: #ffffff; padding: 12px 24px; text-decoration: none; border-radius: 6px; font-weight: 500; font-size: 14px;">Use Your Credits</a>
-    </p>
-  `;
-  return baseTemplate({ content, title: 'AI Credits Expiring Soon' });
-};
-
-export const getGrantedCreditsExpiryWarningPlainText = (userName, expiryDate, remainingCredits, dashboardUrl = null) => {
-  const url = dashboardUrl || (getFrontendUrl() + '/student/agent');
-  return 'AI Credits Expiring Soon\n\nHi ' + (userName || 'there') + ',\n\nThis is a friendly reminder that your Classgrid AI granted credits are expiring soon.\n\nExpiration Date: ' + formatDate(expiryDate) + '\nRemaining Credits: ' + remainingCredits + '\n\nMake sure to use your remaining credits before they expire. After expiration, your granted credit balance will be set to zero.\n\nTo use your credits: ' + url + '\n\nBest regards,\nThe Classgrid Team';
+export const getGrantedCreditsRemovedPlainText = (userName, dashboardUrl = null, plan = null) => {
+  const url = dashboardUrl || USAGE_URL;
+  return 'AI Credits Removed\n\nHi ' + (userName || 'there') + ',\n\nYour Classgrid AI granted credits have been removed by the administrator. Your promotional credit balance has been set to zero.\n\n' + planLimitsStillApplyText(plan) + (isFreePlan(plan) ? '' : ' You can top up any time: ' + BILLING_URL) + '\n\nTo see your usage, go to Settings > Usage: ' + url + '\n\nBest regards,\nThe Classgrid Team';
 };
 
 // ============================================================================
-// AI CREDITS - LOW BALANCE & EXHAUSTION TEMPLATES
+// PLANS (Free, Pro, Max): the wording of the plan emails and WhatsApp texts
 // ============================================================================
+// `plan` is the user's plan row from the plan table (plan-limits.service.js planOf: name, key, window_reset_value,
+// window_reset_unit, tokens_per_week, features_text), or null while plans are off and for Classgrid staff: then the
+// text says "your plan" with no name. `paidNames` are the paid plans' names from the same table (ai-credits.service.js
+// planWording). No plan name, amount or limit is typed by hand here.
+export const PLANS_URL = "https://classgrid.in/pricing";
+export const BILLING_URL = "https://chat.classgrid.in/agent/settings?section=billing";
+export const USAGE_URL = "https://chat.classgrid.in/agent/settings?section=usage";
+// Top-up credits stay valid for 30 days from the purchase (razorpay-webhook.routes.js sets ai_credits_end_date)
+export const TOPUP_VALID_DAYS = 30;
 
-export const getGrantedCreditsLowEmailHtml = (userName, expirationDate, subdomain) => {
-    const dashboardLink = "https://chat.classgrid.in";
-    const checkoutLink = "https://chat.classgrid.in";
+const escHtml = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const planButton = (href, label) => `<p><a href="${href}" style="display:inline-block; padding:10px 20px; background:#111111; color:#ffffff; text-decoration:none; border-radius:6px; font-weight:bold;">${label}</a></p>`;
+const planSignOff = `<p>Thanks,<br/>The Classgrid Team</p>`;
 
-    const content = `
-      <p>Hello ${userName},</p>
-      <p>Your account has used <strong>80% of its Granted AI Credits</strong>. This usage covers all AI-powered tools and generations across the Classgrid platform, and your current grant is scheduled to expire on ${expirationDate}.</p>
-      <p>Once your Granted AI Credits are fully consumed, your AI access will be automatically paused unless you have a Top-Up Credit balance available on your account.</p>
-      <p>To ensure your workflow isn't interrupted, you can easily purchase Top-Up Credits or check your current balance in your AI Dashboard.</p>
-      <p><a href="${dashboardLink}" style="display:inline-block; padding:10px 20px; background:#111111; color:#ffffff; text-decoration:none; border-radius:6px; font-weight:bold;">Check My AI Usage & Balance</a></p>
-      <p>Need more AI capacity? Top-Up Credits stay valid for 30 days and seamlessly take over once your granted promotional credits run out. Head over to your dashboard to secure additional credits and keep your AI tools running smoothly.</p>
-      <p><a href="${checkoutLink}" style="display:inline-block; padding:10px 20px; background:#111111; color:#ffffff; text-decoration:none; border-radius:6px; font-weight:bold;">Purchase Top-Up Credits</a></p>
-      <p>Need help? Check out the <a href="https://classgrid.in/help-center" style="color:#2563eb; text-decoration:underline;">Help Center</a> for answers to your most common questions, or reach out to our Support team directly from your dashboard.</p>
-      <p>Thanks,<br/>The Classgrid Team</p>
-    `;
-    return baseTemplate({ content, title: "Action Required: You have used 80% of your Granted AI Credits" });
+/** The Free plan: it cannot buy top-ups (top-ups are for the paid plans) */
+export const isFreePlan = (plan) => plan?.key === "free";
+/** "your Pro plan's" / "your plan's" */
+export const yourPlansText = (plan) => (plan?.name ? `your ${plan.name} plan's` : "your plan's");
+/** "Your Pro plan" / "Your plan" */
+const yourPlanTitle = (plan) => (plan?.name ? `Your ${plan.name} plan` : "Your plan");
+/** "Your Pro plan's limits still apply." */
+const planLimitsStillApplyText = (plan) => `${plan?.name ? `Your ${plan.name} plan's` : "Your plan's"} limits still apply.`;
+/** The paid plans' names: "Pro and Max" (word "and") or "Pro or Max" (word "or") */
+export const paidPlansText = (paidNames, word = "and") => {
+  const names = (paidNames || []).filter(Boolean);
+  return names.length > 1 ? `${names.slice(0, -1).join(", ")} ${word} ${names[names.length - 1]}` : names[0] || "";
 };
 
-export const getTopUpCreditsLowEmailHtml = (userName, subdomain) => {
-    const dashboardLink = "https://chat.classgrid.in";
-    const checkoutLink = "https://chat.classgrid.in";
-
-    const content = `
-      <p>Hello ${userName},</p>
-      <p>Your account has used <strong>80% of its Top-Up AI Credits</strong>. This usage covers all AI-powered tools and generations across the Classgrid platform.</p>
-      <p>Top-Up Credits stay valid for 30 days from purchase. Once your remaining Top-Up Credits are completely consumed, your AI access will be automatically paused.</p>
-      <p>To ensure your workflow isn't interrupted and your AI tools keep running smoothly, you can easily purchase additional Top-Up Credits right now.</p>
-      <p><a href="${dashboardLink}" style="display:inline-block; padding:10px 20px; background:#111111; color:#ffffff; text-decoration:none; border-radius:6px; font-weight:bold;">Check My AI Usage & Balance</a></p>
-      <p>Need more AI capacity? Head over to your dashboard to secure additional Top-Up Credits in minutes, ensuring your access to Classgrid's advanced AI features is never disrupted.</p>
-      <p><a href="${checkoutLink}" style="display:inline-block; padding:10px 20px; background:#111111; color:#ffffff; text-decoration:none; border-radius:6px; font-weight:bold;">Purchase Top-Up Credits</a></p>
-      <p>Need help? Check out the <a href="https://classgrid.in/help-center" style="color:#2563eb; text-decoration:underline;">Help Center</a> for answers to your most common questions, or reach out to our Support team directly from your dashboard.</p>
-      <p>Thanks,<br/>The Classgrid Team</p>
-    `;
-    return baseTemplate({ content, title: "Action Required: You have used 80% of your Top-Up AI Credits" });
+// The plan's session window as { value, unit }: from the plan row (window_reset_value / window_reset_unit), else from
+// the window's length in ms (plans off: the dashboard's reset timing)
+const WINDOW_UNITS_MS = [["week", 7 * 24 * 3600000], ["day", 24 * 3600000], ["hour", 3600000], ["minute", 60000], ["second", 1000]];
+function windowParts(plan, periodMs) {
+  const value = Number(plan?.window_reset_value);
+  if (value > 0 && plan?.window_reset_unit) return { value, unit: plan.window_reset_unit };
+  const ms = Number(periodMs);
+  if (ms > 0) for (const [unit, size] of WINDOW_UNITS_MS) if (ms % size === 0) return { value: ms / size, unit };
+  return null;
+}
+/** "5 hours" */
+export const windowLengthText = (plan, periodMs) => {
+  const w = windowParts(plan, periodMs);
+  return w ? `${w.value} ${w.unit}${w.value === 1 ? "" : "s"}` : "";
 };
-
-export const getFreeLimitsExhaustedEmailHtml = (userName, resetDate, subdomain) => {
-    const checkoutLink = "https://chat.classgrid.in";
-    
-    const content = `
-      <p>Hello ${userName},</p>
-      <p>Your account has reached <strong>100% of its Personal Free Limits</strong> for AI usage.</p>
-      <p>Your AI access has been temporarily paused. Don't worry—your free limits refill automatically, and your access will be fully restored on <strong>${resetDate}</strong>.</p>
-      <p>Don't want to wait? If you need to keep using Classgrid's AI tools right now, you can purchase Top-Up Credits. Top-Up Credits stay valid for 30 days and instantly restore your access so you can continue your work without any interruptions.</p>
-      <p><a href="${checkoutLink}" style="display:inline-block; padding:10px 20px; background:#111111; color:#ffffff; text-decoration:none; border-radius:6px; font-weight:bold;">Purchase Top-Up Credits</a></p>
-      <p>Need help? Check out the <a href="https://classgrid.in/help-center" style="color:#2563eb; text-decoration:underline;">Help Center</a> for answers to your most common questions, or reach out to our Support team directly from your dashboard.</p>
-      <p>Thanks,<br/>The Classgrid Team</p>
-    `;
-    return baseTemplate({ content, title: "Action Required: You have reached 100% of your Free AI Usage" });
+/** "5-hour limit" */
+export const windowLimitText = (plan, periodMs) => {
+  const w = windowParts(plan, periodMs);
+  return w ? `${w.value}-${w.unit} limit` : "session limit";
 };
+/** A time in India time, as the other alerts show it: "18 Nov 2026, 3:00 pm (India time)" */
+export const indiaTimeText = (date) => `${new Date(date).toLocaleString("en-IN", { timeZone: "Asia/Kolkata", dateStyle: "medium", timeStyle: "short" })} (India time)`;
 
-export const getGrantedCreditsExhaustedEmailHtml = (userName, resetDate, subdomain) => {
-    const checkoutLink = "https://chat.classgrid.in";
-    
-    const content = `
-      <p>Hello ${userName},</p>
-      <p>Your account has reached <strong>100% of its Granted AI Credits</strong>.</p>
-      <p>Because your granted promotional credits have been fully consumed, your AI access has been paused. However, your access will be automatically restored when your Personal Free Limits reset on <strong>${resetDate}</strong>.</p>
-      <p>Don't want to wait until ${resetDate}? You can instantly restore your access right now by adding a Top-Up Credit balance to your account. Top-Up Credits seamlessly take over when your free limits or grants run out, ensuring your workflow is never interrupted.</p>
-      <p><a href="${checkoutLink}" style="display:inline-block; padding:10px 20px; background:#111111; color:#ffffff; text-decoration:none; border-radius:6px; font-weight:bold;">Purchase Top-Up Credits</a></p>
-      <p>Need help? Check out the <a href="https://classgrid.in/help-center" style="color:#2563eb; text-decoration:underline;">Help Center</a> for answers to your most common questions, or reach out to our Support team directly from your dashboard.</p>
-      <p>Thanks,<br/>The Classgrid Team</p>
-    `;
-    return baseTemplate({ content, title: "Action Required: You have reached 100% of your Granted AI Credits" });
-};
-
-export const getTopUpCreditsExhaustedEmailHtml = (userName, resetDate, subdomain) => {
-    const checkoutLink = "https://chat.classgrid.in";
-    
-    const content = `
-      <p>Hello ${userName},</p>
-      <p>Your account has reached <strong>100% of its Top-Up AI Credits</strong>.</p>
-      <p>Because your purchased balance has been fully depleted, your AI access has been paused. However, your access will automatically resume as soon as your Personal Free Limits reset on <strong>${resetDate}</strong>.</p>
-      <p>Need to keep working right now? If you don't want to wait for your free limits to reset, you can easily purchase a new bundle of Top-Up Credits today to instantly restore your access to Classgrid's advanced AI features.</p>
-      <p><a href="${checkoutLink}" style="display:inline-block; padding:10px 20px; background:#111111; color:#ffffff; text-decoration:none; border-radius:6px; font-weight:bold;">Purchase Top-Up Credits</a></p>
-      <p>Need help? Check out the <a href="https://classgrid.in/help-center" style="color:#2563eb; text-decoration:underline;">Help Center</a> for answers to your most common questions, or reach out to our Support team directly from your dashboard.</p>
-      <p>Thanks,<br/>The Classgrid Team</p>
-    `;
-    return baseTemplate({ content, title: "Action Required: You have reached 100% of your Top-Up AI Credits" });
-};
-
-
-// ------------- AI CREDITS USAGE ALERTS -------------
-
-export const getGrantedCreditsWarningHtml = (userName, expirationDate, dashboardUrl) => {
-  return baseTemplate({
-    title: "Action Required: You have used 80% of your Granted AI Credits",
+// ------------- A PLAN'S LIMIT IS USED UP -------------
+// Sent at most once a day (ai-credits.service.js triggerEmailAlerts, type "free"). `which` is "week" (the plan's weekly
+// limit) or "window" (the session window), `backAt` when that limit comes back, `periodMs` the window's length.
+export const getPlanLimitReachedEmail = ({ userName, plan, paidNames, which, backAt, periodMs }) => {
+  const plans = yourPlansText(plan);
+  const limit = which === "week" ? "weekly limit" : windowLimitText(plan, periodMs);
+  const subject = `You've used ${plans} limit for now`;
+  const used = `You've used all of ${plans} ${limit}.${backAt ? ` It comes back on ${indiaTimeText(backAt)}.` : ""}`;
+  const free = isFreePlan(plan);
+  const paid = paidPlansText(paidNames) || "Our paid plans";
+  const more = free ? `Want more now? ${paid} have higher limits.` : `Want to keep going now? Top up AI credits. They are used after your plan's limit and stay valid for ${TOPUP_VALID_DAYS} days.`;
+  const button = free ? { href: PLANS_URL, label: "See plans" } : { href: BILLING_URL, label: "Top up" };
+  const html = baseTemplate({
+    title: escHtml(subject),
     content: `
-      <h2>Hello ${userName},</h2>
-      <p>Your account has used <strong>80%</strong> of its <strong>Granted AI Credits</strong>. This usage covers all AI-powered tools and generations across the Classgrid platform, and your current grant is scheduled to expire on <strong>${formatDate(expirationDate)}</strong>.</p>
-      <p>Once your Granted AI Credits are fully consumed, your AI access will be automatically paused unless you have a Top-Up Credit balance available on your account.</p>
-      <p>To ensure your workflow isn't interrupted, you can easily purchase Top-Up Credits or check your current balance in your AI Dashboard.</p>
-      <a href="${dashboardUrl}" class="btn">Check My AI Usage & Balance</a>
-      
-      <div class="box" style="margin-top: 30px;">
-        <h3 style="margin-bottom: 8px;">Need more AI capacity for your classroom?</h3>
-        <p>Top-Up Credits never expire and seamlessly take over once your granted promotional credits run out. Head over to your dashboard to secure additional credits and keep your AI tools running smoothly.</p>
-      </div>
-    `
+      <p>Hello ${escHtml(userName)},</p>
+      <p>${escHtml(used)}</p>
+      <p>${escHtml(more)}</p>
+      ${planButton(button.href, button.label)}
+      ${planSignOff}
+    `,
   });
+  const text = `Hello ${userName},\n\n${used}\n\n${more}\n\n${button.label}: ${button.href}\n\nThanks,\nThe Classgrid Team`;
+  return { subject, html, text };
 };
 
-export const getTopUpCreditsWarningHtml = (userName, dashboardUrl) => {
-  return baseTemplate({
-    title: "Action Required: You have used 80% of your Top-Up AI Credits",
-    content: `
-      <h2>Hello ${userName},</h2>
-      <p>Your account has used <strong>80%</strong> of its <strong>Top-Up AI Credits</strong>. This usage covers all AI-powered tools and generations across the Classgrid platform.</p>
-      <p>Since Top-Up credits never expire, they will remain active until they are fully depleted. However, once your remaining Top-Up Credits are completely consumed, your AI access will be automatically paused.</p>
-      <p>To ensure your workflow isn't interrupted and your AI tools keep running smoothly, you can easily purchase additional Top-Up Credits right now.</p>
-      <a href="${dashboardUrl}" class="btn">Check My AI Usage & Balance</a>
-    `
-  });
+// ------------- TOP-UP AND GRANTED CREDITS: 80% USED, AND USED UP -------------
+// The plan keeps working when these credits run out, so nothing here says access stops. "Top up" only for a plan
+// that can buy top-ups (not Free).
+const creditsNoticeHtml = ({ userName, plan, title, lead, keeps }) => baseTemplate({
+  title,
+  content: `
+      <p>Hello ${escHtml(userName)},</p>
+      <p>${escHtml(lead)} ${escHtml(keeps)}</p>
+      ${isFreePlan(plan) ? "" : planButton(BILLING_URL, "Top up")}
+      ${planSignOff}
+    `,
+});
+const planKeepsText = (plan) => `${yourPlanTitle(plan)} keeps working as its limits refill.`;
+const planAndTopUpsKeepText = (plan) => `${yourPlanTitle(plan)} and any top-up credits keep working as its limits refill.`;
+
+export const CREDIT_EMAIL_SUBJECTS = {
+  topUpLow: "You've used 80% of your top-up credits",
+  topUpUsedUp: "Your top-up credits are used up",
+  grantedLow: "You've used 80% of your granted credits",
+  grantedUsedUp: "Your granted credits are used up",
 };
 
-export const getFreeLimitsExhaustedHtml = (userName, resetDate, dashboardUrl) => {
-  return baseTemplate({
-    title: "Action Required: You have reached 100% of your Free AI Usage",
-    content: `
-      <h2>Hello ${userName},</h2>
-      <p>Your account has reached <strong>100%</strong> of its <strong>Personal Free Limits</strong> for AI usage.</p>
-      <p>Your AI access has been temporarily paused. Don't worry—your free limits refill automatically, and your access will be fully restored on <strong>${formatDate(resetDate)}</strong>.</p>
+export const getTopUpCreditsLowEmailHtml = (userName, plan = null) => creditsNoticeHtml({
+  userName, plan, title: CREDIT_EMAIL_SUBJECTS.topUpLow,
+  lead: "You've used 80% of your top-up credits.", keeps: planKeepsText(plan),
+});
 
-      <div class="box" style="margin-top: 30px;">
-        <h3 style="margin-bottom: 8px;">Don't want to wait?</h3>
-        <p>If you need to keep using Classgrid's AI tools right now, you can purchase Top-Up Credits. Top-Up Credits never expire and instantly restore your access so you can continue your work without any interruptions.</p>
-        <a href="${dashboardUrl}" class="btn" style="margin-top: 15px;">Purchase Top-Up Credits</a>
-      </div>
-    `
+export const getTopUpCreditsExhaustedEmailHtml = (userName, plan = null) => creditsNoticeHtml({
+  userName, plan, title: CREDIT_EMAIL_SUBJECTS.topUpUsedUp,
+  lead: "Your top-up credits are used up.", keeps: planKeepsText(plan),
+});
+
+export const getGrantedCreditsLowEmailHtml = (userName, plan = null) => creditsNoticeHtml({
+  userName, plan, title: CREDIT_EMAIL_SUBJECTS.grantedLow,
+  lead: "You've used 80% of your granted credits.", keeps: planAndTopUpsKeepText(plan),
+});
+
+export const getGrantedCreditsExhaustedEmailHtml = (userName, plan = null) => creditsNoticeHtml({
+  userName, plan, title: CREDIT_EMAIL_SUBJECTS.grantedUsedUp,
+  lead: "Your granted credits are used up.", keeps: planAndTopUpsKeepText(plan),
+});
+
+// ------------- A PLAN SET BY A SUPER ADMIN -------------
+// super-admin/ai-plans.controller.js setUserPlan. `plan` is the plan row read live from the plan table. Nothing for
+// the Free plan (null), and nothing without a plan row.
+export const getPlanSetEmail = ({ userName, plan, start, end = null }) => {
+  if (!plan?.name || isFreePlan(plan)) return null;
+  const day = (d) => new Date(d).toLocaleDateString("en-IN", { day: "numeric", month: "long", year: "numeric", timeZone: "Asia/Kolkata" });
+  const subject = `You're on the Classgrid ${plan.name} plan`;
+  const period = end ? `${plan.name} is on from ${day(start)} to ${day(end)}.` : `${plan.name} is on from ${day(start)}. It has no end date.`;
+  const features = (plan.features_text || []).map((l) => String(l).trim()).filter(Boolean);
+  const html = baseTemplate({
+    title: escHtml(subject),
+    content: `
+      <p>Hi ${escHtml(userName || "there")},</p>
+      <p>${escHtml(period)}</p>
+      ${features.length ? `<ul>${features.map((l) => `<li>${escHtml(l)}</li>`).join("")}</ul>` : ""}
+      ${planButton(USAGE_URL, "See your usage")}
+      ${planSignOff}
+    `,
   });
+  const text = `Hi ${userName || "there"},\n\n${period}\n\n${features.map((l) => `- ${l}`).join("\n")}${features.length ? "\n\n" : ""}See your usage: ${USAGE_URL}\n\nThanks,\nThe Classgrid Team`;
+  return { subject, html, text };
 };
 
-export const getGrantedCreditsExhaustedHtml = (userName, resetDate, dashboardUrl) => {
-  return baseTemplate({
-    title: "Action Required: You have reached 100% of your Granted AI Credits",
-    content: `
-      <h2>Hello ${userName},</h2>
-      <p>Your account has reached <strong>100%</strong> of its <strong>Granted AI Credits</strong>.</p>
-      <p>Because your granted promotional credits have been fully consumed, your AI access has been paused. However, your access will be automatically restored when your <strong>Personal Free Limits</strong> reset on <strong>${formatDate(resetDate)}</strong>.</p>
-      
-      <div class="box" style="margin-top: 30px;">
-        <h3 style="margin-bottom: 8px;">Don't want to wait?</h3>
-        <p>You can instantly restore your access right now by adding a Top-Up Credit balance to your account. Top-Up Credits seamlessly take over when your free limits or grants run out, ensuring your workflow is never interrupted.</p>
-        <a href="${dashboardUrl}" class="btn" style="margin-top: 15px;">Purchase Top-Up Credits</a>
-      </div>
-    `
-  });
+// ------------- WHATSAPP TEXTS WHEN A PLAN'S LIMIT IS USED UP -------------
+// whatsapp-call.service.js and agent-task.service.js. Free: wait, or upgrade (Free cannot buy top-ups). Every other
+// plan, and plans off: wait, or top up. `backAt`: when the limit comes back.
+const PLANS_SITE = "classgrid.in/pricing";
+const CHAT_SITE = "chat.classgrid.in";
+const limitNextStep = ({ plan, paidNames, backAt, comesBack }) => {
+  const upgrade = `upgrade to ${paidPlansText(paidNames, "or") || "a paid plan"} for more: ${PLANS_SITE}`;
+  const topUp = `top up on ${CHAT_SITE}`;
+  const step = isFreePlan(plan) ? upgrade : topUp;
+  if (!backAt) return step.charAt(0).toUpperCase() + step.slice(1);
+  return `${comesBack} back on ${indiaTimeText(backAt)}, or ${step}`;
 };
+const capitalFirst = (s) => s.charAt(0).toUpperCase() + s.slice(1);
 
-export const getTopUpCreditsExhaustedHtml = (userName, resetDate, dashboardUrl) => {
-  return baseTemplate({
-    title: "Action Required: You have reached 100% of your Top-Up AI Credits",
-    content: `
-      <h2>Hello ${userName},</h2>
-      <p>Your account has reached <strong>100%</strong> of its <strong>Top-Up AI Credits</strong>.</p>
-      <p>Because your purchased balance has been fully depleted, your AI access has been paused. However, your access will automatically resume as soon as your <strong>Personal Free Limits</strong> reset on <strong>${formatDate(resetDate)}</strong>.</p>
-      
-      <div class="box" style="margin-top: 30px;">
-        <h3 style="margin-bottom: 8px;">Need to keep working right now?</h3>
-        <p>If you don't want to wait for your free limits to reset, you can easily purchase a new bundle of Top-Up Credits today to instantly restore your access to Classgrid's advanced AI features.</p>
-        <a href="${dashboardUrl}" class="btn" style="margin-top: 15px;">Purchase Top-Up Credits</a>
-      </div>
-    `
-  });
+/** An incoming call refused: the plan's limit (and the call minutes) are used up */
+export const callRefusedLimitText = ({ plan, paidNames, backAt }) =>
+  `You've used ${yourPlansText(plan)} limit for now, so Classgrid AI can't take calls. ${limitNextStep({ plan, paidNames, backAt, comesBack: "Calls come" })}`;
+
+/** A call ended: the plan's call minutes ran out, with no limit left to pay for more */
+export const callMinutesUsedUpText = ({ plan, paidNames, backAt, taskSaved = false }) =>
+  `${capitalFirst(yourPlansText(plan))} call minutes for this period are used up${taskSaved ? ", but your request is saved and Classgrid AI is working on it" : ""}. ${limitNextStep({ plan, paidNames, backAt, comesBack: "Calls come" })}`;
+
+/** A background task paused until the plan's limit comes back */
+export const taskPausedLimitText = ({ plan, paidNames, backAt }) => {
+  const next = limitNextStep({ plan, paidNames, backAt, comesBack: "it comes" });
+  return `⏸️ You've used ${yourPlansText(plan)} limit for now, so I paused your task. ${backAt ? `I'll continue by myself when ${next}` : `I'll continue by myself when it comes back. ${next}`}`;
 };
 
 // ------------- CHAT OTP EMAIL -------------
@@ -3364,7 +3341,33 @@ const chatWelcomeGreetingName = (name) => {
   return first.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 };
 
-export const getChatWelcomeEmailHtml = (name) => {
+// The welcome's plan part. `plan`: the new account's plan row (plan-limits.service.js planOf: the Free plan), and
+// `paidNames`: the paid plans' names, all from the plan table. Plans off (or staff): only where usage is shown.
+const chatWelcomePlan = (plan, paidNames) => {
+  const usage = "You can see what you've used in Settings > Usage.";
+  if (!plan?.name) return { lead: "", refills: "", more: "", usage };
+  const every = windowLengthText(plan);
+  const weekly = Number(plan.tokens_per_week) === -1 ? "" : ", with a weekly limit";
+  return {
+    lead: `You're on the ${plan.name} plan.`,
+    refills: every ? `It refills every ${every}${weekly}.` : "",
+    more: `For more use, Claude models and more images, see ${paidPlansText(paidNames) || "our paid plans"}:`,
+    usage,
+  };
+};
+const chatWelcomePlanHtml = (plan, paidNames) => {
+  const w = chatWelcomePlan(plan, paidNames);
+  const usage = `You can see what you've used in <a href="${USAGE_URL}">Settings &gt; Usage</a>.`;
+  if (!w.lead) return `<p>${usage}</p>`;
+  return `<p><strong>${escHtml(w.lead)}</strong>${w.refills ? ` ${escHtml(w.refills)}` : ""} ${escHtml(w.more)} <a href="${PLANS_URL}">classgrid.in/pricing</a>. ${usage}</p>`;
+};
+const chatWelcomePlanText = (plan, paidNames) => {
+  const w = chatWelcomePlan(plan, paidNames);
+  if (!w.lead) return w.usage;
+  return [w.lead, w.refills, `${w.more} classgrid.in/pricing.`, w.usage].filter(Boolean).join(" ");
+};
+
+export const getChatWelcomeEmailHtml = (name, plan = null, paidNames = []) => {
   const firstName = chatWelcomeGreetingName(name);
   const content = `
     <p>Hello${firstName ? ` ${firstName}` : ""},</p>
@@ -3378,7 +3381,7 @@ export const getChatWelcomeEmailHtml = (name) => {
 
     <p><strong>Works while you're away.</strong> Schedule daily briefs, weekly reports and reminders. The agent runs in the background and delivers the finished summaries straight to your WhatsApp.</p>
 
-    <p><strong>Flexible AI credits.</strong> No locked-in monthly plans. Top up AI credits with any amount from ₹1 to ₹10,000 whenever you need, from Upgrade in the app.</p>
+    ${chatWelcomePlanHtml(plan, paidNames)}
 
     <div style="text-align:center;margin:8px 0 28px;">
       <a href="${CHAT_APP_URL}" class="btn">Give the agent its first task</a>
@@ -3401,7 +3404,7 @@ export const getChatWelcomeEmailHtml = (name) => {
   });
 };
 
-export const getChatWelcomeEmailPlainText = (name) => {
+export const getChatWelcomeEmailPlainText = (name, plan = null, paidNames = []) => {
   const firstName = chatWelcomeGreetingName(name);
   return `Welcome to Classgrid AI!
 
@@ -3415,7 +3418,7 @@ Built to do your real work: Give the agent your toughest tasks. Upload spreadshe
 
 Works while you're away: Schedule daily briefs, weekly reports and reminders. The agent runs in the background and delivers the finished summaries straight to your WhatsApp.
 
-Flexible AI credits: No locked-in monthly plans. Top up AI credits with any amount from ₹1 to ₹10,000 whenever you need, from Upgrade in the app.
+${chatWelcomePlanText(plan, paidNames)}
 
 Please be aware that AI responses might contain inaccuracies.
 

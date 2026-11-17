@@ -101,7 +101,7 @@ export const setUserPlan = async (req, res) => {
             expiresAt = new Date(req.body.expires_at);
             if (Number.isNaN(expiresAt.getTime())) return res.status(400).json({ success: false, message: "expires_at is not a date." });
         }
-        const user = await User.findById(userId).select("plan email");
+        const user = await User.findById(userId).select("plan email name");
         if (!user) return res.status(404).json({ success: false, message: "User not found." });
         user.plan = {
             id: planId,
@@ -118,11 +118,25 @@ export const setUserPlan = async (req, res) => {
         const io = req.app.get("io");
         if (io) { io.to(String(userId)).emit("ai_token_update"); io.to(String(userId)).emit("plan_update", { plan: planId }); } // (a user's socket room is their id, socket.service.js)
         res.json({ success: true, plan: user.plan });
+        // After the reply, so the email never holds up or fails the save: "You're on the Classgrid Pro plan"
+        if (planId !== "free") planSetEmail(user, planId).catch((e) => console.error("[setUserPlan] plan email failed:", e.message));
     } catch (error) {
         console.error("[setUserPlan]", error);
         res.status(500).json({ success: false, message: "Server error setting the plan." });
     }
 };
+
+// The email for a plan set by a super admin: the plan's name, its dates, and its features_text lines, read live from
+// the plan table (as the webhook's receipt does). Nothing for Free, without an email address, or without a plan row.
+export async function planSetEmail(user, planId) {
+    if (!user?.email || planId === "free") return;
+    const planRow = await PlanConfig.findOne({ key: planId }).lean();
+    const { getPlanSetEmail } = await import("../../services/email-templates.service.js");
+    const mail = getPlanSetEmail({ userName: user.name, plan: planRow, start: user.plan?.started_at || new Date(), end: user.plan?.expires_at || null });
+    if (!mail) return;
+    const { sendEmail } = await import("../../services/aws-ses.service.js");
+    await sendEmail({ to: user.email, subject: mail.subject, html: mail.html, text: mail.text, fromName: "Classgrid", userId: user._id });
+}
 
 // Everyone on a paid plan (Pro, Max, Enterprise: bought or granted), newest first, and the plan payments
 export const listSubscribers = async (req, res) => {

@@ -44,7 +44,7 @@ import { enqueueEmail } from "./email-queue.service.js";
 import { resetPeriodMs, RESET_UNITS } from "./ai-feature-limits.js";
 import { planOf, isUnlimited } from "./plan-limits.service.js";
 import redis from "../config/redis.js";
-import { getGrantedCreditsLowEmailHtml, getTopUpCreditsLowEmailHtml, getFreeLimitsExhaustedEmailHtml, getGrantedCreditsExhaustedEmailHtml, getTopUpCreditsExhaustedEmailHtml, baseTemplate } from "./email-templates.service.js";
+import { getGrantedCreditsLowEmailHtml, getTopUpCreditsLowEmailHtml, getPlanLimitReachedEmail, getGrantedCreditsExhaustedEmailHtml, getTopUpCreditsExhaustedEmailHtml, CREDIT_EMAIL_SUBJECTS, baseTemplate } from "./email-templates.service.js";
 
 // Automatic top-ups (Settings > Billing): once the bought credits fall below the amount the user set, one email a day
 // with a one-click link that opens Billing with the top-up amount filled in. No payment method is kept, so the user
@@ -155,6 +155,37 @@ export async function weekCounters(userId, tokens, nowMs = Date.now()) {
     return { week_used: 0, claude_week_used: 0, fable_week_used: 0, weekEnd: new Date(nowMs + WEEK_MS) };
 }
 const weekUsed = async (userId, tokens, nowMs = Date.now()) => (await weekCounters(userId, tokens, nowMs)).week_used;
+
+// Which limit a person used up and when it comes back, by the same rule as hasEnoughTokens' resetAt: the plan's weekly
+// limit when the week's use reached the weekly cap (back at the week's end), else the session window (back at the
+// window's end). periodMs is the window's length (for "5-hour limit" while plans are off). `user` needs ai_tokens,
+// plan, role and email.
+export async function limitBackAt(user, orgId = user?.organization_id || null, nowMs = Date.now()) {
+    const [globalConfig, org] = await Promise.all([
+        GlobalAiConfig.findOne({ key: "singleton" }).select("global_user_weekly_limit classgrid_custom_limits_enabled classgrid_user_weekly_limit global_token_reset_value global_token_reset_unit classgrid_token_reset_value classgrid_token_reset_unit").lean(),
+        orgId ? Organization.findById(orgId).select("ai_config").lean() : null,
+    ]);
+    const window = await freeWindow(user, org, globalConfig || {}, orgId);
+    const week = window.weekCap === null ? null : await weekCounters(user._id, user.ai_tokens, nowMs);
+    if (week && window.weekCap - week.week_used <= 0) return { which: "week", at: new Date(week.weekEnd), periodMs: window.periodMs };
+    const windowEndMs = tokenWindowEnd(user.ai_tokens, window.periodMs, nowMs);
+    return { which: "window", at: new Date(nowMs >= windowEndMs ? nowMs + window.periodMs : windowEndMs), periodMs: window.periodMs };
+}
+
+// The plan wording for emails and WhatsApp texts, all from the plan table: the user's plan row (null while plans are
+// off, and for Classgrid staff) and the paid plans' names ("Pro", "Max") to upgrade to
+export async function planWording(user) {
+    const plan = await planOf(user).catch(() => null);
+    let paidNames = [];
+    try {
+        const { planTable } = await import("./plan-limits.service.js");
+        const table = await planTable();
+        paidNames = ["pro", "max"].map((key) => table?.plans?.[key]?.name).filter(Boolean);
+    } catch (e) {
+        console.warn("[plans] could not read the plan names:", e.message);
+    }
+    return { plan, paidNames };
+}
 
 // One computer, one free limit (desktop app): the free tokens used by every account on the same Windows computer
 // count together, so making more accounts doesn't give more free usage. Paid and granted credits are not affected.
@@ -347,81 +378,45 @@ const triggerEmailAlerts = async (userId, orgId, type, oldBalance, currentBalanc
         if (!user || !user.email) return;
         if (type === 'personal') autoTopupEmail(user, orgId, currentBalance).catch((e) => console.error("[auto top-up email]", e.message));
 
-        let subdomain = '';
-        if (orgId) {
-            const org = await Organization.findById(orgId).select('subdomain');
-            if (org && org.subdomain) subdomain = org.subdomain;
-        }
-
         const userName = user.name || (user.first_name ? `${user.first_name} ${user.last_name || ''}`.trim() : 'Classgrid User');
-        // Refills can be hours apart (set in the super admin dashboard), so the time is shown too
-        let resetDate = user.ai_tokens?.week_reset_date ? new Date(user.ai_tokens.week_reset_date).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', dateStyle: 'medium', timeStyle: 'short' }) : 'your next refill';
-        if (user.ai_tokens?.week_reset_date) {
-            const msLeft = new Date(user.ai_tokens.week_reset_date).getTime() - Date.now();
-            const hoursLeft = Math.round(msLeft / 3600000);
-            if (msLeft > 0) resetDate += hoursLeft < 1 ? ' (in less than an hour)' : hoursLeft >= 48 ? ` (in about ${Math.round(hoursLeft / 24)} days)` : ` (in about ${hoursLeft} hour${hoursLeft === 1 ? '' : 's'})`;
-        }
         const threshold20 = totalLimit * 0.2;
+        // Every alert names the user's plan (from the plan table; "your plan" while plans are off)
+        const alert = async (subject, html, text = "") => enqueueEmail({ to: user.email, subject, html, text, type: "billing_alert", userId, organizationId: orgId });
 
-        // Top-Up Alerts
+        // Top-Up Alerts: the plan keeps working when they run out
         if (type === 'personal') {
             if (oldBalance > threshold20 && currentBalance <= threshold20 && currentBalance > 0) {
-                await enqueueEmail({
-                    to: user.email,
-                    subject: "Action Required: You have used 80% of your Top-Up AI Credits",
-                    html: getTopUpCreditsLowEmailHtml(userName, subdomain),
-                    type: "billing_alert",
-                    userId, organizationId: orgId
-                });
+                const { plan } = await planWording(user);
+                await alert(CREDIT_EMAIL_SUBJECTS.topUpLow, getTopUpCreditsLowEmailHtml(userName, plan));
             }
             if (oldBalance > 0 && currentBalance <= 0) {
-                await enqueueEmail({
-                    to: user.email,
-                    subject: "Action Required: You have reached 100% of your Top-Up AI Credits",
-                    html: getTopUpCreditsExhaustedEmailHtml(userName, resetDate, subdomain),
-                    type: "billing_alert",
-                    userId, organizationId: orgId
-                });
+                const { plan } = await planWording(user);
+                await alert(CREDIT_EMAIL_SUBJECTS.topUpUsedUp, getTopUpCreditsExhaustedEmailHtml(userName, plan));
             }
         }
 
-        // Granted Credits Alerts
+        // Granted Credits Alerts: the plan and any top-up credits keep working when they run out
         if (type === 'promotion') {
             if (oldBalance > threshold20 && currentBalance <= threshold20 && currentBalance > 0) {
-                const expDate = user.ai_tokens?.promotion_credits_end_date ? new Date(user.ai_tokens.promotion_credits_end_date).toLocaleDateString('en-IN') : 'soon';
-                await enqueueEmail({
-                    to: user.email,
-                    subject: "Action Required: You have used 80% of your Granted AI Credits",
-                    html: getGrantedCreditsLowEmailHtml(userName, expDate, subdomain),
-                    type: "billing_alert",
-                    userId, organizationId: orgId
-                });
+                const { plan } = await planWording(user);
+                await alert(CREDIT_EMAIL_SUBJECTS.grantedLow, getGrantedCreditsLowEmailHtml(userName, plan));
             }
             if (oldBalance > 0 && currentBalance <= 0) {
-                await enqueueEmail({
-                    to: user.email,
-                    subject: "Action Required: You have reached 100% of your Granted AI Credits",
-                    html: getGrantedCreditsExhaustedEmailHtml(userName, resetDate, subdomain),
-                    type: "billing_alert",
-                    userId, organizationId: orgId
-                });
+                const { plan } = await planWording(user);
+                await alert(CREDIT_EMAIL_SUBJECTS.grantedUsedUp, getGrantedCreditsExhaustedEmailHtml(userName, plan));
             }
         }
 
-        // Free Limits Alert
+        // The plan's limit is used up: which limit (the session window or the week) and when it comes back
         if (type === 'free') {
             // At most once a day per person. A limit now ends at 100 percent every time it is used up (a message
             // starts whenever anything is left), so without this a person who uses up each session window would get
             // this email every few hours; before, a window reached exactly 0 only now and then. When Redis can't be
             // asked, the email is not sent.
             if (oldBalance > 0 && currentBalance <= 0 && (await limitEmailDue(userId))) {
-                await enqueueEmail({
-                    to: user.email,
-                    subject: "Action Required: You have reached 100% of your Free AI Usage",
-                    html: getFreeLimitsExhaustedEmailHtml(userName, resetDate, subdomain),
-                    type: "billing_alert",
-                    userId, organizationId: orgId
-                });
+                const [{ plan, paidNames }, back] = await Promise.all([planWording(user), limitBackAt(user, orgId)]);
+                const mail = getPlanLimitReachedEmail({ userName, plan, paidNames, which: back.which, backAt: back.at, periodMs: back.periodMs });
+                await alert(mail.subject, mail.html, mail.text);
             }
         }
     } catch (error) {
@@ -544,7 +539,9 @@ export const deductTokens = async (userId, orgId, tokenAmount, source, { noSpill
                 }, { returnDocument: 'after' });
                 result = { success: true, remaining: Math.max(0, weeklyLimit - updatedUser.ai_tokens.used_this_week), limit: weeklyLimit, type: "free" };
                 await addDeviceFree(userId, actualDeduction, window.periodMs);
-                triggerEmailAlerts(userId, orgId, "free", headroom, result.remaining, weeklyLimit);
+                // What is left after this answer, of whichever limit is lower (the window, the computer's, or the
+                // week's): the limit email goes out when any of them is used up, the weekly limit too
+                triggerEmailAlerts(userId, orgId, "free", headroom, Math.max(0, headroom - actualDeduction), weeklyLimit);
             } else {
                 result = { success: true, remaining: 0, limit: weeklyLimit, type: "free" };
             }

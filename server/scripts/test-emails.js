@@ -14,52 +14,33 @@ import { sendEmail } from '../src/services/aws-ses.service.js';
 import {
     getGrantedCreditsLowEmailHtml,
     getTopUpCreditsLowEmailHtml,
-    getFreeLimitsExhaustedEmailHtml,
+    getPlanLimitReachedEmail,
     getGrantedCreditsExhaustedEmailHtml,
-    getTopUpCreditsExhaustedEmailHtml
+    getTopUpCreditsExhaustedEmailHtml,
+    CREDIT_EMAIL_SUBJECTS,
 } from '../src/services/email-templates.service.js';
 import dotenv from 'dotenv';
 dotenv.config();
 
+// Sends the plan and credit alerts to the owner's test address only, to look at them in a real inbox (run by hand:
+// node scripts/test-emails.js). The plan rows here are stand-ins with only what the emails read.
 const testEmails = async () => {
-    const recipients = ['nikhil.shinde@classgrid.in', 'nikhilsubsun123@gmail.com'];
+    const recipients = ['nikhilsubsun123@gmail.com'];
     const userName = 'Nikhil';
-    const expDate = '31 Oct 2026';
-    const resetDate = '12 Oct 2026';
-    const subdomain = 'university';
+    const free = { key: 'free', name: 'Free', window_reset_value: 5, window_reset_unit: 'hour' };
+    const pro = { key: 'pro', name: 'Pro', window_reset_value: 5, window_reset_unit: 'hour' };
+    const backAt = new Date(Date.now() + 3 * 3600 * 1000);
 
     for (const to of recipients) {
         console.log(`Sending to ${to}...`);
-
-        await sendEmail({
-            to,
-            subject: 'Action Required: You have used 80% of your Granted AI Credits',
-            html: getGrantedCreditsLowEmailHtml(userName, expDate, subdomain)
-        });
-
-        await sendEmail({
-            to,
-            subject: 'Action Required: You have used 80% of your Top-Up AI Credits',
-            html: getTopUpCreditsLowEmailHtml(userName, subdomain)
-        });
-
-        await sendEmail({
-            to,
-            subject: 'Action Required: You have reached 100% of your Free AI Usage',
-            html: getFreeLimitsExhaustedEmailHtml(userName, resetDate, subdomain)
-        });
-
-        await sendEmail({
-            to,
-            subject: 'Action Required: You have reached 100% of your Granted AI Credits',
-            html: getGrantedCreditsExhaustedEmailHtml(userName, resetDate, subdomain)
-        });
-
-        await sendEmail({
-            to,
-            subject: 'Action Required: You have reached 100% of your Top-Up AI Credits',
-            html: getTopUpCreditsExhaustedEmailHtml(userName, resetDate, subdomain)
-        });
+        for (const plan of [free, pro]) {
+            const limit = getPlanLimitReachedEmail({ userName, plan, paidNames: ['Pro', 'Max'], which: 'window', backAt, periodMs: 5 * 3600 * 1000 });
+            await sendEmail({ to, subject: limit.subject, html: limit.html });
+        }
+        await sendEmail({ to, subject: CREDIT_EMAIL_SUBJECTS.grantedLow, html: getGrantedCreditsLowEmailHtml(userName, pro) });
+        await sendEmail({ to, subject: CREDIT_EMAIL_SUBJECTS.topUpLow, html: getTopUpCreditsLowEmailHtml(userName, pro) });
+        await sendEmail({ to, subject: CREDIT_EMAIL_SUBJECTS.grantedUsedUp, html: getGrantedCreditsExhaustedEmailHtml(userName, pro) });
+        await sendEmail({ to, subject: CREDIT_EMAIL_SUBJECTS.topUpUsedUp, html: getTopUpCreditsExhaustedEmailHtml(userName, pro) });
     }
     console.log('All test emails sent!');
 };

@@ -3605,11 +3605,14 @@ export const chatFinalizeOnboarding = async (req, res) => {
             // Welcome email, also after the reply (the general sendWelcomeEmail stays disabled; this one is chat-only)
             (async () => {
                 const { getChatWelcomeEmailHtml, getChatWelcomeEmailPlainText } = await import('../services/email-templates.service.js');
+                // The plan part (the Free plan's name and refill window, the paid plans' names) comes from the plan table
+                const { planWording } = await import('../services/ai-credits.service.js');
+                const { plan, paidNames } = await planWording(user);
                 await sendEmail({
                     to: user.email,
                     subject: 'Welcome to Classgrid AI',
-                    html: getChatWelcomeEmailHtml(user.name),
-                    text: getChatWelcomeEmailPlainText(user.name),
+                    html: getChatWelcomeEmailHtml(user.name, plan, paidNames),
+                    text: getChatWelcomeEmailPlainText(user.name, plan, paidNames),
                     fromName: 'Classgrid AI',
                     userId: user._id,
                 });

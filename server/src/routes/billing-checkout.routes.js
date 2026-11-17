@@ -82,7 +82,7 @@ import { detectFraud, parseUserAgent } from "../services/fraud.service.js";
 import razorpayService from "../services/razorpay.service.js";
 import { finalizeCapturedPayment } from "../services/billing-payment-finalization.service.js";
 import { sendEmail, sendTemplateEmail } from "../services/aws-ses.service.js";
-import { baseTemplate, getAiCreditUserReceiptHtml, getAiCreditAdminNotificationHtml } from "../services/email-templates.service.js";
+import { baseTemplate, getAiCreditUserReceiptHtml, getAiCreditAdminNotificationHtml, PLANS_URL, BILLING_URL } from "../services/email-templates.service.js";
 import { generateInvoicePdfBuffer, generateAiReceiptPdfBuffer } from "../services/pdf-invoice.service.js";
 import { generalLimiter } from "../middleware/rateLimiter.js";
 import {
@@ -387,6 +387,28 @@ router.post("/confirm", async (req, res) => {
     }
 });
 
+// The email to the payer when a payment was not completed. A plan payment (AI_PLAN) carries its label "Classgrid Pro
+// plan (1 month)" (ai-credits-topup.controller.js buyPlan); a top-up (AI_TOPUP) is an amount of AI credits.
+export function paymentNotCompletedEmail(handoff) {
+    const isPlan = handoff?.payment_type === "AI_PLAN";
+    const label = String(handoff?.context?.label || "");
+    const rupees = `₹${(Number(handoff?.amountPaise || 0) / 100).toLocaleString("en-IN")}`;
+    const what = isPlan ? (/^Classgrid .+ plan \(1 (month|year)\)$/.test(label) ? `the ${label}` : "your Classgrid plan") : `${rupees} of AI credits`;
+    const link = isPlan ? { href: PLANS_URL, text: "classgrid.in/pricing" } : { href: BILLING_URL, text: "Settings > Billing on chat.classgrid.in" };
+    const esc = (v) => String(v).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+    const name = String(handoff?.context?.payerName || "").trim();
+    const hello = `Hi ${name && name !== "Payer" ? name : "there"},`;
+    const sentence = `Your payment for ${what} was not completed.`;
+    return {
+        subject: "Your Classgrid payment was not completed",
+        html: baseTemplate({
+            title: "Your Classgrid payment was not completed",
+            content: `<p>${esc(hello)}</p><p>${esc(sentence)} You can try again from <a href="${link.href}">${esc(link.text)}</a>.</p><p>Thanks,<br/>The Classgrid Team</p>`,
+        }),
+        text: `${hello}\n\n${sentence} You can try again from ${link.text}: ${link.href}\n\nThanks,\nThe Classgrid Team`,
+    };
+}
+
 router.post("/failed", async (req, res) => {
     try {
         const { token: rawToken, error_description } = req.body;
@@ -432,26 +454,17 @@ router.post("/failed", async (req, res) => {
             console.warn("[Billing Checkout] Admin failed notification email failed:", emailErr.message);
         });
 
-        // Also send to the user if email is present
+        // Also send to the user if email is present: what the payment was for (a plan, or AI credits) and where to
+        // try again (classgrid.in/pricing for a plan, Settings > Billing for credits)
         if (handoff.email) {
-            const userEmailTitle = `Payment Failed — ${amountFormatted} | Classgrid`;
-            const userCompiledHtml = `
-                <div style="font-family: sans-serif; padding: 20px;">
-                    <h2 style="color: #d97706;">Payment Failed</h2>
-                    <p>Hi ${payerName},</p>
-                    <p>Your attempt to purchase ${amountFormatted} in AI credits was not successful.</p>
-                    <p><strong>Reason:</strong> ${error_description || "Transaction cancelled."}</p>
-                    <p>If you have any questions, please contact our support.</p>
-                    <br/>
-                    <p>Thanks,<br/>Classgrid Team</p>
-                </div>
-            `;
+            const mail = paymentNotCompletedEmail(handoff);
             await sendEmail({
                 to: handoff.email,
-                subject: userEmailTitle,
+                subject: mail.subject,
                 fromName: "Classgrid Billing",
                 fromEmail: "billing@classgrid.in",
-                html: userCompiledHtml,
+                html: mail.html,
+                text: mail.text,
                 organizationId: handoff.organization_id,
             }).catch((emailErr) => {
                 console.warn("[Billing Checkout] User failed notification email failed:", emailErr.message);

@@ -38,7 +38,8 @@ import User from "../models/User.js";
 import AiUsageLog from "../models/AiUsageLog.js";
 import redis from "../config/redis.js";
 import { normalizeWhatsappNumber } from "./ai-feature-limits.js";
-import { hasEnoughTokens, deductTokens } from "./ai-credits.service.js";
+import { hasEnoughTokens, deductTokens, limitBackAt, planWording } from "./ai-credits.service.js";
+import { taskPausedLimitText } from "./email-templates.service.js";
 import { chargeableTokens } from "./ai-token-pricing.js";
 import { noteMessagesRead, messagesByIds, messagesSince, readUpTo } from "./whatsapp-inbox.service.js";
 import {
@@ -371,14 +372,20 @@ async function endTask(task, answer = "") {
     await sendWhatsappText(task.phone, text);
 }
 
+// The task waits until the plan's limit really comes back: the refusal's own time (hasEnoughTokens' resetAt), else the
+// same rule worked out here (the week's end when the weekly limit is used up, else the session window's end)
 async function pauseForTokens(task, user, resetDate) {
-    const fresh = await User.findById(user._id).select("ai_tokens").lean().catch(() => null);
-    const resetAt = resetDate ? new Date(resetDate) : fresh?.ai_tokens?.week_reset_date ? new Date(fresh.ai_tokens.week_reset_date) : new Date(Date.now() + 60 * 60 * 1000);
+    const fresh = await User.findById(user._id).select("ai_tokens plan role email organization_id").lean().catch(() => null);
+    let resetAt = resetDate ? new Date(resetDate) : null;
+    if (!resetAt || Number.isNaN(resetAt.getTime())) resetAt = fresh ? (await limitBackAt(fresh).catch(() => null))?.at || null : null;
+    if (!resetAt) resetAt = new Date(Date.now() + 60 * 60 * 1000); // (the account could not be read: look again in an hour)
     const notify = !task.pause_notified && task.phone;
     await AgentTask.updateOne({ _id: task._id }, { $set: { status: "waiting_tokens", wake_at: resetAt, heartbeat_at: null, pause_notified: true } });
     await record.syncStatus(task._id);
     if (notify) {
-        const text = `⏸️ Your AI tokens ran out, so I paused your task. I'll continue by myself when your tokens come back (${india(resetAt)}), or sooner if you top up.`;
+        // Free: wait, or upgrade; other plans: wait, or top up
+        const { plan, paidNames } = await planWording(fresh || user);
+        const text = taskPausedLimitText({ plan, paidNames, backAt: resetAt });
         record.noteSent(task._id, text);
         await sendWhatsappText(task.phone, text);
     }
@@ -549,7 +556,7 @@ export async function wakeTask(taskId, reason) {
             return endTask(task);
         }
         const tokens = await hasEnoughTokens(user._id, user.organization_id || null, 3000).catch(() => ({ allowed: false }));
-        if (!tokens.allowed) return pauseForTokens(task, user, null);
+        if (!tokens.allowed) return pauseForTokens(task, user, tokens.resetAt || null);
 
         const newest = Math.max(task.last_seen_msg_at || 0, ...msgs.map((m) => m.at));
         // The task keeps its history: what the user asked first, then what they said later. New work after a

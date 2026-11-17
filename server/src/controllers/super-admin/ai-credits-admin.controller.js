@@ -35,50 +35,14 @@ import mongoose from "mongoose";
 import AdminSecurityCode from "../../models/AdminSecurityCode.js";
 import { sendEmail } from "../../services/aws-ses.service.js";
 import { parseResetPeriodInput } from "../../services/ai-feature-limits.js";
-import { getAiCreditGrantedHtml, getAiCreditGrantedPlainText, getSuperAdminSecurityOtpHtml, getSuperAdminSecurityOtpPlainText } from "../../services/email-templates.service.js";
+import { getAiCreditGrantedHtml, getAiCreditGrantedPlainText, getSuperAdminSecurityOtpHtml, getSuperAdminSecurityOtpPlainText, USAGE_URL } from "../../services/email-templates.service.js";
+import { planOf } from "../../services/plan-limits.service.js";
 
 /**
  * PHASE 9: Super Admin AI Credits Admin Controller
  * Handles mutations: Blocking, Unblocking, Resetting limits, Granting credits.
  */
 
-const getDashboardUrlForUser = async (user) => {
-    let baseUrl = "https://app.classgrid.in";
-    if (user.organization_id) {
-        try {
-            const org = await Organization.findById(user.organization_id);
-            if (org) {
-                if (org.erp_domain && org.erp_domain.domain) {
-                    baseUrl = `https://${org.erp_domain.domain}`;
-                } else if (org.subdomain) {
-                    baseUrl = `https://${org.subdomain}.classgrid.in`;
-                }
-            }
-        } catch (e) { console.error("Error getting org url", e); }
-    }
-
-    let agentPath = "/student/agent";
-    switch (user.role) {
-        case "super_admin":
-        case "co_super_admin": agentPath = "/superadmin/agent"; break;
-        case "org_admin":
-        case "admin": agentPath = "/org/admin/agent"; break;
-        case "teacher":
-        case "faculty":
-        case "hod":
-        case "principal":
-        case "vice_principal": agentPath = "/faculty/agent"; break;
-        case "library_manager": agentPath = "/dept/library/agent"; break;
-        case "hostel_warden": agentPath = "/dept/hostel/agent"; break;
-        case "hr_manager": agentPath = "/dept/hr/agent"; break;
-        case "attendance_manager": agentPath = "/dept/attendance/agent"; break;
-        case "fees_admin":
-        case "accountant": agentPath = "/dept/fees/agent"; break;
-        case "exams_admin": agentPath = "/dept/exams/agent"; break;
-        case "admissions_admin": agentPath = "/dept/admissions/agent"; break;
-    }
-    return `${baseUrl}${agentPath}`;
-};
 
 export const blockAiUser = async (req, res) => {
     try {
@@ -253,7 +217,7 @@ export const grantCredits = async (req, res) => {
                 const d = new Date(endDate);
                 const expireDateStr = d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
 
-                const dashboardUrl = await getDashboardUrlForUser(user);
+                const dashboardUrl = USAGE_URL; // Settings > Usage on chat.classgrid.in
                 const emailHtml = getAiCreditGrantedHtml(user.name || user.email, amount.toLocaleString(), totalBalance, expireDateStr, dashboardUrl);
                 const emailText = getAiCreditGrantedPlainText(user.name || user.email, amount.toLocaleString(), totalBalance, expireDateStr, dashboardUrl);
                 await sendEmail({
@@ -369,7 +333,7 @@ export const grantOrgCredits = async (req, res) => {
                 const d = new Date(endDate);
                 const expireDateStr = d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
 
-                const dashboardUrl = await getDashboardUrlForUser(user);
+                const dashboardUrl = USAGE_URL; // Settings > Usage on chat.classgrid.in
                 const emailHtml = getAiCreditGrantedHtml(user.name || user.email, amount.toLocaleString(), totalBalance, expireDateStr, dashboardUrl);
                 const emailText = getAiCreditGrantedPlainText(user.name || user.email, amount.toLocaleString(), totalBalance, expireDateStr, dashboardUrl);
                 await sendEmail({
@@ -702,13 +666,14 @@ export const removeGrantedCredits = async (req, res) => {
         if (user && user.email) {
             try {
                 const { getGrantedCreditsRemovedHtml, getGrantedCreditsRemovedPlainText } = await import("../../services/email-templates.service.js");
+                const plan = await planOf(user).catch(() => null);
                 const { sendEmail: sendSESEmail } = await import("../../services/aws-ses.service.js");
-                const dashboardUrl = await getDashboardUrlForUser(user);
+                const dashboardUrl = USAGE_URL; // Settings > Usage on chat.classgrid.in
                 await sendSESEmail({
                     to: user.email,
                     subject: "Your AI Credits Have Been Removed",
-                    html: getGrantedCreditsRemovedHtml(user.name, dashboardUrl),
-                    text: getGrantedCreditsRemovedPlainText(user.name, dashboardUrl),
+                    html: getGrantedCreditsRemovedHtml(user.name, dashboardUrl, plan),
+                    text: getGrantedCreditsRemovedPlainText(user.name, dashboardUrl, plan),
                     userId: user._id,
                     organizationId: user.organization_id
                 });
@@ -795,13 +760,14 @@ export const pauseGrantedCredits = async (req, res) => {
         if (user && user.email) {
             try {
                 const { getGrantedCreditsPausedHtml, getGrantedCreditsPausedPlainText } = await import("../../services/email-templates.service.js");
+                const plan = await planOf(user).catch(() => null);
                 const { sendEmail: sendSESEmail } = await import("../../services/aws-ses.service.js");
-                const dashboardUrl = await getDashboardUrlForUser(user);
+                const dashboardUrl = USAGE_URL; // Settings > Usage on chat.classgrid.in
                 await sendSESEmail({
                     to: user.email,
                     subject: `Your AI Credits Have Been ${isPaused ? 'Paused' : 'Resumed'}`,
-                    html: getGrantedCreditsPausedHtml(user.name, isPaused, dashboardUrl),
-                    text: getGrantedCreditsPausedPlainText(user.name, isPaused, dashboardUrl),
+                    html: getGrantedCreditsPausedHtml(user.name, isPaused, dashboardUrl, plan),
+                    text: getGrantedCreditsPausedPlainText(user.name, isPaused, dashboardUrl, plan),
                     userId: user._id,
                     organizationId: user.organization_id
                 });
@@ -872,7 +838,7 @@ export const extendGrantedCredits = async (req, res) => {
                 const { getGrantedCreditsExtendedHtml, getGrantedCreditsExtendedPlainText } = await import("../../services/email-templates.service.js");
                 const { sendEmail: sendSESEmail } = await import("../../services/aws-ses.service.js");
 
-                const dashboardUrl = await getDashboardUrlForUser(user);
+                const dashboardUrl = USAGE_URL; // Settings > Usage on chat.classgrid.in
                 const emailHtml = getGrantedCreditsExtendedHtml(user.name, new Date(endDate), dashboardUrl);
                 const emailText = getGrantedCreditsExtendedPlainText(user.name, new Date(endDate), dashboardUrl);
 
