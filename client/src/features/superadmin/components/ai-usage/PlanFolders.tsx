@@ -106,12 +106,14 @@ function MeterRow({ label, note, meter, unit }: { label: string; note?: string; 
   if (limit === 0) return null;
   const percent = limit && limit > 0 ? Math.min(100, Math.max(0, (meter.used / limit) * 100)) : 0;
   return (
-    <div className="w-full flex items-start justify-between">
-      <div className="flex flex-col gap-1 pr-6 min-w-[150px]">
+    // Two equal columns in every row, so all the bars start at the same place and have the same length (owner,
+    // 2026-11-17: "align them"); on a phone the bar goes under the name
+    <div className="w-full grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-2 items-start">
+      <div className="flex flex-col gap-1 min-w-0">
         <span className="text-sm font-medium text-foreground">{label}</span>
-        <span className="text-xs text-muted-foreground">{note || meter.periodText || ""}</span>
+        <span className="text-xs text-muted-foreground break-words">{note || meter.periodText || ""}</span>
       </div>
-      <div className="flex-1 flex flex-col gap-1.5 mt-1">
+      <div className="flex flex-col gap-1.5 mt-1 min-w-0">
         <div className="w-full flex items-center justify-between text-xs mb-1">
           <span className="font-medium text-foreground">{limit && limit > 0 ? `${Math.round(percent)}% Used` : "No limit"}</span>
           <span className="text-muted-foreground font-medium">{n(meter.used)}{limit && limit > 0 ? ` / ${n(limit)}` : ""} {unit}</span>
