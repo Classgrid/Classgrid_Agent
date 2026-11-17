@@ -7377,17 +7377,11 @@ If a tool fails, never show the error message; say only: "Something went wrong o
             res.write(`data: ${JSON.stringify({ type: "answer", answer: "I'm currently experiencing high traffic and cannot process your request right now." })}\n\n`);
         } else if (!res.writableEnded) {
             // Save Assistant response: to Supabase (source of truth) + Redis (cache) in parallel
-            // Cloudflare was capped and Claude answered in place of the model the person had picked: the chat says so
-            // under the answer ("Answered by Claude Haiku"), live and when the chat is opened again (owner, 2026-11-17:
-            // "users will think it's DeepSeek ... but it's Claude Haiku")
-            const answeredBy = claudeByCap && CLAUDE_CHAT_MODELS.has(usedModel) ? (MODEL_DISPLAY_NAMES[usedModel] || "") : "";
-            if (answeredBy) res.write(`data: ${JSON.stringify({ type: "model_used", model: usedModel, name: answeredBy, reason: "cloudflare_cap" })}\n\n`);
             if (!isIncognito && sessionId) {
                 let savedContent = answer;
-                if (accThought || accSteps.length > 0 || checkpointId || answeredBy) {
+                if (accThought || accSteps.length > 0 || checkpointId) {
                     savedContent = JSON.stringify({
                         classgrid_ai_message: true,
-                        ...(answeredBy ? { answered_by: answeredBy } : {}),
                         ...(checkpointId ? { checkpoint: checkpointId } : {}),
                         content: answer,
                         thought: accThought,

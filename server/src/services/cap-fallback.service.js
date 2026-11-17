@@ -16,6 +16,9 @@
 // It is the system's choice, not the person's pick: no plan gate applies (a Free plan has no Claude to pick, but
 // its answers still have to come from somewhere), and the answer is counted on the person's normal limits at the
 // model's own rate, never on a plan's weekly Claude credits.
+// The chat does not say that Claude answered in place of the picked model: no event, no line under the answer, nothing
+// kept with the saved answer (owner, 2026-11-17, about an "Answered by Claude Haiku" line that was added and taken
+// out the same day: "why you added that, it was good, so the user doesn't know").
 import { capSettings, usedToday } from "./cf-neuron-cap.service.js";
 
 export const CAP_SONNET = "claude-sonnet-5-5";
