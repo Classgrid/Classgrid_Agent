@@ -79,7 +79,7 @@ import Organization from "../models/Organization.js";
 import connectDB from "../../config/db.js";
 import { needsChatOnboarding, whatsappStepDone } from "../utils/chat-onboarding.js";
 import { liftEndedBlock } from "../utils/account-block.js";
-import { sessionState, legacyTokenState, touchSession, noteLegacyUse, sessionCheckAnswer, DEVICE_TICKET_PURPOSE } from "../services/user-session.service.js";
+import { sessionState, legacyTokenState, touchSession, noteLegacyUse, nameSessionIfUnnamed, sessionCheckAnswer, DEVICE_TICKET_PURPOSE } from "../services/user-session.service.js";
 
 const JWT_SECRET = getJwtSecret();
 
@@ -321,7 +321,9 @@ export const isAuthenticated = async (req, res, next) => {
             // This request's sign-in (Settings > Devices marks it "This device"), and its last used time (written at
             // most once every 5 minutes, without holding up the answer)
             req.authSid = sid;
-            if (sid) touchSession(sid);
+            // (each time the last used time is written, at most every 5 minutes, a sign-in still without a name, made by
+            // an app's request that had no user agent, is named from this request)
+            if (sid) touchSession(sid).then((wrote) => { if (wrote) nameSessionIfUnnamed(sid, req, { editor: decoded.client === "editor" }); }).catch(() => {});
             // An older sign-in (no sid): listed in Settings > Devices from this request on, even if it never calls /me
             else if (!decoded.impersonatedBy && !decoded.isProvisional && !decoded.purpose) {
                 noteLegacyUse({ user, req, token, exp: decoded.exp, deviceOpts: { editor: decoded.client === "editor" } });
