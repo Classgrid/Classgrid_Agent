@@ -126,7 +126,8 @@ export interface PersonOverview {
     age: number | string | null;
     whatsapp: { number: string | null; verified: boolean; skipped: boolean };
     addedEmails: { email: string; verifiedAt: string | null; addedAt: string | null }[];
-    ban: { at: string | null; reason: string | null; by: string | null } | null;
+    // (until: when the block ends by itself; null = until it is unblocked)
+    ban: { at: string | null; reason: string | null; by: string | null; until?: string | null } | null;
   };
   plan: PlanSummary & { student: StudentPrice; history: PlanHistoryItem[] };
   account: {
@@ -151,7 +152,16 @@ export interface PersonOverview {
     pages: number | null;
     calls: number | null;
     lastAiUseAt: string | null;
+    firstAiUseAt?: string | null;
+    activeDays?: number | null;
+    aiAnswers?: number | null;
+    scheduledTasks?: number | null;
+    libraryFiles?: number | null;
   };
+  // How many plans they bought, and how often an admin gave them a plan or moved them back to Free (null = couldn't count)
+  planCounts?: { bought: number | null; gifted: number | null; movedToFree: number | null };
+  // The skills they saved for their AI (null = couldn't be read)
+  skills?: { _id: string; name: string; instructions: string; active: boolean; isDefault: boolean; createdAt: string | null; updatedAt: string | null }[] | null;
   payments: { items: PaymentRow[]; count: number; totalPaidInr: number };
   adminLog: AdminLogItem[];
 }
@@ -168,7 +178,7 @@ export interface PaymentsResponse {
 
 // The things the Actions card can do to an account
 export type PersonActionInput =
-  | { type: "ban"; reason: string }
+  | { type: "ban"; reason: string; days?: number; until?: string }
   | { type: "unban" }
   | { type: "force_logout" }
   | { type: "reset_password" }

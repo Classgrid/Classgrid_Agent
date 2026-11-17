@@ -85,8 +85,8 @@ export function usePersonPayments(userId: string, page: number, enabled: boolean
 
 // Each action is the same request the server has always taken; the page shows its own words when it worked
 const SUCCESS_TEXT = {
-  ban: "Banned",
-  unban: "Unbanned",
+  ban: "Blocked. They got an email.",
+  unban: "Unblocked. They got an email.",
   force_logout: "Logged out everywhere",
   reset_password: "Password reset email sent",
 } as const;
@@ -99,7 +99,10 @@ export function usePersonAction(userId: string) {
       switch (input.type) {
         case "ban": {
           const reason = input.reason.trim().slice(0, 300);
-          return (await apiClient.patch(`${base}/ban`, reason ? { reason } : {})).data;
+          const body: Record<string, unknown> = reason ? { reason } : {};
+          if (input.days) body.days = input.days;
+          else if (input.until) body.until = input.until;
+          return (await apiClient.patch(`${base}/ban`, body)).data;
         }
         case "unban": return (await apiClient.patch(`${base}/unban`)).data;
         case "force_logout": return (await apiClient.post(`${base}/force-logout`)).data;
@@ -109,6 +112,25 @@ export function usePersonAction(userId: string) {
     },
     onSuccess: (_data, input) => {
       toast.success(input.type === "role" ? `Role changed to ${roleLabel(input.role)}` : SUCCESS_TEXT[input.type]);
+      queryClient.invalidateQueries({ queryKey: personKey(userId) });
+      queryClient.invalidateQueries({ queryKey: PEOPLE_KEY });
+    },
+    onError: (error) => toast.error(errorText(error)),
+  });
+}
+
+// Deletes the account and everything in it (the same full delete as GDPR & Privacy); the email typed to confirm is
+// checked again by the server. The person gets an email. Parts that could not be removed are named in the message.
+export function useDeletePerson(userId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (confirmEmail: string) =>
+      (await apiClient.post<{ success: boolean; message: string; failedParts?: string[] }>(
+        `/api/super-admin/gdpr/erase/${encodeURIComponent(userId)}`, { confirmEmail },
+      )).data,
+    onSuccess: (data) => {
+      if (data?.failedParts?.length) toast.error(data.message);
+      else toast.success("Account deleted. They got an email.");
       queryClient.invalidateQueries({ queryKey: personKey(userId) });
       queryClient.invalidateQueries({ queryKey: PEOPLE_KEY });
     },

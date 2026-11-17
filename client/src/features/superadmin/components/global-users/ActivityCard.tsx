@@ -32,6 +32,11 @@ export function ActivityCard({ activity }: { activity: PersonOverview["activity"
     { label: "Live docs", ...count(activity.liveDocs) },
     { label: "Pages", ...count(activity.pages) },
     { label: "WhatsApp calls", ...count(activity.calls) },
+    { label: "Active days", ...count(activity.activeDays) },
+    { label: "AI answers", ...count(activity.aiAnswers) },
+    { label: "Using AI since", value: activity.firstAiUseAt ? dateText(activity.firstAiUseAt) : activity.aiAnswers === 0 ? "Not yet" : "–" },
+    { label: "Scheduled tasks", ...count(activity.scheduledTasks) },
+    { label: "Library files", ...count(activity.libraryFiles) },
   ];
   return (
     <SectionCard icon={Activity} title="Activity" note="What they've made with Classgrid.">

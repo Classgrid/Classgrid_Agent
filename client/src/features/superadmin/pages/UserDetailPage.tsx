@@ -84,6 +84,7 @@ import { AccountCard } from "../components/global-users/AccountCard";
 import { ActivityCard } from "../components/global-users/ActivityCard";
 import { PaymentsCard } from "../components/global-users/PaymentsCard";
 import { ActionsCard } from "../components/global-users/ActionsCard";
+import { SkillsCard } from "../components/global-users/SkillsCard";
 
 const LIST_PATH = "/superadmin/global-users";
 
@@ -141,10 +142,11 @@ export function UserDetailPage() {
         {/* Two columns that fill evenly (owner, 2026-11-17: a tall card "cut the page in half" and left the other
             side empty): each card goes under the one before it and the two sides end at about the same height */}
         <div className="lg:columns-2 gap-6 min-w-0 -mb-6 [&>*]:mb-6 [&>*]:break-inside-avoid">
-          <PlanCard userId={data.person._id} plan={data.plan} name={data.person.name || data.person.email} />
+          <PlanCard userId={data.person._id} plan={data.plan} name={data.person.name || data.person.email} counts={data.planCounts} />
           <ActivityCard activity={data.activity} />
           <PaymentsCard userId={data.person._id} payments={data.payments} />
           <AccountCard account={data.account} person={data.person} />
+          <SkillsCard skills={data.skills} />
         </div>
         <ActionsCard key={data.person._id} overview={data} />
       </>

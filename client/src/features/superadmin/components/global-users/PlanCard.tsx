@@ -28,7 +28,7 @@ function studentText(student: PersonOverview["plan"]["student"]): string {
   return student.expiresAt ? `Yes, until ${dateText(student.expiresAt)}` : "Yes";
 }
 
-export function PlanCard({ userId, plan, name }: { userId: string; plan: PersonOverview["plan"]; name?: string }) {
+export function PlanCard({ userId, plan, name, counts }: { userId: string; plan: PersonOverview["plan"]; name?: string; counts?: PersonOverview["planCounts"] }) {
   const queryClient = useQueryClient();
   const [open, setOpen] = useState(false);
   const [askEnd, setAskEnd] = useState(false);
@@ -99,6 +99,13 @@ export function PlanCard({ userId, plan, name }: { userId: string; plan: PersonO
         <InfoRow label="Until">{untilText(plan)}</InfoRow>
         {plan.note && <InfoRow label={gifted ? "Reason" : "Note"}>{plan.note}</InfoRow>}
         <InfoRow label="Student price">{studentText(plan.student)}</InfoRow>
+        {counts && (
+          <>
+            <InfoRow label="Plans bought">{counts.bought === null ? "–" : String(counts.bought)}</InfoRow>
+            <InfoRow label="Plans gifted">{counts.gifted === null ? "–" : String(counts.gifted)}</InfoRow>
+            <InfoRow label="Moved back to Free">{counts.movedToFree === null ? "–" : String(counts.movedToFree)}</InfoRow>
+          </>
+        )}
       </InfoList>
 
       {plan.noLimits && <p className="text-sm text-muted-foreground mt-3">Classgrid staff have no plan limits.</p>}

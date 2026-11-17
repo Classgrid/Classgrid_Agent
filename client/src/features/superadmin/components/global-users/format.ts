@@ -60,9 +60,9 @@ export function roleLabel(role: string | null | undefined): string {
 
 export function statusLabel(status: string | null | undefined): string {
   if (!status || status === "active") return "Active";
-  if (status === "suspended" || status === "blocked") return "Banned";
+  if (status === "suspended" || status === "blocked") return "Blocked";
   if (status === "pending") return "Pending";
-  if (status === "deleted") return "Erased";
+  if (status === "deleted") return "Deleted";
   return capitalise(status);
 }
 

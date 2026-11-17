@@ -5,18 +5,19 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/marketing_ui/a
 import { PersonAvatar } from "./PersonAvatar";
 import { PlanBadge } from "./PlanBadge";
 import { StatusBadge } from "./StatusBadge";
-import { dateText, roleLabel, whatsappText } from "./format";
+import { dateText, dateTimeText, roleLabel, whatsappText } from "./format";
 import type { PersonOverview } from "./types";
 
-// "Banned on 12 Nov 2026 by Nikhil. Reason: spam", leaving out whatever wasn't recorded
+// "Blocked on 12 Nov 2026 by Nikhil until 19 Nov 2026, 5:30 pm. Reason: spam", leaving out whatever wasn't recorded
 function banText(ban: NonNullable<PersonOverview["person"]["ban"]>): string {
-  if (!ban.at && !ban.by && !ban.reason) return "This account is banned.";
-  let first = "Banned";
+  const until = ban.until ? ` Opens again on ${dateTimeText(ban.until)}.` : " Blocked until you unblock it.";
+  if (!ban.at && !ban.by && !ban.reason) return `This account is blocked.${until}`;
+  let first = "Blocked";
   if (ban.at) first += ` on ${dateText(ban.at)}`;
   if (ban.by) first += ` by ${ban.by}`;
   const parts = ban.at || ban.by ? [`${first}.`] : [];
   if (ban.reason) parts.push(`Reason: ${ban.reason}`);
-  return parts.join(" ");
+  return parts.join(" ") + until;
 }
 
 export function PersonHeader({ overview }: { overview: PersonOverview }) {
@@ -55,7 +56,7 @@ export function PersonHeader({ overview }: { overview: PersonOverview }) {
 
       {person.ban && (
         <Alert variant="destructive" className="border-destructive/40 px-4 py-3">
-          <AlertTitle>Banned</AlertTitle>
+          <AlertTitle>Blocked</AlertTitle>
           <AlertDescription className="break-words">{banText(person.ban)}</AlertDescription>
         </Alert>
       )}

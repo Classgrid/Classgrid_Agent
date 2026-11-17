@@ -25,6 +25,7 @@ export function AccountCard({ account, person, className }: { account: PersonOve
     <SectionCard icon={UserRound} title="Account" note="How and when they sign in." className={className}>
       <InfoList>
         <InfoRow label="Joined">{dateTimeText(account.joinedAt)}</InfoRow>
+        {person.username && <InfoRow label="Username">{person.username}</InfoRow>}
         <InfoRow label="Signed up with">{signupLabel(account.signupMethod)}</InfoRow>
         <InfoRow label="Last sign-in">
           {account.lastSignInAt

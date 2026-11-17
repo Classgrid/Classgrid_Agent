@@ -25,7 +25,7 @@ export const PLAN_OPTIONS = [
 export const STATUS_OPTIONS = [
   { value: "all", label: "Any status" },
   { value: "active", label: "Active" },
-  { value: "banned", label: "Banned" },
+  { value: "banned", label: "Blocked" },
   { value: "erased", label: "Erased" },
 ] as const;
 
