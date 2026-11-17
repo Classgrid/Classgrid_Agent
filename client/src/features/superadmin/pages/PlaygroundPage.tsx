@@ -106,7 +106,7 @@ export function PlaygroundPage() {
               <EmptyHeader>
                 <EmptyMedia variant="icon"><FlaskConical /></EmptyMedia>
                 <EmptyTitle>Waiting for your next message</EmptyTitle>
-                <EmptyDescription>Send a message in the chat (Agent or Project Mode) from this account. Each round shows up here as it happens.</EmptyDescription>
+                <EmptyDescription>Send a message in the chat (Agent, or Project in Studio) from this account. Each round shows up here as it happens.</EmptyDescription>
               </EmptyHeader>
             </Empty>
           </CardContent>
@@ -132,7 +132,7 @@ export function PlaygroundPage() {
               <CardContent>
                 {status === "running" && <Badge variant="info" dot>Working</Badge>}
                 {status === "done" && <Badge variant="success">Finished</Badge>}
-                {status === "stopped" && <Badge variant="warning">Stopped: tokens ran out</Badge>}
+                {status === "stopped" && <Badge variant="warning">Stopped: limit reached</Badge>}
                 <CardDescription className="mt-2 line-clamp-2">{run.question}</CardDescription>
               </CardContent>
             </Card>

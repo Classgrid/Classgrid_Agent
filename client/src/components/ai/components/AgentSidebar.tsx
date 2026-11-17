@@ -2053,7 +2053,7 @@ export function AgentNestedMenu({ searchQuery = "", pages }: { searchQuery?: str
                 onKeyDown={(e) => { if (e.key === "Enter") createProjectAndMove(); }}
               />
             </div>
-            <p className="text-[12.5px] text-muted-foreground">The chat moves into this project and continues in Project Mode.</p>
+            <p className="text-[12.5px] text-muted-foreground">The chat moves into this project and continues in Project.</p>
           </div>
           <DialogFooter>
             <Button variant="secondary" disabled={!newProjectName.trim() || isMovingChat} onClick={createProjectAndMove}>

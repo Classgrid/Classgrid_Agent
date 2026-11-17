@@ -77,7 +77,7 @@ async function ensureBox(ssh, userId) {
   const { stdout, stderr } = await ssh.execCommand(`/home/ubuntu/ide_branding/ide-user.sh ${userId}`);
   const port = stdout.trim().split("\n").pop();
   if (!/^4\d{4}$/.test(port || "")) {
-    if (/busy/.test(stderr)) { const e = new Error("Project Mode is busy right now. Try again in a few minutes."); e.status = 503; throw e; }
+    if (/busy/.test(stderr)) { const e = new Error("Project is busy right now. Try again in a few minutes."); e.status = 503; throw e; }
     throw new Error(`Editor box did not start: ${stderr.slice(0, 200)}`);
   }
   await redis.set(BOX_PORT(userId), port, "EX", 24 * 60 * 60);
@@ -1049,7 +1049,7 @@ async function newRepoFor(project, token, { name: wanted, isPrivate = true } = {
     const r = await fetch("https://api.github.com/user/repos", {
       method: "POST",
       headers: { ...ghHeaders(token), "Content-Type": "application/json" },
-      body: JSON.stringify({ name, private: isPrivate, description: "Made by Classgrid Project Mode" }),
+      body: JSON.stringify({ name, private: isPrivate, description: "Made by Classgrid" }),
     }).catch(() => null);
     const gh = r ? await r.json().catch(() => ({})) : {};
     if (r?.ok && gh.full_name) return { repo: gh.full_name };

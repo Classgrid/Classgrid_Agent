@@ -159,6 +159,21 @@ function voiceSystemPrompt(user, { language = "", memory = "", voiceOn = true } 
 
 const refusal = (res, status, message, code, extra = {}) => res.status(status).json({ error: message, message, code, ...extra });
 
+// The user's limit is used up: when it comes back (only a real time, never a guess) and how to get more. Free moves
+// to Pro or Max (Free cannot buy top-ups); every other plan, plans off and Classgrid staff can top up AI credits (the
+// same rule as ai-credits-topup.controller.js topupBlockedByPlan)
+async function limitUsedText(user, backAt) {
+    const plan = await planOf(user).catch(() => null);
+    const at = backAt ? new Date(backAt) : null;
+    const when = at && !Number.isNaN(at.getTime()) && at.getTime() > Date.now()
+        ? at.toLocaleString("en-IN", { timeZone: "Asia/Kolkata", day: "numeric", month: "short", hour: "numeric", minute: "2-digit" })
+        : "";
+    const free = plan?.key === "free";
+    const used = plan ? `You've used your ${plan.name || "plan"} plan's limit for now.` : "You've used your AI limit for now.";
+    if (when) return `${used} It comes back on ${when}, or ${free ? "move to Pro or Max for more" : "top up AI credits"}.`;
+    return `${used} ${free ? "Move to Pro or Max for more." : "Top up AI credits to keep going."}`;
+}
+
 // The models voice mode can answer with: the chat picker's (ai-chat.controller.js), Claude included
 export const isVoiceModel = (id) => typeof id === "string" && (CLAUDE_CHAT_MODELS.has(id) || CF_PICKER_MODELS.has(id));
 
@@ -297,9 +312,11 @@ export const voiceTurn = async (req, res) => {
     // (a Claude model on the plan's Claude credits was checked just above: the other credits do not stop it)
     if (!check.allowed && !(picked && claudePooled(picked))) {
         const row = await User.findById(userId).select("ai_tokens").lean().catch(() => null);
-        const resetDate = row?.ai_tokens?.week_reset_date ? new Date(row.ai_tokens.week_reset_date) : new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
+        // When the limit comes back: the check says which limit ran out (the session window, or the week), as in the chat
+        const backAt = check.resetAt || row?.ai_tokens?.week_reset_date || null;
+        const resetDate = backAt ? new Date(backAt) : new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
         const out = check.reason === "Insufficient tokens.";
-        return refusal(res, 429, out ? "You've used all your AI credits for now. Top up AI credits to keep talking, or wait until they refill." : String(check.reason || "Classgrid AI is not available for your account right now."), out ? "ai_quota_exceeded" : "ai_blocked", { resetDate: resetDate.toISOString() });
+        return refusal(res, 429, out ? await limitUsedText(user, backAt) : String(check.reason || "Classgrid AI is not available for your account right now."), out ? "ai_quota_exceeded" : "ai_blocked", { resetDate: resetDate.toISOString() });
     }
     const tokenSource = check.source;
     if (!isNew) {
@@ -507,7 +524,7 @@ export const voiceTurn = async (req, res) => {
                 return { content: "It took too long, so it was stopped and nothing more is being done. Tell the user this one is a longer job: they can ask for it by typing in the chat.", is_error: true };
             }
             if (result.aborted) return { content: "Stopped.", is_error: true };
-            if (result.quota) return { content: "Classgrid could not do it: the user's AI credits are used up. They can top up AI credits, or wait until they refill.", is_error: true };
+            if (result.quota) return { content: `Classgrid could not do it: the user's limit is used up. Tell them: "${await limitUsedText(user, result.quota.resetDate)}"`, is_error: true };
             if (!result.answer) return { content: `Classgrid could not answer${result.error ? `: ${result.error}` : "."}`, is_error: true };
             return { content: result.answer.slice(0, 4000) };
         }

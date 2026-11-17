@@ -1463,7 +1463,7 @@ export async function backupAndRemoveProjectCode(ssh, project) {
     const base = String(project.name || "project").toLowerCase().replace(/[^a-z0-9._-]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 60) || "project";
     let made = "";
     for (const name of [base, `${base}-${String(project._id).slice(-6)}`]) {
-      made = await createRepoForProject(project, ssh, { name, private: true, description: "Made by Classgrid Project Mode" });
+      made = await createRepoForProject(project, ssh, { name, private: true, description: "Made by Classgrid" });
       if (project.repo) break;
     }
     if (!project.repo || /failed/i.test(made)) return { removed: false, reason: `could not save to a new GitHub repo: ${made}` };

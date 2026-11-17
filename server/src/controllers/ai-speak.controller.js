@@ -82,8 +82,8 @@ export async function voiceReplyGate(user) {
     if (cap === 0 || (cap > 0 && (await usedToday(String(user._id), KIND)) >= cap)) {
         const pay = await canPayExtra(user, KIND);
         if (pay.allowed) extra = pay;
-        else if (cap === 0) return { allowed: false, status: 402, body: { error: `Voice replies are not included in ${who}. Upgrade your plan to have answers read aloud.${extraOfferText(KIND, pay.price)}`, code: "voice_not_included", plan: plan?.key, extraCredits: pay.price } };
-        else return { allowed: false, status: 429, body: { error: `You've used the ${cap} voice replies a day of ${who}. They refill on ${nextDayText()}.${extraOfferText(KIND, pay.price)}`, code: "voice_cap_reached", plan: plan?.key, extraCredits: pay.price } };
+        else if (cap === 0) return { allowed: false, status: 402, body: { error: `Voice replies are not included in ${who}. Upgrade your plan to have answers read aloud.${extraOfferText(KIND, pay.price, plan?.key)}`, code: "voice_not_included", plan: plan?.key, extraCredits: pay.price } };
+        else return { allowed: false, status: 429, body: { error: `You've used the ${cap} voice replies a day of ${who}. They refill on ${nextDayText()}.${extraOfferText(KIND, pay.price, plan?.key)}`, code: "voice_cap_reached", plan: plan?.key, extraCredits: pay.price } };
     }
     return { allowed: true, extra, maxChars };
 }

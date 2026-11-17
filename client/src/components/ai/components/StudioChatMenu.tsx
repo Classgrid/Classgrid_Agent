@@ -340,7 +340,7 @@ export function OpenInProjectButton({ sessionId }: { sessionId: string }) {
           <button
             type="button"
             onClick={open}
-            aria-label="Open in Project Mode"
+            aria-label="Open in Project"
             className="flex items-center gap-1.5 h-8 pl-1.5 pr-2.5 rounded-md text-[13px] text-muted-foreground hover:text-foreground hover:bg-black/5 dark:hover:bg-white/10 transition-colors cursor-pointer"
           >
             <svg viewBox="0 0 24 24" className="size-[18px] shrink-0" aria-hidden="true">
@@ -350,7 +350,7 @@ export function OpenInProjectButton({ sessionId }: { sessionId: string }) {
             Open
           </button>
         </TooltipTrigger>
-        <TooltipContent side="bottom">Open in Project Mode</TooltipContent>
+        <TooltipContent side="bottom">Open in Project</TooltipContent>
       </Tooltip>
     </TooltipProvider>
   );

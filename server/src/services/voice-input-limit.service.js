@@ -17,8 +17,8 @@ export async function voiceInputAllowed(user) {
     if (cap > 0 && used / 60 < cap) return { allowed: true };
     const extra = await canPayExtra(user, "voiceinput");
     if (extra.allowed) return { allowed: true, extra: true, price: extra.price };
-    if (cap === 0) return { allowed: false, error: `Voice input is not included in the ${plan.name} plan. Upgrade your plan, or type instead.${extraOfferText("voiceinput", extra.price)}` };
-    return { allowed: false, error: `You've used the ${cap} minutes of voice input a day of your ${plan.name} plan. It refills on ${nextDayText()}. Upgrade your plan, or type instead.${extraOfferText("voiceinput", extra.price)}` };
+    if (cap === 0) return { allowed: false, error: `Voice input is not included in the ${plan.name} plan. Upgrade your plan, or type instead.${extraOfferText("voiceinput", extra.price, plan.key)}` };
+    return { allowed: false, error: `You've used the ${cap} minutes of voice input a day of your ${plan.name} plan. It refills on ${nextDayText()}. Upgrade your plan, or type instead.${extraOfferText("voiceinput", extra.price, plan.key)}` };
 }
 
 /** Counts the seconds that were heard on the day's minutes (and charges the extra minutes when the day's are used) */

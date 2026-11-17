@@ -561,7 +561,7 @@ export function StudioProjectPicker() {
         open={!!deleting}
         onOpenChange={(o) => { if (!o) setDeleting(null); }}
         title="Delete project"
-        description={`Delete "${deleting?.name || ""}" from Project Mode.`}
+        description={`Delete "${deleting?.name || ""}" from Project.`}
         confirmationSteps={deleting ? [{ label: "To confirm, type the project name", value: deleting.name }] : []}
         warningMessage="Its code stays on GitHub. Only the project here is deleted."
         actionLabel="Delete project"
@@ -712,7 +712,7 @@ export function NewProjectDialog({ open, onOpenChange, onCreated, linkTo = null 
         <div className="flex items-start justify-between gap-4 px-5 pt-4 pb-3">
           <div>
             <DialogTitle className="text-[15px] font-medium">{linkTo ? (linkTo.repo ? "Change repo" : "Link a GitHub repo") : "New project"}</DialogTitle>
-            <DialogDescription className="mt-0.5 text-[13px] text-muted-foreground">{linkTo ? linkTo.name : desktopApp?.isDesktop ? "A folder on this PC, or a project in the cloud." : "Shared with Project Mode and Studio Mode."}</DialogDescription>
+            <DialogDescription className="mt-0.5 text-[13px] text-muted-foreground">{linkTo ? linkTo.name : desktopApp?.isDesktop ? "A folder on this PC, or a project in the cloud." : "Shared with Project."}</DialogDescription>
           </div>
           <button
             type="button"
@@ -768,7 +768,7 @@ export function NewProjectDialog({ open, onOpenChange, onCreated, linkTo = null 
             >
             {github === "missing" || github === "expired" ? (
               <p className="text-[13px] text-muted-foreground">
-                {github === "expired" ? "Your GitHub connection has expired." : "GitHub is not connected."} Connect it in Project Mode first.
+                {github === "expired" ? "Your GitHub connection has expired." : "GitHub is not connected."} Connect it in Project first.
               </p>
             ) : (
               <div className="rounded-md border border-black/10 dark:border-white/[0.08] bg-white dark:bg-[#161616] overflow-hidden">
@@ -858,7 +858,7 @@ function RenameDialog({ project, onClose, onRenamed }: { project: Project | null
           <DialogDescription className="mt-0.5 text-[13px] text-muted-foreground">
             {project?.location === "local" && project.localPath
               ? `The folder ${project.localPath} on your computer gets this new name too.`
-              : "The new name shows in Project Mode and Studio Mode."}
+              : "The new name shows in Project and the rest of Studio."}
           </DialogDescription>
         </div>
         <div className="px-5 pb-5">

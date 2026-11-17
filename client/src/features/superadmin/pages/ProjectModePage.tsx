@@ -962,7 +962,7 @@ export function ProjectModePage() {
             )}
           </>
         ) : (
-          <span className="text-sm font-medium">Project Mode</span>
+          <span className="text-sm font-medium">Project</span>
         )}
         {!aiOpen && (
           <button
@@ -1082,8 +1082,8 @@ export function ProjectModePage() {
         <div className="flex-1 flex items-center justify-center px-6">
           <div className="w-full max-w-md rounded-xl border border-border bg-background p-6 flex flex-col gap-4 text-center">
             <GithubIcon className="size-8 mx-auto" />
-            <h1 className="text-xl font-semibold">{githubExpired ? "Reconnect GitHub" : "Connect GitHub to use Project Mode"}</h1>
-            <p className="text-sm text-muted-foreground">Project Mode needs your GitHub account. Your code is only kept on GitHub, never on our servers.</p>
+            <h1 className="text-xl font-semibold">{githubExpired ? "Reconnect GitHub" : "Connect GitHub to use Project"}</h1>
+            <p className="text-sm text-muted-foreground">Project needs your GitHub account. Your code is only kept on GitHub, never on our servers.</p>
             <button onClick={() => setHubOpen(true)} className="flex items-center justify-center gap-2 bg-foreground text-background px-4 py-2 rounded-full font-medium text-sm hover:opacity-90">
               <GithubIcon className="size-4" onDark /> {githubExpired ? "Reconnect GitHub" : "Connect GitHub"}
             </button>
@@ -1316,7 +1316,7 @@ export function ProjectModePage() {
         open={!!deleting}
         onOpenChange={(o) => { if (!o && !deleteBusy) setDeleting(null); }}
         title="Delete project"
-        description={`Delete "${deleting?.name || ""}" from Project Mode.`}
+        description={`Delete "${deleting?.name || ""}" from Project.`}
         confirmationSteps={deleting ? [{ label: "To confirm, type the project name", value: deleting.name }] : []}
         warningMessage="Its code stays on GitHub. Only the project here is deleted."
         actionLabel="Delete project"

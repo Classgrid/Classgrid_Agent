@@ -246,7 +246,7 @@ export async function checkWhatsappLimit(user, { includeUpcomingRepeats = false,
             extraCredits = await chargeExtra(user, "whatsapp", 1, extra.price);
             allowed = true;
         } else {
-            extraOffer = extraOfferText("whatsapp", extra.price);
+            extraOffer = extraOfferText("whatsapp", extra.price, plan?.key);
         }
     }
 

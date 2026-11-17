@@ -262,7 +262,7 @@ export function StudioProjectView({ projectId, reloadKey = 0 }: { projectId: str
                 )}
               </div>
             )}
-            <p className="text-[12px] text-muted-foreground">Shared with Project Mode{project?.updatedAt ? ` · edited ${ago(project.updatedAt)}` : ""}</p>
+            <p className="text-[12px] text-muted-foreground">Shared with Project{project?.updatedAt ? ` · edited ${ago(project.updatedAt)}` : ""}</p>
           </div>
           {/* (a narrow pane puts the buttons on their own line under the name) */}
           <div className="ml-auto flex items-center gap-2">
@@ -290,7 +290,7 @@ export function StudioProjectView({ projectId, reloadKey = 0 }: { projectId: str
               <ArrowLeftRight className="size-3.5" /> Switch
             </button>
             <Link to={window.location.pathname.startsWith("/superadmin") ? "/superadmin/studio/project" : "/c/studio/project"} className="shrink-0 h-8 px-2.5 inline-flex items-center gap-1.5 rounded-md border border-black/10 dark:border-white/10 text-[12px] text-muted-foreground hover:text-foreground hover:bg-black/[0.04] dark:hover:bg-white/[0.05] transition-colors">
-              Open in Project Mode
+              Open in Project
             </Link>
             <button onClick={load} className="shrink-0 flex items-center justify-center size-8 rounded-md text-muted-foreground hover:text-foreground hover:bg-black/[0.05] dark:hover:bg-white/[0.06] transition-colors" title="Refresh" aria-label="Refresh">
               {loading ? <Spinner className="size-3.5" /> : <RotateCw className="size-3.5" />}
@@ -321,8 +321,8 @@ export function StudioProjectView({ projectId, reloadKey = 0 }: { projectId: str
           </div>
           {githubMissing ? (
             <div className="mt-2 flex items-center justify-between gap-3">
-              <p className="text-[12px] text-muted-foreground">GitHub is not connected. Set it up in Project Mode first.</p>
-              <Link to={window.location.pathname.startsWith("/superadmin") ? "/superadmin/studio/project" : "/c/studio/project"} className="shrink-0 h-7 px-2.5 inline-flex items-center rounded-md bg-foreground text-background text-[12px] font-medium hover:opacity-90">Go to Project Mode</Link>
+              <p className="text-[12px] text-muted-foreground">GitHub is not connected. Set it up in Project first.</p>
+              <Link to={window.location.pathname.startsWith("/superadmin") ? "/superadmin/studio/project" : "/c/studio/project"} className="shrink-0 h-7 px-2.5 inline-flex items-center rounded-md bg-foreground text-background text-[12px] font-medium hover:opacity-90">Go to Project</Link>
             </div>
           ) : !project?.repo && folderRepo ? (
             <div className="mt-2 flex flex-col gap-1.5 text-[12px] text-foreground/80">

@@ -121,7 +121,7 @@ export function EditorPanelPage() {
       <div className="h-[100dvh] flex items-center justify-center bg-background p-6 text-center">
         <div className="max-w-[260px] space-y-2">
           <p className="text-[15px] font-medium text-foreground">Open your project from Classgrid</p>
-          <p className="text-[13px] leading-relaxed text-muted-foreground">Sign in to the Classgrid app and open this project from Project Mode. Your Agent shows up here, already signed in.</p>
+          <p className="text-[13px] leading-relaxed text-muted-foreground">Sign in to the Classgrid app and open this project from Project. Your Agent shows up here, already signed in.</p>
         </div>
       </div>
     );

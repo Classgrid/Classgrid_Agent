@@ -8518,7 +8518,7 @@ export const generateImage = async (req, res) => {
                         limit: imageLimit,
                         resetPeriod: imagePeriod.label,
                         extraCredits: extra.price || 0,
-                        error: `Image generation limit reached: you've used all ${imageLimit} image${imageLimit === 1 ? "" : "s"} for this period. You can create more images after the limit resets (it resets ${imagePeriod.label}). Reset time: ${resetText}.${extraOfferText("image", extra.price)}`,
+                        error: `Image generation limit reached: you've used all ${imageLimit} image${imageLimit === 1 ? "" : "s"} for this period. You can create more images after the limit resets (it resets ${imagePeriod.label}). Reset time: ${resetText}.${extraOfferText("image", extra.price, imagePlan?.key)}`,
                     });
                 }
             }

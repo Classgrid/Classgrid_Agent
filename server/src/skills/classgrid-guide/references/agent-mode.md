@@ -107,7 +107,7 @@ Type **@** in the box to open a quick menu:
     **Auto-Delete At** and **Schedule For**. Scheduled messages wait in **Scheduled Messages**.
 -   **Share Grid** (icon in the chat header, no label): up to 4 people, counting you, use one AI chat together. Invite
     by email, **Add from Grids** or **Copy invite link**. One person asks at a time; others see "Agent is responding to
-    X". Incognito and Project Mode chats can't be shared this way.
+    X". Incognito and Project chats can't be shared this way.
 -   **AI in Grids**: from your normal AI chat, the agent can summarise a group's recent messages (about the last 1 to 2
     hours), create a poll and read results, draft and post a message, and send a file. It always asks "Should I send
     this to the group?" first, and asks before reading one-to-one chats.

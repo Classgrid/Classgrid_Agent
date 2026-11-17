@@ -181,7 +181,7 @@ export function StudioFilesView({ projectId, projectName, wide, reloadKey = 0, r
       }
       const { res, data } = fromServer!;
       if (!res.ok) {
-        setError(data.error === "github_not_connected" ? "Connect GitHub in Project Mode to see this project's files." : data.error || "Could not load the files");
+        setError(data.error === "github_not_connected" ? "Connect GitHub in Project to see this project's files." : data.error || "Could not load the files");
         return;
       }
       setListing(data);
@@ -531,7 +531,7 @@ export function StudioFilesView({ projectId, projectName, wide, reloadKey = 0, r
               </div>
             ) : !tree.length ? (
               <p className="px-4 py-3 text-[13px] text-muted-foreground">
-                {listing.source === "local" ? "This folder is empty." : listing.source === "sandbox" ? "No files yet. Open the project in Project Mode, or let the agent make some." : "This repo has no files yet."}
+                {listing.source === "local" ? "This folder is empty." : listing.source === "sandbox" ? "No files yet. Open the project in Project, or let the agent make some." : "This repo has no files yet."}
               </p>
             ) : q ? (
               !matches.length ? (

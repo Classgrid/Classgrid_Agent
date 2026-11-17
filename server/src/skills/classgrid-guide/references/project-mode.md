@@ -30,7 +30,7 @@ Project Mode only works with GitHub. Code is kept on GitHub, never on Classgrid'
 - **Open** downloads the newest code of the repo's default branch. While a Classgrid pull request is still open, it opens that pull request's branch instead, so changes not merged yet are there. You can't pick another branch to open.
 - Loading lines: "Downloading the latest code from GitHub", "Starting the editor", "Almost ready". After a page reload: "Reconnecting to your project".
 - If the copy on Classgrid has changes not yet pushed, a **Download a fresh copy** card asks first: "A fresh copy from GitHub replaces them." Confirm with **Download fresh copy**.
-- At busy times: "Project Mode is busy right now. Try again in a few minutes."
+- At busy times: "Project is busy right now. Try again in a few minutes."
 - The editor is VS Code with Classgrid branding: file explorer, built-in terminal, auto-save, Prettier and ESLint, and a run button for the open file. There is no extension store.
 - Packages install by themselves in the background. Red marks go away when that finishes (about a minute the first time).
 - Every user gets their own editor box with only their own projects.

@@ -603,7 +603,7 @@ export function StudioModePage() {
       { label: "New Browser Tab", run: () => showTab("browser") },
       { label: "New Terminal", run: () => showTab("terminal") },
       "-",
-      { label: "Open Project Mode", run: () => navigate(window.location.pathname.startsWith("/superadmin") ? "/superadmin/studio/project" : "/c/studio/project") },
+      { label: "Open Project", run: () => navigate(window.location.pathname.startsWith("/superadmin") ? "/superadmin/studio/project" : "/c/studio/project") },
       "-",
       { label: "Close Window", run: () => window.close() },
     ] },
@@ -708,11 +708,11 @@ export function StudioModePage() {
               <img src="https://cdn.classgrid.in/classgrid_intgration/github-icon.svg" alt="" aria-hidden className="size-5 shrink-0 dark:invert" />
               <p className="flex-1 min-w-0 text-[13px]">
                 {gate.kind === "app"
-                  ? <>The Classgrid app is not installed on <span className="font-medium">{studioProjectInfo?.repo}</span>. Set it up in Project Mode first.</>
-                  : <>GitHub is not connected. Set it up in Project Mode first, then come back.</>}
+                  ? <>The Classgrid app is not installed on <span className="font-medium">{studioProjectInfo?.repo}</span>. Set it up in Project first.</>
+                  : <>GitHub is not connected. Set it up in Project first, then come back.</>}
               </p>
               {/* GitHub and the Classgrid app are set up in one place only: Project Mode */}
-              <Link to={window.location.pathname.startsWith("/superadmin") ? "/superadmin/studio/project" : "/c/studio/project"} className="shrink-0 h-8 px-3 inline-flex items-center rounded-md bg-foreground text-background text-[13px] font-medium hover:opacity-90 transition-opacity">Go to Project Mode</Link>
+              <Link to={window.location.pathname.startsWith("/superadmin") ? "/superadmin/studio/project" : "/c/studio/project"} className="shrink-0 h-8 px-3 inline-flex items-center rounded-md bg-foreground text-background text-[13px] font-medium hover:opacity-90 transition-opacity">Go to Project</Link>
             </motion.div>
           )}
         </AnimatePresence>

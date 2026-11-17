@@ -125,7 +125,7 @@ export const STATUS: Record<CallStatus, { label: string; tone: Tone; pulse?: boo
   working: { label: "Working", tone: "blue", pulse: true, help: "Classgrid AI is working on it now." },
   sleeping: { label: "Continues later", tone: "violet", help: "The AI paused on purpose and continues at the time it chose." },
   waiting: { label: "Waiting for you", tone: "amber", help: "The AI asked you something on WhatsApp and waits for your reply." },
-  paused: { label: "Paused: no tokens", tone: "amber", help: "Your AI tokens ran out. It continues when they come back." },
+  paused: { label: "Paused: limit reached", tone: "amber", help: "Your plan's limit is used up. It continues when it comes back." },
   retrying: { label: "Failed, trying again", tone: "red", help: "The last run failed. It tries again in a few minutes." },
   done: { label: "Done", tone: "green", help: "The task is finished." },
   failed: { label: "Failed", tone: "red", help: "The AI gave up on this task." },
@@ -283,11 +283,11 @@ export const SIDE_EFFECT_LABEL: Record<Exclude<SideEffect, null>, string> = {
 
 export const RUN_REASON: Record<string, string> = {
   call: "after the call", restart: "after the server restarted", reply: "after your WhatsApp reply", time: "at the time it chose",
-  tokens: "when your tokens came back", continue: "to finish what was left", email: "after your email", helpers: "after its helpers finished", retry: "trying again",
+  tokens: "when your plan's limit came back", continue: "to finish what was left", email: "after your email", helpers: "after its helpers finished", retry: "trying again",
 };
 
 export const RUN_OUTCOME: Record<string, { label: string; tone: Tone }> = {
-  answer: { label: "Answered", tone: "green" }, sleep: { label: "Paused on purpose", tone: "violet" }, quota: { label: "Tokens ran out", tone: "amber" },
+  answer: { label: "Answered", tone: "green" }, sleep: { label: "Paused on purpose", tone: "violet" }, quota: { label: "Limit reached", tone: "amber" },
   error: { label: "Failed", tone: "red" }, stopped: { label: "Stopped", tone: "neutral" }, "": { label: "Running", tone: "blue" },
 };
 

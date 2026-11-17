@@ -46,8 +46,10 @@ export async function chargeExtra(user, kind, count = 1, price = null) {
     return total;
 }
 
-/** The sentence that tells a user at a limit what an extra costs and that a top-up pays it */
-export function extraOfferText(kind, price) {
+/** The sentence that tells a user at a limit what an extra costs and that a top-up pays it. Never for a user on the
+ * Free plan (`planKey` "free"): top-ups are for Pro and Max, a Free user moves to Pro or Max for more. */
+export function extraOfferText(kind, price, planKey = null) {
+    if (planKey === "free") return "";
     const unit = EXTRA_KINDS[kind]?.unit || kind;
     return price > 0
         ? ` Each extra ${unit} costs ${price.toLocaleString("en-IN")} credits from your top-up credits: top up to keep going.`

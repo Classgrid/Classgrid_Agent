@@ -47,7 +47,7 @@ async function loadOwnedSession(req, res) {
     if (!session || session.is_incognito) { res.status(404).json({ error: "Chat not found." }); return null; }
     if (norm(session.user_email) !== norm(req.user?.email)) { res.status(403).json({ error: "Only the chat owner can do this." }); return null; }
     const IdeProject = (await import("../models/IdeProject.js")).default;
-    if (await IdeProject.exists({ chatSessionIds: session.id })) { res.status(400).json({ error: "Project Mode chats can't be shared." }); return null; }
+    if (await IdeProject.exists({ chatSessionIds: session.id })) { res.status(400).json({ error: "Project chats can't be shared." }); return null; }
     return session;
 }
 
