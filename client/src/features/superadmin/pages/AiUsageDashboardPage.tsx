@@ -43,8 +43,7 @@ import { AiUsageTrendsChart } from "@/features/superadmin/components/AiUsageTren
 import { AiUsageBar } from "@/components/ai/components/AiUsageBar";
 import { TopAiUsersTable } from "@/features/superadmin/components/TopAiUsersTable";
 import { GrantCreditsModal } from "@/features/superadmin/components/GrantCredits";
-import { GiftPlansPanel } from "@/features/superadmin/components/GiftPlansPanel";
-import { PlanFolders, PlanPeopleFolders } from "@/features/superadmin/components/ai-usage/PlanFolders";
+import { PeopleFolders } from "@/features/superadmin/components/ai-usage/PlanFolders";
 import { useCurrentUser } from "@/features/auth/queries/useCurrentUser";
 import { useQuery } from "@tanstack/react-query";
 import { apiClient } from "@/lib/apiClient";
@@ -69,8 +68,6 @@ import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip,
 const COLORS = ['#3b82f6', '#8b5cf6', '#10b981', '#f59e0b', '#ef4444', '#ec4899'];
 
 interface PathState {
-  plan?: string;
-  planName?: string;
   userId?: string;
   userName?: string;
 }
@@ -148,7 +145,7 @@ export function AiUsageDashboardPage() {
   const [orgTypeFilter, setOrgTypeFilter] = useState("all");
   const [dateFilter, setDateFilter] = useState<Date | undefined>();
   const [selectedGlobalOrgId, setSelectedGlobalOrgId] = useState<string>("all");
-  const [isGiftPlansOpen, setIsGiftPlansOpen] = useState(false);
+  const [isGrantCreditsOpen, setIsGrantCreditsOpen] = useState(false);
   const [isOrgGrantCreditsOpen, setIsOrgGrantCreditsOpen] = useState(false);
 
   const [chatsTime, setChatsTime] = useState<"daily" | "weekly" | "monthly">("daily");
@@ -325,20 +322,31 @@ export function AiUsageDashboardPage() {
         {/* Settings beside the plans */}
         <GlobalAiConfigPanel />
 
-        {/* Gift plans to many people at once, each with their own plan */}
+        {/* Grant credits to many people at once (the old Grant panel, for people) */}
         <div className="border border-border rounded-xl shadow-sm bg-card flex flex-col justify-between">
           <div className="p-5">
-            <h3 className="text-lg font-semibold text-foreground tracking-tight">Gift Plans</h3>
-            <p className="text-sm text-muted-foreground mt-1">Give Pro or Max to many people at once. Use Add Separate to give each person a different plan.</p>
+            <h3 className="text-lg font-semibold text-foreground tracking-tight">Grant Credits</h3>
+            <p className="text-sm text-muted-foreground mt-1">Give credits to many people at once.</p>
           </div>
           <div className="p-4 bg-muted/20 border-t border-border flex items-center justify-end">
-            <Button variant="outline" onClick={() => setIsGiftPlansOpen(true)}>
+            <Button variant="outline" onClick={() => setIsGrantCreditsOpen(true)}>
               <LayoutTemplate className="w-4 h-4 mr-2" />
-              Open Gift Plans Panel
+              Open Grant Panel
             </Button>
           </div>
         </div>
-        <GiftPlansPanel isOpen={isGiftPlansOpen} onClose={() => setIsGiftPlansOpen(false)} />
+        <GrantCreditsModal
+          isOpen={isGrantCreditsOpen}
+          onClose={() => setIsGrantCreditsOpen(false)}
+          orgs={(globalUsersFallback?.data || []).map((u: any) => ({
+            id: String(u._id || u.id),
+            name: u.name || u.email || "",
+            orgName: "",
+            email: u.email || "",
+            role: formatRoleLabel(u.role || "user"),
+            avatar: u.profilePicture || undefined,
+          }))}
+        />
 
         <div className="flex flex-col space-y-6">
           {/* Bar Chart 1: Daily AI Requests */}
@@ -634,13 +642,12 @@ export function AiUsageDashboardPage() {
       <PageBreadcrumbs
         items={[
           { label: "AI Usage & Credits", onClick: () => setPath({}) },
-          ...(path.planName ? [{ label: path.planName, onClick: () => setPath({ plan: path.plan, planName: path.planName }) }] : []),
           ...(path.userName ? [{ label: path.userName }] : [])
         ] as any}
       />
 
       <div className="flex justify-end gap-2">
-        {!path.plan && (
+        {!path.userId && (
           <Link to="/superadmin/ai-usage/models" className="inline-flex items-center gap-2 rounded-full border border-border px-3 py-1 text-[13px] font-medium text-foreground hover:bg-muted transition-colors">
             Models
           </Link>
@@ -651,9 +658,8 @@ export function AiUsageDashboardPage() {
         </span>
       </div>
 
-      {!path.plan && !path.userId && renderGlobalStats()}
-      {!path.plan && !path.userId && <PlanFolders onOpen={(plan, planName) => setPath({ plan, planName })} />}
-      {path.plan && !path.userId && <PlanPeopleFolders plan={path.plan} planName={path.planName || ""} onOpen={(userId, userName) => setPath({ ...path, userId, userName })} />}
+      {!path.userId && renderGlobalStats()}
+      {!path.userId && <PeopleFolders onOpen={(userId, userName) => setPath({ userId, userName })} />}
       {path.userId && renderLevel3UserDetail()}
     </div>
   );

@@ -1,13 +1,13 @@
-// AI Usage & Credits, rebuilt for plans in the old page's look (owner, 2026-11-17): the folders are the plans (Free,
-// Pro, Max) instead of organizations, then the people on that plan, then the person. PlanMeters shows a person's
-// plan limits and what they used of them, the same numbers they see in their own Settings > Usage.
+// AI Usage & Credits in the old page's look (owner, 2026-11-17): the folders are the users (no organizations), then
+// the person. PlanMeters shows what a person used of their limits, the same numbers they see in their own Settings >
+// Usage. Plans themselves (and gifting them) are on Plans & Billing, not here.
 import { useState } from "react";
-import { User as UserIcon, Layers } from "lucide-react";
+import { User as UserIcon } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/marketing_ui/card";
 import { Input } from "@/components/marketing_ui/input";
 import { Button } from "@/components/marketing_ui/button";
 import { Skeleton } from "@/components/marketing_ui/skeleton";
-import { usePlansSummary, usePeople } from "@/features/superadmin/queries/useAiUsage";
+import { usePeople } from "@/features/superadmin/queries/useAiUsage";
 import { n, type Meter, type PlanOverview } from "@/features/shared/queries/usePlanOverview";
 
 function Folder({ label, subtitle, onClick, icon: Icon }: { label: string; subtitle?: string; onClick: () => void; icon: typeof UserIcon }) {
@@ -33,55 +33,28 @@ function Folder({ label, subtitle, onClick, icon: Icon }: { label: string; subti
   );
 }
 
-/** One folder per plan, with how many people are on it */
-export function PlanFolders({ onOpen }: { onOpen: (plan: string, planName: string) => void }) {
-  const { data, isLoading } = usePlansSummary();
-  if (isLoading) return <Skeleton className="h-64 w-full" />;
-  const plans = (data?.plans || []).filter((p) => !p.coming_soon || p.people > 0);
-  return (
-    <Card>
-      <CardHeader>
-        <CardTitle className="text-lg">Plans ({plans.length})</CardTitle>
-      </CardHeader>
-      <CardContent>
-        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-4">
-          {plans.map((p) => (
-            <Folder
-              key={p.key}
-              label={p.name}
-              subtitle={p.key === "free" ? `${n(p.people)} people` : `${n(p.people)} people · ${n(p.bought)} bought · ${n(p.gifted)} gifted`}
-              icon={Layers}
-              onClick={() => onOpen(p.key, p.name)}
-            />
-          ))}
-        </div>
-      </CardContent>
-    </Card>
-  );
-}
-
-/** The people on one plan, as folders, with a search and pages */
-export function PlanPeopleFolders({ plan, planName, onOpen }: { plan: string; planName: string; onOpen: (userId: string, userName: string) => void }) {
+/** Everyone, as folders, with a search and pages */
+export function PeopleFolders({ onOpen }: { onOpen: (userId: string, userName: string) => void }) {
   const [q, setQ] = useState("");
   const [page, setPage] = useState(1);
-  const { data, isLoading } = usePeople({ q, plan, how: "", page, limit: 60 });
+  const { data, isLoading } = usePeople({ q, plan: "all", how: "", page, limit: 60 });
   const people = data?.data || [];
   return (
     <Card>
       <CardHeader className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-        <CardTitle className="text-lg">{planName} ({n(data?.total ?? 0)})</CardTitle>
+        <CardTitle className="text-lg">Users ({n(data?.total ?? 0)})</CardTitle>
         <Input value={q} onChange={(e) => { setQ(e.target.value); setPage(1); }} placeholder="Search by name or email..." className="h-9 sm:max-w-[280px]" />
       </CardHeader>
       <CardContent>
         {isLoading ? <Skeleton className="h-48 w-full" /> : people.length === 0 ? (
-          <div className="text-center py-12 text-muted-foreground">No people on this plan.</div>
+          <div className="text-center py-12 text-muted-foreground">No users found.</div>
         ) : (
           <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-4">
             {people.map((u) => (
               <Folder
                 key={u.id}
                 label={u.name || u.email}
-                subtitle={u.staff ? "Staff" : u.plan?.expires_at ? `Until ${new Date(u.plan.expires_at).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })}` : u.email}
+                subtitle={u.email}
                 icon={UserIcon}
                 onClick={() => onOpen(u.id, u.name || u.email)}
               />
@@ -128,13 +101,8 @@ function MeterRow({ label, note, meter, unit }: { label: string; note?: string; 
 export function PlanMeters({ overview }: { overview?: PlanOverview | null }) {
   if (!overview) return null;
   const u = overview.usage;
-  const until = overview.plan.expires_at ? ` · until ${new Date(overview.plan.expires_at).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })}` : "";
   return (
     <>
-      <div className="w-full flex items-center justify-between">
-        <span className="text-sm font-medium text-foreground">Plan</span>
-        <span className="text-sm font-semibold text-foreground">{overview.plan.name}{until}</span>
-      </div>
       <MeterRow label="Session" meter={u.credits_window} unit="credits" />
       <MeterRow label="This week" meter={u.credits_week} unit="credits" />
       <MeterRow label="Claude" meter={u.claude_week} unit="credits" />
