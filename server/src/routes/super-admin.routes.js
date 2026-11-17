@@ -2380,88 +2380,235 @@ router.patch("/content-reports/:id/dismiss", async (req, res) => {
 // ── GDPR / DATA EXPORT & DELETION ────────────────────────────────────────────
 // ══════════════════════════════════════════════════════════════════════════════
 
-// Export all data for a specific user (GDPR Article 20)
+// Privacy requests page (owner, 2026-11-17: the page listed "No users." with 42 users and nobody understood it).
+// The page has its own list of people, so it can show each person's plan, which the general /users list does not
+// return. Same people as the Users page: unfinished chat sign-ups are not accounts yet, so they are left out.
+const GDPR_ERASED_EMAIL = /@erased\.classgrid\.in$/i;
+const gdprEscapeRegex = (s) => String(s).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+// An account erased before 2026-11-17 was only renamed (name "Deleted User", email deleted_...@erased.classgrid.in):
+// its chats and files were left behind under the old email
+const gdprErasedEarlier = (u) => u.status === "deleted" || GDPR_ERASED_EMAIL.test(String(u.email || ""));
+// A plan that ran out or was cancelled leaves the person on Free (services/plan-limits.service.js)
+const gdprPlanId = (plan) => (plan?.id && plan.status !== "expired" && plan.status !== "cancelled" ? plan.id : "free");
+// (a malformed id is "not found", not a server error from a failed database cast)
+const gdprValidId = (id) => /^[0-9a-f]{24}$/i.test(String(id || ""));
+
+router.get("/gdpr/people", async (req, res) => {
+    try {
+        const User = (await import("../models/User.js")).default;
+        const q = String(req.query.q || "").trim().slice(0, 100);
+        const limit = Math.min(Math.max(parseInt(req.query.limit) || 25, 1), 100);
+        const page = Math.max(parseInt(req.query.page) || 1, 1);
+
+        const filter = { $and: [finishedAccountsMatch()] };
+        if (q) {
+            const rx = new RegExp(gdprEscapeRegex(q), "i");
+            filter.$and.push({ $or: [{ name: rx }, { email: rx }] });
+        }
+
+        const [people, total] = await Promise.all([
+            User.find(filter)
+                .select("name email role status profilePicture plan createdAt")
+                .sort({ createdAt: -1 })
+                .skip((page - 1) * limit)
+                .limit(limit)
+                .lean(),
+            User.countDocuments(filter),
+        ]);
+
+        res.json({
+            success: true,
+            data: people.map((u) => ({
+                _id: String(u._id),
+                name: u.name || "",
+                email: u.email || "",
+                photo: u.profilePicture || null,
+                plan: gdprPlanId(u.plan),
+                joinedAt: u.createdAt || null,
+                isSuperAdmin: u.role === "super_admin",
+                erasedEarlier: gdprErasedEarlier(u),
+            })),
+            total,
+            page,
+            limit,
+        });
+    } catch (err) {
+        console.error("[SuperAdmin] GDPR people error:", err.message);
+        res.status(500).json({ success: false, message: "Server error" });
+    }
+});
+
+// Download a person's data (GDPR Article 20, data portability): one JSON file with plain field names, holding what
+// Classgrid AI keeps about them. Chats are listed (title, date, number of messages), not copied message by message.
 router.get("/gdpr/export/:userId", async (req, res) => {
     try {
         const User = (await import("../models/User.js")).default;
 
-        const user = await User.findById(req.params.userId)
-            .select("-password -resetPasswordToken -activationToken -activationCodeHash")
-            .lean();
+        const user = await User.findById(req.params.userId).lean();
+        if (!user) return res.status(404).json({ success: false, message: "Person not found" });
+        const userId = user._id;
+        const iso = (d) => (d ? new Date(d).toISOString() : null);
 
-        if (!user) return res.status(404).json({ success: false, message: "User not found" });
+        // Each part is read on its own: one that fails says so in the file instead of stopping the whole download
+        const part = async (fn) => {
+            try { return await fn(); } catch (e) {
+                console.error(`[SuperAdmin] GDPR export part failed for ${userId}:`, e.message);
+                return { couldNotBeRead: e.message };
+            }
+        };
 
-        // Collect data from related collections
-        const collections = {};
-        try {
-            const AdminAuditLog = (await import("../models/AdminAuditLog.js")).default;
-            collections.auditLogs = await AdminAuditLog.find({ userId: req.params.userId }).limit(500).lean();
-        } catch (_) { collections.auditLogs = []; }
+        if (!user) return res.status(404).json({ success: false, message: "Person not found" });
+
+        const files = await part(async () => {
+            const rows = await AiLibraryFile.find({ user_id: userId }).sort({ created_at: -1 }).lean();
+            return {
+                total: rows.length,
+                list: rows.map((f) => ({ name: f.original_name, kind: f.file_type, sizeBytes: f.size_bytes || 0, madeBy: f.source === "generated" ? "AI" : "uploaded", link: f.cdn_url, addedAt: iso(f.created_at) })),
+            };
+        });
 
         const exportData = {
             exportedAt: new Date().toISOString(),
             exportedBy: req.user.email,
-            subject: "GDPR Data Export",
-            user,
-            ...collections,
+            person: {
+                id: String(userId),
+                name: user.name || "",
+                email: user.email || "",
+                otherEmails: (user.account_emails || []).map((e) => ({ email: e.email, confirmedAt: iso(e.verified_at) })),
+                phoneNumber: user.phoneNumber || null,
+                whatsappNumber: user.metadata?.whatsappPhone || null,
+                bio: user.bio || null,
+                address: user.address || null,
+                profilePhoto: user.profilePicture || null,
+                emailConfirmed: !!user.isEmailVerified,
+                signsInWithGoogle: !!user.googleId,
+                signsInWithGithub: !!user.githubId,
+                joinedAt: iso(user.createdAt),
+                lastSignInAt: iso(user.lastLoginAt),
+                accountStatus: user.status || "active",
+                signUpAnswers,
+            },
+            plan: {
+                name: gdprPlanId(plan),
+                status: plan.status || "active",
+                howPaid: plan.billing || "none",
+                startedAt: iso(plan.started_at),
+                endsAt: iso(plan.expires_at),
+                endsAtEndOfPeriod: !!plan.cancel_at_period_end,
+            },
+            credits: {
+                boughtCreditsLeft: t.ai_credits_balance || 0,
+                boughtCreditsTotal: t.total_ai_credits_purchased || 0,
+                giftedCreditsLeft: t.promotion_credits_balance || 0,
+                giftedCreditsTotal: t.total_promotion_credits_granted || 0,
+                totalTokensUsed: t.total_ai_tokens_used || 0,
+            },
+            aiSettings: user.ai_preferences || {},
+            customInstructions: (user.ai_custom_skills || []).map((s) => ({ name: s.name, instructions: s.instructions })),
+            memory,
+            chats,
+            files,
+            savedSongs,
+            projects,
+            payments,
+            otherPaymentRecords,
+            adminActionsOnThisAccount,
         };
 
-        res.setHeader("Content-Disposition", `attachment; filename="gdpr-export-${req.params.userId}.json"`);
+        // Every download is written to the audit log: it hands a person's data to whoever holds the file
+        await AdminAuditLog.create({
+            actorId: req.user._id, actorName: req.user.name, actorRole: "super_admin",
+            action: "user.gdpr_export", targetId: String(userId), targetName: user.name,
+            targetType: "user", metadata: { email: user.email }, rollbackStatus: "none",
+            ip: req.ip, userAgent: req.headers["user-agent"] ?? "",
+        }).catch(e => console.error("[AuditLog] gdpr_export write failed:", e.message));
+
+        res.setHeader("Content-Disposition", `attachment; filename="classgrid-data-${userId}.json"`);
         res.setHeader("Content-Type", "application/json");
-        res.json(exportData);
+        res.send(JSON.stringify(exportData, null, 2));
     } catch (err) {
         console.error("[SuperAdmin] GDPR export error:", err.message);
         res.status(500).json({ success: false, message: "Server error" });
     }
 });
 
-// Anonymize / delete user data (GDPR Article 17 - Right to Erasure)
+// Delete a person's data (GDPR Article 17, right to erasure). The same deletion as Delete Account in the person's own
+// Settings (controllers/auth.controller.js deleteAccount, services/account-deletion.service.js): chats, Library files,
+// songs, projects, memory, schedules, docs, pages, notifications, usage logs, the files in storage, then the account
+// itself. Payments, invoices and credit records stay (the business must keep them by law). Until 2026-11-17 this only
+// renamed the account and left every chat and file behind.
 // Using POST (not DELETE) so the body is reliably parsed by all middleware
 router.post("/gdpr/erase/:userId", async (req, res) => {
     try {
         const User = (await import("../models/User.js")).default;
         const AdminAuditLog = (await import("../models/AdminAuditLog.js")).default;
-        const { confirm } = req.body;
-
-        if (confirm !== "ERASE") {
-            return res.status(400).json({ success: false, message: "Must send confirm: 'ERASE' to proceed." });
-        }
 
         const user = await User.findById(req.params.userId).lean();
-        if (!user) return res.status(404).json({ success: false, message: "User not found" });
+        // Their chats (own ones, by email), 1000 at a time, and how many messages they hold
+        const chats = await part(async () => {
+            const rows = [];
+            for (let from = 0; ; from += 1000) {
+                const { data, error } = await sb.from("ai_chat_sessions")
+                    .select("id, title, created_at, is_incognito")
+                    .eq("user_email", user.email)
+                    .order("created_at", { ascending: false })
+                    .range(from, from + 999);
+                if (error) throw error;
+                rows.push(...(data || []));
+                if (!data || data.length < 1000) break;
+            }
+            let messagesTotal = 0;
+            const ids = rows.map((r) => r.id);
+            for (let i = 0; i < ids.length; i += 200) {
+                const { count, error } = await sb.from("ai_chat_messages")
+                    .select("id", { count: "exact", head: true })
+                    .in("session_id", ids.slice(i, i + 200));
+                if (error) throw error;
+                messagesTotal += count || 0;
+            }
+            return {
+                total: rows.length,
+                messagesTotal,
+                list: rows.map((r) => ({ id: r.id, title: r.title || "(no title)", startedAt: r.created_at, incognito: !!r.is_incognito })),
+            };
+        });
 
         // Safety: never erase a super_admin
         if (user.role === "super_admin") {
-            return res.status(403).json({ success: false, message: "Cannot erase a Super Admin account." });
+            return res.status(403).json({ success: false, message: "Super admin accounts can't be deleted." });
         }
 
-        // Anonymize instead of hard delete (preserves foreign key integrity)
-        const anonymizedEmail = `deleted_${Date.now()}@erased.classgrid.in`;
-        await User.findByIdAndUpdate(req.params.userId, {
-            $set: {
-                name: "Deleted User",
-                email: anonymizedEmail,
-                phoneNumber: "",
-                bio: "",
-                address: "",
-                profilePicture: "",
-                status: "deleted",
-                password: null,
-                googleId: null,
-                facebookId: null,
-                githubId: null,
-                linkedinId: null,
-                fcmTokens: [],
-                trustedDevices: [],
-            },
-        });
+        // The super admin types the person's email to confirm, so the wrong row can't be deleted by a slip
+        const typed = String(req.body?.confirmEmail || "").trim().toLowerCase();
+        if (!typed || typed !== String(user.email || "").trim().toLowerCase()) {
+            return res.status(400).json({ success: false, message: "The email typed doesn't match this person's email." });
+        }
 
-        // Audit log
+        // An account renamed by the old erase still has its chats under the email it had then (in the audit log)
+        let dataEmail = user.email;
+        const erasedEarlier = gdprErasedEarlier(user);
+        if (erasedEarlier) {
+            const earlier = await AdminAuditLog.findOne({ action: "user.gdpr_erase", targetId: String(user._id) })
+                .sort({ timestamp: -1 }).select("previousState").lean();
+            if (earlier?.previousState?.email) dataEmail = earlier.previousState.email;
+        }
+
+        const { deleteAccountData, deleteStoredFiles } = await import("../services/account-deletion.service.js");
+        const { report, files } = await deleteAccountData({ ...user, email: dataEmail }, { io: req.app.get("io") });
+        console.log(`[SuperAdmin] GDPR erase ${user._id} data:`, JSON.stringify(report));
+
+        await User.findByIdAndDelete(user._id);
+        // The files in storage go after the reply, like the person's own deletion (there can be many)
+        deleteStoredFiles(String(user._id), files)
+            .then((n) => console.log(`[SuperAdmin] GDPR erase ${user._id}: ${n} stored file(s) deleted`))
+            .catch((e) => console.error(`[SuperAdmin] GDPR erase ${user._id}: stored files failed:`, e.message));
+
+        // Every erase is written to the audit log, with who it was and what each part removed
         await AdminAuditLog.create({
             actorId: req.user._id, actorName: req.user.name, actorRole: "super_admin",
-            action: "user.gdpr_erase", targetId: req.params.userId, targetName: user.name,
-            targetType: "user", previousState: { email: user.email, name: user.name },
-            metadata: { anonymizedEmail }, rollbackStatus: "none",
+            action: "user.gdpr_erase", targetId: String(user._id), targetName: user.name,
+            targetType: "user", previousState: { email: dataEmail, name: user.name, plan: gdprPlanId(user.plan) },
+            metadata: { removed: report, storedFilesQueued: files.length, erasedEarlier }, rollbackStatus: "none",
             ip: req.ip, userAgent: req.headers["user-agent"] ?? "",
         }).catch(e => console.error("[AuditLog] gdpr_erase write failed:", e.message));
 
@@ -2470,7 +2617,9 @@ router.post("/gdpr/erase/:userId", async (req, res) => {
             io.emit("platform_gdpr_updated");
         }
 
-        res.json({ success: true, message: `User data erased. Email replaced with ${anonymizedEmail}.` });
+        // Parts that could not be removed are named, so the super admin knows to look (they are in the server log too)
+        const failed = Object.entries(report).filter(([, v]) => typeof v === "string" && v.startsWith("failed")).map(([k]) => k);
+        res.json({ success: true, failedParts: failed, message: failed.length ? `Deleted, but some parts failed: ${failed.join(", ")}.` : "Deleted." });
     } catch (err) {
         console.error("[SuperAdmin] GDPR erase error:", err.message);
         res.status(500).json({ success: false, message: "Server error" });
@@ -2538,7 +2687,16 @@ router.post("/rollback/:logId", async (req, res) => {
             const User = (await import("../models/User.js")).default;
             const reverseStatus = action === "user.ban" ? "active" : "suspended";
             await User.findByIdAndUpdate(targetId, { $set: { status: reverseStatus } });
+        if (!gdprValidId(req.params.userId)) return res.status(404).json({ success: false, message: "Person not found" });
             rollbackMessage = `User status rolled back to ${reverseStatus}.`;
+        const AdminAuditLog = (await import("../models/AdminAuditLog.js")).default;
+        const AiCreditTransaction = (await import("../models/AiCreditTransaction.js")).default;
+        const PlatformTransaction = (await import("../models/PlatformTransaction.js")).default;
+        const AiLibraryFile = (await import("../models/AiLibraryFile.js")).default;
+        const SavedSong = (await import("../models/SavedSong.js")).default;
+        const IdeProject = (await import("../models/IdeProject.js")).default;
+        const AiSkill = (await import("../models/AiSkill.js")).default;
+        const { primarySupabaseClient: sb } = await import("../config/supabaseClient.js");
         } else if (action === "user.role_change" && targetId && previousState?.role) {
             const User = (await import("../models/User.js")).default;
             await User.findByIdAndUpdate(targetId, { $set: { role: previousState.role } });
@@ -2553,7 +2711,43 @@ router.post("/rollback/:logId", async (req, res) => {
         }
 
         // Mark log entry as rolled back
+        const savedSongs = await part(async () => (await SavedSong.find({ userId }).lean())
+            .map((s) => ({ title: s.title, channel: s.channel, lengthSeconds: s.durationSec || 0, savedAt: iso(s.createdAt) })));
+
+        const projects = await part(async () => (await IdeProject.find({ owner: userId }).sort({ createdAt: -1 }).lean())
+            .map((p) => ({ name: p.name, githubRepo: p.repo || p.masteroRepo || null, chatsInProject: (p.chatSessionIds || []).length, createdAt: iso(p.createdAt), lastOpenedAt: iso(p.lastOpenedAt) })));
+
+        const memory = await part(async () => (await AiSkill.find({ userId }).lean())
+            .map((s) => ({ name: s.name, whatTheAiRemembers: s.instructions, savedAt: iso(s.createdAt) })));
+
+        const payments = await part(async () => (await AiCreditTransaction.find({ userId }).sort({ createdAt: -1 }).lean())
+            .map((t) => ({
+                date: iso(t.paymentTime || t.createdAt),
+                kind: t.type === "plan" ? "plan" : t.type === "topup" ? "credits bought" : t.type,
+                plan: t.plan_key || null,
+                planTerm: t.plan_term || null,
+                amountInr: t.amount_inr,
+                creditsAdded: t.credits_added,
+                status: t.status,
+                paymentMethod: t.paymentMethod || null,
+                razorpayPaymentId: t.razorpay_payment_id || null,
+                razorpayOrderId: t.razorpay_order_id || null,
+            })));
+
+        const otherPaymentRecords = await part(async () => (await PlatformTransaction.find({ userId }).sort({ createdAt: -1 }).lean())
+            .map((t) => ({ date: iso(t.paymentTime || t.createdAt), amountInr: t.amount, status: t.status, kind: t.paymentFlow, razorpayPaymentId: t.razorpayPaymentId || null })));
+
+        const adminActionsOnThisAccount = await part(async () => (await AdminAuditLog.find({ targetId: String(userId) }).sort({ timestamp: -1 }).limit(500).lean())
+            .map((a) => ({ date: iso(a.timestamp || a.createdAt), action: a.action, by: a.actorName })));
+
+        // Sign-up answers are kept as free-form metadata: anything that looks like a secret stays out of the file
+        const signUpAnswers = Object.fromEntries(Object.entries(user.metadata || {})
+            .filter(([k]) => !/token|secret|password|hash|otp|code/i.test(k)));
+
+        const t = user.ai_tokens || {};
+        const plan = user.plan || {};
         await AdminAuditLog.findByIdAndUpdate(req.params.logId, {
+            about: "Everything Classgrid AI keeps about this person, downloaded by a super admin on their request.",
             $set: { rollbackStatus: "rolled_back", rolledBackBy: req.user._id, rolledBackAt: new Date() }
         });
 
@@ -2574,6 +2768,7 @@ router.get("/backup/stats", async (req, res) => {
         const User = (await import("../models/User.js")).default;
         const Organization = (await import("../models/Organization.js")).default;
         const EmailJob = (await import("../models/EmailJob.js")).default;
+        if (!gdprValidId(req.params.userId)) return res.status(404).json({ success: false, message: "Person not found" });
         const SystemLog = (await import("../models/SystemLog.js")).default;
         const AdminAuditLog = (await import("../models/AdminAuditLog.js")).default;
         const PlatformTransaction = (await import("../models/PlatformTransaction.js")).default;

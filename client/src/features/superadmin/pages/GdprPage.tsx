@@ -65,158 +65,134 @@
  * ─────────────────────────────────────────────────────────
  */
 
-import { useState, useMemo, useEffect } from "react";
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { Shield, Download, Trash2, RefreshCw, AlertTriangle, User } from "lucide-react";
-import type { ColumnDef } from "@tanstack/react-table";
+
+// Privacy requests (superadmin.classgrid.in/superadmin/gdpr), rebuilt 2026-11-17. The old page listed "No users."
+// with 42 users: it passed the list to DataTable as `data`, but DataTable reads `rows`. It now has its own list
+// (GET /api/super-admin/gdpr/people, which also gives each person's plan), plain words for the two actions, a
+// download that carries the sign-in (an <a href> to the API did not send the token), and a delete that asks for
+// the person's email.
+import { useEffect, useState } from "react";
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 
-import { SectionPanel } from "@/components/marketing_ui/SectionPanel";
-import { Badge } from "@/components/marketing_ui/badge";
-import { Button } from "@/components/marketing_ui/button";
-import { Input } from "@/components/marketing_ui/input";
-import { DataTable } from "@/components/marketing_ui/data-table";
-import { PageHeader } from "@/components/layout/PageHeader";
-
-import { Avatar, AvatarImage, AvatarFallback } from "@/components/marketing_ui/avatar";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/marketing_ui/dialog";
 import { apiClient } from "@/lib/apiClient";
-import { formatDate } from "@/utils/dateUtils";
 import { getSocket } from "@/lib/socketClient";
-import { resolveRescueNavigation } from "@/lib/rescue";
+import { PrivacyActionCards } from "../components/gdpr/PrivacyActionCards";
+import { PeopleList } from "../components/gdpr/PeopleList";
+import { DeletePersonDialog } from "../components/gdpr/DeletePersonDialog";
+import type { PrivacyPeoplePage, PrivacyPerson } from "../components/gdpr/types";
 
+const PAGE_SIZE = 25;
 
 export function GdprPage() {
+  const queryClient = useQueryClient();
   const [search, setSearch] = useState("");
-  const [eraseTarget, setEraseTarget] = useState<any>(null);
-  const [eraseConfirmText, setEraseConfirmText] = useState("");
+  const [query, setQuery] = useState("");
+  const [page, setPage] = useState(1);
+  const [deleteTarget, setDeleteTarget] = useState<PrivacyPerson | null>(null);
+  const [downloadingId, setDownloadingId] = useState<string | null>(null);
 
-  const { data, isLoading, refetch, isFetching } = useQuery({
-    queryKey: ["gdpr-users", search],
-    queryFn: () => apiClient.get<any>("/api/super-admin/users", { params: { q: search, limit: 100, signup: "all" } }).then(r => r.data),
+  // The search waits for typing to pause, and starts again from the first page
+  useEffect(() => {
+    const t = setTimeout(() => { setQuery(search.trim()); setPage(1); }, 300);
+    return () => clearTimeout(t);
+  }, [search]);
+
+  const { data, isLoading, isError, refetch } = useQuery({
+    queryKey: ["gdpr-people", query, page],
+    queryFn: () => apiClient.get<PrivacyPeoplePage>("/api/super-admin/gdpr/people", { params: { q: query, page, limit: PAGE_SIZE } }).then((r) => r.data),
+    placeholderData: keepPreviousData,
     staleTime: 30_000,
   });
 
+  // Another super admin deleted someone: the list follows
   useEffect(() => {
     const socket = getSocket();
     if (!socket) return;
-    const handleUpdate = () => refetch();
-    socket.on("platform_gdpr_updated", handleUpdate);
-    return () => {
-      socket.off("platform_gdpr_updated", handleUpdate);
-    };
-  }, [refetch]);
+    const refresh = () => queryClient.invalidateQueries({ queryKey: ["gdpr-people"] });
+    socket.on("platform_gdpr_updated", refresh);
+    return () => { socket.off("platform_gdpr_updated", refresh); };
+  }, [queryClient]);
 
-  const users: any[] = data?.data ?? [];
+  const people = data?.data ?? [];
+  const total = data?.total ?? 0;
+  const pages = Math.max(1, Math.ceil(total / PAGE_SIZE));
 
-  const eraseMut = useMutation({
-    mutationFn: (userId: string) =>
-      apiClient.post(`/api/super-admin/gdpr/erase/${userId}`, { confirm: "ERASE" }).then(r => r.data),
-    onSuccess: () => { toast.success("User data erased."); setEraseTarget(null); setEraseConfirmText(""); refetch(); },
-    onError: (e: any) => toast.error(e?.response?.data?.message ?? "Erasure failed."),
-  });
-
-  async function handleExport(user: any) {
-    const a = document.createElement("a");
-    a.href = await resolveRescueNavigation(`/api/super-admin/gdpr/export/${user._id}`);
-    a.download = `gdpr-export-${user._id}.json`;
-    a.click();
-    toast.success(`Export started for ${user.name}.`);
+  async function handleDownload(person: PrivacyPerson) {
+    setDownloadingId(person._id);
+    try {
+      // Fetched through apiClient so the sign-in goes with it, then saved as a file
+      const res = await apiClient.get(`/api/super-admin/gdpr/export/${person._id}`, { responseType: "blob", timeout: 120_000 });
+      const url = URL.createObjectURL(res.data as Blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `classgrid-data-${(person.email || person._id).replace(/[^a-z0-9._-]+/gi, "_")}.json`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 10_000);
+      toast.success(`${person.name || person.email}'s data was downloaded.`);
+    } catch {
+      toast.error("The data couldn't be downloaded. Try again.");
+    } finally {
+      setDownloadingId(null);
+    }
   }
 
-  const columns: ColumnDef<any>[] = useMemo(() => [
-    {
-      accessorKey: "name", header: "User", size: 220,
-      cell: ({ row }) => {
-        const u = row.original;
-        return (
-          <div >
-            <Avatar className="w-8 h-8"><AvatarFallback>{u.name?.charAt(0)}</AvatarFallback></Avatar>
-            <div>
-              <div >{u.name}</div>
-              <div >{u.email}</div>
-            </div>
-          </div>
-        );
-      },
+  const deleteMut = useMutation({
+    // (removing chats, files and projects can take a while, so this waits longer than a normal request)
+    mutationFn: ({ person, typedEmail }: { person: PrivacyPerson; typedEmail: string }) =>
+      apiClient
+        .post<{ success: boolean; message: string; failedParts?: string[] }>(`/api/super-admin/gdpr/erase/${person._id}`, { confirmEmail: typedEmail }, { timeout: 180_000 })
+        .then((r) => r.data),
+    onSuccess: (res, { person }) => {
+      const who = person.name || person.email;
+      if (res.failedParts?.length) toast.warning(`${who}'s data was deleted, but some parts failed: ${res.failedParts.join(", ")}.`);
+      else toast.success(`${who}'s data was deleted.`);
+      setDeleteTarget(null);
+      queryClient.invalidateQueries({ queryKey: ["gdpr-people"] });
     },
-    { accessorKey: "role", header: "Role", size: 130, cell: ({ getValue }) => <Badge variant="neutral">{getValue<string>().replace(/_/g, " ")}</Badge> },
-    {
-      accessorKey: "organizationName", header: "Organization", size: 170,
-      cell: ({ getValue }) => getValue<string>() || <span >Platform</span>,
-    },
-    {
-      accessorKey: "status", header: "Status", size: 100,
-      cell: ({ getValue }) => {
-        const s = getValue<string>() ?? "active";
-        if (s === "active") return <Badge variant="success" dot>Active</Badge>;
-        if (s === "deleted") return <Badge variant="danger">Erased</Badge>;
-        return <Badge variant="warning">{s}</Badge>;
-      },
-    },
-    { accessorKey: "createdAt", header: "Joined", size: 120, cell: ({ getValue }) => <span >{formatDate(getValue<string>())}</span> },
-    {
-      id: "actions", header: "GDPR Actions", size: 180,
-      cell: ({ row }) => {
-        const u = row.original;
-        const isErased = u.status === "deleted" || u.name === "Deleted User";
-        return (
-          <div >
-            <Button size="sm" variant="outline" onClick={() => handleExport(u)}><Download size={12} /> Export</Button>
-            {!isErased && u.role !== "super_admin" && (
-              <Button size="sm" variant="destructive" onClick={() => setEraseTarget(u)}><Trash2 size={12} /> Erase</Button>
-            )}
-          </div>
-        );
-      },
-    },
-  ], []);
-
-  // inline styles removed
+    onError: (e: any) => toast.error(e?.message || "The data couldn't be deleted."),
+  });
 
   return (
-    <div className="flex flex-col gap-6 w-full max-w-7xl mx-auto p-4 sm:p-6 lg:p-8 pb-12">
-      <PageHeader
-        title="GDPR & Data Privacy"
-        description="Export or erase user data — GDPR Article 17 (Right to Erasure) and Article 20 (Data Portability)."
-      />
-      <div >
-        <AlertTriangle size={18}  />
-        <div>
-          <div >Erasure is irreversible</div>
-          <div >
-            Erasing a user anonymizes their account — name, email, and PII replaced with placeholders. Foreign keys are preserved. Super Admin accounts are protected from erasure. All actions are logged.
-          </div>
-        </div>
+    <div className="flex flex-col gap-5 w-full max-w-5xl mx-auto p-4 sm:p-6 lg:p-8 pb-12">
+      <div>
+        <h1 className="text-2xl sm:text-3xl font-bold tracking-tight text-foreground">Privacy requests</h1>
+        <p className="text-sm text-muted-foreground mt-1">
+          When someone asks for a copy of their data, or for their data to be deleted, find them in the list and do it here.
+        </p>
       </div>
-      <SectionPanel title="All Users" description="Perform GDPR actions on any user account." noPadding>
-        <div >
-          <div searchValue={search} onSearchChange={setSearch} searchPlaceholder="Search by name or email…" />
-        </div>
-        <DataTable columns={columns} data={users} isLoading={isLoading} pageSize={50}
-          emptyIcon={<User size={32} />} emptyTitle="No users found" emptyDescription="Try a different search." emptyMessage="No users." />
-      </SectionPanel>
 
-      <Dialog open={!!eraseTarget} onOpenChange={o => !o && setEraseTarget(null)}>
-        <DialogContent className="max-w-md">
-          <DialogHeader>
-            <DialogTitle>⚠️ Erase User Data (GDPR)</DialogTitle>
-            <DialogDescription>
-              This will permanently anonymize <strong>{eraseTarget?.name}</strong> ({eraseTarget?.email}). This action <strong>cannot be undone</strong>.
-            </DialogDescription>
-          </DialogHeader>
-          <div >
-            <label className="text-sm font-medium mb-1 block">Type <strong>ERASE</strong> to confirm</label>
-            <Input value={eraseConfirmText} onChange={e => setEraseConfirmText(e.target.value)} placeholder="ERASE" />
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => { setEraseTarget(null); setEraseConfirmText(""); }}>Cancel</Button>
-            <Button variant="destructive" isLoading={eraseMut.isPending} disabled={eraseConfirmText !== "ERASE"} onClick={() => eraseMut.mutate(eraseTarget._id)}>
-              <Trash2 size={14} /> Erase Permanently
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      <PrivacyActionCards />
+
+      <p className="text-xs text-muted-foreground">
+        Download is GDPR Article 20 (data portability); delete is GDPR Article 17 (right to erasure). Every download and
+        delete is written to the audit log.
+      </p>
+
+      <PeopleList
+        people={people}
+        total={total}
+        page={page}
+        pages={pages}
+        isLoading={isLoading}
+        isError={isError}
+        search={search}
+        onSearch={setSearch}
+        onPage={setPage}
+        onRetry={() => refetch()}
+        downloadingId={downloadingId}
+        onDownload={handleDownload}
+        onDelete={setDeleteTarget}
+      />
+
+      <DeletePersonDialog
+        person={deleteTarget}
+        busy={deleteMut.isPending}
+        onCancel={() => setDeleteTarget(null)}
+        onConfirm={(person, typedEmail) => deleteMut.mutate({ person, typedEmail })}
+      />
     </div>
   );
 }
