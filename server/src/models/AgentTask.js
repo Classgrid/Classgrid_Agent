@@ -39,6 +39,9 @@ const agentTaskSchema = new mongoose.Schema({
   // (services/call-limits.service.js; owner, 2026-11-17). Sleeping and waiting for the user do not count.
   work_cap_ms: { type: Number, default: null },
   work_ms: { type: Number, default: 0 },
+  // Why the task ended, when it matters later: "work_cap" (its minutes of work ran out). A reply to such a task does
+  // not start new work with fresh minutes (a new call does).
+  ended_reason: { type: String, default: null },
 }, { timestamps: true });
 
 agentTaskSchema.index({ phone: 1, updatedAt: -1 });

@@ -107,8 +107,8 @@ test("-1 is no limit; a lowered limit comes back only when enough calls are old 
 test("the line sent with the call's work counts every set limit", () => {
     const caps = limits.callCountCaps(FREE, 50);
     const t = [ago(2 * DAY), ago(HOUR)];
-    assert.equal(limits.callsLineText(caps, { day: [ago(HOUR)], week: t, month: t }, NOW), "(Call 2 of 3 for today, 3 of 10 for this week, 3 of 30 for this month.)");
-    assert.equal(limits.callsLineText(limits.callCountCaps(null, 50), { day: [] }, NOW), "(Call 1 of 50 for today.)");
+    assert.equal(limits.callsLineText(caps, { day: [ago(HOUR)], week: t, month: t }, NOW), "(Call 2 of 3 you can make in 24 hours, 3 of 10 in 7 days, 3 of 30 in 30 days.)");
+    assert.equal(limits.callsLineText(limits.callCountCaps(null, 50), { day: [] }, NOW), "(Call 1 of 50 you can make in 24 hours.)", "plans off: the owner's line from before, word for word");
 });
 
 test("the week and month are counted from the call records: this person's answered calls", async () => {
@@ -162,7 +162,8 @@ test("the running tasks are counted from the call records: queued, working or re
     const q = countQueries[0];
     assert.equal(q.user_id, "aaaaaaaaaaaaaaaaaaaaaaaa");
     assert.equal(q.origin, "call");
-    assert.deepEqual(q.status, { $in: ["queued", "working", "retrying"] });
+    // every open state counts: a sleeping, waiting or paused task runs beside the others when it wakes
+    assert.deepEqual(q.status, { $in: ["queued", "working", "retrying", "sleeping", "waiting", "paused"] });
     assert.equal(q.updatedAt.$gte.getTime(), NOW - 48 * HOUR);
 });
 
@@ -207,15 +208,42 @@ test("a task's minutes of work: the run is stopped when they run out, and its ti
     assert.equal(added.length, 1);
 });
 
+test("a run's time is saved while it runs (a restart loses at most a minute), done() saves the rest once", async () => {
+    const added = [];
+    const stop = new AbortController();
+    const clock = limits.workClock({ _id: "t3", work_cap_ms: 10 * MIN, work_ms: 0 }, stop, (id, ms) => added.push(ms), { saveEveryMs: 30 });
+    await new Promise((r) => setTimeout(r, 100));
+    assert.ok(added.length >= 2, `saved while running: ${added.length}`);
+    await clock.done();
+    const count = added.length;
+    await clock.done(); // (a second done() adds nothing: the run's finally and its caller both call it)
+    assert.equal(added.length, count);
+    const total = added.reduce((a, b) => a + b, 0);
+    assert.ok(total >= 90 && total < 1000, `the saved parts add up to the run's time: ${total}`);
+    assert.equal(stop.signal.aborted, false);
+});
+
+test("minutes longer than a task can work set no timer (a timer above 2^31-1 ms would fire at once)", async () => {
+    const stop = new AbortController();
+    const clock = limits.workClock({ _id: "t4", work_cap_ms: 40000 * MIN, work_ms: 0 }, stop, () => {});
+    await new Promise((r) => setTimeout(r, 30));
+    assert.equal(stop.signal.aborted, false);
+    assert.equal(clock.hit(), false);
+    assert.equal(clock.limited, true);
+    await clock.done();
+});
+
 // ── WhatsApp texts ──
-test("the WhatsApp texts: calls for today, this week and this month; Free upgrades to Pro or Max, Pro to Max, Max waits", () => {
+test("the WhatsApp texts: the 24-hour refusal is the owner's text from before; 7 and 30 days say the same; a plan with no calls upgrades", () => {
     const backAt = new Date(NOW + 3 * HOUR);
     const when = templates.indiaTimeText(backAt);
-    assert.equal(templates.callCountLimitText({ plan: FREE, paidNames: PAID, which: "day", cap: 3, backAt }), `You've used all 3 calls for today on your Free plan, so Classgrid AI can't take this call. You can call again on ${when}, or upgrade to Pro or Max for more calls: classgrid.in/pricing`);
-    assert.equal(templates.callCountLimitText({ plan: FREE, paidNames: PAID, which: "week", cap: 10, backAt }), `You've used all 10 calls for this week on your Free plan, so Classgrid AI can't take this call. You can call again on ${when}, or upgrade to Pro or Max for more calls: classgrid.in/pricing`);
-    assert.equal(templates.callCountLimitText({ plan: PRO, paidNames: PAID, which: "month", cap: 300, backAt }), `You've used all 300 calls for this month on your Pro plan, so Classgrid AI can't take this call. You can call again on ${when}, or upgrade to Max for more calls: classgrid.in/pricing`);
-    assert.equal(templates.callCountLimitText({ plan: MAX, paidNames: PAID, which: "day", cap: 30, backAt }), `You've used all 30 calls for today on your Max plan, so Classgrid AI can't take this call. You can call again on ${when}.`);
-    assert.equal(templates.callCountLimitText({ plan: null, paidNames: PAID, which: "day", cap: 50, backAt }), `You've used all 50 calls for today, so Classgrid AI can't take this call. You can call again on ${when}.`);
+    // (the text before the plans' call limits: "You've used all <cap> Classgrid AI calls for the last 24 hours. You
+    // can call again after <en-IN medium date, short time> (India time).")
+    assert.equal(templates.callCountLimitText({ plan: null, paidNames: PAID, which: "day", cap: 50, backAt }), `You've used all 50 Classgrid AI calls for the last 24 hours. You can call again after ${when}.`);
+    assert.match(when, / \(India time\)$/);
+    assert.equal(templates.callCountLimitText({ plan: FREE, paidNames: PAID, which: "day", cap: 3, backAt }), `You've used all 3 Classgrid AI calls for the last 24 hours. You can call again after ${when}.`);
+    assert.equal(templates.callCountLimitText({ plan: FREE, paidNames: PAID, which: "week", cap: 10, backAt }), `You've used all 10 Classgrid AI calls for the last 7 days. You can call again after ${when}.`);
+    assert.equal(templates.callCountLimitText({ plan: PRO, paidNames: PAID, which: "month", cap: 300, backAt }), `You've used all 300 Classgrid AI calls for the last 30 days. You can call again after ${when}.`);
     assert.equal(templates.callCountLimitText({ plan: FREE, paidNames: PAID, which: "week", cap: 0 }), "Calls with Classgrid AI are not part of your Free plan. Upgrade to Pro or Max to call: classgrid.in/pricing");
     const timeUp = templates.callTaskTimeUpText({ plan: FREE, paidNames: PAID, minutes: 10, whereItGot: "Two of the three slides are made.", link: "\n\nWhat it did so far: https://chat.classgrid.in/calls/1" });
     assert.equal(timeUp, "Classgrid AI stopped your task: it used the 10 minutes of work a task from a call gets on your Free plan. For bigger tasks, upgrade to Pro or Max: classgrid.in/pricing\n\nWhere it got to:\nTwo of the three slides are made.\n\nWhat it did so far: https://chat.classgrid.in/calls/1");

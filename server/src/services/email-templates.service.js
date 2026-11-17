@@ -3327,19 +3327,21 @@ export const biggerPlanNames = (plan, paidNames) => {
   return i >= 0 ? names.slice(i + 1) : [];
 };
 const yourPlanText = (plan) => (plan?.name ? `your ${plan.name} plan` : "your plan");
-const CALL_WINDOW_TEXT = { day: "today", week: "this week", month: "this month" };
+// The windows are rolling (the calls answered in the last 24 hours, 7 days, 30 days), not calendar days or weeks
+const CALL_WINDOW_TEXT = { day: "24 hours", week: "7 days", month: "30 days" };
 
-/** An incoming call refused: the plan's calls for today, this week or this month are used (`which`: day, week or
- * month, `cap`: that limit, `backAt`: when one more call fits) */
+/** An incoming call refused: the calls for the last 24 hours, 7 days or 30 days are used (`which`: day, week or
+ * month, `cap`: that limit, `backAt`: when one more call fits). The 24-hour text is the owner's text from before
+ * the plans' call limits, word for word (project rule: user-facing text changes only when the owner asks for it);
+ * the 7-day and 30-day limits are new and say the same in the same words. */
 export const callCountLimitText = ({ plan, paidNames, which = "day", cap = 0, backAt = null }) => {
   const more = biggerPlanNames(plan, paidNames);
   if (!cap) {
     return `Calls with Classgrid AI are not part of ${yourPlanText(plan)}.${more.length ? ` Upgrade to ${paidPlansText(more, "or")} to call: ${PLANS_SITE}` : ""}`;
   }
-  const used = `You've used all ${cap} call${cap === 1 ? "" : "s"} for ${CALL_WINDOW_TEXT[which] || CALL_WINDOW_TEXT.day}${plan?.name ? ` on your ${plan.name} plan` : ""}, so Classgrid AI can't take this call.`;
-  const upgrade = more.length ? `upgrade to ${paidPlansText(more, "or")} for more calls: ${PLANS_SITE}` : "";
-  if (!backAt) return `${used} ${upgrade ? capitalFirst(upgrade) : "Please call again later."}`;
-  return `${used} You can call again on ${indiaTimeText(backAt)}${upgrade ? `, or ${upgrade}` : "."}`;
+  const used = `You've used all ${cap} Classgrid AI calls for the last ${CALL_WINDOW_TEXT[which] || CALL_WINDOW_TEXT.day}.`;
+  if (!backAt) return `${used} Please call again later.`;
+  return `${used} You can call again after ${indiaTimeText(backAt)}.`;
 };
 
 /** A task from a call stopped: it used the minutes of work a task from a call gets on the plan. `whereItGot`: the

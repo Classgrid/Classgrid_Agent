@@ -828,7 +828,7 @@ async function afterCall(call, why) {
     }
     if (why === "free minutes used") {
         // Free: call again when the minutes or the limit come back, or upgrade; other plans: or top up
-        const { plan, paidNames } = await planWording(call.user);
+        const { plan, paidNames } = await planWording(call.user).catch(() => ({ plan: null, paidNames: [] }));
         const text = callMinutesUsedUpText({ plan, paidNames, backAt: call.limitBackAt, taskSaved: call.tasks.length > 0 });
         record.noteSentForCall(call.id, text);
         await sendWhatsappText(call.from, text);
@@ -1010,7 +1010,7 @@ async function runCallJob(job, { resumed = false, lockToken = null } = {}) {
             if (info?.name === "send_whatsapp_message") sends.push(info);
             tasks.logTaskStep(job.taskId, info);
             save();
-        }, { taskOrigin: "whatsapp" }, stop.signal, rec.onData).finally(() => clearInterval(taskBeat));
+        }, { taskOrigin: "whatsapp" }, stop.signal, rec.onData).finally(() => { clearInterval(taskBeat); return clock.done(); });
         await clock.done();
         await rec.end(result);
         // Its minutes of work ran out during this run: the task is ended and the user told
@@ -1082,16 +1082,25 @@ async function askClassgridLive(call, request, projectName) {
             else question += `\n\n(The project "${project.name}" could not be opened: ${opened.error}. Tell the user.)`;
         }
         const key = project ? String(project._id) : "none";
-        // The minutes of work the caller's plan gives a task from a call apply to live work too (owner, 2026-11-17)
-        const maxMinutes = call.taskCaps?.maxMinutes || 0;
-        const stop = maxMinutes ? new AbortController() : null;
+        // The minutes of work the caller's plan gives a task from a call apply to live work too (owner, 2026-11-17).
+        // A plan with no tasks from calls (any task limit 0): live work is answered only while the call lasts; at
+        // hang-up it stops, since work going on after the call is what such a plan leaves out.
+        const caps = call.taskCaps || {};
+        const duringCallOnly = caps.perCall === 0 || caps.atOnce === 0 || caps.maxMinutes === 0;
+        const maxMinutes = caps.maxMinutes || 0;
+        const stop = maxMinutes || duringCallOnly ? new AbortController() : null;
         const clock = workClock({ work_cap_ms: maxMinutes * 60000, work_ms: 0 }, stop);
+        let hungUp = false;
+        const hangUpWatch = duringCallOnly ? setInterval(() => { if (call.ended) { hungUp = true; stop.abort(); } }, 2000) : null;
         try {
             // whatsappSince: the live work reads only the WhatsApp messages sent since this call started (no old ones)
             const out = await runAgentTask(call.user, question, project?._id, (id) => { call.liveSessions[key] ||= id; }, call.liveSessions[key] || null, null, { whatsappSince: call.startedAt }, stop?.signal || null);
-            if (clock.hit()) return { ...out, sessionId: out.sessionId || call.liveSessions[key] || null, answer: "", error: `it used the ${maxMinutes} minute${maxMinutes === 1 ? "" : "s"} of work a task from a call gets on your plan`, key };
+            const sessionId = out.sessionId || call.liveSessions[key] || null;
+            if (clock.hit()) return { ...out, sessionId, answer: "", error: `it used the ${maxMinutes} minute${maxMinutes === 1 ? "" : "s"} of work a task from a call gets on your plan`, key };
+            if (hungUp) return { ...out, sessionId, answer: "", error: "the call ended, and work after a call is not part of your plan", key };
             return { ...out, key };
         } finally {
+            if (hangUpWatch) clearInterval(hangUpWatch);
             await clock.done();
             stopKeepOpen();
         }
@@ -1434,7 +1443,7 @@ export async function handleCallsWebhook(value) {
             const enough = await hasEnoughTokens(user._id, user.organization_id || null, 1).catch(() => null);
             if (!enough?.allowed && free.left <= 0) {
                 await callAction(c.id, "reject").catch(() => {});
-                const { plan, paidNames } = await planWording(user);
+                const { plan, paidNames } = await planWording(user).catch(() => ({ plan: null, paidNames: [] }));
                 await sendWhatsappText(from, /insufficient/i.test(enough?.reason || "")
                     ? callRefusedLimitText({ plan, paidNames, backAt: callsBackAt(enough, free) })
                     : "Classgrid AI can't take calls for your account right now. Please try again later.");
@@ -1456,7 +1465,7 @@ export async function handleCallsWebhook(value) {
             const full = fullCallLimit(countCaps, callTimes);
             if (full) {
                 await callAction(c.id, "reject").catch(() => {});
-                const { plan, paidNames } = await planWording(user);
+                const { plan, paidNames } = await planWording(user).catch(() => ({ plan: null, paidNames: [] }));
                 await sendWhatsappText(from, callCountLimitText({ plan, paidNames, which: full.which, cap: full.cap, backAt: full.backAt }));
                 continue;
             }

@@ -383,7 +383,7 @@ export const addWorkTime = (taskId, ms) => AgentTask.updateOne({ _id: taskId }, 
 export async function endForWorkCap(task, user, answer = "") {
     const ended = await AgentTask.findOneAndUpdate(
         { _id: task._id, status: { $nin: ["ended", "done"] } },
-        { $set: { status: "ended", wake_at: null, heartbeat_at: null } },
+        { $set: { status: "ended", ended_reason: "work_cap", wake_at: null, heartbeat_at: null } },
     );
     if (!ended) return;
     const minutes = Math.round((Number(ended.work_cap_ms) || 0) / 60000);
@@ -580,8 +580,11 @@ export async function wakeTask(taskId, reason) {
             await putBack();
             return endTask(task);
         }
-        // A task from a call whose minutes of work are used up is ended (new work after a finished task gets its own
-        // minutes, as it gets its own 48 hours)
+        // A task from a call whose minutes of work are used up is ended. New work after a finished task gets its own
+        // minutes, as it gets its own 48 hours; but a task ended because its minutes ran out is not started again by
+        // a reply (a reply like "continue" would give it full minutes every time): the user was told, and a new call
+        // starts new work.
+        if (newWork && task.ended_reason === "work_cap") return putBack();
         if (newWork) task.work_ms = 0;
         if (workLeftMs(task) <= 0) {
             await putBack();
@@ -600,7 +603,7 @@ export async function wakeTask(taskId, reason) {
         task.goal = goal;
         await AgentTask.updateOne({ _id: task._id }, {
             $set: {
-                last_seen_msg_at: newest, pause_notified: false, goal, ...(newWork ? { work_started_at: new Date(), no_progress: 0, work_ms: 0 } : {}),
+                last_seen_msg_at: newest, pause_notified: false, goal, ...(newWork ? { work_started_at: new Date(), no_progress: 0, work_ms: 0, ended_reason: null } : {}),
                 // The user is talking on WhatsApp now, so the answers go there
                 ...(reason === "reply" ? { origin: "whatsapp" } : {}),
             },
@@ -654,7 +657,7 @@ export async function wakeTask(taskId, reason) {
             if (!stepText.startsWith("sleep_until")) steps++;
             if (info?.name === "send_whatsapp_message") sends.push(info);
             logTaskStep(task._id, info);
-        }, { taskOrigin: task.origin }, stop?.signal || null, rec.onData);
+        }, { taskOrigin: task.origin }, stop?.signal || null, rec.onData).finally(() => clock.done());
         await clock.done();
         await rec.end(result);
         if (clock.hit()) return endForWorkCap(task, user, result.answer || "");

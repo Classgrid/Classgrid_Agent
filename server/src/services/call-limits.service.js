@@ -18,8 +18,10 @@ export const MONTH_MS = 30 * DAY_MS;
 const WINDOW_MS = { day: DAY_MS, week: WEEK_MS, month: MONTH_MS };
 // A task from a call works for at most 48 hours (agent-task.service.js), so an older record is not running
 const TASK_LIFE_MS = 48 * 60 * 60 * 1000;
-// The call record states (models/Call.js) of a task that is running or about to run again by itself
-export const RUNNING_STATES = ["queued", "working", "retrying"];
+// The call record states (models/Call.js) of a task from a call that is still open: running now, about to run, or
+// going to run again (at a set time, when the user replies, when the plan's limit comes back, or after a failed run).
+// All of them count for call_tasks_at_once: a sleeping or waiting task would run beside the others when it wakes.
+export const RUNNING_STATES = ["queued", "working", "retrying", "sleeping", "waiting", "paused"];
 
 /** A plan's number: null = no limit (-1, not set, not a number), else a whole number of 0 or more */
 export function planNumber(v) {
@@ -59,9 +61,10 @@ export function fullCallLimit(caps, times, now = Date.now()) {
     return null;
 }
 
-/** The line sent on WhatsApp with the call's work: "(Call 2 of 3 for today, 5 of 10 for this week.)" */
+/** The line sent on WhatsApp with the call's work. The 24-hour part is the owner's line from before, word for word:
+ * "(Call 2 of 3 you can make in 24 hours.)"; a set 7-day or 30-day limit adds ", 5 of 10 in 7 days". */
 export function callsLineText(caps, times, now = Date.now()) {
-    const words = { day: "for today", week: "for this week", month: "for this month" };
+    const words = { day: "you can make in 24 hours", week: "in 7 days", month: "in 30 days" };
     const parts = [];
     for (const which of ["day", "week", "month"]) {
         const cap = caps?.[which];
@@ -151,19 +154,38 @@ export function callTaskLimitsLine(caps, plan = null) {
 /** The ms of work this task has left (Infinity: no limit) */
 export const workLeftMs = (task) => (Number(task?.work_cap_ms) > 0 ? Math.max(0, Number(task.work_cap_ms) - (Number(task.work_ms) || 0)) : Infinity);
 
+// The time of a run is saved this often while it runs, so a restart or a crash in the middle of a run loses at most
+// this much of it (the resumed run gets only what is really left)
+export const WORK_SAVE_EVERY_MS = 60 * 1000;
+
 /** A clock for one run of a task: aborts `stop` when the task's minutes run out. hit(): it ran out during this run;
- * done(): the run is over (its time is added to the task). `addTime(taskId, ms)` saves the time. */
-export function workClock(task, stop, addTime) {
+ * done(): the run is over (the rest of its time is added; calling it again does nothing). `addTime(taskId, ms)` saves
+ * time to the task: every WORK_SAVE_EVERY_MS while the run goes on, and at done(). Minutes left longer than a task
+ * from a call can work (48 hours) set no timer: the 48 hours end the task first (and a timer above 2^31-1 ms would
+ * fire at once). */
+export function workClock(task, stop, addTime, { saveEveryMs = WORK_SAVE_EVERY_MS } = {}) {
     const left = workLeftMs(task);
-    const startedAt = Date.now();
-    let hit = false;
-    const timer = Number.isFinite(left) ? setTimeout(() => { hit = true; stop?.abort(); }, left) : null;
+    const limited = Number.isFinite(left);
+    let savedUpTo = Date.now();
+    let hit = false, finished = false;
+    const save = () => {
+        const now = Date.now();
+        const ms = now - savedUpTo;
+        savedUpTo = now;
+        if (!addTime || ms <= 0) return Promise.resolve();
+        return Promise.resolve().then(() => addTime(task._id, ms)).catch(() => {});
+    };
+    const timer = limited && left <= TASK_LIFE_MS ? setTimeout(() => { hit = true; stop?.abort(); }, left) : null;
+    const saver = limited && addTime ? setInterval(save, saveEveryMs) : null;
     return {
-        limited: Number.isFinite(left),
+        limited,
         hit: () => hit,
         async done() {
+            if (finished) return;
+            finished = true;
             if (timer) clearTimeout(timer);
-            if (Number.isFinite(left) && addTime) await Promise.resolve(addTime(task._id, Date.now() - startedAt)).catch(() => {});
+            if (saver) clearInterval(saver);
+            if (limited) await save();
         },
     };
 }
