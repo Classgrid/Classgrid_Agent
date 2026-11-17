@@ -20,15 +20,18 @@ import { NikhilTimeCalendar } from "@/components/marketing_ui/nikhil_time_calend
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/marketing_ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/marketing_ui/select";
 import { PageBreadcrumbs } from "@/components/layout/PageBreadcrumbs";
-import { User as UserIcon, HardDrive, LayoutTemplate } from "lucide-react";
+import { User as UserIcon, HardDrive, LayoutTemplate, Cpu, Database } from "lucide-react";
 
 import { GiftPlansPanel } from "@/features/superadmin/components/GiftPlansPanel";
+import { GrantCreditsModal } from "@/features/superadmin/components/GrantCredits";
+import { useQuery } from "@tanstack/react-query";
+import { apiClient } from "@/lib/apiClient";
 import { PlanFolders, PlanPeopleFolders } from "@/features/superadmin/components/ai-usage/PlanFolders";
 import { usePlansSummary } from "@/features/superadmin/queries/useAiUsage";
 import { GlobalAiConfigPanel } from "@/features/superadmin/components/GlobalAiConfigPanel";
 import { useGlobalAiStats, useAiUserDetail } from "@/features/superadmin/queries/useAiUsage";
 import { Skeleton } from "@/components/marketing_ui/skeleton";
-import { formatNumber } from "@/lib/utils";
+import { formatNumber, formatRoleLabel } from "@/lib/utils";
 import { AiUserDetailPanel } from "@/features/superadmin/components/ai-usage/AiUserDetailPanel";
 import { ModelUsageSection } from "@/features/superadmin/components/ai-usage/ModelUsageSection";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, ResponsiveContainer, Legend, ReferenceLine } from "recharts";
@@ -63,6 +66,8 @@ export function AiUsageDashboardPage() {
   const [path, setPath] = useState<PathState>({});
   const [dateFilter, setDateFilter] = useState<Date | undefined>();
   const [isGiftPlansOpen, setIsGiftPlansOpen] = useState(false);
+  const [isGrantCreditsOpen, setIsGrantCreditsOpen] = useState(false);
+  const [spendingCurrency, setSpendingCurrency] = useState<"USD" | "INR">("USD");
   const { data: plansSummary } = usePlansSummary();
 
   const [chatsTime, setChatsTime] = useState<"daily" | "weekly" | "monthly">("daily");
@@ -102,6 +107,12 @@ export function AiUsageDashboardPage() {
     };
   }, [queryClient]);
   
+
+  const { data: globalUsersFallback } = useQuery({
+    queryKey: ["global-users-fallback"],
+    queryFn: () => apiClient.get<any>("/api/super-admin/users", { params: { limit: 1000 } }).then(r => r.data),
+    staleTime: 300_000,
+  });
 
   const selectedMonth = dateFilter ? dateFilter.getMonth() + 1 : undefined;
   const selectedYear = dateFilter ? dateFilter.getFullYear() : undefined;
@@ -152,7 +163,7 @@ export function AiUsageDashboardPage() {
     if (globalLoading) return <Skeleton className="h-96 w-full mb-8" />;
     if (!globalStats) return null;
 
-    const { totalChats, usageTrend, usersBreakdown } = globalStats;
+    const { totalCreditsSpent, creditsPurchasedThisMonth, totalChats, usageTrend, usersBreakdown } = globalStats;
 
     const UniversalTooltip = ({ active, payload, label }: any) => {
       if (active && payload && payload.length) {
@@ -175,7 +186,7 @@ export function AiUsageDashboardPage() {
 
     return (
       <div className="space-y-6 mb-8">
-        <div className="grid gap-4 grid-cols-2 md:grid-cols-4">
+        <div className="grid gap-4 grid-cols-2 md:grid-cols-3">
           {(["free", "pro", "max"] as const).map((key) => {
             const p = plansSummary?.plans?.find((x) => x.key === key);
             return (
@@ -193,6 +204,20 @@ export function AiUsageDashboardPage() {
               <HardDrive className="h-8 w-8 text-amber-500 mb-3" />
               <div className="text-3xl font-bold">{formatNumber(totalChats || 0)}</div>
               <div className="text-sm text-muted-foreground mt-1">Total Chat Sessions</div>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardContent className="p-6 flex flex-col items-center text-center">
+              <Cpu className="h-8 w-8 text-blue-500 mb-3" />
+              <div className="text-3xl font-bold">{formatNumber(totalCreditsSpent || 0)}</div>
+              <div className="text-sm text-muted-foreground mt-1">Total Credits Used</div>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardContent className="p-6 flex flex-col items-center text-center">
+              <Database className="h-8 w-8 text-indigo-500 mb-3" />
+              <div className="text-3xl font-bold">{formatNumber(creditsPurchasedThisMonth || 0)}</div>
+              <div className="text-sm text-muted-foreground mt-1">Credits Sold This Month</div>
             </CardContent>
           </Card>
         </div>
@@ -215,6 +240,32 @@ export function AiUsageDashboardPage() {
           </div>
         </div>
         <GiftPlansPanel isOpen={isGiftPlansOpen} onClose={() => setIsGiftPlansOpen(false)} />
+
+        {/* Grant credits to many people at once (the old Grant panel, for people) */}
+        <div className="border border-border rounded-xl shadow-sm bg-card flex flex-col justify-between">
+          <div className="p-5">
+            <h3 className="text-lg font-semibold text-foreground tracking-tight">Grant Credits</h3>
+            <p className="text-sm text-muted-foreground mt-1">Give credits to many people at once.</p>
+          </div>
+          <div className="p-4 bg-muted/20 border-t border-border flex items-center justify-end">
+            <Button variant="outline" onClick={() => setIsGrantCreditsOpen(true)}>
+              <LayoutTemplate className="w-4 h-4 mr-2" />
+              Open Grant Panel
+            </Button>
+          </div>
+        </div>
+        <GrantCreditsModal
+          isOpen={isGrantCreditsOpen}
+          onClose={() => setIsGrantCreditsOpen(false)}
+          orgs={(globalUsersFallback?.data || []).map((u: any) => ({
+            id: String(u._id || u.id),
+            name: u.name || u.email || "",
+            orgName: "",
+            email: u.email || "",
+            role: formatRoleLabel(u.role || "user"),
+            avatar: u.profilePicture || undefined,
+          }))}
+        />
 
         <div className="flex flex-col space-y-6">
           {/* Bar Chart 1: Daily AI Requests */}
@@ -310,6 +361,89 @@ export function AiUsageDashboardPage() {
                     <Bar dataKey="promptTokens" name="Input Tokens" stackId="a" fill="#f97316" radius={[0, 0, 0, 0]} maxBarSize={12} />
                     <Bar dataKey="completionTokens" name="Output Tokens" stackId="a" fill="#3b82f6" radius={[2, 2, 0, 0]} maxBarSize={12} />
                     <Legend wrapperStyle={{ fontSize: '12px', paddingTop: '10px' }} />
+                                      <ReferenceLine x={getTodayStr()} stroke="#22c55e" strokeWidth={2} strokeDasharray="4 4" />
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* Bar Chart 3: Cost Spend Trend */}
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between pb-2">
+              <CardTitle>Daily Credits Spending</CardTitle>
+              <div className="flex items-center gap-4">
+                <NikhilTimeCalendar value={dateFilter} onChange={setDateFilter as any} showTime={false} placeholder="Select Date" className="w-[160px] h-9 border border-input bg-background" />
+                <Select value={spendingCurrency} onValueChange={setSpendingCurrency as any}>
+                  <SelectTrigger className="w-[100px]">
+                    <SelectValue placeholder="Currency" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="USD">USD ($)</SelectItem>
+                    <SelectItem value="INR">INR (₹)</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </CardHeader>
+            <CardContent>
+              <div className="h-[300px] w-full">
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart data={usageTrend || []} barCategoryGap="30%" margin={{ top: 10, right: 10, left: 10, bottom: 0 }}>
+                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="currentColor" className="opacity-10" />
+                    <XAxis 
+                      dataKey="date" 
+                      stroke="currentColor" 
+                      className="text-xs opacity-50" 
+                      tickLine={false} 
+                      axisLine={false}
+                      minTickGap={15}
+                      tickFormatter={(value) => {
+                        const date = parseLocalDate(value);
+                        return isNaN(date.getTime()) ? value : date.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+                      }}
+                    />
+                    <YAxis stroke="currentColor" className="text-xs opacity-50" tickLine={false} axisLine={false} />
+                    <RechartsTooltip cursor={{ fill: 'currentColor', opacity: 0.05 }} content={<UniversalTooltip />} />
+                    <Bar 
+                      dataKey={spendingCurrency === "USD" ? "costUSD" : "costINR"} 
+                      name={`Cost (${spendingCurrency})`} 
+                      fill="#10b981" 
+                      radius={[2, 2, 0, 0]} 
+                      maxBarSize={12} 
+                    />
+                                      <ReferenceLine x={getTodayStr()} stroke="#22c55e" strokeWidth={2} strokeDasharray="4 4" />
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* Bar Chart 4: Top-up Revenue (INR) */}
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between pb-2">
+              <CardTitle>Top-up Revenue (INR)</CardTitle>
+              <NikhilTimeCalendar value={dateFilter} onChange={setDateFilter as any} showTime={false} placeholder="Select Date" className="w-[160px] h-9 border border-input bg-background" />
+            </CardHeader>
+            <CardContent>
+              <div className="h-[300px] w-full">
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart data={usageTrend || []} barCategoryGap="30%" margin={{ top: 10, right: 10, left: 10, bottom: 0 }}>
+                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="currentColor" className="opacity-10" />
+                    <XAxis 
+                      dataKey="date" 
+                      stroke="currentColor" 
+                      className="text-xs opacity-50" 
+                      tickLine={false} 
+                      axisLine={false}
+                      minTickGap={15}
+                      tickFormatter={(value) => {
+                        const date = parseLocalDate(value);
+                        return isNaN(date.getTime()) ? value : date.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+                      }}
+                    />
+                    <YAxis stroke="currentColor" className="text-xs opacity-50" tickLine={false} axisLine={false} />
+                    <RechartsTooltip cursor={{ fill: 'currentColor', opacity: 0.05 }} content={<UniversalTooltip />} />
+                    <Bar dataKey="revenue" name="Revenue (INR)" fill="#8b5cf6" radius={[2, 2, 0, 0]} maxBarSize={12} />
                                       <ReferenceLine x={getTodayStr()} stroke="#22c55e" strokeWidth={2} strokeDasharray="4 4" />
                   </BarChart>
                 </ResponsiveContainer>

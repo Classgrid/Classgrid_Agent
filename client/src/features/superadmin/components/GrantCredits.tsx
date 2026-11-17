@@ -216,7 +216,7 @@ export function GrantCreditsModal({ isOpen, onClose, orgs = [], isOrgMode = fals
                 <SuperadminFilterBar
                   searchQuery={searchQuery}
                 onSearchChange={setSearchQuery}
-                searchPlaceholder="Search by name, email or org..."
+                searchPlaceholder={isOrgMode ? "Search by name, email or org..." : "Search by name or email..."}
               >
                 {!isOrgMode && (
                   <Select value={roleFilter} onValueChange={(val) => setRoleFilter(val as string)}>
@@ -270,7 +270,7 @@ export function GrantCreditsModal({ isOpen, onClose, orgs = [], isOrgMode = fals
               <DataTable
                 columns={columns}
                 rows={filteredRows}
-                emptyMessage="No organizations found."
+                emptyMessage={isOrgMode ? "No organizations found." : "No people found."}
                 onRowClick={(row: OrgRow) => {
                   setSelectedIds((prev) => 
                     prev.includes(row.id) ? prev.filter(id => id !== row.id) : [...prev, row.id]
@@ -291,7 +291,7 @@ export function GrantCreditsModal({ isOpen, onClose, orgs = [], isOrgMode = fals
                   >
                     <div className="text-sm shrink-0">
                       <span className="font-semibold text-foreground">{selectedOrgs.length}</span>{" "}
-                      <span className="text-muted-foreground">organizations selected</span>
+                      <span className="text-muted-foreground">{isOrgMode ? "organizations selected" : selectedOrgs.length === 1 ? "person selected" : "people selected"}</span>
                     </div>
 
                     <div className="flex-1 flex items-center justify-end gap-6 max-w-[500px]">
@@ -441,8 +441,8 @@ export function GrantCreditsModal({ isOpen, onClose, orgs = [], isOrgMode = fals
                   className="w-full h-11 rounded-lg bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white text-sm font-semibold transition-all shadow-sm active:scale-[0.98]"
                 >
                   {(grantCreditsMutation.isPending || grantOrgCreditsMutation.isPending) ? "Granting..." : (isSeparateMode 
-                    ? `Grant Custom Credits to ${selectedOrgs.length} ${selectedOrgs.length === 1 ? 'organization' : 'organizations'}`
-                    : `Grant ${formatCredits(credits)} Credits to ${selectedOrgs.length} ${selectedOrgs.length === 1 ? 'organization' : 'organizations'}`
+                    ? `Grant Custom Credits to ${selectedOrgs.length} ${isOrgMode ? (selectedOrgs.length === 1 ? 'organization' : 'organizations') : (selectedOrgs.length === 1 ? 'person' : 'people')}`
+                    : `Grant ${formatCredits(credits)} Credits to ${selectedOrgs.length} ${isOrgMode ? (selectedOrgs.length === 1 ? 'organization' : 'organizations') : (selectedOrgs.length === 1 ? 'person' : 'people')}`
                   )}
                 </button>
               </div>

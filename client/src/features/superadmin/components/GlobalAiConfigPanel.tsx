@@ -61,6 +61,7 @@ const F = {
   extraVoiceReply: { key: "extra_voice_reply_credits", label: "Credits per extra read-aloud", min: 0, fallback: 3000 },
   extraVoiceInput: { key: "extra_voice_input_credits_per_minute", label: "Credits per extra minute of voice", min: 0, fallback: 2000 },
   voiceMaxChars: { key: "voice_reply_max_chars", label: "Longest read-aloud", min: 200, fallback: 4000 },
+  peakAnswers: { key: "peak_answers_at_once", label: "AI answers at once before the line (0 = no line)", min: 0, fallback: 40 },
   session: { key: "global_user_weekly_limit", label: "Session limit", min: 1000, fallback: 0 },
   pictures: { key: "global_image_weekly_limit", label: "Pictures", min: 0, fallback: 0 },
   whatsapp: { key: "global_whatsapp_scheduling_limit", label: "WhatsApp messages", min: 0, fallback: 0 },
@@ -97,7 +98,9 @@ function EditButton({ onClick }: { onClick: () => void }) {
   return <Button type="button" variant="outline" onClick={onClick}>Edit</Button>;
 }
 
-export function GlobalAiConfigPanel() {
+// only="credits": just the top-up credit settings (the Top-up credits tab of Plans & Billing; owner, 2026-11-17: "a
+// separate tab so we can update"). Without it: the settings beside the plans, on the AI Usage & Credits page.
+export function GlobalAiConfigPanel({ only }: { only?: "credits" } = {}) {
   const queryClient = useQueryClient();
   const { data: plansData } = useAiPlans();
   const plansOn = plansData?.enabled;
@@ -162,6 +165,75 @@ export function GlobalAiConfigPanel() {
   const voiceReplies = valueOf(cfg, F.voiceReplies);
   const busy = save.isPending;
 
+  // The number dialog shared by every card: it saves only the fields it shows
+  const numberDialog = (
+    <Dialog open={!!editor} onOpenChange={(o) => { if (!o && !busy) setEditor(null); }}>
+      <DialogContent className="sm:max-w-sm max-h-[90vh] overflow-y-auto">
+        <DialogHeader>
+          <DialogTitle>{editor?.title}</DialogTitle>
+          {editor?.description && <DialogDescription>{editor.description}</DialogDescription>}
+        </DialogHeader>
+        <div className="flex flex-col gap-4 py-2">
+          {editor?.fields.map((f) => {
+            const err = tried ? fieldError(f, draft[f.key] ?? "") : "";
+            return (
+              <div key={f.key} className="flex flex-col gap-1.5">
+                <Label htmlFor={`setting-${f.key}`} className="text-sm font-medium">{f.label}</Label>
+                <Input
+                  id={`setting-${f.key}`} type="number" min={f.min} max={f.max} step={1}
+                  value={draft[f.key] ?? ""} onChange={(e) => setDraft((d) => ({ ...d, [f.key]: e.target.value }))} disabled={busy}
+                />
+                {err && <p className="text-xs text-red-500">{err}</p>}
+              </div>
+            );
+          })}
+          {editor?.reset && <ResetPeriodInput id={`setting-${editor.reset.kind}`} value={draftReset} onChange={setDraftReset} disabled={busy} />}
+        </div>
+        <DialogFooter>
+          <Button type="button" onClick={saveEditor} disabled={busy}>
+            {busy && <Spinner className="w-4 h-4 mr-2" />}
+            Save
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+
+  // Plans & Billing > Top-up credits: what a rupee buys, and what each thing past a plan limit takes from the credits
+  if (only === "credits") {
+    return (
+      <div className="flex flex-col gap-6 mb-6">
+        <div>
+          <h2 className="text-lg font-semibold text-foreground">Top-up credits</h2>
+          <p className="text-sm text-muted-foreground">
+            Credits are one pool: bought and gifted together. They are used only when a plan limit is over, at these prices. Chat and Claude take credits by the tokens they use.
+          </p>
+        </div>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          <SettingCard title="Credits for ₹1" value={`${num(valueOf(cfg, F.creditsPerInr))} credits`} line="Top-up credits a person gets for each rupee.">
+            <EditButton onClick={() => open({ title: "Credits for ₹1", fields: [F.creditsPerInr] })} />
+          </SettingCard>
+          <SettingCard title="Credits per picture" value={`${num(valueOf(cfg, F.imageCost))} credits`} line="Taken from the person's credits for each picture, besides counting it in their picture limit.">
+            <EditButton onClick={() => open({ title: "Credits per picture", fields: [F.imageCost] })} />
+          </SettingCard>
+          <SettingCard title="Extra picture" value={`${num(valueOf(cfg, F.extraImage))} credits`} line="Each picture past the plan's number. 0 = off: the limit then stops them.">
+            <EditButton onClick={() => open({ title: "Extra picture", description: "Taken from the person's credits for each picture past their plan's number. 0 turns it off, and the limit then stops them.", fields: [F.extraImage] })} />
+          </SettingCard>
+          <SettingCard title="Extra WhatsApp message" value={`${num(valueOf(cfg, F.extraWhatsapp))} credits`} line="Each WhatsApp message past the plan's number. 0 = off: the limit then stops them.">
+            <EditButton onClick={() => open({ title: "Extra WhatsApp message", description: "Taken from the person's credits for each WhatsApp message past their plan's number. 0 turns it off, and the limit then stops them.", fields: [F.extraWhatsapp] })} />
+          </SettingCard>
+          <SettingCard title="Extra read-aloud" value={`${num(valueOf(cfg, F.extraVoiceReply))} credits`} line="Each read-aloud past the plan's number. 0 = off: the limit then stops them.">
+            <EditButton onClick={() => open({ title: "Extra read-aloud", description: "Taken from the person's credits for each read-aloud past their plan's number. 0 turns it off, and the limit then stops them.", fields: [F.extraVoiceReply] })} />
+          </SettingCard>
+          <SettingCard title="Extra voice minute" value={`${num(valueOf(cfg, F.extraVoiceInput))} credits`} line="Each minute of voice past the plan's minutes. 0 = off: the limit then stops them.">
+            <EditButton onClick={() => open({ title: "Extra voice minute", description: "Taken from the person's credits for each minute of voice past their plan's minutes. 0 turns it off, and the limit then stops them.", fields: [F.extraVoiceInput] })} />
+          </SettingCard>
+        </div>
+        {numberDialog}
+      </div>
+    );
+  }
+
   return (
     <div className="flex flex-col gap-6 mb-6">
       <div>
@@ -170,6 +242,9 @@ export function GlobalAiConfigPanel() {
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+        <SettingCard title="AI answers at once before the line" value={valueOf(cfg, F.peakAnswers) > 0 ? num(valueOf(cfg, F.peakAnswers)) : "No line"} line="When more answers than this run at once, a plan with priority at peak starts at once and everyone else waits in line. 0 = no line.">
+          <EditButton onClick={() => open({ title: "AI answers at once before the line", description: "0 means no line: every answer starts at once.", fields: [F.peakAnswers] })} />
+        </SettingCard>
         <SettingCard title="Longest read-aloud" value={`${num(valueOf(cfg, F.voiceMaxChars))} characters`} line="The most one answer read aloud can say. A longer answer stops at its last full sentence.">
           <EditButton onClick={() => open({ title: "Longest read-aloud", fields: [F.voiceMaxChars] })} />
         </SettingCard>
@@ -217,37 +292,7 @@ export function GlobalAiConfigPanel() {
         </div>
       </div>
 
-      {/* The number dialog shared by every tile: it saves only the fields it shows */}
-      <Dialog open={!!editor} onOpenChange={(o) => { if (!o && !busy) setEditor(null); }}>
-        <DialogContent className="sm:max-w-sm max-h-[90vh] overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle>{editor?.title}</DialogTitle>
-            {editor?.description && <DialogDescription>{editor.description}</DialogDescription>}
-          </DialogHeader>
-          <div className="flex flex-col gap-4 py-2">
-            {editor?.fields.map((f) => {
-              const err = tried ? fieldError(f, draft[f.key] ?? "") : "";
-              return (
-                <div key={f.key} className="flex flex-col gap-1.5">
-                  <Label htmlFor={`setting-${f.key}`} className="text-sm font-medium">{f.label}</Label>
-                  <Input
-                    id={`setting-${f.key}`} type="number" min={f.min} max={f.max} step={1}
-                    value={draft[f.key] ?? ""} onChange={(e) => setDraft((d) => ({ ...d, [f.key]: e.target.value }))} disabled={busy}
-                  />
-                  {err && <p className="text-xs text-red-500">{err}</p>}
-                </div>
-              );
-            })}
-            {editor?.reset && <ResetPeriodInput id={`setting-${editor.reset.kind}`} value={draftReset} onChange={setDraftReset} disabled={busy} />}
-          </div>
-          <DialogFooter>
-            <Button type="button" onClick={saveEditor} disabled={busy}>
-              {busy && <Spinner className="w-4 h-4 mr-2" />}
-              Save
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      {numberDialog}
 
       <Dialog open={studentOpen} onOpenChange={(o) => { if (!o && !busy) setStudentOpen(false); }}>
         <DialogContent className="sm:max-w-md max-h-[90vh] overflow-y-auto">

@@ -20,6 +20,7 @@ import { Input } from '@/components/marketing_ui/input';
 import { Skeleton } from '@/components/marketing_ui/skeleton';
 import { apiClient as api } from '@/lib/apiClient';
 import { PlanConfigPanel } from '@/features/superadmin/components/PlanConfigPanel';
+import { GlobalAiConfigPanel } from '@/features/superadmin/components/GlobalAiConfigPanel';
 import { UserPlanCard } from '@/features/superadmin/components/ai-usage/UserPlanCard';
 
 type Subscriber = {
@@ -162,10 +163,13 @@ const PlansAndBillingPage = () => {
             <TabsTrigger value="plans">Plans</TabsTrigger>
             <TabsTrigger value="subscribers">Subscribers</TabsTrigger>
             <TabsTrigger value="payments">Plan payments</TabsTrigger>
+            <TabsTrigger value="topup">Top-up credits</TabsTrigger>
           </TabsList>
           <TabsContent value="plans" className="mt-6"><PlanConfigPanel /></TabsContent>
           <TabsContent value="subscribers" className="mt-6"><Subscribers /></TabsContent>
           <TabsContent value="payments" className="mt-6"><Payments /></TabsContent>
+          {/* What a rupee buys and what each thing past a plan limit takes from the credits (owner, 2026-11-17) */}
+          <TabsContent value="topup" className="mt-6"><GlobalAiConfigPanel only="credits" /></TabsContent>
         </Tabs>
       </div>
     </div>
