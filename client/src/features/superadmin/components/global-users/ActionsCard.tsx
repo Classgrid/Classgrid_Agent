@@ -1,26 +1,19 @@
-// What a super admin can do to an account: ban or unban it, log it out everywhere, send a password reset email, or
-// change its role. Each one asks first. Nothing is refused (the owner's rule is no blocks): banning yourself or a
-// Super Admin, or giving or changing an admin role, asks for the email to be typed instead, so it can't happen by
-// a slip of the mouse. Under the buttons is the list of the last things admins did to this account.
+// What a super admin can do to an account: ban or unban it, log it out everywhere, or send a password reset email.
+// Each one asks first. Banning yourself or a Super Admin asks for the email to be typed, so it can't happen by a slip
+// of the mouse. Under the buttons is the list of the last things admins did to this account.
+// No "Change role" here (owner, 2026-11-17: one click could make anyone a super admin); admin roles are given on the
+// Platform Team page.
 import { useState } from "react";
 import { ShieldAlert } from "lucide-react";
 import { Button } from "@/components/marketing_ui/button";
 import { Label } from "@/components/marketing_ui/label";
 import { Textarea } from "@/components/marketing_ui/textarea";
-import { ResponsiveSelect } from "@/components/marketing_ui/responsive-select";
 import { DangerConfirmDialog } from "@/components/marketing_ui/danger-confirm-dialog";
-import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/marketing_ui/dialog";
 import { SectionCard } from "./SectionCard";
 import { usePersonAction } from "./api";
 import { dateTimeText, isBanned, planIdLabel, roleLabel } from "./format";
 import type { AdminLogItem, PersonOverview } from "./types";
 
-const ROLE_OPTIONS = [
-  { value: "user", label: "User" },
-  { value: "co_super_admin", label: "Co-Super Admin" },
-  { value: "super_admin", label: "Super Admin" },
-];
-const ADMIN_ROLES = ["super_admin", "co_super_admin"];
 const REASON_MAX = 300;
 
 type Confirm = "ban" | "unban" | "logout" | "reset" | null;
@@ -47,9 +40,6 @@ export function ActionsCard({ overview }: { overview: PersonOverview }) {
 
   const [confirm, setConfirm] = useState<Confirm>(null);
   const [reason, setReason] = useState("");
-  const [roleOpen, setRoleOpen] = useState(false);
-  const [newRole, setNewRole] = useState(person.role);
-  const [roleConfirmOpen, setRoleConfirmOpen] = useState(false);
 
   const erased = person.status === "deleted";
   const banned = isBanned(person.status);
@@ -58,12 +48,6 @@ export function ActionsCard({ overview }: { overview: PersonOverview }) {
   // Banning yourself or a Super Admin needs the email typed first
   const guardedBan = isSelf || person.role === "super_admin";
   const banExtra = isSelf ? "This is your own account. You'll be locked out at once." : person.role === "super_admin" ? "This is a Super Admin account." : null;
-
-  const openRoleDialog = () => { setNewRole(person.role); setRoleOpen(true); };
-  const newRoleLabel = roleLabel(newRole);
-  const roleNeedsTyping = ADMIN_ROLES.includes(newRole) || isSelf;
-  const saveRole = () => action.mutate({ type: "role", role: newRole }, { onSuccess: () => { setRoleOpen(false); setRoleConfirmOpen(false); } });
-  const currentIsListed = ROLE_OPTIONS.some((o) => o.value === person.role);
 
   return (
     <SectionCard icon={ShieldAlert} title="Actions" note="Each one asks you to confirm first." className="lg:col-span-2">
@@ -75,7 +59,6 @@ export function ActionsCard({ overview }: { overview: PersonOverview }) {
         ))}
         {!erased && <Button variant="outline" size="sm" onClick={() => setConfirm("logout")}>Log out everywhere</Button>}
         {!erased && <Button variant="outline" size="sm" onClick={() => setConfirm("reset")}>Send password reset email</Button>}
-        <Button variant="outline" size="sm" onClick={openRoleDialog}>Change role</Button>
       </div>
       {erased && <p className="text-sm text-muted-foreground mt-3">This account was erased.</p>}
 
@@ -162,45 +145,6 @@ export function ActionsCard({ overview }: { overview: PersonOverview }) {
         onConfirm={() => action.mutate({ type: "reset_password" }, { onSuccess: close })}
       />
 
-      {/* Change role: pick the role, then (for an admin role or your own account) type the email to confirm */}
-      <Dialog open={roleOpen} onOpenChange={(o) => { if (!busy) setRoleOpen(o); }}>
-        <DialogContent className="sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle className="text-lg font-semibold text-foreground">Change role</DialogTitle>
-          </DialogHeader>
-          <div className="flex flex-col gap-2">
-            <ResponsiveSelect aria-label="Role" value={newRole} disabled={busy}
-              onChange={(e) => setNewRole(String(e.target.value))}>
-              {/* (their current role when it is none of the three choices; "(now)" because an old "student" account
-                  also reads "User", and the wide-screen dropdown can't grey an entry out) */}
-              {!currentIsListed && <option value={person.role} disabled>{`${roleLabel(person.role)} (now)`}</option>}
-              {ROLE_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
-            </ResponsiveSelect>
-            <p className="text-xs text-muted-foreground">Super Admin and Co-Super Admin can open this dashboard and change anything in it.</p>
-          </div>
-          <DialogFooter>
-            <Button size="sm" disabled={busy || newRole === person.role}
-              onClick={() => {
-                if (roleNeedsTyping) { setRoleOpen(false); setRoleConfirmOpen(true); }
-                else saveRole();
-              }}>
-              Change role
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      <DangerConfirmDialog
-        open={roleConfirmOpen}
-        onOpenChange={(o) => { if (!o && !busy) setRoleConfirmOpen(false); }}
-        variant="danger"
-        title={isSelf ? "Change your own role?" : `Make ${name} ${newRoleLabel}?`}
-        confirmationSteps={[{ label: "To confirm, type", value: person.email }]}
-        warningMessage={isSelf ? "You may lose access to this dashboard." : "They get full access to this dashboard."}
-        actionLabel="Change role"
-        isLoading={busy}
-        onConfirm={saveRole}
-      />
     </SectionCard>
   );
 }

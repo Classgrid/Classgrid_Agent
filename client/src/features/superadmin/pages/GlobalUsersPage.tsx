@@ -217,9 +217,10 @@ export function GlobalUsersPage() {
   }
 
   return (
-    <div className="w-full max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-6 flex flex-col gap-6 min-w-0">
+    <div className="w-full max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 pt-2 pb-6 flex flex-col gap-5 min-w-0">
       <div className="min-w-0">
-        <h1 className="text-2xl font-semibold text-foreground">Users</h1>
+        {/* (the same name as the sidebar and the page's top bar) */}
+        <h1 className="text-2xl font-semibold text-foreground">Global Users</h1>
         <p className="text-sm text-muted-foreground mt-1">Everyone with a Classgrid account. Open a person to see their plan, payments and activity.</p>
       </div>
 
@@ -231,12 +232,8 @@ export function GlobalUsersPage() {
           params={params}
           unfinishedSignups={data ? data.unfinishedSignups : null}
           onChange={changeFilters}
+          countText={isError && !data ? undefined : isLoading ? <Skeleton className="h-4 w-24" /> : peopleText(total)}
         />
-        {!(isError && !data) && (
-          <div className="mb-3 h-5 flex items-center">
-            {isLoading ? <Skeleton className="h-4 w-24" /> : <span className="text-sm text-muted-foreground">{peopleText(total)}</span>}
-          </div>
-        )}
         {body}
       </div>
     </div>
