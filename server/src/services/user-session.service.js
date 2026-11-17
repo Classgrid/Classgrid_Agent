@@ -83,10 +83,27 @@ export function isDesktopAppRequest(req) {
     return /Classgrid\/\d/i.test(ua) && /Electron\//i.test(ua);
 }
 
+/**
+ * A code editor's own requests (the Classgrid extension inside it): Electron with the editor's name and version in the
+ * user agent ("Code/1.146.0" = VS Code, "Cursor/", "Antigravity/", "ClassgridCode/" ...). The editor's name, or "".
+ */
+const EDITOR_AGENTS = [
+    [/\bClassgridCode\//i, "Classgrid Code"], [/\bCursor\//i, "Cursor"], [/\bAntigravity\//i, "Antigravity"],
+    [/\bWindsurf\//i, "Windsurf"], [/\bVSCodium\//i, "VSCodium"], [/\bTrae\//i, "Trae"], [/\bKiro\//i, "Kiro"],
+    [/\bCode\/\d/, "VS Code"],
+];
+export function editorFromUserAgent(ua) {
+    const s = String(ua || "");
+    if (!/Electron\//i.test(s) || /Classgrid\/\d/i.test(s)) return "";
+    const hit = EDITOR_AGENTS.find(([re]) => re.test(s));
+    return hit ? hit[1] : "";
+}
+
 /** website | desktop | phone | editor */
 export function deviceKindOf(req, { editor = false } = {}) {
     if (editor) return "editor";
     if (isDesktopAppRequest(req)) return "desktop";
+    if (editorFromUserAgent(header(req, "user-agent"))) return "editor";
     if (isPhoneAppRequest(req)) return "phone";
     return "website";
 }
@@ -165,7 +182,7 @@ export function deviceInfoOf(req, { editor = false, editorScheme = "", editorApp
     }
     let editorName = "";
     if (kind === "editor") {
-        editorName = editorNameOf(editorScheme) || clip(editorApp, 40);
+        editorName = editorNameOf(editorScheme) || clip(editorApp, 40) || editorFromUserAgent(userAgent);
         // The editor signs in through the browser. Its device: the id the editor sent (none yet: the extension's next
         // release adds it), else the browser's id with the editor's name, so the same editor signed in again from the
         // same computer replaces its own sign-in without touching the browser's
@@ -198,6 +215,7 @@ function mongoStore(S) {
         // (the query repeats the unique index's partial filter so MongoDB can use that index)
         byLegacy: (key) => S.findOne({ legacy_key: { $eq: key, $type: "string", $gt: "" } }).lean(),
         setPush: (sid, push) => S.updateOne({ sid }, { $set: push }),
+        setInfo: (sid, info) => S.updateOne({ sid, user_agent: "" }, { $set: info }),
     };
 }
 
@@ -560,6 +578,7 @@ export async function adoptLegacyToken({ user, req, oldToken, payload, expiresIn
             throw new LegacyRevokedError();
         }
         touchSession(have.sid);
+        if (!have.user_agent) await nameSessionIfUnnamed(have.sid, req, deviceOpts);
         return renewUserToken({ payload, sid: have.sid, expiresIn });
     };
     const had = await fromRow();
@@ -590,6 +609,9 @@ export async function adoptLegacyToken({ user, req, oldToken, payload, expiresIn
 export async function noteLegacyUse({ user, req, token, exp, deviceOpts = {} }) {
     try {
         if (!user?._id || !token) return;
+        // A request with no user agent (an app's background poller, e.g. the desktop app's main process): it can't say
+        // what the device is, so it makes no row (seen live 2026-11-17: such rows showed as "Web browser")
+        if (!header(req, "user-agent")) return;
         const d = await D();
         if (!ready(d.redis)) return;
         const key = legacyKeyOf(token);
@@ -597,7 +619,14 @@ export async function noteLegacyUse({ user, req, token, exp, deviceOpts = {} }) 
         if (got !== "OK") return; // seen less than 5 minutes ago, or Redis didn't answer
         const have = await d.store.byLegacy(key);
         if (have) {
-            if (!have.revoked_at && String(have.user_id) === String(user._id)) touchSession(have.sid);
+            if (!have.revoked_at && String(have.user_id) === String(user._id)) {
+                touchSession(have.sid);
+                // A row made from a request with no user agent (before 2026-11-17's fix) gets its real name now
+                if (!have.user_agent) {
+                    const info = deviceInfoOf(req, deviceOpts);
+                    await d.store.setInfo(have.sid, { kind: info.kind, device_name: info.device_name, user_agent: info.user_agent, device_id: info.device_id });
+                }
+            }
             return;
         }
         const expSec = Number(exp) > 0 ? Number(exp) : Math.floor(d.now() / 1000) + 24 * 60 * 60;
@@ -605,6 +634,19 @@ export async function noteLegacyUse({ user, req, token, exp, deviceOpts = {} }) 
             .catch((e) => { if (e?.code !== 11000) throw e; }); // (another request made its row a moment ago)
     } catch (e) {
         console.error("[sessions] giving an older sign-in its row failed:", e.message);
+    }
+}
+
+/** A sign-in row made from a request with no user agent gets its real name, type and device id from this request
+ * (only while the row has no user agent: one indexed update that changes nothing otherwise). Never throws. */
+export async function nameSessionIfUnnamed(sid, req, deviceOpts = {}) {
+    try {
+        if (!sid || !header(req, "user-agent")) return;
+        const d = await D();
+        const info = deviceInfoOf(req, deviceOpts);
+        await d.store.setInfo(sid, { kind: info.kind, device_name: info.device_name, user_agent: info.user_agent, device_id: info.device_id });
+    } catch (e) {
+        console.error("[sessions] naming a sign-in failed:", e.message);
     }
 }
 
@@ -681,6 +723,16 @@ export async function afterSessionEnded(userId, row) {
 
 // ── Settings > Devices ──────────────────────────────────────────
 
+// What a row is shown as. An older sign-in's row (legacy_key) is named again from its saved user agent each time, so
+// rows made before the editor and desktop checks were right (2026-11-17: VS Code saved as "Chrome on Windows") show
+// their real name; a row with no user agent keeps what it has until the app's first real request names it.
+function shownDevice(r) {
+    const saved = { kind: SESSION_KINDS.includes(r.kind) ? r.kind : "website", device_name: r.device_name || "Unknown device" };
+    if (!r.legacy_key || !r.user_agent) return saved;
+    const info = deviceInfoOf({ headers: { "user-agent": r.user_agent } });
+    return info.kind === "website" && saved.kind !== "website" ? saved : { kind: info.kind, device_name: info.device_name };
+}
+
 /** { devices, limit: { used, max }, note } for the person; this_device marks the caller's own sign-in */
 export async function listDevices(user, currentSid) {
     const d = await D();
@@ -689,10 +741,11 @@ export async function listDevices(user, currentSid) {
     const devices = live
         .slice()
         .sort((a, b) => lastUsed(b) - lastUsed(a))
-        .map((r) => ({
+        .map((r) => ({ r, shown: shownDevice(r) }))
+        .map(({ r, shown }) => ({
             id: String(r._id),
-            kind: SESSION_KINDS.includes(r.kind) ? r.kind : "website",
-            device_name: r.device_name || "Unknown device",
+            kind: shown.kind,
+            device_name: shown.device_name,
             created_at: r.created_at,
             last_seen_at: r.last_seen_at || r.created_at,
             this_device: !!currentSid && r.sid === currentSid,

@@ -12,7 +12,7 @@ import {
     sessionState, touchSession, startSession, signUserToken, renewUserToken, listDevices, revokeDevice, revokeSid,
     revokeAllSessions, deviceLimitText, isDeviceLimitError, DEVICES_NOTE, readDeviceLimitTicket, deviceLimitBody,
     sessionCheckAnswer, adoptLegacyToken, attachPushToSession, isWeakDeviceId, legacyTokenState, legacyKeyOf,
-    afterSessionEnded, renewalKind, tokenStillSignedIn, noteLegacyUse,
+    afterSessionEnded, renewalKind, tokenStillSignedIn, noteLegacyUse, editorFromUserAgent,
 } from "../src/services/user-session.service.js";
 import { findByAnyEmail } from "../src/utils/account-email.js";
 
@@ -56,6 +56,7 @@ function memoryStore() {
         extend: async (sid, at) => { store.calls.extend++; const r = rows.find((x) => x.sid === sid && !x.revoked_at); if (r && at > r.expires_at) r.expires_at = at; },
         byLegacy: async (key) => copy(rows.find((r) => r.legacy_key === key)),
         setPush: async (sid, push) => { const r = rows.find((x) => x.sid === sid); if (r) Object.assign(r, push); },
+        setInfo: async (sid, info) => { const r = rows.find((x) => x.sid === sid && !x.user_agent); if (r) Object.assign(r, info); },
     };
     return store;
 }
@@ -640,4 +641,24 @@ test("an older sign-in is listed from its first request or socket, even if it ne
     // and /api/auth/me later gives that same row its sid, no second row
     await adoptLegacyToken({ user: userA, req: reqOf(UA.desktopApp), oldToken: "old-desktop-token", payload: { id: userA._id }, expiresIn: "7d" });
     assert.equal((await listDevices(userA, null)).devices.length, 2);
+});
+
+test("code editors are told by their user agent; a background poller with no user agent makes no row; a row made without one gets its name later", async () => {
+    const VSCODE = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Code/1.146.0 Chrome/150.0.7871.250 Electron/43.8.6 Safari/537.36";
+    const CGCODE = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) ClassgridCode/1.143.17696 Chrome/150.0.7871.250 Electron/43.7.7 Safari/537.36";
+    assert.equal(editorFromUserAgent(VSCODE), "VS Code");
+    assert.equal(editorFromUserAgent(CGCODE), "Classgrid Code");
+    assert.equal(editorFromUserAgent(UA.desktopApp), "", "the desktop app is not an editor");
+    assert.equal(editorFromUserAgent(UA.chromeWin), "");
+    setup({ limit: FREE });
+    const exp = Math.floor(clock / 1000) + 365 * 24 * 60 * 60;
+    await noteLegacyUse({ user: userA, req: reqOf(VSCODE), token: "old-vscode", exp });
+    await noteLegacyUse({ user: userA, req: { headers: {} }, token: "old-poller", exp });
+    const { devices } = await listDevices(userA, null);
+    assert.deepEqual(devices.map((x) => [x.kind, x.device_name]), [["editor", "VS Code on Windows"]]);
+    // a row made earlier from a request with no user agent (before the fix) is named by the app's first real request
+    world.store.rows.push({ _id: "old-row", user_id: userA._id, sid: "sid-noagent", kind: "website", device_name: "Web browser", user_agent: "", device_id: "", legacy_key: legacyKeyOf("old-desktop"), created_at: new Date(clock), last_seen_at: new Date(clock), expires_at: new Date(exp * 1000), revoked_at: null });
+    await adoptLegacyToken({ user: userA, req: reqOf(UA.desktopApp), oldToken: "old-desktop", payload: { id: userA._id }, expiresIn: "7d" });
+    const row = world.store.rows.find((r) => r._id === "old-row");
+    assert.deepEqual([row.kind, row.device_name], ["desktop", "Classgrid desktop app on Windows"]);
 });

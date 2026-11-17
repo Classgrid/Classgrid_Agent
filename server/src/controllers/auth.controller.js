@@ -73,7 +73,7 @@ import { PutObjectCommand } from "@aws-sdk/client-s3";
 import { s3Client, BUCKET_NAME, CDN_BASE_URL } from "../config/s3Client.js";
 import { checkAndRegisterDevice, getDeviceFingerprint } from "../services/device-fingerprint.service.js";
 import { liftEndedBlock } from "../utils/account-block.js";
-import { signUserToken, renewUserToken, adoptLegacyToken, revokeSid, afterSessionEnded, isDeviceLimitError, deviceLimitBody, renewalKind, tokenStillSignedIn } from "../services/user-session.service.js";
+import { signUserToken, renewUserToken, nameSessionIfUnnamed, adoptLegacyToken, revokeSid, afterSessionEnded, isDeviceLimitError, deviceLimitBody, renewalKind, tokenStillSignedIn } from "../services/user-session.service.js";
 import { getUserAccessBlock } from "../middleware/auth.middleware.js";
 
 export async function uploadBase64ToS3(base64String, folder, filenamePrefix) {
@@ -430,7 +430,11 @@ const renewToken = async (req) => {
     const rememberMe = req.authRememberMe === true;
     const payload = tokenPayload(req.user, rememberMe);
     const expiresIn = tokenLifetime(req, rememberMe);
-    if (kind === "renew") return renewUserToken({ payload, sid: req.authSid, expiresIn });
+    if (kind === "renew") {
+        // (a sign-in whose row was made by an app's request with no user agent gets its real name here)
+        await nameSessionIfUnnamed(req.authSid, req, { editor: req.editorClient === true });
+        return renewUserToken({ payload, sid: req.authSid, expiresIn });
+    }
     if (kind === "adopt") {
         try {
             return await adoptLegacyToken({ user: req.user, req, oldToken, payload, expiresIn, deviceOpts: { editor: req.editorClient === true } });
