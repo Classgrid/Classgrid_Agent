@@ -79,7 +79,7 @@ import Organization from "../models/Organization.js";
 import connectDB from "../../config/db.js";
 import { needsChatOnboarding, whatsappStepDone } from "../utils/chat-onboarding.js";
 import { liftEndedBlock } from "../utils/account-block.js";
-import { sessionState, legacyTokenState, touchSession, sessionCheckAnswer, DEVICE_TICKET_PURPOSE } from "../services/user-session.service.js";
+import { sessionState, legacyTokenState, touchSession, noteLegacyUse, sessionCheckAnswer, DEVICE_TICKET_PURPOSE } from "../services/user-session.service.js";
 
 const JWT_SECRET = getJwtSecret();
 
@@ -322,6 +322,10 @@ export const isAuthenticated = async (req, res, next) => {
             // most once every 5 minutes, without holding up the answer)
             req.authSid = sid;
             if (sid) touchSession(sid);
+            // An older sign-in (no sid): listed in Settings > Devices from this request on, even if it never calls /me
+            else if (!decoded.impersonatedBy && !decoded.isProvisional && !decoded.purpose) {
+                noteLegacyUse({ user, req, token, exp: decoded.exp, deviceOpts: { editor: decoded.client === "editor" } });
+            }
             // Support's "log in as" token (super-admin.controller.js impersonateUser): /api/auth/me hands it back as it
             // is, never as one of the person's own sign-ins
             req.authImpersonatedBy = decoded.impersonatedBy || null;

@@ -86,7 +86,7 @@ import accessLogger from "../config/logger.js";
 import { primarySupabaseClient } from "../config/supabaseClient.js";
 import { canAccessSession } from "./ai-chat-grid.service.js";
 import { getSessionById } from "./ai-chat.service.js";
-import { sessionState, DEVICE_TICKET_PURPOSE } from "./user-session.service.js";
+import { sessionState, noteLegacyUse, DEVICE_TICKET_PURPOSE } from "./user-session.service.js";
 
 // Live Chat Analytics: push fresh numbers to the "superadmin:analytics" room every 20 s,
 // only while at least one super admin has the page open (the loop stops when the room is empty).
@@ -180,6 +180,11 @@ export const initSocket = (server, { path } = {}) => {
         ]).then(([state, user]) => {
             const changed = user?.passwordChangedAt ? new Date(user.passwordChangedAt).getTime() : 0;
             if (state === "revoked" || (changed && decoded.iat * 1000 < changed)) return next(new Error("Authentication error: Invalid token"));
+            // An older sign-in (no sid) connecting: listed in Settings > Devices from now on (the desktop app may only
+            // reconnect its socket and never call /api/auth/me)
+            if (!sid && user?._id && !decoded.impersonation && !decoded.impersonatedBy && !decoded.isProvisional && !decoded.purpose) {
+                noteLegacyUse({ user, req: { headers: socket.handshake.headers || {} }, token, exp: decoded.exp, deviceOpts: { editor: decoded.client === "editor" } });
+            }
             next();
         }, (e) => {
             console.error("[socket] sign-in check failed, connection let in:", e?.message);

@@ -580,6 +580,34 @@ export async function adoptLegacyToken({ user, req, oldToken, payload, expiresIn
     return jwt.sign({ ...payload, sid, iat, exp }, d.secret());
 }
 
+/**
+ * An older sign-in (a token from before sign-in rows existed) used for any request or socket: it gets its row the way
+ * /api/auth/me gives one, so the phone app and the desktop app show in Settings > Devices from their next request even
+ * when they never call /me (seen live on 2026-11-17: the desktop app only reconnected its socket, so it never showed).
+ * The token itself is not changed (the next /me swaps it for one with a sid as before). At most once every 5 minutes per
+ * token (Redis); skipped while Redis can't be reached; never refused for the limit; never throws.
+ */
+export async function noteLegacyUse({ user, req, token, exp, deviceOpts = {} }) {
+    try {
+        if (!user?._id || !token) return;
+        const d = await D();
+        if (!ready(d.redis)) return;
+        const key = legacyKeyOf(token);
+        const got = await within(d.redis.set(`ulegacy:seen:${key}`, "1", "EX", SEEN_EVERY_SEC, "NX")).catch(() => "down");
+        if (got !== "OK") return; // seen less than 5 minutes ago, or Redis didn't answer
+        const have = await d.store.byLegacy(key);
+        if (have) {
+            if (!have.revoked_at && String(have.user_id) === String(user._id)) touchSession(have.sid);
+            return;
+        }
+        const expSec = Number(exp) > 0 ? Number(exp) : Math.floor(d.now() / 1000) + 24 * 60 * 60;
+        await startSession({ user, info: deviceInfoOf(req, deviceOpts), expiresAt: new Date(expSec * 1000), legacyKey: key })
+            .catch((e) => { if (e?.code !== 11000) throw e; }); // (another request made its row a moment ago)
+    } catch (e) {
+        console.error("[sessions] giving an older sign-in its row failed:", e.message);
+    }
+}
+
 export class LegacyRevokedError extends Error {
     constructor() {
         super("This sign-in was logged out.");

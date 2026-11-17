@@ -12,7 +12,7 @@ import {
     sessionState, touchSession, startSession, signUserToken, renewUserToken, listDevices, revokeDevice, revokeSid,
     revokeAllSessions, deviceLimitText, isDeviceLimitError, DEVICES_NOTE, readDeviceLimitTicket, deviceLimitBody,
     sessionCheckAnswer, adoptLegacyToken, attachPushToSession, isWeakDeviceId, legacyTokenState, legacyKeyOf,
-    afterSessionEnded, renewalKind, tokenStillSignedIn,
+    afterSessionEnded, renewalKind, tokenStillSignedIn, noteLegacyUse,
 } from "../src/services/user-session.service.js";
 import { findByAnyEmail } from "../src/utils/account-email.js";
 
@@ -623,4 +623,21 @@ test("E: logging out an adopted row ends the old token too, and a hit moves its 
     assert.equal(await legacyTokenState(oldToken), "revoked");
     // another old token is untouched
     assert.equal(await legacyTokenState(oldTokenOf({ x: 1 })), "ok");
+});
+
+test("an older sign-in is listed from its first request or socket, even if it never calls /api/auth/me", async () => {
+    setup({ limit: FREE });
+    const exp = Math.floor(clock / 1000) + 365 * 24 * 60 * 60;
+    // the desktop app (old token, no sid) reconnects its socket; the phone app makes a request
+    await noteLegacyUse({ user: userA, req: reqOf(UA.desktopApp), token: "old-desktop-token", exp });
+    await noteLegacyUse({ user: userA, req: reqOf(UA.phoneApp, { "x-platform-app": "android" }), token: "old-phone-token", exp });
+    // the same token again within 5 minutes adds nothing
+    await noteLegacyUse({ user: userA, req: reqOf(UA.desktopApp), token: "old-desktop-token", exp });
+    world.redis.kv.delete(`ulegacy:seen:${legacyKeyOf("old-desktop-token")}`);
+    await noteLegacyUse({ user: userA, req: reqOf(UA.desktopApp), token: "old-desktop-token", exp });
+    const { devices } = await listDevices(userA, null);
+    assert.deepEqual(devices.map((x) => x.kind).sort(), ["desktop", "phone"]);
+    // and /api/auth/me later gives that same row its sid, no second row
+    await adoptLegacyToken({ user: userA, req: reqOf(UA.desktopApp), oldToken: "old-desktop-token", payload: { id: userA._id }, expiresIn: "7d" });
+    assert.equal((await listDevices(userA, null)).devices.length, 2);
 });
