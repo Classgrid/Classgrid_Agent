@@ -267,6 +267,7 @@ async function streamOneRound({ provider, messages, tools, temperature, maxToken
         let text = "";
         let reasoning = "";
         let usage = null;
+        let writtenTokens = 0; // what the chunks between the first and the last say they hold (see below)
         let finishReason = null;
         const toolCalls = [];
         const emitReasoning = (piece) => {
@@ -292,8 +293,12 @@ async function streamOneRound({ provider, messages, tools, temperature, maxToken
                 piece = await reader.read();
             } catch (e) {
                 // Stopped or broken mid-round (the user pressed Stop): the real usage Cloudflare sent so far goes with
-                // the error, so what was used is charged (it sends the running count on every chunk)
-                if (e && typeof e === "object" && usage) e.partialUsage = usage;
+                // the error, so what was used is charged: the input count from the first chunk, and what was written
+                // from the chunks after it (each says how many tokens it holds)
+                if (e && typeof e === "object" && (usage || writtenTokens > 0)) {
+                    const written = Math.max(usage?.completion_tokens || 0, writtenTokens);
+                    e.partialUsage = { ...(usage || {}), prompt_tokens: usage?.prompt_tokens || 0, completion_tokens: written, total_tokens: (usage?.prompt_tokens || 0) + written };
+                }
                 throw e;
             }
             const { done, value } = piece;
@@ -310,10 +315,15 @@ async function streamOneRound({ provider, messages, tools, temperature, maxToken
                 let chunk;
                 try { chunk = JSON.parse(data); } catch { continue; }
 
-                // Cloudflare attaches usage to every chunk; the largest total is the round's final count.
+                // Cloudflare attaches usage to every chunk (read live 2026-11-17 on DeepSeek V4.1 Flash, V4 Pro and
+                // GLM 5.3): the first chunk has the round's real input count and nothing written yet, each chunk in
+                // between only how many tokens it holds itself (no input count), and the last one the whole round. So
+                // the largest total is the round's final count, and the chunks in between add up to what was written
+                // so far (used when the round is stopped before its last chunk).
                 if (chunk.usage && (!usage || (chunk.usage.total_tokens || 0) >= (usage.total_tokens || 0))) {
                     usage = chunk.usage;
                 }
+                if (chunk.usage && !(chunk.usage.prompt_tokens > 0)) writtenTokens += Number(chunk.usage.completion_tokens) || 0;
                 if (!inputChecked && usage?.prompt_tokens > 0) {
                     inputChecked = true;
                     if (inputTooBig?.({ prompt_tokens: usage.prompt_tokens, completion_tokens: 0, total_tokens: usage.prompt_tokens })) {

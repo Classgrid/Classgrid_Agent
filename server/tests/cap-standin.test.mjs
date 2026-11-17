@@ -11,6 +11,9 @@
 //   - no stand-in (none given, or Claude can't be used): the refusal goes up as before
 //   - the stand-in's own failure goes up with what both models used
 //   - an answer a stand-in was finishing when the server restarted goes on with a stand-in, without asking Cloudflare
+// Also here, the usage of a Cloudflare round the user stops (streamOneRound): Cloudflare's first chunk carries the
+// input count, each chunk after it how many tokens it holds, and only the last chunk the whole round, so a stopped
+// round is charged for its input and for what its chunks add up to (it used to be charged for the input only).
 // Cloudflare and Claude are stand-ins here: nothing is sent anywhere.
 // Run: node --experimental-test-module-mocks --test tests/cap-standin.test.mjs
 import test, { mock } from "node:test";
@@ -26,6 +29,16 @@ mock.module("../src/services/cf-neuron-cap.service.js", {
             const next = script.shift();
             if (!next || next === "refuse") throw new CapError();
             sent.push(JSON.parse(init.body));
+            if (next.stopAfter) {
+                // (a round the user stops: its chunks arrive one by one, then Stop is pressed and the stream breaks)
+                let i = 0;
+                return new Response(new ReadableStream({
+                    pull(controller) {
+                        if (i < next.stopAfter.length) { controller.enqueue(new TextEncoder().encode(`data: ${JSON.stringify(next.stopAfter[i++])}\n\n`)); return; }
+                        return new Promise((r) => setTimeout(r, 5)).then(() => { next.stop.abort(); controller.error(new Error("This operation was aborted")); });
+                    },
+                }), { status: 200, headers: { "content-type": "text/event-stream" } });
+            }
             const text = next.map((c) => `data: ${JSON.stringify(c)}\n\n`).join("") + "data: [DONE]\n\n";
             return new Response(text, { status: 200, headers: { "content-type": "text/event-stream" } });
         },
@@ -175,4 +188,22 @@ test("after a restart, an answer a stand-in was finishing goes on with a stand-i
     const again = await streamChat({ provider, messages, tools, maxTokens: 1000, resumeProvider: "claude", resumeConversation: saved, resumeStandIn: { model: "claude-haiku-5-5", before } });
     assert.equal(again.answer, "Fresh answer");
     assert.equal(again.standIn, undefined);
+});
+
+test("a Cloudflare round the user stops is charged for its input and for what it wrote", async () => {
+    const stop = new AbortController();
+    // (the usage on each chunk as Cloudflare sends it: read live 2026-11-17)
+    start([{ stop, stopAfter: [
+        { choices: [{ delta: { role: "assistant", content: "" } }], usage: { prompt_tokens: 5000, completion_tokens: 0, total_tokens: 5000 } },
+        { choices: [{ delta: { content: "One two three " } }], usage: { prompt_tokens: 0, completion_tokens: 6, total_tokens: 6 } },
+        { choices: [{ delta: { content: "four five six " } }], usage: { prompt_tokens: 0, completion_tokens: 6, total_tokens: 6 } },
+        { choices: [{ delta: { content: "seven" } }], usage: { prompt_tokens: 0, completion_tokens: 1, total_tokens: 1 } },
+    ] }]);
+    let shown = "";
+    await assert.rejects(
+        () => streamChat({ provider, messages, tools, maxTokens: 1000, signal: stop.signal, onToken: (p) => { shown += p; }, capStandIn: standIn() }),
+        (e) => e.usage.prompt_tokens === 5000 && e.usage.completion_tokens === 13 && e.usage.total_tokens === 5013,
+    );
+    assert.equal(shown, "One two three four five six seven");
+    assert.equal(claudeCalls.length, 0, "a stopped answer is not handed to a stand-in");
 });

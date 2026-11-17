@@ -376,8 +376,15 @@ const parseBody = (init) => {
     try { return init && typeof init.body === "string" ? JSON.parse(init.body) : null; } catch { return null; }
 };
 /**
- * Reads a streamed text answer (a copy of it) as it arrives and keeps what counts: the last usage the provider sent
- * (Cloudflare sends the running count on every chunk; the largest total is the final one) and how much was written.
+/**
+ * Reads a streamed text answer (a copy of it) as it arrives and keeps what counts.
+ * How Cloudflare reports usage in a stream (read live 2026-11-17 on DeepSeek V4.1 Flash, DeepSeek V4 Pro and GLM 5.3):
+ * the first chunk carries the real input count and nothing written yet (N in, 0 out); every chunk in between says only
+ * how many tokens it holds itself (0 in, k out); the last chunk carries the whole answer (N in, all out). So:
+ *   usage        the chunk usage with an input count and the largest total: the last chunk's for a stream that reached
+ *                its end, the first chunk's (input only) for one stopped before that
+ *   pieceTokens  what the chunks in between add up to: the tokens written so far, for a stream stopped before its end
+ *   writtenBytes how much text arrived, for a provider that sends no usage at all
  * A stream that is stopped in the middle ends here with what had arrived, so a stopped answer is counted by what it
  * really used, not by a guess.
  */
@@ -386,6 +393,7 @@ async function readStreamedAnswer(copy) {
     const decoder = new TextDecoder();
     let buffer = "";
     let usage = null;
+    let pieceTokens = 0;
     let writtenBytes = 0;
     const take = (line) => {
         if (!line.startsWith("data:")) return;
@@ -393,7 +401,13 @@ async function readStreamedAnswer(copy) {
         if (!raw || raw === "[DONE]") return;
         let c;
         try { c = JSON.parse(raw); } catch { return; /* a partial chunk */ }
-        if (c.usage && (!usage || (c.usage.total_tokens || 0) >= (usage.total_tokens || 0))) usage = c.usage;
+        if (c.usage) {
+            if ((c.usage.prompt_tokens || 0) > 0) {
+                if (!usage || (c.usage.total_tokens || 0) >= (usage.total_tokens || 0)) usage = c.usage;
+            } else {
+                pieceTokens += Number(c.usage.completion_tokens) || 0;
+            }
+        }
         const d = c.choices?.[0]?.delta;
         if (d) {
             for (const piece of [d.content, d.reasoning_content, d.reasoning]) if (typeof piece === "string") writtenBytes += Buffer.byteLength(piece, "utf8");
@@ -413,7 +427,7 @@ async function readStreamedAnswer(copy) {
         }
         if (buffer) take(buffer);
     } catch { /* stopped in the middle: what arrived until then is what is counted */ }
-    return { usage, writtenBytes };
+    return { usage, pieceTokens, writtenBytes };
 }
 
 // The fetch that was there before this module installed its own (below): what cfAiFetch sends with
@@ -476,12 +490,17 @@ export async function cfAiFetch(url, init = {}) {
                 const type = response.headers.get("content-type") || "";
                 const copy = response.clone();
                 if (type.includes("text/event-stream")) {
-                    readStreamedAnswer(copy).then(({ usage, writtenBytes }) => settle(usage
-                        ? usageNeurons(model, usage)
-                        // (no usage arrived: the input by the request's size, the output by what was written, and
-                        // never less than the expected cost)
-                        : Math.max(expected(), neuronsForText(model, { promptTokens: costs().promptTokens, completionTokens: Math.ceil(writtenBytes / 3) }))))
-                        .catch(() => settle(expected));
+                    readStreamedAnswer(copy).then(({ usage, pieceTokens, writtenBytes }) => {
+                        // (what the chunks in between add up to can never be more than the request may write)
+                        const written = Math.min(pieceTokens, wantedOutput(body) || UNSET_MAX_OUTPUT_TOKENS);
+                        settle(usage
+                            // the real input, and the whole answer's count or, for a stream stopped before its last
+                            // chunk, what its pieces add up to
+                            ? usageNeurons(model, { ...usage, completion_tokens: Math.max(Number(usage.completion_tokens) || 0, written) })
+                            // (no usage with an input count arrived: the input by the request's size, the output by
+                            // its pieces or the text that arrived, and never less than the expected cost)
+                            : Math.max(expected(), neuronsForText(model, { promptTokens: costs().promptTokens, completionTokens: Math.max(written, Math.ceil(writtenBytes / 3)) })));
+                    }).catch(() => settle(expected));
                 } else {
                     copy.json().then((j) => {
                         const usage = j?.usage || j?.result?.usage || null;

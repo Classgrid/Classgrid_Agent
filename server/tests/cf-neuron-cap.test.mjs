@@ -6,7 +6,9 @@
 //     and the room held for requests on their way counts as used: two requests sent together cannot both take the
 //     last room; a request that does not fit is refused and nothing is sent
 //   - when the answer ends, its real cost replaces the held room; a hold whose request never reported back runs out
-//   - a stopped stream is counted by its last usage; a stream with no usage by what was written, never under the
+//   - a stream is read as Cloudflare really sends it (the first chunk has the input count, each chunk in between how
+//     many tokens it holds, the last one the whole answer): a finished stream is counted by its last chunk, a stopped
+//     one by the input plus what its pieces add up to; a stream with no usage by what was written, never under the
 //     expected cost; a request stopped after sending is counted at the expected cost; a failed one is not counted
 //   - a count that cannot be read refuses
 //   - a picture in a request counts as a set number of tokens, not by its bytes
@@ -194,7 +196,34 @@ test("many requests at the same moment never take more than the cap between them
     assert.ok((await usedToday()) <= 10000, `the day's count stays inside Cloudflare's free 10,000 (${Math.round(await usedToday())})`);
 });
 
-test("a stream that is stopped in the middle is counted by the last usage that arrived", async () => {
+// (the usage on each chunk as Cloudflare sends it: read live 2026-11-17)
+const firstChunk = (input) => ({ choices: [{ delta: { role: "assistant", content: "" } }], usage: { prompt_tokens: input, completion_tokens: 0, total_tokens: input } });
+const piece = (text, tokens) => ({ choices: [{ delta: { content: text } }], usage: { prompt_tokens: 0, completion_tokens: tokens, total_tokens: tokens } });
+const lastChunk = (input, output) => ({ choices: [{ delta: {}, finish_reason: "stop" }], usage: { prompt_tokens: input, completion_tokens: output, total_tokens: input + output } });
+
+test("a stream that reaches its end is counted by its last chunk, once", async () => {
+    reset();
+    answer = async () => sse([firstChunk(5000), piece("Hello", 1500), piece(" there", 1500), lastChunk(5000, 3000)]);
+    await cfAiFetch(CHAT, chatInit({ stream: true }));
+    await settled();
+    assert.ok(Math.abs((await usedToday()) - neuronsForText(GLM, { promptTokens: 5000, completionTokens: 3000 })) < 1e-6, "the pieces are not added on top of the last chunk's count");
+    assert.equal(hash(HELD).size, 0);
+});
+
+test("a stream that is stopped in the middle is counted by its input and what its pieces add up to", async () => {
+    reset();
+    answer = async () => sse([firstChunk(5000), piece("Hello", 1500), piece(" there", 1500)], { breakAfter: true });
+    await cfAiFetch(CHAT, chatInit({ stream: true }));
+    await settled();
+    assert.ok(Math.abs((await usedToday()) - neuronsForText(GLM, { promptTokens: 5000, completionTokens: 3000 })) < 1e-6, "the input from the first chunk and the 3,000 tokens written, not input only and not a guessed 1,024");
+    assert.equal(hash(HELD).size, 0);
+    // What the pieces add up to is never more than the request may write
+    reset();
+    answer = async () => sse([firstChunk(5000), piece("a", 6000), piece("b", 6000)], { breakAfter: true });
+    await cfAiFetch(CHAT, chatInit({ stream: true })); // max_tokens 8192
+    await settled();
+    assert.ok(Math.abs((await usedToday()) - neuronsForText(GLM, { promptTokens: 5000, completionTokens: 8192 })) < 1e-6);
+    // A provider that sends the running count with the input on every chunk: the largest one counts
     reset();
     answer = async () => sse([
         { choices: [{ delta: { content: "Hello" } }], usage: { prompt_tokens: 5000, completion_tokens: 3, total_tokens: 5003 } },
@@ -202,8 +231,7 @@ test("a stream that is stopped in the middle is counted by the last usage that a
     ], { breakAfter: true });
     await cfAiFetch(CHAT, chatInit({ stream: true }));
     await settled();
-    assert.ok(Math.abs((await usedToday()) - neuronsForText(GLM, { promptTokens: 5000, completionTokens: 3000 })) < 1e-6, "3,000 written tokens, not the 1,024 the old meter took for a stopped stream");
-    assert.equal(hash(HELD).size, 0);
+    assert.ok(Math.abs((await usedToday()) - neuronsForText(GLM, { promptTokens: 5000, completionTokens: 3000 })) < 1e-6);
 });
 
 test("a stream that sends no usage is counted by what was written, never under the expected cost", async () => {
