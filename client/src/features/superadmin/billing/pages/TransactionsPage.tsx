@@ -30,220 +30,131 @@
  * =========================================================================================
  */
 
-// Transactions (owner, 2026-11-17: rebuilt as "every payment for Classgrid AI"). Plans and credit top-ups come from
-// the AI credit ledger, the only place every plan purchase is saved; failed attempts and older payments come from the
-// platform ledger. The old page listed organization payments with filters that never matched the data, so it is
-// replaced, not patched. Filters live in the URL so Back from a payment keeps them.
-import React, { useEffect, useMemo, useState } from "react";
-import { useNavigate, useSearchParams } from "react-router-dom";
-import { toast } from "sonner";
-import { Download, Receipt, XCircle } from "lucide-react";
-import { Button } from "@/components/marketing_ui/button";
-import { Skeleton } from "@/components/marketing_ui/skeleton";
+import React, { useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { ResponsiveSelect } from '@/components/marketing_ui/responsive-select';
+import { SuperadminFilterBar } from '../../components/SuperadminFilterBar';
+import { NikhilTimeCalendar } from '@/components/marketing_ui/nikhil_time_calendar';
+import { X } from 'lucide-react';
+import { TransactionTable } from '../components/finance/TransactionComponents';
 import { useBreadcrumbStore } from "@/store/useBreadcrumbStore";
-import { PaymentFilters, type PaymentFilterValues } from "../components/transactions/PaymentFilters";
-import { PaymentSummary } from "../components/transactions/PaymentSummary";
-import { PaymentsTable } from "../components/transactions/PaymentsTable";
-import { PaymentsPager } from "../components/transactions/PaymentsPager";
-import { usePayments } from "../components/transactions/usePayments";
-import { downloadPaymentsCsv, type PaymentFilters as Filters } from "../components/transactions/paymentsApi";
-
-const LIMIT = 25;
-const CSV_MAX = 5000;
-const TYPES = ["plan", "topup", "other"];
-const PLANS = ["pro", "max", "enterprise"];
-const STATUSES = ["paid", "refunded", "failed", "pending"];
-const DAY = /^\d{4}-\d{2}-\d{2}$/;
-const FILTER_KEYS = ["q", "type", "plan", "status", "from", "to"] as const;
-
-// A value from the URL is used only when it is one the server accepts, so a hand-edited link can't break the page
-const pickOne = (v: string | null, allowed: string[]) => (v && allowed.includes(v) ? v : "");
+import { useBillingOrganizations } from '../hooks/useBillingFilters';
 
 const TransactionsPage = () => {
   const navigate = useNavigate();
   const setBreadcrumbs = useBreadcrumbStore((state) => state.setBreadcrumbs);
-
+  
   useEffect(() => {
-    setBreadcrumbs([{ label: "Transactions" }]);
+    setBreadcrumbs([
+      { label: "Transactions" }
+    ]);
     return () => setBreadcrumbs([]);
   }, [setBreadcrumbs]);
 
-  const [searchParams, setSearchParams] = useSearchParams();
-  const q = (searchParams.get("q") || "").slice(0, 100);
-  const values: PaymentFilterValues = {
-    type: pickOne(searchParams.get("type"), TYPES),
-    plan: pickOne(searchParams.get("plan"), PLANS),
-    status: pickOne(searchParams.get("status"), STATUSES),
-    from: DAY.test(searchParams.get("from") || "") ? (searchParams.get("from") as string) : "",
-    to: DAY.test(searchParams.get("to") || "") ? (searchParams.get("to") as string) : "",
-  };
-  const page = Math.max(1, parseInt(searchParams.get("page") || "1", 10) || 1);
-  const anyFilter = !!(q || values.type || values.plan || values.status || values.from || values.to);
+  const [searchInput, setSearchInput] = useState('');
+  const [search, setSearch] = useState('');
+  const [organizationId, setOrganizationId] = useState<string>('');
+  const [paymentFlow, setPaymentFlow] = useState<string>('');
+  const [status, setStatus] = useState<string>('');
+  const [dateFrom, setDateFrom] = useState<Date>();
+  const [dateType, setDateType] = useState<"created" | "updated">("created");
 
-  // Every filter change starts again at page 1. replace keeps the history short: Back leaves the list instead of
-  // stepping through each filter.
-  const updateParams = (patch: Record<string, string>, keepPage = false) => {
-    setSearchParams(
-      (prev) => {
-        const next = new URLSearchParams(prev);
-        for (const [k, v] of Object.entries(patch)) {
-          if (v) next.set(k, v);
-          else next.delete(k);
-        }
-        if (!keepPage) next.delete("page");
-        return next;
-      },
-      { replace: true },
-    );
-  };
+  const { data: organizations } = useBillingOrganizations();
 
-  // The search box writes to the URL 400 ms after typing stops
-  const [searchInput, setSearchInput] = useState(q);
+  // Debounce search
   useEffect(() => {
-    const t = setTimeout(() => {
-      const next = searchInput.trim();
-      if (next !== q) updateParams({ q: next });
-    }, 400);
+    const t = setTimeout(() => setSearch(searchInput), 400);
     return () => clearTimeout(t);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searchInput]);
-  // The URL changed some other way (Clear filters, Back): show its search in the box
-  useEffect(() => {
-    if (q !== searchInput.trim()) setSearchInput(q);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [q]);
 
-  const filters: Filters = useMemo(
-    () => ({
-      search: q,
-      type: values.type as Filters["type"],
-      plan: values.plan as Filters["plan"],
-      status: values.status as Filters["status"],
-      from: values.from,
-      to: values.to,
-      page,
-      limit: LIMIT,
-    }),
-    [q, values.type, values.plan, values.status, values.from, values.to, page],
-  );
-
-  const { data, isLoading, isError, isFetching, isPlaceholderData, refetch } = usePayments(filters);
-  const rows = data?.data || [];
-  const total = data?.pagination?.total ?? data?.summary?.total ?? 0;
-  const summary = data?.summary;
-
-  // A page past the end (an old link, or fewer payments after a refresh) goes to the last page that has rows
-  useEffect(() => {
-    if (!data || isPlaceholderData) return;
-    const pages = Math.max(1, Math.ceil(total / LIMIT));
-    if (page > pages) updateParams({ page: pages > 1 ? String(pages) : "" }, true);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [data, isPlaceholderData, total, page]);
-
-  const clearFilters = () => {
-    setSearchInput("");
-    updateParams(Object.fromEntries(FILTER_KEYS.map((k) => [k, ""])));
+  const filters = {
+    organizationId: organizationId || undefined,
+    type: paymentFlow || undefined,
+    status: status || undefined,
+    startDate: dateFrom ? dateFrom.toISOString() : undefined,
+    endDate: dateFrom ? (() => { const e = new Date(dateFrom); e.setHours(23, 59, 59, 999); return e.toISOString(); })() : undefined,
+    search: search || undefined,
   };
-
-  const [downloading, setDownloading] = useState(false);
-  const downloadCsv = async () => {
-    if (downloading) return;
-    if (summary && summary.total === 0) {
-      toast("There are no payments to download.");
-      return;
-    }
-    setDownloading(true);
-    try {
-      await downloadPaymentsCsv(filters);
-      if (summary && summary.total > CSV_MAX) {
-        toast("Only the newest 5,000 payments are in the file. Pick fewer dates for the rest.");
-      }
-    } catch {
-      toast.error("Couldn't make the CSV. Try again.");
-    } finally {
-      setDownloading(false);
-    }
-  };
-
-  const openPayment = (id: string) => navigate(`/super-admin/billing/transactions/${id}`);
-
-  let list: React.ReactNode;
-  if (isLoading && !data) {
-    list = (
-      <div className="flex flex-col gap-2">
-        {Array.from({ length: 8 }).map((_, i) => (
-          <Skeleton key={i} className="h-14 w-full rounded-xl" />
-        ))}
-      </div>
-    );
-  } else if (isError && !data) {
-    list = (
-      <div className="bg-card border border-border rounded-xl shadow-sm p-6 flex flex-col items-center text-center gap-3">
-        <div className="w-8 h-8 rounded-lg bg-muted flex items-center justify-center">
-          <XCircle className="w-4 h-4 text-foreground" />
-        </div>
-        <p className="text-sm font-medium text-foreground">Couldn't load payments.</p>
-        <Button variant="outline" size="sm" onClick={() => refetch()}>
-          Try again
-        </Button>
-      </div>
-    );
-  } else if (rows.length === 0) {
-    list = (
-      <div className="bg-card border border-border rounded-xl shadow-sm p-6 flex flex-col items-center text-center gap-2">
-        <div className="w-8 h-8 rounded-lg bg-muted flex items-center justify-center">
-          <Receipt className="w-4 h-4 text-foreground" />
-        </div>
-        <h4 className="text-base font-semibold text-foreground">
-          {anyFilter ? "No payments match these filters" : "No payments yet"}
-        </h4>
-        <p className="text-xs text-muted-foreground">
-          {anyFilter ? "Try other filters or dates." : "Plan purchases and credit top-ups show up here as soon as someone pays."}
-        </p>
-        {anyFilter && (
-          <Button variant="outline" size="sm" className="mt-2" onClick={clearFilters}>
-            Clear filters
-          </Button>
-        )}
-      </div>
-    );
-  } else {
-    list = <PaymentsTable rows={rows} onOpen={(row) => openPayment(row.id)} dimmed={isPlaceholderData} />;
-  }
 
   return (
-    <div className="flex flex-col gap-4 w-full min-w-0 pb-8">
-      <div className="flex flex-wrap items-center justify-end gap-2">
-        <Button variant="outline" size="sm" className="gap-2" onClick={downloadCsv} disabled={downloading}>
-          <Download className="w-4 h-4" />
-          {downloading ? "Making the CSV" : "Download CSV"}
-        </Button>
+    <div className="flex flex-col gap-6 w-full pb-8">
+      {/* ═══ FILTER BAR — copied from ClassgridTalkPage ═══ */}
+      <SuperadminFilterBar
+        searchQuery={searchInput}
+        onSearchChange={setSearchInput}
+        searchPlaceholder="Search here..."
+      >
+        {/* Org Name */}
+        <div className="w-[180px]">
+          <ResponsiveSelect
+            className="flex h-9 w-full items-center rounded-md border border-border bg-transparent px-3 py-1 shadow-sm hover:bg-accent/50 transition-colors text-sm"
+            value={organizationId}
+            onChange={(e) => setOrganizationId(e.target.value)}
+          >
+            <option value="">Org: All</option>
+            {organizations?.map((org: any) => (
+              <option key={org._id || org.id} value={org._id || org.id}>
+                {org.name}
+              </option>
+            ))}
+          </ResponsiveSelect>
+        </div>
+
+        {/* Payment Flow */}
+        <div className="w-[150px]">
+          <ResponsiveSelect
+            className="flex h-9 w-full items-center rounded-md border border-border bg-transparent px-3 py-1 shadow-sm hover:bg-accent/50 transition-colors text-sm"
+            value={paymentFlow}
+            onChange={(e) => setPaymentFlow(e.target.value)}
+          >
+            <option value="">Flow: All</option>
+            <option value="CLASSGRID_SUBSCRIPTION">Subscriptions</option>
+            <option value="INSTITUTION_FEE">Institution</option>
+            <option value="AI_TOPUP">AI Top-Ups</option>
+          </ResponsiveSelect>
+        </div>
+
+        <div className="w-[180px] max-w-[180px] overflow-hidden relative">
+          <NikhilTimeCalendar
+            value={dateFrom}
+            onChange={setDateFrom}
+            placeholder="Select Date"
+            popDirection="down"
+            showTime={false}
+            className="h-9 w-full pr-8"
+          />
+          {dateFrom && (
+            <button
+              type="button"
+              onClick={(e) => { e.stopPropagation(); setDateFrom(undefined); }}
+              className="absolute right-3 top-1/2 -translate-y-1/2 z-10 p-0.5 text-muted-foreground hover:text-foreground rounded-full hover:bg-accent bg-background"
+              title="Clear date"
+            >
+              <X size={14} />
+            </button>
+          )}
+        </div>
+
+        {/* Status */}
+        <div className="w-[150px]">
+          <ResponsiveSelect
+            className="flex h-9 w-full items-center rounded-md border border-border bg-transparent px-3 py-1 shadow-sm hover:bg-accent/50 transition-colors text-sm"
+            value={status}
+            onChange={(e) => setStatus(e.target.value)}
+          >
+            <option value="">Status: All</option>
+            <option value="CAPTURED">Captured</option>
+            <option value="REFUNDED">Refunded</option>
+            <option value="FAILED">Failed</option>
+            <option value="DISPUTED">Disputed</option>
+          </ResponsiveSelect>
+        </div>
+      </SuperadminFilterBar>
+
+      {/* ═══ TABLE — direct render, no Card wrapper ═══ */}
+      <div className="mt-4">
+        <TransactionTable filters={filters} onViewDetail={(id) => navigate(`/super-admin/billing/transactions/${id}`)} />
       </div>
-
-      <PaymentSummary summary={summary} loading={isLoading && !data} />
-
-      <PaymentFilters
-        searchInput={searchInput}
-        onSearchInput={setSearchInput}
-        values={values}
-        onChange={(patch) => updateParams(patch as Record<string, string>)}
-        anyFilter={anyFilter || !!searchInput.trim()}
-        onClear={clearFilters}
-      />
-
-      {list}
-
-      {rows.length > 0 && (
-        <PaymentsPager
-          page={page}
-          limit={LIMIT}
-          total={total}
-          onPage={(p) => {
-            updateParams({ page: p > 1 ? String(p) : "" }, true);
-            window.scrollTo({ top: 0, behavior: "smooth" });
-          }}
-        />
-      )}
     </div>
   );
 };
