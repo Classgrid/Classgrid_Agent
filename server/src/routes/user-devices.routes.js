@@ -41,7 +41,10 @@ async function ownSiteOnly(req, res, next) {
 
 router.get("/", isAuthenticated, async (req, res) => {
     try {
-        res.json(await listDevices(req.user, req.authSid || null));
+        // (the token of this request: an older token without a sid finds its own row by it, for "This device")
+        const auth = String(req.headers.authorization || "");
+        const token = auth.startsWith("Bearer ") ? auth.slice(7) : (req.cookies?.token || req.cookies?.jwt || "");
+        res.json(await listDevices(req.user, req.authSid || null, req.authSid ? "" : token));
     } catch (error) {
         console.error("LIST DEVICES ERROR:", error.message);
         res.status(500).json({ message: "Couldn't load your devices." });

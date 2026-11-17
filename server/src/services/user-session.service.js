@@ -734,7 +734,9 @@ function shownDevice(r) {
 }
 
 /** { devices, limit: { used, max }, note } for the person; this_device marks the caller's own sign-in */
-export async function listDevices(user, currentSid) {
+export async function listDevices(user, currentSid, currentToken = "") {
+    // (a request with an older token, no sid: its own row is the one made for that token)
+    const currentLegacy = !currentSid && currentToken ? legacyKeyOf(currentToken) : "";
     const d = await D();
     const limit = await d.deviceLimit(user);
     const live = await liveSessions(user);
@@ -748,7 +750,7 @@ export async function listDevices(user, currentSid) {
             device_name: shown.device_name,
             created_at: r.created_at,
             last_seen_at: r.last_seen_at || r.created_at,
-            this_device: !!currentSid && r.sid === currentSid,
+            this_device: (!!currentSid && r.sid === currentSid) || (!!currentLegacy && r.legacy_key === currentLegacy),
         }));
     return { devices, limit: { used: countedSessions(live, d.now()).length, max: limit ? limit.max : null }, note: DEVICES_NOTE };
 }
