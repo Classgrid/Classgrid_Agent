@@ -8812,8 +8812,9 @@ export const generateImage = async (req, res) => {
                     if (!src.ok) throw new Error(`A picture to edit could not be fetched (${src.status})`);
                     references.push({ buffer: Buffer.from(await src.arrayBuffer()), mimeType: src.headers.get("content-type") || "" });
                 }
-                // (an edit with given pictures is made at high quality: faces and details from the pictures are kept better)
-                const made = await eleven.generateImage(prompt, { references, quality: references.length ? "high" : "medium" });
+                // Every picture, a new one or an edit, is made at high quality (owner, 2026-11-17: "make it realistic and
+                // high"); new pictures were made at medium and came out plainer than ChatGPT's
+                const made = await eleven.generateImage(prompt, { references, quality: "high" });
                 imageBuffer = made.buffer;
                 imageMime = made.mimeType;
                 imageModel = `elevenlabs/${made.model}`;
