@@ -17,6 +17,11 @@ import { chatsStartedSince, getUserGeneratedImages } from "../services/ai-chat.s
 const num = (v, fallback = null) => (v === undefined || v === null || v === "" ? fallback : (Number.isFinite(Number(v)) ? Number(v) : fallback));
 const lim = (v) => (v === Infinity ? -1 : num(v));
 const mb = (bytes) => Math.round(((Number(bytes) || 0) / (1024 * 1024)) * 10) / 10;
+// 12:00 am on the 1st of next month, India time (the monthly counters use India months)
+function nextIstMonthStart(now = new Date()) {
+    const ist = new Date(now.getTime() + 5.5 * 3600000);
+    return new Date(Date.UTC(ist.getUTCFullYear(), ist.getUTCMonth() + 1, 1) - 5.5 * 3600000);
+}
 
 // Midnight India time, tomorrow (the daily counters' restart)
 function nextIstMidnight() {
@@ -91,8 +96,10 @@ export async function planOverviewFor(userId) {
         const callSeconds = callReset && callReset.getTime() > now ? (user.ai_call_seconds_used || 0) : 0;
 
         // Projects and storage (the Library: uploaded files and generated pictures)
-        const [projects, storage, generated] = await Promise.all([
+        const [projects, runsUsed, storage, generated] = await Promise.all([
             IdeProject.countDocuments({ owner: userId, location: { $ne: "local" } }).catch(() => 0),
+            // Coding agent runs and runs with a Claude model this month (services/coding-run-limit.service.js)
+            import("../services/coding-run-limit.service.js").then((m) => m.codingRunsUsed(userId)).catch(() => ({ runs: 0, premium: 0 })),
             AiLibraryFile.aggregate([
                 { $match: { user_id: user._id } },
                 { $group: { _id: { $cond: [{ $eq: ["$file_type", "image"] }, "images", "files"] }, bytes: { $sum: "$size_bytes" }, count: { $sum: 1 } } },
@@ -138,6 +145,9 @@ export async function planOverviewFor(userId) {
                 whatsapp: wa ? { used: wa.used, limit: lim(wa.limit), resetAt: wa.resetAt ? new Date(wa.resetAt).toISOString() : null, periodText: waPeriod.label.replace(/^every /, ""), dayLimit: plan ? num(plan.whatsapp_per_day, null) : null } : null,
                 call_minutes: { used: Math.round((callSeconds / 60) * 10) / 10, limit: lim(callLimit), resetAt: callReset && callReset.getTime() > now ? callReset.toISOString() : null, periodText: callPeriod.label.replace(/^every /, ""), callsPerDay: plan ? num(plan.calls_per_day, null) : null, maxMinutes: plan ? num(plan.call_max_minutes, null) : null },
                 projects: { used: projects, limit: plan ? num(plan.projects_max, 0) : null },
+                // (they start again on the 1st of the month, India time)
+                coding_runs: plan ? { used: runsUsed.runs, limit: num(plan.coding_runs_per_month, -1), resetAt: nextIstMonthStart().toISOString() } : null,
+                premium_runs: plan ? { used: runsUsed.premium, limit: num(plan.premium_runs_per_month, -1), resetAt: nextIstMonthStart().toISOString() } : null,
                 storage: { usedMb: mb(files.bytes + images.bytes), limit: storageCap, files: { count: files.count, mb: mb(files.bytes) }, images: { count: images.count, mb: mb(images.bytes) }, generatedImages: generated },
             },
         };

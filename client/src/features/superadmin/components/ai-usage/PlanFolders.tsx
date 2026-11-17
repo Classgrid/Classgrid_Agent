@@ -137,6 +137,8 @@ export function PlanMeters({ overview }: { overview?: PlanOverview | null }) {
       <MeterRow label="Session limit" note={`Mid models (DeepSeek, GLM and others) · ${u.credits_window?.periodText || "5 hours"}`} meter={u.credits_window} unit="" />
       <MeterRow label="Mid models limit" note="DeepSeek, GLM and other models · Weekly" meter={u.credits_week} unit="" />
       <MeterRow label="Claude limit" note="Sonnet, Opus and Haiku · Weekly" meter={u.claude_week} unit="" />
+      <MeterRow label="Coding agent runs limit" note="Messages to the coding agent in projects · this month" meter={u.coding_runs} unit="runs" />
+      <MeterRow label="Claude runs in projects limit" note="Project runs with a Claude model · this month" meter={u.premium_runs} unit="runs" />
       <MeterRow label="Pictures" meter={u.images} unit="pictures" />
       <MeterRow label="WhatsApp messages limit" note={`Messages the AI sends${u.whatsapp?.periodText ? ` · ${u.whatsapp.periodText}` : ""}`} meter={u.whatsapp} unit="messages" />
       <MeterRow label="Read-aloud limit" note="Answers the AI reads out loud · today" meter={u.voice_replies} unit="replies" />

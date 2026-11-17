@@ -91,6 +91,16 @@ export function SettingsUsageSection() {
           </div>
         </>
       )}
+      {/* Projects: the coding agent's runs this month, and those with a Claude model (counted since 2026-11-17) */}
+      {[u.coding_runs, u.premium_runs].some(inPlan) && (
+        <>
+          <div className="text-[13px] font-semibold text-foreground mt-7 mb-2">Projects</div>
+          <div className="rounded-xl border border-border bg-card">
+            {u.coding_runs && <Bar name="Coding agent runs limit" m={u.coding_runs} line={`Messages to the coding agent in projects · ${ofText(u.coding_runs, "runs")} this month · ${u.coding_runs.resetAt ? `Resets ${dayText(u.coding_runs.resetAt)}` : ""}`} />}
+            {u.premium_runs && <Bar name="Claude runs in projects limit" m={u.premium_runs} line={`Project runs with a Claude model · ${ofText(u.premium_runs, "runs")} this month · ${u.premium_runs.resetAt ? `Resets ${dayText(u.premium_runs.resetAt)}` : ""}`} />}
+          </div>
+        </>
+      )}
       <p className="text-xs text-muted-foreground mt-2.5">Last updated: less than a minute ago</p>
 
       {hist && (

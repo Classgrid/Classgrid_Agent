@@ -18,6 +18,9 @@ export type PlanOverview = {
     whatsapp: (Meter & { dayLimit?: number | null }) | null;
     call_minutes: (Meter & { callsPerDay?: number | null; maxMinutes?: number | null }) | null;
     projects: Meter;
+    // Coding agent runs this month, and those with a Claude model (limit 0 = not in the plan, -1 = no limit)
+    coding_runs?: Meter;
+    premium_runs?: Meter;
     storage: { usedMb: number; limit: number | null; files: { count: number; mb: number }; images: { count: number; mb: number }; generatedImages: number };
   };
 };
