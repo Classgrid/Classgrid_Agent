@@ -124,17 +124,13 @@ function MeterRow({ label, note, meter, unit }: { label: string; note?: string; 
   );
 }
 
-/** The person's plan and its limits, with what they used (from the server's planOverviewFor) */
+/** What the person used of their plan's limits (from the server's planOverviewFor). The plan's name and end date
+ * are in the two boxes above these rows on the person's page. */
 export function PlanMeters({ overview }: { overview?: PlanOverview | null }) {
   if (!overview) return null;
   const u = overview.usage;
-  const until = overview.plan.expires_at ? ` · until ${new Date(overview.plan.expires_at).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })}` : "";
   return (
     <>
-      <div className="w-full flex items-center justify-between">
-        <span className="text-sm font-medium text-foreground">Plan</span>
-        <span className="text-sm font-semibold text-foreground">{overview.plan.name}{until}</span>
-      </div>
       <MeterRow label="Session" meter={u.credits_window} unit="" />
       <MeterRow label="This week" meter={u.credits_week} unit="" />
       <MeterRow label="Claude" meter={u.claude_week} unit="" />
