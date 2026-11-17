@@ -69,6 +69,7 @@ import {
 import { DEFAULT_USER_AVATAR, DEFAULT_GROUP_AVATAR } from "@/lib/constants";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/marketing_ui/tooltip";
 import { useUploadContext } from "../context/UploadContext";
+import { menuCard, menuItem } from "./chatMenuLook";
 
 interface ChatSidebarProps {
   threads: ChatThread[];
@@ -96,8 +97,8 @@ function getInitials(name: string) {
 }
 
 const avatarColors = [
-  "bg-violet-500", "bg-blue-500", "bg-emerald-500", "bg-amber-500",
-  "bg-rose-500", "bg-cyan-500", "bg-indigo-500", "bg-teal-500",
+  "bg-violet-500", "bg-blue-500", "bg-fuchsia-500", "bg-amber-500",
+  "bg-rose-500", "bg-cyan-500", "bg-indigo-500", "bg-slate-500",
 ];
 
 function getAvatarColor(name: string) {
@@ -211,9 +212,7 @@ export function ChatSidebar({
     if (activeFilter === "Unread" && t.unread === 0) return false;
     if (activeFilter === "Mentions" && !t.unreadMentions) return false;
     if (activeFilter === "Groups" && t.type !== "group") return false;
-    if (activeFilter === "Admins" && (t.type !== "dm" || !t.role || t.role.toLowerCase() !== "admin")) return false;
-    if (activeFilter === "Faculty" && (t.type !== "dm" || !t.role || !t.role.toLowerCase().includes("faculty"))) return false;
-    
+
     return true;
   });
 
@@ -223,7 +222,8 @@ export function ChatSidebar({
     return 0;
   });
 
-  const filters = ["All", "Unread", "Mentions", "Groups", "Admins", "Faculty", "Archived"];
+  // (the Admins and Faculty filters went with the ERP's roles: they never matched anyone on Classgrid)
+  const filters = ["All", "Unread", "Mentions", "Groups", "Archived"];
 
   return (
     <div className="flex flex-col h-full w-full bg-background min-h-0">
@@ -289,23 +289,23 @@ export function ChatSidebar({
                         <MoreVertical className="w-5 h-5" />
                       </button>
                     </DropdownMenuTrigger>
-                    <DropdownMenuContent align="end" className="w-48">
-                      <DropdownMenuItem onClick={onNewGroup} className="cursor-pointer py-2">
-                        <Users className="w-4 h-4 mr-3" />
+                    <DropdownMenuContent align="end" sideOffset={6} className={`w-52 ${menuCard}`}>
+                      <DropdownMenuItem onClick={onNewGroup} className={menuItem}>
+                        <Users className="w-4 h-4" />
                         <span>New group</span>
                       </DropdownMenuItem>
-                      <DropdownMenuItem className="cursor-pointer py-2" onClick={() => setIsSelectionMode(true)}>
-                        <CheckSquare className="w-4 h-4 mr-3" />
+                      <DropdownMenuItem className={menuItem} onClick={() => setIsSelectionMode(true)}>
+                        <CheckSquare className="w-4 h-4" />
                         <span>Select chats</span>
                       </DropdownMenuItem>
                       {onOpenBlockedContacts && (
-                        <DropdownMenuItem className="cursor-pointer py-2" onClick={onOpenBlockedContacts}>
-                          <Ban className="w-4 h-4 mr-3" />
+                        <DropdownMenuItem className={menuItem} onClick={onOpenBlockedContacts}>
+                          <Ban className="w-4 h-4" />
                           <span>Blocked contacts</span>
                         </DropdownMenuItem>
                       )}
-                      <DropdownMenuItem onClick={onMarkAllRead} className="cursor-pointer py-2 text-primary">
-                        <CheckCheck className="w-4 h-4 mr-3" />
+                      <DropdownMenuItem onClick={onMarkAllRead} className={menuItem}>
+                        <CheckCheck className="w-4 h-4" />
                         <span>Mark all as read</span>
                       </DropdownMenuItem>
                     </DropdownMenuContent>
@@ -415,7 +415,7 @@ export function ChatSidebar({
                   {thread.type === "dm" && (thread.otherUserId || thread.id) && onlineUsers?.has(thread.otherUserId || thread.id) && (
                     <span 
                       title="Online"
-                      className="absolute bottom-0 right-0 z-10 block w-3 h-3 rounded-full bg-emerald-500 border-2 border-background animate-pulse shadow-[0_0_8px_rgba(127,127,127,0.5)]" 
+                      className="absolute bottom-0 right-0 z-10 block w-3 h-3 rounded-full bg-blue-500 border-2 border-background animate-pulse shadow-[0_0_8px_rgba(127,127,127,0.5)]" 
                     />
                   )}
                   {thread.unread > 0 && (

@@ -158,7 +158,7 @@ export function ViewPollVotesModal({
                           {user?.profilePicture ? (
                             <img src={user.profilePicture} className="w-8 h-8 rounded-full object-cover shrink-0 ring-2 ring-white dark:ring-[#111b21]" alt="avatar" />
                           ) : (
-                            <div className="w-8 h-8 rounded-full bg-emerald-100 dark:bg-white/10 text-foreground dark:text-foreground flex items-center justify-center text-xs font-bold shrink-0 uppercase ring-2 ring-white dark:ring-[#111b21]">
+                            <div className="w-8 h-8 rounded-full bg-muted dark:bg-white/10 text-foreground dark:text-foreground flex items-center justify-center text-xs font-bold shrink-0 uppercase ring-2 ring-white dark:ring-[#111b21]">
                               {user?.name?.[0] || '?'}
                             </div>
                           )}

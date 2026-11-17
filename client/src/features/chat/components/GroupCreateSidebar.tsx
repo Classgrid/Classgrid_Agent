@@ -63,10 +63,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { toast } from "sonner";
 import type { OrgUser } from "../services/chatApi";
 import { DEFAULT_USER_AVATAR } from "@/lib/constants";
-import { useOrgRoles } from "@/features/org/queries/useOrgRoles";
 import { useCurrentUser } from "@/features/auth/queries/useCurrentUser";
 import { GROUP_SETTING_LABELS } from "./groupSettingLabels";
-import { isChatHost } from "@/lib/chatHost";
 
 interface GroupCreateSidebarProps {
   onClose: () => void;
@@ -116,13 +114,6 @@ export function GroupCreateSidebar({
   });
 
   const { data: currentUser } = useCurrentUser();
-  const { data: dynamicRolesData } = useOrgRoles();
-  let availableRoles = dynamicRolesData || [];
-
-  if (currentUser?.role === 'super_admin') {
-    // Roles come back as { value, label } objects (older responses were plain strings)
-    availableRoles = availableRoles.filter((r: any) => (typeof r === 'string' ? r : r.value) !== 'student');
-  }
 
   const filteredAndSortedUsers = useMemo(() => {
     let list = users.filter((u) => u._id !== currentUserId && u.role !== 'super_admin');
@@ -250,7 +241,7 @@ export function GroupCreateSidebar({
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
                 <input
                   type="text"
-                  placeholder="Search by name, email, or role..."
+                  placeholder="Search by name or email"
                   value={search}
                   onChange={(e) => setSearch(e.target.value)}
                   className="w-full pl-9 pr-3 py-1.5 h-9 text-sm bg-muted/50 border border-border rounded-lg outline-none text-foreground placeholder:text-muted-foreground/70"
@@ -300,7 +291,7 @@ export function GroupCreateSidebar({
                               )}
                             </div>
                             {isSelected && (
-                              <div className="absolute -bottom-1 -right-1 w-5 h-5 bg-emerald-500 text-white rounded-full flex items-center justify-center border-2 border-background shadow-sm">
+                              <div className="absolute -bottom-1 -right-1 w-5 h-5 bg-primary text-primary-foreground rounded-full flex items-center justify-center border-2 border-background shadow-sm">
                                 <Check className="w-3 h-3" />
                               </div>
                             )}
@@ -331,7 +322,7 @@ export function GroupCreateSidebar({
                   animate={{ scale: 1, opacity: 1 }}
                   exit={{ scale: 0, opacity: 0 }}
                   onClick={() => setStage("details")}
-                  className="absolute bottom-6 right-6 w-14 h-14 bg-emerald-500 hover:bg-emerald-600 text-white rounded-full flex items-center justify-center shadow-lg transition-colors z-20"
+                  className="absolute bottom-6 right-6 w-14 h-14 bg-primary hover:bg-primary/90 text-primary-foreground rounded-full flex items-center justify-center shadow-lg transition-colors z-20"
                 >
                   <ArrowRight className="w-6 h-6" />
                 </motion.button>
@@ -380,7 +371,7 @@ export function GroupCreateSidebar({
                     placeholder="Group name *"
                     value={groupName}
                     onChange={(e) => setGroupName(e.target.value)}
-                    className="w-full bg-transparent border-b-2 border-emerald-500 py-2 pr-8 text-foreground outline-none placeholder:text-muted-foreground/70 font-semibold"
+                    className="w-full bg-transparent border-b-2 border-foreground py-2 pr-8 text-foreground outline-none placeholder:text-muted-foreground/70 font-semibold"
                     autoFocus
                   />
                   <div className="absolute right-0 top-1/2 -translate-y-1/2 text-red-500 font-bold text-xl pointer-events-none">
@@ -447,10 +438,6 @@ export function GroupCreateSidebar({
                     </SelectTrigger>
                     <SelectContent>
                        <SelectItem value="general">General</SelectItem>
-                       <SelectItem value="class">Class</SelectItem>
-                       <SelectItem value="department">Department</SelectItem>
-                       <SelectItem value="subject">Subject</SelectItem>
-                       <SelectItem value="team_staff">Team / Staff</SelectItem>
                        <SelectItem value="official_announcement">Official / Announcement</SelectItem>
                     </SelectContent>
                  </Select>
@@ -498,40 +485,6 @@ export function GroupCreateSidebar({
 
 
 
-              {/* Auto-Grant Admin Roles (ERP school roles: hidden on chat.classgrid.in, where they don't apply) */}
-              <div className={`flex flex-col gap-2 ${isChatHost() ? 'hidden' : ''}`}>
-                 <span className="text-sm font-medium text-foreground">Auto-Grant Admin by Role</span>
-                 <span className="text-xs text-muted-foreground mb-1">Anyone inside this chat group with these roles will automatically be given Group Admin rights.</span>
-                 <div className="flex flex-wrap gap-2">
-                   {availableRoles.map((roleObj: any) => {
-                     // Same handling as GroupSettingsModal: a role may be a { value, label } object or a plain string
-                     const role: string = typeof roleObj === 'string' ? roleObj : roleObj.value;
-                     const roleLabel: string = typeof roleObj === 'string'
-                       ? roleObj.replace('_', ' ').replace(/\b\w/g, (l: string) => l.toUpperCase())
-                       : (roleObj.label || String(roleObj.value || ''));
-                     const currentRoles = groupPermissions.admin_roles || [];
-                     const isSelected = currentRoles.includes(role);
-                     return (
-                       <button
-                         key={role}
-                         onClick={() => {
-                           const newRoles = isSelected
-                             ? currentRoles.filter((r: string) => r !== role)
-                             : [...currentRoles, role];
-                           setGroupPermissions({ ...groupPermissions, admin_roles: newRoles });
-                         }}
-                         className={`px-3 py-1 text-xs rounded-full border transition-colors ${
-                           isSelected 
-                             ? 'bg-primary text-primary-foreground border-primary' 
-                             : 'bg-background text-foreground border-border hover:border-primary/50'
-                         }`}
-                       >
-                         {roleLabel}
-                       </button>
-                     );
-                   })}
-                 </div>
-               </div>
             </div>
           </div>
 
@@ -544,10 +497,10 @@ export function GroupCreateSidebar({
                   exit={{ scale: 0, opacity: 0 }}
                   onClick={handleCreate}
                   disabled={isSubmitting}
-                  className="absolute bottom-6 right-6 w-14 h-14 bg-emerald-500 hover:bg-emerald-600 text-white rounded-full flex items-center justify-center shadow-lg transition-colors z-20 disabled:opacity-70 disabled:cursor-not-allowed"
+                  className="absolute bottom-6 right-6 w-14 h-14 bg-primary hover:bg-primary/90 text-primary-foreground rounded-full flex items-center justify-center shadow-lg transition-colors z-20 disabled:opacity-70 disabled:cursor-not-allowed"
                 >
                   {isSubmitting ? (
-                    <Spinner className="w-6 h-6 text-white" />
+                    <Spinner className="w-6 h-6 text-primary-foreground" />
                   ) : (
                     <Check className="w-7 h-7" />
                   )}

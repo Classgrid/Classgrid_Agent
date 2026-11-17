@@ -96,7 +96,7 @@ const renderDomainStatus = (domainObj: any) => {
         <Tooltip>
           <TooltipTrigger asChild>
             <div className="cursor-help inline-flex">
-              <Badge variant="success" dot>Verified</Badge>
+              <Badge variant="info" dot>Verified</Badge>
             </div>
           </TooltipTrigger>
           <TooltipContent side="top">Verified on: {verifiedText}</TooltipContent>
@@ -161,7 +161,7 @@ export function CustomDomainsPage() {
                   <TooltipTrigger asChild>
                     <span className="font-mono text-sm font-semibold text-primary/90 cursor-help w-fit">{erpDomain}</span>
                   </TooltipTrigger>
-                  <TooltipContent side="top">ERP Domain</TooltipContent>
+                  <TooltipContent side="top">Dashboard Domain</TooltipContent>
                 </Tooltip>
               </TooltipProvider>
             )}
@@ -190,18 +190,24 @@ export function CustomDomainsPage() {
       width: "w-[20%]",
       render: (val: any, row: any) => {
         const realName = row.owner_id?.name || row.ownerName || "Unknown Admin";
+        // The organization pages are gone (they open Global Users), so the name opens the owner's own user page
+        const ownerUserId = row.owner_id?._id;
+        if (!ownerUserId) {
+          return <span className="text-sm text-muted-foreground">{realName}</span>;
+        }
         return (
-          <span 
-            onClick={() => navigate(`/superadmin/detail/${row._id}`)}
-            className="text-sm font-semibold text-primary hover:underline cursor-pointer flex items-center gap-1.5"
+          <button
+            type="button"
+            onClick={() => navigate(`/superadmin/global-users/${ownerUserId}`)}
+            className="text-sm font-semibold text-foreground hover:underline cursor-pointer inline-flex items-center gap-1.5 text-left"
           >
-            {realName} <Info size={14} />
-          </span>
+            {realName} <Info size={14} className="shrink-0 text-muted-foreground" />
+          </button>
         );
       },
     },
 
-  ], []);
+  ], [navigate]);
 
   // Generate Cloudflare JSON
   const activeDomains = useMemo(() => {
@@ -285,12 +291,16 @@ export function CustomDomainsPage() {
     <div className="flex flex-col gap-6 w-full max-w-7xl mx-auto p-4 sm:p-6 lg:p-8 pb-12">
       <div >
         <SectionPanel title="Domain Registry" description={`Showing ${orgs.length} registered custom domains`} noPadding>
-          <DataTable 
-            columns={columns} 
-            rows={orgs} 
-            isLoading={isLoading} 
-            emptyMessage="No organizations have requested custom domains yet." 
-          />
+          {/* The table keeps its width and scrolls inside this box on a phone */}
+          <div className="overflow-x-auto">
+            <DataTable
+              className="min-w-[640px]"
+              columns={columns}
+              rows={orgs}
+              isLoading={isLoading}
+              emptyMessage="No organizations have requested custom domains yet."
+            />
+          </div>
         </SectionPanel>
       </div>
 

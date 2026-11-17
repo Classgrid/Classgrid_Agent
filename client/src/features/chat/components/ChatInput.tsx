@@ -30,6 +30,7 @@ import EmojiPicker from 'emoji-picker-react';
 import DOMPurify from "dompurify";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/marketing_ui/popover";
 import { toast } from "sonner";
+import { menuCard, menuItem } from "./chatMenuLook";
 
 import { Input } from "@/components/marketing_ui/input";
 import {
@@ -134,12 +135,12 @@ export function ChatInput({ onSendMessage, isSending, replyTo, onCancelReply, on
           if (userId === "everyone") {
             mentionHtml = mentionableUsers?.map(u => {
               const uid = u._id || u.id;
-              return `<a href="/profile/${uid}" class="text-emerald-600 dark:text-emerald-500 hover:underline font-semibold no-underline" data-mention="true" data-user-id="${uid}" contenteditable="false">@${u.name}</a>&nbsp;`;
+              return `<a href="/profile/${uid}" class="text-blue-600 dark:text-blue-400 hover:underline font-semibold no-underline" data-mention="true" data-user-id="${uid}" contenteditable="false">@${u.name}</a>&nbsp;`;
             }).join(" ") || "";
           } else if (userId && userId !== "everyone") {
-            mentionHtml = `<a href="/profile/${userId}" class="text-emerald-600 dark:text-emerald-500 hover:underline font-semibold no-underline" data-mention="true" data-user-id="${userId}" contenteditable="false">@${name}</a>&nbsp;`;
+            mentionHtml = `<a href="/profile/${userId}" class="text-blue-600 dark:text-blue-400 hover:underline font-semibold no-underline" data-mention="true" data-user-id="${userId}" contenteditable="false">@${name}</a>&nbsp;`;
           } else {
-            mentionHtml = `<a href="#" class="text-emerald-600 dark:text-emerald-500 hover:underline font-semibold no-underline" data-mention="true" contenteditable="false">@${name}</a>&nbsp;`;
+            mentionHtml = `<a href="#" class="text-blue-600 dark:text-blue-400 hover:underline font-semibold no-underline" data-mention="true" contenteditable="false">@${name}</a>&nbsp;`;
           }
           document.execCommand("insertHTML", false, mentionHtml);
           
@@ -602,7 +603,7 @@ export function ChatInput({ onSendMessage, isSending, replyTo, onCancelReply, on
               className="w-full text-left px-3 py-2.5 rounded-xl hover:bg-accent/80 flex items-center gap-3 transition-colors mb-1"
               onClick={() => insertMention("Everyone", "everyone")}
             >
-              <div className="w-10 h-10 rounded-full bg-emerald-500/10 text-emerald-500 flex items-center justify-center shrink-0 shadow-sm border border-emerald-500/20">
+              <div className="w-10 h-10 rounded-full bg-muted text-foreground flex items-center justify-center shrink-0 shadow-sm border border-border">
                 <Users className="w-5 h-5" />
               </div>
               <div className="flex flex-col">
@@ -636,7 +637,7 @@ export function ChatInput({ onSendMessage, isSending, replyTo, onCancelReply, on
       {replyTo && (() => {
         const isMe = replyTo.sender_id === currentUserId;
         const senderName = isMe ? "You" : replyTo.sender_name;
-        const nameColor = isMe ? "text-emerald-600 dark:text-emerald-500" : "text-blue-500 dark:text-blue-400";
+        const nameColor = isMe ? "text-foreground" : "text-blue-500 dark:text-blue-400";
         
         let mediaIcon = null;
         let mediaText = "";
@@ -672,7 +673,7 @@ export function ChatInput({ onSendMessage, isSending, replyTo, onCancelReply, on
         return (
           <div className="px-3 py-2 bg-transparent">
             <div className="relative bg-black/5 dark:bg-black/20 rounded-lg p-2 overflow-hidden flex items-stretch gap-2 transition-colors">
-              <div className="absolute left-0 top-0 bottom-0 w-[4px] bg-emerald-500"></div>
+              <div className="absolute left-0 top-0 bottom-0 w-[4px] bg-foreground/40"></div>
               
               <div className="flex-1 min-w-0 pl-2 flex flex-col justify-center">
                 <span className={`${nameColor} text-[13px] font-semibold leading-tight block mb-0.5 truncate`}>
@@ -763,7 +764,7 @@ export function ChatInput({ onSendMessage, isSending, replyTo, onCancelReply, on
                   const getDocStyle = () => {
                     if (isPdf) return { color: "text-red-500 bg-red-500/10", label: "PDF" };
                     if (isWord) return { color: "text-blue-500 bg-blue-500/10", label: "DOC" };
-                    if (isExcel) return { color: "text-green-500 bg-green-500/10", label: "XLS" };
+                    if (isExcel) return { color: "text-foreground bg-muted", label: "XLS" };
                     if (isPpt) return { color: "text-orange-500 bg-orange-500/10", label: "PPT" };
                     if (isMd) return { color: "text-purple-500 bg-purple-500/10", label: "MD" };
                     if (isAudio) return { color: "text-violet-500 bg-violet-500/10", label: ext.toUpperCase() };
@@ -836,7 +837,7 @@ export function ChatInput({ onSendMessage, isSending, replyTo, onCancelReply, on
             <div className="flex-1 min-w-0">
               <p className="text-[13px] font-semibold text-foreground line-clamp-1">{linkPreview.title || linkPreview.domain}</p>
               {linkPreview.description && <p className="text-[12px] text-muted-foreground line-clamp-1 mt-0.5">{linkPreview.description}</p>}
-              <p className="text-[11px] text-emerald-600 dark:text-emerald-500 line-clamp-1 mt-0.5 font-medium">{linkPreview.domain}</p>
+              <p className="text-[11px] text-muted-foreground line-clamp-1 mt-0.5 font-medium">{linkPreview.domain}</p>
             </div>
             <button
               onClick={() => setLinkPreview(null)}
@@ -866,9 +867,9 @@ export function ChatInput({ onSendMessage, isSending, replyTo, onCancelReply, on
                   <Paperclip className="w-5 h-5" />
                 </button>
               </DropdownMenuTrigger>
-              <DropdownMenuContent align="start" side="top" className="w-48 mb-2">
+              <DropdownMenuContent align="start" side="top" sideOffset={6} className={`w-52 ${menuCard}`}>
                 <DropdownMenuItem 
-                  className="cursor-pointer py-2" 
+                  className={menuItem}
                   onClick={() => {
                     if (fileInputRef.current) {
                       fileInputRef.current.accept = "*/*";
@@ -876,11 +877,11 @@ export function ChatInput({ onSendMessage, isSending, replyTo, onCancelReply, on
                     }
                   }}
                 >
-                  <FileText className="w-4 h-4 mr-2" />
+                  <FileText className="w-4 h-4" />
                   <span>Document</span>
                 </DropdownMenuItem>
                 <DropdownMenuItem 
-                  className="cursor-pointer py-2" 
+                  className={menuItem}
                   onClick={() => {
                     if (fileInputRef.current) {
                       fileInputRef.current.accept = "image/*,video/*";
@@ -888,15 +889,15 @@ export function ChatInput({ onSendMessage, isSending, replyTo, onCancelReply, on
                     }
                   }}
                 >
-                  <ImageIcon className="w-4 h-4 mr-2" />
+                  <ImageIcon className="w-4 h-4" />
                   <span>Photos & Videos</span>
                 </DropdownMenuItem>
                 {onOpenPollModal && (
                   <DropdownMenuItem 
-                    className="cursor-pointer py-2" 
+                    className={menuItem}
                     onClick={onOpenPollModal}
                   >
-                    <BarChart2 className="w-4 h-4 mr-2" />
+                    <BarChart2 className="w-4 h-4" />
                     <span>Poll</span>
                   </DropdownMenuItem>
                 )}

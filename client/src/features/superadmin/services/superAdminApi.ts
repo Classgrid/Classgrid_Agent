@@ -1033,7 +1033,8 @@ export type AgentReview = {
   id: string;
   message_id: string;
   user_email: string;
-  type: 'down';
+  /** "up" = thumbs up (positive), "down" = thumbs down (negative) */
+  type: 'up' | 'down';
   feedback_text: string | null;
   file_url: string | null;
   status: 'pending' | 'actioned' | 'acknowledged' | 'no_action';
@@ -1042,8 +1043,6 @@ export type AgentReview = {
     id: string;
     name: string;
     profilePicture?: string;
-    orgName: string;
-    role: string;
   } | null;
 };
 

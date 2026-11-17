@@ -84,7 +84,6 @@ import { Switch } from "@/components/marketing_ui/switch";
 import { Button } from "@/components/marketing_ui/button";
 import { useOnlineUsers } from "../context/PresenceContext";
 import { useCurrentUser } from "@/features/auth/queries/useCurrentUser";
-import { useOrgRoles } from "@/features/org/queries/useOrgRoles";
 import { DangerConfirmDialog } from "@/components/marketing_ui/danger-confirm-dialog";
 
 import { Input } from "@/components/marketing_ui/input";
@@ -126,15 +125,6 @@ export function GroupSettingsModal({ groupId, onClose, onLeaveGroup, onUserClick
     queryKey: ["group-info", groupId],
     queryFn: () => fetchGroupInfo(groupId),
   });
-
-  // Fetch dynamic roles based on this organization type
-  const { data: dynamicRolesData } = useOrgRoles();
-  let availableRoles = dynamicRolesData || [];
-
-  // Safety filter: Super admins shouldn't see 'student' in auto-add lists to prevent massive accidental additions
-  if (user?.role === 'super_admin') {
-    availableRoles = availableRoles.filter((r: any) => (typeof r === 'string' ? r : r.value) !== 'student');
-  }
 
   // ── Data: Org Users (for Add Member) ──
   const { data: orgUsersData } = useQuery({
@@ -421,8 +411,8 @@ export function GroupSettingsModal({ groupId, onClose, onLeaveGroup, onUserClick
                     <h4 className="text-sm font-semibold text-foreground flex items-center gap-2">
                       Group Members
                       {onlineMembersCount > 0 && (
-                        <span className="text-xs font-medium text-emerald-600 bg-emerald-500/10 px-2 py-0.5 rounded-full flex items-center gap-1">
-                          <span className="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
+                        <span className="text-xs font-medium text-blue-600 dark:text-blue-400 bg-blue-500/10 px-2 py-0.5 rounded-full flex items-center gap-1">
+                          <span className="w-1.5 h-1.5 rounded-full bg-blue-500"></span>
                           {onlineMembersCount} online
                         </span>
                       )}
@@ -430,14 +420,13 @@ export function GroupSettingsModal({ groupId, onClose, onLeaveGroup, onUserClick
                 {/* Add Member Button — Controlled by Policy */}
                 {(() => {
                   const policy = data.group.add_member_policy || 'admin_only';
-                  const isOrgAdmin = user?.role === 'super_admin' || user?.role === 'org_admin';
-                  const isFaculty = user?.role === 'faculty';
                   const isSuperAdmin = user?.role === 'super_admin';
                   const isAdmin = data.myRole === 'admin' || isSuperAdmin;
                   
                   let canAddMember = false;
                   if (policy === 'all') canAddMember = true;
-                  else if (policy === 'admin_only' || policy === 'org_admin_only' || policy === 'admin_faculty') canAddMember = isAdmin;
+                  // any other saved policy (admin_only, and the old ERP ones org_admin_only and admin_faculty) means admins only
+                  else canAddMember = isAdmin;
 
                   return canAddMember && (
                     <button
@@ -494,7 +483,7 @@ export function GroupSettingsModal({ groupId, onClose, onLeaveGroup, onUserClick
                                     {onlineUsers?.has(member.userId) && (
                                       <span 
                                         title="Online"
-                                        className="absolute bottom-0 right-0 z-10 block w-2.5 h-2.5 rounded-full bg-emerald-500 border-2 border-background animate-pulse shadow-[0_0_8px_rgba(127,127,127,0.5)]" 
+                                        className="absolute bottom-0 right-0 z-10 block w-2.5 h-2.5 rounded-full bg-blue-500 border-2 border-background animate-pulse shadow-[0_0_8px_rgba(127,127,127,0.5)]" 
                                       />
                                     )}
                                   </div>
@@ -504,7 +493,7 @@ export function GroupSettingsModal({ groupId, onClose, onLeaveGroup, onUserClick
                                     </span>
                                     {member.userRole && (
                                       <span className="text-[10px] text-muted-foreground block truncate">
-                                        {member.userRole === 'super_admin' ? 'Classgrid Staff' : member.userRole === 'org_admin' ? 'Org Admin' : member.userRole.charAt(0).toUpperCase() + member.userRole.slice(1)}
+                                        {member.userRole === 'super_admin' ? 'Classgrid Staff' : member.userRole.charAt(0).toUpperCase() + member.userRole.slice(1).replace(/_/g, ' ')}
                                       </span>
                                     )}
                                   </div>
@@ -714,10 +703,6 @@ export function GroupSettingsModal({ groupId, onClose, onLeaveGroup, onUserClick
                         </SelectTrigger>
                         <SelectContent>
                            <SelectItem value="general">General</SelectItem>
-                           <SelectItem value="class">Class</SelectItem>
-                           <SelectItem value="department">Department</SelectItem>
-                           <SelectItem value="subject">Subject</SelectItem>
-                           <SelectItem value="team_staff">Team / Staff</SelectItem>
                            <SelectItem value="official_announcement">Official / Announcement</SelectItem>
                         </SelectContent>
                      </Select>
@@ -741,38 +726,6 @@ export function GroupSettingsModal({ groupId, onClose, onLeaveGroup, onUserClick
                   </div>
 
 
-                  {/* Auto-Grant Admin Roles (ERP school roles: hidden on chat.classgrid.in, where they don't apply) */}
-                  <div className={`flex flex-col gap-2 p-3 bg-muted/30 rounded-lg border border-border md:col-span-2 ${isChatHost() ? 'hidden' : ''}`}>
-                    <span className="text-sm font-medium text-foreground">Auto-Grant Admin by Role</span>
-                    <span className="text-xs text-muted-foreground mb-2">Anyone inside this chat group with these roles will automatically be given Group Admin rights.</span>
-                    <div className="flex flex-wrap gap-2">
-                      {availableRoles.map((roleObj: any) => {
-                        const roleValue = typeof roleObj === 'string' ? roleObj : roleObj.value;
-                        const roleLabel = typeof roleObj === 'string' ? roleObj.replace('_', ' ').replace(/\b\w/g, (l: string) => l.toUpperCase()) : roleObj.label;
-                        const currentRoles = data.group.admin_roles || [];
-                        const isSelected = currentRoles.includes(roleValue);
-                        return (
-                          <button
-                            key={roleValue}
-                            disabled={isUpdatingPermissions}
-                            onClick={() => {
-                              const newRoles = isSelected
-                                ? currentRoles.filter((r: string) => r !== roleValue)
-                                : [...currentRoles, roleValue];
-                              handleUpdatePermissions({ admin_roles: newRoles });
-                            }}
-                            className={`px-3 py-1 text-xs rounded-full border transition-colors ${
-                              isSelected 
-                                ? 'bg-primary text-primary-foreground border-primary' 
-                                : 'bg-background text-foreground border-border hover:border-primary/50'
-                            }`}
-                          >
-                            {roleLabel}
-                          </button>
-                        );
-                      })}
-                    </div>
-                  </div>
                   
                   {/* Actions Row */}
                   <div className="flex items-center gap-3 mt-2 md:col-span-2">
@@ -784,8 +737,6 @@ export function GroupSettingsModal({ groupId, onClose, onLeaveGroup, onUserClick
                             navigate('/audit');
                           } else if (user?.role === 'super_admin') {
                             navigate('/superadmin/audit-logs');
-                          } else if (user?.role === 'org_admin') {
-                            navigate('/org/audit');
                           } else {
                             navigate('/audit'); 
                           }
