@@ -18,10 +18,12 @@ export const MONTH_MS = 30 * DAY_MS;
 const WINDOW_MS = { day: DAY_MS, week: WEEK_MS, month: MONTH_MS };
 // A task from a call works for at most 48 hours (agent-task.service.js), so an older record is not running
 const TASK_LIFE_MS = 48 * 60 * 60 * 1000;
-// The call record states (models/Call.js) of a task from a call that is still open: running now, about to run, or
-// going to run again (at a set time, when the user replies, when the plan's limit comes back, or after a failed run).
-// All of them count for call_tasks_at_once: a sleeping or waiting task would run beside the others when it wakes.
-export const RUNNING_STATES = ["queued", "working", "retrying", "sleeping", "waiting", "paused"];
+// The call record states (models/Call.js) of a task from a call that is running now, about to run, or going to run
+// again by itself (at a set time, when the plan's limit comes back, or after a failed run): these count for
+// call_tasks_at_once, since a sleeping or paused task runs beside the others when it wakes. "waiting" does not count:
+// it is the normal state of a task that gave its answer (agent-task.service.js), kept open up to 48 hours only in
+// case the user replies; counting it would block new tasks with answered ones the user can't see or end.
+export const RUNNING_STATES = ["queued", "working", "retrying", "sleeping", "paused"];
 
 /** A plan's number: null = no limit (-1, not set, not a number), else a whole number of 0 or more */
 export function planNumber(v) {

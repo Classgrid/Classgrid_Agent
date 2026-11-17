@@ -986,13 +986,14 @@ async function runCallJob(job, { resumed = false, lockToken = null } = {}) {
         }
         // Every minute: the task is marked as running, and if it was deleted meanwhile the run is stopped
         const stop = new AbortController();
-        const clock = workClock({ _id: job.taskId, ...(work || {}) }, stop, tasks.addWorkTime);
         const taskBeat = setInterval(async () => {
             if (await taskGone()) { stop.abort(); return; }
             AgentTask.updateOne({ _id: job.taskId, status: "working" }, { $set: { heartbeat_at: new Date() } }).catch(() => {});
         }, 60 * 1000);
         // Every tool, its timing, the thinking and the model of this run go into the call's record
         const rec = record.runRecorder(job.taskId, { reason: resumed ? "restart" : "call", attempt: job.attempts });
+        // The run's minutes start here, right before the run (its finally stops the clock)
+        const clock = workClock({ _id: job.taskId, ...(work || {}) }, stop, tasks.addWorkTime);
         const result = await runAgentTask(user, question, job.projectId, (sessionId) => {
             tasks.setTaskSession(job.taskId, sessionId);
             if (job.sessionId) return;
@@ -1070,6 +1071,9 @@ async function askClassgridLive(call, request, projectName) {
     const pendingKey = projectName ? `p:${looseName(projectName)}` : "none";
     if (call.livePending[pendingKey]) return "The earlier request is still being worked on; its answer will be sent to the caller on WhatsApp when it is ready.";
     let question = `[Live question during a WhatsApp voice call with the user. Your answer is read out on the call, so keep it short and spoken; no tables or links.]\n${request}`;
+    // A plan with no tasks from calls (any task limit 0): live work is answered only while the call lasts
+    const caps = call.taskCaps || {};
+    const duringCallOnly = caps.perCall === 0 || caps.atOnce === 0 || caps.maxMinutes === 0;
     const work = (async () => {
         // A project: open it first (keeps work that is not pushed yet) so the Agent reads its files. Each project
         // gets its own live chat, because a chat stays with the project it started in.
@@ -1085,8 +1089,6 @@ async function askClassgridLive(call, request, projectName) {
         // The minutes of work the caller's plan gives a task from a call apply to live work too (owner, 2026-11-17).
         // A plan with no tasks from calls (any task limit 0): live work is answered only while the call lasts; at
         // hang-up it stops, since work going on after the call is what such a plan leaves out.
-        const caps = call.taskCaps || {};
-        const duringCallOnly = caps.perCall === 0 || caps.atOnce === 0 || caps.maxMinutes === 0;
         const maxMinutes = caps.maxMinutes || 0;
         const stop = maxMinutes || duringCallOnly ? new AbortController() : null;
         const clock = workClock({ work_cap_ms: maxMinutes * 60000, work_ms: 0 }, stop);
@@ -1123,6 +1125,7 @@ async function askClassgridLive(call, request, projectName) {
             record.noteSentForCall(call.id, text);
             sendWhatsappText(call.from, text);
         });
+        if (duringCallOnly) return "Still working on it. The caller's plan does not include work after the call: if it is ready while the call is on, the answer is sent to the caller on WhatsApp; if the call ends first, the work stops. Tell the caller that plainly.";
         return "Still working on it. The answer will be sent to the caller on WhatsApp when it is ready.";
     }
     record.callLiveWork(call.id, { key: result.key, sessionId: result.sessionId, request, startedAt: liveStartedAt, answer: result.answer, error: result.error, late: false });

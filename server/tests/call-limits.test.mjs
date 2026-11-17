@@ -162,8 +162,9 @@ test("the running tasks are counted from the call records: queued, working or re
     const q = countQueries[0];
     assert.equal(q.user_id, "aaaaaaaaaaaaaaaaaaaaaaaa");
     assert.equal(q.origin, "call");
-    // every open state counts: a sleeping, waiting or paused task runs beside the others when it wakes
-    assert.deepEqual(q.status, { $in: ["queued", "working", "retrying", "sleeping", "waiting", "paused"] });
+    // a sleeping or paused task runs beside the others when it wakes, so it counts; "waiting" (answered, open only in
+    // case the user replies) does not
+    assert.deepEqual(q.status, { $in: ["queued", "working", "retrying", "sleeping", "paused"] });
     assert.equal(q.updatedAt.$gte.getTime(), NOW - 48 * HOUR);
 });
 
