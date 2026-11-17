@@ -29,8 +29,7 @@ export const useUpdateAgentReviewStatus = () => {
       aiAgentReviewsApi.updateStatus(id, status),
     onSuccess: (data, variables) => {
       queryClient.invalidateQueries({ queryKey: ["ai-agent-reviews"] });
-      const label: Record<string, string> = { pending: "Pending", actioned: "Actioned", acknowledged: "Acknowledged", no_action: "No action" };
-      toast.success(`Status set to ${label[variables.status] || variables.status}`);
+      toast.success(`Review status updated to ${variables.status}`);
     },
     onError: () => {
       toast.error("Failed to update review status");

@@ -215,7 +215,7 @@ export function NewChatSidebar({
               onClick={onNewGroup}
               className="w-full flex items-center gap-4 px-4 py-3 hover:bg-black/5 dark:hover:bg-white/5 transition-colors text-left"
             >
-              <div className="w-12 h-12 rounded-full bg-primary text-primary-foreground flex items-center justify-center shrink-0 shadow-sm">
+              <div className="w-12 h-12 rounded-full bg-emerald-500 text-white flex items-center justify-center shrink-0 shadow-sm">
                 <Users className="w-6 h-6" />
               </div>
               <div className="flex-1 min-w-0 border-b border-border pb-3 pt-1">
@@ -227,7 +227,7 @@ export function NewChatSidebar({
             {filterType === "groups" && filteredGroups.length > 0 && (
               <>
                 <div className="px-5 py-3 pt-5">
-                  <p className="text-[13px] font-medium text-muted-foreground uppercase tracking-wide">Explore Groups</p>
+                  <p className="text-[14px] font-medium text-emerald-600 uppercase tracking-wide">Explore Groups</p>
                 </div>
                 {filteredGroups.map((group, index) => (
                   <div key={group.id} className="w-full flex items-center gap-4 px-4 py-3 text-left hover:bg-black/5 dark:hover:bg-white/5 transition-colors">
@@ -267,7 +267,7 @@ export function NewChatSidebar({
                         <button 
                           onClick={() => joinPublicGroup(group.id)}
                           disabled={isJoining}
-                          className="px-3 py-1.5 bg-muted text-foreground hover:bg-primary hover:text-primary-foreground text-xs font-semibold rounded-full transition-colors flex items-center gap-1"
+                          className="px-3 py-1.5 bg-emerald-500/10 text-emerald-600 hover:bg-emerald-500 hover:text-white text-xs font-semibold rounded-full transition-colors flex items-center gap-1"
                         >
                           Join
                         </button>
@@ -282,7 +282,7 @@ export function NewChatSidebar({
             {filterType === "contacts" && (
               <>
                 <div className="px-5 py-3 pt-5 border-t border-border mt-2">
-                  <p className="text-[13px] font-medium text-muted-foreground uppercase tracking-wide">Contacts on Classgrid</p>
+                  <p className="text-[14px] font-medium text-emerald-600 uppercase tracking-wide">Contacts on Classgrid</p>
                 </div>
 
                 {filteredUsers.length === 0 ? (
@@ -313,7 +313,7 @@ export function NewChatSidebar({
                           />
                         )}
                         {isSelected && (
-                          <div className="absolute -bottom-1 -right-1 w-5 h-5 bg-primary text-primary-foreground rounded-full flex items-center justify-center border-2 border-background shadow-sm z-10">
+                          <div className="absolute -bottom-1 -right-1 w-5 h-5 bg-emerald-500 text-white rounded-full flex items-center justify-center border-2 border-background shadow-sm z-10">
                             <Check className="w-3 h-3" />
                           </div>
                         )}
@@ -367,10 +367,10 @@ export function NewChatSidebar({
                 }
               }}
               disabled={isSubmitting}
-              className="w-full flex items-center justify-center gap-2 py-3 bg-primary hover:bg-primary/90 text-primary-foreground rounded-lg font-bold shadow-lg transition-colors disabled:opacity-70 disabled:cursor-not-allowed"
+              className="w-full flex items-center justify-center gap-2 py-3 bg-emerald-500 hover:bg-emerald-600 text-white rounded-lg font-bold shadow-lg transition-colors disabled:opacity-70 disabled:cursor-not-allowed"
             >
               {isSubmitting ? (
-                <Spinner className="w-5 h-5 text-primary-foreground" />
+                <Spinner className="w-5 h-5 text-white" />
               ) : (
                 <>
                   <MessageSquarePlus className="w-5 h-5" />

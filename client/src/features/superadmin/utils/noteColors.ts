@@ -57,7 +57,7 @@
 export const getTagColor = (tag: string) => {
   const normalized = tag.toLowerCase().trim();
   
-  if (normalized.includes('aws')) return 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/20';
+  if (normalized.includes('aws')) return 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20';
   if (normalized.includes('prod')) return 'bg-orange-500/10 text-orange-600 dark:text-orange-400 border-orange-500/20';
   if (normalized.includes('secret') || normalized.includes('auth')) return 'bg-purple-500/10 text-purple-600 dark:text-purple-400 border-purple-500/20';
   if (normalized.includes('db') || normalized.includes('data')) return 'bg-blue-500/10 text-blue-600 dark:text-blue-400 border-blue-500/20';

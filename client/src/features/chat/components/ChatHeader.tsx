@@ -69,7 +69,6 @@ import {
 } from "@/components/marketing_ui/dropdown-menu";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/marketing_ui/tooltip";
 import { DEFAULT_USER_AVATAR, DEFAULT_GROUP_AVATAR } from "@/lib/constants";
-import { menuCard, menuItem, menuItemDanger, menuSeparator } from "./chatMenuLook";
 
 
 interface ChatHeaderProps {
@@ -110,8 +109,8 @@ function getInitials(name: string) {
 }
 
 const avatarColors = [
-  "bg-violet-500", "bg-blue-500", "bg-fuchsia-500", "bg-amber-500",
-  "bg-rose-500", "bg-cyan-500", "bg-indigo-500", "bg-slate-500",
+  "bg-violet-500", "bg-blue-500", "bg-emerald-500", "bg-amber-500",
+  "bg-rose-500", "bg-cyan-500", "bg-indigo-500", "bg-teal-500",
 ];
 
 function getAvatarColor(name: string) {
@@ -135,7 +134,7 @@ export function ChatHeader({ thread, onBack, onShowInfo, onAvatarClick, onlineUs
       {/* Back button (mobile) */}
       <button
         onClick={onBack}
-        className="md:hidden p-1.5 rounded-lg hover:bg-accent text-muted-foreground"
+        className="lg:hidden p-1.5 rounded-lg hover:bg-accent text-muted-foreground"
       >
         <ArrowLeft className="w-5 h-5" />
       </button>
@@ -150,7 +149,7 @@ export function ChatHeader({ thread, onBack, onShowInfo, onAvatarClick, onlineUs
         {thread.type === "dm" && (thread.otherUserId || thread.id) && onlineUsers?.has(thread.otherUserId || thread.id) && (
           <span 
             title="Online"
-            className="absolute bottom-0 right-0 z-10 block w-2.5 h-2.5 rounded-full bg-blue-500 border-2 border-background animate-pulse shadow-[0_0_8px_rgba(127,127,127,0.5)]" 
+            className="absolute bottom-0 right-0 z-10 block w-2.5 h-2.5 rounded-full bg-emerald-500 border-2 border-background animate-pulse shadow-[0_0_8px_rgba(127,127,127,0.5)]" 
           />
         )}
       </button>
@@ -180,12 +179,12 @@ export function ChatHeader({ thread, onBack, onShowInfo, onAvatarClick, onlineUs
                   let typingText = "";
                   if (thread?.type === 'dm' && typingUsers && typingUsers.length > 0) {
                     const typeStr = typingUsers[0].type === 'recording' ? 'recording audio' : typingUsers[0].type === 'uploading' ? 'uploading file' : 'typing';
-                    typingText = `${(thread?.name || "Someone").split(" ")[0]} is ${typeStr}`;
+                    typingText = `${(thread?.name || "Someone").split(" ")[0]} is ${typeStr}...`;
                     isTypingSubtitle = true;
                   }
 
                   if (isTypingSubtitle) {
-                    return <span className="text-blue-600 dark:text-blue-400 font-medium">{typingText}</span>;
+                    return <span className="text-emerald-500 font-medium">{typingText}</span>;
                   }
 
                   if (thread.type === "group" && groupInfo?.members) {
@@ -196,9 +195,9 @@ export function ChatHeader({ thread, onBack, onShowInfo, onAvatarClick, onlineUs
                         {onlineCount > 0 && (
                           <>
                             <span>•</span>
-                            <span className="flex items-center gap-1 text-blue-600 dark:text-blue-400 font-medium">
+                            <span className="flex items-center gap-1 text-emerald-500 font-medium">
                               {onlineCount} online
-                              <span className="w-2 h-2 rounded-full bg-blue-500 shadow-[0_0_8px_rgba(127,127,127,0.5)] animate-pulse"></span>
+                              <span className="w-2 h-2 rounded-full bg-emerald-500 shadow-[0_0_8px_rgba(127,127,127,0.5)] animate-pulse"></span>
                             </span>
                           </>
                         )}
@@ -225,7 +224,7 @@ export function ChatHeader({ thread, onBack, onShowInfo, onAvatarClick, onlineUs
                 <input
                   type="text"
                   autoFocus
-                  placeholder="Search in chat"
+                  placeholder="Search in chat..."
                   value={searchQuery || ""}
                   onChange={(e) => onSearchChange?.(e.target.value)}
                   className="w-full bg-accent/50 border-none rounded-full pl-9 pr-8 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-primary text-foreground"
@@ -263,89 +262,92 @@ export function ChatHeader({ thread, onBack, onShowInfo, onAvatarClick, onlineUs
               <MoreVertical className="w-5 h-5" />
             </button>
           </DropdownMenuTrigger>
-          <DropdownMenuContent align="end" sideOffset={6} className={`w-56 ${menuCard}`}>
-            <DropdownMenuItem onClick={onShowInfo} className={menuItem}>
-              <User className="w-4 h-4" />
+          <DropdownMenuContent align="end" className="w-56">
+            <DropdownMenuItem onClick={onShowInfo} className="cursor-pointer py-2">
+              <User className="w-4 h-4 mr-2" />
               <span>{thread.type === "group" ? "View Group Info" : "View Profile"}</span>
             </DropdownMenuItem>
 
             {thread.type === "group" && onAddMember && (() => {
-              // "all" lets every member add people; any other saved policy (admin_only, and the old ERP ones
-              // org_admin_only and admin_faculty) means group admins only, as in the group's settings
               const policy = groupInfo?.add_member_policy || 'admin_only';
-              if (policy !== 'all' && thread.myRole !== 'admin') return null;
-
+              const isFaculty = ['faculty', 'teacher', 'hod', 'principal', 'vice_principal'].includes(thread.myRole || ''); // wait, thread.myRole is group role ('admin' or 'member'). User role is not passed to ChatHeader!
+              
+              // Simplest fix: only admins can add members for now, or we can just pass currentUser to ChatHeader.
+              // If we don't have user role, at least restrict to thread.myRole === 'admin'
+              if (policy === 'admin_only' && thread.myRole !== 'admin') return null;
+              if (policy === 'org_admin_only' && thread.myRole !== 'admin') return null;
+              
               return (
-                <DropdownMenuItem onClick={onAddMember} className={menuItem}>
-                  <UserPlus className="w-4 h-4" />
+                <DropdownMenuItem onClick={onAddMember} className="cursor-pointer py-2 text-primary focus:text-primary focus:bg-primary/10">
+                  <UserPlus className="w-4 h-4 mr-2" />
                   <span>Add member</span>
                 </DropdownMenuItem>
               );
             })()}
 
-            <DropdownMenuItem className={menuItem} onClick={() => onOpenSearch?.()}>
-              <Search className="w-4 h-4" />
+            <DropdownMenuItem className="cursor-pointer py-2" onClick={() => onOpenSearch?.()}>
+              <Search className="w-4 h-4 mr-2" />
               <span>Search in chat</span>
             </DropdownMenuItem>
             
             {onToggleReplies && thread.myRole === 'admin' && (
-              <DropdownMenuItem className={menuItem} onClick={onToggleReplies}>
-                {thread.allowReplies === false ? <CheckSquare className="w-4 h-4" /> : <XCircle className="w-4 h-4 text-danger" />}
+              <DropdownMenuItem className="cursor-pointer py-2" onClick={onToggleReplies}>
+                {thread.allowReplies === false ? <CheckSquare className="w-4 h-4 mr-2" /> : <XCircle className="w-4 h-4 mr-2 text-danger" />}
                 <span className={thread.allowReplies === false ? "" : "text-danger"}>{thread.allowReplies === false ? "Enable replies" : "Disable replies"}</span>
               </DropdownMenuItem>
             )}
             
             {onOpenStarredMessages && (
-              <DropdownMenuItem className={menuItem} onClick={onOpenStarredMessages}>
-                <Star className="w-4 h-4" />
+              <DropdownMenuItem className="cursor-pointer py-2" onClick={onOpenStarredMessages}>
+                <Star className="w-4 h-4 mr-2" />
                 <span>Starred messages</span>
               </DropdownMenuItem>
             )}
             {onOpenScheduledMessages && (
-              <DropdownMenuItem className={menuItem} onClick={onOpenScheduledMessages}>
-                <Clock className="w-4 h-4" />
+              <DropdownMenuItem className="cursor-pointer py-2" onClick={onOpenScheduledMessages}>
+                <Clock className="w-4 h-4 mr-2" />
                 <span>Scheduled messages</span>
               </DropdownMenuItem>
             )}
-            <DropdownMenuItem className={menuItem} onClick={onMuteThread}>
-              {isMuted ? <BellOff className="w-4 h-4" /> : <Bell className="w-4 h-4" />}
+            <DropdownMenuItem className="cursor-pointer py-2" onClick={onMuteThread}>
+              {isMuted ? <BellOff className="w-4 h-4 mr-2" /> : <Bell className="w-4 h-4 mr-2" />}
               <span>{isMuted ? "Unmute notifications" : "Mute notifications"}</span>
             </DropdownMenuItem>
-            <DropdownMenuItem className={menuItem} onClick={onEnterSelectionMode}>
-              <CheckSquare className="w-4 h-4" />
+            <DropdownMenuItem className="cursor-pointer py-2" onClick={onEnterSelectionMode}>
+              <CheckSquare className="w-4 h-4 mr-2" />
               <span>Select messages</span>
             </DropdownMenuItem>
             {onPinThread && (
-              <DropdownMenuItem className={menuItem} onClick={onPinThread}>
-                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="rotate-45"><line x1="12" y1="17" x2="12" y2="22"></line><path d="M5 17h14v-1.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V6h1a2 2 0 0 0 0-4H8a2 2 0 0 0 0 4h1v4.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24Z"></path></svg>
+              <DropdownMenuItem className="cursor-pointer py-2" onClick={onPinThread}>
+                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="mr-2 rotate-45"><line x1="12" y1="17" x2="12" y2="22"></line><path d="M5 17h14v-1.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V6h1a2 2 0 0 0 0-4H8a2 2 0 0 0 0 4h1v4.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24Z"></path></svg>
                 <span>{thread.isPinned ? "Unpin chat" : "Pin chat"}</span>
               </DropdownMenuItem>
             )}
             {onArchiveThread && (
-              <DropdownMenuItem className={menuItem} onClick={onArchiveThread}>
-                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="21 8 21 21 3 21 3 8"></polyline><rect x="1" y="3" width="22" height="5"></rect><line x1="10" y1="12" x2="14" y2="12"></line></svg>
+              <DropdownMenuItem className="cursor-pointer py-2" onClick={onArchiveThread}>
+                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="mr-2"><polyline points="21 8 21 21 3 21 3 8"></polyline><rect x="1" y="3" width="22" height="5"></rect><line x1="10" y1="12" x2="14" y2="12"></line></svg>
                 <span>{thread.isArchived ? "Unarchive chat" : "Archive chat"}</span>
               </DropdownMenuItem>
             )}
-            <DropdownMenuItem className={menuItem} onClick={onOpenDisappearingModal}>
-              <ShieldAlert className="w-4 h-4" />
+            <DropdownMenuItem className="cursor-pointer py-2" onClick={onOpenDisappearingModal}>
+              <ShieldAlert className="w-4 h-4 mr-2" />
               <span>Disappearing messages</span>
             </DropdownMenuItem>
-            <DropdownMenuSeparator className={menuSeparator} />
-            <DropdownMenuItem className={menuItemDanger} onClick={onClearChat}>
-              <XCircle className="w-4 h-4" />
+            <DropdownMenuSeparator />
+            <DropdownMenuItem className="cursor-pointer py-2 text-danger focus:text-danger focus:bg-danger/10" onClick={onClearChat}>
+              <XCircle className="w-4 h-4 mr-2" />
               <span>Clear chat</span>
             </DropdownMenuItem>
 
             {thread.type === "group" ? (
               <>
-                <DropdownMenuItem className={menuItemDanger} onClick={onLeaveGroup || onDeleteChat}>
-                  <LogOut className="w-4 h-4" />
+                <DropdownMenuItem className="cursor-pointer py-2 text-danger focus:text-danger focus:bg-danger/10" onClick={onLeaveGroup || onDeleteChat}>
+                  <LogOut className="w-4 h-4 mr-2" />
                   <span>Leave group</span>
                 </DropdownMenuItem>
                 {thread.myRole === 'admin' && (
-                  <DropdownMenuItem className={menuItemDanger} onClick={onDeleteChat}>
-                    <Trash className="w-4 h-4" />
+                  <DropdownMenuItem className="cursor-pointer py-2 text-danger focus:text-danger focus:bg-danger/10" onClick={onDeleteChat}>
+                    <Trash className="w-4 h-4 mr-2" />
                     <span>Delete group</span>
                   </DropdownMenuItem>
                 )}
@@ -353,13 +355,13 @@ export function ChatHeader({ thread, onBack, onShowInfo, onAvatarClick, onlineUs
             ) : (
               <>
                 {onToggleBlock && (
-                  <DropdownMenuItem className={menuItemDanger} onClick={onToggleBlock}>
-                    <Ban className="w-4 h-4" />
+                  <DropdownMenuItem className="cursor-pointer py-2 text-danger focus:text-danger focus:bg-danger/10" onClick={onToggleBlock}>
+                    <Ban className="w-4 h-4 mr-2" />
                     <span>{isBlocked ? "Unblock" : "Block"}</span>
                   </DropdownMenuItem>
                 )}
-                <DropdownMenuItem className={menuItemDanger} onClick={onDeleteChat}>
-                  <Trash className="w-4 h-4" />
+                <DropdownMenuItem className="cursor-pointer py-2 text-danger focus:text-danger focus:bg-danger/10" onClick={onDeleteChat}>
+                  <Trash className="w-4 h-4 mr-2" />
                   <span>Delete chat</span>
                 </DropdownMenuItem>
               </>

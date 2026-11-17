@@ -143,7 +143,7 @@ function IconPicker({
               onClick={() => { onChange(icon); setOpen(false); }}
               className={cn(
                 "w-7 h-7 flex items-center justify-center rounded-md text-base hover:bg-muted transition-colors",
-                value === icon && "bg-foreground/10 ring-1 ring-foreground/30"
+                value === icon && "bg-emerald-500/20 ring-1 ring-emerald-500/50"
               )}
             >
               {icon}
@@ -198,8 +198,8 @@ function PremiumSelect({
               setIsCustom(false);
             }
           }}
-          placeholder="Type a category, then press Enter"
-          className="flex-1 min-w-0 h-9 rounded-md border border-input bg-background px-3 py-1 text-xs shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-foreground/30"
+          placeholder="Type category & press Enter..."
+          className="flex-1 h-9 rounded-md border border-input bg-background px-3 py-1 text-xs shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-emerald-500/50"
         />
         <button
           type="button"
@@ -211,7 +211,7 @@ function PremiumSelect({
             }
             setIsCustom(false);
           }}
-          className="px-2.5 py-1.5 rounded-md bg-foreground text-background hover:opacity-90 text-[10px] uppercase font-semibold transition-opacity"
+          className="px-2.5 py-1.5 rounded-md bg-emerald-500 hover:bg-emerald-600 text-white text-[10px] uppercase font-semibold transition-colors"
         >
           Add
         </button>
@@ -234,7 +234,6 @@ function PremiumSelect({
     <Select
       value={value || ""}
       onValueChange={(val) => {
-        if (val === null) return;
         if (val === "__custom__") {
           setIsCustom(true);
           setCustomValue("");
@@ -264,10 +263,10 @@ function PremiumSelect({
             </SelectItem>
           ))}
           {allowCustom && (
-            <SelectItem value="__custom__" className="py-2.5 px-3 text-foreground font-medium border-t rounded-none mt-1">
+            <SelectItem value="__custom__" className="py-2.5 px-3 text-emerald-600 dark:text-emerald-400 font-medium border-t rounded-none mt-1">
               <div className="flex items-center gap-2">
                 <Plus className="w-3.5 h-3.5" />
-                <span>Custom category</span>
+                <span>Custom category...</span>
               </div>
             </SelectItem>
           )}
@@ -325,7 +324,7 @@ function CategoryFilterDropdown({
       <Select
         value={value || "all"}
         onValueChange={(val) => {
-          if (!val || val === "all") onChange(undefined);
+          if (val === "all") onChange(undefined);
           else onChange(val);
         }}
       >
@@ -346,7 +345,7 @@ function CategoryFilterDropdown({
         <SelectContent>
           <div className="max-h-[220px] overflow-y-auto pr-1">
             <SelectItem value="all" className="font-semibold px-3 py-2 text-xs">
-              All categories
+              All Categories
             </SelectItem>
             <div className="h-px bg-border mx-2 my-1" />
             {allOptions.map((cat) => (
@@ -387,10 +386,10 @@ function ResizeHandle({ onDrag }: { onDrag: (delta: number) => void }) {
   return (
     <div
       onMouseDown={onMouseDown}
-      className="w-[5px] shrink-0 cursor-col-resize flex items-center justify-center hover:bg-foreground/10 active:bg-foreground/20 transition-colors group z-10"
+      className="w-[5px] shrink-0 cursor-col-resize flex items-center justify-center hover:bg-emerald-500/20 active:bg-emerald-500/40 transition-colors group z-10"
       style={{ touchAction: "none" }}
     >
-      <div className="w-[3px] h-10 rounded-full bg-border/60 group-hover:bg-foreground/40 transition-all duration-150" />
+      <div className="w-[3px] h-10 rounded-full bg-border/60 group-hover:bg-emerald-500/50 transition-all duration-150" />
     </div>
   );
 }
@@ -420,13 +419,9 @@ export function NotesPage() {
   const [selectedCategory, setSelectedCategory] = useState<string | undefined>();
   const [filterMode, setFilterMode] = useState<"All" | "Pinned" | "Private" | "Public">("All");
 
-  // The date filter covers the picked day in the admin's own time zone (start and end of that local day)
-  const dayStart = selectedDate ? new Date(selectedDate.getFullYear(), selectedDate.getMonth(), selectedDate.getDate()) : undefined;
-  const dayEnd = dayStart ? new Date(dayStart.getFullYear(), dayStart.getMonth(), dayStart.getDate() + 1) : undefined;
-  const { data: notes = [], isLoading, isFetching } = useNotes({
+  const { data: notes = [], isLoading } = useNotes({
     search: debouncedSearchQuery || undefined,
-    from: dayStart ? dayStart.toISOString() : undefined,
-    to: dayEnd ? dayEnd.toISOString() : undefined,
+    date: selectedDate ? selectedDate.toISOString() : undefined,
     tag: selectedTag,
     category: selectedCategory,
     visibility: filterMode === "Private" || filterMode === "Public" ? filterMode : undefined,
@@ -477,14 +472,12 @@ export function NotesPage() {
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [isEditing, editTitle, editContent, editTags, editCategory, editIcon, editVisibility, editStatus]);
 
-  // Close the open note when it is no longer in the list (deleted, or left out by a filter).
-  // Not while the list is loading again: a note that was just created or saved is not in the old list yet.
   useEffect(() => {
-    if (!isFetching && activeNote && !notes.find((n) => n._id === activeNote._id)) {
+    if (activeNote && !notes.find((n) => n._id === activeNote._id)) {
       setActiveNote(null);
       setIsEditing(false);
     }
-  }, [notes, activeNote, isFetching]);
+  }, [notes, activeNote]);
 
   const handleCreateNew = () => {
     setActiveNote(null);
@@ -595,12 +588,11 @@ export function NotesPage() {
     <div className="flex h-full w-full overflow-hidden bg-background border border-border rounded-lg cursor-pointer [&_*]:cursor-pointer">
 
       {/* ══════════ LEFT: Sidebar + List ══════════ */}
-      {/* The dragged width only applies from tablet width up; on a phone the list takes the full width */}
       <div
-        style={{ "--notes-list-width": `${leftWidth}px` } as React.CSSProperties}
+        style={{ width: leftWidth, minWidth: 280, maxWidth: 600, flexShrink: 0 }}
         className={cn(
-          "h-full border-r overflow-hidden transition-all duration-300 w-full md:w-[var(--notes-list-width)] md:min-w-[280px] md:max-w-[600px] md:shrink-0",
-          (activeNote || isEditing) ? "hidden md:flex" : "flex"
+          "flex h-full border-r overflow-hidden transition-all duration-300",
+          (activeNote || isEditing) ? "hidden md:flex" : "flex w-full md:w-auto"
         )}
       >
 
@@ -609,9 +601,8 @@ export function NotesPage() {
           {/* New Note */}
           <button
             onClick={handleCreateNew}
-            title="New note (Ctrl+N)"
-            aria-label="New note"
-            className="w-8 h-8 rounded-lg bg-foreground text-background hover:opacity-90 flex items-center justify-center transition-opacity shadow-sm mb-2"
+            title="New Note (Ctrl+N)"
+            className="w-8 h-8 rounded-lg bg-emerald-500 hover:bg-emerald-600 text-white flex items-center justify-center transition-colors shadow-sm shadow-emerald-500/20 mb-2"
           >
             <Plus className="w-4 h-4" />
           </button>
@@ -620,11 +611,10 @@ export function NotesPage() {
 
           <button
             onClick={() => setFilterMode("All")}
-            title="All notes"
-            aria-label="All notes"
+            title="All Notes"
             className={cn(
               "w-8 h-8 rounded-lg flex items-center justify-center transition-colors",
-              filterMode === "All" ? "bg-foreground/10 text-foreground" : "hover:bg-muted text-muted-foreground"
+              filterMode === "All" ? "bg-emerald-500/15 text-emerald-500" : "hover:bg-muted text-muted-foreground"
             )}
           >
             <FileText className="w-4 h-4" />
@@ -632,8 +622,7 @@ export function NotesPage() {
 
           <button
             onClick={() => setFilterMode("Pinned")}
-            title="Pinned notes"
-            aria-label="Pinned notes"
+            title="Favorites"
             className={cn(
               "w-8 h-8 rounded-lg flex items-center justify-center transition-colors",
               filterMode === "Pinned" ? "bg-amber-500/15 text-amber-500" : "hover:bg-muted text-muted-foreground"
@@ -662,9 +651,8 @@ export function NotesPage() {
               <Search className="absolute left-2.5 top-2.5 h-3.5 w-3.5 text-muted-foreground" />
               <input
                 ref={searchInputRef}
-                placeholder="Search notes"
-                aria-label="Search notes"
-                className="w-full h-9 pl-8 pr-3 rounded-lg bg-background border border-input text-sm outline-none focus:ring-1 focus:ring-foreground/30 transition-shadow placeholder:text-muted-foreground/60"
+                placeholder="Search notes…"
+                className="w-full h-9 pl-8 pr-3 rounded-lg bg-background border border-input text-sm outline-none focus:ring-1 focus:ring-emerald-500/50 transition-shadow placeholder:text-muted-foreground/60"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
               />
@@ -772,7 +760,7 @@ export function NotesPage() {
       </div>
 
       {/* Resize Handle (Hidden on small screens) */}
-      <div className="hidden md:flex">
+      <div className={cn("hidden md:flex", (activeNote || isEditing) ? "flex" : "hidden")}>
         <ResizeHandle onDrag={handleLeftDrag} />
       </div>
 
@@ -792,9 +780,9 @@ export function NotesPage() {
                 setActiveNote(null);
                 setIsEditing(false);
               }}
-              className="text-sm font-medium text-foreground flex items-center gap-1 hover:opacity-80 transition-opacity"
+              className="text-sm font-medium text-emerald-500 flex items-center gap-1 hover:text-emerald-600 transition-colors"
             >
-              &larr; Back to notes
+              &larr; Back to Notes
             </button>
           </div>
         )}
@@ -807,7 +795,7 @@ export function NotesPage() {
                 <BookOpen className="w-10 h-10 text-muted-foreground" />
               </div>
               <div className="text-center">
-                <h2 className="text-xl font-semibold">Notes</h2>
+                <h2 className="text-xl font-semibold">Premium Notes</h2>
                 <p className="text-sm text-muted-foreground mt-1">
                   Select a note or press{" "}
                   <kbd className="px-1.5 py-0.5 border rounded bg-background text-xs font-mono mx-0.5">Ctrl</kbd>+
@@ -843,12 +831,12 @@ export function NotesPage() {
                 <button
                   onClick={handleSave}
                   disabled={createNote.isPending || updateNote.isPending || !editTitle.trim()}
-                  className="px-3 py-1.5 rounded-lg text-xs font-medium bg-foreground text-background hover:opacity-90 disabled:opacity-40 transition-opacity flex items-center gap-1.5"
+                  className="px-3 py-1.5 rounded-lg text-xs font-medium bg-emerald-500 hover:bg-emerald-600 disabled:opacity-40 text-white transition-colors flex items-center gap-1.5"
                 >
                   {createNote.isPending || updateNote.isPending ? (
                     <>
-                      <Spinner className="w-3 h-3" />
-                      Saving
+                      <Spinner className="w-3 h-3 text-white" />
+                      Saving…
                     </>
                   ) : (
                     <>
@@ -862,7 +850,7 @@ export function NotesPage() {
 
             {/* Scrollable body — this is the key: flex-1 + min-h-0 + overflow-y-auto */}
             <div className="flex-1 min-h-0 overflow-y-auto">
-              <div className="max-w-3xl mx-auto px-4 sm:px-5 py-6 space-y-5">
+              <div className="max-w-3xl mx-auto px-5 py-6 space-y-5">
 
                 {/* ── Icon + Title row ── */}
                 <div className="flex items-center gap-3">
@@ -871,8 +859,7 @@ export function NotesPage() {
                   </div>
                   <input
                     autoFocus
-                    placeholder="Note title"
-                    aria-label="Note title"
+                    placeholder="Note title…"
                     value={editTitle}
                     onChange={(e) => setEditTitle(e.target.value)}
                     className="flex-1 text-2xl font-bold bg-transparent outline-none placeholder:text-muted-foreground/30 text-foreground leading-snug min-w-0"
@@ -901,7 +888,7 @@ export function NotesPage() {
                   <label className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1">
                     <Hash className="w-3 h-3" /> Tags
                   </label>
-                  <div className="flex flex-wrap items-center gap-1.5 px-3 py-2 border border-input rounded-lg bg-background min-h-10 focus-within:ring-1 focus-within:ring-foreground/30 transition-shadow">
+                  <div className="flex flex-wrap items-center gap-1.5 px-3 py-2 border border-input rounded-lg bg-background min-h-10 focus-within:ring-1 focus-within:ring-emerald-500/40 transition-shadow">
                     {editTags.map((tag) => (
                       <span
                         key={tag}
@@ -914,8 +901,7 @@ export function NotesPage() {
                       </span>
                     ))}
                     <input
-                      placeholder={editTags.length === 0 ? "Type a tag, then press Enter" : "Add another tag"}
-                      aria-label="Add a tag"
+                      placeholder={editTags.length === 0 ? "Add tags and press Enter…" : "Add more…"}
                       value={newTagInput}
                       onChange={(e) => setNewTagInput(e.target.value)}
                       onKeyDown={handleAddTag}
@@ -968,9 +954,8 @@ export function NotesPage() {
               togglePin.mutate(activeNote._id, {
                 onSuccess: (updatedNote) => {
                   setActiveNote(updatedNote);
-                  toast.success(updatedNote.isPinned ? "Note pinned" : "Note unpinned");
-                },
-                onError: () => toast.error("Could not change the pin"),
+                  toast.success(updatedNote.isPinned ? "Note pinned successfully" : "Note unpinned successfully");
+                }
               });
             }}
             onDelete={() => setShowDeleteConfirm(true)}
@@ -995,11 +980,10 @@ export function NotesPage() {
               { id: activeNote._id, title: v.title, content: v.content, tags: v.tags, category: v.category, icon: v.icon, visibility: v.visibility },
               {
                 onSuccess: (updated) => {
-                  toast.success("Version restored");
+                  toast.success("Version restored successfully");
                   setActiveNote(updated);
                   setRestoreVersion(null);
                 },
-                onError: () => toast.error("Could not restore this version"),
               }
             );
           }}
@@ -1019,11 +1003,10 @@ export function NotesPage() {
           onConfirm={() => {
             deleteNote.mutate(activeNote._id, {
               onSuccess: () => {
-                toast.success("Note deleted");
+                toast.success("Note deleted successfully");
                 setActiveNote(null);
                 setShowDeleteConfirm(false);
-              },
-              onError: () => toast.error("Could not delete the note"),
+              }
             });
           }}
         />

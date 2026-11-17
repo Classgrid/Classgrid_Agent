@@ -8254,15 +8254,16 @@ export const getAgentReviews = async (req, res) => {
 
         const User = (await import('../models/User.js')).default;
         const emails = [...new Set(data.map(r => r.user_email))];
-        // Agent Reviews groups feedback by person, then by day (the old organization and role levels went with the ERP)
-        const users = await User.find({ email: { $in: emails } }).select('name email profilePicture').lean();
+        const users = await User.find({ email: { $in: emails } }).select('name email profilePicture organization_id role').populate('organization_id', 'name').lean();
 
         const userMap = {};
         users.forEach(u => {
             userMap[u.email] = {
                 id: u._id.toString(),
                 name: u.name,
-                profilePicture: u.profilePicture
+                profilePicture: u.profilePicture,
+                orgName: u.organization_id?.name || "No Organization",
+                role: u.role || "unknown"
             };
         });
 

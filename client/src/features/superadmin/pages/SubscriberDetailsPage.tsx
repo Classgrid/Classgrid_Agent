@@ -65,29 +65,19 @@
  * ─────────────────────────────────────────────────────────
  */
 
-import { useEffect } from "react";
+import React, { useEffect } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { toast } from "sonner";
+import { ChevronLeft } from "lucide-react";
 
 import { Skeleton } from "@/components/marketing_ui/skeleton";
 import { Badge } from "@/components/marketing_ui/badge";
-import { Button } from "@/components/marketing_ui/button";
 import { Switch } from "@/components/marketing_ui/switch";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/marketing_ui/card";
 import { useBreadcrumbStore } from "@/store/useBreadcrumbStore";
 
 import { useSubscribers, useUpdateSubscriberPreferences } from "../queries/useSubscribers";
 import { formatDate } from "@/utils/dateUtils";
-
-// One subscriber on the classgrid.in email list: when they joined and which of the three emails they get.
-
-type PreferenceKey = "receives_blog" | "receives_changelog" | "receives_legal";
-
-const PREFERENCES: { key: PreferenceKey; name: string; title: string; description: string }[] = [
-  { key: "receives_blog", name: "Blog", title: "Blog posts", description: "An email when a new article is published." },
-  { key: "receives_changelog", name: "Changelog", title: "Changelog", description: "An email about new Classgrid features and fixes." },
-  { key: "receives_legal", name: "Legal", title: "Legal notices", description: "Changes to the terms and policies." },
-];
 
 function formatSubscriberDate(value?: string | null) {
   return value ? formatDate(value, "dd MMM, yyyy hh:mm a") : "—";
@@ -97,20 +87,30 @@ export function SubscriberDetailsPage() {
   const { email } = useParams<{ email: string }>();
   const navigate = useNavigate();
 
-  const { data, isLoading, isError, error, refetch } = useSubscribers({ q: email }, !!email);
+  const { data, isLoading } = useSubscribers({ q: email }, true);
   const updatePreferences = useUpdateSubscriberPreferences();
   const setBreadcrumbs = useBreadcrumbStore((state) => state.setBreadcrumbs);
 
-  const subscriber = data?.data?.find((s) => s.email.toLowerCase() === (email || "").toLowerCase());
+  const subscriber = data?.data?.find((s) => s.email === email);
 
-  const handlePreferenceChange = (pref: (typeof PREFERENCES)[number], checked: boolean) => {
+  const handlePreferenceChange = (key: 'receives_blog' | 'receives_changelog' | 'receives_legal', checked: boolean) => {
     if (!subscriber) return;
 
     updatePreferences.mutate(
-      { email: subscriber.email, preferences: { [pref.key]: checked } },
+      { email: subscriber.email, preferences: { [key]: checked } },
       {
-        onSuccess: () => toast.success(`${pref.name} emails turned ${checked ? "on" : "off"}.`),
-        onError: (err: any) => toast.error(err?.response?.data?.message || err?.message || "Could not change the emails."),
+        onSuccess: () => {
+          let type = "Preferences";
+          if (key === 'receives_blog') type = "Blog";
+          if (key === 'receives_changelog') type = "Changelog";
+          if (key === 'receives_legal') type = "Legal";
+          
+          const action = checked ? "updated" : "paused";
+          toast.success(`${type} ${action}.`);
+        },
+        onError: (err: any) => {
+          toast.error(err?.message || "Failed to update preferences.");
+        }
       }
     );
   };
@@ -131,13 +131,13 @@ export function SubscriberDetailsPage() {
     return (
       <div className="flex flex-col gap-6 w-full max-w-5xl mx-auto p-4 sm:p-6 lg:p-8 pb-12">
         <div className="flex items-center gap-4">
-          <div className="flex min-w-0 flex-col gap-2">
-            <Skeleton className="h-8 w-[250px] max-w-full" />
-            <Skeleton className="h-4 w-[200px] max-w-full" />
+          <div className="flex flex-col gap-2">
+            <Skeleton className="h-8 w-[250px]" />
+            <Skeleton className="h-4 w-[200px]" />
           </div>
           <Skeleton className="h-6 w-16 ml-auto rounded-full" />
         </div>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mt-4">
           <Skeleton className="h-[200px] w-full rounded-xl" />
           <Skeleton className="h-[250px] w-full rounded-xl" />
         </div>
@@ -145,85 +145,94 @@ export function SubscriberDetailsPage() {
     );
   }
 
-  if (isError) {
-    return (
-      <div className="mx-auto max-w-xl p-8 text-center">
-        <p className="font-medium text-foreground">{(error as any)?.response?.data?.message || "Could not load this subscriber."}</p>
-        <Button variant="outline" size="sm" className="mt-3" onClick={() => refetch()}>Retry</Button>
-      </div>
-    );
+  if (!subscriber) {
+    return <div className="p-8">Subscriber not found.</div>;
   }
 
-  if (!subscriber) {
-    return (
-      <div className="mx-auto max-w-xl p-8 text-center">
-        <p className="font-medium text-foreground">This subscriber was not found.</p>
-        <p className="mt-1 text-sm text-muted-foreground">They may have been removed from the list.</p>
-        <Button variant="outline" size="sm" className="mt-3" onClick={() => navigate("/superadmin/subscribers")}>Back to Subscribers</Button>
-      </div>
-    );
-  }
+  const receivesBlog = subscriber.receives_blog !== false;
+  const receivesChangelog = subscriber.receives_changelog !== false;
+  const receivesLegal = subscriber.receives_legal !== false;
 
   return (
     <div className="flex flex-col gap-6 w-full max-w-5xl mx-auto p-4 sm:p-6 lg:p-8 pb-12">
-      <div className="flex flex-wrap items-start gap-3">
-        <div className="flex min-w-0 flex-col">
-          <h1 className="break-all text-2xl font-bold tracking-tight text-foreground">
+      <div className="flex items-center gap-4">
+        <div className="flex flex-col">
+          <h1 className="text-2xl font-bold tracking-tight">
             {subscriber.name ? subscriber.name : subscriber.email}
           </h1>
-          <p className="break-all text-sm text-muted-foreground">
-            {subscriber.name ? subscriber.email : "On the classgrid.in email list"}
+          <p className="text-sm text-muted-foreground">
+            {subscriber.name ? subscriber.email : "Subscriber details and preferences"}
           </p>
         </div>
-        <div className="ml-auto shrink-0">
+        <div className="ml-auto">
           {subscriber.is_active ? (
-            <Badge variant="info" dot className="w-fit text-sm py-1">Active</Badge>
+            <Badge variant="success" dot className="w-fit text-sm py-1">Active</Badge>
           ) : (
-            <Badge variant="warning" dot className="w-fit text-sm py-1">Paused</Badge>
+            <Badge variant="warning" className="w-fit text-sm py-1">Paused</Badge>
           )}
         </div>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mt-4">
+        {/* Profile Info */}
         <Card>
           <CardHeader>
-            <CardTitle>Subscriber</CardTitle>
-            <CardDescription>When they joined the list</CardDescription>
+            <CardTitle>Subscriber Information</CardTitle>
+            <CardDescription>Timestamps and general information</CardDescription>
           </CardHeader>
           <CardContent className="flex flex-col gap-6">
             <div className="flex flex-col gap-1">
-              <span className="text-xs font-medium text-muted-foreground">Subscribed</span>
-              <span className="text-sm font-medium text-foreground">{formatSubscriberDate(subscriber.created_at)}</span>
+              <span className="text-xs text-muted-foreground font-medium uppercase tracking-wider">Subscribed Date</span>
+              <span className="text-sm font-medium">{formatSubscriberDate(subscriber.created_at)}</span>
             </div>
             {!subscriber.is_active && (
               <div className="flex flex-col gap-1">
-                <span className="text-xs font-medium text-muted-foreground">Paused (all emails off)</span>
-                <span className="text-sm font-medium text-foreground">{formatSubscriberDate(subscriber.updated_at)}</span>
+                <span className="text-xs text-muted-foreground font-medium uppercase tracking-wider">Paused Date</span>
+                <span className="text-sm font-medium">{formatSubscriberDate(subscriber.updated_at)}</span>
               </div>
             )}
           </CardContent>
         </Card>
 
+        {/* Email Preferences */}
         <Card>
           <CardHeader>
-            <CardTitle>Emails</CardTitle>
-            <CardDescription>Which emails they get. With all three off they are paused.</CardDescription>
+            <CardTitle>Email Preferences</CardTitle>
+            <CardDescription>Manage exactly what emails they receive</CardDescription>
           </CardHeader>
           <CardContent className="flex flex-col gap-6">
-            {PREFERENCES.map((pref) => (
-              <div key={pref.key} className="flex items-center justify-between gap-4">
-                <div className="flex min-w-0 flex-col gap-1">
-                  <span className="text-sm font-medium text-foreground">{pref.title}</span>
-                  <span className="text-xs text-muted-foreground">{pref.description}</span>
-                </div>
-                <Switch
-                  checked={subscriber[pref.key] !== false}
-                  disabled={updatePreferences.isPending}
-                  onCheckedChange={(checked) => handlePreferenceChange(pref, checked)}
-                  aria-label={`${pref.title} emails`}
-                />
+            <div className="flex items-center justify-between">
+              <div className="flex flex-col gap-1 pr-4">
+                <span className="text-sm font-medium">Blog Posts</span>
+                <span className="text-xs text-muted-foreground">Receive updates when new articles are published.</span>
               </div>
-            ))}
+              <Switch 
+                checked={receivesBlog} 
+                onCheckedChange={(checked) => handlePreferenceChange('receives_blog', checked)} 
+              />
+            </div>
+
+            <div className="flex items-center justify-between">
+              <div className="flex flex-col gap-1 pr-4">
+                <span className="text-sm font-medium">Product Changelogs</span>
+                <span className="text-xs text-muted-foreground">Receive updates about new platform features.</span>
+              </div>
+              <Switch 
+                checked={receivesChangelog} 
+                onCheckedChange={(checked) => handlePreferenceChange('receives_changelog', checked)} 
+              />
+            </div>
+
+            <div className="flex items-center justify-between">
+              <div className="flex flex-col gap-1 pr-4">
+                <span className="text-sm font-medium">Legal Notices</span>
+                <span className="text-xs text-muted-foreground">Receive required terms and policy updates.</span>
+              </div>
+              <Switch 
+                checked={receivesLegal} 
+                onCheckedChange={(checked) => handlePreferenceChange('receives_legal', checked)} 
+              />
+            </div>
           </CardContent>
         </Card>
       </div>

@@ -90,13 +90,9 @@ export type Lead = {
   role?: string;
   website?: string;
   message: string;
-  // From the Classgrid AI "Book a Demo" form (leads saved before it changed don't have them)
-  teamSize?: string;
-  useCase?: string;
   status: LeadStatus;
   lifecycleStage: LeadLifecycle;
-  // The same values as the server's DemoRequest.meetingStatus
-  meetingStatus: "pending" | "scheduled" | "completed" | "cancelled" | "rescheduled" | "missed" | "closed";
+  meetingStatus: "pending" | "scheduled" | "completed" | "cancelled";
   meetingProvider: string;
   scheduledAt?: string | null;
   meetingScheduledAt: string | null;
@@ -174,12 +170,12 @@ export type SupportTicket = {
   category: string;
   status: TicketStatus;
   priority: TicketPriority;
-  submittedBy?: { _id: string; name: string; email: string; role: string; profilePicture?: string };
+  submittedBy?: { _id: string; name: string; email: string; role: string };
   submitterEmail: string;
   submitterName: string;
   isPlatformUser?: boolean;
   organization_id?: { _id: string; name: string; slug: string };
-  assignedTo?: { _id: string; name: string; email: string; profilePicture?: string };
+  assignedTo?: { _id: string; name: string; email: string };
   lastComment?: string;
   messages?: Array<{
     _id?: string;
@@ -594,7 +590,6 @@ export const configApi = {
           osMetrics: h?.osMetrics ?? null,
           warnings: h?.warnings ?? [],
           server: h?.server ?? null,
-          timestamp: (h?.timestamp ?? null) as string | null, // when the server ran the checks (System Config's "Checked")
         };
       }),
 
@@ -1040,8 +1035,7 @@ export type AgentReview = {
   id: string;
   message_id: string;
   user_email: string;
-  /** "up" = thumbs up (positive), "down" = thumbs down (negative) */
-  type: 'up' | 'down';
+  type: 'down';
   feedback_text: string | null;
   file_url: string | null;
   status: 'pending' | 'actioned' | 'acknowledged' | 'no_action';
@@ -1050,6 +1044,8 @@ export type AgentReview = {
     id: string;
     name: string;
     profilePicture?: string;
+    orgName: string;
+    role: string;
   } | null;
 };
 

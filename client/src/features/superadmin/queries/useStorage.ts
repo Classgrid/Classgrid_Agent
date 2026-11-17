@@ -172,19 +172,18 @@ export function useDeleteObjects() {
 export function useRenameObject() {
   const queryClient = useQueryClient();
   return useMutation({
-    // "move" uses the same server rename (copy + delete); it only changes the wording of the toasts.
-    mutationFn: ({ sourceKey, destinationKey }: { sourceKey: string; destinationKey: string; action?: "rename" | "move" }) =>
+    mutationFn: ({ sourceKey, destinationKey }: { sourceKey: string; destinationKey: string }) =>
       storageApi.renameObject(sourceKey, destinationKey),
-    onSuccess: (_, { sourceKey, action = "rename" }) => {
+    onSuccess: (_, { sourceKey }) => {
       setTimeout(() => {
         queryClient.invalidateQueries({ queryKey: storageKeys.analytics() });
       }, 3000);
-      const what = sourceKey.endsWith('/') ? "Folder" : "File";
-      toast.success(action === "move" ? `${what} moved.` : `${what} renamed.`);
+      const isFolder = sourceKey.endsWith('/');
+      toast.success(isFolder ? "Folder renamed successfully." : "File renamed successfully.");
     },
-    onError: (error: unknown, { sourceKey, action = "rename" }) => {
-      const what = sourceKey.endsWith('/') ? "folder" : "file";
-      toast.error(storageErrorMessage(error, action === "move" ? `Could not move the ${what}.` : `Could not rename the ${what}.`));
+    onError: (error: unknown, { sourceKey }) => {
+      const isFolder = sourceKey.endsWith('/');
+      toast.error(storageErrorMessage(error, isFolder ? "Failed to rename folder." : "Failed to rename file."));
     },
   });
 }

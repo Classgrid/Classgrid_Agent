@@ -86,7 +86,6 @@ import {
 import { toast } from "sonner";
 import type { ChatMessage, Poll } from "../services/chatApi";
 import { DEFAULT_USER_AVATAR } from "@/lib/constants";
-import { menuCard, menuItem, menuItemDanger, menuSeparator } from "./chatMenuLook";
 
 
 interface ChatBubbleProps {
@@ -243,7 +242,7 @@ export function ChatBubble({
       >
         {isSelectionMode && (
           <div className="shrink-0 w-12 flex justify-center pt-2 self-stretch">
-            <div className={`w-5 h-5 rounded border flex items-center justify-center transition-colors ${isSelected ? "bg-primary border-primary text-primary-foreground" : "border-border bg-background"}`}>
+            <div className={`w-5 h-5 rounded border flex items-center justify-center transition-colors ${isSelected ? "bg-emerald-500 border-emerald-500 text-white" : "border-border bg-background"}`}>
               {isSelected && <Check className="w-3.5 h-3.5" strokeWidth={3} />}
             </div>
           </div>
@@ -317,7 +316,7 @@ export function ChatBubble({
                           : message.status === 'rejected'
                             ? "bg-red-50 dark:bg-red-950/50 text-foreground border border-red-200 dark:border-red-800 opacity-70"
                             : isMine
-                              ? "bg-zinc-100 dark:bg-[#262626] text-[#111b21] dark:text-white/90 font-medium rounded-tr-sm shadow-sm border border-zinc-200 dark:border-white/10"
+                              ? "bg-emerald-50 dark:bg-[#262626] text-[#111b21] dark:text-white/90 font-medium rounded-tr-sm shadow-sm border border-emerald-100 dark:border-white/10"
                               : "bg-white dark:bg-[#202c33] text-foreground dark:text-[#e9edef] border border-black/5 dark:border-transparent rounded-tl-sm shadow-sm"
                       }
             `}
@@ -338,7 +337,7 @@ export function ChatBubble({
                         </div>
                         {isAdmin && onApprove && onReject && (
                           <div className="flex gap-2 mt-2">
-                            <button onClick={() => onApprove(message.id)} className="flex-1 bg-primary text-primary-foreground py-1 rounded font-medium hover:bg-primary/90">Approve</button>
+                            <button onClick={() => onApprove(message.id)} className="flex-1 bg-emerald-500 text-white py-1 rounded font-medium hover:bg-emerald-600">Approve</button>
                             <button onClick={() => onReject(message.id)} className="flex-1 bg-red-500 text-white py-1 rounded font-medium hover:bg-red-600">Reject</button>
                           </div>
                         )}
@@ -360,7 +359,7 @@ export function ChatBubble({
                     {message.reply_to && !(message.reply_to as any).isForwarded && !message.is_deleted && (() => {
                       const isReplyMe = message.reply_to.sender_id === currentUserId;
                       const senderName = isReplyMe ? "You" : message.reply_to.sender_name;
-                      const nameColor = isReplyMe ? "text-foreground" : "text-blue-500 dark:text-blue-400";
+                      const nameColor = isReplyMe ? "text-emerald-600 dark:text-emerald-500" : "text-blue-500 dark:text-blue-400";
 
                       let mediaIcon = null;
                       let mediaText = "";
@@ -395,7 +394,7 @@ export function ChatBubble({
 
                       return (
                         <div className="relative bg-black/5 dark:bg-black/20 rounded-lg p-2 mb-1.5 overflow-hidden flex items-stretch gap-2 cursor-pointer hover:bg-black/10 dark:hover:bg-black/30 transition-colors">
-                          <div className="absolute left-0 top-0 bottom-0 w-[4px] bg-foreground/40"></div>
+                          <div className="absolute left-0 top-0 bottom-0 w-[4px] bg-emerald-500"></div>
 
                           <div className="flex-1 min-w-0 pl-2 flex flex-col justify-center">
                             <span className={`${nameColor} text-[13px] font-semibold leading-tight block mb-0.5 truncate`}>
@@ -534,7 +533,7 @@ export function ChatBubble({
 
                         {/* Text Message */}
                         {message.message && !poll && (
-                          <div className="relative text-[15px] leading-relaxed max-w-full overflow-hidden prose prose-sm dark:prose-invert break-words break-all [&_*:not(pre):not(code)]:!bg-transparent [&_*:not(a):not(pre):not(code)]:!text-current [&_a:not([data-mention])]:text-blue-500 [&_a:not([data-mention])]:underline [&_a:not([data-mention])]:hover:text-blue-600 [&_a[data-mention]]:!text-blue-600 [&_a[data-mention]]:dark:!text-blue-400 [&_a[data-mention]]:!no-underline [&_a[data-mention]]:font-semibold [&_a[data-mention]]:hover:underline [&_p]:mb-1 [&_p]:last:mb-0 [&_ul]:list-disc [&_ul]:ml-4 [&_ul]:my-1 [&_ol]:list-decimal [&_ol]:ml-4 [&_ol]:my-1 [&_li]:my-0 [&_strong]:font-bold [&_b]:font-bold [&_em]:italic [&_i]:italic [&_u]:underline [&_s]:line-through [&_h1]:text-lg [&_h1]:font-bold [&_h2]:text-base [&_h2]:font-bold [&_h3]:text-[15px] [&_h3]:font-bold [&_h1]:mb-1 [&_h2]:mb-1 [&_h3]:mb-1 [&_pre]:bg-[#1e1e1e] [&_pre]:dark:bg-[#111111] [&_pre]:text-[#d4d4d4] [&_pre]:p-4 [&_pre]:rounded-xl [&_pre]:my-2 [&_pre]:border [&_pre]:border-black/20 [&_pre]:dark:border-white/10 [&_pre]:shadow-sm [&_code]:font-mono [&_code]:text-[13px] [&_pre_code]:bg-transparent [&_pre_code]:text-inherit [&_code:not(pre_code)]:bg-black/5 [&_code:not(pre_code)]:dark:bg-white/10 [&_code:not(pre_code)]:px-1.5 [&_code:not(pre_code)]:py-0.5 [&_code:not(pre_code)]:rounded-md [&_code:not(pre_code)]:text-foreground" style={{ overflowWrap: 'anywhere', wordBreak: 'break-word' }}>
+                          <div className="relative text-[15px] leading-relaxed max-w-full overflow-hidden prose prose-sm dark:prose-invert break-words break-all [&_*:not(pre):not(code)]:!bg-transparent [&_*:not(a):not(pre):not(code)]:!text-current [&_a:not([data-mention])]:text-blue-500 [&_a:not([data-mention])]:underline [&_a:not([data-mention])]:hover:text-blue-600 [&_a[data-mention]]:!text-emerald-600 [&_a[data-mention]]:dark:!text-emerald-500 [&_a[data-mention]]:!no-underline [&_a[data-mention]]:font-semibold [&_a[data-mention]]:hover:underline [&_p]:mb-1 [&_p]:last:mb-0 [&_ul]:list-disc [&_ul]:ml-4 [&_ul]:my-1 [&_ol]:list-decimal [&_ol]:ml-4 [&_ol]:my-1 [&_li]:my-0 [&_strong]:font-bold [&_b]:font-bold [&_em]:italic [&_i]:italic [&_u]:underline [&_s]:line-through [&_h1]:text-lg [&_h1]:font-bold [&_h2]:text-base [&_h2]:font-bold [&_h3]:text-[15px] [&_h3]:font-bold [&_h1]:mb-1 [&_h2]:mb-1 [&_h3]:mb-1 [&_pre]:bg-[#1e1e1e] [&_pre]:dark:bg-[#111111] [&_pre]:text-[#d4d4d4] [&_pre]:p-4 [&_pre]:rounded-xl [&_pre]:my-2 [&_pre]:border [&_pre]:border-black/20 [&_pre]:dark:border-white/10 [&_pre]:shadow-sm [&_code]:font-mono [&_code]:text-[13px] [&_pre_code]:bg-transparent [&_pre_code]:text-inherit [&_code:not(pre_code)]:bg-black/5 [&_code:not(pre_code)]:dark:bg-white/10 [&_code:not(pre_code)]:px-1.5 [&_code:not(pre_code)]:py-0.5 [&_code:not(pre_code)]:rounded-md [&_code:not(pre_code)]:text-emerald-700 [&_code:not(pre_code)]:dark:text-emerald-300" style={{ overflowWrap: 'anywhere', wordBreak: 'break-word' }}>
                             <div style={!isTextExpanded && isLongMessage ? {
                               display: '-webkit-box',
                               WebkitLineClamp: 15,
@@ -582,7 +581,7 @@ export function ChatBubble({
 
                         {/* Link Preview */}
                         {message.link_preview && (
-                          <div className={`mt-2 mb-1 rounded-xl overflow-hidden border transition-colors ${isMine ? "bg-black/5 border-black/10 dark:bg-white/5 dark:border-white/10" : "bg-muted/40 border-border"} max-w-[320px] sm:max-w-[400px]`}>
+                          <div className={`mt-2 mb-1 rounded-xl overflow-hidden border transition-colors ${isMine ? "bg-emerald-700/20 border-emerald-600/30 dark:bg-emerald-900/30 dark:border-emerald-700/30" : "bg-muted/40 border-border"} max-w-[320px] sm:max-w-[400px]`}>
                             <a href={message.link_preview.url} target="_blank" rel="noopener noreferrer" className="flex flex-col sm:flex-row hover:opacity-90 transition-opacity">
                               {message.link_preview.image && (
                                 <div className="sm:w-[120px] shrink-0 bg-black/10 dark:bg-white/5 flex items-center justify-center overflow-hidden border-b sm:border-b-0 sm:border-r border-black/5 dark:border-white/5">
@@ -598,7 +597,7 @@ export function ChatBubble({
                                     {message.link_preview.description}
                                   </span>
                                 )}
-                                <span className={`text-[11px] font-bold uppercase tracking-wide ${isMine ? "text-[#111b21]/60 dark:text-white/60" : "text-muted-foreground"}`}>
+                                <span className={`text-[11px] font-bold uppercase tracking-wide ${isMine ? "text-emerald-800 dark:text-emerald-400" : "text-emerald-600 dark:text-emerald-500"}`}>
                                   {message.link_preview.domain}
                                 </span>
                               </div>
@@ -765,15 +764,15 @@ export function ChatBubble({
                 </div>
               </ContextMenuTrigger>
               {!message.is_deleted && (
-                <ContextMenuContent className={`w-56 ${menuCard}`} align={isMine ? "end" : "start"}>
+                <ContextMenuContent className="w-56" align={isMine ? "end" : "start"}>
                   {!message.isSending && canReply && (
-                    <ContextMenuItem onClick={() => onReply(message)} className={menuItem}>
-                      <CornerUpLeft className="w-4 h-4" /> Reply
+                    <ContextMenuItem onClick={() => onReply(message)} className="cursor-pointer py-2">
+                      <CornerUpLeft className="w-4 h-4 mr-2" /> Reply
                     </ContextMenuItem>
                   )}
                   {!message.isSending && isMine && !message.is_deleted && (
-                    <ContextMenuItem onClick={() => setInfoModalOpen(true)} className={menuItem}>
-                      <Info className="w-4 h-4" /> Message Info
+                    <ContextMenuItem onClick={() => setInfoModalOpen(true)} className="cursor-pointer py-2">
+                      <Info className="w-4 h-4 mr-2" /> Message Info
                     </ContextMenuItem>
                   )}
                   {!message.isSending && message.message && (
@@ -806,39 +805,39 @@ export function ChatBubble({
                         navigator.clipboard.writeText(tempDiv.innerText || tempDiv.textContent || message.message);
                         toast.success("Copied to clipboard");
                       }
-                    }} className={menuItem}>
-                      <Copy className="w-4 h-4" /> Copy
+                    }} className="cursor-pointer py-2">
+                      <Copy className="w-4 h-4 mr-2" /> Copy
                     </ContextMenuItem>
                   )}
                   {!message.isSending && (
-                    <ContextMenuItem onClick={() => onForward?.(message.id)} className={menuItem}>
-                      <Forward className="w-4 h-4" /> Forward
+                    <ContextMenuItem onClick={() => onForward?.(message.id)} className="cursor-pointer py-2">
+                      <Forward className="w-4 h-4 mr-2" /> Forward
                     </ContextMenuItem>
                   )}
                   {!message.isSending && onPin && (
-                    <ContextMenuItem onClick={() => onPin(message.id, !message.is_pinned)} className={menuItem}>
-                      <Pin className="w-4 h-4" /> {message.is_pinned ? "Unpin" : "Pin"}
+                    <ContextMenuItem onClick={() => onPin(message.id, !message.is_pinned)} className="cursor-pointer py-2">
+                      <Pin className="w-4 h-4 mr-2" /> {message.is_pinned ? "Unpin" : "Pin"}
                     </ContextMenuItem>
                   )}
                   {!message.isSending && onStar && message.message && (
-                    <ContextMenuItem onClick={() => onStar(message.id)} className={menuItem}>
-                      <Star className="w-4 h-4" /> Star
+                    <ContextMenuItem onClick={() => onStar(message.id)} className="cursor-pointer py-2 text-amber-500 hover:text-amber-600 focus:text-amber-600 focus:bg-amber-50 dark:focus:bg-amber-950">
+                      <Star className="w-4 h-4 mr-2" /> Star
                     </ContextMenuItem>
                   )}
                   {!message.isSending && isMine && (!message.attachments || message.attachments.length === 0) && !message.isSeen && (
-                    <ContextMenuItem onClick={() => setIsEditing(true)} className={menuItem}>
-                      <Edit2 className="w-4 h-4" /> Edit
+                    <ContextMenuItem onClick={() => setIsEditing(true)} className="cursor-pointer py-2">
+                      <Edit2 className="w-4 h-4 mr-2" /> Edit
                     </ContextMenuItem>
                   )}
-                  {!message.isSending && <ContextMenuSeparator className={menuSeparator} />}
+                  {!message.isSending && <ContextMenuSeparator />}
                   {!message.isSending && (
-                    <ContextMenuItem onClick={() => onToggleSelect?.()} className={menuItem}>
-                      <CheckSquare className="w-4 h-4" /> Select
+                    <ContextMenuItem onClick={() => onToggleSelect?.()} className="cursor-pointer py-2">
+                      <CheckSquare className="w-4 h-4 mr-2" /> Select
                     </ContextMenuItem>
                   )}
                   {isMine && (
-                    <ContextMenuItem onClick={() => onDelete(message.id)} className={menuItemDanger}>
-                      <Trash2 className="w-4 h-4" /> {message.isSending ? "Cancel Upload" : "Delete"}
+                    <ContextMenuItem onClick={() => onDelete(message.id)} className="cursor-pointer py-2 text-red-500 hover:text-red-600 focus:text-red-600 focus:bg-red-50 dark:focus:bg-red-950">
+                      <Trash2 className="w-4 h-4 mr-2" /> {message.isSending ? "Cancel Upload" : "Delete"}
                     </ContextMenuItem>
                   )}
                 </ContextMenuContent>
@@ -897,48 +896,48 @@ export function ChatBubble({
                       <MoreHorizontal className="w-4 h-4" />
                     </button>
                   </DropdownMenuTrigger>
-                  <DropdownMenuContent sideOffset={6} className={`w-56 ${menuCard}`} align={isMine ? "end" : "start"}>
+                  <DropdownMenuContent className="w-56" align={isMine ? "end" : "start"}>
                     {!message.isSending && canReply && (
-                      <DropdownMenuItem onClick={() => onReply(message)} className={menuItem}>
-                        <CornerUpLeft className="w-4 h-4" /> Reply
+                      <DropdownMenuItem onClick={() => onReply(message)} className="cursor-pointer py-2">
+                        <CornerUpLeft className="w-4 h-4 mr-2" /> Reply
                       </DropdownMenuItem>
                     )}
                     {!message.isSending && message.message && (
                       <DropdownMenuItem onClick={() => {
                         navigator.clipboard.writeText(message.message);
                         toast.success("Copied to clipboard");
-                      }} className={menuItem}>
-                        <Copy className="w-4 h-4" /> Copy
+                      }} className="cursor-pointer py-2">
+                        <Copy className="w-4 h-4 mr-2" /> Copy
                       </DropdownMenuItem>
                     )}
                     {!message.isSending && (
-                      <DropdownMenuItem className={menuItem} disabled>
-                        <Forward className="w-4 h-4" /> Forward
+                      <DropdownMenuItem className="cursor-pointer py-2" disabled>
+                        <Forward className="w-4 h-4 mr-2" /> Forward
                       </DropdownMenuItem>
                     )}
                     {!message.isSending && onPin && (
-                      <DropdownMenuItem onClick={() => onPin(message.id, !message.is_pinned)} className={menuItem}>
-                        <Pin className="w-4 h-4" /> {message.is_pinned ? "Unpin" : "Pin"}
+                      <DropdownMenuItem onClick={() => onPin(message.id, !message.is_pinned)} className="cursor-pointer py-2">
+                        <Pin className="w-4 h-4 mr-2" /> {message.is_pinned ? "Unpin" : "Pin"}
                       </DropdownMenuItem>
                     )}
                     {!message.isSending && onStar && message.message && (
-                      <DropdownMenuItem onClick={() => onStar(message.id)} className={menuItem}>
-                        <Star className="w-4 h-4" /> Star
+                      <DropdownMenuItem onClick={() => onStar(message.id)} className="cursor-pointer py-2 text-amber-500 hover:text-amber-600 focus:text-amber-600 focus:bg-amber-50 dark:focus:bg-amber-950">
+                        <Star className="w-4 h-4 mr-2" /> Star
                       </DropdownMenuItem>
                     )}
                     {!message.isSending && isMine && (!message.attachments || message.attachments.length === 0) && !message.isSeen && (
-                      <DropdownMenuItem onClick={() => setIsEditing(true)} className={menuItem}>
-                        <Edit2 className="w-4 h-4" /> Edit
+                      <DropdownMenuItem onClick={() => setIsEditing(true)} className="cursor-pointer py-2">
+                        <Edit2 className="w-4 h-4 mr-2" /> Edit
                       </DropdownMenuItem>
                     )}
                     {!message.isSending && (
-                      <DropdownMenuItem className={menuItem} disabled>
-                        <CheckSquare className="w-4 h-4" /> Select
+                      <DropdownMenuItem className="cursor-pointer py-2" disabled>
+                        <CheckSquare className="w-4 h-4 mr-2" /> Select
                       </DropdownMenuItem>
                     )}
                     {isMine && (
-                      <DropdownMenuItem onClick={() => onDelete(message.id)} className={menuItemDanger}>
-                        <Trash2 className="w-4 h-4" /> {message.isSending ? "Cancel Upload" : "Delete"}
+                      <DropdownMenuItem onClick={() => onDelete(message.id)} className="cursor-pointer py-2 text-red-500 hover:text-red-600 focus:text-red-600 focus:bg-red-50 dark:focus:bg-red-950">
+                        <Trash2 className="w-4 h-4 mr-2" /> {message.isSending ? "Cancel Upload" : "Delete"}
                       </DropdownMenuItem>
                     )}
                   </DropdownMenuContent>

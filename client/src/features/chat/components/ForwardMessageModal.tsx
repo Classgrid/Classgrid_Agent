@@ -150,7 +150,7 @@ export function ForwardMessageModal({
                 onClick={() => handleToggleSelect(thread.id)}
               >
                 <div className="shrink-0 flex items-center justify-center">
-                  <div className={`w-5 h-5 rounded-md border flex items-center justify-center transition-colors ${isSelected ? "bg-primary border-primary text-primary-foreground" : "border-border bg-transparent"}`}>
+                  <div className={`w-5 h-5 rounded-md border flex items-center justify-center transition-colors ${isSelected ? "bg-emerald-500 border-emerald-500 text-white" : "border-border bg-transparent"}`}>
                     {isSelected && <Check className="w-3.5 h-3.5" strokeWidth={3} />}
                   </div>
                 </div>
@@ -196,11 +196,11 @@ export function ForwardMessageModal({
             <Button
               onClick={handleForward}
               disabled={selectedTargetIds.size === 0 || isForwarding}
-              className="bg-primary hover:bg-primary/90 text-primary-foreground border-transparent"
+              className="bg-emerald-500 hover:bg-emerald-600 text-white border-transparent"
             >
               {isForwarding ? (
                 <>
-                  <Spinner className="mr-2 w-4 h-4 text-primary-foreground" />
+                  <Spinner className="mr-2 w-4 h-4 text-white" />
                   Forwarding...
                 </>
               ) : (

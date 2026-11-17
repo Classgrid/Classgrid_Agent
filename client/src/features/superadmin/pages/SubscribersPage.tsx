@@ -66,55 +66,58 @@
  */
 
 import { useMemo, useState } from "react";
-import { UserCheck, UserMinus, Users } from "lucide-react";
+import {
+  Mail,
+  TrendingDown,
+  TrendingUp,
+  UserCheck,
+  UserMinus,
+  Users,
+  Search,
+} from "lucide-react";
 import { toast } from "sonner";
 import { BarChart } from "@/components/marketing_ui/BarChart";
 
 import { Badge } from "@/components/marketing_ui/badge";
 import { Button } from "@/components/marketing_ui/button";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/marketing_ui/card";
-import { DataTable } from "@/components/marketing_ui/data-table";
+import { Input } from "@/components/marketing_ui/input";
+import { RecentActivityTable, DataTable } from "@/components/marketing_ui/data-table";
 import { StatCard } from "@/components/marketing_ui/StatCard";
+import { Switch } from "@/components/marketing_ui/switch";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/marketing_ui/tooltip";
 import { ResponsiveSelect } from "@/components/marketing_ui/responsive-select";
 import { Skeleton } from "@/components/marketing_ui/skeleton";
-import { DangerConfirmDialog } from "@/components/marketing_ui/danger-confirm-dialog";
 import { useNavigate } from "react-router-dom";
 import { SuperadminFilterBar } from "../components/SuperadminFilterBar";
 
 import { formatDate } from "@/utils/dateUtils";
 
 import {
+  usePauseSubscriber,
   useRemoveSubscriber,
+  useResumeSubscriber,
   useSubscribers,
+  useUpdateSubscriberPreferences,
 } from "../queries/useSubscribers";
 import type { BlogSubscriber } from "../services/superAdminApi";
 
-// Subscribers: the people on the classgrid.in email list (blog posts, changelog, legal notices). Data: GET
-// /api/super-admin/subscribers (the blog_subscribers table). A subscriber is "Active" while at least one of the
-// three emails is on; with all three off they are "Paused".
 
 const STATUS_OPTIONS = [
-  { label: "Status: All", value: "all" },
+  { label: "All Status", value: "all" },
   { label: "Active", value: "active" },
   { label: "Paused", value: "inactive" },
 ];
 
 const PREFERENCE_OPTIONS = [
-  { label: "Emails: All", value: "all" },
-  { label: "Gets blog", value: "blog" },
-  { label: "Gets changelog", value: "changelog" },
-  { label: "Gets legal", value: "legal" },
-  { label: "Blog off", value: "blog-off" },
-  { label: "Changelog off", value: "changelog-off" },
-  { label: "Legal off", value: "legal-off" },
+  { label: "Preference: All", value: "all" },
+  { label: "Receives Blog", value: "blog" },
+  { label: "Receives Changelog", value: "changelog" },
+  { label: "Receives Legal", value: "legal" },
+  { label: "Turned OFF Blog", value: "blog-off" },
+  { label: "Turned OFF Changelog", value: "changelog-off" },
+  { label: "Turned OFF Legal", value: "legal-off" },
 ];
-
-const SELECT_CLASS =
-  "flex h-9 w-full items-center rounded-md border border-border bg-card px-3 py-1 text-sm text-foreground shadow-sm transition-colors hover:bg-muted";
-
-// Skeleton bar heights for the chart while it loads (fixed, so the skeleton does not jump on every render)
-const SKELETON_BARS = [40, 65, 30, 80, 55, 45, 70, 35, 60, 50, 75, 40, 85, 55, 45];
 
 function formatSubscriberDate(value?: string | null) {
   return value ? formatDate(value, "dd MMM, yyyy") : "—";
@@ -124,24 +127,10 @@ function formatFullSubscriberDate(value?: string | null) {
     return value ? formatDate(value, "dd MMM, yyyy hh:mm a") : "—";
 }
 
-function EmailChip({ label, on }: { label: string; on: boolean }) {
-  return (
-    <span
-      title={`${label} emails ${on ? "on" : "off"}`}
-      className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-medium ${
-        on ? "border-border bg-muted text-foreground" : "border-dashed border-border text-muted-foreground line-through"
-      }`}
-    >
-      {label}
-    </span>
-  );
-}
-
 export function SubscribersPage() {
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
   const [preferenceFilter, setPreferenceFilter] = useState("all");
-  const [removeEmail, setRemoveEmail] = useState<string | null>(null);
   const navigate = useNavigate();
 
   const {
@@ -150,6 +139,7 @@ export function SubscribersPage() {
     isError,
     error,
     refetch,
+    isFetching,
   } = useSubscribers(
     {
       q: search || undefined,
@@ -159,10 +149,24 @@ export function SubscribersPage() {
     true
   );
 
+  const pauseSubscriber = usePauseSubscriber();
+  const resumeSubscriber = useResumeSubscriber();
   const removeSubscriber = useRemoveSubscriber();
+  const updatePreferences = useUpdateSubscriberPreferences();
+
+  const isMutating =
+    pauseSubscriber.isPending ||
+    resumeSubscriber.isPending ||
+    updatePreferences.isPending;
 
   const subscribers = data?.data ?? [];
+  const inactiveSubscribers = data?.inactiveSubscribers ?? [];
+  const recentSubscribers = data?.recentSubscribers ?? [];
   const trend = data?.trend ?? [];
+  const activity = data?.activity ?? {
+    lastSubscribedAt: null,
+    lastUnsubscribedAt: null,
+  };
   const stats = data?.stats ?? {
     total: 0,
     active: 0,
@@ -174,12 +178,39 @@ export function SubscribersPage() {
     deliveryReady: 0,
   };
 
-  const confirmRemove = () => {
-    const email = removeEmail;
-    if (!email) return;
+  const subscribeSparkline = trend.map((point) => point.subscribed);
+  const unsubscribeSparkline = trend.map((point) => point.unsubscribed);
+
+  const handleToggleActive = (subscriber: BlogSubscriber, isActive: boolean) => {
+    const action = isActive ? resumeSubscriber : pauseSubscriber;
+    action.mutate(subscriber.email, {
+        onSuccess: () => toast.success(`Subscriber ${isActive ? 'resumed' : 'paused'}.`),
+        onError: (err: any) =>
+          toast.error(err?.message || `Failed to ${isActive ? 'resume' : 'pause'} subscriber.`),
+    });
+  }
+
+  const handlePause = (email: string) => {
+    pauseSubscriber.mutate(email, {
+      onSuccess: () => toast.success("Subscriber paused."),
+      onError: (err: any) =>
+        toast.error(err?.message || "Failed to pause subscriber."),
+    });
+  };
+
+  const handleResume = (email: string) => {
+    resumeSubscriber.mutate(email, {
+      onSuccess: () => toast.success("Subscriber resumed."),
+      onError: (err: any) =>
+        toast.error(err?.message || "Failed to resume subscriber."),
+    });
+  };
+
+  const handleRemove = (email: string) => {
     removeSubscriber.mutate(email, {
-      onSuccess: () => { toast.success(`${email} was removed from the list.`); setRemoveEmail(null); },
-      onError: (err: any) => toast.error(err?.response?.data?.message || err?.message || `Could not remove ${email}.`),
+      onSuccess: () => toast.success(`${email} removed successfully.`),
+      onError: (err: any) =>
+        toast.error(err?.message || `Failed to remove ${email}.`),
     });
   };
 
@@ -188,38 +219,41 @@ export function SubscribersPage() {
       {
         key: "email",
         header: "Email",
-        width: "w-[34%]",
+        width: "w-[250px]",
         render: (_val: any, row: BlogSubscriber) => (
-          <div className="flex min-w-0 flex-col gap-0.5">
-            <span className="truncate text-sm font-medium text-foreground" title={row.email}>{row.email}</span>
-            {row.name && <span className="truncate text-xs text-muted-foreground">{row.name}</span>}
+          <div 
+            className="flex flex-col gap-1 cursor-pointer hover:opacity-80 transition-opacity"
+            onClick={() => navigate(`/superadmin/subscribers/${encodeURIComponent(row.email)}`)}
+          >
+            <span className="font-mono text-sm text-emerald-600 dark:text-emerald-500 hover:underline">{row.email}</span>
+            <span className="text-xs text-muted-foreground">Click to view details</span>
           </div>
         )
       },
       {
         key: "is_active",
         header: "Status",
-        width: "w-[13%]",
+        width: "w-[120px]",
         render: (_val: any, row: BlogSubscriber) => (
             row.is_active ? (
-                <Badge variant="info" dot>Active</Badge>
+                <Badge variant="success" dot>Active</Badge>
             ) : (
-                <Badge variant="warning" dot>Paused</Badge>
+                <Badge variant="warning">Paused</Badge>
             )
         )
       },
       {
         key: "created_at",
         header: "Subscribed",
-        width: "w-[16%]",
+        width: "w-[160px]",
         render: (_val: any, row: BlogSubscriber) => (
-            <TooltipProvider delay={0}>
-                <Tooltip>
+            <TooltipProvider>
+                <Tooltip delay={0}>
                     <TooltipTrigger className="text-sm text-muted-foreground">
                         {formatSubscriberDate(row.created_at)}
                     </TooltipTrigger>
                     <TooltipContent>
-                        Subscribed {formatFullSubscriberDate(row.created_at)}
+                        Joined: {formatFullSubscriberDate(row.created_at)}
                     </TooltipContent>
                 </Tooltip>
             </TooltipProvider>
@@ -227,47 +261,58 @@ export function SubscribersPage() {
       },
       {
         key: "updated_at",
-        header: "Emails",
-        width: "w-[25%]",
+        header: "Preferences / Unsubscribed",
+        width: "w-[200px]",
         render: (_val: any, row: BlogSubscriber) => {
              if (!row.is_active) {
                  return (
-                    <TooltipProvider delay={0}>
-                        <Tooltip>
+                    <TooltipProvider>
+                        <Tooltip delay={0}>
                             <TooltipTrigger className="text-sm text-muted-foreground">
-                                All off since {formatSubscriberDate(row.updated_at)}
+                                {formatSubscriberDate(row.updated_at)}
                             </TooltipTrigger>
                             <TooltipContent>
-                                Paused {formatFullSubscriberDate(row.updated_at)}
+                                Unsubscribed: {formatFullSubscriberDate(row.updated_at)}
                             </TooltipContent>
                         </Tooltip>
                     </TooltipProvider>
                  );
              }
+
+             const blogStyle = row.receives_blog !== false 
+                ? "text-emerald-600 bg-emerald-50 border-emerald-200 dark:bg-emerald-500/10 dark:border-emerald-500/20" 
+                : "text-red-600 bg-red-50 border-red-200 dark:bg-red-500/10 dark:border-red-500/20 opacity-60";
+             const changelogStyle = row.receives_changelog !== false 
+                ? "text-emerald-600 bg-emerald-50 border-emerald-200 dark:bg-emerald-500/10 dark:border-emerald-500/20" 
+                : "text-red-600 bg-red-50 border-red-200 dark:bg-red-500/10 dark:border-red-500/20 opacity-60";
+             const legalStyle = row.receives_legal !== false 
+                ? "text-emerald-600 bg-emerald-50 border-emerald-200 dark:bg-emerald-500/10 dark:border-emerald-500/20" 
+                : "text-red-600 bg-red-50 border-red-200 dark:bg-red-500/10 dark:border-red-500/20 opacity-60";
+
              return (
-                 <div className="flex flex-wrap items-center gap-1.5">
-                     <EmailChip label="Blog" on={row.receives_blog !== false} />
-                     <EmailChip label="Changelog" on={row.receives_changelog !== false} />
-                     <EmailChip label="Legal" on={row.receives_legal !== false} />
+                 <div className="flex items-center gap-1.5" onClick={(e) => e.stopPropagation()}>
+                     <Badge variant="outline" className={`text-[9px] uppercase font-bold tracking-widest px-1.5 py-0 ${blogStyle}`}>Blog</Badge>
+                     <Badge variant="outline" className={`text-[9px] uppercase font-bold tracking-widest px-1.5 py-0 ${changelogStyle}`}>Changelog</Badge>
+                     <Badge variant="outline" className={`text-[9px] uppercase font-bold tracking-widest px-1.5 py-0 ${legalStyle}`}>Legal</Badge>
                  </div>
              );
         }
       },
       {
         key: "actions",
-        header: "",
-        width: "w-[12%]",
+        header: "Actions",
+        width: "w-[100px]",
         render: (_val: any, row: BlogSubscriber) => (
-             <div className="flex items-center justify-end">
+             <div className="flex items-center">
                  <Button
                     size="sm"
                     variant="ghost"
-                    className="shrink-0 text-red-600 hover:bg-red-500/10 hover:text-red-600 dark:text-red-400"
+                    className="text-destructive hover:bg-destructive/10 shrink-0"
                     onClick={(e) => {
                         e.stopPropagation();
-                        setRemoveEmail(row.email);
+                        handleRemove(row.email);
                     }}
-                    disabled={removeSubscriber.isPending}
+                    disabled={isMutating}
                  >
                     Remove
                  </Button>
@@ -275,100 +320,158 @@ export function SubscribersPage() {
         )
       }
     ],
-    [removeSubscriber.isPending]
+    [isMutating]
   );
 
-  const hasRows = !isLoading && subscribers.length > 0;
+  const inactiveColumns = useMemo<any[]>(
+    () => [
+      {
+        key: "email",
+        header: "Email",
+        render: (_val: any, row: BlogSubscriber) => (
+            <div className="flex flex-col gap-1">
+                <span className="font-medium text-sm text-foreground">{row.email}</span>
+                <span className="text-xs text-muted-foreground">Currently not receiving updates</span>
+            </div>
+        )
+      },
+      {
+        key: "updated_at",
+        header: "Paused On",
+        width: "w-[150px]",
+        render: (_val: any, row: BlogSubscriber) => (
+            <span className="text-sm text-muted-foreground">{formatSubscriberDate(row.updated_at)}</span>
+        )
+      },
+      {
+        key: "actions",
+        header: "Actions",
+        width: "w-[180px]",
+        render: (_val: any, row: BlogSubscriber) => (
+            <div className="flex items-center gap-2">
+                <Button
+                    size="sm"
+                    variant="outline"
+                    disabled={isMutating}
+                    onClick={() => handleResume(row.email)}
+                >
+                Resume
+                </Button>
+                <Button
+                    size="sm"
+                    variant="ghost"
+                    className="text-red-500 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-500/10"
+                    disabled={isMutating}
+                    onClick={() => handleRemove(row.email)}
+                >
+                Remove
+                </Button>
+            </div>
+        )
+      }
+    ],
+    [isMutating]
+  );
+
+
 
   return (
     <div className="flex flex-col gap-6 w-full max-w-7xl mx-auto p-4 sm:p-6 lg:p-8 pb-12">
-      {/* Header */}
-      <div className="flex flex-col gap-1">
-        <h1 className="text-2xl font-bold tracking-tight text-foreground">Subscribers</h1>
-        <p className="text-sm text-muted-foreground">
-          The classgrid.in email list: who gets the blog, changelog and legal notice emails.
-        </p>
+        {/* Header */}
+      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+        <div className="flex flex-col gap-1">
+          <h1 className="text-2xl font-bold tracking-tight text-foreground">Subscribers</h1>
+          <p className="text-sm text-muted-foreground">
+            Track growth, unsubscribes, and audience health for blog, changelog and legal notice emails.
+          </p>
+        </div>
+        <div className="flex items-center gap-2">
+          
+        </div>
       </div>
 
-      {isError && (
-        <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-red-500/30 bg-red-500/5 p-4 text-sm">
-          <span className="text-foreground">{(error as any)?.response?.data?.message || "Could not load the subscribers."}</span>
-          <Button variant="outline" size="sm" onClick={() => refetch()}>Retry</Button>
-        </div>
-      )}
+        {/* Stats Row 1 */}
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+        <StatCard
+          title="Total Subscribers"
+          value={isLoading ? <Skeleton className="h-9 w-24" /> : stats.total}
+          icon={<Users size={16} />}
+        />
+        <StatCard
+          title="Delivery Ready (Active)"
+          value={isLoading ? <Skeleton className="h-9 w-24" /> : stats.deliveryReady}
+          icon={<UserCheck size={16} />}
+        />
+        <StatCard
+          title="Paused / Unsubscribed"
+          value={isLoading ? <Skeleton className="h-9 w-24" /> : stats.inactive}
+          icon={<UserMinus size={16} />}
+        />
+      </div>
 
-      {/* Stats */}
-      {isLoading ? (
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-          {Array.from({ length: 3 }).map((_, i) => <Skeleton key={i} className="h-[104px] rounded-xl" />)}
-        </div>
-      ) : (
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-          <StatCard title="Subscribers" value={stats.total} icon={<Users size={16} />} />
-          <StatCard title="Active" value={stats.active} icon={<UserCheck size={16} />} trend="Get at least one of the emails" />
-          <StatCard title="Paused" value={stats.inactive} icon={<UserMinus size={16} />} trend="All three emails off" />
-        </div>
-      )}
 
-      {/* Trend */}
-      <Card>
-        <CardHeader>
-          <CardTitle>Subscribes and unsubscribes</CardTitle>
-          <p className="text-sm text-muted-foreground">Per day, last 15 days. Unsubscribed means all three emails were turned off that day.</p>
-        </CardHeader>
-        <CardContent>
-          {isLoading ? (
-            <div className="mt-4 flex h-[300px] items-end gap-2">
-              {SKELETON_BARS.map((h, i) => (
-                <div key={i} className="flex h-full flex-1 flex-col justify-end">
-                  <Skeleton className="w-full rounded-sm" style={{ height: `${h}%` }} />
+
+        {/* Trend & Health */}
+        <Card>
+            <CardHeader>
+                <CardTitle>Subscriber Movement</CardTitle>
+                <p className="text-sm text-muted-foreground">Daily new subscribes vs unsubscribes over the last 15 days.</p>
+            </CardHeader>
+            <CardContent>
+                {isLoading ? (
+                     <div className="h-[300px] mt-4 flex items-end gap-2">
+                         {/* Fake bars for a bar chart skeleton */}
+                         {Array.from({ length: 15 }).map((_, i) => (
+                             <div key={i} className="flex-1 flex flex-col justify-end gap-1 h-full">
+                                 <Skeleton className="w-full rounded-sm" style={{ height: `${Math.max(20, Math.random() * 100)}%` }} />
+                             </div>
+                         ))}
+                     </div>
+                ) : (
+                <div className="overflow-x-auto">
+                    <div className="min-w-[600px]">
+                        <BarChart
+                            className="h-[300px] mt-4"
+                            data={trend}
+                            index="label"
+                            categories={["subscribed", "unsubscribed"]}
+                            colors={["blue", "emerald"]}
+                            valueFormatter={(number: number) =>
+                              Intl.NumberFormat("us").format(number).toString()
+                            }
+                            yAxisWidth={40}
+                            showLegend={true}
+                            xAxisLabel="Last 15 Days"
+                        />
+                    </div>
                 </div>
-              ))}
-            </div>
-          ) : (
-            // The chart keeps its width and scrolls inside the card on a phone
-            <div className="overflow-x-auto">
-              <div className="min-w-[600px]">
-                <BarChart
-                  className="mt-4 h-[300px]"
-                  data={trend}
-                  index="label"
-                  categories={["subscribed", "unsubscribed"]}
-                  colors={["blue", "orange"]}
-                  valueFormatter={(number: number) => Intl.NumberFormat("en-IN").format(number).toString()}
-                  yAxisWidth={40}
-                  showLegend={true}
-                  allowDecimals={false}
-                />
-              </div>
-            </div>
-          )}
-        </CardContent>
-      </Card>
+                )}
+            </CardContent>
+        </Card>
 
-      <div className="flex flex-col gap-4">
+      <div className="mt-6 flex flex-col gap-4">
         {/* ═══ FILTER BAR ═══ */}
         <SuperadminFilterBar
           searchQuery={search}
           onSearchChange={setSearch}
-          searchPlaceholder="Search email"
+          searchPlaceholder="Search subscriber email..."
         >
-          <div className="w-[calc(50%-4px)] sm:w-[170px]">
+          <div className="w-[180px]">
             <ResponsiveSelect
               value={preferenceFilter}
               onChange={(e) => setPreferenceFilter(e.target.value)}
-              className={SELECT_CLASS}
+              className="flex h-9 w-full items-center rounded-md border border-border bg-transparent px-3 py-1 shadow-sm hover:bg-accent/50 transition-colors text-sm"
             >
               {PREFERENCE_OPTIONS.map(opt => (
                 <option key={opt.value} value={opt.value}>{opt.label}</option>
               ))}
             </ResponsiveSelect>
           </div>
-          <div className="w-[calc(50%-4px)] sm:w-[150px]">
+          <div className="w-[150px]">
             <ResponsiveSelect
               value={statusFilter}
               onChange={(e) => setStatusFilter(e.target.value)}
-              className={SELECT_CLASS}
+              className="flex h-9 w-full items-center rounded-md border border-border bg-transparent px-3 py-1 shadow-sm hover:bg-accent/50 transition-colors text-sm"
             >
               {STATUS_OPTIONS.map(opt => (
                 <option key={opt.value} value={opt.value}>{opt.label}</option>
@@ -376,38 +479,22 @@ export function SubscribersPage() {
             </ResponsiveSelect>
           </div>
         </SuperadminFilterBar>
+        
+        <div className="flex justify-end">
+            <div className="text-sm text-muted-foreground whitespace-nowrap">
+                Showing {subscribers.length} rows
+            </div>
+        </div>
 
-        {!isLoading && (
-          <div className="-mt-6 text-right text-sm text-muted-foreground">
-            {subscribers.length} {subscribers.length === 1 ? "subscriber" : "subscribers"}
-          </div>
-        )}
-
-        {/* Table: scrolls inside its own box on a phone */}
-        <div className={hasRows ? "max-h-[600px] overflow-auto rounded-md border border-border" : ""}>
-          <DataTable
+        {/* Table Area */}
+        <DataTable
             columns={subscriberColumns}
             rows={subscribers}
             isLoading={isLoading}
-            onRowClick={(row: BlogSubscriber) => navigate(`/superadmin/subscribers/${encodeURIComponent(row.email)}`)}
-            emptyMessage="No subscribers match this search or these filters."
-            className={hasRows ? "min-w-[720px] rounded-none border-0" : ""}
-          />
-        </div>
+            emptyMessage="No subscribers found. Try a different search or status filter."
+            className="max-h-[600px] overflow-auto"
+        />
       </div>
-
-      <DangerConfirmDialog
-        open={!!removeEmail}
-        onOpenChange={(open) => { if (!open && !removeSubscriber.isPending) setRemoveEmail(null); }}
-        title="Remove subscriber"
-        description={<>Remove <strong className="break-all">{removeEmail}</strong> from the email list.</>}
-        warningMessage="They stop getting every email and their preferences are deleted. To get emails again they have to subscribe again on classgrid.in."
-        actionLabel="Remove"
-        cancelLabel="Cancel"
-        isLoading={removeSubscriber.isPending}
-        onConfirm={confirmRemove}
-        variant="danger"
-      />
     </div>
   );
 }

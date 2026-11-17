@@ -153,13 +153,6 @@ import {
   useAnalyticsFiles,
   useAnalyticsSummary,
 } from "../../queries/useStorage";
-import {
-  storageMenuCard,
-  storageMenuIcon,
-  storageMenuItem,
-  storageMenuLabel,
-  storageMenuSeparator,
-} from "./storageMenuStyles";
 
 const TYPE_OPTIONS = [
   { value: "all", label: "All types" },
@@ -247,14 +240,14 @@ interface StorageBarProps {
   value: number;
   label: string;
   className?: string;
-  tone?: "foreground" | "amber" | "neutral";
+  tone?: "emerald" | "amber" | "neutral";
 }
 
 function StorageBar({
   value,
   label,
   className,
-  tone = "foreground",
+  tone = "emerald",
 }: StorageBarProps) {
   const safeValue = Math.max(0, Math.min(100, Number(value) || 0));
 
@@ -272,9 +265,9 @@ function StorageBar({
           "h-full min-w-0 rounded-sm transition-[width] duration-500",
           "w-[var(--storage-progress)]",
           safeValue > 0 && "min-w-[2px]",
-          tone === "foreground" && "bg-foreground",
+          tone === "emerald" && "bg-emerald-500",
           tone === "amber" && "bg-amber-500",
-          tone === "neutral" && "bg-foreground/50",
+          tone === "neutral" && "bg-foreground/70",
         )}
         style={{ "--storage-progress": `${safeValue}%` } as React.CSSProperties}
       />
@@ -291,7 +284,7 @@ interface MetricCardProps {
 
 function MetricCard({ label, value, loading, icon }: MetricCardProps) {
   return (
-    <section className="rounded-xl border border-border bg-card px-4 py-4 shadow-sm">
+    <section className="border border-border bg-card px-4 py-4 shadow-sm">
       <div className="mb-4 flex items-center justify-between gap-3">
         <p className="text-sm text-muted-foreground">{label}</p>
         <span className="text-muted-foreground/70" aria-hidden="true">
@@ -316,7 +309,7 @@ interface PanelProps {
 
 function Panel({ title, children, className, action }: PanelProps) {
   return (
-    <section className={cn("overflow-hidden rounded-xl border border-border bg-card shadow-sm", className)}>
+    <section className={cn("border border-border bg-card shadow-sm", className)}>
       <header className="flex min-h-12 items-center justify-between gap-3 border-b border-border px-4 py-3">
         <h2 className="text-xs font-semibold uppercase tracking-[0.16em] text-muted-foreground">
           {title}
@@ -387,7 +380,7 @@ function AnalyticsFilters({
         <Input
           value={search}
           onChange={(event) => onSearchChange(event.target.value)}
-          placeholder="Search files"
+          placeholder="Search files..."
           className="h-10 pl-9"
         />
       </Label>
@@ -483,28 +476,28 @@ function FileActionMenu({
       >
         <MoreHorizontal className="size-4" />
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" sideOffset={6} className={`w-[230px] ${storageMenuCard}`}>
-        <DropdownMenuLabel className={storageMenuLabel} title={file.name}>{file.name}</DropdownMenuLabel>
-        <DropdownMenuItem className={storageMenuItem} onClick={() => window.open(file.cdnUrl, "_blank", "noopener,noreferrer")}>
-          <ExternalLink className={storageMenuIcon} />
-          Open in new tab
+      <DropdownMenuContent align="end" className="min-w-52">
+        <DropdownMenuLabel>{file.name}</DropdownMenuLabel>
+        <DropdownMenuItem onClick={() => window.open(file.cdnUrl, "_blank", "noopener,noreferrer")}>
+          <ExternalLink />
+          Open using CDN
         </DropdownMenuItem>
-        <DropdownMenuItem className={storageMenuItem} onClick={() => void onCopy(file.cdnUrl, "CDN URL")}>
-          <Copy className={storageMenuIcon} />
+        <DropdownMenuItem onClick={() => void onCopy(file.cdnUrl, "CDN URL")}>
+          <Copy />
           Copy CDN URL
         </DropdownMenuItem>
-        <DropdownMenuItem className={storageMenuItem} onClick={() => void onMetadata(file)}>
-          <Info className={storageMenuIcon} />
+        <DropdownMenuItem onClick={() => void onMetadata(file)}>
+          <Info />
           View metadata
         </DropdownMenuItem>
-        <DropdownMenuItem className={storageMenuItem} onClick={() => void onDownload(file)}>
-          <ArrowDownToLine className={storageMenuIcon} />
-          Download
+        <DropdownMenuItem onClick={() => void onDownload(file)}>
+          <ArrowDownToLine />
+          Download temporary URL
         </DropdownMenuItem>
-        <DropdownMenuSeparator className={storageMenuSeparator} />
-        <DropdownMenuItem className={storageMenuItem} onClick={() => onLocate(file)}>
-          <FolderSearch className={storageMenuIcon} />
-          Show in Files
+        <DropdownMenuSeparator />
+        <DropdownMenuItem onClick={() => onLocate(file)}>
+          <FolderSearch />
+          Locate in Files
         </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>
@@ -712,15 +705,15 @@ export function StorageAnalyticsDashboard() {
     zeroOnly,
   ].filter(Boolean).length;
 
-  const firstRank = filesData?.files?.[0]?.rank || 0;
-  const lastRank = filesData?.files?.at(-1)?.rank || 0;
+  const firstRank = filesData?.files[0]?.rank || 0;
+  const lastRank = filesData?.files.at(-1)?.rank || 0;
   const summaryUnavailable = summaryQuery.isError && !summary;
   const isEmptyBucket = Boolean(summary && summary.totalFiles === 0);
 
   if (summaryUnavailable) {
     const requestId = getRequestId(summaryQuery.error);
     return (
-      <div className="mx-auto flex w-full max-w-[1600px] flex-col gap-6 pb-20">
+      <main className="mx-auto flex w-full max-w-[1600px] flex-col gap-6 p-4 pb-20 sm:p-6 lg:p-8">
         <header>
           <h1 className="text-2xl font-semibold tracking-tight sm:text-3xl">Storage Analytics</h1>
           <p className="mt-1 text-sm text-muted-foreground">Understand current S3 usage.</p>
@@ -742,15 +735,15 @@ export function StorageAnalyticsDashboard() {
             </Button>
           </AlertDescription>
         </Alert>
-      </div>
+      </main>
     );
   }
 
   return (
-    <div className="mx-auto flex w-full max-w-[1600px] flex-col gap-6 pb-20">
+    <main className="mx-auto flex w-full max-w-[1600px] flex-col gap-6 p-4 pb-20 sm:p-6 lg:p-8">
       <header className="flex flex-col justify-between gap-4 border-b border-border pb-5 md:flex-row md:items-end">
         <div>
-          <div className="mb-2 flex items-center gap-2 text-xs font-medium uppercase tracking-[0.16em] text-muted-foreground">
+          <div className="mb-2 flex items-center gap-2 text-xs font-medium uppercase tracking-[0.16em] text-emerald-600 dark:text-emerald-400">
             <BarChart3 className="size-4" />
             Current bucket snapshot
           </div>
@@ -782,7 +775,7 @@ export function StorageAnalyticsDashboard() {
             aria-label="Refresh storage analytics"
           >
             {isRefreshing ? <Spinner className="mr-2 size-4" /> : <RefreshCw className="mr-2 size-4" />}
-            {isRefreshing ? "Recalculating" : "Refresh analytics"}
+            {isRefreshing ? "Recalculating..." : "Refresh analytics"}
           </Button>
         </div>
       </header>
@@ -858,7 +851,7 @@ export function StorageAnalyticsDashboard() {
             icon: <FileArchive className="size-4" />,
           },
         ].map(({ label, file, icon }) => (
-          <section key={label} className="rounded-xl border border-border bg-card p-4 shadow-sm">
+          <section key={label} className="border border-border bg-card p-4 shadow-sm">
             <div className="mb-4 flex items-center justify-between text-sm text-muted-foreground">
               <span>{label}</span>
               {icon}
@@ -884,7 +877,7 @@ export function StorageAnalyticsDashboard() {
           </section>
         ))}
 
-        <section className="rounded-xl border border-border bg-card p-4 shadow-sm">
+        <section className="border border-border bg-card p-4 shadow-sm">
           <div className="mb-4 flex items-center justify-between text-sm text-muted-foreground">
             <span>Zero-byte files</span>
             <ShieldAlert className="size-4" />
@@ -911,7 +904,7 @@ export function StorageAnalyticsDashboard() {
       </div>
 
       {isEmptyBucket ? (
-        <section className="flex min-h-72 flex-col items-center justify-center rounded-xl border border-dashed border-border bg-card px-6 text-center">
+        <section className="flex min-h-72 flex-col items-center justify-center border border-dashed border-border bg-card px-6 text-center">
           <HardDrive className="mb-4 size-10 text-muted-foreground/60" />
           <h2 className="text-lg font-semibold">No files found</h2>
           <p className="mt-2 max-w-md text-sm text-muted-foreground">
@@ -949,7 +942,7 @@ export function StorageAnalyticsDashboard() {
                     <Input
                       value={search}
                       onChange={(event) => changeFilter(() => setSearch(event.target.value))}
-                      placeholder="Search files"
+                      placeholder="Search files..."
                       className="h-10 pl-9"
                     />
                   </Label>
@@ -1059,7 +1052,7 @@ export function StorageAnalyticsDashboard() {
                     Try again
                   </Button>
                 </div>
-              ) : filesData?.files?.length ? (
+              ) : filesData?.files.length ? (
                 <div className="divide-y divide-border">
                   {filesData.files.map((file) => {
                     const typeLabel =
@@ -1185,7 +1178,7 @@ export function StorageAnalyticsDashboard() {
             <Panel title="Storage by file type">
               {breakdownQuery.isLoading ? (
                 <BreakdownSkeleton />
-              ) : breakdown?.byType?.length ? (
+              ) : breakdown?.byType.length ? (
                 <div className="space-y-5 p-5">
                   {breakdown.byType.map((item) => (
                     <div key={item.type}>
@@ -1213,7 +1206,7 @@ export function StorageAnalyticsDashboard() {
             <Panel title="Storage by folder">
               {breakdownQuery.isLoading ? (
                 <BreakdownSkeleton />
-              ) : breakdown?.byFolder?.length ? (
+              ) : breakdown?.byFolder.length ? (
                 <div className="space-y-5 p-5">
                   {breakdown.byFolder.slice(0, 10).map((item) => (
                     <Button
@@ -1253,7 +1246,7 @@ export function StorageAnalyticsDashboard() {
             <Panel title="File size distribution">
               {breakdownQuery.isLoading ? (
                 <BreakdownSkeleton />
-              ) : breakdown?.bySizeRange?.length ? (
+              ) : breakdown?.bySizeRange.length ? (
                 <div className="space-y-5 p-5">
                   {breakdown.bySizeRange.map((item) => {
                     const percentage = summary?.totalFiles
@@ -1288,7 +1281,7 @@ export function StorageAnalyticsDashboard() {
                     <Skeleton key={item} className="h-6 w-full" />
                   ))}
                 </div>
-              ) : breakdown?.recentFiles?.length ? (
+              ) : breakdown?.recentFiles.length ? (
                 <div className="divide-y divide-border">
                   {breakdown.recentFiles.slice(0, 5).map((file) => (
                     <div key={file.key} className="flex items-center justify-between gap-4 px-5 py-3">
@@ -1440,6 +1433,6 @@ export function StorageAnalyticsDashboard() {
           )}
         </DialogContent>
       </Dialog>
-    </div>
+    </main>
   );
 }

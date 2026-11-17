@@ -65,18 +65,18 @@
  * ─────────────────────────────────────────────────────────
  */
 
-// Super admin > Platform Team: the people who run Classgrid from this dashboard (Super Admin and Co-Super Admin).
-// Invite new members (each gets a @classgrid.in email and a temporary password, sent to their personal email),
-// see who is online, and remove members or revoke invitations. The founder accounts are protected.
 import React, { useState, useMemo, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { Trash2, Plus, Search, X, BadgeCheck } from "lucide-react";
+import { Shield, Trash2, Plus, MoreHorizontal, Search, XCircle, X, BadgeCheck } from "lucide-react";
 import { toast } from "sonner";
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/marketing_ui/card";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/marketing_ui/tabs";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/marketing_ui/tooltip";
+import { DataTable } from "@/components/marketing_ui/data-table";
 import { Button } from "@/components/marketing_ui/button";
 import { Input } from "@/components/marketing_ui/input";
 import { ResponsiveSelect } from "@/components/marketing_ui/responsive-select";
-import { Skeleton } from "@/components/marketing_ui/skeleton";
+import { Badge } from "@/components/marketing_ui/badge";
 import { DangerConfirmDialog } from "@/components/marketing_ui/danger-confirm-dialog";
 import { apiClient } from "@/lib/apiClient";
 import { getSocket } from "@/lib/socketClient";
@@ -99,34 +99,46 @@ type TeamMember = {
   isOnline?: boolean;
 };
 
-// ── Roles ─────────────────────────────────────────────────────────────────────
+// ── Role definitions ──────────────────────────────────────────────────────────
 
-const PLATFORM_ROLES: { value: PlatformRole; label: string; description: string }[] = [
-  { value: "super_admin", label: "Super Admin", description: "Full access to everything, the owner controls too." },
-  { value: "co_super_admin", label: "Co-Super Admin", description: "Full access to everything except the owner controls." },
+const PLATFORM_ROLES: { value: PlatformRole; label: string; description: string; icon: React.ComponentType<any> }[] = [
+  {
+    value: "super_admin",
+    label: "Super Admin",
+    description: "God mode. Unrestricted access to everything.",
+    icon: Shield
+  },
+  {
+    value: "co_super_admin",
+    label: "Co-Super Admin",
+    description: "Full platform access. Can manage everything except God-Owner controls.",
+    icon: Shield
+  },
 ];
 
-/** Founder accounts: nobody can remove them (the server refuses it too) */
-const PROTECTED_EMAILS = ["nikhil.shinde@classgrid.in", "support@classgrid.in"];
+const ROLE_MAP: Record<PlatformRole, { label: string; variant: "danger" | "success" }> = {
+  super_admin: { label: "Super Admin", variant: "danger" },
+  co_super_admin: { label: "Co-Super Admin", variant: "success" }
+};
 
 function fmtDate(iso?: string) {
   if (!iso) return "Never";
-  const d = new Date(iso);
-  if (isNaN(d.getTime())) return "Never";
-  return d.toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" });
+  return new Date(iso).toLocaleDateString("en-US", { day: "numeric", month: "short", year: "numeric" });
 }
 
-function lastSeenText(iso?: string) {
-  if (!iso) return "Never seen";
+function getRelativeTime(iso?: string) {
+  if (!iso) return "Never";
   const d = new Date(iso);
-  if (isNaN(d.getTime())) return "Never seen";
-  const seconds = Math.max(0, Math.floor((Date.now() - d.getTime()) / 1000));
-  if (seconds < 60) return "Seen just now";
+  if (isNaN(d.getTime())) return "Never";
+  const seconds = Math.floor((new Date().getTime() - d.getTime()) / 1000);
+  if (seconds < 60) return `${seconds}s ago`;
   const minutes = Math.floor(seconds / 60);
-  if (minutes < 60) return `Seen ${minutes} min ago`;
+  if (minutes < 60) return `${minutes}m ago`;
   const hours = Math.floor(minutes / 60);
-  if (hours < 24) return `Seen ${hours} h ago`;
-  return `Seen ${d.toLocaleString("en-IN", { day: "numeric", month: "short", hour: "numeric", minute: "2-digit" })}`;
+  if (hours < 24) return `${hours}h ago`;
+  
+  // Show exact date and time if it's older than 24 hours
+  return d.toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
 }
 
 // ── API calls ─────────────────────────────────────────────────────────────────
@@ -142,183 +154,64 @@ const teamApi = {
       .post<{ success: boolean; message: string; member: TeamMember }>("/api/super-admin/team/invite", payload)
       .then((r) => r.data),
 
+  updateRole: (id: string, role: PlatformRole) =>
+    apiClient
+      .patch<{ success: boolean }>(`/api/super-admin/team/${id}/role`, { role })
+      .then((r) => r.data),
+
   removeMember: (id: string) =>
     apiClient
       .delete<{ success: boolean }>(`/api/super-admin/team/${id}`)
-      .then((r) => r.data),
+      .then((r) => r.data)
 };
-
-const errorText = (err: any, fallback: string) => err?.response?.data?.message || err?.message || fallback;
 
 // ── Component ─────────────────────────────────────────────────────────────────
 
-type InviteForm = { name: string; personalEmail: string; classgridEmail: string; password: string; role: PlatformRole };
-type FormErrors = Partial<Record<keyof InviteForm, string>>;
-
-const EMPTY_FORM: InviteForm = { name: "", personalEmail: "", classgridEmail: "", password: "", role: "co_super_admin" };
-
-function validate(f: InviteForm): FormErrors {
-  const err: FormErrors = {};
-  if (!f.name.trim()) err.name = "Enter their name.";
-  if (!f.personalEmail.trim()) err.personalEmail = "Enter their personal email.";
-  else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(f.personalEmail.trim())) err.personalEmail = "This is not an email address.";
-  if (!f.classgridEmail.trim()) err.classgridEmail = "Enter their Classgrid email.";
-  else if (!/^[^\s@]+@classgrid\.in$/i.test(f.classgridEmail.trim())) err.classgridEmail = "It must end in @classgrid.in.";
-  if (!f.password.trim()) err.password = "Enter a temporary password.";
-  else if (f.password.trim().length < 6) err.password = "Use 6 characters at least.";
-  return err;
-}
-
-function Field({ label, hint, error, children }: { label: string; hint?: string; error?: string; children: React.ReactNode }) {
-  return (
-    <div className="space-y-1.5">
-      <label className="block text-sm font-medium text-foreground">
-        {label} {hint && <span className="font-normal text-muted-foreground">{hint}</span>}
-      </label>
-      {children}
-      {error && <span className="block text-xs font-medium text-red-600 dark:text-red-400">{error}</span>}
-    </div>
-  );
-}
-
-function StatusCell({ m }: { m: TeamMember }) {
-  if (m.status === "pending") {
-    return <span className="inline-flex rounded-full bg-amber-500/15 px-2.5 py-0.5 text-xs font-medium text-amber-700 dark:text-amber-400">Invited</span>;
-  }
-  if (m.status === "suspended") {
-    return <span className="inline-flex rounded-full bg-red-500/15 px-2.5 py-0.5 text-xs font-medium text-red-600 dark:text-red-400">Suspended</span>;
-  }
-  return (
-    <div className="flex flex-col items-start gap-1">
-      {m.isOnline ? (
-        <span className="inline-flex items-center gap-1.5 rounded-full bg-foreground px-2.5 py-0.5 text-xs font-medium text-background">
-          <span className="h-1.5 w-1.5 rounded-full bg-background" /> Online
-        </span>
-      ) : (
-        <span className="inline-flex items-center gap-1.5 rounded-full bg-muted px-2.5 py-0.5 text-xs font-medium text-muted-foreground">
-          <span className="h-1.5 w-1.5 rounded-full bg-current" /> Offline
-        </span>
-      )}
-      {!m.isOnline && <span className="whitespace-nowrap text-[11px] text-muted-foreground">{lastSeenText(m.lastSeen)}</span>}
-    </div>
-  );
-}
-
-function TeamTable({ rows, isLoading, pending, emptyMessage, onRemove }: {
-  rows: TeamMember[]; isLoading: boolean; pending: boolean; emptyMessage: string; onRemove: (m: TeamMember) => void;
-}) {
-  if (isLoading) {
-    return (
-      <div className="space-y-2 rounded-xl border border-border bg-card p-3">
-        {[0, 1, 2].map((i) => <Skeleton key={i} className="h-12 w-full" />)}
-      </div>
-    );
-  }
-  if (!rows.length) {
-    return <div className="rounded-xl border border-border bg-card p-8 text-center text-sm text-muted-foreground">{emptyMessage}</div>;
-  }
-  return (
-    <div className="overflow-x-auto rounded-xl border border-border bg-card">
-      <table className="w-full min-w-[680px] text-sm">
-        <thead>
-          <tr className="bg-muted/30 text-left text-muted-foreground">
-            <th className="p-3 font-medium">Member</th>
-            <th className="p-3 font-medium">Role</th>
-            <th className="p-3 font-medium">Status</th>
-            <th className="p-3 font-medium">Last sign-in</th>
-            <th className="p-3 font-medium">{pending ? "Invited on" : "Joined"}</th>
-            <th className="p-3 font-medium"><span className="sr-only">Actions</span></th>
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map((m) => {
-            const isProtected = PROTECTED_EMAILS.includes(m.email.toLowerCase());
-            return (
-              <tr key={m._id} className="border-t border-border/60">
-                <td className="p-3">
-                  <div className="flex min-w-0 items-center gap-3">
-                    {m.profilePicture ? (
-                      <img src={m.profilePicture} alt="" className="h-8 w-8 shrink-0 rounded-full border border-border object-cover" />
-                    ) : (
-                      <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-muted text-xs font-medium text-foreground">
-                        {(m.name || m.email).substring(0, 2).toUpperCase()}
-                      </div>
-                    )}
-                    <div className="min-w-0">
-                      <div className="max-w-[220px] truncate font-medium text-foreground" title={m.name}>{m.name}</div>
-                      <div className="max-w-[220px] truncate text-xs text-muted-foreground" title={m.email}>{m.email}</div>
-                    </div>
-                  </div>
-                </td>
-                <td className="p-3 whitespace-nowrap text-foreground">{PLATFORM_ROLES.find((r) => r.value === m.role)?.label || m.role}</td>
-                <td className="p-3"><StatusCell m={m} /></td>
-                <td className="p-3 whitespace-nowrap text-muted-foreground">{fmtDate(m.lastLogin)}</td>
-                <td className="p-3 whitespace-nowrap text-muted-foreground">{fmtDate(m.createdAt)}</td>
-                <td className="p-3 text-right">
-                  {isProtected ? (
-                    <span className="inline-flex items-center gap-1 text-xs text-muted-foreground" title="Founder account: it can't be removed">
-                      <BadgeCheck size={16} className="text-foreground" /> Founder
-                    </span>
-                  ) : (
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      className="h-8 gap-1.5 px-3 text-red-600 hover:bg-red-500/10 hover:text-red-600 dark:text-red-400"
-                      onClick={() => onRemove(m)}
-                    >
-                      <Trash2 size={14} />
-                      {pending ? "Revoke" : "Remove"}
-                    </Button>
-                  )}
-                </td>
-              </tr>
-            );
-          })}
-        </tbody>
-      </table>
-    </div>
-  );
-}
+const EMPTY_FORM = { name: "", personalEmail: "", classgridEmail: "", password: "", role: "co_super_admin" as PlatformRole };
 
 export function TeamPage() {
   const qc = useQueryClient();
-  const [forms, setForms] = useState<InviteForm[]>([EMPTY_FORM]);
-  const [errors, setErrors] = useState<FormErrors[]>([]);
+  const [forms, setForms] = useState([EMPTY_FORM]);
+  const [errors, setErrors] = useState<Array<Partial<typeof EMPTY_FORM>>>([]);
+  const [formResult, setFormResult] = useState<{ success: boolean; message: string } | null>(null);
   const [activeTab, setActiveTab] = useState("team-members");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [roleFilter, setRoleFilter] = useState<"all" | PlatformRole>("all");
   const [memberToDelete, setMemberToDelete] = useState<TeamMember | null>(null);
 
-  const { data, isLoading, isError, refetch } = useQuery({
+  const { data, isLoading, refetch, isFetching } = useQuery({
     queryKey: ["superadmin-platform-team"],
     queryFn: () => teamApi.getTeam(),
     staleTime: 60_000,
-    retry: 1,
+    retry: 1
   });
 
   useEffect(() => {
     const socket = getSocket();
     if (!socket) return;
-    // Own handler, so only this page's listeners are removed when it closes
-    const onChange = () => { refetch(); };
-    socket.on("platform_team_updated", onChange);
-    socket.on("platform_user_status_changed", onChange);
+    
+    socket.on("platform_team_updated", () => {
+      refetch();
+    });
+    socket.on("platform_user_status_changed", () => {
+      refetch();
+    });
     return () => {
-      socket.off("platform_team_updated", onChange);
-      socket.off("platform_user_status_changed", onChange);
+      socket.off("platform_team_updated");
+      socket.off("platform_user_status_changed");
     };
   }, [refetch]);
 
+  const team: TeamMember[] = data?.team ?? [];
+  
   const filteredTeam = useMemo(() => {
-    const team: TeamMember[] = data?.team ?? [];
-    const q = searchQuery.trim().toLowerCase();
     return team.filter((m) => {
-      const matchesSearch = !q || (m.name || "").toLowerCase().includes(q) || (m.email || "").toLowerCase().includes(q);
-      const matchesRole = roleFilter === "all" || m.role === roleFilter;
-      return matchesSearch && matchesRole;
+        const matchesSearch = !searchQuery || m.name.toLowerCase().includes(searchQuery.toLowerCase()) || m.email.toLowerCase().includes(searchQuery.toLowerCase());
+        const matchesRole = roleFilter === "all" || m.role === roleFilter;
+        return matchesSearch && matchesRole;
     });
-  }, [data, searchQuery, roleFilter]);
+  }, [team, searchQuery, roleFilter]);
 
   const activeMembers = filteredTeam.filter((m) => m.status !== "pending");
   const pendingMembers = filteredTeam.filter((m) => m.status === "pending");
@@ -326,213 +219,473 @@ export function TeamPage() {
   const removeMutation = useMutation({
     mutationFn: (id: string) => teamApi.removeMember(id),
     onSuccess: () => {
-      toast.success(memberToDelete?.status === "pending" ? "Invitation revoked." : "Team member removed.");
-      setMemberToDelete(null);
+      toast.success("Team member removed successfully.");
       qc.invalidateQueries({ queryKey: ["superadmin-platform-team"] });
     },
-    onError: (err: any) => toast.error(errorText(err, "Couldn't remove the member.")),
+    onError: (err: any) => {
+      toast.error(err?.response?.data?.message || "Failed to remove member.");
+    }
   });
 
-  const updateForm = (index: number, key: keyof InviteForm, value: string) => {
-    setForms((prev) => prev.map((f, i) => (i === index ? { ...f, [key]: value } : f)));
-    if (errors[index]?.[key]) {
-      setErrors((prev) => prev.map((e, i) => (i === index ? { ...e, [key]: undefined } : e)));
-    }
-  };
+  const roleUpdateMutation = useMutation({
+    mutationFn: ({ id, role }: { id: string; role: PlatformRole }) => teamApi.updateRole(id, role),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["superadmin-platform-team"] })
+  });
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    const newErrors = forms.map(validate);
-    if (newErrors.some((err) => Object.keys(err).length)) {
-      setErrors(newErrors);
-      return;
+    setFormResult(null);
+
+    const newErrors: Array<Partial<typeof EMPTY_FORM>> = [];
+    let hasError = false;
+
+    forms.forEach((f, i) => {
+        const err: Partial<typeof EMPTY_FORM> = {};
+        if (!f.name.trim()) {
+            err.name = "Name is required.";
+            hasError = true;
+        }
+        if (!f.personalEmail.trim()) {
+            err.personalEmail = "Personal email is required.";
+            hasError = true;
+        } else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(f.personalEmail)) {
+            err.personalEmail = "Invalid email format.";
+            hasError = true;
+        }
+        if (!f.classgridEmail.trim()) {
+            err.classgridEmail = "Classgrid email is required.";
+            hasError = true;
+        } else if (!/^[^\s@]+@classgrid\.in$/.test(f.classgridEmail)) {
+            err.classgridEmail = "Must be a @classgrid.in email.";
+            hasError = true;
+        }
+        if (!f.password.trim()) {
+            err.password = "Password is required.";
+            hasError = true;
+        } else if (f.password.length < 6) {
+            err.password = "Password must be at least 6 characters.";
+            hasError = true;
+        }
+        newErrors[i] = err as any;
+    });
+
+    if (hasError) {
+        setErrors(newErrors);
+        return;
     }
+
     setErrors([]);
     setIsSubmitting(true);
-    // Each invitation on its own: the ones that went through leave the form, the failed ones stay with their reason
-    const results = await Promise.allSettled(forms.map((f) =>
-      teamApi.inviteMember({
-        name: f.name.trim(),
-        email: f.classgridEmail.trim().toLowerCase(),
-        personalEmail: f.personalEmail.trim(),
-        password: f.password.trim(),
-        role: f.role,
-      })
-    ));
-    setIsSubmitting(false);
-    const sent = results.filter((r) => r.status === "fulfilled").length;
-    const failedForms: InviteForm[] = [];
-    const failedErrors: FormErrors[] = [];
-    results.forEach((r, i) => {
-      const form = forms[i];
-      if (r.status === "rejected" && form) {
-        failedForms.push(form);
-        failedErrors.push({ classgridEmail: errorText(r.reason, "Couldn't send this invitation.") });
-      }
-    });
-    if (sent) {
-      toast.success(sent === 1 ? "Invitation sent. The welcome email is on its way." : `${sent} invitations sent. The welcome emails are on their way.`);
-      qc.invalidateQueries({ queryKey: ["superadmin-platform-team"] });
-    }
-    if (failedForms.length) {
-      toast.error(failedForms.length === 1 ? "One invitation was not sent. See the reason below." : `${failedForms.length} invitations were not sent. See the reasons below.`);
-      setForms(failedForms);
-      setErrors(failedErrors);
-    } else {
-      setForms([EMPTY_FORM]);
-      setActiveTab("pending-invitations");
+    
+    try {
+        await Promise.all(forms.map(f => 
+            teamApi.inviteMember({
+                name: f.name,
+                email: f.classgridEmail,
+                personalEmail: f.personalEmail,
+                password: f.password,
+                role: f.role
+            })
+        ));
+        
+        toast.success("Invitations sent successfully! Welcome emails have been dispatched.");
+        setFormResult({ success: true, message: "Invitations sent successfully! Welcome emails have been dispatched." });
+        setForms([EMPTY_FORM]);
+        setActiveTab("pending-invitations");
+        qc.invalidateQueries({ queryKey: ["superadmin-platform-team"] });
+        setTimeout(() => setFormResult(null), 5000);
+    } catch (err: any) {
+        toast.error(err?.response?.data?.message || err?.message || "Failed to invite members.");
+        setFormResult({ success: false, message: err?.response?.data?.message || err?.message || "Failed to invite members." });
+    } finally {
+        setIsSubmitting(false);
     }
   };
 
-  const inputCls = (bad?: string) => (bad ? "bg-background border-red-500 focus-visible:ring-red-500" : "bg-background");
+  const handleAddMore = () => {
+    setForms([...forms, EMPTY_FORM]);
+  };
+
+  const getColumns = (isPending: boolean) => [
+    {
+      key: "user",
+      header: "Admin",
+      width: "w-full min-w-[250px]", // Let user column expand to fill space
+      render: (_: any, row: TeamMember) => (
+        <div className="flex items-center gap-3 py-2 w-full min-w-[250px]">
+          {row.profilePicture ? (
+            <img 
+                src={row.profilePicture} 
+                alt={row.name} 
+                className="h-8 w-8 rounded-full object-cover border border-border"
+            />
+          ) : (
+            <div className="flex h-8 w-8 items-center justify-center rounded-full bg-primary/10 text-primary font-medium text-xs">
+              {row.name.substring(0, 2).toUpperCase()}
+            </div>
+          )}
+          <div className="flex flex-col min-w-0">
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <span className="font-medium text-sm truncate cursor-help max-w-[200px] block">{row.name}</span>
+              </TooltipTrigger>
+              <TooltipContent side="top" align="start">
+                <p>{row.name}</p>
+              </TooltipContent>
+            </Tooltip>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <span className="text-muted-foreground text-xs truncate cursor-help max-w-[200px] block">{row.email}</span>
+              </TooltipTrigger>
+              <TooltipContent side="bottom" align="start">
+                <p>{row.email}</p>
+              </TooltipContent>
+            </Tooltip>
+          </div>
+        </div>
+      )
+    },
+    {
+      key: "role",
+      header: "Role",
+      width: "w-[180px]",
+      render: (_: any, row: TeamMember) => {
+        const roleInfo = PLATFORM_ROLES.find(r => r.value === row.role);
+        return (
+          <div className="pr-4">
+            <span className="text-sm font-medium text-foreground">
+              {roleInfo?.label || row.role}
+            </span>
+          </div>
+        );
+      }
+    },
+    {
+      key: "status",
+      header: "Status",
+      width: "w-[150px]",
+      render: (_: any, row: TeamMember) => {
+        if (row.status === "pending") {
+          return <Badge variant="warning" dot>Pending</Badge>;
+        }
+        if (row.status === "suspended") {
+          return <Badge variant="danger" dot>Suspended</Badge>;
+        }
+        
+        if (row.isOnline) {
+          return <Badge variant="success" dot>Online</Badge>;
+        }
+
+        // Offline state
+        let lastSeenText = "Never";
+        if (row.lastSeen) {
+          const d = new Date(row.lastSeen);
+          if (!isNaN(d.getTime())) {
+            const dateStr = d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+            const timeStr = d.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
+            
+            const seconds = Math.floor((new Date().getTime() - d.getTime()) / 1000);
+            let relative = "";
+            if (seconds < 60) relative = `${seconds}s ago`;
+            else {
+              const minutes = Math.floor(seconds / 60);
+              if (minutes < 60) relative = `${minutes}m ago`;
+              else {
+                const hours = Math.floor(minutes / 60);
+                if (hours < 24) relative = `${hours}h ago`;
+                else relative = `${Math.floor(hours / 24)}d ago`;
+              }
+            }
+            lastSeenText = `${dateStr}, ${timeStr} (${relative})`;
+          }
+        }
+
+        return (
+          <div className="flex flex-col gap-1 items-start">
+            <Badge variant="neutral" dot>Offline</Badge>
+            <span className="text-[10px] text-muted-foreground ml-1 whitespace-nowrap" title={lastSeenText}>Seen: {lastSeenText}</span>
+          </div>
+        );
+      }
+    },
+    {
+      key: "lastLogin",
+      header: "Last Login",
+      width: "w-[140px]",
+      render: (_: any, row: TeamMember) => (
+        <span className="text-sm text-muted-foreground">{fmtDate(row.lastLogin)}</span>
+      )
+    },
+    {
+      key: "date",
+      header: isPending ? "Invited On" : "Joined",
+      width: "w-[140px]",
+      render: (_: any, row: TeamMember) => (
+        <span className="text-sm text-muted-foreground">{fmtDate(row.createdAt)}</span>
+      )
+    },
+    {
+      key: "actions",
+      header: "",
+      width: "w-[100px]",
+      render: (_: any, row: TeamMember) => {
+        // Protected founder account — cannot be deleted by anyone
+        const PROTECTED_EMAILS = ["nikhil.shinde@classgrid.in", "support@classgrid.in"];
+        if (PROTECTED_EMAILS.includes(row.email.toLowerCase())) {
+          return <div className="flex justify-end"><BadgeCheck size={20} className="text-blue-500" /></div>;
+        }
+        return (
+          <div className="flex justify-end">
+              <Button
+                size="sm"
+                variant="ghost"
+                className="text-red-500 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-500/10 h-8 px-3 rounded-md flex items-center gap-2"
+                onClick={() => setMemberToDelete(row)}
+                title={row.status === "pending" ? "Revoke Invite" : "Remove Member"}
+              >
+                <Trash2 size={14} />
+                <span>Delete</span>
+              </Button>
+          </div>
+        );
+      }
+    }
+  ];
 
   return (
-    <div className="flex h-full flex-col bg-background text-foreground">
-      <div className="border-b border-border bg-card px-4 py-5 sm:px-6">
-        <h1 className="text-xl font-semibold tracking-tight">Platform Team</h1>
-        <p className="mt-1 text-sm text-muted-foreground">The people who run Classgrid from this dashboard. Invite new members and manage who has access.</p>
+    <div className="flex flex-col gap-8 w-full max-w-[1000px] mx-auto p-4 sm:p-6 lg:p-8 pb-12">
+      
+      {/* Header */}
+      <div className="flex items-center justify-between">
+        <div>
+            <h1 className="text-3xl font-bold tracking-tight text-foreground">Members</h1>
+            <p className="text-sm text-muted-foreground mt-1">Manage team members and invitations</p>
+        </div>
+        
       </div>
 
-      <div className="mx-auto flex w-full max-w-5xl flex-col gap-8 px-4 py-6 sm:px-6">
-        {/* Invite */}
-        <section className="overflow-hidden rounded-xl border border-border bg-card">
-          <div className="border-b border-border px-4 py-4 sm:px-6">
-            <h2 className="text-base font-semibold text-foreground">Invite members</h2>
-            <p className="mt-1 text-sm text-muted-foreground">
-              Give each new member a @classgrid.in email and a temporary password. The welcome email with both goes to their personal email, and they change the password when they first sign in.
-            </p>
-          </div>
-          <form onSubmit={handleSubmit} noValidate>
-            <div className="space-y-6 px-4 py-5 sm:px-6">
-              {forms.map((f, index) => (
-                <div key={index} className={index > 0 ? "border-t border-border pt-5" : ""}>
-                  <div className="mb-3 flex items-center justify-between">
-                    <span className="text-sm font-medium text-muted-foreground">Member {index + 1}</span>
-                    {forms.length > 1 && (
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="icon"
-                        className="h-8 w-8 shrink-0 text-muted-foreground hover:text-foreground"
-                        title="Take this member out of the list"
-                        onClick={() => {
-                          setForms(forms.filter((_, i) => i !== index));
-                          setErrors(errors.filter((_, i) => i !== index));
-                        }}
-                      >
-                        <X size={14} />
-                      </Button>
-                    )}
-                  </div>
-                  <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-                    <Field label="Name" error={errors[index]?.name}>
-                      <Input type="text" placeholder="For example: Jane Doe" className={inputCls(errors[index]?.name)} value={f.name} onChange={(e) => updateForm(index, "name", e.target.value)} />
-                    </Field>
-                    <Field label="Personal email" hint="(the welcome email goes here)" error={errors[index]?.personalEmail}>
-                      <Input type="email" placeholder="name@gmail.com" className={inputCls(errors[index]?.personalEmail)} value={f.personalEmail} onChange={(e) => updateForm(index, "personalEmail", e.target.value)} />
-                    </Field>
-                    <Field label="New Classgrid email" error={errors[index]?.classgridEmail}>
-                      <Input type="email" placeholder="name@classgrid.in" className={inputCls(errors[index]?.classgridEmail)} value={f.classgridEmail} onChange={(e) => updateForm(index, "classgridEmail", e.target.value)} />
-                    </Field>
-                    <Field label="Temporary password" error={errors[index]?.password}>
-                      <Input type="text" autoComplete="off" placeholder="6 characters at least" className={inputCls(errors[index]?.password)} value={f.password} onChange={(e) => updateForm(index, "password", e.target.value)} />
-                    </Field>
-                    <div className="md:col-span-2">
-                      <Field label="Role">
-                        <ResponsiveSelect
-                          className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground"
-                          value={f.role}
-                          onChange={(e) => updateForm(index, "role", e.target.value)}
-                        >
-                          {PLATFORM_ROLES.map((r) => (
-                            <option key={r.value} value={r.value}>{r.label}</option>
-                          ))}
-                        </ResponsiveSelect>
-                        <p className="text-xs text-muted-foreground">{PLATFORM_ROLES.find((r) => r.value === f.role)?.description}</p>
-                      </Field>
+      {/* Invite Members Card (Vercel Style) */}
+      <Card className="border-border shadow-sm overflow-hidden">
+        <CardHeader className="border-b border-border bg-muted/20 pb-4">
+          <CardTitle className="text-lg">Invite Members</CardTitle>
+          <CardDescription>
+            Add new members to your team by entering their email address and assigning a role
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="p-0">
+          <form onSubmit={handleSubmit} className="flex flex-col">
+            <div className="p-6 pb-4">
+                {formResult && (
+                    <div className={`mb-4 p-3 rounded-md text-sm border ${formResult.success ? "bg-success/10 border-success/20 text-success" : "bg-danger/10 border-danger/20 text-danger"}`}>
+                        {formResult.message}
                     </div>
-                  </div>
-                </div>
-              ))}
-
-              <Button type="button" variant="outline" size="sm" className="h-8 gap-1.5 text-muted-foreground" onClick={() => setForms([...forms, EMPTY_FORM])}>
-                <Plus size={14} /> Add another member
-              </Button>
+                )}
+                
+                {forms.map((f, index) => (
+                    <div key={index} className="mb-6 last:mb-0">
+                        {index > 0 && <hr className="border-border mb-4" />}
+                        <div className="flex items-center justify-between mb-3">
+                            <span className="text-sm font-semibold text-muted-foreground">Member {index + 1}</span>
+                            {forms.length > 1 && (
+                                <Button type="button" variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground hover:text-danger flex-shrink-0" onClick={() => {
+                                    setForms(forms.filter((_, i) => i !== index));
+                                    setErrors(errors.filter((_, i) => i !== index));
+                                }}>
+                                    <X size={14} />
+                                </Button>
+                            )}
+                        </div>
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            {/* Name */}
+                            <div className="space-y-1.5">
+                                <label className="text-sm font-medium text-foreground">Team Member Name</label>
+                                <Input
+                                    type="text"
+                                    placeholder="e.g. Jane Doe"
+                                    className={(errors[index] as any)?.name ? "border-danger focus-visible:ring-danger bg-background" : "bg-background"}
+                                    value={f.name}
+                                    onChange={(e) => {
+                                        const newForms = [...forms];
+                                        newForms[index] = { ...newForms[index], name: e.target.value };
+                                        setForms(newForms);
+                                        if ((errors[index] as any)?.name) {
+                                            const newErrors = [...errors];
+                                            newErrors[index] = { ...newErrors[index], name: undefined } as any;
+                                            setErrors(newErrors);
+                                        }
+                                    }}
+                                />
+                                {(errors[index] as any)?.name && <span className="text-xs font-medium text-danger">{(errors[index] as any)?.name}</span>}
+                            </div>
+                            {/* Personal Email */}
+                            <div className="space-y-1.5">
+                                <label className="text-sm font-medium text-foreground">Personal Email <span className="text-muted-foreground font-normal">(Where to send this email)</span></label>
+                                <Input
+                                    type="email"
+                                    placeholder="e.g. personal@gmail.com"
+                                    className={(errors[index] as any)?.personalEmail ? "border-danger focus-visible:ring-danger bg-background" : "bg-background"}
+                                    value={f.personalEmail}
+                                    onChange={(e) => {
+                                        const newForms = [...forms];
+                                        newForms[index] = { ...newForms[index], personalEmail: e.target.value };
+                                        setForms(newForms);
+                                        if ((errors[index] as any)?.personalEmail) {
+                                            const newErrors = [...errors];
+                                            newErrors[index] = { ...newErrors[index], personalEmail: undefined } as any;
+                                            setErrors(newErrors);
+                                        }
+                                    }}
+                                />
+                                {(errors[index] as any)?.personalEmail && <span className="text-xs font-medium text-danger">{(errors[index] as any)?.personalEmail}</span>}
+                            </div>
+                            {/* Classgrid Email */}
+                            <div className="space-y-1.5">
+                                <label className="text-sm font-medium text-foreground">New Classgrid Email</label>
+                                <Input
+                                    type="email"
+                                    placeholder="e.g. name@classgrid.in"
+                                    className={(errors[index] as any)?.classgridEmail ? "border-danger focus-visible:ring-danger bg-background" : "bg-background"}
+                                    value={f.classgridEmail}
+                                    onChange={(e) => {
+                                        const newForms = [...forms];
+                                        newForms[index] = { ...newForms[index], classgridEmail: e.target.value };
+                                        setForms(newForms);
+                                        if ((errors[index] as any)?.classgridEmail) {
+                                            const newErrors = [...errors];
+                                            newErrors[index] = { ...newErrors[index], classgridEmail: undefined } as any;
+                                            setErrors(newErrors);
+                                        }
+                                    }}
+                                />
+                                {(errors[index] as any)?.classgridEmail && <span className="text-xs font-medium text-danger">{(errors[index] as any)?.classgridEmail}</span>}
+                            </div>
+                            {/* Temporary Password */}
+                            <div className="space-y-1.5">
+                                <label className="text-sm font-medium text-foreground">Temporary Password</label>
+                                <Input
+                                    type="text"
+                                    placeholder="Enter a secure temporary password"
+                                    className={(errors[index] as any)?.password ? "border-danger focus-visible:ring-danger bg-background" : "bg-background"}
+                                    value={f.password}
+                                    onChange={(e) => {
+                                        const newForms = [...forms];
+                                        newForms[index] = { ...newForms[index], password: e.target.value };
+                                        setForms(newForms);
+                                        if ((errors[index] as any)?.password) {
+                                            const newErrors = [...errors];
+                                            newErrors[index] = { ...newErrors[index], password: undefined } as any;
+                                            setErrors(newErrors);
+                                        }
+                                    }}
+                                />
+                                {(errors[index] as any)?.password && <span className="text-xs font-medium text-danger">{(errors[index] as any)?.password}</span>}
+                            </div>
+                            {/* Role */}
+                            <div className="space-y-1.5 md:col-span-2">
+                                <label className="text-sm font-medium text-foreground">Role</label>
+                                <ResponsiveSelect
+                                    className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                                    value={f.role}
+                                    onChange={(e) => {
+                                        const newForms = [...forms];
+                                        newForms[index] = { ...newForms[index], role: e.target.value as PlatformRole };
+                                        setForms(newForms);
+                                    }}
+                                >
+                                    {PLATFORM_ROLES.map((r) => (
+                                        <option key={r.value} value={r.value}>{r.label}</option>
+                                    ))}
+                                </ResponsiveSelect>
+                            </div>
+                        </div>
+                    </div>
+                ))}
+                
+                <Button type="button" variant="outline" size="sm" className="h-8 gap-1.5 text-muted-foreground mt-2" onClick={handleAddMore}>
+                    <Plus size={14} /> Add more
+                </Button>
             </div>
 
-            <div className="flex items-center justify-end border-t border-border bg-muted/30 px-4 py-4 sm:px-6">
-              <Button type="submit" isLoading={isSubmitting} className="bg-foreground font-medium text-background hover:bg-foreground/90">
-                {forms.length > 1 ? "Send invitations" : "Send invitation"}
-              </Button>
+            <div className="bg-muted/30 border-t border-border px-6 py-4 flex items-center justify-end">
+                <Button type="submit" isLoading={isSubmitting} className="bg-primary text-primary-foreground font-medium w-[120px]">
+                    Send Invite
+                </Button>
             </div>
           </form>
-        </section>
+        </CardContent>
+      </Card>
 
-        {/* Members */}
-        <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-          <TabsList className="mb-4 flex h-auto w-full flex-wrap justify-start gap-1 sm:w-auto">
-            <TabsTrigger value="team-members">Team members ({activeMembers.length})</TabsTrigger>
-            <TabsTrigger value="pending-invitations">Invited ({pendingMembers.length})</TabsTrigger>
-          </TabsList>
-
-          <div className="mb-4 flex w-full flex-col gap-2 sm:flex-row sm:items-center">
-            <div className="relative w-full sm:max-w-sm">
-              <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
-              <Input
-                className="h-10 w-full bg-background pl-9"
-                placeholder="Search by name or email"
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-              />
+      {/* Tabs & Data Table */}
+      <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
+        <TabsList className="mb-4">
+          <TabsTrigger value="team-members">Team Members</TabsTrigger>
+          <TabsTrigger value="pending-invitations">Pending Invitations</TabsTrigger>
+        </TabsList>
+        
+        {/* Filter Bar */}
+        <div className="flex flex-col sm:flex-row items-center gap-2 mb-4 w-full">
+            <div className="relative flex-1 w-full max-w-[400px]">
+                <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+                <Input 
+                    className="pl-9 h-10 w-full bg-background" 
+                    placeholder="Filter by name or email..." 
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                />
             </div>
-            <ResponsiveSelect
-              className="h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground sm:ml-auto sm:w-[200px]"
-              value={roleFilter}
-              onChange={(e) => setRoleFilter(e.target.value as "all" | PlatformRole)}
-            >
-              <option value="all">All roles</option>
-              {PLATFORM_ROLES.map((r) => (
-                <option key={r.value} value={r.value}>{r.label}</option>
-              ))}
-            </ResponsiveSelect>
-          </div>
-
-          {isError ? (
-            <div className="rounded-xl border border-border bg-card p-8 text-center text-sm text-muted-foreground">
-              Couldn't load the team.{" "}
-              <button type="button" className="font-medium text-foreground underline underline-offset-2" onClick={() => refetch()}>Try again</button>
+            <div className="flex items-center gap-2 w-full sm:w-auto overflow-x-auto pb-1 sm:pb-0 sm:ml-auto">
+                <ResponsiveSelect
+                    className="h-10 rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground focus-visible:outline-none w-[180px]"
+                    value={roleFilter}
+                    onChange={(e) => setRoleFilter(e.target.value as any)}
+                >
+                    <option value="all">All Team Roles</option>
+                    {PLATFORM_ROLES.map(r => (
+                        <option key={r.value} value={r.value}>{r.label}</option>
+                    ))}
+                </ResponsiveSelect>
             </div>
-          ) : (
-            <>
-              <TabsContent value="team-members" className="m-0">
-                <TeamTable rows={activeMembers} isLoading={isLoading} pending={false} onRemove={setMemberToDelete}
-                  emptyMessage={searchQuery || roleFilter !== "all" ? "No team member matches." : "No team members yet."} />
-              </TabsContent>
-              <TabsContent value="pending-invitations" className="m-0">
-                <TeamTable rows={pendingMembers} isLoading={isLoading} pending onRemove={setMemberToDelete}
-                  emptyMessage={searchQuery || roleFilter !== "all" ? "No invitation matches." : "No open invitations."} />
-              </TabsContent>
-            </>
-          )}
-        </Tabs>
-      </div>
+        </div>
+
+        <TabsContent value="team-members" className="m-0 border border-border rounded-md overflow-hidden bg-background">
+          <DataTable
+            columns={getColumns(false)}
+            rows={activeMembers}
+            isLoading={isLoading}
+            emptyMessage="No active team members found."
+          />
+        </TabsContent>
+        
+        <TabsContent value="pending-invitations" className="m-0 border border-border rounded-md overflow-hidden bg-background">
+          <DataTable
+            columns={getColumns(true)}
+            rows={pendingMembers}
+            isLoading={isLoading}
+            emptyMessage="No pending invitations."
+          />
+        </TabsContent>
+      </Tabs>
 
       <DangerConfirmDialog
         open={!!memberToDelete}
-        onOpenChange={(open) => { if (!open && !removeMutation.isPending) setMemberToDelete(null); }}
-        title={memberToDelete?.status === "pending" ? "Revoke invitation" : "Remove team member"}
+        onOpenChange={(open) => !open && setMemberToDelete(null)}
+        title={memberToDelete?.status === "pending" ? "Revoke Invitation" : "Remove Team Member"}
         description={
-          <>
-            Remove <strong className="text-foreground">{memberToDelete?.name}</strong> ({memberToDelete?.email}) from the platform team?
-            {memberToDelete?.status === "pending"
-              ? " Their invitation stops working and the account made for it is deleted."
-              : " They lose all access to the super admin dashboard and their account is deleted."}
-          </>
+            <>
+                Are you sure you want to remove <strong className="text-foreground">{memberToDelete?.name}</strong> ({memberToDelete?.email}) from the platform team? 
+                They will lose all administrative access to the Classgrid super admin dashboard.
+            </>
         }
-        warningMessage="This can't be undone."
-        actionLabel={memberToDelete?.status === "pending" ? "Revoke invitation" : "Remove member"}
+        warningMessage="This action cannot be undone."
+        actionLabel={memberToDelete?.status === "pending" ? "Revoke Invitation" : "Remove Member"}
         isLoading={removeMutation.isPending}
-        onConfirm={() => { if (memberToDelete) removeMutation.mutate(memberToDelete._id); }}
+        onConfirm={() => {
+            if (memberToDelete) {
+                removeMutation.mutate(memberToDelete._id, {
+                    onSuccess: () => setMemberToDelete(null)
+                });
+            }
+        }}
       />
     </div>
   );

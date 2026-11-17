@@ -27,6 +27,7 @@ import { RemoveUserGrantedCredits } from "./RemoveUserGrantedCredits";
 import { ExtendUserGrantedCredits } from "./ExtendUserGrantedCredits";
 import { ViewGrantedCreditsDetails } from "./ViewGrantedCreditsDetails";
 import { UserPlanCard } from "./UserPlanCard";
+import { PlanMeters } from "./PlanFolders";
 import socketClient from "@/lib/socketClient";
 import { useQueryClient } from "@tanstack/react-query";
 
@@ -215,32 +216,8 @@ export function AiUserDetailPanel({ userDetail }: { userDetail: any }) {
             </div>
             
             <div className="mt-4 border-t border-border/50 pt-4 flex flex-col gap-4">
-              {/* 1. Personal Limits */}
-              {(() => {
-                const limit = userDetail.ai_tokens?.free_weekly_limit ?? 0;
-                const used = userDetail.limitTimers?.tokens ? userDetail.limitTimers.tokens.used : (userDetail.ai_tokens?.used_this_week || 0);
-                const percent = limit > 0 ? Math.min(100, Math.max(0, (used / limit) * 100)) : 0;
-                return (
-                  <div className="w-full flex items-start justify-between">
-                    <div className="flex flex-col gap-1 pr-6 min-w-[150px]">
-                      <span className="text-sm font-medium text-foreground">Personal Limits</span>
-                      {userDetail.limitTimers ? <ResetCountdown resetAt={userDetail.limitTimers.tokens?.resetAt} /> : <span className="text-xs text-muted-foreground">Resets in 7 days</span>}
-                    </div>
-                    <div className="flex-1 flex flex-col gap-1.5 mt-1">
-                      <div className="w-full flex items-center justify-between text-xs mb-1">
-                        <span className="font-medium text-foreground">{Math.round(percent)}% Used</span>
-                        <span className="text-muted-foreground font-medium">{formatNumber(used)} / {formatNumber(limit)} Tokens</span>
-                      </div>
-                      <div className="w-full h-1.5 bg-muted-foreground/20 rounded-full overflow-hidden">
-                        <div className="h-full bg-blue-500 rounded-full transition-all" style={{ width: `${percent}%` }} />
-                      </div>
-                    </div>
-                  </div>
-                );
-              })()}
-
-              <LimitTimerRow label="Images" unit="Images" timer={userDetail.limitTimers?.image} />
-              <LimitTimerRow label="WhatsApp" unit="Messages" timer={userDetail.limitTimers?.whatsapp} />
+              {/* The plan's limits and what they used of them (the same numbers they see in Settings > Usage) */}
+              <PlanMeters overview={userDetail.overview} />
 
               {/* 2. Paid Credits */}
               {(() => {
@@ -293,32 +270,6 @@ export function AiUserDetailPanel({ userDetail }: { userDetail: any }) {
                       </div>
                       <div className="w-full h-1.5 bg-muted-foreground/20 rounded-full overflow-hidden">
                         <div className="h-full bg-purple-500 rounded-full transition-all" style={{ width: `${percent}%` }} />
-                      </div>
-                    </div>
-                  </div>
-                );
-              })()}
-
-              {/* 4. Org Pool (Only for Admin/Owner) */}
-              {(() => {
-                if (userDetail.role !== 'org_admin' && userDetail.role !== 'Owner') return null;
-                if (!userDetail.orgPool) return null;
-                const limit = userDetail.orgPool.limit || 0;
-                const used = userDetail.orgPool.used || 0;
-                const percent = limit > 0 ? Math.min(100, Math.max(0, (used / limit) * 100)) : 0;
-                return (
-                  <div className="w-full flex items-start justify-between">
-                    <div className="flex flex-col gap-1 pr-6 min-w-[150px]">
-                      <span className="text-sm font-medium text-foreground">Org Pool</span>
-                      <span className="text-xs text-muted-foreground">Shared Pro pool</span>
-                    </div>
-                    <div className="flex-1 flex flex-col gap-1.5 mt-1">
-                      <div className="w-full flex items-center justify-between text-xs mb-1">
-                        <span className="font-medium text-foreground">{Math.round(percent)}% Used</span>
-                        <span className="text-muted-foreground font-medium">{formatNumber(used)} / {formatNumber(limit)} Tokens</span>
-                      </div>
-                      <div className="w-full h-1.5 bg-muted-foreground/20 rounded-full overflow-hidden">
-                        <div className="h-full bg-orange-500 rounded-full transition-all" style={{ width: `${percent}%` }} />
                       </div>
                     </div>
                   </div>

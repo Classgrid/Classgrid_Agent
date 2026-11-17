@@ -93,8 +93,8 @@ export function NoteCard({ note, isActive, onClick }: NoteCardProps) {
       className={cn(
         "p-3 rounded-xl border cursor-pointer [&_*]:cursor-pointer transition-all hover:shadow-sm group",
         isActive
-          ? "bg-muted border-foreground/30 ring-1 ring-foreground/10"
-          : "bg-card border-border hover:border-foreground/20"
+          ? "bg-emerald-50/50 dark:bg-emerald-950/20 border-emerald-500/50 ring-1 ring-emerald-500/20"
+          : "bg-card border-border hover:border-emerald-500/30"
       )}
     >
       <div className="flex items-start justify-between gap-2 mb-1">
@@ -146,12 +146,10 @@ export function NoteCard({ note, isActive, onClick }: NoteCardProps) {
         )}
         
         <div className="flex items-center justify-between text-[10px] text-muted-foreground font-medium">
-          {note.updatedAt && !Number.isNaN(new Date(note.updatedAt).getTime()) && (
-            <div className="flex items-center gap-1">
-              <span>Edited</span>
-              <span>{formatDistanceToNow(new Date(note.updatedAt), { addSuffix: true })}</span>
-            </div>
-          )}
+          <div className="flex items-center gap-1">
+            <span>Edited</span>
+            <span>{formatDistanceToNow(new Date(note.updatedAt), { addSuffix: true })}</span>
+          </div>
           {note.textContent && (
             <span>{Math.max(1, Math.ceil(note.textContent.length / 1000))} min read</span>
           )}

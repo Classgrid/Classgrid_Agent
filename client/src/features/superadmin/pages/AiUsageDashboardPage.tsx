@@ -42,19 +42,16 @@ import {
 import { AiUsageTrendsChart } from "@/features/superadmin/components/AiUsageTrendsChart";
 import { AiUsageBar } from "@/components/ai/components/AiUsageBar";
 import { TopAiUsersTable } from "@/features/superadmin/components/TopAiUsersTable";
-import { SetupUsageCredits } from "@/features/superadmin/components/SetupUsageCredits";
 import { GrantCreditsModal } from "@/features/superadmin/components/GrantCredits";
+import { GiftPlansPanel } from "@/features/superadmin/components/GiftPlansPanel";
+import { PlanFolders, PlanPeopleFolders } from "@/features/superadmin/components/ai-usage/PlanFolders";
 import { useCurrentUser } from "@/features/auth/queries/useCurrentUser";
 import { useQuery } from "@tanstack/react-query";
 import { apiClient } from "@/lib/apiClient";
 import { GlobalAiConfigPanel } from "@/features/superadmin/components/GlobalAiConfigPanel";
 import { PlanConfigPanel } from "@/features/superadmin/components/PlanConfigPanel";
-import { ResetOrganizationDailyLimit } from "@/features/superadmin/components/ResetOrganizationDailyLimit";
-import { EditOrganizationDailyLimit } from "@/features/superadmin/components/EditOrganizationDailyLimit";
-import { BlockOrganizationAiUsage } from "@/features/superadmin/components/BlockOrganizationAiUsage";
 import { 
   useGlobalAiStats, 
-  useAiUsageOrgs, 
   useAiOrgDetail, 
   useAiOrgUsers,
   useAiUserDetail,
@@ -73,9 +70,8 @@ import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip,
 const COLORS = ['#3b82f6', '#8b5cf6', '#10b981', '#f59e0b', '#ef4444', '#ec4899'];
 
 interface PathState {
-  orgId?: string;
-  orgName?: string;
-  role?: string;
+  plan?: string;
+  planName?: string;
   userId?: string;
   userName?: string;
 }
@@ -153,7 +149,7 @@ export function AiUsageDashboardPage() {
   const [orgTypeFilter, setOrgTypeFilter] = useState("all");
   const [dateFilter, setDateFilter] = useState<Date | undefined>();
   const [selectedGlobalOrgId, setSelectedGlobalOrgId] = useState<string>("all");
-  const [isGlobalGrantCreditsOpen, setIsGlobalGrantCreditsOpen] = useState(false);
+  const [isGiftPlansOpen, setIsGiftPlansOpen] = useState(false);
   const [isOrgGrantCreditsOpen, setIsOrgGrantCreditsOpen] = useState(false);
 
   const [chatsTime, setChatsTime] = useState<"daily" | "weekly" | "monthly">("daily");
@@ -195,9 +191,6 @@ export function AiUsageDashboardPage() {
     };
   }, [queryClient]);
   
-  const resetOrgMutation = useResetOrgUsage();
-  const blockOrgMutation = useBlockAiOrg();
-  const updateLimitsMutation = useUpdateOrgAiLimits();
 
   const { data: globalUsersFallback } = useQuery({
     queryKey: ["global-users-fallback"],
@@ -233,11 +226,6 @@ export function AiUsageDashboardPage() {
 
   const { data: globalGrantedCredits, isLoading: loadingGrantedCredits } = useGlobalGrantedCredits();
 
-  const { data: orgTrendStats } = useGlobalAiStats(
-    path.orgId,
-    selectedMonth,
-    selectedYear
-  );
 
   const getAggregatedData = (data: any[], type: "daily"| "weekly"| "monthly") => {
     if (!data) return [];
@@ -270,17 +258,9 @@ export function AiUsageDashboardPage() {
     });
     return Object.values(aggregated);
   };
-  const { data: orgs, isLoading: orgsLoading } = useAiUsageOrgs();
 
-  const { data: orgDetail, isLoading: orgDetailLoading } = useAiOrgDetail(path.orgId || "");
-  const { data: orgUsers, isLoading: orgUsersLoading } = useAiOrgUsers(path.orgId || "");
   const { data: userDetail, isLoading: userDetailLoading } = useAiUserDetail(path.userId || "");
 
-  const handleNavigateUp = (level: "root" | "org" | "role") => {
-    if (level === "root") setPath({});
-    else if (level === "org") setPath({ orgId: path.orgId, orgName: path.orgName });
-    else if (level === "role") setPath({ orgId: path.orgId, orgName: path.orgName, role: path.role });
-  };
 
   
 
@@ -319,7 +299,7 @@ export function AiUsageDashboardPage() {
 
     return (
       <div className="space-y-6 mb-8">
-        <div className="grid gap-4 md:grid-cols-4">
+        <div className="grid gap-4 md:grid-cols-3">
           <Card>
             <CardContent className="p-6 flex flex-col items-center text-center">
               <Cpu className="h-8 w-8 text-blue-500 mb-3" />
@@ -336,13 +316,6 @@ export function AiUsageDashboardPage() {
           </Card>
           <Card>
             <CardContent className="p-6 flex flex-col items-center text-center">
-              <Building className="h-8 w-8 text-emerald-500 mb-3" />
-              <div className="text-3xl font-bold">{formatNumber(orgs?.length || 0)}</div>
-              <div className="text-sm text-muted-foreground mt-1">Active Organizations</div>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardContent className="p-6 flex flex-col items-center text-center">
               <HardDrive className="h-8 w-8 text-amber-500 mb-3" />
               <div className="text-3xl font-bold">{formatNumber(totalChats || 0)}</div>
               <div className="text-sm text-muted-foreground mt-1">Total Chat Sessions</div>
@@ -350,30 +323,26 @@ export function AiUsageDashboardPage() {
           </Card>
         </div>
 
-        {/* Global Limits & Grant Credits */}
-        <GlobalAiConfigPanel 
-          grantCreditsNode={
-            <div className="border border-border rounded-xl shadow-sm bg-card flex flex-col justify-between">
-              <div className="p-5">
-                <h3 className="text-lg font-semibold text-foreground tracking-tight">Grant Global Credits</h3>
-                <p className="text-sm text-muted-foreground mt-1">
-                  Open the AI Hub Panel to securely grant tokens across all organizations.
-                </p>
-              </div>
-              <div className="p-4 bg-muted/20 border-t border-border flex items-center justify-end">
-                <Button variant="outline" onClick={() => setIsGlobalGrantCreditsOpen(true)}>
-                  <LayoutTemplate className="w-4 h-4 mr-2" />
+        {/* Settings beside the plans */}
+        <GlobalAiConfigPanel />
+
+        {/* Gift plans to many people at once, each with their own plan */}
+        <div className="border border-border rounded-xl shadow-sm bg-card flex flex-col justify-between">
+          <div className="p-5">
+            <h3 className="text-lg font-semibold text-foreground tracking-tight">Gift Plans</h3>
+            <p className="text-sm text-muted-foreground mt-1">Give Pro or Max to many people at once. Use Add Separate to give each person a different plan.</p>
+          </div>
+          <div className="p-4 bg-muted/20 border-t border-border flex items-center justify-end">
+            <Button variant="outline" onClick={() => setIsGiftPlansOpen(true)}>
+              <LayoutTemplate className="w-4 h-4 mr-2" />
+              Open Gift Plans Panel
+            </Button>
+          </div>
+        </div>
+        <GiftPlansPanel isOpen={isGiftPlansOpen} onClose={() => setIsGiftPlansOpen(false)} />
 
         {/* The plans: Free, Pro, Max, Enterprise (every limit editable, with the on/off switch) */}
         <PlanConfigPanel />
-                  Open Global Grant Panel
-                </Button>
-              </div>
-            </div>
-          }
-        />
-
-
 
         <div className="flex flex-col space-y-6">
           {/* Bar Chart 1: Daily AI Requests */}
@@ -559,84 +528,6 @@ export function AiUsageDashboardPage() {
             </CardContent>
           </Card>
 
-          {/* Bar Chart 5: Active Organizations */}
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between pb-2">
-              <CardTitle>Active Organizations</CardTitle>
-              <Select value={orgsTime} onValueChange={setOrgsTime as any}>
-                <SelectTrigger className="w-[120px]">
-                  <SelectValue placeholder="Daily" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="daily">Daily</SelectItem>
-                  <SelectItem value="weekly">Weekly</SelectItem>
-                  <SelectItem value="monthly">Monthly</SelectItem>
-                </SelectContent>
-              </Select>
-            </CardHeader>
-            <CardContent>
-              <div className="h-[300px] w-full">
-                <ResponsiveContainer width="100%" height="100%">
-                  <BarChart data={getAggregatedData(usageTrend, orgsTime)} barCategoryGap="30%" margin={{ top: 10, right: 10, left: 10, bottom: 0 }}>
-                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="currentColor" className="opacity-10" />
-                    <XAxis 
-                      dataKey="date" 
-                      stroke="currentColor" 
-                      className="text-xs opacity-50" 
-                      tickLine={false} 
-                      axisLine={false}
-                      minTickGap={15}
-                      tickFormatter={(value) => {
-                        const date = parseLocalDate(value);
-                        return isNaN(date.getTime()) ? value : date.toLocaleDateString("en-US", { month: "short", day: "numeric" });
-                      }}
-                    />
-                    <YAxis stroke="currentColor" className="text-xs opacity-50" tickLine={false} axisLine={false} />
-                    <RechartsTooltip cursor={{ fill: 'currentColor', opacity: 0.05 }} content={({ active, payload, label }) => {
-                        if (active && payload && payload.length) {
-                            const data = payload[0].payload;
-                            const ids = [...new Set(data.activeOrgsList || [])];
-                            
-                            return (
-                              <div className="bg-background border border-border rounded-lg shadow-sm p-3 text-sm flex flex-col gap-2 z-50 min-w-[220px]">
-                                <span className="font-medium text-foreground">{label}</span>
-                                <div className="text-xs text-muted-foreground mb-1">Active Organizations: {data.activeOrgs}</div>
-                                {ids.length === 0 ? <div className="text-xs text-muted-foreground italic">No organizations active</div> : null}
-                                <div className="space-y-2 max-h-[150px] overflow-y-auto pr-2">
-                                    {ids.slice(0, 10).map((id: any) => {
-                                       const org = orgsBreakdown?.find((o: any) => o.orgId === id);
-                                       if (!org) return null;
-                                       return (
-                                         <div key={id} className="flex flex-col space-y-1 mb-2 border-b border-border/50 pb-2 last:border-0 last:pb-0">
-                                            <div className="flex items-center space-x-2">
-                                                {org.logo ? (
-                                                    <img src={org.logo} alt={org.name} className="h-5 w-5 rounded object-cover" />
-                                                ) : (
-                                                    <div className="h-5 w-5 rounded bg-primary/10 flex items-center justify-center text-primary text-[10px] font-bold">
-                                                        {org.name?.substring(0, 2).toUpperCase()}
-                                                    </div>
-                                                )}
-                                                <span className="truncate font-medium text-xs text-foreground">Org: {org.name}</span>
-                                            </div>
-                                            <span className="text-[10px] text-muted-foreground font-mono">Org ID: {org.orgId}</span>
-                                         </div>
-                                       );
-                                    })}
-                                    {ids.length > 10 && <div className="text-xs text-muted-foreground italic">+{ids.length - 10} more...</div>}
-                                </div>
-                              </div>
-                            );
-                        }
-                        return null;
-                    }} />
-                    <Bar dataKey="activeOrgs" name="Active Organizations" fill="#2563eb" radius={[2, 2, 0, 0]} maxBarSize={12} />
-                                      <ReferenceLine x={getTodayStr()} stroke="#22c55e" strokeWidth={2} strokeDasharray="4 4" />
-                  </BarChart>
-                </ResponsiveContainer>
-              </div>
-            </CardContent>
-          </Card>
-
           {/* Bar Chart 5: Active Users */}
           <Card>
             <CardHeader className="flex flex-row items-center justify-between pb-2">
@@ -726,21 +617,9 @@ export function AiUsageDashboardPage() {
 
           {/* Breakdowns Row */}
           {/* The Top Organizations and Top Users cards have been removed as requested */}
-          <ModelUsageSection orgs={orgs?.map((o: any) => ({ id: o.id, name: o.name }))} />
+          <ModelUsageSection />
 
-          <GrantCreditsModal 
-            isOpen={isGlobalGrantCreditsOpen} 
-            onClose={() => setIsGlobalGrantCreditsOpen(false)}
-            isOrgMode={true}
-            orgs={orgs?.map((org: any) => ({
-              id: org.id,
-              name: org.adminName || org.name,
-              orgName: org.name,
-              email: org.adminEmail || getFallbackAdminEmail(org.id) || "",
-              role: org.id,
-              avatar: org.logo || getFallbackOrgLogo(org.id) || (org.id === "classgrid" ? currentUser?.platformLogo || currentUser?.profilePicture : "")
-            })) || []}
-          />
+
 
 
         </div>
@@ -749,326 +628,37 @@ export function AiUsageDashboardPage() {
   };
 
   
-  const getFilteredOrgs = () => {
-    if (!orgs) return [];
-    return orgs.filter((org: any) => {
-      const name = org.name || org.orgName || "";
-      const matchesSearch = name.toLowerCase().includes(searchQuery.toLowerCase());
-      const matchesType = orgTypeFilter === "all" || org.type === orgTypeFilter;
-      return matchesSearch && matchesType;
-    });
-  };
-
-  const renderLevel0Orgs = () => {
-    if (orgsLoading) return <Skeleton className="h-64 w-full" />;
-    const filteredOrgs = getFilteredOrgs();
-    if (!filteredOrgs || filteredOrgs.length === 0) return <div className="text-center py-12 text-muted-foreground">No organizations found using AI.</div>;
-
-    return (
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-lg">Organizations ({filteredOrgs.length})</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-4">
-            {filteredOrgs.map((org: any) => (
-              <FolderIcon
-                key={org.id}
-                label={org.name}
-                subtitle={`${formatNumber(org.totalUsage || 0)} Credits`}
-                badge={org.isBlocked ? "BLOCKED" : 0}
-                icon={Building}
-                onClick={() => setPath({ orgId: org.id, orgName: org.name })}
-              />
-            ))}
-          </div>
-        </CardContent>
-      </Card>
-    );
-  };
-
-    const renderLevel1Roles = () => {
-    if (orgDetailLoading || orgUsersLoading) return <Skeleton className="h-64 w-full" />;
-
-    const isOrgBlocked = orgDetail?.isBlocked;
-
-    return (
-      <div className="space-y-6">
-        <AiUsageTrendsChart data={orgTrendStats?.usageTrend} />
-        
-        <AiUsageBar 
-          showExactTokens={true}
-          initialData={{
-            type: 'pro',
-            used: orgDetail?.poolUsed ?? 0,
-            limit: orgDetail?.poolLimit ?? 0,
-            remaining: Math.max(0, (orgDetail?.poolLimit ?? 0) - (orgDetail?.poolUsed ?? 0)),
-            freeData: {
-              used: orgDetail?.userWeeklyUsed ?? 0,
-              limit: orgDetail?.userWeeklyLimit ?? 0,
-              remaining: Math.max(0, (orgDetail?.userWeeklyLimit ?? 0) - (orgDetail?.userWeeklyUsed ?? 0))
-            }
-          }}
-        />
-        <TopAiUsersTable users={orgUsers?.flatMap((roleGroup: any) => roleGroup.users?.map((u: any) => ({ 
-          ...u, 
-          role: u.role || roleGroup.roleName,
-          profilePicture: u.profilePicture || getFallbackPhoto(u.email) || (u.id === currentUser?._id ? (currentUser?.profilePicture || currentUser?.platformLogo) : null)
-        }))) || []} />
-        <SetupUsageCredits 
-          orgId={path.orgId || ""} 
-          orgName={path.orgName || ""} 
-          currentPoolLimit={orgDetail?.poolLimit ?? 0} 
-          currentUserWeeklyLimit={orgDetail?.userWeeklyLimit ?? 0}
-          currentImageLimit={orgDetail?.imageLimit ?? 0}
-          currentWhatsappLimit={orgDetail?.whatsappLimit ?? 0}
-          currentResetPeriods={orgDetail?.resetPeriods}
-          customLimitsEnabled={orgDetail?.customLimitsEnabled ?? false}
-        />
-
-        <div className="border border-border rounded-xl shadow-sm bg-card">
-          <div className="p-6 flex flex-col gap-6">
-            <div className="flex flex-col gap-1.5">
-              <h3 className="text-lg font-semibold text-foreground tracking-tight">
-                Grant Organization Credits
-              </h3>
-              <p className="text-sm text-muted-foreground">
-                Open the AI Hub Panel to securely grant tokens to {path.orgName}.
-              </p>
-            </div>
-          </div>
-          <div className="p-4 bg-muted/20 border-t border-border flex items-center justify-end">
-            <Button variant="outline" onClick={() => setIsOrgGrantCreditsOpen(true)}>
-              <LayoutTemplate className="w-4 h-4 mr-2" />
-              Open Grant Credits Panel
-            </Button>
-          </div>
-        </div>
-
-        <ResetOrganizationDailyLimit orgId={path.orgId || ""} orgName={path.orgName || ""} />
-
-        <EditOrganizationDailyLimit 
-          orgId={path.orgId || ""} 
-          orgName={path.orgName || ""} 
-          currentPoolLimit={orgDetail?.poolLimit} 
-          currentUserWeeklyLimit={orgDetail?.userWeeklyLimit} 
-        />
-
-        <BlockOrganizationAiUsage orgId={path.orgId || ""} orgName={path.orgName || ""} isBlocked={isOrgBlocked} />
-
-        <GrantCreditsModal 
-          isOpen={isOrgGrantCreditsOpen} 
-          onClose={() => setIsOrgGrantCreditsOpen(false)}
-          orgs={orgUsers?.flatMap((role: any) => role.users.map((u: any) => ({
-            id: u.id,
-            name: u.name,
-            orgName: path.orgName || "",
-            email: u.email,
-            role: formatRoleLabel(u.role || role.roleName || "User"),
-            avatar: u.profilePicture || getFallbackPhoto(u.email) || (u.id === currentUser?._id ? (currentUser?.profilePicture || currentUser?.platformLogo) : null)
-          }))) || []}
-        />
-
-        {renderGlobalGrantedCredits()}
-
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-lg">{path.orgName} — Usage Roles</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4">
-              {orgUsers?.map((roleGroup: any) => (
-                <FolderIcon
-                  key={roleGroup.roleName}
-                  label={formatRoleLabel(roleGroup.roleName)}
-                  subtitle={`${roleGroup.userCount} users • ${formatNumber(roleGroup.totalUsage || 0)} Credits`}
-                  badge={roleGroup.userCount}
-                  icon={Shield}
-                  onClick={() => setPath({ ...path, role: roleGroup.roleName })}
-                />
-              ))}
-            </div>
-          </CardContent>
-        </Card>
-      </div>
-    );
-  };
-
-  const renderLevel2Users = () => {
-    if (orgUsersLoading) return <Skeleton className="h-64 w-full" />;
-    
-    const roleGroup = orgUsers?.find((r: any) => r.roleName === path.role);
-    const usersInRole = roleGroup ? roleGroup.users : [];
-
-    return (
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-lg">{formatRoleLabel(path.role)} Users ({usersInRole.length})</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-4">
-            {usersInRole.map((user: any) => (
-              <FolderIcon
-                key={user.id}
-                label={user.name || user.email}
-                subtitle={`${formatNumber(user.totalUsage || 0)} Credits`}
-                badge={user.isBlocked ? "BLOCKED" : 0}
-                icon={UserIcon}
-                onClick={() => setPath({ ...path, userId: user.id, userName: user.name || user.email })}
-              />
-            ))}
-          </div>
-        </CardContent>
-      </Card>
-    );
-  };
-
   const renderLevel3UserDetail = () => {
     if (userDetailLoading) return <Skeleton className="h-96 w-full" />;
     return <AiUserDetailPanel userDetail={userDetail} />;
-  };
-
-  const renderGlobalGrantedCredits = () => {
-    if (loadingGrantedCredits) return <Skeleton className="h-64 w-full" />;
-    if (!globalGrantedCredits || globalGrantedCredits.length === 0) return null;
-    const orgCredits = globalGrantedCredits.filter((c: any) => c.orgId === path.orgId);
-    if (orgCredits.length === 0) return null;
-    
-    return (
-      <Card className="mt-8">
-        <CardHeader>
-          <CardTitle className="text-lg text-purple-500">Active Granted Credits</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <DataTable 
-            columns={[
-              {
-                key: "user",
-                header: "User",
-                width: "w-[30%]",
-                render: (_: any, row: any) => (
-                  <div className="flex items-center gap-3 cursor-pointer" onClick={() => setPath({ orgId: row.orgId, orgName: "Org", role: "all", userId: row.id, userName: row.name })}>
-                    <img src={getFallbackPhoto(row.email) || row.avatar || `https://ui-avatars.com/api/?name=${encodeURIComponent(row.name)}&background=random`} alt={row.name} className="w-8 h-8 rounded-full" />
-                    <div className="flex flex-col">
-                      <span className="font-medium hover:underline text-primary">{row.name}</span>
-                      <span className="text-xs text-muted-foreground">{row.email}</span>
-                    </div>
-                  </div>
-                )
-              },
-              {
-                key: "credits",
-                header: "Credits",
-                width: "w-[30%]",
-                render: (_: any, row: any) => (
-                  <div className="flex flex-col">
-                    <span className="font-medium text-foreground">{formatNumber(row.used)} / {formatNumber(row.granted)}</span>
-                    <span className="text-xs text-muted-foreground">{Math.round((row.used / row.granted) * 100)}% Used</span>
-                  </div>
-                )
-              },
-              {
-                key: "status",
-                header: "Status",
-                width: "w-[20%]",
-                render: (_: any, row: any) => {
-                  const isExpired = row.expirationDate && new Date(row.expirationDate).getTime() < Date.now();                  const isRevoked = row.isRevoked;
-
-                  let statusLabel = "ACTIVE";
-                  let statusClass = "bg-green-500/10 text-green-500";
-
-                  if (isRevoked) {
-                    statusLabel = "REVOKED";
-                    statusClass = "bg-red-500/10 text-red-500";
-                  } else if (row.isPaused) {
-                    statusLabel = "PAUSED";
-                    statusClass = "bg-amber-500/10 text-amber-500";
-                  } else if (isExpired) {
-                    statusLabel = "EXPIRED";
-                    statusClass = "bg-red-500/10 text-red-500";
-                  }
-
-                  return (
-                    <span className={`inline-flex px-2 py-0.5 rounded-full text-xs font-medium ${statusClass}`}>
-                      {statusLabel}
-                    </span>
-                  );
-                }
-              },
-              {
-                key: "dates",
-                header: "Dates",
-                width: "w-[20%]",
-                render: (_: any, row: any) => (
-                  <div className="flex flex-col text-xs text-muted-foreground">
-                    <span>Starts: {row.startDate ? new Date(row.startDate).toLocaleDateString() : "N/A"}</span>
-                    <span>Expires: {row.expirationDate ? new Date(row.expirationDate).toLocaleDateString() : "N/A"}</span>
-                  </div>
-                )
-              }
-            ]}
-            rows={orgCredits}
-            emptyMessage="No active granted credits."
-          />
-        </CardContent>
-      </Card>
-    );
   };
 
   return (
     <div className="flex-1 space-y-4 p-8 pt-6">
       <PageBreadcrumbs
         items={[
-          { label: "AI Usage & Credits", onClick: () => handleNavigateUp("root") },
-          ...(path.orgName ? [{ label: path.orgName, onClick: () => handleNavigateUp("org") }] : []),
-          ...(path.role ? [{ label: formatRoleLabel(path.role), onClick: () => handleNavigateUp("role") }] : []),
+          { label: "AI Usage & Credits", onClick: () => setPath({}) },
+          ...(path.planName ? [{ label: path.planName, onClick: () => setPath({ plan: path.plan, planName: path.planName }) }] : []),
           ...(path.userName ? [{ label: path.userName }] : [])
-        ]}
+        ] as any}
       />
 
       <div className="flex justify-end gap-2">
-        {!path.orgId && (
+        {!path.plan && (
           <Link to="/superadmin/ai-usage/models" className="inline-flex items-center gap-2 rounded-full border border-border px-3 py-1 text-[13px] font-medium text-foreground hover:bg-muted transition-colors">
             Models
           </Link>
         )}
-        <span className={`inline-flex items-center gap-2 rounded-full border px-3 py-1 text-[13px] font-medium ${live ? "border-emerald-500/30 text-emerald-700 dark:text-emerald-400" : "border-border text-muted-foreground"}`}>
-          <span className={`h-2 w-2 rounded-full ${live ? "bg-emerald-500 animate-pulse" : "bg-muted-foreground/50"}`} />
+        <span className={`inline-flex items-center gap-2 rounded-full border px-3 py-1 text-[13px] font-medium ${live ? "border-blue-500/30 text-blue-700 dark:text-blue-400" : "border-border text-muted-foreground"}`}>
+          <span className={`h-2 w-2 rounded-full ${live ? "bg-blue-500 animate-pulse" : "bg-muted-foreground/50"}`} />
           {live ? "Live" : "Connecting…"}
         </span>
       </div>
 
-      {!path.orgId && renderGlobalStats()}
-
-      {!path.orgId && renderLevel0Orgs()}
-
-      {path.orgId && !path.role && renderLevel1Roles()}
-      {path.orgId && path.role && !path.userId && renderLevel2Users()}
+      {!path.plan && !path.userId && renderGlobalStats()}
+      {!path.plan && !path.userId && <PlanFolders onOpen={(plan, planName) => setPath({ plan, planName })} />}
+      {path.plan && !path.userId && <PlanPeopleFolders plan={path.plan} planName={path.planName || ""} onOpen={(userId, userName) => setPath({ ...path, userId, userName })} />}
       {path.userId && renderLevel3UserDetail()}
-
-      {/* Organization Level Action Dialogs */}
-      <DangerConfirmDialog
-        open={showOrgReset}
-        onOpenChange={setShowOrgReset}
-        title="Reset Organization Limit?"
-        description="This will reset the total usage counter for this organization back to 0."
-        onConfirm={() => {
-            resetOrgMutation.mutate(path.orgId || "");
-            setShowOrgReset(false);
-        }}
-        confirmText="Reset Limit"
-      />
-      <DangerConfirmDialog
-        open={showOrgBlock}
-        onOpenChange={setShowOrgBlock}
-        title={orgDetail?.isBlocked ? "Unblock Organization?" : "Block Organization?"}
-        description={orgDetail?.isBlocked ? "Unblocking will allow all users in this org to use AI again." : "Blocking will immediately prevent all users in this org from using AI features."}
-        onConfirm={() => {
-            blockOrgMutation.mutate({ orgId: path.orgId || "", blocked: !orgDetail?.isBlocked });
-            setShowOrgBlock(false);
-        }}
-        confirmText={orgDetail?.isBlocked ? "Unblock" : "Block"}
-      />
     </div>
   );
 }

@@ -75,7 +75,7 @@ interface PremiumNoteEditorProps {
   placeholder?: string;
 }
 
-export function PremiumNoteEditor({ content, onChange, placeholder = "Start writing your note in Markdown" }: PremiumNoteEditorProps) {
+export function PremiumNoteEditor({ content, onChange, placeholder = "Start writing your note in Markdown..." }: PremiumNoteEditorProps) {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   const insertMarkdown = (prefix: string, suffix: string = "") => {
@@ -124,7 +124,7 @@ export function PremiumNoteEditor({ content, onChange, placeholder = "Start writ
   );
 
   return (
-    <div className="flex flex-col w-full min-h-[500px] border rounded-xl overflow-hidden bg-card focus-within:ring-1 focus-within:ring-foreground/30 transition-shadow">
+    <div className="flex flex-col w-full min-h-[500px] border rounded-xl overflow-hidden bg-card focus-within:ring-1 focus-within:ring-emerald-500/50 transition-shadow">
       
       {/* Markdown Toolbar */}
       <div className="flex flex-wrap items-center gap-1 p-1.5 border-b bg-muted/30 shrink-0">

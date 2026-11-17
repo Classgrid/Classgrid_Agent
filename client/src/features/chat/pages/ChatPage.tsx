@@ -1133,13 +1133,15 @@ function ChatPageInner() {
     }
   };
 
+  const isOrgAdmin = ['super_admin', 'org_admin', 'hod', 'principal', 'vice_principal', 'exam_controller', 'fee_manager', 'admission_head'].includes(currentUser?.role || '');
   const isSuperAdmin = currentUser?.role === 'super_admin';
+  const isFaculty = ['faculty', 'teacher', 'hod', 'principal', 'vice_principal'].includes(currentUser?.role || '');
   const isAdmin = activeThread?.myRole === 'admin' || isSuperAdmin;
 
-  // A group set to "Only Admins" (or the old ERP setting "admins and faculty", which now means the same) takes
-  // messages from its admins only
-  const isInputDisabled = activeThread?.type === "group" && !isAdmin &&
-    (activeThread.sendMessagesPolicy === "admin_only" || activeThread.sendMessagesPolicy === "admin_faculty");
+  const isInputDisabled = activeThread?.type === "group" && (
+    (activeThread.sendMessagesPolicy === "admin_only" && !isAdmin) ||
+    (activeThread.sendMessagesPolicy === "admin_faculty" && !isAdmin && !isFaculty)
+  );
 
   // -- Layout --
   return (
@@ -1199,7 +1201,7 @@ function ChatPageInner() {
       </div>
 
       {/* Main Conversation Panel */}
-      <div className={`${!activeThread && !showBlocked ? "hidden md:flex" : "flex"} flex-1 flex-col min-w-0 min-h-0 h-full overflow-hidden bg-background relative`}>
+      <div className={`${!activeThread && !showBlocked ? "hidden lg:flex" : "flex"} flex-1 flex-col min-w-0 min-h-0 h-full overflow-hidden bg-background relative`}>
         {showBlocked && (
           <BlockedContactsView blocked={blocked} onUnblock={unblock} onClose={() => setShowBlocked(false)} />
         )}
@@ -1453,7 +1455,7 @@ function ChatPageInner() {
               </div>
             ) : isInputDisabled ? (
               <div className="p-4 bg-background border-t border-border flex items-center justify-center text-sm text-muted-foreground">
-                Only group admins can send messages
+                Only {activeThread?.sendMessagesPolicy === 'admin_faculty' ? 'admins and faculty' : 'admins'} can send messages
               </div>
             ) : (
               <ChatInput
@@ -1489,7 +1491,7 @@ function ChatPageInner() {
             </div>
           </>
         ) : (
-          <div className="hidden md:flex flex-1 flex-col items-center justify-center text-center p-8 bg-background relative overflow-hidden">
+          <div className="hidden lg:flex flex-1 flex-col items-center justify-center text-center p-8 bg-background relative overflow-hidden">
             <style>{`
               @keyframes cg-float { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-8px); } }
               @keyframes cg-grid-in { from { opacity: 0; } to { opacity: 1; } }
@@ -1655,8 +1657,10 @@ function ChatPageInner() {
                   role: selectedUserForProfile.role,
                   profilePicture: selectedUserForProfile.profilePicture || selectedUserForProfile.photoURL || "",
                   profileBanner: selectedUserForProfile.profileBanner || "",
+                  prn: selectedUserForProfile.prn,
                   bio: selectedUserForProfile.bio,
-                  // (no PRN or organization: those were the ERP's, and a contact's profile here is the person's own)
+                  organization_name: selectedUserForProfile.organization_name,
+                  organization_logo: selectedUserForProfile.organization_logo,
                   metadata: selectedUserForProfile.metadata,
                   forumUsername: selectedUserForProfile.forumUsername,
                   lastLoginAt: selectedUserForProfile.lastLoginAt,

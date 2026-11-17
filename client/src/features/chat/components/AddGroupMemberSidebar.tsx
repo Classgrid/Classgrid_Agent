@@ -230,7 +230,7 @@ export function AddGroupMemberSidebar({
                           )}
                         </div>
                         {isSelected && (
-                          <div className="absolute -bottom-1 -right-1 w-5 h-5 bg-primary text-primary-foreground rounded-full flex items-center justify-center border-2 border-background shadow-sm">
+                          <div className="absolute -bottom-1 -right-1 w-5 h-5 bg-emerald-500 text-white rounded-full flex items-center justify-center border-2 border-background shadow-sm">
                             <Check className="w-3 h-3" />
                           </div>
                         )}
@@ -240,7 +240,7 @@ export function AddGroupMemberSidebar({
                           {user.name}
                         </p>
                         <p className="text-[13px] text-muted-foreground truncate">
-                          {user.role === 'super_admin' ? 'Classgrid Staff' : user.metadata?.job_role ? user.metadata.job_role : user.role ? user.role.charAt(0).toUpperCase() + user.role.slice(1) : ''}
+                          {user.role === 'super_admin' ? 'Classgrid Staff' : user.role === 'org_admin' ? 'Organization Admin' : user.metadata?.job_role ? user.metadata.job_role : user.role ? user.role.charAt(0).toUpperCase() + user.role.slice(1) : ''}
                         </p>
                       </div>
                     </button>
@@ -264,10 +264,10 @@ export function AddGroupMemberSidebar({
               <button
                 onClick={handleAdd}
                 disabled={isSubmitting}
-                className="w-full flex items-center justify-center gap-2 py-3 bg-primary hover:bg-primary/90 text-primary-foreground rounded-lg font-bold shadow-lg transition-colors disabled:opacity-70 disabled:cursor-not-allowed"
+                className="w-full flex items-center justify-center gap-2 py-3 bg-emerald-500 hover:bg-emerald-600 text-white rounded-lg font-bold shadow-lg transition-colors disabled:opacity-70 disabled:cursor-not-allowed"
               >
                 {isSubmitting ? (
-                  <Spinner className="w-5 h-5 text-primary-foreground" />
+                  <Spinner className="w-5 h-5 text-white" />
                 ) : (
                   <>
                     <Check className="w-5 h-5" />

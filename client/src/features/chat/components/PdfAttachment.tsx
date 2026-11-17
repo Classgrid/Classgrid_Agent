@@ -143,7 +143,7 @@ export function PdfAttachment({ url, filename, size, isSending, uploadProgress, 
           <button 
             type="button"
             onClick={onOpen}
-            className="text-blue-600 hover:text-blue-500 dark:text-blue-400 dark:hover:text-blue-300 text-[14px] font-medium transition-colors"
+            className="text-emerald-500 hover:text-emerald-400 text-[14px] font-medium transition-colors"
           >
             Open
           </button>
@@ -152,7 +152,7 @@ export function PdfAttachment({ url, filename, size, isSending, uploadProgress, 
             href={url} 
             target="_blank" 
             rel="noopener noreferrer"
-            className="text-blue-600 hover:text-blue-500 dark:text-blue-400 dark:hover:text-blue-300 text-[14px] font-medium transition-colors"
+            className="text-emerald-500 hover:text-emerald-400 text-[14px] font-medium transition-colors"
           >
             Open
           </a>
@@ -160,9 +160,9 @@ export function PdfAttachment({ url, filename, size, isSending, uploadProgress, 
         <a 
           href={url} 
           download={filename}
-          className="text-blue-600 hover:text-blue-500 dark:text-blue-400 dark:hover:text-blue-300 text-[14px] font-medium transition-colors"
+          className="text-emerald-500 hover:text-emerald-400 text-[14px] font-medium transition-colors"
         >
-          Download
+          Save as...
         </a>
       </div>
       
