@@ -1216,6 +1216,8 @@ const HELPER_REPORT_NOTE = "\n\nWho reads your work: only the main AI that start
 // a result (llm-stream.js, llm-stream-anthropic.js) and five full reports are a little more than that, so the last
 // one was cut and still marked as given. A report that does not fit whole is left for the next check_helpers call.
 const HELPER_RESULT_ROOM = 190000;
+// How long one try of a helper may work before its tools say "time is up" and it writes its report
+const HELPER_TRY_MS = 5 * 60 * 60 * 1000;
 
 // The files finished helpers changed, in the same "FILES CHANGED IN PROJECT:" list a code run gives, so the
 // chat's "files changed" box counts helpers' work too
@@ -4453,7 +4455,10 @@ You work on the user's own Windows computer through their Classgrid desktop app,
                                         emitHelper({ helper: i, state: "restart" }); // a retry starts its report again
                                         h.live = "";
                                         h.nowModel = model; // (the Agent map shows the model working now)
-                                        deadline = Date.now() + (h.canEdit || hasBrowser ? 12 : 4) * 60 * 1000;
+                                        // (5 hours a try for every helper (owner, 2026-11-17: "remove that limit, add 5 hours"). It was 12
+                                        // minutes for a helper that edits or browses and 4 for one that reads: a helper writing and testing
+                                        // a 3,000-line program ran out before its speed test)
+                                        deadline = Date.now() + HELPER_TRY_MS;
                                         const helperArgs = {
                                             messages: [{ role: "system", content: system }, { role: "user", content: task }],
                                             tools: defs,
