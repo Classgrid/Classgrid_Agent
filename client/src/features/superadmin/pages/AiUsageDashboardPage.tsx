@@ -49,7 +49,6 @@ import { useCurrentUser } from "@/features/auth/queries/useCurrentUser";
 import { useQuery } from "@tanstack/react-query";
 import { apiClient } from "@/lib/apiClient";
 import { GlobalAiConfigPanel } from "@/features/superadmin/components/GlobalAiConfigPanel";
-import { PlanConfigPanel } from "@/features/superadmin/components/PlanConfigPanel";
 import { 
   useGlobalAiStats, 
   useAiOrgDetail, 
@@ -340,9 +339,6 @@ export function AiUsageDashboardPage() {
           </div>
         </div>
         <GiftPlansPanel isOpen={isGiftPlansOpen} onClose={() => setIsGiftPlansOpen(false)} />
-
-        {/* The plans: Free, Pro, Max, Enterprise (every limit editable, with the on/off switch) */}
-        <PlanConfigPanel />
 
         <div className="flex flex-col space-y-6">
           {/* Bar Chart 1: Daily AI Requests */}
