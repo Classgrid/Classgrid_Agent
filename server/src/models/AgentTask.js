@@ -35,6 +35,10 @@ const agentTaskSchema = new mongoose.Schema({
   ended_by_ai_at: { type: Date, default: null },
   // When the task began (a call task: when the call started); its chat only sees emails from this time on
   started_at: { type: Date, default: null },
+  // A task from a call: the minutes of work its plan gives it (ms; null = no limit) and the ms its runs used so far
+  // (services/call-limits.service.js; owner, 2026-11-17). Sleeping and waiting for the user do not count.
+  work_cap_ms: { type: Number, default: null },
+  work_ms: { type: Number, default: 0 },
 }, { timestamps: true });
 
 agentTaskSchema.index({ phone: 1, updatedAt: -1 });

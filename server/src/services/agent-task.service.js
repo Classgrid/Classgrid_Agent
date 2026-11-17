@@ -39,7 +39,8 @@ import AiUsageLog from "../models/AiUsageLog.js";
 import redis from "../config/redis.js";
 import { normalizeWhatsappNumber } from "./ai-feature-limits.js";
 import { hasEnoughTokens, deductTokens, limitBackAt, planWording } from "./ai-credits.service.js";
-import { taskPausedLimitText } from "./email-templates.service.js";
+import { taskPausedLimitText, callTaskTimeUpText } from "./email-templates.service.js";
+import { workLeftMs, workClock } from "./call-limits.service.js";
 import { chargeableTokens } from "./ai-token-pricing.js";
 import { noteMessagesRead, messagesByIds, messagesSince, readUpTo } from "./whatsapp-inbox.service.js";
 import {
@@ -256,12 +257,14 @@ export async function endTaskFromTool({ sessionId, summary }) {
 
 // A call's task gets its record when its work starts: older open tasks of the number are closed, and the WhatsApp
 // messages the user sent since the call started are put in the new task's record
-export async function startCallTask({ user, phone, question, sessionId, callStartedAt, projectId = null, projectName = null }) {
+// workCapMs: the minutes of work (ms) the caller's plan gives a task from a call (null = no limit)
+export async function startCallTask({ user, phone, question, sessionId, callStartedAt, projectId = null, projectName = null, workCapMs = null }) {
     const number = normalizeWhatsappNumber(phone) || null;
     const task = await AgentTask.create({
         user_id: user._id, organization_id: user.organization_id || null, phone: number, session_id: sessionId || null,
         // The task works inside this Project Mode project (every wake-up opens it)
         project_id: projectId ? String(projectId) : null, project_name: projectName || null,
+        work_cap_ms: Number(workCapMs) > 0 ? Number(workCapMs) : null, work_ms: 0,
         origin: "whatsapp", goal: String(question || "").slice(0, 8000), status: "working", heartbeat_at: new Date(),
         work_started_at: new Date(), last_seen_msg_at: callStartedAt || Date.now(), started_at: new Date(callStartedAt || Date.now()),
     });
@@ -370,6 +373,28 @@ async function endTask(task, answer = "") {
     const text = `Sorry, Classgrid AI could not finish your task in 48 hours, so it has stopped.${answer ? `\n\nWhere it got to:\n${short(answer)}` : ""}${await taskLink(task, "What it did so far")}`;
     record.noteSent(task._id, text);
     await sendWhatsappText(task.phone, text);
+}
+
+// ─── Minutes of work of a task from a call (the plan's call_task_max_minutes, owner 2026-11-17) ───
+// The time of each run is added to the task (call-limits.service.js workClock); when its minutes run out, the run is
+// stopped and the task is ended here, and the user is told on WhatsApp.
+export const addWorkTime = (taskId, ms) => AgentTask.updateOne({ _id: taskId }, { $inc: { work_ms: Math.max(0, Math.round(ms)) } });
+
+export async function endForWorkCap(task, user, answer = "") {
+    const ended = await AgentTask.findOneAndUpdate(
+        { _id: task._id, status: { $nin: ["ended", "done"] } },
+        { $set: { status: "ended", wake_at: null, heartbeat_at: null } },
+    );
+    if (!ended) return;
+    const minutes = Math.round((Number(ended.work_cap_ms) || 0) / 60000);
+    console.log(`[agent task] ${task._id} stopped: it used its ${minutes} minutes of work (task from a call)`);
+    await endTaskLog(task._id);
+    await record.syncStatus(task._id, { error: `Used the ${minutes} minutes of work a task from a call gets on the plan.` });
+    if (!ended.phone) return;
+    const { plan, paidNames } = await planWording(user).catch(() => ({ plan: null, paidNames: [] }));
+    const text = callTaskTimeUpText({ plan, paidNames, minutes, whereItGot: answer ? short(answer) : "", link: await taskLink(ended, "What it did so far") });
+    record.noteSent(task._id, text);
+    await sendWhatsappText(ended.phone, text);
 }
 
 // The task waits until the plan's limit really comes back: the refusal's own time (hasEnoughTokens' resetAt), else the
@@ -555,6 +580,13 @@ export async function wakeTask(taskId, reason) {
             await putBack();
             return endTask(task);
         }
+        // A task from a call whose minutes of work are used up is ended (new work after a finished task gets its own
+        // minutes, as it gets its own 48 hours)
+        if (newWork) task.work_ms = 0;
+        if (workLeftMs(task) <= 0) {
+            await putBack();
+            return endForWorkCap(task, user);
+        }
         const tokens = await hasEnoughTokens(user._id, user.organization_id || null, 3000).catch(() => ({ allowed: false }));
         if (!tokens.allowed) return pauseForTokens(task, user, tokens.resetAt || null);
 
@@ -568,7 +600,7 @@ export async function wakeTask(taskId, reason) {
         task.goal = goal;
         await AgentTask.updateOne({ _id: task._id }, {
             $set: {
-                last_seen_msg_at: newest, pause_notified: false, goal, ...(newWork ? { work_started_at: new Date(), no_progress: 0 } : {}),
+                last_seen_msg_at: newest, pause_notified: false, goal, ...(newWork ? { work_started_at: new Date(), no_progress: 0, work_ms: 0 } : {}),
                 // The user is talking on WhatsApp now, so the answers go there
                 ...(reason === "reply" ? { origin: "whatsapp" } : {}),
             },
@@ -613,14 +645,19 @@ export async function wakeTask(taskId, reason) {
         const sends = []; // WhatsApp messages the Agent sent itself during this run
         // Every tool, its timing, the thinking and the model of this run go into the task's record (Calls page)
         const rec = record.runRecorder(task._id, { reason });
+        // A task from a call: the run stops when its minutes of work run out
+        const stop = Number.isFinite(workLeftMs(task)) ? new AbortController() : null;
+        const clock = workClock(task, stop, addWorkTime);
         const result = await runAgentTask(user, question, task.project_id, (sessionId) => {
             setTaskSession(task._id, sessionId);
         }, task.session_id, (stepText, info) => {
             if (!stepText.startsWith("sleep_until")) steps++;
             if (info?.name === "send_whatsapp_message") sends.push(info);
             logTaskStep(task._id, info);
-        }, { taskOrigin: task.origin }, null, rec.onData);
+        }, { taskOrigin: task.origin }, stop?.signal || null, rec.onData);
+        await clock.done();
         await rec.end(result);
+        if (clock.hit()) return endForWorkCap(task, user, result.answer || "");
         await afterRun({
             user, phone: task.phone, sessionId: result.sessionId || task.session_id, projectId: task.project_id,
             projectName: task.project_name, goal, origin: task.origin, result, steps, runStartedAt, taskId: task._id, sends,

@@ -39,7 +39,11 @@ import Organization from "../models/Organization.js";
 import GlobalAiConfig from "../models/GlobalAiConfig.js";
 import { isSharedTestWhatsapp } from "../utils/chat-onboarding.js";
 import { hasEnoughTokens, deductTokens, planWording } from "./ai-credits.service.js";
-import { callRefusedLimitText, callMinutesUsedUpText } from "./email-templates.service.js";
+import { callRefusedLimitText, callMinutesUsedUpText, callCountLimitText } from "./email-templates.service.js";
+import {
+    callCountCaps, fullCallLimit, callsLineText, callTimesSince, callTaskCaps, callTaskRefusal, callTaskRefusedToolText,
+    callTaskLimitsLine, runningCallTasks, workLeftMs, workClock, WEEK_MS, MONTH_MS,
+} from "./call-limits.service.js";
 import { chargeableTokens } from "./ai-token-pricing.js";
 import { toWhatsappText, splitWhatsappText } from "./ai-feature-limits.js";
 import { BUSY_KEY, markLastIn } from "./whatsapp-inbox.service.js";
@@ -105,14 +109,15 @@ function chargeCall(call, usage, model) {
         .catch((e) => console.error("[WA call] token charge failed:", e.message));
 }
 
-// How many calls this number had in the last 24 h, and when the oldest of them stops counting
+// The calls this number had in the last 24 h: how many, and when each was answered (ms, oldest first)
 async function callsToday(number) {
     const key = CALLS_KEY(number);
     const now = Date.now();
     await redis.zremrangebyscore(key, 0, now - DAY_MS);
-    const count = await redis.zcard(key);
-    const oldest = await redis.zrange(key, 0, 0, "WITHSCORES");
-    return { count, nextAt: oldest?.[1] ? Number(oldest[1]) + DAY_MS : now };
+    const flat = await redis.zrange(key, 0, -1, "WITHSCORES");
+    const times = [];
+    for (let i = 1; i < (flat || []).length; i += 2) times.push(Number(flat[i]));
+    return { count: times.length, times };
 }
 const SAMPLE_RATE = 48000;
 const FRAME = SAMPLE_RATE / 100; // 10 ms of audio
@@ -407,7 +412,7 @@ async function runProjectTool(call, tool) {
     return "Unknown tool.";
 }
 
-function systemPrompt(user) {
+function systemPrompt(user, call = null) {
     const now = new Date().toLocaleString("en-IN", { timeZone: "Asia/Kolkata", dateStyle: "full", timeStyle: "short" });
     return [
         "You are Classgrid AI on a WhatsApp voice call with a Classgrid user.",
@@ -418,6 +423,8 @@ function systemPrompt(user) {
         "The work's chat is saved in Studio Mode in the caller's Classgrid app (not in Agent mode or Project Mode): when they ask where to see it, tell them to open Studio Mode.",
         "The caller can also send extra details or files (photos, PDFs, documents) in this WhatsApp chat; the Agent reads their latest WhatsApp messages before it sends the final result.",
         "You have your own email address: agent@classgrid.in. When the caller wants to email you (for example keys, files or details), tell them to send it to agent@classgrid.in; the Agent reads every email there.",
+        // The caller's plan limits for tasks from calls (owner, 2026-11-17), so the AI keeps each task to what fits
+        ...(call?.taskLimitsLine ? [call.taskLimitsLine] : []),
     ].join("\n");
 }
 
@@ -488,7 +495,7 @@ export async function fallbackVoiceAnswer({ system, tools, messages, noTools = f
 }
 
 async function fallbackTurn(call, { noTools = false, onSentence = null } = {}) {
-    const answer = await fallbackVoiceAnswer({ system: systemPrompt(call.user), tools: CALL_TOOLS, messages: call.messages, noTools, onSentence });
+    const answer = await fallbackVoiceAnswer({ system: systemPrompt(call.user, call), tools: CALL_TOOLS, messages: call.messages, noTools, onSentence });
     chargeCall(call, answer.usage, FALLBACK_MODEL);
     if (answer.content.length) call.messages.push({ role: "assistant", content: answer.content });
     return { text: answer.text, tools: answer.tools, cutOff: answer.cutOff };
@@ -560,7 +567,7 @@ export async function claudeVoiceAnswer({ system, tools, messages, noTools = fal
 async function claudeOnlyTurn(call, { noTools = false, onSentence = null } = {}) {
     // ask_classgrid is back (owner's choice, 2026-10-24 evening): the AI can work during the call, so it opens
     // or makes the project right away and the tasks are saved with it
-    const answer = await claudeVoiceAnswer({ system: systemPrompt(call.user), tools: CALL_TOOLS, messages: call.messages, noTools, onSentence });
+    const answer = await claudeVoiceAnswer({ system: systemPrompt(call.user, call), tools: CALL_TOOLS, messages: call.messages, noTools, onSentence });
     chargeCall(call, answer.usage, CALL_MODEL);
     // An empty answer is not kept (the API refuses a conversation with an empty message in it)
     if (answer.content.length) call.messages.push({ role: "assistant", content: answer.content });
@@ -654,6 +661,22 @@ async function runTool(call, t, cutOff, { canHangUp = true } = {}) {
         const task = String(t.input?.task || "").trim();
         const project = t.input?.project_name ? await findProject(call.user, t.input.project_name).catch(() => null) : null;
         if (!task) return { content: "Nothing was saved: the task text was empty. Call start_task again with the full task.", is_error: true };
+        // The plan's task limits (owner, 2026-11-17): tasks one call may start, and tasks from calls running at once
+        // for this person (the running ones from the call records, and this person's other live calls that already
+        // saved a task). A task past a limit is not started (call tasks have no queue); the AI tells the caller.
+        const refusal = await callTaskRefusal(call.taskCaps, {
+            savedThisCall: call.tasks.length,
+            running: async () => {
+                const others = [...calls.values()].filter((c) => c !== call && !c.ended && c.tasks.length && String(c.user._id) === String(call.user._id)).length;
+                return others + (await runningCallTasks(call.user._id).catch(() => 0));
+            },
+        });
+        if (refusal) {
+            const { plan, paidNames } = await planWording(call.user).catch(() => ({ plan: null, paidNames: [] }));
+            const why = callTaskRefusedToolText(refusal, { plan, paidNames });
+            line(call, "ai", "tool", `Task not started (plan limit): ${task}`, { tool: "start_task", args: { refused: refusal.why } });
+            return { content: why, is_error: true };
+        }
         call.tasks.push({ task, project, coding: t.input?.coding_work === true });
         line(call, "ai", "task", task, { tool: "start_task", args: { project_name: t.input?.project_name || "", coding_work: t.input?.coding_work === true } });
         return {
@@ -866,6 +889,8 @@ async function afterCall(call, why) {
             projectId: project ? String(project._id) : null, projectName: project?.name || null,
             sessionId: liveSession, startedAt: Date.now(), attempts: 0, steps: [], callsLine: call.callsLine || "", announced,
             callStartedAt: call.startedAt, callId: call.id,
+            // The minutes of work the caller's plan gives a task from a call (null = no limit)
+            workCapMs: call.taskCaps?.maxMinutes ? call.taskCaps.maxMinutes * 60000 : null,
         }).catch((e) => console.error(`[WA call] task for ${call.id} failed:`, e.message));
     }
 }
@@ -945,14 +970,23 @@ async function runCallJob(job, { resumed = false, lockToken = null } = {}) {
         if (!job.taskId) {
             job.taskId = await tasks.startCallTask({
                 user, phone: job.from, question: job.question, sessionId: job.sessionId, callStartedAt: job.callStartedAt,
-                projectId: job.projectId, projectName: job.projectName,
+                projectId: job.projectId, projectName: job.projectName, workCapMs: job.workCapMs || null,
             });
             await save();
             // The call's record now belongs to this task (every run of the task is written to it)
             record.attachTask(job.callId, { taskId: job.taskId, sessionId: job.sessionId, projectId: job.projectId, projectName: job.projectName });
         }
+        // The minutes of work the caller's plan gives this task (owner, 2026-11-17): used up already (a run after a
+        // restart), the task is ended; else the run stops when they run out
+        const work = await AgentTask.findById(job.taskId).select("work_cap_ms work_ms").lean().catch(() => null);
+        if (work && workLeftMs(work) <= 0) {
+            await tasks.endForWorkCap({ _id: job.taskId }, user);
+            await forget();
+            return;
+        }
         // Every minute: the task is marked as running, and if it was deleted meanwhile the run is stopped
         const stop = new AbortController();
+        const clock = workClock({ _id: job.taskId, ...(work || {}) }, stop, tasks.addWorkTime);
         const taskBeat = setInterval(async () => {
             if (await taskGone()) { stop.abort(); return; }
             AgentTask.updateOne({ _id: job.taskId, status: "working" }, { $set: { heartbeat_at: new Date() } }).catch(() => {});
@@ -977,7 +1011,14 @@ async function runCallJob(job, { resumed = false, lockToken = null } = {}) {
             tasks.logTaskStep(job.taskId, info);
             save();
         }, { taskOrigin: "whatsapp" }, stop.signal, rec.onData).finally(() => clearInterval(taskBeat));
+        await clock.done();
         await rec.end(result);
+        // Its minutes of work ran out during this run: the task is ended and the user told
+        if (clock.hit() && !(await taskGone())) {
+            await tasks.endForWorkCap({ _id: job.taskId }, user, result.answer || "");
+            await forget();
+            return;
+        }
         if (result.aborted || await taskGone()) {
             console.log(`[WA call] task ${job.id} was deleted during its run, its job stops`);
             await forget();
@@ -1041,10 +1082,17 @@ async function askClassgridLive(call, request, projectName) {
             else question += `\n\n(The project "${project.name}" could not be opened: ${opened.error}. Tell the user.)`;
         }
         const key = project ? String(project._id) : "none";
+        // The minutes of work the caller's plan gives a task from a call apply to live work too (owner, 2026-11-17)
+        const maxMinutes = call.taskCaps?.maxMinutes || 0;
+        const stop = maxMinutes ? new AbortController() : null;
+        const clock = workClock({ work_cap_ms: maxMinutes * 60000, work_ms: 0 }, stop);
         try {
             // whatsappSince: the live work reads only the WhatsApp messages sent since this call started (no old ones)
-            return { ...(await runAgentTask(call.user, question, project?._id, (id) => { call.liveSessions[key] ||= id; }, call.liveSessions[key] || null, null, { whatsappSince: call.startedAt })), key };
+            const out = await runAgentTask(call.user, question, project?._id, (id) => { call.liveSessions[key] ||= id; }, call.liveSessions[key] || null, null, { whatsappSince: call.startedAt }, stop?.signal || null);
+            if (clock.hit()) return { ...out, sessionId: out.sessionId || call.liveSessions[key] || null, answer: "", error: `it used the ${maxMinutes} minute${maxMinutes === 1 ? "" : "s"} of work a task from a call gets on your plan`, key };
+            return { ...out, key };
         } finally {
+            await clock.done();
             stopKeepOpen();
         }
     })();
@@ -1220,12 +1268,14 @@ function filterAnswerSdp(sdp, publicIpv4) {
 const candidateSummary = (sdp) => sdp.split("\r\n").filter((l) => l.startsWith("a=candidate:"))
     .map((l) => { const p = l.split(" "); return `${p[7] || "?"} ${p[2]} ${p[4]}:${p[5]}`; }).join(", ") || "none";
 
-export async function answerCall({ id, from, sdp, user, tokenSource, callsLine = "", maxMs = MAX_CALL_MS, freeUntil = 0, paidOk = true, limitBackAt = null }) {
+// taskCaps: the plan's limits for tasks from this call (call-limits.service.js callTaskCaps); taskLimitsLine: the same,
+// told to the AI in its instructions
+export async function answerCall({ id, from, sdp, user, tokenSource, callsLine = "", maxMs = MAX_CALL_MS, freeUntil = 0, paidOk = true, limitBackAt = null, taskCaps = null, taskLimitsLine = "" }) {
     const { RTCPeerConnection, nonstandard } = await loadWrtc();
     const pc = new RTCPeerConnection({ iceServers: [{ urls: "stun:stun.l.google.com:19302" }], portRange: { min: 10000, max: 60000 } });
     const source = new nonstandard.RTCAudioSource();
     const call = {
-        id, from, user, pc, source, tokenSource, callsLine, maxMs, freeUntil, paidOk, limitBackAt,
+        id, from, user, pc, source, tokenSource, callsLine, maxMs, freeUntil, paidOk, limitBackAt, taskCaps: taskCaps || callTaskCaps(null), taskLimitsLine,
         startedAt: Date.now(), ended: false, busy: false, tasks: [],
         messages: [], transcript: [],
         outQueue: [], outCurrent: null, outPos: 0, speechEndedAt: 0,
@@ -1390,25 +1440,35 @@ export async function handleCallsWebhook(value) {
                     : "Classgrid AI can't take calls for your account right now. Please try again later.");
                 continue;
             }
-            // Calls per number in 24 hours: the plan's number (plans on), never above the 50 the owner set; and the
-            // plan's longest call, never above 15 minutes (if the count can't be read, the call is answered)
+            // Calls per day, week and month (owner, 2026-11-17: each can be set, a call is taken only when every set
+            // limit has room). The day: answered calls of this number in 24 hours, the plan's number (plans on), never
+            // above the 50 the owner set. The week and month: this person's answered calls in the last 7 and 30 days,
+            // from the call records. And the plan's longest call, never above 15 minutes. (If a count can't be read,
+            // that limit lets the call through.)
             const callPlan = await planOf(user).catch(() => null);
-            const callsCap = callPlan && !isUnlimited(callPlan.calls_per_day) ? Math.max(0, Math.min(MAX_CALLS_PER_DAY, Number(callPlan.calls_per_day) || 0)) : MAX_CALLS_PER_DAY;
+            const countCaps = callCountCaps(callPlan, MAX_CALLS_PER_DAY);
             const planMaxMs = callPlan && !isUnlimited(callPlan.call_max_minutes) ? Math.min(MAX_CALL_MS, Math.max(60000, (Number(callPlan.call_max_minutes) || 0) * 60000)) : MAX_CALL_MS;
             const number = normalizeWhatsappNumber(from);
             const today = await callsToday(number).catch(() => null);
-            if (today && today.count >= callsCap) {
+            const longer = countCaps.month !== null ? MONTH_MS : countCaps.week !== null ? WEEK_MS : 0;
+            const recent = longer ? await callTimesSince(user._id, Date.now() - longer).catch(() => []) : [];
+            const callTimes = { day: today?.times || [], week: recent, month: recent };
+            const full = fullCallLimit(countCaps, callTimes);
+            if (full) {
                 await callAction(c.id, "reject").catch(() => {});
-                const next = new Date(today.nextAt).toLocaleString("en-IN", { timeZone: "Asia/Kolkata", dateStyle: "medium", timeStyle: "short" });
-                await sendWhatsappText(from, `You've used all ${callsCap} Classgrid AI calls for the last 24 hours. You can call again after ${next} (India time).`);
+                const { plan, paidNames } = await planWording(user);
+                await sendWhatsappText(from, callCountLimitText({ plan, paidNames, which: full.which, cap: full.cap, backAt: full.backAt }));
                 continue;
             }
+            // The plan's limits for tasks from this call: how many it may start, how many may run at once, and the
+            // minutes of work each may use (call-limits.service.js)
+            const taskCaps = callTaskCaps(callPlan);
             // With no tokens to pay with, the call ends when the free minutes do
             const maxMs = enough?.allowed ? planMaxMs : Math.min(planMaxMs, Math.max(10000, free.left * 1000));
             const freeUntil = free.left > 0 ? Date.now() + free.left * 1000 : 0;
             markBusy(number, maxMs / 1000 + 120);
-            const callsLine = `(Call ${(today?.count || 0) + 1} of ${callsCap} you can make in 24 hours.)`;
-            const answered = await answerCall({ id: c.id, from, sdp: c.session.sdp, user, tokenSource: enough?.source || "personal", callsLine, maxMs, freeUntil, paidOk: !!enough?.allowed, limitBackAt: enough?.allowed ? null : callsBackAt(enough, free) });
+            const callsLine = callsLineText(countCaps, callTimes);
+            const answered = await answerCall({ id: c.id, from, sdp: c.session.sdp, user, tokenSource: enough?.source || "personal", callsLine, maxMs, freeUntil, paidOk: !!enough?.allowed, limitBackAt: enough?.allowed ? null : callsBackAt(enough, free), taskCaps, taskLimitsLine: callTaskLimitsLine(taskCaps, callPlan) });
             if (answered) redis.zadd(CALLS_KEY(number), Date.now(), c.id).then(() => redis.expire(CALLS_KEY(number), 2 * 24 * 60 * 60)).catch(() => {});
         } catch (e) {
             console.error(`[WA call] ${c.id} failed:`, e.message);

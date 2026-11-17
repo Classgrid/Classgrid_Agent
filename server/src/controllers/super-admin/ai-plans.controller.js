@@ -12,6 +12,7 @@ const NUMBER_FIELDS = [
     "claude_credits_per_week", "fable_share_percent", "context_tokens", "helpers_per_chat",
     "images_per_period", "images_reset_value", "voice_replies_per_day", "voice_input_minutes_per_day",
     "call_minutes_per_period", "call_reset_value", "calls_per_day", "call_max_minutes",
+    "calls_per_week", "calls_per_month", "call_tasks_per_call", "call_tasks_at_once", "call_task_max_minutes",
     "whatsapp_per_day", "whatsapp_per_period", "whatsapp_reset_value",
     "projects_max", "coding_runs_per_month", "premium_runs_per_month", "sandbox_hours_per_month", "sandbox_sessions",
     "uploads_per_window", "upload_max_mb", "library_storage_mb", "devices_max",
