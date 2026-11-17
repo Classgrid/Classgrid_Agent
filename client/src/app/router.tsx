@@ -328,14 +328,11 @@ export function AppRouter() {
           <Route path="/superadmin/analytics" element={<SuperadminChatAnalyticsPage />} />
           <Route path="/superadmin/audit-logs" element={<AuditLogsPage />} />
 
-          <Route path="/superadmin/orgs" element={<OrganizationsPage />} />
+          {/* The ERP's organization pages are gone (owner, 2026-11-17: "what is this, delete it"): their addresses open
+              Global Users, where the people are */}
+          <Route path="/superadmin/orgs" element={<Navigate to="/superadmin/global-users" replace />} />
           <Route path="/superadmin/domains" element={<CustomDomainsPage />} />
-          <Route path="/superadmin/detail/:orgId" element={<OrgDetailsPage />} />
-          <Route path="/superadmin/detail/:id/hierarchy" element={<OrgHierarchyPage />} />
-          <Route path="/superadmin/detail/:id/staff" element={<OrgFacultyPage />} />
-          <Route path="/superadmin/detail/:id/students" element={<OrgStudentsPage />} />
-          <Route path="/superadmin/detail/:id/fees" element={<OrgFeesPage />} />
-          <Route path="/superadmin/detail/:id/admission" element={<OrgAdmissionsPage />} />
+          <Route path="/superadmin/detail/*" element={<Navigate to="/superadmin/global-users" replace />} />
           <Route path="/superadmin/leads" element={<LeadsPage />} />
           <Route path="/superadmin/leads/:id" element={<LeadDetailsPage />} />
           {/* NEW BILLING ROUTES */}

@@ -134,7 +134,7 @@ export const dashboardConfigs: DashboardConfig[] = [
       {
         label: "ORGANIZATIONS",
         items: [
-          { label: "All Organizations", to: "/superadmin/orgs", icon: Building2 },
+          // (All Organizations is gone: it was the shut-down ERP's school pages; owner, 2026-11-17)
           { label: "Demo Leads", to: "/superadmin/leads", icon: ClipboardList },
         ]
       },
