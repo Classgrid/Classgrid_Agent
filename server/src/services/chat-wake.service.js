@@ -11,6 +11,11 @@ const LOCK = (sessionId) => `chatwake:lock:${sessionId}`;
 const META = (sessionId) => `chatwake:meta:${sessionId}`;
 const WORKING = (userId) => `ai:working:${userId}`;
 const DAY = 24 * 60 * 60;
+// The longest note a chat is woken with. Anything longer is cut, so a caller with more to say must keep the rest
+// where the woken AI can read it (a helper's report: utils/helper-reports.js). It was 12,000, which cut helpers'
+// reports (one can be 40,000 characters) and a workflow's results (run_workflow sends up to 30,000). Owner,
+// 2026-11-17: "make it more than 70 thousand".
+export const WAKE_NOTE_MAX = 80000;
 
 /** Remember how a chat was last used (website or desktop app, which mode), so a woken turn runs the same way */
 export async function rememberChatMeta(sessionId, meta) {
@@ -28,8 +33,8 @@ const LIVE_EVENTS = new Set(["token", "thought", "tool_start", "tool_result", "s
  */
 export async function wakeChat(userId, sessionId, note) {
     if (!userId || !sessionId || !note) return;
-    await redis.multi().rpush(PENDING(sessionId), String(note).slice(0, 12000)).expire(PENDING(sessionId), DAY).exec().catch(() => {});
-    if (!(await answering(userId, sessionId))) runWake(userId, sessionId).catch((e) => console.warn("[chat wake]", e.message));
+    await redis.multi().rpush(PENDING(sessionId), String(note).slice(0, WAKE_NOTE_MAX)).expire(PENDING(sessionId), DAY).exec().catch(() => {});
+    if (!(await chatAnswering(userId, sessionId))) runWake(userId, sessionId).catch((e) => console.warn("[chat wake]", e.message));
 }
 
 /** The chat's answer has ended: anything that finished meanwhile wakes it now. (Its end is marked in two steps, the
@@ -39,14 +44,14 @@ export async function wakeIfPending(userId, sessionId) {
     if (!userId || !sessionId) return;
     for (let i = 0; i < 100; i++) {
         if (!((await redis.llen(PENDING(sessionId)).catch(() => 0)) > 0)) return;
-        if (!(await answering(userId, sessionId))) return runWake(userId, sessionId).catch((e) => console.warn("[chat wake]", e.message));
+        if (!(await chatAnswering(userId, sessionId))) return runWake(userId, sessionId).catch((e) => console.warn("[chat wake]", e.message));
         await new Promise((r) => setTimeout(r, 100));
     }
 }
 
 // The chat is answering the user right now (also in the first seconds of an answer, before it's marked working):
 // the results wait and the chat is woken when that answer ends
-async function answering(userId, sessionId) {
+export async function chatAnswering(userId, sessionId) {
     const working = await redis.hexists(WORKING(String(userId)), String(sessionId)).catch(() => 0);
     const running = await redis.exists(`chat:run:${userId}:${sessionId}`).catch(() => 0);
     return !!(working || running);
@@ -54,7 +59,7 @@ async function answering(userId, sessionId) {
 
 async function runWake(userId, sessionId) {
     // One woken turn at a time per chat
-    if (await answering(userId, sessionId)) return; // woken when that answer ends (wakeIfPending)
+    if (await chatAnswering(userId, sessionId)) return; // woken when that answer ends (wakeIfPending)
     const got = await redis.set(LOCK(sessionId), "1", "EX", 15 * 60, "NX").catch(() => null);
     if (!got) return; // another wake-up of this chat is running: it takes what is pending when it ends
     let ran = false;

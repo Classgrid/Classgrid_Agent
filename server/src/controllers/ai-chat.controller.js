@@ -1210,6 +1210,11 @@ const helperStepDone = (step, out) => {
 // "I'll now…" between steps, emojis, headings and tables, secret values copied out of files; owner, 2026-11-08)
 const HELPER_REPORT_NOTE = "\n\nWho reads your work: only the main AI that started you, never the user. Write for that AI, not for a person: no greetings, no \"I'll now...\" lines between your steps, no emojis, no decorative headings, tables or bold. Your final answer is your report to the main AI: dense plain text with everything it needs to act on without redoing your work: what you did, what you found (file paths with line numbers, exact names, values, commands and their results), what failed and why, and what is still unknown. Never copy a secret's value (password, API key, token, private key, connection string) into your report or notes: say where it is (file and line) and what kind of secret it is.";
 
+// How much of a run_project_helpers / check_helpers result is reports. The model is given 200,000 characters of such
+// a result (llm-stream.js, llm-stream-anthropic.js) and five full reports are a little more than that, so the last
+// one was cut and still marked as given. A report that does not fit whole is left for the next check_helpers call.
+const HELPER_RESULT_ROOM = 190000;
+
 // The files finished helpers changed, in the same "FILES CHANGED IN PROJECT:" list a code run gives, so the
 // chat's "files changed" box counts helpers' work too
 const helperChangesText = (helpers) => {
@@ -1223,6 +1228,35 @@ const helperChangesText = (helpers) => {
     if (!total.size) return "";
     return `\n\nFILES CHANGED IN PROJECT:\n${[...total].map(([p, c]) => `+${c.added} -${c.removed} ${p}`).join("\n")}`;
 };
+// A finished helper's report that the main AI has not read goes to the chat by itself: one wake-up message per helper,
+// with the whole report, the moment that helper finishes, the way a person gets each colleague's report as it comes
+// (owner, 2026-11-17: "send one by one, don't send all together"). Before, the chat was woken once, when the last
+// helper had finished, with every report in one message cut at 12,000 characters, and every report was marked as
+// given: a long first report came cut, the others were lost, and check_helpers said "report already given".
+// - While the chat is answering (the answer that started the helpers, or one telling the user about another helper's
+//   report), nothing is sent: the main AI can read the report there with check_helpers, and what it has not read is
+//   sent when that answer ends (answerEnded, from the end of streamAskAi; a helper that finishes just as an answer
+//   ends waits for it itself, utils/helper-reports.js).
+// - A background task reads its helpers' reports itself, once all of them are done; it is woken from a helper
+//   finishing only, never from the end of its own run (it would wake itself again and again).
+// - A report too long even for its own message (WAKE_NOTE_MAX) stays on the board and the message says to read it
+//   with check_helpers; that is said once (reportTold).
+async function sendHelperReports(userId, sessionId, { answerEnded = false } = {}) {
+    const board = HELPER_BOARDS.get(String(sessionId || "none"));
+    if (!board || !userId || !sessionId) return;
+    const { wakeChat, chatAnswering, WAKE_NOTE_MAX } = await import("../services/chat-wake.service.js");
+    const { sendReports } = await import("../utils/helper-reports.js");
+    await sendReports({
+        board, answerEnded, max: WAKE_NOTE_MAX, changesText: helperChangesText,
+        hasTask: async () => {
+            const { default: AgentTask } = await import("../models/AgentTask.js");
+            return !!(await AgentTask.findOne({ session_id: sessionId, status: { $in: ["working", "sleeping", "waiting_tokens"] } }).select("_id").lean().catch(() => null));
+        },
+        wakeTask: () => import("../services/agent-task.service.js").then((m) => m.wakeTaskForSession(sessionId, "helpers")),
+        answering: () => chatAnswering(userId, sessionId),
+        wake: (note) => wakeChat(userId, sessionId, note),
+    });
+}
 const stopHelpers = (sessionId) => {
     const board = HELPER_BOARDS.get(String(sessionId || "none"));
     if (!board) return;
@@ -2050,6 +2084,7 @@ export const streamAskAi = async (req, res) => {
     let replacedCheck = null;
     let runKey = null;
     let runId = null;
+    let chatOfRun = null; // this answer's chat, for the end of the answer (the finally block)
     let touchedChat = null; // this answer's chat: marked as just updated again when the answer ends
     let releaseGridLock = null; // Share Grid: unlocks "Agent is responding to …" when this request is fully done (see finally)
     try {
@@ -4412,20 +4447,9 @@ You work on the user's own Windows computer through their Classgrid desktop app,
                                     + (h.wtError ? `\n\n[It worked in the project itself: it couldn't get its own copy (${h.wtError}).]` : "");
                                 emitHelper({ helper: i, state: out.state });
                                 // The answer that started them has ended: wake this chat's background task to read the reports
-                                if ((res.writableEnded || res.destroyed) && !board.helpers.some((x) => x.state === "running")) {
-                                    import("../services/agent-task.service.js").then(async (m) => {
-                                        const { default: AgentTask } = await import("../models/AgentTask.js");
-                                        const task = await AgentTask.findOne({ session_id: sessionId, status: { $in: ["working", "sleeping", "waiting_tokens"] } }).select("_id").lean().catch(() => null);
-                                        if (task) return m.wakeTaskForSession(sessionId, "helpers");
-                                        // A normal chat: wake it with the reports it hasn't read yet
-                                        const unread = board.helpers.filter((x) => x.state !== "running" && !x.reportTaken && !x.quiet); // a workflow's helpers report through the workflow
-                                        if (!unread.length) return;
-                                        unread.forEach((x) => { x.reportTaken = true; });
-                                        const notes = unread.map((x) => `Helper ${x.no} (${x.task.slice(0, 120)}) ${x.state === "done" ? "finished" : "failed"}:\n${x.report}${x.notes.length ? `\nNotes it sent: ${x.notes.join(" | ")}` : ""}`);
-                                        const { wakeChat } = await import("../services/chat-wake.service.js");
-                                        await wakeChat(userId, sessionId, `Your helpers finished.\n\n${notes.join("\n\n")}${helperChangesText(unread)}`);
-                                    }).catch(() => {});
-                                }
+                                // Its report goes to the chat by itself: now, or when the answer the chat is writing ends, if
+                                // the main AI did not read it there with check_helpers (sendHelperReports)
+                                sendHelperReports(userId, sessionId).catch(() => {});
                             });
                             board.helpers.push(h);
                             return h;
@@ -4435,11 +4459,18 @@ You work on the user's own Windows computer through their Classgrid desktop app,
                             return `Started ${batch.length} helper(s), working in the background:\n${batch.map(label).join("\n")}\nTalk to them with message_helper and read their notes and reports with check_helpers. Wait for them with check_helpers before your final answer; if your answer has to end first, they keep working and you are woken with their reports when they finish.`;
                         }
                         await Promise.all(batch.map((h) => h.promise));
+                        let resultRoom = HELPER_RESULT_ROOM;
+                        const told = [];
                         return batch.map((h) => {
-                            h.reportTaken = true;
                             const notes = h.notes.length ? `\nNotes it sent you: ${h.notes.join(" | ")}` : "";
-                            return h.state === "done" ? `${label(h)}:\n${h.report}${notes}` : `${label(h)} failed: ${h.report}${notes}`;
-                        }).join("\n\n") + helperChangesText(batch);
+                            const line = h.state === "done" ? `${label(h)}:\n${h.report}${notes}` : `${label(h)} failed: ${h.report}${notes}`;
+                            // (a workflow's helpers are read here only: there is no later call for them)
+                            if (line.length > resultRoom && !h.quiet) return `${label(h)} ${h.state === "done" ? "finished" : "failed"}. Its report did not fit in this result: read it in full with check_helpers.`;
+                            resultRoom -= line.length;
+                            h.reportTaken = true;
+                            told.push(h);
+                            return line;
+                        }).join("\n\n") + helperChangesText(told);
                     },
                     // The user's own helper types (kept per user)
                     define_helper: async (args) => {
@@ -4521,6 +4552,7 @@ You work on the user's own Windows computer through their Classgrid desktop app,
                         const until = Date.now() + waitMs;
                         while (!news() && Date.now() < until) await new Promise((r) => setTimeout(r, 1000));
                         const reported = [];
+                        let room = HELPER_RESULT_ROOM;
                         const lines = board.helpers.map((h) => {
                             const name = `Helper ${h.no} (${MODEL_DISPLAY_NAMES[h.usedModel || h.model] || h.model}, ${h.canEdit ? "can edit" : "read only"})`;
                             const notes = h.notes.slice(h.notesRead);
@@ -4528,9 +4560,13 @@ You work on the user's own Windows computer through their Classgrid desktop app,
                             const noteText = notes.length ? `\n  New notes: ${notes.join(" | ")}` : "";
                             if (h.state === "running") return `${name}: still working.${noteText}`;
                             if (h.reportTaken) return `${name}: finished (report already given).${noteText}`;
+                            const line = h.state === "done" ? `${name}: finished.${noteText}\n  Report:\n${h.report}` : `${name}: failed (${h.report}).${noteText}`;
+                            // Never a cut report: one that does not fit whole in this result is given by the next call
+                            if (line.length > room) return `${name}: ${h.state === "done" ? "finished" : "failed"}.${noteText}\n  Its report did not fit in this result: call check_helpers again to read it in full.`;
+                            room -= line.length;
                             h.reportTaken = true;
                             reported.push(h);
-                            return h.state === "done" ? `${name}: finished.${noteText}\n  Report:\n${h.report}` : `${name}: failed (${h.report}).${noteText}`;
+                            return line;
                         });
                         const running = board.helpers.filter((h) => h.state === "running").length;
                         return `${lines.join("\n\n")}\n\n${running ? `${running} helper(s) still working.` : "All helpers have finished."}${helperChangesText(reported)}`;
@@ -6689,6 +6725,7 @@ If a tool fails, never show the error message; say only: "Something went wrong o
         // it says so, and the agent waits for the answer. No mode sent (or WhatsApp) = nothing asks, as before.
         // Studio's Agents board: this chat is working until its answer ends (or the user stops it)
         if (userId && sessionId && body.taskOrigin !== "whatsapp") {
+            chatOfRun = sessionId;
             markChatWorking(userId, sessionId, true);
             res.on("close", () => {
                 markChatWorking(userId, sessionId, false).then(() => import("../services/chat-wake.service.js")).then((m) => m.wakeIfPending(userId, sessionId)).catch(() => {});
@@ -7570,8 +7607,12 @@ If a tool fails, never show the error message; say only: "Something went wrong o
         // The answer ended here: its saved rounds (and the ones of the run it went on from) aren't needed any more
         if (durableTurn) import("../services/turn-state.service.js").then((m) => { m.clearTurnState(durableTurn.id); if (resumeState && body.resumeTurn) m.clearTurnState(String(body.resumeTurn)); }).catch(() => {});
         // The answer is over: background results that waited for it wake the chat now
-        if (runKey) redis.get(runKey).then((newest) => (newest === runId ? redis.del(runKey) : null))
-            .then(() => import("../services/chat-wake.service.js")).then((m) => m.wakeIfPending(userId, sessionId)).catch(() => {});
+        // Also the reports of helpers that finished during this answer and were not read in it: each goes to the chat by
+        // itself now (sendHelperReports). chatOfRun: the chat's id is a variable of the try block and cannot be read
+        // here; this line named it all the same since 2026-11-02, so it threw and never woke anything.
+        const runEnded = runKey ? redis.get(runKey).then((newest) => (newest === runId ? redis.del(runKey) : null)).catch(() => {}) : Promise.resolve();
+        if (chatOfRun) runEnded.then(() => sendHelperReports(userId, chatOfRun, { answerEnded: true }).catch(() => {}))
+            .then(() => import("../services/chat-wake.service.js")).then((m) => m.wakeIfPending(userId, chatOfRun)).catch(() => {});
         if (releaseGridLock) releaseGridLock();
         if (touchedChat) touchChat(req.user?.email, touchedChat);
         if (!res.writableEnded) {
