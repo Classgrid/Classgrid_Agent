@@ -3150,6 +3150,8 @@ export const TOPUP_VALID_DAYS = 30;
 const escHtml = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const planButton = (href, label) => `<p><a href="${href}" style="display:inline-block; padding:10px 20px; background:#111111; color:#ffffff; text-decoration:none; border-radius:6px; font-weight:bold;">${label}</a></p>`;
 const planSignOff = `<p>Thanks,<br/>The Classgrid Team</p>`;
+// (the help line the limit and credit emails had before they spoke of plans; owner, 2026-11-17: keep it)
+const planHelpLine = `<p>Need help? The <a href="https://classgrid.in/help-center" style="color:#2563eb; text-decoration:underline;">Help Center</a> answers the most common questions, or you can write to our Support team from chat.classgrid.in.</p>`;
 
 /** The Free plan: it cannot buy top-ups (top-ups are for the paid plans) */
 export const isFreePlan = (plan) => plan?.key === "free";
@@ -3207,6 +3209,7 @@ export const getPlanLimitReachedEmail = ({ userName, plan, paidNames, which, bac
       <p>${escHtml(used)}</p>
       <p>${escHtml(more)}</p>
       ${planButton(button.href, button.label)}
+      ${planHelpLine}
       ${planSignOff}
     `,
   });
@@ -3217,12 +3220,14 @@ export const getPlanLimitReachedEmail = ({ userName, plan, paidNames, which, bac
 // ------------- TOP-UP AND GRANTED CREDITS: 80% USED, AND USED UP -------------
 // The plan keeps working when these credits run out, so nothing here says access stops. "Top up" only for a plan
 // that can buy top-ups (not Free).
-const creditsNoticeHtml = ({ userName, plan, title, lead, keeps }) => baseTemplate({
+const creditsNoticeHtml = ({ userName, plan, title, lead, keeps, extra = "" }) => baseTemplate({
   title,
   content: `
       <p>Hello ${escHtml(userName)},</p>
       <p>${escHtml(lead)} ${escHtml(keeps)}</p>
+      ${extra ? `<p>${escHtml(extra)}</p>` : ""}
       ${isFreePlan(plan) ? "" : planButton(BILLING_URL, "Top up")}
+      ${planHelpLine}
       ${planSignOff}
     `,
 });
@@ -3246,9 +3251,13 @@ export const getTopUpCreditsExhaustedEmailHtml = (userName, plan = null) => cred
   lead: "Your top-up credits are used up.", keeps: planKeepsText(plan),
 });
 
-export const getGrantedCreditsLowEmailHtml = (userName, plan = null) => creditsNoticeHtml({
+// `expiresOn`: when the granted credits end (the email had this date before it spoke of plans; owner, 2026-11-17)
+export const getGrantedCreditsLowEmailHtml = (userName, plan = null, expiresOn = null) => creditsNoticeHtml({
   userName, plan, title: CREDIT_EMAIL_SUBJECTS.grantedLow,
   lead: "You've used 80% of your granted credits.", keeps: planAndTopUpsKeepText(plan),
+  extra: expiresOn && !Number.isNaN(new Date(expiresOn).getTime())
+    ? `Your granted credits end on ${new Date(expiresOn).toLocaleDateString("en-IN", { timeZone: "Asia/Kolkata", day: "numeric", month: "long", year: "numeric" })}.`
+    : "",
 });
 
 export const getGrantedCreditsExhaustedEmailHtml = (userName, plan = null) => creditsNoticeHtml({

@@ -399,7 +399,7 @@ const triggerEmailAlerts = async (userId, orgId, type, oldBalance, currentBalanc
         if (type === 'promotion') {
             if (oldBalance > threshold20 && currentBalance <= threshold20 && currentBalance > 0) {
                 const { plan } = await planWording(user);
-                await alert(CREDIT_EMAIL_SUBJECTS.grantedLow, getGrantedCreditsLowEmailHtml(userName, plan));
+                await alert(CREDIT_EMAIL_SUBJECTS.grantedLow, getGrantedCreditsLowEmailHtml(userName, plan, user.ai_tokens?.promotion_credits_end_date || null));
             }
             if (oldBalance > 0 && currentBalance <= 0) {
                 const { plan } = await planWording(user);
