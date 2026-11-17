@@ -1,11 +1,13 @@
-// Extra usage paid from top-up credits (owner, 2026-11-14 evening): a top-up must raise every limit, not only the
-// chat's credits. Once the plan's (or the global) number of images, WhatsApp messages, voice replies or voice input
-// minutes is used up, each further one is paid from the user's top-up credits (ai_credits_balance only: never the
-// free pool, never the granted promotion credits), at the price the super admin sets in Global AI Config
-// (extra_*_credits). A price of 0 turns the extra off for that feature: the limit then stays a hard stop.
+// Extra usage paid from the person's credits (owner, 2026-11-14 evening): credits must raise every limit, not only the
+// chat's. Once the plan's (or the global) number of images, WhatsApp messages, voice replies or voice input minutes
+// is used up, each further one is paid from the person's credits at the price the super admin sets in Global AI
+// Config (extra_*_credits). A price of 0 turns the extra off for that feature: the limit then stays a hard stop.
+// Since 2026-11-17 (owner: "gifted credits work everywhere bought credits work") the credits are one shared pool:
+// gifted (promotion) and bought (top-up) together, the older one first, spilling into the other when it runs out
+// (creditsAvailable and deductTokens in ai-credits.service.js). Never the plan's own free limit.
 // WhatsApp calls already work this way: past the free minutes a call is paid per turn from credits.
 import GlobalAiConfig from "../models/GlobalAiConfig.js";
-import { hasEnoughTokens, deductTokens } from "./ai-credits.service.js";
+import { creditsAvailable, deductTokens } from "./ai-credits.service.js";
 
 export const EXTRA_KINDS = {
     image: { field: "extra_image_credits", unit: "image" },
@@ -30,8 +32,8 @@ export async function canPayExtra(user, kind, count = 1) {
     const price = await extraPrice(kind);
     if (price <= 0) return { allowed: false, price: 0, total: 0, reason: "off" };
     const total = price * Math.max(1, Math.ceil(count));
-    const check = await hasEnoughTokens(user._id, user.organization_id || null, total, { paidOnly: true }).catch(() => null);
-    if (!check?.allowed) return { allowed: false, price, total, reason: "no_credits", remaining: check?.remaining || 0 };
+    const credits = await creditsAvailable(user._id).catch(() => null);
+    if (!credits || credits.total < total) return { allowed: false, price, total, reason: "no_credits", remaining: credits?.total || 0 };
     return { allowed: true, price, total };
 }
 
@@ -40,7 +42,9 @@ export async function chargeExtra(user, kind, count = 1, price = null) {
     const each = price ?? await extraPrice(kind);
     const total = each * Math.max(1, Math.ceil(count));
     if (total <= 0) return 0;
-    await deductTokens(user._id, user.organization_id || null, total, "personal", { noSpill: true })
+    // The pool that started first pays; what it can't cover comes from the other one (never the plan's free limit)
+    const credits = await creditsAvailable(user._id).catch(() => null);
+    await deductTokens(user._id, user.organization_id || null, total, credits?.source || "personal")
         .catch((e) => console.error(`[extra usage] could not charge ${total} credits for ${kind}:`, e.message));
     console.log(`[extra usage] ${total} credits for ${Math.ceil(count)} extra ${EXTRA_KINDS[kind]?.unit || kind}${Math.ceil(count) === 1 ? "" : "s"} (${user.email || user._id})`);
     return total;

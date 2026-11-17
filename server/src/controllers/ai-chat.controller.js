@@ -1849,8 +1849,14 @@ export const streamAskAi = async (req, res) => {
     const fableByPlan = !!planRow && Number(planRow.fable_share_percent) > 0;
     // Claude is separate from the other models (owner, 2026-11-14): with a plan that includes Claude, a Claude answer
     // is checked against and counted on the plan's weekly Claude credits only, never the window / weekly credits
-    const claudePooled = (model) => !!planRow && typeof model === "string" && CLAUDE_CHAT_MODELS.has(model) && Number(planRow.claude_credits_per_week) !== 0;
+    // (not while this answer is paid from the person's credits: see claudeOnCredits)
+    const claudePooled = (model) => !claudeOnCredits && !!planRow && typeof model === "string" && CLAUDE_CHAT_MODELS.has(model) && Number(planRow.claude_credits_per_week) !== 0;
     let claudeSeparate = false; // this request picked a Claude model the plan includes
+    // The plan's weekly Claude credits (or Fable's share of them) are used up and the person has credits: this answer
+    // is paid from the credits (gifted or bought) at the model's own rate, like any other use past a plan limit
+    // (owner, 2026-11-17: "Claude and Fable take from credits when their limit is over")
+    let claudeOnCredits = false;
+    let claudeCreditSource = null; // "promotion" or "personal": the credit pool used first
     let claudePoolLeft; // what is left of the plan's weekly Claude credits (undefined = unlimited)
     // The plan's weekly Claude pool, and Fable's share of it (a Claude model picked by name; -1 = unlimited)
     if (planRow && typeof body.selectedModel === "string" && CLAUDE_CHAT_MODELS.has(body.selectedModel)) {
@@ -1864,20 +1870,27 @@ export const streamAskAi = async (req, res) => {
                 return;
             }
         } else if (pool > 0) {
-            const { weekCounters } = await import("../services/ai-credits.service.js");
+            const { weekCounters, creditsAvailable } = await import("../services/ai-credits.service.js");
             const counters = await weekCounters(userId, req.user.ai_tokens);
             const when = counters.weekEnd.toLocaleString("en-IN", { timeZone: "Asia/Kolkata", day: "numeric", month: "short", hour: "numeric", minute: "2-digit" });
-            if (counters.claude_week_used >= pool) {
+            const poolUsedUp = counters.claude_week_used >= pool;
+            const fableUsedUp = wantsFable && counters.fable_week_used >= pool * Number(planRow.fable_share_percent) / 100;
+            const credits = poolUsedUp || fableUsedUp ? await creditsAvailable(userId).catch(() => null) : null;
+            if (credits?.source && credits.total > 0) {
+                claudeOnCredits = true;
+                claudeCreditSource = credits.source;
+                claudePoolLeft = credits.total;
+            } else if (poolUsedUp) {
                 res.writeHead(402, { "Content-Type": "application/json" });
                 res.end(JSON.stringify({ error: `You've used this week's Claude credits of your ${planRow.name} plan. They refill on ${when} (India time). Upgrade your plan, or pick a DeepSeek model.`, code: "claude_cap_reached", plan: planRow.key }));
                 return;
             }
-            if (wantsFable && counters.fable_week_used >= pool * Number(planRow.fable_share_percent) / 100) {
+            if (!claudeOnCredits && fableUsedUp) {
                 res.writeHead(402, { "Content-Type": "application/json" });
                 res.end(JSON.stringify({ error: `You've used this week's Claude Fable share of your ${planRow.name} plan. It refills on ${when} (India time). Upgrade your plan, or pick Sonnet or Opus.`, code: "fable_cap_reached", plan: planRow.key }));
                 return;
             }
-            claudePoolLeft = Math.max(1, wantsFable ? Math.min(pool - counters.claude_week_used, Math.round(pool * Number(planRow.fable_share_percent) / 100) - counters.fable_week_used) : pool - counters.claude_week_used);
+            if (!claudeOnCredits) claudePoolLeft = Math.max(1, wantsFable ? Math.min(pool - counters.claude_week_used, Math.round(pool * Number(planRow.fable_share_percent) / 100) - counters.fable_week_used) : pool - counters.claude_week_used);
         }
     }
     // Claude Fable (the family: 5.1, 5.2 and later) comes with the plan only (Pro and Max give it a share; owner,
@@ -1909,7 +1922,7 @@ export const streamAskAi = async (req, res) => {
         // (the database is 150 ms away per read, measured 2026-11-10; this check alone is three reads)
         const quotaKey = `quota:${userId}:${orgId || "-"}:${fablePaidOnly ? 1 : 0}`;
         const check = claudeSeparate && !fablePaidOnly
-            ? { allowed: true, source: "weekly_free", remaining: claudePoolLeft, spendable: claudePoolLeft, claudePool: true } // (the Claude credits were checked above)
+            ? { allowed: true, source: claudeOnCredits ? claudeCreditSource : "weekly_free", remaining: claudePoolLeft, spendable: claudePoolLeft, claudePool: true } // (the Claude credits, or the person's credits past them, were checked above)
             : await keptFor(quotaKey, 30000, () => hasEnoughTokens(userId, orgId, 1, { paidOnly: fablePaidOnly }));
         if (!check.claudePool && (!check.allowed || ((check.spendable ?? check.remaining) !== undefined && (check.spendable ?? check.remaining) < 50000))) forgetKept(quotaKey);
         firstCheck = check;
@@ -7366,7 +7379,7 @@ If a tool fails, never show the error message; say only: "Something went wrong o
                 // when the week's Claude credits are used up: they come back at the end of the Claude week. Any other
                 // answer: the session window or the week, asked again now that this answer is charged.)
                 let resetAt;
-                if (claudePooled(usedModel)) {
+                if (claudePooled(usedModel) || (claudeOnCredits && CLAUDE_CHAT_MODELS.has(usedModel))) {
                     const fresh = await User.findById(userId).select("ai_tokens").lean().catch(() => null);
                     const { weekCounters } = await import("../services/ai-credits.service.js");
                     const counters = await weekCounters(userId, fresh?.ai_tokens).catch(() => null);

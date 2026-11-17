@@ -441,6 +441,29 @@ function pickCreditSource(user) {
     return null;
 }
 
+/**
+ * The person's credits for use past a plan limit (owner, 2026-11-17: one shared pool; gifted credits work everywhere
+ * bought ones do): gifted (promotion) and bought (top-up) together, without the expired ones. `source` is the pool
+ * used first, the one that started first, as for chat; deductTokens then spills into the other when it runs out.
+ * Nothing is available while the account's AI is blocked, the account is not active, or AI is blocked for everyone.
+ * Returns { total, gifted, bought, source } (source null = no credits).
+ */
+export async function creditsAvailable(userId) {
+    const none = { total: 0, gifted: 0, bought: 0, source: null };
+    const [user, globalConfig] = await Promise.all([
+        User.findById(userId).select("ai_tokens status").lean(),
+        GlobalAiConfig.findOne({ key: "singleton" }).select("global_ai_blocked").lean(),
+    ]);
+    if (!user || user.ai_tokens?.is_ai_blocked || globalConfig?.global_ai_blocked) return none;
+    if (user.status && user.status !== "active" && user.status !== "pending") return none;
+    const t = user.ai_tokens || {};
+    const now = Date.now();
+    const live = (balance, end) => (end && new Date(end).getTime() < now ? 0 : Math.max(0, Number(balance) || 0));
+    const gifted = live(t.promotion_credits_balance, t.promotion_credits_end_date);
+    const bought = live(t.ai_credits_balance, t.ai_credits_end_date);
+    return { total: gifted + bought, gifted, bought, source: pickCreditSource(user) };
+}
+
 // A credit pool that ran out during a request: the rest goes to the other credit pool (granted <-> top-up), if it has
 // anything left, so an answer is never left unpaid while the user still has credits
 async function spillToOtherPool(userId, orgId, rest, from) {

@@ -2970,7 +2970,15 @@ export const getAiCreditGrantedHtml = (userName, creditsAdded, totalBalance, exp
             <li><strong>Expiration Date:</strong> ${expireDateStr}</li>
         </ul>
         
-        <p>You can now use your credits to generate content, run AI tools, and use all available smart features. To check your usage at any time, go to <a href="${url}">Settings &gt; Usage</a>.</p>
+        <p><strong>How your credits work</strong></p>
+        <ul style="color: #374151; padding-left: 20px; line-height: 1.6; margin: 16px 0;">
+            <li>Your plan's own limits are used first. Credits are used only when a limit is over.</li>
+            <li>Past a limit, credits keep chat, pictures, WhatsApp messages and calls, voice and read-aloud going. On plans with Claude, they keep Claude going too.</li>
+            <li>Each of these takes credits at its own rate; bigger models take more.</li>
+            <li>Unused credits end on the expiration date above.</li>
+        </ul>
+
+        <p>To check your usage at any time, go to <a href="${url}">Settings &gt; Usage</a>.</p>
         <p>If you have any questions or need more credits, just reply to this email.</p>
         
         <p>Best regards,<br>The Classgrid Support Team</p>
@@ -2988,7 +2996,13 @@ Good news! We have successfully added ${creditsAdded} AI credits to your account
 • New Total Balance: ${totalBalance} Credits
 • Expiration Date: ${expireDateStr}
 
-You can now use your credits to generate content, run AI tools, and use all available smart features. To check your usage at any time, go to Settings > Usage: ${url}
+How your credits work:
+• Your plan's own limits are used first. Credits are used only when a limit is over.
+• Past a limit, credits keep chat, pictures, WhatsApp messages and calls, voice and read-aloud going. On plans with Claude, they keep Claude going too.
+• Each of these takes credits at its own rate; bigger models take more.
+• Unused credits end on the expiration date above.
+
+To check your usage at any time, go to Settings > Usage: ${url}
 
 If you have any questions or need more credits, just reply to this email.
 
