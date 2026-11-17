@@ -131,14 +131,15 @@ export function PlanMeters({ overview }: { overview?: PlanOverview | null }) {
   const u = overview.usage;
   return (
     <>
-      <MeterRow label="Session" meter={u.credits_window} unit="" />
-      <MeterRow label="This week" meter={u.credits_week} unit="" />
-      <MeterRow label="Claude" meter={u.claude_week} unit="" />
+      {/* The same names and lines as the person's own Settings > Usage page, so it is clear which models each limit is for */}
+      <MeterRow label="Session limit" note={`Mid models (DeepSeek, GLM and others) · ${u.credits_window?.periodText || "5 hours"}`} meter={u.credits_window} unit="" />
+      <MeterRow label="Mid models limit" note="DeepSeek, GLM and other models · Weekly" meter={u.credits_week} unit="" />
+      <MeterRow label="Claude limit" note="Sonnet, Opus and Haiku · Weekly" meter={u.claude_week} unit="" />
       <MeterRow label="Pictures" meter={u.images} unit="pictures" />
-      <MeterRow label="WhatsApp" meter={u.whatsapp} unit="messages" />
-      <MeterRow label="Read aloud" meter={u.voice_replies} unit="replies" />
-      <MeterRow label="Voice input" meter={u.voice_input_minutes} unit="minutes" />
-      <MeterRow label="Calls" meter={u.call_minutes} unit="minutes" />
+      <MeterRow label="WhatsApp messages limit" note={`Messages the AI sends${u.whatsapp?.periodText ? ` · ${u.whatsapp.periodText}` : ""}`} meter={u.whatsapp} unit="messages" />
+      <MeterRow label="Read-aloud limit" note="Answers the AI reads out loud · today" meter={u.voice_replies} unit="replies" />
+      <MeterRow label="Voice limit" note="Minutes talking with the AI · today" meter={u.voice_input_minutes} unit="minutes" />
+      <MeterRow label="WhatsApp calls limit" note={`Call minutes with the AI${u.call_minutes?.periodText ? ` · ${u.call_minutes.periodText}` : ""}`} meter={u.call_minutes} unit="minutes" />
     </>
   );
 }
