@@ -240,6 +240,19 @@ const startBackupJobs = async () => {
 
 const rescueHttpServer = app.listen(PORT, async () => {
   console.log(`🚑 Rescue Server running on port ${PORT}`);
+
+  // This server takes people's requests while the main one restarts, so it says how busy it is too
+  // (src/utils/busy-report.js): the deploy restarts it only when it has finished what it took. Until 2026-11-17 it
+  // was restarted right after the main one, and an answer it was writing was cut in the middle.
+  try {
+    const { reportBusy } = await import("./src/utils/busy-report.js");
+    reportBusy(rescueHttpServer, "classgrid-rescue", {
+      skip: (url) => url.startsWith("/api/rescue/socket.io") || url.startsWith("/socket.io"),
+      helpers: async () => (await import("./src/controllers/ai-chat.controller.js")).runningHelperCount(),
+    });
+  } catch (err) {
+    console.error("❌ Rescue Server could not start its busy report:", err.message);
+  }
   
   // ─────────────────────────────────────────────────────────
   // 🚨 MONITOR MAIN SERVER FOR AUTO-RED AND AUTO-GREEN

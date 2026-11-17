@@ -2,19 +2,28 @@
 # Puts a new server version live only when nobody is using the server (.github/workflows/deploy-backend.yml starts it
 # on EC2 after each push). It waits until the server has been quiet for a full minute: no requests being answered
 # (an AI answer is one long request) and no helpers working, as the running server reports in ~/.classgrid-busy
-# (server.js). A server too old to report is judged by its own log instead (log_quiet). Then it takes the
-# newest code from GitHub, installs packages only if they changed, and restarts. A newer push replaces this wait.
+# (src/utils/busy-report.js). A server too old to report is judged by its own log instead (log_quiet). Then it takes
+# the newest code from GitHub, installs packages only if they changed, and restarts. A newer push replaces this wait.
+#
+# The rescue server takes people's requests while the main one restarts. It is restarted only when it has finished
+# what it took (its own report shows nothing running), not right after the main one: on 2026-11-17 a question asked
+# in the seconds of a restart was answered by the rescue server and cut in the middle when it was restarted too
+# (owner: "it shows the answer but it got hidden within a second").
 set -u
 
-APP=/var/www/classgrid_platform
+# (CLASSGRID_APP: another folder, for the script's own test)
+APP="${CLASSGRID_APP:-/var/www/classgrid_platform}"
 BUSY_DIR="$HOME/.classgrid-busy"
 PID_FILE="$HOME/.classgrid-deploy-wait.pid"
 QUIET_NEEDED=4   # quiet checks in a row (15 s apart: one minute)
+QUIET_SLEEP="${CLASSGRID_QUIET_SLEEP:-15}"   # (seconds between two checks; shorter only in the script's own test)
 
 echo $$ > "$PID_FILE"
 echo "[$(date -u +%FT%TZ)] waiting for a quiet moment to put the new server version live"
 
-# Requests + helpers of every running server process, from reports fresher than 20 s; -1 when there are none
+# Requests + helpers of the main server, from reports fresher than 20 s; -1 when there are none. (A report with
+# another name is another process, the rescue server: it does not hold the main server's restart back; it has its own
+# wait below, busy_of.)
 busy_now() {
   node -e '
     const fs = require("fs"), path = require("path"), dir = process.argv[1];
@@ -24,6 +33,7 @@ busy_now() {
         try {
           const r = JSON.parse(fs.readFileSync(path.join(dir, f), "utf8"));
           if (Date.now() - r.at > 20000) continue;
+          if (r.name && r.name !== "classgrid") continue;
           fresh++;
           total += (r.requests || 0) + (r.helpers || 0);
         } catch {}
@@ -31,6 +41,20 @@ busy_now() {
     } catch {}
     console.log(fresh ? total : -1);
   ' "$BUSY_DIR"
+}
+
+# Requests + helpers of ONE process (its pm2 name), from its own report; -1 when it has no fresh report (a process
+# that does not report, or one too old to)
+busy_of() {
+  PID=$(pm2 jlist 2>/dev/null | node -e "let d='';process.stdin.on('data',c=>d+=c).on('end',()=>{try{const p=JSON.parse(d).find(x=>x.name===process.argv[1]);console.log(p&&p.pid?p.pid:'')}catch{console.log('')}})" "$1")
+  if [ -z "$PID" ]; then echo -1; return; fi
+  node -e '
+    const fs = require("fs"), path = require("path");
+    try {
+      const r = JSON.parse(fs.readFileSync(path.join(process.argv[1], process.argv[2] + ".json"), "utf8"));
+      console.log(Date.now() - r.at > 20000 ? -1 : (r.requests || 0) + (r.helpers || 0));
+    } catch { console.log(-1); }
+  ' "$BUSY_DIR" "$PID"
 }
 
 # (a server too old to report) its own log says whether an AI answer is running: 1 when no AI line was written for 3
@@ -74,7 +98,7 @@ while true; do
     echo "[$(date -u +%FT%TZ)] still waiting: busy=$busy"
     last_note=$now
   fi
-  sleep 15
+  sleep "$QUIET_SLEEP"
 done
 
 echo "[$(date -u +%FT%TZ)] quiet for a minute: putting the new version live"
@@ -95,6 +119,15 @@ if [ "$OLD_LOCK" != "$NEW_LOCK" ] || [ ! -d node_modules ]; then
   npm install --omit=dev --no-audit --no-fund --legacy-peer-deps || (sudo rm -rf node_modules && npm install --omit=dev --no-audit --no-fund --legacy-peer-deps)
 fi
 
+# The new code is on the disk; a request that came in while it was fetched is not cut: the main server is restarted
+# when it is still quiet, else after its next quiet moment (two checks, 5 s apart)
+quiet=0
+while [ "$quiet" -lt 2 ]; do
+  busy=$(busy_now)
+  if [ "$busy" = "0" ] || [ "$busy" = "-1" ]; then quiet=$((quiet + 1)); else quiet=0; echo "[$(date -u +%FT%TZ)] a request came in: waiting for it before the restart (busy=$busy)"; fi
+  if [ "$quiet" -lt 2 ]; then sleep 5; fi
+done
+
 pm2 restart classgrid --update-env
 MAIN_UP=0
 for i in $(seq 1 45); do
@@ -103,6 +136,21 @@ for i in $(seq 1 45); do
 done
 if [ "$MAIN_UP" = "1" ]; then
   for name in $(pm2 jlist | node -e "let d='';process.stdin.on('data',c=>d+=c).on('end',()=>console.log(JSON.parse(d).map(p=>p.name).filter(n=>n!=='classgrid').join(' ')))"); do
+    # A process that answers people too (the rescue server, while the main one was restarting) is restarted when its
+    # own report shows nothing running, twice in a row (5 s apart). One that does not report is restarted at once, as
+    # before. After 20 minutes it is restarted whatever it is doing, so it never stays on the old code for good.
+    waited=0
+    calm=0
+    while true; do
+      b=$(busy_of "$name")
+      if [ "$b" = "-1" ]; then break; fi
+      if [ "$b" = "0" ]; then calm=$((calm + 1)); else calm=0; fi
+      if [ "$calm" -ge 2 ]; then break; fi
+      if [ "$waited" -ge 1200 ]; then echo "[$(date -u +%FT%TZ)] $name is still answering after 20 minutes (busy=$b): restarting it now"; break; fi
+      if [ "$b" != "0" ] && [ $((waited % 60)) -eq 0 ]; then echo "[$(date -u +%FT%TZ)] $name is still answering (busy=$b): it is restarted when it has finished"; fi
+      sleep 5
+      waited=$((waited + 5))
+    done
     pm2 restart "$name" --update-env
   done
   echo "[$(date -u +%FT%TZ)] the new version is live"
