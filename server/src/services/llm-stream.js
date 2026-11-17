@@ -427,9 +427,11 @@ export async function streamChat({
     onConversation = null,
     resumeStandIn = null,
     // How much the model thinks: "all" (every round, Deep), "first" (plans on the first round, then each round after a
-    // tool result goes straight to the next step: those rounds were 8-23 s of thinking each, Normal), "none" (Fast)
-    thinking = "all"
+    // tool result goes straight to the next step: those rounds were 8-23 s of thinking each, Normal), "none" (Fast).
+    // Not given: this loop thinks every round ("all"), and a Claude stand-in works at its model's own default.
+    thinking: thinkingAsked
 }) {
+    const thinking = thinkingAsked === undefined ? "all" : thinkingAsked;
     // `tools` is re-read every round: load_tools can add tools to the same array mid-answer.
     const currentTools = () => tools.filter(t => t?.function?.name !== "internal_thought_process" && !excludeTools?.has(t?.function?.name));
     const resumed = resumeProvider === "cf" && Array.isArray(resumeConversation) && resumeConversation.length > 0;
@@ -490,8 +492,11 @@ export async function streamChat({
                 tokensLeft: stand.tokensLeft || tokensLeft,
                 maxOutputTokens: stand.maxOutputTokens || maxOutputTokens,
                 inputTooBig: stand.inputTooBig || inputTooBig,
-                // (Deep thinks harder, Fast less; Normal is the model's own default)
-                ...(thinking === "all" ? { effort: "high" } : thinking === "none" ? { effort: "low" } : {}),
+                // (Deep thinks harder, Fast less; Normal is the model's own default. Only what the caller asked for:
+                // a title, a summary, a file read or a helper gives no thinking level, and "all" is only this loop's
+                // own default; it used to make every such stand-in work at effort high, slower and dearer than the
+                // same job started on Claude)
+                ...(thinkingAsked === "all" ? { effort: "high" } : thinkingAsked === "none" ? { effort: "low" } : {}),
                 signal,
                 onToken,
                 onThought,
@@ -831,6 +836,8 @@ export async function streamChat({
             if (stand) return finishWithClaude(stand);
         }
         const wrapped = err instanceof StreamChatError ? err : new StreamChatError(err?.message || String(err));
+        // (the cap's refusal stays recognisable to the caller, isCfNeuronCapError: it is not an error to try again)
+        if (isCfNeuronCapError(err)) wrapped.code = "cf_neuron_cap";
         wrapped.toolsRun = toolsRun;
         // (the finished rounds, plus what the round in progress had really used when it stopped)
         const part = err?.partialUsage;

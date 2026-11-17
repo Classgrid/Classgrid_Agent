@@ -250,9 +250,11 @@ async function summarizeWithFlash(input, desktop = false) {
         maxTokens: desktop ? 8000 : 3000, // Flash reasons first; leave room for the memory after the reasoning
         maxToolDepth: 0,
         timeoutMs: 90000,
-        // (the day is not used up, but the Cloudflare cap had no room for this request: Claude Haiku writes the summary)
+        // (the day is not used up, but the Cloudflare cap had no room for this request: Claude Haiku writes the summary,
+        // or Sonnet when the Model manager has Haiku off; nothing when the super admin switched Claude off)
         capStandIn: async () => {
-            const model = await import('./cap-fallback.service.js').then((m) => m.claudeFor("small"));
+            const m = await import('./cap-fallback.service.js');
+            const model = m.claudeFor("small", await m.claudeSwitches());
             return model ? { model } : null;
         }
     });
@@ -386,7 +388,8 @@ export async function triggerMemoryAgent(sessionId, { force = false } = {}) {
         let summary = "";
         let usedModel = MEMORY_FLASH_MODEL;
         // (also before December whenever Cloudflare's free Neurons of the day are used up: cap-fallback.service.js)
-        const capped = await import('./cap-fallback.service.js').then((m) => m.claudeWhenCapped("small")).catch(() => null);
+        // (not when the super admin switched Claude off: claudeSwitches)
+        const capped = await import('./cap-fallback.service.js').then(async (m) => m.claudeWhenCapped("small", await m.claudeSwitches())).catch(() => null);
         if (haikuWritesSummary() || capped) {
             // Claude Haiku first; DeepSeek Flash only when Haiku fails or writes nothing
             usedModel = MEMORY_HAIKU_MODEL;

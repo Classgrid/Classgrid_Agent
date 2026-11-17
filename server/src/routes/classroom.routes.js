@@ -1870,8 +1870,10 @@ Material Title: ${material.title || "Untitled"}
 Content: ${text.substring(0, 10000)}
 `;
 
+        // (DeepSeek V4.1 Flash: V4 Pro, used here before, is removed by Cloudflare on 20 Nov 2026 and answers 410 Gone;
+        // this call was the only one that named it directly, past cf-retired-models.js)
         const response = await groq.chat.completions.create({
-            model: '@cf/deepseek-ai/deepseek-v4-pro-0813',
+            model: '@cf/deepseek-ai/deepseek-v4.1-flash-1017',
             messages: [{ role: "user", content: prompt }],
             temperature: 0.3,
             max_tokens: 1000,

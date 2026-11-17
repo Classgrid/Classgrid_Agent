@@ -56,3 +56,34 @@ export function roundInputTooBig(meter, who, cost) {
  * not squeezed when little is left.
  */
 export const answerOutputRoom = (spendable) => (spendable === undefined ? undefined : Math.max(spendable, FIRST_ROUND_OUTPUT));
+
+// Past the plan's weekly Claude credits in the middle of an answer (owner, 2026-11-17: five helpers writing programs
+// on Claude all stopped when the week's Claude credits ran out under them, with 45 crore gifted credits unused; "fix
+// that so it starts in the middle"). An answer on the plan's Claude credits used to stop there; the switch to the
+// person's own credits was made only when a message started. Now the meter knows, from the start, what the person's
+// credits hold (meter.afterPool); when what is left of the Claude credits is about to stop a round, the credits are
+// added to what the answer may use, once, and it goes on. What is used past the Claude credits is charged to the
+// credits (splitPoolCharge), never to the Claude credits.
+
+/**
+ * Before a round: if fewer than `need` credits are left and the person's own credits can carry the answer on, they
+ * are added to what it may use (once per answer). Returns true when that happened now.
+ */
+export function spillPastPool(meter, need = 1) {
+    if (!(meter.afterPool > 0) || meter.pastPool || meter.spendable === undefined) return false;
+    if (meter.spendable - meter.spent >= need) return false;
+    meter.spendable += meter.afterPool;
+    meter.pastPool = true;
+    return true;
+}
+
+/**
+ * A Claude cost, split into what the plan's Claude credits still cover (`room`; undefined = no end to them) and what
+ * is past them (paid from the person's credits).
+ */
+export function splitPoolCharge(room, cost) {
+    const c = Math.max(0, Number(cost) || 0);
+    if (room === undefined) return { toPool: c, past: 0 };
+    const toPool = Math.min(c, Math.max(0, room));
+    return { toPool, past: c - toPool };
+}

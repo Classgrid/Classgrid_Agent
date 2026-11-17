@@ -11,6 +11,10 @@
 //   - no stand-in (none given, or Claude can't be used): the refusal goes up as before
 //   - the stand-in's own failure goes up with what both models used
 //   - an answer a stand-in was finishing when the server restarted goes on with a stand-in, without asking Cloudflare
+//   - an answer picked up after a restart from a Cloudflare model's saved rounds, on a capped day: its next round is
+//     refused and the stand-in goes on from the saved conversation; what was used before the restart is counted once
+//   - a stand-in works at its model's own default effort unless the caller asked for a thinking level
+//   - with no stand-in, the refusal that goes up is still recognisable as the cap's (callers do not retry it)
 // Also here, the usage of a Cloudflare round the user stops (streamOneRound): Cloudflare's first chunk carries the
 // input count, each chunk after it how many tokens it holds, and only the last chunk the whole round, so a stopped
 // round is charged for its input and for what its chunks add up to (it used to be charged for the input only).
@@ -142,7 +146,9 @@ test("no stand-in: the refusal goes up as before", async () => {
     start([toolRound, "refuse"]);
     await assert.rejects(
         () => streamChat({ provider, messages, tools, maxTokens: 1000, toolHandlers: { lookup: async () => "found" } }),
-        (e) => /paused for today/.test(e.message) && e.toolsRun === 1 && e.usage.total_tokens === 110 && !e.standIn,
+        // (still the cap's refusal for the caller: a helper or the file reader does not wait and try it again; its
+        // wording "... 9512 of 9500 Neurons ..." matched their "5xx" retry pattern)
+        (e) => /paused for today/.test(e.message) && e.code === "cf_neuron_cap" && e.toolsRun === 1 && e.usage.total_tokens === 110 && !e.standIn,
     );
     start(["refuse"]);
     await assert.rejects(() => streamChat({ provider, messages, tools, maxTokens: 1000, capStandIn: async () => null }), /paused for today/);
@@ -206,4 +212,41 @@ test("a Cloudflare round the user stops is charged for its input and for what it
     );
     assert.equal(shown, "One two three four five six seven");
     assert.equal(claudeCalls.length, 0, "a stopped answer is not handed to a stand-in");
+});
+
+test("after a restart, a Cloudflare model's saved rounds go on; on a capped day the stand-in takes them over", async () => {
+    // What turn-state.service.js saved after the Cloudflare model's last round with tools: the conversation in this
+    // loop's shape, and what it had used
+    const savedConversation = [
+        ...messages,
+        { role: "assistant", content: "Let me look. ", tool_calls: [{ id: "call_a", type: "function", function: { name: "lookup", arguments: "{\"q\":\"x\"}" } }] },
+        { role: "tool", tool_call_id: "call_a", content: "found x" },
+    ];
+    const savedUsage = { prompt_tokens: 3000, completion_tokens: 200, total_tokens: 3200, cached_tokens: 0 };
+    start(["refuse"]);
+    let ran = 0;
+    const r = await streamChat({
+        provider, messages, tools, maxTokens: 1000,
+        toolHandlers: { lookup: async () => { ran++; return "found"; } },
+        resumeProvider: "cf", resumeConversation: savedConversation, resumeUsage: savedUsage,
+        capStandIn: standIn(),
+    });
+    assert.equal(ran, 0, "the tool that ran before the restart is not run again");
+    assert.equal(sent.length, 0, "the refused round was not sent");
+    assert.deepEqual(claudeCalls[0].resumeConversation[0].from, ["system", "user", "assistant", "tool"], "the stand-in goes on from the saved rounds, not from the question");
+    assert.equal(claudeCalls[0].resumeUsage, null, "the stand-in's own usage does not carry the Cloudflare rounds");
+    assert.deepEqual(r.standIn.before, { model: "@cf/zai-org/glm-5.3", usage: savedUsage }, "what was used before the restart is the Cloudflare part");
+    assert.equal(r.usage.total_tokens, 950, "the answer's usage is the stand-in's alone: each part is charged once");
+});
+
+test("a stand-in works at its model's own default effort unless the caller asked for a thinking level", async () => {
+    // (a title, a summary, a file read or a helper asks for none: they used to work at effort high)
+    start(["refuse"]);
+    await streamChat({ provider, messages, tools, maxTokens: 1000, capStandIn: standIn() });
+    assert.equal(claudeCalls[0].effort, undefined);
+    for (const [thinking, effort] of [["all", "high"], ["none", "low"], ["first", undefined]]) {
+        start(["refuse"]);
+        await streamChat({ provider, messages, tools, maxTokens: 1000, thinking, capStandIn: standIn() });
+        assert.equal(claudeCalls[0].effort, effort, `thinking ${thinking}`);
+    }
 });

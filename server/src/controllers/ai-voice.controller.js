@@ -424,8 +424,13 @@ export const voiceTurn = async (req, res) => {
     const system = voiceSystemPrompt(user, { language: body.language, memory: session?.long_term_memory ? memoryText(session.long_term_memory).slice(0, 6000) : "", voiceOn });
     const messages = toVoiceMessages(trimHistory(history), said);
     let answerModel = picked || VOICE_MODEL;
+    // (the stand-in is never a Claude model the super admin switched off: the Claude feature flag and the Model
+    // manager, read here whatever was picked; offModels above is read only when a model was picked by name, so on Auto
+    // Claude Haiku answered even with Haiku turned off)
+    const capSwitches = CLAUDE_CHAT_MODELS.has(answerModel) ? null
+        : await import("../services/cap-fallback.service.js").then((m) => m.claudeSwitches()).catch(() => ({ claudeOff: false, disabled: offModels || [] }));
     if (!CLAUDE_CHAT_MODELS.has(answerModel)) {
-        const stand = await import("../services/cap-fallback.service.js").then((m) => m.claudeWhenCapped("simple", { disabled: offModels || [] })).catch(() => null);
+        const stand = await import("../services/cap-fallback.service.js").then((m) => m.claudeWhenCapped("simple", capSwitches)).catch(() => null);
         if (stand) { answerModel = stand; claudeByCap = true; }
     }
     let modelFailed = false; // the model could not answer (the turn ends with model_failed)
@@ -441,7 +446,7 @@ export const voiceTurn = async (req, res) => {
                 // reached in the middle of the turn): Claude Haiku answers it and the rest of the turn, the same
                 // system's choice as the stand-in picked above (not a backup for a model that failed)
                 const stand = e?.code === "cf_neuron_cap" && !CLAUDE_CHAT_MODELS.has(answerModel)
-                    ? await import("../services/cap-fallback.service.js").then((m) => m.claudeFor("simple", { disabled: offModels || [] })).catch(() => null)
+                    ? await import("../services/cap-fallback.service.js").then((m) => m.claudeFor("simple", capSwitches || {})).catch(() => null)
                     : null;
                 if (!stand) throw e;
                 answerModel = stand;

@@ -54,7 +54,7 @@ import { planToolsForMessage, buildLoadToolsTool, orderTools, groupOfTool, ageSt
 import { safetyRulesFor } from "../services/ai-safety-rules.js";
 import { cfModel } from "../services/cf-retired-models.js";
 import { chargeableTokens, pricesFor } from "../services/ai-token-pricing.js";
-import { FIRST_ROUND_OUTPUT, addRound, roundTokensLeft, roundMaxOutput, roundInputTooBig, answerOutputRoom } from "../services/answer-meter.js";
+import { FIRST_ROUND_OUTPUT, addRound, roundTokensLeft, roundMaxOutput, roundInputTooBig, answerOutputRoom, spillPastPool, splitPoolCharge } from "../services/answer-meter.js";
 import { getPresignedUploadUrl, uploadBufferToR2 } from "../config/r2Client.js";
 import { primarySupabaseClient as supabase } from "../config/supabaseClient.js";
 import {
@@ -79,7 +79,7 @@ import { canAccessSession, gridLabelMap, gridProfilesText, getSharedSessionsFor,
 import { editorContextFor, rememberProjectSnapshot, sandboxDataDir, startCheckpoint, finishCheckpoint, linkChatToProject, forgetChatScreenProject, touchStudio, pcChatIds, masteroAutoPush, pullMastero } from "../services/ide-project.service.js";
 // Cloudflare Workers AI daily Neuron cap and meter (Global AI Config): every Cloudflare request goes through cfAiFetch
 import { cfAiFetch, providersWithoutCappedCloudflare, isCfNeuronCapError } from "../services/cf-neuron-cap.service.js";
-import { usageParts } from "../services/cap-fallback.service.js";
+import { usageParts, claudeSwitches, keepsCloudflareRounds, CAP_REFUSED_WHY } from "../services/cap-fallback.service.js";
 import * as eleven from "../services/elevenlabs.service.js";
 import { planOf, isUnlimited } from "../services/plan-limits.service.js";
 import { PLANNER_BROWSER_TOOLS, PLANNER_BLIND_TOOLS, WORKER_BROWSER_TOOLS, BROWSER_TOOL_NAMES, makeBrowserHandlers, BROWSER_WORKER_SYSTEM } from "../services/studio-browser-tools.js";
@@ -770,8 +770,10 @@ async function generateShortTitleText(instruction, text) {
     ];
     // Cloudflare's free Neurons of the day are used up (the cap switch is on): Claude Haiku writes it
     // (services/cap-fallback.service.js)
+    // (never on a Claude model the super admin switched off: the Claude feature flag and the Model manager)
     const { claudeWhenCapped, claudeFor } = await import("../services/cap-fallback.service.js");
-    const stand = await claudeWhenCapped("small").catch(() => null);
+    const switches = await claudeSwitches();
+    const stand = await claudeWhenCapped("small", switches).catch(() => null);
     if (stand) {
         const result = await streamClaudeChat({ model: stand, messages, tools: [], maxTokens: 2000, maxToolDepth: 0, timeoutMs: 30000 });
         return { answer: result.answer || "", usage: result.usage, model: stand, provider: "anthropic" };
@@ -784,7 +786,7 @@ async function generateShortTitleText(instruction, text) {
         maxToolDepth: 0,
         timeoutMs: 30000,
         // (the day is not used up, but the cap had no room for this request: Claude Haiku writes it)
-        capStandIn: async () => { const model = claudeFor("small"); return model ? { model } : null; },
+        capStandIn: async () => { const model = claudeFor("small", switches); return model ? { model } : null; },
     });
     return result.standIn
         ? { answer: result.answer || "", usage: result.usage, model: result.servedModel || result.standIn.model, provider: "anthropic" }
@@ -1804,6 +1806,11 @@ export const streamAskAi = async (req, res) => {
         playgroundRun.pending[kind] += piece;
         if (!playgroundRun.timer) playgroundRun.timer = setTimeout(flushPlaygroundText, 250);
     };
+    // (the plan's weekly Claude credits ran out in the middle of this answer and the person's credits carry it on:
+    // answer-meter.js spillPastPool; logged once)
+    const notePastPool = (now, who) => {
+        if (now) console.log(`[AI-TOKEN] The plan's weekly Claude credits ran out during this answer (${who}): it goes on, paid from the person's credits (${liveMeter.afterPool} available)`);
+    };
     const meterHooks = (model, who = "Agent") => {
         const outputWeight = chargeableTokens({ prompt_tokens: 0, completion_tokens: 1000 }, model) / 1000;
         return {
@@ -1825,6 +1832,7 @@ export const streamAskAi = async (req, res) => {
                 }
             },
             tokensLeft: () => {
+                notePastPool(spillPastPool(liveMeter, 1), who);
                 const l = roundTokensLeft(liveMeter, who);
                 if (l !== undefined && l <= 0 && !liveMeter.stopped) {
                     liveMeter.stopped = true;
@@ -1832,8 +1840,8 @@ export const streamAskAi = async (req, res) => {
                 }
                 return l;
             },
-            maxOutputTokens: () => roundMaxOutput(liveMeter, who, outputWeight),
-            inputTooBig: (u) => roundInputTooBig(liveMeter, who, chargeableTokens(u, model)),
+            maxOutputTokens: () => { notePastPool(spillPastPool(liveMeter, outputWeight * FIRST_ROUND_OUTPUT), who); return roundMaxOutput(liveMeter, who, outputWeight); },
+            inputTooBig: (u) => { const cost = chargeableTokens(u, model); notePastPool(spillPastPool(liveMeter, cost + 1), who); return roundInputTooBig(liveMeter, who, cost); },
         };
     };
     // When Cloudflare's daily cap refuses a round of a job (before it or in the middle of it), a Claude model finishes
@@ -1909,6 +1917,20 @@ export const streamAskAi = async (req, res) => {
     // (not while this answer is paid from the person's credits: see claudeOnCredits)
     const claudePooled = (model) => !claudeOnCredits && !claudeByCap && !!planRow && typeof model === "string" && CLAUDE_CHAT_MODELS.has(model) && Number(planRow.claude_credits_per_week) !== 0;
     let claudeSeparate = false; // this request picked a Claude model the plan includes
+    // A pooled Claude cost (claudePooled): to the plan's weekly Claude credits up to what this answer had left of them,
+    // the rest to the person's credits (gifted or bought). With no credits, the rest is counted on the Claude credits
+    // as before (it is not charged anywhere else).
+    const chargeClaudePool = async (cost, model) => {
+        if (claudeCreditsAfterP) await claudeCreditsAfterP;
+        const { toPool, past } = splitPoolCharge(claudePoolRoom, cost);
+        if (claudePoolRoom !== undefined) claudePoolRoom -= toPool;
+        const onPool = past > 0 && claudeCreditsAfter ? toPool : toPool + past;
+        if (onPool > 0) await User.updateOne({ _id: userId }, { $inc: { "ai_tokens.claude_week_used": onPool, ...(/claude-fable/.test(model) ? { "ai_tokens.fable_week_used": onPool } : {}) } });
+        if (past > 0 && claudeCreditsAfter) {
+            await deductTokens(userId, orgId, past, claudeCreditsAfter.source);
+            console.log(`[AI-TOKEN] Past the plan's weekly Claude credits: ${past} charged to the person's ${claudeCreditsAfter.source} credits (${model})`);
+        }
+    };
     // The plan's weekly Claude credits (or Fable's share of them) are used up and the person has credits: this answer
     // is paid from the credits (gifted or bought) at the model's own rate, like any other use past a plan limit
     // (owner, 2026-11-17: "Claude and Fable take from credits when their limit is over")
@@ -1918,8 +1940,16 @@ export const streamAskAi = async (req, res) => {
     // place of the Cloudflare model it would have used (services/cap-fallback.service.js). The system's choice, not the
     // person's pick: no plan gate, counted on the person's normal limits, never on a plan's weekly Claude credits.
     let claudeByCap = false;
+    let capSmallModel = null; // the Claude model for the small jobs of this answer (the file reader) while capped
+    let capDisabled = []; // the models turned off in the Model manager, as read when the stand-in was picked
     let selectedBeforeCap = null; // what the person had picked ("auto" or a Cloudflare model), for what is remembered
     let claudePoolLeft; // what is left of the plan's weekly Claude credits (undefined = unlimited)
+    // This answer's Claude use is charged to the plan's Claude credits only up to what was left of them when it
+    // started (claudePoolRoom, counted down as it is charged); the rest is past them and paid from the person's credits
+    // (claudeCreditsAfter: { source, total }, read at the start; the live meter carries the answer on with them).
+    let claudePoolRoom;
+    let claudeCreditsAfter = null;
+    let claudeCreditsAfterP = null;
     // The plan's weekly Claude pool, and Fable's share of it (a Claude model picked by name; -1 = unlimited)
     if (planRow && typeof body.selectedModel === "string" && CLAUDE_CHAT_MODELS.has(body.selectedModel)) {
         const pool = Number(planRow.claude_credits_per_week);
@@ -1937,7 +1967,11 @@ export const streamAskAi = async (req, res) => {
             const when = counters.weekEnd.toLocaleString("en-IN", { timeZone: "Asia/Kolkata", day: "numeric", month: "short", hour: "numeric", minute: "2-digit" });
             const poolUsedUp = counters.claude_week_used >= pool;
             const fableUsedUp = wantsFable && counters.fable_week_used >= pool * Number(planRow.fable_share_percent) / 100;
-            const credits = poolUsedUp || fableUsedUp ? await creditsAvailable(userId).catch(() => null) : null;
+            // (read for every answer on the plan's Claude credits, not only when they are used up: they can run out in
+            // the middle of this answer, and it goes on with the person's credits then. Read alongside, not waited for,
+            // unless the Claude credits are already used up)
+            const creditsP = creditsAvailable(userId).catch(() => null);
+            const credits = poolUsedUp || fableUsedUp ? await creditsP : null;
             if (credits?.source && credits.total > 0) {
                 claudeOnCredits = true;
                 claudeCreditSource = credits.source;
@@ -1952,7 +1986,11 @@ export const streamAskAi = async (req, res) => {
                 res.end(JSON.stringify({ error: `You've used this week's Claude Fable share of your ${planRow.name} plan. It refills on ${when} (India time). Upgrade your plan, or pick Sonnet or Opus.`, code: "fable_cap_reached", plan: planRow.key }));
                 return;
             }
-            if (!claudeOnCredits) claudePoolLeft = Math.max(1, wantsFable ? Math.min(pool - counters.claude_week_used, Math.round(pool * Number(planRow.fable_share_percent) / 100) - counters.fable_week_used) : pool - counters.claude_week_used);
+            if (!claudeOnCredits) claudeCreditsAfterP = creditsP.then((c) => {
+                claudeCreditsAfter = c?.source && c.total > 0 ? { source: c.source, total: c.total } : null;
+                if (claudeCreditsAfter) liveMeter.afterPool = claudeCreditsAfter.total;
+            });
+            if (!claudeOnCredits) claudePoolRoom = claudePoolLeft = Math.max(1, wantsFable ? Math.min(pool - counters.claude_week_used, Math.round(pool * Number(planRow.fable_share_percent) / 100) - counters.fable_week_used) : pool - counters.claude_week_used);
         }
     }
     // Claude Fable (the family: 5.1, 5.2 and later) comes with the plan only (Pro and Max give it a share; owner,
@@ -1978,18 +2016,26 @@ export const streamAskAi = async (req, res) => {
     // The chat's row is read while the usage check runs (it is needed right after it), not after it
     // Sonnet for a longer or harder message, Haiku for a short simple one (the same split Auto makes between its two
     // Cloudflare models). After the plan checks above on purpose: they are about what the person picked.
-    if (!CLAUDE_CHAT_MODELS.has(typeof body.selectedModel === "string" ? body.selectedModel : "")) {
+    // An answer picked up again after a server restart (resumeTurn) whose saved rounds are a Cloudflare model's is not
+    // moved here: Claude's loop would start the question from the beginning (the tools that ran before the restart
+    // would run again, and what the Cloudflare model used would never be counted). It goes on from its saved rounds on
+    // the Cloudflare path, and when the cap refuses its next round the stand-in takes over there, from the saved
+    // conversation (cap-fallback.service.js keepsCloudflareRounds; llm-stream.js capStandIn).
+    const resumesCloudflareRounds = typeof body.resumeTurn === "string" && body.resumeTurn
+        ? keepsCloudflareRounds(await import("../services/turn-state.service.js").then((m) => m.loadTurnState(body.resumeTurn)).catch(() => null), userId)
+        : false;
+    if (!CLAUDE_CHAT_MODELS.has(typeof body.selectedModel === "string" ? body.selectedModel : "") && !resumesCloudflareRounds) {
         try {
-            const { claudeWhenCapped } = await import("../services/cap-fallback.service.js");
+            const { claudeWhenCapped, claudeFor } = await import("../services/cap-fallback.service.js");
             const { disabledModels } = await import("../services/model-access.service.js");
-            const stand = await claudeWhenCapped(pickChatModel(body) === CF_PRO_MODEL ? "hard" : "simple", {
-                claudeOff: flagsOff.has(modelFlagKey("claude-haiku-5-5")),
-                disabled: await disabledModels().catch(() => []),
-            });
+            const switches = { claudeOff: flagsOff.has(modelFlagKey("claude-haiku-5-5")), disabled: await disabledModels().catch(() => []) };
+            const stand = await claudeWhenCapped(pickChatModel(body) === CF_PRO_MODEL ? "hard" : "simple", switches);
             if (stand) {
                 selectedBeforeCap = typeof body.selectedModel === "string" ? body.selectedModel : "auto";
                 body.selectedModel = stand;
                 claudeByCap = true;
+                capSmallModel = claudeFor("small", switches);
+                capDisabled = switches.disabled;
                 console.log(`[AI-STREAM] Cloudflare's daily Neurons are used up: ${stand} answers in place of ${selectedBeforeCap}`);
             }
         } catch (e) {
@@ -4036,8 +4082,9 @@ Every user is using you as a personal AI assistant and agent (like ChatGPT) to m
                 // file from a short spec, go to a low-cost model, so the main model gets only its short answer, never
                 // the whole files. When the main model costs more than the reader, a whole read of a big file (or a
                 // cat of it) is sent to the reader instead.
-                // (while Cloudflare is capped, see claudeByCap: Claude Haiku reads)
-                const READER_MODELS = claudeByCap ? ["claude-haiku-5-5"] : ["@cf/deepseek-ai/deepseek-v4.1-flash-1017", HELPER_GLM_MODEL];
+                // (while Cloudflare is capped, see claudeByCap: the Claude model for small jobs reads, Haiku unless the
+                // Model manager has it off)
+                const READER_MODELS = claudeByCap && capSmallModel ? [capSmallModel] : ["@cf/deepseek-ai/deepseek-v4.1-flash-1017", HELPER_GLM_MODEL];
                 const READER_MIN_LINES = Number(process.env.READER_MIN_LINES) || 350;
                 const readerOn = pricesFor(typeof body.selectedModel === "string" ? body.selectedModel : "auto").input > pricesFor(READER_MODELS[0]).input;
                 const READER_PIECE_LINES = 150;
@@ -4097,7 +4144,8 @@ Every user is using you as a personal AI assistant and agent (like ChatGPT) to m
                             if (answer) return { answer, model: r.standIn?.model || model };
                             lastError = "no answer";
                         } catch (e) {
-                            lastError = String(e?.message || e);
+                            // (the cap refused it and no Claude model could read instead: said plainly, CAP_REFUSED_WHY)
+                            lastError = isCfNeuronCapError(e) ? CAP_REFUSED_WHY : String(e?.message || e);
                         }
                     }
                     throw new Error(lastError || "no answer");
@@ -4383,11 +4431,16 @@ You work on the user's own Windows computer through their Classgrid desktop app,
                             let lastError = "";
                             // When every model failed, the helper restarts by itself (up to 2 more times), carrying on from
                             // the files it already made
+                            let rounds = 0;
                             for (let round = 0; round < 3; round++) {
                             if (round > 0) {
                                 emitHelper({ helper: i, state: "running" });
                                 await sleep(10000);
                             }
+                            rounds++;
+                            // Cloudflare's cap refused every model of this try and no Claude model could take over: the same
+                            // models are not tried again 10 seconds later (the cap stays until the day ends)
+                            let onlyCapRefusals = true;
                             // with_chat: the chat's recent conversation comes first, so the helper knows the whole story
                             const chatSoFar = h.withChat ? (messages || []).filter((m) => (m.role === "user" || m.role === "assistant") && typeof m.content === "string" && !m.content.startsWith("[SYSTEM:")).slice(-12)
                                 .map((m) => `${m.role === "user" ? "User" : "Main AI"}: ${m.content.slice(0, 1500)}`).join("\n\n").slice(-12000) : "";
@@ -4419,22 +4472,29 @@ You work on the user's own Windows computer through their Classgrid desktop app,
                                             : await streamChat({ ...helperArgs, ...meterHooks(model, `Helper ${h.no}`), capStandIn: capStandInFor("helper", `Helper ${h.no}`, (m) => { h.nowModel = m; return {}; }), provider: cloudflareStreamProvider(model, `${sessionId || "x"}-helper-${h.no}`), seesImages: CF_VISION_MODELS.has(model), maxTokens: 8192, maxContinuations: 6, answerAtDepthLimit: true, toolDriver: localLoop ? localLoop.driverFor(h.no) : null }); // a long report keeps going instead of being cut
                                         if (userId) for (const part of usageParts(r, model)) deductTokens(userId, orgId, chargeableTokens(part.usage, part.model), tokenSource).catch(() => {});
                                         h.tokens = (h.tokens || 0) + (r.usage?.total_tokens || 0) + (r.standIn?.before?.usage?.total_tokens || 0); // shown in the chat's Agent map
-                                        if (!String(r.answer || "").trim()) { lastError = "no answer"; h.switches = [...(h.switches || []), { from: model, why: "it gave no answer" }]; break; } // try the next model
+                                        if (!String(r.answer || "").trim()) { onlyCapRefusals = false; lastError = "no answer"; h.switches = [...(h.switches || []), { from: model, why: "it gave no answer" }]; break; } // try the next model
                                         h.usedModel = r.standIn?.model || model;
                                         return { state: "done", text: String(r.answer).slice(0, 40000) };
                                     } catch (e) {
-                                        lastError = String(e?.message || e);
+                                        // Cloudflare's cap refused the round and no Claude model could take it over. It is not
+                                        // waited out and tried again on this model (its wording, "9512 of 9500 Neurons used", has a
+                                        // "500" in it and matched the pattern below), and the helper's report and the Agent map get
+                                        // plain words, not the cap's (CAP_REFUSED_WHY)
+                                        const capRefused = isCfNeuronCapError(e);
+                                        if (!capRefused) onlyCapRefusals = false;
+                                        lastError = capRefused ? CAP_REFUSED_WHY : String(e?.message || e);
                                         if (h.abort.signal.aborted) return { state: "failed", text: "stopped because the user stopped the chat" };
                                         // "Too many requests", a timeout or a busy server: wait once and retry this model, then move to the next one
-                                        if (/429|408|5\d\d|rate limit|timeout|timed out/i.test(lastError) && attempt < 2) { await sleep(4000); continue; }
+                                        if (!capRefused && /429|408|5\d\d|rate limit|timeout|timed out/i.test(lastError) && attempt < 2) { await sleep(4000); continue; }
                                         // The Agent map says why the next model took over
                                         h.switches = [...(h.switches || []), { from: model, why: lastError.slice(0, 300) }];
                                         break;
                                     }
                                 }
                             }
+                            if (onlyCapRefusals) break;
                             }
-                            return { state: "failed", text: `${lastError} (tried 3 times on ${models.map((m) => MODEL_DISPLAY_NAMES[m] || m).join(", ")})` };
+                            return { state: "failed", text: `${lastError} (tried ${rounds === 1 ? "once" : `${rounds} times`} on ${models.map((m) => MODEL_DISPLAY_NAMES[m] || m).join(", ")})` };
                         };
 
                         const batch = specs.slice(0, room).map((s, i) => {
@@ -5054,7 +5114,9 @@ You work on the user's own Windows computer through their Classgrid desktop app,
                                 }
                                 return "VISION AI ANSWER:\n" + (seen.answer || "(no description)");
                             };
-                            const visionStand = await capFallback.claudeWhenCapped("small").catch(() => null);
+                            // (never on a Claude model the super admin switched off)
+                            const visionSwitches = await capFallback.claudeSwitches();
+                            const visionStand = await capFallback.claudeWhenCapped("small", visionSwitches).catch(() => null);
                             if (visionStand) return await claudeLooks(visionStand);
 
                             console.log(`[analyze_image] Using Cloudflare Vision AI. Question: ${question}`);
@@ -5086,7 +5148,7 @@ You work on the user's own Windows computer through their Classgrid desktop app,
                                 });
                             } catch (capErr) {
                                 // The day is not used up, but the Cloudflare cap had no room for this picture: Claude Haiku looks at it
-                                const after = isCfNeuronCapError(capErr) ? capFallback.claudeFor("small") : null;
+                                const after = isCfNeuronCapError(capErr) ? capFallback.claudeFor("small", visionSwitches) : null;
                                 if (!after) throw capErr;
                                 return await claudeLooks(after);
                             }
@@ -6950,7 +7012,7 @@ If a tool fails, never show the error message; say only: "Something went wrong o
                 if (!(cost > 0)) continue;
                 try {
                     if (claudePooled(m)) {
-                        await User.updateOne({ _id: userId }, { $inc: { "ai_tokens.claude_week_used": cost, ...(/claude-fable/.test(m) ? { "ai_tokens.fable_week_used": cost } : {}) } });
+                        await chargeClaudePool(cost, m);
                     } else {
                         await deductTokens(userId, orgId, cost, tokenSource);
                     }
@@ -7034,7 +7096,7 @@ If a tool fails, never show the error message; say only: "Something went wrong o
                         if (!userId || !(claudeUsage?.total_tokens > 0)) return;
                         const detachedTokens = chargeableTokens(claudeUsage, claudeModel);
                         if (claudePooled(claudeModel)) {
-                            User.updateOne({ _id: userId }, { $inc: { "ai_tokens.claude_week_used": detachedTokens, ...(/claude-fable/.test(claudeModel) ? { "ai_tokens.fable_week_used": detachedTokens } : {}) } })
+                            chargeClaudePool(detachedTokens, claudeModel)
                                 .catch((err) => console.error("[AI-TOKEN] Claude week count (detached) failed:", err.message));
                         } else {
                             deductTokens(userId, orgId, detachedTokens, tokenSource)
@@ -7062,7 +7124,7 @@ If a tool fails, never show the error message; say only: "Something went wrong o
                     // (while Cloudflare is capped, see claudeByCap: a stand-in that gives nothing before any output is
                     // followed once by the other Claude model, because the Cloudflare models below are refused by the cap)
                     const claudeTries = !CLAUDE_CHAT_MODELS.has(requestedModel) ? []
-                        : claudeByCap ? [requestedModel, requestedModel === "claude-sonnet-5-5" ? "claude-haiku-5-5" : "claude-sonnet-5-5"]
+                        : claudeByCap ? [requestedModel, requestedModel === "claude-sonnet-5-5" ? "claude-haiku-5-5" : "claude-sonnet-5-5"].filter((m, k) => k === 0 || !capDisabled.includes(m))
                         : [requestedModel];
                     for (const claudeModelNow of claudeTries) {
                         if (streamed) break;
@@ -7410,7 +7472,7 @@ If a tool fails, never show the error message; say only: "Something went wrong o
                     // answer is paid from the credits (the tokenSource was determined earlier via hasEnoughTokens).
                     let deductionResult = null;
                     if (claudePooled(usedModel) && poolTokens > 0) {
-                        await User.updateOne({ _id: userId }, { $inc: { "ai_tokens.claude_week_used": poolTokens, ...(/claude-fable/.test(usedModel) ? { "ai_tokens.fable_week_used": poolTokens } : {}) } })
+                        await chargeClaudePool(poolTokens, usedModel)
                             .catch((err) => console.error("[AI-TOKEN] Claude week count failed:", err.message));
                         deductionResult = { success: true, uncharged: 0, type: "claude_pool" };
                     } else {
@@ -8930,6 +8992,8 @@ export const generateImage = async (req, res) => {
             } catch (err) {
                 lastError = err;
                 console.error(`[Cloudflare Image API] Attempt ${attempt} failed:`, err.message);
+                // (Cloudflare's daily cap refused it: the same answer comes back until the day ends, so no second try)
+                if (isCfNeuronCapError(err)) break;
                 if (attempt < 3) await new Promise(res => setTimeout(res, 4000)); // Wait 4s before retry
             }
         }

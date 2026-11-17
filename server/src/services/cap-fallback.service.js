@@ -69,6 +69,45 @@ export function claudeFor(job, { claudeOff = false, disabled = [] } = {}) {
 }
 
 /**
+ * What the super admin has switched off, in the shape claudeFor and claudeWhenCapped take: the Claude family's
+ * feature flag (model_claude) and the models turned off in the Model manager. A stand-in is the system's choice, not
+ * the person's pick, but it never runs on a model the super admin turned off: every caller passes this (before, only
+ * the main answer and the helpers did; titles, the summary, the file reader, the picture reader, the task checker
+ * and voice mode on Auto used Claude Haiku whatever the switches said). A switch that cannot be read counts as on.
+ */
+export async function claudeSwitches() {
+    const [flags, access] = await Promise.all([import("./feature-flag.service.js"), import("./model-access.service.js")]);
+    const [off, disabled] = await Promise.all([
+        flags.offFeatures().catch(() => new Set()),
+        access.disabledModels().catch(() => []),
+    ]);
+    return { claudeOff: !!off?.has?.("model_claude"), disabled: Array.isArray(disabled) ? disabled : [] };
+}
+
+/**
+ * True for an answer picked up again after a server restart (resumeTurn) whose saved rounds are a Cloudflare
+ * model's (turn-state.service.js: provider "cf"). Such an answer is not moved to Claude before it starts, even
+ * while Cloudflare is capped: Claude's loop only goes on from rounds saved in its own shape, so it would start the
+ * question from the beginning (the files edited and the commands run before the restart would be done again), and
+ * what the Cloudflare model used before the restart would never be counted. It stays on the Cloudflare path: that
+ * loop takes the saved rounds and their usage, the cap refuses its next round, and the stand-in goes on from the
+ * saved conversation (llm-stream.js capStandIn), with the Cloudflare rounds counted once at their own rate.
+ * Rounds saved in Claude's shape (an answer started on Claude, or one a stand-in was finishing) go on with Claude.
+ */
+export function keepsCloudflareRounds(saved, userId) {
+    return !!saved && saved.provider === "cf" && Array.isArray(saved.conversation) && saved.conversation.length > 0
+        && String(saved.userId || "") === String(userId || "");
+}
+
+/**
+ * What a job tells its caller when Cloudflare's cap refused it and no Claude model could take it over. It is read
+ * by another AI (a tool result, a helper's report) and by staff (the Agent map's "why"), never by the user, and it
+ * does not name Cloudflare, Neurons or the cap: the main AI used to repeat "Cloudflare AI is paused for today:
+ * 9512 of 9500 Neurons used" to the person.
+ */
+export const CAP_REFUSED_WHY = "the model is not available right now";
+
+/**
  * The Claude model that does `job` while Cloudflare is capped, or null when Cloudflare should be used as usual (not
  * capped) or Claude can't be used (claudeFor). Asked before a job starts.
  */

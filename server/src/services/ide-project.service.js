@@ -36,7 +36,7 @@ import { guideFiles, GUIDE_PROJECT_DIR } from "./classgrid-guide.service.js";
 import { githubAppReady, githubAppInstallUrl, repoAppToken, classgridAuthor, userCoAuthorLine } from "./github-app.service.js";
 import connectDB from "../../config/db.js";
 import redis from "../config/redis.js";
-import { cfAiFetch } from "./cf-neuron-cap.service.js";
+import { cfAiFetch, isCfNeuronCapError } from "./cf-neuron-cap.service.js";
 
 // File tools for a Project Mode project (the code the user and the AI share). Everything runs on the sandbox as
 // the normal user, inside the project folder only. Pushing adds the owner's GitHub key just for that one command,
@@ -857,6 +857,21 @@ async function embedTexts(texts) {
   return results.flat();
 }
 
+// What search_project_by_meaning answers when Cloudflare's daily cap refuses its embeddings (a search by meaning has
+// no Claude stand-in: Claude makes no embeddings). Read by the model, which tells the user what it does next: plain
+// words and the way on, not the cap's own wording ("Cloudflare AI is paused for today: 9512 of 9500 Neurons used"),
+// which the model used to repeat to the person.
+export const MEANING_SEARCH_PAUSED = "Search by meaning is not available right now. Use search_project (text search for names and words) or find_project_files instead.";
+// The embeddings of a search by meaning, or MEANING_SEARCH_PAUSED when the cap refuses them (any other failure goes up)
+export async function meaningVectors(texts, embed = embedTexts) {
+  try {
+    return { vectors: await embed(texts) };
+  } catch (e) {
+    if (isCfNeuronCapError(e)) return { paused: MEANING_SEARCH_PAUSED };
+    throw e;
+  }
+}
+
 // One search at a time per project: two at once (the AI and its helpers) wrote the same index file together and broke it
 const SEM_RUNS = new Map();
 function searchByMeaning(project, ssh, query, maxResults) {
@@ -881,7 +896,9 @@ async function searchByMeaningNow(project, ssh, query, maxResults) {
   try { plan = JSON.parse(planned.stdout); } catch { return `Error: could not read the project (${(planned.stderr || "").trim().slice(-300)})`; }
   const todo = plan.todo || [];
   if (todo.length) {
-    const vectors = await embedTexts(todo.map((c) => c.text));
+    const made = await meaningVectors(todo.map((c) => c.text));
+    if (made.paused) return made.paused;
+    const vectors = made.vectors;
     for (let i = 0; i < todo.length; i += 1000) {
       // A chunk the embedding service gave no vector for is left out (it would break the index file)
       const part = todo.slice(i, i + 1000).map((c, j) => ({ file: c.file, start: c.start, end: c.end, sha: c.sha, vec: vectors[i + j] })).filter((c) => Array.isArray(c.vec) && c.vec.length);
@@ -891,7 +908,9 @@ async function searchByMeaningNow(project, ssh, query, maxResults) {
       if (added.code) return `Error: could not save the search index (${(added.stderr || "").trim().slice(-300)})`;
     }
   }
-  const [qvec] = await embedTexts([question]);
+  const asked = await meaningVectors([question]);
+  if (asked.paused) return asked.paused;
+  const [qvec] = asked.vectors;
   const found = await ssh.execCommand(`python3 ${SEM_SCRIPT} search ${q(index)} ${k}`, { stdin: JSON.stringify(qvec) });
   let hits;
   try { hits = JSON.parse(found.stdout); } catch { return "Error: the search failed"; }

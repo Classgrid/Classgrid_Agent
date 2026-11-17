@@ -92,7 +92,9 @@ async function smallModel(user, system, text) {
         }
         return { answer: String(r.answer || ""), thinking: "" };
     };
-    const stand = await capFallback.claudeWhenCapped("small").catch(() => null);
+    // (never on a Claude model the super admin switched off: the Claude feature flag and the Model manager)
+    const switches = await capFallback.claudeSwitches();
+    const stand = await capFallback.claudeWhenCapped("small", switches).catch(() => null);
     if (stand) return claudeChecks(stand);
     let res;
     try {
@@ -107,7 +109,7 @@ async function smallModel(user, system, text) {
         }); // (room under the daily Neuron cap is held first and the usage counted after, cf-neuron-cap.service.js)
     } catch (e) {
         // The day is not used up, but the cap had no room for this request: Claude Haiku checks
-        const after = isCfNeuronCapError(e) ? capFallback.claudeFor("small") : null;
+        const after = isCfNeuronCapError(e) ? capFallback.claudeFor("small", switches) : null;
         if (!after) throw e;
         return claudeChecks(after);
     }

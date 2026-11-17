@@ -30,15 +30,24 @@ export function toOpenAiMessages(system, messages) {
     return out;
 }
 
-// GLM's answer in Claude's shape: a text block and a tool_use block per function call
+// GLM's answer in Claude's shape: a text block and a tool_use block per function call.
+// The call's id is made one Claude's API takes (letters, digits, "_" and "-", at most 64, different from the other
+// calls of the answer), the way llm-stream-anthropic.js toClaudeConversation does: a turn can move to Claude in the
+// middle (Cloudflare's daily cap refuses a round, ai-voice.controller.js), and an id with any other character made
+// Anthropic refuse the whole conversation (HTTP 400). The tool's result is filed under the same id
+// (voice-turn.service.js), so the call and its result still match on either model.
 export function fromOpenAiAnswer(message) {
     const content = [];
     const text = String(message?.content || "").trim();
     if (text) content.push({ type: "text", text });
+    const used = new Set();
     for (const c of message?.tool_calls || []) {
         let input = {};
         try { input = JSON.parse(c.function?.arguments || "{}"); } catch { input = {}; }
-        content.push({ type: "tool_use", id: c.id || `call_${crypto.randomBytes(8).toString("hex")}`, name: c.function?.name, input });
+        let id = String(c.id || "").replace(/[^a-zA-Z0-9_-]/g, "_").slice(0, 64);
+        while (!id || used.has(id)) id = `call_${crypto.randomBytes(8).toString("hex")}`;
+        used.add(id);
+        content.push({ type: "tool_use", id, name: c.function?.name, input });
     }
     return content;
 }
