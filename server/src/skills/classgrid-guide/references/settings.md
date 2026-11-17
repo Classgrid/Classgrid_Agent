@@ -1,14 +1,16 @@
 # Settings, Models and Permissions
 
-Where a user changes how Classgrid AI looks, talks, thinks, spends credits and asks before acting.
+Where a user changes how Classgrid AI looks, talks, thinks, which plan it is on, and when it asks before acting.
 
 ## 1. Where settings live
 
--   **AI Hub**: the sliders icon in the message box (tooltip **AI Hub**). Tabs: **Plugins**, **Images**, **Skills**,
-    **Connected apps**, **Usage**, **AI Credits**, **Upgrade**.
+-   **AI Hub**: the sliders icon in the message box (tooltip **AI Hub**). Tabs: **Plugins**, **Images**, **Skills** and
+    **Connected apps**. Usage, plans and top-ups are not in the AI Hub: they are in Settings (section 5).
 -   **Account menu**: click your name or photo at the bottom of the sidebar. It has **Profile**, **Settings**,
     **Theme** (system, light, dark), **Home Page**, **Changelog**, **Support** and **Log Out**.
--   **Settings page** (account menu → **Settings**): the account cards in section 2.
+-   **Settings page** (account menu → **Settings**): a list of sections on the left: **General**, **Privacy**,
+    **Account**, **Browser**, **Mastero**, **Usage** and **Billing** (the desktop app also has **Notifications**). On a
+    phone the sections are a row of buttons at the top. The account cards are in section 2.
 -   **Notifications**: the bell next to your name at the bottom of the sidebar.
 -   **Model picker** and **permission shield**: inside the message box (sections 4 and 6).
 
@@ -39,29 +41,41 @@ Where a user changes how Classgrid AI looks, talks, thinks, spends credits and a
 -   You can switch model for any message, even mid-chat. The new model sees the whole chat.
 -   Your pick is remembered in this browser until you change it.
 -   The model changes how the agent thinks and writes, not which tools it can use.
--   **Claude Fable** (Fable 5.2 and Fable 5.1, the most capable models) is locked with a padlock until your total top-ups reach a set
-    amount; the picker shows how much more is needed, and clicking it opens **Upgrade**. Once unlocked it stays
-    unlocked. Fable runs on bought credits only; free tokens work with every other model.
+-   Your plan decides which models you can pick. Claude models come with **Pro** and **Max**; **Free** has none.
+    **Claude Fable** (Fable 5.2 and Fable 5.1, the most capable models) can use a share of the plan's weekly Claude
+    limit. A model your plan does not include has a padlock and a tag with the plans that include it; clicking it
+    shows how to upgrade.
 -   Classgrid can turn a model off. Turned-off models disappear from the picker; if one was your pick, the picker goes
     back to **Auto**.
 -   WhatsApp calls are answered by a voice setup Classgrid chooses, not by the picker.
 
-## 5. Credits and top-ups
+## 5. Plans, limits and top-ups
 
--   Classgrid AI is free to start. Every account gets free tokens that refresh on a regular cycle; the app shows
-    the refresh date.
--   Chatting, making images, WhatsApp calls, tasks after a call or email, and work in connected apps all use
-    credits. Incognito chats use credits too.
+-   There are three plans: **Free**, **Pro** and **Max**. Every account starts on Free, which costs nothing.
+-   Each plan has a **session limit** that refills every few hours (counted from your first message) and a
+    **weekly limit**. Some things also have their own limit: Claude models, images, WhatsApp messages, WhatsApp
+    calls, voice and Library storage.
+-   Chatting, making images, WhatsApp calls, tasks after a call or email, and work in connected apps all count
+    toward your limits. Incognito chats count too.
 -   Stronger models, longer chats and bigger jobs use more. Each model is charged by its real cost, so a premium
     model can use many times more per message than a fast one.
--   **Top up**: AI Hub → **Upgrade** (or **AI Credits**), choose an amount, check **You will receive**, and pay.
--   Bought credits last 30 days from the day you buy them.
--   **AI Credits** shows **Credits remaining**, **Expiration date** and **Billing History**. **Usage** shows how much
-    you have used.
--   When credits run out: in chat, top up or wait for the free refresh; a WhatsApp call says you're out of credits;
-    a long task pauses and you get a WhatsApp message, and it can carry on after a top-up.
--   Each person has their own credits. There is no shared team plan.
--   Never quote prices, limits or free amounts from memory: they change. Point the user to the AI Hub.
+-   **Pro** and **Max** have higher limits, Claude models (Free has none), more images and more storage.
+-   **Students** can apply for a student price on Pro and Max: Settings → **Billing** → **Apply for student prices**.
+-   **Top-ups** (extra AI credits) are only for Pro and Max. They are used after your plan's limit is reached, and
+    they last 30 days from the day you buy them. Settings → **Billing** → **Buy credits**, or **Auto top-up** to add
+    credits when your balance is low.
+-   **Usage**: Settings → **Usage** shows each limit, how much of it you have used and when it refills, and your
+    usage history.
+-   **Billing**: Settings → **Billing** shows your current plan with **Upgrade**, your credit balance, top-ups and
+    invoices. Payments go through classgrid.in/pricing.
+-   When you reach a limit: wait until it refills (the app shows when), or upgrade your plan; on Pro and Max you
+    can also buy extra credits. A WhatsApp call tells you that you have used your plan's limit. A long task
+    pauses, sends you a WhatsApp message, and carries on by itself when the limit refills.
+-   Each person has their own plan and limits.
+-   Prices and limits are on classgrid.in/pricing. They are set in Classgrid's dashboard and change, so this guide
+    has no numbers. **For Classgrid AI**: never quote a price, limit, image count or storage size from memory or
+    from this guide. Call get_plans_and_usage (load the account_plan tool group first if it is not loaded) and
+    answer only from its result. For the user's own usage it gives the same numbers as Settings → Usage.
 
 ## 6. Skills, custom instructions and memory
 
@@ -124,12 +138,16 @@ Where a user changes how Classgrid AI looks, talks, thinks, spends credits and a
 
 ## 11. FAQ
 
--   **Why is Claude Fable greyed out with a lock?** It unlocks after enough total top-ups, and then needs bought
-    credits. Hover or open the picker to see what is left, or pick another model.
+-   **Why is a Claude model greyed out with a lock?** Your plan does not include it. Claude models come with Pro
+    and Max; the tag next to the model shows which plans include it. Upgrade, or pick another model.
 -   **How do I make the AI always reply in simple English?** AI Hub → **Skills** → **How would you like Classgrid AI
     to respond?**, or say "from now on, use simple English" in chat.
 -   **Which permission mode should I use?** **Default** for most people; **Turbo** only for jobs you are happy to
     let run alone.
--   **Do bought credits roll over?** No. They last 30 days from purchase.
+-   **Do bought credits roll over?** No. Top-up credits last 30 days from purchase.
+-   **Can I top up on the Free plan?** No. Top-ups are for Pro and Max. On Free, wait for your limit to refill or
+    upgrade.
+-   **Where do I see what I have used?** Settings → **Usage**. Your plan, top-ups and invoices are in Settings →
+    **Billing**.
 -   **How do I stop an app reaching my account?** **Plugins** → **Disconnect** for apps the agent uses;
     **Connected apps** → **Remove** for outside AI apps.

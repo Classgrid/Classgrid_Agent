@@ -36,15 +36,15 @@ const PLAN_FIELDS = [
     "price_inr_monthly", "price_inr_yearly", "student_price_inr_monthly", "student_price_inr_yearly", "tagline", "coming_soon",
 ];
 
-export const getPlanOverview = async (req, res) => {
-    try {
-        const userId = req.user._id;
+// The overview for one user (null when there is no such user). Shared by the Usage page (GET /api/ai/plan/overview, below) and
+// Classgrid AI's own get_plans_and_usage tool (services/plan-info-tools.js), so both show the same numbers
+export async function planOverviewFor(userId) {
         const [user, config, enabled] = await Promise.all([
             User.findById(userId).lean(),
             GlobalAiConfig.findOne({ key: "singleton" }).lean().catch(() => null),
             plansEnabled().catch(() => false),
         ]);
-        if (!user) return res.status(404).json({ error: "User not found" });
+        if (!user) return null;
         const orgId = user.organization_id || null;
         const org = orgId ? await Organization.findById(orgId).select("ai_config").lean().catch(() => null) : null;
         const plan = await planOf(user).catch(() => null);
@@ -110,7 +110,7 @@ export const getPlanOverview = async (req, res) => {
         const limits = {};
         if (plan) for (const f of PLAN_FIELDS) limits[f] = plan[f];
 
-        res.json({
+        return {
             enabled,
             plan: {
                 key: enabled ? planKeyOf(user) : "free", name: plan?.name || "Free", tagline: plan?.tagline || "",
@@ -138,7 +138,14 @@ export const getPlanOverview = async (req, res) => {
                 projects: { used: projects, limit: plan ? num(plan.projects_max, 0) : null },
                 storage: { usedMb: mb(files.bytes + images.bytes), limit: storageCap, files: { count: files.count, mb: mb(files.bytes) }, images: { count: images.count, mb: mb(images.bytes) }, generatedImages: generated },
             },
-        });
+        };
+}
+
+export const getPlanOverview = async (req, res) => {
+    try {
+        const overview = await planOverviewFor(req.user._id);
+        if (!overview) return res.status(404).json({ error: "User not found" });
+        res.json(overview);
     } catch (err) {
         console.error("[plan overview]", err);
         res.status(500).json({ error: err.message });

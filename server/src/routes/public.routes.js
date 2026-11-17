@@ -81,13 +81,9 @@ import {
 } from "../services/notification-email.service.js";
 import { trackOnboardingEvent } from "../services/onboarding-event.service.js";
 import { sendPushToRole } from "../services/push.service.js";
-import GlobalAiConfig from "../models/GlobalAiConfig.js";
 import { resolveWeeklyLimit } from "../services/ai-credits.service.js";
-import { resolveFeatureLimit, resolveResetPeriod } from "../services/ai-feature-limits.js";
-import { planAllowsModel, isFableModel } from "../services/model-access.service.js";
-import { TOPUP_MIN_INR, TOPUP_MAX_INR } from "../controllers/ai-credits-topup.controller.js";
-import { CHAT_PUBLIC_ORG_ID } from "../utils/chat-onboarding.js";
-import { planTable } from "../services/plan-limits.service.js";
+import { resolveFeatureLimit } from "../services/ai-feature-limits.js";
+import { aiPricingData } from "../services/ai-pricing.service.js";
 
 const router = express.Router();
 const TURNSTILE_VERIFY_URL = "https://challenges.cloudflare.com/turnstile/v0/siteverify";
@@ -506,81 +502,13 @@ router.post("/request-demo/:id/meeting-booked", async (req, res) => {
  * GET /api/public/ai-pricing
  * Live reset times and top-up values for the pricing page on classgrid.in, resolved the same way the app
  * resolves them for a chat.classgrid.in account. Only super admin settings, no user data.
+ * (The shaping is shared with Classgrid AI's own plans tool: services/ai-pricing.service.js)
  */
-const AI_PRICING_CACHE_MS = 60 * 1000;
-let aiPricingCache = null;
-
-const positiveNumber = (value) => (typeof value === "number" && Number.isFinite(value) && value > 0 ? value : null);
-
 router.get("/ai-pricing", async (req, res) => {
   try {
-    if (!aiPricingCache || aiPricingCache.expiresAt <= Date.now()) {
-      const [globalConfig, chatOrg, plansNow] = await Promise.all([
-        GlobalAiConfig.findOne({ key: "singleton" }).lean(),
-        Organization.findById(CHAT_PUBLIC_ORG_ID).select("ai_config").lean(),
-        planTable().catch(() => ({ enabled: false, plans: {} })),
-      ]);
-      // The plans as the super admin set them (prices, taglines, pricing-page lines); only public ones.
-      // buyUrlMonthly / buyUrlYearly: where a plan's button on classgrid.in/pricing sends the visitor. The chat
-      // (chat.classgrid.in) keeps the wish through sign-in, opens the plans and starts the payment on
-      // billing.classgrid.in. Free: the chat itself. Not buyable (coming soon, contact us): null.
-      const chatApp = String(process.env.CHAT_APP_URL || "https://chat.classgrid.in").replace(/\/$/, "");
-      const buyUrl = (p, term) => (!p.coming_soon && p.key !== "free" && Number(term === "year" ? p.price_inr_yearly : p.price_inr_monthly) > 0) ? `${chatApp}/agent?buy=${encodeURIComponent(p.key)}&term=${term}&back=pricing` : null;
-      const plans = Object.values(plansNow.plans || {}).filter((p) => p.is_public !== false).sort((a, b) => (a.sort ?? 0) - (b.sort ?? 0)).map((p) => ({
-        key: p.key, name: p.name, tagline: p.tagline, comingSoon: !!p.coming_soon,
-        buyUrlMonthly: buyUrl(p, "month"), buyUrlYearly: buyUrl(p, "year"), startUrl: p.key === "free" ? `${chatApp}/` : null,
-        // The same at the student price (the chat asks the visitor to confirm a student email first if needed)
-        studentBuyUrlMonthly: (!p.coming_soon && p.key !== "free" && Number(p.student_price_inr_monthly) > 0) ? `${chatApp}/agent?buy=${encodeURIComponent(p.key)}&term=month&student=1&back=pricing` : null,
-        studentBuyUrlYearly: (!p.coming_soon && p.key !== "free" && Number(p.student_price_inr_yearly) > 0) ? `${chatApp}/agent?buy=${encodeURIComponent(p.key)}&term=year&student=1&back=pricing` : null,
-        priceInrMonthly: p.price_inr_monthly, priceInrYearly: p.price_inr_yearly,
-        studentPriceInrMonthly: p.student_price_inr_monthly, studentPriceInrYearly: p.student_price_inr_yearly,
-        features: p.features_text || [],
-        // The models the plan lets a person pick (empty = every model); the picker's plan tags come from modelPlans below
-        modelsAllowed: Array.isArray(p.models_allowed) ? p.models_allowed : [],
-        limits: { chatsPerWindow: p.chats_per_window, chatsPerWeek: p.chats_per_week, windowHours: p.window_reset_unit === "hour" ? p.window_reset_value : null, claudeCreditsPerWeek: p.claude_credits_per_week, fableSharePercent: p.fable_share_percent, contextTokens: p.context_tokens, helpersPerChat: p.helpers_per_chat, imagesPerPeriod: p.images_per_period, imagesPeriod: `${p.images_reset_value} ${p.images_reset_unit}`, voiceRepliesPerDay: p.voice_replies_per_day, voiceInputMinutesPerDay: p.voice_input_minutes_per_day, callMinutesPerPeriod: p.call_minutes_per_period, callsPerDay: p.calls_per_day, callMaxMinutes: p.call_max_minutes, whatsappPerDay: p.whatsapp_per_day, projectsMax: p.projects_max, codingRunsPerMonth: p.coding_runs_per_month, premiumRunsPerMonth: p.premium_runs_per_month, sandboxHoursPerMonth: p.sandbox_hours_per_month, uploadMaxMb: p.upload_max_mb, libraryStorageMb: p.library_storage_mb, devicesMax: p.devices_max, support: p.support_level },
-      }));
-      // For every model, the plans (in plan order) that include it, by the same rules POST /api/ai/ask uses
-      // (ai-chat.controller.js): the plan's models_allowed (empty = all), a Claude model only when the plan's
-      // weekly Claude credits are not 0, and Claude Fable only when the plan gives Fable a share. The model
-      // pickers on the website, the desktop app and the phone draw their "Pro, Max or Ultra" tags from this.
-      const pickable = Object.values(plansNow.plans || {}).filter((p) => p.is_public !== false && !p.coming_soon).sort((a, b) => (a.sort ?? 0) - (b.sort ?? 0));
-      const everyModel = [...new Set([...pickable.flatMap((p) => (Array.isArray(p.models_allowed) ? p.models_allowed : [])), "claude-fable-5-1", "claude-fable-5-2"])].filter((m) => m !== "auto");
-      const modelPlans = {};
-      for (const model of everyModel) {
-        modelPlans[model] = pickable.filter((p) => {
-          if (!planAllowsModel(p.models_allowed, model)) return false;
-          if (/^claude-/.test(model) && Number(p.claude_credits_per_week) === 0) return false;
-          if (isFableModel(model) && !(Number(p.fable_share_percent) > 0)) return false;
-          return true;
-        }).map((p) => ({ key: p.key, name: p.name }));
-      }
-      const config = globalConfig || {};
-      const org = chatOrg || null;
-      const tokens = resolveResetPeriod("tokens", org, config, CHAT_PUBLIC_ORG_ID);
-      const image = resolveResetPeriod("image", org, config, CHAT_PUBLIC_ORG_ID);
-      const whatsapp = resolveResetPeriod("whatsapp", org, config, CHAT_PUBLIC_ORG_ID);
-
-      aiPricingCache = {
-        expiresAt: Date.now() + AI_PRICING_CACHE_MS,
-        // Free limit amounts (tokens, images, WhatsApp, image token cost) stay private: only how often they reset
-        data: {
-          freeRefill: { value: tokens.value, unit: tokens.unit },
-          imageRefill: { value: image.value, unit: image.unit },
-          whatsappRefill: { value: whatsapp.value, unit: whatsapp.unit },
-          creditsPerInr: positiveNumber(config.credits_per_inr),
-          topupMinInr: TOPUP_MIN_INR,
-          topupMaxInr: TOPUP_MAX_INR,
-          creditValidityDays: 30,
-          plansEnabled: plansNow.enabled === true,
-          plans,
-          modelPlans,
-          updatedAt: new Date(config.updatedAt || Date.now()).toISOString(),
-        },
-      };
-    }
-
+    const data = await aiPricingData();
     res.set("Cache-Control", "public, max-age=60");
-    return res.json(aiPricingCache.data);
+    return res.json(data);
   } catch (error) {
     console.error("[Public] ai-pricing error:", error);
     return res.status(500).json({ success: false, message: "Failed to load AI pricing." });

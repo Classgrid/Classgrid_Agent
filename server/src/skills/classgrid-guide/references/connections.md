@@ -17,7 +17,7 @@ Everything Classgrid AI connects to, and every way to reach it from outside the 
 - While a task is open, your WhatsApp texts, photos and PDFs go to that task. You get a short "got it" style reply and the agent carries on with them.
 - Results arrive as normal WhatsApp messages. PDFs, images, audio and video arrive as real files. A finished task ends with "✅ Task completed." and a link to the chat.
 - From any chat you can ask: "Send this PDF to my WhatsApp" or "When the report is ready, send it to me on WhatsApp."
-- There is a weekly limit on WhatsApp messages from Classgrid AI (set by Classgrid). Credits are used as normal.
+- Your plan sets a limit on WhatsApp messages from Classgrid AI. Settings → **Usage** shows what is left and when it refills.
 
 ## 3. Call Classgrid AI on WhatsApp
 
@@ -27,8 +27,8 @@ Everything Classgrid AI connects to, and every way to reach it from outside the 
 - Bigger jobs are saved as a task and done after you hang up. Coding or website work runs in Project Mode; other work (reports, emails, research) runs in a normal Agent chat.
 - After the call: "Got it. Classgrid AI is working on it now. I'll send you the result here when it's done." The result and a chat link come on WhatsApp.
 - No task saved: you get a short recap titled **Your call with Classgrid AI**. If the call drops, any request already made is kept and worked on.
-- Limits: up to 15 minutes per call (the AI is told when time is almost up), a daily limit on answered calls per number (set by Classgrid), and credits are needed. The AI never calls you.
-- Unverified number: "This WhatsApp number is not linked to a Classgrid account…". Out of credits: "You're out of Classgrid AI credits right now…".
+- Limits: your plan sets the longest call, the calls answered each day and the call minutes (see Settings → **Usage**), and your plan's limit must not be used up. The AI is told when time is almost up. The AI never calls you.
+- Unverified number: "This WhatsApp number is not linked to a Classgrid account." with how to verify it. Plan limit used up: "You've used your [plan] plan's limit for now, so Classgrid AI can't take calls." with when calls come back, and how to get more: upgrade (Free) or top up (Pro and Max).
 
 ## 4. Email the agent
 
@@ -44,7 +44,7 @@ Everything Classgrid AI connects to, and every way to reach it from outside the 
 - Make one by asking in chat: "Remind me every Monday at 7 am to plan my week." You can also type in the **Schedule a task...** box on the **Scheduled** page, which opens a new chat with your text.
 - The reminder text is written when the schedule is made. At the set time that same text is sent. The AI does not run again, so a schedule can't send fresh news, prices or reports.
 - Repeat options: one time, daily, weekly, or chosen weekdays. A repeat runs for up to 90 days (30 days if no end date is given).
-- Where it arrives: email always (your account email); WhatsApp too if your number is verified and you asked for it. Over the weekly WhatsApp limit, only the email goes.
+- Where it arrives: email always (your account email); WhatsApp too if your number is verified and you asked for it. Over your plan's WhatsApp messages limit, only the email goes.
 - The **Scheduled** page lists your schedules with **All**, **Pending** and **Completed** filters, a status (**Pending**, **Completed**, **Failed**, **Cancelled**), a repeat label like "Repeats daily · until 16 Oct", a copy-link button and delete.
 - Ask in chat to change a schedule's time, title or text, or to delete it.
 - Schedules go only to you. They can't post into Grids (use **Schedule For** in the message options there) and can't watch a site or inbox.
@@ -56,7 +56,7 @@ Everything Classgrid AI connects to, and every way to reach it from outside the 
 - Your WhatsApp reply wakes it at once; set times are checked every few minutes. It picks up with the full chat so far.
 - A task can work for up to 48 hours. If unfinished: "Sorry, Classgrid AI could not finish your task in 48 hours, so it has stopped." with a link to what was done. If it was only waiting for your reply, it closes with a short recap and "🔒 Task closed."
 - A failed run is tried again about 5 minutes later. After 5 runs in a row with no progress, it tells you it is stuck and waits for your reply.
-- Credits run out: "⏸️ Your AI tokens ran out, so I paused your task…". It continues by itself when credits come back, or sooner if you top up.
+- Plan limit used up: "⏸️ You've used your [plan] plan's limit for now, so I paused your task." It continues by itself when the limit refills, or sooner if you upgrade (Free) or top up (Pro and Max).
 - A server restart does not lose the task; it carries on by itself.
 - Incognito chats can't run as long tasks (they are not saved).
 
@@ -98,7 +98,7 @@ Everything Classgrid AI connects to, and every way to reach it from outside the 
 ## 11. FAQ
 
 - **I texted the WhatsApp number and only got a help message.** No task was open. Call the number or email agent@classgrid.in to start one.
-- **Why didn't the AI pick up my call?** The number must be verified on exactly one account, the call must be a WhatsApp voice call, and you need credits and calls left for the day.
+- **Why didn't the AI pick up my call?** The number must be verified on exactly one account, the call must be a WhatsApp voice call, and your plan's limit and calls for the day must not be used up.
 - **Will my daily reminder have new information each day?** No. The same text, written when you made it, is sent each time.
 - **Do I need to keep the browser open for a long task?** No. It runs on Classgrid's side and messages you when done.
 - **Can I publish to sites.classgrid.in from Project Mode?** No. Use the Vercel plugin, or publish from an Agent mode chat.

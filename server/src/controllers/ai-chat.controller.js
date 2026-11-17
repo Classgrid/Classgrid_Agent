@@ -108,6 +108,7 @@ import AiSchedule from "../models/AiSchedule.js";
 import AiUsageLog from "../models/AiUsageLog.js";
 import { LIVE_DOC_TOOLS, LIVE_DOC_PROMPT, buildLiveDocHandlers } from "../services/live-doc-tools.js";
 import { APP_HISTORY_TOOLS, buildAppHistoryHandlers } from "../mcp/mcp-extra-tools.js";
+import { PLAN_INFO_TOOLS, buildPlanInfoHandlers } from "../services/plan-info-tools.js";
 import { ROLE_DEFINITIONS } from "../utils/roles.js";
 import { SHARE_PAGE_TOOLS, SHARE_PAGE_PROMPT, runPublishPage, runPageComments } from "../services/share-page.service.js";
 import { isPublicChatAccount } from "../utils/chat-onboarding.js";
@@ -3595,6 +3596,8 @@ Every user is using you as a personal AI assistant and agent (like ChatGPT) to m
                 },
                 ...LIVE_DOC_TOOLS,
                 ...APP_HISTORY_TOOLS,
+                // Plans, prices, limits and the user's own usage, live (tool group account_plan)
+                ...PLAN_INFO_TOOLS,
                 {
                     type: "function",
                     function: {
@@ -4462,6 +4465,7 @@ You work on the user's own Windows computer through their Classgrid desktop app,
                     // clients; stepStatus carries running/done/failed.
                     ...buildLiveDocHandlers({ user: req.user }),
                     ...buildAppHistoryHandlers({ user: req.user }),
+                    ...buildPlanInfoHandlers({ user: req.user }),
                     ...buildEndConversationHandlers({ sessionId, isIncognito, messages, question: body.question, res }),
                     update_plan_step: async (args) => {
                         const stepId = typeof args?.step_id === "string" ? args.step_id.trim().slice(0, 100) : "";

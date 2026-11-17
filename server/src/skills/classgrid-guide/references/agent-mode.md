@@ -30,7 +30,8 @@ Agent Mode is the main AI chat at chat.classgrid.in: you ask in plain words, and
 -   **Enter** sends. **Shift+Enter** adds a new line. The **Expand input** button makes the box bigger.
 -   Typing shows formatting: **Ctrl+B** bold, **Ctrl+I** italic, **Ctrl+E** inline code, **Ctrl+K** add a link.
 -   **Attach file** (paperclip): up to 6 files per message.
--   **AI Hub** (sliders icon): plugins, skills, settings and **Upgrade**.
+-   **AI Hub** (sliders icon): **Plugins**, **Images**, **Skills** and **Connected apps**. Your usage is in Settings →
+    **Usage**, and your plan and top-ups in Settings → **Billing**.
 -   **Dictate** (mic): speak, and your words are typed into the box to check before sending.
 -   **Paste**: pasted files and images are attached. Very long pasted text (over about 600 words) becomes a
     **Pasted text** chip instead of filling the box; up to 2 long texts per message.
@@ -56,8 +57,9 @@ Type **@** in the box to open a quick menu:
 -   Groups: **Claude** (Haiku 5.5, Sonnet 5.5, Opus 5.5, Fable 5.2 and Fable 5.1), **DeepSeek** (V4.1 Flash, V4 Pro, V4 Flash) and
     **More models** (GPT-OSS, Kimi, GLM, Qwen, Gemma, Nemotron, Llama, Mistral). New models show a **New** badge.
 -   Classgrid can turn any model off. A model that is off is not shown; if it was picked, the chat goes back to Auto.
--   **Claude Fable 5.2 and Fable 5.1** has a lock until your total top-ups reach a set amount; the picker shows how much more is
-    needed, and clicking it opens **Upgrade**. Once open, it uses paid credits only.
+-   Your plan decides which models you can pick. Claude models come with **Pro** and **Max** (Free has none), and
+    **Claude Fable 5.2 and Fable 5.1** can use a share of the plan's weekly Claude limit. A model outside your plan has
+    a lock and a tag with the plans that include it; clicking it shows how to upgrade.
 -   The pick is remembered, and you can change it for any message mid-chat. Every model keeps the same tools.
 
 ### The message queue
@@ -77,14 +79,16 @@ Type **@** in the box to open a quick menu:
 -   **Library**: every upload and every file the AI makes (PDF, Word, Excel, PowerPoint). Search, date filter, sort and
     a storage meter. Reuse a file with **@** > **Add from library**.
 -   **Images**: ask, or use **@** > **Create image**. Images are kept in the **AI Hub** under **Images**. Image making
-    uses credits and has its own limit. It can add text or a logo on top using the code sandbox.
+    has its own limit, set by your plan (Pro and Max make more images). It can add text or a logo on top using the
+    code sandbox.
 -   **Web research**: always on, no switch needed. Answers show numbered [n] citations. Paste a link to have it read
     the page; paste a YouTube link to get a summary.
 -   **Long tasks**: the agent can pause, wake up later and carry on for up to 48 hours, even with the tab closed.
-    Results come on WhatsApp or email with a link to the chat. If credits run out, the task is paused, not deleted.
+    Results come on WhatsApp or email with a link to the chat. If you reach your plan's limit, the task is paused, not deleted,
+    and carries on when the limit refills.
 -   **Incognito**: the ghost **Incognito chat** button at the top right of a new chat. It shows "You're incognito".
-    Not saved to history or search, stays in this browser only, and closing it deletes it for good. It still uses
-    credits and can't be shared with Share Grid.
+    Not saved to history or search, stays in this browser only, and closing it deletes it for good. It still counts
+    toward your plan's limits and can't be shared with Share Grid.
 
 ## 5. Sharing a chat
 
@@ -94,7 +98,7 @@ Type **@** in the box to open a quick menu:
 -   **Email** sends the chat to your own email only. Check for private details before sharing: anyone with the link
     can read it.
 -   **Ask Classgrid links**: `https://chat.classgrid.in/?q=YOUR_TEXT` (URL-encoded) opens the chat with that text
-    ready in the box. Nothing is sent by itself, and it uses the reader's own credits.
+    ready in the box. Nothing is sent by itself, and it counts toward the reader's own plan.
 
 ## 6. Grids (in short)
 
