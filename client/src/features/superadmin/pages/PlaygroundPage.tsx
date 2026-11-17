@@ -23,7 +23,8 @@ import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@/
 import { getSocket } from "@/lib/socketClient";
 
 // Playground: the super admin's own AI messages, live. The server sends each round's tokens, every tool call,
-// the words as they are written and what was charged at the end (events "playground:*" on the user's channel).
+// the words as they are written and what was counted toward the plan's limits at the end (events "playground:*"
+// on the user's channel). "Left" is what the account's plan limits still allow; "No limit" when none applies.
 
 type RoundRow = {
   who: string; model: string; round: number; input: number; output: number; cacheRead: number; cacheWrite: number;
@@ -116,7 +117,7 @@ export function PlaygroundPage() {
           {runs.length > 1 && (
             <div className="flex flex-wrap gap-2">
               {runs.map((r) => (
-                <Button key={r.id} size="sm" variant={r.id === run.id ? "default" : "outline"} onClick={() => setSelectedId(r.id)}>
+                <Button key={r.id} size="sm" variant={r.id === run.id ? "default" : "outline"} className="max-w-full truncate" onClick={() => setSelectedId(r.id)}>
                   {time(r.startedAt)} · {r.question.slice(0, 30) || "Message"}
                 </Button>
               ))}
@@ -124,14 +125,14 @@ export function PlaygroundPage() {
           )}
 
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-            <StatCard title="Balance at start" value={n(run.spendable)} icon={Coins} trend={shortModel(run.model)} />
-            <StatCard title="Spent so far" value={n(spent)} icon={Gauge} trend={`${n(totalTokens)} real tokens${run.spendable ? ` · ${Math.min(100, Math.round((spent / run.spendable) * 100))}% of the balance` : ""}`} />
+            <StatCard title="Left at start" value={n(run.spendable)} icon={Coins} trend={shortModel(run.model)} />
+            <StatCard title="Spent so far" value={n(spent)} icon={Gauge} trend={`${n(totalTokens)} real tokens${run.spendable ? ` · ${Math.min(100, Math.round((spent / run.spendable) * 100))}% of what was left` : ""}`} />
             <StatCard title="Rounds" value={run.rounds.length} icon={Repeat} trend={`${run.tools.length} tool call${run.tools.length === 1 ? "" : "s"}`} />
             <Card>
               <CardHeader className="pb-2"><CardTitle className="text-sm font-medium">Status</CardTitle></CardHeader>
               <CardContent>
                 {status === "running" && <Badge variant="info" dot>Working</Badge>}
-                {status === "done" && <Badge variant="success">Finished</Badge>}
+                {status === "done" && <Badge variant="neutral">Finished</Badge>}
                 {status === "stopped" && <Badge variant="warning">Stopped: limit reached</Badge>}
                 <CardDescription className="mt-2 line-clamp-2">{run.question}</CardDescription>
               </CardContent>
@@ -157,7 +158,7 @@ export function PlaygroundPage() {
                     <TableHead className="text-right">Cached</TableHead>
                     <TableHead className="text-right">Output</TableHead>
                     <TableHead className="text-right">Total tokens</TableHead>
-                    <TableHead className="text-right">Taken from balance</TableHead>
+                    <TableHead className="text-right">Counted</TableHead>
                     <TableHead className="text-right">Total so far</TableHead>
                     <TableHead className="text-right">Left</TableHead>
                     <TableHead>Time</TableHead>
@@ -184,13 +185,13 @@ export function PlaygroundPage() {
                   ))}
                   {status === "running" && (
                     <TableRow>
-                      <TableCell colSpan={11}><Badge variant="info" dot>Round {run.rounds.length + 1} running…</Badge></TableCell>
+                      <TableCell colSpan={11}><Badge variant="info" dot>Round {run.rounds.length + 1} running</Badge></TableCell>
                     </TableRow>
                   )}
                   {run.stop && (
                     <TableRow>
                       <TableCell colSpan={11}>
-                        <Badge variant="warning">Stopped ({run.stop.who}): spent {n(run.stop.spent)} of {n(run.stop.spendable)}, nothing left for another round</Badge>
+                        <Badge variant="warning">Stopped ({run.stop.who}): used {n(run.stop.spent)} of {n(run.stop.spendable)}, nothing left for another round</Badge>
                       </TableCell>
                     </TableRow>
                   )}
@@ -243,16 +244,17 @@ export function PlaygroundPage() {
           {run.end && (
             <Card>
               <CardHeader>
-                <CardTitle>Charged</CardTitle>
-                <CardDescription>What this message really cost compared with what was taken from the balance.</CardDescription>
+                <CardTitle>Counted toward the limits</CardTitle>
+                <CardDescription>What this message really cost compared with what was counted toward the plan's limits.</CardDescription>
               </CardHeader>
               <CardContent>
                 <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
                   <StatCard title="Real cost (agent)" value={n(run.end.realCost)} trend={shortModel(run.end.model)} />
                   <StatCard title="All rounds (with helpers)" value={n(run.end.meterTotal)} />
-                  <StatCard title="Charged" value={n(run.end.charged)} />
-                  <StatCard title="Not charged" value={n(run.end.uncharged)} trend={run.end.uncharged > 0 ? "Lost: the balance ran out" : "Nothing lost"} />
-                  <StatCard title="Balance after" value={n(run.end.balanceAfter)} />
+                  <StatCard title="Counted" value={n(run.end.charged)} />
+                  <StatCard title="Not counted" value={n(run.end.uncharged)} trend={run.end.uncharged > 0 ? "The limit ran out before the end" : "Everything was counted"} />
+                  {/* A Claude answer on a plan with Claude counts toward the weekly Claude limit, which sends no "left" number */}
+                  <StatCard title="Left after" value={run.end.balanceAfter === null && run.end.spendable !== null ? "Not reported" : n(run.end.balanceAfter)} />
                 </div>
               </CardContent>
             </Card>

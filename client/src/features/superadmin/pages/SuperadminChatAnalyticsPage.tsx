@@ -39,9 +39,12 @@ type Analytics = {
   cached?: boolean;
 };
 
+// No green in the app's look: blue, orange, violet, yellow, magenta (checked with the palette validator, light and
+// dark: every neighbouring pair passes the colour-blind and normal-vision checks). The sixth group type uses the
+// neutral "other" grey; the legend always names each type with its count, so no type is told apart by colour alone.
 const PALETTE = {
-  light: { series: ["#2a78d6", "#eb6834", "#1baf7a", "#eda100", "#e87ba4", "#008300"], grid: "#e7e6e2", axis: "#52514e", other: "#a3a29d" },
-  dark: { series: ["#3987e5", "#d95926", "#199e70", "#c98500", "#d55181", "#008300"], grid: "#2f2f2d", axis: "#c3c2b7", other: "#6d6c67" },
+  light: { series: ["#2a78d6", "#eb6834", "#6250d6", "#eda100", "#e87ba4"], grid: "#e7e6e2", axis: "#52514e", other: "#a3a29d" },
+  dark: { series: ["#3987e5", "#d95926", "#9085e9", "#c98500", "#d55181"], grid: "#2f2f2d", axis: "#c3c2b7", other: "#6d6c67" },
 };
 
 const TYPE_LABELS: Record<string, string> = {
@@ -152,7 +155,7 @@ export function SuperadminChatAnalyticsPage() {
     const ia = TYPE_ORDER.indexOf(a.type), ib = TYPE_ORDER.indexOf(b.type);
     return (ia < 0 ? 99 : ia) - (ib < 0 ? 99 : ib);
   });
-  const typeColor = (type: string) => { const i = TYPE_ORDER.indexOf(type); return i >= 0 ? c.series[i] : c.other; };
+  const typeColor = (type: string) => { const i = TYPE_ORDER.indexOf(type); return (i >= 0 && c.series[i]) || c.other; };
   const topGroups = data?.topGroups || [];
 
   return (
@@ -161,9 +164,9 @@ export function SuperadminChatAnalyticsPage() {
         <p className="text-sm text-muted-foreground">
           chat.classgrid.in activity{data ? ` · updated ${new Date(data.generatedAt).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" })}` : ""}
         </p>
-        <span className={`inline-flex items-center gap-2 rounded-full border px-3 py-1 text-[13px] font-medium ${live ? "border-emerald-500/30 text-emerald-700 dark:text-emerald-400" : "border-border text-muted-foreground"}`}>
-          <span className={`h-2 w-2 rounded-full ${live ? "bg-emerald-500 animate-pulse" : "bg-muted-foreground/50"}`} />
-          {live ? "Live" : "Connecting…"}
+        <span className={`inline-flex items-center gap-2 rounded-full border border-border bg-card px-3 py-1 text-[13px] font-medium ${live ? "text-foreground" : "text-muted-foreground"}`}>
+          <span className={`h-2 w-2 rounded-full ${live ? "bg-blue-500 animate-pulse dark:bg-blue-400" : "bg-muted-foreground/50"}`} />
+          {live ? "Live" : "Connecting"}
         </span>
       </div>
 
@@ -278,7 +281,7 @@ export function SuperadminChatAnalyticsPage() {
                   <BarChart data={topGroups} layout="vertical" margin={{ top: 0, right: 40, left: 0, bottom: 0 }} barCategoryGap="25%">
                     <CartesianGrid stroke={c.grid} horizontal={false} />
                     <XAxis type="number" allowDecimals={false} tick={{ fill: c.axis, fontSize: 12 }} axisLine={false} tickLine={false} />
-                    <YAxis type="category" dataKey="name" width={140} tick={{ fill: c.axis, fontSize: 12 }} axisLine={false} tickLine={false} tickFormatter={(v: string) => (v.length > 18 ? v.slice(0, 17) + "…" : v)} />
+                    <YAxis type="category" dataKey="name" width={140} tick={{ fill: c.axis, fontSize: 12 }} axisLine={false} tickLine={false} tickFormatter={(v: string) => (v.length > 18 ? v.slice(0, 18).trimEnd() : v)} />
                     <Tooltip content={<ChartTooltip unit="messages" />} cursor={{ fill: c.grid, opacity: 0.5 }} />
                     <Bar isAnimationActive={false} dataKey="messages" name="Messages" fill={c.series[0]} radius={[0, 4, 4, 0]} maxBarSize={24}>
                       <LabelList dataKey="messages" position="right" style={{ fill: c.axis, fontSize: 12 }} />

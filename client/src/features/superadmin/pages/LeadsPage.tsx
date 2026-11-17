@@ -88,26 +88,22 @@
 
 import { useState, useMemo, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
-import {
-  ClipboardList, CheckCircle, CalendarClock,
-  AlertTriangle
-} from "lucide-react";
+import { X } from "lucide-react";
 
-import { SectionPanel } from "@/components/marketing_ui/SectionPanel";
-import { StatCard } from "@/components/marketing_ui/StatCard";
-import { Button } from "@/components/marketing_ui/button";
-import { Input } from "@/components/marketing_ui/input";
+import { PageHeader } from "@/components/layout/PageHeader";
 import { SuperadminFilterBar } from "../components/SuperadminFilterBar";
 import { ResponsiveSelect } from "@/components/marketing_ui/responsive-select";
 import { NikhilTimeCalendar } from "@/components/marketing_ui/nikhil_time_calendar";
-import { X } from "lucide-react";
-import { DataTable } from "@/components/marketing_ui/data-table";
 import { useLeads, useAssignLead } from "../queries/useLeads";
-import type { Lead } from "../services/superAdminApi";
 import { getSocket } from "@/lib/socketClient";
 
-import { LeadTable } from "../components/LeadTable";
+import { LeadTable, getLeadStatus } from "../components/LeadTable";
 import { toast } from "sonner";
+
+// Demo Leads: requests from the "Book a Demo" form on classgrid.in (Classgrid AI). The form sends name, work email,
+// phone, company, role, team size, what they want Classgrid AI for, website and a message (POST
+// /api/public/request-demo); the list comes from GET /api/super-admin/leads and refreshes live on
+// "superadmin:leads_updated".
 
 // ── Page ──────────────────────────────────────────────────────────────────────
 
@@ -123,28 +119,36 @@ import { toast } from "sonner";
  * ONLY "rescheduled" belongs here. Not "scheduled". Never "scheduled".
  * ─────────────────────────────────────────────────────────────────────────────
  */
+// The values are the keys getLeadStatus (LeadTable.tsx) gives, so the filter matches the status each row shows.
+// No green: "Completed" is the plain text colour, "Converted" (older leads) is indigo.
 const STATUS_OPTIONS = [
   { value: "", label: "Status: All" },
-  { value: "pending", label: "Pending", color: "bg-yellow-500" },
+  { value: "pending", label: "Pending", color: "bg-amber-500" },
   { value: "contacted", label: "Contacted", color: "bg-blue-500" },
-  { value: "completed", label: "Completed", color: "bg-green-500" },
+  { value: "completed", label: "Completed", color: "bg-foreground" },
   { value: "cancelled", label: "Cancelled", color: "bg-red-500" },
   { value: "rescheduled", label: "Rescheduled", color: "bg-purple-500" },
   { value: "missed", label: "Missed", color: "bg-orange-500" },
-  { value: "closed", label: "Closed", color: "bg-gray-500" },
-  { value: "provisioned", label: "Provisioned", color: "bg-emerald-500" },
+  { value: "closed", label: "Closed", color: "bg-zinc-400" },
+  { value: "converted", label: "Converted", color: "bg-indigo-500" },
 ];
+
+// Team sizes the form offers (Book a Demo on classgrid.in)
+const TEAM_SIZE_OPTIONS = ["1-10", "11-50", "51-200", "201-1000", "1000+"];
+
+const SELECT_CLASS =
+  "flex h-9 w-full items-center rounded-md border border-border bg-card px-3 py-1 text-sm text-foreground shadow-sm transition-colors hover:bg-muted";
 
 export function LeadsPage() {
   const navigate = useNavigate();
-  const { data, isLoading, isError, refetch, isFetching } = useLeads();
+  const { data, isLoading, isError, refetch } = useLeads();
   const assignMutation = useAssignLead();
 
   const [search, setSearch] = useState("");
   const [assigningId, setAssigningId] = useState<string | null>(null);
 
   const [statusFilter, setStatusFilter] = useState("");
-  const [orgTypeFilter, setOrgTypeFilter] = useState("");
+  const [teamSizeFilter, setTeamSizeFilter] = useState("");
   const [assigneeFilter, setAssigneeFilter] = useState("");
   const [dateFrom, setDateFrom] = useState<Date | undefined>();
   const [dateType, setDateType] = useState<"createdAt" | "meetingScheduledAt">("createdAt");
@@ -154,24 +158,15 @@ export function LeadsPage() {
     if (!socket) return;
 
     // Listen for DemoRequest changes emitted by our MongoDB change stream
-    socket.on("superadmin:leads_updated", () => {
-      refetch();
-    });
+    const onLeadsUpdated = () => { refetch(); };
+    socket.on("superadmin:leads_updated", onLeadsUpdated);
 
     return () => {
-      socket.off("superadmin:leads_updated");
+      socket.off("superadmin:leads_updated", onLeadsUpdated);
     };
   }, [refetch]);
 
   const leads = data?.leads ?? [];
-
-  const stats = useMemo(() => {
-    const total = leads.length;
-    const unassigned = leads.filter(l => !l.assignedTo).length;
-    const demoScheduled = leads.filter(l => l.meetingStatus === "scheduled").length;
-    const converted = leads.filter(l => l.status === "converted").length;
-    return { total, unassigned, demoScheduled, converted };
-  }, [leads]);
 
   const assignees = useMemo(() => {
     const map = new Map<string, any>();
@@ -187,41 +182,23 @@ export function LeadsPage() {
     let result = leads;
 
     if (statusFilter) {
-      result = result.filter(l => {
-        // Provisioned = status is "converted"
-        if (statusFilter === "provisioned") return l.status === "converted";
-        // Closed uses the top-level status field
-        if (statusFilter === "closed") return l.status === "closed";
-        // All others: compute the displayed badge the same way LeadTable does
-        if (l.status === "converted" || l.status === "closed") return false;
-        const ms = l.meetingStatus || "pending";
-        if (statusFilter === "contacted") {
-          // "Contacted" = meetingStatus is pending AND has an assignee
-          return ms === "pending" && !!l.assignedTo;
-        }
-        if (statusFilter === "pending") {
-          // "Pending" = meetingStatus is pending AND no assignee
-          return ms === "pending" && !l.assignedTo;
-        }
-        // scheduled, completed, cancelled, rescheduled, missed map 1:1 to meetingStatus
-        return ms === statusFilter;
-      });
+      result = result.filter(l => getLeadStatus(l).key === statusFilter);
     }
-    
-    if (orgTypeFilter) {
-      result = result.filter(l => l.orgType?.toLowerCase() === orgTypeFilter.toLowerCase());
+
+    if (teamSizeFilter) {
+      result = result.filter(l => l.teamSize === teamSizeFilter);
     }
-    
+
     if (assigneeFilter) {
       result = result.filter(l => l.assignedTo?._id === assigneeFilter);
     }
-    
+
     if (dateFrom) {
       const startOfDay = new Date(dateFrom);
       startOfDay.setHours(0, 0, 0, 0);
       const endOfDay = new Date(dateFrom);
       endOfDay.setHours(23, 59, 59, 999);
-      
+
       result = result.filter((lead) => {
         const cDate = lead[dateType] ? new Date(lead[dateType] as string | Date) : null;
         if (!cDate) return false;
@@ -230,22 +207,23 @@ export function LeadsPage() {
     }
 
     if (search.trim()) {
-      const q = search.toLowerCase();
+      const q = search.trim().toLowerCase();
       result = result.filter(l =>
         l.institutionName?.toLowerCase().includes(q) ||
         l.adminEmail?.toLowerCase().includes(q) ||
         l.adminName?.toLowerCase().includes(q) ||
-        l.city?.toLowerCase().includes(q)
+        l.role?.toLowerCase().includes(q) ||
+        l.useCase?.toLowerCase().includes(q)
       );
     }
     return result;
-  }, [leads, search, statusFilter, orgTypeFilter, assigneeFilter, dateFrom, dateType]);
+  }, [leads, search, statusFilter, teamSizeFilter, assigneeFilter, dateFrom, dateType]);
 
   const handleAssign = (id: string) => {
     setAssigningId(id);
     assignMutation.mutate(id, {
       onSettled: () => setAssigningId(null),
-      onError: (err: Error) => toast.error(err?.message || "Failed to assign lead")
+      onError: (err: Error) => toast.error(err?.message || "Could not assign the lead.")
     });
   };
 
@@ -255,21 +233,22 @@ export function LeadsPage() {
 
   return (
     <div className="flex flex-col gap-6 w-full max-w-7xl mx-auto p-4 sm:p-6 lg:p-8">
-
-
-
+      <PageHeader
+        title="Demo Leads"
+        description={`Requests from the Book a Demo form on classgrid.in${data ? ` · ${leads.length} in total` : ""}.`}
+      />
 
       {/* Search & Filters */}
-      <div className="w-full -mb-6 relative z-50">
+      <div className="w-full -mt-6 -mb-6 relative z-30">
         <SuperadminFilterBar
           searchQuery={search}
           onSearchChange={setSearch}
-          searchPlaceholder="Search institution, contact, city…"
+          searchPlaceholder="Search name, email, company"
         >
           {/* Assignee */}
-          <div className="w-[150px]">
+          <div className="w-[calc(50%-4px)] sm:w-[150px]">
             <ResponsiveSelect
-              className="flex h-9 w-full items-center rounded-md border border-border bg-transparent px-3 py-1 shadow-sm hover:bg-accent/50 transition-colors text-sm"
+              className={SELECT_CLASS}
               value={assigneeFilter}
               onChange={(e) => setAssigneeFilter(e.target.value)}
             >
@@ -282,29 +261,28 @@ export function LeadsPage() {
             </ResponsiveSelect>
           </div>
 
-          {/* Org Type */}
-          <div className="w-[150px]">
+          {/* Team size */}
+          <div className="w-[calc(50%-4px)] sm:w-[150px]">
             <ResponsiveSelect
-              className="flex h-9 w-full items-center rounded-md border border-border bg-transparent px-3 py-1 shadow-sm hover:bg-accent/50 transition-colors text-sm"
-              value={orgTypeFilter}
-              onChange={(e) => setOrgTypeFilter(e.target.value)}
+              className={SELECT_CLASS}
+              value={teamSizeFilter}
+              onChange={(e) => setTeamSizeFilter(e.target.value)}
             >
-              <option value="">Org Type: All</option>
-              {["school", "junior_college", "engineering", "coaching", "diploma", "other"].map((type) => (
-                <option key={type} value={type}>
-                  {type.charAt(0).toUpperCase() + type.slice(1).replace(/_/g, " ")}
+              <option value="">Team size: All</option>
+              {TEAM_SIZE_OPTIONS.map((size) => (
+                <option key={size} value={size}>
+                  {size} people
                 </option>
               ))}
             </ResponsiveSelect>
           </div>
 
-
           {/* Date picker */}
-          <div className="w-[180px] max-w-[180px] overflow-hidden relative">
+          <div className="w-[calc(50%-4px)] sm:w-[180px] relative">
             <NikhilTimeCalendar
               value={dateFrom}
               onChange={setDateFrom}
-              placeholder="Select Date"
+              placeholder="Select date"
               popDirection="down"
               showTime={false}
               className="h-9 w-full pr-8"
@@ -315,8 +293,9 @@ export function LeadsPage() {
               <button
                 type="button"
                 onClick={(e) => { e.stopPropagation(); setDateFrom(undefined); }}
-                className="absolute right-3 top-1/2 -translate-y-1/2 z-10 p-0.5 text-muted-foreground hover:text-foreground rounded-full hover:bg-accent bg-background"
+                className="absolute right-3 top-1/2 -translate-y-1/2 z-10 p-0.5 text-muted-foreground hover:text-foreground rounded-full hover:bg-muted bg-card"
                 title="Clear date"
+                aria-label="Clear date"
               >
                 <X size={14} />
               </button>
@@ -324,9 +303,9 @@ export function LeadsPage() {
           </div>
 
           {/* Status */}
-          <div className="w-[150px]">
+          <div className="w-[calc(50%-4px)] sm:w-[150px]">
             <ResponsiveSelect
-              className="flex h-9 w-full items-center rounded-md border border-border bg-transparent px-3 py-1 shadow-sm hover:bg-accent/50 transition-colors text-sm"
+              className={SELECT_CLASS}
               value={statusFilter}
               onChange={(e) => setStatusFilter(e.target.value)}
             >
@@ -342,13 +321,13 @@ export function LeadsPage() {
 
       {/* Leads List */}
       <div className="w-full">
-        <LeadTable 
-          leads={filtered} 
-          isLoading={isLoading} 
-          isError={isError} 
-          onManage={handleManage} 
-          onAssign={handleAssign} 
-          assigningId={assigningId} 
+        <LeadTable
+          leads={filtered}
+          isLoading={isLoading}
+          isError={isError}
+          onManage={handleManage}
+          onAssign={handleAssign}
+          assigningId={assigningId}
         />
       </div>
     </div>

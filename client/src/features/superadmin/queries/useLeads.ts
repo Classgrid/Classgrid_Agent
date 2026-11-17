@@ -54,6 +54,8 @@
  * ─────────────────────────────────────────────────────────
  */
 
+// Demo Leads (super admin): the leads from the Book a Demo form on classgrid.in. The old ERP steps (approve and
+// provision an organisation, activation links, vetting approval) are no longer offered on the lead page.
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { leadsApi } from "../services/superAdminApi";
 import { toast } from "sonner";
@@ -65,17 +67,6 @@ export function useLeads() {
     queryKey: LEADS_KEY,
     queryFn: () => leadsApi.getAll(),
     staleTime: 60_000,
-  });
-}
-
-export function useApproveLead() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: (id: string) => leadsApi.approve(id),
-    onSuccess: () => qc.invalidateQueries({ queryKey: LEADS_KEY }),
-    onError: (error: any) => {
-      toast.error(error?.message || "Failed to approve lead. Please try again.");
-    }
   });
 }
 
@@ -96,34 +87,17 @@ export function useAssignLead() {
   });
 }
 
-export function useCreateLead() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: (payload: { institutionName: string; adminName: string; adminEmail: string; adminPhone?: string; city?: string; orgType?: string }) =>
-      leadsApi.create(payload),
-    onSuccess: () => qc.invalidateQueries({ queryKey: LEADS_KEY }),
-  });
-}
-
 export function useDeleteLead() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (id: string) => leadsApi.delete(id),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: LEADS_KEY });
-      toast.success("Lead deleted successfully");
+      toast.success("Demo lead deleted.");
     },
     onError: (err: any) => {
-      toast.error(err.response?.data?.message || "Failed to delete lead");
+      toast.error(err.response?.data?.message || "Could not delete the demo lead.");
     }
-  });
-}
-
-export function useRegenerateActivation() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: (id: string) => leadsApi.regenerateActivation(id),
-    onSuccess: () => qc.invalidateQueries({ queryKey: LEADS_KEY }),
   });
 }
 
@@ -132,7 +106,7 @@ export function useUpdateLeadNotes() {
   return useMutation({
     mutationFn: ({ id, payload }: { id: string; payload: any }) => leadsApi.updateMeetingNotes(id, payload),
     onMutate: async ({ id, payload }) => {
-      toast.loading("Saving changes...", { id: "save-lead-update" });
+      toast.loading("Saving", { id: "save-lead-update" });
       await qc.cancelQueries({ queryKey: LEADS_KEY });
       const previous = qc.getQueryData<any>(LEADS_KEY);
       
@@ -146,16 +120,14 @@ export function useUpdateLeadNotes() {
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: LEADS_KEY });
-      toast.success("Saved successfully", { id: "save-lead-update" });
+      toast.success("Saved.", { id: "save-lead-update" });
     },
     onError: (err: any, variables, context: any) => {
       if (context?.previous) {
         qc.setQueryData(LEADS_KEY, context.previous);
       }
-      toast.error(err.response?.data?.message || "Failed to update lead notes");
+      toast.error(err.response?.data?.message || "Could not save the change.", { id: "save-lead-update" });
     },
     onSettled: () => qc.invalidateQueries({ queryKey: LEADS_KEY }),
   });
 }
-
-export function useRequestVettingApproval() { const queryClient = useQueryClient(); return useMutation({ mutationFn: (id: string) => leadsApi.requestVettingApproval(id), onSuccess: (_, id) => { queryClient.invalidateQueries({ queryKey: LEADS_KEY }); toast.success("Approval request sent to Nikhil"); }, onError: (err: any) => { toast.error(err.response?.data?.message || "Failed to request approval"); } }); }

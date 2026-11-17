@@ -90,9 +90,13 @@ export type Lead = {
   role?: string;
   website?: string;
   message: string;
+  // From the Classgrid AI "Book a Demo" form (leads saved before it changed don't have them)
+  teamSize?: string;
+  useCase?: string;
   status: LeadStatus;
   lifecycleStage: LeadLifecycle;
-  meetingStatus: "pending" | "scheduled" | "completed" | "cancelled";
+  // The same values as the server's DemoRequest.meetingStatus
+  meetingStatus: "pending" | "scheduled" | "completed" | "cancelled" | "rescheduled" | "missed" | "closed";
   meetingProvider: string;
   scheduledAt?: string | null;
   meetingScheduledAt: string | null;
