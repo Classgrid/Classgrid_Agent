@@ -7,7 +7,7 @@
 // to the number instead of typing -1; each number shows how it reads ("1,00,000"); the models are picked by name
 // with their logos (the chat's own model list); the bar with Save sits at the bottom of the screen while there are
 // unsaved changes, so nothing at the top covers the page.
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import {
@@ -64,7 +64,7 @@ const SECTIONS: Section[] = [
     { key: "voice_input_minutes_per_day", label: "Talking to the AI per day", type: "number", unit: "minutes", unlimited: true, none: true },
   ] },
   { title: "WhatsApp calls", icon: Phone, note: "After the free minutes, a call is paid from credits.", fields: [
-    { key: "call_minutes_per_period", label: "Free call minutes", type: "number", unlimited: true, none: true },
+    { key: "call_minutes_per_period", label: "Free call minutes", type: "number", unlimited: true, hint: "0 = no free minutes (calls are then paid from credits)" },
     { key: "call_reset_value", label: "Every", type: "period", unitKey: "call_reset_unit" },
     { key: "calls_per_day", label: "Calls per day", type: "number", unlimited: true },
     { key: "calls_per_week", label: "Calls per week", type: "number", unlimited: true, hint: "Answered calls in the last 7 days" },
@@ -138,18 +138,38 @@ export function PlanConfigPanel() {
   const [drafts, setDrafts] = useState<Record<string, Record<string, any>>>({});
   const [dirty, setDirty] = useState<Record<string, boolean>>({});
 
+  // The list came back (first load, or after a save): plans with unsaved changes keep them; the others take the
+  // saved values (saving one plan used to throw away the unsaved changes of the others)
+  const dirtyRef = useRef(dirty);
+  useEffect(() => { dirtyRef.current = dirty; }, [dirty]);
+  const savedKeyRef = useRef<string | null>(null);
   useEffect(() => {
     if (!data?.plans) return;
-    const next: Record<string, Record<string, any>> = {};
-    for (const p of data.plans) next[p.key] = pick(p);
-    setDrafts(next);
-    setDirty({});
+    const keep = Object.keys(dirtyRef.current).filter((k) => dirtyRef.current[k] && k !== savedKeyRef.current);
+    setDrafts((prev) => {
+      const next: Record<string, Record<string, any>> = {};
+      for (const p of data.plans) {
+        const kept = prev[p.key];
+        next[p.key] = keep.includes(p.key) && kept ? kept : pick(p);
+      }
+      return next;
+    });
+    setDirty(Object.fromEntries(keep.map((k) => [k, true])));
+    savedKeyRef.current = null;
   }, [data]);
+  // The number a limit had before it was switched to Unlimited, to bring back when it is switched off again
+  const lastNumber = useRef<Record<string, number>>({});
 
   const savePlan = useMutation({
-    mutationFn: async (key: string) => (await api.put(`/api/super-admin/ai-plans/${key}`, drafts[key])).data,
+    mutationFn: async (key: string) => {
+      // (an empty list is read by the server as "every model", so a plan is never saved with no model ticked)
+      const models = Array.isArray(drafts[key]?.models_allowed) ? drafts[key].models_allowed.filter(Boolean) : [];
+      if (!models.length) throw new Error("Tick at least one model for this plan before saving.");
+      savedKeyRef.current = key;
+      return (await api.put(`/api/super-admin/ai-plans/${key}`, drafts[key])).data;
+    },
     onSuccess: (_d, key) => { toast.success(`${drafts[key]?.name || key} plan saved`); queryClient.invalidateQueries({ queryKey: ["aiPlans"] }); },
-    onError: (e: any) => toast.error(e?.response?.data?.message || "Could not save the plan"),
+    onError: (e: any) => { savedKeyRef.current = null; toast.error(e?.response?.data?.message || e?.message || "Could not save the plan"); },
   });
   const setEnabled = useMutation({
     mutationFn: async (enabled: boolean) => (await api.put("/api/super-admin/ai-plans-enabled", { enabled })).data,
@@ -188,13 +208,19 @@ export function PlanConfigPanel() {
           {unlimited ? (
             <div className="h-9 min-w-[140px] px-3 rounded-md border border-border bg-muted/50 text-sm text-foreground flex items-center">{notSet ? "No limit" : "Unlimited"}</div>
           ) : (
-            <Input id={id} type="number" min={f.unlimited ? -1 : 0} value={v ?? 0} onChange={(e) => set(plan.key, f.key, Number(e.target.value))} disabled={busy} className="h-9 text-sm w-[160px]" />
+            <Input id={id} type="number" value={v ?? 0} onChange={(e) => set(plan.key, f.key, Number(e.target.value))} disabled={busy} className="h-9 text-sm w-[160px]" />
           )}
           {f.unit && f.unit !== "₹" && !unlimited && <span className="text-sm text-muted-foreground">{f.unit}</span>}
           {f.unlimited && (
             <label className="inline-flex items-center gap-2 text-sm text-muted-foreground cursor-pointer ml-1">
-              {/* (switching Unlimited off brings back the saved number, or 0 when the saved one was unlimited too) */}
-              <Switch checked={unlimited} disabled={busy} onCheckedChange={(on) => { const saved = Number(plan[f.key]); set(plan.key, f.key, on ? -1 : saved > 0 ? saved : 0); }} aria-label={`${f.label}: unlimited`} />
+              {/* (switching Unlimited off brings back the number it had before, else the saved number, else 0 where
+                  0 means "not included" and 1 elsewhere, so a limit is never saved as 0 by accident) */}
+              <Switch checked={unlimited} disabled={busy} aria-label={`${f.label}: unlimited`} onCheckedChange={(on) => {
+                const k = `${plan.key}:${f.key}`;
+                if (on) { if (Number(v) >= 0) lastNumber.current[k] = Number(v); set(plan.key, f.key, -1); return; }
+                const saved = Number(plan[f.key]);
+                set(plan.key, f.key, lastNumber.current[k] ?? (saved >= 0 ? saved : f.none ? 0 : 1));
+              }} />
               Unlimited
             </label>
           )}
@@ -241,7 +267,7 @@ export function PlanConfigPanel() {
         ))}
         {unknown.length > 0 && (
           <div>
-            <span className="text-xs font-medium text-muted-foreground">Other models on this plan (not in the chat's model list)</span>
+            <span className="text-xs font-medium text-muted-foreground">Other models on this plan (not in the chat&apos;s model list)</span>
             <div className="flex flex-wrap gap-2 mt-2">
               {unknown.map((id) => (
                 <span key={id} className="inline-flex items-center gap-2 rounded-md border border-border px-2.5 py-1 text-xs text-foreground">
@@ -272,8 +298,10 @@ export function PlanConfigPanel() {
       const allowed: string[] = Array.isArray(d.models_allowed) ? d.models_allowed.filter(Boolean) : [];
       const options = [...new Set([...(allowed.includes(AUTO_MODEL_ID) ? [AUTO_MODEL_ID] : []), ...allowed.filter((x) => x !== AUTO_MODEL_ID), ...(v ? [v] : [])])];
       control = (
-        <select id={id} value={v ?? AUTO_MODEL_ID} onChange={(e) => set(plan.key, f.key, e.target.value)} disabled={busy} className="h-9 w-full max-w-[320px] rounded-md border border-border bg-background px-2 text-sm text-foreground">
-          {options.map((m) => <option key={m} value={m}>{modelName(m)}{m !== AUTO_MODEL_ID && !allowed.includes(m) ? " (not on this plan)" : ""}</option>)}
+        <select id={id} value={v || ""} onChange={(e) => set(plan.key, f.key, e.target.value)} disabled={busy || !options.length} className="h-9 w-full max-w-[320px] rounded-md border border-border bg-background px-2 text-sm text-foreground">
+          {/* (no default saved yet, or no model ticked: said plainly instead of showing a model that isn't saved) */}
+          {!v && <option value="" disabled>{options.length ? "Choose a model" : "Tick models above first"}</option>}
+          {options.map((m) => <option key={m} value={m}>{modelName(m)}{!allowed.includes(m) ? " (not on this plan)" : ""}</option>)}
         </select>
       );
     }

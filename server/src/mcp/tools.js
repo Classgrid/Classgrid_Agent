@@ -4107,6 +4107,9 @@ export const handleToolCall = async (name, args, context = {}) => {
 
         // Use user-specified limit, default 20, max 500
         const queryLimit = Math.min(Math.max(1, args.limit || 20), 500);
+        // (the aggregate's stages, read again after the query: it was only defined inside the aggregate branch, so an
+        // aggregate returning more than one document threw "pipeline is not defined")
+        let aggregatePipeline = null;
 
         if (operation === 'find') {
           if (actualCollectionName === 'users') {
@@ -4154,6 +4157,7 @@ export const handleToolCall = async (name, args, context = {}) => {
           result = await collection.distinct(field, filter);
         } else if (operation === 'aggregate') {
           const pipeline = Array.isArray(query) ? query : (Array.isArray(data) ? data : data?.pipeline || query?.pipeline || []);
+          aggregatePipeline = pipeline;
 
           if (!isSuperAdmin) {
             const usersCollection = mongoose.connection.db.collection('users');
@@ -4180,7 +4184,7 @@ export const handleToolCall = async (name, args, context = {}) => {
         // Enforce projection for multiple items to solve Issue #1 (Data Leak & Token Limits)
         if (Array.isArray(result) && result.length > 1) {
           const hasFields = args.fields && Array.isArray(args.fields) && args.fields.length > 0;
-          const hasProject = operation === 'aggregate' && pipeline && pipeline.some(stage => Object.keys(stage)[0] === '$project');
+          const hasProject = operation === 'aggregate' && Array.isArray(aggregatePipeline) && aggregatePipeline.some(stage => Object.keys(stage)[0] === '$project');
 
           if (!hasFields && !hasProject) {
             return {
@@ -4477,11 +4481,11 @@ export const handleToolCall = async (name, args, context = {}) => {
     }
 
     if (name === 'run_code') {
-      const { language, code } = args;
+      const { language, code } = args || {};
       const { sessionId = 'default', userEmail = 'unknown' } = context;
       // (a call with no code crashed below on code.substring, seen live 2026-11-16: the model is told what is missing)
       if (typeof code !== 'string' || !code.trim()) {
-        return { content: [{ type: 'text', text: 'Error: run_code needs "code" (the program to run) and "language" (python or javascript). Nothing was run.' }], isError: true };
+        return { content: [{ type: 'text', text: 'Error: run_code needs "code" (the program to run) and "language" (python, javascript or bash). Nothing was run.' }], isError: true };
       }
 
       console.log(`\n=================================================`);
