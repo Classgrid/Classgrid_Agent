@@ -464,9 +464,15 @@ async function liveSessions(user) {
         await revokeRows(before, "password_changed");
         live = live.filter((r) => !before.includes(r));
     }
-    // Rows made by the server's own calls before its tokens were marked internal (2026-11-17: user agent "node", one per
-    // voice-mode task, 12 hours each): not a device of the person
-    return live.filter((r) => !(r.legacy_key && /^node(\/|$)/i.test(String(r.user_agent || ""))));
+    // Rows that are not a device of the person, so they are not listed and not counted (Log out from all devices still
+    // ends them):
+    //  - made by the server's own calls before its tokens were marked internal (2026-11-17: user agent "node", one per
+    //    voice-mode task, 12 hours each);
+    //  - an older sign-in given a row by a request that named no app at all (no user agent; such a request makes no
+    //    row any more): nobody can tell what it is. It showed as a second "Web browser" next to the person's real
+    //    browser (owner, 2026-11-17: "it shows duplicate devices too"). It is listed and counted from its next
+    //    request that names its app (nameSessionIfUnnamed).
+    return live.filter((r) => !(r.legacy_key && (/^node(\/|$)/i.test(String(r.user_agent || "")) || !String(r.user_agent || "").trim())));
 }
 
 /** The sign-ins that count toward the device limit: the live ones used in the last 30 days */
@@ -547,14 +553,26 @@ export async function startSession({ user, info, expiresAt, legacyKey = "" }) {
     });
     await keepState(sid, "ok", Math.min(expiresAt.getTime(), d.now() + OK_KEEP_SEC * 1000));
 
-    // Two sign-ins at the same moment could both have fitted: counted again, the oldest ones keep their place
+    // Two sign-ins at the same moment could both have fitted: counted again, and the devices that signed in first keep
+    // their place. It is the SAME count as above: one per device (deviceGroups), without the rows that are not a
+    // device (liveSessions). Until 2026-11-17 this second count took every stored row, so an account with 4 devices
+    // and 12 rows (one browser three times, six rows of the server's own calls) had every new sign-in removed again
+    // and refused with "You're signed in on 11 devices" (owner: "it allows 10 and I am only on 4").
     if (counts) {
-        const after = (await d.store.live(userId, new Date(d.now()))).filter((r) => !isUnused(r, d.now()));
-        if (after.length > limit.max) {
-            const order = after.sort((a, b) => new Date(a.created_at) - new Date(b.created_at) || String(a._id).localeCompare(String(b._id)));
-            if (order.findIndex((r) => r.sid === sid) >= limit.max) {
+        const after = (await liveSessions(user)).filter((r) => !isUnused(r, d.now()));
+        const keys = deviceGroups(after);
+        const firstSignIn = new Map(); // device -> when its earliest row was made
+        for (const r of after) {
+            const k = keys.get(r);
+            const at = new Date(r.created_at).getTime();
+            if (!firstSignIn.has(k) || at < firstSignIn.get(k)) firstSignIn.set(k, at);
+        }
+        if (firstSignIn.size > limit.max) {
+            const mine = keys.get(after.find((r) => r.sid === sid));
+            const order = [...firstSignIn.entries()].sort((a, b) => a[1] - b[1] || String(a[0]).localeCompare(String(b[0]))).map(([k]) => k);
+            if (mine && order.indexOf(mine) >= limit.max) {
                 await revokeRows([row], "limit");
-                throw await refuse(after.length - 1, limit, userId);
+                throw await refuse(firstSignIn.size - 1, limit, userId);
             }
         }
     }

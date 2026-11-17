@@ -12,7 +12,7 @@ import {
     sessionState, touchSession, startSession, signUserToken, renewUserToken, listDevices, revokeDevice, revokeSid,
     revokeAllSessions, deviceLimitText, isDeviceLimitError, DEVICES_NOTE, readDeviceLimitTicket, deviceLimitBody,
     sessionCheckAnswer, adoptLegacyToken, attachPushToSession, isWeakDeviceId, legacyTokenState, legacyKeyOf,
-    afterSessionEnded, renewalKind, tokenStillSignedIn, noteLegacyUse, editorFromUserAgent,
+    afterSessionEnded, renewalKind, tokenStillSignedIn, noteLegacyUse, editorFromUserAgent, nameSessionIfUnnamed,
 } from "../src/services/user-session.service.js";
 import { findByAnyEmail } from "../src/utils/account-email.js";
 
@@ -694,4 +694,61 @@ test("the server's own calls are never a device: internal tokens aren't adopted,
     const { devices, limit } = await listDevices(userA, null);
     assert.equal(devices.length, 0);
     assert.equal(limit.used, 0);
+});
+
+// (owner, 2026-11-17: "it allows 10 and I am only on 4": his desktop app was refused three times with "You're signed
+// in on 11 devices" while Settings > Devices said 4 of 10)
+test("a new device is not refused because the devices it has are stored as many rows", async () => {
+    setup({ limit: { max: 4, plan: "Max" } });
+    const exp = new Date(clock + 7 * DAY);
+    const row = (sid, extra) => ({ _id: sid, user_id: userA._id, sid, kind: "website", device_name: "Chrome on Windows", user_agent: UA.chromeWin, device_id: "", legacy_key: "", created_at: new Date(clock), last_seen_at: new Date(clock), expires_at: exp, revoked_at: null, ...extra });
+    // one browser, three rows: its own sign-in and two older tokens given rows
+    world.store.rows.push(row("c1", { device_id: "browser-1" }));
+    world.store.rows.push(row("c2", { device_id: "ua:chrome", legacy_key: legacyKeyOf("cookie-1") }));
+    world.store.rows.push(row("c3", { device_id: "ua:chrome", legacy_key: legacyKeyOf("cookie-2") }));
+    // the phone
+    world.store.rows.push(row("p1", { kind: "phone", device_name: "Classgrid phone app on Android", user_agent: UA.phoneApp, device_id: "ua:phone" }));
+    // six rows the server's own calls made, and one older sign-in whose request named no app
+    for (let i = 1; i <= 6; i++) world.store.rows.push(row(`n${i}`, { kind: "phone", device_name: "Classgrid phone app on Android", user_agent: "node", device_id: "ua:node", legacy_key: legacyKeyOf(`node-${i}`) }));
+    world.store.rows.push(row("w1", { device_name: "Web browser", user_agent: "", legacy_key: legacyKeyOf("no-agent") }));
+    assert.equal(world.store.rows.length, 11);
+    assert.equal((await listDevices(userA, "c1")).limit.used, 2, "two real devices");
+
+    clock += 60000;
+    // the desktop app and a code editor sign in: devices 3 and 4 of 4. Both stay signed in.
+    const desktop = await signIn(userA, reqOf(UA.desktopApp, { "x-device-id": "desktop-1" }));
+    clock += 60000;
+    const editor = await signIn(userA, reqOf(UA.chromeWin, { "x-device-id": "browser-1" }), { editor: true, editorScheme: "vscode" });
+    assert.equal(await sessionState(desktop, 0), "ok");
+    assert.equal(await sessionState(editor, 0), "ok");
+    assert.equal(world.store.rows.filter((r) => r.revoke_reason === "limit").length, 0, "nothing was taken back");
+    const list = await listDevices(userA, "c1");
+    assert.equal(list.limit.used, 4);
+    assert.deepEqual(list.devices.map((x) => x.device_name).sort(), ["Chrome on Windows", "Classgrid desktop app on Windows", "Classgrid phone app on Android", "VS Code on Windows"]);
+
+    // the fifth device is refused, with the number of real devices in the message
+    clock += 60000;
+    await assert.rejects(
+        signIn(userA, reqOf(UA.safariMac, { "x-device-id": "mac-1" })),
+        (e) => isDeviceLimitError(e) && e.message === deviceLimitText(4, "Max"),
+    );
+});
+
+test("an older sign-in whose request named no app is not a device until a request names its app", async () => {
+    setup({ limit: FREE });
+    const exp = new Date(clock + 7 * DAY);
+    world.store.rows.push({ _id: "w1", user_id: userA._id, sid: "w1", kind: "website", device_name: "Web browser", user_agent: "", device_id: "", legacy_key: legacyKeyOf("no-agent"), created_at: new Date(clock), last_seen_at: new Date(clock), expires_at: exp, revoked_at: null });
+    let list = await listDevices(userA, null);
+    assert.equal(list.devices.length, 0, "no second 'Web browser' next to the person's real browser");
+    assert.equal(list.limit.used, 0);
+    // its next request says what it is: listed and counted from then on
+    await nameSessionIfUnnamed("w1", reqOf(UA.chromeWin));
+    list = await listDevices(userA, null);
+    assert.deepEqual(list.devices.map((x) => x.device_name), ["Chrome on Windows"]);
+    assert.equal(list.limit.used, 1);
+    // Log out from all devices ends it either way
+    setup({ limit: FREE });
+    world.store.rows.push({ _id: "w2", user_id: userA._id, sid: "w2", kind: "website", device_name: "Web browser", user_agent: "", device_id: "", legacy_key: legacyKeyOf("no-agent-2"), created_at: new Date(clock), last_seen_at: new Date(clock), expires_at: exp, revoked_at: null });
+    await revokeAllSessions(userA._id);
+    assert.ok(world.store.rows.find((r) => r.sid === "w2").revoked_at);
 });
