@@ -683,3 +683,15 @@ test("one device is listed and counted once, however many rows it has; Log out e
     assert.equal(world.store.rows.filter((r) => r.kind === "phone" && !r.revoked_at).length, 0);
     assert.equal((await listDevices(userA, "b1")).devices.length, 1);
 });
+
+test("the server's own calls are never a device: internal tokens aren't adopted, and older rows from them are not listed", async () => {
+    assert.equal(renewalKind({ sid: null, internal: true, hasUser: true, hasToken: true }), "plain");
+    setup({ limit: FREE });
+    const exp = Math.floor(clock / 1000) + 12 * 60 * 60;
+    for (const sid of ["n1", "n2"]) {
+        world.store.rows.push({ _id: sid, user_id: userA._id, sid, kind: "phone", device_name: "Classgrid phone app on Android", user_agent: "node", device_id: "ua:nodex", legacy_key: legacyKeyOf(sid), created_at: new Date(clock), last_seen_at: new Date(clock), expires_at: new Date(exp * 1000), revoked_at: null });
+    }
+    const { devices, limit } = await listDevices(userA, null);
+    assert.equal(devices.length, 0);
+    assert.equal(limit.used, 0);
+});

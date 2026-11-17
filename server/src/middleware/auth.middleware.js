@@ -325,12 +325,13 @@ export const isAuthenticated = async (req, res, next) => {
             // an app's request that had no user agent, is named from this request)
             if (sid) touchSession(sid).then((wrote) => { if (wrote) nameSessionIfUnnamed(sid, req, { editor: decoded.client === "editor" }); }).catch(() => {});
             // An older sign-in (no sid): listed in Settings > Devices from this request on, even if it never calls /me
-            else if (!decoded.impersonatedBy && !decoded.isProvisional && !decoded.purpose) {
+            else if (!decoded.impersonatedBy && !decoded.isProvisional && !decoded.purpose && !decoded.internal) {
                 noteLegacyUse({ user, req, token, exp: decoded.exp, deviceOpts: { editor: decoded.client === "editor" } });
             }
             // Support's "log in as" token (super-admin.controller.js impersonateUser): /api/auth/me hands it back as it
             // is, never as one of the person's own sign-ins
             req.authImpersonatedBy = decoded.impersonatedBy || null;
+            req.authInternal = decoded.internal === true; // the server's own token (never a device)
         }
 
         // Organization ID always sourced from JWT (authoritative)

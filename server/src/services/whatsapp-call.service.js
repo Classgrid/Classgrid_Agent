@@ -1133,10 +1133,12 @@ async function askClassgridLive(call, request, projectName) {
     return result.answer.slice(0, 4000);
 }
 
-// A short login token for this user, for calling our own routes as them (same checks as their own login)
+// A short login token for this user, for calling our own routes as them (same checks as their own login). internal:
+// the server's own token, never one of the person's devices (Settings > Devices; 2026-11-17 each voice-mode task made
+// a new "phone" row)
 function userToken(user) {
     return jwt.sign(
-        { id: user._id, role: user.role, organizationId: user.organization_id || null, rememberMe: false },
+        { id: user._id, role: user.role, organizationId: user.organization_id || null, rememberMe: false, internal: true },
         getJwtSecret(),
         { expiresIn: "12h" }
     );

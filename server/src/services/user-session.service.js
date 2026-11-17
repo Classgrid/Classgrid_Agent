@@ -464,7 +464,9 @@ async function liveSessions(user) {
         await revokeRows(before, "password_changed");
         live = live.filter((r) => !before.includes(r));
     }
-    return live;
+    // Rows made by the server's own calls before its tokens were marked internal (2026-11-17: user agent "node", one per
+    // voice-mode task, 12 hours each): not a device of the person
+    return live.filter((r) => !(r.legacy_key && /^node(\/|$)/i.test(String(r.user_agent || ""))));
 }
 
 /** The sign-ins that count toward the device limit: the live ones used in the last 30 days */
@@ -696,8 +698,9 @@ export class LegacyRevokedError extends Error {
  * "adopt"  a person's token from before sign-in rows existed: it gets a row and a sid (adoptLegacyToken)
  * "plain"  the impersonation and provisional tokens: renewed as before
  */
-export function renewalKind({ sid, impersonatedBy, isImpersonating, isProvisional, hasUser, hasToken }) {
+export function renewalKind({ sid, impersonatedBy, isImpersonating, isProvisional, hasUser, hasToken, internal = false }) {
     if (impersonatedBy && hasToken) return "as_is";
+    if (internal) return "plain"; // the server's own token (whatsapp-call.service.js userToken): never a device
     if (sid) return "renew";
     if (hasToken && hasUser && !isImpersonating && !isProvisional) return "adopt";
     return "plain";

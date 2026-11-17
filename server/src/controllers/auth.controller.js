@@ -424,7 +424,7 @@ const renewToken = async (req) => {
     const oldToken = requestToken(req);
     const kind = renewalKind({
         sid: req.authSid, impersonatedBy: req.authImpersonatedBy, isImpersonating: req.isImpersonating,
-        isProvisional: req.user?.isProvisional, hasUser: !!req.user?._id, hasToken: !!oldToken,
+        isProvisional: req.user?.isProvisional, hasUser: !!req.user?._id, hasToken: !!oldToken, internal: req.authInternal === true,
     });
     if (kind === "as_is") return oldToken;
     const rememberMe = req.authRememberMe === true;
