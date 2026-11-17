@@ -6691,6 +6691,23 @@ If a tool fails, never show the error message; say only: "Something went wrong o
             });
         }
 
+        // Priority at peak (services/answer-priority.service.js; owner, 2026-11-17: Max's "priority at peak" must be
+        // real): while the server runs its set number of answers at once, a plan with priority (Max) starts at once
+        // and everyone else waits in line for a free place. The place is given back when this answer's response ends.
+        try {
+            const { takeAnswerPlace } = await import("../services/answer-priority.service.js");
+            const releasePlace = await takeAnswerPlace({
+                priority: planRow?.priority === true,
+                signal: streamAbort.signal,
+                onWait: () => { try { res.write(`data: ${JSON.stringify({ type: "status", label: "Classgrid is busy, your answer starts in a moment" })}\n\n`); } catch { /* the asker left */ } },
+            });
+            res.once("close", releasePlace);
+        } catch (e) {
+            // They closed the chat while waiting: nothing to answer
+            if (e?.name === "AbortError") { if (!res.writableEnded) res.end(); return; }
+            throw e;
+        }
+
         // One answer at a time in a chat: a new message from the same person stops their older answer that is still
         // running there (one the page lost track of would otherwise go on hidden, waiting on permission prompts and
         // changing the same files). Redis holds the newest answer's id, so this works across server processes.

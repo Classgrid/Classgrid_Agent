@@ -75,6 +75,9 @@ const globalAiConfigSchema = new mongoose.Schema(
         // plans are off (plans on: the plan's voice_replies_per_day), and the most characters one reading says
         global_voice_replies_per_day: { type: Number, default: 20 },
         voice_reply_max_chars: { type: Number, default: 4000 },
+        // Priority at peak (services/answer-priority.service.js): AI answers one server process runs at once before
+        // the rest wait in line; plans with priority (Max) never wait. 0 = no line.
+        peak_answers_at_once: { type: Number, default: 40 },
         // Extra usage paid from top-up credits once a limit is used up (services/extra-usage.service.js); 0 = off
         extra_image_credits: { type: Number, default: 5000 },
         extra_whatsapp_credits: { type: Number, default: 2000 },
