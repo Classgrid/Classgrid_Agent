@@ -305,6 +305,16 @@ export const initSocket = (server, { path } = {}) => {
             socket.leave("superadmin:storage");
         });
 
+        // Super admin Revenue page: the Razorpay webhook sends "billing_payments_updated" (no payment data in it) to
+        // this room when a payment is saved, fails or is refunded, and the open page loads its numbers again
+        socket.on("join_superadmin_billing", () => {
+            socket.join("superadmin:billing");
+        });
+
+        socket.on("leave_superadmin_billing", () => {
+            socket.leave("superadmin:billing");
+        });
+
         socket.on("join_superadmin_ai_usage", () => {
             socket.join("superadmin:ai_usage");
             console.log(`Super admin socket ${socket.userId} joined superadmin:ai_usage`);

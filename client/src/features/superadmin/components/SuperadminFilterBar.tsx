@@ -91,7 +91,7 @@ export function SuperadminFilterBar({
           placeholder={searchPlaceholder}
           value={searchQuery}
           onChange={(e) => onSearchChange(e.target.value)}
-          className="w-full h-9 pl-10 pr-10 rounded-full border border-dashed border-border bg-transparent text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-emerald-500/40 focus:border-emerald-500 transition-all shadow-sm"
+          className="w-full h-9 pl-10 pr-10 rounded-full border border-dashed border-border bg-transparent text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring/40 focus:border-ring transition-all shadow-sm"
         />
         {searchQuery && (
           <button

@@ -80,6 +80,11 @@ router.get("", Controller.getRevenueOverview);
 router.get("/by-organization", Controller.getRevenueByOrganization);
 router.get("/by-module", Controller.getRevenueByModule);
 router.get("/by-invoice", Controller.getRevenueByInvoice);
+// Revenue page (Classgrid AI plans and top-ups): totals, where the money came from, money per day, refunds and
+// failed payments; the payments list; and the list as CSV
+router.get("/plans-summary", Controller.getPlansSummary);
+router.get("/payments", Controller.listRevenuePayments);
+router.get("/payments/export", Controller.exportRevenuePayments);
 router.get("/export", Controller.exportRevenue);
 router.post("/export", Controller.exportRevenue);
 router.post("/reconcile", Controller.reconcileRevenue);

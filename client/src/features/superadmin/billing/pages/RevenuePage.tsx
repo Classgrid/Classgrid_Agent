@@ -65,100 +65,230 @@
  * ─────────────────────────────────────────────────────────
  */
 
-// 🛑 AI AGENT INSTRUCTION: DO NOT EDIT OR REFACTOR THIS FILE.
-// The user explicitly requested that AI agents must NEVER modify this file,
-// its layout, logic, or structure without extreme explicit permission.
-// 🛑 STOP AND ASK BEFORE MAKING ANY CHANGES HERE.
+// The owner approved this rebuild of the Revenue page (Classgrid AI plans and top-ups) on 2026-11-17.
 
-import React, { useState } from 'react';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/marketing_ui/card';
-import { RevenueViewTabs, RevenueOrganizationTable, RevenueTypeTable } from '../components/finance/RevenueComponents';
-import { RevenueExportDialog } from '../components/finance/FinanceComponents';
-import { SuperadminFilterBar } from '../../components/SuperadminFilterBar';
-import { OrganizationSelector, OrganizationTypeFilter } from '../components/shared/BillingFilterComponents';
+import React, { useEffect, useMemo, useState } from 'react';
+import { format } from 'date-fns';
+import { Download, X } from 'lucide-react';
+import { toast } from 'sonner';
+import { Button } from '@/components/marketing_ui/button';
+import { Card, CardContent } from '@/components/marketing_ui/card';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/marketing_ui/select';
+import { Skeleton } from '@/components/marketing_ui/skeleton';
 import { NikhilTimeCalendar } from '@/components/marketing_ui/nikhil_time_calendar';
-import { X } from 'lucide-react';
+import { SuperadminFilterBar } from '../../components/SuperadminFilterBar';
+import { PaymentsPager } from '../components/transactions/PaymentsPager';
+import { RevenueDailyChart } from '../components/revenue/RevenueDailyChart';
+import { RevenuePaymentsTable } from '../components/revenue/RevenuePaymentsTable';
+import {
+  CardTitleRow,
+  MoneyInTiles,
+  RefundsFailedCard,
+  SourcesCard,
+  rangeLabel,
+} from '../components/revenue/RevenueSummaryParts';
+import { useRevenueLive, useRevenuePayments, useRevenueSummary } from '../components/revenue/useRevenue';
+import { downloadRevenueCsv, type RevenueKind, type RevenuePaymentFilters } from '../components/revenue/revenueApi';
+
+const LIMIT = 20;
+const SEARCH_DELAY_MS = 400;
+
+const KIND_LABELS: Record<RevenueKind, string> = {
+  all: 'All payments',
+  pro: 'Pro',
+  max: 'Max',
+  topup: 'Top-ups',
+  refunded: 'Refunded',
+  failed: 'Failed',
+};
+const KINDS = Object.keys(KIND_LABELS) as RevenueKind[];
+
+// yyyy-MM-dd for the server, and back to a local Date for the calendar (the picked day stays that day)
+const toKey = (date: Date | undefined) => (date ? format(date, 'yyyy-MM-dd') : '');
+const toDate = (key: string) =>
+  key ? new Date(Number(key.slice(0, 4)), Number(key.slice(5, 7)) - 1, Number(key.slice(8, 10))) : undefined;
+
+// One date box of the filter bar, with a small button that clears it
+function DateFilter({ value, onChange, placeholder }: { value: string; onChange: (key: string) => void; placeholder: string }) {
+  return (
+    <div className="relative w-[160px] max-w-full overflow-hidden">
+      <NikhilTimeCalendar
+        value={toDate(value)}
+        onChange={(date) => onChange(toKey(date))}
+        placeholder={placeholder}
+        popDirection="down"
+        showTime={false}
+        className="h-9 w-full pr-8"
+      />
+      {value && (
+        <button
+          type="button"
+          onClick={(e) => { e.stopPropagation(); onChange(''); }}
+          className="absolute right-3 top-1/2 -translate-y-1/2 z-10 p-0.5 text-muted-foreground hover:text-foreground rounded-full hover:bg-accent bg-background"
+          title="Clear date"
+          aria-label="Clear date"
+        >
+          <X size={14} />
+        </button>
+      )}
+    </div>
+  );
+}
 
 const RevenuePage = () => {
-  const [activeTab, setActiveTab] = useState('organizations');
   const [searchInput, setSearchInput] = useState('');
-  const [organizationId, setOrganizationId] = useState('');
-  const [organizationType, setOrganizationType] = useState('ALL');
-  const [dateFrom, setDateFrom] = useState<Date | undefined>(undefined);
-  const [dateType, setDateType] = useState('createdAt');
+  const [search, setSearch] = useState('');
+  const [kind, setKind] = useState<RevenueKind>('all');
+  const [from, setFrom] = useState('');
+  const [to, setTo] = useState('');
+  const [page, setPage] = useState(1);
+  const [downloading, setDownloading] = useState(false);
 
-  const filters = {
-    organizationId: organizationId || undefined,
-    organizationType: organizationType !== 'ALL' ? organizationType : undefined,
-    startDate: dateFrom ? dateFrom.toISOString() : undefined,
-    endDate: dateFrom ? (() => { const e = new Date(dateFrom); e.setHours(23, 59, 59, 999); return e.toISOString(); })() : undefined,
-    search: searchInput || undefined,
+  // Payments saved, failed or refunded on Razorpay reload the page's numbers by themselves
+  useRevenueLive();
+
+  // The search is sent 400 ms after typing stops
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      const next = searchInput.trim();
+      if (next !== search) {
+        setSearch(next);
+        setPage(1);
+      }
+    }, SEARCH_DELAY_MS);
+    return () => clearTimeout(timer);
+  }, [searchInput, search]);
+
+  // A start after the end (or an end before the start) clears the other date instead of asking for an impossible range
+  const changeFrom = (key: string) => {
+    setFrom(key);
+    if (key && to && key > to) setTo('');
+    setPage(1);
+  };
+  const changeTo = (key: string) => {
+    setTo(key);
+    if (key && from && key < from) setFrom('');
+    setPage(1);
+  };
+
+  const range = useMemo(() => ({ from: from || undefined, to: to || undefined }), [from, to]);
+  const filters: RevenuePaymentFilters = useMemo(
+    () => ({ search, kind, from: from || undefined, to: to || undefined, page, limit: LIMIT }),
+    [search, kind, from, to, page],
+  );
+
+  const summaryQuery = useRevenueSummary(range);
+  const summary = summaryQuery.data;
+  const summaryLoading = summaryQuery.isLoading;
+  const summaryFailed = summaryQuery.isError && !summary;
+
+  const paymentsQuery = useRevenuePayments(filters);
+  const rows = paymentsQuery.data?.data || [];
+  const total = paymentsQuery.data?.pagination?.total ?? 0;
+  const anyFilter = !!(search || kind !== 'all' || from || to);
+
+  // Fewer payments than before (a filter, or a live change): a page past the end goes to the last page with rows
+  useEffect(() => {
+    if (!paymentsQuery.data || paymentsQuery.isPlaceholderData) return;
+    const pages = Math.max(1, Math.ceil(total / LIMIT));
+    if (page > pages) setPage(pages);
+  }, [paymentsQuery.data, paymentsQuery.isPlaceholderData, total, page]);
+
+  const exportCsv = async () => {
+    if (downloading) return;
+    if (paymentsQuery.data && total === 0) {
+      toast('There are no payments to export.');
+      return;
+    }
+    setDownloading(true);
+    try {
+      await downloadRevenueCsv(filters);
+    } catch {
+      toast.error("Couldn't make the CSV.");
+    } finally {
+      setDownloading(false);
+    }
   };
 
   return (
     <div className="flex h-full flex-col bg-background text-foreground">
-      <div className="flex items-center justify-between border-b border-border bg-card p-6">
-        <div>
-          <h2 className="text-xl font-semibold tracking-tight">Revenue Ledger</h2>
-          <p className="mt-1 text-sm text-muted-foreground">
-            Includes Classgrid SaaS subscriptions and AI Credit top-up revenue.
-          </p>
-        </div>
-                <RevenueExportDialog />
-      </div>
-
-      <div className="w-full relative z-50 p-6 pb-0">
+      <div className="w-full relative z-50 px-4 pt-4 sm:px-6 sm:pt-6">
         <SuperadminFilterBar
           searchQuery={searchInput}
           onSearchChange={setSearchInput}
-          searchPlaceholder="Search by organization name..."
+          searchPlaceholder="Search name, email or payment id"
         >
-          <div className="w-full md:w-[180px] xl:w-[200px]">
-            <OrganizationSelector selectedId={organizationId} onSelect={setOrganizationId} />
-          </div>
-          <div className="w-full md:w-[160px] xl:w-[180px]">
-            <OrganizationTypeFilter value={organizationType} onChange={setOrganizationType} />
-          </div>
-          <div className="w-[180px] max-w-[180px] overflow-hidden relative">
-            <NikhilTimeCalendar
-              value={dateFrom}
-              onChange={setDateFrom}
-              placeholder="Select Date"
-              popDirection="down"
-              showTime={false}
-              className="h-9 w-full pr-8"
-              dateType={dateType}
-              onDateTypeChange={setDateType}
-            />
-            {dateFrom && (
-              <button
-                type="button"
-                onClick={(e) => { e.stopPropagation(); setDateFrom(undefined); }}
-                className="absolute right-3 top-1/2 -translate-y-1/2 z-10 p-0.5 text-muted-foreground hover:text-foreground rounded-full hover:bg-accent bg-background"
-                title="Clear date"
-              >
-                <X size={14} />
-              </button>
-            )}
-          </div>
+          <Select
+            value={kind}
+            onValueChange={(value) => {
+              setKind(KINDS.includes(value as RevenueKind) ? (value as RevenueKind) : 'all');
+              setPage(1);
+            }}
+          >
+            <SelectTrigger
+              className="h-9 px-3 min-w-[150px] rounded-full border border-dashed border-border bg-transparent shadow-sm"
+              aria-label="Payments to show"
+            >
+              <SelectValue>{(value: string) => KIND_LABELS[value as RevenueKind] || KIND_LABELS.all}</SelectValue>
+            </SelectTrigger>
+            <SelectContent>
+              {KINDS.map((key) => (
+                <SelectItem key={key} value={key}>{KIND_LABELS[key]}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <DateFilter value={from} onChange={changeFrom} placeholder="From" />
+          <DateFilter value={to} onChange={changeTo} placeholder="To" />
+          <Button variant="outline" size="sm" className="h-9 ml-auto" onClick={exportCsv} disabled={downloading}>
+            <Download className="mr-2 h-4 w-4" />
+            {downloading ? 'Exporting' : 'Export CSV'}
+          </Button>
         </SuperadminFilterBar>
       </div>
 
-      <div className="space-y-6 p-6">
-        <RevenueViewTabs activeTab={activeTab} onTabChange={setActiveTab} />
-        <Card>
-          <CardHeader>
-            <CardTitle>
-              {activeTab === 'organizations'
-                ? 'Revenue by Organization'
-                : activeTab === 'types' ? 'Revenue by Payment Type' : ''}
-            </CardTitle>
-            <p className="text-sm text-muted-foreground">Detailed platform subscription and AI usage revenue records.</p>
-          </CardHeader>
+      <div className="space-y-6 px-4 pb-6 sm:px-6">
+        <MoneyInTiles summary={summary} loading={summaryLoading} />
+
+        <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
+          <Card className="min-w-0 lg:col-span-2">
+            <CardTitleRow title="Money per day" note={rangeLabel(summary?.range)} />
+            <CardContent className="p-4 pt-0 sm:p-6 sm:pt-0">
+              {summaryLoading ? (
+                <Skeleton className="h-[260px] w-full" />
+              ) : summaryFailed || !summary ? (
+                <p className="text-sm text-muted-foreground">Couldn't load these numbers.</p>
+              ) : (
+                <RevenueDailyChart days={summary.daily} />
+              )}
+            </CardContent>
+          </Card>
+          <div className="min-w-0 space-y-6">
+            <SourcesCard summary={summary} loading={summaryLoading} failed={summaryFailed} />
+            <RefundsFailedCard summary={summary} loading={summaryLoading} failed={summaryFailed} />
+          </div>
+        </div>
+
+        <Card className="min-w-0">
+          <CardTitleRow title="Payments" />
           <CardContent className="p-0">
-            {activeTab === 'organizations' && <RevenueOrganizationTable filters={filters} />}
-                        </CardContent>
+            {paymentsQuery.isLoading ? (
+              <div className="space-y-2 px-4 pb-4 sm:px-6 sm:pb-6">
+                {[0, 1, 2, 3, 4].map((i) => (
+                  <Skeleton key={i} className="h-12 w-full" />
+                ))}
+              </div>
+            ) : paymentsQuery.isError && !paymentsQuery.data ? (
+              <p className="px-4 pb-4 text-sm text-muted-foreground sm:px-6 sm:pb-6">Couldn't load payments.</p>
+            ) : rows.length === 0 ? (
+              <p className="px-4 pb-4 text-sm text-muted-foreground sm:px-6 sm:pb-6">
+                {anyFilter ? 'No payments match these filters.' : 'No payments yet.'}
+              </p>
+            ) : (
+              <RevenuePaymentsTable rows={rows} dimmed={paymentsQuery.isPlaceholderData} />
+            )}
+          </CardContent>
         </Card>
+        <PaymentsPager page={page} limit={LIMIT} total={total} onPage={setPage} />
       </div>
     </div>
   );

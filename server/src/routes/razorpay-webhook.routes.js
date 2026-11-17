@@ -99,6 +99,17 @@ const router = express.Router();
 /**
  * Verify Razorpay webhook signature using HMAC SHA256
  */
+// Tells the open super admin Revenue pages (room "superadmin:billing", joined with "join_superadmin_billing") that a
+// payment was saved, failed or was refunded, so they load again. The event carries no payment data. A socket problem
+// never fails the webhook.
+function announcePaymentsChanged(req) {
+    try {
+        req.app.get("io")?.to("superadmin:billing").emit("billing_payments_updated");
+    } catch (e) {
+        console.error("[Razorpay Webhook] billing_payments_updated emit failed:", e.message);
+    }
+}
+
 function verifyRazorpaySignature(rawBody, signature, secret) {
     if (!signature || !secret) return false;
     const expectedSignature = crypto
@@ -614,6 +625,7 @@ router.post("/razorpay", express.raw({ type: "application/json" }), async (req, 
                             io.to(`org:${organizationId}`).emit("ai_token_update");
                         }
                     }
+                    announcePaymentsChanged(req);
 
                     console.log(`[Razorpay Webhook] ✅ AI Top-Up successful! ${creditsAdded} credits added to User ${userId}`);
                 }
@@ -710,6 +722,7 @@ router.post("/razorpay", express.raw({ type: "application/json" }), async (req, 
                         io.to(userId.toString()).emit("plan_update", { plan: planKey });
                         io.to("superadmin:ai_usage").emit("ai_usage_updated");
                     }
+                    announcePaymentsChanged(req);
                     console.log(`[Razorpay Webhook] ✅ Plan ${planKey} (${term}) on user ${userId} until ${expiresAt.toISOString()}`);
                 }
 
@@ -821,6 +834,7 @@ router.post("/razorpay", express.raw({ type: "application/json" }), async (req, 
                     paymentMethod: paymentEntity.method || "",
                     paymentTime: paymentEntity.created_at ? new Date(paymentEntity.created_at * 1000) : new Date(),
                 });
+                announcePaymentsChanged(req);
 
                 // NEW LOGIC FOR FAILED PAYMENTS DASHBOARD & EMAIL
                 try {
@@ -958,6 +972,7 @@ router.post("/razorpay", express.raw({ type: "application/json" }), async (req, 
                     originalTxn.status = "refunded";
                     await originalTxn.save();
                 }
+                announcePaymentsChanged(req);
 
                 // RULE 6 ENFORCEMENT: Audit Log
                 const { logAdminAction } = await import("../services/auditLog.service.js");

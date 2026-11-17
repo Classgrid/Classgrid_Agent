@@ -460,11 +460,11 @@ const REFUND_ROW_FIELDS = "razorpayPaymentId amount note refundOf refundReason r
 
 const indiaDayKeyFormat = new Intl.DateTimeFormat("en-CA", { timeZone: INDIA_TZ, year: "numeric", month: "2-digit", day: "2-digit" });
 
-function escapeRegex(value) {
+export function escapeRegex(value) {
     return String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
-function roundInr(value) {
+export function roundInr(value) {
     return Math.round((Number(value) || 0) * 100) / 100;
 }
 
@@ -475,14 +475,14 @@ function toIso(value) {
 }
 
 // A query value that is not a plain string (a repeated param, or ?type[$ne]=x) is treated as a wrong value, never used.
-function queryText(value) {
+export function queryText(value) {
     if (value === undefined || value === null) return "";
     if (typeof value !== "string") return null;
     return value.trim();
 }
 
 // "2026-11-17" is a day in India. The round trip check turns away days that don't exist (2026-02-31 would roll over).
-function indiaDayBounds(day) {
+export function indiaDayBounds(day) {
     if (!DAY_RE.test(day)) return null;
     const start = new Date(`${day}T00:00:00.000+05:30`);
     if (Number.isNaN(start.getTime()) || indiaDayKeyFormat.format(start) !== day) return null;
@@ -526,7 +526,7 @@ function finishRefundMap(map) {
 
 // Every Razorpay refund the webhook saw, keyed by the payment it refunded. Refunds are few, so one bounded read is
 // enough; it uses the {status, createdAt} index.
-async function loadRefundMap() {
+export async function loadRefundMap() {
     const refundRows = await PlatformTransaction.find({ status: "refunded", type: "refund" })
         .select(REFUND_ROW_FIELDS)
         .sort({ createdAt: -1 })
@@ -783,7 +783,7 @@ function rawMethod(method) {
     return String(method || "").split(":")[0].trim().toLowerCase() || null;
 }
 
-async function loadPlansByKey() {
+export async function loadPlansByKey() {
     const plans = await PlanConfig.find({})
         .select("key name price_inr_monthly price_inr_yearly student_price_inr_monthly student_price_inr_yearly")
         .maxTimeMS(SIDE_LOOKUP_MAX_MS)
@@ -854,7 +854,7 @@ function toPaymentRow(row, { user, plansByKey, refundInfo }) {
     };
 }
 
-async function toPaymentRows(rows, refundMap) {
+export async function toPaymentRows(rows, refundMap) {
     const [usersById, plansByKey] = await Promise.all([loadUsersById(rows), loadPlansByKey()]);
     return rows.map((row) => toPaymentRow(row, {
         user: row.userId ? usersById.get(String(row.userId)) : null,
@@ -924,12 +924,12 @@ const CSV_HEADERS = [
     "Amount (₹)", "Refunded (₹)", "Status", "Paid with", "Razorpay payment id", "Razorpay order id",
 ];
 
-function fmtIndiaDay(iso) {
+export function fmtIndiaDay(iso) {
     if (!iso) return "";
     return new Date(iso).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric", timeZone: INDIA_TZ });
 }
 
-function fmtIndiaTime(iso) {
+export function fmtIndiaTime(iso) {
     if (!iso) return "";
     return new Date(iso).toLocaleTimeString("en-IN", { hour: "numeric", minute: "2-digit", hour12: true, timeZone: INDIA_TZ });
 }
@@ -949,13 +949,13 @@ function csvStatusLabel(row) {
     return "Not finished";
 }
 
-function paidWithLabel(method) {
+export function paidWithLabel(method) {
     if (!method) return "";
     return PAID_WITH_LABELS[method] || method;
 }
 
 // Every cell is quoted. A cell that starts like a formula gets a leading ' so a spreadsheet shows it as text.
-function csvCell(value) {
+export function csvCell(value) {
     let text = value === null || value === undefined ? "" : String(value);
     if (/^[=+\-@\t\r]/.test(text)) text = `'${text}`;
     return `"${text.replace(/"/g, '""')}"`;

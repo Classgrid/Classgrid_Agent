@@ -913,7 +913,7 @@ function publicItem(item) {
 }
 
 // The one shared loader of the list and the summary: newest failed rows first, at most SCAN_CAP of them
-async function loadAiFailures({ match }) {
+export async function loadAiFailures({ match }) {
     const rows = await PlatformTransaction.find(match)
         .sort({ createdAt: -1 })
         .limit(SCAN_CAP + 1)
@@ -990,7 +990,7 @@ export function readListQuery(query = {}) {
 }
 
 // The database part of the filters: failed rows, the date range (on createdAt) and the search
-function buildFailedMatch({ search = "", from = null, to = null } = {}) {
+export function buildFailedMatch({ search = "", from = null, to = null } = {}) {
     const match = { status: "failed" };
     if (from || to) {
         match.createdAt = {};
