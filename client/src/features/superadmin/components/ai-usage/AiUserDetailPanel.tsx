@@ -96,6 +96,12 @@ export function AiUserDetailPanel({ userDetail }: { userDetail: any }) {
   if (!userDetail) return null;
 
   const isBlocked = userDetail.isBlocked;
+  // The credits the person can still use: each pool's balance, or nothing once its end date has passed
+  const liveCredits = (balance: unknown, end: unknown) => (end && new Date(end as string).getTime() < Date.now() ? 0 : Math.max(0, Number(balance) || 0));
+  const creditsLeft = {
+    gifted: liveCredits(userDetail.ai_tokens?.promotion_credits_balance, userDetail.ai_tokens?.promotion_credits_end_date),
+    bought: liveCredits(userDetail.ai_tokens?.ai_credits_balance, userDetail.ai_tokens?.ai_credits_end_date),
+  };
 
   const billingColumns = [
     {
@@ -207,14 +213,14 @@ export function AiUserDetailPanel({ userDetail }: { userDetail: any }) {
               </div>
               <div className="bg-muted/30 p-4 rounded-lg border border-border/50">
                 <div className="text-sm text-muted-foreground mb-1">Available Credits</div>
-                <div className="text-2xl font-bold">{formatNumber(userDetail.balance || 0)}</div>
+                {/* One pool: gifted and bought together, without an expired one (it showed bought only, so an account
+                    with only gifted credits read 0) */}
+                <div className="text-2xl font-bold">{formatNumber(creditsLeft.gifted + creditsLeft.bought)}</div>
+                <div className="text-xs text-muted-foreground mt-1">{`Gifted ${formatNumber(creditsLeft.gifted)} · Bought ${formatNumber(creditsLeft.bought)}`}</div>
               </div>
             </div>
             
             <div className="mt-4 border-t border-border/50 pt-4 flex flex-col gap-4">
-              {/* The plan's limits and what they used of them (the same numbers they see in Settings > Usage) */}
-              <PlanMeters overview={userDetail.overview} />
-
               {/* 2. Paid Credits */}
               {(() => {
                 const limit = userDetail.ai_tokens?.total_ai_credits_purchased || 0;
@@ -319,6 +325,22 @@ export function AiUserDetailPanel({ userDetail }: { userDetail: any }) {
         </Card>
       </div>
 
+
+      {/* The plan's limits and what they used of them (the same numbers they see in Settings > Usage): a card of its
+          own across the page, so the two cards above stay about the same height, as on the old page */}
+      {userDetail.overview && (
+        <Card>
+          <CardHeader>
+            <CardTitle>Plan limits</CardTitle>
+            <CardDescription>What they used of each limit of their plan</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="flex flex-col gap-4">
+              <PlanMeters overview={userDetail.overview} />
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       {/* Gift a plan to this person (owner, 2026-11-17) */}
       <div className="border border-border rounded-xl shadow-sm bg-card">
