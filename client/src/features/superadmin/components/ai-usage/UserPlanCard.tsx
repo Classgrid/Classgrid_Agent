@@ -8,6 +8,13 @@ import { Button } from "@/components/marketing_ui/button";
 import { Input } from "@/components/marketing_ui/input";
 import { Label } from "@/components/marketing_ui/label";
 import { Spinner } from "@/components/marketing_ui/spinner";
+import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from "@/components/marketing_ui/select";
+import { NikhilTimeCalendar } from "@/components/marketing_ui/nikhil_time_calendar";
+import { X } from "lucide-react";
+
+// A day as "YYYY-MM-DD" <-> a Date, for the app's own calendar (NikhilTimeCalendar) instead of the browser's date box
+const dateOf = (iso: string) => (iso ? new Date(`${iso}T00:00:00`) : undefined);
+const isoOf = (d?: Date) => (d ? `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}` : "");
 
 const PLAN_NAMES: Record<string, string> = { free: "Free", pro: "Pro", max: "Max", enterprise: "Enterprise" };
 
@@ -58,14 +65,21 @@ export function UserPlanCard({ userId, plan, student }: { userId: string; plan?:
         <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
           <div className="flex flex-col gap-1">
             <Label htmlFor="user-plan" className="text-xs">Plan</Label>
-            <select id="user-plan" value={planId} onChange={(e) => setPlanId(e.target.value)} disabled={save.isPending}
-              className="h-9 rounded-md border border-border bg-background px-2 text-sm">
-              {Object.entries(PLAN_NAMES).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
-            </select>
+            <Select value={planId} onValueChange={(v) => v && setPlanId(v as string)} disabled={save.isPending}>
+              <SelectTrigger id="user-plan" className="h-9 w-full"><SelectValue>{PLAN_NAMES[planId] || planId}</SelectValue></SelectTrigger>
+              <SelectContent>
+                <SelectGroup>{Object.entries(PLAN_NAMES).map(([k, v]) => <SelectItem key={k} value={k}>{v}</SelectItem>)}</SelectGroup>
+              </SelectContent>
+            </Select>
           </div>
           <div className="flex flex-col gap-1">
             <Label htmlFor="user-plan-until" className="text-xs">Until (empty = no end)</Label>
-            <Input id="user-plan-until" type="date" value={expiresAt} onChange={(e) => setExpiresAt(e.target.value)} disabled={save.isPending || planId === "free"} className="h-9" />
+            <div className={`flex items-center gap-1 ${save.isPending || planId === "free" ? "pointer-events-none opacity-60" : ""}`}>
+              <NikhilTimeCalendar value={dateOf(expiresAt)} onChange={(d) => setExpiresAt(isoOf(d))} showTime={false} placeholder="No end" className="flex-1 h-9 border border-input bg-background" />
+              {expiresAt && (
+                <Button type="button" variant="ghost" size="sm" className="h-9 px-2 shrink-0" title="Clear date" onClick={() => setExpiresAt("")}><X className="w-4 h-4" /></Button>
+              )}
+            </div>
           </div>
           <div className="flex flex-col gap-1">
             <Label htmlFor="user-plan-note" className="text-xs">Note</Label>

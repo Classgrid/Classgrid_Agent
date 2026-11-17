@@ -6,12 +6,16 @@ import { useMemo, useState } from "react";
 import { toast } from "sonner";
 import { Gift } from "lucide-react";
 import { Button } from "@/components/marketing_ui/button";
-import { Input } from "@/components/marketing_ui/input";
+import { NikhilTimeCalendar } from "@/components/marketing_ui/nikhil_time_calendar";
 import { Label } from "@/components/marketing_ui/label";
 import { Textarea } from "@/components/marketing_ui/textarea";
 import { Skeleton } from "@/components/marketing_ui/skeleton";
 import { useAiPlans, useGiftPlan, giftablePlans } from "@/features/superadmin/queries/useAiUsage";
 import { errorText } from "./planText";
+
+// A day as "YYYY-MM-DD" <-> a Date, for the app's own calendar (NikhilTimeCalendar) instead of the browser's date box
+const dateOf = (iso: string) => (iso ? new Date(`${iso}T00:00:00`) : undefined);
+const isoOf = (d?: Date) => (d ? `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}` : "");
 
 const PERIODS = [
   { key: "1", label: "1 month", months: 1 },
@@ -97,7 +101,9 @@ export function GiftPlanForm({ userIds, who, onDone, idPrefix = "gift", disabled
           ))}
         </div>
         {period === "date" && (
-          <Input id={`${idPrefix}-end`} type="date" min={todayIso()} value={endDate} onChange={(e) => setEndDate(e.target.value)} disabled={busy} className="h-9 max-w-[220px] mt-1" aria-label="End date" />
+          <div className={`mt-1 max-w-[220px] ${busy ? "pointer-events-none opacity-60" : ""}`}>
+            <NikhilTimeCalendar value={dateOf(endDate)} onChange={(d) => setEndDate(isoOf(d))} showTime={false} placeholder="End date" className="w-full h-9 border border-input bg-background" />
+          </div>
         )}
         {tried && !endOk && <p className="text-xs text-red-500">Pick a date after today.</p>}
       </div>

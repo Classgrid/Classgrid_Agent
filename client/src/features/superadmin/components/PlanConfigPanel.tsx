@@ -21,6 +21,7 @@ import { Switch } from "@/components/marketing_ui/switch";
 import { Label } from "@/components/marketing_ui/label";
 import { Spinner } from "@/components/marketing_ui/spinner";
 import { Skeleton } from "@/components/marketing_ui/skeleton";
+import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from "@/components/marketing_ui/select";
 import { MODEL_GROUPS, AUTO_MODEL_ID, ModelLogoImg } from "@/components/ai/components/ModelPicker";
 
 type Plan = Record<string, any> & { key: string; name: string };
@@ -298,11 +299,17 @@ export function PlanConfigPanel() {
       const allowed: string[] = Array.isArray(d.models_allowed) ? d.models_allowed.filter(Boolean) : [];
       const options = [...new Set([...(allowed.includes(AUTO_MODEL_ID) ? [AUTO_MODEL_ID] : []), ...allowed.filter((x) => x !== AUTO_MODEL_ID), ...(v ? [v] : [])])];
       control = (
-        <select id={id} value={v || ""} onChange={(e) => set(plan.key, f.key, e.target.value)} disabled={busy || !options.length} className="h-9 w-full max-w-[320px] rounded-md border border-border bg-background px-2 text-sm text-foreground">
+        <Select value={v || ""} onValueChange={(val) => val && set(plan.key, f.key, val as string)} disabled={busy || !options.length}>
           {/* (no default saved yet, or no model ticked: said plainly instead of showing a model that isn't saved) */}
-          {!v && <option value="" disabled>{options.length ? "Choose a model" : "Tick models above first"}</option>}
-          {options.map((m) => <option key={m} value={m}>{modelName(m)}{!allowed.includes(m) ? " (not on this plan)" : ""}</option>)}
-        </select>
+          <SelectTrigger id={id} className="h-9 w-full max-w-[320px]">
+            <SelectValue>{v ? `${modelName(v)}${!allowed.includes(v) ? " (not on this plan)" : ""}` : options.length ? "Choose a model" : "Tick models above first"}</SelectValue>
+          </SelectTrigger>
+          <SelectContent>
+            <SelectGroup>
+              {options.map((m) => <SelectItem key={m} value={m}>{modelName(m)}{!allowed.includes(m) ? " (not on this plan)" : ""}</SelectItem>)}
+            </SelectGroup>
+          </SelectContent>
+        </Select>
       );
     }
     else if (f.type === "modes") control = (
@@ -322,9 +329,12 @@ export function PlanConfigPanel() {
     else if (f.type === "period") control = (
       <div className="flex items-center gap-2">
         <Input id={id} type="number" min={1} value={v ?? 1} onChange={(e) => set(plan.key, f.key, Number(e.target.value))} disabled={busy} className="h-9 w-20 text-sm" />
-        <select value={d[f.unitKey!] ?? "hour"} onChange={(e) => set(plan.key, f.unitKey!, e.target.value)} disabled={busy} className="h-9 rounded-md border border-border bg-background px-2 text-sm text-foreground">
-          {UNITS.map((u) => <option key={u} value={u}>{u}{(v ?? 1) === 1 ? "" : "s"}</option>)}
-        </select>
+        <Select value={d[f.unitKey!] ?? "hour"} onValueChange={(val) => val && set(plan.key, f.unitKey!, val as string)} disabled={busy}>
+          <SelectTrigger className="h-9 w-[120px]"><SelectValue>{`${d[f.unitKey!] ?? "hour"}${(v ?? 1) === 1 ? "" : "s"}`}</SelectValue></SelectTrigger>
+          <SelectContent>
+            <SelectGroup>{UNITS.map((u) => <SelectItem key={u} value={u}>{u}{(v ?? 1) === 1 ? "" : "s"}</SelectItem>)}</SelectGroup>
+          </SelectContent>
+        </Select>
       </div>
     );
     return (

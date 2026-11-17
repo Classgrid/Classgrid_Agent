@@ -12,11 +12,15 @@ import { SuperadminFilterBar } from "@/features/superadmin/components/Superadmin
 import { DataTable } from "@/components/marketing_ui/data-table";
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectGroup, SelectItem } from "@/components/marketing_ui/select";
 import { Button } from "@/components/marketing_ui/button";
-import { Input } from "@/components/marketing_ui/input";
+import { NikhilTimeCalendar } from "@/components/marketing_ui/nikhil_time_calendar";
 import { Textarea } from "@/components/marketing_ui/textarea";
 import { apiClient as api } from "@/lib/apiClient";
 import { usePeople, useAiPlans, giftablePlans, invalidatePlanQueries, type PersonRow } from "@/features/superadmin/queries/useAiUsage";
 import { errorText } from "@/features/superadmin/components/ai-usage/planText";
+
+// A day as "YYYY-MM-DD" <-> a Date, for the app's own calendar (NikhilTimeCalendar) instead of the browser's date box
+const dateOf = (iso: string) => (iso ? new Date(`${iso}T00:00:00`) : undefined);
+const isoOf = (d?: Date) => (d ? `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}` : "");
 
 const PERIODS = [
   { key: "1", label: "1 month", months: 1 },
@@ -258,7 +262,7 @@ export function GiftPlansPanel({ isOpen, onClose }: { isOpen: boolean; onClose: 
                         </SelectContent>
                       </Select>
                       {period === "date" && (
-                        <Input type="date" min={todayIso()} value={endDate} onChange={(e) => setEndDate(e.target.value)} className="h-10 w-[170px]" aria-label="End date" />
+                        <NikhilTimeCalendar value={dateOf(endDate)} onChange={(d) => setEndDate(isoOf(d))} showTime={false} popDirection="up" placeholder="End date" className="w-[170px] h-10 border border-input bg-background" />
                       )}
                       <button
                         type="button"
