@@ -913,6 +913,10 @@ router.get("/activity-logs", async (req, res) => {
 
         const filter = {};
         if (action) filter.action = String(action);
+        if (actorId !== undefined) {
+            if (!/^[a-f\d]{24}$/i.test(String(actorId))) return res.status(400).json({ success: false, message: "actorId is not an id." });
+            filter.actorId = String(actorId);
+        }
         if (actorId) filter.actorId = actorId;
         if (targetType) filter.targetType = String(targetType);
         // Search (Audit Logs page): the admin's name, the target's name or id. Escaped, so "(" searches for "(".
@@ -1507,6 +1511,10 @@ router.patch("/team/:id/role", async (req, res) => {
         const allowedRoles = ["super_admin", "co_super_admin"];
         if (!allowedRoles.includes(role)) {
             return res.status(400).json({ success: false, message: "Invalid platform role" });
+        }
+        // Not your own role: changing it could take away your own access to this dashboard
+        if (String(req.params.id) === String(req.user?._id)) {
+            return res.status(400).json({ success: false, message: "You can't change your own role." });
         }
         const User = (await import("../models/User.js")).default;
         const member = await User.findById(req.params.id).select("role email").lean();
@@ -3352,51 +3360,101 @@ router.get("/rollback/candidates", async (req, res) => {
     }
 });
 
-// Rollback a specific action
+// Rollback a specific action. The undo puts back what the action's own audit entry saved, and only when the target
+// is still as the action left it (a later change is never thrown away). The entry is claimed first with one atomic
+// update, so two clicks (two admins, two tabs) can't both apply the undo; if the undo can't be done, the claim is
+// given back.
+const USER_STATUSES = ["pending", "active", "suspended", "blocked", "deleted"];
+const ROLLBACK_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
 router.post("/rollback/:logId", async (req, res) => {
+    const AdminAuditLog = (await import("../models/AdminAuditLog.js")).default;
+    let claimed = null;
+    const giveBack = () => claimed && AdminAuditLog.updateOne(
+        { _id: claimed._id, rollbackStatus: "rolled_back" },
+        { $set: { rollbackStatus: claimed.rollbackStatus || "none" }, $unset: { rolledBackBy: "", rolledBackAt: "" } },
+    ).catch((e) => console.error("[SuperAdmin] rollback claim give-back failed:", e.message));
+    // Nothing was undone: the claim goes back and the admin is told why
+    const refuse = async (status, message) => {
+        await giveBack();
+        return res.status(status).json({ success: false, message });
+    };
     try {
-        const AdminAuditLog = (await import("../models/AdminAuditLog.js")).default;
-
         if (!/^[a-f\d]{24}$/i.test(String(req.params.logId || ""))) return res.status(404).json({ success: false, message: "Action not found." });
-        const logEntry = await AdminAuditLog.findById(req.params.logId).lean();
-        if (!logEntry) return res.status(404).json({ success: false, message: "Action not found." });
-        if (logEntry.rollbackStatus === "rolled_back") {
-            return res.status(400).json({ success: false, message: "Already rolled back." });
-        }
-        // The same 7 days the list shows
-        if (!logEntry.timestamp || Date.now() - new Date(logEntry.timestamp).getTime() > 7 * 24 * 60 * 60 * 1000) {
+
+        // Claim it: only an entry from the last 7 days, of an action that can be undone, not undone already
+        claimed = await AdminAuditLog.findOneAndUpdate(
+            {
+                _id: req.params.logId,
+                rollbackStatus: { $ne: "rolled_back" },
+                action: { $in: ROLLBACK_ACTIONS },
+                timestamp: { $gte: new Date(Date.now() - ROLLBACK_WINDOW_MS) },
+            },
+            { $set: { rollbackStatus: "rolled_back", rolledBackBy: req.user._id, rolledBackAt: new Date() } },
+            { new: false },
+        ).lean();
+        if (!claimed) {
+            // Why not: say it plainly
+            const entry = await AdminAuditLog.findById(req.params.logId).select("action rollbackStatus timestamp").lean();
+            if (!entry) return res.status(404).json({ success: false, message: "Action not found." });
+            if (entry.rollbackStatus === "rolled_back") return res.status(409).json({ success: false, message: "Already rolled back." });
+            if (!ROLLBACK_ACTIONS.includes(entry.action)) return res.status(400).json({ success: false, message: "This action cannot be undone from here. Change it by hand." });
             return res.status(400).json({ success: false, message: "Only actions from the last 7 days can be rolled back." });
         }
 
-        const { action, targetId, previousState } = logEntry;
+        const { action, targetId, previousState, metadata } = claimed;
         let rollbackMessage = "";
 
-        // Perform the inverse action
         if ((action === "user.ban" || action === "user.unban") && targetId) {
+            // Back to the status the person had before (saved by the ban and unban routes), only while they still
+            // have the status the action gave them
+            const before = previousState?.status;
+            if (!USER_STATUSES.includes(before)) return refuse(400, "The status before this action was not saved, so it can't be put back. Change it by hand.");
+            const leftAs = action === "user.ban" ? "suspended" : "active";
             const User = (await import("../models/User.js")).default;
-            const reverseStatus = action === "user.ban" ? "active" : "suspended";
-            await User.findByIdAndUpdate(targetId, { $set: { status: reverseStatus } });
-            rollbackMessage = `User status rolled back to ${reverseStatus}.`;
-        } else if (action === "user.role_change" && targetId && previousState?.role) {
+            const set = { status: before };
+            const unset = {};
+            if (action === "user.ban") { unset.bannedReason = ""; unset.bannedAt = ""; }
+            const done = await User.findOneAndUpdate(
+                { _id: targetId, status: leftAs },
+                { $set: set, ...(Object.keys(unset).length ? { $unset: unset } : {}) },
+                { new: true },
+            ).select("_id").lean();
+            if (!done) {
+                const exists = await User.exists({ _id: targetId });
+                return refuse(409, exists ? "The person's status has changed since this action, so it wasn't undone." : "This person no longer exists.");
+            }
+            rollbackMessage = `Status put back to ${before}.`;
+        } else if (action === "user.role_change" && targetId) {
+            // Back to the role before, only while they still have the role this action gave them
             const User = (await import("../models/User.js")).default;
-            await User.findByIdAndUpdate(targetId, { $set: { role: previousState.role } });
-            rollbackMessage = `User role rolled back to ${previousState.role}.`;
+            const before = previousState?.role;
+            const given = metadata?.newRole;
+            if (!before || !User.schema.path("role").enumValues.includes(before) || !given) {
+                return refuse(400, "The role before this action was not saved, so it can't be put back. Change it by hand.");
+            }
+            const done = await User.findOneAndUpdate({ _id: targetId, role: given }, { $set: { role: before } }, { new: true }).select("_id").lean();
+            if (!done) {
+                const exists = await User.exists({ _id: targetId });
+                return refuse(409, exists ? "The person's role has changed since this action, so it wasn't undone." : "This person no longer exists.");
+            }
+            rollbackMessage = `Role put back to ${before}.`;
         } else if (action === "feature_flag.toggle" && targetId) {
+            // Back to the value the flag had before (previousState.isEnabled, written with the toggle), only while it
+            // still has the value the toggle gave it
+            const before = previousState?.isEnabled;
+            if (typeof before !== "boolean") return refuse(400, "The flag's value before this action was not saved, so it can't be put back. Change it by hand.");
             const FeatureFlag = (await import("../models/FeatureFlag.js")).default;
-            await FeatureFlag.findOneAndUpdate({ key: targetId }, [{ $set: { isEnabled: { $not: "$isEnabled" } } }]);
+            const done = await FeatureFlag.findOneAndUpdate({ key: targetId, isEnabled: !before }, { $set: { isEnabled: before } }, { new: true }).select("_id").lean();
+            if (!done) return refuse(409, "The flag has changed since this action (or no longer exists), so it wasn't undone.");
             (await import("../services/feature-flag.service.js")).forgetFeatureFlags(); // (the flags are kept in memory between requests)
-            rollbackMessage = "Feature flag toggled back.";
+            rollbackMessage = `Flag put back to ${before ? "on" : "off"}.`;
         } else {
-            return res.status(400).json({ success: false, message: "This action cannot be undone from here. Change it by hand." });
+            return refuse(400, "This action cannot be undone from here. Change it by hand.");
         }
-
-        // Mark log entry as rolled back
-        await AdminAuditLog.findByIdAndUpdate(req.params.logId, {
-            $set: { rollbackStatus: "rolled_back", rolledBackBy: req.user._id, rolledBackAt: new Date() }
-        });
 
         res.json({ success: true, message: rollbackMessage });
     } catch (err) {
+        await giveBack();
         console.error("[SuperAdmin] rollback error:", err.message);
         res.status(500).json({ success: false, message: "Server error" });
     }

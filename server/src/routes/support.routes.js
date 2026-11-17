@@ -900,10 +900,11 @@ router.get("/tickets/:id", isAuthenticated, async (req, res) => {
         if (ticket && !ticket.submittedBy && ticket.submitterEmail) {
             const user = await User.findOne(
                 { email: ticket.submitterEmail.toLowerCase() },
-                "name email role organization_id"
+                "name email role organization_id profilePicture"
             ).populate("organization_id", "name").lean();
             if (user) {
                 ticket.submitterRole = user.role;
+                ticket.isPlatformUser = true; // (the same as the admin list says for this ticket)
                 ticket.requesterProfilePicture = user.profilePicture;
                 if (!ticket.organization_id && user.organization_id) {
                     ticket.organization_id = user.organization_id;
@@ -911,6 +912,7 @@ router.get("/tickets/:id", isAuthenticated, async (req, res) => {
             }
         }
 
+        if (ticket && ticket.isPlatformUser === undefined) ticket.isPlatformUser = !!ticket.submittedBy;
         if (!ticket) return res.status(404).json({ success: false, message: "Ticket not found" });
 
         // Only the submitter or super_admin can view
