@@ -432,9 +432,22 @@ export const voiceTurn = async (req, res) => {
     const askModel = async ({ messages: conversation, noTools, onSentence, onText }) => {
         const ask = { system, tools: VOICE_TOOLS, messages: conversation, noTools, onSentence, onText, signal: abort.signal };
         try {
-            return CLAUDE_CHAT_MODELS.has(answerModel)
-                ? await claudeVoiceAnswer({ ...ask, model: answerModel })
-                : await fallbackVoiceAnswer({ ...ask, model: answerModel });
+            try {
+                return CLAUDE_CHAT_MODELS.has(answerModel)
+                    ? await claudeVoiceAnswer({ ...ask, model: answerModel })
+                    : await fallbackVoiceAnswer({ ...ask, model: answerModel });
+            } catch (e) {
+                // The day's free Neurons are not used up, but Cloudflare's cap had no room for this request (or was
+                // reached in the middle of the turn): Claude Haiku answers it and the rest of the turn, the same
+                // system's choice as the stand-in picked above (not a backup for a model that failed)
+                const stand = e?.code === "cf_neuron_cap" && !CLAUDE_CHAT_MODELS.has(answerModel)
+                    ? await import("../services/cap-fallback.service.js").then((m) => m.claudeFor("simple", { disabled: offModels || [] })).catch(() => null)
+                    : null;
+                if (!stand) throw e;
+                answerModel = stand;
+                claudeByCap = true;
+                return await claudeVoiceAnswer({ ...ask, model: answerModel });
+            }
         } catch (e) {
             if (!closed) modelFailed = true;
             throw e;

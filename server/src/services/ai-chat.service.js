@@ -249,11 +249,29 @@ async function summarizeWithFlash(input, desktop = false) {
         tools: [],
         maxTokens: desktop ? 8000 : 3000, // Flash reasons first; leave room for the memory after the reasoning
         maxToolDepth: 0,
-        timeoutMs: 90000
+        timeoutMs: 90000,
+        // (the day is not used up, but the Cloudflare cap had no room for this request: Claude Haiku writes the summary)
+        capStandIn: async () => {
+            const model = await import('./cap-fallback.service.js').then((m) => m.claudeFor("small"));
+            return model ? { model } : null;
+        }
     });
-    // (its tokens are not written to AiUsageLog: counted here towards the Cloudflare daily Neuron cap)
-    if (result.usage) meterCfNeurons(desktop ? DESKTOP_MEMORY_FLASH_MODEL : MEMORY_FLASH_MODEL, result.usage);
+    // (its Cloudflare tokens are not written to AiUsageLog; the Cloudflare daily Neuron cap counts them itself, when the
+    // request is sent: cfAiFetch. They used to be counted here a second time. A Claude stand-in's tokens are kept in the
+    // usage log, like Haiku's own summaries.)
+    if (result.standIn) logSummaryUsage(result.servedModel || result.standIn.model, result.usage);
     return String(result.answer || "").trim();
+}
+
+// What a Claude model's summary cost is kept in the usage log (no person is charged for the summary), so it shows with
+// the models' use
+function logSummaryUsage(model, usage) {
+    if (!(usage?.total_tokens > 0)) return;
+    import('../models/AiUsageLog.js').then(({ default: AiUsageLog }) => AiUsageLog.create({
+        organization_id: null, userId: null, provider: "anthropic", model, feature: "other",
+        promptTokens: usage.prompt_tokens || 0, completionTokens: usage.completion_tokens || 0,
+        totalTokens: usage.total_tokens, success: true, metadata: { purpose: "chat_summary" },
+    })).catch((e) => console.error("[Memory Agent] usage log failed:", e.message));
 }
 
 // From 1 December 2026 (India time) the chat's summary is written by Claude Haiku, and DeepSeek Flash is only the
@@ -276,14 +294,7 @@ async function summarizeWithHaiku(input, desktop = false) {
         maxToolDepth: 0,
         timeoutMs: 90000
     });
-    // What it cost is kept in the usage log (no person is charged for the summary), so it shows with the models' use
-    if (result.usage?.total_tokens > 0) {
-        import('../models/AiUsageLog.js').then(({ default: AiUsageLog }) => AiUsageLog.create({
-            organization_id: null, userId: null, provider: "anthropic", model: MEMORY_HAIKU_MODEL, feature: "other",
-            promptTokens: result.usage.prompt_tokens || 0, completionTokens: result.usage.completion_tokens || 0,
-            totalTokens: result.usage.total_tokens, success: true, metadata: { purpose: "chat_summary" },
-        })).catch((e) => console.error("[Memory Agent] usage log failed:", e.message));
-    }
+    logSummaryUsage(MEMORY_HAIKU_MODEL, result.usage);
     return String(result.answer || "").trim();
 }
 
@@ -550,7 +561,6 @@ async function readSessionRow(sessionId) {
 // ─────────────────────────────────────────────────
 
 import crypto from 'crypto';
-import { meterText as meterCfNeurons } from "./cf-neuron-cap.service.js";
 
 /**
  * Generates a short, URL-safe share ID (10 chars).

@@ -3,9 +3,15 @@
 // 10 thousand free; after finishing those, all fall back to Claude models, depending on the task: helpers use
 // Sonnet, summary and titles use Claude").
 //
-// It only happens while the super admin's "Cloudflare daily Neuron cap" switch is on and today's count has reached
-// the cap (services/cf-neuron-cap.service.js: 9,500 of Cloudflare's free 10,000, UTC day). With the switch off
-// nothing is refused and nothing moves. Before this, a capped Cloudflare request fell to Mistral Nemo or stopped.
+// It only happens while the super admin's "Cloudflare daily Neuron cap" switch is on (services/cf-neuron-cap.service.js:
+// 9,500 of Cloudflare's free 10,000, UTC day). With the switch off nothing is refused and nothing moves. Before this,
+// a capped Cloudflare request fell to Mistral Nemo or stopped. Two moments:
+//   - The day is used up (today's count, with the room held for requests on their way, has reached the cap): the job
+//     starts on Claude (claudeWhenCapped, asked before the job).
+//   - The day is not used up, but this one request does not fit (the cap holds room for the MOST a request can cost:
+//     a big model's round is refused long before a small one's), or the cap is reached in the middle of a job: the
+//     request is refused (CfNeuronCapError) and Claude goes on from there (claudeFor: streamChat's capStandIn in
+//     llm-stream.js finishes the answer from where it stands; a single request is simply asked again on Claude).
 //
 // Which Claude model does which job:
 //   hard    the main answer for a longer or harder message  -> Claude Sonnet
@@ -19,7 +25,7 @@
 // The chat does not say that Claude answered in place of the picked model: no event, no line under the answer, nothing
 // kept with the saved answer (owner, 2026-11-17, about an "Answered by Claude Haiku" line that was added and taken
 // out the same day: "why you added that, it was good, so the user doesn't know").
-import { capSettings, usedToday } from "./cf-neuron-cap.service.js";
+import { capSettings, spokenForToday } from "./cf-neuron-cap.service.js";
 
 export const CAP_SONNET = "claude-sonnet-5-5";
 export const CAP_HAIKU = "claude-haiku-5-5";
@@ -30,8 +36,8 @@ let kept = { at: 0, value: false };
 export const forgetCapState = () => { kept = { at: 0, value: false }; };
 
 /**
- * True while the cap switch is on and today's free Neurons are used up. A count that cannot be read counts as used
- * up, because the gate refuses Cloudflare then too.
+ * True while the cap switch is on and today's free Neurons are used up (what is counted, plus the room held for
+ * requests on their way). A count that cannot be read counts as used up, because the gate refuses Cloudflare then too.
  */
 export async function cloudflareCapped(now = Date.now()) {
     if (now - kept.at < KEEP_MS) return kept.value;
@@ -39,7 +45,7 @@ export async function cloudflareCapped(now = Date.now()) {
     try {
         const s = await capSettings();
         if (s?.enabled) {
-            try { value = (await usedToday()) >= s.cap; } catch { value = true; }
+            try { value = (await spokenForToday()) >= s.cap; } catch { value = true; }
         }
     } catch {
         value = false; // the settings could not be read: Cloudflare is tried as usual
@@ -49,18 +55,39 @@ export async function cloudflareCapped(now = Date.now()) {
 }
 
 /**
- * The Claude model that does `job` while Cloudflare is capped, or null when Cloudflare should be used as usual
- * (not capped), or Claude can't be (no Anthropic key, the Claude family switched off, or the model turned off in the
- * Model manager: then the other Claude model, or null when both are off).
+ * The Claude model that does `job` in place of a Cloudflare model, or null when Claude can't be used (no Anthropic
+ * key, the Claude family switched off, or the model turned off in the Model manager: then the other Claude model, or
+ * null when both are off). It does not look at the cap: it is for the moment the cap has just refused a request.
  */
-export async function claudeWhenCapped(job, { claudeOff = false, disabled = [] } = {}) {
+export function claudeFor(job, { claudeOff = false, disabled = [] } = {}) {
     if (claudeOff || !process.env.ANTHROPIC_API_KEY) return null;
-    if (!(await cloudflareCapped())) return null;
     const off = Array.isArray(disabled) ? disabled : [];
     const first = BY_JOB[job] || CAP_HAIKU;
     if (!off.includes(first)) return first;
     const other = first === CAP_SONNET ? CAP_HAIKU : CAP_SONNET;
     return off.includes(other) ? null : other;
+}
+
+/**
+ * The Claude model that does `job` while Cloudflare is capped, or null when Cloudflare should be used as usual (not
+ * capped) or Claude can't be used (claudeFor). Asked before a job starts.
+ */
+export async function claudeWhenCapped(job, opts = {}) {
+    if (opts.claudeOff || !process.env.ANTHROPIC_API_KEY) return null;
+    if (!(await cloudflareCapped())) return null;
+    return claudeFor(job, opts);
+}
+
+/**
+ * The parts of a finished job's usage, each with the model it is counted at: one part for a job a single model did;
+ * for a job a Claude stand-in finished (result.standIn, llm-stream.js), the Cloudflare model's rounds before the cap
+ * refused one, then the stand-in's rounds. Parts that used nothing are left out.
+ */
+export function usageParts(result, model) {
+    const parts = result?.standIn
+        ? [{ usage: result.standIn.before?.usage, model: result.standIn.before?.model || model }, { usage: result.usage, model: result.servedModel || result.standIn.model }]
+        : [{ usage: result?.usage, model }];
+    return parts.filter((p) => p.usage?.total_tokens > 0);
 }
 
 /** The picture's type from its first bytes (what Claude's API accepts), or null */

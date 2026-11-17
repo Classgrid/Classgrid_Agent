@@ -8,6 +8,8 @@
 //     read leave Cloudflare in use
 //   - no Claude without an Anthropic key, or with the Claude family switched off; a Claude model turned off in the
 //     Model manager is replaced by the other one, and with both off nothing moves
+//   - when the cap has just refused one request (the day is not used up yet), the same Claude model is named without
+//     looking at the count; a job a stand-in finished is counted in two parts, each at its own model
 // The cap's settings and count are stand-ins: no database, no Redis.
 // Run: node --experimental-test-module-mocks --test tests/cap-fallback.test.mjs
 import test, { mock } from "node:test";
@@ -20,11 +22,11 @@ let settingsFail = false;
 mock.module("../src/services/cf-neuron-cap.service.js", {
     namedExports: {
         capSettings: async () => { if (settingsFail) throw new Error("no database"); return settings; },
-        usedToday: async () => { if (usedFails) throw new Error("no redis"); return used; },
+        spokenForToday: async () => { if (usedFails) throw new Error("no redis"); return used; },
     },
 });
 
-const { cloudflareCapped, claudeWhenCapped, forgetCapState, CAP_SONNET, CAP_HAIKU } = await import("../src/services/cap-fallback.service.js");
+const { cloudflareCapped, claudeWhenCapped, claudeFor, usageParts, forgetCapState, CAP_SONNET, CAP_HAIKU } = await import("../src/services/cap-fallback.service.js");
 
 const set = ({ enabled = true, neurons = 0, noCount = false, noSettings = false, key = "sk-test" } = {}) => {
     settings = { enabled, cap: 9500 };
@@ -96,4 +98,29 @@ test("imageTypeOf: the picture types Claude reads, from the file's first bytes",
     assert.equal(imageTypeOf(Buffer.concat([Buffer.from("RIFF", "latin1"), Buffer.from([1, 2, 3, 4]), Buffer.from("WEBPVP8 ", "latin1")])), "image/webp");
     assert.equal(imageTypeOf(Buffer.from("%PDF-1.7 not a picture")), null);
     assert.equal(imageTypeOf(null), null);
+});
+
+test("claudeFor: the stand-in right after a refusal, whatever today's count is", async () => {
+    set({ neurons: 100 }); // far under the cap: one big request was refused, the day is not used up
+    assert.equal(await claudeWhenCapped("hard"), null);
+    assert.equal(claudeFor("hard"), CAP_SONNET);
+    assert.equal(claudeFor("helper"), CAP_SONNET);
+    assert.equal(claudeFor("simple"), CAP_HAIKU);
+    assert.equal(claudeFor("small"), CAP_HAIKU);
+    assert.equal(claudeFor("hard", { disabled: [CAP_SONNET] }), CAP_HAIKU);
+    assert.equal(claudeFor("hard", { disabled: [CAP_SONNET, CAP_HAIKU] }), null);
+    assert.equal(claudeFor("hard", { claudeOff: true }), null);
+    set({ neurons: 100, key: "" });
+    assert.equal(claudeFor("hard"), null);
+});
+
+test("usageParts: a job a stand-in finished is counted in two parts, each at its own model", () => {
+    const u = (n) => ({ prompt_tokens: n, completion_tokens: 1, total_tokens: n + 1 });
+    assert.deepEqual(usageParts({ usage: u(10) }, "@cf/x"), [{ usage: u(10), model: "@cf/x" }]);
+    assert.deepEqual(usageParts({ usage: null }, "@cf/x"), []);
+    const finished = { usage: u(30), servedModel: CAP_HAIKU, standIn: { model: CAP_HAIKU, before: { model: "@cf/x", usage: u(20) } } };
+    assert.deepEqual(usageParts(finished, "@cf/x"), [{ usage: u(20), model: "@cf/x" }, { usage: u(30), model: CAP_HAIKU }]);
+    // refused at the first round: nothing was used on Cloudflare
+    const fromStart = { usage: u(30), standIn: { model: CAP_SONNET, before: { model: "@cf/x", usage: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 } } } };
+    assert.deepEqual(usageParts(fromStart, "@cf/x"), [{ usage: u(30), model: CAP_SONNET }]);
 });

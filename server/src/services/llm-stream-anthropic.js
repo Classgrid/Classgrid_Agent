@@ -449,6 +449,117 @@ function toClaudeMessages(messages, attachmentBlocks) {
     return out;
 }
 
+/**
+ * A conversation in the OpenAI shape (what streamChat keeps for a Cloudflare model: system / user / assistant with
+ * tool_calls / tool messages, pictures as image_url parts) as the conversation this loop keeps (Claude's shape: text,
+ * tool_use, tool_result and image blocks), so a Claude model can go on with an answer a Cloudflare model started
+ * (llm-stream.js: the stand-in when Cloudflare's daily cap refuses a round). The system messages in front are the
+ * system prompt and are left out; a system note further in goes with the next user message.
+ * `toolNames`: the tools the Claude model is given. A call to any other tool (one only the first model had) is kept
+ * as plain text, because a tool_use block has to name a tool that exists.
+ * A call to the thought tool (internal_thought_process, which only some Cloudflare models use) and its "Thought
+ * logged" result are left out altogether: the thought was already shown as thinking, and Claude Sonnet declines a
+ * conversation that carries them ("I can't help with that request", no output; tested live 2026-11-17, three times
+ * out of three, while the same conversation without them is answered).
+ */
+const LEFT_OUT_TOOLS = new Set(["internal_thought_process"]);
+export function toClaudeConversation(messages, { toolNames = null } = {}) {
+    const out = [];
+    const add = (role, blocks) => {
+        const content = blocks.filter(Boolean);
+        if (!content.length) return;
+        const last = out[out.length - 1];
+        if (last && last.role === role) last.content.push(...content);
+        else out.push({ role, content });
+    };
+    const plain = (c) => (typeof c === "string" ? c : c == null ? "" : JSON.stringify(c));
+    const textBlock = (t) => { const text = String(t ?? ""); return text.trim() ? { type: "text", text } : null; };
+    const imageBlock = (url) => {
+        const u = String(url || "");
+        const m = /^data:(image\/[a-z0-9.+-]+);base64,([\s\S]+)$/i.exec(u);
+        if (m) return { type: "image", source: { type: "base64", media_type: m[1].toLowerCase() === "image/jpg" ? "image/jpeg" : m[1].toLowerCase(), data: m[2] } };
+        return /^https:\/\//i.test(u) ? { type: "image", source: { type: "url", url: u } } : null;
+    };
+    const userBlocks = (content) => (Array.isArray(content)
+        ? content.map((p) => (p?.type === "image_url" ? imageBlock(p.image_url?.url) : textBlock(p?.type === "text" ? p.text : plain(p))))
+        : [textBlock(plain(content))]);
+    const usedIds = new Set();
+    let leading = true; // the system messages in front are the system prompt
+    let notes = []; // system notes further in: they go with the next user message
+    let waiting = []; // the last assistant message's tool calls: { given, id (null: kept as text), name, answered, leftOut }
+    const answerWaiting = () => {
+        // (a call with no result message should not happen; every tool_use needs its result, so it gets one)
+        for (const c of waiting) if (!c.answered && c.id) add("user", [{ type: "tool_result", tool_use_id: c.id, content: "(No result was kept for this step.)" }]);
+        waiting = [];
+    };
+    for (const m of messages || []) {
+        if (!m || typeof m !== "object") continue;
+        if (m.role === "system") {
+            if (!leading && plain(m.content).trim()) notes.push(plain(m.content));
+            continue;
+        }
+        leading = false;
+        if (m.role === "tool") {
+            const call = waiting.find((c) => !c.answered && c.given && c.given === String(m.tool_call_id ?? "")) || waiting.find((c) => !c.answered);
+            const result = plain(m.content) || "(no output)";
+            if (!call) { add("user", [textBlock(`Result of an earlier step:\n${result}`)]); continue; }
+            call.answered = true;
+            if (call.leftOut) continue;
+            add("user", [call.id ? { type: "tool_result", tool_use_id: call.id, content: result } : textBlock(`Result of ${call.name}:\n${result}`)]);
+            continue;
+        }
+        if (m.role === "user") {
+            answerWaiting();
+            add("user", [...(notes.length ? [textBlock(notes.join("\n\n"))] : []), ...userBlocks(m.content)]);
+            notes = [];
+            continue;
+        }
+        if (m.role !== "assistant") continue;
+        answerWaiting();
+        const blocks = [textBlock(plain(m.content))];
+        const calls = [];
+        const first = out.length === 0; // the first message must be from the user: an assistant message in front is left out
+        for (const tc of Array.isArray(m.tool_calls) ? m.tool_calls : []) {
+            const name = String(tc?.function?.name || "");
+            if (!name) continue;
+            const given = String(tc?.id ?? "");
+            const args = String(tc?.function?.arguments || "");
+            if (LEFT_OUT_TOOLS.has(name)) { calls.push({ given, id: null, name, answered: false, leftOut: true }); continue; }
+            if (first || (toolNames && !toolNames.has(name))) {
+                blocks.push(textBlock(`(I used ${name}${args && args !== "{}" ? ` with ${args.slice(0, 2000)}` : ""}.)`));
+                calls.push({ given, id: null, name, answered: false });
+                continue;
+            }
+            let input = {};
+            try {
+                const parsed = JSON.parse(args || "{}");
+                if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) input = parsed;
+            } catch { /* not JSON: the tool answered with an error, which follows as its result */ }
+            let id = given.replace(/[^a-zA-Z0-9_-]/g, "_").slice(0, 64);
+            if (!id || usedIds.has(id)) {
+                let n = usedIds.size + 1;
+                while (usedIds.has(`call_${n}`)) n++;
+                id = `call_${n}`;
+            }
+            usedIds.add(id);
+            blocks.push({ type: "tool_use", id, name, input });
+            calls.push({ given, id, name, answered: false });
+        }
+        if (!first) add("assistant", blocks);
+        waiting = calls;
+    }
+    answerWaiting();
+    if (notes.length) add("user", [textBlock(notes.join("\n\n"))]);
+    if (out.length && out[out.length - 1].role === "assistant") add("user", [textBlock(CONTINUE_PROMPT)]);
+    // In a user message the tool results come first (the API's rule), then its text and pictures
+    for (const m of out) {
+        if (m.role !== "user") continue;
+        const results = m.content.filter((b) => b.type === "tool_result");
+        if (results.length && results.length < m.content.length) m.content = [...results, ...m.content.filter((b) => b.type !== "tool_result")];
+    }
+    return out;
+}
+
 // Tool search: only these frequently used tools are loaded into Claude's context up front. Every other
 // tool is sent with defer_loading, so its definition costs no input tokens until Claude finds it with
 // the server-side tool search. Deferred tools sit outside the cached prefix, so caching is unaffected.
@@ -514,6 +625,10 @@ export async function streamClaudeChat({
     model,
     messages,
     tools = [],
+    // toolsNow(): the tool list as it is now, read again before every round, every tool loaded and none deferred.
+    // For the stand-in that finishes a Cloudflare model's answer (llm-stream.js): that loop's load_tools adds tools to
+    // its list in the middle of an answer, and the calls already in the conversation name tools from it.
+    toolsNow = null,
     toolHandlers = {},
     maxTokens = MIN_MAX_TOKENS,
     maxToolDepth = 100,
@@ -563,15 +678,16 @@ export async function streamClaudeChat({
     const conversation = resumed ? resumeConversation : toClaudeMessages(messages, attachmentBlocks);
     // (analyze_image stays in the list on picture turns too: a tool list that differs from the last message's empties
     // the prompt cache; Claude looks at an attached picture directly anyway)
-    const claudeTools = withToolSearch(toClaudeTools(tools), loadedToolNames);
+    const toolsOfRound = () => { const list = toClaudeTools(toolsNow()); return withToolSearch(list, new Set(list.map((t) => t.name))); };
+    let claudeTools = toolsNow ? toolsOfRound() : withToolSearch(toClaudeTools(tools), loadedToolNames);
     // What really went to the model, for the cache log: the two system blocks and the loaded tools (depth 0 only)
     try {
         const h = (t) => createHash("sha1").update(String(t || "")).digest("hex").slice(0, 8);
         const loadedNames = claudeTools.filter((t) => !t.defer_loading).map((t) => t.name);
         console.log(`[AI-CACHE-REAL] sys0 ${h(system?.[0]?.text)} ${system?.[0]?.text?.length || 0} | sys1 ${h(system?.[1]?.text)} ${system?.[1]?.text?.length || 0} | tools ${h(loadedNames.join(","))} ${loadedNames.length} loaded, ${claudeTools.length - loadedNames.length} deferred | turns ${conversation.length}`);
     } catch { /* a log line only */ }
-    const sentToolNames = new Set(claudeTools.map((t) => t.name));
-    const deferredToolNames = new Set(claudeTools.filter((t) => t.defer_loading).map((t) => t.name));
+    let sentToolNames = new Set(claudeTools.map((t) => t.name));
+    let deferredToolNames = new Set(claudeTools.filter((t) => t.defer_loading).map((t) => t.name));
     if (conversation.length === 0) throw new StreamChatError("No user message to send");
 
     // Images a tool result carries: ones the handler returned ({ images: [{ data, mediaType }] }) and Classgrid
@@ -700,6 +816,13 @@ export async function streamClaudeChat({
             const roundMax = budgetMaxTokens();
             if (roundMax < 1) return budgetStop("nothing left to write with");
 
+            if (toolsNow) {
+                // (the stand-in's tool list, as it is before this round)
+                claudeTools = toolsOfRound();
+                sentToolNames = new Set(claudeTools.map((t) => t.name));
+                deferredToolNames = new Set(claudeTools.filter((t) => t.defer_loading).map((t) => t.name));
+                params.tools = claudeTools.length > 0 ? claudeTools : undefined;
+            }
             thoughtThisRound = false;
             const emitThought = (piece) => {
                 // Keep reasoning from separate rounds visually separate in the thought stream.

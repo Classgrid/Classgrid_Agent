@@ -78,7 +78,8 @@ import { getHistory, getHistoryCount, appendToHistory, invalidateHistoryCache, g
 import { canAccessSession, gridLabelMap, gridProfilesText, getSharedSessionsFor, leaveSharedChat, sharedChatIdsFor } from "../services/ai-chat-grid.service.js";
 import { editorContextFor, rememberProjectSnapshot, sandboxDataDir, startCheckpoint, finishCheckpoint, linkChatToProject, forgetChatScreenProject, touchStudio, pcChatIds, masteroAutoPush, pullMastero } from "../services/ide-project.service.js";
 // Cloudflare Workers AI daily Neuron cap and meter (Global AI Config): every Cloudflare request goes through cfAiFetch
-import { cfAiFetch, providersWithoutCappedCloudflare } from "../services/cf-neuron-cap.service.js";
+import { cfAiFetch, providersWithoutCappedCloudflare, isCfNeuronCapError } from "../services/cf-neuron-cap.service.js";
+import { usageParts } from "../services/cap-fallback.service.js";
 import * as eleven from "../services/elevenlabs.service.js";
 import { planOf, isUnlimited } from "../services/plan-limits.service.js";
 import { PLANNER_BROWSER_TOOLS, PLANNER_BLIND_TOOLS, WORKER_BROWSER_TOOLS, BROWSER_TOOL_NAMES, makeBrowserHandlers, BROWSER_WORKER_SYSTEM } from "../services/studio-browser-tools.js";
@@ -769,7 +770,7 @@ async function generateShortTitleText(instruction, text) {
     ];
     // Cloudflare's free Neurons of the day are used up (the cap switch is on): Claude Haiku writes it
     // (services/cap-fallback.service.js)
-    const { claudeWhenCapped } = await import("../services/cap-fallback.service.js");
+    const { claudeWhenCapped, claudeFor } = await import("../services/cap-fallback.service.js");
     const stand = await claudeWhenCapped("small").catch(() => null);
     if (stand) {
         const result = await streamClaudeChat({ model: stand, messages, tools: [], maxTokens: 2000, maxToolDepth: 0, timeoutMs: 30000 });
@@ -781,9 +782,13 @@ async function generateShortTitleText(instruction, text) {
         tools: [],
         maxTokens: 1200, // Flash reasons first; leave room for the title after the reasoning
         maxToolDepth: 0,
-        timeoutMs: 30000
+        timeoutMs: 30000,
+        // (the day is not used up, but the cap had no room for this request: Claude Haiku writes it)
+        capStandIn: async () => { const model = claudeFor("small"); return model ? { model } : null; },
     });
-    return { answer: result.answer || "", usage: result.usage, model: CF_FLASH_MODEL, provider: "cloudflare" };
+    return result.standIn
+        ? { answer: result.answer || "", usage: result.usage, model: result.servedModel || result.standIn.model, provider: "anthropic" }
+        : { answer: result.answer || "", usage: result.usage, model: CF_FLASH_MODEL, provider: "cloudflare" };
 }
 
 // The chat title is refreshed every TITLE_REFRESH_EVERY user messages from the recent ones, so a chat
@@ -1796,6 +1801,15 @@ export const streamAskAi = async (req, res) => {
             maxOutputTokens: () => roundMaxOutput(liveMeter, who, outputWeight),
             inputTooBig: (u) => roundInputTooBig(liveMeter, who, chargeableTokens(u, model)),
         };
+    };
+    // When Cloudflare's daily cap refuses a round of a job (before it or in the middle of it), a Claude model finishes
+    // the job from where it stands (llm-stream.js capStandIn; services/cap-fallback.service.js): the Claude model for
+    // that kind of job, with the live meter counting its rounds at its own rate. `extra(model)` adds what only that
+    // job knows. Null when Claude can't be used (then the refusal ends the job as before).
+    const capStandInFor = (job, who = "Agent", extra = null) => async () => {
+        const [{ claudeFor }, { disabledModels }] = await Promise.all([import("../services/cap-fallback.service.js"), import("../services/model-access.service.js")]);
+        const model = claudeFor(job, { claudeOff: flagsOff.has(modelFlagKey("claude-haiku-5-5")), disabled: await disabledModels().catch(() => []) });
+        return model ? { model, ...meterHooks(model, who), ...(extra ? extra(model) : {}) } : null;
     };
     let availableTokensToGenerate = 8192;
     let orgId = req.user?.organization_id || null;
@@ -4041,10 +4055,11 @@ Every user is using you as a personal AI assistant and agent (like ChatGPT) to m
                             };
                             const r = CLAUDE_CHAT_MODELS.has(model)
                                 ? await streamClaudeChat({ ...readerArgs, model })
-                                : await streamChat({ ...readerArgs, provider: cloudflareStreamProvider(model), temperature: 0.2 });
-                            if (userId && r.usage?.total_tokens) deductTokens(userId, orgId, chargeableTokens(r.usage, model), tokenSource).catch(() => {});
+                                // (capStandIn: the cap had no room for this read, or was reached in the middle of it: Claude Haiku reads on)
+                                : await streamChat({ ...readerArgs, provider: cloudflareStreamProvider(model), temperature: 0.2, capStandIn: capStandInFor("small", "File reader") });
+                            if (userId) for (const part of usageParts(r, model)) deductTokens(userId, orgId, chargeableTokens(part.usage, part.model), tokenSource).catch(() => {});
                             const answer = String(r.answer || "").trim();
-                            if (answer) return { answer, model };
+                            if (answer) return { answer, model: r.standIn?.model || model };
                             lastError = "no answer";
                         } catch (e) {
                             lastError = String(e?.message || e);
@@ -4364,11 +4379,13 @@ You work on the user's own Windows computer through their Classgrid desktop app,
                                         const r = CLAUDE_CHAT_MODELS.has(model)
                                             // (the desktop app drives each helper's loop too, like the main answer's: local-loop.service.js)
                                             ? await streamClaudeChat({ ...helperArgs, ...meterHooks(model, `Helper ${h.no}`), model, loadedToolNames: new Set([...names, "tell_main", ...(hasBrowser ? WORKER_BROWSER_TOOLS.map((t) => t.function.name) : [])]), answerAtDepthLimit: true, maxContinuations: 3, toolDriver: localLoop ? localLoop.driverFor(h.no) : null })
-                                            : await streamChat({ ...helperArgs, ...meterHooks(model, `Helper ${h.no}`), provider: cloudflareStreamProvider(model, `${sessionId || "x"}-helper-${h.no}`), seesImages: CF_VISION_MODELS.has(model), maxTokens: 8192, maxContinuations: 6, answerAtDepthLimit: true, toolDriver: localLoop ? localLoop.driverFor(h.no) : null }); // a long report keeps going instead of being cut
-                                        if (userId && r.usage?.total_tokens) deductTokens(userId, orgId, chargeableTokens(r.usage, model), tokenSource).catch(() => {});
-                                        h.tokens = (h.tokens || 0) + (r.usage?.total_tokens || 0); // shown in the chat's Agent map
+                                            // (capStandIn: the cap refuses a round of this helper: Claude Sonnet goes on with its work from where it
+                                            // stands, instead of the helper starting again on the next model)
+                                            : await streamChat({ ...helperArgs, ...meterHooks(model, `Helper ${h.no}`), capStandIn: capStandInFor("helper", `Helper ${h.no}`, (m) => { h.nowModel = m; return {}; }), provider: cloudflareStreamProvider(model, `${sessionId || "x"}-helper-${h.no}`), seesImages: CF_VISION_MODELS.has(model), maxTokens: 8192, maxContinuations: 6, answerAtDepthLimit: true, toolDriver: localLoop ? localLoop.driverFor(h.no) : null }); // a long report keeps going instead of being cut
+                                        if (userId) for (const part of usageParts(r, model)) deductTokens(userId, orgId, chargeableTokens(part.usage, part.model), tokenSource).catch(() => {});
+                                        h.tokens = (h.tokens || 0) + (r.usage?.total_tokens || 0) + (r.standIn?.before?.usage?.total_tokens || 0); // shown in the chat's Agent map
                                         if (!String(r.answer || "").trim()) { lastError = "no answer"; h.switches = [...(h.switches || []), { from: model, why: "it gave no answer" }]; break; } // try the next model
-                                        h.usedModel = model;
+                                        h.usedModel = r.standIn?.model || model;
                                         return { state: "done", text: String(r.answer).slice(0, 40000) };
                                     } catch (e) {
                                         lastError = String(e?.message || e);
@@ -4990,18 +5007,19 @@ You work on the user's own Windows computer through their Classgrid desktop app,
                             // Cloudflare's free Neurons of the day are used up (the cap switch is on): Claude Haiku looks at
                             // the picture in place of Cloudflare's vision model (services/cap-fallback.service.js)
                             const capFallback = await import("../services/cap-fallback.service.js");
-                            const visionStand = await capFallback.claudeWhenCapped("small").catch(() => null);
-                            if (visionStand) {
-                                const seen = await capFallback.claudeSeesImage(visionStand, buffer, question);
+                            const claudeLooks = async (stand) => {
+                                const seen = await capFallback.claudeSeesImage(stand, buffer, question);
                                 if (userId && seen.usage.total_tokens > 0) {
                                     AiUsageLog.create({
-                                        organization_id: orgId || null, userId, provider: "anthropic", model: visionStand, feature: "other",
+                                        organization_id: orgId || null, userId, provider: "anthropic", model: stand, feature: "other",
                                         promptTokens: seen.usage.prompt_tokens, completionTokens: seen.usage.completion_tokens, totalTokens: seen.usage.total_tokens,
                                         success: true, metadata: { purpose: "analyze_image" },
                                     }).catch((err) => console.error("AiUsageLog Error:", err));
                                 }
                                 return "VISION AI ANSWER:\n" + (seen.answer || "(no description)");
-                            }
+                            };
+                            const visionStand = await capFallback.claudeWhenCapped("small").catch(() => null);
+                            if (visionStand) return await claudeLooks(visionStand);
 
                             console.log(`[analyze_image] Using Cloudflare Vision AI. Question: ${question}`);
                             const cfToken = process.env.CLOUDFLARE_WORKERS_AI_TOKEN;
@@ -5017,17 +5035,25 @@ You work on the user's own Windows computer through their Classgrid desktop app,
                             // Converting to base64 string keeps it small enough to pass the 10MB API Gateway limit!
                             const base64String = buffer.toString('base64');
 
-                            const visionResponse = await cfAiFetch(cfUrl, {
-                                method: 'POST',
-                                headers: {
-                                    'Authorization': `Bearer ${cfToken}`,
-                                    'Content-Type': 'application/json'
-                                },
-                                body: JSON.stringify({
-                                    prompt: question || "Describe this image in high detail, extracting all text and explaining visual elements.",
-                                    image: base64String
-                                })
-                            });
+                            let visionResponse;
+                            try {
+                                visionResponse = await cfAiFetch(cfUrl, {
+                                    method: 'POST',
+                                    headers: {
+                                        'Authorization': `Bearer ${cfToken}`,
+                                        'Content-Type': 'application/json'
+                                    },
+                                    body: JSON.stringify({
+                                        prompt: question || "Describe this image in high detail, extracting all text and explaining visual elements.",
+                                        image: base64String
+                                    })
+                                });
+                            } catch (capErr) {
+                                // The day is not used up, but the Cloudflare cap had no room for this picture: Claude Haiku looks at it
+                                const after = isCfNeuronCapError(capErr) ? capFallback.claudeFor("small") : null;
+                                if (!after) throw capErr;
+                                return await claudeLooks(after);
+                            }
 
                             if (!visionResponse.ok) {
                                 throw new Error(`Cloudflare Vision AI failed: ${visionResponse.statusText}`);
@@ -6719,6 +6745,25 @@ If a tool fails, never show the error message; say only: "Something went wrong o
             messages[0] = { role: "system", content: filterPromptBlocks(dynamicSystemPrompt, promptCtx) + filterPromptBlocks(volatilePrompt, promptCtx) + strictRule + whereYouWork };
         };
 
+        // The tool list a Claude model gets (a Claude answer, and the stand-in that finishes a Cloudflare model's answer
+        // when the daily cap refuses a round): every allowed tool, with only the loaded ones in its context; the rest
+        // are deferred and reachable through tool search or load_tools
+        const claudeToolSetup = () => {
+            // view_image is Claude-only (native vision); it is loaded whenever the sandbox tools are.
+            // (not on the desktop on the user's computer: view_image reads the cloud sandbox only)
+            const sandboxImages = !(onComputer || chatProject?.location === "local");
+            let tools = sandboxImages && toolPlan.allowedToolNames.has("run_code") ? [...fullToolList, VIEW_IMAGE_TOOL] : fullToolList;
+            let loadedNames = sandboxImages && toolPlan.loadedNames.has("run_code") ? new Set([...toolPlan.loadedNames, "view_image"]) : toolPlan.loadedNames;
+            // Studio: the Planner's browser tools (scratchpad, look at the live page)
+            if (body.appMode === "studio") {
+                // (without the live browser's tools while that feature flag is off)
+                const plannerTools = PLANNER_BROWSER_TOOLS.filter((t) => !toolOff(t.function.name));
+                tools = [...tools, ...plannerTools.filter((t) => !tools.some((x) => x?.function?.name === t.function.name))];
+                loadedNames = new Set([...loadedNames, ...plannerTools.map((t) => t.function.name)]);
+            }
+            return { tools, loadedNames };
+        };
+
         // (while the Cloudflare daily Neuron cap is reached, the shared client gets the list without the Cloudflare models)
         const client = createLLMClient({ ...llmConfig, providers: await providersWithoutCappedCloudflare(llmConfig.providers) });
 
@@ -6826,11 +6871,22 @@ If a tool fails, never show the error message; say only: "Something went wrong o
         // After every model round with tools, the answer's state so far goes to Redis (the model conversation in its
         // own format, the steps, the thinking, the usage), so a server restart doesn't end the answer: the app asks for
         // it again with resumeTurn and it goes on from that round (turn-state.service.js)
-        const saveTurnProgress = durableTurn ? async (conversation, usage) => {
+        // (extra.standIn: a Claude stand-in is finishing a Cloudflare model's answer, llm-stream.js capStandIn: kept with
+        // the state, so after a restart the stand-in goes on and what the Cloudflare model used is still counted)
+        const saveTurnProgress = durableTurn ? async (conversation, usage, extra = null) => {
             const { saveTurnState } = await import("../services/turn-state.service.js");
             const provider = conversation.some((m) => m?.role === "system" || Array.isArray(m?.tool_calls) || m?.role === "tool") ? "cf" : "claude";
-            await saveTurnState(durableTurn.id, { userId: String(userId), sessionId: String(sessionId), provider, conversation, usage, steps: accSteps, thought: accThought, at: Date.now() });
+            await saveTurnState(durableTurn.id, { userId: String(userId), sessionId: String(sessionId), provider, conversation, usage, steps: accSteps, thought: accThought, at: Date.now(), ...(extra?.standIn ? { standIn: extra.standIn } : {}) });
         } : null;
+        // The Cloudflare model's rounds of an answer a Claude stand-in finished are charged at the Cloudflare model's
+        // rate, each such part once (the stand-in's own rounds are the answer's usage, at its rate)
+        const standInBeforeCounted = new WeakSet();
+        const countStandInBefore = (standIn) => {
+            const before = standIn?.before;
+            if (!(before?.usage?.total_tokens > 0) || standInBeforeCounted.has(before)) return;
+            standInBeforeCounted.add(before);
+            usageStore.failedAttempts.push({ usage: before.usage, model: before.model });
+        };
         // The user pressed Stop: what the answer really used up to then is charged, like a finished answer (owner,
         // 2026-11-17: a stopped answer on a non-Claude model was not charged at all, so with a message allowed to
         // start whenever anything is left, Send and Stop could be repeated with the bar never moving). Real numbers
@@ -6973,18 +7029,10 @@ If a tool fails, never show the error message; say only: "Something went wrong o
                         modelSeesImages = true;
                         setModelIdentity(requestedModel, isStaffRole(req.user?.role), { selected: requestedModel, previousModel });
                         try {
-                            // view_image is Claude-only (native vision); it is loaded whenever the sandbox tools are.
-                            // (not on the desktop on the user's computer: view_image reads the cloud sandbox only)
-                            const sandboxImages = !(onComputer || chatProject?.location === "local");
-                            let claudeToolList = sandboxImages && toolPlan.allowedToolNames.has("run_code") ? [...fullToolList, VIEW_IMAGE_TOOL] : fullToolList;
-                            let claudeLoadedNames = sandboxImages && toolPlan.loadedNames.has("run_code") ? new Set([...toolPlan.loadedNames, "view_image"]) : toolPlan.loadedNames;
-                            // Studio: the Planner's browser tools (scratchpad, look at the live page)
-                            if (body.appMode === "studio") {
-                                // (without the live browser's tools while that feature flag is off)
-                                const plannerTools = PLANNER_BROWSER_TOOLS.filter((t) => !toolOff(t.function.name));
-                                claudeToolList = [...claudeToolList, ...plannerTools.filter((t) => !claudeToolList.some((x) => x?.function?.name === t.function.name))];
-                                claudeLoadedNames = new Set([...claudeLoadedNames, ...plannerTools.map((t) => t.function.name)]);
-                            }
+                            const { tools: claudeToolList, loadedNames: claudeLoadedNames } = claudeToolSetup();
+                            // (going on, after a restart, with an answer a stand-in was finishing: what its Cloudflare
+                            // model had used before the stand-in took over is counted too)
+                            if (resumeState?.standIn) countStandInBefore(resumeState.standIn);
                             streamed = await streamClaudeChat({
                                 model: requestedModel,
                                 messages: body.appMode === "studio" && body.taskOrigin !== "whatsapp" && !flagsOff.has("live_browser") ? withStudioBrowser(messages, true) : messages,
@@ -7114,32 +7162,59 @@ If a tool fails, never show the error message; say only: "Something went wrong o
                                 resumeProvider: resumeState ? resumeState.provider : null,
                                 resumeConversation: resumeState ? resumeState.conversation : null,
                                 resumeUsage: resumeState ? resumeState.usage : null,
+                                // (an answer a Claude stand-in was finishing when the server restarted goes on with one)
+                                resumeStandIn: resumeState ? resumeState.standIn || null : null,
                                 onConversation: saveTurnProgress,
+                                // Cloudflare's daily cap refuses a round (the first, or one in the middle of the answer): a
+                                // Claude model finishes the answer in the same reply, set up as a Claude answer of this
+                                // chat is (its system prompt and tool list), and counted on the person's normal limits
+                                // like the stand-in picked before an answer (claudeByCap)
+                                capStandIn: capStandInFor(pickChatModel(body) === CF_PRO_MODEL ? "hard" : "simple", "Agent", () => {
+                                    claudeByCap = true;
+                                    const setup = claudeToolSetup();
+                                    const claudeCtx = { ...promptCtx, isClaude: true };
+                                    const fixed = filterPromptBlocks(dynamicSystemPrompt, claudeCtx);
+                                    const prompt = [{ role: "system", content: fixed + filterPromptBlocks(volatilePrompt, claudeCtx) + strictRule + whereYouWork }];
+                                    return {
+                                        system: (body.appMode === "studio" && body.taskOrigin !== "whatsapp" && !flagsOff.has("live_browser") ? withStudioBrowser(prompt, true) : prompt)[0].content,
+                                        systemCacheBoundary: fixed.length,
+                                        tools: setup.tools,
+                                        loadedToolNames: new Set([...setup.loadedNames, ...llmConfig.tools.map((t) => t?.function?.name).filter(Boolean)]),
+                                        groupNeedingLoad,
+                                    };
+                                }),
                                 onStatus,
                                 onThought,
                                 onToken
                             });
-                            usedModel = model;
+                            // (a Claude stand-in finished the answer: its rounds are the answer's usage, at its rate; the
+                            // Cloudflare model's rounds before it are counted at the Cloudflare model's)
+                            countStandInBefore(streamed.standIn);
+                            usedModel = streamed.standIn ? streamed.servedModel || streamed.standIn.model : model;
                             if (streamed.usage.total_tokens > 0) usageStore.usage = streamed.usage;
                             console.log(`[AI-STREAM] ${model} streamed answer in ${((Date.now() - generateStartTime) / 1000).toFixed(1)}s, toolsRun=${streamed.toolsRun}, input=${streamed.usage.prompt_tokens}, cacheRead=${streamed.usage.cached_tokens || 0}`);
                             break;
                         } catch (streamErr) {
+                            // (a Claude stand-in was finishing the answer when it failed or was stopped: the error's usage
+                            // is the stand-in's, and the Cloudflare model's rounds before it are counted at their own rate)
+                            countStandInBefore(streamErr.standIn);
+                            const failedModel = streamErr.standIn ? streamErr.servedModel || streamErr.standIn.model : model;
                             if (requestAborted) {
-                                await chargeStoppedAnswer(streamErr.usage, model);
+                                await chargeStoppedAnswer(streamErr.usage, failedModel);
                                 return keepUnfinishedAnswer(STOPPED_NOTE);
                             }
                             // Not retried when a tool already ran (it could repeat side effects) or answer text was
                             // already shown (the retry would add a second answer below it).
                             if (streamErr.toolsRun > 0 || shownAnswerText) {
                                 if (streamErr.usage?.total_tokens > 0) usageStore.usage = streamErr.usage;
-                                console.error(`[AI-STREAM] ${model} failed after output started (toolsRun=${streamErr.toolsRun}, answerShown=${!!shownAnswerText}); not retrying: ${streamErr.message}`);
-                                usedModel = model;
+                                console.error(`[AI-STREAM] ${failedModel} failed after output started (toolsRun=${streamErr.toolsRun}, answerShown=${!!shownAnswerText}); not retrying: ${streamErr.message}`);
+                                usedModel = failedModel;
                                 streamed = { answer: shownAnswerText ? cutOffAnswer() : "I could not finish this answer: the AI model stopped answering. The steps above were done. Say continue and I will pick up from here." };
                                 break;
                             }
                             // Retried on the next model: this attempt's usage is added to the bill, not overwritten.
-                            if (streamErr.usage?.total_tokens > 0) usageStore.failedAttempts.push({ usage: streamErr.usage, model });
-                            console.warn(`[AI-STREAM] ${model} failed before any tool ran: ${streamErr.message}`);
+                            if (streamErr.usage?.total_tokens > 0) usageStore.failedAttempts.push({ usage: streamErr.usage, model: failedModel });
+                            console.warn(`[AI-STREAM] ${failedModel} failed before any tool ran: ${streamErr.message}`);
                         }
                     }
                     if (!streamed) console.warn(`[AI-STREAM] All streaming attempts failed, falling back to SDK`);

@@ -390,6 +390,18 @@ export async function streamChat({
     excludeTools,
     // Other models a failed round moves to (same API), so the answer keeps going when one model is down
     fallbackProviders = [],
+    // When Cloudflare's daily Neuron cap refuses a round (cf-neuron-cap.service.js) and no model outside Cloudflare is
+    // in the list, a Claude model finishes the answer from where it stands, in the same reply: capStandIn() resolves
+    // with { model, onRoundUsage?, tokensLeft?, maxOutputTokens?, inputTooBig? } (the live token check counted at that
+    // model's rate; the caller's own hooks are used for the ones left out), or with null when Claude can't be used
+    // (services/cap-fallback.service.js claudeFor). It may also bring what a Claude answer of the caller gets:
+    // `system` (the system prompt in its Claude form, with `systemCacheBoundary`) and `tools` with `loadedToolNames`
+    // and `groupNeedingLoad` (the Claude tool list: only the loaded tools in context, the rest through tool search);
+    // without them the stand-in works with this loop's own system prompt and tool list.
+    // The result then carries `standIn: { model, before: { model,
+    // usage } }`: `usage` is the Claude model's, `before.usage` what the Cloudflare model used until then, and an
+    // error from the stand-in carries the same `standIn`. Without capStandIn a refused round ends the answer as before.
+    capStandIn = null,
     // The model sees images (like Claude): images from tool results are shown to it, not just their links
     seesImages = false,
     // The desktop app driving the loop (local-loop.service.js): after a round with tool calls it decides which run,
@@ -400,7 +412,10 @@ export async function streamChat({
     resumeProvider = null, // "cf" for a conversation saved by this loop; another loop's is ignored
     resumeConversation = null,
     resumeUsage = null,
+    // onConversation(conversation, usage, extra): `extra.standIn` is set once a Claude stand-in is finishing the
+    // answer (the conversation is then in Claude's shape); given back as resumeStandIn, the stand-in goes on with it
     onConversation = null,
+    resumeStandIn = null,
     // How much the model thinks: "all" (every round, Deep), "first" (plans on the first round, then each round after a
     // tool result goes straight to the next step: those rounds were 8-23 s of thinking each, Normal), "none" (Fast)
     thinking = "all"
@@ -432,6 +447,70 @@ export async function streamChat({
         const cap = maxOutputTokens?.();
         return cap === undefined || cap === null ? maxTokens : Math.min(maxTokens, Math.floor(cap));
     };
+    // The Claude stand-in (capStandIn) finishes this answer from where it stands: the conversation so far goes to
+    // Claude's own loop in its shape, with the same tools, handlers, limits and callbacks, and what it writes joins
+    // what was already written. `saved`: a stand-in's conversation from before a server restart (resumeStandIn).
+    const finishWithClaude = async (stand, saved = null) => {
+        const before = saved?.before?.model ? saved.before : { model: provider.model, usage: { ...usage } };
+        const standIn = { model: stand.model, before };
+        try {
+            const { streamClaudeChat, toClaudeConversation } = await import("./llm-stream-anthropic.js");
+            const ownTools = Array.isArray(stand.tools) ? stand.tools : null; // (the stand-in's own tool list)
+            const toolNames = new Set((ownTools || currentTools()).map((t) => t?.function?.name).filter(Boolean));
+            // (with its own list, the tools this answer already used are in its context from the start)
+            const usedNames = conversation.flatMap((m) => (Array.isArray(m?.tool_calls) ? m.tool_calls : []).map((tc) => tc?.function?.name)).filter((n) => toolNames.has(n));
+            const ownSystem = typeof stand.system === "string" && stand.system.trim() ? stand.system : null;
+            console.warn(`[AI-STREAM] ${provider.model}: ${saved ? "going on after a restart" : "the Cloudflare daily cap refused the round"} (toolsRun=${toolsRun}); ${stand.model} finishes the answer`);
+            const r = await streamClaudeChat({
+                model: stand.model,
+                // (the system messages in front are the system prompt; the conversation itself is resumeConversation)
+                messages: ownSystem ? [{ role: "system", content: ownSystem }] : conversation,
+                ...(ownSystem && stand.systemCacheBoundary ? { systemCacheBoundary: stand.systemCacheBoundary } : {}),
+                ...(ownTools
+                    ? { tools: ownTools, loadedToolNames: new Set([...(stand.loadedToolNames || []), ...usedNames]), groupNeedingLoad: stand.groupNeedingLoad }
+                    : { toolsNow: currentTools }),
+                toolHandlers,
+                maxTokens,
+                maxToolDepth: maxToolDepth > 0 ? Math.max(1, maxToolDepth - depth) : 0,
+                timeoutMs,
+                maxContinuations: Math.max(0, maxContinuations - continuations),
+                answerAtDepthLimit,
+                outputBudget: outputBudget === undefined ? undefined : Math.max(0, outputBudget - usage.completion_tokens),
+                onRoundUsage: stand.onRoundUsage || onRoundUsage,
+                tokensLeft: stand.tokensLeft || tokensLeft,
+                maxOutputTokens: stand.maxOutputTokens || maxOutputTokens,
+                inputTooBig: stand.inputTooBig || inputTooBig,
+                // (Deep thinks harder, Fast less; Normal is the model's own default)
+                ...(thinking === "all" ? { effort: "high" } : thinking === "none" ? { effort: "low" } : {}),
+                signal,
+                onToken,
+                onThought,
+                onStatus,
+                toolDriver,
+                resumeProvider: "claude",
+                resumeConversation: saved?.conversation || toClaudeConversation(conversation, { toolNames }),
+                resumeUsage: saved?.usage || null,
+                onConversation: onConversation ? (c, u) => onConversation(c, u, { standIn }) : null,
+            });
+            return { ...r, answer: (continuedText + (r.answer || "")).trim() || null, toolsRun: toolsRun + (r.toolsRun || 0), servedModel: r.servedModel || stand.model, standIn };
+        } catch (e) {
+            const wrapped = e instanceof StreamChatError ? e : new StreamChatError(e?.message || String(e));
+            wrapped.toolsRun = toolsRun + (e?.toolsRun || 0);
+            wrapped.usage = e?.usage; // (the stand-in's own usage; the Cloudflare model's is in standIn.before)
+            wrapped.servedModel = e?.servedModel || stand.model;
+            wrapped.standIn = standIn;
+            throw wrapped;
+        }
+    };
+    const askStandIn = async () => {
+        if (!capStandIn || signal?.aborted) return null;
+        try { const stand = await capStandIn(); return stand?.model ? stand : null; } catch { return null; }
+    };
+    // An answer a stand-in was finishing when the server restarted goes on with a stand-in
+    if (resumeStandIn?.model && resumeProvider === "claude" && Array.isArray(resumeConversation) && resumeConversation.length > 0) {
+        const stand = await askStandIn();
+        if (stand) return finishWithClaude(stand, { conversation: resumeConversation, usage: resumeUsage, before: resumeStandIn.before });
+    }
 
     try {
         for (;;) {
@@ -735,6 +814,12 @@ export async function streamChat({
             }
         }
     } catch (err) {
+        // Cloudflare's daily cap refused a round and no model outside Cloudflare could take it: the Claude stand-in
+        // finishes the answer (its own failure goes up as it is, with `standIn` on it)
+        if (isCfNeuronCapError(err)) {
+            const stand = await askStandIn();
+            if (stand) return finishWithClaude(stand);
+        }
         const wrapped = err instanceof StreamChatError ? err : new StreamChatError(err?.message || String(err));
         wrapped.toolsRun = toolsRun;
         // (the finished rounds, plus what the round in progress had really used when it stopped)

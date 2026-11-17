@@ -2,19 +2,36 @@
 //
 // From 2026-12-01 Cloudflare bills Workers AI above 10,000 Neurons a day (every model of the account together: chat,
 // voice to text, text to speech, images, embeddings). The super admin's Global AI Config has a switch: with the switch
-// on, no request goes to Cloudflare once today's Neurons (UTC day, like Cloudflare's) plus what that request is
-// expected to cost would pass the cap; every Cloudflare model is refused until midnight UTC, and the chat falls back
-// to its non-Cloudflare models where it has them. With the switch off nothing is refused, but the meter still counts,
-// so the super admin sees what a day costs.
+// on, no request goes to Cloudflare unless the most it can cost still fits under the cap today (UTC day, like
+// Cloudflare's); a request that does not fit is refused, and text work moves to Claude (cap-fallback.service.js).
+// With the switch off nothing is refused, but the meter still counts, so the super admin sees what a day costs.
 //
 // Neurons are counted here from Cloudflare's own price list (developers.cloudflare.com/workers-ai/platform/pricing):
 // text models by tokens, Whisper by audio minutes, Aura by characters, Flux by tiles and steps.
 //
+// How nothing passes the cap (owner, 2026-11-17: "carefully check all Cloudflare models ... so we are not charged"):
+//   - Before a request is sent, room for the MOST it can cost is held in Redis (holdNeurons): its whole body as input
+//     and its full max_tokens as output. The room held for every request on its way counts as used, so requests sent
+//     at the same moment see each other, and the last request before the cap cannot carry the day past it. (Before
+//     this, the check expected at most 1,024 answer tokens, left the tool list out, and saw nothing of the requests
+//     on their way: one GLM 5.3 answer is about 3,500 Neurons, the margin is 500.)
+//   - When the answer ends, its real cost replaces the held room in one step (countAndRelease). A stream that is
+//     stopped is counted by what had arrived (its last usage, or the words written); a request stopped or timed out
+//     before any answer is counted at its expected cost. Nothing is ever counted as free.
+//   - A count that cannot be read refuses (it never guesses zero), and a switch that cannot be read counts as on
+//     unless it was last seen off (capSettings).
+// The room held is on purpose more than a request usually costs (Cloudflare's prompt cache makes most rounds far
+// cheaper than their size): near the cap, or with many requests at once, a request is refused a little early and
+// Claude does that work. That is the price of never passing 10,000.
+//
 // Every request to Cloudflare AI goes through cfAiFetch(): this module also installs it as the process's fetch for
-// Cloudflare AI addresses (globalThis.fetch), so the SDK clients (openai, groq-sdk), the @classgrid/ai client and any
-// plain fetch() are gated and counted too, once each, without every call site having to remember it. Nothing is
-// counted twice: cfAiFetch sends with the fetch that was there before it was installed. (owner, 2026-11-14: the cap
-// was untested; no request may ever slip past it, and a count that cannot be read refuses rather than lets through.)
+// Cloudflare AI addresses (globalThis.fetch), so the SDK clients (openai, groq-sdk: each is given fetch: cfAiFetch),
+// the @classgrid/ai client and any plain fetch() are gated and counted too, once each, without every call site
+// having to remember it. Nothing is counted twice: cfAiFetch sends with the fetch that was there before it was
+// installed.
+// Not covered, because nothing here uses them (tests/cf-neuron-cap.test.mjs fails when a source file starts to):
+// Cloudflare's AI Gateway (gateway.ai.cloudflare.com), AI Search (/autorag/) and /ai/tomarkdown. A Worker with its
+// own AI binding (env.AI) spends Neurons this meter never sees: there is none on the account (checked 2026-11-17).
 import redis from "../config/redis.js";
 import GlobalAiConfig from "../models/GlobalAiConfig.js";
 
@@ -25,8 +42,14 @@ export const SAFETY_MARGIN = 500;
 export const DEFAULT_CAP = FREE_NEURONS_PER_DAY - SAFETY_MARGIN;
 const CONFIG_TTL_MS = 15000;
 const KEEP_DAYS = 10;
-// What a text request is expected to answer with, for the check before it is sent (its real usage is counted after)
+// What a text answer is taken to be when its real usage cannot be read afterwards (the least that is counted for it)
 const ASSUMED_OUTPUT_TOKENS = 1024;
+// The most a text request may write when it names no max_tokens of its own (for the room held while it runs)
+const UNSET_MAX_OUTPUT_TOKENS = 4096;
+// A picture in a request: a vision model reads it as a set number of tokens, not by its bytes (the most one takes)
+const IMAGE_TOKENS = 6500;
+// How long room stays held for a request that never reports back (its server stopped in the middle)
+const HOLD_MS = 30 * 60 * 1000;
 
 // Neurons per model: per million input / cached-input / output tokens, or per unit (minute, 1k characters, image)
 const PER_M_TOKENS = {
@@ -86,14 +109,27 @@ export class CfNeuronCapError extends Error {
 export const isCfNeuronCapError = (e) => !!e && (e.code === "cf_neuron_cap" || e.name === "CfNeuronCapError");
 
 // ── Settings (Global AI Config, cached for a few seconds) ─────────────────────────────────────────────────────────
-let cached = { at: 0, enabled: false, cap: DEFAULT_CAP };
+// (`read`: this process has read the switch from the database at least once)
+let cached = { at: 0, enabled: false, cap: DEFAULT_CAP, read: false };
+const SWITCH_KEY = "cf:neurons:cap:switch"; // the switch as the last process read it: "on" or "off"
 export async function capSettings() {
     if (Date.now() - cached.at < CONFIG_TTL_MS) return cached;
     try {
         const c = await GlobalAiConfig.findOne({ key: "singleton" }).select("cf_neuron_cap_enabled").lean();
-        cached = { at: Date.now(), enabled: c?.cf_neuron_cap_enabled === true, cap: DEFAULT_CAP };
+        const enabled = c?.cf_neuron_cap_enabled === true;
+        if (!cached.read || cached.enabled !== enabled) {
+            try { Promise.resolve(redis.set(SWITCH_KEY, enabled ? "on" : "off")).catch(() => {}); } catch { /* Redis away */ }
+        }
+        cached = { at: Date.now(), enabled, cap: DEFAULT_CAP, read: true };
     } catch {
-        cached = { ...cached, at: Date.now() };
+        // The database could not be read. What this process read last stays. A process that has not read it yet takes
+        // what the last process left in Redis; with nothing there either, the cap counts as ON: nothing goes to
+        // Cloudflare on a guess (owner, 2026-11-17: "so we are not charged").
+        let enabled = cached.enabled;
+        if (!cached.read) {
+            try { enabled = (await redis.get(SWITCH_KEY)) !== "off"; } catch { enabled = true; }
+        }
+        cached = { ...cached, enabled, at: Date.now() };
     }
     return cached;
 }
@@ -121,21 +157,103 @@ export async function usageToday(day = utcDay()) {
     return out;
 }
 
-/** Adds `neurons` of `model` to today's count (never throws; a Redis hiccup only loses that count) */
-export async function addNeurons(model, neurons) {
+// ── Room held for requests on their way ─────────────────────────────────────────────────────────────────────────
+// One Redis hash a day: hold id -> "neurons|until" (until: the time after which a hold whose request never reported
+// back no longer counts).
+const heldKey = (day) => `cf:neurons:${day}:held`;
+let holdNo = 0;
+const newHoldId = () => `${process.pid}.${Date.now().toString(36)}.${(holdNo++).toString(36)}`;
+const liveHolds = (all, now) => {
+    let held = 0;
+    const ended = [];
+    for (const [id, value] of Object.entries(all || {})) {
+        const [neurons, until] = String(value).split("|");
+        if (Number(until) > now) held += Number(neurons) || 0; else ended.push(id);
+    }
+    return { held, ended };
+};
+const dropHolds = (day, ids) => {
+    if (!ids.length) return;
+    try { Promise.resolve(redis.hdel(heldKey(day), ...ids)).catch(() => {}); } catch { /* Redis away: they run out by themselves */ }
+};
+const execOrThrow = async (multi) => {
+    const r = await multi.exec();
+    const failed = Array.isArray(r) ? r.find((x) => x?.[0]) : null;
+    if (!Array.isArray(r) || failed) throw (failed?.[0] || new Error("no answer from Redis"));
+    return r.map((x) => x[1]);
+};
+
+/**
+ * Today's Neurons that are spoken for: counted so far, plus the room held for requests on their way. Throws when
+ * Redis cannot answer (the callers then refuse; nothing is guessed).
+ */
+export async function spokenForToday(day = utcDay(), now = Date.now()) {
+    const [used, all] = await execOrThrow(redis.multi().get(totalKey(day)).hgetall(heldKey(day)));
+    return (Number(used) || 0) + liveHolds(all, now).held;
+}
+
+/**
+ * Takes room for a request before it is sent: `worst` is the most it can cost (a number, or a function that gives
+ * it: called only while the cap is on, so a request's body is not read for nothing). With the cap off nothing is held
+ * (null). With the cap on, the hold is written first and the day's count and every live hold are read in the same
+ * Redis step, so two requests sent together cannot both take the last room. Throws CfNeuronCapError when the room is
+ * not there, or when Redis cannot answer. The hold is given back by countAndRelease().
+ */
+export async function holdNeurons(model = "", worst = 0) {
+    const s = await capSettings();
+    if (!s.enabled) return null;
+    const day = utcDay();
+    const now = Date.now();
+    const id = newHoldId();
+    const want = Math.max(0, Number(typeof worst === "function" ? worst() : worst) || 0);
+    let used = 0;
+    let held = 0;
+    try {
+        const [, , usedNow, all] = await execOrThrow(redis.multi()
+            .hset(heldKey(day), id, `${want}|${now + HOLD_MS}`).expire(heldKey(day), KEEP_DAYS * 86400)
+            .get(totalKey(day)).hgetall(heldKey(day)));
+        used = Number(usedNow) || 0;
+        const live = liveHolds(all, now);
+        held = live.held; // (this request's own hold is in it)
+        dropHolds(day, live.ended);
+    } catch (e) {
+        dropHolds(day, [id]);
+        console.warn(`[cf-neurons] refused ${model || "a request"}: today's count could not be read (${e?.message || e})`);
+        throw new CfNeuronCapError(0, s.cap, "unreadable");
+    }
+    if (used + held > s.cap) {
+        dropHolds(day, [id]);
+        console.warn(`[cf-neurons] refused ${model || "a request"}: ${Math.round(used)} used + ${Math.round(held - want)} held for requests on their way + ${Math.round(want)} this one can cost > ${s.cap} Neurons today`);
+        throw new CfNeuronCapError(used, s.cap);
+    }
+    return { id, day };
+}
+
+/**
+ * Adds a request's real `neurons` to today's count and gives its held room back, in one Redis step (never throws; a
+ * Redis hiccup loses that count, and the room then stays held until it runs out by itself).
+ */
+export async function countAndRelease(model, neurons, hold = null) {
     const n = Number(neurons);
-    if (!model || !Number.isFinite(n) || n <= 0) return;
+    const counts = Number.isFinite(n) && n > 0;
+    if (!counts && !hold) return;
+    const name = model || "unknown"; // (a request that names no model is still counted)
     const day = utcDay();
     try {
-        await redis.multi()
-            .incrbyfloat(totalKey(day), n).expire(totalKey(day), KEEP_DAYS * 86400)
-            .hincrbyfloat(modelsKey(day), model, n).expire(modelsKey(day), KEEP_DAYS * 86400)
-            .hincrby(requestsKey(day), model, 1).expire(requestsKey(day), KEEP_DAYS * 86400)
-            .exec();
+        const m = redis.multi();
+        if (counts) {
+            m.incrbyfloat(totalKey(day), n).expire(totalKey(day), KEEP_DAYS * 86400)
+                .hincrbyfloat(modelsKey(day), name, n).expire(modelsKey(day), KEEP_DAYS * 86400)
+                .hincrby(requestsKey(day), name, 1).expire(requestsKey(day), KEEP_DAYS * 86400);
+        }
+        if (hold) m.hdel(heldKey(hold.day), hold.id);
+        await m.exec();
     } catch (e) {
         console.warn("[cf-neurons] could not count:", e.message);
     }
 }
+/** Adds `neurons` of `model` to today's count (never throws) */
+export const addNeurons = (model, neurons) => countAndRelease(model, neurons);
 
 // ── Neurons from what a request used ─────────────────────────────────────────────────────────────────────────────
 export function neuronsForText(model, { promptTokens = 0, cachedTokens = 0, completionTokens = 0 } = {}) {
@@ -154,52 +272,76 @@ export function neuronsForImage(model, { width = 1024, height = 1024, steps } = 
     const tiles = Math.ceil(w / 512) * Math.ceil(h / 512);
     return tiles * FLUX_SCHNELL.tile + (Number(steps) || FLUX_SCHNELL.defaultSteps) * FLUX_SCHNELL.step;
 }
-/** Counts a text answer from its usage */
-export const meterText = (model, usage) => addNeurons(model, neuronsForText(model, {
+const usageNeurons = (model, usage) => neuronsForText(model, {
     promptTokens: usage?.prompt_tokens ?? usage?.promptTokens,
     cachedTokens: usage?.prompt_tokens_details?.cached_tokens ?? usage?.cached_tokens ?? usage?.cachedTokens,
     completionTokens: usage?.completion_tokens ?? usage?.completionTokens,
-}));
+});
+/** Counts a text answer from its usage */
+export const meterText = (model, usage) => addNeurons(model, usageNeurons(model, usage));
 
 const kindOf = (model) => PER_1K_CHARS[model] ? "speech" : /flux/.test(model) ? "image" : PER_AUDIO_MINUTE[model] ? "audio" : "text";
 const bodyBytes = (init) => Number(init?.body?.byteLength ?? init?.body?.size ?? init?.body?.length) || 0;
-const requestText = (body) => {
-    if (!body) return "";
-    if (Array.isArray(body.messages)) return JSON.stringify(body.messages);
-    const t = body.text ?? body.input ?? body.prompt ?? "";
-    return Array.isArray(t) ? t.join(" ") : String(t || "");
-};
 /**
- * What a request is expected to cost, before it is sent: Aura by its text, Flux by its size, Whisper by the upload's
- * length, a text model by its prompt (four characters to a token) plus the answer it may write (max_tokens, at most
- * ASSUMED_OUTPUT_TOKENS). The gate refuses the request when today's count plus this would pass the cap.
+ * The input tokens of a text request, from its body, never too low: the whole body counts (the messages, the tool
+ * list, every field) at three bytes to a token (English runs at about four, Devanagari at about three), and a picture
+ * counts as IMAGE_TOKENS in place of its bytes.
  */
-export function estimateRequestNeurons(model, body, init) {
+export function promptTokensOf(body, init) {
+    if (!body || typeof body !== "object") return Math.ceil(bodyBytes(init) / 3);
+    let pictures = 0;
+    const text = JSON.stringify(body, function (key, value) {
+        // (a vision request to /ai/run carries the picture as `image` at the top; a chat message as an image_url part)
+        if (key === "image" && this === body && value) { pictures++; return undefined; }
+        if (key === "image_url" && value && typeof value === "object" && typeof value.url === "string") { pictures++; return undefined; }
+        if (typeof value === "string" && value.startsWith("data:image/")) { pictures++; return undefined; }
+        return value;
+    }) || "";
+    return Math.ceil(Buffer.byteLength(text, "utf8") / 3) + pictures * IMAGE_TOKENS;
+}
+const wantedOutput = (body) => Number(body?.max_tokens ?? body?.max_completion_tokens) || 0;
+/**
+ * A request's cost before it is sent, from one reading of its body:
+ *   expected  what it is likely to cost: Aura by its text, Flux by its size, Whisper by the upload's length, a text
+ *             model by its input (promptTokensOf) plus an answer of at most ASSUMED_OUTPUT_TOKENS. It is what is
+ *             counted when the real usage cannot be read afterwards.
+ *   worst     the MOST it can cost, which is the room held for it while it runs: for a text model its input at the
+ *             full price (no prompt cache) plus everything it is allowed to write (its max_tokens;
+ *             UNSET_MAX_OUTPUT_TOKENS when it names none). Voice and pictures cost what they are expected to.
+ */
+function requestCost(model, body, init) {
+    const same = (neurons) => ({ expected: neurons, worst: neurons, promptTokens: 0 });
     switch (kindOf(model)) {
-        case "speech": return neuronsForSpeech(model, String(body?.text || "").length);
-        case "image": return neuronsForImage(model, { width: body?.width, height: body?.height, steps: body?.steps ?? body?.num_steps });
-        case "audio": return neuronsForAudio(model, bodyBytes(init) / WAV_BYTES_PER_SECOND);
+        case "speech": return same(neuronsForSpeech(model, String(body?.text || "").length));
+        case "image": return same(neuronsForImage(model, { width: body?.width, height: body?.height, steps: body?.steps ?? body?.num_steps }));
+        case "audio": return same(neuronsForAudio(model, bodyBytes(init) / WAV_BYTES_PER_SECOND));
         default: {
-            const promptTokens = Math.ceil(requestText(body).length / 4);
-            const wanted = Number(body?.max_tokens ?? body?.max_completion_tokens) || ASSUMED_OUTPUT_TOKENS;
             const r = PER_M_TOKENS[model] || UNKNOWN_TEXT;
-            const completionTokens = r.output ? Math.min(wanted, ASSUMED_OUTPUT_TOKENS) : 0;
-            return neuronsForText(model, { promptTokens, completionTokens });
+            const promptTokens = promptTokensOf(body, init);
+            const wanted = wantedOutput(body);
+            return {
+                promptTokens,
+                expected: neuronsForText(model, { promptTokens, completionTokens: r.output ? Math.min(wanted || ASSUMED_OUTPUT_TOKENS, ASSUMED_OUTPUT_TOKENS) : 0 }),
+                worst: neuronsForText(model, { promptTokens, completionTokens: r.output ? (wanted || UNSET_MAX_OUTPUT_TOKENS) : 0 }),
+            };
         }
     }
 }
+export const estimateRequestNeurons = (model, body, init) => requestCost(model, body, init).expected;
+export const worstCaseNeurons = (model, body, init) => requestCost(model, body, init).worst;
 
 // ── The gate ─────────────────────────────────────────────────────────────────────────────────────────────────────
 /**
- * Throws CfNeuronCapError when the cap is on and today's Neurons plus `expected` (what the request is about to cost)
- * would pass it, or when today's count cannot be read (Redis away): with the cap on, nothing is sent on a guess.
+ * A check only (nothing is held; cfAiFetch holds room with holdNeurons): throws CfNeuronCapError when the cap is on
+ * and today's Neurons, the room held for requests on their way and `expected` together would pass it, or when today's
+ * count cannot be read (Redis away): with the cap on, nothing is sent on a guess.
  */
 export async function assertCloudflareAiAllowed(model = "", expected = 0) {
     const s = await capSettings();
     if (!s.enabled) return;
     let used;
     try {
-        used = await usedToday();
+        used = await spokenForToday();
     } catch (e) {
         console.warn(`[cf-neurons] refused ${model || "a request"}: today's count could not be read (${e.message})`);
         throw new CfNeuronCapError(0, s.cap, "unreadable");
@@ -216,7 +358,7 @@ export async function providersWithoutCappedCloudflare(providers) {
     const s = await capSettings();
     if (!s.enabled) return list;
     try {
-        if ((await usedToday()) < s.cap) return list;
+        if ((await spokenForToday()) < s.cap) return list;
     } catch (e) {
         console.warn(`[cf-neurons] today's count could not be read (${e.message}): Cloudflare left out`);
     }
@@ -233,64 +375,124 @@ const modelFromUrl = (url) => { const m = CF_AI_RE.exec(String(url || "")); retu
 const parseBody = (init) => {
     try { return init && typeof init.body === "string" ? JSON.parse(init.body) : null; } catch { return null; }
 };
-const parseSseUsage = (text) => {
-    // Cloudflare attaches usage to every chunk; the largest total is the final count
+/**
+ * Reads a streamed text answer (a copy of it) as it arrives and keeps what counts: the last usage the provider sent
+ * (Cloudflare sends the running count on every chunk; the largest total is the final one) and how much was written.
+ * A stream that is stopped in the middle ends here with what had arrived, so a stopped answer is counted by what it
+ * really used, not by a guess.
+ */
+async function readStreamedAnswer(copy) {
+    const reader = copy.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
     let usage = null;
-    for (const line of String(text).split("\n")) {
-        if (!line.startsWith("data:")) continue;
+    let writtenBytes = 0;
+    const take = (line) => {
+        if (!line.startsWith("data:")) return;
         const raw = line.slice(5).trim();
-        if (!raw || raw === "[DONE]") continue;
-        try { const c = JSON.parse(raw); if (c.usage && (!usage || (c.usage.total_tokens || 0) >= (usage.total_tokens || 0))) usage = c.usage; } catch { /* a partial chunk */ }
-    }
-    return usage;
-};
+        if (!raw || raw === "[DONE]") return;
+        let c;
+        try { c = JSON.parse(raw); } catch { return; /* a partial chunk */ }
+        if (c.usage && (!usage || (c.usage.total_tokens || 0) >= (usage.total_tokens || 0))) usage = c.usage;
+        const d = c.choices?.[0]?.delta;
+        if (d) {
+            for (const piece of [d.content, d.reasoning_content, d.reasoning]) if (typeof piece === "string") writtenBytes += Buffer.byteLength(piece, "utf8");
+            for (const tc of d.tool_calls || []) writtenBytes += Buffer.byteLength(String(tc?.function?.name || "") + String(tc?.function?.arguments || ""), "utf8");
+        } else if (typeof c.response === "string") {
+            writtenBytes += Buffer.byteLength(c.response, "utf8"); // (the /ai/run stream shape)
+        }
+    };
+    try {
+        for (;;) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            buffer += decoder.decode(value, { stream: true });
+            const lines = buffer.split("\n");
+            buffer = lines.pop();
+            for (const line of lines) take(line);
+        }
+        if (buffer) take(buffer);
+    } catch { /* stopped in the middle: what arrived until then is what is counted */ }
+    return { usage, writtenBytes };
+}
 
 // The fetch that was there before this module installed its own (below): what cfAiFetch sends with
 const nativeFetch = globalThis.fetch;
 
 /**
- * fetch() for Cloudflare AI. Any other address goes straight through. For a Cloudflare AI address: the cap is checked
- * first, with what the request is expected to cost (CfNeuronCapError when it would pass the cap), and the answer is
- * metered: text by its usage (JSON or SSE), Whisper by the audio's duration (or the upload's size when the answer has
- * none), Aura by the text's characters, Flux by the image. An answer whose usage cannot be read (the stream was
- * stopped, or the body was not JSON) is counted at the expected cost, so a request is never counted as free.
+ * fetch() for Cloudflare AI. Any other address goes straight through. For a Cloudflare AI address: room for the most
+ * the request can cost is held first (CfNeuronCapError when the cap has no room for it), and when the answer ends its
+ * real cost is counted and the room given back: text by its usage (JSON, or the stream as it arrives), Whisper by the
+ * audio's duration (or the upload's size when the answer has none), Aura by the text's characters, Flux by the image.
+ * An answer whose usage cannot be read is counted at the expected cost, and a request that was stopped or timed out
+ * after it was sent too, so a request is never counted as free. A request that failed (an HTTP error, no connection)
+ * is not counted.
  */
 export async function cfAiFetch(url, init = {}) {
     const address = addressOf(url);
     if (!isCloudflareAiUrl(address)) return nativeFetch(url, init);
     const body = parseBody(init);
     const model = modelFromUrl(address) || body?.model || "";
-    const expected = estimateRequestNeurons(model, body, init);
-    await assertCloudflareAiAllowed(model, expected);
-    const response = await nativeFetch(url, init);
-    if (!response.ok) return response;
+    // (worked out once, and only when a number is needed: with the cap off and the usage readable, the body is not read)
+    let cost = null;
+    const costs = () => (cost ||= requestCost(model, body, init));
+    const hold = await holdNeurons(model, () => costs().worst);
+    let settled = false;
+    const settle = (neurons) => {
+        if (settled) return;
+        settled = true;
+        countAndRelease(model, typeof neurons === "function" ? neurons() : neurons, hold);
+    };
+    const expected = () => costs().expected;
+    const stoppedBeforeSending = !!init?.signal?.aborted;
+    let response;
     try {
-        const counted = (n) => addNeurons(model, n);
+        response = await nativeFetch(url, init);
+    } catch (e) {
+        const stoppedAfterSending = !stoppedBeforeSending && (e?.name === "AbortError" || e?.name === "TimeoutError" || !!init?.signal?.aborted);
+        settle(stoppedAfterSending ? expected : 0);
+        throw e;
+    }
+    if (!response.ok) {
+        settle(0);
+        return response;
+    }
+    try {
         switch (kindOf(model)) {
             case "speech":
             case "image":
-                counted(expected);
+                settle(expected);
                 break;
             case "audio": {
                 const bytes = bodyBytes(init);
                 response.clone().json().then((j) => {
                     const r = j?.result || {};
                     const seconds = Number(r.transcription_info?.duration) || Number(r.segments?.at?.(-1)?.end) || (r.words?.length ? Number(r.words.at(-1)?.end) : 0) || bytes / WAV_BYTES_PER_SECOND;
-                    counted(neuronsForAudio(model, seconds));
-                }).catch(() => counted(expected));
+                    settle(neuronsForAudio(model, seconds));
+                }).catch(() => settle(expected));
                 break;
             }
             default: {
                 const type = response.headers.get("content-type") || "";
-                const clone = response.clone();
-                (type.includes("text/event-stream") ? clone.text().then(parseSseUsage) : clone.json().then((j) => j?.usage || j?.result?.usage || null))
-                    .then((usage) => usage ? meterText(model, usage) : counted(expected))
-                    .catch(() => counted(expected));
+                const copy = response.clone();
+                if (type.includes("text/event-stream")) {
+                    readStreamedAnswer(copy).then(({ usage, writtenBytes }) => settle(usage
+                        ? usageNeurons(model, usage)
+                        // (no usage arrived: the input by the request's size, the output by what was written, and
+                        // never less than the expected cost)
+                        : Math.max(expected(), neuronsForText(model, { promptTokens: costs().promptTokens, completionTokens: Math.ceil(writtenBytes / 3) }))))
+                        .catch(() => settle(expected));
+                } else {
+                    copy.json().then((j) => {
+                        const usage = j?.usage || j?.result?.usage || null;
+                        settle(usage ? usageNeurons(model, usage) : expected);
+                    }).catch(() => settle(expected));
+                }
             }
         }
     } catch (e) {
         console.warn("[cf-neurons] could not meter:", e.message);
-        addNeurons(model, expected);
+        settle(expected);
     }
     return response;
 }

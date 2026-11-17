@@ -47,7 +47,7 @@ import {
     sendWhatsappText, markWhatsappRead, findCaller, numberInUse, runAgentTask, openProject, keepProjectOpen,
 } from "./whatsapp-call.service.js";
 import * as record from "./call-record.service.js";
-import { cfAiFetch } from "./cf-neuron-cap.service.js";
+import { cfAiFetch, isCfNeuronCapError } from "./cf-neuron-cap.service.js";
 
 const MAX_WORK_MS = 48 * 60 * 60 * 1000;
 const ALARM_MS = 5 * 60 * 1000;
@@ -76,8 +76,8 @@ async function smallModel(user, system, text) {
     if (!tokens.allowed) return null;
     // Cloudflare's free Neurons of the day are used up (the cap switch is on): Claude Haiku checks in place of the
     // Cloudflare model (services/cap-fallback.service.js), charged to the user at its own rate like the other one
-    const stand = await import("./cap-fallback.service.js").then((m) => m.claudeWhenCapped("small")).catch(() => null);
-    if (stand) {
+    const capFallback = await import("./cap-fallback.service.js");
+    const claudeChecks = async (stand) => {
         const { streamClaudeChat } = await import("./llm-stream-anthropic.js");
         const r = await streamClaudeChat({
             model: stand, tools: [], maxTokens: 2000, maxToolDepth: 0, timeoutMs: 45000,
@@ -91,16 +91,26 @@ async function smallModel(user, system, text) {
             }).catch((e) => console.error("[agent task] usage log failed:", e.message));
         }
         return { answer: String(r.answer || ""), thinking: "" };
+    };
+    const stand = await capFallback.claudeWhenCapped("small").catch(() => null);
+    if (stand) return claudeChecks(stand);
+    let res;
+    try {
+        res = await cfAiFetch(`https://api.cloudflare.com/client/v4/accounts/${process.env.CLOUDFLARE_ACCOUNT_ID}/ai/v1/chat/completions`, {
+            method: "POST",
+            headers: { Authorization: `Bearer ${process.env.CLOUDFLARE_WORKERS_AI_TOKEN}`, "Content-Type": "application/json" },
+            body: JSON.stringify({
+                model: CHECK_MODEL, temperature: 0, max_tokens: 1500,
+                messages: [{ role: "system", content: system }, { role: "user", content: text }],
+            }),
+            signal: AbortSignal.timeout(45000),
+        }); // (room under the daily Neuron cap is held first and the usage counted after, cf-neuron-cap.service.js)
+    } catch (e) {
+        // The day is not used up, but the cap had no room for this request: Claude Haiku checks
+        const after = isCfNeuronCapError(e) ? capFallback.claudeFor("small") : null;
+        if (!after) throw e;
+        return claudeChecks(after);
     }
-    const res = await cfAiFetch(`https://api.cloudflare.com/client/v4/accounts/${process.env.CLOUDFLARE_ACCOUNT_ID}/ai/v1/chat/completions`, {
-        method: "POST",
-        headers: { Authorization: `Bearer ${process.env.CLOUDFLARE_WORKERS_AI_TOKEN}`, "Content-Type": "application/json" },
-        body: JSON.stringify({
-            model: CHECK_MODEL, temperature: 0, max_tokens: 1500,
-            messages: [{ role: "system", content: system }, { role: "user", content: text }],
-        }),
-        signal: AbortSignal.timeout(45000),
-    }); // (the daily Neuron cap is checked first and the usage counted after, cf-neuron-cap.service.js)
     const data = await res.json().catch(() => ({}));
     const usage = data.usage || {};
     if (usage.total_tokens || usage.prompt_tokens) {
