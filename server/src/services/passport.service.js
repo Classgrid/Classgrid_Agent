@@ -79,9 +79,18 @@ import axios from "axios";
 import User from "../models/User.js";
 import connectDB from "../../config/db.js";
 import { sendNoAccountEmail } from "../controllers/auth.controller.js";
+import { isFeatureOn, getFeatureFlagDefinition } from "./feature-flag.service.js";
 import { GITHUB_CLIENT_ID as GITHUB_PLUGIN_CLIENT_ID, GITHUB_CLIENT_SECRET as GITHUB_PLUGIN_CLIENT_SECRET } from "../routes/auth.github.routes.js";
 
 // chat.classgrid.in sign-in with Google/GitHub and no account: the route redirects to ?error=no_account
+// Feature flags: while Sign-up is off (super admin > Feature flags) Google and GitHub make no new accounts; the
+// login page shows this message (auth.routes.js passes it on). People who already have an account sign in as usual.
+function signupOffError() {
+    const err = new Error(getFeatureFlagDefinition("signup").message);
+    err.code = "feature_off";
+    return err;
+}
+
 function noChatAccountError(email, req) {
     sendNoAccountEmail(email, req, "chat"); // rate-limited, fire-and-forget
     const err = new Error("Account does not exist. Please sign up.");
@@ -242,6 +251,8 @@ const passportConfig = () => {
                         // "Account does not exist" error (and no-account email) as typing the email
                         if (req.oauthState?.intent !== "signup") return done(noChatAccountError(email, req), null);
 
+                        if (!(await isFeatureOn("signup"))) return done(signupOffError(), null);
+
                         // Auto-create for the Chat Organization
                         console.log(`✅ Google Chat: Creating new user: ${email}`);
                         
@@ -315,6 +326,8 @@ const passportConfig = () => {
 
                         // Only the Sign up screen creates accounts (see google-chat)
                         if (req.oauthState?.intent !== "signup") return done(noChatAccountError(email, req), null);
+
+                        if (!(await isFeatureOn("signup"))) return done(signupOffError(), null);
 
                         // Auto-create for the Chat Organization
                         console.log(`✅ GitHub Chat: Creating new user: ${email}`);

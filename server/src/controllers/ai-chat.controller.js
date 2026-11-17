@@ -113,6 +113,7 @@ import { ROLE_DEFINITIONS } from "../utils/roles.js";
 import { SHARE_PAGE_TOOLS, SHARE_PAGE_PROMPT, runPublishPage, runPageComments } from "../services/share-page.service.js";
 import { isPublicChatAccount } from "../utils/chat-onboarding.js";
 import { isWebsite } from "../utils/client-app.js";
+import { offFeatures, sendFeatureOff, toolOffBy, isFlaggedTool, getFeatureFlagDefinition } from "../services/feature-flag.service.js";
 import { takeInlineImages, findInlineImage, withInlineImages, INLINE_IMAGE_PREFIX, INLINE_IMAGE_NOTE } from "../utils/inline-images.js";
 
 const uniqueDashboards = [...new Set(Object.values(ROLE_DEFINITIONS).map(r => r.dashboard))];
@@ -1226,6 +1227,25 @@ export const CF_PICKER_MODELS = new Map([
     ["@cf/mistralai/mistral-small-3.1-24b-instruct", "openai"],
 ]);
 
+// Feature flags: which flag covers a model (Claude Fable, the other Claude models, Auto, or any other model picked by name)
+const modelFlagKey = (model) => {
+    if (typeof model !== "string" || !model || model === "auto") return "model_auto";
+    if (isFableModel(model)) return "model_fable";
+    if (CLAUDE_CHAT_MODELS.has(model)) return "model_claude";
+    return "model_open";
+};
+
+// Feature flags: the flag that refuses this chat message (null = it may go on). Checked in streamAskAi before anything
+// is saved: the model family picked, Studio, and Project Mode (a project chat, or a message that opens a project).
+function chatFeatureOff(body, off) {
+    if (!off || !off.size) return null;
+    const modelKey = modelFlagKey(body.selectedModel);
+    if (off.has(modelKey)) return modelKey;
+    if (body.appMode === "studio" && off.has("studio")) return "studio";
+    if ((body.appMode === "project" || /^[0-9a-f]{24}$/i.test(String(body.projectId || ""))) && off.has("projects")) return "projects";
+    return null;
+}
+
 /*
  * ─────────────────────────────────────────────────────────
  * 👁 VISION RULE (owner's order, 2026-10-29) 👁
@@ -1792,6 +1812,17 @@ export const streamAskAi = async (req, res) => {
     };
     // A model Cloudflare removed (an older app, a saved chat) goes to its replacement (services/cf-retired-models.js)
     if (typeof body.selectedModel === "string") body.selectedModel = cfModel(body.selectedModel);
+    // Feature flags (super admin > Feature flags): the whole chat is closed in front of this route (api/index.js); here
+    // the parts only the request body tells: the model family picked, Studio and Project Mode. Off means off for
+    // everyone, so the message is refused before anything is saved or charged.
+    const flagsOff = await offFeatures().catch(() => new Set());
+    {
+        const offKey = chatFeatureOff(body, flagsOff);
+        if (offKey) {
+            sendFeatureOff(res, offKey);
+            return;
+        }
+    }
     // Claude Fable is a family (Fable 5.1 and Fable 5.2 are both picked by name): one unlock, one plan share and one
     // weekly Fable count for all its members (owner, 2026-11-15)
     const fableName = isFableModel(body.selectedModel) ? (MODEL_DISPLAY_NAMES[body.selectedModel] || "Claude Fable") : "Claude Fable";
@@ -2469,6 +2500,12 @@ You are currently talking to Nikhil Shinde (nikhil.shinde@classgrid.in), the CRE
         // The desktop app's memory notes: one folder for everything, plus one per project (named after the chat's project)
         const memoryProject = body.clientApp === "desktop" && whereProject ? `${whereProject.name || "project"}-${String(whereProject._id).slice(-6)}` : "";
         const isProjectChat = !!whereProject; // Project Mode chat: Agent-mode website hosting rules are not sent
+        // Feature flags: a chat that belongs to a project is refused while Projects are off (the message may not say so
+        // itself; the chat's project is known only here). The answer has started streaming, so it ends with the error.
+        if (isProjectChat && flagsOff.has("projects")) {
+            res.write(`data: ${JSON.stringify({ type: "error", error: getFeatureFlagDefinition("projects").message, code: "feature_off", feature: "projects" })}\n\n`);
+            return;
+        }
         tailPrompt += projectContext; // (the editor notes change with every message)
         // The three modes of the app and the one the user is in now, so the AI knows what the user can see and do
         const appMode = ["agent", "project", "studio"].includes(body.appMode) ? body.appMode : null;
@@ -4076,6 +4113,8 @@ Every user is using you as a personal AI assistant and agent (like ChatGPT) to m
                             }
                         }
                         if (!specs.length) return "Error: give 1 to 5 helpers.";
+                        // Feature flags: with the live browser turned off, a helper gets no browser
+                        if (specs.some((h) => h.browser) && (await offFeatures().catch(() => flagsOff)).has("live_browser")) return `Error: ${getFeatureFlagDefinition("live_browser").message} Do the work without the browser, or tell the user.`;
                         // A Browser worker: start the user's browser right away, in the background, while the worker starts
                         if (specs.some((h) => h.browser) && userId && body.clientApp !== "desktop") ensureBrowser(String(userId)).catch(() => {});
                         const board = helperBoard(sessionId);
@@ -4095,7 +4134,10 @@ Every user is using you as a personal AI assistant and agent (like ChatGPT) to m
                         // The model the main AI asked for (its id or its name in the model list); Fable is too costly for helpers
                         // Models turned off in the super admin Model manager are never given to a helper
                         const { disabledModels } = await import("../services/model-access.service.js");
-                        const offModels = await disabledModels().catch(() => []);
+                        // (models turned off in the Model manager, and every model of a family whose feature flag is off)
+                        const offModels = [...(await disabledModels().catch(() => []))];
+                        const familyOff = await offFeatures().catch(() => flagsOff);
+                        for (const m of [...CF_PICKER_MODELS.keys(), ...CLAUDE_CHAT_MODELS]) if (familyOff.has(modelFlagKey(m)) && !offModels.includes(m)) offModels.push(m);
                         const pickModel = (wanted, i) => {
                             const allowed = [...CF_PICKER_MODELS.keys(), ...[...CLAUDE_CHAT_MODELS].filter((m) => !/claude-fable/.test(m))].filter((m) => !offModels.includes(m));
                             const w = wanted.toLowerCase();
@@ -4171,7 +4213,7 @@ Every user is using you as a personal AI assistant and agent (like ChatGPT) to m
                                 return withInbox(out);
                             }]));
                             // In Studio every helper also has the user's live browser, so it never has to say it has none
-                            const hasBrowser = h.browser || body.appMode === "studio";
+                            const hasBrowser = (h.browser || body.appMode === "studio") && !flagsOff.has("live_browser");
                             if (hasBrowser) {
                                 defs.push(...WORKER_BROWSER_TOOLS);
                                 const browserHandlers = makeBrowserHandlers({ userId: userId ? String(userId) : null, sessionId: sessionId || "none", desktop: body.clientApp === "desktop" });
@@ -6128,6 +6170,12 @@ You work on the user's own Windows computer through their Classgrid desktop app,
         });
         // Classgrid Cloud is for Agent mode HTML sites (not Project Mode, not WhatsApp call/message tasks)
         if (isProjectChat || body.taskOrigin === 'whatsapp') toolPlan.allowedToolNames.delete("deploy_to_classgrid_cloud");
+        // Feature flags: a tool group whose every tool is off (wherever the chat runs) is not offered by load_tools.
+        // The tools themselves are taken out further down, once every tool of this answer is known.
+        if (flagsOff.size) {
+            const offEverywhere = (n) => toolOffBy(n, flagsOff, { onComputer: false }) && toolOffBy(n, flagsOff, { onComputer: true });
+            toolPlan.allowedGroups = toolPlan.allowedGroups.filter((g) => !(g.tools || []).length || !(g.tools || []).every(offEverywhere));
+        }
         const seenToolNames = new Set();
         // Every tool this user may use (one definition per name), in a fixed order.
         const fullToolList = orderTools([...llmConfig.tools, buildLoadToolsTool(toolPlan.allowedGroups)].filter(t => {
@@ -6495,9 +6543,32 @@ If a tool fails, never show the error message; say only: "Something went wrong o
 
         // Studio: the Planner's browser and scratchpad tools are allowed (every user, in Studio Mode)
         if (body.appMode === "studio") for (const t of PLANNER_BROWSER_TOOLS) toolPlan.allowedToolNames.add(t.function.name);
+        // Feature flags (super admin > Feature flags): the tools of a feature that is off are taken out of every list
+        // here, after every tool of this answer was added, so the AI neither sees nor calls them. On the person's own
+        // computer (desktop app) the terminal and file tools belong to "Desktop computer tools", in the cloud to
+        // "Cloud sandbox" (services/feature-flag.service.js, toolOffBy).
+        const toolsOnComputer = onComputer || chatProject?.location === "local";
+        const toolOff = (name) => toolOffBy(name, flagsOff, { onComputer: toolsOnComputer });
+        if (flagsOff.size) {
+            for (const list of [fullToolList, activeToolList]) {
+                for (let k = list.length - 1; k >= 0; k--) if (toolOff(list[k]?.function?.name || "")) list.splice(k, 1);
+            }
+            for (const name of [...toolPlan.allowedToolNames]) {
+                if (toolOff(name)) { toolPlan.allowedToolNames.delete(name); toolPlan.loadedNames.delete(name); }
+            }
+        }
         // Only the tools this user may use can run, on every path (the SDK fallback runs any handler it is asked for).
         for (const name of Object.keys(llmConfig.toolHandlers)) {
             if (name !== LOAD_TOOLS_NAME && !toolPlan.allowedToolNames.has(name)) delete llmConfig.toolHandlers[name];
+        }
+        // Feature flags: a feature turned off while this answer is still working stops its tools at their next call
+        // (the flags are read again, kept for a few seconds), and the AI is told to say so instead of retrying.
+        for (const [name, fn] of Object.entries(llmConfig.toolHandlers)) {
+            if (typeof fn !== "function" || !isFlaggedTool(name, { onComputer: toolsOnComputer })) continue;
+            llmConfig.toolHandlers[name] = async (...args) => {
+                const offNow = toolOffBy(name, await offFeatures().catch(() => flagsOff), { onComputer: toolsOnComputer });
+                return offNow ? `${getFeatureFlagDefinition(offNow).message} Tell the user this in plain words and do not try this tool again in this answer.` : fn(...args);
+            };
         }
         // The user's permission mode (the shield in the chat box): commands, pushes and browser actions ask first when
         // it says so, and the agent waits for the answer. No mode sent (or WhatsApp) = nothing asks, as before.
@@ -6801,12 +6872,14 @@ If a tool fails, never show the error message; say only: "Something went wrong o
                             let claudeLoadedNames = sandboxImages && toolPlan.loadedNames.has("run_code") ? new Set([...toolPlan.loadedNames, "view_image"]) : toolPlan.loadedNames;
                             // Studio: the Planner's browser tools (scratchpad, look at the live page)
                             if (body.appMode === "studio") {
-                                claudeToolList = [...claudeToolList, ...PLANNER_BROWSER_TOOLS.filter((t) => !claudeToolList.some((x) => x?.function?.name === t.function.name))];
-                                claudeLoadedNames = new Set([...claudeLoadedNames, ...PLANNER_BROWSER_TOOLS.map((t) => t.function.name)]);
+                                // (without the live browser's tools while that feature flag is off)
+                                const plannerTools = PLANNER_BROWSER_TOOLS.filter((t) => !toolOff(t.function.name));
+                                claudeToolList = [...claudeToolList, ...plannerTools.filter((t) => !claudeToolList.some((x) => x?.function?.name === t.function.name))];
+                                claudeLoadedNames = new Set([...claudeLoadedNames, ...plannerTools.map((t) => t.function.name)]);
                             }
                             streamed = await streamClaudeChat({
                                 model: requestedModel,
-                                messages: body.appMode === "studio" && body.taskOrigin !== "whatsapp" ? withStudioBrowser(messages, true) : messages,
+                                messages: body.appMode === "studio" && body.taskOrigin !== "whatsapp" && !flagsOff.has("live_browser") ? withStudioBrowser(messages, true) : messages,
                                 // All allowed tools go to Claude; only the loaded ones enter its context, the rest
                                 // are deferred and reachable through tool search or load_tools.
                                 tools: claudeToolList,
@@ -6900,10 +6973,11 @@ If a tool fails, never show the error message; say only: "Something went wrong o
                             // Studio: the main AI's browser tools. A model that can't see images gets no clicking tools: its
                             // Browser worker on DeepSeek V4.1 Flash does the clicking
                             if (body.appMode === "studio") {
-                                const studioTools = sees ? PLANNER_BROWSER_TOOLS : PLANNER_BLIND_TOOLS;
+                                // (without the live browser's tools while that feature flag is off)
+                                const studioTools = (sees ? PLANNER_BROWSER_TOOLS : PLANNER_BLIND_TOOLS).filter((t) => !toolOff(t.function.name));
                                 llmConfig.tools = llmConfig.tools.filter((t) => !BROWSER_TOOL_NAMES.has(t?.function?.name) || studioTools.includes(t));
                                 for (const t of studioTools) if (!llmConfig.tools.includes(t)) llmConfig.tools.push(t);
-                                if (body.taskOrigin !== "whatsapp") modelMessages = withStudioBrowser(modelMessages, sees);
+                                if (body.taskOrigin !== "whatsapp" && !flagsOff.has("live_browser")) modelMessages = withStudioBrowser(modelMessages, sees);
                             }
                             streamed = await streamChat({
                                 provider: cloudflareStreamProvider(model, sessionId),

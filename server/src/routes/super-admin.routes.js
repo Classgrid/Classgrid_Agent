@@ -1718,6 +1718,138 @@ router.patch("/organizations/:id/activate", async (req, res) => {
 // ── GOD MODE: USER CONTROL (ACROSS ALL ORGS) ─────────────────────────────────
 // ══════════════════════════════════════════════════════════════════════════════
 
+// ── Helpers for the Users pages (the list, a person's page and their payments) ──
+// Only the handlers in this block use them, so they live here next to their callers.
+
+// Search text is typed by an admin: escape it before it goes into a regex, so "(" or "+" searches for that character
+// instead of breaking the query (an unescaped "(" used to give a 500)
+function escapeRegex(text) {
+    return String(text).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+// A user id from the URL must be a full 24-character id; anything else gets a clear 400 instead of a Mongo CastError
+// 500. Lower-cased so it matches the ids saved as text (AdminAuditLog.targetId).
+function cleanUserId(raw) {
+    return typeof raw === "string" && /^[a-f\d]{24}$/i.test(raw) ? raw.toLowerCase() : null;
+}
+
+// Dates go out as ISO text or null, never as an "Invalid Date"
+function isoOrNull(value) {
+    if (!value) return null;
+    const d = new Date(value);
+    return Number.isNaN(d.getTime()) ? null : d.toISOString();
+}
+
+// Empty text saved on an account ("") means "nothing", so the pages get null and can leave the line out
+function emptyToNull(value) {
+    return value === undefined || value === null || value === "" ? null : value;
+}
+
+function capitalise(text) {
+    const t = String(text || "");
+    return t ? t[0].toUpperCase() + t.slice(1) : "";
+}
+
+const PAID_PLAN_IDS = ["pro", "max", "enterprise"];
+
+// How the person got their plan, read from user.plan.billing (what the plan card says: bought, gifted, phone app...)
+const PLAN_SOURCE_BY_BILLING = {
+    none: "free", granted: "gifted", manual_monthly: "bought", prepaid_yearly: "bought", upi_autopay: "bought",
+    play: "phone_app", org_seat: "seat",
+};
+
+// The plans' display names from PlanConfig ("pro" -> "Pro"), so a renamed plan shows its new name here too
+function planNameMap(rows) {
+    const map = {};
+    for (const r of rows || []) if (r?.key) map[r.key] = r.name || capitalise(r.key);
+    return map;
+}
+
+// The plan a person is really on (planKeyOf: an ended, cancelled or expired paid plan counts as Free) next to what is
+// saved on the account, so the page can say "Pro ended" instead of hiding it
+function planSummary(user, planNames, planKeyOf) {
+    const p = user?.plan || {};
+    const id = planKeyOf(user);
+    const savedId = emptyToNull(p.id);
+    const billing = p.billing || "none";
+    const email = String(user?.email || "").toLowerCase();
+    return {
+        id,
+        name: planNames[id] || capitalise(id),
+        savedId,
+        ended: PAID_PLAN_IDS.includes(savedId) && id === "free",
+        billing,
+        source: PLAN_SOURCE_BY_BILLING[billing] || "free",
+        status: emptyToNull(p.status),
+        startedAt: isoOrNull(p.started_at),
+        expiresAt: isoOrNull(p.expires_at),
+        setBy: emptyToNull(p.set_by),
+        note: emptyToNull(p.note),
+        // Same rule as planOf in plan-limits.service.js: Classgrid staff have no plan limits
+        noLimits: user?.role === "super_admin" || email.endsWith("@classgrid.in"),
+    };
+}
+
+// The first sign-in method saved on the account is how they signed up: "manual" (or nothing, on very old accounts)
+// is email and password
+function signupMethodOf(linkedProviders) {
+    const first = Array.isArray(linkedProviders) ? linkedProviders[0] : undefined;
+    if (!first || first === "manual") return "email";
+    if (first === "google" || first === "github") return first;
+    return "other";
+}
+
+// One plan or credit purchase (AiCreditTransaction, written by the Razorpay webhook) as the person page shows it
+function paymentRow(t, planNames) {
+    const planId = t.type === "plan" ? emptyToNull(t.plan_key) : null;
+    return {
+        _id: String(t._id),
+        kind: t.type === "plan" ? "plan" : "topup",
+        planId,
+        planName: planId ? planNames[planId] || capitalise(planId) : null,
+        term: t.plan_term === "month" || t.plan_term === "year" ? t.plan_term : null,
+        periodStart: isoOrNull(t.plan_period_start),
+        periodEnd: isoOrNull(t.plan_period_end),
+        amountInr: Number(t.amount_inr) || 0,
+        credits: Number(t.credits_added) || 0,
+        status: t.status || "pending",
+        paymentId: t.razorpay_payment_id || "",
+        method: t.paymentMethod || "",
+        paidAt: isoOrNull(t.paymentTime) || isoOrNull(t.createdAt),
+    };
+}
+
+// A person's chats live in Supabase (ai_chat_sessions, keyed by the lower-case main email), counted the same way as
+// the Plans & Usage page (incognito included). Never throws: a failed count is null, so one Supabase hiccup never
+// breaks the Users pages. With `newest`, also reads when their newest chat was started (there is no updated_at).
+async function chatStats(email, { newest = false } = {}) {
+    const key = String(email || "").toLowerCase().trim();
+    if (!key) return { count: 0, lastAt: null };
+    const { primarySupabaseClient } = await import("../config/supabaseClient.js");
+    // Promise.resolve().then(...) so a missing Supabase setting (the client throws when first used) becomes a null too
+    const count = Promise.resolve()
+        .then(() => primarySupabaseClient.from("ai_chat_sessions").select("id", { count: "exact", head: true }).eq("user_email", key))
+        .then(({ count: n, error }) => (error ? null : n ?? 0))
+        .catch(() => null);
+    const lastAt = !newest ? Promise.resolve(null) : Promise.resolve()
+        .then(() => primarySupabaseClient.from("ai_chat_sessions").select("created_at").eq("user_email", key)
+            .order("created_at", { ascending: false }).limit(1))
+        .then(({ data, error }) => (error ? null : isoOrNull(data?.[0]?.created_at)))
+        .catch(() => null);
+    const [c, l] = await Promise.all([count, lastAt]);
+    return { count: c, lastAt: l };
+}
+
+// Tells the open Users pages (they join "superadmin:support" with "join_superadmin_support") that a person changed,
+// so they refresh by themselves. A socket problem never fails the action that already succeeded.
+function announceUserChanged(req, userId) {
+    try {
+        req.app.get("io")?.to("superadmin:support").emit("global_users_updated", { userId });
+    } catch (e) {
+        console.error("[SuperAdmin] global_users_updated emit failed:", e.message);
+    }
+}
+
 // Global user search (across all organizations)
 router.get("/users", async (req, res) => {
     try {
@@ -1728,9 +1860,10 @@ router.get("/users", async (req, res) => {
 
         const filter = {};
         if (q.trim()) {
+            // Escaped, so search text with "(" or "+" finds that text instead of failing; normal text matches as before
             filter.$or = [
-                { name: { $regex: q, $options: "i" } },
-                { email: { $regex: q, $options: "i" } },
+                { name: { $regex: escapeRegex(q), $options: "i" } },
+                { email: { $regex: escapeRegex(q), $options: "i" } },
             ];
         }
         if (role) filter.role = role;
@@ -1769,6 +1902,414 @@ router.get("/users", async (req, res) => {
         res.json({ success: true, data: enriched, total, unfinishedSignups, page: parseInt(page), limit: parseInt(limit) });
     } catch (err) {
         console.error("[SuperAdmin] global-users error:", err.message);
+        res.status(500).json({ success: false, message: "Server error" });
+    }
+});
+
+// The Users list page (Global Users): people and their plans, one page at a time. GET /users above stays as it is
+// for its other callers (AI usage fallback, GDPR search); this one is filtered, sorted and paged on the server so the
+// filters work on everyone, not just on the rows already loaded.
+router.get("/users/list", async (req, res) => {
+    try {
+        // An optional choice from a fixed list: missing or "" -> the default; anything else not on the list -> 400
+        const pick = (name, allowed, fallback) => {
+            const raw = req.query[name];
+            if (raw === undefined || raw === "") return fallback;
+            return typeof raw === "string" && allowed.includes(raw) ? raw : undefined;
+        };
+        const filters = {
+            plan: pick("plan", ["all", "free", "pro", "max", "enterprise", "none"], "all"),
+            status: pick("status", ["all", "active", "banned", "erased"], "all"),
+            method: pick("method", ["all", "email", "google", "github"], "all"),
+            signup: pick("signup", ["finished", "unfinished", "all"], "finished"),
+            sort: pick("sort", ["joined", "last_active"], "joined"),
+            dir: pick("dir", ["desc", "asc"], "desc"),
+        };
+        for (const [name, value] of Object.entries(filters)) {
+            if (value === undefined) return res.status(400).json({ success: false, message: `Unknown ${name} filter.` });
+        }
+        const q = typeof req.query.q === "string" ? req.query.q.trim().slice(0, 100) : "";
+        const intOr = (raw, fallback) => {
+            const n = Number.parseInt(raw, 10);
+            return Number.isFinite(n) ? n : fallback;
+        };
+        // Pages are capped at 50 rows (each row also costs one Supabase chat count)
+        const limit = Math.min(50, Math.max(1, intOr(req.query.limit, 25)));
+        const page = Math.min(100000, Math.max(1, intOr(req.query.page, 1)));
+
+        const User = (await import("../models/User.js")).default;
+        const PlanConfig = (await import("../models/PlanConfig.js")).default;
+        const { planKeyOf } = await import("../services/plan-limits.service.js");
+
+        const now = new Date();
+        const conds = [];
+
+        // Chat sign-ups that stopped before the last step are not users yet: shown only when asked for
+        if (filters.signup === "finished") conds.push(finishedAccountsMatch());
+        else if (filters.signup === "unfinished") conds.push(unfinishedChatSignupMatch());
+
+        // "Any status" leaves out erased (GDPR) accounts; they have their own filter
+        if (filters.status === "all") conds.push({ status: { $ne: "deleted" } });
+        else if (filters.status === "active") conds.push({ status: "active" });
+        else if (filters.status === "banned") conds.push({ status: { $in: ["suspended", "blocked"] } });
+        else if (filters.status === "erased") conds.push({ status: "deleted" });
+
+        // A paid plan that is really on, the same rule as planKeyOf: status active or past_due (no status counts as
+        // active there too) and not past its end date (no end date = no end)
+        const paidActive = (id) => ({
+            "plan.id": id,
+            "plan.status": { $in: ["active", "past_due", null, ""] },
+            $or: [{ "plan.expires_at": null }, { "plan.expires_at": { $gt: now } }],
+        });
+        if (PAID_PLAN_IDS.includes(filters.plan)) conds.push(paidActive(filters.plan));
+        // Free = everyone not on a paid plan right now: no plan saved, Free saved, or a paid plan that ended
+        else if (filters.plan === "free") conds.push({ $nor: [paidActive({ $in: PAID_PLAN_IDS })] });
+        else if (filters.plan === "none") conds.push({ "plan.id": { $exists: false } });
+
+        // How they signed up = the first sign-in method saved (email sign-ups start with "manual")
+        if (filters.method === "email") conds.push({ $or: [{ "linkedProviders.0": "manual" }, { "linkedProviders.0": { $exists: false } }] });
+        else if (filters.method === "google") conds.push({ "linkedProviders.0": "google" });
+        else if (filters.method === "github") conds.push({ "linkedProviders.0": "github" });
+
+        if (q) {
+            const rx = new RegExp(escapeRegex(q), "i");
+            const or = [{ name: rx }, { email: rx }, { "account_emails.email": rx }, { username: rx }];
+            // Looks like a phone number: also search the saved phone and WhatsApp numbers. They are saved in different
+            // shapes ("+91 98...", "9198..."), so anything that is not a digit may sit between the typed digits.
+            const digits = q.replace(/[\s+-]/g, "");
+            if (/^\d{4,}$/.test(digits)) {
+                const phoneRx = new RegExp(digits.split("").join("\\D*"));
+                or.push({ phoneNumber: phoneRx }, { "metadata.whatsappPhone": phoneRx }, { "metadata.whatsapp_number": phoneRx });
+            }
+            conds.push({ $or: or });
+        }
+
+        const d = filters.dir === "asc" ? 1 : -1;
+        const pipeline = [
+            { $match: conds.length ? { $and: conds } : {} },
+            {
+                $addFields: {
+                    // Very old accounts have no createdAt: their id carries the time they were made
+                    joinedAt: { $ifNull: ["$createdAt", { $toDate: "$_id" }] },
+                    // Last sign-in or the last time their live connection closed, whichever is later (null = never)
+                    lastActiveAt: { $max: ["$lastSeen", "$lastLoginAt"] },
+                },
+            },
+            // _id breaks ties so paging never repeats or skips a person; never-active people sort as the oldest
+            { $sort: filters.sort === "joined" ? { joinedAt: d, _id: d } : { lastActiveAt: d, _id: d } },
+            {
+                $facet: {
+                    rows: [
+                        { $skip: (page - 1) * limit },
+                        { $limit: limit },
+                        {
+                            $project: {
+                                name: 1, email: 1, profilePicture: 1, role: 1, status: 1, plan: 1, joinedAt: 1, lastActiveAt: 1,
+                                linkedProviders: { $slice: [{ $ifNull: ["$linkedProviders", []] }, 1] },
+                                "metadata.whatsappPhone": 1,
+                            },
+                        },
+                    ],
+                    total: [{ $count: "n" }],
+                },
+            },
+        ];
+
+        const [facet, unfinishedSignups, planRows] = await Promise.all([
+            User.aggregate(pipeline),
+            User.countDocuments(unfinishedChatSignupMatch()),
+            // Plan names only; without them the plan ids are shown capitalised
+            PlanConfig.find({}).select("key name").lean().catch(() => []),
+        ]);
+        const rows = facet?.[0]?.rows || [];
+        const total = facet?.[0]?.total?.[0]?.n || 0;
+        const planNames = planNameMap(planRows);
+
+        // Chats are counted after paging (they live in Supabase), at most 50 at once; a failed count is null
+        const chatCounts = await Promise.all(rows.map((u) => chatStats(u.email).then((s) => s.count).catch(() => null)));
+
+        const data = rows.map((u, i) => ({
+            _id: String(u._id),
+            name: u.name || "",
+            email: u.email || "",
+            profilePicture: emptyToNull(u.profilePicture),
+            role: u.role || "",
+            status: u.status || "",
+            plan: planSummary(u, planNames, planKeyOf),
+            joinedAt: isoOrNull(u.joinedAt),
+            lastActiveAt: isoOrNull(u.lastActiveAt),
+            chats: chatCounts[i],
+            signupMethod: signupMethodOf(u.linkedProviders),
+            whatsappVerified: !!u.metadata?.whatsappPhone,
+        }));
+
+        res.json({ success: true, data, total, page, limit, pages: Math.max(1, Math.ceil(total / limit)), unfinishedSignups });
+    } catch (err) {
+        console.error("[SuperAdmin] users list error:", err.message);
+        res.status(500).json({ success: false, message: "Server error" });
+    }
+});
+
+// One person's page: who they are, their plan and how they got it, how they sign in, what they made, what they paid,
+// and what admins did to the account. Each side lookup (chats, projects, payments, admin log...) that fails gives an
+// empty value instead of failing the whole page.
+router.get("/users/:id/overview", async (req, res) => {
+    try {
+        const id = cleanUserId(req.params.id);
+        if (!id) return res.status(400).json({ success: false, message: "Invalid user id." });
+
+        const mongoose = (await import("mongoose")).default;
+        const User = (await import("../models/User.js")).default;
+        const oid = new mongoose.Types.ObjectId(id);
+
+        // Only the fields this page shows. Never the password, tokens, code hashes, integration tokens, device
+        // fingerprints, IP hashes or push tokens; the big id lists come back as counts only.
+        const [u] = await User.aggregate([
+            { $match: { _id: oid } },
+            {
+                $project: {
+                    name: 1, email: 1, username: 1, profilePicture: 1, role: 1, status: 1,
+                    joinedAt: { $ifNull: ["$createdAt", { $toDate: "$_id" }] },
+                    lastLoginAt: 1, lastLoginMethod: 1, lastSeen: 1, linkedProviders: 1, isEmailVerified: 1, lockUntil: 1,
+                    "trustedDevices.browser": 1, "trustedDevices.os": 1, "trustedDevices.addedAt": 1,
+                    "fcmDevices.platform": 1, "fcmDevices.appVersion": 1, "fcmDevices.updatedAt": 1,
+                    account_emails: 1, plan: 1,
+                    "student_verification.method": 1, "student_verification.verified_at": 1, "student_verification.expires_at": 1,
+                    "metadata.whatsappPhone": 1, "metadata.whatsapp_number": 1, "metadata.whatsappSkipped": 1,
+                    "metadata.age": 1, "metadata.job_role": 1,
+                    webChats: { $size: { $ifNull: ["$web_chat_ids", []] } },
+                    desktopChats: { $size: { $ifNull: ["$desktop_chat_ids", []] } },
+                    callChats: { $size: { $ifNull: ["$call_chat_ids", []] } },
+                    fcmTokenCount: { $size: { $ifNull: ["$fcmTokens", []] } },
+                },
+            },
+        ]);
+        if (!u) return res.status(404).json({ success: false, message: "User not found." });
+
+        const [
+            AiCreditTransaction, AdminAuditLog, PlanConfig, IdeProject, LiveDoc, SharePage, Call, AiUsageLog, planLimits,
+        ] = await Promise.all([
+            import("../models/AiCreditTransaction.js"), import("../models/AdminAuditLog.js"), import("../models/PlanConfig.js"),
+            import("../models/IdeProject.js"), import("../models/LiveDoc.js"), import("../models/SharePage.js"),
+            import("../models/Call.js"), import("../models/AiUsageLog.js"), import("../services/plan-limits.service.js"),
+        ]).then((mods) => mods.map((m, i) => (i === mods.length - 1 ? m : m.default)));
+        const { planKeyOf } = planLimits;
+
+        // One failed lookup gives null (logged), never a 500 for the whole page
+        const safe = (label, fn) => Promise.resolve().then(fn).catch((e) => {
+            console.error(`[SuperAdmin] user overview ${label} failed:`, e.message);
+            return null;
+        });
+        const payFilter = { userId: oid, type: { $in: ["plan", "topup"] } };
+        const ADMIN_ACTIONS = ["user.ban", "user.unban", "user.force_logout", "user.reset_password", "user.role_change", "user.plan_gift", "user.plan_end"];
+
+        const [chat, projects, liveDocs, pages, calls, lastAi, payItems, payCount, paySum, logs, planRows] = await Promise.all([
+            safe("chats", () => chatStats(u.email, { newest: true })),
+            safe("projects", () => IdeProject.countDocuments({ owner: oid })),
+            safe("live docs", () => LiveDoc.countDocuments({ owner: oid })),
+            safe("pages", () => SharePage.countDocuments({ owner: oid })),
+            safe("calls", () => Call.countDocuments({ user_id: oid })),
+            safe("last AI answer", () => AiUsageLog.findOne({ userId: oid }).sort({ createdAt: -1 }).select("createdAt").lean()),
+            safe("payments", () => AiCreditTransaction.find(payFilter).sort({ createdAt: -1 }).limit(10).lean()),
+            safe("payment count", () => AiCreditTransaction.countDocuments(payFilter)),
+            safe("payment total", () => AiCreditTransaction.aggregate([
+                { $match: { ...payFilter, status: "success" } },
+                { $group: { _id: null, sum: { $sum: "$amount_inr" } } },
+            ])),
+            // The audit log's time field is `timestamp` (the model has no createdAt)
+            safe("admin log", () => AdminAuditLog.find({ targetType: "user", targetId: id, action: { $in: ADMIN_ACTIONS } })
+                .sort({ timestamp: -1 }).limit(40).select("action actorName metadata timestamp").lean()),
+            safe("plan names", () => PlanConfig.find({}).select("key name").lean()),
+        ]);
+
+        const now = new Date();
+        const planNames = planNameMap(planRows);
+        const meta = u.metadata || {};
+        const logRows = logs || [];
+
+        // The ban reason and time are kept only in the audit log (the user has no fields for them). The newest ban row
+        // counts only if no unban came after it; bans made in bulk have no row, so all three stay null for those.
+        let ban = null;
+        if (u.status === "suspended" || u.status === "blocked") {
+            const lastBan = logRows.find((l) => l.action === "user.ban");
+            const lastUnban = logRows.find((l) => l.action === "user.unban");
+            const row = lastBan && (!lastUnban || new Date(lastBan.timestamp) >= new Date(lastUnban.timestamp)) ? lastBan : null;
+            ban = {
+                at: isoOrNull(row?.timestamp),
+                reason: emptyToNull(row?.metadata?.reason),
+                by: emptyToNull(row?.actorName),
+            };
+        }
+
+        const history = logRows
+            .filter((l) => l.action === "user.plan_gift" || l.action === "user.plan_end")
+            .slice(0, 20)
+            .map((l) => {
+                const plan = String(l.metadata?.plan || (l.action === "user.plan_end" ? "free" : ""));
+                return {
+                    at: isoOrNull(l.timestamp),
+                    action: l.action === "user.plan_gift" ? "gift" : "end",
+                    plan,
+                    planName: planNames[plan] || capitalise(plan),
+                    expiresAt: isoOrNull(l.metadata?.expires_at),
+                    reason: String(l.metadata?.reason || ""),
+                    by: String(l.actorName || l.metadata?.set_by || ""),
+                };
+            });
+
+        // detail: the ban reason, the new role, or the plan given / ended
+        const adminLog = logRows.slice(0, 10).map((l) => {
+            const action = l.action.slice("user.".length);
+            let detail = null;
+            if (action === "ban") detail = emptyToNull(l.metadata?.reason);
+            else if (action === "role_change") detail = emptyToNull(l.metadata?.newRole);
+            else if (action === "plan_gift" || action === "plan_end") detail = emptyToNull(l.metadata?.plan);
+            return { at: isoOrNull(l.timestamp), action, by: String(l.actorName || ""), detail: detail === null ? null : String(detail) };
+        });
+
+        // Student price: confirmed, and the confirmation has not run out
+        const sv = u.student_verification || {};
+        const svExpires = sv.expires_at ? new Date(sv.expires_at) : null;
+        const student = {
+            verified: !!sv.verified_at && (!svExpires || svExpires > now),
+            method: ["email", "admin", "review"].includes(sv.method) ? sv.method : null,
+            verifiedAt: isoOrNull(sv.verified_at),
+            expiresAt: isoOrNull(sv.expires_at),
+        };
+
+        const lastAiUseAt = isoOrNull(lastAi?.createdAt);
+        // Last active = the latest of: last sign-in, last time the live connection closed, last AI answer
+        const activeTimes = [u.lastSeen, u.lastLoginAt, lastAiUseAt].map((t) => (t ? new Date(t).getTime() : NaN)).filter((t) => !Number.isNaN(t));
+        const lastActiveAt = activeTimes.length ? new Date(Math.max(...activeTimes)).toISOString() : null;
+
+        const lockUntil = u.lockUntil ? new Date(u.lockUntil) : null;
+        const whatsappNumber = emptyToNull(meta.whatsappPhone) ?? emptyToNull(meta.whatsapp_number);
+        const ageRaw = meta.age;
+        const age = (typeof ageRaw === "number" && Number.isFinite(ageRaw)) || (typeof ageRaw === "string" && ageRaw.trim()) ? ageRaw : null;
+        const fcmDevices = Array.isArray(u.fcmDevices) ? u.fcmDevices : [];
+
+        res.json({
+            success: true,
+            data: {
+                isSelf: String(req.user._id) === id,
+                person: {
+                    _id: String(u._id),
+                    name: u.name || "",
+                    email: u.email || "",
+                    username: emptyToNull(u.username),
+                    profilePicture: emptyToNull(u.profilePicture),
+                    role: u.role || "",
+                    status: u.status || "",
+                    jobRole: typeof meta.job_role === "string" && meta.job_role.trim() ? meta.job_role : null,
+                    age,
+                    whatsapp: {
+                        number: whatsappNumber === null ? null : String(whatsappNumber),
+                        // A number is saved in whatsappPhone only after its code was checked
+                        verified: !!meta.whatsappPhone,
+                        skipped: meta.whatsappSkipped === true,
+                    },
+                    addedEmails: (Array.isArray(u.account_emails) ? u.account_emails : []).map((e) => ({
+                        email: e?.email || "",
+                        verifiedAt: isoOrNull(e?.verified_at),
+                        addedAt: isoOrNull(e?.added_at),
+                    })),
+                    ban,
+                },
+                plan: { ...planSummary(u, planNames, planKeyOf), student, history },
+                account: {
+                    joinedAt: isoOrNull(u.joinedAt),
+                    lastSignInAt: isoOrNull(u.lastLoginAt),
+                    lastSignInMethod: ["google", "github", "email"].includes(u.lastLoginMethod) ? u.lastLoginMethod : null,
+                    lastSeenAt: isoOrNull(u.lastSeen),
+                    lastActiveAt,
+                    signupMethod: signupMethodOf(u.linkedProviders),
+                    signInMethods: [...new Set((Array.isArray(u.linkedProviders) ? u.linkedProviders : [])
+                        .filter(Boolean).map((p) => (p === "manual" ? "email" : String(p))))],
+                    emailVerified: !!u.isEmailVerified,
+                    lockedUntil: lockUntil && lockUntil > now ? lockUntil.toISOString() : null,
+                    browsers: (Array.isArray(u.trustedDevices) ? u.trustedDevices : []).map((dv) => ({
+                        browser: dv?.browser || "",
+                        os: dv?.os || "",
+                        addedAt: isoOrNull(dv?.addedAt),
+                    })),
+                    phoneApps: fcmDevices.map((dv) => ({
+                        platform: dv?.platform || "",
+                        appVersion: dv?.appVersion || "",
+                        updatedAt: isoOrNull(dv?.updatedAt),
+                    })),
+                    // Worked out from what the account holds: web chats are listed only since 2026-11-04, and the
+                    // place someone signed up from is not recorded
+                    usesOn: {
+                        website: (u.webChats || 0) > 0,
+                        desktop: (u.desktopChats || 0) > 0,
+                        phone: fcmDevices.length > 0 || (u.fcmTokenCount || 0) > 0,
+                        whatsapp: (u.callChats || 0) > 0 || !!meta.whatsappPhone,
+                    },
+                },
+                activity: {
+                    chats: chat ? chat.count : null,
+                    lastChatAt: chat ? chat.lastAt : null,
+                    projects, liveDocs, pages, calls,
+                    lastAiUseAt,
+                },
+                payments: {
+                    items: (payItems || []).map((t) => paymentRow(t, planNames)),
+                    count: payCount || 0,
+                    totalPaidInr: Number(paySum?.[0]?.sum) || 0,
+                },
+                adminLog,
+            },
+        });
+    } catch (err) {
+        console.error("[SuperAdmin] user overview error:", err.message);
+        res.status(500).json({ success: false, message: "Server error" });
+    }
+});
+
+// All of one person's plan and credit purchases, a page at a time ("Show all" on their page)
+router.get("/users/:id/payments", async (req, res) => {
+    try {
+        const id = cleanUserId(req.params.id);
+        if (!id) return res.status(400).json({ success: false, message: "Invalid user id." });
+        const intOr = (raw, fallback) => {
+            const n = Number.parseInt(raw, 10);
+            return Number.isFinite(n) ? n : fallback;
+        };
+        const limit = Math.min(50, Math.max(1, intOr(req.query.limit, 20)));
+        const page = Math.min(100000, Math.max(1, intOr(req.query.page, 1)));
+
+        const mongoose = (await import("mongoose")).default;
+        const User = (await import("../models/User.js")).default;
+        const AiCreditTransaction = (await import("../models/AiCreditTransaction.js")).default;
+        const PlanConfig = (await import("../models/PlanConfig.js")).default;
+        const oid = new mongoose.Types.ObjectId(id);
+
+        if (!(await User.exists({ _id: oid }))) return res.status(404).json({ success: false, message: "User not found." });
+
+        // Plans and credit top-ups only (admin grants and other credit actions are not payments); uses userId+createdAt
+        const filter = { userId: oid, type: { $in: ["plan", "topup"] } };
+        const [items, total, sum, planRows] = await Promise.all([
+            AiCreditTransaction.find(filter).sort({ createdAt: -1 }).skip((page - 1) * limit).limit(limit).lean(),
+            AiCreditTransaction.countDocuments(filter),
+            AiCreditTransaction.aggregate([
+                { $match: { ...filter, status: "success" } },
+                { $group: { _id: null, sum: { $sum: "$amount_inr" } } },
+            ]),
+            PlanConfig.find({}).select("key name").lean().catch(() => []),
+        ]);
+        const planNames = planNameMap(planRows);
+
+        res.json({
+            success: true,
+            data: items.map((t) => paymentRow(t, planNames)),
+            total,
+            page,
+            limit,
+            pages: Math.max(1, Math.ceil(total / limit)),
+            totalPaidInr: Number(sum?.[0]?.sum) || 0,
+        });
+    } catch (err) {
+        console.error("[SuperAdmin] user payments error:", err.message);
         res.status(500).json({ success: false, message: "Server error" });
     }
 });
@@ -1815,15 +2356,21 @@ router.get("/users/:id/full", async (req, res) => {
 // Ban / suspend a user (God mode: no org restriction)
 router.patch("/users/:id/ban", async (req, res) => {
     try {
-        const { reason = "Banned by Super Admin" } = req.body;
+        const id = cleanUserId(req.params.id);
+        if (!id) return res.status(400).json({ success: false, message: "Invalid user id." });
+        // The reason is typed by the admin: trimmed and kept short; none given -> the usual default
+        const typedReason = typeof req.body?.reason === "string" ? req.body.reason.trim().slice(0, 300) : "";
+        const reason = typedReason || "Banned by Super Admin";
         const User = (await import("../models/User.js")).default;
         const AdminAuditLog = (await import("../models/AdminAuditLog.js")).default;
 
-        const prev = await User.findById(req.params.id).select("status name email").lean();
+        const prev = await User.findById(id).select("status name email").lean();
         if (!prev) return res.status(404).json({ success: false, message: "User not found" });
 
+        // bannedReason / bannedAt are not fields of the User model, so Mongoose drops them: the reason and time are
+        // kept in the audit log row below, which the person page reads
         const user = await User.findByIdAndUpdate(
-            req.params.id,
+            id,
             { $set: { status: "suspended", bannedReason: reason, bannedAt: new Date() } },
             { returnDocument: 'after' }
         ).select("name email status").lean();
@@ -1836,6 +2383,7 @@ router.patch("/users/:id/ban", async (req, res) => {
             ip: req.ip, userAgent: req.headers["user-agent"] ?? "",
         }).catch(e => console.error("[AuditLog] user.ban write failed:", e.message));
 
+        announceUserChanged(req, id);
         res.json({ success: true, message: `User "${user.name}" banned.`, user });
     } catch (err) {
         res.status(500).json({ success: false, message: "Server error" });
@@ -1845,14 +2393,16 @@ router.patch("/users/:id/ban", async (req, res) => {
 // Unban / reactivate a user
 router.patch("/users/:id/unban", async (req, res) => {
     try {
+        const id = cleanUserId(req.params.id);
+        if (!id) return res.status(400).json({ success: false, message: "Invalid user id." });
         const User = (await import("../models/User.js")).default;
         const AdminAuditLog = (await import("../models/AdminAuditLog.js")).default;
 
-        const prev = await User.findById(req.params.id).select("status name").lean();
+        const prev = await User.findById(id).select("status name").lean();
         if (!prev) return res.status(404).json({ success: false, message: "User not found" });
 
         const user = await User.findByIdAndUpdate(
-            req.params.id,
+            id,
             { $set: { status: "active" }, $unset: { bannedReason: "", bannedAt: "" } },
             { returnDocument: 'after' }
         ).select("name email status").lean();
@@ -1864,6 +2414,7 @@ router.patch("/users/:id/unban", async (req, res) => {
             rollbackStatus: "none", ip: req.ip, userAgent: req.headers["user-agent"] ?? "",
         }).catch(e => console.error("[AuditLog] user.unban write failed:", e.message));
 
+        announceUserChanged(req, id);
         res.json({ success: true, message: `User "${user.name}" reactivated.`, user });
     } catch (err) {
         res.status(500).json({ success: false, message: "Server error" });
@@ -1873,13 +2424,26 @@ router.patch("/users/:id/unban", async (req, res) => {
 // Force logout a user (invalidate their session by bumping passwordChangedAt)
 router.post("/users/:id/force-logout", async (req, res) => {
     try {
+        const id = cleanUserId(req.params.id);
+        if (!id) return res.status(400).json({ success: false, message: "Invalid user id." });
         const User = (await import("../models/User.js")).default;
+        const AdminAuditLog = (await import("../models/AdminAuditLog.js")).default;
         const user = await User.findByIdAndUpdate(
-            req.params.id,
+            id,
             { $set: { passwordChangedAt: new Date() } },
             { returnDocument: 'after' }
         ).select("name email").lean();
         if (!user) return res.status(404).json({ success: false, message: "User not found" });
+
+        // Kept in the audit log so the person page can list it under the recent admin actions
+        await AdminAuditLog.create({
+            actorId: req.user._id, actorName: req.user.name, actorRole: "super_admin",
+            action: "user.force_logout", targetId: user._id.toString(), targetName: user.name,
+            targetType: "user", previousState: null, rollbackStatus: "none",
+            ip: req.ip, userAgent: req.headers["user-agent"] ?? "",
+        }).catch(e => console.error("[AuditLog] user.force_logout write failed:", e.message));
+
+        announceUserChanged(req, id);
         res.json({ success: true, message: `User "${user.name}" force-logged-out.` });
     } catch (err) {
         res.status(500).json({ success: false, message: "Server error" });
@@ -1892,14 +2456,18 @@ router.post("/users/:id/reset-password", async (req, res) => {
         const User = (await import("../models/User.js")).default;
         const crypto = (await import("crypto")).default;
         const { sendEmail } = await import("../services/aws-ses.service.js");
+        const AdminAuditLog = (await import("../models/AdminAuditLog.js")).default;
 
-        const user = await User.findById(req.params.id).select("name email").lean();
+        const id = cleanUserId(req.params.id);
+        if (!id) return res.status(400).json({ success: false, message: "Invalid user id." });
+
+        const user = await User.findById(id).select("name email").lean();
         if (!user) return res.status(404).json({ success: false, message: "User not found" });
 
         const token = crypto.randomBytes(32).toString("hex");
         const expires = new Date(Date.now() + 60 * 60 * 1000); // 1 hour
 
-        await User.findByIdAndUpdate(req.params.id, {
+        await User.findByIdAndUpdate(id, {
             $set: { resetPasswordToken: token, resetPasswordExpires: expires }
         });
 
@@ -1911,6 +2479,14 @@ router.post("/users/:id/reset-password", async (req, res) => {
             text: `Password reset link: ${resetUrl}`,
         });
 
+        // Written once the email has gone, so the person page lists only resets that were really sent
+        await AdminAuditLog.create({
+            actorId: req.user._id, actorName: req.user.name, actorRole: "super_admin",
+            action: "user.reset_password", targetId: user._id.toString(), targetName: user.name,
+            targetType: "user", previousState: null, rollbackStatus: "none",
+            ip: req.ip, userAgent: req.headers["user-agent"] ?? "",
+        }).catch(e => console.error("[AuditLog] user.reset_password write failed:", e.message));
+
         res.json({ success: true, message: `Password reset email sent to ${user.email}.` });
     } catch (err) {
         console.error("[SuperAdmin] reset-password error:", err.message);
@@ -1921,18 +2497,25 @@ router.post("/users/:id/reset-password", async (req, res) => {
 // Update user role (God mode)
 router.patch("/users/:id/role", async (req, res) => {
     try {
-        const { role } = req.body;
+        const id = cleanUserId(req.params.id);
+        if (!id) return res.status(400).json({ success: false, message: "Invalid user id." });
+        const { role } = req.body || {};
         if (!role) return res.status(400).json({ success: false, message: "role is required" });
         const User = (await import("../models/User.js")).default;
         const AdminAuditLog = (await import("../models/AdminAuditLog.js")).default;
 
-        const prev = await User.findById(req.params.id).select("role name").lean();
+        // Only the roles the User model knows: any other text used to be saved as a role and break that account
+        if (typeof role !== "string" || !User.schema.path("role").enumValues.includes(role)) {
+            return res.status(400).json({ success: false, message: "No such role." });
+        }
+
+        const prev = await User.findById(id).select("role name").lean();
         if (!prev) return res.status(404).json({ success: false, message: "User not found" });
 
         const user = await User.findByIdAndUpdate(
-            req.params.id,
+            id,
             { $set: { role } },
-            { returnDocument: 'after' }
+            { returnDocument: 'after', runValidators: true }
         ).select("name email role").lean();
 
         await AdminAuditLog.create({
@@ -1943,6 +2526,7 @@ router.patch("/users/:id/role", async (req, res) => {
             ip: req.ip, userAgent: req.headers["user-agent"] ?? "",
         }).catch(e => console.error("[AuditLog] user.role_change write failed:", e.message));
 
+        announceUserChanged(req, id);
         res.json({ success: true, message: `Role updated to ${role}.`, user });
     } catch (err) {
         res.status(500).json({ success: false, message: "Server error" });
@@ -2414,6 +2998,15 @@ const gdprErasedEarlier = (u) => u.status === "deleted" || GDPR_ERASED_EMAIL.tes
 const gdprPlanId = (plan) => (plan?.id && plan.status !== "expired" && plan.status !== "cancelled" ? plan.id : "free");
 // (a malformed id is "not found", not a server error from a failed database cast)
 const gdprValidId = (id) => /^[0-9a-f]{24}$/i.test(String(id || ""));
+// Accounts that can never be erased from here: super admins and co super admins (by role or extra role), the two
+// owner emails the server treats as super admins (middleware/auth.middleware.js requireRole), and the admin doing it
+const GDPR_OWNER_EMAILS = ["nikhil.shinde@classgrid.in", "support@classgrid.in"];
+const gdprProtected = (u, me) => {
+    const roles = [u.role, ...(u.additional_roles || [])];
+    return roles.includes("super_admin") || roles.includes("co_super_admin")
+        || GDPR_OWNER_EMAILS.includes(String(u.email || "").trim().toLowerCase())
+        || (me && String(u._id) === String(me));
+};
 
 router.get("/gdpr/people", async (req, res) => {
     try {
@@ -2430,7 +3023,7 @@ router.get("/gdpr/people", async (req, res) => {
 
         const [people, total] = await Promise.all([
             User.find(filter)
-                .select("name email role status profilePicture plan createdAt")
+                .select("name email role additional_roles status profilePicture plan createdAt")
                 .sort({ createdAt: -1 })
                 .skip((page - 1) * limit)
                 .limit(limit)
@@ -2447,7 +3040,8 @@ router.get("/gdpr/people", async (req, res) => {
                 photo: u.profilePicture || null,
                 plan: gdprPlanId(u.plan),
                 joinedAt: u.createdAt || null,
-                isSuperAdmin: u.role === "super_admin",
+                // (named isSuperAdmin for the page: any account that can't be erased, see gdprProtected)
+                isSuperAdmin: gdprProtected(u, req.user?._id),
                 erasedEarlier: gdprErasedEarlier(u),
             })),
             total,
@@ -2464,7 +3058,16 @@ router.get("/gdpr/people", async (req, res) => {
 // Classgrid AI keeps about them. Chats are listed (title, date, number of messages), not copied message by message.
 router.get("/gdpr/export/:userId", async (req, res) => {
     try {
+        if (!gdprValidId(req.params.userId)) return res.status(404).json({ success: false, message: "Person not found" });
         const User = (await import("../models/User.js")).default;
+        const AdminAuditLog = (await import("../models/AdminAuditLog.js")).default;
+        const AiCreditTransaction = (await import("../models/AiCreditTransaction.js")).default;
+        const PlatformTransaction = (await import("../models/PlatformTransaction.js")).default;
+        const AiLibraryFile = (await import("../models/AiLibraryFile.js")).default;
+        const SavedSong = (await import("../models/SavedSong.js")).default;
+        const IdeProject = (await import("../models/IdeProject.js")).default;
+        const AiSkill = (await import("../models/AiSkill.js")).default;
+        const { primarySupabaseClient: sb } = await import("../config/supabaseClient.js");
 
         const user = await User.findById(req.params.userId).lean();
         if (!user) return res.status(404).json({ success: false, message: "Person not found" });
@@ -2479,7 +3082,34 @@ router.get("/gdpr/export/:userId", async (req, res) => {
             }
         };
 
-        if (!user) return res.status(404).json({ success: false, message: "Person not found" });
+        // Their chats (own ones, by email), 1000 at a time, and how many messages they hold
+        const chats = await part(async () => {
+            const rows = [];
+            for (let from = 0; ; from += 1000) {
+                const { data, error } = await sb.from("ai_chat_sessions")
+                    .select("id, title, created_at, is_incognito")
+                    .eq("user_email", user.email)
+                    .order("created_at", { ascending: false })
+                    .range(from, from + 999);
+                if (error) throw error;
+                rows.push(...(data || []));
+                if (!data || data.length < 1000) break;
+            }
+            let messagesTotal = 0;
+            const ids = rows.map((r) => r.id);
+            for (let i = 0; i < ids.length; i += 200) {
+                const { count, error } = await sb.from("ai_chat_messages")
+                    .select("id", { count: "exact", head: true })
+                    .in("session_id", ids.slice(i, i + 200));
+                if (error) throw error;
+                messagesTotal += count || 0;
+            }
+            return {
+                total: rows.length,
+                messagesTotal,
+                list: rows.map((r) => ({ id: r.id, title: r.title || "(no title)", startedAt: r.created_at, incognito: !!r.is_incognito })),
+            };
+        });
 
         const files = await part(async () => {
             const rows = await AiLibraryFile.find({ user_id: userId }).sort({ created_at: -1 }).lean();
@@ -2489,7 +3119,43 @@ router.get("/gdpr/export/:userId", async (req, res) => {
             };
         });
 
+        const savedSongs = await part(async () => (await SavedSong.find({ userId }).lean())
+            .map((s) => ({ title: s.title, channel: s.channel, lengthSeconds: s.durationSec || 0, savedAt: iso(s.createdAt) })));
+
+        const projects = await part(async () => (await IdeProject.find({ owner: userId }).sort({ createdAt: -1 }).lean())
+            .map((p) => ({ name: p.name, githubRepo: p.repo || p.masteroRepo || null, chatsInProject: (p.chatSessionIds || []).length, createdAt: iso(p.createdAt), lastOpenedAt: iso(p.lastOpenedAt) })));
+
+        const memory = await part(async () => (await AiSkill.find({ userId }).lean())
+            .map((s) => ({ name: s.name, whatTheAiRemembers: s.instructions, savedAt: iso(s.createdAt) })));
+
+        const payments = await part(async () => (await AiCreditTransaction.find({ userId }).sort({ createdAt: -1 }).lean())
+            .map((t) => ({
+                date: iso(t.paymentTime || t.createdAt),
+                kind: t.type === "plan" ? "plan" : t.type === "topup" ? "credits bought" : t.type,
+                plan: t.plan_key || null,
+                planTerm: t.plan_term || null,
+                amountInr: t.amount_inr,
+                creditsAdded: t.credits_added,
+                status: t.status,
+                paymentMethod: t.paymentMethod || null,
+                razorpayPaymentId: t.razorpay_payment_id || null,
+                razorpayOrderId: t.razorpay_order_id || null,
+            })));
+
+        const otherPaymentRecords = await part(async () => (await PlatformTransaction.find({ userId }).sort({ createdAt: -1 }).lean())
+            .map((t) => ({ date: iso(t.paymentTime || t.createdAt), amountInr: t.amount, status: t.status, kind: t.paymentFlow, razorpayPaymentId: t.razorpayPaymentId || null })));
+
+        const adminActionsOnThisAccount = await part(async () => (await AdminAuditLog.find({ targetId: String(userId) }).sort({ timestamp: -1 }).limit(500).lean())
+            .map((a) => ({ date: iso(a.timestamp || a.createdAt), action: a.action, by: a.actorName })));
+
+        // Sign-up answers are kept as free-form metadata: anything that looks like a secret stays out of the file
+        const signUpAnswers = Object.fromEntries(Object.entries(user.metadata || {})
+            .filter(([k]) => !/token|secret|password|hash|otp|code/i.test(k)));
+
+        const t = user.ai_tokens || {};
+        const plan = user.plan || {};
         const exportData = {
+            about: "Everything Classgrid AI keeps about this person, downloaded by a super admin on their request.",
             exportedAt: new Date().toISOString(),
             exportedBy: req.user.email,
             person: {
@@ -2562,42 +3228,16 @@ router.get("/gdpr/export/:userId", async (req, res) => {
 // Using POST (not DELETE) so the body is reliably parsed by all middleware
 router.post("/gdpr/erase/:userId", async (req, res) => {
     try {
+        if (!gdprValidId(req.params.userId)) return res.status(404).json({ success: false, message: "Person not found" });
         const User = (await import("../models/User.js")).default;
         const AdminAuditLog = (await import("../models/AdminAuditLog.js")).default;
 
         const user = await User.findById(req.params.userId).lean();
-        // Their chats (own ones, by email), 1000 at a time, and how many messages they hold
-        const chats = await part(async () => {
-            const rows = [];
-            for (let from = 0; ; from += 1000) {
-                const { data, error } = await sb.from("ai_chat_sessions")
-                    .select("id, title, created_at, is_incognito")
-                    .eq("user_email", user.email)
-                    .order("created_at", { ascending: false })
-                    .range(from, from + 999);
-                if (error) throw error;
-                rows.push(...(data || []));
-                if (!data || data.length < 1000) break;
-            }
-            let messagesTotal = 0;
-            const ids = rows.map((r) => r.id);
-            for (let i = 0; i < ids.length; i += 200) {
-                const { count, error } = await sb.from("ai_chat_messages")
-                    .select("id", { count: "exact", head: true })
-                    .in("session_id", ids.slice(i, i + 200));
-                if (error) throw error;
-                messagesTotal += count || 0;
-            }
-            return {
-                total: rows.length,
-                messagesTotal,
-                list: rows.map((r) => ({ id: r.id, title: r.title || "(no title)", startedAt: r.created_at, incognito: !!r.is_incognito })),
-            };
-        });
+        if (!user) return res.status(404).json({ success: false, message: "Person not found" });
 
-        // Safety: never erase a super_admin
-        if (user.role === "super_admin") {
-            return res.status(403).json({ success: false, message: "Super admin accounts can't be deleted." });
+        // Safety: never erase a super admin, a co super admin, an owner email or yourself
+        if (gdprProtected(user, req.user?._id)) {
+            return res.status(403).json({ success: false, message: "This account can't be deleted from here (an admin account)." });
         }
 
         // The super admin types the person's email to confirm, so the wrong row can't be deleted by a slip
@@ -2607,41 +3247,68 @@ router.post("/gdpr/erase/:userId", async (req, res) => {
         }
 
         // An account renamed by the old erase still has its chats under the email it had then (in the audit log)
+        // Chats, shares and doc access are kept by email, so the old email is used only when no other account has it
+        // now (someone who signed up again with it would otherwise lose their new chats)
         let dataEmail = user.email;
+        let oldEmailNote = null;
         const erasedEarlier = gdprErasedEarlier(user);
         if (erasedEarlier) {
             const earlier = await AdminAuditLog.findOne({ action: "user.gdpr_erase", targetId: String(user._id) })
                 .sort({ timestamp: -1 }).select("previousState").lean();
-            if (earlier?.previousState?.email) dataEmail = earlier.previousState.email;
+            const oldEmail = String(earlier?.previousState?.email || "").trim();
+            if (!oldEmail) {
+                oldEmailNote = "no record of the email it had before, so chats kept under that email could not be found";
+            } else {
+                const rx = new RegExp(`^${gdprEscapeRegex(oldEmail)}$`, "i");
+                const taken = await User.exists({ _id: { $ne: user._id }, $or: [{ email: rx }, { "account_emails.email": rx }] });
+                if (taken) oldEmailNote = "its old email now belongs to another account, so chats kept under that email were left alone";
+                else dataEmail = oldEmail;
+            }
         }
+
+        // The audit entry is written first (pending) and completed at the end, so an erase that stops half way is on record
+        const audit = await AdminAuditLog.create({
+            actorId: req.user._id, actorName: req.user.name, actorRole: "super_admin",
+            action: "user.gdpr_erase", targetId: String(user._id), targetName: user.name,
+            targetType: "user", previousState: { email: dataEmail, name: user.name, plan: gdprPlanId(user.plan) },
+            metadata: { erasedEarlier, oldEmailNote }, rollbackStatus: "none", status: "pending",
+            ip: req.ip, userAgent: req.headers["user-agent"] ?? "",
+        });
 
         const { deleteAccountData, deleteStoredFiles } = await import("../services/account-deletion.service.js");
         const { report, files } = await deleteAccountData({ ...user, email: dataEmail }, { io: req.app.get("io") });
         console.log(`[SuperAdmin] GDPR erase ${user._id} data:`, JSON.stringify(report));
 
-        await User.findByIdAndDelete(user._id);
-        // The files in storage go after the reply, like the person's own deletion (there can be many)
-        deleteStoredFiles(String(user._id), files)
-            .then((n) => console.log(`[SuperAdmin] GDPR erase ${user._id}: ${n} stored file(s) deleted`))
-            .catch((e) => console.error(`[SuperAdmin] GDPR erase ${user._id}: stored files failed:`, e.message));
+        // Parts that could not be removed are named, so the super admin knows to look (they are in the server log too)
+        const failed = Object.entries(report).filter(([, v]) => typeof v === "string" && v.startsWith("failed")).map(([k]) => k);
 
-        // Every erase is written to the audit log, with who it was and what each part removed
-        await AdminAuditLog.create({
-            actorId: req.user._id, actorName: req.user.name, actorRole: "super_admin",
-            action: "user.gdpr_erase", targetId: String(user._id), targetName: user.name,
-            targetType: "user", previousState: { email: dataEmail, name: user.name, plan: gdprPlanId(user.plan) },
-            metadata: { removed: report, storedFilesQueued: files.length, erasedEarlier }, rollbackStatus: "none",
-            ip: req.ip, userAgent: req.headers["user-agent"] ?? "",
-        }).catch(e => console.error("[AuditLog] gdpr_erase write failed:", e.message));
+        // All removed: the account goes. A part failed: the account stays (marked deleted, still in the list), so the
+        // erase can be run again for what is left
+        if (failed.length) await User.updateOne({ _id: user._id }, { $set: { status: "deleted" } });
+        else await User.findByIdAndDelete(user._id);
+        await AdminAuditLog.updateOne({ _id: audit._id }, {
+            $set: { status: failed.length ? "failure" : "success", "metadata.removed": report, "metadata.failedParts": failed, "metadata.storedFilesQueued": files.length },
+        }).catch(e => console.error("[AuditLog] gdpr_erase update failed:", e.message));
+
+        // The files in storage go after the reply, like the person's own deletion (there can be many); how many went is
+        // written into the same audit entry
+        deleteStoredFiles(String(user._id), files)
+            .then((n) => AdminAuditLog.updateOne({ _id: audit._id }, { $set: { "metadata.storedFilesDeleted": n } }).catch(() => {}))
+            .catch((e) => {
+                console.error(`[SuperAdmin] GDPR erase ${user._id}: stored files failed:`, e.message);
+                AdminAuditLog.updateOne({ _id: audit._id }, { $set: { "metadata.storedFilesError": String(e.message).slice(0, 300) } }).catch(() => {});
+            });
 
         const io = req.app.get("io");
         if (io) {
             io.emit("platform_gdpr_updated");
         }
 
-        // Parts that could not be removed are named, so the super admin knows to look (they are in the server log too)
-        const failed = Object.entries(report).filter(([, v]) => typeof v === "string" && v.startsWith("failed")).map(([k]) => k);
-        res.json({ success: true, failedParts: failed, message: failed.length ? `Deleted, but some parts failed: ${failed.join(", ")}.` : "Deleted." });
+        const note = oldEmailNote ? ` Note: ${oldEmailNote}.` : "";
+        res.json({
+            success: true, failedParts: failed, oldEmailNote,
+            message: failed.length ? `Some parts could not be deleted: ${failed.join(", ")}. The account is kept so you can try again.${note}` : `Deleted.${note}`,
+        });
     } catch (err) {
         console.error("[SuperAdmin] GDPR erase error:", err.message);
         res.status(500).json({ success: false, message: "Server error" });
@@ -2709,16 +3376,7 @@ router.post("/rollback/:logId", async (req, res) => {
             const User = (await import("../models/User.js")).default;
             const reverseStatus = action === "user.ban" ? "active" : "suspended";
             await User.findByIdAndUpdate(targetId, { $set: { status: reverseStatus } });
-        if (!gdprValidId(req.params.userId)) return res.status(404).json({ success: false, message: "Person not found" });
             rollbackMessage = `User status rolled back to ${reverseStatus}.`;
-        const AdminAuditLog = (await import("../models/AdminAuditLog.js")).default;
-        const AiCreditTransaction = (await import("../models/AiCreditTransaction.js")).default;
-        const PlatformTransaction = (await import("../models/PlatformTransaction.js")).default;
-        const AiLibraryFile = (await import("../models/AiLibraryFile.js")).default;
-        const SavedSong = (await import("../models/SavedSong.js")).default;
-        const IdeProject = (await import("../models/IdeProject.js")).default;
-        const AiSkill = (await import("../models/AiSkill.js")).default;
-        const { primarySupabaseClient: sb } = await import("../config/supabaseClient.js");
         } else if (action === "user.role_change" && targetId && previousState?.role) {
             const User = (await import("../models/User.js")).default;
             await User.findByIdAndUpdate(targetId, { $set: { role: previousState.role } });
@@ -2733,43 +3391,7 @@ router.post("/rollback/:logId", async (req, res) => {
         }
 
         // Mark log entry as rolled back
-        const savedSongs = await part(async () => (await SavedSong.find({ userId }).lean())
-            .map((s) => ({ title: s.title, channel: s.channel, lengthSeconds: s.durationSec || 0, savedAt: iso(s.createdAt) })));
-
-        const projects = await part(async () => (await IdeProject.find({ owner: userId }).sort({ createdAt: -1 }).lean())
-            .map((p) => ({ name: p.name, githubRepo: p.repo || p.masteroRepo || null, chatsInProject: (p.chatSessionIds || []).length, createdAt: iso(p.createdAt), lastOpenedAt: iso(p.lastOpenedAt) })));
-
-        const memory = await part(async () => (await AiSkill.find({ userId }).lean())
-            .map((s) => ({ name: s.name, whatTheAiRemembers: s.instructions, savedAt: iso(s.createdAt) })));
-
-        const payments = await part(async () => (await AiCreditTransaction.find({ userId }).sort({ createdAt: -1 }).lean())
-            .map((t) => ({
-                date: iso(t.paymentTime || t.createdAt),
-                kind: t.type === "plan" ? "plan" : t.type === "topup" ? "credits bought" : t.type,
-                plan: t.plan_key || null,
-                planTerm: t.plan_term || null,
-                amountInr: t.amount_inr,
-                creditsAdded: t.credits_added,
-                status: t.status,
-                paymentMethod: t.paymentMethod || null,
-                razorpayPaymentId: t.razorpay_payment_id || null,
-                razorpayOrderId: t.razorpay_order_id || null,
-            })));
-
-        const otherPaymentRecords = await part(async () => (await PlatformTransaction.find({ userId }).sort({ createdAt: -1 }).lean())
-            .map((t) => ({ date: iso(t.paymentTime || t.createdAt), amountInr: t.amount, status: t.status, kind: t.paymentFlow, razorpayPaymentId: t.razorpayPaymentId || null })));
-
-        const adminActionsOnThisAccount = await part(async () => (await AdminAuditLog.find({ targetId: String(userId) }).sort({ timestamp: -1 }).limit(500).lean())
-            .map((a) => ({ date: iso(a.timestamp || a.createdAt), action: a.action, by: a.actorName })));
-
-        // Sign-up answers are kept as free-form metadata: anything that looks like a secret stays out of the file
-        const signUpAnswers = Object.fromEntries(Object.entries(user.metadata || {})
-            .filter(([k]) => !/token|secret|password|hash|otp|code/i.test(k)));
-
-        const t = user.ai_tokens || {};
-        const plan = user.plan || {};
         await AdminAuditLog.findByIdAndUpdate(req.params.logId, {
-            about: "Everything Classgrid AI keeps about this person, downloaded by a super admin on their request.",
             $set: { rollbackStatus: "rolled_back", rolledBackBy: req.user._id, rolledBackAt: new Date() }
         });
 
@@ -2790,7 +3412,6 @@ router.get("/backup/stats", async (req, res) => {
         const User = (await import("../models/User.js")).default;
         const Organization = (await import("../models/Organization.js")).default;
         const EmailJob = (await import("../models/EmailJob.js")).default;
-        if (!gdprValidId(req.params.userId)) return res.status(404).json({ success: false, message: "Person not found" });
         const SystemLog = (await import("../models/SystemLog.js")).default;
         const AdminAuditLog = (await import("../models/AdminAuditLog.js")).default;
         const PlatformTransaction = (await import("../models/PlatformTransaction.js")).default;

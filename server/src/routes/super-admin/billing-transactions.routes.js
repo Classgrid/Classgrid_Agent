@@ -77,6 +77,15 @@ import * as Controller from "../../controllers/super-admin/billing-transactions.
 const router = express.Router();
 
 router.get("/", Controller.listTransactions);
+
+// Transactions pages (every payment for Classgrid AI: plans, credit top-ups, failed attempts, older payments).
+// These must stay above "/:transactionId", or "/payments" would be read as a transaction id and fail.
+// The param is called paymentKey, not ...Id, because validateBillingRequest checks every param ending in "id" for an
+// ObjectId, and a key can also be a Razorpay payment id (pay_...).
+router.get("/payments", Controller.listPayments);
+router.get("/payments/export", Controller.exportPayments);
+router.get("/payments/:paymentKey", Controller.getPayment);
+
 router.get("/:transactionId", Controller.getTransaction);
 
 router.post("/:transactionId/recheck", Controller.recheckTransaction);

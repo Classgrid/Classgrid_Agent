@@ -78,6 +78,11 @@ const router = express.Router();
 
 router.get("", Controller.listFailedPayments);
 router.get("/overview", Controller.getFailureOverview);
+// Classgrid AI failed payments (plans and AI credits), read only. They must stay above "/:failureId",
+// or "/ai" would be taken as a failure id.
+router.get("/ai", Controller.listAiFailedPayments);
+router.get("/ai/summary", Controller.getAiFailedPaymentsSummary);
+router.get("/ai/:id", Controller.getAiFailedPayment);
 router.get("/:failureId", Controller.getFailedPayment);
 
 router.post("/:failureId/generate-payment-link", Controller.generatePaymentLink);

@@ -1,5 +1,5 @@
 import { getJwtSecret } from "../utils/jwt-secret.js";
-import { forgetFeatureFlags } from "../services/feature-flag.service.js";
+import { FEATURE_GROUPS, getFeatureFlagDefinition, listFeatureFlagsForPage, setFeatureFlag } from "../services/feature-flag.service.js";
 /*
  * ─────────────────────────────────────────────────────────
  * 🚫 NO BLOCKS RULE (owner's order, 2026-10-23) 🚫
@@ -76,7 +76,6 @@ import { forgetFeatureFlags } from "../services/feature-flag.service.js";
 import { getChatSb, studentNotesClient } from "../config/supabaseClient.js";
 import { sendPushToMultiple } from "../services/firebase.service.js";
 import ScheduledNotification from "../models/ScheduledNotification.js";
-import FeatureFlag from "../models/FeatureFlag.js";
 import User from "../models/User.js";
 import Organization from "../models/Organization.js";
 import DemoRequest from "../models/DemoRequest.js";
@@ -359,76 +358,66 @@ export const cancelScheduledNotification = async (req, res) => {
 //  4. FEATURE FLAGS — Kill Switch CRUD
 // ══════════════════════════════════════════════════════════════
 
-// LIST all feature flags
+// The Feature flags page tells every super admin's open page to read the list again (socket event)
+const flagsChanged = (req) => {
+    const io = req.app.get("io");
+    if (io) io.emit("platform_feature_flags_updated");
+};
+
+// LIST every feature flag of Classgrid AI (the catalog in services/feature-flag.service.js, with each switch from
+// the database: a flag that was never switched is on), and the groups the page shows them under
 export const listFeatureFlags = async (req, res) => {
     try {
-        const flags = await FeatureFlag.find().sort({ key: 1 }).lean();
-        res.json({ success: true, flags });
+        const flags = await listFeatureFlagsForPage();
+        res.json({ success: true, groups: FEATURE_GROUPS, flags });
     } catch (err) {
+        console.error("[SuperAdmin] Feature flag list error:", err.message);
         res.status(500).json({ success: false, message: "Server error" });
     }
 };
 
-// CREATE or UPDATE a feature flag
+// SET one feature flag on or off. The flags are fixed in code now, so only a key from the catalog is accepted
+// (the old "New flag" form made flags that nothing checked).
 export const upsertFeatureFlag = async (req, res) => {
     try {
-        const { key, name, description, isEnabled, disabledForOrgs, enabledForOrgs, allowedOrgTypes, isPremium } = req.body;
-
-        if (!key || !name) {
-            return res.status(400).json({ success: false, message: "key and name are required" });
+        const { key, isEnabled } = req.body || {};
+        if (!getFeatureFlagDefinition(key)) {
+            return res.status(400).json({ success: false, message: "There is no feature with that key." });
         }
-
-        const flag = await FeatureFlag.findOneAndUpdate(
-            { key },
-            {
-                key,
-                name,
-                description: description || "",
-                isEnabled: isEnabled !== undefined ? isEnabled : true,
-                disabledForOrgs: disabledForOrgs || [],
-                enabledForOrgs: enabledForOrgs || [],
-                allowedOrgTypes: allowedOrgTypes || [],
-                isPremium: isPremium || false,
-                lastModifiedBy: req.user._id
-            },
-            { upsert: true, returnDocument: 'after' }
-        );
-        forgetFeatureFlags(); // (the flags are kept in memory between requests)
-
-        const io = req.app.get("io");
-        if (io) {
-            io.emit("platform_feature_flags_updated");
+        if (typeof isEnabled !== "boolean") {
+            return res.status(400).json({ success: false, message: "isEnabled must be true or false." });
         }
-
-        res.json({ success: true, message: `Feature flag "${key}" updated`, flag });
+        const flag = await setFeatureFlag(key, isEnabled, req.user);
+        flagsChanged(req);
+        res.json({ success: true, message: `${flag.name} is now ${flag.isEnabled ? "on" : "off"}.`, flag });
     } catch (err) {
         console.error("[SuperAdmin] Feature flag error:", err.message);
         res.status(500).json({ success: false, message: "Server error" });
     }
 };
 
-// TOGGLE a feature flag ON/OFF instantly
+// TOGGLE a feature flag. The page sends the state it wants ({ isEnabled }), so two clicks from two open pages
+// can't flip it back by accident; without a body it flips the current state.
 export const toggleFeatureFlag = async (req, res) => {
     try {
-        const flag = await FeatureFlag.findOne({ key: req.params.key });
-        if (!flag) return res.status(404).json({ success: false, message: "Feature flag not found" });
+        const definition = getFeatureFlagDefinition(req.params.key);
+        if (!definition) return res.status(404).json({ success: false, message: "Feature flag not found" });
 
-        flag.isEnabled = !flag.isEnabled;
-        flag.lastModifiedBy = req.user._id;
-        await flag.save();
-        forgetFeatureFlags(); // (the flags are kept in memory between requests)
-
-        const io = req.app.get("io");
-        if (io) {
-            io.emit("platform_feature_flags_updated");
+        let wanted = req.body?.isEnabled;
+        if (typeof wanted !== "boolean") {
+            const current = (await listFeatureFlagsForPage()).find((f) => f.key === definition.key);
+            wanted = !(current?.isEnabled ?? true);
         }
+        const flag = await setFeatureFlag(definition.key, wanted, req.user);
+        flagsChanged(req);
 
         res.json({
             success: true,
-            message: `"${flag.name}" is now ${flag.isEnabled ? "ON ✅" : "OFF ❌"}`,
+            message: `${definition.name} is now ${flag.isEnabled ? "on" : "off"}.`,
             flag
         });
     } catch (err) {
+        console.error("[SuperAdmin] Feature flag toggle error:", err.message);
         res.status(500).json({ success: false, message: "Server error" });
     }
 };

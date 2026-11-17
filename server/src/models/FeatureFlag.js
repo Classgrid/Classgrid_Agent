@@ -74,12 +74,15 @@
 import mongoose from "mongoose";
 
 /**
- * FeatureFlag â€” Kill Switch for any module on the platform.
- * Super Admin can disable "Go Live", "Canteen", "Quiz" etc. globally 
- * or for specific organizations without deploying new code.
+ * FeatureFlag: one kill switch for one feature of Classgrid AI (voice mode, image making, Studio...).
+ * The list of features lives in code (services/feature-flag.service.js, FEATURE_FLAG_CATALOG); a document here
+ * only remembers a switch the super admin has changed. A feature with no document is on.
+ *
+ * Older documents (from before 2026-11-17) used the org fields below; they are kept so those documents still
+ * load, but nothing reads them any more.
  */
 const featureFlagSchema = new mongoose.Schema({
-    // Unique key for the feature (e.g., "go_live", "canteen", "quiz_manager")
+    // The feature's key from the catalog (e.g. "voice_mode", "image_generation")
     key: {
         type: String,
         required: true,
@@ -102,6 +105,12 @@ const featureFlagSchema = new mongoose.Schema({
         trim: true,
         default: "platform"
     },
+    // The group the feature is shown under on the Feature flags page (copied from the catalog when saved)
+    group: {
+        type: String,
+        trim: true,
+        default: ""
+    },
     routePrefixes: [{
         type: String,
         trim: true
@@ -115,32 +124,42 @@ const featureFlagSchema = new mongoose.Schema({
         type: Boolean,
         default: true
     },
-    // If globally enabled, you can still disable for specific orgs
+    // Old fields (no longer read): per-org overrides, org types and premium
     disabledForOrgs: [{
         type: mongoose.Schema.Types.ObjectId,
         ref: "Organization"
     }],
-    // If globally disabled, you can still enable for specific orgs (beta testing)
     enabledForOrgs: [{
         type: mongoose.Schema.Types.ObjectId,
         ref: "Organization"
     }],
-    // Which org types can use this feature? Empty = all
     allowedOrgTypes: [{
         type: String,
         enum: ["SCHOOL", "COLLEGE", "COACHING", "JUNIOR_COLLEGE", "DIPLOMA", "CUSTOM"]
     }],
-    // Is this a premium-only feature?
     isPremium: {
         type: Boolean,
         default: false
     },
-    // Who last modified this flag
+    // Who last switched this flag, and when (the page shows it). The name and email are copied at that moment so
+    // the page can show them even if the account changes later.
     lastModifiedBy: {
         type: mongoose.Schema.Types.ObjectId,
         ref: "User"
+    },
+    lastModifiedByName: {
+        type: String,
+        default: ""
+    },
+    lastModifiedByEmail: {
+        type: String,
+        default: ""
+    },
+    lastModifiedAt: {
+        type: Date,
+        default: null
     }
 }, { timestamps: true });
 
-export default mongoose.models.FeatureFlag || 
+export default mongoose.models.FeatureFlag ||
     mongoose.model("FeatureFlag", featureFlagSchema);

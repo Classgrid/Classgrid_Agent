@@ -117,6 +117,8 @@ export function GdprPage() {
   const people = data?.data ?? [];
   const total = data?.total ?? 0;
   const pages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+  // (deleting the last person on the last page leaves that page empty: go back to the last page that has people)
+  useEffect(() => { if (data && page > pages) setPage(pages); }, [data, page, pages]);
 
   async function handleDownload(person: PrivacyPerson) {
     setDownloadingId(person._id);

@@ -120,12 +120,17 @@ export function giftEndDate(body = {}, now = new Date()) {
 export const setUserPlan = async (req, res) => {
     try {
         const { userId } = req.params;
+        // (a bad id used to reach findById and come back as a server error)
+        if (!/^[a-f0-9]{24}$/i.test(String(userId || ""))) return res.status(400).json({ success: false, message: "Invalid user ID." });
         const planId = String(req.body?.planId || "free");
         if (!PLAN_KEYS.includes(planId)) return res.status(400).json({ success: false, message: "No such plan." });
         const reason = String(req.body?.reason ?? req.body?.note ?? "").trim().slice(0, 300);
         if (planId !== "free" && !reason) return res.status(400).json({ success: false, message: "Write why you are giving this plan." });
         const { expiresAt, error } = planId === "free" ? { expiresAt: null } : giftEndDate(req.body || {});
         if (error) return res.status(400).json({ success: false, message: error });
+        // A plan marked "coming soon" (Enterprise today) is not sold yet, so it cannot be given either
+        const planRow = planId === "free" ? null : await PlanConfig.findOne({ key: planId }).lean();
+        if (planId !== "free" && (!planRow || planRow.coming_soon === true)) return res.status(400).json({ success: false, message: "This plan is not open yet." });
         const user = await User.findById(userId).select("plan email name");
         if (!user) return res.status(404).json({ success: false, message: "User not found." });
         const before = user.plan ? { id: user.plan.id, status: user.plan.status, billing: user.plan.billing, started_at: user.plan.started_at, expires_at: user.plan.expires_at } : null;
@@ -142,7 +147,11 @@ export const setUserPlan = async (req, res) => {
         };
         await user.save();
         const io = req.app.get("io");
-        if (io) { io.to(String(userId)).emit("ai_token_update"); io.to(String(userId)).emit("plan_update", { plan: planId }); } // (a user's socket room is their id, socket.service.js)
+        if (io) {
+            io.to(String(userId)).emit("ai_token_update"); io.to(String(userId)).emit("plan_update", { plan: planId }); // (a user's socket room is their id, socket.service.js)
+            // Every open Plans & Usage page refreshes its plan counts, people list and this person
+            io.to("superadmin:ai_usage").emit("ai_usage_updated");
+        }
         res.json({ success: true, plan: user.plan });
         // The audit log (after the reply, so a failed log never fails the save)
         AdminAuditLog.create({
@@ -159,7 +168,7 @@ export const setUserPlan = async (req, res) => {
             userAgent: req.headers?.["user-agent"] || "",
         }).catch((e) => console.error("[setUserPlan] audit log failed:", e.message));
         // After the reply, so the email never holds up or fails the save: "You're on the Classgrid Pro plan"
-        if (planId !== "free") planSetEmail(user, planId).catch((e) => console.error("[setUserPlan] plan email failed:", e.message));
+        if (planId !== "free") planSetEmail(user, planId, planRow).catch((e) => console.error("[setUserPlan] plan email failed:", e.message));
     } catch (error) {
         console.error("[setUserPlan]", error);
         res.status(500).json({ success: false, message: "Server error setting the plan." });
@@ -168,9 +177,10 @@ export const setUserPlan = async (req, res) => {
 
 // The email for a plan set by a super admin: the plan's name, its dates, and its features_text lines, read live from
 // the plan table (as the webhook's receipt does). Nothing for Free, without an email address, or without a plan row.
-export async function planSetEmail(user, planId) {
+// setUserPlan passes the row it already read (for the "not open yet" check), so the table is not read twice.
+export async function planSetEmail(user, planId, knownRow = null) {
     if (!user?.email || planId === "free") return;
-    const planRow = await PlanConfig.findOne({ key: planId }).lean();
+    const planRow = knownRow || await PlanConfig.findOne({ key: planId }).lean();
     const { getPlanSetEmail } = await import("../../services/email-templates.service.js");
     const mail = getPlanSetEmail({ userName: user.name, plan: planRow, start: user.plan?.started_at || new Date(), end: user.plan?.expires_at || null });
     if (!mail) return;

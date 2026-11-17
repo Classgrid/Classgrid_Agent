@@ -242,6 +242,8 @@ adminAuditLogSchema.index({ organization_id: 1, timestamp: -1 });
 adminAuditLogSchema.index({ actorId: 1, timestamp: -1 });
 adminAuditLogSchema.index({ action: 1, timestamp: -1 });
 adminAuditLogSchema.index({ rollbackStatus: 1, timestamp: -1 });
+// The plan history of one person (Plans & Usage > a person > History): their gifts and ends, newest first
+adminAuditLogSchema.index({ targetId: 1, timestamp: -1 });
 
 export default mongoose.models.AdminAuditLog ||
     mongoose.model("AdminAuditLog", adminAuditLogSchema);

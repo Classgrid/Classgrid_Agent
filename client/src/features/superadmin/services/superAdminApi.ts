@@ -563,14 +563,19 @@ export const auditApi = {
 
 // ─── Config & Feature Flags API ───────────────────────────────────────────────
 
+// One kill switch per Classgrid AI feature (the list is fixed on the server: services/feature-flag.service.js).
+// A flag nobody has switched yet is on and has no changedBy / changedAt.
 export type FeatureFlag = {
-  _id: string;
   key: string;
+  name: string;
+  group: string;
   description: string;
   isEnabled: boolean;
-  module: string;
-  updatedAt: string;
+  changedAt: string | null;
+  changedBy: { name: string; email: string } | null;
 };
+
+export type FeatureFlagGroup = { id: string; label: string };
 
 export const configApi = {
   getHealth: () =>
@@ -597,14 +602,15 @@ export const configApi = {
       .get<any>("/api/super-admin/feature-flags")
       .then((r) => {
         const raw = r.data;
-        // Backend returns: { success, flags: [...] }  (not data)
-        const flags: FeatureFlag[] = raw?.flags ?? raw?.data ?? [];
-        return { success: true, data: flags };
+        // Backend returns: { success, groups: [...], flags: [...] }
+        const flags: FeatureFlag[] = raw?.flags ?? [];
+        const groups: FeatureFlagGroup[] = raw?.groups ?? [];
+        return { success: true, data: flags, groups };
       }),
 
   toggleFeatureFlag: (key: string, isEnabled: boolean) =>
     apiClient
-      .patch<{ success: boolean; data: FeatureFlag }>(`/api/super-admin/feature-flags/${key}/toggle`, { isEnabled })
+      .patch<{ success: boolean; message: string }>(`/api/super-admin/feature-flags/${key}/toggle`, { isEnabled })
       .then((r) => r.data),
 };
 

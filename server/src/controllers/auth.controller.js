@@ -120,6 +120,7 @@ import { sendSMS } from "../services/sms.service.js";
 import { RecaptchaVerificationError, verifyRecaptchaToken } from "../services/recaptcha.service.js";
 import { isPublicChatAccount, needsChatOnboarding, isSharedTestWhatsapp, readableJobRole, whatsappStepDone } from "../utils/chat-onboarding.js";
 import { isWebsiteOrigin } from "../utils/client-app.js";
+import { isFeatureOn, sendFeatureOff } from "../services/feature-flag.service.js";
 
 const JWT_SECRET = getJwtSecret();
 const getFrontendUrl = () => {
@@ -3264,6 +3265,9 @@ export const chatVerifyEmailOtp = async (req, res) => {
         // Find or create user (an added email of an account is that account)
         let user = await findByAnyEmail(User, email);
         let isNewAccount = false;
+        // Feature flags: while Sign-up is off (super admin > Feature flags) no new account is made; people who
+        // already have one sign in as usual
+        if (!user && !(await isFeatureOn("signup"))) return sendFeatureOff(res, "signup");
         if (!user) {
             isNewAccount = true;
             user = await User.create({
@@ -3540,6 +3544,8 @@ export const chatFinalizeOnboarding = async (req, res) => {
         // The WhatsApp part of the account: the verified number, or the Skip mark (a number already there is kept)
         const whatsappMeta = skipWhatsapp ? { whatsappSkipped: true } : { whatsappPhone, whatsapp_number: whatsappPhone };
 
+        // Feature flags: no new account while Sign-up is off (an account that exists finishes its setup as usual)
+        if (!user && !(await isFeatureOn("signup"))) return sendFeatureOff(res, "signup");
         if (!user) {
             user = new User({
                 email: email.toLowerCase(),

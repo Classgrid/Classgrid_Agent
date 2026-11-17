@@ -33,6 +33,7 @@ import crypto from "crypto";
 import { isAuthenticated } from "../middleware/auth.middleware.js";
 import User from "../models/User.js";
 import connectDB from "../../config/db.js";
+import { isFeatureOn } from "../services/feature-flag.service.js";
 
 const router = express.Router();
 
@@ -193,7 +194,8 @@ router.post("/messages-internal", async (req, res) => {
         // help bot stays quiet. busy: an Agent or a call is using this number's chat, so the help bot stays quiet.
         const from = req.body?.messages?.[0]?.from;
         let taken = false;
-        if (from) {
+        // (Feature flags: while Tasks from calls are off, a message wakes no task and the help bot answers it)
+        if (from && (await isFeatureOn("call_tasks"))) {
             const { onWhatsappMessage } = await import("../services/agent-task.service.js");
             taken = await onWhatsappMessage(req.body).catch((e) => { console.error("[agent task] WhatsApp message failed:", e.message); return false; });
         }

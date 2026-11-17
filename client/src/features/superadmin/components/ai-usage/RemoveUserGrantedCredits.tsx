@@ -28,7 +28,8 @@ export function RemoveUserGrantedCredits({ userId, transactionId }: { userId: st
     try {
       await apiClient.post(`/api/super-admin/ai-usage/users/${userId}/credits/${transactionId}/remove`);
       toast.success("Granted credits removed successfully.");
-      queryClient.invalidateQueries({ queryKey: ["aiUsage", "user", userId] });
+      // (the person page reads ["ai-usage-user", id]; the old "aiUsage" keys matched no query, so the page did not refresh)
+      queryClient.invalidateQueries({ queryKey: ["ai-usage-user", userId] });
       queryClient.invalidateQueries({ queryKey: ["aiUsage"] });
       setIsDialogOpen(false);
     } catch (e: any) {

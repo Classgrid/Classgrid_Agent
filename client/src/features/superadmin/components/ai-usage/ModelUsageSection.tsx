@@ -24,9 +24,10 @@ import { cn } from "@/lib/utils";
 type Metric = "requests" | "tokens" | "costUSD";
 type Preset = "today" | "7d" | "30d" | "month" | "custom";
 
+// No green in the app's own look (owner's rule), so the greens and the green-leaning lime and teal are left out
 const PALETTE = [
-  "#3b82f6", "#ec4899", "#10b981", "#f59e0b", "#8b5cf6", "#ef4444", "#06b6d4", "#84cc16", "#f97316", "#a855f7",
-  "#14b8a6", "#eab308", "#6366f1", "#f43f5e", "#22c55e", "#0ea5e9", "#d946ef", "#64748b", "#78716c", "#facc15",
+  "#3b82f6", "#ec4899", "#f59e0b", "#8b5cf6", "#ef4444", "#06b6d4", "#f97316", "#a855f7",
+  "#eab308", "#6366f1", "#f43f5e", "#0ea5e9", "#d946ef", "#64748b", "#78716c", "#facc15",
 ];
 const OTHER_COLOR = "#94a3b8";
 const TIMELINE_TOP_MODELS = 6;
@@ -81,15 +82,16 @@ function ChartTooltip({ active, payload, label, metric }: any) {
   );
 }
 
-export function ModelUsageSection({ orgs }: { orgs?: { id: string; name: string }[] }) {
+// Every person is in the one Classgrid account now, so the old organization picker is gone and the breakdown is
+// always for everyone.
+export function ModelUsageSection() {
   const [preset, setPreset] = useState<Preset>("7d");
   const [range, setRange] = useState(() => presetRange("7d"));
   const [customFrom, setCustomFrom] = useState<Date | undefined>();
   const [customTo, setCustomTo] = useState<Date | undefined>();
-  const [orgId, setOrgId] = useState("all");
   const [metric, setMetric] = useState<Metric>("requests");
 
-  const { data, isLoading, isError } = useAiModelBreakdown({ ...range, orgId: orgId === "all" ? undefined : orgId });
+  const { data, isLoading, isError } = useAiModelBreakdown(range);
 
   const choosePreset = (p: Preset) => {
     setPreset(p);
@@ -137,7 +139,7 @@ export function ModelUsageSection({ orgs }: { orgs?: { id: string; name: string 
       <Card>
         <CardHeader className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between space-y-0">
           <div>
-            <CardTitle>Model Usage</CardTitle>
+            <CardTitle>Models used</CardTitle>
             <p className="text-sm text-muted-foreground mt-1">
               {requestsTotal.toLocaleString("en-IN")} requests
               {failedTotal > 0 && <span className="text-rose-500"> · {failedTotal.toLocaleString("en-IN")} failed</span>}
@@ -145,7 +147,7 @@ export function ModelUsageSection({ orgs }: { orgs?: { id: string; name: string 
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
-            <div className="flex rounded-lg border border-border p-0.5">
+            <div className="flex flex-wrap rounded-lg border border-border p-0.5">
               {PRESETS.map((p) => (
                 <button
                   key={p.id}
@@ -160,16 +162,8 @@ export function ModelUsageSection({ orgs }: { orgs?: { id: string; name: string 
                 </button>
               ))}
             </div>
-            <Select value={orgId} onValueChange={(v) => setOrgId(v || "all")}>
-              <SelectTrigger className="w-[180px] h-9"><SelectValue placeholder="All organizations" /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All organizations</SelectItem>
-                <SelectItem value="classgrid">Classgrid (no org)</SelectItem>
-                {(orgs || []).map((o) => <SelectItem key={o.id} value={o.id}>{o.name}</SelectItem>)}
-              </SelectContent>
-            </Select>
             <Select value={metric} onValueChange={(v) => v && setMetric(v as Metric)}>
-              <SelectTrigger className="w-[130px] h-9"><SelectValue /></SelectTrigger>
+              <SelectTrigger className="w-[130px] h-9"><SelectValue>{(v: Metric) => METRIC_LABELS[v] || METRIC_LABELS.requests}</SelectValue></SelectTrigger>
               <SelectContent>
                 {(Object.keys(METRIC_LABELS) as Metric[]).map((m) => <SelectItem key={m} value={m}>{METRIC_LABELS[m]}</SelectItem>)}
               </SelectContent>
@@ -212,7 +206,7 @@ export function ModelUsageSection({ orgs }: { orgs?: { id: string; name: string 
         <>
           <div className="grid gap-6 lg:grid-cols-2">
             <Card>
-              <CardHeader><CardTitle>Share by Model</CardTitle></CardHeader>
+              <CardHeader><CardTitle>Share of each model</CardTitle></CardHeader>
               <CardContent className="flex flex-col items-center gap-6">
                 <div className="relative h-[220px] w-[220px]">
                   <ResponsiveContainer width="100%" height="100%">
@@ -244,7 +238,7 @@ export function ModelUsageSection({ orgs }: { orgs?: { id: string; name: string 
             </Card>
 
             <Card>
-              <CardHeader><CardTitle>Most Used Models</CardTitle></CardHeader>
+              <CardHeader><CardTitle>Most used models</CardTitle></CardHeader>
               <CardContent>
                 <div style={{ height: Math.max(200, ranked.length * 34) }} className="w-full">
                   <ResponsiveContainer width="100%" height="100%">
@@ -265,7 +259,7 @@ export function ModelUsageSection({ orgs }: { orgs?: { id: string; name: string 
 
           <Card>
             <CardHeader>
-              <CardTitle>Models Over Time</CardTitle>
+              <CardTitle>Models over time</CardTitle>
               <p className="text-sm text-muted-foreground">
                 {data?.bucket === "hour" ? "Per hour" : "Per day"} · top {Math.min(TIMELINE_TOP_MODELS, ranked.length)} models{hasOther ? ", the rest grouped as Other" : ""}
               </p>

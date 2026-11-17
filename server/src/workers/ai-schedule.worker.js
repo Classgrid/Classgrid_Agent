@@ -34,10 +34,16 @@ import User from '../models/User.js';
 import { sendEmail } from '../services/aws-ses.service.js';
 import { normalizeWhatsappNumber, checkWhatsappLimit, recordDirectWhatsappSend } from '../services/ai-feature-limits.js';
 import { nextRun } from '../utils/schedule-repeat.js';
+import { offFeatures } from '../services/feature-flag.service.js';
 
 // Run every minute
 cron.schedule('* * * * *', async () => {
   try {
+    // Feature flags (super admin > Feature flags): with Schedules off nothing is sent; the schedules stay pending and
+    // go out when Schedules are turned back on (a repeating one skips the runs it missed, see nextRun below).
+    // Email and WhatsApp have their own flags: while one is off, that part of a schedule is not sent.
+    const flagsOff = await offFeatures().catch(() => new Set());
+    if (flagsOff.has('schedules')) return;
     const now = new Date();
     // Find pending schedules where scheduled time has passed
     const pendingSchedules = await AiSchedule.find({
@@ -77,7 +83,7 @@ cron.schedule('* * * * *', async () => {
           .catch((pushErr) => console.warn(`[AiSchedule Worker] Push failed: ${pushErr.message}`));
 
         // Fire and forget AWS SES if email fields exist
-        if (schedule.email_subject && schedule.email_body) {
+        if (schedule.email_subject && schedule.email_body && !flagsOff.has('email_sending')) {
           sendEmail({
             to: schedule.user_email,
             subject: schedule.email_subject,
@@ -89,8 +95,8 @@ cron.schedule('* * * * *', async () => {
 
         // Each run of a repeating schedule counts toward the weekly WhatsApp limit when it goes out;
         // over the limit, that run sends the email only
-        let whatsappAllowed = true;
-        if (isRepeat && schedule.whatsapp_phone_number && schedule.whatsapp_message && schedule.user_id) {
+        let whatsappAllowed = !flagsOff.has('whatsapp_messages');
+        if (whatsappAllowed && isRepeat && schedule.whatsapp_phone_number && schedule.whatsapp_message && schedule.user_id) {
           try {
             // The limit of the person's own plan: with only their id here, a paid person's repeats were checked
             // against the Free plan's numbers (the plan is read from the account)

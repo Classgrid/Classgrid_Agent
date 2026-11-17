@@ -73,7 +73,9 @@ export function useFeatureFlags() {
   return useQuery({
     queryKey: FEATURE_FLAGS_KEY,
     queryFn: () => configApi.getFeatureFlags(),
-    staleTime: 60_000,
+    // (a switch changed on another super admin's page shows here soon; the socket event refreshes it at once)
+    staleTime: 10_000,
+    refetchInterval: 30_000,
   });
 }
 

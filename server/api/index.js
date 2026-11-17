@@ -138,7 +138,7 @@ import buildRoutes from "../src/routes/build.routes.js";
 import extractSubdomain, { resolveTenant, getPublicTenantInfo } from "../src/middleware/subdomain-router.middleware.js";
 import { sendEmail } from "../src/services/aws-ses.service.js";
 import { metricsMiddleware, startMetricsFlush } from "../src/middleware/metrics.middleware.js";
-import { enforceFeatureFlags, platformAccessGate } from "../src/middleware/feature-flag.middleware.js";
+import { enforceFeatureFlags } from "../src/middleware/feature-flag.middleware.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -383,8 +383,9 @@ if (isProduction) {
   });
 }
 
-// 🛡️ Enforce Feature Flags
-app.use(platformAccessGate);
+// 🛡️ Feature flags (kill switches, super admin > Feature flags): a request to a feature that is turned off is
+// answered here with 423 { code: "feature_off" } (services/feature-flag.service.js). The old "platform access"
+// switch is gone: the flags are now one per Classgrid AI feature.
 app.use(enforceFeatureFlags);
 
 /* ---------- API ROUTES ---------- */

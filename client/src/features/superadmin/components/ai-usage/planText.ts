@@ -48,7 +48,23 @@ export function planLines(p: PlanRow) {
     { label: "Session", value: limitText(p.tokens_per_window, "credits", periodText(p.window_reset_value, p.window_reset_unit)) },
     { label: "Week", value: limitText(p.tokens_per_week, "credits", "a week") },
     { label: "Claude", value: limitText(p.claude_credits_per_week, "credits", "a week") },
-    { label: "Images", value: limitText(p.images_per_period, "images", periodText(p.images_reset_value, p.images_reset_unit)) },
+    { label: "Pictures", value: limitText(p.images_per_period, "pictures", periodText(p.images_reset_value, p.images_reset_unit)) },
     { label: "Calls", value: limitText(p.call_minutes_per_period, "minutes", periodText(p.call_reset_value, p.call_reset_unit)) },
   ];
+}
+
+/** The first word of a person's name, for sentences like "Give Asha a paid plan" ("this person" when there is no name) */
+export function firstNameOf(name?: string | null) {
+  return String(name || "").trim().split(/\s+/)[0] || "this person";
+}
+
+/** "1 person", "12 people" */
+export const peopleText = (count: number) => `${num(count)} ${count === 1 ? "person" : "people"}`;
+
+/** A 24 character hex id, the only kind of person id the server knows (anything else is not looked up) */
+export const isPersonId = (id?: string | null) => !!id && /^[0-9a-f]{24}$/i.test(id);
+
+/** Scrolls the page to a section by its id (the "See people" and "Gift a plan" buttons) */
+export function scrollToId(id: string) {
+  document.getElementById(id)?.scrollIntoView({ behavior: "smooth", block: "start" });
 }

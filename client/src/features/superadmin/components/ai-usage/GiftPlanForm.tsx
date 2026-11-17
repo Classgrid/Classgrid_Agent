@@ -1,6 +1,7 @@
 // Gift a plan (owner, 2026-11-17): pick a paid plan from the plan table, how long it lasts (1, 3, 6 months, 1 year or
 // an end date) and why. Saved by setUserPlan (PUT /api/super-admin/ai-usage/users/:id/plan), which keeps the reason
 // on the plan and in the admin audit log, and emails the user "You're on the Classgrid {Plan} plan".
+// disabled: the person's page turns the button off for Classgrid staff accounts, which never use a plan.
 import { useMemo, useState } from "react";
 import { toast } from "sonner";
 import { Gift } from "lucide-react";
@@ -17,7 +18,7 @@ const PERIODS = [
   { key: "3", label: "3 months", months: 3 },
   { key: "6", label: "6 months", months: 6 },
   { key: "12", label: "1 year", months: 12 },
-  { key: "date", label: "End date", months: 0 },
+  { key: "date", label: "Pick a date", months: 0 },
 ] as const;
 type PeriodKey = (typeof PERIODS)[number]["key"];
 
@@ -27,7 +28,7 @@ const inr = (v: unknown) => (Number(v) > 0 ? `₹${Math.round(Number(v)).toLocal
 const todayIso = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`; };
 const monthsFromNow = (months: number) => { const d = new Date(); d.setMonth(d.getMonth() + months); return d; };
 
-export function GiftPlanForm({ userIds, who, onDone, idPrefix = "gift" }: { userIds: string[]; who?: string; onDone?: () => void; idPrefix?: string }) {
+export function GiftPlanForm({ userIds, who, onDone, idPrefix = "gift", disabled = false }: { userIds: string[]; who?: string; onDone?: () => void; idPrefix?: string; disabled?: boolean }) {
   const { data, isLoading } = useAiPlans();
   const plans = useMemo(() => giftablePlans(data?.plans), [data]);
   const gift = useGiftPlan();
@@ -47,12 +48,12 @@ export function GiftPlanForm({ userIds, who, onDone, idPrefix = "gift" }: { user
 
   const submit = () => {
     setTried(true);
-    if (!plan || !end || !endOk || !reasonOk || !userIds.length) return;
+    if (disabled || !plan || !end || !endOk || !reasonOk || !userIds.length) return;
     gift.mutate(
       { userIds, planId: plan.key, reason: reason.trim(), ...(choice.months ? { months: choice.months } : { expiresAt: end.toISOString() }) },
       {
         onSuccess: (count) => {
-          toast.success(`${plan.name} plan given to ${count === 1 ? who || "the user" : `${count} users`}, until ${dayText(end)}`);
+          toast.success(`${plan.name} given to ${count === 1 ? who || "this person" : `${count} people`} until ${dayText(end)}`);
           setReason("");
           setTried(false);
           onDone?.();
@@ -98,7 +99,7 @@ export function GiftPlanForm({ userIds, who, onDone, idPrefix = "gift" }: { user
         {period === "date" && (
           <Input id={`${idPrefix}-end`} type="date" min={todayIso()} value={endDate} onChange={(e) => setEndDate(e.target.value)} disabled={busy} className="h-9 max-w-[220px] mt-1" aria-label="End date" />
         )}
-        {tried && !endOk && <p className="text-xs text-red-500">Pick an end date after today.</p>}
+        {tried && !endOk && <p className="text-xs text-red-500">Pick a date after today.</p>}
       </div>
 
       <div className="flex flex-col gap-2">
@@ -106,17 +107,17 @@ export function GiftPlanForm({ userIds, who, onDone, idPrefix = "gift" }: { user
         <Textarea id={`${idPrefix}-reason`} rows={2} value={reason} onChange={(e) => setReason(e.target.value)} disabled={busy} maxLength={300}
           placeholder="For example: thanks for the bug reports" className="min-h-[64px]" fieldState={tried && !reasonOk ? "error" : "normal"} />
         <p className={`text-xs ${tried && !reasonOk ? "text-red-500" : "text-muted-foreground"}`}>
-          {tried && !reasonOk ? "Write why you are giving this plan." : "Saved with the plan and shown in the plan history."}
+          {tried && !reasonOk ? "Write why you are giving this plan." : "Saved with the plan and shown in the history."}
         </p>
       </div>
 
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 border-t border-border pt-4">
         <p className="text-sm text-muted-foreground">
-          {end ? <>{plan.name} until <span className="text-foreground font-medium">{dayText(end)}</span>. {userIds.length === 1 ? "The user gets" : "Each user gets"} an email.</> : "Pick when the plan ends."}
+          {end ? <>{plan.name} until <span className="text-foreground font-medium">{dayText(end)}</span>. {userIds.length === 1 ? "They get" : "Each one gets"} an email.</> : "Pick when the plan ends."}
         </p>
-        <Button type="button" size="sm" onClick={submit} isLoading={busy} disabled={!userIds.length} className="shrink-0">
+        <Button type="button" size="sm" onClick={submit} isLoading={busy} disabled={disabled || !userIds.length} className="shrink-0">
           {!busy && <Gift className="w-4 h-4" />}
-          {`Gift ${plan.name}`}{userIds.length > 1 ? ` to ${userIds.length} users` : ""}
+          {`Gift ${plan.name}`}{userIds.length > 1 ? ` to ${userIds.length} people` : ""}
         </Button>
       </div>
     </div>

@@ -14,7 +14,8 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { apiClient as api } from "@/lib/apiClient";
-import type { UsageHistory } from "@/features/shared/queries/usePlanOverview";
+import type { UsageHistory, PlanOverview } from "@/features/shared/queries/usePlanOverview";
+import type { UserPlan } from "@/features/superadmin/components/ai-usage/planText";
 
 export type ResetUnit = "second" | "minute" | "hour" | "day" | "week" | "month";
 export type ResetPeriod = { value: number; unit: ResetUnit; ms?: number; label?: string };
@@ -110,12 +111,18 @@ export const useAiOrgUsers = (orgId: string) => useQuery({
   refetchIntervalInBackground: true,
 });
 
+/** A person's page on Plans & Usage (GET /users/:id/detail). The socket refreshes it on every change, so the minute
+ * timer is only a safety net, and it stops while the tab is hidden. A wrong or unknown id (400, 404) is not retried. */
 export const useAiUserDetail = (userId: string) => useQuery({
   queryKey: ["ai-usage-user", userId],
-  queryFn: () => aiUsageApi.getUserDetail(userId),
-  refetchInterval: 30000,
-  refetchIntervalInBackground: true,
+  queryFn: async () => (await aiUsageApi.getUserDetail(userId)) as UserDetail,
+  refetchInterval: 60_000,
+  refetchIntervalInBackground: false,
   enabled: !!userId,
+  retry: (count, error) => {
+    const status = (error as { response?: { status?: number } })?.response?.status;
+    return status !== 400 && status !== 404 && count < 2;
+  },
 });
 
 export const useBlockAiUser = () => {
@@ -274,10 +281,96 @@ export const useGiftPlan = () => {
       }
       return userIds.length;
     },
-    onSettled: () => {
+    onSettled: () => invalidatePlanQueries(queryClient),
+  });
+};
+
+/** Every list that shows a person's plan: their page, the people list, the plan counts and Plans & Billing's list.
+ * Used after a plan is gifted or ended. */
+export const PLAN_QUERY_KEYS = [["ai-usage-user"], ["ai-people"], ["ai-plans-summary"], ["ai-plan-subscribers"]] as const;
+export function invalidatePlanQueries(queryClient: ReturnType<typeof useQueryClient>) {
+  for (const queryKey of PLAN_QUERY_KEYS) queryClient.invalidateQueries({ queryKey: [...queryKey] });
+}
+
+// ── Plans & Usage: the plan counts, the people list and one person (the server's /people, /plans/summary, /detail) ──
+
+/** One row of the people list (GET /people). session.limit: -1 no limit, 0 not included. */
+export type PersonRow = {
+  id: string; name: string; email: string; photo: string | null; staff: boolean; blocked: boolean;
+  plan: {
+    key: "free" | "pro" | "max" | "enterprise" | string; name: string; how: "free" | "bought" | "gifted"; billing: string;
+    started_at: string | null; expires_at: string | null;
+    ended: { key: string; name: string; at: string | null } | null;
+  };
+  session: { used: number; limit: number; resetAt: string | null };
+};
+export type PeoplePage = { success: boolean; data: PersonRow[]; total: number; page: number; limit: number; pages: number; asOf: string };
+export type PeopleFilters = { q: string; plan: string; how: string; page: number; limit?: number };
+
+/** The people list, one page at a time. The page on screen stays while the next one loads. */
+export const usePeople = ({ q, plan, how, page, limit = 25 }: PeopleFilters) => useQuery({
+  queryKey: ["ai-people", { q, plan, how, page, limit }],
+  queryFn: async () => (await api.get("/api/super-admin/ai-usage/people", { params: { q, plan, how, page, limit } })).data as PeoplePage,
+  placeholderData: (prev) => prev,
+  staleTime: 15_000,
+});
+
+export type PlanCount = { key: string; name: string; sort: number; coming_soon: boolean; is_public: boolean; people: number; bought: number; gifted: number; endingSoon: number };
+export type PlansSummaryData = { success: boolean; enabled: boolean; total: number; staff: number; asOf: string; plans: PlanCount[] };
+
+/** How many people are on each plan, bought or gifted (GET /plans/summary) */
+export const usePlansSummary = () => useQuery({
+  queryKey: ["ai-plans-summary"],
+  queryFn: async () => (await api.get("/api/super-admin/ai-usage/plans/summary")).data as PlansSummaryData,
+  staleTime: 30_000,
+});
+
+export type PlanHistoryRow = { at: string | null; action: "gift" | "end"; plan: string; expires_at: string | null; reason: string; by: string; saved_on_plan: boolean };
+export type Payment = {
+  id: string; at: string; kind: "plan" | "topup"; plan_key: string | null; plan_term: "month" | "year" | null; amount_inr: number;
+  credits_added: number; status: string; period_start: string | null; period_end: string | null; payment_id: string | null;
+};
+export type CallCount = { used: number; limit: number | null };
+export type CreditEvent = { id: string; type: string; credits_added: number; status: string; date: string; metadata: Record<string, any> };
+export type StudentInfo = { email?: string | null; method?: string; verified_at?: string; expires_at?: string | null } | null;
+
+/** One person, as GET /users/:id/detail sends it */
+export type UserDetail = {
+  id: string; name?: string; email: string; role?: string;
+  photo: string | null; staff: boolean; planKey: string; joinedAt: string | null; lastLoginAt: string | null; customWindowLimit: number | null;
+  overview: PlanOverview | null; planHistory: PlanHistoryRow[];
+  plan: UserPlan; student: StudentInfo; profilePicture: string | null;
+  isBlocked: boolean; totalUsage: number; balance: number; totalChats: number;
+  ai_tokens?: {
+    ai_credits_balance?: number; promotion_credits_balance?: number; total_promotion_credits_granted?: number;
+    promotion_credits_end_date?: string | null; promotion_credits_paused?: boolean; [field: string]: unknown;
+  };
+  topupHistory: { id: string; amount_inr: number; credits_added: number; status: string; date: string }[];
+  promotionHistory: CreditEvent[];
+  payments: Payment[];
+  callCounts: { day: CallCount; week: CallCount; month: CallCount } | null;
+};
+
+/** Blocks or unblocks one person's AI (the page shows its own message) */
+export const useSetAiBlocked = () => {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ userId, isBlocked }: { userId: string; isBlocked: boolean }) => aiUsageApi.blockUser(userId, isBlocked),
+    onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["ai-usage-user"] });
-      queryClient.invalidateQueries({ queryKey: ["ai-usage-org-users"] });
-      queryClient.invalidateQueries({ queryKey: ["ai-plan-subscribers"] });
+      queryClient.invalidateQueries({ queryKey: ["ai-people"] });
+    },
+  });
+};
+
+/** Sets a person's session credits and pictures used back to 0 (the page shows its own message) */
+export const useClearSessionUse = () => {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (userId: string) => aiUsageApi.resetUserUsage(userId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["ai-usage-user"] });
+      queryClient.invalidateQueries({ queryKey: ["ai-people"] });
     },
   });
 };

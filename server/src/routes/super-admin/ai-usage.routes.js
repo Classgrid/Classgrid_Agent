@@ -57,6 +57,11 @@ router.get("/orgs/:orgId/users", userController.listUsersInOrg);
 router.get("/users/:userId/detail", userController.getUserAiDetail);
 router.get("/users/:userId/usage-history", userController.getUserUsageHistory); // (the same history the user sees in Settings > Usage)
 
+// 3b. Plans & Usage page: everyone in one list (search, plan and bought/gifted filters, one page at a time) and how
+// many people are on each plan. Protected by the super admin guard where this router is mounted (super-admin.routes.js).
+router.get("/people", userController.listPeople);
+router.get("/plans/summary", userController.getPlansSummary);
+
 // 4. Admin Mutations
 router.put("/users/:userId/block", adminController.blockAiUser);
 router.put("/orgs/:orgId/block", adminController.blockAiOrg);

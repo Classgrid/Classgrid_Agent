@@ -126,7 +126,8 @@ export function GrantCreditsModal({ isOpen, onClose, orgs = [], isOrgMode = fals
           )}
           <div className="flex flex-col min-w-0">
             <span className="text-sm font-semibold text-foreground truncate">{row.name}</span>
-            {(!isOrgMode || row.name !== row.orgName) && (
+            {/* (Plans & Usage opens this for one person with no group name, so an empty line is left out) */}
+            {row.orgName && (!isOrgMode || row.name !== row.orgName) && (
               <span className="text-xs text-muted-foreground truncate">{row.orgName}</span>
             )}
           </div>
@@ -154,11 +155,11 @@ export function GrantCreditsModal({ isOpen, onClose, orgs = [], isOrgMode = fals
       key: "role",
       header: isOrgMode ? "ID" : "Role",
       width: "w-32",
-      render: (val: string, row: OrgRow) => (
+      render: (val: string, row: OrgRow) => (isOrgMode || val) ? (
         <span className="text-xs font-medium px-2.5 py-1 rounded-full bg-muted text-muted-foreground inline-block" title={isOrgMode ? row.id : val}>
           {isOrgMode ? row.id : val}
         </span>
-      ),
+      ) : null,
     },
     ...(isSeparateMode && !planMode
       ? [
@@ -454,7 +455,7 @@ export function GrantCreditsModal({ isOpen, onClose, orgs = [], isOrgMode = fals
                         )}
                         <div className="flex flex-col min-w-0">
                           <span className="text-sm font-semibold text-foreground truncate">{org.name}</span>
-                          <span className="text-xs text-muted-foreground truncate">{org.email} • {org.orgName}</span>
+                          <span className="text-xs text-muted-foreground truncate">{[org.email, org.orgName].filter(Boolean).join(" • ")}</span>
                         </div>
                       </div>
                       <div className="flex items-center gap-1.5 bg-blue-50 text-blue-700 dark:bg-blue-500/10 dark:text-blue-400 px-3 py-1.5 rounded-full text-xs font-bold whitespace-nowrap ml-2">

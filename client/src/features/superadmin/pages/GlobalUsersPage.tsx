@@ -65,293 +65,180 @@
  * ─────────────────────────────────────────────────────────
  */
 
-import React, { useState, useMemo } from "react";
-import { useQuery } from "@tanstack/react-query";
-import { useNavigate } from "react-router-dom";
-import { Users, Search, X } from "lucide-react";
+// The Users list (rebuilt 2026-11-17 for Classgrid AI): everyone with an account, with their plan, when they joined,
+// when they were last active and how many chats they have. Filters, sort and page live in the page address, so
+// Back from a person's page returns to the same list. Opening a person shows their own page (UserDetailPage).
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useNavigate, useSearchParams } from "react-router-dom";
 
-import { Card, CardContent } from "@/components/marketing_ui/card";
-import { DataTable } from "@/components/marketing_ui/data-table";
-import { Badge } from "@/components/marketing_ui/badge";
-import { Input } from "@/components/marketing_ui/input";
-import { ResponsiveSelect } from "@/components/marketing_ui/responsive-select";
-import { NikhilTimeCalendar } from "@/components/marketing_ui/nikhil_time_calendar";
-import { SuperadminFilterBar } from "../components/SuperadminFilterBar";
+import { Button } from "@/components/marketing_ui/button";
+import { Skeleton } from "@/components/marketing_ui/skeleton";
+import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/marketing_ui/empty";
 
-import { apiClient } from "@/lib/apiClient";
-import { getSocket } from "@/lib/socketClient";
-import { formatDate } from "@/utils/dateUtils";
+import { usePeople, usePeopleLive } from "../components/global-users/api";
+import { METHOD_OPTIONS, PLAN_OPTIONS, PeopleFilters, SORT_OPTIONS, STATUS_OPTIONS, type FilterChange } from "../components/global-users/PeopleFilters";
+import { PeopleTable } from "../components/global-users/PeopleTable";
+import { PeopleCards } from "../components/global-users/PeopleCards";
+import { PeoplePager } from "../components/global-users/PeoplePager";
+import { peopleText } from "../components/global-users/format";
+import type { PeopleParams, PersonRow } from "../components/global-users/types";
 
-// ── Types & Constants ────────────────────────────────────────────────────────
+const DEFAULTS: PeopleParams = { q: "", plan: "all", status: "all", method: "all", signup: "finished", sort: "joined", dir: "desc", page: 1 };
+const SEARCH_DELAY_MS = 300;
 
-const ROLE_OPTIONS = [
-  { label: "All Roles", value: "" },
-  { label: "Student", value: "student" },
-  { label: "Faculty", value: "faculty" },
-  { label: "Org Admin", value: "org_admin" },
-  { label: "Super Admin", value: "super_admin" },
-  { label: "Principal", value: "principal" },
-  { label: "HOD", value: "hod" },
-];
+// A value typed into the address by hand that the server doesn't know falls back to the default, instead of the
+// whole list failing with "Unknown filter"
+const oneOf = <T extends string>(value: string | null, allowed: readonly { value: string }[], fallback: T): T =>
+  (value && allowed.some((o) => o.value === value) ? value : fallback) as T;
 
-const ORG_TYPE_OPTIONS = [
-  { label: "All Org Types", value: "" },
-  { label: "Engineering", value: "engineering" },
-  { label: "School", value: "school" },
-  { label: "Junior College", value: "junior_college" },
-  { label: "Coaching", value: "coaching" },
-  { label: "Diploma", value: "diploma" },
-  { label: "Other", value: "other" },
-];
+function readParams(sp: URLSearchParams): PeopleParams {
+  const [sortRaw, dirRaw] = [sp.get("sort"), sp.get("dir")];
+  const sortValue = oneOf(`${sortRaw || DEFAULTS.sort}:${dirRaw || DEFAULTS.dir}`, SORT_OPTIONS, `${DEFAULTS.sort}:${DEFAULTS.dir}`);
+  const [sort, dir] = sortValue.split(":") as [PeopleParams["sort"], PeopleParams["dir"]];
+  const page = Number.parseInt(sp.get("page") || "", 10);
+  return {
+    q: (sp.get("q") || "").slice(0, 100),
+    plan: oneOf(sp.get("plan"), PLAN_OPTIONS, DEFAULTS.plan),
+    status: oneOf(sp.get("status"), STATUS_OPTIONS, DEFAULTS.status),
+    method: oneOf(sp.get("method"), METHOD_OPTIONS, DEFAULTS.method),
+    signup: oneOf(sp.get("signup"), [{ value: "finished" }, { value: "unfinished" }, { value: "all" }], DEFAULTS.signup),
+    sort,
+    dir,
+    page: Number.isFinite(page) && page >= 1 ? page : 1,
+  };
+}
 
-const STATUS_OPTIONS = [
-  { label: "All Statuses", value: "" },
-  { label: "Active", value: "active" },
-  { label: "Suspended", value: "suspended" },
-];
-
-// ── Component ─────────────────────────────────────────────────────────────────
+// Only the values that differ from the defaults go in the address, so a plain list has a plain address
+function writeParams(params: PeopleParams): URLSearchParams {
+  const sp = new URLSearchParams();
+  (Object.keys(DEFAULTS) as (keyof PeopleParams)[]).forEach((key) => {
+    const value = params[key];
+    if (key === "q" ? String(value).trim() : value !== DEFAULTS[key]) sp.set(key, String(key === "q" ? String(value).trim() : value));
+  });
+  return sp;
+}
 
 export function GlobalUsersPage() {
   const navigate = useNavigate();
-  
-  // Filters state
-  const [search, setSearch] = useState("");
-  const [roleFilter, setRoleFilter] = useState("");
-  const [statusFilter, setStatusFilter] = useState("");
-  // "" = finished sign-ups only; "unfinished" = chat sign-ups that stopped before the last step
-  const [signupFilter, setSignupFilter] = useState("");
-  const [orgTypeFilter, setOrgTypeFilter] = useState("");
-  const [dateFilter, setDateFilter] = useState<Date | undefined>(undefined);
+  const [searchParams, setSearchParams] = useSearchParams();
+  const params = useMemo(() => readParams(searchParams), [searchParams]);
+  const { data, isLoading, isError, isPlaceholderData, refetch } = usePeople(params);
+  usePeopleLive();
 
-  // Fetch users from our newly enriched API
-  const { data, isLoading, refetch, isFetching } = useQuery({
-    queryKey: ["global-users", search, roleFilter, statusFilter, signupFilter],
-    queryFn: () => apiClient.get<any>("/api/super-admin/users", { 
-        params: { 
-            q: search, 
-            role: roleFilter || undefined, 
-            status: statusFilter || undefined, 
-            signup: signupFilter || undefined,
-            limit: 200 
-        } 
-    }).then(r => r.data),
-    staleTime: 30_000,
-  });
+  const update = (next: PeopleParams, push = false) => setSearchParams(writeParams(next), { replace: !push });
+  // (the search timer reads the filters as they are when it fires, not as they were when typing started)
+  const latestParams = useRef(params);
+  latestParams.current = params;
 
-  const allUsers: any[] = data?.data ?? [];
-  const total: number = data?.total ?? 0;
-  const unfinishedSignups: number = data?.unfinishedSignups ?? 0;
-
-  // Listen for real-time user updates via WebSocket
-  React.useEffect(() => {
-    const socket = getSocket();
-    if (!socket) return;
-
-    // Join the superadmin room to receive system-wide updates
-    socket.emit("join_superadmin_support");
-
-    const handleUserUpdate = () => {
-      refetch();
-    };
-
-    socket.on("global_users_updated", handleUserUpdate);
-    socket.on("user_status_changed", handleUserUpdate);
-    socket.on("new_user_registered", handleUserUpdate);
-
-    return () => {
-      socket.off("global_users_updated", handleUserUpdate);
-      socket.off("user_status_changed", handleUserUpdate);
-      socket.off("new_user_registered", handleUserUpdate);
-    };
-  }, [refetch]);
-
-  // Client-side filtering for Org Type & Date (since API doesn't filter them natively yet)
-  const filteredUsers = useMemo(() => {
-    return allUsers.filter(u => {
-        if (orgTypeFilter && u.orgType !== orgTypeFilter) return false;
-        
-        if (dateFilter) {
-            const joinedDate = new Date(u.createdAt);
-            // Simple date match by Day/Month/Year
-            if (joinedDate.toDateString() !== dateFilter.toDateString()) {
-                return false;
-            }
-        }
-        return true;
-    });
-  }, [allUsers, orgTypeFilter, dateFilter]);
-
-  // Table Columns
-  const columns = useMemo(() => [
-    {
-      key: "user",
-      header: "User",
-      width: "w-full min-w-[220px]",
-      render: (_: any, u: any) => (
-        <div className="flex items-center gap-3 py-1">
-          {u.profilePicture ? (
-            <>
-              <img src={u.profilePicture} alt={u.name} className="h-8 w-8 rounded-full object-cover border border-border flex-shrink-0" onError={(e) => { e.currentTarget.style.display = 'none'; e.currentTarget.nextElementSibling?.classList.remove('hidden'); e.currentTarget.nextElementSibling?.classList.add('flex'); }} />
-              <div className="hidden h-8 w-8 flex-shrink-0 items-center justify-center rounded-full bg-primary/10 text-primary font-medium text-xs">
-                {u.name?.substring(0, 2).toUpperCase() || "??"}
-              </div>
-            </>
-          ) : (
-            <div className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full bg-primary/10 text-primary font-medium text-xs">
-              {u.name?.substring(0, 2).toUpperCase() || "??"}
-            </div>
-          )}
-          <div className="flex flex-col min-w-0">
-            <span className="font-medium text-sm text-foreground truncate transition-colors">{u.name}</span>
-            <span className="text-muted-foreground text-xs truncate">{u.email}</span>
-          </div>
-        </div>
-      )
-    },
-    {
-      key: "status",
-      header: "Status",
-      width: "w-[120px]",
-      render: (_: any, u: any) => {
-        const s = u.status ?? "active";
-        return (
-          <Badge variant={s === "active" ? "success" : "danger"} dot>
-            {s === "active" ? "Ready" : "Suspended"}
-          </Badge>
-        );
-      }
-    },
-    {
-      key: "role",
-      header: "Role",
-      width: "w-[150px]",
-      render: (_: any, u: any) => {
-        const r = u.role ?? "user";
-        return (
-          <Badge variant={r.includes("admin") ? "danger" : r === "faculty" ? "warning" : "info"} className="whitespace-nowrap">
-            {r.replace(/_/g, " ").replace(/\b\w/g, (c: string) => c.toUpperCase())}
-          </Badge>
-        );
-      }
-    },
-    {
-      key: "organizationName",
-      header: "Organization",
-      width: "w-[200px]",
-      render: (_: any, u: any) => (
-        <div className="flex items-center gap-2 max-w-[200px]">
-          {u.organizationLogo ? (
-            <>
-              <img src={u.organizationLogo} alt="org" className="h-5 w-5 rounded object-cover flex-shrink-0" onError={(e) => { e.currentTarget.style.display = 'none'; e.currentTarget.nextElementSibling?.classList.remove('hidden'); e.currentTarget.nextElementSibling?.classList.add('flex'); }} />
-              <div className="hidden h-5 w-5 rounded bg-muted/50 border border-border flex-shrink-0" />
-            </>
-          ) : (
-             <div className="h-5 w-5 rounded bg-muted/50 border border-border flex-shrink-0" />
-          )}
-          <span className="text-sm font-medium text-muted-foreground truncate">{u.organizationName || "Platform User"}</span>
-        </div>
-      )
-    },
-    {
-      key: "joined",
-      header: "Joined",
-      width: "w-[130px]",
-      render: (_: any, u: any) => (
-        <span className="text-sm text-muted-foreground flex items-center gap-2">
-            <div className="h-1.5 w-1.5 rounded-full bg-muted-foreground/30" />
-            {formatDate(u.createdAt)}
-        </span>
-      )
+  // Search is typed here and sent 300 ms after the last key. The box follows the address when the address changes
+  // from elsewhere (Back, Clear filters), but not when it is the box's own text arriving there.
+  const [search, setSearch] = useState(params.q);
+  const sentSearch = useRef(params.q);
+  useEffect(() => {
+    if (params.q !== sentSearch.current) {
+      sentSearch.current = params.q;
+      setSearch(params.q);
     }
-  ], []);
+  }, [params.q]);
+  useEffect(() => {
+    if (search.trim() === params.q.trim()) return;
+    const timer = setTimeout(() => {
+      sentSearch.current = search.trim();
+      update({ ...latestParams.current, q: search, page: 1 });
+    }, SEARCH_DELAY_MS);
+    return () => clearTimeout(timer);
+    // (only a change in the typed text starts the timer)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [search]);
+
+  const changeFilters = (change: FilterChange) => update({ ...params, ...change, page: 1 });
+  const clearFilters = () => {
+    sentSearch.current = "";
+    setSearch("");
+    update(DEFAULTS);
+  };
+  const goToPage = (page: number) => {
+    update({ ...params, page }, true);
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  };
+
+  // A page number past the end (people were removed, or an old link) moves to the last page there is
+  useEffect(() => {
+    if (data && data.data.length === 0 && data.total > 0 && params.page > data.pages) update({ ...params, page: data.pages });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [data, params.page]);
+
+  const rows: PersonRow[] = data?.data ?? [];
+  const total = data?.total ?? 0;
+  const filtersOn = params.q.trim() !== "" || params.plan !== "all" || params.status !== "all" || params.method !== "all" || params.signup !== "finished";
+  const openPerson = (row: PersonRow) => navigate(`/superadmin/global-users/${row._id}`);
+
+  let body: ReactNode;
+  if (isError && !data) {
+    body = (
+      <Empty className="border border-dashed border-border bg-card">
+        <EmptyHeader>
+          <EmptyTitle className="text-foreground">Couldn&apos;t load users</EmptyTitle>
+          <EmptyDescription>Check your connection and try again.</EmptyDescription>
+        </EmptyHeader>
+        <EmptyContent><Button size="sm" onClick={() => refetch()}>Try again</Button></EmptyContent>
+      </Empty>
+    );
+  } else if (!isLoading && rows.length === 0 && total === 0) {
+    body = filtersOn ? (
+      <Empty className="border border-dashed border-border bg-card">
+        <EmptyHeader>
+          <EmptyTitle className="text-foreground">No one matches</EmptyTitle>
+          <EmptyDescription>Try another name, email or phone, or clear the filters.</EmptyDescription>
+        </EmptyHeader>
+        <EmptyContent><Button size="sm" variant="outline" onClick={clearFilters}>Clear filters</Button></EmptyContent>
+      </Empty>
+    ) : (
+      <Empty className="border border-dashed border-border bg-card">
+        <EmptyHeader>
+          <EmptyTitle className="text-foreground">No users yet</EmptyTitle>
+          <EmptyDescription>People appear here as soon as they sign up.</EmptyDescription>
+        </EmptyHeader>
+      </Empty>
+    );
+  } else {
+    body = (
+      // (the rows of the old page stay dimmed while the next page or filter loads)
+      <div className={`flex flex-col gap-4 transition-opacity ${isPlaceholderData ? "opacity-60" : ""}`}>
+        <div className="hidden md:block">
+          <PeopleTable rows={rows} isLoading={isLoading} onOpen={openPerson} />
+        </div>
+        <div className="md:hidden">
+          <PeopleCards rows={rows} isLoading={isLoading} onOpen={openPerson} />
+        </div>
+        {data && <PeoplePager page={params.page} pages={data.pages} onPage={goToPage} disabled={isPlaceholderData} />}
+      </div>
+    );
+  }
 
   return (
-    <div className="flex flex-col gap-6 w-full max-w-7xl mx-auto p-4 sm:p-6 lg:p-8 animate-in fade-in">
-      {/* Filter Bar */}
-      <SuperadminFilterBar
-        searchQuery={search}
-        onSearchChange={setSearch}
-        searchPlaceholder="Search by name or email..."
-      >
-        {/* Org Type */}
-          <div className="w-[140px]">
-            <ResponsiveSelect
-              className="flex h-9 w-full items-center rounded-md border border-border bg-transparent px-3 py-1 shadow-sm hover:bg-accent/50 transition-colors text-sm"
-              value={orgTypeFilter}
-              onChange={(e) => setOrgTypeFilter(e.target.value)}
-            >
-              {ORG_TYPE_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
-            </ResponsiveSelect>
-          </div>
+    <div className="w-full max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-6 flex flex-col gap-6 min-w-0">
+      <div className="min-w-0">
+        <h1 className="text-2xl font-semibold text-foreground">Users</h1>
+        <p className="text-sm text-muted-foreground mt-1">Everyone with a Classgrid account. Open a person to see their plan, payments and activity.</p>
+      </div>
 
-          {/* Role */}
-          <div className="w-[140px]">
-            <ResponsiveSelect
-              className="flex h-9 w-full items-center rounded-md border border-border bg-transparent px-3 py-1 shadow-sm hover:bg-accent/50 transition-colors text-sm"
-              value={roleFilter}
-              onChange={(e) => setRoleFilter(e.target.value)}
-            >
-              {ROLE_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
-            </ResponsiveSelect>
+      {/* (the filter bar brings its own space underneath, so it sits in a block without the page gap) */}
+      <div className="min-w-0">
+        <PeopleFilters
+          search={search}
+          onSearchChange={setSearch}
+          params={params}
+          unfinishedSignups={data ? data.unfinishedSignups : null}
+          onChange={changeFilters}
+        />
+        {!(isError && !data) && (
+          <div className="mb-3 h-5 flex items-center">
+            {isLoading ? <Skeleton className="h-4 w-24" /> : <span className="text-sm text-muted-foreground">{peopleText(total)}</span>}
           </div>
-
-          {/* Status */}
-          <div className="w-[140px]">
-            <ResponsiveSelect
-              className="flex h-9 w-full items-center rounded-md border border-border bg-transparent px-3 py-1 shadow-sm hover:bg-accent/50 transition-colors text-sm"
-              value={statusFilter}
-              onChange={(e) => setStatusFilter(e.target.value)}
-            >
-              {STATUS_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
-            </ResponsiveSelect>
-          </div>
-
-          {/* Sign-up: finished users, or sign-ups that stopped before the last step */}
-          <div className="w-[200px]">
-            <ResponsiveSelect
-              className="flex h-9 w-full items-center rounded-md border border-border bg-transparent px-3 py-1 shadow-sm hover:bg-accent/50 transition-colors text-sm"
-              value={signupFilter}
-              onChange={(e) => setSignupFilter(e.target.value)}
-            >
-              <option value="">Finished sign-ups</option>
-              <option value="unfinished">Unfinished sign-ups ({unfinishedSignups})</option>
-              <option value="all">Everyone</option>
-            </ResponsiveSelect>
-          </div>
-
-          {/* Date picker */}
-          <div className="w-[180px] max-w-[180px] overflow-hidden relative">
-            <NikhilTimeCalendar 
-              value={dateFilter} 
-              onChange={setDateFilter} 
-              placeholder="Select Date Range" 
-              popDirection="down"
-              showTime={false}
-              className="h-9 w-full pr-8" 
-            />
-            {dateFilter && (
-              <button
-                type="button"
-                onClick={(e) => { e.stopPropagation(); setDateFilter(undefined); }}
-                className="absolute right-3 top-1/2 -translate-y-1/2 z-10 p-0.5 text-muted-foreground hover:text-foreground rounded-full hover:bg-accent bg-background"
-                title="Clear date"
-              >
-                <X size={14} />
-              </button>
-            )}
-          </div>
-      </SuperadminFilterBar>
-
-      {/* Data Table (Vercel wraps the list in a subtle border) */}
-      <DataTable
-        columns={columns}
-        rows={filteredUsers}
-        isLoading={isLoading}
-        emptyMessage={search ? "No users found matching your search." : "No users found."}
-        onRowClick={(user) => navigate(`/superadmin/global-users/${user._id}`)}
-        className="shadow-sm" // Keeps the default rounded-md border from DataTable
-      />
+        )}
+        {body}
+      </div>
     </div>
   );
 }

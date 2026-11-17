@@ -33,7 +33,7 @@ export function PeopleList({ people, total, page, pages, isLoading, isError, sea
         <div className="min-w-0">
           <h2 className="text-base font-semibold text-foreground">People</h2>
           <p className="text-xs text-muted-foreground">
-            {isLoading ? "Loading…" : `${total} ${total === 1 ? "person" : "people"}${search.trim() ? " found" : ""}. Find the person who asked, then pick what to do.`}
+            {isLoading ? "Loading the list" : `${total} ${total === 1 ? "person" : "people"}${search.trim() ? " found" : ""}. Find the person who asked, then pick what to do.`}
           </p>
         </div>
       </div>
