@@ -14,12 +14,15 @@
 import React from 'react';
 import { XCircle, Sparkles } from 'lucide-react';
 import { Button } from './ui/button';
+import { usePlanOverview } from '@/features/shared/queries/usePlanOverview';
+import { openPricing } from './planInfo';
 
 export interface InsufficientCreditsCardProps {
   onDismiss: () => void;
+  /** The top-up flow (Settings > Billing): the button on a paid plan, and while the plan is not known */
   onUpgrade: () => void;
   refreshDate: Date;
-  /** Set when an expensive model (e.g. Claude Opus) is the reason; offers switching to Auto. */
+  /** The old "ai_quota_exceeded|<reset>|<model>" form (the server no longer sends the model): only used while the plan is not known. */
   modelName?: string;
   onSwitchToAuto?: () => void;
 }
@@ -41,29 +44,24 @@ export function InsufficientCreditsCard({
     hour12: true
   }).format(refreshDate);
 
+  // The plan (owner, 2026-11-17): known once the overview is in, plans are on and plan limits apply (staff have none)
+  const { data: overview } = usePlanOverview();
+  const plan = overview?.enabled && overview.plan?.limits && overview.plan.name ? overview.plan : null;
+  const free = plan?.key === "free";
+
   return (
     <div className="w-full max-w-md rounded-xl border border-border bg-card p-5 shadow-sm">
       {/* Header */}
       <div className="mb-3 flex items-center gap-2">
         <XCircle className="h-4 w-4 text-muted-foreground" />
         <h3 className="text-base font-semibold text-card-foreground">
-          {modelName ? `Not enough credits for ${modelName}` : "Insufficient AI Credits"}
+          {plan ? `You've reached your ${plan.name} plan's limit` : "You've reached your limit"}
         </h3>
       </div>
 
       {/* Body Text */}
       <p className="mb-5 text-[15px] leading-relaxed text-muted-foreground">
-        {modelName ? (
-          <>
-            This model costs more than you have left this week. Switch to <span className="font-medium text-card-foreground">Auto</span> to keep
-            chatting, or purchase AI Credits. Your weekly quota refreshes on {formattedDate}.
-          </>
-        ) : (
-          <>
-            You've used up your AI Credits for now. To continue using the AI, purchase more AI Credits.
-            Your plan's baseline quota will refresh on {formattedDate}.
-          </>
-        )}
+        {`It comes back on ${formattedDate}.`}
       </p>
 
       {/* Buttons */}
@@ -75,7 +73,7 @@ export function InsufficientCreditsCard({
           Dismiss
         </Button>
 
-        {modelName && onSwitchToAuto && (
+        {!plan && modelName && onSwitchToAuto && (
           <Button variant="outline" onClick={onSwitchToAuto}>
             Switch to Auto
           </Button>
@@ -83,11 +81,11 @@ export function InsufficientCreditsCard({
 
         <Button
           variant="outline"
-          onClick={onUpgrade}
+          onClick={free ? openPricing : onUpgrade}
           className="relative h-10 rounded-lg border-border bg-accent px-4 md:px-6 text-sm font-medium tracking-tight text-foreground/90 transition-all duration-200 hover:bg-slate-200 dark:hover:bg-accent/80 hover:border-border hover:text-foreground cursor-pointer flex items-center gap-2"
         >
           <Sparkles className="w-4 h-4" />
-          Purchase Credits
+          {plan ? (free ? "See plans" : "Top up") : "Purchase Credits"}
         </Button>
       </div>
     </div>
