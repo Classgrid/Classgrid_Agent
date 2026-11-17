@@ -83,6 +83,22 @@ import storageService from "../services/storage.service.js";
 import { notifyTicketCreatorOfAdminReply, notifyUserOfTicketCreation, notifyUserOfTalkRequestCreation, notifyTalkCreatorOfAdminReply } from "../services/support-ticket-email.service.js";
 import { dispatchNotification, bulkDispatchNotification } from "../services/notification.service.js";
 import { getIO } from "../services/socket.service.js";
+import { planOf } from "../services/plan-limits.service.js";
+
+// A ticket's priority comes from the person's plan (owner, 2026-11-17: the plan's Service settings must be real, not
+// only shown): a plan with "priority" on (Max) gets high, a plan whose support level includes email (Pro: "email",
+// Max: "priority email") medium, the community level (Free) low. No plan (plans off, staff, someone not signed up):
+// the priority asked for, as before.
+const PRIORITIES = ["low", "medium", "high", "critical"];
+async function ticketPriority(user, asked) {
+    const fallback = PRIORITIES.includes(asked) ? asked : "medium";
+    if (!user) return fallback;
+    const plan = await planOf(user).catch(() => null);
+    if (!plan) return fallback;
+    if (plan.priority === true) return "high";
+    if (/email/i.test(String(plan.support_level || ""))) return "medium";
+    return "low";
+}
 
 
 
@@ -301,7 +317,7 @@ router.post("/public/tickets", enforceStrictSession, multipleUploads("files", 5)
 
         // Try to find if this email belongs to a registered user
         const fullUser = await User.findOne({ email: email.trim().toLowerCase() })
-            .select("name profilePicture role organization_id")
+            .select("name email profilePicture role organization_id plan")
             .lean();
 
         let organization_id = null;
@@ -380,7 +396,7 @@ router.post("/public/tickets", enforceStrictSession, multipleUploads("files", 5)
             message: message.trim(),
             category: category || "general",
             attachments: uploadedAttachments,
-            priority: priority || "medium",
+            priority: await ticketPriority(fullUser, priority),
             submitterEmail,
             submitterName,
             submitterRole: userRole || (submitterRoleInput || "").trim(),
@@ -802,7 +818,7 @@ router.post("/tickets", isAuthenticated, multipleUploads("files", 5), async (req
             message: message.trim(),
             category: category || "general",
             attachments: uploadedAttachments,
-            priority: priority || "medium",
+            priority: await ticketPriority(req.user, priority),
             submittedBy: req.user._id,
             submitterEmail: req.user.email,
             submitterName: req.user.name,
