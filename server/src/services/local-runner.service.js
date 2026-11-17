@@ -289,7 +289,8 @@ export async function runOnComputer(userId, tool, args = {}, chat = null) {
 const LOCAL_FILE_TEXT_CHARS = 18000;
 
 // The whole file the app sends in pieces (the socket takes at most 1 MB per message): { buf }, or an error text
-async function gatherFile(userId, file) {
+// (chat: the chat the file is read for, passed to the app with every piece like the first request)
+async function gatherFile(userId, file, chat = null) {
     const parts = [Buffer.from(file.data, "base64")];
     for (let n = 1; n < Number(file.chunks || 1); n++) {
         const next = await callRunner(userId, "read_local_file", { path: file.path, chunk: n }, chat);
@@ -304,7 +305,7 @@ async function gatherFile(userId, file) {
 // The app sends it there itself in one request (to a signed link made here) instead of through this server in 512 KB
 // pieces, one round trip each (a 10-minute video's sound was 38 of them, 2026-11-09). An older app, or a send that
 // failed, still comes in pieces.
-async function soundToStorage(userId, file, name, mime) {
+async function soundToStorage(userId, file, name, mime, chat = null) {
     const { getPresignedUploadUrl, uploadBufferToR2 } = await import("../config/r2Client.js");
     try {
         const { uploadUrl, publicUrl } = await getPresignedUploadUrl(name, mime, 15 * 60);
@@ -315,7 +316,7 @@ async function soundToStorage(userId, file, name, mime) {
     } catch (e) {
         console.warn(`[read_local_file] could not have the app send the sound to storage: ${e.message}`);
     }
-    const got = await gatherFile(userId, file);
+    const got = await gatherFile(userId, file, chat);
     if (typeof got === "string") return got;
     return { link: await uploadBufferToR2(got.buf, name, mime) };
 }
@@ -371,7 +372,7 @@ export async function readLocalFile(userId, args = {}, { seesImages = false, cha
         }
         let heard = "";
         if (first.file?.kind === "audio") {
-            const sound = await soundToStorage(userId, first.file, "local-video-sound.wav", "audio/wav");
+            const sound = await soundToStorage(userId, first.file, "local-video-sound.wav", "audio/wav", chat);
             heard = typeof sound === "string" ? ` Its sound couldn't be fetched (${sound.replace(/^Error: /, "")}).` : await soundToText(sound.link);
         }
         const frames = first.video.frames;
@@ -384,12 +385,12 @@ export async function readLocalFile(userId, args = {}, { seesImages = false, cha
 
     const sizeOf = (n) => (n >= 1048576 ? `${(n / 1048576).toFixed(1)} MB` : n >= 1024 ? `${Math.round(n / 1024)} KB` : `${n} bytes`);
     if (file.kind === "audio") {
-        const sound = await soundToStorage(userId, file, file.name || "local-audio", file.mime);
+        const sound = await soundToStorage(userId, file, file.name || "local-audio", file.mime, chat);
         if (typeof sound === "string") return sound;
         return `Audio ${file.path} (${sizeOf(file.bytes)}).${await soundToText(sound.link)}`;
     }
 
-    const got = await gatherFile(userId, file);
+    const got = await gatherFile(userId, file, chat);
     if (typeof got === "string") return got;
     const { buf } = got;
     const size = sizeOf(buf.length);

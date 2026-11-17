@@ -4479,6 +4479,10 @@ export const handleToolCall = async (name, args, context = {}) => {
     if (name === 'run_code') {
       const { language, code } = args;
       const { sessionId = 'default', userEmail = 'unknown' } = context;
+      // (a call with no code crashed below on code.substring, seen live 2026-11-16: the model is told what is missing)
+      if (typeof code !== 'string' || !code.trim()) {
+        return { content: [{ type: 'text', text: 'Error: run_code needs "code" (the program to run) and "language" (python or javascript). Nothing was run.' }], isError: true };
+      }
 
       console.log(`\n=================================================`);
       console.log(`ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â°ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¸ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ [SANDBOX CODE EXECUTION STARTED]`);
