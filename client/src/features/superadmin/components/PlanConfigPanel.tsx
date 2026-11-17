@@ -1,10 +1,19 @@
 // The plans (Free, Pro, Max, Enterprise), one page per plan (owner, 2026-11-14): pick a plan at the top, then its
 // prices and every limit in titled sections, each field with its unit and a hint. Nothing about plans is fixed in
 // code: every number here is what the chat enforces and what the pricing page shows. -1 = unlimited, 0 = not included.
+//
+// Easier to read (owner, 2026-11-17: "plans and billing page is robotic", the plan's bar covered the fields under
+// it, and the models were raw ids): sections are cards with an icon and a plain line; "Unlimited" is a switch next
+// to the number instead of typing -1; each number shows how it reads ("1,00,000"); the models are picked by name
+// with their logos (the chat's own model list); the bar with Save sits at the bottom of the screen while there are
+// unsaved changes, so nothing at the top covers the page.
 import React, { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { Check, Globe, Clock } from "lucide-react";
+import {
+  Check, Globe, Clock, Cpu, Sparkles, MessagesSquare, ImageIcon, Mic, Phone, MessageCircle, FolderGit2, HardDrive,
+  Headphones, Bot, LayoutList, IndianRupee,
+} from "lucide-react";
 import { apiClient as api } from "@/lib/apiClient";
 import { Button } from "@/components/marketing_ui/button";
 import { Input } from "@/components/marketing_ui/input";
@@ -12,93 +21,105 @@ import { Switch } from "@/components/marketing_ui/switch";
 import { Label } from "@/components/marketing_ui/label";
 import { Spinner } from "@/components/marketing_ui/spinner";
 import { Skeleton } from "@/components/marketing_ui/skeleton";
+import { MODEL_GROUPS, AUTO_MODEL_ID, ModelLogoImg } from "@/components/ai/components/ModelPicker";
 
 type Plan = Record<string, any> & { key: string; name: string };
-type FieldType = "number" | "text" | "bool" | "list" | "period" | "modes";
-type Field = { key: string; label: string; type: FieldType; hint?: string; unitKey?: string; unit?: string; wide?: boolean };
-type Section = { title: string; note?: string; fields: Field[] };
+type FieldType = "number" | "text" | "bool" | "list" | "period" | "modes" | "models" | "model";
+// unlimited: the number may be -1 (shown as an "Unlimited" switch); none: 0 means "not included" (said under it)
+type Field = { key: string; label: string; type: FieldType; hint?: string; unitKey?: string; unit?: string; wide?: boolean; unlimited?: boolean; none?: boolean };
+type Section = { title: string; note?: string; icon: React.ElementType; fields: Field[] };
 
 const UNITS = ["second", "minute", "hour", "day", "week", "month"];
-const THINKING = ["fast", "normal", "deep"];
+const THINKING = [
+  { id: "fast", label: "Fast" },
+  { id: "normal", label: "Normal" },
+  { id: "deep", label: "Deep" },
+];
 const inr = (n: any) => (Number(n) < 0 ? "Contact us" : Number(n) === 0 ? "Free" : `₹${Math.round(Number(n)).toLocaleString("en-IN")}`);
+const readable = (n: any) => (Number.isFinite(Number(n)) ? Number(n).toLocaleString("en-IN") : "");
 
 const SECTIONS: Section[] = [
-  { title: "Cloudflare models", note: "DeepSeek, GLM, Gemma, Llama, GPT-OSS, Mistral and Auto share these credits. Claude is counted separately below.", fields: [
-    { key: "tokens_per_window", label: "Credits per window", type: "number", hint: "-1 unlimited" },
-    { key: "window_reset_value", label: "Window length", type: "period", unitKey: "window_reset_unit" },
-    { key: "tokens_per_week", label: "Credits per week (ceiling)", type: "number", hint: "-1 unlimited" },
-    { key: "context_tokens", label: "Memory of a chat", type: "number", unit: "tokens" },
+  { title: "Credits for everyday models", icon: Cpu, note: "DeepSeek, GLM, Gemma, Llama, GPT-OSS, Mistral and Auto share these credits. Claude has its own credits below.", fields: [
+    { key: "tokens_per_window", label: "Credits per session", type: "number", unlimited: true },
+    { key: "window_reset_value", label: "A session lasts", type: "period", unitKey: "window_reset_unit" },
+    { key: "tokens_per_week", label: "Credits per week (the most in 7 days)", type: "number", unlimited: true },
+    { key: "context_tokens", label: "How much of a chat the AI remembers", type: "number", unit: "tokens" },
   ] },
-  { title: "Claude models", note: "Haiku, Sonnet, Opus and Fable. Their own weekly credits; 0 = no Claude in this plan.", fields: [
-    { key: "claude_credits_per_week", label: "Claude credits per week", type: "number", hint: "-1 unlimited, 0 not included" },
-    { key: "fable_share_percent", label: "Fable share of the Claude credits", type: "number", unit: "%", hint: "0 = no Fable" },
+  { title: "Claude", icon: Sparkles, note: "Haiku, Sonnet, Opus and Fable use their own weekly credits.", fields: [
+    { key: "claude_credits_per_week", label: "Claude credits per week", type: "number", unlimited: true, none: true },
+    { key: "fable_share_percent", label: "Part of them Fable may use", type: "number", unit: "%", hint: "0 = no Fable on this plan" },
   ] },
-  { title: "Chats", note: "New chats a user may start. A chat itself has no message limit.", fields: [
-    { key: "chats_per_window", label: "New chats per window", type: "number", hint: "-1 unlimited" },
-    { key: "chats_per_week", label: "New chats per week", type: "number", hint: "-1 unlimited" },
-    { key: "helpers_per_chat", label: "Helpers per chat", type: "number" },
+  { title: "Chats", icon: MessagesSquare, note: "How many new chats a person may start. A chat itself has no message limit.", fields: [
+    { key: "chats_per_window", label: "New chats per session", type: "number", unlimited: true },
+    { key: "chats_per_week", label: "New chats per week", type: "number", unlimited: true },
+    { key: "helpers_per_chat", label: "Helpers the AI may send in one chat", type: "number" },
     { key: "thinking_modes", label: "Thinking modes", type: "modes" },
   ] },
-  { title: "Images", fields: [
-    { key: "images_per_period", label: "Images and photo edits", type: "number", hint: "-1 unlimited, 0 not included" },
-    { key: "images_reset_value", label: "Per", type: "period", unitKey: "images_reset_unit" },
+  { title: "Images", icon: ImageIcon, fields: [
+    { key: "images_per_period", label: "Images and photo edits", type: "number", unlimited: true, none: true },
+    { key: "images_reset_value", label: "Every", type: "period", unitKey: "images_reset_unit" },
   ] },
-  { title: "Voice", fields: [
-    { key: "voice_replies_per_day", label: "Voice replies per day", type: "number", hint: "-1 unlimited, 0 not included" },
-    { key: "voice_input_minutes_per_day", label: "Voice input per day", type: "number", unit: "minutes", hint: "-1 unlimited, 0 not included" },
+  { title: "Voice", icon: Mic, fields: [
+    { key: "voice_replies_per_day", label: "Spoken replies per day", type: "number", unlimited: true, none: true },
+    { key: "voice_input_minutes_per_day", label: "Talking to the AI per day", type: "number", unit: "minutes", unlimited: true, none: true },
   ] },
-  { title: "WhatsApp calls", note: "Past the free minutes a call is paid per turn from credits.", fields: [
-    { key: "call_minutes_per_period", label: "Free call minutes", type: "number", hint: "-1 unlimited, 0 none" },
-    { key: "call_reset_value", label: "Per", type: "period", unitKey: "call_reset_unit" },
-    { key: "calls_per_day", label: "Calls per day", type: "number", hint: "-1 unlimited" },
+  { title: "WhatsApp calls", icon: Phone, note: "After the free minutes, a call is paid from credits.", fields: [
+    { key: "call_minutes_per_period", label: "Free call minutes", type: "number", unlimited: true, none: true },
+    { key: "call_reset_value", label: "Every", type: "period", unitKey: "call_reset_unit" },
+    { key: "calls_per_day", label: "Calls per day", type: "number", unlimited: true },
     { key: "call_max_minutes", label: "Longest call", type: "number", unit: "minutes" },
   ] },
-  { title: "WhatsApp scheduled messages", fields: [
-    { key: "whatsapp_per_period", label: "Messages", type: "number", hint: "-1 unlimited, 0 not included" },
-    { key: "whatsapp_reset_value", label: "Per", type: "period", unitKey: "whatsapp_reset_unit" },
-    { key: "whatsapp_per_day", label: "At most per day", type: "number", hint: "-1 no daily cap" },
+  { title: "WhatsApp scheduled messages", icon: MessageCircle, fields: [
+    { key: "whatsapp_per_period", label: "Messages", type: "number", unlimited: true, none: true },
+    { key: "whatsapp_reset_value", label: "Every", type: "period", unitKey: "whatsapp_reset_unit" },
+    { key: "whatsapp_per_day", label: "At most per day", type: "number", unlimited: true },
   ] },
-  { title: "Projects and coding", fields: [
-    { key: "projects_max", label: "Cloud projects", type: "number", hint: "-1 unlimited" },
-    { key: "coding_runs_per_month", label: "Coding agent runs per month", type: "number", hint: "-1 unlimited" },
-    { key: "premium_runs_per_month", label: "Premium (Sonnet) runs per month", type: "number", hint: "-1 unlimited, 0 none" },
-    { key: "sandbox_hours_per_month", label: "Cloud sandbox hours per month", type: "number", hint: "-1 unlimited" },
-    { key: "sandbox_sessions", label: "Sandbox sessions at once", type: "number" },
+  { title: "Projects and coding", icon: FolderGit2, fields: [
+    { key: "projects_max", label: "Cloud projects", type: "number", unlimited: true },
+    { key: "coding_runs_per_month", label: "Coding agent runs per month", type: "number", unlimited: true },
+    { key: "premium_runs_per_month", label: "Premium (Sonnet) runs per month", type: "number", unlimited: true, none: true },
+    { key: "sandbox_hours_per_month", label: "Cloud computer hours per month", type: "number", unlimited: true },
+    { key: "sandbox_sessions", label: "Cloud computers at once", type: "number" },
   ] },
-  { title: "Files and devices", fields: [
-    { key: "uploads_per_window", label: "Uploads per window", type: "number", hint: "-1 unlimited" },
+  { title: "Files and devices", icon: HardDrive, fields: [
+    { key: "uploads_per_window", label: "Uploads per session", type: "number", unlimited: true },
     { key: "upload_max_mb", label: "Largest upload", type: "number", unit: "MB" },
-    { key: "library_storage_mb", label: "Library storage", type: "number", unit: "MB", hint: "-1 unlimited" },
-    { key: "devices_max", label: "Signed-in devices", type: "number", hint: "-1 unlimited" },
+    { key: "library_storage_mb", label: "Library storage", type: "number", unit: "MB", unlimited: true },
+    { key: "devices_max", label: "Signed-in devices", type: "number", unlimited: true },
   ] },
-  { title: "Service", fields: [
-    { key: "priority", label: "Priority at peak", type: "bool" },
+  { title: "Service", icon: Headphones, fields: [
+    { key: "priority", label: "Priority at busy times", type: "bool" },
     { key: "support_level", label: "Support", type: "text", hint: "e.g. community, email, priority email, named contact" },
   ] },
-  { title: "Models allowed", note: "One model id per line, as the model picker names them (auto, claude-sonnet-5-5, @cf/zai-org/glm-5.3 ...). A model not listed here cannot be picked on this plan.", fields: [
-    { key: "models_allowed", label: "Models", type: "list", wide: true },
-    { key: "default_model", label: "Default model", type: "text" },
+  { title: "Models", icon: Bot, note: "The models people on this plan can pick. A model that is off here can't be picked.", fields: [
+    { key: "models_allowed", label: "Models on this plan", type: "models", wide: true },
+    { key: "default_model", label: "Model a new chat starts with", type: "model" },
   ] },
-  { title: "Pricing page", note: "The lines shown on the plan's card on classgrid.in/pricing and in the app, one per line.", fields: [
-    { key: "features_text", label: "Lines", type: "list", wide: true },
+  { title: "Pricing page", icon: LayoutList, note: "The lines on this plan's card on classgrid.in/pricing and in the apps, one per line. Change them when you change a limit above.", fields: [
+    { key: "features_text", label: "Lines on the card", type: "list", wide: true },
   ] },
 ];
 
 const HEAD_FIELDS: Field[] = [
   { key: "name", label: "Name", type: "text" },
-  { key: "tagline", label: "Tagline", type: "text", wide: true },
-  { key: "price_inr_monthly", label: "Monthly price", type: "number", unit: "₹", hint: "-1 = contact us" },
+  { key: "tagline", label: "One line under the name", type: "text", wide: true },
+  { key: "price_inr_monthly", label: "Monthly price", type: "number", unit: "₹", hint: "0 = free, -1 = contact us" },
   { key: "price_inr_yearly", label: "Yearly price", type: "number", unit: "₹" },
-  { key: "student_price_inr_monthly", label: "Student monthly", type: "number", unit: "₹" },
-  { key: "student_price_inr_yearly", label: "Student yearly", type: "number", unit: "₹" },
+  { key: "student_price_inr_monthly", label: "Student monthly price", type: "number", unit: "₹" },
+  { key: "student_price_inr_yearly", label: "Student yearly price", type: "number", unit: "₹" },
   { key: "is_public", label: "Shown on the pricing page", type: "bool" },
-  { key: "coming_soon", label: "Coming soon (cannot be bought)", type: "bool" },
-  { key: "sort", label: "Order on the page", type: "number" },
+  { key: "coming_soon", label: "Coming soon (can't be bought yet)", type: "bool" },
+  { key: "sort", label: "Order on the pricing page", type: "number" },
 ];
 
 const ALL_FIELDS = [...HEAD_FIELDS, ...SECTIONS.flatMap((s) => s.fields)];
 const EDITABLE_KEYS = ALL_FIELDS.flatMap((f) => (f.unitKey ? [f.key, f.unitKey] : [f.key]));
 const pick = (plan: Plan) => Object.fromEntries(EDITABLE_KEYS.map((k) => [k, plan[k]]));
+
+// The chat's own model list (names and logos), with Auto first
+const AUTO_OPTION = { id: AUTO_MODEL_ID, name: "Auto", description: "Classgrid picks the right model for each message" };
+const KNOWN_MODEL_IDS = new Set([AUTO_MODEL_ID, ...MODEL_GROUPS.flatMap((g) => g.models.map((m) => m.id))]);
+const modelName = (id: string) => (id === AUTO_MODEL_ID ? "Auto" : MODEL_GROUPS.flatMap((g) => g.models).find((m) => m.id === id)?.name || id);
 
 export function PlanConfigPanel() {
   const queryClient = useQueryClient();
@@ -134,6 +155,12 @@ export function PlanConfigPanel() {
     setDrafts((d) => ({ ...d, [key]: { ...d[key], [field]: value } }));
     setDirty((x) => ({ ...x, [key]: true }));
   };
+  const undo = (key: string) => {
+    const original = data?.plans.find((p) => p.key === key);
+    if (!original) return;
+    setDrafts((d) => ({ ...d, [key]: pick(original) }));
+    setDirty((x) => ({ ...x, [key]: false }));
+  };
 
   if (isLoading) return <Skeleton className="w-full h-64 mb-6" />;
   if (!data) return null;
@@ -141,33 +168,117 @@ export function PlanConfigPanel() {
   if (!plan) return null;
   const d = drafts[plan.key] || {};
   const busy = savePlan.isPending;
+  const isDirty = !!dirty[plan.key];
+  const planName = d.name || plan.name;
+
+  const numberControl = (f: Field, id: string, v: any) => {
+    const unlimited = f.unlimited && Number(v) === -1;
+    return (
+      <div className="flex flex-col gap-1">
+        <div className="flex items-center gap-2 flex-wrap">
+          {f.unit === "₹" && <span className="text-sm text-muted-foreground">₹</span>}
+          {unlimited ? (
+            <div className="h-9 min-w-[140px] px-3 rounded-md border border-border bg-muted/50 text-sm text-foreground flex items-center">Unlimited</div>
+          ) : (
+            <Input id={id} type="number" min={f.unlimited ? -1 : 0} value={v ?? 0} onChange={(e) => set(plan.key, f.key, Number(e.target.value))} disabled={busy} className="h-9 text-sm w-[160px]" />
+          )}
+          {f.unit && f.unit !== "₹" && !unlimited && <span className="text-sm text-muted-foreground">{f.unit}</span>}
+          {f.unlimited && (
+            <label className="inline-flex items-center gap-2 text-sm text-muted-foreground cursor-pointer ml-1">
+              {/* (switching Unlimited off brings back the saved number, or 0 when the saved one was unlimited too) */}
+              <Switch checked={unlimited} disabled={busy} onCheckedChange={(on) => { const saved = Number(plan[f.key]); set(plan.key, f.key, on ? -1 : saved > 0 ? saved : 0); }} aria-label={`${f.label}: unlimited`} />
+              Unlimited
+            </label>
+          )}
+        </div>
+        {!unlimited && Number(v) >= 1000 && <span className="text-xs text-muted-foreground">{f.unit === "₹" ? "₹" : ""}{readable(v)}{f.unit && f.unit !== "₹" ? ` ${f.unit}` : ""}</span>}
+        {!unlimited && f.none && Number(v) === 0 && <span className="text-xs text-muted-foreground">Not included in this plan</span>}
+      </div>
+    );
+  };
+
+  const modelsControl = (v: any) => {
+    const list: string[] = Array.isArray(v) ? v.filter(Boolean) : [];
+    const has = (id: string) => list.includes(id);
+    const toggle = (id: string, on: boolean) => set(plan.key, "models_allowed", on ? [...list.filter((x) => x !== id), id] : list.filter((x) => x !== id));
+    const unknown = list.filter((id) => !KNOWN_MODEL_IDS.has(id));
+    const row = (id: string, name: string, description: string, logo?: React.ReactNode) => (
+      <label key={id} className={`flex items-center gap-3 rounded-lg border px-3 py-2.5 cursor-pointer transition-colors ${has(id) ? "border-foreground/25 bg-muted/40" : "border-border hover:bg-muted/30"}`}>
+        <input type="checkbox" checked={has(id)} disabled={busy} onChange={(e) => toggle(id, e.target.checked)} className="h-4 w-4 rounded border-border shrink-0" />
+        <span className="w-5 h-5 flex items-center justify-center shrink-0">{logo}</span>
+        <span className="min-w-0">
+          <span className="block text-sm font-medium text-foreground">{name}</span>
+          <span className="block text-xs text-muted-foreground">{description}</span>
+        </span>
+      </label>
+    );
+    return (
+      <div className="space-y-4">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+          {row(AUTO_OPTION.id, AUTO_OPTION.name, AUTO_OPTION.description, <Sparkles className="w-4 h-4 text-muted-foreground" />)}
+        </div>
+        {MODEL_GROUPS.map((g) => (
+          <div key={g.label}>
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-xs font-medium text-muted-foreground">{g.label}</span>
+              <span className="flex items-center gap-3 text-xs">
+                <button type="button" disabled={busy} className="text-muted-foreground hover:text-foreground" onClick={() => set(plan.key, "models_allowed", [...list.filter((x) => !g.models.some((m) => m.id === x)), ...g.models.map((m) => m.id)])}>All</button>
+                <button type="button" disabled={busy} className="text-muted-foreground hover:text-foreground" onClick={() => set(plan.key, "models_allowed", list.filter((x) => !g.models.some((m) => m.id === x)))}>None</button>
+              </span>
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+              {g.models.map((m) => row(m.id, m.name, m.description, <ModelLogoImg logo={m.logo} />))}
+            </div>
+          </div>
+        ))}
+        {unknown.length > 0 && (
+          <div>
+            <span className="text-xs font-medium text-muted-foreground">Other models on this plan (not in the chat's model list)</span>
+            <div className="flex flex-wrap gap-2 mt-2">
+              {unknown.map((id) => (
+                <span key={id} className="inline-flex items-center gap-2 rounded-md border border-border px-2.5 py-1 text-xs text-foreground">
+                  {id}
+                  <button type="button" disabled={busy} className="text-muted-foreground hover:text-foreground" onClick={() => toggle(id, false)} aria-label={`Remove ${id}`}>Remove</button>
+                </span>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  };
 
   const field = (f: Field) => {
     const v = d[f.key];
     const id = `${plan.key}-${f.key}`;
     let control: React.ReactNode;
-    if (f.type === "number") control = (
-      <div className="flex items-center gap-2">
-        {f.unit === "₹" && <span className="text-sm text-muted-foreground">₹</span>}
-        <Input id={id} type="number" min={-1} value={v ?? 0} onChange={(e) => set(plan.key, f.key, Number(e.target.value))} disabled={busy} className="h-9 text-sm max-w-[180px]" />
-        {f.unit && f.unit !== "₹" && <span className="text-sm text-muted-foreground">{f.unit}</span>}
-      </div>
-    );
+    if (f.type === "number") control = numberControl(f, id, v);
     else if (f.type === "text") control = <Input id={id} value={v ?? ""} onChange={(e) => set(plan.key, f.key, e.target.value)} disabled={busy} className="h-9 text-sm" />;
     else if (f.type === "bool") control = <div className="h-9 flex items-center"><Switch id={id} checked={v === true} onCheckedChange={(c) => set(plan.key, f.key, c)} disabled={busy} /></div>;
     else if (f.type === "list") control = (
-      <textarea id={id} value={(Array.isArray(v) ? v : []).join("\n")} onChange={(e) => set(plan.key, f.key, e.target.value.split("\n"))} disabled={busy} rows={Math.min(16, Math.max(5, (Array.isArray(v) ? v.length : 0) + 1))}
-        className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm font-mono leading-6" />
+      <textarea id={id} value={(Array.isArray(v) ? v : []).join("\n")} onChange={(e) => set(plan.key, f.key, e.target.value.split("\n"))} disabled={busy} rows={Math.min(14, Math.max(4, (Array.isArray(v) ? v.length : 0) + 1))}
+        className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm leading-6" />
     );
+    else if (f.type === "models") control = modelsControl(v);
+    else if (f.type === "model") {
+      const allowed: string[] = Array.isArray(d.models_allowed) ? d.models_allowed.filter(Boolean) : [];
+      const options = [...new Set([...(allowed.includes(AUTO_MODEL_ID) ? [AUTO_MODEL_ID] : []), ...allowed.filter((x) => x !== AUTO_MODEL_ID), ...(v ? [v] : [])])];
+      control = (
+        <select id={id} value={v ?? AUTO_MODEL_ID} onChange={(e) => set(plan.key, f.key, e.target.value)} disabled={busy} className="h-9 w-full max-w-[320px] rounded-md border border-border bg-background px-2 text-sm text-foreground">
+          {options.map((m) => <option key={m} value={m}>{modelName(m)}{m !== AUTO_MODEL_ID && !allowed.includes(m) ? " (not on this plan)" : ""}</option>)}
+        </select>
+      );
+    }
     else if (f.type === "modes") control = (
-      <div className="flex items-center gap-4 h-9">
+      <div className="flex items-center gap-2 flex-wrap">
         {THINKING.map((m) => {
-          const on = Array.isArray(v) && v.includes(m);
+          const on = Array.isArray(v) && v.includes(m.id);
           return (
-            <label key={m} className="flex items-center gap-2 text-sm cursor-pointer">
-              <input type="checkbox" checked={on} disabled={busy} onChange={(e) => set(plan.key, f.key, e.target.checked ? [...(Array.isArray(v) ? v : []), m].filter((x, i, a) => a.indexOf(x) === i) : (Array.isArray(v) ? v : []).filter((x) => x !== m))} className="h-4 w-4 rounded border-border" />
-              <span className="capitalize">{m}</span>
-            </label>
+            <button key={m.id} type="button" disabled={busy}
+              onClick={() => set(plan.key, f.key, on ? (Array.isArray(v) ? v : []).filter((x) => x !== m.id) : [...(Array.isArray(v) ? v : []), m.id].filter((x, i, a) => a.indexOf(x) === i))}
+              className={`h-9 px-3 rounded-md border text-sm inline-flex items-center gap-1.5 transition-colors ${on ? "border-foreground/30 bg-muted text-foreground" : "border-border text-muted-foreground hover:text-foreground"}`}>
+              {on && <Check className="w-3.5 h-3.5" />}{m.label}
+            </button>
           );
         })}
       </div>
@@ -175,16 +286,16 @@ export function PlanConfigPanel() {
     else if (f.type === "period") control = (
       <div className="flex items-center gap-2">
         <Input id={id} type="number" min={1} value={v ?? 1} onChange={(e) => set(plan.key, f.key, Number(e.target.value))} disabled={busy} className="h-9 w-20 text-sm" />
-        <select value={d[f.unitKey!] ?? "hour"} onChange={(e) => set(plan.key, f.unitKey!, e.target.value)} disabled={busy} className="h-9 rounded-md border border-border bg-background px-2 text-sm">
+        <select value={d[f.unitKey!] ?? "hour"} onChange={(e) => set(plan.key, f.unitKey!, e.target.value)} disabled={busy} className="h-9 rounded-md border border-border bg-background px-2 text-sm text-foreground">
           {UNITS.map((u) => <option key={u} value={u}>{u}{(v ?? 1) === 1 ? "" : "s"}</option>)}
         </select>
       </div>
     );
     return (
-      <div key={f.key} className={`flex flex-col gap-1.5 ${f.wide ? "md:col-span-2" : ""}`}>
+      <div key={f.key} className={`flex flex-col gap-1.5 min-w-0 ${f.wide ? "md:col-span-2" : ""}`}>
         <Label htmlFor={id} className="text-sm text-foreground">{f.label}</Label>
         {control}
-        {f.hint && <span className="text-[11px] text-muted-foreground">{f.hint}</span>}
+        {f.hint && <span className="text-xs text-muted-foreground">{f.hint}</span>}
       </div>
     );
   };
@@ -193,9 +304,9 @@ export function PlanConfigPanel() {
     <div className="space-y-5">
       {/* The switch and the plan picker */}
       <div className="bg-card border border-border rounded-xl shadow-sm p-5 flex items-start justify-between gap-4 flex-wrap">
-        <div>
+        <div className="min-w-0">
           <h2 className="text-lg font-semibold text-foreground">Plans</h2>
-          <p className="text-sm text-muted-foreground">Pick a plan below and edit its prices and limits. -1 means unlimited, 0 means not included. With the switch off, the global limits on the AI Usage page apply to everyone.</p>
+          <p className="text-sm text-muted-foreground">Pick a plan, change its prices and limits, then save. While plans are off, the global limits on the AI Usage page apply to everyone.</p>
         </div>
         <div className="flex items-center gap-3">
           <Label htmlFor="plans-enabled" className="text-sm font-medium">{data.enabled ? "Plans are on" : "Plans are off"}</Label>
@@ -212,10 +323,10 @@ export function PlanConfigPanel() {
               className={`text-left rounded-xl border p-4 transition-colors ${active ? "border-foreground bg-card shadow-sm" : "border-border bg-card/60 hover:bg-card"}`}>
               <div className="flex items-center justify-between gap-2">
                 <span className="font-semibold text-foreground">{dp.name || p.name}</span>
-                {dirty[p.key] && <span className="text-[10px] uppercase tracking-wide text-amber-500">unsaved</span>}
+                {dirty[p.key] && <span className="text-[10px] uppercase tracking-wide text-amber-600 dark:text-amber-400">Not saved</span>}
               </div>
               <div className="text-xl font-bold text-foreground mt-1">{inr(dp.price_inr_monthly)}{Number(dp.price_inr_monthly) > 0 ? <span className="text-xs font-normal text-muted-foreground"> / month</span> : null}</div>
-              <div className="flex items-center gap-2 mt-2 text-[11px] text-muted-foreground">
+              <div className="flex items-center gap-2 mt-2 text-xs text-muted-foreground flex-wrap">
                 {dp.is_public !== false ? <span className="inline-flex items-center gap-1"><Globe className="w-3 h-3" /> On the pricing page</span> : <span>Hidden</span>}
                 {dp.coming_soon && <span className="inline-flex items-center gap-1"><Clock className="w-3 h-3" /> Coming soon</span>}
               </div>
@@ -224,38 +335,57 @@ export function PlanConfigPanel() {
         })}
       </div>
 
-      {/* The selected plan */}
-      <div className="bg-card border border-border rounded-xl shadow-sm">
-        <div className="p-5 border-b border-border flex items-center justify-between gap-4 flex-wrap sticky top-0 bg-card z-10 rounded-t-xl">
-          <div>
-            <h3 className="text-lg font-semibold text-foreground">{d.name || plan.name} plan</h3>
-            <p className="text-sm text-muted-foreground">{d.tagline || plan.tagline}</p>
-          </div>
-          <Button variant={dirty[plan.key] ? "default" : "outline"} disabled={!dirty[plan.key] || busy} onClick={() => savePlan.mutate(plan.key)}>
-            {busy && savePlan.variables === plan.key ? <Spinner className="w-3.5 h-3.5 mr-2" /> : dirty[plan.key] ? null : <Check className="w-3.5 h-3.5 mr-2" />}
-            {dirty[plan.key] ? `Save ${d.name || plan.name}` : "Saved"}
-          </Button>
+      {/* The selected plan: its name and Save (not pinned to the top any more: it covered the fields under it) */}
+      <div className="bg-card border border-border rounded-xl shadow-sm p-5 flex items-center justify-between gap-4 flex-wrap">
+        <div className="min-w-0">
+          <h3 className="text-lg font-semibold text-foreground">{planName} plan</h3>
+          <p className="text-sm text-muted-foreground">{d.tagline || plan.tagline}</p>
         </div>
-        <div className="p-5 space-y-6">
-          <section>
-            <h4 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-3">Plan and prices (₹, GST included)</h4>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-4">{HEAD_FIELDS.map(field)}</div>
-          </section>
-          {SECTIONS.map((s) => (
-            <section key={s.title} className="border-t border-border pt-5">
-              <h4 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">{s.title}</h4>
-              {s.note && <p className="text-xs text-muted-foreground mt-1 mb-3">{s.note}</p>}
-              <div className={`grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-4 ${s.note ? "" : "mt-3"}`}>{s.fields.map(field)}</div>
-            </section>
-          ))}
-        </div>
-        <div className="p-5 border-t border-border flex justify-end">
-          <Button variant={dirty[plan.key] ? "default" : "outline"} disabled={!dirty[plan.key] || busy} onClick={() => savePlan.mutate(plan.key)}>
-            {busy && savePlan.variables === plan.key && <Spinner className="w-3.5 h-3.5 mr-2" />}
-            {dirty[plan.key] ? `Save ${d.name || plan.name}` : "Saved"}
-          </Button>
-        </div>
+        <Button variant={isDirty ? "default" : "outline"} disabled={!isDirty || busy} onClick={() => savePlan.mutate(plan.key)}>
+          {busy && savePlan.variables === plan.key ? <Spinner className="w-3.5 h-3.5 mr-2" /> : isDirty ? null : <Check className="w-3.5 h-3.5 mr-2" />}
+          {isDirty ? `Save ${planName}` : "Saved"}
+        </Button>
       </div>
+
+      <section className="bg-card border border-border rounded-xl shadow-sm p-5">
+        <div className="flex items-center gap-2.5">
+          <span className="w-8 h-8 rounded-lg bg-muted flex items-center justify-center shrink-0"><IndianRupee className="w-4 h-4 text-foreground" /></span>
+          <div>
+            <h4 className="text-base font-semibold text-foreground">Name and prices</h4>
+            <p className="text-xs text-muted-foreground">In rupees, GST included.</p>
+          </div>
+        </div>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-5 mt-4">{HEAD_FIELDS.map(field)}</div>
+      </section>
+
+      {SECTIONS.map((s) => (
+        <section key={s.title} className="bg-card border border-border rounded-xl shadow-sm p-5">
+          <div className="flex items-center gap-2.5">
+            <span className="w-8 h-8 rounded-lg bg-muted flex items-center justify-center shrink-0"><s.icon className="w-4 h-4 text-foreground" /></span>
+            <div className="min-w-0">
+              <h4 className="text-base font-semibold text-foreground">{s.title}</h4>
+              {s.note && <p className="text-xs text-muted-foreground">{s.note}</p>}
+            </div>
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-5 mt-4">{s.fields.map(field)}</div>
+        </section>
+      ))}
+
+      {/* Unsaved changes: Save and Undo stay at the bottom of the screen while scrolling */}
+      {isDirty && (
+        <div className="sticky bottom-4 z-10">
+          <div className="mx-auto max-w-xl rounded-xl border border-border bg-popover text-popover-foreground shadow-lg px-4 py-3 flex items-center justify-between gap-3">
+            <span className="text-sm">{planName}: changes not saved</span>
+            <div className="flex items-center gap-2">
+              <Button variant="ghost" size="sm" disabled={busy} onClick={() => undo(plan.key)}>Undo</Button>
+              <Button size="sm" disabled={busy} onClick={() => savePlan.mutate(plan.key)}>
+                {busy && savePlan.variables === plan.key && <Spinner className="w-3.5 h-3.5 mr-2" />}
+                Save {planName}
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

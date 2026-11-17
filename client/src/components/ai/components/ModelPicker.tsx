@@ -121,7 +121,7 @@ export function useSelectedModel() {
   return [selectedModel, setSelectedModel] as const;
 }
 
-function ModelLogoImg({ logo, className }: { logo: ModelLogo; className?: string }) {
+export function ModelLogoImg({ logo, className }: { logo: ModelLogo; className?: string }) {
   return (
     <img
       src={logo.src}
