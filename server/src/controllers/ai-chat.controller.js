@@ -1218,6 +1218,12 @@ const HELPER_REPORT_NOTE = "\n\nWho reads your work: only the main AI that start
 const HELPER_RESULT_ROOM = 190000;
 // How long one try of a helper may work before its tools say "time is up" and it writes its report
 const HELPER_TRY_MS = 5 * 60 * 60 * 1000;
+// A helper has no step limit of its own (owner, same day: "fix all limits, make it like you"): the 5 hours, the
+// person's credits (the live meter) and the repeated-step check end it. This number is only a backstop far above
+// what 5 hours of steps can reach (a helper took 57 steps in 11 minutes)
+const HELPER_MAX_STEPS = 5000;
+// How long one model call of a helper may take (it was 4 minutes; one round can write a whole long file)
+const HELPER_ROUND_MS = 10 * 60 * 1000;
 
 // The files finished helpers changed, in the same "FILES CHANGED IN PROJECT:" list a code run gives, so the
 // chat's "files changed" box counts helpers' work too
@@ -4465,8 +4471,10 @@ You work on the user's own Windows computer through their Classgrid desktop app,
                                             toolHandlers: liveHandlers,
                                             onToken: (piece) => { emitHelper({ helper: i, text: piece }); if (h.live.length < 40000) h.live += piece; },
                                             onThought: (piece) => { emitHelper({ helper: i, thought: piece }); if (h.thought.length < 60000) h.thought += piece; },
-                                            maxToolDepth: h.canEdit || hasBrowser ? 60 : 30, // big repos need more looking around before a full answer
-                                            timeoutMs: 240000,
+                                            // (no step limit of its own: the 5 hours a try, the person's credits and the loop check end a helper.
+                                            // It was 60 steps for a helper that edits or browses and 30 for one that reads)
+                                            maxToolDepth: HELPER_MAX_STEPS,
+                                            timeoutMs: HELPER_ROUND_MS,
                                             signal: h.abort.signal
                                         };
                                         const r = CLAUDE_CHAT_MODELS.has(model)
