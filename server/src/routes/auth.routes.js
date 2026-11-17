@@ -148,7 +148,7 @@ router.get(
         const loginTab = req.query.loginTab || req.query.role || 'student';
         const host = req.query.host || '';
         try {
-            const { state, nonce } = await createOAuthState({ loginTab, host, intent: req.query.intent, next: req.query.next, desktop: req.query.desktop === "1" });
+            const { state, nonce } = await createOAuthState({ loginTab, host, intent: req.query.intent, next: req.query.next, desktop: req.query.desktop === "1", device: req.query.device, deviceModel: req.query.device_model });
             res.cookie(OAUTH_STATE_COOKIE, nonce, oauthStateCookieOptions());
             passport.authenticate("google-chat", {
                 ...rescueCallback(req, "google"),
@@ -205,7 +205,7 @@ router.get(
         const loginTab = req.query.loginTab || req.query.role || 'student';
         const host = req.query.host || '';
         try {
-            const { state, nonce } = await createOAuthState({ loginTab, host, intent: req.query.intent, next: req.query.next, desktop: req.query.desktop === "1" });
+            const { state, nonce } = await createOAuthState({ loginTab, host, intent: req.query.intent, next: req.query.next, desktop: req.query.desktop === "1", device: req.query.device, deviceModel: req.query.device_model });
             res.cookie(OAUTH_STATE_COOKIE, nonce, oauthStateCookieOptions());
             passport.authenticate(githubStrategy(req), {
                 ...rescueCallback(req, "github"),
@@ -273,6 +273,54 @@ router.get(
 
 router.get("/me", isAuthenticated, authController.getCurrentUser);
 
+// A sign-in refused by the plan's device limit (403 DEVICE_LIMIT) comes with a ticket (10 minutes, naming only the
+// account: services/user-session.service.js). With it, in the X-Device-Ticket header, the login page lists the
+// account's devices and logs out one, so the person can sign in again. Nothing else works with a ticket.
+// GET    /api/auth/device-limit/devices      -> { devices, limit: { used, max }, note }   (as GET /api/user/devices)
+// DELETE /api/auth/device-limit/devices/:id  -> { success, message }
+const deviceTicketLimiter = rateLimit({ validate: { ip: false, xForwardedForHeader: false }, windowMs: 10 * 60 * 1000, max: 60, standardHeaders: true, legacyHeaders: false, message: { message: "Too many tries. Wait a few minutes." } });
+const ticketAccount = async (req, res) => {
+    const { readDeviceLimitTicket } = await import("../services/user-session.service.js");
+    const uid = await readDeviceLimitTicket(req.headers["x-device-ticket"]);
+    if (!uid) {
+        res.status(401).json({ message: "This list has expired. Sign in again to see it." });
+        return null;
+    }
+    const { default: User } = await import("../models/User.js");
+    // (what the device list needs: the plan for the limit, and the password-changed time for ended sign-ins)
+    const user = await User.findById(uid).select("plan role email passwordChangedAt").lean();
+    if (!user) res.status(401).json({ message: "This list has expired. Sign in again to see it." });
+    return user;
+};
+router.get("/device-limit/devices", deviceTicketLimiter, async (req, res) => {
+    try {
+        const user = await ticketAccount(req, res);
+        if (!user) return;
+        const { listDevices } = await import("../services/user-session.service.js");
+        res.json(await listDevices(user, null));
+    } catch (error) {
+        console.error("DEVICE LIMIT LIST ERROR:", error.message);
+        res.status(500).json({ message: "Couldn't load your devices." });
+    }
+});
+router.delete("/device-limit/devices/:id", deviceTicketLimiter, async (req, res) => {
+    try {
+        const user = await ticketAccount(req, res);
+        if (!user) return;
+        const { default: mongoose } = await import("mongoose");
+        const id = String(req.params.id || "");
+        if (!mongoose.isValidObjectId(id)) return res.status(404).json({ message: "Device not found" });
+        const { revokeDevice, afterSessionEnded } = await import("../services/user-session.service.js");
+        const { found, row } = await revokeDevice(user._id, id);
+        if (!found) return res.status(404).json({ message: "Device not found" });
+        await afterSessionEnded(user._id, row);
+        res.json({ success: true, message: "Device logged out" });
+    } catch (error) {
+        console.error("DEVICE LIMIT LOGOUT ERROR:", error.message);
+        res.status(500).json({ message: "Couldn't log out that device. Try again." });
+    }
+});
+
 // Classgrid desktop app sign-in with Google / GitHub: the login runs in the user's browser and ends here with a
 // one-time code; this page hands it to the app (classgrid://), and the app swaps it for its in-app page.
 router.get("/desktop-done", (req, res) => {
@@ -313,9 +361,25 @@ router.post("/editor-code", isAuthenticated, async (req, res) => {
     // 60 seconds for the Classgrid app's handoff; 5 minutes with PKCE (useless without the verifier), so a code pasted
     // by hand still works
     const ttl = challenge ? 300 : 60;
-    // A browser sign-in gets the extension's own login (client: "editor": no WhatsApp number needed there); the
-    // Classgrid app's handoff keeps handing over its own login
-    const handed = challenge ? authController.generateEditorToken(req.user) : token;
+    // A browser sign-in gets the extension's own login (client: "editor": no WhatsApp number needed there), its own
+    // sign-in in Settings > Devices named by the editor (editor: its link scheme, e.g. "cursor"; app and device: the
+    // editor's name and own id, when the extension sends them). The Classgrid app's handoff keeps handing over its own
+    // login, so the desktop app and its Classgrid Code are one sign-in.
+    let handed = token;
+    if (challenge) {
+        const clean = (v, max) => String(v || "").replace(/[^A-Za-z0-9 ._:+-]/g, "").trim().slice(0, max);
+        try {
+            handed = await authController.generateEditorToken(req.user, req, {
+                scheme: clean(req.body?.editor, 40).toLowerCase(),
+                app: clean(req.body?.app, 40),
+                device: clean(req.body?.device, 128),
+            });
+        } catch (e) {
+            if (e?.code === "DEVICE_LIMIT") return authController.sendDeviceLimit(res, e);
+            console.error("Editor sign-in token error:", e.message);
+            return res.status(500).json({ message: "Couldn't finish signing in to your editor." });
+        }
+    }
     await redis.set(`desktoplogin:${code}`, `/editor/project?token=${encodeURIComponent(handed)}`, "EX", ttl);
     if (challenge) await redis.set(`desktoplogin-pkce:${code}`, challenge, "EX", ttl);
     res.json({ code });
@@ -359,7 +423,7 @@ router.get(
         const loginTab = req.query.loginTab || req.query.role || 'student';
         const host = req.query.host || '';
         try {
-            const { state, nonce } = await createOAuthState({ loginTab, host, intent: req.query.intent, next: req.query.next, desktop: req.query.desktop === "1" });
+            const { state, nonce } = await createOAuthState({ loginTab, host, intent: req.query.intent, next: req.query.next, desktop: req.query.desktop === "1", device: req.query.device, deviceModel: req.query.device_model });
             res.cookie(OAUTH_STATE_COOKIE, nonce, oauthStateCookieOptions());
             passport.authenticate("google", {
                 ...rescueCallback(req, "google"),

@@ -3,7 +3,8 @@
 import { useEffect, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { apiClient } from "@/lib/apiClient";
-import { clearEditorSignIn, editorLink, pendingEditorSignIn, type EditorSignIn } from "../editorHandoff";
+import { clearEditorSignIn, editorLink, editorScheme, pendingEditorSignIn, type EditorSignIn } from "../editorHandoff";
+import { DeviceLimitDevices } from "@/features/shared/components/settings/DeviceLimitDevices";
 
 const ON_WEBSITE = import.meta.env.VITE_EDITOR !== "1" && import.meta.env.VITE_DESKTOP !== "1";
 const PAGE = "/editor-signed-in";
@@ -31,7 +32,8 @@ export function EditorSignInWatcher() {
   return null;
 }
 
-type Status = { kind: "working" } | { kind: "done"; code: string; link: string } | { kind: "none" } | { kind: "error"; message: string; relogin: boolean };
+// (ticket: the editor's sign-in was over the plan's devices; the account's devices are listed to log out one)
+type Status = { kind: "working" } | { kind: "done"; code: string; link: string } | { kind: "none" } | { kind: "error"; message: string; relogin: boolean; ticket?: string };
 
 export default function EditorSignedInPage() {
   const navigate = useNavigate();
@@ -46,16 +48,17 @@ export default function EditorSignedInPage() {
     if (!req) return setStatus({ kind: "none" });
     if (!localStorage.getItem("token")) return void navigate("/login", { replace: true });
     apiClient
-      .post<{ code: string }>("/api/auth/editor-code", { challenge: req.challenge })
+      // (editor, device, app: which editor this is, for Settings > Devices)
+      .post<{ code: string }>("/api/auth/editor-code", { challenge: req.challenge, editor: editorScheme(req), device: req.device, app: req.app })
       .then(({ data }) => {
         clearEditorSignIn();
         const link = editorLink(req, data.code);
         setStatus({ kind: "done", code: data.code, link });
         window.location.href = link;
       })
-      .catch((err: { code?: string; status?: number; message?: string }) => {
+      .catch((err: { code?: string; status?: number; message?: string; ticket?: string }) => {
         const relogin = err?.status === 401 || err?.code === "401";
-        setStatus({ kind: "error", relogin, message: relogin ? "Your sign-in here has expired. Sign in again to finish." : err?.message || "Couldn't finish signing in to your editor." });
+        setStatus({ kind: "error", relogin, ticket: typeof err?.ticket === "string" ? err.ticket : undefined, message: relogin ? "Your sign-in here has expired. Sign in again to finish." : err?.message || "Couldn't finish signing in to your editor." });
       });
   }, [navigate]);
 
@@ -95,6 +98,7 @@ export default function EditorSignedInPage() {
           <>
             <h1 className="mb-2 text-xl font-semibold">Sign-in didn't finish</h1>
             <p className="mb-5 text-sm text-muted-foreground">{status.message}</p>
+            {status.ticket && <DeviceLimitDevices ticket={status.ticket} className="mb-5" />}
             {status.relogin
               ? <button type="button" onClick={signInAgain} className="rounded-full bg-foreground px-5 py-2.5 text-sm font-semibold text-background">Sign in again</button>
               : <p className="text-sm text-muted-foreground">Start again from your editor: run "Classgrid: Sign in".</p>}

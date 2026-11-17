@@ -59,6 +59,7 @@ import axios from "axios";
 import type { ApiErrorResponse } from "@shared-types";
 import { mockApiAdapter } from "./mockApiAdapter";
 import { isMainDown, isMainDownStatus, isRescueUrl, markMainDown, toRescueUrl } from "./rescue";
+import { deviceId } from "./deviceId";
 
 const isMockApiEnabled = import.meta.env.VITE_MOCK_API === "true";
 export const API_BASE_URL =
@@ -82,6 +83,12 @@ apiClient.interceptors.request.use((config) => {
   const token = localStorage.getItem("token");
   if (token && config.headers) {
     config.headers.Authorization = `Bearer ${token}`;
+  }
+  // Sign-ins (/api/auth/...) say which browser they come from: the same one signing in again replaces its own sign-in
+  // in Settings > Devices (lib/deviceId.ts)
+  if (config.headers && config.url && /\/api\/auth\//.test(config.url)) {
+    const id = deviceId();
+    if (id) config.headers["X-Device-Id"] = id;
   }
   if (!isMockApiEnabled && isMainDown() && config.url && !isRescueUrl(config.url)) {
     config.url = toRescueUrl(config.url);

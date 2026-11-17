@@ -73,6 +73,8 @@ import { PutObjectCommand } from "@aws-sdk/client-s3";
 import { s3Client, BUCKET_NAME, CDN_BASE_URL } from "../config/s3Client.js";
 import { checkAndRegisterDevice, getDeviceFingerprint } from "../services/device-fingerprint.service.js";
 import { liftEndedBlock } from "../utils/account-block.js";
+import { signUserToken, renewUserToken, adoptLegacyToken, revokeSid, afterSessionEnded, isDeviceLimitError, deviceLimitBody, renewalKind, tokenStillSignedIn } from "../services/user-session.service.js";
+import { getUserAccessBlock } from "../middleware/auth.middleware.js";
 
 export async function uploadBase64ToS3(base64String, folder, filenamePrefix) {
     if (!base64String || typeof base64String !== 'string' || !base64String.startsWith('data:image')) return base64String;
@@ -393,31 +395,82 @@ const isMobileApp = (req) => {
     return false;
 };
 
+// How long a sign-in token lasts: phone app 365 days, "Remember Me" 7 days, else 24 hours
+const tokenLifetime = (req, rememberMe) => {
+    if (req && isMobileApp(req)) return "365d"; // Mobile app: 365 days (like Instagram)
+    if (rememberMe) return "7d"; // Desktop "Remember Me": 7 days
+    return "24h"; // Desktop default: 24 hours
+};
+const tokenPayload = (user, rememberMe) => ({ id: user._id, role: user.role, organizationId: user.organization_id || null, rememberMe: rememberMe === true });
+
 // Helper: Token Generator (standardized — all tokens carry id, role, organizationId)
-const generateToken = (user, req = null, rememberMe = false) => {
-    let expiry = "24h"; // Desktop default: 24 hours
+// Every sign-in token gets its own sign-in row and sid (Settings > Devices, services/user-session.service.js). Throws
+// DeviceLimitError when the plan's device limit is reached: the caller answers 403 DEVICE_LIMIT (sendDeviceLimit).
+// deviceOpts: { oauthState } for a Google / GitHub sign-in (the desktop and phone apps' browser sign-in).
+const generateToken = (user, req = null, rememberMe = false, deviceOpts = {}) => signUserToken({
+    user,
+    req,
+    payload: tokenPayload(user, rememberMe),
+    expiresIn: tokenLifetime(req, rememberMe),
+    deviceOpts,
+});
 
-    if (req && isMobileApp(req)) {
-        expiry = "365d"; // Mobile app: 365 days (like Instagram)
-    } else if (rememberMe) {
-        expiry = "7d";   // Desktop "Remember Me": 7 days
+// The token /api/auth/me hands back: the same sign-in (same sid, its row's expiry moved on) for a token that has one.
+// A person's token from before sign-in rows existed gets a row and a sid here (never refused for the device limit), so
+// everyone signed in today shows up in Settings > Devices from their next visit. Support's "log in as" token
+// (impersonatedBy, 1 hour) is handed back as it is: never one of the person's sign-ins, never longer. The impersonation
+// and provisional tokens are renewed as before. An old token whose row was logged out throws LegacyRevokedError (401).
+const renewToken = async (req) => {
+    const oldToken = requestToken(req);
+    const kind = renewalKind({
+        sid: req.authSid, impersonatedBy: req.authImpersonatedBy, isImpersonating: req.isImpersonating,
+        isProvisional: req.user?.isProvisional, hasUser: !!req.user?._id, hasToken: !!oldToken,
+    });
+    if (kind === "as_is") return oldToken;
+    const rememberMe = req.authRememberMe === true;
+    const payload = tokenPayload(req.user, rememberMe);
+    const expiresIn = tokenLifetime(req, rememberMe);
+    if (kind === "renew") return renewUserToken({ payload, sid: req.authSid, expiresIn });
+    if (kind === "adopt") {
+        try {
+            return await adoptLegacyToken({ user: req.user, req, oldToken, payload, expiresIn, deviceOpts: { editor: req.editorClient === true } });
+        } catch (e) {
+            if (e?.code === "LEGACY_REVOKED") throw e;
+            console.error("[auth/me] giving an older sign-in its row failed:", e.message); // renewed as before
+        }
     }
-
-    return jwt.sign(
-        { id: user._id, role: user.role, organizationId: user.organization_id || null, rememberMe: rememberMe === true },
-        JWT_SECRET,
-        { expiresIn: expiry }
-    );
+    return jwt.sign(payload, JWT_SECRET, { expiresIn });
 };
 
-// The Classgrid extension's login (Classgrid Code, VS Code, Cursor), made by /editor-code for a browser sign-in.
-// client: "editor" lets it use the AI without a WhatsApp number and age (the extension has no WhatsApp or schedules);
-// the website and the desktop app still ask for them (auth.middleware.js). 30 days, like other editor sign-ins.
-export const generateEditorToken = (user) => jwt.sign(
-    { id: user._id, role: user.role, organizationId: user.organization_id || null, rememberMe: true, client: "editor" },
-    JWT_SECRET,
-    { expiresIn: "30d" }
-);
+/**
+ * A login token that is still signed in, checked the way the auth middleware checks one: not support's or a
+ * provisional token, its sign-in not logged out (sid), an old token whose row was not logged out, and the account's own
+ * checks (password changed after it was issued, blocked, global lock). Used where a login token stands in for another
+ * proof (chatFinalizeOnboarding).
+ */
+const loginTokenStillSignedIn = (decoded, rawToken) => tokenStillSignedIn(decoded, rawToken, {
+    accountBlocked: async (t) => {
+        const row = await User.findById(t.id).select("-password -verificationToken").maxTimeMS(5000).lean();
+        if (!row) return true;
+        return !!(await getUserAccessBlock(User.hydrate(row), { issuedAtMs: t.iat * 1000 }));
+    },
+});
+
+// A sign-in refused by the plan's device limit: 403 { success: false, code: "DEVICE_LIMIT", message }
+export const sendDeviceLimit = (res, err) => res.status(403).json(deviceLimitBody(err));
+
+// The Classgrid extension's login (VS Code, Cursor, Antigravity, Classgrid Code), made by /editor-code for a browser
+// sign-in. client: "editor" lets it use the AI without a WhatsApp number and age (the extension has no WhatsApp or
+// schedules); the website and the desktop app still ask for them (auth.middleware.js). 30 days, like other editor
+// sign-ins. editor: { scheme, app, device } from the extension's sign-in request: the editor's name in Settings >
+// Devices and its own device. Throws DeviceLimitError like generateToken.
+export const generateEditorToken = (user, req = null, editor = {}) => signUserToken({
+    user,
+    req,
+    payload: { id: user._id, role: user.role, organizationId: user.organization_id || null, rememberMe: true, client: "editor" },
+    expiresIn: "30d",
+    deviceOpts: { editor: true, editorScheme: editor.scheme || "", editorApp: editor.app || "", editorDevice: editor.device || "" },
+});
 
 // Helper: Set Cookie (duration matches JWT expiry)
 const setTokenCookie = (res, token, req = null, rememberMe = false) => {
@@ -1094,7 +1147,7 @@ export const activateAdmin = async (req, res) => {
         }
 
         // --- 6. Auto login ---
-        const jwtToken = generateToken(user, req);
+        const jwtToken = await generateToken(user, req);
         setTokenCookie(res, jwtToken, req);
 
         // --- 7. Determine redirect based on role ---
@@ -1270,7 +1323,7 @@ export const finalizeOnboarding = async (req, res) => {
         }
         
         // 4. Generate Standard JWT
-        const jwtToken = generateToken(newUser, req);
+        const jwtToken = await generateToken(newUser, req);
         setTokenCookie(res, jwtToken, req);
         
         return res.status(200).json({
@@ -1681,7 +1734,8 @@ export const login = async (req, res) => {
         }
         // -----------------------------
 
-        const token = generateToken(user, req, rememberMe);
+        let token;
+        try { token = await generateToken(user, req, rememberMe); } catch (e) { if (isDeviceLimitError(e)) return sendDeviceLimit(res, e); throw e; }
         setTokenCookie(res, token, req, rememberMe);
         recordLoginMethod(res, req, user, "email");
 
@@ -1930,7 +1984,8 @@ export const completeSignup = async (req, res) => {
         await sendWelcomeEmail(user, "manual");
 
         // Auto Login
-        const jwtToken = generateToken(user, req);
+        let jwtToken;
+        try { jwtToken = await generateToken(user, req); } catch (e) { if (isDeviceLimitError(e)) return sendDeviceLimit(res, e); throw e; }
         setTokenCookie(res, jwtToken, req);
 
         // Detect if faculty/teacher needs to enter org code
@@ -2078,7 +2133,24 @@ export const oauthCallback = async (req, res) => {
     req.user.lastLoginAt = new Date();
     await req.user.save();
 
-    const token = generateToken(req.user, req);
+    let token;
+    try {
+        token = await generateToken(req.user, req, false, { oauthState: req.oauthState });
+    } catch (e) {
+        const portalPathOnError = host && host.startsWith('chat.') ? '/login' : getLoginPortalPath(loginTab);
+        if (!isDeviceLimitError(e)) {
+            // (this handler runs outside any try: a failed sign-in row must not end as an unhandled rejection)
+            console.error("OAuth sign-in token error:", e);
+            return res.redirect(`${TARGET_URL}${portalPathOnError}?error=Callback`);
+        }
+        // The plan's device limit: the login page shows the message (error=device_limit) and, with the ticket, the
+        // account's devices with a Log out button each (routes/auth.routes.js /device-limit). Started from the desktop or
+        // phone app, this runs in the person's browser, which opens the same login page: they log out a device there and
+        // sign in again from the app.
+        const message = encodeURIComponent(e.message);
+        const ticket = encodeURIComponent(e.ticket || "");
+        return res.redirect(`${TARGET_URL}${portalPathOnError}?error=device_limit&message=${message}&ticket=${ticket}`);
+    }
     setTokenCookie(res, token, req);
     recordLoginMethod(res, req, req.user, req.oauthProvider); // set by the Google/GitHub callback routes
 
@@ -2328,8 +2400,47 @@ export const facultyActivate = async (req, res) => {
     }
 };
 
-// Logout
-export const logout = (req, res) => {
+// A request's login token: the Bearer token first, then the cookie, like the auth middleware ("" when none)
+const requestToken = (req) => {
+    const auth = String(req.headers.authorization || "");
+    const token = auth.startsWith("Bearer ") ? auth.split(" ")[1] || "" : (req.cookies?.token || req.cookies?.jwt || "");
+    return !token || token === "null" || token === "undefined" ? "" : token;
+};
+
+// The sign-in (sid) a request's token names. null for a token without one (signed before sign-in rows existed), an
+// expired or a wrong token.
+const requestSid = (req) => {
+    const token = requestToken(req);
+    if (!token) return null;
+    try {
+        const decoded = jwt.verify(token, JWT_SECRET);
+        return typeof decoded?.sid === "string" ? decoded.sid : null;
+    } catch {
+        return null;
+    }
+};
+
+// Logout: this sign-in ends (Settings > Devices no longer lists or counts it, and its token stops working), its live
+// connection is closed, and this browser's login cookies are cleared
+export const logout = async (req, res) => {
+    const sid = requestSid(req);
+    if (sid) {
+        const row = await revokeSid(sid, "logout").catch((e) => { console.error("[logout] ending the sign-in failed:", e.message); return null; });
+        if (row) await afterSessionEnded(row.user_id, row);
+    }
+    clearAuthCookies(res);
+
+    // Subdomain-aware logout redirect hint
+    const redirectPath = "/login";
+
+    res.json({
+        message: "Logged out successfully",
+        redirect: redirectPath
+    });
+};
+
+// Clears this browser's login cookies (the logout route, and Settings > Devices when it logs out this device)
+export const clearAuthCookies = (res) => {
     const isProd = process.env.NODE_ENV === "production";
 
     // Clear cookie WITHOUT domain (covers api.classgrid.in-scoped legacy cookies)
@@ -2350,14 +2461,6 @@ export const logout = (req, res) => {
             domain: ".classgrid.in",
         });
     }
-
-    // Subdomain-aware logout redirect hint
-    const redirectPath = "/login";
-    
-    res.json({ 
-        message: "Logged out successfully",
-        redirect: redirectPath
-    });
 };
 
 // Setup Org Admin Account String (Custom login flow for new org admins)
@@ -2414,7 +2517,7 @@ export const setupOrgAdmin = async (req, res) => {
         });
 
         // Generate JWT token exactly as a normal non-remembered login does.
-        const token = generateToken(user, req);
+        const token = await generateToken(user, req);
         setTokenCookie(res, token, req);
 
         res.status(200).json({
@@ -2507,9 +2610,11 @@ export const getCurrentUser = async (req, res) => {
             needsChatOnboarding: !req.isImpersonating && needsChatOnboarding(req.user),
             google_access_token: req.user.google_access_token || null,
             zoom_access_token: req.user.zoom_access_token || null,
-            token: generateToken(req.user, req, req.authRememberMe === true)
+            token: await renewToken(req)
         });
     } catch (err) {
+        // An old token whose sign-in was logged out in Settings > Devices: the same answer as a bad token
+        if (err?.code === "LEGACY_REVOKED") return res.status(401).json({ message: "Token invalid" });
         console.error("GetMe Error:", err);
         res.status(500).json({ message: "Server error" });
     }
@@ -2708,7 +2813,8 @@ export const verifyDeviceOtp = async (req, res) => {
         // Clean up verification doc
         await DeviceVerification.deleteOne({ _id: verification._id });
 
-        const token = generateToken(user, req, rememberMe);
+        let token;
+        try { token = await generateToken(user, req, rememberMe); } catch (e) { if (isDeviceLimitError(e)) return sendDeviceLimit(res, e); throw e; }
         setTokenCookie(res, token, req, rememberMe);
 
         // Store the approved fingerprint in a stable cookie to prevent future mismatch loops
@@ -3165,8 +3271,10 @@ export const chatOnboard = async (req, res) => {
         }
         await user.save();
 
-        const JWT_SECRET = getJwtSecret();
-        const token = jwt.sign({ id: user._id.toString(), role: user.role, organization_id: user.organization_id }, JWT_SECRET, { expiresIn: '30d' });
+        let token;
+        try {
+            token = await signUserToken({ user, req, payload: { id: user._id.toString(), role: user.role, organization_id: user.organization_id }, expiresIn: '30d' });
+        } catch (e) { if (isDeviceLimitError(e)) return sendDeviceLimit(res, e); throw e; }
         // The chat calls the API with the login cookie, not this JSON token: without the cookie every request
         // after sign-up was 401 until the user logged out and in again
         setTokenCookie(res, token, req);
@@ -3286,14 +3394,16 @@ export const chatVerifyEmailOtp = async (req, res) => {
         const needsOnboarding = !whatsappStepDone(user) || !user.metadata?.age;
 
         let token = null;
-        if (!needsOnboarding) {
-            token = generateToken(user, req);
-            setTokenCookie(res, token, req);
-        } else if (editor === true) {
-            // Signing in to the Classgrid extension: the verified email is enough (no WhatsApp step there). No cookie: the
-            // page only uses it to get the editor's own login (/editor-code); the website still asks for WhatsApp.
-            token = generateToken(user, req);
-        }
+        try {
+            if (!needsOnboarding) {
+                token = await generateToken(user, req);
+                setTokenCookie(res, token, req);
+            } else if (editor === true) {
+                // Signing in to the Classgrid extension: the verified email is enough (no WhatsApp step there). No cookie: the
+                // page only uses it to get the editor's own login (/editor-code); the website still asks for WhatsApp.
+                token = await generateToken(user, req);
+            }
+        } catch (e) { if (isDeviceLimitError(e)) return sendDeviceLimit(res, e); throw e; }
         recordLoginMethod(res, req, user, "email"); // the email code was correct
 
         // Short-lived proof that this email was verified, required by chatFinalizeOnboarding.
@@ -3502,8 +3612,9 @@ export const chatFinalizeOnboarding = async (req, res) => {
         }
         
         if (ticket?.purpose !== CHAT_EMAIL_TICKET_PURPOSE) {
-            // Normal token fallback
-            if (!ticket?.id) {
+            // Normal token fallback: only a login that is still signed in (not logged out in Settings > Devices, by
+            // Log out from all devices or by a password change), checked like the auth middleware checks it
+            if (!ticket?.id || !(await loginTokenStillSignedIn(ticket, emailVerifiedTicket))) {
                 return res.status(401).json({ message: 'Email verification expired. Please verify your email again.' });
             }
             ticket.uid = ticket.id;
@@ -3588,7 +3699,10 @@ export const chatFinalizeOnboarding = async (req, res) => {
         }
         await user.save();
 
-        const token = jwt.sign({ id: user._id.toString(), role: user.role, organization_id: user.organization_id }, JWT_SECRET, { expiresIn: '30d' });
+        let token;
+        try {
+            token = await signUserToken({ user, req, payload: { id: user._id.toString(), role: user.role, organization_id: user.organization_id }, expiresIn: '30d' });
+        } catch (e) { if (isDeviceLimitError(e)) return sendDeviceLimit(res, e); throw e; }
         // The chat calls the API with the login cookie, not this JSON token: without the cookie every request
         // after sign-up was 401 until the user logged out and in again
         setTokenCookie(res, token, req);
@@ -3796,7 +3910,8 @@ export const googleNativeLogin = async (req, res) => {
         if (!user.profilePicture && profile.picture) user.profilePicture = profile.picture;
         await user.save();
 
-        const token = generateToken(user, req, true);
+        let token;
+        try { token = await generateToken(user, req, true); } catch (e) { if (isDeviceLimitError(e)) return sendDeviceLimit(res, e); throw e; }
         setTokenCookie(res, token, req, true);
 
         return res.json({

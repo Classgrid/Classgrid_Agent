@@ -267,6 +267,9 @@ export function getAuthCallbackFeedback(search: string): AuthCallbackFeedback | 
     }
     case "maintenance_mode":
       return { message: "Classgrid is temporarily in maintenance mode. Please try again later." };
+    case "device_limit":
+      // The plan's device limit: the server's own words ("You're signed in on 2 devices, the most on Free. ...")
+      return { message: params.get("message") || "You're signed in on the most devices your plan allows. Log out one in Settings → Devices, or upgrade." };
     case "org_suspended":
       return { message: "This organization portal is suspended. Contact the organization administrator." };
     case "no_email":
@@ -284,7 +287,7 @@ export function getAuthCallbackFeedback(search: string): AuthCallbackFeedback | 
 export function clearAuthCallbackError() {
   if (typeof window === "undefined") return;
   const url = new URL(window.location.href);
-  ["error", "message", "tab", "provider"].forEach((key) => url.searchParams.delete(key));
+  ["error", "message", "tab", "provider", "ticket"].forEach((key) => url.searchParams.delete(key));
   window.history.replaceState({}, document.title, `${url.pathname}${url.search}${url.hash}`);
 }
 

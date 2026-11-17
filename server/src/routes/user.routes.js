@@ -986,6 +986,14 @@ router.post("/fcm-token", isAuthenticated, async (req, res) => {
     });
     if (!saved.ok) return res.status(400).json({ message: saved.error });
 
+    // Kept on this sign-in (Settings > Devices): logging it out stops this phone's notifications, even when the app
+    // sent no device id at sign-in (services/user-session.service.js afterSessionEnded)
+    if (req.authSid) {
+      const { attachPushToSession } = await import("../services/user-session.service.js");
+      await attachPushToSession(req.authSid, { token, deviceId: typeof deviceId === "string" ? deviceId : "" })
+        .catch((e) => console.error("[fcm-token] not kept on the sign-in:", e.message));
+    }
+
     res.json({ success: true, message: "FCM token registered successfully", devices: saved.devices });
   } catch (error) {
     console.error("FCM TOKEN REGISTRATION ERROR:", error.message);

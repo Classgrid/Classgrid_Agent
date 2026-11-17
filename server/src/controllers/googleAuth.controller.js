@@ -86,6 +86,8 @@ import {
 } from "../services/email-templates.service.js";
 import { checkAndRegisterDevice } from "../services/device-fingerprint.service.js";
 import Organization from "../models/Organization.js";
+import { findByAnyEmail } from "../utils/account-email.js";
+import { signUserToken, isDeviceLimitError } from "../services/user-session.service.js";
 
 const JWT_SECRET = getJwtSecret();
 
@@ -205,10 +207,9 @@ export const googleCallback = async (req, res) => {
             );
         }
 
-        // Find user by googleId first, then by email (to allow linking)
-        let user = await User.findOne({
-            $or: [{ googleId: id }, { email: email }],
-        });
+        // Find user by googleId first, then by any of the account's emails (to allow linking; an added email is the
+        // same account: utils/account-email.js)
+        let user = (await User.findOne({ googleId: id })) || (await findByAnyEmail(User, email));
 
         if (!user) {
             // ──── NEW USER ────
@@ -274,11 +275,19 @@ export const googleCallback = async (req, res) => {
         // Day 3 Login Law: Mobile = 365d, Desktop = 24h
         const ua = (req.headers["user-agent"] || "").toLowerCase();
         const isMobile = ua.includes("android") || ua.includes("iphone") || ua.includes("ipad") || ua.includes("classgrid") || ua.includes("wv");
-        const token = jwt.sign(
-            { id: user._id.toString(), role: user.role, organizationId: user.organization_id || null },
-            JWT_SECRET,
-            { expiresIn: isMobile ? "365d" : "24h" }
-        );
+        // Its own sign-in in Settings > Devices (services/user-session.service.js); the plan's device limit can refuse it
+        let token;
+        try {
+            token = await signUserToken({
+                user,
+                req,
+                payload: { id: user._id.toString(), role: user.role, organizationId: user.organization_id || null },
+                expiresIn: isMobile ? "365d" : "24h",
+            });
+        } catch (e) {
+            if (!isDeviceLimitError(e)) throw e;
+            return res.redirect(`${FRONTEND_URL}/login?error=device_limit&message=${encodeURIComponent(e.message)}&ticket=${encodeURIComponent(e.ticket || "")}`);
+        }
         console.log("✅ JWT token generated");
 
         let redirectUrl = `${FRONTEND_URL}/classroom?token=${token}&google_auth=true`;

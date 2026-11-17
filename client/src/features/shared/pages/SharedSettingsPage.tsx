@@ -83,6 +83,7 @@ import { isChatHost } from "@/lib/chatHost";
 import { SettingsBrowserSection } from "../components/settings/SettingsBrowserSection";
 import { SettingsUsageSection } from "../components/settings/SettingsUsageSection";
 import { SettingsBillingSection } from "../components/settings/SettingsBillingSection";
+import { SettingsDevicesSection } from "../components/settings/SettingsDevicesSection";
 import { SettingsEditorExtensionCard } from "../components/settings/SettingsEditorExtensionCard";
 import { settingsSections, useSettingsSection } from "../settings/settingsSections";
 
@@ -240,6 +241,8 @@ export function SharedSettingsPage() {
           </>
         )
       )}
+
+      {section === "devices" && <SettingsDevicesSection />}
 
       {section === "browser" && <SettingsBrowserSection role={role} />}
 

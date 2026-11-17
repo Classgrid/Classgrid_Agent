@@ -59,6 +59,7 @@ import { useSearchParams } from "react-router-dom";
 import { Spinner } from "@/components/marketing_ui/spinner";
 import { apiClient } from "@/lib/apiClient";
 import { clearChatCache } from "@/features/chat/services/chatCache";
+import { DEVICE_ID_KEY } from "@/lib/deviceId";
 
 export function LogoutPage() {
   const [searchParams] = useSearchParams();
@@ -79,8 +80,11 @@ export function LogoutPage() {
       
       // 3. Clear all stored user data
       const pushDismissed = localStorage.getItem("push_banner_dismissed");
+      // (this browser's own id stays: signing in here again is the same device in Settings > Devices)
+      const thisDevice = localStorage.getItem(DEVICE_ID_KEY);
       localStorage.clear();
       if (pushDismissed) localStorage.setItem("push_banner_dismissed", pushDismissed);
+      if (thisDevice) localStorage.setItem(DEVICE_ID_KEY, thisDevice);
       
       sessionStorage.clear();
       await clearChatCache(); // Grids chats saved in this browser

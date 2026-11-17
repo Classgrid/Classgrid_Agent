@@ -68,10 +68,12 @@ import { getBrandingForHost, injectBranding } from "../src/services/branding-res
 import connectDB from "../config/db.js";
 import passportConfig from "../src/services/passport.service.js";
 import Organization from "../src/models/Organization.js";
+import { isKnownApiOrigin, isVerifiedOrgDomain } from "../src/utils/api-origins.js";
 
 import authRoutes from "../src/routes/auth.routes.js";
 import vercelAuthRoutes from "../src/routes/auth.vercel.routes.js";
 import userRoutes from "../src/routes/user.routes.js";
+import userDevicesRoutes from "../src/routes/user-devices.routes.js";
 import chatRoutes from "../src/routes/chat.routes.js";
 import classroomRoutes from "../src/routes/classroom.routes.js";
 import notificationRoutes from "../src/routes/notification.routes.js";
@@ -186,49 +188,14 @@ const isOAuthProviderPath = (path) => {
   return p === "/oauth" || p.startsWith("/oauth/");
 };
 
-// White-labeled ERP domains (e.g. erp.mycollege.edu) are allowed only when an organization has verified them.
-// The answer is kept for 5 minutes per domain, so most requests don't touch the database.
-const orgDomainCache = new Map();
-async function isVerifiedOrgDomain(origin) {
-  let host;
-  try { host = new URL(origin).hostname.toLowerCase(); } catch { return false; }
-  const cached = orgDomainCache.get(host);
-  if (cached && Date.now() - cached.at < 5 * 60 * 1000) return cached.ok;
-  try {
-    const org = await Organization.findOne({
-      $or: [
-        { "erp_domain.domain": host, "erp_domain.status": { $in: ["verified", "active"] }, "erp_domain.is_enabled": { $ne: false } },
-        { "custom_domain.domain": host, "custom_domain.status": { $in: ["verified", "active"] }, "custom_domain.is_enabled": { $ne: false } },
-      ],
-    }).select("_id").lean();
-    orgDomainCache.set(host, { ok: !!org, at: Date.now() });
-    return !!org;
-  } catch {
-    return cached?.ok || false; // database hiccup: keep the last answer
-  }
-}
-
+// The allowed origins (the static list, *.classgrid.in except cdn, localhost, and verified white-labeled domains)
+// are in src/utils/api-origins.js, shared with the routes that check where a cookie-only request came from
 const apiCorsOptions = {
     origin: function (origin, callback) {
       // Allow requests with no origin (mobile apps, curl, server-to-server)
       if (!origin) return callback(null, true);
 
-      const allowedStatic = [
-        "https://api.classgrid.in",
-        "https://classgrid.in",
-        "http://127.0.0.1:3000",
-        "https://www.classgrid.in",
-        "https://superadmin.classgrid.in",
-        "https://classgridplatform.vercel.app",
-        "https://nikhil.quantumchem.site"
-      ];
-
-      // Allow any *.classgrid.in subdomain (tenant portals), except cdn (it serves files users upload)
-      const isClassgridSubdomain = /^https:\/\/[a-z0-9-]+\.classgrid\.in$/.test(origin) && origin !== "https://cdn.classgrid.in";
-      const isLocalSubdomain = /^http:\/\/[a-z0-9-]+\.localhost(:\d+)?$/.test(origin);
-      const isLocalhostDev = /^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin);
-
-      if (allowedStatic.includes(origin) || isClassgridSubdomain || isLocalSubdomain || isLocalhostDev) {
+      if (isKnownApiOrigin(origin)) {
         return callback(null, true);
       }
 
@@ -391,6 +358,7 @@ app.use(enforceFeatureFlags);
 /* ---------- API ROUTES ---------- */
 app.use("/api/auth", authRoutes);
 app.use("/api/auth/vercel", vercelAuthRoutes);
+app.use("/api/user/devices", userDevicesRoutes); // Settings > Devices: the person's own sign-ins
 app.use("/api/user", userRoutes);
 app.use("/api/chat", chatRoutes);
 app.use("/api/notifications", notificationRoutes);

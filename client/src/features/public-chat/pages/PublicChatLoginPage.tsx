@@ -28,6 +28,8 @@ import { motion, AnimatePresence } from "framer-motion";
 import { toast } from "sonner"; // the app's mounted Toaster (components/marketing_ui/sonner)
 import { getGoogleAuthUrl, loginWithPassword, requestPasswordReset, verifyDeviceOtp, resendDeviceOtp } from "../../auth/api";
 import { API_BASE_URL, apiClient } from "@/lib/apiClient";
+import { deviceId } from "@/lib/deviceId";
+import { DeviceLimitDevices } from "@/features/shared/components/settings/DeviceLimitDevices";
 import { fetchWithRescue, navigateWithRescue } from "@/lib/rescue";
 import { LoginGridBackground } from "../components/LoginGridBackground";
 import { peekOAuthConsentReturn } from "@/features/oauth/lib/oauthReturn";
@@ -367,11 +369,18 @@ function LoginContent() {
     return consentReturn ? `&next=${encodeURIComponent(consentReturn)}` : "";
   };
 
+  // This browser's own id (or the desktop app's): the same device signing in again replaces its own sign-in in
+  // Settings > Devices (lib/deviceId.ts)
+  const deviceParam = () => {
+    const id = deviceId();
+    return id ? `&device=${encodeURIComponent(id)}` : "";
+  };
+
   const handleGoogle = () => {
     const loginTab = encodeURIComponent("user");
     const host = encodeURIComponent(window.location.hostname);
     // intent: only the Sign up screen may create an account; from Sign in an unknown email comes back as error=no_account
-    const path = `/api/auth/google?loginTab=${loginTab}&host=${host}&intent=${mode}${consentNextParam()}`;
+    const path = `/api/auth/google?loginTab=${loginTab}&host=${host}&intent=${mode}${consentNextParam()}${deviceParam()}`;
     const url = (API_BASE_URL && !API_BASE_URL.startsWith('/')) ? new URL(path, API_BASE_URL).toString() : path;
     navigateWithRescue(url);
   };
@@ -379,7 +388,7 @@ function LoginContent() {
   const handleGithub = () => {
     const loginTab = encodeURIComponent("user");
     const host = encodeURIComponent(window.location.hostname);
-    const path = `/api/auth/chat/github?loginTab=${loginTab}&host=${host}&intent=${mode}${consentNextParam()}`;
+    const path = `/api/auth/chat/github?loginTab=${loginTab}&host=${host}&intent=${mode}${consentNextParam()}${deviceParam()}`;
     const url = (API_BASE_URL && !API_BASE_URL.startsWith('/')) ? new URL(path, API_BASE_URL).toString() : path;
     navigateWithRescue(url);
   };
@@ -428,6 +437,15 @@ function LoginContent() {
   const [deviceOtpMode, setDeviceOtpMode] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  // A sign-in refused by the plan's device limit: its message on top, and the account's devices to log out one of
+  // them (the refusal's ticket: DeviceLimitDevices). A Google / GitHub sign-in brings them in the address.
+  const [deviceLimit, setDeviceLimit] = useState<{ message: string; ticket: string } | null>(null);
+  const takeDeviceLimit = (err: any) => {
+    const ticket = err?.ticket || err?.response?.data?.ticket;
+    if (!ticket || typeof ticket !== "string") return false;
+    setDeviceLimit({ message: err?.message || err?.response?.data?.message || "", ticket });
+    return true;
+  };
 
   // (Variables declared above)
 
@@ -436,7 +454,20 @@ function LoginContent() {
   // Show OAuth error from URL (e.g. OAuthCallback)
   const urlError = searchParams.get("error");
   // no_account is shown as the red line under the email field instead (see the effect below)
-  const friendlyUrlError = urlError && urlError !== "no_account"
+  // device_limit: a Google / GitHub sign-in over the plan's devices; the server's own words and the ticket for the
+  // account's devices come with it
+  // (read once, then taken out of the address bar, like the portal pages do with their callback errors)
+  const [urlDeviceTicket] = useState(() => (urlError === "device_limit" ? searchParams.get("ticket") || "" : ""));
+  useEffect(() => {
+    if (!urlDeviceTicket) return;
+    const url = new URL(window.location.href);
+    if (!url.searchParams.has("ticket")) return;
+    url.searchParams.delete("ticket");
+    window.history.replaceState(window.history.state, document.title, `${url.pathname}${url.search}${url.hash}`);
+  }, [urlDeviceTicket]);
+  const friendlyUrlError = urlError === "device_limit"
+    ? (searchParams.get("message") || "You're signed in on the most devices your plan allows. Log out one in Settings → Devices, or upgrade.")
+    : urlError && urlError !== "no_account"
     ? (Object.prototype.hasOwnProperty.call(OAUTH_ERROR_MAP, urlError) ? OAUTH_ERROR_MAP[urlError] : OAUTH_ERROR_MAP.default)
     : "";
 
@@ -700,6 +731,7 @@ function LoginContent() {
   const handleLoginWithPassword = async (e: React.FormEvent) => {
     e.preventDefault();
     setError("");
+    setDeviceLimit(null);
     if (!password) {
       setError("Please enter your password");
       return;
@@ -737,6 +769,7 @@ function LoginContent() {
         startCountdown();
         return;
       }
+      if (takeDeviceLimit(err)) return;
       setError(err?.message || "Login failed. Please try again.");
     } finally {
       setLoading(false);
@@ -760,6 +793,7 @@ function LoginContent() {
   const handleVerifyOTP = async (e: React.FormEvent) => {
     e.preventDefault();
     setError("");
+    setDeviceLimit(null);
 
     if (otp.length !== 6) {
       setError("Please enter the 6-digit code");
@@ -774,7 +808,7 @@ function LoginContent() {
         // Unfinished sign-ups are sent back from the chat to the WhatsApp step.
         window.location.href = "/";
       } catch (err: any) {
-        setError(err?.message || "Device verification failed.");
+        if (!takeDeviceLimit(err)) setError(err?.message || "Device verification failed.");
         setLoading(false);
       }
       return;
@@ -815,7 +849,7 @@ function LoginContent() {
         setLoading(false);
       }
     } catch (err: any) {
-      setError(err?.message && typeof err.message === "string" ? err.message : "Something went wrong.");
+      if (!takeDeviceLimit(err)) setError(err?.message && typeof err.message === "string" ? err.message : "Something went wrong.");
       setLoading(false);
     }
   };
@@ -1014,6 +1048,7 @@ function LoginContent() {
   const handleSetupRole = async (e: React.FormEvent) => {
     e.preventDefault();
     setError("");
+    setDeviceLimit(null);
     if (!role) {
        setError("Please select a role.");
        return;
@@ -1036,7 +1071,7 @@ function LoginContent() {
       clearOnboarding();
       setStep("success");
     } catch (err: any) {
-      setError(err?.response?.data?.message || err?.message || "Failed to save role.");
+      if (!takeDeviceLimit(err)) setError(err?.response?.data?.message || err?.message || "Failed to save role.");
     } finally {
       setLoading(false);
     }
@@ -1137,11 +1172,14 @@ function LoginContent() {
           
 
 
-          {/* Show OAuth error from URL (e.g. OAuthCallback) */}
-          {friendlyUrlError && (
+          {/* Show OAuth error from URL (e.g. OAuthCallback), or a sign-in refused by the plan's device limit */}
+          {(deviceLimit?.message || friendlyUrlError) && (
             <div className="mb-4 rounded-md border border-red-200 bg-red-50 px-4 py-3 text-center text-sm text-red-600 dark:border-red-900/40 dark:bg-red-950/30 dark:text-red-400">
-              {friendlyUrlError}
+              {deviceLimit?.message || friendlyUrlError}
             </div>
+          )}
+          {(deviceLimit?.ticket || urlDeviceTicket) && (
+            <DeviceLimitDevices key={deviceLimit?.ticket || urlDeviceTicket} ticket={deviceLimit?.ticket || urlDeviceTicket} className="mb-4" />
           )}
 
           {/* Custom Unsubscribe Banner */}

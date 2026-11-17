@@ -58,6 +58,7 @@ import { API_BASE_URL, apiClient } from "@/lib/apiClient";
 
 import { getAuthIntent } from "./auth-helpers";
 import { getClientDeviceFingerprint } from "./device-fingerprint";
+import { deviceId } from "@/lib/deviceId";
 import { executeRecaptcha } from "./recaptcha";
 import type { AuthAudience, AuthBrandingResponse, AuthLoginRole, AuthType, LoginResponse } from "./types";
 
@@ -172,7 +173,8 @@ type GoogleAuthUrlPayload = {
 
 export function getGoogleAuthUrl({ audience, role }: GoogleAuthUrlPayload) {
   const loginTab = getAuthIntent(audience, role);
-  const path = `/api/auth/google?loginTab=${encodeURIComponent(loginTab)}&host=${encodeURIComponent(window.location.hostname)}`;
+  // (this browser's own id: the same device signing in again replaces its own sign-in in Settings > Devices)
+  const path = `/api/auth/google?loginTab=${encodeURIComponent(loginTab)}&host=${encodeURIComponent(window.location.hostname)}&device=${encodeURIComponent(deviceId())}`;
 
   if (!API_BASE_URL || API_BASE_URL.startsWith('/')) {
     return path;

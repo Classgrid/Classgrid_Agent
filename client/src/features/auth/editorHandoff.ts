@@ -14,7 +14,9 @@ const MAX_AGE_MS = 15 * 60 * 1000;
 const WEB_SCHEMES = new Set(["http", "https", "file", "javascript", "data", "blob", "about", "ftp", "mailto", "tel", "sms", "ws", "wss", "chrome", "edge", "ms-settings", "ms-windows-store"]);
 const isEditorScheme = (scheme: string) => /^[a-z][a-z0-9+.-]{1,40}$/.test(scheme) && !WEB_SCHEMES.has(scheme);
 
-export type EditorSignIn = { state: string; challenge: string; callback: string; at: number };
+// device and app: the editor's own id and name, when the extension sends them (?device=&app=); Settings > Devices names
+// the editor by its link scheme otherwise, and keeps one sign-in per editor on this computer
+export type EditorSignIn = { state: string; challenge: string; callback: string; at: number; device?: string; app?: string };
 
 const clean = (v: string | null, max: number) => (v || "").replace(/[^A-Za-z0-9_-]/g, "").slice(0, max);
 
@@ -38,7 +40,9 @@ export function captureEditorSignIn(): void {
     const challenge = clean(p.get("challenge"), 128);
     const callback = p.get("callback") || "";
     if (state.length < 16 || challenge.length < 43 || !isAllowedEditorCallback(callback)) return;
-    const req: EditorSignIn = { state, challenge, callback, at: Date.now() };
+    const device = (p.get("device") || "").replace(/[^A-Za-z0-9._:-]/g, "").slice(0, 128);
+    const app = (p.get("app") || "").replace(/[^A-Za-z0-9 ._+-]/g, "").trim().slice(0, 40);
+    const req: EditorSignIn = { state, challenge, callback, at: Date.now(), ...(device ? { device } : {}), ...(app ? { app } : {}) };
     sessionStorage.setItem(KEY, JSON.stringify(req));
   } catch { /* storage blocked: the page is a normal login */ }
 }
@@ -54,6 +58,11 @@ export function pendingEditorSignIn(): EditorSignIn | null {
   } catch {
     return null;
   }
+}
+
+/** The editor's link scheme ("cursor://classgrid.classgrid/login" -> "cursor"): which editor is signing in */
+export function editorScheme(req: EditorSignIn): string {
+  return /^([a-z][a-z0-9+.-]{1,40}):\/\//i.exec(req.callback)?.[1]?.toLowerCase() || "";
 }
 
 export function clearEditorSignIn(): void {

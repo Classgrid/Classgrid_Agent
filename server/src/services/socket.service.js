@@ -86,6 +86,7 @@ import accessLogger from "../config/logger.js";
 import { primarySupabaseClient } from "../config/supabaseClient.js";
 import { canAccessSession } from "./ai-chat-grid.service.js";
 import { getSessionById } from "./ai-chat.service.js";
+import { sessionState, DEVICE_TICKET_PURPOSE } from "./user-session.service.js";
 
 // Live Chat Analytics: push fresh numbers to the "superadmin:analytics" room every 20 s,
 // only while at least one super admin has the page open (the loop stops when the room is empty).
@@ -155,14 +156,35 @@ export const initSocket = (server, { path } = {}) => {
         const token = socket.handshake.auth.token || socket.handshake.query.token;
         if (!token) return next(new Error("Authentication error: No token provided"));
 
+        let decoded;
         try {
-            const decoded = jwt.verify(token, JWT_SECRET);
-            socket.userId = decoded.id; // User ID
-            socket.orgId = decoded.organizationId; // Tenant isolation
-            next();
+            decoded = jwt.verify(token, JWT_SECRET);
         } catch (err) {
-            next(new Error("Authentication error: Invalid token"));
+            return next(new Error("Authentication error: Invalid token"));
         }
+        // A refused sign-in's ticket only lists and logs out devices: never a connection
+        if (decoded?.purpose === DEVICE_TICKET_PURPOSE) return next(new Error("Authentication error: Invalid token"));
+        socket.userId = decoded.id; // User ID
+        socket.orgId = decoded.organizationId; // Tenant isolation
+        // A sign-in that was logged out (Settings > Devices, logout, Log out from all devices: user-session.service.js)
+        // gets no live connection, like the API refuses it. Its sid also names a room, so logging it out closes this
+        // connection (endSessionSockets). When the check itself can't be made (the database or Redis not answering), the
+        // connection is let in: the API still checks every request, and refusing here would send every app connecting at
+        // that moment to the rescue server.
+        const sid = typeof decoded.sid === "string" && !decoded.impersonation && !decoded.isProvisional ? decoded.sid : null;
+        socket.sid = sid;
+        Promise.all([
+            sid ? sessionState(sid, decoded.exp) : "ok",
+            // "Log out from all devices" and a password change also end tokens without a sid (User.passwordChangedAt)
+            decoded.id && !decoded.impersonation && mongoose.isValidObjectId(decoded.id) ? User.findById(decoded.id).select("passwordChangedAt").maxTimeMS(3000).lean() : null,
+        ]).then(([state, user]) => {
+            const changed = user?.passwordChangedAt ? new Date(user.passwordChangedAt).getTime() : 0;
+            if (state === "revoked" || (changed && decoded.iat * 1000 < changed)) return next(new Error("Authentication error: Invalid token"));
+            next();
+        }, (e) => {
+            console.error("[socket] sign-in check failed, connection let in:", e?.message);
+            next();
+        });
     });
 
     io.on("connection", (socket) => {
@@ -197,6 +219,8 @@ export const initSocket = (server, { path } = {}) => {
         // Join personal room for private direct messages
         socket.join(`${effectiveOrgId}:${socket.userId}`);
         socket.join(socket.userId.toString());
+        // This sign-in's own room: logging it out closes its connections (user-session.service.js endSessionSockets)
+        if (socket.sid) socket.join(`sid:${socket.sid}`);
 
         socket.on("join_classroom", (classroomId) => {
             const roomName = `${orgId}:${classroomId}`;

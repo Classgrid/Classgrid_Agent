@@ -41,6 +41,7 @@ import SharePage from "../models/SharePage.js";
 import UserProfile from "../models/UserProfile.js";
 import UserStorageQuota from "../models/UserStorageQuota.js";
 import { OAuthAuthCode, OAuthToken } from "../models/OAuth.js";
+import UserSession from "../models/UserSession.js";
 
 const CHUNK = 200;
 const chunks = (list, size = CHUNK) => {
@@ -170,6 +171,7 @@ export async function deleteAccountData(user, { io = null } = {}) {
         ["usageLogs", AiUsageLog, { userId: user._id }],
         ["profile", UserProfile, { user: user._id }],
         ["storageQuota", UserStorageQuota, { user_id: user._id }],
+        ["signIns", UserSession, { user_id: user._id }], // Settings > Devices: the sign-in rows (user-session.service.js)
     ];
     for (const [name, Model, filter] of byUser) {
         await step(name, async () => (await Model.deleteMany(filter)).deletedCount || 0);

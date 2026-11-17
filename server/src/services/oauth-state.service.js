@@ -150,7 +150,7 @@ export function oauthStateCookieOptions({ clear = false } = {}) {
     return options;
 }
 
-export async function createOAuthState({ loginTab, host, intent, next, desktop }) {
+export async function createOAuthState({ loginTab, host, intent, next, desktop, device, deviceModel }) {
     const safeLoginTab = LOGIN_TABS.has(loginTab) ? loginTab : "student";
     const safeHost = await resolveAllowedHost(host);
     if (host && !safeHost) throw new Error("This login portal host is not registered or active.");
@@ -165,6 +165,10 @@ export async function createOAuthState({ loginTab, host, intent, next, desktop }
         r: safeConsentReturn(next),
         // Started from the Classgrid desktop app: the login ends with a one-time code for the app (signed)
         d: desktop ? 1 : 0,
+        // The device's own id and the phone's model (Settings > Devices: the same device signing in again replaces its
+        // own sign-in; services/user-session.service.js). Kept short; the session service cleans them again.
+        v: String(device || "").replace(/[^A-Za-z0-9._:-]/g, "").slice(0, 128),
+        m: String(deviceModel || "").replace(/[\u0000-\u001f\u007f]/g, " ").trim().slice(0, 60),
         n: nonce,
         exp: Date.now() + STATE_TTL_MS,
     };
@@ -199,5 +203,7 @@ export async function verifyOAuthState(rawState, expectedNonce) {
         intent: payload.i === "signup" ? "signup" : "signin",
         consentReturn: safeConsentReturn(payload.r),
         desktop: payload.d === 1,
+        device: typeof payload.v === "string" ? payload.v : "",
+        deviceModel: typeof payload.m === "string" ? payload.m : "",
     };
 }

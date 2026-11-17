@@ -79,6 +79,7 @@ import Organization from "../models/Organization.js";
 import connectDB from "../../config/db.js";
 import { needsChatOnboarding, whatsappStepDone } from "../utils/chat-onboarding.js";
 import { liftEndedBlock } from "../utils/account-block.js";
+import { sessionState, legacyTokenState, touchSession, sessionCheckAnswer, DEVICE_TICKET_PURPOSE } from "../services/user-session.service.js";
 
 const JWT_SECRET = getJwtSecret();
 
@@ -215,6 +216,10 @@ export const isAuthenticated = async (req, res, next) => {
 
     try {
         const decoded = jwt.verify(token, JWT_SECRET);
+        // A refused sign-in's ticket (it only lists and logs out devices, routes/auth.routes.js) is never a login
+        if (decoded?.purpose === DEVICE_TICKET_PURPOSE) {
+            return res.status(401).json({ message: "Token invalid" });
+        }
 
         // Ensure DB is connected (critical for serverless cold starts)
         await connectDB();
@@ -227,6 +232,16 @@ export const isAuthenticated = async (req, res, next) => {
         const userRowP = normalMode ? keptUser(decoded.id) : null;
         const orgHint = decoded.organization_id || decoded.orgId;
         if (normalMode && orgHint && decoded.role !== "super_admin") keptOrgStatus(orgHint).catch(() => {});
+        // The token's own sign-in (Settings > Devices, services/user-session.service.js): one Redis GET, asked together
+        // with the reads above. A token without a sid (signed before sign-in rows existed) works as before, unless the row
+        // /api/auth/me gave it was logged out (legacyTokenState: also one Redis GET). Support's "log in as" token
+        // (impersonatedBy) is never given a row, so it is not asked. (a check that fails comes back as "error": 503, see
+        // sessionCheckAnswer)
+        const sid = normalMode && typeof decoded.sid === "string" ? decoded.sid : null;
+        const failed = (e) => { console.error("[auth] sign-in check failed:", e.message); return "error"; };
+        const sessionP = sid
+            ? sessionState(sid, decoded.exp).catch(failed)
+            : normalMode && !decoded.impersonatedBy ? legacyTokenState(token).catch(failed) : null;
         // Dynamically check system settings for emergency locks (kept in memory for a few seconds, see keptSettings)
         const settings = await settingsP;
 
@@ -275,6 +290,13 @@ export const isAuthenticated = async (req, res, next) => {
             }
             const user = User.hydrate(userRow);
 
+            // A sign-in logged out in Settings > Devices (or by logout, or Log out from all devices) or one that is gone:
+            // 401. When the check itself couldn't be made: 503, so the app doesn't log the person out for it.
+            const sessionAnswer = sessionP ? sessionCheckAnswer(await sessionP) : null;
+            if (sessionAnswer) {
+                return res.status(sessionAnswer.status).json(sessionAnswer.body);
+            }
+
             // Password change, global lock / maintenance, user status and organization status checks
             const block = await getUserAccessBlock(user, { issuedAtMs: decoded.iat * 1000, settings });
             if (block) {
@@ -296,6 +318,13 @@ export const isAuthenticated = async (req, res, next) => {
             req.user = user;
             req.realUser = null;
             req.isImpersonating = false;
+            // This request's sign-in (Settings > Devices marks it "This device"), and its last used time (written at
+            // most once every 5 minutes, without holding up the answer)
+            req.authSid = sid;
+            if (sid) touchSession(sid);
+            // Support's "log in as" token (super-admin.controller.js impersonateUser): /api/auth/me hands it back as it
+            // is, never as one of the person's own sign-ins
+            req.authImpersonatedBy = decoded.impersonatedBy || null;
         }
 
         // Organization ID always sourced from JWT (authoritative)
