@@ -166,27 +166,10 @@ export function GlobalAiConfigPanel() {
     <div className="flex flex-col gap-6 mb-6">
       <div>
         <h2 className="text-lg font-semibold text-foreground">Settings</h2>
-        <p className="text-sm text-muted-foreground">What applies beside the plans. These apply to everyone today, with plans on or off.</p>
+        <p className="text-sm text-muted-foreground">What applies beside the plans.</p>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-        <SettingCard title="Credits for ₹1" value={`${num(valueOf(cfg, F.creditsPerInr))} credits`} line="Top-up credits a person gets for each rupee.">
-          <EditButton onClick={() => open({ title: "Credits for ₹1", fields: [F.creditsPerInr] })} />
-        </SettingCard>
-        <SettingCard title="Credits per picture" value={`${num(valueOf(cfg, F.imageCost))} credits`} line="Taken from the person's credits for each picture, besides counting it in their picture limit.">
-          <EditButton onClick={() => open({ title: "Credits per picture", fields: [F.imageCost] })} />
-        </SettingCard>
-        <SettingCard
-          title="Extra use from top-up credits"
-          value={`${num(valueOf(cfg, F.extraImage))} credits a picture`}
-          line={`WhatsApp message ${num(valueOf(cfg, F.extraWhatsapp))} · read aloud ${num(valueOf(cfg, F.extraVoiceReply))} · voice minute ${num(valueOf(cfg, F.extraVoiceInput))}`}
-        >
-          <EditButton onClick={() => open({
-            title: "Extra use from top-up credits",
-            description: "When someone has used all the pictures, WhatsApp messages, read-alouds or voice minutes of their plan, each extra one is paid from their top-up credits at these prices. 0 turns it off, and the limit then stops them.",
-            fields: [F.extraImage, F.extraWhatsapp, F.extraVoiceReply, F.extraVoiceInput],
-          })} />
-        </SettingCard>
         <SettingCard title="Longest read-aloud" value={`${num(valueOf(cfg, F.voiceMaxChars))} characters`} line="The most one answer read aloud can say. A longer answer stops at its last full sentence.">
           <EditButton onClick={() => open({ title: "Longest read-aloud", fields: [F.voiceMaxChars] })} />
         </SettingCard>

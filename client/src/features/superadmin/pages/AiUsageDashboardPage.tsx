@@ -15,106 +15,31 @@
 // Trigger deploy verification - Oct 4 2026
 import React, { useState, useEffect } from "react";
 import { Link } from "react-router-dom";
-import { PageHeader } from "@/components/layout/PageHeader";
 import { Button } from "@/components/marketing_ui/button";
-import { Input } from "@/components/marketing_ui/input";
-import { SuperadminFilterBar } from "@/features/superadmin/components/SuperadminFilterBar";
 import { NikhilTimeCalendar } from "@/components/marketing_ui/nikhil_time_calendar";
-import { Search, Filter, Calendar } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/marketing_ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/marketing_ui/select";
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/marketing_ui/dialog";
-import { DataTable } from "@/components/marketing_ui/data-table";
 import { PageBreadcrumbs } from "@/components/layout/PageBreadcrumbs";
-import { 
-  Building, 
-  ChevronRight,
-  Home,
-  Shield,
-  Activity,
-  User as UserIcon,
-  Cpu,
-  Database,
-  HardDrive,
-  LayoutTemplate
-} from "lucide-react";
+import { User as UserIcon, HardDrive, LayoutTemplate } from "lucide-react";
 
-import { AiUsageTrendsChart } from "@/features/superadmin/components/AiUsageTrendsChart";
-import { AiUsageBar } from "@/components/ai/components/AiUsageBar";
-import { TopAiUsersTable } from "@/features/superadmin/components/TopAiUsersTable";
-import { GrantCreditsModal } from "@/features/superadmin/components/GrantCredits";
-import { PeopleFolders } from "@/features/superadmin/components/ai-usage/PlanFolders";
-import { useCurrentUser } from "@/features/auth/queries/useCurrentUser";
-import { useQuery } from "@tanstack/react-query";
-import { apiClient } from "@/lib/apiClient";
+import { GiftPlansPanel } from "@/features/superadmin/components/GiftPlansPanel";
+import { PlanFolders, PlanPeopleFolders } from "@/features/superadmin/components/ai-usage/PlanFolders";
+import { usePlansSummary } from "@/features/superadmin/queries/useAiUsage";
 import { GlobalAiConfigPanel } from "@/features/superadmin/components/GlobalAiConfigPanel";
-import { 
-  useGlobalAiStats, 
-  useAiOrgDetail, 
-  useAiOrgUsers,
-  useAiUserDetail,
-  useResetOrgUsage,
-  useBlockAiOrg,
-  useUpdateOrgAiLimits,
-  useGlobalGrantedCredits
-} from "@/features/superadmin/queries/useAiUsage";
-import { DangerConfirmDialog } from "@/components/marketing_ui/danger-confirm-dialog";
+import { useGlobalAiStats, useAiUserDetail } from "@/features/superadmin/queries/useAiUsage";
 import { Skeleton } from "@/components/marketing_ui/skeleton";
-import { formatNumber, formatRoleLabel } from "@/lib/utils";
+import { formatNumber } from "@/lib/utils";
 import { AiUserDetailPanel } from "@/features/superadmin/components/ai-usage/AiUserDetailPanel";
 import { ModelUsageSection } from "@/features/superadmin/components/ai-usage/ModelUsageSection";
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, ResponsiveContainer, PieChart, Legend, Pie, Cell, ReferenceLine } from "recharts";
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, ResponsiveContainer, Legend, ReferenceLine } from "recharts";
 
-const COLORS = ['#3b82f6', '#8b5cf6', '#10b981', '#f59e0b', '#ef4444', '#ec4899'];
 
 interface PathState {
+  plan?: string;
+  planName?: string;
   userId?: string;
   userName?: string;
 }
-
-const FolderIcon = ({ label, subtitle, onClick, badge, icon: Icon = Building }: any) => (
-  <button 
-    onClick={onClick}
-    className="flex flex-col items-center justify-start p-4 rounded-xl hover:bg-accent/50 transition-colors border border-transparent hover:border-border group h-auto min-h-[160px] relative cursor-pointer"
-  >
-    <div className="relative mb-2">
-      <svg width="64" height="64" viewBox="0 0 24 24" fill="currentColor" className="text-amber-400 group-hover:text-amber-500 transition-colors drop-shadow-sm">
-        <path d="M10 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z"/>
-      </svg>
-      {badge > 0 && (
-        <div className="absolute -top-2 -right-2 bg-rose-500 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full shadow-sm min-w-[20px] text-center">
-          {badge}
-        </div>
-      )}
-      {badge === "BLOCKED" && (
-        <div className="absolute -top-2 -right-2 bg-rose-500 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full shadow-sm min-w-[20px] text-center">
-          {badge}
-        </div>
-      )}
-      <div className="absolute inset-0 flex items-center justify-center pt-2">
-        <Icon className="w-6 h-6 text-amber-100 opacity-60" />
-      </div>
-    </div>
-    <div className="flex flex-col w-full justify-center mt-2">
-      <span className="text-sm font-medium text-foreground whitespace-normal break-normal w-full text-center leading-tight px-1 text-balance">{label}</span>
-      {subtitle && <span className="text-xs text-muted-foreground whitespace-normal break-words w-full text-center mt-1 px-1 text-balance">{subtitle}</span>}
-    </div>
-  </button>
-);
-const CustomTooltip = ({ active, payload }: any) => {
-  if (active && payload && payload.length) {
-    return (
-      <div className="bg-background border border-border rounded-lg shadow-sm p-3 text-sm flex flex-col gap-1 z-50">
-        <span className="font-semibold text-foreground flex items-center gap-2">
-          <div className="w-2 h-2 rounded-full" style={{ backgroundColor: payload[0].payload.fill || payload[0].color }} />
-          {payload[0].name}
-        </span>
-        <span className="text-muted-foreground">{new Intl.NumberFormat("en-IN").format(payload[0].value)} Tokens Consumed</span>
-      </div>
-    );
-  }
-  return null;
-};
 
 import { useQueryClient } from "@tanstack/react-query";
 import socketClient from "@/lib/socketClient";
@@ -135,23 +60,13 @@ const getTodayStr = () => {
 
 export function AiUsageDashboardPage() {
   const queryClient = useQueryClient();
-  const { data: currentUser } = useCurrentUser();
   const [path, setPath] = useState<PathState>({});
-  const [showOrgReset, setShowOrgReset] = useState(false);
-  const [showOrgBlock, setShowOrgBlock] = useState(false);
-  const [showLimitsDialog, setShowLimitsDialog] = useState(false);
-  const [tempLimits, setTempLimits] = useState({ poolLimit: 0, userWeeklyLimit: 0 });
-  const [searchQuery, setSearchQuery] = useState("");
-  const [orgTypeFilter, setOrgTypeFilter] = useState("all");
   const [dateFilter, setDateFilter] = useState<Date | undefined>();
-  const [selectedGlobalOrgId, setSelectedGlobalOrgId] = useState<string>("all");
-  const [isGrantCreditsOpen, setIsGrantCreditsOpen] = useState(false);
-  const [isOrgGrantCreditsOpen, setIsOrgGrantCreditsOpen] = useState(false);
+  const [isGiftPlansOpen, setIsGiftPlansOpen] = useState(false);
+  const { data: plansSummary } = usePlansSummary();
 
   const [chatsTime, setChatsTime] = useState<"daily" | "weekly" | "monthly">("daily");
-  const [orgsTime, setOrgsTime] = useState<"daily" | "weekly" | "monthly">("daily");
   const [usersTime, setUsersTime] = useState<"daily" | "weekly" | "monthly">("daily");
-  const [spendingCurrency, setSpendingCurrency] = useState<"USD" | "INR">("USD");
   const [live, setLive] = useState(false); // WebSocket connected and listening for usage updates
 
   useEffect(() => {
@@ -188,39 +103,10 @@ export function AiUsageDashboardPage() {
   }, [queryClient]);
   
 
-  const { data: globalUsersFallback } = useQuery({
-    queryKey: ["global-users-fallback"],
-    queryFn: () => apiClient.get<any>("/api/super-admin/users", { params: { limit: 1000 } }).then(r => r.data),
-    staleTime: 300_000,
-  });
-
-  const getFallbackPhoto = (email: string) => {
-    if (!globalUsersFallback?.data) return null;
-    const found = globalUsersFallback.data.find((u: any) => u.email === email);
-    return found?.profilePicture || null;
-  };
-
-  const getFallbackOrgLogo = (orgId: string) => {
-    if (!globalUsersFallback?.data) return null;
-    const foundUserInOrg = globalUsersFallback.data.find((u: any) => u.organization_id === orgId);
-    return foundUserInOrg?.organizationLogo || null;
-  };
-
-  const getFallbackAdminEmail = (orgId: string) => {
-    if (!globalUsersFallback?.data) return null;
-    const foundAdminInOrg = globalUsersFallback.data.find((u: any) => u.organization_id === orgId && (u.role === "org_admin" || u.role === "super_admin"));
-    return foundAdminInOrg?.email || null;
-  };
-
   const selectedMonth = dateFilter ? dateFilter.getMonth() + 1 : undefined;
   const selectedYear = dateFilter ? dateFilter.getFullYear() : undefined;
-  const { data: globalStats, isLoading: globalLoading } = useGlobalAiStats(
-    selectedGlobalOrgId !== "all" ? selectedGlobalOrgId : undefined,
-    selectedMonth,
-    selectedYear
-  );
+  const { data: globalStats, isLoading: globalLoading } = useGlobalAiStats(undefined, selectedMonth, selectedYear);
 
-  const { data: globalGrantedCredits, isLoading: loadingGrantedCredits } = useGlobalGrantedCredits();
 
 
   const getAggregatedData = (data: any[], type: "daily"| "weekly"| "monthly") => {
@@ -266,13 +152,7 @@ export function AiUsageDashboardPage() {
     if (globalLoading) return <Skeleton className="h-96 w-full mb-8" />;
     if (!globalStats) return null;
 
-    const { totalCreditsSpent, totalRevenue, creditsPurchasedThisMonth, totalChats, usageTrend, models, orgsBreakdown, usersBreakdown } = globalStats;
-    // Prepare pie chart data
-    const modelPieData = models?.map((m: any, i: number) => ({ 
-        name: m.name.split('/').pop(), 
-        value: m.value || m.requests || 0,
-        color: COLORS[i % COLORS.length]
-    })) || [];
+    const { totalChats, usageTrend, usersBreakdown } = globalStats;
 
     const UniversalTooltip = ({ active, payload, label }: any) => {
       if (active && payload && payload.length) {
@@ -295,21 +175,19 @@ export function AiUsageDashboardPage() {
 
     return (
       <div className="space-y-6 mb-8">
-        <div className="grid gap-4 md:grid-cols-3">
-          <Card>
-            <CardContent className="p-6 flex flex-col items-center text-center">
-              <Cpu className="h-8 w-8 text-blue-500 mb-3" />
-              <div className="text-3xl font-bold">{formatNumber(totalCreditsSpent || 0)}</div>
-              <div className="text-sm text-muted-foreground mt-1">Total Credits Used</div>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardContent className="p-6 flex flex-col items-center text-center">
-              <Database className="h-8 w-8 text-indigo-500 mb-3" />
-              <div className="text-3xl font-bold">{formatNumber(creditsPurchasedThisMonth || 0)}</div>
-              <div className="text-sm text-muted-foreground mt-1">Credits Sold This Month</div>
-            </CardContent>
-          </Card>
+        <div className="grid gap-4 grid-cols-2 md:grid-cols-4">
+          {(["free", "pro", "max"] as const).map((key) => {
+            const p = plansSummary?.plans?.find((x) => x.key === key);
+            return (
+              <Card key={key}>
+                <CardContent className="p-6 flex flex-col items-center text-center">
+                  <UserIcon className="h-8 w-8 text-blue-500 mb-3" />
+                  <div className="text-3xl font-bold">{formatNumber(p?.people || 0)}</div>
+                  <div className="text-sm text-muted-foreground mt-1">On {p?.name || key.charAt(0).toUpperCase() + key.slice(1)}</div>
+                </CardContent>
+              </Card>
+            );
+          })}
           <Card>
             <CardContent className="p-6 flex flex-col items-center text-center">
               <HardDrive className="h-8 w-8 text-amber-500 mb-3" />
@@ -322,31 +200,21 @@ export function AiUsageDashboardPage() {
         {/* Settings beside the plans */}
         <GlobalAiConfigPanel />
 
-        {/* Grant credits to many people at once (the old Grant panel, for people) */}
+        {/* The Grant panel gives plans now (owner, 2026-11-17: "we have plans, no AI credits gift"): pick many people,
+            the same plan for all or Add Separate for a plan each */}
         <div className="border border-border rounded-xl shadow-sm bg-card flex flex-col justify-between">
           <div className="p-5">
-            <h3 className="text-lg font-semibold text-foreground tracking-tight">Grant Credits</h3>
-            <p className="text-sm text-muted-foreground mt-1">Give credits to many people at once.</p>
+            <h3 className="text-lg font-semibold text-foreground tracking-tight">Gift Plans</h3>
+            <p className="text-sm text-muted-foreground mt-1">Give Pro or Max to many people at once. Use Add Separate to give each person a different plan.</p>
           </div>
           <div className="p-4 bg-muted/20 border-t border-border flex items-center justify-end">
-            <Button variant="outline" onClick={() => setIsGrantCreditsOpen(true)}>
+            <Button variant="outline" onClick={() => setIsGiftPlansOpen(true)}>
               <LayoutTemplate className="w-4 h-4 mr-2" />
-              Open Grant Panel
+              Open Gift Plans Panel
             </Button>
           </div>
         </div>
-        <GrantCreditsModal
-          isOpen={isGrantCreditsOpen}
-          onClose={() => setIsGrantCreditsOpen(false)}
-          orgs={(globalUsersFallback?.data || []).map((u: any) => ({
-            id: String(u._id || u.id),
-            name: u.name || u.email || "",
-            orgName: "",
-            email: u.email || "",
-            role: formatRoleLabel(u.role || "user"),
-            avatar: u.profilePicture || undefined,
-          }))}
-        />
+        <GiftPlansPanel isOpen={isGiftPlansOpen} onClose={() => setIsGiftPlansOpen(false)} />
 
         <div className="flex flex-col space-y-6">
           {/* Bar Chart 1: Daily AI Requests */}
@@ -442,89 +310,6 @@ export function AiUsageDashboardPage() {
                     <Bar dataKey="promptTokens" name="Input Tokens" stackId="a" fill="#f97316" radius={[0, 0, 0, 0]} maxBarSize={12} />
                     <Bar dataKey="completionTokens" name="Output Tokens" stackId="a" fill="#3b82f6" radius={[2, 2, 0, 0]} maxBarSize={12} />
                     <Legend wrapperStyle={{ fontSize: '12px', paddingTop: '10px' }} />
-                                      <ReferenceLine x={getTodayStr()} stroke="#22c55e" strokeWidth={2} strokeDasharray="4 4" />
-                  </BarChart>
-                </ResponsiveContainer>
-              </div>
-            </CardContent>
-          </Card>
-
-          {/* Bar Chart 3: Cost Spend Trend */}
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between pb-2">
-              <CardTitle>Daily Credits Spending</CardTitle>
-              <div className="flex items-center gap-4">
-                <NikhilTimeCalendar value={dateFilter} onChange={setDateFilter as any} showTime={false} placeholder="Select Date" className="w-[160px] h-9 border border-input bg-background" />
-                <Select value={spendingCurrency} onValueChange={setSpendingCurrency as any}>
-                  <SelectTrigger className="w-[100px]">
-                    <SelectValue placeholder="Currency" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="USD">USD ($)</SelectItem>
-                    <SelectItem value="INR">INR (₹)</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-            </CardHeader>
-            <CardContent>
-              <div className="h-[300px] w-full">
-                <ResponsiveContainer width="100%" height="100%">
-                  <BarChart data={usageTrend || []} barCategoryGap="30%" margin={{ top: 10, right: 10, left: 10, bottom: 0 }}>
-                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="currentColor" className="opacity-10" />
-                    <XAxis 
-                      dataKey="date" 
-                      stroke="currentColor" 
-                      className="text-xs opacity-50" 
-                      tickLine={false} 
-                      axisLine={false}
-                      minTickGap={15}
-                      tickFormatter={(value) => {
-                        const date = parseLocalDate(value);
-                        return isNaN(date.getTime()) ? value : date.toLocaleDateString("en-US", { month: "short", day: "numeric" });
-                      }}
-                    />
-                    <YAxis stroke="currentColor" className="text-xs opacity-50" tickLine={false} axisLine={false} />
-                    <RechartsTooltip cursor={{ fill: 'currentColor', opacity: 0.05 }} content={<UniversalTooltip />} />
-                    <Bar 
-                      dataKey={spendingCurrency === "USD" ? "costUSD" : "costINR"} 
-                      name={`Cost (${spendingCurrency})`} 
-                      fill="#10b981" 
-                      radius={[2, 2, 0, 0]} 
-                      maxBarSize={12} 
-                    />
-                                      <ReferenceLine x={getTodayStr()} stroke="#22c55e" strokeWidth={2} strokeDasharray="4 4" />
-                  </BarChart>
-                </ResponsiveContainer>
-              </div>
-            </CardContent>
-          </Card>
-
-          {/* Bar Chart 4: Top-up Revenue (INR) */}
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between pb-2">
-              <CardTitle>Top-up Revenue (INR)</CardTitle>
-              <NikhilTimeCalendar value={dateFilter} onChange={setDateFilter as any} showTime={false} placeholder="Select Date" className="w-[160px] h-9 border border-input bg-background" />
-            </CardHeader>
-            <CardContent>
-              <div className="h-[300px] w-full">
-                <ResponsiveContainer width="100%" height="100%">
-                  <BarChart data={usageTrend || []} barCategoryGap="30%" margin={{ top: 10, right: 10, left: 10, bottom: 0 }}>
-                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="currentColor" className="opacity-10" />
-                    <XAxis 
-                      dataKey="date" 
-                      stroke="currentColor" 
-                      className="text-xs opacity-50" 
-                      tickLine={false} 
-                      axisLine={false}
-                      minTickGap={15}
-                      tickFormatter={(value) => {
-                        const date = parseLocalDate(value);
-                        return isNaN(date.getTime()) ? value : date.toLocaleDateString("en-US", { month: "short", day: "numeric" });
-                      }}
-                    />
-                    <YAxis stroke="currentColor" className="text-xs opacity-50" tickLine={false} axisLine={false} />
-                    <RechartsTooltip cursor={{ fill: 'currentColor', opacity: 0.05 }} content={<UniversalTooltip />} />
-                    <Bar dataKey="revenue" name="Revenue (INR)" fill="#8b5cf6" radius={[2, 2, 0, 0]} maxBarSize={12} />
                                       <ReferenceLine x={getTodayStr()} stroke="#22c55e" strokeWidth={2} strokeDasharray="4 4" />
                   </BarChart>
                 </ResponsiveContainer>
@@ -642,12 +427,13 @@ export function AiUsageDashboardPage() {
       <PageBreadcrumbs
         items={[
           { label: "AI Usage & Credits", onClick: () => setPath({}) },
+          ...(path.planName ? [{ label: path.planName, onClick: () => setPath({ plan: path.plan, planName: path.planName }) }] : []),
           ...(path.userName ? [{ label: path.userName }] : [])
         ] as any}
       />
 
       <div className="flex justify-end gap-2">
-        {!path.userId && (
+        {!path.plan && !path.userId && (
           <Link to="/superadmin/ai-usage/models" className="inline-flex items-center gap-2 rounded-full border border-border px-3 py-1 text-[13px] font-medium text-foreground hover:bg-muted transition-colors">
             Models
           </Link>
@@ -658,8 +444,9 @@ export function AiUsageDashboardPage() {
         </span>
       </div>
 
-      {!path.userId && renderGlobalStats()}
-      {!path.userId && <PeopleFolders onOpen={(userId, userName) => setPath({ userId, userName })} />}
+      {!path.plan && !path.userId && renderGlobalStats()}
+      {!path.plan && !path.userId && <PlanFolders onOpen={(plan, planName) => setPath({ plan, planName })} />}
+      {path.plan && !path.userId && <PlanPeopleFolders plan={path.plan} planName={path.planName || ""} onOpen={(userId, userName) => setPath({ ...path, userId, userName })} />}
       {path.userId && renderLevel3UserDetail()}
     </div>
   );

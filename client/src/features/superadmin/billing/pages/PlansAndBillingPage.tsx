@@ -20,8 +20,6 @@ import { Input } from '@/components/marketing_ui/input';
 import { Skeleton } from '@/components/marketing_ui/skeleton';
 import { apiClient as api } from '@/lib/apiClient';
 import { PlanConfigPanel } from '@/features/superadmin/components/PlanConfigPanel';
-import { GiftPlansPanel } from '@/features/superadmin/components/GiftPlansPanel';
-import { Button } from '@/components/marketing_ui/button';
 import { UserPlanCard } from '@/features/superadmin/components/ai-usage/UserPlanCard';
 
 type Subscriber = {
@@ -156,7 +154,6 @@ function Payments() {
 
 const PlansAndBillingPage = () => {
   const [activeTab, setActiveTab] = useState('plans');
-  const [isGiftPlansOpen, setIsGiftPlansOpen] = useState(false);
   return (
     <div className="flex h-full flex-col bg-background text-foreground">
       <div className="border-b border-border bg-card p-6">
@@ -173,20 +170,7 @@ const PlansAndBillingPage = () => {
             <TabsTrigger value="payments">Plan payments</TabsTrigger>
           </TabsList>
           <TabsContent value="plans" className="mt-6"><PlanConfigPanel /></TabsContent>
-          <TabsContent value="subscribers" className="mt-6 flex flex-col gap-6">
-            {/* Gift plans to many people at once, each with their own plan (owner, 2026-11-17) */}
-            <div className="border border-border rounded-xl shadow-sm bg-card flex flex-col justify-between">
-              <div className="p-5">
-                <h3 className="text-lg font-semibold text-foreground tracking-tight">Gift Plans</h3>
-                <p className="text-sm text-muted-foreground mt-1">Give Pro or Max to many people at once. Use Add Separate to give each person a different plan.</p>
-              </div>
-              <div className="p-4 bg-muted/20 border-t border-border flex items-center justify-end">
-                <Button variant="outline" onClick={() => setIsGiftPlansOpen(true)}>Open Gift Plans Panel</Button>
-              </div>
-            </div>
-            <GiftPlansPanel isOpen={isGiftPlansOpen} onClose={() => setIsGiftPlansOpen(false)} />
-            <Subscribers />
-          </TabsContent>
+          <TabsContent value="subscribers" className="mt-6"><Subscribers /></TabsContent>
           <TabsContent value="payments" className="mt-6"><Payments /></TabsContent>
         </Tabs>
       </div>

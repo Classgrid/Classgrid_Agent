@@ -81,15 +81,14 @@ function ChartTooltip({ active, payload, label, metric }: any) {
   );
 }
 
-export function ModelUsageSection({ orgs }: { orgs?: { id: string; name: string }[] }) {
+export function ModelUsageSection() {
   const [preset, setPreset] = useState<Preset>("7d");
   const [range, setRange] = useState(() => presetRange("7d"));
   const [customFrom, setCustomFrom] = useState<Date | undefined>();
   const [customTo, setCustomTo] = useState<Date | undefined>();
-  const [orgId, setOrgId] = useState("all");
   const [metric, setMetric] = useState<Metric>("requests");
 
-  const { data, isLoading, isError } = useAiModelBreakdown({ ...range, orgId: orgId === "all" ? undefined : orgId });
+  const { data, isLoading, isError } = useAiModelBreakdown({ ...range });
 
   const choosePreset = (p: Preset) => {
     setPreset(p);
@@ -160,14 +159,6 @@ export function ModelUsageSection({ orgs }: { orgs?: { id: string; name: string 
                 </button>
               ))}
             </div>
-            <Select value={orgId} onValueChange={(v) => setOrgId(v || "all")}>
-              <SelectTrigger className="w-[180px] h-9"><SelectValue placeholder="All organizations" /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All organizations</SelectItem>
-                <SelectItem value="classgrid">Classgrid (no org)</SelectItem>
-                {(orgs || []).map((o) => <SelectItem key={o.id} value={o.id}>{o.name}</SelectItem>)}
-              </SelectContent>
-            </Select>
             <Select value={metric} onValueChange={(v) => v && setMetric(v as Metric)}>
               <SelectTrigger className="w-[130px] h-9"><SelectValue /></SelectTrigger>
               <SelectContent>
