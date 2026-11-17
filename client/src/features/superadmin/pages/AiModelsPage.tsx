@@ -39,7 +39,7 @@ export function AiModelsPage() {
 
   return (
     <div className="flex flex-col gap-6">
-      <PageBreadcrumbs items={[{ label: "AI Usage & Credits", href: "/superadmin/ai-usage" }, { label: "Models" }]} />
+      <PageBreadcrumbs items={[{ label: "Plans & Usage", href: "/superadmin/ai-usage" }, { label: "Models" }]} />
       <PageHeader
         title="Models"
         description="Turn a model off and nobody can use it: it disappears from the model picker, and messages that pick it go to Auto."

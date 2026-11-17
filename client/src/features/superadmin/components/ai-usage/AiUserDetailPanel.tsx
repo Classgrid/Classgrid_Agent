@@ -13,10 +13,9 @@
 // CLASSGRID USES CLOUDFLARE USAGE TO CALCULATE TOKENS, NOT GPT-TOKENIZER (WHICH IS ONLY A FALLBACK)
 import React, { useState, useEffect } from "react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/marketing_ui/card";
-import { Button } from "@/components/marketing_ui/button";
-import { AlertTriangle, Zap, LayoutTemplate } from "lucide-react";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/marketing_ui/dialog";
+import { AlertTriangle, Zap } from "lucide-react";
 import { formatNumber, formatRoleLabel } from "@/lib/utils";
-import { AiUsageBar } from "@/components/ai/components/AiUsageBar";
 import { GrantCreditsModal } from "../../components/GrantCredits";
 import { DataTable } from "@/components/marketing_ui/data-table";
 import { BlockUserAiUsage } from "../BlockUserAiUsage";
@@ -26,43 +25,27 @@ import { PauseUserGrantedCredits } from "./PauseUserGrantedCredits";
 import { RemoveUserGrantedCredits } from "./RemoveUserGrantedCredits";
 import { ExtendUserGrantedCredits } from "./ExtendUserGrantedCredits";
 import { ViewGrantedCreditsDetails } from "./ViewGrantedCreditsDetails";
-import { UserPlanCard } from "./UserPlanCard";
+import { GiftPlanForm } from "./GiftPlanForm";
+import { PlanHeaderCard, PlanUsageBars, PlanHistoryList, UserUsageHistory } from "./UserPlanUsage";
 import socketClient from "@/lib/socketClient";
 import { useQueryClient } from "@tanstack/react-query";
 
-function ResetCountdown({ resetAt }: { resetAt?: string | null }) {
-  const [now, setNow] = useState(Date.now());
-  useEffect(() => {
-    const id = setInterval(() => setNow(Date.now()), 1000);
-    return () => clearInterval(id);
-  }, []);
-  if (!resetAt) return <span className="text-xs text-muted-foreground">Full limit available</span>;
-  const left = Math.max(0, Math.floor((new Date(resetAt).getTime() - now) / 1000));
-  if (left === 0) return <span className="text-xs text-muted-foreground">Resetting now</span>;
-  const d = Math.floor(left / 86400);
-  const h = Math.floor((left % 86400) / 3600);
-  const m = Math.floor((left % 3600) / 60);
-  const s = left % 60;
-  const pad = (n: number) => String(n).padStart(2, "0");
-  return <span className="text-xs text-muted-foreground tabular-nums">Resets in {d > 0 ? `${d}d ` : ""}{pad(h)}:{pad(m)}:{pad(s)}</span>;
-}
-
-function LimitTimerRow({ label, unit, timer }: { label: string; unit: string; timer?: { used: number; limit: number; resetAt?: string | null } | null }) {
-  if (!timer) return null;
-  const percent = timer.limit > 0 ? Math.min(100, Math.max(0, (timer.used / timer.limit) * 100)) : 0;
+// One credit balance as a bar (paid top-ups, granted credits, the org pool), under Credits
+function CreditBar({ label, sub, used, limit, color, badge }: { label: string; sub: string; used: number; limit: number; color: string; badge?: React.ReactNode }) {
+  const percent = limit > 0 ? Math.min(100, Math.max(0, (used / limit) * 100)) : 0;
   return (
-    <div className="w-full flex items-start justify-between">
-      <div className="flex flex-col gap-1 pr-6 min-w-[150px]">
-        <span className="text-sm font-medium text-foreground">{label}</span>
-        <ResetCountdown resetAt={timer.resetAt} />
+    <div className="w-full flex flex-col sm:flex-row sm:items-start justify-between gap-2">
+      <div className="flex flex-col gap-1 sm:pr-6 sm:min-w-[150px]">
+        <span className="text-sm font-medium text-foreground flex items-center gap-2">{label}{badge}</span>
+        <span className="text-xs text-muted-foreground">{sub}</span>
       </div>
       <div className="flex-1 flex flex-col gap-1.5 mt-1">
         <div className="w-full flex items-center justify-between text-xs mb-1">
-          <span className="font-medium text-foreground">{Math.round(percent)}% Used</span>
-          <span className="text-muted-foreground font-medium">{formatNumber(timer.used)} / {formatNumber(timer.limit)} {unit}</span>
+          <span className="font-medium text-foreground">{Math.round(percent)}% used</span>
+          <span className="text-muted-foreground font-medium">{formatNumber(used)} / {formatNumber(limit)} credits</span>
         </div>
         <div className="w-full h-1.5 bg-muted-foreground/20 rounded-full overflow-hidden">
-          <div className="h-full bg-blue-500 rounded-full transition-all" style={{ width: `${percent}%` }} />
+          <div className={`h-full w-[var(--w)] ${color} rounded-full transition-all`} style={{ "--w": `${percent}%` } as React.CSSProperties} />
         </div>
       </div>
     </div>
@@ -71,43 +54,27 @@ function LimitTimerRow({ label, unit, timer }: { label: string; unit: string; ti
 
 export function AiUserDetailPanel({ userDetail }: { userDetail: any }) {
   const [isGrantCreditsOpen, setIsGrantCreditsOpen] = useState(false);
+  const [isGiftPlanOpen, setIsGiftPlanOpen] = useState(false);
   const { data: currentUser } = useCurrentUser();
   const queryClient = useQueryClient();
 
   useEffect(() => {
     const socket = socketClient.getSocket();
-    if (socket) {
-      socket.on("ai_usage_updated", () => {
-         queryClient.invalidateQueries({ queryKey: ["ai-usage-user"] });
-      });
-      socket.on("ai_token_update", () => {
-         queryClient.invalidateQueries({ queryKey: ["ai-usage-user"] });
-      });
-    }
-
+    if (!socket) return;
+    // (its own handler, so leaving this page never removes the Plans & Usage page's listener)
+    const refresh = () => queryClient.invalidateQueries({ queryKey: ["ai-usage-user"] });
+    socket.on("ai_usage_updated", refresh);
+    socket.on("ai_token_update", refresh);
     return () => {
-      if (socket) {
-        socket.off("ai_usage_updated");
-        socket.off("ai_token_update");
-      }
+      socket.off("ai_usage_updated", refresh);
+      socket.off("ai_token_update", refresh);
     };
   }, [queryClient]);
 
   if (!userDetail) return null;
 
   const isBlocked = userDetail.isBlocked;
-
-  const aiBarData = {
-    type: 'pro',
-    used: userDetail.totalUsage || 0,
-    limit: userDetail.ai_tokens?.ai_credits_balance || 0, 
-    remaining: userDetail.balance || 0,
-    freeData: {
-      used: userDetail.ai_tokens?.used_this_week || 0,
-      limit: userDetail.ai_tokens?.free_weekly_limit || 0,
-      remaining: Math.max(0, (userDetail.ai_tokens?.free_weekly_limit || 0) - (userDetail.ai_tokens?.used_this_week || 0))
-    }
-  };
+  const userId = String(userDetail._id || userDetail.id || userDetail.userId || "");
 
   const billingColumns = [
     {
@@ -192,170 +159,53 @@ export function AiUserDetailPanel({ userDetail }: { userDetail: any }) {
     }
   ];
 
+  const paidLimit = userDetail.ai_tokens?.total_ai_credits_purchased || 0;
+  const paidLeft = userDetail.ai_tokens?.ai_credits_balance || 0;
+  const grantLimit = userDetail.ai_tokens?.total_promotion_credits_granted || 0;
+  const grantLeft = userDetail.ai_tokens?.promotion_credits_balance || 0;
+  const showOrgPool = (userDetail.role === 'org_admin' || userDetail.role === 'Owner') && userDetail.orgPool;
+
   return (
     <div className="flex flex-col gap-6 animate-in fade-in duration-300">
-      
-      {/* Overview and Usage Bar */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-        <Card className="md:col-span-2">
-          <CardHeader>
-            <CardTitle>Usage Overview</CardTitle>
-            <CardDescription>Lifetime credit consumption & balance</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <div className="grid grid-cols-2 gap-4">
-              <div className="bg-muted/30 p-4 rounded-lg border border-border/50">
-                <div className="text-sm text-muted-foreground mb-1">Total Credits Consumed</div>
-                <div className="text-2xl font-bold">{formatNumber(userDetail.totalUsage || 0)}</div>
-              </div>
-              <div className="bg-muted/30 p-4 rounded-lg border border-border/50">
-                <div className="text-sm text-muted-foreground mb-1">Available Credits</div>
-                <div className="text-2xl font-bold">{formatNumber(userDetail.balance || 0)}</div>
-              </div>
-            </div>
-            
-            <div className="mt-4 border-t border-border/50 pt-4 flex flex-col gap-4">
-              {/* 1. Personal Limits */}
-              {(() => {
-                const limit = userDetail.ai_tokens?.free_weekly_limit ?? 0;
-                const used = userDetail.limitTimers?.tokens ? userDetail.limitTimers.tokens.used : (userDetail.ai_tokens?.used_this_week || 0);
-                const percent = limit > 0 ? Math.min(100, Math.max(0, (used / limit) * 100)) : 0;
-                return (
-                  <div className="w-full flex items-start justify-between">
-                    <div className="flex flex-col gap-1 pr-6 min-w-[150px]">
-                      <span className="text-sm font-medium text-foreground">Personal Limits</span>
-                      {userDetail.limitTimers ? <ResetCountdown resetAt={userDetail.limitTimers.tokens?.resetAt} /> : <span className="text-xs text-muted-foreground">Resets in 7 days</span>}
-                    </div>
-                    <div className="flex-1 flex flex-col gap-1.5 mt-1">
-                      <div className="w-full flex items-center justify-between text-xs mb-1">
-                        <span className="font-medium text-foreground">{Math.round(percent)}% Used</span>
-                        <span className="text-muted-foreground font-medium">{formatNumber(used)} / {formatNumber(limit)} Tokens</span>
-                      </div>
-                      <div className="w-full h-1.5 bg-muted-foreground/20 rounded-full overflow-hidden">
-                        <div className="h-full bg-blue-500 rounded-full transition-all" style={{ width: `${percent}%` }} />
-                      </div>
-                    </div>
-                  </div>
-                );
-              })()}
 
-              <LimitTimerRow label="Images" unit="Images" timer={userDetail.limitTimers?.image} />
-              <LimitTimerRow label="WhatsApp" unit="Messages" timer={userDetail.limitTimers?.whatsapp} />
-
-              {/* 2. Paid Credits */}
-              {(() => {
-                const limit = userDetail.ai_tokens?.total_ai_credits_purchased || 0;
-                if (limit <= 0) return null;
-                const remaining = userDetail.ai_tokens?.ai_credits_balance || 0;
-                const used = Math.max(0, limit - remaining);
-                const percent = limit > 0 ? Math.min(100, Math.max(0, (used / limit) * 100)) : 0;
-                return (
-                  <div className="w-full flex items-start justify-between">
-                    <div className="flex flex-col gap-1 pr-6 min-w-[150px]">
-                      <span className="text-sm font-medium text-foreground">Paid Credits</span>
-                      <span className="text-xs text-muted-foreground">Purchased Top-Ups</span>
-                    </div>
-                    <div className="flex-1 flex flex-col gap-1.5 mt-1">
-                      <div className="w-full flex items-center justify-between text-xs mb-1">
-                        <span className="font-medium text-foreground">{Math.round(percent)}% Used</span>
-                        <span className="text-muted-foreground font-medium">{formatNumber(used)} / {formatNumber(limit)} Tokens</span>
-                      </div>
-                      <div className="w-full h-1.5 bg-muted-foreground/20 rounded-full overflow-hidden">
-                        <div className="h-full bg-emerald-500 rounded-full transition-all" style={{ width: `${percent}%` }} />
-                      </div>
-                    </div>
-                  </div>
-                );
-              })()}
-
-              {/* 3. Granted Credits */}
-              {(() => {
-                const limit = userDetail.ai_tokens?.total_promotion_credits_granted || 0;
-                const remaining = userDetail.ai_tokens?.promotion_credits_balance || 0;
-                if (limit <= 0 && remaining <= 0) return null;
-                const used = Math.max(0, limit - remaining);
-                const percent = limit > 0 ? Math.min(100, Math.max(0, (used / limit) * 100)) : 0;
-                return (
-                  <div className="w-full flex items-start justify-between">
-                    <div className="flex flex-col gap-1 pr-6 min-w-[150px]">
-                      <span className="text-sm font-medium text-foreground flex items-center gap-2">
-                        Granted Credits
-                        {userDetail.ai_tokens?.promotion_credits_paused && (
-                          <span className="text-[10px] bg-amber-500/10 text-amber-500 px-1.5 py-0.5 rounded font-bold uppercase tracking-wider">Paused</span>
-                        )}
-                      </span>
-                      <span className="text-xs text-muted-foreground">Promotional limit</span>
-                    </div>
-                    <div className="flex-1 flex flex-col gap-1.5 mt-1">
-                      <div className="w-full flex items-center justify-between text-xs mb-1">
-                        <span className="font-medium text-foreground">{Math.round(percent)}% Used</span>
-                        <span className="text-muted-foreground font-medium">{formatNumber(used)} / {formatNumber(limit)} Tokens</span>
-                      </div>
-                      <div className="w-full h-1.5 bg-muted-foreground/20 rounded-full overflow-hidden">
-                        <div className="h-full bg-purple-500 rounded-full transition-all" style={{ width: `${percent}%` }} />
-                      </div>
-                    </div>
-                  </div>
-                );
-              })()}
-
-              {/* 4. Org Pool (Only for Admin/Owner) */}
-              {(() => {
-                if (userDetail.role !== 'org_admin' && userDetail.role !== 'Owner') return null;
-                if (!userDetail.orgPool) return null;
-                const limit = userDetail.orgPool.limit || 0;
-                const used = userDetail.orgPool.used || 0;
-                const percent = limit > 0 ? Math.min(100, Math.max(0, (used / limit) * 100)) : 0;
-                return (
-                  <div className="w-full flex items-start justify-between">
-                    <div className="flex flex-col gap-1 pr-6 min-w-[150px]">
-                      <span className="text-sm font-medium text-foreground">Org Pool</span>
-                      <span className="text-xs text-muted-foreground">Shared Pro pool</span>
-                    </div>
-                    <div className="flex-1 flex flex-col gap-1.5 mt-1">
-                      <div className="w-full flex items-center justify-between text-xs mb-1">
-                        <span className="font-medium text-foreground">{Math.round(percent)}% Used</span>
-                        <span className="text-muted-foreground font-medium">{formatNumber(used)} / {formatNumber(limit)} Tokens</span>
-                      </div>
-                      <div className="w-full h-1.5 bg-muted-foreground/20 rounded-full overflow-hidden">
-                        <div className="h-full bg-orange-500 rounded-full transition-all" style={{ width: `${percent}%` }} />
-                      </div>
-                    </div>
-                  </div>
-                );
-              })()}
-
-            </div>
-          </CardContent>
-        </Card>
+      {/* 1. The plan (with the two gift buttons) and the account */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        <div className="lg:col-span-2">
+          <PlanHeaderCard
+            userId={userId}
+            plan={userDetail.plan}
+            overview={userDetail.overview}
+            student={userDetail.student}
+            onGift={() => setIsGiftPlanOpen(true)}
+            onGrant={() => setIsGrantCreditsOpen(true)}
+          />
+        </div>
 
         <Card>
           <CardHeader>
-            <CardTitle>Account Details</CardTitle>
+            <CardTitle className="text-lg">Account</CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
-            <div>
-              <div className="text-xs text-muted-foreground uppercase tracking-wider">User ID</div>
-              <div className="font-mono text-sm mt-1 truncate">{userDetail.id}</div>
-            </div>
             <div>
               <div className="text-xs text-muted-foreground uppercase tracking-wider">Name</div>
               <div className="text-sm font-medium mt-1">{userDetail.name || "N/A"}</div>
             </div>
             <div>
               <div className="text-xs text-muted-foreground uppercase tracking-wider">Email</div>
-              <div className="text-sm font-medium mt-1">{userDetail.email}</div>
+              <div className="text-sm font-medium mt-1 break-all">{userDetail.email}</div>
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <div className="text-xs text-muted-foreground uppercase tracking-wider">Role</div>
+                <div className="text-sm font-medium mt-1">{formatRoleLabel(userDetail.role)}</div>
+              </div>
+              <div>
+                <div className="text-xs text-muted-foreground uppercase tracking-wider">Chats</div>
+                <div className="text-sm font-medium mt-1">{formatNumber(userDetail.totalChats || 0)}</div>
+              </div>
             </div>
             <div>
-              <div className="text-xs text-muted-foreground uppercase tracking-wider">Role</div>
-              <div className="text-sm font-medium mt-1">{formatRoleLabel(userDetail.role)}</div>
-            </div>
-            <div>
-              <div className="text-xs text-muted-foreground uppercase tracking-wider">Total Chat Sessions</div>
-              <div className="text-sm font-medium mt-1">{formatNumber(userDetail.totalChats || 0)}</div>
-            </div>
-            <div>
-              <div className="text-xs text-muted-foreground uppercase tracking-wider">Status</div>
+              <div className="text-xs text-muted-foreground uppercase tracking-wider">AI access</div>
               <div className="mt-1">
                 {isBlocked ? (
                   <span className="inline-flex items-center text-sm font-medium text-red-500">
@@ -368,12 +218,62 @@ export function AiUserDetailPanel({ userDetail }: { userDetail: any }) {
                 )}
               </div>
             </div>
+            <div>
+              <div className="text-xs text-muted-foreground uppercase tracking-wider">User ID</div>
+              <div className="font-mono text-xs mt-1 truncate text-muted-foreground">{userDetail.id}</div>
+            </div>
           </CardContent>
         </Card>
       </div>
 
-      {/* The user's plan, set by hand */}
-      <UserPlanCard userId={String(userDetail._id || userDetail.id || userDetail.userId || "")} plan={userDetail.plan} student={userDetail.student} />
+      {/* 2. The usage bars, as the user sees them in Settings > Usage */}
+      <PlanUsageBars overview={userDetail.overview} />
+
+      {/* 3. Plans given or ended by hand, with the reasons */}
+      <PlanHistoryList rows={userDetail.planHistory} />
+
+      {/* 4. The usage history */}
+      <UserUsageHistory userId={userId} />
+
+      {/* 5. Credits: paid top-ups and granted credits */}
+      <div className="flex flex-col gap-1 pt-2">
+        <h2 className="text-lg font-semibold text-foreground">Credits</h2>
+        <p className="text-sm text-muted-foreground">Top-ups the user bought and credits given by hand. They are used after the limits of the plan.</p>
+      </div>
+
+      <Card>
+        <CardContent className="pt-6 flex flex-col gap-5">
+          <div className="grid grid-cols-2 gap-4">
+            <div className="bg-muted/30 p-4 rounded-lg border border-border/50">
+              <div className="text-sm text-muted-foreground mb-1">Credits used, all time</div>
+              <div className="text-2xl font-bold">{formatNumber(userDetail.totalUsage || 0)}</div>
+            </div>
+            <div className="bg-muted/30 p-4 rounded-lg border border-border/50">
+              <div className="text-sm text-muted-foreground mb-1">Top-up credits left</div>
+              <div className="text-2xl font-bold">{formatNumber(userDetail.balance || 0)}</div>
+            </div>
+          </div>
+          {paidLimit > 0 && (
+            <CreditBar label="Paid Credits" sub="Top-ups bought" used={Math.max(0, paidLimit - paidLeft)} limit={paidLimit} color="bg-emerald-500" />
+          )}
+          {(grantLimit > 0 || grantLeft > 0) && (
+            <CreditBar
+              label="Granted Credits"
+              sub="Given by hand"
+              used={Math.max(0, grantLimit - grantLeft)}
+              limit={grantLimit}
+              color="bg-purple-500"
+              badge={userDetail.ai_tokens?.promotion_credits_paused ? <span className="text-[10px] bg-amber-500/10 text-amber-500 px-1.5 py-0.5 rounded font-bold uppercase tracking-wider">Paused</span> : null}
+            />
+          )}
+          {showOrgPool && (
+            <CreditBar label="Org Pool" sub="Shared pool" used={userDetail.orgPool.used || 0} limit={userDetail.orgPool.limit || 0} color="bg-orange-500" />
+          )}
+          {paidLimit <= 0 && grantLimit <= 0 && grantLeft <= 0 && !showOrgPool && (
+            <p className="text-sm text-muted-foreground">No paid or granted credits.</p>
+          )}
+        </CardContent>
+      </Card>
 
       {/* Billing Summary */}
       <Card>
@@ -397,33 +297,13 @@ export function AiUserDetailPanel({ userDetail }: { userDetail: any }) {
              </div>
           </div>
 
-          <DataTable 
-            columns={billingColumns} 
-            rows={userDetail.topupHistory || []} 
+          <DataTable
+            columns={billingColumns}
+            rows={userDetail.topupHistory || []}
             emptyMessage="No payment history. This user hasn't made any purchases yet."
           />
         </CardContent>
       </Card>
-
-      {/* Grant Credits Card */}
-      <div className="border border-border rounded-xl shadow-sm bg-card">
-        <div className="p-6 flex flex-col gap-6">
-          <div className="flex flex-col gap-1.5">
-            <h3 className="text-lg font-semibold text-foreground tracking-tight">
-              Grant User Credits
-            </h3>
-            <p className="text-sm text-muted-foreground">
-              Open the AI Hub Panel to securely grant tokens to {userDetail.name || "this user"}.
-            </p>
-          </div>
-        </div>
-        <div className="p-4 bg-muted/20 border-t border-border flex items-center justify-end">
-          <Button variant="outline" onClick={() => setIsGrantCreditsOpen(true)}>
-            <LayoutTemplate className="w-4 h-4 mr-2" />
-            Open Grant Credits Panel
-          </Button>
-        </div>
-      </div>
 
       {((userDetail.promotionHistory || []).filter((h: any) => h.type === 'grant' || h.type === 'granted').length > 0 || userDetail.ai_tokens?.total_promotion_credits_granted > 0) && (
         <Card>
@@ -583,9 +463,22 @@ export function AiUserDetailPanel({ userDetail }: { userDetail: any }) {
       
       <ResetUserDailyLimit userId={userDetail.id} userName={userDetail.name || userDetail.email} />
 
-      <GrantCreditsModal 
-        isOpen={isGrantCreditsOpen} 
+      {/* Gift a plan: the main action (the plan header's first button) */}
+      <Dialog open={isGiftPlanOpen} onOpenChange={setIsGiftPlanOpen}>
+        <DialogContent className="sm:max-w-lg max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Gift a plan</DialogTitle>
+            <DialogDescription>Give {userDetail.name || userDetail.email} a plan for a while. They get an email.</DialogDescription>
+          </DialogHeader>
+          <GiftPlanForm userIds={[userId]} who={userDetail.name || userDetail.email} idPrefix="user-gift" onDone={() => setIsGiftPlanOpen(false)} />
+        </DialogContent>
+      </Dialog>
+
+      {/* Gift credits: the second, smaller option (the panel also has Gift a plan) */}
+      <GrantCreditsModal
+        isOpen={isGrantCreditsOpen}
         onClose={() => setIsGrantCreditsOpen(false)}
+        initialMode="credits"
         orgs={[{
           id: userDetail.id,
           name: userDetail.name || "N/A",

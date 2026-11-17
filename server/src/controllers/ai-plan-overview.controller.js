@@ -1,6 +1,7 @@
 // The user's plan and every usage count in one answer (owner, 2026-11-14 evening): the AI hub's Plan and Usage
 // pages read this. Plans on: the plan's numbers; plans off: the global numbers. A limit is -1 for unlimited, 0 for
 // not included, null when nothing limits it. Nothing is charged or changed here (read only).
+import mongoose from "mongoose";
 import User from "../models/User.js";
 import Organization from "../models/Organization.js";
 import GlobalAiConfig from "../models/GlobalAiConfig.js";
@@ -30,6 +31,7 @@ const PLAN_FIELDS = [
     "claude_credits_per_week", "fable_share_percent", "models_allowed", "default_model", "thinking_modes", "context_tokens", "helpers_per_chat",
     "images_per_period", "images_reset_value", "images_reset_unit", "voice_replies_per_day", "voice_input_minutes_per_day",
     "call_minutes_per_period", "call_reset_value", "call_reset_unit", "calls_per_day", "call_max_minutes",
+    "calls_per_week", "calls_per_month", "call_tasks_per_call", "call_tasks_at_once", "call_task_max_minutes",
     "whatsapp_per_day", "whatsapp_per_period", "whatsapp_reset_value", "whatsapp_reset_unit",
     "projects_max", "coding_runs_per_month", "premium_runs_per_month", "sandbox_hours_per_month", "sandbox_sessions",
     "uploads_per_window", "upload_max_mb", "library_storage_mb", "devices_max", "priority", "support_level", "features_text",
@@ -154,14 +156,25 @@ export const getPlanOverview = async (req, res) => {
 
 // The Usage page's history (GET /api/ai/plan/usage-history?days=14&page=1&limit=15): credits per day (India time)
 // for the last days, the totals, and the AI requests with their model and credits (from AiUsageLog), newest first,
-// one page at a time
+// one page at a time. usageHistoryFor is shared with the super admin's user page (Plans & Usage), so both show the
+// same history.
 export const getUsageHistory = async (req, res) => {
     try {
-        const days = Math.min(90, Math.max(1, parseInt(req.query.days, 10) || 14));
-        const limit = Math.min(50, Math.max(1, parseInt(req.query.limit, 10) || 15));
-        const page = Math.max(1, parseInt(req.query.page, 10) || 1);
+        res.json(await usageHistoryFor(req.user._id, req.query));
+    } catch (err) {
+        console.error("[usage history]", err);
+        res.status(500).json({ error: err.message });
+    }
+};
+
+export async function usageHistoryFor(userId, query = {}) {
+        const days = Math.min(90, Math.max(1, parseInt(query.days, 10) || 14));
+        const limit = Math.min(50, Math.max(1, parseInt(query.limit, 10) || 15));
+        const page = Math.max(1, parseInt(query.page, 10) || 1);
         const since = new Date(Date.now() - days * 86400000);
-        const match = { userId: req.user._id, createdAt: { $gte: since }, success: { $ne: false } };
+        // (an id given as text, from the super admin's page, made an ObjectId: aggregate does not cast it)
+        const uid = typeof userId === "string" && mongoose.Types.ObjectId.isValid(userId) ? new mongoose.Types.ObjectId(userId) : userId;
+        const match = { userId: uid, createdAt: { $gte: since }, success: { $ne: false } };
         const [perDay, events, totals, eventsTotal] = await Promise.all([
             AiUsageLog.aggregate([
                 { $match: match },
@@ -190,15 +203,11 @@ export const getUsageHistory = async (req, res) => {
             if (/image|flux|dall|imagen|stable-diffusion|sdxl/i.test(String(e.model || ""))) return "Image";
             return (e.totalTokens || 0) <= 2000 ? "Chat title" : "Chat";
         };
-        res.json({
+        return {
             days, since: since.toISOString(),
             total: { credits: totals[0]?.credits || 0, requests: totals[0]?.requests || 0 },
             perDay: list,
             events: events.map((e) => ({ at: e.createdAt, model: e.model, provider: e.provider, what: what(e), credits: e.totalTokens || 0 })),
             page, limit, eventsTotal, pages: Math.max(1, Math.ceil(eventsTotal / limit)), asOf: new Date().toISOString(),
-        });
-    } catch (err) {
-        console.error("[usage history]", err);
-        res.status(500).json({ error: err.message });
-    }
-};
+        };
+}

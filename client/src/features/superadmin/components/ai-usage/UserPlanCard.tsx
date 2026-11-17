@@ -1,97 +1,107 @@
-// A user's plan (Free, Pro, Max, Enterprise), set by hand by the super admin: a gift, a test account, a refund case.
-import React, { useEffect, useState } from "react";
+// A user's plan set by hand by the super admin (owner, 2026-11-17): gift a paid plan from the plan table for a period,
+// with a reason (GiftPlanForm), or end it (back to Free). Also the student price, confirmed by hand. Used on the Plans
+// & Usage user page and in the Plans & Billing subscriber list.
+import { useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { apiClient as api } from "@/lib/apiClient";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/marketing_ui/card";
 import { Button } from "@/components/marketing_ui/button";
-import { Input } from "@/components/marketing_ui/input";
-import { Label } from "@/components/marketing_ui/label";
-import { Spinner } from "@/components/marketing_ui/spinner";
-
-const PLAN_NAMES: Record<string, string> = { free: "Free", pro: "Pro", max: "Max", enterprise: "Enterprise" };
+import { DangerConfirmDialog } from "@/components/marketing_ui/danger-confirm-dialog";
+import { useAiPlans, planNameOf } from "@/features/superadmin/queries/useAiUsage";
+import { GiftPlanForm } from "./GiftPlanForm";
+import { errorText, isPast, planSourceText, type UserPlan } from "./planText";
 
 type StudentInfo = { email?: string | null; method?: string; verified_at?: string; expires_at?: string | null } | null;
 
-export function UserPlanCard({ userId, plan, student }: { userId: string; plan?: { id?: string; status?: string; billing?: string; expires_at?: string | null; note?: string; set_by?: string }; student?: StudentInfo }) {
+const day = (iso?: string | null) => (iso ? new Date(iso).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" }) : "");
+
+/** "End plan" (a paid plan only), with a confirmation: the user moves to Free now */
+export function EndPlanButton({ userId, plan }: { userId: string; plan?: UserPlan | null }) {
+  const { data } = useAiPlans();
   const queryClient = useQueryClient();
-  const [planId, setPlanId] = useState(plan?.id || "free");
-  const [expiresAt, setExpiresAt] = useState("");
-  const [note, setNote] = useState("");
-
-  useEffect(() => {
-    setPlanId(plan?.id || "free");
-    setExpiresAt(plan?.expires_at ? new Date(plan.expires_at).toISOString().slice(0, 10) : "");
-    setNote(plan?.note || "");
-  }, [plan?.id, plan?.expires_at, plan?.note]);
-
-  const save = useMutation({
-    mutationFn: async () => (await api.put(`/api/super-admin/ai-usage/users/${userId}/plan`, { planId, expires_at: expiresAt || null, note })).data,
-    onSuccess: () => { toast.success(`Plan set to ${PLAN_NAMES[planId] || planId}`); queryClient.invalidateQueries({ queryKey: ["ai-usage-user"] }); },
-    onError: (e: any) => toast.error(e?.response?.data?.message || "Could not set the plan"),
+  const [open, setOpen] = useState(false);
+  const end = useMutation({
+    mutationFn: async () => (await api.put(`/api/super-admin/ai-usage/users/${userId}/plan`, { planId: "free", reason: "Ended by a super admin" })).data,
+    onSuccess: () => {
+      toast.success("The user is on Free now");
+      setOpen(false);
+      queryClient.invalidateQueries({ queryKey: ["ai-usage-user"] });
+      queryClient.invalidateQueries({ queryKey: ["ai-usage-org-users"] });
+      queryClient.invalidateQueries({ queryKey: ["ai-plan-subscribers"] });
+    },
+    onError: (e) => toast.error(errorText(e, "Could not end the plan")),
   });
+  if (!plan?.id || plan.id === "free") return null;
+  const name = planNameOf(data?.plans, plan.id);
+  return (
+    <>
+      <Button type="button" variant="ghost" size="sm" onClick={() => setOpen(true)} disabled={end.isPending} className="text-muted-foreground font-medium">
+        End plan
+      </Button>
+      <DangerConfirmDialog
+        open={open}
+        onOpenChange={setOpen}
+        title={`End the ${name} plan?`}
+        description="The user moves to Free now and gets the Free limits."
+        warningMessage={plan.billing && plan.billing !== "granted" ? "This plan was bought. Ending it here does not refund the payment." : "The gift ends today."}
+        actionLabel="End plan"
+        variant="warning"
+        isLoading={end.isPending}
+        onConfirm={() => end.mutate()}
+      />
+    </>
+  );
+}
 
-  // Student prices: confirmed by a school email, or by hand here (for a student without one)
+/** The student price row: confirmed by a school email, or by hand here (for a student without one) */
+export function StudentPriceRow({ userId, student }: { userId: string; student?: StudentInfo }) {
+  const queryClient = useQueryClient();
   const setStudent = useMutation({
     mutationFn: async (verified: boolean) => (await api.put(`/api/super-admin/ai-usage/users/${userId}/student`, { verified })).data,
     onSuccess: (_d, verified) => { toast.success(verified ? "Confirmed as a student" : "Student price removed"); queryClient.invalidateQueries({ queryKey: ["ai-usage-user"] }); },
-    onError: (e: any) => toast.error(e?.response?.data?.error || "Could not change the student price"),
+    onError: (e) => toast.error(errorText(e, "Could not change the student price")),
   });
-  const studentOn = !!student?.verified_at && !(student.expires_at && new Date(student.expires_at).getTime() < Date.now());
-  const day = (iso?: string | null) => (iso ? new Date(iso).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" }) : "");
+  const studentOn = !!student?.verified_at && !isPast(student.expires_at);
+  return (
+    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+      <div className="text-sm min-w-0">
+        <div className="font-medium text-foreground">Student price</div>
+        <div className="text-xs text-muted-foreground">
+          {studentOn
+            ? `Confirmed${student?.method === "admin" ? " by hand" : student?.email ? ` with ${student.email}` : ""}, until ${day(student?.expires_at)}`
+            : "Not confirmed. The user confirms a school or university email in Settings > Billing, or you confirm them here."}
+        </div>
+      </div>
+      <Button variant="outline" size="sm" onClick={() => setStudent.mutate(!studentOn)} isLoading={setStudent.isPending} className="shrink-0 self-start sm:self-auto font-medium">
+        {studentOn ? "Remove" : "Confirm as student"}
+      </Button>
+    </div>
+  );
+}
 
+export function UserPlanCard({ userId, plan, student, name }: { userId: string; plan?: UserPlan; student?: StudentInfo; name?: string }) {
+  const { data } = useAiPlans();
   const current = plan?.id || "free";
-  const expired = plan?.expires_at ? new Date(plan.expires_at).getTime() < Date.now() : false;
+  const ended = isPast(plan?.expires_at);
 
   return (
     <Card>
       <CardHeader>
-        <CardTitle>Plan</CardTitle>
+        <CardTitle>Gift a plan</CardTitle>
         <CardDescription>
-          Now on <span className="font-medium text-foreground">{PLAN_NAMES[current] || current}</span>
-          {plan?.billing && plan.billing !== "none" ? ` (${plan.billing.replace(/_/g, " ")})` : ""}
-          {plan?.expires_at ? `, ${expired ? "expired" : "until"} ${new Date(plan.expires_at).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })}` : ""}
-          {plan?.set_by ? `, set by ${plan.set_by}` : ""}
+          Now on <span className="font-medium text-foreground">{planNameOf(data?.plans, current)}</span>
+          {current !== "free" ? ` (${planSourceText(plan).toLowerCase()})` : ""}
+          {plan?.expires_at ? `, ${ended ? "ended" : "until"} ${day(plan.expires_at)}` : ""}
+          {plan?.note && plan.billing === "granted" ? `. Reason: ${plan.note}` : ""}
         </CardDescription>
       </CardHeader>
-      <CardContent className="flex flex-col gap-3">
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-          <div className="flex flex-col gap-1">
-            <Label htmlFor="user-plan" className="text-xs">Plan</Label>
-            <select id="user-plan" value={planId} onChange={(e) => setPlanId(e.target.value)} disabled={save.isPending}
-              className="h-9 rounded-md border border-border bg-background px-2 text-sm">
-              {Object.entries(PLAN_NAMES).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
-            </select>
-          </div>
-          <div className="flex flex-col gap-1">
-            <Label htmlFor="user-plan-until" className="text-xs">Until (empty = no end)</Label>
-            <Input id="user-plan-until" type="date" value={expiresAt} onChange={(e) => setExpiresAt(e.target.value)} disabled={save.isPending || planId === "free"} className="h-9" />
-          </div>
-          <div className="flex flex-col gap-1">
-            <Label htmlFor="user-plan-note" className="text-xs">Note</Label>
-            <Input id="user-plan-note" value={note} onChange={(e) => setNote(e.target.value)} placeholder="e.g. gift for feedback" disabled={save.isPending} className="h-9" />
-          </div>
-        </div>
-        <div className="flex justify-end">
-          <Button onClick={() => save.mutate()} disabled={save.isPending}>
-            {save.isPending && <Spinner className="w-4 h-4 mr-2" />}
-            Set plan
-          </Button>
-        </div>
-        <div className="flex items-center justify-between gap-3 pt-3 border-t border-border">
-          <div className="text-sm">
-            <div className="font-medium text-foreground">Student price</div>
-            <div className="text-xs text-muted-foreground">
-              {studentOn
-                ? `Confirmed${student?.method === "admin" ? " by hand" : student?.email ? ` with ${student.email}` : ""}, until ${day(student?.expires_at)}`
-                : "Not confirmed. The user confirms a school or university email in Settings > Billing, or you confirm them here."}
-            </div>
-          </div>
-          <Button variant="outline" size="sm" onClick={() => setStudent.mutate(!studentOn)} disabled={setStudent.isPending}>
-            {setStudent.isPending && <Spinner className="w-4 h-4 mr-2" />}
-            {studentOn ? "Remove" : "Confirm as student"}
-          </Button>
-        </div>
+      <CardContent className="flex flex-col gap-4">
+        <GiftPlanForm userIds={[userId]} who={name} idPrefix={`gift-${userId}`} />
+        {current !== "free" && (
+          <div className="flex justify-end -mt-2"><EndPlanButton userId={userId} plan={plan} /></div>
+        )}
+        <div className="pt-4 border-t border-border"><StudentPriceRow userId={userId} student={student} /></div>
       </CardContent>
     </Card>
   );

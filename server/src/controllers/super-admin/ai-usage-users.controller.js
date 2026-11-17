@@ -30,8 +30,35 @@
 // CLASSGRID USES CLOUDFLARE USAGE TO CALCULATE TOKENS, NOT GPT-TOKENIZER (WHICH IS ONLY A FALLBACK)
 import User from "../../models/User.js";
 import AiCreditTransaction from "../../models/AiCreditTransaction.js";
+import AdminAuditLog from "../../models/AdminAuditLog.js";
 import { primarySupabaseClient as supabase } from "../../config/supabaseClient.js";
 import mongoose from "mongoose";
+import { planKeyOf } from "../../services/plan-limits.service.js";
+import { planOverviewFor, usageHistoryFor } from "../ai-plan-overview.controller.js";
+
+// The plan gifts and ends for one user, newest first, from the admin audit log (setUserPlan writes them)
+export async function planHistoryFor(userId) {
+    const rows = await AdminAuditLog.find({ targetType: "user", targetId: String(userId), action: { $in: ["user.plan_gift", "user.plan_end"] } })
+        .sort({ createdAt: -1 }).limit(50).select("action actorName metadata createdAt").lean();
+    return rows.map((r) => ({
+        at: r.createdAt, action: r.action === "user.plan_gift" ? "gift" : "end",
+        plan: r.metadata?.plan || "free", expires_at: r.metadata?.expires_at || null,
+        reason: r.metadata?.reason || "", by: r.metadata?.set_by || r.actorName || "",
+    }));
+}
+
+// The user's usage history for the super admin's user page (GET /api/super-admin/ai-usage/users/:userId/usage-history),
+// the same answer as the user's own Usage page (?days=14&page=1&limit=15)
+export const getUserUsageHistory = async (req, res) => {
+    try {
+        const { userId } = req.params;
+        if (!mongoose.Types.ObjectId.isValid(userId)) return res.status(400).json({ success: false, error: "Invalid user ID" });
+        res.json(await usageHistoryFor(userId, req.query));
+    } catch (error) {
+        console.error("User usage history error:", error);
+        res.status(500).json({ success: false, error: "Failed to read the usage history" });
+    }
+};
 
 // PHASE 8: Super Admin AI Usage - Users Controller
 
@@ -49,8 +76,9 @@ export const listUsersInOrg = async (req, res) => {
             query = { organization_id: orgId };
         }
 
+        // (the whole list comes in one answer, so the page's search filters it on the screen; "plan" for the plan column)
         const users = await User.find(query)
-            .select("name email role ai_tokens organization_id profilePicture platformLogo avatarUrl picture photoUrl")
+            .select("name email role ai_tokens organization_id profilePicture platformLogo avatarUrl picture photoUrl plan")
             .lean();
 
         const userIds = users.map(u => u._id);
@@ -91,6 +119,7 @@ export const listUsersInOrg = async (req, res) => {
                 totalUsage: user.ai_tokens?.total_ai_tokens_used || 0,
                 isBlocked: user.ai_tokens?.is_ai_blocked || false,
                 plan: user.plan && user.plan.id ? user.plan : { id: "free", status: "active", billing: "none" },
+                planKey: planKeyOf(user), // the plan in force now (an ended or cancelled plan is Free)
                 recentTopUp: topUpMap[user._id.toString()] ? topUpMap[user._id.toString()].amount : null
             });
         });
@@ -237,10 +266,18 @@ export const getUserAiDetail = async (req, res) => {
             console.error("Error fetching limit timers:", e);
         }
 
+        // The plan and every usage bar exactly as the user sees them (Settings > Usage), and the plan gifts with reasons
+        const [overview, planHistory] = await Promise.all([
+            planOverviewFor(userId).catch((e) => { console.error("Plan overview for the super admin failed:", e.message); return null; }),
+            planHistoryFor(userId).catch((e) => { console.error("Plan history failed:", e.message); return []; }),
+        ]);
+
         res.status(200).json({
             success: true,
             data: {
                 id: user._id,
+                overview,
+                planHistory,
                 limitTimers,
                 name: user.name,
                 email: user.email,

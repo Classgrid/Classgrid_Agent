@@ -217,10 +217,10 @@ export function SetupUsageCredits({ orgId, orgName, currentPoolLimit, currentUse
   return (
     <div className="flex flex-col gap-6">
       <div className="bg-card border border-border rounded-xl shadow-sm overflow-hidden h-full">
-        <div className="p-5 border-b border-border flex items-center justify-between">
-          <div>
-            <h2 className="text-lg font-semibold text-foreground">Setup Usage Credits (DEBUG orgId: '{orgId}')</h2>
-            <p className="text-sm text-muted-foreground">Manage default limits and quotas for {orgName}.</p>
+        <div className="p-5 border-b border-border flex flex-wrap items-center justify-between gap-3">
+          <div className="min-w-0">
+            <h2 className="text-lg font-semibold text-foreground">Limits for {orgName}</h2>
+            <p className="text-sm text-muted-foreground">Credits, images and WhatsApp messages for this organization while plans are off.</p>
           </div>
           <div className="flex items-center gap-3">
             <Label htmlFor="custom-limits" className="text-sm font-medium whitespace-nowrap">

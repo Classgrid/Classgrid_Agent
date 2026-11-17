@@ -25,6 +25,8 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/marketing
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/marketing_ui/select";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/marketing_ui/dialog";
 import { DataTable } from "@/components/marketing_ui/data-table";
+import { Badge } from "@/components/marketing_ui/badge";
+import { Avatar, AvatarImage, AvatarFallback } from "@/components/marketing_ui/avatar";
 import { PageBreadcrumbs } from "@/components/layout/PageBreadcrumbs";
 import { 
   Building, 
@@ -32,11 +34,11 @@ import {
   Home,
   Shield,
   Activity,
-  User as UserIcon,
   Cpu,
   Database,
   HardDrive,
-  LayoutTemplate
+  LayoutTemplate,
+  Gift
 } from "lucide-react";
 
 import { AiUsageTrendsChart } from "@/features/superadmin/components/AiUsageTrendsChart";
@@ -48,7 +50,7 @@ import { useCurrentUser } from "@/features/auth/queries/useCurrentUser";
 import { useQuery } from "@tanstack/react-query";
 import { apiClient } from "@/lib/apiClient";
 import { GlobalAiConfigPanel } from "@/features/superadmin/components/GlobalAiConfigPanel";
-import { PlanConfigPanel } from "@/features/superadmin/components/PlanConfigPanel";
+import { PlansSummary } from "@/features/superadmin/components/ai-usage/PlansSummary";
 import { ResetOrganizationDailyLimit } from "@/features/superadmin/components/ResetOrganizationDailyLimit";
 import { EditOrganizationDailyLimit } from "@/features/superadmin/components/EditOrganizationDailyLimit";
 import { BlockOrganizationAiUsage } from "@/features/superadmin/components/BlockOrganizationAiUsage";
@@ -61,7 +63,9 @@ import {
   useResetOrgUsage,
   useBlockAiOrg,
   useUpdateOrgAiLimits,
-  useGlobalGrantedCredits
+  useGlobalGrantedCredits,
+  useAiPlans,
+  planNameOf
 } from "@/features/superadmin/queries/useAiUsage";
 import { DangerConfirmDialog } from "@/components/marketing_ui/danger-confirm-dialog";
 import { Skeleton } from "@/components/marketing_ui/skeleton";
@@ -71,6 +75,12 @@ import { ModelUsageSection } from "@/features/superadmin/components/ai-usage/Mod
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, ResponsiveContainer, PieChart, Legend, Pie, Cell, ReferenceLine } from "recharts";
 
 const COLORS = ['#3b82f6', '#8b5cf6', '#10b981', '#f59e0b', '#ef4444', '#ec4899'];
+
+// One row of the user list (listUsersInOrg): planKey is the plan in force now (an ended plan is "free")
+type OrgUserRow = {
+  id: string; name?: string; email?: string; profilePicture?: string | null; totalUsage?: number; isBlocked?: boolean;
+  plan?: { id?: string; billing?: string }; planKey?: string;
+};
 
 interface PathState {
   orgId?: string;
@@ -150,6 +160,12 @@ export function AiUsageDashboardPage() {
   const [showLimitsDialog, setShowLimitsDialog] = useState(false);
   const [tempLimits, setTempLimits] = useState({ poolLimit: 0, userWeeklyLimit: 0 });
   const [searchQuery, setSearchQuery] = useState("");
+  // The user list's search (name or email): kept per list, so opening another role's list starts empty
+  const [userSearchState, setUserSearchState] = useState({ list: "", q: "" });
+  const userList = `${path.orgId || ""}|${path.role || ""}`;
+  const userSearch = userSearchState.list === userList ? userSearchState.q : "";
+  const setUserSearch = (q: string) => setUserSearchState({ list: userList, q });
+  const { data: plansInfo } = useAiPlans();
   const [orgTypeFilter, setOrgTypeFilter] = useState("all");
   const [dateFilter, setDateFilter] = useState<Date | undefined>();
   const [selectedGlobalOrgId, setSelectedGlobalOrgId] = useState<string>("all");
@@ -319,6 +335,9 @@ export function AiUsageDashboardPage() {
 
     return (
       <div className="space-y-6 mb-8">
+        {/* The plans, live from the plan table (edited in Plans & Billing) */}
+        <PlansSummary />
+
         <div className="grid gap-4 md:grid-cols-4">
           <Card>
             <CardContent className="p-6 flex flex-col items-center text-center">
@@ -363,9 +382,6 @@ export function AiUsageDashboardPage() {
               <div className="p-4 bg-muted/20 border-t border-border flex items-center justify-end">
                 <Button variant="outline" onClick={() => setIsGlobalGrantCreditsOpen(true)}>
                   <LayoutTemplate className="w-4 h-4 mr-2" />
-
-        {/* The plans: Free, Pro, Max, Enterprise (every limit editable, with the on/off switch) */}
-        <PlanConfigPanel />
                   Open Global Grant Panel
                 </Button>
               </div>
@@ -794,8 +810,11 @@ export function AiUsageDashboardPage() {
 
     return (
       <div className="space-y-6">
+        {/* The plans first: with plans on, everyone here follows their plan */}
+        <PlansSummary />
+
         <AiUsageTrendsChart data={orgTrendStats?.usageTrend} />
-        
+
         <AiUsageBar 
           showExactTokens={true}
           initialData={{
@@ -815,35 +834,43 @@ export function AiUsageDashboardPage() {
           role: u.role || roleGroup.roleName,
           profilePicture: u.profilePicture || getFallbackPhoto(u.email) || (u.id === currentUser?._id ? (currentUser?.profilePicture || currentUser?.platformLogo) : null)
         }))) || []} />
-        <SetupUsageCredits 
-          orgId={path.orgId || ""} 
-          orgName={path.orgName || ""} 
-          currentPoolLimit={orgDetail?.poolLimit ?? 0} 
+
+        <div className="border border-border rounded-xl shadow-sm bg-card">
+          <div className="p-6 flex flex-col gap-1.5">
+            <h3 className="text-lg font-semibold text-foreground tracking-tight">
+              Gift a plan or credits
+            </h3>
+            <p className="text-sm text-muted-foreground">
+              Pick people in {path.orgName} and give them a plan for a while, or some credits.
+            </p>
+          </div>
+          <div className="p-4 bg-muted/20 border-t border-border flex items-center justify-end">
+            <Button size="sm" onClick={() => setIsOrgGrantCreditsOpen(true)}>
+              <Gift className="w-4 h-4 mr-2" />
+              Gift a plan or credits
+            </Button>
+          </div>
+        </div>
+
+        {/* The old flat limits: used only while plans are off (and by Classgrid staff accounts) */}
+        <div className="flex flex-col gap-1 pt-2">
+          <h2 className="text-lg font-semibold text-foreground">When plans are off</h2>
+          <p className="text-sm text-muted-foreground">
+            {plansInfo?.enabled
+              ? "Plans are on, so these limits are not used. Only Classgrid staff accounts (super admins and @classgrid.in emails) still use them."
+              : "Plans are off, so these limits apply to everyone in this organization."}
+          </p>
+        </div>
+        <SetupUsageCredits
+          orgId={path.orgId || ""}
+          orgName={path.orgName || ""}
+          currentPoolLimit={orgDetail?.poolLimit ?? 0}
           currentUserWeeklyLimit={orgDetail?.userWeeklyLimit ?? 0}
           currentImageLimit={orgDetail?.imageLimit ?? 0}
           currentWhatsappLimit={orgDetail?.whatsappLimit ?? 0}
           currentResetPeriods={orgDetail?.resetPeriods}
           customLimitsEnabled={orgDetail?.customLimitsEnabled ?? false}
         />
-
-        <div className="border border-border rounded-xl shadow-sm bg-card">
-          <div className="p-6 flex flex-col gap-6">
-            <div className="flex flex-col gap-1.5">
-              <h3 className="text-lg font-semibold text-foreground tracking-tight">
-                Grant Organization Credits
-              </h3>
-              <p className="text-sm text-muted-foreground">
-                Open the AI Hub Panel to securely grant tokens to {path.orgName}.
-              </p>
-            </div>
-          </div>
-          <div className="p-4 bg-muted/20 border-t border-border flex items-center justify-end">
-            <Button variant="outline" onClick={() => setIsOrgGrantCreditsOpen(true)}>
-              <LayoutTemplate className="w-4 h-4 mr-2" />
-              Open Grant Credits Panel
-            </Button>
-          </div>
-        </div>
 
         <ResetOrganizationDailyLimit orgId={path.orgId || ""} orgName={path.orgName || ""} />
 
@@ -898,25 +925,100 @@ export function AiUsageDashboardPage() {
     if (orgUsersLoading) return <Skeleton className="h-64 w-full" />;
     
     const roleGroup = orgUsers?.find((r: any) => r.roleName === path.role);
-    const usersInRole = roleGroup ? roleGroup.users : [];
+    const usersInRole: OrgUserRow[] = roleGroup ? roleGroup.users : [];
+    // The whole list comes in one answer (listUsersInOrg), so the search filters it here, as you type
+    const q = userSearch.trim().toLowerCase();
+    const shown = q ? usersInRole.filter((u) => `${u.name || ""} ${u.email || ""}`.toLowerCase().includes(q)) : usersInRole;
+    const roleLabel = formatRoleLabel(path.role);
+    const openUser = (u: OrgUserRow) => setPath({ ...path, userId: u.id, userName: u.name || u.email });
 
     return (
       <Card>
         <CardHeader>
-          <CardTitle className="text-lg">{formatRoleLabel(path.role)} Users ({usersInRole.length})</CardTitle>
+          <CardTitle className="text-lg">{roleLabel === "User" ? "Users" : `${roleLabel} accounts`} ({usersInRole.length})</CardTitle>
         </CardHeader>
         <CardContent>
-          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-4">
-            {usersInRole.map((user: any) => (
-              <FolderIcon
-                key={user.id}
-                label={user.name || user.email}
-                subtitle={`${formatNumber(user.totalUsage || 0)} Credits`}
-                badge={user.isBlocked ? "BLOCKED" : 0}
-                icon={UserIcon}
-                onClick={() => setPath({ ...path, userId: user.id, userName: user.name || user.email })}
+          <SuperadminFilterBar searchQuery={userSearch} onSearchChange={setUserSearch} searchPlaceholder="Search by name or email" />
+          {q && <p className="text-xs text-muted-foreground -mt-3 mb-3">{shown.length} of {usersInRole.length} match</p>}
+          <div className="hidden sm:block overflow-x-auto">
+            <div className="min-w-[600px]">
+              <DataTable
+                columns={[
+                  {
+                    key: "user",
+                    header: "User",
+                    width: "w-[44%]",
+                    render: (_: unknown, u: OrgUserRow) => (
+                      <div className="flex items-center gap-3 min-w-0">
+                        <Avatar>
+                          {u.profilePicture && <AvatarImage src={u.profilePicture} alt="" />}
+                          <AvatarFallback className="text-xs font-semibold">{(u.name || u.email || "?").charAt(0).toUpperCase()}</AvatarFallback>
+                        </Avatar>
+                        <div className="flex flex-col min-w-0">
+                          <span className="text-sm font-medium text-foreground truncate">{u.name || u.email}</span>
+                          <span className="text-xs text-muted-foreground truncate">{u.email}</span>
+                        </div>
+                      </div>
+                    ),
+                  },
+                  {
+                    key: "plan",
+                    header: "Plan",
+                    width: "w-[20%]",
+                    render: (_: unknown, u: OrgUserRow) => {
+                      const key = u.planKey || u.plan?.id || "free";
+                      return (
+                        <div className="flex flex-col items-start gap-0.5">
+                          <Badge variant={key === "free" ? "neutral" : "info"}>{planNameOf(plansInfo?.plans, key)}</Badge>
+                          {key !== "free" && u.plan?.billing === "granted" && <span className="text-[11px] text-muted-foreground">Gifted</span>}
+                        </div>
+                      );
+                    },
+                  },
+                  {
+                    key: "credits",
+                    header: "Credits used",
+                    width: "w-[20%]",
+                    render: (_: unknown, u: OrgUserRow) => <span className="text-sm tabular-nums">{formatNumber(u.totalUsage || 0)}</span>,
+                  },
+                  {
+                    key: "access",
+                    header: "AI access",
+                    width: "w-[16%]",
+                    render: (_: unknown, u: OrgUserRow) => u.isBlocked ? <Badge variant="danger">Blocked</Badge> : <span className="text-sm text-muted-foreground">Active</span>,
+                  },
+                ]}
+                rows={shown}
+                emptyMessage={q ? `No one matches "${userSearch.trim()}".` : "No users here yet."}
+                onRowClick={openUser}
               />
-            ))}
+            </div>
+          </div>
+
+          {/* Phone: one line per user, with the plan on the right */}
+          <div className="sm:hidden rounded-md border border-border bg-card divide-y divide-border">
+            {shown.length === 0 && <p className="p-6 text-center text-sm text-muted-foreground">{q ? `No one matches "${userSearch.trim()}".` : "No users here yet."}</p>}
+            {shown.map((u) => {
+              const key = u.planKey || u.plan?.id || "free";
+              return (
+                <Button key={u.id} type="button" variant="ghost" onClick={() => openUser(u)} className="w-full h-auto rounded-none justify-start px-3 py-3 font-normal">
+                  <span className="flex items-center gap-3 w-full min-w-0">
+                    <Avatar>
+                      {u.profilePicture && <AvatarImage src={u.profilePicture} alt="" />}
+                      <AvatarFallback className="text-xs font-semibold">{(u.name || u.email || "?").charAt(0).toUpperCase()}</AvatarFallback>
+                    </Avatar>
+                    <span className="flex flex-col min-w-0 flex-1 text-left">
+                      <span className="text-sm font-medium text-foreground truncate">{u.name || u.email}</span>
+                      <span className="text-xs text-muted-foreground truncate">{u.email}</span>
+                    </span>
+                    <span className="flex flex-col items-end gap-0.5 shrink-0">
+                      <Badge variant={key === "free" ? "neutral" : "info"}>{planNameOf(plansInfo?.plans, key)}</Badge>
+                      {u.isBlocked ? <span className="text-[11px] text-red-500">Blocked</span> : key !== "free" && u.plan?.billing === "granted" ? <span className="text-[11px] text-muted-foreground">Gifted</span> : null}
+                    </span>
+                  </span>
+                </Button>
+              );
+            })}
           </div>
         </CardContent>
       </Card>
@@ -1016,10 +1118,10 @@ export function AiUsageDashboardPage() {
   };
 
   return (
-    <div className="flex-1 space-y-4 p-8 pt-6">
+    <div className="flex-1 space-y-4 p-4 pt-6 sm:p-8 sm:pt-6">
       <PageBreadcrumbs
         items={[
-          { label: "AI Usage & Credits", onClick: () => handleNavigateUp("root") },
+          { label: "Plans & Usage", onClick: () => handleNavigateUp("root") },
           ...(path.orgName ? [{ label: path.orgName, onClick: () => handleNavigateUp("org") }] : []),
           ...(path.role ? [{ label: formatRoleLabel(path.role), onClick: () => handleNavigateUp("role") }] : []),
           ...(path.userName ? [{ label: path.userName }] : [])
@@ -1034,7 +1136,7 @@ export function AiUsageDashboardPage() {
         )}
         <span className={`inline-flex items-center gap-2 rounded-full border px-3 py-1 text-[13px] font-medium ${live ? "border-emerald-500/30 text-emerald-700 dark:text-emerald-400" : "border-border text-muted-foreground"}`}>
           <span className={`h-2 w-2 rounded-full ${live ? "bg-emerald-500 animate-pulse" : "bg-muted-foreground/50"}`} />
-          {live ? "Live" : "Connecting…"}
+          {live ? "Live" : "Connecting"}
         </span>
       </div>
 

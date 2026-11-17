@@ -4,6 +4,7 @@ import GlobalAiConfig from "../../models/GlobalAiConfig.js";
 import PlanConfig, { PLAN_KEYS, RESET_UNIT_ENUM, ensurePlanRows } from "../../models/PlanConfig.js";
 import User from "../../models/User.js";
 import AiCreditTransaction from "../../models/AiCreditTransaction.js";
+import AdminAuditLog from "../../models/AdminAuditLog.js";
 import { forgetPlans } from "../../services/plan-limits.service.js";
 
 const NUMBER_FIELDS = [
@@ -91,19 +92,43 @@ export const setPlansEnabled = async (req, res) => {
     }
 };
 
-// A user's plan, set by hand (a gift, a test account, a refund case). expires_at empty = no end.
+// The periods a super admin can gift a plan for (Plans & Usage > a user > Gift a plan), in months
+export const GIFT_MONTHS = [1, 3, 6, 12];
+
+// When a gifted plan ends: `months` (1, 3, 6 or 12 from now) or `expires_at` (a date). Neither: no end (null).
+// { error } when the period is not one of these or the date is not in the future.
+export function giftEndDate(body = {}, now = new Date()) {
+    if (body.months !== undefined && body.months !== null && body.months !== "") {
+        const months = Number(body.months);
+        if (!GIFT_MONTHS.includes(months)) return { error: "The period must be 1, 3, 6 or 12 months." };
+        const end = new Date(now);
+        end.setMonth(end.getMonth() + months);
+        return { expiresAt: end };
+    }
+    if (body.expires_at) {
+        const end = new Date(body.expires_at);
+        if (Number.isNaN(end.getTime())) return { error: "The end date is not a date." };
+        if (end.getTime() <= now.getTime()) return { error: "The end date must be in the future." };
+        return { expiresAt: end };
+    }
+    return { expiresAt: null };
+}
+
+// A user's plan, set by hand: a gift (Pro or Max, with a reason), or back to Free. The reason is required for a paid
+// plan; it is saved on the plan (plan.note) and in the admin audit log (AdminAuditLog, "user.plan_gift" or
+// "user.plan_end"), which the user's page lists as the plan history. expires_at / months empty = no end.
 export const setUserPlan = async (req, res) => {
     try {
         const { userId } = req.params;
         const planId = String(req.body?.planId || "free");
         if (!PLAN_KEYS.includes(planId)) return res.status(400).json({ success: false, message: "No such plan." });
-        let expiresAt = null;
-        if (req.body?.expires_at) {
-            expiresAt = new Date(req.body.expires_at);
-            if (Number.isNaN(expiresAt.getTime())) return res.status(400).json({ success: false, message: "expires_at is not a date." });
-        }
+        const reason = String(req.body?.reason ?? req.body?.note ?? "").trim().slice(0, 300);
+        if (planId !== "free" && !reason) return res.status(400).json({ success: false, message: "Write why you are giving this plan." });
+        const { expiresAt, error } = planId === "free" ? { expiresAt: null } : giftEndDate(req.body || {});
+        if (error) return res.status(400).json({ success: false, message: error });
         const user = await User.findById(userId).select("plan email name");
         if (!user) return res.status(404).json({ success: false, message: "User not found." });
+        const before = user.plan ? { id: user.plan.id, status: user.plan.status, billing: user.plan.billing, started_at: user.plan.started_at, expires_at: user.plan.expires_at } : null;
         user.plan = {
             id: planId,
             status: "active",
@@ -113,12 +138,26 @@ export const setUserPlan = async (req, res) => {
             cancel_at_period_end: false,
             source: "admin",
             set_by: req.user?.email || "",
-            note: String(req.body?.note || "").slice(0, 300),
+            note: reason,
         };
         await user.save();
         const io = req.app.get("io");
         if (io) { io.to(String(userId)).emit("ai_token_update"); io.to(String(userId)).emit("plan_update", { plan: planId }); } // (a user's socket room is their id, socket.service.js)
         res.json({ success: true, plan: user.plan });
+        // The audit log (after the reply, so a failed log never fails the save)
+        AdminAuditLog.create({
+            actorId: req.user?._id,
+            actorName: req.user?.name || req.user?.email || "Super admin",
+            actorRole: "super_admin",
+            action: planId === "free" ? "user.plan_end" : "user.plan_gift",
+            targetId: String(user._id),
+            targetName: user.email || user.name || "",
+            targetType: "user",
+            previousState: before,
+            metadata: { plan: planId, expires_at: expiresAt, reason, set_by: req.user?.email || "" },
+            ip: req.ip || "",
+            userAgent: req.headers?.["user-agent"] || "",
+        }).catch((e) => console.error("[setUserPlan] audit log failed:", e.message));
         // After the reply, so the email never holds up or fails the save: "You're on the Classgrid Pro plan"
         if (planId !== "free") planSetEmail(user, planId).catch((e) => console.error("[setUserPlan] plan email failed:", e.message));
     } catch (error) {

@@ -14,6 +14,7 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { apiClient as api } from "@/lib/apiClient";
+import type { UsageHistory } from "@/features/shared/queries/usePlanOverview";
 
 export type ResetUnit = "second" | "minute" | "hour" | "day" | "week" | "month";
 export type ResetPeriod = { value: number; unit: ResetUnit; ms?: number; label?: string };
@@ -234,3 +235,58 @@ export const useGlobalGrantedCredits = () => {
     staleTime: 60000,
   });
 };
+
+// ── Plans (the plan table edited in Plans & Billing) ──
+export type PlanRow = {
+  key: string; name: string; sort?: number; coming_soon?: boolean; is_public?: boolean; tagline?: string;
+  price_inr_monthly?: number; tokens_per_window?: number; window_reset_value?: number; window_reset_unit?: string; tokens_per_week?: number;
+  claude_credits_per_week?: number; images_per_period?: number; images_reset_value?: number; images_reset_unit?: string;
+  call_minutes_per_period?: number; call_reset_value?: number; call_reset_unit?: string;
+  [field: string]: unknown;
+};
+
+/** The plan table and the plans on/off switch (GET /api/super-admin/ai-plans; the same query Plans & Billing uses) */
+export const useAiPlans = () => useQuery({
+  queryKey: ["aiPlans"],
+  queryFn: async () => (await api.get("/api/super-admin/ai-plans")).data as { enabled: boolean; plans: PlanRow[] },
+  staleTime: 30_000,
+});
+
+/** The plans that can be gifted: every paid plan in the plan table that can be bought (not Free, not coming soon) */
+export const giftablePlans = (plans?: PlanRow[]) =>
+  (plans || []).filter((p) => p.key !== "free" && !p.coming_soon).slice().sort((a, b) => (a.sort ?? 0) - (b.sort ?? 0));
+
+/** A plan's name from the plan table ("pro" -> "Pro") */
+export const planNameOf = (plans: PlanRow[] | undefined, key?: string | null) => {
+  const k = key || "free";
+  return plans?.find((p) => p.key === k)?.name || k.charAt(0).toUpperCase() + k.slice(1);
+};
+
+export type GiftPlanInput = { userIds: string[]; planId: string; months?: number; expiresAt?: string; reason: string };
+
+/** Gives a plan to one or more users (PUT /users/:id/plan, setUserPlan: it saves the reason and emails the user) */
+export const useGiftPlan = () => {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ userIds, planId, months, expiresAt, reason }: GiftPlanInput) => {
+      for (const id of userIds) {
+        await api.put(`/api/super-admin/ai-usage/users/${id}/plan`, { planId, reason, ...(months ? { months } : {}), ...(expiresAt ? { expires_at: expiresAt } : {}) });
+      }
+      return userIds.length;
+    },
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: ["ai-usage-user"] });
+      queryClient.invalidateQueries({ queryKey: ["ai-usage-org-users"] });
+      queryClient.invalidateQueries({ queryKey: ["ai-plan-subscribers"] });
+    },
+  });
+};
+
+/** A user's usage history, the same as their own Settings > Usage page */
+export const useUserUsageHistory = (userId: string, days = 14, page = 1) => useQuery({
+  queryKey: ["ai-usage-user-history", userId, days, page],
+  queryFn: async () => (await api.get(`/api/super-admin/ai-usage/users/${userId}/usage-history`, { params: { days, page, limit: 15 } })).data as UsageHistory,
+  enabled: !!userId,
+  staleTime: 30_000,
+  placeholderData: (prev) => prev,
+});

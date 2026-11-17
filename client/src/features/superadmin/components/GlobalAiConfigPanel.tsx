@@ -32,7 +32,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiClient as api } from "@/lib/apiClient";
 import { Skeleton } from "@/components/marketing_ui/skeleton";
 import { ResetPeriodInput, formatResetPeriod, toResetPeriod } from "@/features/superadmin/components/SetupUsageCredits";
-import type { ResetPeriod } from "@/features/superadmin/queries/useAiUsage";
+import { useAiPlans, type ResetPeriod } from "@/features/superadmin/queries/useAiUsage";
 
 export function GlobalAiConfigPanel({ grantCreditsNode }: { grantCreditsNode?: React.ReactNode }) {
   const queryClient = useQueryClient();
@@ -70,6 +70,9 @@ export function GlobalAiConfigPanel({ grantCreditsNode }: { grantCreditsNode?: R
   const [openWhatsapp, setOpenWhatsapp] = useState(false);
   const [openCreditsPerInr, setOpenCreditsPerInr] = useState(false);
   const [openImageCost, setOpenImageCost] = useState(false);
+
+  // The plans switch: with plans on, the limits below are used only by Classgrid staff accounts (plan-limits.service.js planOf)
+  const { data: plansData } = useAiPlans();
 
   const { data, isLoading } = useQuery({
     queryKey: ["globalAiConfig"],
@@ -157,8 +160,19 @@ export function GlobalAiConfigPanel({ grantCreditsNode }: { grantCreditsNode?: R
       <div className="flex flex-col gap-6 mb-6">
         <div className="bg-card border border-border rounded-xl shadow-sm overflow-hidden">
         <div className="p-5 border-b border-border">
-          <h2 className="text-lg font-semibold text-foreground">Global AI Fallback Limits</h2>
-          <p className="text-sm text-muted-foreground">Manage global default limits and quotas for all organizations.</p>
+          <div className="flex items-center gap-2 flex-wrap">
+            <h2 className="text-lg font-semibold text-foreground">When plans are off</h2>
+            {plansData && (
+              <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-semibold ${plansData.enabled ? "bg-zinc-500/15 text-zinc-600 dark:bg-zinc-500/20 dark:text-zinc-400" : "bg-emerald-500/15 text-emerald-600 dark:bg-emerald-500/20 dark:text-emerald-400"}`}>
+                {plansData.enabled ? "Not used now" : "In use now"}
+              </span>
+            )}
+          </div>
+          <p className="text-sm text-muted-foreground mt-1">
+            {plansData?.enabled
+              ? "Plans are on, so users follow their plan and these limits are not used. Only Classgrid staff accounts (super admins and @classgrid.in emails) still use them. They apply to everyone again if you turn plans off in Plans & Billing."
+              : "Plans are off, so these limits apply to everyone. Turn plans on in Plans & Billing to use the plans instead."}
+          </p>
         </div>
 
         <div className="p-0 flex flex-col">
@@ -416,6 +430,18 @@ export function GlobalAiConfigPanel({ grantCreditsNode }: { grantCreditsNode?: R
               </DialogContent>
             </Dialog>
 
+          </div>
+        </div>
+      </div>
+
+      {/* Settings that apply with plans on or off */}
+      <div className="bg-card border border-border rounded-xl shadow-sm overflow-hidden">
+        <div className="p-5 border-b border-border">
+          <h2 className="text-lg font-semibold text-foreground">Other settings</h2>
+          <p className="text-sm text-muted-foreground mt-1">These apply with plans on or off.</p>
+        </div>
+        <div className="p-0 flex flex-col">
+          <div className="grid grid-cols-1 gap-px bg-border">
             {/* Extra usage: once a limit is used up, each further one is paid from top-up credits at these prices (0 = off) */}
             <Dialog open={openExtra} onOpenChange={(open) => {
               if (!open) {

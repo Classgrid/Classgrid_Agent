@@ -6,22 +6,8 @@ import { useState } from "react";
 import { ChevronLeft, ChevronRight, RefreshCw } from "lucide-react";
 import { Skeleton } from "@/components/marketing_ui/skeleton";
 import { usePlanOverview, useUsageHistory, whenText, inText, timeText, dayText, n, type Meter } from "@/features/shared/queries/usePlanOverview";
-import { MODEL_GROUPS } from "@/components/ai/components/ModelPicker";
-
-// The model's name as the model picker shows it ("GLM 5.3"), never the provider path ("@cf/zai-org/glm-5.3"). A model
-// the picker does not list gets its last part written out ("deepseek-v4.1-flash-1017" -> "Deepseek V4.1 Flash")
-const MODEL_NAMES = new Map(MODEL_GROUPS.flatMap((g) => g.models.map((m) => [m.id, m.name] as const)));
-function modelName(id: string) {
-  const known = MODEL_NAMES.get(id);
-  if (known) return known;
-  const last = String(id || "").split("/").pop() || id;
-  return last
-    .replace(/-\d{3,}$/, "") // a date or build number at the end
-    .split(/[-_]+/)
-    .filter(Boolean)
-    .map((w) => (/^v?\d/.test(w) ? w.toUpperCase() : w.charAt(0).toUpperCase() + w.slice(1)))
-    .join(" ");
-}
+// (the model's name as the model picker shows it, shared with the super admin's user page)
+import { modelName } from "./modelName";
 
 function pctOf(m: Meter) {
   if (!m || m.limit === null || m.limit <= 0) return 0;

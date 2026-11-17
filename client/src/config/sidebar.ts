@@ -144,7 +144,7 @@ export const dashboardConfigs: DashboardConfig[] = [
           { label: "Global Users", to: "/superadmin/global-users", icon: Users },
           { label: "Platform Team", to: "/superadmin/team", icon: User },
           { label: "GDPR & Privacy", to: "/superadmin/gdpr", icon: Shield },
-          { label: "AI Usage & Credits", to: "/superadmin/ai-usage", icon: Bot },
+          { label: "Plans & Usage", to: "/superadmin/ai-usage", icon: Bot },
           { label: "Student Applications", to: "/superadmin/students", icon: GraduationCap },
         ]
       },

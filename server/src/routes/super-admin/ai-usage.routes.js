@@ -55,6 +55,7 @@ router.get("/orgs/:orgId/detail", orgController.getOrgAiDetail);
 // 3. Roles/Users (Level 2 & 3)
 router.get("/orgs/:orgId/users", userController.listUsersInOrg);
 router.get("/users/:userId/detail", userController.getUserAiDetail);
+router.get("/users/:userId/usage-history", userController.getUserUsageHistory); // (the same history the user sees in Settings > Usage)
 
 // 4. Admin Mutations
 router.put("/users/:userId/block", adminController.blockAiUser);

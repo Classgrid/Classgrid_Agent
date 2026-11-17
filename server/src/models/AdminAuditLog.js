@@ -170,6 +170,8 @@ const adminAuditLogSchema = new mongoose.Schema(
                 "user.reset_password",
                 "user.gdpr_export",
                 "user.gdpr_erase",
+                "user.plan_gift", // a super admin gave a plan (Pro, Max) with a reason (Plans & Usage)
+                "user.plan_end", // a super admin moved a user back to Free
                 "subscription.update",
                 "feature_flag.toggle",
                 "feature_flag.kill_all",
