@@ -138,7 +138,8 @@ export async function saveMessage(sessionId, role, content, fileUrls = [], sende
 // The summary starts with this header, so the chat knows how many messages it covers and sends the model
 // every message after that point (no gap between the summary and the recent messages).
 const MEMORY_HEADER = /^\[Summary of messages 1-(\d+)\]\n/;
-// Every 8 messages DeepSeek V4 Flash rewrites one summary of the whole chat (User facts + Task state).
+// Every 8 messages one summary of the whole chat is rewritten (User facts + Task state): by DeepSeek V4 Flash until
+// the end of November 2026, by Claude Haiku from 1 December with DeepSeek Flash as the backup (see haikuWritesSummary).
 const MEMORY_EVERY = 8;
 const MEMORY_MESSAGE_CHARS = 3000;
 const MEMORY_FLASH_MODEL = "@cf/deepseek-ai/deepseek-v4.1-flash-1017";
@@ -255,6 +256,37 @@ async function summarizeWithFlash(input, desktop = false) {
     return String(result.answer || "").trim();
 }
 
+// From 1 December 2026 (India time) the chat's summary is written by Claude Haiku, and DeepSeek Flash is only the
+// backup (owner, 2026-11-17: "from next month don't use the DeepSeek model for summary, use Claude Haiku for it and
+// DeepSeek Flash as only backup"). Until then it stays as it was: DeepSeek Flash, then Mistral Nemo.
+const MEMORY_HAIKU_MODEL = "claude-haiku-5-5";
+const HAIKU_SUMMARY_FROM_MS = Date.UTC(2026, 10, 30, 18, 30); // 1 Dec 2026, 12:00 am India time
+export const haikuWritesSummary = (now = Date.now()) => now >= HAIKU_SUMMARY_FROM_MS;
+
+async function summarizeWithHaiku(input, desktop = false) {
+    const { streamClaudeChat } = await import('./llm-stream-anthropic.js');
+    const result = await streamClaudeChat({
+        model: MEMORY_HAIKU_MODEL,
+        messages: [
+            { role: "system", content: desktop ? DESKTOP_MEMORY_INSTRUCTIONS : MEMORY_INSTRUCTIONS },
+            { role: "user", content: input }
+        ],
+        tools: [],
+        maxTokens: desktop ? 8000 : 3000,
+        maxToolDepth: 0,
+        timeoutMs: 90000
+    });
+    // What it cost is kept in the usage log (no person is charged for the summary), so it shows with the models' use
+    if (result.usage?.total_tokens > 0) {
+        import('../models/AiUsageLog.js').then(({ default: AiUsageLog }) => AiUsageLog.create({
+            organization_id: null, userId: null, provider: "anthropic", model: MEMORY_HAIKU_MODEL, feature: "other",
+            promptTokens: result.usage.prompt_tokens || 0, completionTokens: result.usage.completion_tokens || 0,
+            totalTokens: result.usage.total_tokens, success: true, metadata: { purpose: "chat_summary" },
+        })).catch((e) => console.error("[Memory Agent] usage log failed:", e.message));
+    }
+    return String(result.answer || "").trim();
+}
+
 // Fallback when DeepSeek V4 Flash is unavailable.
 async function summarizeWithMistral(input, desktop = false) {
     const mistralKey = process.env.MISTRAL_API_KEY || process.env.MISTRAL_API_KEY_2;
@@ -342,14 +374,28 @@ export async function triggerMemoryAgent(sessionId, { force = false } = {}) {
         console.log(`[Memory Agent] Updating memory for session ${sessionId} (messages ${covered + 1}-${total})...`);
         let summary = "";
         let usedModel = MEMORY_FLASH_MODEL;
-        try {
-            summary = await summarizeWithFlash(input, desktop);
-        } catch (e) {
-            console.warn(`[Memory Agent] DeepSeek V4 Flash failed, using Mistral Nemo: ${e.message}`);
-        }
-        if (!summary) {
-            usedModel = "open-mistral-nemo";
-            summary = await summarizeWithMistral(input, desktop);
+        if (haikuWritesSummary()) {
+            // Claude Haiku first; DeepSeek Flash only when Haiku fails or writes nothing
+            usedModel = MEMORY_HAIKU_MODEL;
+            try {
+                summary = await summarizeWithHaiku(input, desktop);
+            } catch (e) {
+                console.warn(`[Memory Agent] Claude Haiku failed, using DeepSeek Flash: ${e.message}`);
+            }
+            if (!summary) {
+                usedModel = MEMORY_FLASH_MODEL;
+                summary = await summarizeWithFlash(input, desktop);
+            }
+        } else {
+            try {
+                summary = await summarizeWithFlash(input, desktop);
+            } catch (e) {
+                console.warn(`[Memory Agent] DeepSeek V4 Flash failed, using Mistral Nemo: ${e.message}`);
+            }
+            if (!summary) {
+                usedModel = "open-mistral-nemo";
+                summary = await summarizeWithMistral(input, desktop);
+            }
         }
         if (!summary) throw new Error("empty summary");
 

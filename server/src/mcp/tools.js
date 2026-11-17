@@ -323,7 +323,7 @@ export const getMcpTools = () => [
     inputSchema: {
       type: 'object',
       properties: {
-        prompt: { type: 'string', description: 'The highly detailed prompt for the image to generate.' }
+        prompt: { type: 'string', description: 'The highly detailed prompt for the image to generate. It is sent to the image model exactly as you write it, so keep exactly who and what the user asked for (a boy stays a boy, the same number of people, the same objects, any text word for word) and add detail only about look, lighting, setting and style.' }
       },
       required: ['prompt']
     }

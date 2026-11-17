@@ -8659,35 +8659,10 @@ export const generateImage = async (req, res) => {
         const cfAccountId = process.env.CLOUDFLARE_ACCOUNT_ID;
         const cfToken = process.env.CLOUDFLARE_WORKERS_AI_TOKEN;
 
-        // Step 1: Prompt Upsampling (Enhancement) via LLM (not for an edit: the picture is given, and the prompt says
-        // what to change in it, in the user's own words)
-        let enhancedPrompt = prompt;
-        if (!imageUrl) try {
-            const llmUrl = `https://api.cloudflare.com/client/v4/accounts/${cfAccountId}/ai/run/@cf/deepseek-ai/deepseek-v4.1-flash-1017`;
-            const llmRes = await cfAiFetch(llmUrl, {
-                method: 'POST',
-                headers: {
-                    'Authorization': `Bearer ${cfToken}`,
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify({
-                    messages: [
-                        { role: "system", content: "You are an expert AI image generation prompt engineer. The user will give you a short, basic idea for an image. Your job is to instantly rewrite it into a highly detailed, extremely photorealistic prompt. Describe lighting, camera angle, textures, and realism. Output ONLY the new prompt, nothing else." },
-                        { role: "user", content: prompt }
-                    ]
-                })
-            });
-            if (llmRes.ok) {
-                const llmJson = await llmRes.json();
-                if (llmJson.result && llmJson.result.response) {
-                    enhancedPrompt = llmJson.result.response.trim();
-                    console.log(`[Image Enhancement] Original: "${prompt}" -> Enhanced: "${enhancedPrompt}"`);
-                }
-            }
-        } catch (enhanceErr) {
-            console.error("Prompt enhancement failed, falling back to original prompt:", enhanceErr.message);
-        }
-
+        // The prompt goes to the image model exactly as it came: from the chat it is the one the person's own chosen
+        // model wrote (generate_image), from "@Create image" it is the person's own words. Until 2026-11-17 a second,
+        // fixed model (DeepSeek Flash) rewrote it first, and its rewrite could change what was asked for (owner: "I
+        // told it to make a boy, it came out a girl ... use the main model directly, not DeepSeek").
         if (eleven.elevenLabsEnabled()) {
             try {
                 const references = [];
@@ -8697,7 +8672,7 @@ export const generateImage = async (req, res) => {
                     references.push({ buffer: Buffer.from(await src.arrayBuffer()), mimeType: src.headers.get("content-type") || "" });
                 }
                 // (an edit with given pictures is made at high quality: faces and details from the pictures are kept better)
-                const made = await eleven.generateImage(imageUrl ? prompt : enhancedPrompt, { references, quality: references.length ? "high" : "medium" });
+                const made = await eleven.generateImage(prompt, { references, quality: references.length ? "high" : "medium" });
                 imageBuffer = made.buffer;
                 imageMime = made.mimeType;
                 imageModel = `elevenlabs/${made.model}`;
@@ -8714,7 +8689,7 @@ export const generateImage = async (req, res) => {
         for (let attempt = 1; attempt <= 3 && !success; attempt++) {
             try {
                 // Ensure prompt is not too long
-                const safePrompt = enhancedPrompt.length > 800 ? enhancedPrompt.substring(0, 800) : enhancedPrompt;
+                const safePrompt = prompt.length > 800 ? prompt.substring(0, 800) : prompt;
 
                 const cfUrl = `https://api.cloudflare.com/client/v4/accounts/${cfAccountId}/ai/run/@cf/black-forest-labs/flux-1-schnell`;
 
