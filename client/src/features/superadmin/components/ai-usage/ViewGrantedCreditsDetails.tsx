@@ -19,8 +19,6 @@ interface ViewGrantedCreditsDetailsProps {
   limit: number;
   history: Array<{
     id: string;
-    // (older rows were sent with Mongo's _id instead of id)
-    _id?: string;
     type: string;
     credits_added: number;
     status: string;
@@ -50,7 +48,7 @@ export function ViewGrantedCreditsDetails({ used, limit, history, status, transa
     );
     const sortedHistory = [...relevantHistory].sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
     const isExhausted = used >= limit;
-    const isCurrentlyPaused = sortedHistory[sortedHistory.length - 1]?.type === "paused";
+    const isCurrentlyPaused = sortedHistory.length > 0 && sortedHistory[sortedHistory.length - 1].type === "paused";
     const isRevoked = sortedHistory.length > 0 && sortedHistory.some(s => s.type === "revoked");
 
     const generatedSteps = [];
@@ -71,7 +69,7 @@ export function ViewGrantedCreditsDetails({ used, limit, history, status, transa
         id: "granted",
         title: "Granted",
         description: "Initial credit allocation for AI operations.",
-        date: sortedHistory[0] ? formatDateTime(sortedHistory[0].date) : "Unknown Date",
+        date: sortedHistory.length > 0 ? formatDateTime(sortedHistory[0].date) : "Unknown Date",
         isCompleted: true,
         isActive: false,
       });
@@ -104,8 +102,7 @@ export function ViewGrantedCreditsDetails({ used, limit, history, status, transa
     }
 
     // Final Status Step
-    const lastEvent = sortedHistory[sortedHistory.length - 1];
-    const lastDate = lastEvent ? formatDateTime(lastEvent.date) : "Today";
+    const lastDate = sortedHistory.length > 0 ? formatDateTime(sortedHistory[sortedHistory.length - 1].date) : "Today";
     
     if (status) {
       let normalizedStatus = status.toUpperCase();
@@ -203,7 +200,7 @@ export function ViewGrantedCreditsDetails({ used, limit, history, status, transa
             <div className="flex items-center justify-between p-4 px-6 border-b border-border bg-card rounded-t-lg">
               <div className="flex items-center gap-2">
                 <Rocket className="w-4 h-4 text-muted-foreground" />
-                <h2 className="text-sm font-semibold text-foreground tracking-tight">Credit history</h2>
+                <h2 className="text-sm font-semibold text-foreground tracking-tight">Deployment Pipeline</h2>
                 <span className="text-muted-foreground text-xs ml-2">·</span>
                 <span className="text-xs text-muted-foreground ml-2">
                   {timeline.currentStep} of {totalSteps} completed

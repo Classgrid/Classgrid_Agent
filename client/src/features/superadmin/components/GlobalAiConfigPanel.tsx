@@ -11,378 +11,640 @@
  * ─────────────────────────────────────────────────────────
  */
 // CLASSGRID USES CLOUDFLARE USAGE TO CALCULATE TOKENS, NOT GPT-TOKENIZER (WHICH IS ONLY A FALLBACK)
-//
-// Plans & Usage > Settings (owner, 2026-11-17): the global settings beside the plans, in two cards.
-// "In use now": read for everyone, plans on or off (top-up credits per rupee, credits per picture, the prices of
-// extra use, the longest read-aloud, one free limit per computer, student prices, the Cloudflare Neuron cap).
-// "Only used while plans are off": the fallback limits planOf() falls back to when plans are off, and that Classgrid
-// staff accounts always use. The organization pool is an organization idea and is not shown (the field stays).
-//
-// Each dialog saves only its own fields (a partial PUT, which the server accepts): saving every field from the
-// page's state, as before, could write back an old value another tab had just changed. The server does not check
-// credits per rupee, credits per picture or the session limit, so the minimums are checked here before saving.
-import { useState, type ReactNode } from "react";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { toast } from "sonner";
-import { ChevronDown, SlidersHorizontal } from "lucide-react";
-import { Badge } from "@/components/marketing_ui/badge";
+import React, { useState, useEffect } from "react";
 import { Button } from "@/components/marketing_ui/button";
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/marketing_ui/collapsible";
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/marketing_ui/dialog";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/marketing_ui/dialog";
 import { Input } from "@/components/marketing_ui/input";
 import { Label } from "@/components/marketing_ui/label";
 import { Switch } from "@/components/marketing_ui/switch";
-import { Textarea } from "@/components/marketing_ui/textarea";
+import { BlueSlider } from "@/components/marketing_ui/BlueSlider";
+import { toast } from "sonner";
 import { Spinner } from "@/components/marketing_ui/spinner";
-import { Skeleton } from "@/components/marketing_ui/skeleton";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiClient as api } from "@/lib/apiClient";
+import { Skeleton } from "@/components/marketing_ui/skeleton";
 import { ResetPeriodInput, formatResetPeriod, toResetPeriod } from "@/features/superadmin/components/SetupUsageCredits";
-import { useAiPlans, type ResetPeriod } from "@/features/superadmin/queries/useAiUsage";
-import { Section } from "@/features/superadmin/components/ai-usage/Section";
-import { errorText } from "@/features/superadmin/components/ai-usage/planText";
+import type { ResetPeriod } from "@/features/superadmin/queries/useAiUsage";
 
-type Config = Record<string, any> & { resetPeriods?: Record<string, ResetPeriod | undefined> };
-type NumField = { key: string; label: string; min: number; max?: number; fallback: number };
-type PeriodKind = "tokens" | "image" | "whatsapp" | "calls";
-type Editor = {
-  title: string; description?: string; fields: NumField[];
-  reset?: { kind: PeriodKind; valueKey: string; unitKey: string };
-};
-
-const num = (v: unknown) => Math.round(Number(v) || 0).toLocaleString("en-IN");
-const valueOf = (cfg: Config | undefined, f: NumField) => (cfg?.[f.key] ?? f.fallback) as number;
-
-// The fields, with the defaults the server uses when a value was never saved
-const F = {
-  creditsPerInr: { key: "credits_per_inr", label: "Credits for ₹1", min: 1, fallback: 0 },
-  imageCost: { key: "image_generation_token_cost", label: "Credits per picture", min: 0, fallback: 0 },
-  extraImage: { key: "extra_image_credits", label: "Credits per extra picture", min: 0, fallback: 5000 },
-  extraWhatsapp: { key: "extra_whatsapp_credits", label: "Credits per extra WhatsApp message", min: 0, fallback: 2000 },
-  extraVoiceReply: { key: "extra_voice_reply_credits", label: "Credits per extra read-aloud", min: 0, fallback: 3000 },
-  extraVoiceInput: { key: "extra_voice_input_credits_per_minute", label: "Credits per extra minute of voice", min: 0, fallback: 2000 },
-  voiceMaxChars: { key: "voice_reply_max_chars", label: "Longest read-aloud", min: 200, fallback: 4000 },
-  session: { key: "global_user_weekly_limit", label: "Session limit", min: 1000, fallback: 0 },
-  pictures: { key: "global_image_weekly_limit", label: "Pictures", min: 0, fallback: 0 },
-  whatsapp: { key: "global_whatsapp_scheduling_limit", label: "WhatsApp messages", min: 0, fallback: 0 },
-  calls: { key: "global_call_minutes_limit", label: "Free call minutes", min: 0, fallback: 0 },
-  voiceReplies: { key: "global_voice_replies_per_day", label: "Read-alouds a day", min: -1, fallback: 20 },
-} satisfies Record<string, NumField>;
-
-/** Why a typed number cannot be saved, or "" when it can */
-function fieldError(f: NumField, raw: string) {
-  if (raw.trim() === "") return "Write a number.";
-  const v = Number(raw);
-  if (!Number.isInteger(v)) return "Write a whole number.";
-  if (v < f.min) return `At least ${f.min.toLocaleString("en-IN")}.`;
-  if (f.max !== undefined && v > f.max) return `At most ${f.max.toLocaleString("en-IN")}.`;
-  return "";
-}
-
-function Tile({ title, value, line, onClick }: { title: string; value: ReactNode; line?: ReactNode; onClick: () => void }) {
-  return (
-    <button type="button" onClick={onClick} className="rounded-lg border border-border bg-background/40 hover:bg-muted/50 transition-colors p-4 text-left flex flex-col gap-1 min-w-0">
-      <span className="text-sm text-muted-foreground">{title}</span>
-      <span className="text-lg font-semibold text-foreground tabular-nums break-words">{value}</span>
-      {line && <span className="text-xs text-muted-foreground">{line}</span>}
-    </button>
-  );
-}
-
-function SubCard({ title, note, badge, children }: { title: string; note: string; badge?: ReactNode; children: ReactNode }) {
-  return (
-    <div className="rounded-xl border border-border p-4 min-w-0">
-      <div className="flex items-center gap-2 flex-wrap"><h3 className="text-sm font-semibold text-foreground">{title}</h3>{badge}</div>
-      <p className="text-xs text-muted-foreground mt-0.5">{note}</p>
-      <div className="mt-4">{children}</div>
-    </div>
-  );
-}
-
-export function GlobalAiConfigPanel() {
+export function GlobalAiConfigPanel({ grantCreditsNode }: { grantCreditsNode?: React.ReactNode }) {
   const queryClient = useQueryClient();
-  const { data: plansData } = useAiPlans();
-  const plansOn = plansData?.enabled;
+  
+  // State for Pools
+  const [individualUsage, setIndividualUsage] = useState(0);
+  const [orgPool, setOrgPool] = useState(0);
+  const [images, setImages] = useState(0);
+  const [whatsapp, setWhatsapp] = useState(0); // Added for UI parity
+  const [callMinutes, setCallMinutes] = useState(0);
+  const [voiceReplies, setVoiceReplies] = useState(20);
+  const [voiceMaxChars, setVoiceMaxChars] = useState(4000);
+  const [openVoiceReplies, setOpenVoiceReplies] = useState(false);
+  const [extraImage, setExtraImage] = useState(5000);
+  const [extraWhatsapp, setExtraWhatsapp] = useState(2000);
+  const [extraVoiceReply, setExtraVoiceReply] = useState(3000);
+  const [extraVoiceInput, setExtraVoiceInput] = useState(2000);
+  const [openExtra, setOpenExtra] = useState(false);
+  // Student prices: the school email endings and how long a verification lasts
+  const [studentDomains, setStudentDomains] = useState("");
+  const [studentMonths, setStudentMonths] = useState(12);
+  const [openStudent, setOpenStudent] = useState(false);
+  const [creditsPerInr, setCreditsPerInr] = useState(0);
+  const [imageCost, setImageCost] = useState(0);
+  const [tokenReset, setTokenReset] = useState<ResetPeriod>(toResetPeriod());
+  const [imageReset, setImageReset] = useState<ResetPeriod>(toResetPeriod());
+  const [whatsappReset, setWhatsappReset] = useState<ResetPeriod>(toResetPeriod());
+  const [callReset, setCallReset] = useState<ResetPeriod>(toResetPeriod());
+  const [openCalls, setOpenCalls] = useState(false);
 
-  const { data: cfg, isLoading } = useQuery({
+  // Loading States
+  const [openIndividual, setOpenIndividual] = useState(false);
+  const [openOrg, setOpenOrg] = useState(false);
+  const [openImages, setOpenImages] = useState(false);
+  const [openWhatsapp, setOpenWhatsapp] = useState(false);
+  const [openCreditsPerInr, setOpenCreditsPerInr] = useState(false);
+  const [openImageCost, setOpenImageCost] = useState(false);
+
+  const { data, isLoading } = useQuery({
     queryKey: ["globalAiConfig"],
     queryFn: async () => {
       const res = await api.get("/api/super-admin/ai-global-config");
-      return (res.data?.config ? { ...res.data.config, resetPeriods: res.data.resetPeriods } : res.data?.config) as Config | undefined;
+      return res.data?.config ? { ...res.data.config, resetPeriods: res.data.resetPeriods } : res.data?.config;
+    }
+  });
+
+  useEffect(() => {
+    if (data) {
+      setOrgPool(data.global_pro_pool_limit ?? 0);
+      setIndividualUsage(data.global_user_weekly_limit ?? 0);
+      setImages(data.global_image_weekly_limit ?? 0);
+      setWhatsapp(data.global_whatsapp_scheduling_limit ?? 0);
+      setCallMinutes(data.global_call_minutes_limit ?? 0);
+      setVoiceReplies(data.global_voice_replies_per_day ?? 20);
+      setVoiceMaxChars(data.voice_reply_max_chars ?? 4000);
+      setExtraImage(data.extra_image_credits ?? 5000);
+      setExtraWhatsapp(data.extra_whatsapp_credits ?? 2000);
+      setExtraVoiceReply(data.extra_voice_reply_credits ?? 3000);
+      setExtraVoiceInput(data.extra_voice_input_credits_per_minute ?? 2000);
+      if (data.credits_per_inr !== undefined) setCreditsPerInr(data.credits_per_inr);
+      if (data.image_generation_token_cost !== undefined) setImageCost(data.image_generation_token_cost);
+      setTokenReset(toResetPeriod(data.resetPeriods?.tokens));
+      setImageReset(toResetPeriod(data.resetPeriods?.image));
+      setWhatsappReset(toResetPeriod(data.resetPeriods?.whatsapp));
+      setCallReset(toResetPeriod(data.resetPeriods?.calls));
+    }
+  }, [data]);
+
+  const updateConfigMutation = useMutation({
+    mutationFn: async (newConfig: any) => {
+      const res = await api.put("/api/super-admin/ai-global-config", newConfig);
+      return res.data;
     },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["globalAiConfig"] });
+    },
+    onError: () => {
+      toast.error("Failed to update global config");
+    }
   });
 
-  const save = useMutation({
-    mutationFn: async (body: Record<string, unknown>) => (await api.put("/api/super-admin/ai-global-config", body)).data,
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["globalAiConfig"] }),
-    onError: (e) => toast.error(errorText(e, "Could not save. Try again.")),
-  });
-
-  // The open dialog, and what is typed in it
-  const [editor, setEditor] = useState<Editor | null>(null);
-  const [draft, setDraft] = useState<Record<string, string>>({});
-  const [draftReset, setDraftReset] = useState<ResetPeriod>(toResetPeriod());
-  const [tried, setTried] = useState(false);
-  const [studentOpen, setStudentOpen] = useState(false);
-  const [studentDomains, setStudentDomains] = useState("");
-  const [studentMonths, setStudentMonths] = useState("12");
-  // The plans-off card is open at first only while plans are off (null: not touched yet, so follow the switch)
-  const [offOpen, setOffOpen] = useState<boolean | null>(null);
-
-  const open = (e: Editor) => {
-    setDraft(Object.fromEntries(e.fields.map((f) => [f.key, String(valueOf(cfg, f))])));
-    if (e.reset) setDraftReset(toResetPeriod(cfg?.resetPeriods?.[e.reset.kind]));
-    setTried(false);
-    setEditor(e);
+  const handleSave = (
+    setOpen: (v: boolean) => void,
+    successMessage: string
+  ) => {
+    updateConfigMutation.mutate({
+      global_pro_pool_limit: orgPool,
+      global_user_weekly_limit: individualUsage,
+      global_image_weekly_limit: images,
+      global_whatsapp_scheduling_limit: whatsapp,
+      global_call_minutes_limit: callMinutes,
+      global_voice_replies_per_day: voiceReplies,
+      voice_reply_max_chars: voiceMaxChars,
+      extra_image_credits: extraImage,
+      extra_whatsapp_credits: extraWhatsapp,
+      extra_voice_reply_credits: extraVoiceReply,
+      extra_voice_input_credits_per_minute: extraVoiceInput,
+      credits_per_inr: creditsPerInr,
+      image_generation_token_cost: imageCost,
+      global_token_reset_value: tokenReset.value,
+      global_token_reset_unit: tokenReset.unit,
+      global_image_reset_value: imageReset.value,
+      global_image_reset_unit: imageReset.unit,
+      global_whatsapp_reset_value: whatsappReset.value,
+      global_whatsapp_reset_unit: whatsappReset.unit,
+      global_call_reset_value: callReset.value,
+      global_call_reset_unit: callReset.unit
+    }, {
+      onSuccess: () => {
+        toast.success(successMessage);
+        setOpen(false);
+      }
+    });
   };
 
-  const saveEditor = () => {
-    if (!editor) return;
-    setTried(true);
-    if (editor.fields.some((f) => fieldError(f, draft[f.key] ?? ""))) return;
-    const body: Record<string, unknown> = Object.fromEntries(editor.fields.map((f) => [f.key, Number(draft[f.key])]));
-    if (editor.reset) { body[editor.reset.valueKey] = draftReset.value; body[editor.reset.unitKey] = draftReset.unit; }
-    save.mutate(body, { onSuccess: () => { toast.success("Saved"); setEditor(null); } });
-  };
-
-  const monthsError = (() => {
-    const v = Number(studentMonths);
-    return studentMonths.trim() === "" || !Number.isInteger(v) || v < 1 || v > 48 ? "From 1 to 48 months." : "";
-  })();
-  const saveStudent = () => {
-    setTried(true);
-    if (monthsError) return;
-    save.mutate(
-      { student_email_domains: studentDomains.split(/[\s,]+/).map((d) => d.trim()).filter(Boolean), student_verification_months: Number(studentMonths) },
-      { onSuccess: () => { toast.success("Saved"); setStudentOpen(false); } },
-    );
-  };
-
-  const setSwitch = (key: string, on: boolean) => save.mutate({ [key]: on }, { onSuccess: () => toast.success("Saved") });
-
-  if (isLoading) return <Skeleton className="w-full h-64 rounded-xl" />;
-
-  const period = (kind: PeriodKind) => formatResetPeriod(cfg?.resetPeriods?.[kind]);
-  const voiceReplies = valueOf(cfg, F.voiceReplies);
-  const offIsOpen = offOpen ?? plansOn === false;
-  const busy = save.isPending;
+  if (isLoading) {
+    return <Skeleton className="w-full h-64 mb-6" />;
+  }
 
   return (
-    <Section icon={SlidersHorizontal} title="Settings" note="What applies beside the plans.">
-      <div className="flex flex-col gap-4">
-        <SubCard title="In use now" note="These apply to everyone today, with plans on or off.">
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <Tile
-              title="Credits for ₹1"
-              value={`${num(valueOf(cfg, F.creditsPerInr))} credits`}
-              line="Top-up credits a person gets for each rupee."
-              onClick={() => open({ title: "Credits for ₹1", fields: [F.creditsPerInr] })}
-            />
-            <Tile
-              title="Credits per picture"
-              value={`${num(valueOf(cfg, F.imageCost))} credits`}
-              line="Taken from the person's credits for each picture, besides counting it in their picture limit."
-              onClick={() => open({ title: "Credits per picture", fields: [F.imageCost] })}
-            />
-            <Tile
-              title="Extra use from top-up credits"
-              value={`${num(valueOf(cfg, F.extraImage))} credits a picture`}
-              line={`WhatsApp message ${num(valueOf(cfg, F.extraWhatsapp))} · read aloud ${num(valueOf(cfg, F.extraVoiceReply))} · voice minute ${num(valueOf(cfg, F.extraVoiceInput))}`}
-              onClick={() => open({
-                title: "Extra use from top-up credits",
-                description: "When someone has used all the pictures, WhatsApp messages, read-alouds or voice minutes of their plan, each extra one is paid from their top-up credits at these prices. 0 turns it off, and the limit then stops them.",
-                fields: [F.extraImage, F.extraWhatsapp, F.extraVoiceReply, F.extraVoiceInput],
+    <>
+      <div className="flex flex-col gap-6 mb-6">
+        <div className="bg-card border border-border rounded-xl shadow-sm overflow-hidden">
+        <div className="p-5 border-b border-border">
+          <h2 className="text-lg font-semibold text-foreground">Global AI Fallback Limits</h2>
+          <p className="text-sm text-muted-foreground">Manage global default limits and quotas for all organizations.</p>
+        </div>
+
+        <div className="p-0 flex flex-col">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-px bg-border border-b border-border">
+            {/* Individual Usage */}
+            <Dialog open={openIndividual} onOpenChange={(open) => {
+              if (!open) setIndividualUsage(data?.global_user_weekly_limit ?? 0);
+              if (!open) setTokenReset(toResetPeriod(data?.resetPeriods?.tokens));
+              setOpenIndividual(open);
+            }}>
+              <DialogTrigger asChild>
+                <button className="bg-card hover:bg-muted/30 p-5 flex flex-col gap-2 text-left transition-colors">
+                  <span className="text-sm font-medium text-muted-foreground">Individual Usage</span>
+                  <span className="text-xl font-bold text-blue-600 dark:text-blue-400">
+                    {(data?.global_user_weekly_limit ?? 0).toLocaleString()} <span className="text-sm font-normal text-muted-foreground ml-1">Tokens</span>
+                  </span>
+                  <span className="text-xs text-muted-foreground">{formatResetPeriod(data?.resetPeriods?.tokens)}</span>
+                </button>
+              </DialogTrigger>
+              <DialogContent className="sm:max-w-sm">
+                <DialogHeader>
+                  <DialogTitle>Edit Global Individual Limit</DialogTitle>
+                  <DialogDescription>Adjust the global token limit for individuals and how often it resets.</DialogDescription>
+                </DialogHeader>
+                <div className="flex flex-col gap-3 py-4">
+                  <div className="flex justify-between items-center">
+                    <Label className="text-sm font-semibold">Individual Usage per Period</Label>
+                    <span className="text-sm font-bold text-blue-600">{individualUsage.toLocaleString()}</span>
+                  </div>
+                  <BlueSlider min={1000} max={100000000} step={1000} value={individualUsage} onValueChange={setIndividualUsage} disabled={updateConfigMutation.isPending} />
+                  <Input
+                    type="number"
+                    min={1000}
+                    max={100000000}
+                    value={individualUsage || ""}
+                    onChange={(e) => setIndividualUsage(Number(e.target.value))}
+                    disabled={updateConfigMutation.isPending}
+                    className="mt-1 text-sm"
+                    placeholder="Type exact value e.g. 500000"
+                  />
+                  <ResetPeriodInput id="global-individual" value={tokenReset} onChange={setTokenReset} disabled={updateConfigMutation.isPending} />
+                </div>
+                <DialogFooter>
+                  <Button type="button" onClick={() => handleSave(setOpenIndividual, "Global individual limit saved successfully!")} disabled={updateConfigMutation.isPending}>
+                    {updateConfigMutation.isPending && <Spinner className="w-4 h-4 mr-2" />}
+                    Save changes
+                  </Button>
+                </DialogFooter>
+              </DialogContent>
+            </Dialog>
+
+            {/* Organization Pool */}
+            <Dialog open={openOrg} onOpenChange={(open) => {
+              if (!open) setOrgPool(data?.global_pro_pool_limit ?? 0);
+              setOpenOrg(open);
+            }}>
+              <DialogTrigger asChild>
+                <button className="bg-card hover:bg-muted/30 p-5 flex flex-col gap-2 text-left transition-colors">
+                  <span className="text-sm font-medium text-muted-foreground">Organization Pool</span>
+                  <span className="text-xl font-bold text-blue-600 dark:text-blue-400">
+                    {(data?.global_pro_pool_limit ?? 0).toLocaleString()} <span className="text-sm font-normal text-muted-foreground ml-1">Tokens</span>
+                  </span>
+                </button>
+              </DialogTrigger>
+              <DialogContent className="sm:max-w-sm">
+                <DialogHeader>
+                  <DialogTitle>Edit Global Organization Pool</DialogTitle>
+                  <DialogDescription>Adjust the global shared token limit for organizations.</DialogDescription>
+                </DialogHeader>
+                <div className="flex flex-col gap-3 py-4">
+                  <div className="flex justify-between items-center">
+                    <Label className="text-sm font-semibold">Organization Shared Pool</Label>
+                    <span className="text-sm font-bold text-blue-600">{orgPool.toLocaleString()}</span>
+                  </div>
+                  <BlueSlider min={10000} max={100000000} step={10000} value={orgPool} onValueChange={setOrgPool} disabled={updateConfigMutation.isPending} />
+                  <Input
+                    type="number"
+                    min={10000}
+                    max={100000000}
+                    value={orgPool || ""}
+                    onChange={(e) => setOrgPool(Number(e.target.value))}
+                    disabled={updateConfigMutation.isPending}
+                    className="mt-1 text-sm"
+                    placeholder="Type exact value e.g. 5000000"
+                  />
+                </div>
+                <DialogFooter>
+                  <Button type="button" onClick={() => handleSave(setOpenOrg, "Global organization pool limit saved successfully!")} disabled={updateConfigMutation.isPending}>
+                    {updateConfigMutation.isPending && <Spinner className="w-4 h-4 mr-2" />}
+                    Save changes
+                  </Button>
+                </DialogFooter>
+              </DialogContent>
+            </Dialog>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-px bg-border">
+            {/* Image Generations */}
+            <Dialog open={openImages} onOpenChange={(open) => {
+              if (!open) setImages(data?.global_image_weekly_limit ?? 0);
+              if (!open) setImageReset(toResetPeriod(data?.resetPeriods?.image));
+              setOpenImages(open);
+            }}>
+              <DialogTrigger asChild>
+                <button className="bg-card hover:bg-muted/30 p-5 flex flex-col gap-2 text-left transition-colors">
+                  <span className="text-sm font-medium text-muted-foreground">Image Generations</span>
+                  <span className="text-xl font-bold text-foreground">
+                    {(data?.global_image_weekly_limit ?? 0).toLocaleString()} <span className="text-sm font-normal text-muted-foreground ml-1">Images</span>
+                  </span>
+                  <span className="text-xs text-muted-foreground">{formatResetPeriod(data?.resetPeriods?.image)}</span>
+                </button>
+              </DialogTrigger>
+              <DialogContent className="sm:max-w-sm">
+                <DialogHeader>
+                  <DialogTitle>Edit Global Image Limits</DialogTitle>
+                  <DialogDescription>Make changes to the global Image generation limits.</DialogDescription>
+                </DialogHeader>
+                <div className="flex flex-col gap-2 py-4">
+                  <Label htmlFor="images" className="text-sm font-medium">Image Generations</Label>
+                  <Input 
+                    id="images" 
+                    type="number"
+                    min={0}
+                    value={images} 
+                    onChange={(e) => setImages(Number(e.target.value))} 
+                    placeholder="e.g. 20" 
+                    disabled={updateConfigMutation.isPending}
+                  />
+                  <ResetPeriodInput id="global-images" value={imageReset} onChange={setImageReset} disabled={updateConfigMutation.isPending} />
+                </div>
+                <DialogFooter>
+                  <Button type="button" onClick={() => handleSave(setOpenImages, "Global image limit saved successfully!")} disabled={updateConfigMutation.isPending}>
+                    {updateConfigMutation.isPending && <Spinner className="w-4 h-4 mr-2" />}
+                    Save changes
+                  </Button>
+                </DialogFooter>
+              </DialogContent>
+            </Dialog>
+
+            {/* WhatsApp Scheduling */}
+            <Dialog open={openWhatsapp} onOpenChange={(open) => {
+              if (!open) setWhatsapp(data?.global_whatsapp_scheduling_limit ?? 0);
+              if (!open) setWhatsappReset(toResetPeriod(data?.resetPeriods?.whatsapp));
+              setOpenWhatsapp(open);
+            }}>
+              <DialogTrigger asChild>
+                <button className="bg-card hover:bg-muted/30 p-5 flex flex-col gap-2 text-left transition-colors">
+                  <span className="text-sm font-medium text-muted-foreground">WhatsApp Scheduling</span>
+                  <span className="text-xl font-bold text-foreground">
+                    {(data?.global_whatsapp_scheduling_limit ?? 0).toLocaleString()} <span className="text-sm font-normal text-muted-foreground ml-1">Messages</span>
+                  </span>
+                  <span className="text-xs text-muted-foreground">{formatResetPeriod(data?.resetPeriods?.whatsapp)}</span>
+                </button>
+              </DialogTrigger>
+              <DialogContent className="sm:max-w-sm">
+                <DialogHeader>
+                  <DialogTitle>Edit Global WhatsApp Limits</DialogTitle>
+                  <DialogDescription>Make changes to the global WhatsApp Scheduling limits.</DialogDescription>
+                </DialogHeader>
+                <div className="flex flex-col gap-2 py-4">
+                  <Label htmlFor="whatsapp" className="text-sm font-medium">WhatsApp Scheduling</Label>
+                  <Input 
+                    id="whatsapp" 
+                    type="number"
+                    min={0}
+                    value={whatsapp} 
+                    onChange={(e) => setWhatsapp(Number(e.target.value))} 
+                    placeholder="e.g. 10" 
+                    disabled={updateConfigMutation.isPending}
+                  />
+                  <ResetPeriodInput id="global-whatsapp" value={whatsappReset} onChange={setWhatsappReset} disabled={updateConfigMutation.isPending} />
+                </div>
+                <DialogFooter>
+                  <Button type="button" onClick={() => handleSave(setOpenWhatsapp, "Global WhatsApp limit saved successfully!")} disabled={updateConfigMutation.isPending}>
+                    {updateConfigMutation.isPending && <Spinner className="w-4 h-4 mr-2" />}
+                    Save changes
+                  </Button>
+                </DialogFooter>
+              </DialogContent>
+            </Dialog>
+
+            {/* Voice Calls: free WhatsApp call minutes per user; past them a call is paid with tokens */}
+            <Dialog open={openCalls} onOpenChange={(open) => {
+              if (!open) setCallMinutes(data?.global_call_minutes_limit ?? 0);
+              if (!open) setCallReset(toResetPeriod(data?.resetPeriods?.calls));
+              setOpenCalls(open);
+            }}>
+              <DialogTrigger asChild>
+                <button className="bg-card hover:bg-muted/30 p-5 flex flex-col gap-2 text-left transition-colors">
+                  <span className="text-sm font-medium text-muted-foreground">Voice Calls</span>
+                  <span className="text-xl font-bold text-foreground">
+                    {(data?.global_call_minutes_limit ?? 0).toLocaleString()} <span className="text-sm font-normal text-muted-foreground ml-1">Free minutes</span>
+                  </span>
+                  <span className="text-xs text-muted-foreground">{formatResetPeriod(data?.resetPeriods?.calls)}</span>
+                </button>
+              </DialogTrigger>
+              <DialogContent className="sm:max-w-sm">
+                <DialogHeader>
+                  <DialogTitle>Edit Global Voice Call Limits</DialogTitle>
+                  <DialogDescription>Free WhatsApp call minutes per user. Past them, a call is paid with AI credits.</DialogDescription>
+                </DialogHeader>
+                <div className="flex flex-col gap-2 py-4">
+                  <Label htmlFor="call-minutes" className="text-sm font-medium">Free call minutes</Label>
+                  <Input
+                    id="call-minutes"
+                    type="number"
+                    min={0}
+                    value={callMinutes}
+                    onChange={(e) => setCallMinutes(Number(e.target.value))}
+                    placeholder="e.g. 150"
+                    disabled={updateConfigMutation.isPending}
+                  />
+                  <ResetPeriodInput id="global-calls" value={callReset} onChange={setCallReset} disabled={updateConfigMutation.isPending} />
+                </div>
+                <DialogFooter>
+                  <Button type="button" onClick={() => handleSave(setOpenCalls, "Global voice call limit saved successfully!")} disabled={updateConfigMutation.isPending}>
+                    {updateConfigMutation.isPending && <Spinner className="w-4 h-4 mr-2" />}
+                    Save changes
+                  </Button>
+                </DialogFooter>
+              </DialogContent>
+            </Dialog>
+
+            {/* Voice replies: answers read aloud with the speaker button (web app only). Plans on: each plan's own number applies. */}
+            <Dialog open={openVoiceReplies} onOpenChange={(open) => {
+              if (!open) { setVoiceReplies(data?.global_voice_replies_per_day ?? 20); setVoiceMaxChars(data?.voice_reply_max_chars ?? 4000); }
+              setOpenVoiceReplies(open);
+            }}>
+              <DialogTrigger asChild>
+                <button className="bg-card hover:bg-muted/30 p-5 flex flex-col gap-2 text-left transition-colors">
+                  <span className="text-sm font-medium text-muted-foreground">Voice replies</span>
+                  <span className="text-xl font-bold text-foreground">
+                    {(data?.global_voice_replies_per_day ?? 20) < 0 ? "Unlimited" : (data?.global_voice_replies_per_day ?? 20).toLocaleString()} <span className="text-sm font-normal text-muted-foreground ml-1">a day</span>
+                  </span>
+                  <span className="text-xs text-muted-foreground">Up to {(data?.voice_reply_max_chars ?? 4000).toLocaleString()} characters a reading</span>
+                </button>
+              </DialogTrigger>
+              <DialogContent className="sm:max-w-sm">
+                <DialogHeader>
+                  <DialogTitle>Edit voice replies</DialogTitle>
+                  <DialogDescription>Answers read aloud in Classgrid's voice (the speaker button on an answer). The number a day applies while plans are off; with plans on, each plan's own number applies. -1 means unlimited, 0 means off.</DialogDescription>
+                </DialogHeader>
+                <div className="flex flex-col gap-2 py-4">
+                  <Label htmlFor="voice-replies" className="text-sm font-medium">Voice replies a day</Label>
+                  <Input id="voice-replies" type="number" min={-1} value={voiceReplies} onChange={(e) => setVoiceReplies(Number(e.target.value))} disabled={updateConfigMutation.isPending} />
+                  <Label htmlFor="voice-max-chars" className="text-sm font-medium mt-2">Most characters one reading says</Label>
+                  <Input id="voice-max-chars" type="number" min={200} value={voiceMaxChars} onChange={(e) => setVoiceMaxChars(Number(e.target.value))} disabled={updateConfigMutation.isPending} />
+                </div>
+                <DialogFooter>
+                  <Button type="button" onClick={() => handleSave(setOpenVoiceReplies, "Voice replies saved")} disabled={updateConfigMutation.isPending}>
+                    {updateConfigMutation.isPending && <Spinner className="w-4 h-4 mr-2" />}
+                    Save changes
+                  </Button>
+                </DialogFooter>
+              </DialogContent>
+            </Dialog>
+
+            {/* Extra usage: once a limit is used up, each further one is paid from top-up credits at these prices (0 = off) */}
+            <Dialog open={openExtra} onOpenChange={(open) => {
+              if (!open) {
+                setExtraImage(data?.extra_image_credits ?? 5000); setExtraWhatsapp(data?.extra_whatsapp_credits ?? 2000);
+                setExtraVoiceReply(data?.extra_voice_reply_credits ?? 3000); setExtraVoiceInput(data?.extra_voice_input_credits_per_minute ?? 2000);
+              }
+              setOpenExtra(open);
+            }}>
+              <DialogTrigger asChild>
+                <button className="bg-card hover:bg-muted/30 p-5 flex flex-col gap-2 text-left transition-colors">
+                  <span className="text-sm font-medium text-muted-foreground">Extra usage from top-up credits</span>
+                  <span className="text-xl font-bold text-foreground">
+                    {(data?.extra_image_credits ?? 5000).toLocaleString()} <span className="text-sm font-normal text-muted-foreground ml-1">credits an image</span>
+                  </span>
+                  <span className="text-xs text-muted-foreground">
+                    WhatsApp message {(data?.extra_whatsapp_credits ?? 2000).toLocaleString()} · voice reply {(data?.extra_voice_reply_credits ?? 3000).toLocaleString()} · voice input minute {(data?.extra_voice_input_credits_per_minute ?? 2000).toLocaleString()}
+                  </span>
+                </button>
+              </DialogTrigger>
+              <DialogContent className="sm:max-w-sm">
+                <DialogHeader>
+                  <DialogTitle>Edit extra usage prices</DialogTitle>
+                  <DialogDescription>Once a user has used the images, WhatsApp messages, voice replies or voice input minutes of their plan, each further one is paid from their top-up credits at these prices. 0 turns the extra off for that feature (the limit is then a hard stop). WhatsApp calls past the free minutes are already paid per turn from credits.</DialogDescription>
+                </DialogHeader>
+                <div className="flex flex-col gap-2 py-4">
+                  <Label htmlFor="extra-image" className="text-sm font-medium">Credits per extra image</Label>
+                  <Input id="extra-image" type="number" min={0} value={extraImage} onChange={(e) => setExtraImage(Number(e.target.value))} disabled={updateConfigMutation.isPending} />
+                  <Label htmlFor="extra-whatsapp" className="text-sm font-medium mt-2">Credits per extra WhatsApp message</Label>
+                  <Input id="extra-whatsapp" type="number" min={0} value={extraWhatsapp} onChange={(e) => setExtraWhatsapp(Number(e.target.value))} disabled={updateConfigMutation.isPending} />
+                  <Label htmlFor="extra-voice-reply" className="text-sm font-medium mt-2">Credits per extra voice reply</Label>
+                  <Input id="extra-voice-reply" type="number" min={0} value={extraVoiceReply} onChange={(e) => setExtraVoiceReply(Number(e.target.value))} disabled={updateConfigMutation.isPending} />
+                  <Label htmlFor="extra-voice-input" className="text-sm font-medium mt-2">Credits per extra minute of voice input</Label>
+                  <Input id="extra-voice-input" type="number" min={0} value={extraVoiceInput} onChange={(e) => setExtraVoiceInput(Number(e.target.value))} disabled={updateConfigMutation.isPending} />
+                </div>
+                <DialogFooter>
+                  <Button type="button" onClick={() => handleSave(setOpenExtra, "Extra usage prices saved")} disabled={updateConfigMutation.isPending}>
+                    {updateConfigMutation.isPending && <Spinner className="w-4 h-4 mr-2" />}
+                    Save changes
+                  </Button>
+                </DialogFooter>
+              </DialogContent>
+            </Dialog>
+          </div>
+
+          {/* One free limit per computer (the desktop app sends the computer's scrambled Windows ID) */}
+          <div className="p-5 border-t border-border flex items-start justify-between gap-4">
+            <div className="flex flex-col gap-1">
+              <Label htmlFor="free-limit-per-computer" className="text-sm font-medium text-foreground">One free limit per computer</Label>
+              <p className="text-xs text-muted-foreground">
+                On: every account used on the same computer shares one free limit, so more accounts on one PC don't give more free usage.
+                Off: every account has its own free limit, even on the same computer.
+              </p>
+            </div>
+            <Switch
+              id="free-limit-per-computer"
+              checked={!!data?.free_limit_per_computer}
+              disabled={updateConfigMutation.isPending}
+              onCheckedChange={(on) => updateConfigMutation.mutate({ free_limit_per_computer: on }, {
+                onSuccess: () => toast.success(on ? "One free limit per computer is on" : "Every account has its own free limit now"),
               })}
             />
-            <Tile
-              title="Longest read-aloud"
-              value={`${num(valueOf(cfg, F.voiceMaxChars))} characters`}
-              line="The most one answer read aloud can say. A longer answer stops at its last full sentence."
-              onClick={() => open({ title: "Longest read-aloud", fields: [F.voiceMaxChars] })}
-            />
-
-            {/* One free limit per computer (the desktop app sends the computer's scrambled Windows ID) */}
-            <div className="sm:col-span-2 rounded-lg border border-border p-4 flex items-start justify-between gap-4">
-              <div className="flex flex-col gap-1 min-w-0">
-                <Label htmlFor="free-limit-per-computer" className="text-sm font-medium text-foreground">One free limit per computer</Label>
-                <p className="text-xs text-muted-foreground">
-                  On: every account used on the same computer shares one free limit, so more accounts on one PC don't give more free usage.
-                  Off: every account has its own free limit, even on the same computer.
-                </p>
-              </div>
-              <Switch id="free-limit-per-computer" checked={!!cfg?.free_limit_per_computer} disabled={busy} onCheckedChange={(on) => setSwitch("free_limit_per_computer", on)} />
-            </div>
-
-            {/* Student prices: who counts as a student (Settings > Billing confirms a university email with a code) */}
-            <div className="sm:col-span-2 rounded-lg border border-border p-4 flex flex-col sm:flex-row sm:items-start justify-between gap-3">
-              <div className="flex flex-col gap-1 min-w-0">
-                <span className="text-sm font-medium text-foreground">Student prices</span>
-                <p className="text-xs text-muted-foreground">
-                  A person gets the student price of Pro and Max after confirming a university email ending in one of these, with a code sent to it.
-                  It lasts {num(cfg?.student_verification_months ?? 12)} months, then they confirm again. You can also confirm a student by hand on their page.
-                </p>
-                <p className="text-xs text-foreground mt-1 break-words">{(cfg?.student_email_domains || []).join("  ") || ".edu  .edu.in  .ac.in  .ac.uk  .edu.au"}</p>
-              </div>
-              <Button
-                type="button" variant="outline" size="sm" className="shrink-0 self-start font-medium"
-                onClick={() => {
-                  setStudentDomains((cfg?.student_email_domains || []).join("\n"));
-                  setStudentMonths(String(cfg?.student_verification_months ?? 12));
-                  setTried(false);
-                  setStudentOpen(true);
-                }}
-              >
-                Edit
-              </Button>
-            </div>
-
-            {/* Cloudflare Workers AI: the account's daily Neuron cap (owner, 2026-11-13: Cloudflare bills above 10,000 a day from Dec 1) */}
-            <div className="sm:col-span-2 rounded-lg border border-border p-4 flex items-start justify-between gap-4">
-              <div className="flex flex-col gap-1 min-w-0">
-                <Label htmlFor="cf-neuron-cap" className="text-sm font-medium text-foreground">Cloudflare daily Neuron cap</Label>
-                <p className="text-xs text-muted-foreground">
-                  On: once today's Neurons reach 9,500, every Cloudflare model (chat, voice, speech, images) pauses until 00:00 UTC (5:30 AM IST); the chat uses its other models where it has them.
-                  Off: nothing pauses, the meter still counts. Cloudflare gives 10,000 Neurons a day free and bills above that from 1 December 2026; the cap stays 500 under it, so nothing is ever billed.
-                </p>
-                <p className="text-xs text-foreground mt-1 break-words">
-                  Today, {cfg?.cfNeurons?.day || "UTC"}: <strong>{num(cfg?.cfNeurons?.used || 0)}</strong> of {num(cfg?.cfNeurons?.cap || 9500)} Neurons
-                  {cfg?.cfNeurons?.byModel?.length ? (
-                    <span className="text-muted-foreground"> · {cfg.cfNeurons.byModel.map((m: { model: string; neurons: number; requests: number }) => `${m.model.replace("@cf/", "")}: ${num(m.neurons)} (${m.requests} requests)`).join(", ")}</span>
-                  ) : null}
-                </p>
-              </div>
-              <Switch id="cf-neuron-cap" checked={!!cfg?.cf_neuron_cap_enabled} disabled={busy} onCheckedChange={(on) => setSwitch("cf_neuron_cap_enabled", on)} />
-            </div>
           </div>
-        </SubCard>
 
-        <Collapsible open={offIsOpen} onOpenChange={(next) => setOffOpen(next)}>
-          <div className="rounded-xl border border-border p-4 min-w-0">
-            <div className="flex items-start justify-between gap-3">
-              <div className="min-w-0">
-                <div className="flex items-center gap-2 flex-wrap">
-                  <h3 className="text-sm font-semibold text-foreground">Only used while plans are off</h3>
-                  {plansOn !== undefined && <Badge variant={plansOn ? "neutral" : "warning"}>{plansOn ? "Not used now" : "In use now"}</Badge>}
+          {/* Student prices: who counts as a student (Settings > Billing confirms a school email with a code) */}
+          <div className="p-5 border-t border-border flex items-start justify-between gap-4">
+            <div className="flex flex-col gap-1 min-w-0">
+              <span className="text-sm font-medium text-foreground">Student prices</span>
+              <p className="text-xs text-muted-foreground">
+                A user gets the student price of Pro and Max after confirming a school or university email ending in one of these, with a code sent to it.
+                It lasts {data?.student_verification_months ?? 12} months, then they confirm again. You can also confirm a student by hand on their page.
+              </p>
+              <p className="text-xs text-foreground mt-1 break-words">{(data?.student_email_domains || []).join("  ") || ".edu  .edu.in  .ac.in  .ac.uk  .edu.au"}</p>
+            </div>
+            <Dialog open={openStudent} onOpenChange={(open) => {
+              if (open) {
+                setStudentDomains((data?.student_email_domains || []).join("\n"));
+                setStudentMonths(data?.student_verification_months ?? 12);
+              }
+              setOpenStudent(open);
+            }}>
+              <DialogTrigger asChild>
+                <Button variant="outline" size="sm" className="shrink-0">Edit</Button>
+              </DialogTrigger>
+              <DialogContent className="sm:max-w-md">
+                <DialogHeader>
+                  <DialogTitle>Edit student prices</DialogTitle>
+                  <DialogDescription>Email endings that count as a school or university, one per line (for example .edu, .ac.in, .edu.in, or a whole address like iitb.ac.in). The prices themselves are set on each plan.</DialogDescription>
+                </DialogHeader>
+                <div className="flex flex-col gap-2 py-2">
+                  <Label htmlFor="student-domains" className="text-sm font-medium">Email endings</Label>
+                  <textarea id="student-domains" rows={8} value={studentDomains} onChange={(e) => setStudentDomains(e.target.value)} disabled={updateConfigMutation.isPending}
+                    className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm font-mono" />
+                  <Label htmlFor="student-months" className="text-sm font-medium mt-2">Months a confirmation lasts</Label>
+                  <Input id="student-months" type="number" min={1} max={48} value={studentMonths} onChange={(e) => setStudentMonths(Number(e.target.value))} disabled={updateConfigMutation.isPending} />
                 </div>
-                <p className="text-xs text-muted-foreground mt-0.5">
-                  {plansOn === false
-                    ? "Plans are off, so these limits apply to everyone."
-                    : "Plans are on, so everyone follows their plan. Only Classgrid staff accounts (super admins and @classgrid.in emails) use these. They apply to everyone again if plans are turned off in Plans & Billing."}
-                </p>
-              </div>
-              <CollapsibleTrigger asChild>
-                <Button type="button" variant="ghost" size="sm" className="shrink-0 font-medium">
-                  {offIsOpen ? "Hide" : "Show"}
-                  <ChevronDown className={`w-4 h-4 ml-1 transition-transform ${offIsOpen ? "rotate-180" : ""}`} />
-                </Button>
-              </CollapsibleTrigger>
-            </div>
-            <CollapsibleContent>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-4">
-                <Tile
-                  title="Session limit"
-                  value={`${num(valueOf(cfg, F.session))} credits`}
-                  line={period("tokens")}
-                  onClick={() => open({
-                    title: "Session limit", description: "Credits a person can use, and how often the count starts again.", fields: [F.session],
-                    reset: { kind: "tokens", valueKey: "global_token_reset_value", unitKey: "global_token_reset_unit" },
-                  })}
-                />
-                <Tile
-                  title="Pictures"
-                  value={`${num(valueOf(cfg, F.pictures))} pictures`}
-                  line={period("image")}
-                  onClick={() => open({
-                    title: "Pictures", description: "Pictures a person can make, and how often the count starts again.", fields: [F.pictures],
-                    reset: { kind: "image", valueKey: "global_image_reset_value", unitKey: "global_image_reset_unit" },
-                  })}
-                />
-                <Tile
-                  title="WhatsApp messages"
-                  value={`${num(valueOf(cfg, F.whatsapp))} messages`}
-                  line={period("whatsapp")}
-                  onClick={() => open({
-                    title: "WhatsApp messages", description: "WhatsApp messages a person can schedule, and how often the count starts again.", fields: [F.whatsapp],
-                    reset: { kind: "whatsapp", valueKey: "global_whatsapp_reset_value", unitKey: "global_whatsapp_reset_unit" },
-                  })}
-                />
-                <Tile
-                  title="Free call minutes"
-                  value={`${num(valueOf(cfg, F.calls))} minutes`}
-                  line={period("calls")}
-                  onClick={() => open({
-                    title: "Free call minutes", description: "Free WhatsApp call minutes a person gets. Past them, a call is paid from credits.", fields: [F.calls],
-                    reset: { kind: "calls", valueKey: "global_call_reset_value", unitKey: "global_call_reset_unit" },
-                  })}
-                />
-                <Tile
-                  title="Read-alouds a day"
-                  value={voiceReplies < 0 ? "No limit" : num(voiceReplies)}
-                  line="Starts again every day"
-                  onClick={() => open({ title: "Read-alouds a day", description: "-1 means no limit, 0 means off.", fields: [F.voiceReplies] })}
-                />
-              </div>
-            </CollapsibleContent>
+                <DialogFooter>
+                  <Button type="button" disabled={updateConfigMutation.isPending} onClick={() => updateConfigMutation.mutate(
+                    { student_email_domains: studentDomains.split(/[\s,]+/).filter(Boolean), student_verification_months: studentMonths },
+                    { onSuccess: () => { toast.success("Student prices saved"); setOpenStudent(false); } }
+                  )}>
+                    {updateConfigMutation.isPending && <Spinner className="w-4 h-4 mr-2" />}
+                    Save changes
+                  </Button>
+                </DialogFooter>
+              </DialogContent>
+            </Dialog>
           </div>
-        </Collapsible>
+        </div>
       </div>
 
-      {/* The number dialog shared by every tile: it saves only the fields it shows */}
-      <Dialog open={!!editor} onOpenChange={(o) => { if (!o && !busy) setEditor(null); }}>
-        <DialogContent className="sm:max-w-sm max-h-[90vh] overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle>{editor?.title}</DialogTitle>
-            {editor?.description && <DialogDescription>{editor.description}</DialogDescription>}
-          </DialogHeader>
-          <div className="flex flex-col gap-4 py-2">
-            {editor?.fields.map((f) => {
-              const err = tried ? fieldError(f, draft[f.key] ?? "") : "";
-              return (
-                <div key={f.key} className="flex flex-col gap-1.5">
-                  <Label htmlFor={`setting-${f.key}`} className="text-sm font-medium">{f.label}</Label>
-                  <Input
-                    id={`setting-${f.key}`} type="number" min={f.min} max={f.max} step={1}
-                    value={draft[f.key] ?? ""} onChange={(e) => setDraft((d) => ({ ...d, [f.key]: e.target.value }))} disabled={busy}
-                  />
-                  {err && <p className="text-xs text-red-500">{err}</p>}
-                </div>
-              );
+      {/* Cloudflare Workers AI: the account's daily Neuron cap (owner, 2026-11-13: Cloudflare bills above 10,000 a day from Dec 1) */}
+      <div className="border border-border rounded-xl shadow-sm bg-card mb-6">
+        <div className="p-5 flex items-start justify-between gap-4">
+          <div className="flex flex-col gap-1">
+            <Label htmlFor="cf-neuron-cap" className="text-sm font-medium text-foreground">Cloudflare daily Neuron cap</Label>
+            <p className="text-xs text-muted-foreground">
+              On: once today's Neurons reach 9,500, every Cloudflare model (chat, voice, speech, images) pauses until 00:00 UTC (5:30 AM IST); the chat uses its other models where it has them.
+              Off: nothing pauses, the meter still counts. Cloudflare gives 10,000 Neurons a day free and bills above that from 1 December 2026; the cap stays 500 under it, so nothing is ever billed.
+            </p>
+            <p className="text-xs text-foreground mt-1">
+              Today, {data?.cfNeurons?.day || "UTC"}: <strong>{Math.round(data?.cfNeurons?.used || 0).toLocaleString()}</strong> of {(data?.cfNeurons?.cap || 9500).toLocaleString()} Neurons
+              {data?.cfNeurons?.byModel?.length ? (
+                <span className="text-muted-foreground"> · {data.cfNeurons.byModel.map((m: { model: string; neurons: number; requests: number }) => `${m.model.replace("@cf/", "")}: ${m.neurons.toLocaleString()} (${m.requests} requests)`).join(", ")}</span>
+              ) : null}
+            </p>
+          </div>
+          <Switch
+            id="cf-neuron-cap"
+            checked={!!data?.cf_neuron_cap_enabled}
+            disabled={updateConfigMutation.isPending}
+            onCheckedChange={(on) => updateConfigMutation.mutate({ cf_neuron_cap_enabled: on }, {
+              onSuccess: () => toast.success(on ? "Cloudflare daily Neuron cap is on" : "Cloudflare daily Neuron cap is off"),
             })}
-            {editor?.reset && <ResetPeriodInput id={`setting-${editor.reset.kind}`} value={draftReset} onChange={setDraftReset} disabled={busy} />}
-          </div>
-          <DialogFooter>
-            <Button type="button" onClick={saveEditor} disabled={busy}>
-              {busy && <Spinner className="w-4 h-4 mr-2" />}
-              Save
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+          />
+        </div>
+      </div>
 
-      <Dialog open={studentOpen} onOpenChange={(o) => { if (!o && !busy) setStudentOpen(false); }}>
-        <DialogContent className="sm:max-w-md max-h-[90vh] overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle>Student prices</DialogTitle>
-            <DialogDescription>Email endings that count as a university, one per line (for example .edu, .ac.in, .edu.in, or a whole address like iitb.ac.in). The prices are set on each plan.</DialogDescription>
-          </DialogHeader>
-          <div className="flex flex-col gap-4 py-2">
-            <div className="flex flex-col gap-1.5">
-              <Label htmlFor="student-domains" className="text-sm font-medium">Email endings</Label>
-              <Textarea id="student-domains" rows={8} value={studentDomains} onChange={(e) => setStudentDomains(e.target.value)} disabled={busy} className="font-mono text-sm" />
-            </div>
-            <div className="flex flex-col gap-1.5">
-              <Label htmlFor="student-months" className="text-sm font-medium">Months a confirmation lasts</Label>
-              <Input id="student-months" type="number" min={1} max={48} step={1} value={studentMonths} onChange={(e) => setStudentMonths(e.target.value)} disabled={busy} />
-              {tried && monthsError && <p className="text-xs text-red-500">{monthsError}</p>}
-            </div>
-          </div>
-          <DialogFooter>
-            <Button type="button" onClick={saveStudent} disabled={busy}>
-              {busy && <Spinner className="w-4 h-4 mr-2" />}
-              Save
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-    </Section>
+      {grantCreditsNode}
+      </div>
+
+      <div className="flex flex-col gap-6 mb-6">
+      {/* Credits per INR Panel */}
+      <div className="border border-border rounded-xl shadow-sm bg-card flex flex-col justify-between">
+        <div className="p-5">
+          <h3 className="text-lg font-semibold text-foreground tracking-tight">Credits per INR</h3>
+          <p className="text-sm text-muted-foreground mt-1">
+            Define how many tokens users receive per ₹1 purchased. Current: <strong>{data?.credits_per_inr ?? 0} Tokens/₹1</strong>
+          </p>
+        </div>
+        <div className="p-4 bg-muted/20 border-t border-border flex items-center justify-end">
+          <Dialog open={openCreditsPerInr} onOpenChange={(open) => {
+            if (!open) setCreditsPerInr(data?.credits_per_inr ?? 0);
+            setOpenCreditsPerInr(open);
+          }}>
+            <DialogTrigger asChild>
+              <Button variant="outline">Edit Rate</Button>
+            </DialogTrigger>
+            <DialogContent className="sm:max-w-sm">
+              <DialogHeader>
+                <DialogTitle>Edit Pricing: Credits per INR</DialogTitle>
+                <DialogDescription>Define how many tokens users receive per ₹1 purchased.</DialogDescription>
+              </DialogHeader>
+              <div className="flex flex-col gap-2 py-4">
+                <Label htmlFor="creditsPerInr" className="text-sm font-medium">Credits per INR</Label>
+                <Input 
+                  id="creditsPerInr" 
+                  type="number"
+                  min={1}
+                  value={creditsPerInr} 
+                  onChange={(e) => setCreditsPerInr(Number(e.target.value))} 
+                  placeholder="e.g. 3000" 
+                  disabled={updateConfigMutation.isPending}
+                />
+              </div>
+              <DialogFooter>
+                <Button type="button" onClick={() => handleSave(setOpenCreditsPerInr, "Global Pricing updated successfully!")} disabled={updateConfigMutation.isPending}>
+                  {updateConfigMutation.isPending && <Spinner className="w-4 h-4 mr-2" />}
+                  Save changes
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
+        </div>
+      </div>
+
+      {/* Image Generation Token Cost Panel */}
+      <div className="border border-border rounded-xl shadow-sm bg-card flex flex-col justify-between">
+        <div className="p-5">
+          <h3 className="text-lg font-semibold text-foreground tracking-tight">Image Generation Cost</h3>
+          <p className="text-sm text-muted-foreground mt-1">
+            Set how many tokens are deducted per AI image generation. Current: <strong>{data?.image_generation_token_cost ?? 0} Tokens/Image</strong>
+          </p>
+        </div>
+        <div className="p-4 bg-muted/20 border-t border-border flex items-center justify-end">
+          <Dialog open={openImageCost} onOpenChange={(open) => {
+            if (!open) setImageCost(data?.image_generation_token_cost ?? 0);
+            setOpenImageCost(open);
+          }}>
+            <DialogTrigger asChild>
+              <Button variant="outline">Edit Cost</Button>
+            </DialogTrigger>
+            <DialogContent className="sm:max-w-sm">
+              <DialogHeader>
+                <DialogTitle>Edit Image Generation Cost</DialogTitle>
+                <DialogDescription>Set how many tokens are deducted per AI image generation.</DialogDescription>
+              </DialogHeader>
+              <div className="flex flex-col gap-2 py-4">
+                <Label htmlFor="imageCost" className="text-sm font-medium">Token Cost per Image</Label>
+                <Input 
+                  id="imageCost" 
+                  type="number"
+                  min={0}
+                  value={imageCost} 
+                  onChange={(e) => setImageCost(Number(e.target.value))} 
+                  placeholder="e.g. 5000" 
+                  disabled={updateConfigMutation.isPending}
+                />
+              </div>
+              <DialogFooter>
+                <Button type="button" onClick={() => handleSave(setOpenImageCost, "Global Image Cost updated successfully!")} disabled={updateConfigMutation.isPending}>
+                  {updateConfigMutation.isPending && <Spinner className="w-4 h-4 mr-2" />}
+                  Save changes
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
+        </div>
+      </div>
+      </div>
+    </>
   );
 }

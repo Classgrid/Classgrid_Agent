@@ -30,8 +30,7 @@ export function PauseUserGrantedCredits({ userId, transactionId, isPaused }: { u
       await apiClient.post(`/api/super-admin/ai-usage/users/${userId}/credits/${transactionId}/pause`, { isPaused: !isPaused });
       toast.success(`Granted credits ${!isPaused ? 'paused' : 'unpaused'} successfully.`);
       // Invalidate the user details query
-      // (the person page reads ["ai-usage-user", id]; the old "aiUsage" keys matched no query, so the page did not refresh)
-      queryClient.invalidateQueries({ queryKey: ["ai-usage-user", userId] });
+      queryClient.invalidateQueries({ queryKey: ["aiUsage", "user", userId] });
       // Invalidate broader stats
       queryClient.invalidateQueries({ queryKey: ["aiUsage"] });
     } catch (e: any) {

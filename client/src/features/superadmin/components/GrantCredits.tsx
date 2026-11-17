@@ -13,10 +13,7 @@
 // CLASSGRID USES CLOUDFLARE USAGE TO CALCULATE TOKENS, NOT GPT-TOKENIZER (WHICH IS ONLY A FALLBACK)
 import React, { useState, useMemo } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { X, ExternalLink, Coins, Gift, Check } from "lucide-react";
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/marketing_ui/dialog";
-import { Button } from "@/components/marketing_ui/button";
-import { GiftPlanForm } from "@/features/superadmin/components/ai-usage/GiftPlanForm";
+import { X, ExternalLink, Coins } from "lucide-react";
 import { SuperadminFilterBar } from "@/features/superadmin/components/SuperadminFilterBar";
 import { BlueSlider } from "@/components/marketing_ui/BlueSlider";
 import { DataTable } from "@/components/marketing_ui/data-table";
@@ -40,8 +37,6 @@ export interface GrantCreditsModalProps {
   onClose: () => void;
   orgs?: OrgRow[];
   isOrgMode?: boolean;
-  /** For people (not organizations): open on "Gift a plan" (the default) or on "Gift credits" */
-  initialMode?: "plan" | "credits";
 }
 
 const ROLES = ["All Roles", "Admin", "Owner", "Member"];
@@ -52,23 +47,10 @@ const formatCredits = (n: number) => {
   return n.toLocaleString("en-IN");
 };
 
-export function GrantCreditsModal({ isOpen, onClose, orgs = [], isOrgMode = false, initialMode }: GrantCreditsModalProps) {
-  // People: "Gift a plan" is the main choice, credits the second (owner, 2026-11-17). Organizations: credits only.
-  const [mode, setMode] = useState<"plan" | "credits">(isOrgMode ? "credits" : initialMode || "plan");
-  const [isGiftPlanOpen, setIsGiftPlanOpen] = useState(false);
-  const planMode = !isOrgMode && mode === "plan";
+export function GrantCreditsModal({ isOpen, onClose, orgs = [], isOrgMode = false }: GrantCreditsModalProps) {
   const [searchQuery, setSearchQuery] = useState("");
   const [roleFilter, setRoleFilter] = useState("All Roles");
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
-  // Each time the panel opens, it starts on the choice it was opened for (set while rendering, React's way to
-  // follow a prop change without an effect)
-  const [wasOpen, setWasOpen] = useState(isOpen);
-  if (wasOpen !== isOpen) {
-    setWasOpen(isOpen);
-    if (isOpen) setMode(isOrgMode ? "credits" : initialMode || "plan");
-    // (opened for one person, from their page: that person is already picked)
-    if (isOpen && !isOrgMode && orgs.length === 1 && orgs[0]) setSelectedIds([orgs[0].id]);
-  }
   const [credits, setCredits] = useState(5000);
   const [isSeparateMode, setIsSeparateMode] = useState(false);
   const [rowCredits, setRowCredits] = useState<Record<string, number>>({});
@@ -109,10 +91,6 @@ export function GrantCreditsModal({ isOpen, onClose, orgs = [], isOrgMode = fals
       accent: true,
       render: (_: any, row: OrgRow) => (
         <div className="flex items-center gap-3">
-          {/* (phone: the tick column is off the screen, so the tick shows here) */}
-          <span className={`sm:hidden w-5 h-5 shrink-0 rounded-full border-2 flex items-center justify-center ${selectedIds.includes(row.id) ? "border-blue-500 bg-blue-500" : "border-border"}`}>
-            {selectedIds.includes(row.id) && <Check className="w-3 h-3 text-white" strokeWidth={3} />}
-          </span>
           {row.avatar ? (
             <img
               src={row.avatar}
@@ -126,8 +104,7 @@ export function GrantCreditsModal({ isOpen, onClose, orgs = [], isOrgMode = fals
           )}
           <div className="flex flex-col min-w-0">
             <span className="text-sm font-semibold text-foreground truncate">{row.name}</span>
-            {/* (Plans & Usage opens this for one person with no group name, so an empty line is left out) */}
-            {row.orgName && (!isOrgMode || row.name !== row.orgName) && (
+            {(!isOrgMode || row.name !== row.orgName) && (
               <span className="text-xs text-muted-foreground truncate">{row.orgName}</span>
             )}
           </div>
@@ -155,13 +132,13 @@ export function GrantCreditsModal({ isOpen, onClose, orgs = [], isOrgMode = fals
       key: "role",
       header: isOrgMode ? "ID" : "Role",
       width: "w-32",
-      render: (val: string, row: OrgRow) => (isOrgMode || val) ? (
+      render: (val: string, row: OrgRow) => (
         <span className="text-xs font-medium px-2.5 py-1 rounded-full bg-muted text-muted-foreground inline-block" title={isOrgMode ? row.id : val}>
           {isOrgMode ? row.id : val}
         </span>
-      ) : null,
+      ),
     },
-    ...(isSeparateMode && !planMode
+    ...(isSeparateMode
       ? [
           {
             key: "slider",
@@ -208,7 +185,6 @@ export function GrantCreditsModal({ isOpen, onClose, orgs = [], isOrgMode = fals
   ];
 
   return (
-    <>
     <AnimatePresence>
       {isOpen && (
         <motion.div
@@ -232,34 +208,6 @@ export function GrantCreditsModal({ isOpen, onClose, orgs = [], isOrgMode = fals
             className="w-full max-w-5xl h-[80vh] flex flex-col bg-background border border-border rounded-2xl shadow-xl overflow-hidden relative"
           >
 
-            {/* ── Title, and for people the choice: a plan (main) or credits ── */}
-            <div className="shrink-0 px-6 pt-5 pr-14 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-              <div className="min-w-0">
-                <h2 className="text-base font-semibold text-foreground">{isOrgMode ? "Grant credits" : "Gift a plan or credits"}</h2>
-                <p className="text-sm text-muted-foreground">
-                  {isOrgMode ? "Pick organizations, then grant credits." : planMode ? "Pick people, then gift them a plan for a while." : "Pick people, then grant them credits."}
-                </p>
-              </div>
-              {!isOrgMode && (
-                <div className="inline-flex shrink-0 rounded-lg border border-border p-0.5 bg-muted/40 self-start sm:self-auto" role="tablist" aria-label="What to gift">
-                  {([["plan", "Gift a plan"], ["credits", "Gift credits"]] as const).map(([key, label]) => (
-                    <Button
-                      key={key}
-                      type="button"
-                      variant="ghost"
-                      size="sm"
-                      role="tab"
-                      aria-selected={mode === key}
-                      onClick={() => { setMode(key); setIsSeparateMode(false); }}
-                      className={`h-8 px-3 font-medium ${mode === key ? "bg-foreground text-background shadow-sm hover:bg-foreground hover:text-background" : "text-muted-foreground hover:text-foreground"}`}
-                    >
-                      {label}
-                    </Button>
-                  ))}
-                </div>
-              )}
-            </div>
-
             {/* ── Body ── */}
             <div className="flex-1 min-h-0 px-6 py-5 flex flex-col gap-4">
 
@@ -268,7 +216,7 @@ export function GrantCreditsModal({ isOpen, onClose, orgs = [], isOrgMode = fals
                 <SuperadminFilterBar
                   searchQuery={searchQuery}
                 onSearchChange={setSearchQuery}
-                searchPlaceholder={isOrgMode ? "Search by name, email or org" : "Search by name or email"}
+                searchPlaceholder="Search by name, email or org..."
               >
                 {!isOrgMode && (
                   <Select value={roleFilter} onValueChange={(val) => setRoleFilter(val as string)}>
@@ -310,7 +258,7 @@ export function GrantCreditsModal({ isOpen, onClose, orgs = [], isOrgMode = fals
                   <SelectContent className="z-[500]">
                     <SelectGroup>
                       <SelectItem value="all">Select All</SelectItem>
-                      {!planMode && <SelectItem value="separate">Add Separate</SelectItem>}
+                      <SelectItem value="separate">Add Separate</SelectItem>
                       <SelectItem value="none">None</SelectItem>
                     </SelectGroup>
                   </SelectContent>
@@ -322,7 +270,7 @@ export function GrantCreditsModal({ isOpen, onClose, orgs = [], isOrgMode = fals
               <DataTable
                 columns={columns}
                 rows={filteredRows}
-                emptyMessage={isOrgMode ? "No organizations found." : "No users found."}
+                emptyMessage="No organizations found."
                 onRowClick={(row: OrgRow) => {
                   setSelectedIds((prev) => 
                     prev.includes(row.id) ? prev.filter(id => id !== row.id) : [...prev, row.id]
@@ -333,37 +281,17 @@ export function GrantCreditsModal({ isOpen, onClose, orgs = [], isOrgMode = fals
 
               {/* ── Bottom Bar replacing inline slider ── */}
               <AnimatePresence>
-                {selectedOrgs.length > 0 && firstOrg && planMode && (
+                {selectedOrgs.length > 0 && firstOrg && (
                   <motion.div
-                    key="gift-plan-bar"
                     initial={{ opacity: 0, y: 12, height: 0 }}
                     animate={{ opacity: 1, y: 0, height: "auto" }}
                     exit={{ opacity: 0, y: 12, height: 0 }}
                     transition={{ duration: 0.25 }}
-                    className="shrink-0 flex flex-wrap items-center justify-between border-t border-border pt-4 mt-2 gap-4"
+                    className="shrink-0 flex items-center justify-between border-t border-border pt-4 mt-2 gap-4"
                   >
                     <div className="text-sm shrink-0">
                       <span className="font-semibold text-foreground">{selectedOrgs.length}</span>{" "}
-                      <span className="text-muted-foreground">{selectedOrgs.length === 1 ? "user" : "users"} selected</span>
-                    </div>
-                    <Button type="button" onClick={() => setIsGiftPlanOpen(true)} className="h-10 px-6 shrink-0">
-                      <Gift className="w-4 h-4" />
-                      Gift a plan
-                    </Button>
-                  </motion.div>
-                )}
-                {selectedOrgs.length > 0 && firstOrg && !planMode && (
-                  <motion.div
-                    key="grant-credits-bar"
-                    initial={{ opacity: 0, y: 12, height: 0 }}
-                    animate={{ opacity: 1, y: 0, height: "auto" }}
-                    exit={{ opacity: 0, y: 12, height: 0 }}
-                    transition={{ duration: 0.25 }}
-                    className="shrink-0 flex flex-wrap items-center justify-between border-t border-border pt-4 mt-2 gap-4"
-                  >
-                    <div className="text-sm shrink-0">
-                      <span className="font-semibold text-foreground">{selectedOrgs.length}</span>{" "}
-                      <span className="text-muted-foreground">{isOrgMode ? "organizations" : selectedOrgs.length === 1 ? "user" : "users"} selected</span>
+                      <span className="text-muted-foreground">organizations selected</span>
                     </div>
 
                     <div className="flex-1 flex items-center justify-end gap-6 max-w-[500px]">
@@ -455,7 +383,7 @@ export function GrantCreditsModal({ isOpen, onClose, orgs = [], isOrgMode = fals
                         )}
                         <div className="flex flex-col min-w-0">
                           <span className="text-sm font-semibold text-foreground truncate">{org.name}</span>
-                          <span className="text-xs text-muted-foreground truncate">{[org.email, org.orgName].filter(Boolean).join(" • ")}</span>
+                          <span className="text-xs text-muted-foreground truncate">{org.email} • {org.orgName}</span>
                         </div>
                       </div>
                       <div className="flex items-center gap-1.5 bg-blue-50 text-blue-700 dark:bg-blue-500/10 dark:text-blue-400 px-3 py-1.5 rounded-full text-xs font-bold whitespace-nowrap ml-2">
@@ -512,9 +440,9 @@ export function GrantCreditsModal({ isOpen, onClose, orgs = [], isOrgMode = fals
                   disabled={grantCreditsMutation.isPending || grantOrgCreditsMutation.isPending || !dateRange?.from || !dateRange?.to}
                   className="w-full h-11 rounded-lg bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white text-sm font-semibold transition-all shadow-sm active:scale-[0.98]"
                 >
-                  {(grantCreditsMutation.isPending || grantOrgCreditsMutation.isPending) ? "Granting" : (isSeparateMode
-                    ? `Grant Custom Credits to ${selectedOrgs.length} ${isOrgMode ? (selectedOrgs.length === 1 ? 'organization' : 'organizations') : (selectedOrgs.length === 1 ? 'user' : 'users')}`
-                    : `Grant ${formatCredits(credits)} Credits to ${selectedOrgs.length} ${isOrgMode ? (selectedOrgs.length === 1 ? 'organization' : 'organizations') : (selectedOrgs.length === 1 ? 'user' : 'users')}`
+                  {(grantCreditsMutation.isPending || grantOrgCreditsMutation.isPending) ? "Granting..." : (isSeparateMode 
+                    ? `Grant Custom Credits to ${selectedOrgs.length} ${selectedOrgs.length === 1 ? 'organization' : 'organizations'}`
+                    : `Grant ${formatCredits(credits)} Credits to ${selectedOrgs.length} ${selectedOrgs.length === 1 ? 'organization' : 'organizations'}`
                   )}
                 </button>
               </div>
@@ -607,31 +535,12 @@ export function GrantCreditsModal({ isOpen, onClose, orgs = [], isOrgMode = fals
                 disabled={otpCode.length < 6 || verifySecurityCode.isPending || grantCreditsMutation.isPending || grantOrgCreditsMutation.isPending}
                 className="w-full h-11 rounded-lg bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white text-sm font-semibold transition-all shadow-sm active:scale-[0.98]"
               >
-                {verifySecurityCode.isPending ? "Checking the code" : "Verify & Grant Credits"}
+                {verifySecurityCode.isPending ? "Verifying..." : "Verify & Grant Credits"}
               </button>
             </div>
           </motion.div>
         </motion.div>
       )}
     </AnimatePresence>
-
-    {/* ── Gift a plan to the people picked ── */}
-    <Dialog open={isGiftPlanOpen} onOpenChange={setIsGiftPlanOpen}>
-      <DialogContent className="sm:max-w-lg max-h-[90vh] overflow-y-auto">
-        <DialogHeader>
-          <DialogTitle>Gift a plan</DialogTitle>
-          <DialogDescription>
-            {selectedOrgs.length === 1 ? `To ${selectedOrgs[0]?.name} (${selectedOrgs[0]?.email}).` : `To ${selectedOrgs.length} users.`} Each one gets an email.
-          </DialogDescription>
-        </DialogHeader>
-        <GiftPlanForm
-          userIds={selectedIds}
-          who={selectedOrgs[0]?.name}
-          idPrefix="panel-gift"
-          onDone={() => { setIsGiftPlanOpen(false); setSelectedIds([]); onClose(); }}
-        />
-      </DialogContent>
-    </Dialog>
-    </>
   );
 }
