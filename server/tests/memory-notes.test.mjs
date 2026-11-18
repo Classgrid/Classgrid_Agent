@@ -43,7 +43,8 @@ const messagesQuery = () => {
     const state = { head: false, range: null };
     const b = {
         select: (_cols, opts) => { state.head = !!opts?.head; return b; },
-        eq: () => b, order: () => b,
+        eq: () => b, order: () => b, limit: () => b,
+        maybeSingle: () => Promise.resolve({ data: chat.length ? chat[chat.length - 1] : null, error: null }),
         range: (from, to) => { state.range = [from, to]; return b; },
         then: (ok) => Promise.resolve(state.head ? { count: chat.length, error: null } : { data: chat.slice(state.range[0], state.range[1] + 1), error: null }).then(ok),
     };
@@ -58,7 +59,7 @@ const USER = { _id: "aaaaaaaaaaaaaaaaaaaaaaaa", email: "someone@example.com", ro
 const NOW = Date.UTC(2026, 10, 18, 12);
 const DAY = 24 * 3600 * 1000;
 const reset = () => { rows = []; kv.clear(); chat = []; };
-const say = (role, content) => chat.push({ role, content });
+const say = (role, content) => chat.push({ role, content, created_at: new Date(NOW).toISOString() });
 
 test("names are kebab-case, dates are real dates", () => {
     assert.equal(notes.noteName("  DSA Exam!! "), "dsa-exam");
@@ -117,10 +118,14 @@ test("the prompt block lists the notes, dated ones still ahead first; nothing wh
     ], NOW);
     assert.match(block, /^\n<saved_notes>\n/);
     assert.match(block, /<\/saved_notes>\n$/);
-    assert.match(block, /- \[exam\] dsa-exam \(2026-11-25\): DSA exam\./);
-    assert.ok(block.indexOf("dsa-exam (") < block.indexOf("] college"), "the exam ahead comes first");
-    assert.ok(block.indexOf("] college") < block.indexOf("] old-test"), "a date that has passed is not put first");
+    assert.match(block, /- dsa-exam \[exam\] \(2026-11-25\): DSA exam\./);
+    assert.ok(block.indexOf("dsa-exam (") < block.indexOf("college ["), "the exam ahead comes first");
+    assert.ok(block.indexOf("college [") < block.indexOf("old-test ["), "a date that has passed is not put first");
     assert.match(block, /save_user_note/);
+    assert.match(block, /search_user_notes/, "the AI is told to read a note in full with search");
+    const long = notes.savedNotesBlock([{ name: "big", type: "fact", content: Array.from({ length: 40 }, (_, i) => `word${i}`).join(" "), updatedAt: new Date(NOW) }], NOW);
+    assert.match(long, /word11\.\.\./);
+    assert.doesNotMatch(long, /word12/, "only the first few words of a note go into the prompt");
 });
 
 test("the reader's answer: JSON is read, anything else saves nothing", () => {
@@ -163,6 +168,25 @@ test("the background reader runs only after 10 new messages and reads only the n
     assert.doesNotMatch(asked[1], /question 0/, "messages already read are not sent again");
     assert.match(asked[1], /USER: one more/);
     assert.equal(rows.length, 0, "the reader deleted the note that is over");
+});
+
+test("a short chat is read once it has gone quiet for 10 minutes", async () => {
+    reset();
+    const asked = [];
+    const ask = async (input) => { asked.push(input); return '{"save":[{"name":"dsa-exam","type":"exam","date":"2026-11-25","content":"DSA exam on 2026-11-25."}],"delete":[]}'; };
+    // 4 messages (2 from the person), the last one 3 minutes ago: still going on, not read
+    say("user", "my DSA exam is on 25 November"); say("assistant", "Noted, good luck!");
+    say("user", "syllabus is stacks and trees"); say("assistant", "Understood.");
+    assert.equal(await notes.notesFromChat({ sessionId: "s3", userId: USER._id, ask, now: NOW - 3 * 60 * 1000 }), false);
+    assert.equal(asked.length, 0, "a chat still going on is not read after every answer");
+    // the same chat, 10 minutes after its last message: read, even with fewer than 10 messages
+    assert.equal(await notes.notesFromChat({ sessionId: "s3", userId: USER._id, ask, now: NOW + 10 * 60 * 1000 }), true);
+    assert.equal(asked.length, 1);
+    assert.match(asked[0], /USER: my DSA exam is on 25 November/);
+    assert.equal(rows.length, 1);
+    // nothing new since: never read again
+    assert.equal(await notes.notesFromChat({ sessionId: "s3", userId: USER._id, ask, now: NOW + 60 * 60 * 1000 }), false);
+    assert.equal(asked.length, 1);
 });
 
 test("the reader survives an answer that is not JSON and a model that fails", async () => {

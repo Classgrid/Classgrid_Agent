@@ -11,9 +11,11 @@
 import AiMemoryNote, { MEMORY_NOTE_TYPES } from "../models/AiMemoryNote.js";
 
 export const NOTES_EVERY = 10;          // new messages in a chat before the reader runs again
+export const NOTES_QUIET_MS = 10 * 60 * 1000; // ...or this long after the chat's last message, even with fewer (short chats)
 export const NOTE_KEEP_DAYS = 120;      // 4 months
 export const MAX_NOTES_PER_USER = 200;
-const MAX_NOTES_IN_PROMPT = 50;
+const MAX_NOTES_IN_PROMPT = 50;         // notes listed in the prompt (name, type, date and a few words only)
+const INDEX_WORDS = 12;                 // words of a note's content shown in the prompt's list
 const MAX_CONTENT = 600;
 const READ_AT_MOST = 40;                // messages read in one run
 const MESSAGE_CHARS = 1500;
@@ -99,13 +101,22 @@ export async function searchNotes({ userId, query }) {
 // What a chat's prompt says when the user has no note yet, so the AI knows the notebook exists and when to write in it
 export const SAVED_NOTES_GUIDE = `\n<saved_notes>\nYou keep online notes about this user, known in every chat on every device (each note is deleted by itself 4 months after its last update). There are none yet. When the user tells an exam (subject, date, syllabus), a deadline, a function or event with its date, or a lasting fact about their studies, work or projects, save it by yourself with save_user_note, without being asked and without announcing it (load the memory_notes tools first when they are not loaded). Never save passwords, codes, keys, card or account numbers.\n</saved_notes>\n`;
 
-/** The notes as a block of the chat's prompt ("" when there are none). Dated notes still ahead come first. */
+/**
+ * The notes as a block of the chat's prompt ("" when there are none). Only a short list goes in (name, type, date and
+ * the first few words), like MEMORY.md on the desktop: the AI reads a note in full with search_user_notes when it needs
+ * it, so a big notebook costs the same as a small one. Dated notes still ahead come first.
+ */
 export function savedNotesBlock(notes, now = Date.now()) {
     const list = (Array.isArray(notes) ? notes : []).filter((n) => n?.name && n?.content);
     if (!list.length) return "";
     const ahead = (n) => (n.date && new Date(n.date).getTime() >= now - DAY ? new Date(n.date).getTime() : Infinity);
     const sorted = [...list].sort((a, b) => ahead(a) - ahead(b) || new Date(b.updatedAt || 0) - new Date(a.updatedAt || 0)).slice(0, MAX_NOTES_IN_PROMPT);
-    return `\n<saved_notes>\nYour notes about this user, kept online from their earlier chats and known in every chat on every device (each note is deleted by itself 4 months after its last update). Treat them as things you remember: use them without being asked, and compare their dates with today's date (a date that has passed is over). They are what was true when written; the user's newest message wins. When the user tells a new exam, deadline, function or event with its date, or a lasting fact about their studies, work or projects, or changes one you have, save it by yourself, without being asked and without announcing it. To add or correct a note use save_user_note (the same name updates it), to remove one delete_user_note, to look one up search_user_notes; load the memory_notes tools first when they are not loaded.\n${sorted.map(noteLine).join("\n")}\n</saved_notes>\n`;
+    const indexLine = (n) => {
+        const all = String(n.content || "").replace(/\s+/g, " ").trim().split(" ");
+        const words = all.slice(0, INDEX_WORDS).join(" ");
+        return `- ${n.name} [${n.type || "fact"}]${n.date ? ` (${day(n.date)})` : ""}: ${words}${all.length > INDEX_WORDS ? "..." : ""}`;
+    };
+    return `\n<saved_notes>\nYour notes about this user, kept online from their earlier chats and known in every chat on every device (each note is deleted by itself 4 months after its last update). This is only the list: each line is the note's name, its type, its date and the first few words. Read a note in full with search_user_notes (load the memory_notes tools first when they are not loaded) before you answer anything it may cover, and never guess what the rest of it says. Treat them as things you remember: use them without being asked, and compare their dates with today's date (a date that has passed is over). They are what was true when written; the user's newest message wins. When the user tells a new exam, deadline, function or event with its date, or a lasting fact about their studies, work or projects, or changes one you have, save it by yourself, without being asked and without announcing it. To add or correct a note use save_user_note (the same name updates it), to remove one delete_user_note.\n${sorted.map(indexLine).join("\n")}\n</saved_notes>\n`;
 }
 
 // ── The AI's own tools (tool group memory_notes in ai-tool-groups.js) ──
@@ -254,8 +265,9 @@ async function askReader(input) {
 }
 
 /**
- * Background: once the chat has NOTES_EVERY new messages since the last run, read only those messages and keep the
- * person's notes up to date. Returns true when a note changed. Never throws.
+ * Background: read only the chat's new messages and keep the person's notes up to date. It runs once the chat has
+ * NOTES_EVERY new messages since the last run, or once it has gone quiet for NOTES_QUIET_MS (so a short chat of 4-6
+ * messages is read too, not only a long one). Returns true when a note changed. Never throws.
  * (ask is the model call; tests pass their own.)
  */
 export async function notesFromChat({ sessionId, userId, ask = askReader, now = Date.now() }) {
@@ -269,7 +281,16 @@ export async function notesFromChat({ sessionId, userId, ask = askReader, now = 
             .from("ai_chat_messages").select("id", { count: "exact", head: true }).eq("session_id", sessionId);
         if (error || !count) return false;
         const covered = Math.min(Number(await redis.get(coveredKey)) || 0, count);
-        if (count - covered < NOTES_EVERY) return false;
+        if (count - covered < 1) return false;
+        if (count - covered < NOTES_EVERY) {
+            // Few new messages: read them only once the chat has gone quiet, so a short chat is not read after every
+            // answer and a chat still going on is read when it stops (the next answer after that reads the rest).
+            const { data: last } = await primarySupabaseClient
+                .from("ai_chat_messages").select("created_at").eq("session_id", sessionId)
+                .order("created_at", { ascending: false }).limit(1).maybeSingle();
+            const lastAt = last?.created_at ? new Date(last.created_at).getTime() : 0;
+            if (!lastAt || now - lastAt < NOTES_QUIET_MS) return false;
+        }
         // One run at a time per chat. A run that fails leaves the lock to run out, so it is tried again 10 minutes
         // later at the earliest, not after every answer.
         if (!(await redis.set(lockKey, "1", "EX", 600, "NX"))) return false;
