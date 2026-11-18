@@ -3,7 +3,7 @@
 //   GET    /api/remote/chats/:id/live        -> { running, question, from, turnId, attachments?, events }  the answer running now
 //   GET    /api/remote/chats/:id/details     -> { deviceId, deviceName, deviceKind, online, connectedSince, totalConnectedMs,
 //                                                 project: { name, path } | null, mode, clientApp, turnedOnAt }
-//   POST   /api/remote/chats/:id/messages    { question, permissionMode?, selectedModel?, effort?, attachments? } -> { ok } or 409/503
+//   POST   /api/remote/chats/:id/messages    { question, permissionMode?, selectedModel?, effort?, attachments?, command? } -> { ok } or 409/503
 //                                             attachments: [{ url, name, mimeType }] as the chat sends them to the AI
 //   POST   /api/remote/chats/:id/stop        -> { ok }   stops the answer running in the chat (phone's or computer's)
 //   DELETE /api/remote/chats/:id             -> { ok }   Remote PC off for this chat (the computer keeps the chat)
@@ -70,6 +70,8 @@ router.post("/chats/:id/messages", isAuthenticated, async (req, res) => {
         selectedModel: typeof b.selectedModel === "string" ? b.selectedModel : undefined,
         effort: ["low", "high"].includes(b.effort) ? b.effort : undefined,
         attachments: Array.isArray(b.attachments) ? b.attachments : undefined,
+        // a "/" command picked in the phone's box (/plan, /review...), as the computer's box sends it
+        command: typeof b.command === "string" && /^[a-z_-]{1,40}$/.test(b.command) ? b.command : undefined,
     });
     if (out.ok) return res.json({ ok: true });
     const status = out.code === "offline" ? 503 : out.code === "busy" ? 409 : out.code === "not_remote" ? 404 : out.code === "not_allowed" ? 403 : 400;
