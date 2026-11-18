@@ -89,14 +89,20 @@ const PROJECT_LOOKUP_MS = 60000; // (the database is 150 ms away per read; linkC
 export function forgetProjectLookup(sessionId) {
   for (const key of projectLookups.keys()) if (key.startsWith(`${sessionId}|`)) projectLookups.delete(key);
 }
-// hint: for a chat made just now, the project the app says is open ({ projectId, userId, deviceId }), so the lookup
-// doesn't wait for the chat to be linked to it first (the link happens meanwhile and gives the same answer)
+// hint: the project the app says is open with this message ({ projectId, userId, deviceId }: a chat made just now, a
+// message typed in the desktop app, a message sent from the phone into a Remote PC chat), so the lookup doesn't wait
+// for the chat to be linked to it first: the link happens meanwhile (linkChatToProject) and gives the same answer.
+// A lookup with a hint is never answered from one made without it, or with another one: the chat's link in Redis may be
+// from before this message (2026-11-18: a desktop message in a chat whose link was gone ran in the project's cloud copy,
+// its file tools went to the sandbox and timed out, and the AI read the project from GitHub instead).
+const hintKey = (hint) => (hint?.projectId && hint?.userId ? `${hint.projectId}|${hint.userId}|${hint.deviceId || ""}` : "");
 export async function projectForChat(sessionId, { website = false, hint = null } = {}) {
   const key = `${sessionId}|${website ? 1 : 0}`;
+  const sig = hintKey(hint);
   const kept = projectLookups.get(key);
-  if (kept && Date.now() - kept.at < PROJECT_LOOKUP_MS) return kept.promise;
+  if (kept && Date.now() - kept.at < PROJECT_LOOKUP_MS && (!sig || kept.sig === sig)) return kept.promise;
   const promise = lookupProjectForChat(sessionId, website, hint);
-  projectLookups.set(key, { at: Date.now(), promise });
+  projectLookups.set(key, { at: Date.now(), promise, sig });
   promise.catch(() => {}).finally(() => setTimeout(() => { if (projectLookups.get(key)?.promise === promise) projectLookups.delete(key); }, PROJECT_LOOKUP_MS).unref?.());
   return promise;
 }
@@ -106,13 +112,16 @@ async function lookupProjectForChat(sessionId, website, hint) {
     redis.get(UI_PROJECT(sessionId)).catch(() => null),
     website ? null : redis.get(CHAT_HERE(sessionId)).catch(() => null),
   ]);
+  // The project the message names comes first: it is what the link made with this message puts on screen
+  // (linkChatToProject: the project named, in the copy of the computer the message came from when that computer holds
+  // one "here"; a message from no known computer puts the chat on the cloud copy, as the link does)
+  if (hint?.projectId && hint?.userId) {
+    const p = await IdeProject.findOne({ _id: hint.projectId, owner: hint.userId }).lean().catch(() => null);
+    if (p && !(website && p.location === "local")) return onComputerCopy(p, website ? null : hint.deviceId || null);
+  }
   if (onScreen) {
     const p = await IdeProject.findById(onScreen).lean().catch(() => null);
     if (p) return onComputerCopy(p, here);
-  }
-  if (hint?.projectId && hint?.userId) {
-    const p = await IdeProject.findOne({ _id: hint.projectId, owner: hint.userId }).lean().catch(() => null);
-    if (p && !(website && p.location === "local")) return onComputerCopy(p, website ? null : hint.deviceId || here);
   }
   return onComputerCopy(await IdeProject.findOne({ chatSessionIds: sessionId }).lean(), here);
 }
@@ -142,9 +151,18 @@ function resolveInProject(project, givenPath = "") {
   return { root, full, rel: path.posix.relative(root, full) || "." };
 }
 
+// The project tools that work only on the project's copy on the cloud computer (the sandbox), never in a folder on the
+// user's computer: a chat working on the computer doesn't get them at all (streamAskAi), and withProject refuses them
+// there (owner, 2026-11-18: "using the sandbox locally is not allowed, it is forbidden")
+export const CLOUD_COPY_PROJECT_TOOLS = ["search_project_by_meaning", "create_github_repo_for_project", "update_project_github_repo"];
+export const CLOUD_ONLY_TOOL_TEXT = "Error: this project is a folder on the user's own computer, and this tool works only on a project's copy on Classgrid's cloud. Nothing was done. Do it on their computer instead, with the terminal (for example git and the GitHub CLI gh) and search_project.";
+
 async function withProject(sessionId, fn) {
   const project = await projectForChat(sessionId);
   if (!project) return "No project is open in this chat. The user opens one in Studio (Project in Studio's left sidebar, or the project picker above the chat box).";
+  // A folder on the user's computer (or the chat's copy of the project there): its files are not on the cloud computer,
+  // and the sandbox is never opened for it
+  if (project.location === "local") return CLOUD_ONLY_TOOL_TEXT;
   let ssh;
   try {
     ssh = await sandboxSsh();
@@ -1062,9 +1080,11 @@ export async function linkChatToProject(userId, projectId, sessionId, deviceId =
   const here = deviceId ? (project.localCopies || []).some((c) => c.deviceId === String(deviceId) && c.here) : false;
   // The kept lookup (projectForChat) is forgotten only when the answer changes: the same project on screen from the same
   // place keeps it, so the second lookup of a message (before the model call) doesn't go to the database every time
-  if (wasOnScreen !== String(project._id) || (here ? wasHere !== String(deviceId) : !!wasHere)) forgetProjectLookup(sessionId);
+  const changed = wasOnScreen !== String(project._id) || (here ? wasHere !== String(deviceId) : !!wasHere);
   await redis.set(UI_PROJECT(sessionId), String(project._id), "EX", 24 * 60 * 60).catch(() => {}); // the user's own project on screen
   await (here ? redis.set(CHAT_HERE(sessionId), String(deviceId), "EX", 24 * 60 * 60) : redis.del(CHAT_HERE(sessionId))).catch(() => {});
+  // (forgotten once the new link is written: a lookup made in between would read the old link and keep it a minute)
+  if (changed) forgetProjectLookup(sessionId);
   // A chat stays with the project it started in (chats are kept per project); it is never moved to another one
   const other = await IdeProject.findOne({ owner: userId, chatSessionIds: sessionId, _id: { $ne: project._id } }).select("_id").lean();
   if (other) return;
@@ -1119,10 +1139,11 @@ export async function editorContextFor(sessionId, { website = false, editorConte
     return `\n\n<project_editor>\n${[
       PROJECT_MODE_RULES,
       `Project: ${project.name}. This project is a folder on the user's OWN computer (${project.localPath || "a local folder"}), not on Classgrid's servers. The Classgrid desktop app on that computer runs your project tools there: the file tools read and change the real files on their disk, and terminal commands run in that folder on their computer (Windows, PowerShell), so use PowerShell commands, not Linux-only ones. Paths are relative to the project folder; /data and /home/workspace/... don't exist here. push_project_to_github commits everything and pushes it to the folder's GitHub repository with the user's own GitHub login on that computer. Review/Undo snapshots and search by meaning aren't available for this project. Code you run (run_code, Python, Go, Node, anything) runs on their computer too, never somewhere else: there is no sandbox in this project, so never mention one. If a tool says the desktop app isn't open, tell the user to open the Classgrid app on that computer.`,
-      ...(await localEditorLines(project, editorContext)),
+      ...(await localEditorLines(project, editorContext, sessionId)),
     ].join("\n")}\n</project_editor>`;
   }
   let ssh;
+  const startedAt = Date.now();
   try {
     ssh = await sandboxSsh();
     const root = `/home/workspace/projects/${project._id}`;
@@ -1180,7 +1201,9 @@ ${rulesFile.text}`);
     if (runs) lines.push(runs);
     if (userDiff) lines.push(`Changes the user made in the editor since your last answer:\n\`\`\`diff\n${userDiff}\n\`\`\``);
     return `\n\n<project_editor>\n${lines.join("\n")}\n</project_editor>`;
-  } catch {
+  } catch (e) {
+    // (the cloud computer not answering held every message of the chat 20 s here, the SSH handshake's limit: 2026-11-18)
+    console.log(`[AI-TIMING] cloud project's editor notes not read (${e?.message || e}) after ${Date.now() - startedAt}ms`);
     return "";
   } finally {
     ssh?.dispose();
@@ -1191,7 +1214,10 @@ ${rulesFile.text}`);
 // user's terminal commands, read by their Classgrid app
 // `given`: the editor notes the desktop app sent with the message (JSON text), so the computer isn't asked for them in
 // front of the answer; an older app that sends none is asked over the runner as before
-async function localEditorLines(project, given = null) {
+// (a message sent from the phone into a Remote PC chat has no app to send them: the computer is asked, at most
+// EDITOR_ASK_MS, and the answer goes on without them when they don't come in time)
+export const EDITOR_ASK_MS = 1500;
+async function localEditorLines(project, given = null, chat = null) {
   try {
     let ctx = null;
     if (typeof given === "string" && given.trim().startsWith("{")) {
@@ -1199,7 +1225,15 @@ async function localEditorLines(project, given = null) {
     }
     if (!ctx) {
       const { callLocal } = await import("./local-runner.service.js");
-      try { ctx = JSON.parse(await callLocal(project, "editor_context", {})); } catch { return []; }
+      const startedAt = Date.now();
+      let timer = null;
+      const reply = await Promise.race([
+        callLocal(project, "editor_context", {}, chat).catch(() => null),
+        new Promise((r) => { timer = setTimeout(() => r(null), EDITOR_ASK_MS); timer.unref?.(); }),
+      ]);
+      clearTimeout(timer);
+      console.log(`[AI-TIMING] editor notes asked of the computer: ${reply === null ? `no answer in ${EDITOR_ASK_MS}ms, the answer goes on without them` : `${Date.now() - startedAt}ms`}`);
+      try { ctx = JSON.parse(reply); } catch { return []; }
     }
     if (!ctx || Date.now() - (ctx.updatedAt || 0) > 6 * 60 * 60 * 1000) return [];
     const root = String(project.localPath || "").replace(/[\\/]+$/, "").toLowerCase();

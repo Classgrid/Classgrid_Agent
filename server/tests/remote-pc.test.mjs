@@ -61,13 +61,17 @@ mock.module("../src/services/remote-device.service.js", {
         deviceConnection: async () => ({ online, connectedSince: online ? "2026-11-18T06:00:00.000Z" : null, totalConnectedMs: 5400000 }),
     },
 });
-mock.module("../src/services/ide-project.service.js", { namedExports: { projectForChat: async () => ({ name: "classgrid_marketting", location: "local", localPath: "c:\\classgrid_marketting" }) } });
+// (the chat's project: its copy on the chat's computer is the one used)
+const CHAT_PROJECT = { _id: "6ae794f2ae1c1229bcf72dd4", name: "classgrid_marketting", location: "local", localPath: "c:\\classgrid_marketting" };
+let chatProject = CHAT_PROJECT;
+const lookups = [];
+mock.module("../src/services/ide-project.service.js", { namedExports: { projectForChat: async (sessionId, opts) => { lookups.push({ sessionId, opts }); return chatProject; } } });
 let answeringFn = null; // (a test that needs the real check: the working mark or the run key)
 mock.module("../src/services/chat-wake.service.js", { namedExports: { chatAnswering: async () => (answeringFn ? answeringFn() : answering) } });
 mock.module("../src/services/whatsapp-call.service.js", {
     namedExports: {
         runAgentTask: async (user, question, projectId, onSession, sessionId, onStep, extraBody, signal, onData) => {
-            runs.push({ question, sessionId, extraBody });
+            runs.push({ question, sessionId, extraBody, projectId });
             onData({ type: "token", token: "Hi" });
             onData({ type: "permission_request", id: "p1", tool: "execute_terminal_command", title: "Run npm test" });
             onData({ type: "pc_tool_call", id: "x" }); // (never sent to the phone)
@@ -248,4 +252,48 @@ test("/remote off: the chat is no longer remote", async () => {
     await svc.setRemoteChat({ userId: "u1", sessionId: S, on: false });
     assert.equal(await svc.remoteChatOn("u1", S), false);
     assert.equal((await svc.sendFromPhone({ _id: "u1" }, S, { question: "hi" })).code, "not_remote");
+});
+
+test("a phone message names the chat's project and its computer, as the computer's app does, and picks tools the same way", async () => {
+    // (2026-11-18: with no project named, the phone's message took the chat off its project and off the computer's
+    // copy, so it ran in the cloud copy: the sandbox, 20 s per message, no prompt cache)
+    remoteRows = remoteRows.map((r) => (r.sessionId === S ? { ...r, on: true, deviceId: "495b3e5d4e0316451f73" } : r));
+    devices = {};
+    online = true; answering = false; answeringFn = null;
+    await redis.del(`chat:run:u1:${S}`, `remote:running:${S}`);
+    assert.deepEqual(await svc.sendFromPhone({ _id: "u1" }, S, { question: "see my project" }), { ok: true });
+    await tick();
+    const run = runs.at(-1);
+    assert.equal(run.projectId, "6ae794f2ae1c1229bcf72dd4", "the chat's project goes with the message (body.projectId)");
+    assert.equal(run.extraBody.deviceId, "495b3e5d4e0316451f73", "with the chat's own computer, whose copy is used");
+    assert.equal(run.extraBody.clientApp, "desktop");
+    assert.equal(run.extraBody.allTools, false, "tools by the message, as on the computer, not every tool at once");
+    assert.equal(run.extraBody.remoteFrom, "phone");
+    assert.equal(String(lookups.at(-1).sessionId), S);
+    // a chat with no project names none
+    chatProject = null;
+    assert.deepEqual(await svc.sendFromPhone({ _id: "u1" }, S, { question: "hi" }), { ok: true });
+    await tick();
+    assert.equal(runs.at(-1).projectId, null);
+    chatProject = CHAT_PROJECT;
+});
+
+test("the other accounts' memory: kept from the computer's messages in a Remote PC chat, used for the phone's", async () => {
+    const mem = [{ email: "other@x.y", prefs: { nickname: "Nik" }, skills: [] }];
+    const T = "22222222-2222-3333-4444-555555555555";
+    // the computer's message: what it sent is used, and kept for the chat
+    assert.deepEqual(await svc.computerMemoryFor({ clientApp: "desktop", computerMemory: mem }, { remoteChat: true, sessionId: T }), mem);
+    await tick();
+    assert.deepEqual(await svc.computerMemoryFor({ clientApp: "desktop", remoteFrom: "phone" }, { remoteChat: true, sessionId: T }), mem, "the phone's message gets the same");
+    // a chat that is not a Remote PC chat keeps nothing
+    const U = "33333333-2222-3333-4444-555555555555";
+    assert.deepEqual(await svc.computerMemoryFor({ clientApp: "desktop", computerMemory: mem }, { remoteChat: false, sessionId: U }), mem);
+    await tick();
+    assert.equal(await redis.get(`remote:compmem:${U}`), null);
+    // the computer sends none any more: none for the phone either
+    assert.deepEqual(await svc.computerMemoryFor({ clientApp: "desktop" }, { remoteChat: true, sessionId: T }), []);
+    await tick();
+    assert.deepEqual(await svc.computerMemoryFor({ clientApp: "desktop", remoteFrom: "phone" }, { remoteChat: true, sessionId: T }), []);
+    // the website never has it
+    assert.deepEqual(await svc.computerMemoryFor({ clientApp: "web", computerMemory: mem }, { remoteChat: true, sessionId: T }), []);
 });

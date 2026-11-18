@@ -287,9 +287,16 @@ async function runFromPhone(user, row, question, { permissionMode, selectedModel
     if (selectedModel) emit(userId, "remote:model", { sessionId, selectedModel, effort: effort || null });
     const fullUser = await User.findById(user._id).select("-password -verificationToken");
     try {
+        const clientApp = row.clientApp || meta.clientApp || "desktop";
+        // The chat's project, worked on in the chat's own computer's copy, as for a message typed there (see chatProjectId)
+        const projectId = await chatProjectId(sessionId);
         const { runAgentTask } = await import("./whatsapp-call.service.js");
-        await runAgentTask(fullUser || user, question, null, null, sessionId, null, {
-            clientApp: row.clientApp || meta.clientApp || "desktop",
+        await runAgentTask(fullUser || user, question, projectId, null, sessionId, null, {
+            clientApp,
+            // The tools are picked by the message and the chat's recent ones, as for a message typed on the computer, not
+            // all of them at once (runAgentTask's default, for WhatsApp tasks): the same tools and rules give the same
+            // prompt, which the model's prompt cache serves again (owner, 2026-11-18: every phone message was a full miss)
+            allTools: false,
             ...(row.appMode || meta.appMode ? { appMode: row.appMode || meta.appMode } : {}),
             permissionMode: PERMISSION_MODES.has(permissionMode) ? permissionMode : (meta.permissionMode || "default"),
             ...(selectedModel || meta.selectedModel ? { selectedModel: selectedModel || meta.selectedModel } : {}),
@@ -319,6 +326,63 @@ async function runFromPhone(user, row, question, { permissionMode, selectedModel
         emit(userId, "chat:woke", { sessionId, phase: "end" });
         await remoteTurnEnded(userId, sessionId);
     }
+}
+
+/**
+ * The chat's project (the one on the computer's screen, else the one the chat belongs to), named with a message sent
+ * from the phone like the computer's app names it with each message (body.projectId, with the chat's computer as
+ * body.deviceId): the answer then works in that computer's copy of it and links the chat to it there
+ * (linkChatToProject), exactly as for a message typed on the computer. null when the chat has no project.
+ * A phone message named no project before (the phone has no project picker), so it ran as "Studio with No project":
+ * its link to the project on screen and to the computer's copy was taken away (forgetChatScreenProject), and a project
+ * in both places ran in its CLOUD copy: the cloud rules and tools, file tools and terminal commands sent to the cloud
+ * sandbox, no computer tool, and 20 s at every message opening the sandbox for the cloud copy's editor notes (the
+ * owner's chat d85e65e3, 2026-11-18: "bb" from the phone took 22.6 s and missed the prompt cache; "on pc open Spotify"
+ * ran its PowerShell in the sandbox, "Timed out while waiting for handshake"; "hey see my project" read the project
+ * from GitHub after its file tools timed out on the sandbox).
+ */
+export async function chatProjectId(sessionId) {
+    try {
+        const { projectForChat } = await import("./ide-project.service.js");
+        const project = await projectForChat(String(sessionId));
+        return project?._id ? String(project._id) : null;
+    } catch (e) {
+        console.warn("[Remote PC] the chat's project could not be looked up:", e?.message || e);
+        return null;
+    }
+}
+
+// The memory the person saved in their other Classgrid accounts on the computer (body.computerMemory, sent by the
+// desktop app with every message), as the computer's last message in a Remote PC chat sent it, for the messages sent
+// from the phone into that chat
+const COMPUTER_MEMORY = (sessionId) => `remote:compmem:${sessionId}`;
+const COMPUTER_MEMORY_CHARS = 300000;
+/**
+ * The other accounts' memory for this message (streamAskAi's <memory_from_other_accounts>): what the desktop app sent
+ * with it, or, for a message sent from the phone into a Remote PC chat, what the computer sent with its last message in
+ * that chat. Without it the phone's messages had less memory than the computer's and a different prompt (no prompt
+ * cache). remoteChat: the chat is a Remote PC chat (only those are kept).
+ */
+export async function computerMemoryFor(body, { remoteChat = false, sessionId = null } = {}) {
+    if (body?.clientApp !== "desktop") return [];
+    const key = remoteChat && sessionId ? COMPUTER_MEMORY(String(sessionId)) : null;
+    if (body.remoteFrom === "phone") {
+        if (!key) return [];
+        try {
+            const kept = JSON.parse((await redis.get(key)) || "[]");
+            return Array.isArray(kept) ? kept.slice(0, 5) : [];
+        } catch {
+            return [];
+        }
+    }
+    const list = Array.isArray(body.computerMemory) ? body.computerMemory.slice(0, 5) : [];
+    if (key) {
+        // (none sent: the computer has no other account's memory now, so none is kept either)
+        const text = JSON.stringify(list);
+        if (list.length && text.length <= COMPUTER_MEMORY_CHARS) redis.set(key, text, "EX", 30 * 24 * 60 * 60).catch(() => {});
+        else redis.del(key).catch(() => {});
+    }
+    return list;
 }
 
 /**

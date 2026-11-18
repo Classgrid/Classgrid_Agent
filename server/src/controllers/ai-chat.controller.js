@@ -77,7 +77,7 @@ import {
 } from "../services/ai-chat.service.js";
 import { getHistory, getHistoryCount, appendToHistory, invalidateHistoryCache, getChatTranscript } from "../services/ai-chat-history.service.js";
 import { canAccessSession, gridLabelMap, gridProfilesText, getSharedSessionsFor, leaveSharedChat, sharedChatIdsFor } from "../services/ai-chat-grid.service.js";
-import { editorContextFor, rememberProjectSnapshot, sandboxDataDir, startCheckpoint, finishCheckpoint, linkChatToProject, forgetChatScreenProject, touchStudio, pcChatIds, masteroAutoPush, pullMastero } from "../services/ide-project.service.js";
+import { editorContextFor, rememberProjectSnapshot, sandboxDataDir, startCheckpoint, finishCheckpoint, linkChatToProject, forgetChatScreenProject, touchStudio, pcChatIds, masteroAutoPush, pullMastero, CLOUD_COPY_PROJECT_TOOLS } from "../services/ide-project.service.js";
 // Cloudflare Workers AI daily Neuron cap and meter (Global AI Config): every Cloudflare request goes through cfAiFetch
 import { cfAiFetch, providersWithoutCappedCloudflare, isCfNeuronCapError } from "../services/cf-neuron-cap.service.js";
 import { usageParts, claudeSwitches, keepsCloudflareRounds, CAP_REFUSED_WHY } from "../services/cap-fallback.service.js";
@@ -1465,8 +1465,8 @@ function whereYouWorkPlace({ desktop, project, task }) {
     if (task) return ""; // WhatsApp and background tasks keep their own rules
     const local = project?.location === "local";
     const head = "\n\n=== WHERE YOU WORK (final rule: it overrides anything above about where things run) ===\n";
-    if (desktop && local && project.worktree) return head + `The user is in the Classgrid DESKTOP APP, in a project that is a folder on their own Windows computer (${project.mainPath || "a local folder"}). This chat now works in ITS OWN COPY of that project (a git worktree) at ${project.localPath}, on the branch ${project.worktree.branch}: every file tool, command and run_code works in that copy, and the user's main folder is not touched. When the work is done, commit it there, then call use_worktree with action "finish" to go back to the main folder (it tells you how to merge the branch; ask the user before merging). EVERYTHING runs on their computer; there is NO cloud sandbox in this chat. Only your thinking happens on Classgrid's servers.`;
-    if (desktop && local) return head + `The user is in the Classgrid DESKTOP APP, in a project that is a folder on their own Windows computer (${project.localPath || "a local folder"}). ${project.repo ? `It is already on GitHub as ${project.repo} and linked to this project: never make another repo for it. Commit and push only as the rule below says (or, without one, only when the user asks).` : "Never create a GitHub repo, commit, push or upload this folder unless the user asks in this chat. When they ask to put it on GitHub or online: make the repo, add a sensible .gitignore (no build output, caches, dependencies or secrets), commit and push; Classgrid then links the repo and the project works on the website too."} EVERYTHING runs on their computer: the file tools, terminal commands (PowerShell), run_code, installs, git and pushes, helpers and (in Studio Mode) the browser. Paths are relative to the project folder; for a file or folder outside it, give the file tools its full path (like C:\\Users\\name\\Desktop\\notes.txt): the user is asked first. There is NO cloud sandbox in this chat: never use one, never mention one, and never say you can't reach their computer. Only your thinking happens on Classgrid's servers. To search for text or code in the folder ALWAYS use search_project (ripgrep: under a second even in a huge folder; regex: true for several words at once). Never search with the terminal (Get-ChildItem -Recurse, Select-String, dir /s, findstr /s): it reads every file, node_modules included, and takes minutes.`;
+    if (desktop && local && project.worktree) return head + `The user is in the Classgrid DESKTOP APP, in a project that is a folder on their own Windows computer (${project.mainPath || "a local folder"}). This chat now works in ITS OWN COPY of that project (a git worktree) at ${project.localPath}, on the branch ${project.worktree.branch}: every file tool, command and run_code works in that copy, and the user's main folder is not touched. When the work is done, commit it there, then call use_worktree with action "finish" to go back to the main folder (it tells you how to merge the branch; ask the user before merging). EVERYTHING runs on their computer; there is NO cloud sandbox in this chat. Only your thinking happens on Classgrid's servers. Read, list and search the project's files only with the project file tools, which work on the folder on their computer: never read them from GitHub (the GitHub connector or the repo's copy online), which can be behind the folder; if a project tool says the Classgrid app isn't open on that computer, tell the user instead of reading another copy.`;
+    if (desktop && local) return head + `The user is in the Classgrid DESKTOP APP, in a project that is a folder on their own Windows computer (${project.localPath || "a local folder"}). ${project.repo ? `It is already on GitHub as ${project.repo} and linked to this project: never make another repo for it. Commit and push only as the rule below says (or, without one, only when the user asks).` : "Never create a GitHub repo, commit, push or upload this folder unless the user asks in this chat. When they ask to put it on GitHub or online: make the repo, add a sensible .gitignore (no build output, caches, dependencies or secrets), commit and push; Classgrid then links the repo and the project works on the website too."} EVERYTHING runs on their computer: the file tools, terminal commands (PowerShell), run_code, installs, git and pushes, helpers and (in Studio Mode) the browser. Paths are relative to the project folder; for a file or folder outside it, give the file tools its full path (like C:\\Users\\name\\Desktop\\notes.txt): the user is asked first. There is NO cloud sandbox in this chat: never use one, never mention one, and never say you can't reach their computer. Only your thinking happens on Classgrid's servers. Read, list and search the project's files only with the project file tools, which work on the folder on their computer: never read them from GitHub (the GitHub connector or the repo's copy online), which can be behind the folder; if a project tool says the Classgrid app isn't open on that computer, tell the user instead of reading another copy. To search for text or code in the folder ALWAYS use search_project (ripgrep: under a second even in a huge folder; regex: true for several words at once). Never search with the terminal (Get-ChildItem -Recurse, Select-String, dir /s, findstr /s): it reads every file, node_modules included, and takes minutes.`;
     if (desktop && project) return head + `The user is in the Classgrid DESKTOP APP, in a CLOUD project (its files live on Classgrid's cloud computer, not on their PC). The project tools, terminal commands and run_code work on that cloud copy, and push_project_to_github pushes it. read_local_file (and, in Studio Mode, the browser) still work on the user's own computer. If they want the work on their own computer, they open the folder there with Open Folder in Project Mode.`;
     if (desktop) return head + "The user is in the Classgrid DESKTOP APP, in a chat with no project. EVERYTHING runs on their own Windows computer: commands (PowerShell), run_code, installs, reading, creating and editing files (full paths), helpers and (in Studio Mode) the browser. There is NO cloud sandbox in this chat: never use one, never mention one, and never say you can't reach their computer. Only your thinking happens on Classgrid's servers.";
     if (project && !local) return head + "The user is on the Classgrid WEBSITE (chat.classgrid.in), in a CLOUD project. The project tools, terminal commands and run_code work on the project's copy on Classgrid's cloud computer. You can't reach the user's own computer from the website: never claim to read or change their local files; for that, they use the Classgrid desktop app.";
@@ -2388,12 +2388,20 @@ export const streamAskAi = async (req, res) => {
 
             // The chat's project and editor notes are looked up while the history loads, not after it (answers must
             // start at once, owner 2026-11-09); they are awaited where they are used (whereProject below)
+            // The project the desktop app says is open (a message sent from the phone into a Remote PC chat names the chat's
+            // project and computer the same way, remote-pc.service.js): looked up as this message links it, not as the
+            // last message left the link (gone or older, the chat ran in the project's cloud copy: 2026-11-18, see
+            // projectForChat)
+            // (only where the message links the chat to that project below: not an Incognito chat, not a Share Grid chat)
+            const openHint = body.clientApp === "desktop" && !fromWebsite && !hideFromUser && !gridSender && /^[0-9a-f]{24}$/i.test(String(body.projectId || "")) && req.user?._id
+                ? { projectId: String(body.projectId), userId: String(req.user._id), deviceId: body.deviceId ? String(body.deviceId) : null }
+                : null;
             contextP = Promise.all([
                 // (the desktop app sends its editor notes with the message, so nothing is asked of the computer here)
-                editorContextFor(sessionId, { website: fromWebsite, editorContext: typeof body.editorContext === "string" ? body.editorContext : null }).catch(() => ""),
+                editorContextFor(sessionId, { website: fromWebsite, editorContext: typeof body.editorContext === "string" ? body.editorContext : null, hint: openHint }).catch(() => ""),
                 // (the website always works in the cloud copy: a project in both places that the desktop app last used from
                 // its computer copy is the cloud project here, so a Mastero chat isn't told it's a folder the website can't reach)
-                body.taskOrigin !== "whatsapp" ? projectForChat(sessionId).then((p) => (fromWebsite && p?.bothPlaces ? { ...p, location: "cloud", localPath: null, bothPlaces: false } : p)).then((p) => inChatWorktree(p, sessionId)).catch(() => null) : null,
+                body.taskOrigin !== "whatsapp" ? projectForChat(sessionId, { hint: openHint }).then((p) => (fromWebsite && p?.bothPlaces ? { ...p, location: "cloud", localPath: null, bothPlaces: false } : p)).then((p) => inChatWorktree(p, sessionId)).catch(() => null) : null,
             ]);
             // Ownership verified, safe to load history
             messages = await getHistory(sessionId, historyDepth, { desktop: desktopChat });
@@ -2679,8 +2687,10 @@ You are currently talking to Nikhil Shinde (nikhil.shinde@classgrid.in), the CRE
             // chat's project was looked up while its history loaded, so the answer starts meanwhile)
             const linked = linkChatToProject(req.user._id, body.projectId, sessionId, body.clientApp === "desktop" ? body.deviceId : null, { website: fromWebsite, desktop: !fromWebsite && body.clientApp === "desktop" }).catch(() => {});
             if (!contextP) await linked;
-        } else if (sessionId && !isIncognito && !incognitoHere && !gridSender && body.appMode === "studio" && body.phone !== true && body.taskOrigin !== "whatsapp" && req.user?._id) {
+        } else if (sessionId && !isIncognito && !incognitoHere && !gridSender && body.appMode === "studio" && body.phone !== true && body.remoteFrom !== "phone" && body.taskOrigin !== "whatsapp" && req.user?._id) {
             // Studio with no project open: the chat is kept in Studio's own chat list (not waited for)
+            // (never for a message sent from the phone into a Remote PC chat: the phone picks no project, so naming none
+            // there doesn't mean "No project"; it took the chat off its project and off the computer's copy, 2026-11-18)
             User.updateOne({ _id: req.user._id }, { $addToSet: { studio_chat_ids: sessionId } }).catch(() => {});
             await forgetChatScreenProject(sessionId);
         }
@@ -2765,10 +2775,15 @@ The user is in ${appMode === "agent" ? "Agent mode" : appMode === "project" ? "S
         if (body.voice === true) volatilePrompt += "\n\n--- VOICE MODE ---\nThe user is talking to you out loud in the Classgrid phone app, and your answer is read aloud to them. Answer like a person on a call: short, natural spoken sentences (usually two to four), no markdown, headings, tables, lists, code blocks, links or emoji. Ask at most one question at a time. If something needs a long or visual answer (code, a table, a document), say so in a sentence and offer to put it in the chat instead.";
         // Remote PC (owner, 2026-11-18: "tell it in the background when this is a remote chat, don't keep it blind"):
         // the AI knows the chat is followed from the phone, and whether this message was typed there
+        let remoteOn = false; // (also for the other accounts' memory below)
         if (sessionId && userId && !isIncognito) {
-            const remoteOn = await import("../services/remote-pc.service.js").then((m) => m.remoteChatOn(String(userId), String(sessionId))).catch(() => false);
+            remoteOn = await import("../services/remote-pc.service.js").then((m) => m.remoteChatOn(String(userId), String(sessionId))).catch(() => false);
             if (remoteOn) {
-                volatilePrompt += `\n\n--- REMOTE PC ---\nThis chat is a Remote PC chat: the user turned it on with /remote on their computer, so they can follow it and answer it from the Classgrid phone app (menu → Remote PC). ${body.remoteFrom === "phone" ? "This message was typed on their PHONE: they may not be at the computer, so don't ask them to look at or click anything on the computer screen; describe results in the chat instead." : "This message was typed on the computer; the user may switch to the phone at any time."} Your work still runs on the computer through the Classgrid app (it must stay running; a closed window keeps running in the tray). The phone shows your steps, file edits, commands and helpers live, shows your permission requests as cards, and has Review, Files, Terminal and Details in its ⋮ menu. When the user asks about Remote PC, answer from .classgrid/classgrid_guide/references/remote-pc.md (or the same page of the Classgrid guide).`;
+                // (the same for every message of the chat: in the system prompt, which the model's prompt cache serves again)
+                volatilePrompt += `\n\n--- REMOTE PC ---\nThis chat is a Remote PC chat: the user turned it on with /remote on their computer, so they can follow it and answer it from the Classgrid phone app (menu → Remote PC). Your work still runs on the computer through the Classgrid app (it must stay running; a closed window keeps running in the tray). The phone shows your steps, file edits, commands and helpers live, shows your permission requests as cards, and has Review, Files, Terminal and Details in its ⋮ menu. When the user asks about Remote PC, answer from .classgrid/classgrid_guide/references/remote-pc.md (or the same page of the Classgrid guide).`;
+                // Where this message was typed changes from one message to the next: it goes with the message (tailPrompt),
+                // or the system prompt differed between the phone's messages and the computer's and each one missed the cache
+                tailPrompt += `\n\n--- REMOTE PC ---\n${body.remoteFrom === "phone" ? "This message was typed on their PHONE: they may not be at the computer, so don't ask them to look at or click anything on the computer screen; describe results in the chat instead." : "This message was typed on the computer; the user may switch to the phone at any time."}`;
             }
         }
         // Every message, in the desktop app and on the website: a missing or failed tool goes straight to the terminal
@@ -3059,7 +3074,9 @@ CRITICAL: If you call ANY integration tool (e.g. Google Classroom, Gmail, Google
 
                 // Desktop app: what the same person saved in their other Classgrid accounts on this computer
                 // (the app keeps each account's memory locally), so switching accounts keeps the memory
-                const fromComputer = body.clientApp === "desktop" && Array.isArray(body.computerMemory) ? body.computerMemory.slice(0, 5) : [];
+                // (a message sent from the phone into a Remote PC chat has no app to send it: the computer's last one is used,
+                // so it gets the same memory, and the same prompt the model's cache already holds, as a message typed there)
+                const fromComputer = await import("../services/remote-pc.service.js").then((m) => m.computerMemoryFor(body, { remoteChat: remoteOn, sessionId })).catch(() => []);
                 let computerText = "";
                 for (const a of fromComputer) {
                     if (!a || typeof a !== "object") continue;
@@ -6593,8 +6610,11 @@ If a tool fails, never show the error message; say only: "Something went wrong o
         // Desktop app, on the user's computer (no project, or a folder project): the cloud sandbox tools are taken away
         // and run_code says it runs on their computer, so the AI never reaches for the sandbox. No CDN upload either:
         // a link to a file on this computer is its path (owner, 2026-11-02)
+        // (also the project tools that work on the project's copy on the cloud computer: search by meaning, and making or
+        // changing its GitHub repo, which open the sandbox even for a folder project. Owner, 2026-11-18: "using the sandbox
+        // locally is not allowed, it is forbidden". Here a repo is made or changed in the terminal on the computer.)
         if (onComputer || chatProject?.location === "local") {
-            const SANDBOX_ONLY = new Set(["read_sandbox_file", "upload_sandbox_file_to_cdn", "deploy_to_classgrid_cloud", "upload_file_to_cdn"]);
+            const SANDBOX_ONLY = new Set(["read_sandbox_file", "upload_sandbox_file_to_cdn", "deploy_to_classgrid_cloud", "upload_file_to_cdn", ...CLOUD_COPY_PROJECT_TOOLS]);
             for (const list of [fullToolList, activeToolList]) {
                 for (let i = list.length - 1; i >= 0; i--) if (SANDBOX_ONLY.has(list[i].function.name)) list.splice(i, 1);
             }
