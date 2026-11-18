@@ -138,11 +138,17 @@ export async function listRemoteChats(user) {
     const ids = rows.map((r) => r.sessionId);
     const { data } = await primarySupabaseClient.from("ai_chat_sessions").select("id, title, created_at").in("id", ids).eq("user_email", user.email);
     const byId = new Map((data || []).map((c) => [c.id, c]));
-    const { deviceOnline } = await import("./remote-device.service.js");
+    const { deviceStatus } = await import("./remote-device.service.js");
     const { chatAnswering } = await import("./chat-wake.service.js");
-    // Each chat's own computer (a connection that did not say its computer counts for any of them)
-    const onlineOf = new Map();
-    for (const d of new Set(rows.map((r) => r.deviceId || null))) onlineOf.set(d, await deviceOnline(String(user._id), d).catch(() => false));
+    // Each chat's own computer and app (a connection that did not say its computer counts for any of them):
+    // "connected", "background" (the Classgrid app's window is closed, it runs in the tray) or "offline"
+    const stateOf = new Map();
+    const keyOf = (r) => `${r.deviceId || ""}|${r.deviceKind || ""}`;
+    for (const r of rows) {
+        if (stateOf.has(keyOf(r))) continue;
+        const st = await deviceStatus(String(user._id), r.deviceId || null, r.deviceKind || null).catch(() => null);
+        stateOf.set(keyOf(r), st?.state || "offline");
+    }
     const devices = await RemoteDevice.find({ userId: user._id }).select("deviceId allowed defaultMode").lean().catch(() => []);
     const deviceOf = new Map((devices || []).map((d) => [d.deviceId, d]));
     return Promise.all(rows.filter((r) => byId.has(r.sessionId)).map(async (r) => ({
@@ -150,7 +156,8 @@ export async function listRemoteChats(user) {
         title: byId.get(r.sessionId)?.title || "New chat",
         deviceName: r.deviceName || "Your computer",
         deviceId: r.deviceId || null,
-        online: !!onlineOf.get(r.deviceId || null),
+        online: stateOf.get(keyOf(r)) !== "offline",
+        state: stateOf.get(keyOf(r)) || "offline",
         allowed: deviceOf.get(r.deviceId)?.allowed !== false,
         defaultMode: deviceOf.get(r.deviceId)?.defaultMode || "default",
         answering: await chatAnswering(String(user._id), r.sessionId).catch(() => false),
@@ -227,7 +234,7 @@ export async function sendFromPhone(user, sessionId, { question, permissionMode,
     if (!(await deviceAllowed(user._id, row.deviceId))) return { error: "Remote PC is turned off on that computer (Settings, General, Remote PC in the Classgrid app there).", code: "not_allowed" };
     // (that chat's own computer: another computer of the person being on doesn't make this one reachable)
     const { deviceOnline } = await import("./remote-device.service.js");
-    if (!(await deviceOnline(userId, row.deviceId || null))) return { error: "Your computer is offline. Open Classgrid on it and try again.", code: "offline" };
+    if (!(await deviceOnline(userId, row.deviceId || null, row.deviceKind || null))) return { error: "Your computer is offline. Open Classgrid on it and try again.", code: "offline" };
     const { chatAnswering } = await import("./chat-wake.service.js");
     // An answer that was just stopped is still ending (it saves what it wrote, up to a few seconds): the message waits
     // for it instead of being refused as busy (the owner's phone, 2026-11-18 09:24 IST: Stop, then a message a second
@@ -332,7 +339,7 @@ export async function remoteChatDetails(user, sessionId) {
     if (!row) return null;
     const { deviceConnection } = await import("./remote-device.service.js");
     const [conn, project] = await Promise.all([
-        deviceConnection(userId, row.deviceId || null).catch(() => ({ online: false, connectedSince: null, totalConnectedMs: 0 })),
+        deviceConnection(userId, row.deviceId || null, { kind: row.deviceKind || null }).catch(() => ({ online: false, state: "offline", connectedSince: null, totalConnectedMs: 0 })),
         chatProject(sessionId),
     ]);
     const turnedOn = row.turnedOnAt || row.createdAt || null;
@@ -341,6 +348,7 @@ export async function remoteChatDetails(user, sessionId) {
         deviceName: row.deviceName || "Your computer",
         deviceKind: row.deviceKind || (!row.deviceName || /^Classgrid desktop app/.test(String(row.deviceName)) ? "desktop" : "editor"),
         online: conn.online,
+        state: conn.state || (conn.online ? "connected" : "offline"),
         connectedSince: conn.connectedSince,
         totalConnectedMs: conn.totalConnectedMs,
         project,

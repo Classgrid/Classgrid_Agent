@@ -25,6 +25,7 @@ const RemoteDevice = {
         if (!r) return { matchedCount: 0 };
         for (const [k, v] of Object.entries(u.$inc || {})) r[k] = (r[k] || 0) + v;
         Object.assign(r, u.$set || {});
+        for (const [k, v] of Object.entries(u.$addToSet || {})) r[k] = [...new Set([...(r[k] || []), v])];
         return { matchedCount: 1 };
     },
 };
@@ -133,5 +134,25 @@ test("Details of a computer whose app said nothing yet: connected since its conn
     assert.equal(d.totalConnectedMs, 90_000);
     runner = [];
     const off = await svc.deviceConnection("u1", PC);
-    assert.deepEqual(off, { online: false, connectedSince: null, totalConnectedMs: 0 });
+    assert.deepEqual(off, { online: false, state: "offline", connectedSince: null, totalConnectedMs: 0 });
+});
+
+// (owner, 2026-11-18: "when the app is closed show it; you still show green")
+test("the Classgrid app with its window closed (in the tray) is a yellow \"background\", and an old extension is not the app", async () => {
+    const DEV = "c".repeat(64);
+    const app = { id: "app", userId: "u1", handshake: { auth: { token: "t", runner: true, deviceId: DEV, app: "desktop", windowOpen: true } }, data: {} };
+    await svc.runnerConnected(app, { now: 5_000_000 });
+    runner = [app];
+    assert.equal((await svc.deviceStatus("u1", DEV, "desktop")).state, "connected");
+    svc.runnerState(app, { windowOpen: false });
+    assert.equal((await svc.deviceStatus("u1", DEV, "desktop")).state, "background");
+    svc.runnerState(app, { windowOpen: true });
+    assert.equal((await svc.deviceStatus("u1", DEV, "desktop")).state, "connected");
+    // An editor extension from before 2026-11-18 (says neither its computer nor its app) is left open; the app quits
+    const oldExtension = { id: "ext", userId: "u1", handshake: { auth: { token: "t", runner: true } }, data: {} };
+    runner = [oldExtension];
+    assert.equal((await svc.deviceStatus("u1", DEV, "desktop")).state, "offline");
+    // ...it still counts for an editor chat, and for a computer whose apps never said which app they are
+    assert.equal((await svc.deviceStatus("u1", DEV, "editor")).state, "connected");
+    assert.equal((await svc.deviceStatus("u1", OTHER, "desktop")).state, "connected");
 });

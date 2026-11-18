@@ -137,6 +137,11 @@ module.exports = {
     },
     /** The main window's close button hides it to the tray (trayOnClose), unless the app is quitting. */
     attachWindow(win) {
+        // The window shown or closed to the tray: the phone's dot for this computer is green or yellow (runner.js)
+        const tell = () => { try { ctx.runner?.setWindowOpen(!win.isDestroyed() && win.isVisible()); } catch { /* an older runner */ } };
+        win.on("show", tell);
+        win.on("hide", tell);
+        tell();
         win.on("close", (e) => {
             if (quitting || !settings.trayOnClose) return;
             e.preventDefault();

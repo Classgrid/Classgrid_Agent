@@ -41,6 +41,10 @@ const remoteDeviceSchema = new mongoose.Schema({
     connectedSince: { type: Date, default: null },
     lastSeenAt: { type: Date, default: null },
     totalConnectedMs: { type: Number, default: 0 },
+    // The apps of this computer that say which app they are when they connect ("desktop", "code", "extension"; apps from
+    // 2026-11-18 on). Once the Classgrid app of a computer says it, a connection there that says nothing is another
+    // app (an older editor extension), which does not make that computer's Classgrid app connected.
+    apps: { type: [String], default: [] },
 }, { timestamps: true });
 remoteDeviceSchema.index({ userId: 1, deviceId: 1 }, { unique: true });
 export const RemoteDevice = mongoose.models.RemoteDevice || mongoose.model("RemoteDevice", remoteDeviceSchema);

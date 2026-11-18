@@ -127,6 +127,8 @@ export function registerRunnerSocket(socket) {
         import("./remote-device.service.js").then((m) => {
             m.runnerConnected(socket).catch((e) => console.warn("[Remote PC] connection not noted:", e?.message));
             socket.on("disconnect", () => { m.runnerDisconnected(socket).catch((e) => console.warn("[Remote PC] disconnection not noted:", e?.message)); });
+            // The Classgrid app's window closed (it runs on in the tray) or opened again: the phone's dot is yellow or green
+            socket.on("runner-state", (d) => { try { m.runnerState(socket, d); } catch { /* a bad message */ } });
         }).catch(() => {});
         console.log(`[Local runner] desktop app connected for user ${socket.userId}`);
     }

@@ -212,7 +212,7 @@ test("a message sent right after Stop waits for the stopped answer to end instea
 test("Details: the computer, its connection, the project open there, the mode and when it was turned on", async () => {
     online = true;
     const d = await svc.remoteChatDetails({ _id: "u1" }, S);
-    assert.deepEqual(Object.keys(d).sort(), ["clientApp", "connectedSince", "deviceId", "deviceKind", "deviceName", "mode", "online", "project", "totalConnectedMs", "turnedOnAt"].sort());
+    assert.deepEqual(Object.keys(d).sort(), ["clientApp", "connectedSince", "deviceId", "deviceKind", "deviceName", "mode", "online", "project", "state", "totalConnectedMs", "turnedOnAt"].sort());
     assert.equal(d.deviceName, "Classgrid desktop app on Windows");
     assert.equal(d.deviceKind, "desktop");
     assert.equal(d.online, true);

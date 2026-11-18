@@ -35,22 +35,53 @@ async function sockets(userId) {
 
 const connectedAtOf = (s) => Number(s?.data?.connectedAt) || Date.parse(s?.handshake?.time || "") || null;
 
+// Which apps run a chat of each kind (RemoteChat.deviceKind): the Classgrid app's chats, Classgrid Code's and the
+// extension's
+const APPS_OF_KIND = { desktop: ["desktop"], editor: ["code", "extension"] };
+
 /**
- * Whether a computer is connected now: { online, since } (since: when its oldest open connection started, ms).
+ * Whether a computer is connected now: { online, state, since } (since: when its oldest open connection started, ms).
+ * state (owner, 2026-11-18: "when the app is closed show it; you still show green"): "connected" (the app is open),
+ * "background" (the Classgrid app's window is closed and it runs in the tray: it still does the work) or "offline".
  * With no computer named, any runner connection counts. A connection that did not say its computer counts for any.
+ * kind ("desktop" or "editor"): only that kind of app counts. A connection that did not say its app (apps before
+ * 2026-11-18) counts too, unless that computer's app of that kind says its app (RemoteDevice.apps): then it is
+ * another app, e.g. an older editor extension left open after the Classgrid app was closed.
  */
-export async function deviceStatus(userId, deviceId) {
+export async function deviceStatus(userId, deviceId, kind = null) {
     const all = await sockets(userId);
     const mine = deviceId ? all.filter((s) => s?.data?.remoteDevice === deviceId) : all;
     const unknown = deviceId ? all.filter((s) => !s?.data?.remoteDevice) : [];
-    const pick = mine.length ? mine : unknown;
+    let pick = mine.length ? mine : unknown;
+    const wanted = APPS_OF_KIND[kind] || null;
+    if (wanted) {
+        const said = deviceId ? await RemoteDevice.findOne({ userId, deviceId }).select("apps").lean().catch(() => null) : null;
+        const appSaysItself = (said?.apps || []).some((a) => wanted.includes(a));
+        pick = pick.filter((s) => (s?.data?.runnerApp ? wanted.includes(s.data.runnerApp) : !appSaysItself));
+    }
     const times = pick.map(connectedAtOf).filter(Boolean);
-    return { online: pick.length > 0, sure: mine.length > 0, since: times.length ? Math.min(...times) : null };
+    const open = pick.some((s) => s?.data?.windowOpen !== false);
+    const state = !pick.length ? "offline" : open ? "connected" : "background";
+    return { online: pick.length > 0, state, sure: mine.length > 0, since: times.length ? Math.min(...times) : null };
+}
+
+// The phone's Remote PC lists and dots are read again (a computer connected, went away, or its window opened or closed)
+const tellPhone = (userId, deviceId) => {
+    try { getIO().to(String(userId)).emit("remote:chats", { deviceId: deviceId || null, connection: true }); } catch { /* no socket server */ }
+};
+
+/** The Classgrid app's window opened or closed (it keeps running in the tray): desktop/runner.js "runner-state" */
+export function runnerState(socket, d) {
+    if (!socket || !d || typeof d.windowOpen !== "boolean") return;
+    socket.data = socket.data || {};
+    if (socket.data.windowOpen === d.windowOpen) return;
+    socket.data.windowOpen = d.windowOpen;
+    tellPhone(socket.userId, socket.data.remoteDevice);
 }
 
 /** Whether that computer can take a step now (see deviceStatus) */
-export async function deviceOnline(userId, deviceId) {
-    return (await deviceStatus(userId, deviceId)).online;
+export async function deviceOnline(userId, deviceId, kind = null) {
+    return (await deviceStatus(userId, deviceId, kind)).online;
 }
 
 // A connection of the computer opened (at: when)
@@ -111,20 +142,25 @@ export async function runnerConnected(socket, { now = Date.now() } = {}) {
     socket.data = socket.data || {};
     socket.data.connectedAt = now;
     if (APPS.has(auth.app)) socket.data.runnerApp = auth.app;
+    if (typeof auth.windowOpen === "boolean") socket.data.windowOpen = auth.windowOpen;
     let deviceId = validDeviceId(auth.deviceId);
     if (!deviceId && socket.sid) deviceId = validDeviceId(await redis.get(SID_DEVICE(socket.sid)).catch(() => null));
-    if (!deviceId) return null;
+    if (!deviceId) { tellPhone(userId, null); return null; }
     socket.data.remoteDevice = deviceId;
     startBeat();
     await spanStarted(userId, deviceId, now);
+    if (socket.data.runnerApp) await RemoteDevice.updateOne({ userId, deviceId }, { $addToSet: { apps: socket.data.runnerApp } }).catch(() => {});
+    tellPhone(userId, deviceId);
     return deviceId;
 }
 
 /** A runner connection closed: when it was that computer's last one (after a short grace for a reconnect), its time adds up */
 export async function runnerDisconnected(socket, { graceMs = RECONNECT_GRACE_MS } = {}) {
     const deviceId = socket?.data?.remoteDevice;
+    const userId = String(socket?.userId);
+    // (the phone's dot turns at once: this app is gone, whether the computer still has another one open)
+    tellPhone(userId, deviceId || null);
     if (!deviceId) return;
-    const userId = String(socket.userId);
     const closedAt = Date.now();
     const check = async () => {
         const still = (await sockets(userId)).some((s) => s?.id !== socket.id && s?.data?.remoteDevice === deviceId);
@@ -160,8 +196,8 @@ export async function learnDevice(userId, sid, deviceId) {
  * total includes the connection open now). A connection the server never saw close is closed here at its last sign of
  * life; a connection open now that was not counted yet (its app did not say its computer) shows from its start.
  */
-export async function deviceConnection(userId, deviceId, { now = Date.now() } = {}) {
-    const status = await deviceStatus(userId, deviceId);
+export async function deviceConnection(userId, deviceId, { now = Date.now(), kind = null } = {}) {
+    const status = await deviceStatus(userId, deviceId, kind);
     const row = deviceId ? await RemoteDevice.findOne({ userId, deviceId }).select("connectedSince lastSeenAt totalConnectedMs").lean().catch(() => null) : null;
     let since = ms(row?.connectedSince);
     let total = Number(row?.totalConnectedMs) || 0;
@@ -176,6 +212,7 @@ export async function deviceConnection(userId, deviceId, { now = Date.now() } = 
     if (!status.online) since = null;
     return {
         online: status.online,
+        state: status.state,
         connectedSince: since ? new Date(since).toISOString() : null,
         totalConnectedMs: Math.max(0, total + (since ? now - since : 0)),
     };
