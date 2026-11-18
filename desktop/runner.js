@@ -1243,9 +1243,9 @@ function keepBefore(chat, cp, full, root) {
       const name = `${Object.keys(m.files).length}.before`;
       fs.mkdirSync(dir, { recursive: true });
       fs.copyFileSync(key, path.join(dir, name));
-      m.files[id] = { kind: "changed", before: name, path: key };
+      m.files[id] = { kind: "changed", before: name, path: key, at: Date.now() };
     } else {
-      m.files[id] = { kind: "added", path: key };
+      m.files[id] = { kind: "added", path: key, at: Date.now() };
     }
     cpSaveManifest(dir, m);
   } catch (e) {
@@ -1335,13 +1335,120 @@ function listCheckpoints(chat) {
   if (!checkpointsDir || !c) return [];
   try { return fs.readdirSync(path.join(checkpointsDir, c)).filter((n) => /^\d{10,16}$/.test(n)).sort(); } catch { return []; }
 }
+// ── Files a command changed (owner, 2026-11-18: the phone showed only the numbers of files changed by a command) ──
+// The before-copies above are kept only for the AI's own file tools. A command (an install, a script, a formatter)
+// changes files without them, so in a Git folder the whole folder is also snapshotted once per answer, just before
+// its first command: a Git tree in the folder's own object store, made through a separate index file, so the person's
+// branch, index and files are never touched (the server does the same for a cloud project: projectSnapshot). Review
+// then also lists every file that differs between that tree and the folder now, with its code, and Reject / Undo put
+// those files back from the tree. A folder that isn't a Git folder keeps only the before-copies, as before.
+const COMMAND_TOOLS = new Set(["execute_terminal_command", "run_code", "start_background_command"]);
+// Installed packages and build output are never the person's work (as the server's SNAPSHOT_SKIP)
+const TREE_SKIP = ["node_modules", "dist", "build", ".next", ".venv", "venv", "__pycache__", ".cache"].map((d) => `:(exclude,glob)**/${d}/**`);
+const TREE_FILES_MAX = 300; // (more changed files than this in one answer: the first ones are shown)
+const treeTried = new Set(); // answers whose folder is not a Git folder: not tried again on each command
+function gitRun(root, args, { env = null, buffer = false } = {}) {
+  const { execFile } = require("node:child_process");
+  return new Promise((resolve) => {
+    execFile("git", args, { cwd: root, windowsHide: true, timeout: 2 * 60 * 1000, maxBuffer: 256 * 1024 * 1024, encoding: buffer ? "buffer" : "utf8", env: env ? { ...process.env, ...env } : process.env },
+      (err, stdout) => resolve({ ok: !err, out: stdout }));
+  });
+}
+// The folder as it is now, as a Git tree id (null when it is not a Git folder)
+async function folderTree(root) {
+  const inside = await gitRun(root, ["rev-parse", "--is-inside-work-tree"]);
+  if (!inside.ok || String(inside.out).trim() !== "true") return null;
+  const idx = path.join(require("node:os").tmpdir(), `cg-index-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`);
+  try {
+    // (the folder's own index is the start, so a file that did not change is not read again: quick in a big folder)
+    const real = await gitRun(root, ["rev-parse", "--git-path", "index"]);
+    try { if (real.ok && String(real.out).trim()) fs.copyFileSync(path.resolve(root, String(real.out).trim()), idx); } catch { /* no index yet */ }
+    const env = { GIT_INDEX_FILE: idx };
+    if (!(await gitRun(root, ["add", "-A", "--", ".", ...TREE_SKIP], { env })).ok) return null;
+    const tree = await gitRun(root, ["write-tree"], { env });
+    const id = String(tree.out || "").trim();
+    return tree.ok && /^[0-9a-f]{40,64}$/.test(id) ? id : null;
+  } finally {
+    try { fs.rmSync(idx, { force: true }); } catch { /* already gone */ }
+  }
+}
+// Before the answer's first command: the folder's snapshot (once per answer)
+async function keepTreeBefore(chat, cp, root) {
+  const dir = cpFolder(chat, cp);
+  if (!dir || !root || treeTried.has(dir)) return;
+  try {
+    const m = cpManifest(dir);
+    if (m.tree) return;
+    treeTried.add(dir);
+    const tree = await folderTree(root);
+    if (!tree) return; // (no folder of copies is made for it: the answer is listed only when a file tool changed something)
+    const now = cpManifest(dir); // (a file tool may have kept a copy meanwhile)
+    now.tree = tree;
+    now.treeAt = Date.now();
+    if (!now.root) now.root = path.resolve(String(root));
+    cpSaveManifest(dir, now);
+  } catch (e) {
+    console.warn("[runner] folder snapshot failed:", e.message);
+  }
+}
+// The files that differ between the answer's snapshot and the folder now, that the snapshot speaks for: a file the AI's
+// own tools copied before its first command keeps that older copy; one copied after it is taken from the snapshot
+// Returns { changes: [{ id, full, rel, kind }], covered: Set of manifest ids the snapshot speaks for (copied after it,
+// in the snapshot's folder and not left out of it), whether they differ from it now or not }
+async function commandChanges(m) {
+  const none = { changes: [], covered: new Set() };
+  if (!m.tree || !m.root || !fs.existsSync(m.root)) return none;
+  const now = await folderTree(m.root);
+  if (!now) return none;
+  // The AI's copies made after the snapshot: the snapshot is the older picture of those files
+  const root = path.resolve(m.root);
+  const later = Object.entries(m.files).filter(([, e]) => e.at && m.treeAt && e.at > m.treeAt)
+    .map(([id, e]) => ({ id, rel: path.relative(root, cpPath(id, e)) }))
+    .filter((x) => x.rel && !x.rel.startsWith("..") && !path.isAbsolute(x.rel) && !x.rel.split(path.sep).some((d) => SKIP_DIRS.has(d)));
+  const covered = new Set(later.map((x) => x.id));
+  if (later.length) {
+    // (a file Git leaves out of the folder, by .gitignore, is not in the snapshot: its own copy speaks for it)
+    const ignored = await new Promise((resolve) => {
+      const { execFile } = require("node:child_process");
+      const p = execFile("git", ["check-ignore", "-z", "--stdin"], { cwd: root, windowsHide: true, timeout: 60 * 1000, maxBuffer: 16 * 1024 * 1024 }, (_err, stdout) => resolve(String(stdout || "").split("\0").filter(Boolean)));
+      p.stdin.end(later.map((x) => x.rel).join("\0") + "\0");
+    });
+    const out = new Set(ignored.map((r) => cpId(path.resolve(root, r))));
+    for (const id of out) covered.delete(id);
+  }
+  if (now === m.tree) return { changes: [], covered };
+  const r = await gitRun(m.root, ["diff", "--name-status", "--no-renames", "-z", "--relative", m.tree, now, "--", "."]);
+  if (!r.ok) return { changes: [], covered };
+  const parts = String(r.out || "").split("\0");
+  const out = [];
+  for (let i = 0; i + 1 < parts.length && out.length < TREE_FILES_MAX; i += 2) {
+    const kind = parts[i].trim()[0];
+    const rel = parts[i + 1];
+    if (!kind || !rel) continue;
+    const full = path.resolve(m.root, rel);
+    const id = cpId(full);
+    const entry = m.files[id];
+    if (entry && !(entry.at && m.treeAt && entry.at > m.treeAt)) continue;
+    out.push({ id, full, rel: rel.split(path.sep).join("/"), kind });
+  }
+  return { changes: out, covered };
+}
+// A file as it was in the snapshot (a Buffer), or null
+async function treeFile(root, tree, rel) {
+  const r = await gitRun(root, ["show", `${tree}:./${rel}`], { buffer: true });
+  return r.ok && Buffer.isBuffer(r.out) ? r.out : null;
+}
+const isBinary = (buf) => buf.subarray(0, 8192).includes(0);
+
 // Review: the changes of one answer, or null when this computer kept nothing for it (a cloud project's answer)
-function reviewCheckpoint(chat, cp) {
+async function reviewCheckpoint(chat, cp) {
   const dir = cpFolder(chat, cp);
   if (!dir || !fs.existsSync(path.join(dir, "files.json"))) return null;
   const m = cpManifest(dir);
   const files = [];
+  const { changes: byCommand, covered: fromTree } = await commandChanges(m).catch(() => ({ changes: [], covered: new Set() }));
   for (const [key, entry] of Object.entries(m.files)) {
+    if (fromTree.has(key)) continue; // (shown below, from the snapshot taken before it)
     // (one file that cannot be read, say one open in another program or far too big, leaves the others shown)
     try {
       const full = cpPath(key, entry);
@@ -1357,16 +1464,58 @@ function reviewCheckpoint(chat, cp) {
       console.warn("[runner] review skipped a file:", e.message);
     }
   }
+  // The files a command changed (or that the AI's tools changed after one), against the snapshot
+  for (const c of byCommand) {
+    try {
+      const file = cpFileName(m, c.full);
+      const before = c.kind === "A" ? null : await treeFile(m.root, m.tree, c.rel);
+      const existsNow = fs.existsSync(c.full) && fs.statSync(c.full).isFile();
+      const after = existsNow && fs.statSync(c.full).size <= BEFORE_MAX_BYTES ? fs.readFileSync(c.full) : null;
+      const kind = c.kind === "A" ? "added" : c.kind === "D" || !existsNow ? "deleted" : "changed";
+      if ((before && isBinary(before)) || (after && isBinary(after))) {
+        files.push({ file, added: 0, removed: 0, kind, diff: "" }); // (a picture or other binary file: no lines to show)
+        continue;
+      }
+      const beforeText = before ? before.toString("utf8") : null;
+      const afterText = after ? after.toString("utf8") : null;
+      if (beforeText === afterText) continue;
+      const { diff, added, removed } = unifiedDiff(file, beforeText, afterText);
+      files.push({ file, added, removed, kind, diff });
+    } catch (e) {
+      console.warn("[runner] review skipped a file:", e.message);
+    }
+  }
   return { files, finished: true };
 }
 // Reject (one file, or every file) and Undo: the before-copies put back; a file the AI created is removed
-function rejectCheckpoint(chat, cp, onlyFile) {
+async function rejectCheckpoint(chat, cp, onlyFile) {
   const dir = cpFolder(chat, cp);
   if (!dir || !fs.existsSync(path.join(dir, "files.json"))) return null;
   const m = cpManifest(dir);
   let count = 0;
   const failed = [];
+  const { changes: byCommand, covered: fromTree } = await commandChanges(m).catch(() => ({ changes: [], covered: new Set() }));
+  // The files a command changed: put back as they were in the snapshot (one it created is removed)
+  for (const c of byCommand) {
+    if (onlyFile && cpFileName(m, c.full) !== onlyFile) continue;
+    try {
+      if (c.kind === "A") {
+        if (fs.existsSync(c.full)) { fs.rmSync(c.full, { force: true }); count++; }
+      } else {
+        const before = await treeFile(m.root, m.tree, c.rel);
+        if (!before) throw new Error("not in the snapshot");
+        fs.mkdirSync(path.dirname(c.full), { recursive: true });
+        fs.writeFileSync(c.full, before);
+        count++;
+      }
+    } catch (e) {
+      console.warn("[runner] could not put a file back:", e.message);
+      failed.push(cpFileName(m, c.full));
+    }
+    seenAt.delete(c.full.toLowerCase());
+  }
   for (const [key, entry] of Object.entries(m.files)) {
+    if (fromTree.has(key)) continue;
     const full = cpPath(key, entry);
     if (onlyFile && cpFileName(m, full) !== onlyFile) continue;
     try {
@@ -1400,7 +1549,7 @@ function rejectCheckpoint(chat, cp, onlyFile) {
 let stepsRunning = 0;
 let onActivity = null;
 async function runTool(req) {
-  const counts = req?.tool !== "ping";
+  const counts = req?.tool !== "ping" && !SCREEN_TOOLS.has(req?.tool);
   if (counts) { stepsRunning++; try { onActivity?.(); } catch { /* the listener's own problem */ } }
   try { return await runToolStep(req); }
   finally { if (counts) { stepsRunning--; try { onActivity?.(); } catch { /* the listener's own problem */ } } }
@@ -1424,7 +1573,16 @@ async function runToolStep(req) {
       if (!full && inRoot && path.isAbsolute(String(args.path))) { try { full = localPath(args.path); } catch { full = null; } }
       if (full) keepBefore(chat, checkpoint, full, inRoot ? root : null);
     }
+    // A command about to run in an answer with a checkpoint, in a project folder: the folder's snapshot first, so the
+    // files it changes are in Review with their code (see keepTreeBefore)
+    if (checkpoint && chat && COMMAND_TOOLS.has(tool) && root) {
+      let isDir = false;
+      try { isDir = fs.statSync(root).isDirectory(); } catch { isDir = false; }
+      if (isDir) await keepTreeBefore(chat, checkpoint, root);
+    }
     if (tool === "ping") return { text: "ok" };
+    // The phone's Remote PC tabs (Review, Files, the chat's background commands), asked by the server (see screenTool)
+    if (SCREEN_TOOLS.has(tool)) return await screenTool(tool, root, chat, args);
     // The AI's browser steps go to the app's own browser (browser.js)
     // The AI using any app on this computer: screen pictures, the real mouse and keyboard (computer.js)
     if (tool === "computer") {
@@ -1535,6 +1693,68 @@ function readForFilesTab(root, rel) {
   // (the Files tab shows at most 2 MB: more would freeze the screen; the AI's own tools read up to 300 MB)
   const tooBig = buf.length > FILES_TAB_BYTES;
   return { path: rel, binary: false, size: buf.length, truncated: tooBig, content: buf.subarray(0, FILES_TAB_BYTES).toString("utf8") };
+}
+
+// ── Remote PC: Studio's own tabs on the phone (owner, 2026-11-18) ────────────────────────────────────────────
+// The phone reaches this computer only through the server, which asks over this connection, for the chat it names:
+//   review_list    -> { checkpoints }           the chat's answers with changes kept here (the Review tab's list)
+//   review_show    { checkpoint } -> { review }  one answer's changed files with their diffs (null: nothing kept here)
+//   review_reject  { checkpoint, file? } -> { reverted }   Reject (one file or all) and Undo, asked only after the
+//                                                person confirmed on the phone
+//   files_list     -> { listing }               the project folder (root), as the Files tab lists it
+//   files_read     { path } -> { file }          one file of it, read only
+//   jobs_list      -> { jobs }                  the chat's background commands with their newest output
+// The same functions the app's own Studio tabs use (main.js, the extension's bridge). One socket message is 1 MB at
+// most, so what goes to the phone is smaller than what the tabs here show.
+const SCREEN_TOOLS = new Set(["review_list", "review_show", "review_reject", "files_list", "files_read", "jobs_list"]);
+const PHONE_FILE_BYTES = 512 * 1024; // a text file's first 512 KB
+const PHONE_IMAGE_BYTES = 600 * 1024; // a bigger picture is named, not sent
+const PHONE_REVIEW_CHARS = 700 * 1000; // all the diffs of one answer together
+const PHONE_JOB_CHARS = 16000; // each background command's newest output
+const PHONE_JOBS = 30;
+async function screenTool(tool, root, chat, args) {
+  if (tool === "review_list") return { text: "ok", checkpoints: listCheckpoints(chat) };
+  if (tool === "review_show") {
+    const review = await reviewCheckpoint(chat, args.checkpoint);
+    if (review) {
+      let left = PHONE_REVIEW_CHARS;
+      review.files = review.files.map((f) => {
+        const diff = f.diff.length > left ? "" : f.diff;
+        left -= diff.length;
+        return diff === f.diff ? f : { ...f, diff, cut: true };
+      });
+    }
+    return { text: "ok", review };
+  }
+  if (tool === "review_reject") {
+    const reverted = await rejectCheckpoint(chat, args.checkpoint, args.file ? String(args.file) : null);
+    return { text: "ok", reverted };
+  }
+  if (tool === "files_list") return { text: "ok", listing: listForFilesTab(root) };
+  if (tool === "files_read") {
+    const file = readForFilesTab(root, String(args.path || ""));
+    if (file.image && file.size > PHONE_IMAGE_BYTES) return { text: "ok", file: { path: file.path, binary: true, image: true, mime: file.mime, size: file.size } };
+    if (!file.binary && typeof file.content === "string" && Buffer.byteLength(file.content) > PHONE_FILE_BYTES) {
+      return { text: "ok", file: { ...file, content: Buffer.from(file.content).subarray(0, PHONE_FILE_BYTES).toString("utf8"), truncated: true, shownBytes: PHONE_FILE_BYTES } };
+    }
+    return { text: "ok", file };
+  }
+  if (tool === "jobs_list") {
+    const c = String(chat || "");
+    const list = [...jobs.values()].filter((j) => c && j.chat === c).sort((a, b) => a.startedAt - b.startedAt).slice(-PHONE_JOBS);
+    return {
+      text: "ok",
+      jobs: list.map((j) => ({
+        id: j.id,
+        command: j.command.slice(0, 4000),
+        running: j.exitCode === null || j.exitCode === undefined,
+        exitCode: j.exitCode ?? null,
+        startedAt: j.startedAt,
+        output: j.log.slice(-PHONE_JOB_CHARS),
+      })),
+    };
+  }
+  return { text: `Error: ${tool} can't run on this computer.` };
 }
 
 module.exports = {
