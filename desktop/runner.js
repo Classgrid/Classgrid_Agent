@@ -16,7 +16,11 @@ const VIEW_LINES = 2000; // lines view_project_file shows when no end_line is gi
 const REPLY_CHARS = 300000; // most text in one tool answer sent to the server (its socket messages are 1 MB at most)
 const AUTO_BACKGROUND_S = Number(process.env.CG_AUTO_BACKGROUND_S) || 120; // a command still running after this (when the AI set no timeout_seconds) keeps running as a background job
 const wait = (ms) => new Promise((r) => setTimeout(r, ms));
-const SKIP_DIRS = new Set(["node_modules", ".git", "dist", "build", ".next", ".turbo", ".cache", "__pycache__", ".venv", "venv"]);
+const SKIP_DIRS = new Set(["node_modules", ".git", "dist", "build", ".next", ".turbo", ".cache", "__pycache__", ".venv", "venv", ".gradle", ".cxx"]);
+// A search on this computer answers before the server stops waiting for it (local-runner.service.js timeoutFor: 60 s
+// for a file tool): past this it ends with what it found so far and says so, instead of the AI being told "the desktop
+// app didn't answer in time" with nothing (owner, 2026-11-18, a search over his whole workspace)
+const SEARCH_MS = 40000;
 
 let socket = null;
 let foldersFile = null;
@@ -151,7 +155,11 @@ const RG_INSIDE = [
   "resources/app/node_modules/@vscode/ripgrep/bin/rg.exe",
 ];
 let rgPath;
+let rgMissingAt = 0;
 function ripgrep() {
+  // (not found is asked again a minute later: right after the app is installed or updated, Classgrid Code is unpacked a
+  // moment after the first search, and a "not found" kept for the app's whole run sent every search to the slow walk)
+  if (rgPath === null && Date.now() - rgMissingAt > 60000) rgPath = undefined;
   if (rgPath !== undefined) return rgPath;
   // Inside Classgrid Code this runs on the editor's own program; in the Classgrid app, in the editor it unpacked
   const roots = [path.dirname(process.execPath)];
@@ -161,6 +169,7 @@ function ripgrep() {
       .sort((a, b) => fs.statSync(b).mtimeMs - fs.statSync(a).mtimeMs));
   } catch { /* no editor unpacked yet */ }
   for (const root of roots) for (const rel of RG_INSIDE) if (fs.existsSync(path.join(root, rel))) return (rgPath = path.join(root, rel));
+  rgMissingAt = Date.now();
   return (rgPath = null);
 }
 // Searching with ripgrep, like Claude Code's Grep: a folder or one file, only some files (glob), lines around each
@@ -177,7 +186,7 @@ function runRipgrep(cwd, args, limit) {
     const lines = [];
     let buf = "", more = false, done = false;
     const finish = (out) => { if (done) return; done = true; clearTimeout(timer); resolve(out); };
-    const timer = setTimeout(() => { more = true; try { p.kill(); } catch { /* gone */ } finish({ lines, more }); }, 60000);
+    const timer = setTimeout(() => { more = true; try { p.kill(); } catch { /* gone */ } finish({ lines, more, timedOut: true }); }, SEARCH_MS);
     p.stdout.setEncoding("utf8");
     p.stdout.on("data", (d) => {
       buf += d;
@@ -231,7 +240,9 @@ async function searchWithRipgrep(root, full, { query, regex, ignore_case, glob, 
   const lines = all.slice(skip);
   const more = out.more ? "+" : "";
   const page = skip ? ` (from result ${skip + 1})` : "";
-  const next = out.more ? `; there are more: use offset ${skip + limit} for the next ${limit}, or narrow it with path, glob or type` : "";
+  const next = out.timedOut
+    ? `; the search stopped after ${SEARCH_MS / 1000} s with what it found so far: narrow it with path, glob or type`
+    : out.more ? `; there are more: use offset ${skip + limit} for the next ${limit}, or narrow it with path, glob or type` : "";
   if (!all.length) return `No matches.${note}`;
   if (!lines.length) return `No more results after ${skip} (there were ${all.length}).${note}`;
   if (mode === "files") return `Found in ${all.length}${more} file${all.length === 1 ? "" : "s"}${page}${next}.${note}\n${lines.join("\n")}`;
@@ -322,10 +333,14 @@ const tools = {
     const needle = ignore_case ? String(query).toLowerCase() : String(query);
     const hits = [];
     const files = new Set();
+    const stopAt = Date.now() + SEARCH_MS;
+    let stopped = false;
     const walk = (d) => {
+      if (stopped || Date.now() > stopAt) { stopped = true; return; }
       let entries = [];
       try { entries = fs.readdirSync(d, { withFileTypes: true }); } catch { return; }
       for (const e of entries) {
+        if (Date.now() > stopAt) { stopped = true; return; }
         const p = path.join(d, e.name);
         if (e.isDirectory()) { if (!SKIP_DIRS.has(e.name)) walk(p); continue; }
         let text;
@@ -348,8 +363,9 @@ const tools = {
         });
       } catch { /* unreadable */ }
     } else walk(full);
-    if (!hits.length) return "No matches.";
-    return `Found in ${files.size} file${files.size === 1 ? "" : "s"} (${hits.length} matching line${hits.length === 1 ? "" : "s"})${hits.length > 200 ? "; showing the first 200 lines" : ""}.\n${hits.slice(0, 200).join("\n")}`;
+    const cut = stopped ? ` The search stopped after ${SEARCH_MS / 1000} s with what it found so far: narrow it with path or glob.` : "";
+    if (!hits.length) return stopped ? `No matches so far.${cut}` : "No matches.";
+    return `Found in ${files.size} file${files.size === 1 ? "" : "s"} (${hits.length} matching line${hits.length === 1 ? "" : "s"})${hits.length > 200 ? "; showing the first 200 lines" : ""}.${cut}\n${hits.slice(0, 200).join("\n")}`;
   },
 
   async find_project_files(root, { pattern, path: dir = "", max_results }) {
