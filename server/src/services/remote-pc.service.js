@@ -215,7 +215,8 @@ async function runFromPhone(user, row, question, { permissionMode, selectedModel
     stopCheck.unref?.();
     await remoteTurnStarted(userId, sessionId, { question, from: "phone" });
     // The computer's app shows it like a woken chat: the start, the live answer, then the saved chat at the end
-    emit(userId, "chat:woke", { sessionId, phase: "start" });
+    // (with the question, so the computer's chat shows it at once above the answer; an app from before shows it at the end)
+    emit(userId, "chat:woke", { sessionId, phase: "start", question });
     const fullUser = await User.findById(user._id).select("-password -verificationToken");
     try {
         const { runAgentTask } = await import("./whatsapp-call.service.js");

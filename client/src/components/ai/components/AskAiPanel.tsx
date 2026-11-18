@@ -3880,11 +3880,15 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
       if (!liveId || gridOpenChatRef.current !== gridSessionId || gridSubmittingRef.current) return;
       setMessages((prev) => prev.map((m) => (m.id === liveId ? change(m) : m)));
     };
-    const start = () => {
+    // question: a message sent from the phone into a Remote PC chat (2026-11-18): it shows here at once, above its answer
+    const start = (question?: string) => {
       if (gridOpenChatRef.current !== gridSessionId || gridSubmittingRef.current) return;
       const id = createMessageId("assistant");
       liveId = id;
-      setMessages((prev) => [...prev, { id, role: "assistant", content: "", createdAt: Date.now(), typing: true, steps: [] }]);
+      const asked = typeof question === "string" && question.trim()
+        ? [{ id: createMessageId("user"), role: "user" as const, content: question, createdAt: Date.now() }]
+        : [];
+      setMessages((prev) => [...prev, ...asked, { id, role: "assistant", content: "", createdAt: Date.now(), typing: true, steps: [] }]);
       setThinkingLabel("Thinking");
       setThinking(true); // "Thinking" shows at once, until its first words or step
     };
@@ -3911,9 +3915,9 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
         });
       }
     };
-    const onWoke = (d: { sessionId?: string; phase?: string }) => {
+    const onWoke = (d: { sessionId?: string; phase?: string; question?: string }) => {
       if (d?.sessionId !== gridSessionId) return;
-      if (d.phase === "start") start();
+      if (d.phase === "start") start(d.question);
       else if (d.phase === "end") {
         if (liveId) setThinking(false);
         liveId = null;
