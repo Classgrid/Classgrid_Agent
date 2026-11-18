@@ -26,6 +26,7 @@ class DurableTurn {
         this.timer = null;
         this.closeHandlers = [];
         this.abortHandlers = [];
+        this.mirror = null; // (event) => void: a copy of every event for the phone (Remote PC)
         this.watch(realRes);
         const self = this;
         // What streamAskAi sees as `res` after the SSE headers: the same calls it makes on a real response
@@ -58,6 +59,8 @@ class DurableTurn {
         if (s.startsWith("data:")) {
             this.events.push(s);
             if (this.events.length > MAX_EVENTS) { this.events.shift(); this.dropped++; }
+            // A Remote PC chat: each event also goes to the person's phone (remote-pc.service.js mirrorRemoteEvent)
+            if (this.mirror) { try { this.mirror(JSON.parse(s.slice(5).trim())); } catch { /* not JSON, or the phone's own problem */ } }
         }
         if (this.live && !this.live.writableEnded && !this.live.destroyed) {
             try { this.live.write(s); } catch { /* the socket is going away; detach() follows */ }

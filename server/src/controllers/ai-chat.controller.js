@@ -2114,9 +2114,19 @@ export const streamAskAi = async (req, res) => {
         // The answer survives the app's internet dropping: its events are kept under a turn id and the app comes back
         // for them (GET /api/ai/turn/:id/events); from here on `res` is the facade that keeps them (durable-turn.service.js)
         const { startDurableTurn } = await import("../services/durable-turn.service.js");
-        durableTurn = startDurableTurn(res, userId);
+        // A Remote PC chat (owner, 2026-11-18): the answer is followed from the phone, so it waits 30 minutes for the
+        // computer to come back (a lid closed, sleep) instead of 4, and every event also goes to the phone
+        const remotePc = body.sessionId ? await import("../services/remote-pc.service.js") : null;
+        const remoteChat = remotePc ? await remotePc.remoteChatOn(String(userId), body.sessionId).catch(() => false) : false;
+        durableTurn = startDurableTurn(res, userId, remoteChat ? { graceMs: 30 * 60 * 1000 } : {});
         res = durableTurn.res;
         res.write(`data: ${JSON.stringify({ type: "turn_info", turnId: durableTurn.id })}\n\n`);
+        if (remoteChat) {
+            const remoteUser = String(userId), remoteSession = String(body.sessionId), turnId = durableTurn.id;
+            await remotePc.remoteTurnStarted(remoteUser, remoteSession, { question: body.question, from: "computer", turnId }).catch(() => {});
+            durableTurn.mirror = (ev) => remotePc.mirrorRemoteEvent(remoteUser, remoteSession, ev);
+            res.on("close", () => { remotePc.remoteTurnEnded(remoteUser, remoteSession).catch(() => {}); });
+        }
         const { registerPcExecutor } = await import("../services/local-runner.service.js");
         const alive = () => !res.writableEnded && !res.destroyed;
         pcExecutor = {
@@ -2227,6 +2237,37 @@ export const streamAskAi = async (req, res) => {
             if (!userEmail || !(await canAccessSession(sessionData, userEmail))) {
                 console.error(`[SECURITY] Unauthorized chat access attempt! User ${userEmail} tried to access session ${sessionId} owned by ${sessionData.user_email}`);
                 res.write(`data: ${JSON.stringify({ type: "error", error: "Unauthorized. You do not have permission to view this chat." })}\n\n`);
+                res.end();
+                return;
+            }
+
+            // "/remote" (or "/remote off") in a chat on the computer (the desktop app, Classgrid Code, the VS Code
+            // extension): the chat is followed and answered from the phone under Remote PC (owner, 2026-11-18). Only the
+            // chat's owner; no model call.
+            const remoteWord = /^\/remote(?:\s+(on|off))?\s*$/i.exec(String(body.question || "").trim());
+            if (remoteWord && !fromWebsite && !body.taskOrigin && !body.wakeUp && userId) {
+                const own = String(sessionData.user_email || "").toLowerCase() === String(userEmail).toLowerCase();
+                const on = (remoteWord[1] || "on").toLowerCase() !== "off";
+                let text;
+                if (!own) {
+                    text = "Only the person who started this chat can turn on Remote PC for it.";
+                } else {
+                    const { setRemoteChat } = await import("../services/remote-pc.service.js");
+                    const { deviceKindOf, deviceNameOf } = await import("../services/user-session.service.js");
+                    const kind = deviceKindOf(req);
+                    await setRemoteChat({
+                        userId, sessionId: String(sessionId), on,
+                        deviceId: typeof body.deviceId === "string" ? body.deviceId.slice(0, 100) : null,
+                        deviceName: deviceNameOf({ kind, userAgent: String(req.headers["user-agent"] || "") }),
+                        clientApp: "desktop", // (Classgrid Code and the extension run the chat the desktop app's way too)
+                        appMode: typeof body.appMode === "string" ? body.appMode : null,
+                    });
+                    text = on
+                        ? "Remote PC is on for this chat. Open Classgrid on your phone: it is under Remote PC in the menu. Keep Classgrid open on this computer while you use it from your phone. Type /remote off to turn it off."
+                        : "Remote PC is off for this chat. It no longer shows on your phone.";
+                }
+                res.write(`data: ${JSON.stringify({ type: "answer", answer: text, sessionId: sessionData.id })}\n\n`);
+                res.write("data: [DONE]\n\n");
                 res.end();
                 return;
             }

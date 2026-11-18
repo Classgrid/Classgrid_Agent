@@ -74,6 +74,7 @@ import authRoutes from "../src/routes/auth.routes.js";
 import vercelAuthRoutes from "../src/routes/auth.vercel.routes.js";
 import userRoutes from "../src/routes/user.routes.js";
 import userDevicesRoutes from "../src/routes/user-devices.routes.js";
+import remoteRoutes from "../src/routes/remote.routes.js";
 import chatRoutes from "../src/routes/chat.routes.js";
 import classroomRoutes from "../src/routes/classroom.routes.js";
 import notificationRoutes from "../src/routes/notification.routes.js";
@@ -359,6 +360,7 @@ app.use(enforceFeatureFlags);
 app.use("/api/auth", authRoutes);
 app.use("/api/auth/vercel", vercelAuthRoutes);
 app.use("/api/user/devices", userDevicesRoutes); // Settings > Devices: the person's own sign-ins
+app.use("/api/remote", remoteRoutes); // Remote PC: a chat on the person's computer, followed and answered from the phone
 app.use("/api/user", userRoutes);
 app.use("/api/chat", chatRoutes);
 app.use("/api/notifications", notificationRoutes);
