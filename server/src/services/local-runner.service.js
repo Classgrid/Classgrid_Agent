@@ -202,6 +202,12 @@ async function liveSockets(here) {
     return checked.filter(Boolean);
 }
 
+// A connection that can't do a step says so, and the next one is asked. The editor extension before 0.1.16 (still the
+// one on the VS Code Marketplace, 2026-11-18) runs runner.js outside the Classgrid app without that check, so its
+// computer step fails with Electron's screen missing instead: "Cannot read properties of undefined (reading
+// 'getPrimaryDisplay')" (the owner's desktop app chat, 2026-11-18 12:58 IST, with VS Code open next to the app). That
+// answer means the same thing.
+const CANT_RUN_HERE = /can't run on this computer|wasn't opened in the Classgrid app|reading '(getPrimaryDisplay|getSources)'/;
 async function askRunnerOnce(userId, tool, payload) {
     const io = getIO();
     const room = runnerRoom(String(userId));
@@ -234,7 +240,7 @@ async function askRunnerOnce(userId, tool, payload) {
                     try { s.disconnect(true); } catch { /* already gone */ } // it answered the probe but not the step: not asked again
                     continue;
                 }
-                if (!(typeof reply?.text === "string" && /can't run on this computer|wasn't opened in the Classgrid app/.test(reply.text))) break;
+                if (!(typeof reply?.text === "string" && CANT_RUN_HERE.test(reply.text))) break;
             }
             if (typeof reply?.text !== "string" && lastError) throw lastError;
             return typeof reply?.text === "string" ? reply : null;
@@ -243,7 +249,9 @@ async function askRunnerOnce(userId, tool, payload) {
         const anywhere = await Promise.race([io.in(room).fetchSockets(), new Promise((r) => setTimeout(() => r([]), 4000))]).catch(() => []);
         if (!anywhere.length) return null;
         const replies = await io.to(room).timeout(timeoutFor(tool, payload?.args)).emitWithAck("local-tool", payload);
-        return (Array.isArray(replies) ? replies.find((r) => r && typeof r.text === "string") : null) || null;
+        // (every connection answered: one that could do the step wins over one that says it can't)
+        const answered = Array.isArray(replies) ? replies.filter((r) => r && typeof r.text === "string") : [];
+        return answered.find((r) => !CANT_RUN_HERE.test(r.text)) || answered[0] || null;
     } catch (err) {
         return { text: `Error: the Classgrid desktop app didn't answer in time (${err.message}). Ask the user to check the app is open.` };
     }
@@ -278,7 +286,7 @@ export function callRunner(userId, tool, args = {}, chat = null) {
 export async function useComputer(userId, args = {}, chat = null) {
     const reply = await callRunner(userId, "computer", args, chat);
     if (!reply) return "The Classgrid desktop app isn't open on the user's computer. Tell the user to open it, then try again.";
-    if (/can't run on this computer/.test(reply.text)) return "Error: the user's Classgrid desktop app is an older version that can't use apps on their computer. Ask them to update the app, then try again.";
+    if (CANT_RUN_HERE.test(reply.text)) return "Error: the user's Classgrid desktop app is an older version that can't use apps on their computer. Ask them to update the app, then try again.";
     const image = reply.computer?.image;
     if (!image) return reply.text;
     let link = "";
